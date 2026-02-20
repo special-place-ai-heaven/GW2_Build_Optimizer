@@ -16,11 +16,12 @@ pub struct DownloadProgress {
 
 /// Download all game data, calling `on_progress` after each endpoint.
 /// Skips endpoints that are already cached at the current build.
+/// Returns the game build number on success.
 pub fn download_all(
     client: &Gw2Client,
     cache: &DataCache,
     mut on_progress: impl FnMut(DownloadProgress),
-) -> Result<(), ApiError> {
+) -> Result<u32, ApiError> {
     let build = client.get_build_number()?;
     let total = 8;
     let mut step = 0;
@@ -115,7 +116,7 @@ pub fn download_all(
     }
     report("Items (equipment)", &mut step);
 
-    Ok(())
+    Ok(build)
 }
 
 /// Fetch only equipment-relevant items: Armor, Weapon, Trinket, Back,

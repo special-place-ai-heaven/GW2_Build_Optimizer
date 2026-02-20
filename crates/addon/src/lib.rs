@@ -4,6 +4,7 @@ mod ui;
 use nexus::gui::{register_render, RenderType};
 use nexus::keybind::{keybind_handler, register_keybind_with_string};
 use nexus::log::{log, LogLevel};
+use nexus::paths::get_addon_dir;
 
 nexus::export! {
     name: "GW2 Build Optimizer",
@@ -13,7 +14,10 @@ nexus::export! {
 }
 
 fn on_load() {
-    state::init();
+    let addon_dir = get_addon_dir("gw2_build_optimizer")
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    state::init(addon_dir);
 
     let _keybind = register_keybind_with_string(
         "GW2_BUILD_OPT_TOGGLE",
@@ -34,5 +38,6 @@ fn on_load() {
 }
 
 fn on_unload() {
+    state::clear();
     log(LogLevel::Info, "GW2 Build Optimizer", "Addon unloaded.");
 }

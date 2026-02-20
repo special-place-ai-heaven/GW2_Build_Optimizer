@@ -9,3 +9,4 @@ gw2-api = { path = "../gw2api" }
 serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
+thiserror.workspace = true
