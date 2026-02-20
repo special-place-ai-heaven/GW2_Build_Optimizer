@@ -81,13 +81,14 @@ pub fn base_stats() -> StatBlock {
     }
 }
 
-/// Base health by profession (at level 80, before vitality).
+/// Base health by profession (at level 80, NOT including vitality).
+/// Vitality is added separately in compute_derived: health = base + vitality * 10.
 pub fn base_health(profession: &str) -> f64 {
     match profession {
-        "Warrior" | "Necromancer" => 19212.0,
-        "Revenant" | "Engineer" | "Ranger" | "Mesmer" => 15922.0,
-        "Guardian" | "Thief" | "Elementalist" => 11645.0,
-        _ => 15922.0, // default to medium
+        "Warrior" | "Necromancer" => 9212.0,
+        "Revenant" | "Engineer" | "Ranger" | "Mesmer" => 5922.0,
+        "Guardian" | "Thief" | "Elementalist" => 1645.0,
+        _ => 5922.0, // default to medium
     }
 }
 
@@ -161,8 +162,8 @@ fn apply_infix_upgrade(stats: &mut StatBlock, infix: &InfixUpgrade) {
 }
 
 /// Calculate rune set bonus stats.
-/// Most runes give stat bonuses at various stack counts (1-6 pieces).
-/// We assume 6 of the same rune for full set bonus.
+/// Rune stat bonuses are in the `bonuses` array as strings like "+25 Power".
+/// We sum all 6 tiers (assuming full 6-piece set).
 pub fn calculate_rune_stats(
     rune_id: Option<u32>,
     items_cache: &HashMap<u32, Item>,
@@ -176,14 +177,54 @@ pub fn calculate_rune_stats(
         return stats;
     };
 
-    // Rune stats come from the infix_upgrade on the upgrade component
     if let Some(ref details) = rune.details {
+        // Parse stat bonuses from bonuses strings like "+25 Power", "+100 Condition Damage"
+        for bonus_str in &details.bonuses {
+            if let Some((value, attr)) = parse_bonus_string(bonus_str) {
+                stats.add(&attr, value);
+            }
+        }
+
+        // Also check infix_upgrade as fallback (some items may use it)
         if let Some(ref infix) = details.infix_upgrade {
             apply_infix_upgrade(&mut stats, infix);
         }
     }
 
     stats
+}
+
+/// Parse a rune bonus string like "+25 Power" or "+100 Condition Damage".
+/// Returns (value, normalized_attribute_name) or None if not a stat bonus.
+fn parse_bonus_string(s: &str) -> Option<(f64, String)> {
+    let s = s.trim();
+    if !s.starts_with('+') {
+        return None;
+    }
+
+    // Split at first space after the number: "+25 Power" -> ("25", "Power")
+    let without_plus = &s[1..];
+    let space_idx = without_plus.find(' ')?;
+    let num_str = &without_plus[..space_idx];
+    let attr_str = without_plus[space_idx + 1..].trim();
+
+    let value: f64 = num_str.parse().ok()?;
+
+    // Normalize attribute names from display format to API format
+    let attr = match attr_str {
+        "Power" => "Power",
+        "Precision" => "Precision",
+        "Toughness" => "Toughness",
+        "Vitality" => "Vitality",
+        "Ferocity" => "CritDamage",
+        "Condition Damage" => "ConditionDamage",
+        "Expertise" => "Expertise",
+        "Concentration" => "Concentration",
+        "Healing Power" => "Healing",
+        _ => return None, // Non-stat bonuses (e.g., "5% damage increase") are ignored
+    };
+
+    Some((value, attr.to_string()))
 }
 
 /// Calculate permanent sigil stat bonuses.
@@ -262,11 +303,15 @@ pub fn calculate_trait_stats(
 
 /// Calculate stat conversions from traits (BuffConversion facts).
 /// E.g., "10% of Precision becomes Ferocity".
+/// Uses a snapshot of stats before any conversions so all conversions
+/// read the same base values regardless of trait order.
 pub fn apply_trait_conversions(
     stats: &mut StatBlock,
     equipped_trait_ids: &[u32],
     traits_cache: &HashMap<u32, Trait>,
 ) {
+    let snapshot = stats.clone();
+
     for &trait_id in equipped_trait_ids {
         let Some(t) = traits_cache.get(&trait_id) else {
             continue;
@@ -280,7 +325,7 @@ pub fn apply_trait_conversions(
                 ..
             } = fact
             {
-                let source_val = stats.get(src);
+                let source_val = snapshot.get(src);
                 let bonus = source_val * pct / 100.0;
                 stats.add(tgt, bonus.round());
             }
@@ -318,6 +363,9 @@ pub fn compute_derived(stats: &StatBlock, profession: &str) -> DerivedStats {
 }
 
 /// Full stat calculation pipeline for PvE/WvW.
+/// NOTE: rune_id and sigil_ids are passed separately from equipment to avoid
+/// double-counting — calculate_gear_stats does NOT process piece.upgrades.
+/// TODO: Process traited_facts (conditional trait bonuses) in trait calculations.
 pub fn calculate_full_stats(
     equipment: &EquipmentTab,
     equipped_trait_ids: &[u32],
@@ -392,9 +440,9 @@ mod tests {
 
     #[test]
     fn test_base_health() {
-        assert_eq!(base_health("Warrior"), 19212.0);
-        assert_eq!(base_health("Guardian"), 11645.0);
-        assert_eq!(base_health("Ranger"), 15922.0);
+        assert_eq!(base_health("Warrior"), 9212.0);
+        assert_eq!(base_health("Guardian"), 1645.0);
+        assert_eq!(base_health("Ranger"), 5922.0);
     }
 
     #[test]
@@ -405,8 +453,61 @@ mod tests {
         assert!((derived.crit_chance - 5.0).abs() < 0.1);
         // Ferocity 0: crit damage = 150%
         assert!((derived.crit_damage - 150.0).abs() < 0.1);
-        // Health: 19212 + 1000 * 10 = 29212
-        assert!((derived.health - 29212.0).abs() < 1.0);
+        // Health: 9212 (profession base) + 1000 (base vitality) * 10 = 19212
+        assert!((derived.health - 19212.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_parse_rune_bonus_strings() {
+        assert_eq!(
+            parse_bonus_string("+25 Power"),
+            Some((25.0, "Power".into()))
+        );
+        assert_eq!(
+            parse_bonus_string("+100 Condition Damage"),
+            Some((100.0, "ConditionDamage".into()))
+        );
+        assert_eq!(
+            parse_bonus_string("+35 Ferocity"),
+            Some((35.0, "CritDamage".into()))
+        );
+        // Non-stat bonuses return None
+        assert_eq!(parse_bonus_string("+5% damage increase"), None);
+        assert_eq!(parse_bonus_string("Some text"), None);
+    }
+
+    #[test]
+    fn test_rune_scholar_stats() {
+        // Scholar rune bonuses: +25 Power, +35 Ferocity, +50 Power, +65 Ferocity, +100 Power, +125 Ferocity
+        // Total: Power = 175, Ferocity = 225
+        let mut items = HashMap::new();
+        items.insert(
+            24836,
+            Item {
+                id: 24836,
+                name: "Superior Rune of the Scholar".into(),
+                item_type: "UpgradeComponent".into(),
+                rarity: "Exotic".into(),
+                level: 60,
+                details: Some(gw2_api::models::ItemDetails {
+                    detail_type: Some("Rune".into()),
+                    bonuses: vec![
+                        "+25 Power".into(),
+                        "+35 Ferocity".into(),
+                        "+50 Power".into(),
+                        "+65 Ferocity".into(),
+                        "+100 Power".into(),
+                        "+125 Ferocity".into(),
+                    ],
+                    ..default_details()
+                }),
+                ..default_item()
+            },
+        );
+
+        let stats = calculate_rune_stats(Some(24836), &items);
+        assert_eq!(stats.power, 175.0);
+        assert_eq!(stats.ferocity, 225.0);
     }
 
     #[test]
