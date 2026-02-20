@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use gw2_core::config::AppConfig;
+use gw2_core::types::{GameMode, ResolvedBuild, StatBlock};
 
 static STATE: Mutex<Option<AddonState>> = Mutex::new(None);
 
@@ -13,6 +14,31 @@ pub struct AddonState {
     pub screen: Screen,
     // Setup wizard transient state
     pub setup: SetupState,
+    // Main UI state
+    pub main: MainState,
+}
+
+#[derive(Default)]
+pub struct MainState {
+    pub characters: Vec<String>,
+    pub characters_loading: bool,
+    pub selected_character: Option<usize>,
+    pub game_mode: GameMode,
+    pub current_build: Option<ResolvedBuild>,
+    pub current_stats: Option<StatBlock>,
+    pub build_loading: bool,
+    pub error: Option<String>,
+    // Left menu
+    pub active_tab: MainTab,
+}
+
+#[derive(Default, Debug, Clone, PartialEq)]
+pub enum MainTab {
+    #[default]
+    NewBuild,
+    Improve,
+    SaveLoad,
+    Settings,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,6 +122,7 @@ pub fn init(addon_dir: PathBuf) {
         addon_dir,
         screen,
         setup,
+        main: MainState::default(),
     });
 }
 
