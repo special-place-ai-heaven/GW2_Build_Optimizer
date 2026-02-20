@@ -1,3 +1,5 @@
+pub mod chat_bar;
+pub mod comparison;
 mod main_view;
 mod setup;
 

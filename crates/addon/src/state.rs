@@ -3,6 +3,8 @@ use std::sync::Mutex;
 
 use gw2_core::config::AppConfig;
 use gw2_core::types::{GameMode, ResolvedBuild, StatBlock};
+use crate::ui::chat_bar::ChatBarState;
+use crate::ui::comparison::ComparisonState;
 
 static STATE: Mutex<Option<AddonState>> = Mutex::new(None);
 
@@ -30,6 +32,10 @@ pub struct MainState {
     pub error: Option<String>,
     // Left menu
     pub active_tab: MainTab,
+    // Comparison view
+    pub comparison: ComparisonState,
+    // Chat bar
+    pub chat: ChatBarState,
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
