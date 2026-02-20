@@ -1,0 +1,11 @@
+[package]
+name = "gw2-optimizer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gw2-core = { path = "../core" }
+gw2-api = { path = "../gw2api" }
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
