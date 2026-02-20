@@ -33,7 +33,7 @@ pub enum GeminiError {
 pub struct GeminiClient {
     api_key: String,
     http: reqwest::blocking::Client,
-    cache: Mutex<HashMap<u64, CachedResponse>>,
+    cache: Mutex<HashMap<String, CachedResponse>>,
     rate: Mutex<RateTracker>,
 }
 
@@ -57,7 +57,7 @@ impl RateTracker {
         }
     }
 
-    fn check_and_increment(&mut self) -> Result<(), GeminiError> {
+    fn check(&mut self) -> Result<(), GeminiError> {
         let now = Instant::now();
         if now.duration_since(self.minute_start).as_secs() >= 60 {
             self.requests_this_minute = 0;
@@ -68,15 +68,16 @@ impl RateTracker {
             return Err(GeminiError::RateLimited);
         }
         if self.requests_today >= 240 {
-            // Leave 10 buffer from the 250 daily limit
             return Err(GeminiError::Unavailable(
                 "Daily quota nearly exhausted (240/250)".into(),
             ));
         }
+        Ok(())
+    }
 
+    fn record_success(&mut self) {
         self.requests_this_minute += 1;
         self.requests_today += 1;
-        Ok(())
     }
 
     fn remaining_today(&self) -> u32 {
@@ -144,11 +145,12 @@ impl GeminiClient {
     /// Send a prompt to Gemini, using cache if available.
     /// Returns cached response if the same prompt was sent within 30 minutes.
     pub fn generate_cached(&self, prompt: &str) -> Result<String, GeminiError> {
-        let hash = simple_hash(prompt);
+        let key = prompt.to_string();
 
-        // Check cache
-        if let Ok(cache) = self.cache.lock() {
-            if let Some(cached) = cache.get(&hash) {
+        // Check cache (recover from poison)
+        {
+            let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(cached) = cache.get(&key) {
                 if cached.cached_at.elapsed().as_secs() < 1800 {
                     return Ok(cached.text.clone());
                 }
@@ -159,8 +161,9 @@ impl GeminiClient {
         let text = self.generate(prompt)?;
 
         // Store in cache
-        if let Ok(mut cache) = self.cache.lock() {
-            cache.insert(hash, CachedResponse {
+        {
+            let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.insert(key, CachedResponse {
                 text: text.clone(),
                 cached_at: Instant::now(),
             });
@@ -171,11 +174,11 @@ impl GeminiClient {
 
     /// Send a prompt to Gemini (no caching). Checks rate limits first.
     pub fn generate(&self, prompt: &str) -> Result<String, GeminiError> {
-        // Check rate limit
+        // Pre-check rate limit (don't increment yet)
         self.rate
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .check_and_increment()?;
+            .check()?;
 
         let request = GenerateRequest {
             contents: vec![Content {
@@ -194,7 +197,13 @@ impl GeminiClient {
 
         let status = resp.status().as_u16();
         match status {
-            200 => {}
+            200 => {
+                // Only count successful requests against quota
+                self.rate
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .record_success();
+            }
             401 | 403 => return Err(GeminiError::InvalidKey),
             429 => return Err(GeminiError::RateLimited),
             _ => {
@@ -228,36 +237,26 @@ impl GeminiClient {
     }
 }
 
-/// Simple hash for cache keys (not cryptographic, just for dedup).
-fn simple_hash(s: &str) -> u64 {
-    let mut hash: u64 = 5381;
-    for byte in s.bytes() {
-        hash = hash.wrapping_mul(33).wrapping_add(byte as u64);
-    }
-    hash
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_rate_tracker() {
+    fn test_rate_tracker_rpm_limit() {
         let mut tracker = RateTracker::new();
         for _ in 0..10 {
-            assert!(tracker.check_and_increment().is_ok());
+            assert!(tracker.check().is_ok());
+            tracker.record_success();
         }
-        // 11th request should fail (10 RPM limit)
-        assert!(tracker.check_and_increment().is_err());
+        // 11th check should fail (10 RPM limit)
+        assert!(tracker.check().is_err());
     }
 
     #[test]
-    fn test_simple_hash_deterministic() {
-        let h1 = simple_hash("test prompt");
-        let h2 = simple_hash("test prompt");
-        let h3 = simple_hash("different prompt");
-        assert_eq!(h1, h2);
-        assert_ne!(h1, h3);
+    fn test_rate_tracker_daily_limit() {
+        let mut tracker = RateTracker::new();
+        tracker.requests_today = 240;
+        assert!(tracker.check().is_err());
     }
 
     #[test]
