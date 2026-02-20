@@ -16,7 +16,7 @@ use crate::stats;
 pub struct BuildCandidate {
     pub gear: GearCandidate,
     pub elite_spec: Option<u32>,
-    pub core_specs: [u32; 2],
+    pub core_specs: Vec<u32>,
     pub stats: stats::StatBlock,
     pub derived: stats::DerivedStats,
     pub score: f64,
@@ -77,8 +77,7 @@ pub fn optimize(
     let mut all_candidates: Vec<BuildCandidate> = Vec::new();
 
     for gear in &gear_candidates {
-        // For efficiency, only test top spec combos with top gear
-        for (elite, cores) in spec_combos.iter().take(5) {
+        for (elite, cores) in &spec_combos {
             // Collect trait IDs for stat calculation (minor traits auto-selected)
             let mut trait_ids = Vec::new();
             let spec_ids: Vec<u32> = cores
@@ -108,7 +107,7 @@ pub fn optimize(
             all_candidates.push(BuildCandidate {
                 gear: gear.clone(),
                 elite_spec: *elite,
-                core_specs: *cores,
+                core_specs: cores.clone(),
                 stats: full_stats,
                 derived,
                 score,
@@ -167,8 +166,8 @@ fn attribute_adjustment_for_slot(slot: &str) -> f64 {
     match slot {
         // Armor (Ascended)
         "Helm" | "Shoulders" | "Gloves" | "Boots" => 141.0,
-        "Coat" => 315.0,
-        "Leggings" => 191.0,
+        "Coat" => 225.0,  // varies by weight class, using Medium average
+        "Leggings" => 171.0, // varies by weight class, using Medium average
         // Weapons (Ascended)
         "WeaponA1" | "WeaponB1" => 251.0, // main-hand / two-handed
         "WeaponA2" | "WeaponB2" => 125.0, // off-hand
@@ -199,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_attribute_adjustment_slots() {
-        assert_eq!(attribute_adjustment_for_slot("Coat"), 315.0);
+        assert_eq!(attribute_adjustment_for_slot("Coat"), 225.0);
         assert_eq!(attribute_adjustment_for_slot("Helm"), 141.0);
         assert_eq!(attribute_adjustment_for_slot("Amulet"), 157.0);
     }
