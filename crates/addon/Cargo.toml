@@ -1,0 +1,13 @@
+[package]
+name = "gw2-build-optimizer"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+gw2-core = { path = "../core" }
+gw2-api = { path = "../gw2api" }
+gw2-optimizer = { path = "../optimizer" }
+nexus = { git = "https://github.com/zerthox/nexus-rs", features = ["serde"] }
