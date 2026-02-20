@@ -34,7 +34,11 @@ crates/addon/     — cdylib: Nexus entry point, ImGui UI, keybinds (nexus-rs)
   src/state.rs    — global AddonState (Mutex<Option<T>>), window visibility toggle
   src/ui/mod.rs   — ImGui render fn, Window::new() conditional display
 crates/core/      — Shared types (types.rs), config (config.rs), storage (storage.rs)
-crates/gw2api/    — GW2 API v2 client (client.rs), serde models (models/), local cache (cache.rs)
+crates/gw2api/    — GW2 API v2 client + cache + download orchestration
+  src/client.rs   — Gw2Client: token-bucket rate limiter, get/fetch_all/fetch_by_ids, validate_api_key
+  src/cache.rs    — DataCache: JSON file cache keyed by build number, is_stale/save/load/clear_all
+  src/download.rs — download_all: 8-endpoint orchestration with DownloadProgress callback; fetch_equipment_items filters ~100k items to Exotic/Ascended/Legendary Armor/Weapon/Trinket/Back/UpgradeComponent/Relic
+  src/models/     — serde structs per API endpoint (see GW2 API Models table below)
 crates/optimizer/ — engine.rs (pipeline orchestration), gemini.rs (LLM client), scoring.rs, search.rs, stats.rs
 ```
 
@@ -47,8 +51,8 @@ Each file maps to one API endpoint family. All structs derive `Debug, Clone, Ser
 | File | API Endpoint | Key Types |
 |------|-------------|-----------|
 | `characters.rs` | `/v2/characters` (auth) | `Character`, `BuildTab`, `Build`, `EquipmentTab`, `EquipmentPiece`, `EquipmentPvp` |
-| `facts.rs` | shared | `Fact` (18-variant tagged enum), `TraitedFact` |
-| `items.rs` | `/v2/items` | `Item`, `ItemDetails` (untagged enum), `ArmorDetails`, `WeaponDetails`, `UpgradeDetails`, `InfixUpgrade` |
+| `facts.rs` | shared | `Fact` (18-variant tagged enum + `Unknown` fallback), `TraitedFact`, `BuffPrefix` |
+| `items.rs` | `/v2/items` | `Item`, `ItemDetails` (flat struct, all fields optional), `InfixUpgrade`, `InfixAttribute`, `InfixBuff`, `InfusionSlot` |
 | `itemstats.rs` | `/v2/itemstats` | `ItemStat`, `StatAttribute` (multiplier + value) |
 | `legends.rs` | `/v2/legends` | `Legend` (Revenant: swap/heal/elite/utilities) |
 | `professions.rs` | `/v2/professions` | `Profession`, `WeaponInfo` (elite spec gate via `specialization` field) |
@@ -78,7 +82,7 @@ Full plan at `~/.claude/plans/reflective-churning-quail.md`. Sprint format: S##-
 |--------|--------|-------|
 | S01 | DONE | Project scaffolding, minimal Nexus addon |
 | S02 | DONE | GW2 API data models (serde structs) |
-| S03 | TODO | API client, rate limiter, local cache |
+| S03 | DONE | API client, rate limiter, local cache |
 | S04 | TODO | Setup wizard UI (API keys + data download) |
 | S05 | TODO | Character loading & current build display |
 | S06 | TODO | Stat calculation engine |
@@ -103,12 +107,16 @@ Full plan at `~/.claude/plans/reflective-churning-quail.md`. Sprint format: S##-
 ## Detected Patterns
 
 - **Stub module pattern**: unimplemented files contain a single comment `// <purpose>.\n// Will be populated in S##.` — do not add placeholder code
-- **Workspace dep hoisting**: all shared deps (serde, serde_json, reqwest) declared once in root `[workspace.dependencies]`, crates reference with `.workspace = true`
+- **Workspace dep hoisting**: all shared deps (serde, serde_json, reqwest, thiserror, urlencoding, chrono) declared once in root `[workspace.dependencies]`, crates reference with `.workspace = true`
 - **State accessor pattern**: global state exposed via free functions (`init`, `toggle_window`, `is_window_visible`) rather than direct static access
 - **Crate internal visibility**: `mod state; mod ui;` kept private in addon; `pub mod` used in library crates (core, gw2api, optimizer)
-- **Tagged enum serde**: `#[serde(tag = "type")]` on `Fact` — API `"type"` field selects the variant; all variants carry `text` and `icon` plus variant-specific fields
-- **Untagged enum serde**: `#[serde(untagged)]` on `ItemDetails` — variant selected by field presence, not a discriminator field
+- **Tagged enum serde**: `#[serde(tag = "type")]` on `Fact` — API `"type"` field selects the variant; all variants carry `text` and `icon` plus variant-specific fields; `#[serde(other)] Unknown` fallback handles future API additions without breaking deserialization
+- **Flat optional struct**: `ItemDetails` is a single struct with all fields `Option<T>` covering all item types (Armor, Weapon, Trinket, UpgradeComponent, Back); use `Item::item_type` to know which fields are populated — no enum needed because the API object has no discriminant tag
 - **Flattened embed**: `#[serde(flatten)]` on `TraitedFact.fact` — inlines `Fact` fields directly into the parent JSON object
 - **Shared fact module**: `facts.rs` re-exported selectively (`Fact`, `TraitedFact`) and imported by `skills.rs` and `traits.rs` via `use super::facts::{Fact, TraitedFact}`
 - **Inline model tests**: each model file has a `#[cfg(test)] mod tests` block with representative JSON payloads exercising deserialization edge cases
+- **Token bucket rate limiter**: `Mutex<TokenBucket>` inside `Gw2Client` — 300 burst, 5/sec refill; `take()` sleeps only when empty; exponential backoff on HTTP 429
+- **Build-number cache invalidation**: `DataCache` stores `build: u32` in every cache entry; `is_stale(key, current_build)` reads metadata only (no full deserialize) to check staleness
+- **Progress callback pattern**: download orchestration accepts `impl FnMut(DownloadProgress)` — decouples UI from data layer; `DownloadProgress` carries step index, total, name, done flag
+- **Fetch-then-filter pattern**: `fetch_equipment_items` fetches all item IDs first, batch-fetches 200 at a time, filters by type+rarity in-process — used when API has no server-side filter
 <!-- END AUTO-MANAGED -->

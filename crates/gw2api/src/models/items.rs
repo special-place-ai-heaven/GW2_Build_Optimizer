@@ -1,6 +1,10 @@
 //! Item data from /v2/items.
 //! Covers armor, weapons, trinkets, upgrade components (runes, sigils),
 //! back items, and relics — all equipment relevant to build optimization.
+//!
+//! `ItemDetails` is a flat struct with all optional fields since the API
+//! details object varies by item type but has no discriminant tag.
+//! Use `Item::item_type` to determine which fields are populated.
 
 use serde::{Deserialize, Serialize};
 
@@ -26,95 +30,50 @@ pub struct Item {
     pub details: Option<ItemDetails>,
 }
 
+/// Flat details struct covering all item types.
+/// Fields are populated based on `Item::item_type`:
+/// - Armor: armor_type, weight_class, defense
+/// - Weapon: weapon_type, damage_type, min_power, max_power
+/// - Trinket: trinket_type
+/// - UpgradeComponent: upgrade_type, suffix, bonuses
+/// - Common: infusion_slots, attribute_adjustment, infix_upgrade, stat_choices
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum ItemDetails {
-    Armor(ArmorDetails),
-    Weapon(WeaponDetails),
-    Trinket(TrinketDetails),
-    Back(BackDetails),
-    UpgradeComponent(UpgradeDetails),
-    // Relic items use the base Item fields; details may be minimal
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArmorDetails {
+pub struct ItemDetails {
+    // Subtype discriminator (varies by item type)
     #[serde(rename = "type")]
-    pub armor_type: Option<String>, // Helm, Shoulders, Coat, Gloves, Leggings, Boots
-    pub weight_class: Option<String>, // Heavy, Medium, Light
+    pub detail_type: Option<String>,
+
+    // Armor fields
+    pub weight_class: Option<String>,
     pub defense: Option<u32>,
-    #[serde(default)]
-    pub infusion_slots: Vec<InfusionSlot>,
-    pub attribute_adjustment: Option<f64>,
-    pub infix_upgrade: Option<InfixUpgrade>,
-    pub suffix_item_id: Option<u32>, // Rune ID
-    pub secondary_suffix_item_id: Option<String>,
-    #[serde(default)]
-    pub stat_choices: Vec<u32>, // Selectable stat IDs (for Ascended/Legendary)
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WeaponDetails {
-    #[serde(rename = "type")]
-    pub weapon_type: Option<String>,
+    // Weapon fields
     pub damage_type: Option<String>,
     pub min_power: Option<u32>,
     pub max_power: Option<u32>,
-    pub defense: Option<u32>,
-    #[serde(default)]
-    pub infusion_slots: Vec<InfusionSlot>,
-    pub attribute_adjustment: Option<f64>,
-    pub infix_upgrade: Option<InfixUpgrade>,
-    pub suffix_item_id: Option<u32>, // Sigil ID
-    pub secondary_suffix_item_id: Option<String>,
-    #[serde(default)]
-    pub stat_choices: Vec<u32>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TrinketDetails {
-    #[serde(rename = "type")]
-    pub trinket_type: Option<String>, // Accessory, Amulet, Ring
+    // Upgrade component fields
+    pub suffix: Option<String>,
     #[serde(default)]
-    pub infusion_slots: Vec<InfusionSlot>,
-    pub attribute_adjustment: Option<f64>,
-    pub infix_upgrade: Option<InfixUpgrade>,
-    pub suffix_item_id: Option<u32>,
-    pub secondary_suffix_item_id: Option<String>,
-    #[serde(default)]
-    pub stat_choices: Vec<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackDetails {
-    #[serde(default)]
-    pub infusion_slots: Vec<InfusionSlot>,
-    pub attribute_adjustment: Option<f64>,
-    pub infix_upgrade: Option<InfixUpgrade>,
-    pub suffix_item_id: Option<u32>,
-    pub secondary_suffix_item_id: Option<String>,
-    #[serde(default)]
-    pub stat_choices: Vec<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpgradeDetails {
-    #[serde(rename = "type")]
-    pub upgrade_type: Option<String>, // Default, Gem, Rune, Sigil
-    #[serde(default)]
-    pub flags: Vec<String>, // Compatible item types
+    pub bonuses: Vec<String>,
     #[serde(default)]
     pub infusion_upgrade_flags: Vec<String>,
-    pub suffix: Option<String>,
-    pub infix_upgrade: Option<InfixUpgrade>,
+
+    // Common equipment fields
     #[serde(default)]
-    pub bonuses: Vec<String>, // Rune set bonus descriptions
+    pub infusion_slots: Vec<InfusionSlot>,
+    pub attribute_adjustment: Option<f64>,
+    pub infix_upgrade: Option<InfixUpgrade>,
+    pub suffix_item_id: Option<u32>,
+    pub secondary_suffix_item_id: Option<String>,
+    #[serde(default)]
+    pub stat_choices: Vec<u32>,
 }
 
 /// Stat bonuses built into an item.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InfixUpgrade {
-    pub id: Option<u32>, // ItemStat ID
+    pub id: Option<u32>,
     #[serde(default)]
     pub attributes: Vec<InfixAttribute>,
     pub buff: Option<InfixBuff>,
@@ -135,7 +94,7 @@ pub struct InfixBuff {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InfusionSlot {
     #[serde(default)]
-    pub flags: Vec<String>, // "Enrichment" or "Infusion"
+    pub flags: Vec<String>,
     pub item_id: Option<u32>,
 }
 
@@ -160,5 +119,50 @@ mod tests {
         assert_eq!(item.id, 12345);
         assert_eq!(item.item_type, "Weapon");
         assert_eq!(item.rarity, "Ascended");
+    }
+
+    #[test]
+    fn test_deserialize_armor_details() {
+        let json = r#"{
+            "id": 80248,
+            "name": "Perfected Envoy Helmet",
+            "type": "Armor",
+            "rarity": "Legendary",
+            "level": 80,
+            "details": {
+                "type": "Helm",
+                "weight_class": "Heavy",
+                "defense": 127,
+                "infusion_slots": [{"flags": ["Infusion"]}],
+                "attribute_adjustment": 47.0,
+                "stat_choices": [584, 656]
+            }
+        }"#;
+        let item: Item = serde_json::from_str(json).unwrap();
+        let details = item.details.unwrap();
+        assert_eq!(details.detail_type.as_deref(), Some("Helm"));
+        assert_eq!(details.weight_class.as_deref(), Some("Heavy"));
+        assert_eq!(details.defense, Some(127));
+    }
+
+    #[test]
+    fn test_deserialize_back_item() {
+        let json = r#"{
+            "id": 77474,
+            "name": "Ad Infinitum",
+            "type": "Back",
+            "rarity": "Legendary",
+            "level": 80,
+            "details": {
+                "infusion_slots": [{"flags": ["Infusion"]}, {"flags": ["Infusion"]}],
+                "attribute_adjustment": 63.0,
+                "stat_choices": [584, 656, 1163]
+            }
+        }"#;
+        let item: Item = serde_json::from_str(json).unwrap();
+        assert_eq!(item.item_type, "Back");
+        let details = item.details.unwrap();
+        assert_eq!(details.infusion_slots.len(), 2);
+        assert!(details.attribute_adjustment.is_some());
     }
 }

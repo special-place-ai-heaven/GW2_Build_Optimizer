@@ -120,6 +120,9 @@ pub enum Fact {
         icon: Option<String>,
         value: Option<bool>,
     },
+    /// Fallback for unknown fact types the API may add in the future.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Prefix for PrefixedBuff facts.
