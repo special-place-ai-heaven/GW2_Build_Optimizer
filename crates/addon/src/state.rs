@@ -6,23 +6,24 @@ pub struct AddonState {
     pub window_visible: bool,
 }
 
+fn lock_state() -> std::sync::MutexGuard<'static, Option<AddonState>> {
+    STATE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub fn init() {
-    let mut lock = STATE.lock().unwrap();
-    *lock = Some(AddonState {
+    *lock_state() = Some(AddonState {
         window_visible: false,
     });
 }
 
 pub fn toggle_window() {
-    if let Some(state) = STATE.lock().unwrap().as_mut() {
+    if let Some(state) = lock_state().as_mut() {
         state.window_visible = !state.window_visible;
     }
 }
 
 pub fn is_window_visible() -> bool {
-    STATE
-        .lock()
-        .unwrap()
+    lock_state()
         .as_ref()
         .map(|s| s.window_visible)
         .unwrap_or(false)
