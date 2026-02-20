@@ -101,34 +101,36 @@ pub fn search_weapon_combos(
                 continue;
             }
         }
-        // Skip aquatic weapons
-        if info.flags.contains(&"Aquatic".to_string()) && !info.flags.iter().any(|f| f != "Aquatic") {
+        // Skip aquatic-only weapons
+        if info.flags.iter().all(|f| f == "Aquatic") {
             continue;
         }
         valid_weapons.push((weapon_name.clone(), info.flags.clone()));
     }
 
+    let is_terrestrial = |flags: &[String]| -> bool {
+        !flags.contains(&"Aquatic".to_string()) || flags.iter().any(|f| f != "Aquatic")
+    };
+
     let mut combos = Vec::new();
 
-    // Generate valid weapon sets
+    // Generate valid weapon sets: two-handed (non-aquatic)
     for (name, flags) in &valid_weapons {
-        if flags.contains(&"TwoHand".to_string()) && !flags.contains(&"Aquatic".to_string()) {
-            // Two-handed can be a full set by itself
+        if flags.contains(&"TwoHand".to_string()) && is_terrestrial(flags) {
             combos.push((vec![name.clone()], Vec::new()));
         }
     }
 
-    // Main-hand + off-hand combinations
+    // Main-hand + off-hand combinations (non-aquatic only)
     let main_hands: Vec<&str> = valid_weapons
         .iter()
-        .filter(|(_, f)| f.contains(&"Mainhand".to_string()) || f.contains(&"TwoHand".to_string()))
-        .filter(|(_, f)| !f.contains(&"Aquatic".to_string()) || f.len() > 1)
+        .filter(|(_, f)| f.contains(&"Mainhand".to_string()) && is_terrestrial(f))
         .map(|(n, _)| n.as_str())
         .collect();
 
     let off_hands: Vec<&str> = valid_weapons
         .iter()
-        .filter(|(_, f)| f.contains(&"Offhand".to_string()))
+        .filter(|(_, f)| f.contains(&"Offhand".to_string()) && is_terrestrial(f))
         .map(|(n, _)| n.as_str())
         .collect();
 
@@ -144,11 +146,13 @@ pub fn search_weapon_combos(
 }
 
 /// Find valid specialization combinations for a profession.
-/// Returns (elite_spec_id_or_none, [core_spec_1, core_spec_2]).
+/// Returns (elite_spec_id_or_none, core_specs).
+/// With elite: 2 core specs (elite fills slot 3).
+/// Without elite: 3 core specs (all 3 slots are core).
 pub fn search_spec_combos(
     profession_specs: &[u32],
     all_specs: &HashMap<u32, Specialization>,
-) -> Vec<(Option<u32>, [u32; 2])> {
+) -> Vec<(Option<u32>, Vec<u32>)> {
     let mut combos = Vec::new();
 
     let core_specs: Vec<u32> = profession_specs
@@ -163,19 +167,21 @@ pub fn search_spec_combos(
         .copied()
         .collect();
 
-    // With each elite spec + 2 core specs
+    // With each elite spec + 2 core specs (elite fills slot 3)
     for &elite in &elite_specs {
         for i in 0..core_specs.len() {
             for j in (i + 1)..core_specs.len() {
-                combos.push((Some(elite), [core_specs[i], core_specs[j]]));
+                combos.push((Some(elite), vec![core_specs[i], core_specs[j]]));
             }
         }
     }
 
-    // Without elite spec: 3 core specs (but we return 2 since slot 3 is also core)
+    // Without elite spec: 3 core specs (all 3 slots are core, no repeats)
     for i in 0..core_specs.len() {
         for j in (i + 1)..core_specs.len() {
-            combos.push((None, [core_specs[i], core_specs[j]]));
+            for k in (j + 1)..core_specs.len() {
+                combos.push((None, vec![core_specs[i], core_specs[j], core_specs[k]]));
+            }
         }
     }
 
