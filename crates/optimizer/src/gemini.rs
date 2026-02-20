@@ -1,6 +1,11 @@
 //! Gemini API client for LLM-powered build reasoning.
 //! Uses Google AI Studio's REST API (generativelanguage.googleapis.com).
 //! API key is sent via x-goog-api-key header (not URL query) for security.
+//! Includes response caching to minimize quota usage.
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -17,15 +22,66 @@ pub enum GeminiError {
     Api { status: u16, message: String },
     #[error("Invalid API key")]
     InvalidKey,
-    #[error("Rate limited")]
+    #[error("Rate limited — try again later")]
     RateLimited,
     #[error("Parse error: {0}")]
     Parse(String),
+    #[error("LLM unavailable: {0}")]
+    Unavailable(String),
 }
 
 pub struct GeminiClient {
     api_key: String,
     http: reqwest::blocking::Client,
+    cache: Mutex<HashMap<u64, CachedResponse>>,
+    rate: Mutex<RateTracker>,
+}
+
+struct CachedResponse {
+    text: String,
+    cached_at: Instant,
+}
+
+struct RateTracker {
+    requests_this_minute: u32,
+    minute_start: Instant,
+    requests_today: u32,
+}
+
+impl RateTracker {
+    fn new() -> Self {
+        Self {
+            requests_this_minute: 0,
+            minute_start: Instant::now(),
+            requests_today: 0,
+        }
+    }
+
+    fn check_and_increment(&mut self) -> Result<(), GeminiError> {
+        let now = Instant::now();
+        if now.duration_since(self.minute_start).as_secs() >= 60 {
+            self.requests_this_minute = 0;
+            self.minute_start = now;
+        }
+
+        if self.requests_this_minute >= 10 {
+            return Err(GeminiError::RateLimited);
+        }
+        if self.requests_today >= 240 {
+            // Leave 10 buffer from the 250 daily limit
+            return Err(GeminiError::Unavailable(
+                "Daily quota nearly exhausted (240/250)".into(),
+            ));
+        }
+
+        self.requests_this_minute += 1;
+        self.requests_today += 1;
+        Ok(())
+    }
+
+    fn remaining_today(&self) -> u32 {
+        250u32.saturating_sub(self.requests_today)
+    }
 }
 
 #[derive(Serialize)]
@@ -61,6 +117,8 @@ impl GeminiClient {
         Ok(Self {
             api_key: api_key.to_string(),
             http,
+            cache: Mutex::new(HashMap::new()),
+            rate: Mutex::new(RateTracker::new()),
         })
     }
 
@@ -78,16 +136,47 @@ impl GeminiClient {
             429 => Err(GeminiError::RateLimited),
             status => {
                 let body = resp.text().unwrap_or_default();
-                Err(GeminiError::Api {
-                    status,
-                    message: body,
-                })
+                Err(GeminiError::Api { status, message: body })
             }
         }
     }
 
-    /// Send a prompt to Gemini and return the response text.
+    /// Send a prompt to Gemini, using cache if available.
+    /// Returns cached response if the same prompt was sent within 30 minutes.
+    pub fn generate_cached(&self, prompt: &str) -> Result<String, GeminiError> {
+        let hash = simple_hash(prompt);
+
+        // Check cache
+        if let Ok(cache) = self.cache.lock() {
+            if let Some(cached) = cache.get(&hash) {
+                if cached.cached_at.elapsed().as_secs() < 1800 {
+                    return Ok(cached.text.clone());
+                }
+            }
+        }
+
+        // Not cached — generate
+        let text = self.generate(prompt)?;
+
+        // Store in cache
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert(hash, CachedResponse {
+                text: text.clone(),
+                cached_at: Instant::now(),
+            });
+        }
+
+        Ok(text)
+    }
+
+    /// Send a prompt to Gemini (no caching). Checks rate limits first.
     pub fn generate(&self, prompt: &str) -> Result<String, GeminiError> {
+        // Check rate limit
+        self.rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .check_and_increment()?;
+
         let request = GenerateRequest {
             contents: vec![Content {
                 parts: vec![Part {
@@ -110,22 +199,70 @@ impl GeminiClient {
             429 => return Err(GeminiError::RateLimited),
             _ => {
                 let body = resp.text().unwrap_or_default();
-                return Err(GeminiError::Api {
-                    status,
-                    message: body,
-                });
+                return Err(GeminiError::Api { status, message: body });
             }
         }
 
         let body: GenerateResponse = resp.json()?;
-        let text = body
-            .candidates
+        body.candidates
             .and_then(|c| c.into_iter().next())
             .and_then(|c| c.content)
             .and_then(|c| c.parts.into_iter().next())
             .map(|p| p.text)
-            .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()))?;
+            .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()))
+    }
 
-        Ok(text)
+    /// Get remaining daily quota.
+    pub fn remaining_quota(&self) -> u32 {
+        self.rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remaining_today()
+    }
+
+    /// Clear the response cache.
+    pub fn clear_cache(&self) {
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.clear();
+        }
+    }
+}
+
+/// Simple hash for cache keys (not cryptographic, just for dedup).
+fn simple_hash(s: &str) -> u64 {
+    let mut hash: u64 = 5381;
+    for byte in s.bytes() {
+        hash = hash.wrapping_mul(33).wrapping_add(byte as u64);
+    }
+    hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rate_tracker() {
+        let mut tracker = RateTracker::new();
+        for _ in 0..10 {
+            assert!(tracker.check_and_increment().is_ok());
+        }
+        // 11th request should fail (10 RPM limit)
+        assert!(tracker.check_and_increment().is_err());
+    }
+
+    #[test]
+    fn test_simple_hash_deterministic() {
+        let h1 = simple_hash("test prompt");
+        let h2 = simple_hash("test prompt");
+        let h3 = simple_hash("different prompt");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, h3);
+    }
+
+    #[test]
+    fn test_remaining_quota() {
+        let client = GeminiClient::new("fake-key").unwrap();
+        assert_eq!(client.remaining_quota(), 250);
     }
 }
