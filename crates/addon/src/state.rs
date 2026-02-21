@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use gw2_core::config::AppConfig;
@@ -8,6 +9,14 @@ use crate::ui::chat_bar::ChatBarState;
 use crate::ui::comparison::ComparisonState;
 
 static STATE: Mutex<Option<AddonState>> = Mutex::new(None);
+
+/// Global shutdown flag — set to true on addon unload so background threads can exit early.
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+/// Check if the addon is shutting down.
+pub fn is_shutting_down() -> bool {
+    SHUTDOWN.load(Ordering::Relaxed)
+}
 
 pub struct AddonState {
     pub window_visible: bool,
@@ -174,6 +183,7 @@ pub fn is_window_visible() -> bool {
 
 /// Clear state on addon unload to prevent stale background thread writes.
 pub fn clear() {
+    SHUTDOWN.store(true, Ordering::Relaxed);
     *lock_state() = None;
 }
 

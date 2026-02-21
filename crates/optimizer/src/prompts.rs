@@ -60,6 +60,15 @@ Respond with a JSON code block containing ONLY the build object:
     )
 }
 
+/// Sanitize build summary text for safe inclusion in prompts.
+/// Strips backticks (fence injection) and caps length.
+fn sanitize_build_summary(s: &str) -> String {
+    s.chars()
+        .take(2000)
+        .filter(|c| *c != '`')
+        .collect()
+}
+
 /// Build a prompt for improving an existing build.
 pub fn improve_build_prompt(
     profession: &str,
@@ -68,6 +77,7 @@ pub fn improve_build_prompt(
     current_build_summary: &str,
     context: &str,
 ) -> String {
+    let sanitized_build = sanitize_build_summary(current_build_summary);
     format!(
         r#"You are a Guild Wars 2 build optimizer. Improve this {archetype} build for {profession} in {game_mode}.
 
@@ -106,7 +116,7 @@ Respond with ONLY a JSON object showing the improved build:
         archetype = archetype.label(),
         profession = profession,
         game_mode = game_mode,
-        current_build = current_build_summary,
+        current_build = sanitized_build,
         context = context,
     )
 }
@@ -125,6 +135,7 @@ pub fn chat_refinement_prompt(
         .take(300)
         .filter(|c| *c != '`')
         .collect();
+    let sanitized_build = sanitize_build_summary(current_build_summary);
 
     format!(
         r#"You are a Guild Wars 2 build advisor for a {profession}. The player has this build:
@@ -155,7 +166,7 @@ Consider all synergies (traits, sigils, runes, relics, skills) as a codependent 
 }}
 ```"#,
         profession = profession,
-        current_build = current_build_summary,
+        current_build = sanitized_build,
         request = sanitized_request,
         context = context,
     )
@@ -167,6 +178,8 @@ pub fn compare_builds_prompt(
     build_b_summary: &str,
     stat_diffs: &str,
 ) -> String {
+    let build_a = sanitize_build_summary(build_a_summary);
+    let build_b = sanitize_build_summary(build_b_summary);
     format!(
         r#"You are a Guild Wars 2 build analyst. Compare these two builds:
 
@@ -180,8 +193,8 @@ Stat differences:
 {diffs}
 
 Explain in 2-3 paragraphs which build is stronger and why. Focus on synergy differences, not just stat numbers. Consider the full combat loop."#,
-        build_a = build_a_summary,
-        build_b = build_b_summary,
+        build_a = build_a,
+        build_b = build_b,
         diffs = stat_diffs,
     )
 }

@@ -2,6 +2,7 @@
 //! Each cache file stores metadata (build number, timestamp) alongside the data.
 //! Cache is invalidated when the GW2 game build number changes.
 
+use std::io::BufWriter;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
@@ -40,8 +41,11 @@ impl DataCache {
             data,
         };
         let path = self.path_for(key);
-        let json = serde_json::to_string(&entry)?;
-        std::fs::write(&path, json)?;
+        let tmp_path = self.base_path.join(format!("{}.tmp", key));
+        let file = std::fs::File::create(&tmp_path)?;
+        let writer = BufWriter::new(file);
+        serde_json::to_writer(writer, &entry)?;
+        std::fs::rename(&tmp_path, &path)?;
         Ok(())
     }
 

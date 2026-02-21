@@ -225,11 +225,7 @@ fn render_left_menu(ui: &Ui, state: &mut AddonState) {
         load_characters(state);
     }
 
-    if let Some(ref err) = state.main.error {
-        ui.spacing();
-        ui.text_colored([1.0, 0.3, 0.0, 1.0], "Error:");
-        ui.text_wrapped(err);
-    }
+    // Error is shown in the top-level error bar (render_main), not duplicated here
 }
 
 fn render_main_content(ui: &Ui, state: &mut AddonState) {
@@ -279,12 +275,14 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
         ui.separator();
         if let Some(ref build) = state.main.current_build {
             let stats = state.main.current_stats.clone();
-            crate::ui::comparison::render_comparison(
+            if let Some(new_idx) = crate::ui::comparison::render_comparison(
                 ui,
                 build,
                 stats.as_ref(),
                 &state.main.comparison,
-            );
+            ) {
+                state.main.comparison.selected_suggestion = new_idx;
+            }
         }
 
         // Save Build button (shown when suggestions exist)
@@ -345,12 +343,14 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
         if let Some(ref build) = state.main.current_build {
             let stats = state.main.current_stats.clone();
             ui.spacing();
-            crate::ui::comparison::render_comparison(
+            if let Some(new_idx) = crate::ui::comparison::render_comparison(
                 ui,
                 build,
                 stats.as_ref(),
                 &state.main.comparison,
-            );
+            ) {
+                state.main.comparison.selected_suggestion = new_idx;
+            }
         }
 
         render_save_build_ui(ui, state);
@@ -403,7 +403,9 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     if ui.button_with_size("Clear Cache", [100.0, 0.0]) {
         let _ = std::fs::remove_dir_all(&cache_dir);
         state.config.cache_build_number = None;
-        let _ = state.config.save(&state.config_path);
+        if let Err(e) = state.config.save(&state.config_path) {
+            nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+        }
         state.main.game_db = None;
     }
 
@@ -956,7 +958,9 @@ fn generate_build_chat_code(
 ) -> Option<String> {
     let profession_name = build.profession.as_deref()?;
     let profession = db.profession(profession_name)?;
-    let profession_code = profession.code? as u8;
+    let code = profession.code?;
+    if code > 255 { return None; }
+    let profession_code = code as u8;
 
     let mut buf: Vec<u8> = Vec::with_capacity(44);
     buf.push(0x0D); // chat code type: build template
@@ -966,6 +970,7 @@ fn generate_build_chat_code(
     for i in 0..3 {
         if let Some(sel) = build.specializations.get(i) {
             if let Some(spec_id) = sel.id {
+                if spec_id > 255 { return None; }
                 buf.push(spec_id as u8);
 
                 // Encode trait choices as 2-bit positions packed into 1 byte
@@ -1101,6 +1106,11 @@ fn load_game_db(state: &mut AddonState) {
 
 /// Start optimization in background thread (S11-T01, S11-T02, S11-T03)
 fn start_optimization(state: &mut AddonState, archetype: Archetype, _current_build: Option<&gw2_core::types::ResolvedBuild>) {
+    // Guard against concurrent optimization
+    if state.main.optimizing {
+        return;
+    }
+
     // Get profession from current build
     let profession_name = state.main.current_build.as_ref()
         .map(|b| b.profession.clone())
@@ -1162,6 +1172,11 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
             let mut suggestions: Vec<crate::ui::comparison::BuildSuggestion> =
                 candidates.iter().map(|c| candidate_to_suggestion(c, &db)).collect();
 
+            // Check shutdown before expensive Gemini call
+            if crate::state::is_shutting_down() {
+                return Err("Addon shutting down".into());
+            }
+
             // Enrich top suggestion with Gemini LLM reasoning
             if let Some(ref key) = gemini_key {
                 crate::state::with_state(|s| {
@@ -1193,19 +1208,21 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
             Ok(suggestions)
         })();
 
-        crate::state::with_state(|s| {
-            s.main.optimizing = false;
-            s.main.comparison.loading = false;
-            match result {
-                Ok(suggestions) => {
-                    s.main.comparison.suggestions = suggestions;
-                    s.main.comparison.selected_suggestion = 0;
+        if !crate::state::is_shutting_down() {
+            crate::state::with_state(|s| {
+                s.main.optimizing = false;
+                s.main.comparison.loading = false;
+                match result {
+                    Ok(suggestions) => {
+                        s.main.comparison.suggestions = suggestions;
+                        s.main.comparison.selected_suggestion = 0;
+                    }
+                    Err(e) => {
+                        s.main.comparison.error = Some(e);
+                    }
                 }
-                Err(e) => {
-                    s.main.comparison.error = Some(e);
-                }
-            }
-        });
+            });
+        }
     });
 }
 
@@ -1469,6 +1486,11 @@ fn enrich_with_gemini(
 
 /// Send a chat message to Gemini for build refinement.
 fn send_chat_message(state: &mut AddonState, message: String) {
+    // Guard against concurrent chat messages
+    if state.main.chat.waiting {
+        return;
+    }
+
     let gemini_key = match state.config.gemini_api_key.clone() {
         Some(key) => key,
         None => {
@@ -1506,33 +1528,35 @@ fn send_chat_message(state: &mut AddonState, message: String) {
                 .map_err(|e| format!("Parse failed: {}", e))
         })();
 
-        crate::state::with_state(|s| {
-            match result {
-                Ok(gemini_build) => {
-                    let display = if gemini_build.explanation.is_empty() {
-                        "Build updated.".to_string()
-                    } else {
-                        gemini_build.explanation.clone()
-                    };
-                    crate::ui::chat_bar::add_ai_response(&mut s.main.chat, display);
+        if !crate::state::is_shutting_down() {
+            crate::state::with_state(|s| {
+                match result {
+                    Ok(gemini_build) => {
+                        let display = if gemini_build.explanation.is_empty() {
+                            "Build updated.".to_string()
+                        } else {
+                            gemini_build.explanation.clone()
+                        };
+                        crate::ui::chat_bar::add_ai_response(&mut s.main.chat, display);
 
-                    let mut suggestion = crate::ui::comparison::BuildSuggestion {
-                        label: "Chat Refinement".into(),
-                        ..Default::default()
-                    };
-                    apply_gemini_response(&mut suggestion, &gemini_build);
-                    s.main.comparison.suggestions.push(suggestion);
-                    s.main.comparison.selected_suggestion =
-                        s.main.comparison.suggestions.len() - 1;
+                        let mut suggestion = crate::ui::comparison::BuildSuggestion {
+                            label: "Chat Refinement".into(),
+                            ..Default::default()
+                        };
+                        apply_gemini_response(&mut suggestion, &gemini_build);
+                        s.main.comparison.suggestions.push(suggestion);
+                        s.main.comparison.selected_suggestion =
+                            s.main.comparison.suggestions.len() - 1;
+                    }
+                    Err(e) => {
+                        crate::ui::chat_bar::add_ai_response(
+                            &mut s.main.chat,
+                            format!("Error: {}", e),
+                        );
+                    }
                 }
-                Err(e) => {
-                    crate::ui::chat_bar::add_ai_response(
-                        &mut s.main.chat,
-                        format!("Error: {}", e),
-                    );
-                }
-            }
-        });
+            });
+        }
     });
 }
 
@@ -1540,6 +1564,9 @@ fn send_chat_message(state: &mut AddonState, message: String) {
 
 /// Render the save build UI (name input + Save button) below the comparison view.
 fn render_save_build_ui(ui: &Ui, state: &mut AddonState) {
+    if state.main.comparison.suggestions.is_empty() {
+        return;
+    }
     ui.spacing();
     ui.separator();
     ui.text("Save Build:");
@@ -1733,7 +1760,7 @@ fn format_timestamp(timestamp: u64) -> String {
     let days_in_months: [u64; 12] = [
         31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
     ];
-    let mut m = 0;
+    let mut m = 11; // default to December if loop doesn't break
     for (i, &dim) in days_in_months.iter().enumerate() {
         if remaining_days < dim {
             m = i;

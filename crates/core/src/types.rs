@@ -146,10 +146,17 @@ pub struct StatBlock {
 
 impl StatBlock {
     /// Compute derived stats from base stats.
-    pub fn compute_derived(&mut self) {
+    /// `profession` determines base health: Warrior/Necro=9212, medium=5922, light=1645.
+    pub fn compute_derived(&mut self, profession: &str) {
         self.crit_chance = ((self.precision - 895) as f64 / 21.0).clamp(0.0, 100.0);
         self.crit_damage = 150.0 + self.ferocity as f64 / 15.0;
-        self.health = self.vitality * 10 + 1645; // level 80 base
+        let base_hp = match profession {
+            "Warrior" | "Necromancer" => 9212,
+            "Revenant" | "Engineer" | "Ranger" | "Mesmer" => 5922,
+            "Guardian" | "Thief" | "Elementalist" => 1645,
+            _ => 5922, // default to medium
+        };
+        self.health = self.vitality * 10 + base_hp;
         self.armor = self.toughness + 1000; // approximate, defense from gear adds too
     }
 }

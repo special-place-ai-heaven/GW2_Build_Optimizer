@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use gw2_api::models::{ItemStat, Profession, Specialization};
+use gw2_api::models::{ItemStat, Specialization};
 
 use crate::scoring::Archetype;
 
@@ -84,65 +84,6 @@ pub fn search_gear_prefixes(
     }
 
     candidates
-}
-
-/// Find valid weapon combinations for a profession.
-/// Returns pairs of (weapon_set_1, weapon_set_2).
-pub fn search_weapon_combos(
-    profession: &Profession,
-    elite_spec_id: Option<u32>,
-) -> Vec<(Vec<String>, Vec<String>)> {
-    let mut valid_weapons: Vec<(String, Vec<String>)> = Vec::new();
-
-    for (weapon_name, info) in &profession.weapons {
-        // Check if weapon requires an elite spec we don't have
-        if let Some(req_spec) = info.specialization {
-            if elite_spec_id != Some(req_spec) {
-                continue;
-            }
-        }
-        // Skip aquatic-only weapons
-        if info.flags.iter().all(|f| f == "Aquatic") {
-            continue;
-        }
-        valid_weapons.push((weapon_name.clone(), info.flags.clone()));
-    }
-
-    let is_terrestrial = |flags: &[String]| -> bool {
-        !flags.contains(&"Aquatic".to_string()) || flags.iter().any(|f| f != "Aquatic")
-    };
-
-    let mut combos = Vec::new();
-
-    // Generate valid weapon sets: two-handed (non-aquatic)
-    for (name, flags) in &valid_weapons {
-        if flags.contains(&"TwoHand".to_string()) && is_terrestrial(flags) {
-            combos.push((vec![name.clone()], Vec::new()));
-        }
-    }
-
-    // Main-hand + off-hand combinations (non-aquatic only)
-    let main_hands: Vec<&str> = valid_weapons
-        .iter()
-        .filter(|(_, f)| f.contains(&"Mainhand".to_string()) && is_terrestrial(f))
-        .map(|(n, _)| n.as_str())
-        .collect();
-
-    let off_hands: Vec<&str> = valid_weapons
-        .iter()
-        .filter(|(_, f)| f.contains(&"Offhand".to_string()) && is_terrestrial(f))
-        .map(|(n, _)| n.as_str())
-        .collect();
-
-    for mh in &main_hands {
-        for oh in &off_hands {
-            combos.push((vec![mh.to_string(), oh.to_string()], Vec::new()));
-        }
-    }
-
-    // Limit to reasonable number
-    combos.truncate(20);
-    combos
 }
 
 /// Find valid specialization combinations for a profession.

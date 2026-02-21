@@ -92,7 +92,9 @@ impl RateTracker {
         }
     }
 
-    fn check(&mut self) -> Result<(), GeminiError> {
+    /// Check rate limits and pre-reserve a slot (increment counters).
+    /// If the request later fails, call `undo_reserve()` to release the slot.
+    fn check_and_reserve(&mut self) -> Result<(), GeminiError> {
         // Reset daily counter if the day changed
         let today = current_epoch_day();
         if today != self.current_day {
@@ -114,12 +116,17 @@ impl RateTracker {
                 "Daily quota nearly exhausted (240/250)".into(),
             ));
         }
+
+        // Reserve slot atomically with the check
+        self.requests_this_minute += 1;
+        self.requests_today += 1;
         Ok(())
     }
 
-    fn record_success(&mut self) {
-        self.requests_this_minute += 1;
-        self.requests_today += 1;
+    /// Release a reserved slot if the request failed before reaching the API.
+    fn undo_reserve(&mut self) {
+        self.requests_this_minute = self.requests_this_minute.saturating_sub(1);
+        self.requests_today = self.requests_today.saturating_sub(1);
     }
 
     fn remaining_today(&self) -> u32 {
@@ -252,11 +259,11 @@ impl GeminiClient {
 
     /// Send a prompt to Gemini (no caching). Checks rate limits first.
     pub fn generate(&self, prompt: &str) -> Result<String, GeminiError> {
-        // Pre-check rate limit (don't increment yet)
+        // Atomically check rate limit and reserve a slot
         self.rate
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .check()?;
+            .check_and_reserve()?;
 
         let request = GenerateRequest {
             contents: vec![Content {
@@ -266,21 +273,24 @@ impl GeminiClient {
             }],
         };
 
-        let resp = self
+        let resp = match self
             .http
             .post(GEMINI_GENERATE_URL)
             .header("x-goog-api-key", &self.api_key)
             .json(&request)
-            .send()?;
+            .send()
+        {
+            Ok(r) => r,
+            Err(e) => {
+                // Request never reached server — release reserved slot
+                self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                return Err(GeminiError::Http(e));
+            }
+        };
 
         let status = resp.status().as_u16();
         match status {
-            200 => {
-                // Only count successful requests against quota
-                let mut rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
-                rate.record_success();
-                self.persist_usage(&rate);
-            }
+            200 => {} // parse body below
             401 | 403 => return Err(GeminiError::InvalidKey),
             429 => return Err(GeminiError::RateLimited),
             _ => {
@@ -290,12 +300,21 @@ impl GeminiClient {
         }
 
         let body: GenerateResponse = resp.json()?;
-        body.candidates
+        let text = body
+            .candidates
             .and_then(|c| c.into_iter().next())
             .and_then(|c| c.content)
             .and_then(|c| c.parts.into_iter().next())
             .map(|p| p.text)
-            .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()))
+            .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()))?;
+
+        // Persist usage after successful parse
+        {
+            let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
+            self.persist_usage(&rate);
+        }
+
+        Ok(text)
     }
 
     /// Save rate tracker to disk if a persistence path is configured.
@@ -332,18 +351,17 @@ mod tests {
     fn test_rate_tracker_rpm_limit() {
         let mut tracker = RateTracker::new();
         for _ in 0..10 {
-            assert!(tracker.check().is_ok());
-            tracker.record_success();
+            assert!(tracker.check_and_reserve().is_ok());
         }
         // 11th check should fail (10 RPM limit)
-        assert!(tracker.check().is_err());
+        assert!(tracker.check_and_reserve().is_err());
     }
 
     #[test]
     fn test_rate_tracker_daily_limit() {
         let mut tracker = RateTracker::new();
         tracker.requests_today = 240;
-        assert!(tracker.check().is_err());
+        assert!(tracker.check_and_reserve().is_err());
     }
 
     #[test]

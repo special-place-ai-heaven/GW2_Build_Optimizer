@@ -124,9 +124,9 @@ pub fn download_all(
         let mut equipment_items: Vec<models::Item> = Vec::new();
 
         for (batch_idx, chunk) in ids.chunks(200).enumerate() {
-            // Report sub-progress for each batch
+            // Report sub-progress for each batch (step is 7 here, use it so bar shows 7/8 not 8/8)
             on_progress(DownloadProgress {
-                current_step: 8,
+                current_step: step,
                 total_steps: TOTAL_STEPS,
                 step_name: "Items (equipment)".to_string(),
                 done: false,
