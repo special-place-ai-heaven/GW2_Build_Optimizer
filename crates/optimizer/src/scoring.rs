@@ -117,7 +117,9 @@ impl Archetype {
             Archetype::HealSupport => &[
                 "Harrier's", "Minstrel's", "Cleric's", "Magi's",
             ],
-            Archetype::CelestialHybrid => &["Celestial"],
+            Archetype::CelestialHybrid => &[
+                "Celestial", "Diviner's", "Trailblazer's", "Minstrel's",
+            ],
         }
     }
 }

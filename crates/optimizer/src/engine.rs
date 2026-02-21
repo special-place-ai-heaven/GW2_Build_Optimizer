@@ -73,7 +73,7 @@ pub fn optimize(
     for candidate in &mut gear_candidates {
         let mock_stats = calculate_candidate_stats(candidate, itemstats_cache);
         let mut full_stats = stats::base_stats();
-        stats_add(&mut full_stats, &mock_stats);
+        full_stats += &mock_stats;
         let derived = stats::compute_derived(&full_stats, &profession.name);
         let perf = combat::calculate_combat_performance(
             &full_stats, &derived, &empty_mods, solo_profile, &profession.name,
@@ -122,8 +122,8 @@ pub fn optimize(
             let trait_stats = stats::calculate_trait_stats(&trait_ids, traits_cache);
 
             let mut full_stats = stats::base_stats();
-            stats_add(&mut full_stats, &gear_stats);
-            stats_add(&mut full_stats, &trait_stats);
+            full_stats += &gear_stats;
+            full_stats += &trait_stats;
             stats::apply_trait_conversions(&mut full_stats, &trait_ids, traits_cache);
 
             let derived = stats::compute_derived(&full_stats, &profession.name);
@@ -221,7 +221,7 @@ fn optimize_pvp(
         // PvP stats come from amulet (not gear), so only calculate trait bonuses
         let trait_stats = stats::calculate_trait_stats(&trait_ids, traits_cache);
         let mut full_stats = stats::base_stats();
-        stats_add(&mut full_stats, &trait_stats);
+        full_stats += &trait_stats;
         stats::apply_trait_conversions(&mut full_stats, &trait_ids, traits_cache);
 
         let derived = stats::compute_derived(&full_stats, &profession.name);
@@ -449,18 +449,6 @@ fn score_fact(fact: &Fact, weights: &crate::scoring::StatWeights) -> f64 {
         }
         _ => 0.0,
     }
-}
-
-fn stats_add(target: &mut stats::StatBlock, source: &stats::StatBlock) {
-    target.power += source.power;
-    target.precision += source.precision;
-    target.toughness += source.toughness;
-    target.vitality += source.vitality;
-    target.condition_damage += source.condition_damage;
-    target.expertise += source.expertise;
-    target.concentration += source.concentration;
-    target.ferocity += source.ferocity;
-    target.healing_power += source.healing_power;
 }
 
 #[cfg(test)]
