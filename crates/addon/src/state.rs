@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use gw2_core::config::AppConfig;
 use gw2_core::types::{GameMode, ResolvedBuild, SavedBuild, StatBlock};
@@ -10,12 +10,29 @@ use crate::ui::comparison::ComparisonState;
 
 static STATE: Mutex<Option<AddonState>> = Mutex::new(None);
 
-/// Global shutdown flag — set to true on addon unload so background threads can exit early.
-static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+/// A cancellation token that background threads check to know when to stop.
+/// Backed by `Arc<AtomicBool>` — cloning is cheap and each thread gets its own Arc ref.
+#[derive(Clone)]
+pub struct CancellationToken {
+    cancelled: Arc<AtomicBool>,
+}
 
-/// Check if the addon is shutting down.
-pub fn is_shutting_down() -> bool {
-    SHUTDOWN.load(Ordering::Relaxed)
+impl CancellationToken {
+    fn new() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Check if cancellation has been requested.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
+
+    /// Signal all threads holding a clone of this token to stop.
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
 }
 
 pub struct AddonState {
@@ -28,6 +45,9 @@ pub struct AddonState {
     pub setup: SetupState,
     // Main UI state
     pub main: MainState,
+    /// Cancellation token — cloned into every background thread.
+    /// Cancelled on addon unload so threads exit early.
+    pub cancel_token: CancellationToken,
 }
 
 #[derive(Default)]
@@ -165,6 +185,7 @@ pub fn init(addon_dir: PathBuf) {
         screen,
         setup,
         main: MainState::default(),
+        cancel_token: CancellationToken::new(),
     });
 }
 
@@ -181,10 +202,15 @@ pub fn is_window_visible() -> bool {
         .unwrap_or(false)
 }
 
-/// Clear state on addon unload to prevent stale background thread writes.
+/// Clear state on addon unload.
+/// Cancels the token first so background threads exit early,
+/// then drops the state to release all resources.
 pub fn clear() {
-    SHUTDOWN.store(true, Ordering::Relaxed);
-    *lock_state() = None;
+    let mut guard = lock_state();
+    if let Some(ref state) = *guard {
+        state.cancel_token.cancel();
+    }
+    *guard = None;
 }
 
 /// Access state for reading/writing in UI code.

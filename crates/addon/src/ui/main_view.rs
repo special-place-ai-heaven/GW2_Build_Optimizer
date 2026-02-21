@@ -491,10 +491,15 @@ fn load_characters(state: &mut AddonState) {
     state.main.characters_loading = true;
     state.main.error = None;
     let key = key.clone();
+    let token = state.cancel_token.clone();
 
     std::thread::spawn(move || {
+        if token.is_cancelled() { return; }
+
         let result = gw2_api::client::Gw2Client::with_key(&key)
             .and_then(|c| c.fetch_characters());
+
+        if token.is_cancelled() { return; }
 
         crate::state::with_state(|s| {
             s.main.characters_loading = false;
@@ -516,15 +521,21 @@ fn load_character_tabs(state: &mut AddonState, character_name: String) {
     state.main.error = None;
     let key = key.clone();
     let expected_char = character_name.clone();
+    let token = state.cancel_token.clone();
 
     std::thread::spawn(move || {
+        if token.is_cancelled() { return; }
+
         let result = (|| -> Result<(Vec<gw2_api::models::BuildTab>, Vec<gw2_api::models::EquipmentTab>), String> {
             let client = gw2_api::client::Gw2Client::with_key(&key)
                 .map_err(|e| e.to_string())?;
             let build_tabs = client.fetch_build_tabs(&expected_char).map_err(|e| e.to_string())?;
+            if token.is_cancelled() { return Err("Cancelled".into()); }
             let equipment_tabs = client.fetch_equipment_tabs(&expected_char).map_err(|e| e.to_string())?;
             Ok((build_tabs, equipment_tabs))
         })();
+
+        if token.is_cancelled() { return; }
 
         crate::state::with_state(|s| {
             // Stale-result guard: discard if user switched characters
@@ -587,13 +598,20 @@ fn resolve_selected_build_inner(state: &mut AddonState) {
         .and_then(|i| state.main.characters.get(i).cloned())
         .unwrap_or_default();
     let expected_char = char_name.clone();
+    let token = state.cancel_token.clone();
 
     std::thread::spawn(move || {
+        if token.is_cancelled() { return; }
+
         let cache = gw2_api::cache::DataCache::new(&cache_dir);
         let result = resolve_build(&char_name, &bt.build, &et, &cache, &game_mode);
 
+        if token.is_cancelled() { return; }
+
         // Also calculate stats from the equipment + traits
         let stats_result = calculate_current_stats(&bt.build, &et, &cache, &game_mode);
+
+        if token.is_cancelled() { return; }
 
         crate::state::with_state(|s| {
             // Stale-result guard
@@ -1080,10 +1098,15 @@ fn generate_build_chat_code(
 fn load_game_db(state: &mut AddonState) {
     state.main.game_db_loading = true;
     let cache_dir = state.addon_dir.join("cache");
+    let token = state.cancel_token.clone();
 
     std::thread::spawn(move || {
+        if token.is_cancelled() { return; }
+
         let cache = gw2_api::cache::DataCache::new(&cache_dir);
         let result = gw2_optimizer::gamedb::GameDb::load(&cache);
+
+        if token.is_cancelled() { return; }
 
         crate::state::with_state(|s| {
             s.main.game_db_loading = false;
@@ -1139,6 +1162,7 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
     let current_build_summary = state.main.current_build.as_ref()
         .map(|b| summarize_resolved_build(b));
     let addon_dir = state.addon_dir.clone();
+    let token = state.cancel_token.clone();
 
     state.main.optimizing = true;
     state.main.optimize_stage = "Starting...".into();
@@ -1148,10 +1172,13 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
 
     std::thread::spawn(move || {
         let result = (|| -> Result<Vec<crate::ui::comparison::BuildSuggestion>, String> {
+            if token.is_cancelled() { return Err("Cancelled".into()); }
+
             let db = db.ok_or("GameDb not loaded")?;
             let profession = db.profession(&profession_name)
                 .ok_or_else(|| format!("Profession {} not found", profession_name))?;
 
+            let token_progress = token.clone();
             let candidates = gw2_optimizer::engine::optimize(
                 profession,
                 &archetype,
@@ -1161,6 +1188,7 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
                 &db.specializations,
                 &db.traits,
                 |progress| {
+                    if token_progress.is_cancelled() { return; }
                     crate::state::with_state(|s| {
                         s.main.optimize_stage = progress.stage.clone();
                     });
@@ -1169,16 +1197,15 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
                 &game_mode,
             );
 
+            if token.is_cancelled() { return Err("Cancelled".into()); }
+
             let mut suggestions: Vec<crate::ui::comparison::BuildSuggestion> =
                 candidates.iter().map(|c| candidate_to_suggestion(c, &db)).collect();
 
-            // Check shutdown before expensive Gemini call
-            if crate::state::is_shutting_down() {
-                return Err("Addon shutting down".into());
-            }
-
             // Enrich top suggestion with Gemini LLM reasoning
             if let Some(ref key) = gemini_key {
+                if token.is_cancelled() { return Err("Cancelled".into()); }
+
                 crate::state::with_state(|s| {
                     s.main.optimize_stage = "Consulting Gemini for synergy analysis...".into();
                 });
@@ -1208,7 +1235,7 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
             Ok(suggestions)
         })();
 
-        if !crate::state::is_shutting_down() {
+        if !token.is_cancelled() {
             crate::state::with_state(|s| {
                 s.main.optimizing = false;
                 s.main.comparison.loading = false;
@@ -1513,8 +1540,11 @@ fn send_chat_message(state: &mut AddonState, message: String) {
         &profession, &Archetype::PowerDPS, &game_mode_label,
     );
     let addon_dir = state.addon_dir.clone();
+    let token = state.cancel_token.clone();
 
     std::thread::spawn(move || {
+        if token.is_cancelled() { return; }
+
         let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
             let prompt = gw2_optimizer::prompts::chat_refinement_prompt(
                 &profession, &build_summary, &message, &context,
@@ -1522,13 +1552,16 @@ fn send_chat_message(state: &mut AddonState, message: String) {
             let usage_path = addon_dir.join("gemini_usage.json");
             let client = gw2_optimizer::gemini::GeminiClient::with_persistence(&gemini_key, usage_path)
                 .map_err(|e| e.to_string())?;
+
+            if token.is_cancelled() { return Err("Cancelled".into()); }
+
             let response = client.generate_cached(&prompt)
                 .map_err(|e| e.to_string())?;
             gw2_optimizer::prompts::parse_gemini_build(&response)
                 .map_err(|e| format!("Parse failed: {}", e))
         })();
 
-        if !crate::state::is_shutting_down() {
+        if !token.is_cancelled() {
             crate::state::with_state(|s| {
                 match result {
                     Ok(gemini_build) => {
