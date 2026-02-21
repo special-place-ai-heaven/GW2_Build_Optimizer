@@ -1528,20 +1528,48 @@ fn candidate_to_suggestion(
 }
 
 /// Infer archetype from current build stats.
+/// Compares stat investment above base (Power/Precision start at 1000)
+/// so gear-driven stats are properly weighted against base-zero stats.
 fn infer_archetype_from_build(_build: &gw2_core::types::ResolvedBuild, stats: Option<&gw2_core::types::StatBlock>) -> Archetype {
     let Some(stats) = stats else {
         return Archetype::PowerDPS;
     };
 
-    let max_stat = [
-        (stats.power, Archetype::PowerDPS),
-        (stats.condition_damage, Archetype::ConditionDPS),
-        (stats.healing_power, Archetype::HealSupport),
-        (stats.concentration, Archetype::BoonSupport),
-        (stats.toughness + stats.vitality, Archetype::Tank),
-    ].iter().max_by_key(|(v, _)| v).map(|(_, a)| a.clone());
+    // Investment above base values (Power & Precision base = 1000, rest = 0)
+    let power_inv = (stats.power - 1000).max(0);
+    let prec_inv = (stats.precision - 1000).max(0);
 
-    max_stat.unwrap_or(Archetype::PowerDPS)
+    // Score each archetype based on stat investment signals
+    let scores: [(i32, Archetype); 7] = [
+        // PowerDPS: power + precision + ferocity
+        (power_inv + prec_inv + stats.ferocity, Archetype::PowerDPS),
+        // ConditionDPS: condition damage + expertise
+        (stats.condition_damage * 2 + stats.expertise, Archetype::ConditionDPS),
+        // SustainHybrid: balanced power + defense
+        (power_inv + prec_inv / 2 + stats.toughness / 2 + stats.vitality / 2, Archetype::SustainHybrid),
+        // Tank: toughness + vitality (scaled down since it's a sum of two)
+        (stats.toughness + stats.vitality, Archetype::Tank),
+        // BoonSupport: concentration-heavy
+        (stats.concentration * 3, Archetype::BoonSupport),
+        // HealSupport: healing-heavy
+        (stats.healing_power * 3, Archetype::HealSupport),
+        // CelestialHybrid: moderate everything (detect low variance across stats)
+        ({
+            let vals = [power_inv, prec_inv, stats.ferocity, stats.condition_damage,
+                        stats.expertise, stats.concentration, stats.healing_power,
+                        stats.toughness, stats.vitality];
+            let min = vals.iter().copied().min().unwrap_or(0);
+            let max = vals.iter().copied().max().unwrap_or(0);
+            // Low spread between min/max = Celestial-like; bonus if all stats are moderate
+            let spread_bonus = if max > 0 && max - min < max / 2 { min * 2 } else { 0 };
+            spread_bonus
+        }, Archetype::CelestialHybrid),
+    ];
+
+    scores.iter()
+        .max_by_key(|(v, _)| v)
+        .map(|(_, a)| a.clone())
+        .unwrap_or(Archetype::PowerDPS)
 }
 
 /// Summarize a ResolvedBuild as text for LLM prompts.

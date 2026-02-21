@@ -7,6 +7,7 @@
 //! multiplier/value come from the itemstat definition.
 
 use std::collections::HashMap;
+use std::ops::AddAssign;
 
 use gw2_api::models::{
     EquipmentPiece, EquipmentTab, Fact, InfixUpgrade, Item, ItemStat, Trait,
@@ -42,6 +43,19 @@ impl StatBlock {
         }
     }
 
+    /// Returns true if all stats are zero (default).
+    pub fn is_zero(&self) -> bool {
+        self.power == 0.0
+            && self.precision == 0.0
+            && self.toughness == 0.0
+            && self.vitality == 0.0
+            && self.condition_damage == 0.0
+            && self.expertise == 0.0
+            && self.concentration == 0.0
+            && self.ferocity == 0.0
+            && self.healing_power == 0.0
+    }
+
     pub fn get(&self, attr: &str) -> f64 {
         match attr {
             "Power" => self.power,
@@ -55,6 +69,34 @@ impl StatBlock {
             "Healing" | "HealingPower" => self.healing_power,
             _ => 0.0,
         }
+    }
+}
+
+impl AddAssign for StatBlock {
+    fn add_assign(&mut self, rhs: Self) {
+        self.power += rhs.power;
+        self.precision += rhs.precision;
+        self.toughness += rhs.toughness;
+        self.vitality += rhs.vitality;
+        self.condition_damage += rhs.condition_damage;
+        self.expertise += rhs.expertise;
+        self.concentration += rhs.concentration;
+        self.ferocity += rhs.ferocity;
+        self.healing_power += rhs.healing_power;
+    }
+}
+
+impl AddAssign<&StatBlock> for StatBlock {
+    fn add_assign(&mut self, rhs: &StatBlock) {
+        self.power += rhs.power;
+        self.precision += rhs.precision;
+        self.toughness += rhs.toughness;
+        self.vitality += rhs.vitality;
+        self.condition_damage += rhs.condition_damage;
+        self.expertise += rhs.expertise;
+        self.concentration += rhs.concentration;
+        self.ferocity += rhs.ferocity;
+        self.healing_power += rhs.healing_power;
     }
 }
 
@@ -685,6 +727,32 @@ mod tests {
         assert_eq!(stats.power, 1900.0);
         assert_eq!(stats.precision, 2200.0);
         assert_eq!(stats.ferocity, 900.0); // CritDamage maps to ferocity
+    }
+
+    #[test]
+    fn test_stat_block_add_assign() {
+        let mut base = StatBlock {
+            power: 1000.0,
+            precision: 900.0,
+            ..Default::default()
+        };
+        let bonus = StatBlock {
+            power: 200.0,
+            ferocity: 300.0,
+            ..Default::default()
+        };
+        base += &bonus;
+        assert_eq!(base.power, 1200.0);
+        assert_eq!(base.precision, 900.0);
+        assert_eq!(base.ferocity, 300.0);
+    }
+
+    #[test]
+    fn test_stat_block_is_zero() {
+        assert!(StatBlock::default().is_zero());
+        let mut s = StatBlock::default();
+        s.power = 1.0;
+        assert!(!s.is_zero());
     }
 
     #[test]
