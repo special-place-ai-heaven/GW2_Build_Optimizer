@@ -266,7 +266,6 @@ fn calculate_candidate_stats(
             continue;
         };
 
-        // Typical Ascended attribute_adjustment by slot type
         let adj = attribute_adjustment_for_slot(slot);
 
         for attr in &itemstat.attributes {
@@ -279,12 +278,14 @@ fn calculate_candidate_stats(
 }
 
 /// Typical Ascended attribute_adjustment values by equipment slot.
+/// In GW2, attribute_adjustment is the same across armor weight classes —
+/// only the defense rating differs (handled by base_defense in stats.rs).
 fn attribute_adjustment_for_slot(slot: &str) -> f64 {
     match slot {
-        // Armor (Ascended)
+        // Armor (Ascended) — same attribute_adjustment regardless of weight class
         "Helm" | "Shoulders" | "Gloves" | "Boots" => 141.0,
-        "Coat" => 225.0,  // varies by weight class, using Medium average
-        "Leggings" => 171.0, // varies by weight class, using Medium average
+        "Coat" => 225.0,
+        "Leggings" => 171.0,
         // Weapons (Ascended)
         "WeaponA1" | "WeaponB1" => 251.0, // main-hand / two-handed
         "WeaponA2" | "WeaponB2" => 125.0, // off-hand
@@ -318,6 +319,8 @@ mod tests {
         assert_eq!(attribute_adjustment_for_slot("Coat"), 225.0);
         assert_eq!(attribute_adjustment_for_slot("Helm"), 141.0);
         assert_eq!(attribute_adjustment_for_slot("Amulet"), 157.0);
+        assert_eq!(attribute_adjustment_for_slot("Leggings"), 171.0);
+        assert_eq!(attribute_adjustment_for_slot("WeaponA1"), 251.0);
     }
 
     #[test]

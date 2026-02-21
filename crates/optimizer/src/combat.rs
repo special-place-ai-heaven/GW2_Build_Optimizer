@@ -250,7 +250,7 @@ pub fn calculate_combat_performance(
 
     // Survivability
     let health = stats::base_health(profession) + stats.vitality * 10.0;
-    let armor = stats.toughness + 1000.0; // base defense approximation
+    let armor = stats.toughness + stats::base_defense(profession);
 
     // Damage reduction from armor
     let armor_dr = armor / (armor + 2600.0);
@@ -493,15 +493,15 @@ fn parse_rune_modifier(mods: &mut DamageModifiers, bonus: &str) {
 fn parse_sigil_modifier(mods: &mut DamageModifiers, sigil: &Item) {
     let name_lower = sigil.name.to_lowercase();
 
-    // Known permanent damage sigils
+    // Known permanent/high-uptime damage sigils
     if name_lower.contains("sigil of force") {
         // Superior Sigil of Force: +5% damage
         mods.strike_pct.push(0.05);
     } else if name_lower.contains("sigil of impact") {
-        // Superior Sigil of Impact: +3% damage on stun (conditional, count at reduced value)
+        // Superior Sigil of Impact: +3% damage vs stunned/knocked down
         mods.strike_pct.push(0.015); // ~50% uptime estimate
     } else if name_lower.contains("sigil of the night") {
-        // Superior Sigil of the Night: +10% damage at night (conditional)
+        // Superior Sigil of the Night: +10% damage at night
         mods.strike_pct.push(0.05); // ~50% uptime estimate
     } else if name_lower.contains("sigil of bursting") {
         // Superior Sigil of Bursting: +6% condition damage
@@ -510,10 +510,101 @@ fn parse_sigil_modifier(mods: &mut DamageModifiers, sigil: &Item) {
         // Superior Sigil of Malice: +10% condition duration
         mods.condi_duration_pct.push(0.10);
     } else if name_lower.contains("sigil of concentration") {
-        // Superior Sigil of Concentration: +10% boon duration on weapon swap
-        mods.boon_duration_pct.push(0.05); // ~50% uptime estimate
+        // Superior Sigil of Concentration: +10% boon duration on weapon swap (33% uptime)
+        mods.boon_duration_pct.push(0.033);
+    } else if name_lower.contains("sigil of smoldering") {
+        // Superior Sigil of Smoldering: +10% Burning duration
+        mods.specific_condi_duration
+            .entry("Burning".into())
+            .or_default()
+            .push(0.10);
+    } else if name_lower.contains("sigil of earth") {
+        // Superior Sigil of Earth: 60% chance to cause Bleeding on crit (proc-based, skip)
+    } else if name_lower.contains("sigil of agony") {
+        // Superior Sigil of Agony: +10% Torment duration
+        mods.specific_condi_duration
+            .entry("Torment".into())
+            .or_default()
+            .push(0.10);
+    } else if name_lower.contains("sigil of venom") {
+        // Superior Sigil of Venom: +10% Poison duration
+        mods.specific_condi_duration
+            .entry("Poison".into())
+            .or_default()
+            .push(0.10);
+    } else if name_lower.contains("sigil of doom") {
+        // Superior Sigil of Doom: apply Poison on weapon swap (proc, skip)
+    } else if name_lower.contains("sigil of geomancy") {
+        // Superior Sigil of Geomancy: Bleeding on weapon swap (proc, skip)
+    } else if name_lower.contains("sigil of absorption") {
+        // Superior Sigil of Absorption: steal a boon on hit (utility, skip)
+    } else if name_lower.contains("sigil of transference") {
+        // Superior Sigil of Transference: +10% outgoing healing
+        mods.healing_pct.push(0.10);
+    } else if name_lower.contains("sigil of benevolence") {
+        // Superior Sigil of Benevolence: stacking +1% outgoing healing per kill (estimate ~3%)
+        mods.healing_pct.push(0.03);
+    } else {
+        // Fallback: try parsing from description
+        parse_sigil_from_description(mods, sigil);
     }
-    // Sigils with on-crit/on-hit procs are too conditional to model statically
+}
+
+/// Try to extract modifiers from a sigil's description text.
+fn parse_sigil_from_description(mods: &mut DamageModifiers, sigil: &Item) {
+    let desc = match sigil.description {
+        Some(ref d) => d.to_lowercase(),
+        None => return,
+    };
+
+    // Look for "+N% <condition> duration" patterns (collect all, don't early return)
+    for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
+        if let Some(pct) = extract_percent_before(&desc, &format!("{} duration", condi)) {
+            mods.specific_condi_duration
+                .entry(capitalize(condi))
+                .or_default()
+                .push(pct / 100.0);
+        }
+    }
+
+    // "+N% condition duration"
+    if let Some(pct) = extract_percent_before(&desc, "condition duration") {
+        mods.condi_duration_pct.push(pct / 100.0);
+    }
+    // "+N% boon duration"
+    if let Some(pct) = extract_percent_before(&desc, "boon duration") {
+        mods.boon_duration_pct.push(pct / 100.0);
+    }
+    // "+N% damage" (strike)
+    if desc.contains("damage") && !desc.contains("condition damage") {
+        if let Some(pct) = extract_percent_before(&desc, "damage") {
+            mods.strike_pct.push(pct / 100.0);
+        }
+    }
+}
+
+/// Extract a percentage number from text that also contains a keyword.
+/// E.g., "10% burning duration" → Some(10.0)
+/// Also handles "increases outgoing healing by 15%" where number is after keyword.
+/// Uses char-level iteration to avoid UTF-8 boundary panics.
+fn extract_percent_before(text: &str, keyword: &str) -> Option<f64> {
+    if !text.contains(keyword) {
+        return None;
+    }
+    // Find the first N% pattern anywhere in the text
+    let chars: Vec<char> = text.chars().collect();
+    let pct_pos = chars.iter().position(|&c| c == '%')?;
+    // Walk backwards from '%' to find the number
+    let start = chars[..pct_pos]
+        .iter()
+        .rposition(|c| !c.is_ascii_digit() && *c != '.')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    if start >= pct_pos {
+        return None;
+    }
+    let num: String = chars[start..pct_pos].iter().collect();
+    num.parse::<f64>().ok()
 }
 
 /// Parse known relic damage modifiers.
@@ -522,16 +613,68 @@ fn parse_relic_modifier(mods: &mut DamageModifiers, relic: &Item) {
 
     // Known relics with permanent or high-uptime damage modifiers
     if name_lower.contains("relic of the thief") {
-        // +1% damage per boon on target (estimate ~5 boons avg)
+        // +1% damage per boon on target (estimate ~5 boons avg in group)
         mods.strike_pct.push(0.05);
     } else if name_lower.contains("relic of fireworks") {
-        // +10% damage for 6s after dodge (estimate ~50% uptime)
+        // +10% damage for 6s after dodge (estimate ~40% uptime)
+        mods.strike_pct.push(0.04);
+    } else if name_lower.contains("relic of isgarren") {
+        // +10% crit damage while above health threshold (high uptime for DPS)
+        mods.crit_damage_pct.push(10.0);
+    } else if name_lower.contains("relic of the aristocracy") {
+        // +5% damage per ally affected by your boons (support builds, estimate ~15%)
+        // Only relevant for boon support
         mods.strike_pct.push(0.05);
+    } else if name_lower.contains("relic of cerus") {
+        // +1% condition damage per condition on target (estimate ~5 conditions)
+        mods.condition_pct.push(0.05);
+    } else if name_lower.contains("relic of the nightmare") {
+        // +10% condition duration
+        mods.condi_duration_pct.push(0.10);
+    } else if name_lower.contains("relic of the krait") {
+        // Bleeding on skill use (proc-based, skip)
+    } else if name_lower.contains("relic of the monk") {
+        // +10% outgoing healing
+        mods.healing_pct.push(0.10);
+    } else if name_lower.contains("relic of karakosa") {
+        // +10% outgoing healing while above health threshold
+        mods.healing_pct.push(0.08); // ~80% uptime estimate
+    } else if name_lower.contains("relic of nourys") {
+        // +10% boon duration for 10s after weapon swap (~33% uptime)
+        mods.boon_duration_pct.push(0.033);
     } else if name_lower.contains("relic of the fractal") {
-        // +15% damage in fractals (conditional on content)
-        // Skip — too content-specific
+        // +15% damage in fractals (content-specific, skip)
+    } else {
+        // Fallback: try parsing from description
+        parse_relic_from_description(mods, relic);
     }
-    // Most relics have proc-based effects, skip for static model
+}
+
+/// Try to extract modifiers from a relic's description text.
+fn parse_relic_from_description(mods: &mut DamageModifiers, relic: &Item) {
+    let desc = match relic.description {
+        Some(ref d) => d.to_lowercase(),
+        None => return,
+    };
+
+    // Check for common patterns
+    if desc.contains("outgoing healing") {
+        if let Some(pct) = extract_percent_before(&desc, "outgoing healing") {
+            mods.healing_pct.push(pct / 100.0);
+            return;
+        }
+    }
+    if desc.contains("condition duration") {
+        if let Some(pct) = extract_percent_before(&desc, "condition duration") {
+            mods.condi_duration_pct.push(pct / 100.0);
+            return;
+        }
+    }
+    if desc.contains("boon duration") {
+        if let Some(pct) = extract_percent_before(&desc, "boon duration") {
+            mods.boon_duration_pct.push(pct / 100.0);
+        }
+    }
 }
 
 fn capitalize(s: &str) -> String {
@@ -695,6 +838,114 @@ mod tests {
     fn test_parse_rune_modifier_condition_duration() {
         let mut mods = DamageModifiers::default();
         parse_rune_modifier(&mut mods, "+10% Condition Duration");
+        assert_eq!(mods.condi_duration_pct.len(), 1);
+        assert!((mods.condi_duration_pct[0] - 0.10).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_extract_percent_before_basic() {
+        assert_eq!(extract_percent_before("10% burning duration", "burning duration"), Some(10.0));
+        assert_eq!(extract_percent_before("+10% condition duration", "condition duration"), Some(10.0));
+        assert_eq!(extract_percent_before("grants 5% damage bonus", "damage"), Some(5.0));
+        // No match
+        assert_eq!(extract_percent_before("no number here", "damage"), None);
+        // Keyword not found
+        assert_eq!(extract_percent_before("10% burning duration", "poison duration"), None);
+    }
+
+    #[test]
+    fn test_extract_percent_before_unicode_safe() {
+        // Should not panic on non-ASCII characters
+        assert_eq!(extract_percent_before("—5% damage", "damage"), Some(5.0));
+        assert_eq!(extract_percent_before("résumé 10% condition duration", "condition duration"), Some(10.0));
+    }
+
+    #[test]
+    fn test_parse_sigil_description_fallback() {
+        let mut mods = DamageModifiers::default();
+        let sigil = Item {
+            id: 99999, name: "Unknown Sigil of Testing".into(),
+            item_type: "UpgradeComponent".into(), rarity: "Exotic".into(),
+            level: 60, description: Some("Grants +10% bleeding duration.".into()),
+            icon: None, vendor_value: None, chat_link: None, default_skin: None,
+            flags: vec![], game_types: vec![], restrictions: vec![], details: None,
+        };
+        parse_sigil_modifier(&mut mods, &sigil);
+        assert_eq!(mods.specific_condi_duration.get("Bleeding").unwrap().len(), 1);
+        assert!((mods.specific_condi_duration["Bleeding"][0] - 0.10).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_relic_description_fallback() {
+        let mut mods = DamageModifiers::default();
+        let relic = Item {
+            id: 99999, name: "Unknown Relic".into(),
+            item_type: "Relic".into(), rarity: "Legendary".into(),
+            level: 80, description: Some("Increases outgoing healing by 15%.".into()),
+            icon: None, vendor_value: None, chat_link: None, default_skin: None,
+            flags: vec![], game_types: vec![], restrictions: vec![], details: None,
+        };
+        parse_relic_modifier(&mut mods, &relic);
+        assert_eq!(mods.healing_pct.len(), 1);
+        assert!((mods.healing_pct[0] - 0.15).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_sigil_smoldering() {
+        let mut mods = DamageModifiers::default();
+        let sigil = Item {
+            id: 1, name: "Superior Sigil of Smoldering".into(),
+            item_type: "UpgradeComponent".into(), rarity: "Exotic".into(),
+            level: 60, description: None, icon: None, vendor_value: None,
+            chat_link: None, default_skin: None, flags: vec![], game_types: vec![],
+            restrictions: vec![], details: None,
+        };
+        parse_sigil_modifier(&mut mods, &sigil);
+        assert_eq!(mods.specific_condi_duration.get("Burning").unwrap().len(), 1);
+        assert!((mods.specific_condi_duration["Burning"][0] - 0.10).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_sigil_transference() {
+        let mut mods = DamageModifiers::default();
+        let sigil = Item {
+            id: 1, name: "Superior Sigil of Transference".into(),
+            item_type: "UpgradeComponent".into(), rarity: "Exotic".into(),
+            level: 60, description: None, icon: None, vendor_value: None,
+            chat_link: None, default_skin: None, flags: vec![], game_types: vec![],
+            restrictions: vec![], details: None,
+        };
+        parse_sigil_modifier(&mut mods, &sigil);
+        assert_eq!(mods.healing_pct.len(), 1);
+        assert!((mods.healing_pct[0] - 0.10).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_relic_isgarren() {
+        let mut mods = DamageModifiers::default();
+        let relic = Item {
+            id: 1, name: "Relic of Isgarren".into(),
+            item_type: "Relic".into(), rarity: "Legendary".into(),
+            level: 80, description: None, icon: None, vendor_value: None,
+            chat_link: None, default_skin: None, flags: vec![], game_types: vec![],
+            restrictions: vec![], details: None,
+        };
+        parse_relic_modifier(&mut mods, &relic);
+        assert_eq!(mods.crit_damage_pct.len(), 1);
+        assert!((mods.crit_damage_pct[0] - 10.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_parse_relic_nightmare() {
+        let mut mods = DamageModifiers::default();
+        let relic = Item {
+            id: 1, name: "Relic of the Nightmare".into(),
+            item_type: "Relic".into(), rarity: "Legendary".into(),
+            level: 80, description: None, icon: None, vendor_value: None,
+            chat_link: None, default_skin: None, flags: vec![], game_types: vec![],
+            restrictions: vec![], details: None,
+        };
+        parse_relic_modifier(&mut mods, &relic);
         assert_eq!(mods.condi_duration_pct.len(), 1);
         assert!((mods.condi_duration_pct[0] - 0.10).abs() < 0.001);
     }
