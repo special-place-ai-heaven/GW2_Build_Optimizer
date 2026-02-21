@@ -347,6 +347,8 @@ impl GeminiClient {
             parts: vec![Part::text(prompt)],
         }];
 
+        let mut last_text: Option<String> = None;
+
         for _turn in 0..max_turns {
             let request = GenerateRequest {
                 contents: contents.clone(),
@@ -355,15 +357,19 @@ impl GeminiClient {
 
             let response_content = self.send_request(&request)?;
 
+            // Capture any text from this response (Gemini may send text + calls)
+            if let Some(text) = response_content.parts.iter().find_map(|p| p.text.clone()) {
+                last_text = Some(text);
+            }
+
             // Check if model wants to call a function
             let function_calls: Vec<&FunctionCall> = response_content.parts.iter()
                 .filter_map(|p| p.function_call.as_ref())
                 .collect();
 
             if function_calls.is_empty() {
-                // No function calls — extract final text response
-                return response_content.parts.into_iter()
-                    .find_map(|p| p.text)
+                // No function calls — return text response
+                return last_text
                     .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()));
             }
 
@@ -384,7 +390,10 @@ impl GeminiClient {
             });
         }
 
-        Err(GeminiError::Parse(format!("Tool loop exceeded {} turns", max_turns)))
+        // If we exceeded max_turns but had text, return it rather than error
+        last_text.ok_or_else(|| {
+            GeminiError::Parse(format!("Tool loop exceeded {} turns with no text response", max_turns))
+        })
     }
 
     /// Low-level: send a request and return the response Content.
