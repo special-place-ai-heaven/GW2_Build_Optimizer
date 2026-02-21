@@ -200,7 +200,12 @@ Explain in 2-3 paragraphs which build is stronger and why. Focus on synergy diff
 }
 
 /// Summarize a build candidate for inclusion in prompts.
-pub fn summarize_build(candidate: &BuildCandidate, spec_names: &[(u32, String)]) -> String {
+/// Includes all 9 primary stats and key combat performance metrics.
+pub fn summarize_build(
+    candidate: &BuildCandidate,
+    spec_names: &[(u32, String)],
+    trait_names: &[(u32, String)],
+) -> String {
     let specs: Vec<String> = candidate
         .core_specs
         .iter()
@@ -208,16 +213,37 @@ pub fn summarize_build(candidate: &BuildCandidate, spec_names: &[(u32, String)])
         .filter_map(|id| spec_names.iter().find(|(sid, _)| sid == id).map(|(_, n)| n.clone()))
         .collect();
 
-    format!(
-        "Specs: {} | Gear: {} | Power: {:.0} Precision: {:.0} Ferocity: {:.0} CondiDmg: {:.0} | Score: {:.3}",
-        specs.join(", "),
-        candidate.gear.stat_prefix_name,
-        candidate.stats.power,
-        candidate.stats.precision,
-        candidate.stats.ferocity,
-        candidate.stats.condition_damage,
-        candidate.score,
-    )
+    let traits: Vec<String> = candidate
+        .equipped_traits
+        .iter()
+        .filter_map(|id| trait_names.iter().find(|(tid, _)| tid == id).map(|(_, n)| n.clone()))
+        .collect();
+
+    let s = &candidate.stats;
+    let c = &candidate.combat;
+
+    let mut lines = Vec::new();
+    lines.push(format!("Specs: {} | Gear: {}", specs.join(", "), candidate.gear.stat_prefix_name));
+
+    if !traits.is_empty() {
+        lines.push(format!("  Traits: {}", traits.join(", ")));
+    }
+
+    lines.push(format!(
+        "  Stats: Power {:.0}, Precision {:.0}, Ferocity {:.0}, CondiDmg {:.0}, Expertise {:.0}, Concentration {:.0}, HealPow {:.0}, Toughness {:.0}, Vitality {:.0}",
+        s.power, s.precision, s.ferocity, s.condition_damage,
+        s.expertise, s.concentration, s.healing_power, s.toughness, s.vitality,
+    ));
+
+    lines.push(format!(
+        "  Combat: StrikeDPS {:.0}, CondiDPS {:.0}, TotalDPS {:.0}, EffPower {:.0}, BoonDur {:.1}%, CondiDur {:.1}%, EffHP {:.0}",
+        c.strike_dps_index, c.condition_dps_index, c.total_dps_index,
+        c.effective_power, c.boon_duration_pct, c.condi_duration_pct, c.effective_health,
+    ));
+
+    lines.push(format!("  Score: {:.3}", candidate.score));
+
+    lines.join("\n")
 }
 
 /// Build a game data context block for LLM prompts.
