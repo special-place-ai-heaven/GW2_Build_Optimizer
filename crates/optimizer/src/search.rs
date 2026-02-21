@@ -30,6 +30,7 @@ const TRINKET_SLOTS: &[&str] = &["Backpack", "Accessory1", "Accessory2", "Amulet
 const RING_SLOTS: &[&str] = &["Ring1", "Ring2"];
 const ACCESSORY_SLOTS: &[&str] = &["Accessory1", "Accessory2"];
 const WEAPON_SLOTS: &[&str] = &["WeaponA1", "WeaponA2", "WeaponB1", "WeaponB2"];
+const ARMOR_SLOTS: &[&str] = &["Helm", "Shoulders", "Coat", "Gloves", "Leggings", "Boots"];
 
 /// Find the best gear prefix combinations for an archetype.
 /// Uses multiple mix strategies to capture common GW2 build patterns:
@@ -39,6 +40,7 @@ const WEAPON_SLOTS: &[&str] = &["WeaponA1", "WeaponA2", "WeaponB1", "WeaponB2"];
 /// 4. Primary everywhere, secondary on accessories only
 /// 5. Primary on armor+trinkets, secondary on weapons
 /// 6. Primary on armor, secondary on weapons+trinkets
+/// 7. Primary on weapons, secondary on armor+trinkets
 pub fn search_gear_prefixes(
     archetype: &Archetype,
     itemstats: &HashMap<u32, ItemStat>,
@@ -110,6 +112,16 @@ pub fn search_gear_prefixes(
                 candidates.push(build_mixed_candidate(
                     primary.id, secondary.id, &wep_and_trinket,
                     &format!("{} armor / {} rest", primary.name, secondary.name),
+                ));
+
+                // Strategy 7: Secondary on armor + trinkets (weapon-only primary)
+                let armor_and_trinket: Vec<&str> = ARMOR_SLOTS.iter()
+                    .chain(TRINKET_SLOTS.iter())
+                    .copied()
+                    .collect();
+                candidates.push(build_mixed_candidate(
+                    primary.id, secondary.id, &armor_and_trinket,
+                    &format!("{} wep / {} rest", primary.name, secondary.name),
                 ));
             }
         }
@@ -209,8 +221,8 @@ mod tests {
         });
 
         let candidates = search_gear_prefixes(&Archetype::PowerDPS, &itemstats);
-        // 2 single-prefix + 2*5 mixed strategies = 12 total
-        assert!(candidates.len() >= 12, "Expected >=12 candidates, got {}", candidates.len());
+        // 2 single-prefix + 2*6 mixed strategies = 14 total
+        assert!(candidates.len() >= 14, "Expected >=14 candidates, got {}", candidates.len());
         // All should have 16 slots
         for c in &candidates {
             assert_eq!(c.slot_stats.len(), STAT_SLOTS.len());
