@@ -4,6 +4,7 @@ pub mod gamedb;
 pub mod gemini;
 pub mod gemini_tools;
 pub mod prompts;
+pub mod rotation;
 pub mod scoring;
 pub mod search;
 pub mod stats;
