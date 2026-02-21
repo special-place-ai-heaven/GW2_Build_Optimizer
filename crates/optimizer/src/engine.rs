@@ -365,9 +365,15 @@ fn score_trait_for_archetype(
         score += score_fact(fact, weights);
     }
 
-    // Also score traited_facts (activated by other traits — give partial credit)
+    // Score traited_facts — these activate when a specific other trait is equipped.
+    // If the requiring trait is from the same spec, it's likely co-selected (80% credit).
+    // If from a different spec, it's uncertain (30% credit).
     for tf in &t.traited_facts {
-        score += score_fact(&tf.fact, weights) * 0.5;
+        let same_spec = traits_cache.get(&tf.requires_trait)
+            .map(|rt| rt.specialization == t.specialization)
+            .unwrap_or(false);
+        let credit = if same_spec { 0.8 } else { 0.3 };
+        score += score_fact(&tf.fact, weights) * credit;
     }
 
     score

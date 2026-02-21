@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use serde_json::{json, Value};
 
-use gw2_api::models::{Fact, Trait as GW2Trait};
+use gw2_api::models::{Fact, ItemStat, Trait as GW2Trait};
 
 use crate::combat::{self, CombatPerformance, DamageModifiers};
 use crate::engine::BuildCandidate;
@@ -476,7 +476,6 @@ fn exec_list_relics(ctx: &ToolContext) -> Value {
 fn exec_calculate_stats(args: &Value, ctx: &ToolContext) -> Value {
     let gear_prefix = args["gear_prefix"].as_str().unwrap_or("");
 
-    // Find the itemstat matching this prefix
     let itemstat = ctx.db.itemstats.values()
         .find(|is| is.name.to_lowercase().contains(&gear_prefix.to_lowercase()));
 
@@ -484,22 +483,9 @@ fn exec_calculate_stats(args: &Value, ctx: &ToolContext) -> Value {
         return json!({ "error": format!("Stat prefix '{}' not found", gear_prefix) });
     };
 
-    // Calculate stats for full set of this prefix
-    let mut gear_stats = stats::StatBlock::default();
-    for attr in &itemstat.attributes {
-        // Use typical Ascended attribute_adjustment values
-        // Armor: ~141, Weapons: ~188, Trinkets: ~110-157
-        let total_adj: f64 = 141.0 * 6.0   // 6 armor pieces
-            + 188.0 * 2.0                    // 2 main weapons
-            + 110.0 * 4.0                    // 4 trinkets (back, amulet, 2 accessories)
-            + 157.0 * 2.0;                   // 2 rings
-        let value = total_adj * attr.multiplier + attr.value as f64 * 16.0;
-        gear_stats.add(&attr.attribute, value);
-    }
-
+    let gear_stats = calculate_full_set_stats(itemstat);
     let mut full_stats = stats::base_stats();
     full_stats += &gear_stats;
-
     let derived = stats::compute_derived(&full_stats, ctx.profession_name);
 
     json!({
@@ -535,13 +521,7 @@ fn exec_simulate_combat(args: &Value, ctx: &ToolContext) -> Value {
         return json!({ "error": format!("Stat prefix '{}' not found", gear_prefix) });
     };
 
-    // Build stat block
-    let mut gear_stats = stats::StatBlock::default();
-    for attr in &itemstat.attributes {
-        let total_adj: f64 = 141.0 * 6.0 + 188.0 * 2.0 + 110.0 * 4.0 + 157.0 * 2.0;
-        let value = total_adj * attr.multiplier + attr.value as f64 * 16.0;
-        gear_stats.add(&attr.attribute, value);
-    }
+    let gear_stats = calculate_full_set_stats(itemstat);
     let mut full_stats = stats::base_stats();
     full_stats += &gear_stats;
     let derived = stats::compute_derived(&full_stats, ctx.profession_name);
@@ -586,12 +566,7 @@ fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
         return json!({ "error": format!("Stat prefix '{}' not found", gear_prefix) });
     };
 
-    let mut gear_stats = stats::StatBlock::default();
-    for attr in &itemstat.attributes {
-        let total_adj: f64 = 141.0 * 6.0 + 188.0 * 2.0 + 110.0 * 4.0 + 157.0 * 2.0;
-        let value = total_adj * attr.multiplier + attr.value as f64 * 16.0;
-        gear_stats.add(&attr.attribute, value);
-    }
+    let gear_stats = calculate_full_set_stats(itemstat);
     let mut full_stats = stats::base_stats();
     full_stats += &gear_stats;
     let derived = stats::compute_derived(&full_stats, ctx.profession_name);
@@ -678,6 +653,29 @@ fn exec_get_optimizer_results(ctx: &ToolContext) -> Value {
 }
 
 // ─── Helpers ───
+
+/// Ascended attribute_adjustment per equipment slot (matches engine.rs exactly).
+const SLOT_ADJUSTMENTS: &[(&str, f64)] = &[
+    ("Helm", 141.0), ("Shoulders", 141.0), ("Coat", 225.0),
+    ("Gloves", 141.0), ("Leggings", 171.0), ("Boots", 141.0),
+    ("WeaponA1", 251.0), ("WeaponA2", 125.0),
+    ("WeaponB1", 251.0), ("WeaponB2", 125.0),
+    ("Backpack", 63.0), ("Accessory1", 110.0), ("Accessory2", 110.0),
+    ("Amulet", 157.0), ("Ring1", 126.0), ("Ring2", 126.0),
+];
+
+/// Calculate gear stats for a full set of one prefix using per-slot attribute adjustments.
+/// Uses the same formula as engine.rs: `adjustment * multiplier + value` per slot.
+fn calculate_full_set_stats(itemstat: &ItemStat) -> stats::StatBlock {
+    let mut gear_stats = stats::StatBlock::default();
+    for &(_slot, adj) in SLOT_ADJUSTMENTS {
+        for attr in &itemstat.attributes {
+            let value = (adj * attr.multiplier + attr.value as f64).round();
+            gear_stats.add(&attr.attribute, value);
+        }
+    }
+    gear_stats
+}
 
 /// Summarize a trait's key mechanical effects (for trait column overview).
 fn summarize_trait_facts(t: &GW2Trait) -> Vec<String> {
