@@ -298,10 +298,15 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
 
                     let result = gw2_api::download::download_all(&client, &cache, |progress| {
                         crate::state::with_state(|s| {
+                            let name = if let Some(ref detail) = progress.detail {
+                                format!("{} ({})", progress.step_name, detail)
+                            } else {
+                                progress.step_name.clone()
+                            };
                             s.setup.download_progress = Some(DownloadState {
                                 current_step: progress.current_step,
                                 total_steps: progress.total_steps,
-                                step_name: progress.step_name,
+                                step_name: name,
                                 done: progress.done,
                                 error: None,
                             });

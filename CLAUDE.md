@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**GW2 Build Optimizer** — In-game Guild Wars 2 addon (Nexus plugin) that optimizes character builds across all game modes (PvE, PvP, WvW). Uses the GW2 API for game/character data and Google Gemini for LLM-powered build reasoning.
+**GW2 Build Optimizer v1.0.0** — In-game Guild Wars 2 addon (Nexus plugin) that optimizes character builds across all game modes (PvE, PvP, WvW). Uses the GW2 API for game/character data and Google Gemini for LLM-powered build reasoning. Full feature complete (S01-S15).
 
 ## Build & Development
 
@@ -42,7 +42,7 @@ crates/core/        — Shared types (types.rs: ResolvedBuild, StatBlock, SavedB
 crates/gw2api/      — GW2 API v2 client + cache + download orchestration
   src/client.rs     — Gw2Client: token-bucket rate limiter, get/fetch_all/fetch_by_ids, validate_api_key
   src/cache.rs      — DataCache: JSON file cache keyed by build number, is_stale/save/load/clear_all
-  src/download.rs   — download_all: 8-endpoint orchestration with DownloadProgress callback; fetch_equipment_items filters ~100k items to Exotic/Ascended/Legendary Armor/Weapon/Trinket/Back/UpgradeComponent/Relic
+  src/download.rs   — download_all: 8-endpoint orchestration with DownloadProgress callback (carries optional `detail: Option<String>` for sub-step info); `report()` is a free function (not closure) to avoid borrow conflicts; items step emits per-batch detail ("batch N/M") before each 200-ID chunk; lenient item deserialization skips malformed items via `serde_json::from_value(...).ok()`; filters ~100k items to Exotic/Ascended/Legendary Armor/Weapon/Trinket/Back/UpgradeComponent/Relic
   src/models/       — serde structs per API endpoint (see GW2 API Models table below)
 crates/optimizer/   — engine.rs (pipeline orchestration), gamedb.rs (GameDb: pre-indexed HashMap lookups for all game data, derived indexes), gemini.rs (GeminiClient: gemini-2.5-flash via generativelanguage.googleapis.com; new()/with_persistence() constructors — with_persistence() loads/saves usage to {addon_dir}/gemini_usage.json; validate_key/generate/generate_cached; RateTracker: 10 RPM hard limit, 240/250 RPD guard; maps 401/403→InvalidKey, 429→RateLimited; remaining_today() exposes quota to UI), prompts.rs (4 prompt builders: new_build_prompt, improve_build_prompt, chat_refinement_prompt with injection-guard, compare_builds_prompt; plus summarize_build, build_game_context; parse_build_response handles markdown fences + raw JSON; parse_gemini_build returns typed GeminiBuildResponse; GeminiBuildResponse struct mirrors BuildSuggestion fields), scoring.rs, search.rs, stats.rs
 ```
@@ -119,18 +119,18 @@ Full finalization plan at `plan.md` in repo root. Sprint format: S##-T##.
 <!-- AUTO-MANAGED: patterns -->
 ## Detected Patterns
 
-- **Stub module pattern**: unimplemented files contain a single comment `// <purpose>.\n// Will be populated in S##.` — all stubs are now implemented; do not add placeholder code to stub files
+- **Stub module pattern**: unimplemented files used to contain a single comment `// <purpose>.\n// Will be populated in S##.` — all stubs are now fully implemented as of S15; do not add placeholder code to stub files
 - **Workspace dep hoisting**: all shared deps (serde, serde_json, reqwest, thiserror, urlencoding, chrono) declared once in root `[workspace.dependencies]`, crates reference with `.workspace = true`
 - **State accessor pattern**: global state exposed via free functions (`init`, `toggle_window`, `is_window_visible`) rather than direct static access
 - **Crate internal visibility**: `mod state; mod ui;` kept private in addon; `pub mod` used in library crates (core, gw2api, optimizer)
 - **Tagged enum serde**: `#[serde(tag = "type")]` on `Fact` — API `"type"` field selects the variant; all variants carry `text` and `icon` plus variant-specific fields; `#[serde(other)] Unknown` fallback handles future API additions without breaking deserialization
 - **Flat optional struct**: `ItemDetails` is a single struct with all fields `Option<T>` covering all item types (Armor, Weapon, Trinket, UpgradeComponent, Back); use `Item::item_type` to know which fields are populated — no enum needed because the API object has no discriminant tag
 - **Flattened embed**: `#[serde(flatten)]` on `TraitedFact.fact` — inlines `Fact` fields directly into the parent JSON object
-- **Shared fact module**: `facts.rs` re-exported selectively (`Fact`, `TraitedFact`) and imported by `skills.rs` and `traits.rs` via `use super::facts::{Fact, TraitedFact}`
+- **Shared fact module**: `facts.rs` re-exported selectively (`Fact`, `TraitedFact`, `deserialize_facts`, `deserialize_traited_facts`) and imported by `skills.rs` and `traits.rs`; lenient deserializers skip facts missing a `type` discriminator via `filter_map(serde_json::from_value(...).ok())`
 - **Inline model tests**: each model file has a `#[cfg(test)] mod tests` block with representative JSON payloads exercising deserialization edge cases
 - **Token bucket rate limiter**: `Mutex<TokenBucket>` inside `Gw2Client` — 300 burst, 5/sec refill; `take()` sleeps only when empty; exponential backoff on HTTP 429
 - **Build-number cache invalidation**: `DataCache` stores `build: u32` in every cache entry; `is_stale(key, current_build)` reads metadata only (no full deserialize) to check staleness
-- **Progress callback pattern**: download orchestration accepts `impl FnMut(DownloadProgress)` — decouples UI from data layer; `DownloadProgress` carries step index, total, name, done flag
+- **Progress callback pattern**: download orchestration accepts `impl FnMut(DownloadProgress)` — decouples UI from data layer; `DownloadProgress` carries step index, total, name, done flag, and optional `detail: Option<String>` for sub-step granularity (e.g. "batch 5/500"); UI merges detail into the ProgressBar overlay as `"{step_name} ({detail})"`
 - **Fetch-then-filter pattern**: `fetch_equipment_items` fetches all item IDs first, batch-fetches 200 at a time, filters by type+rarity in-process — used when API has no server-side filter
 - **Screen state machine pattern**: `Screen::Setup(SetupStep)` drives render dispatch; `init()` routes to the correct step based on `AppConfig` completeness (`has_gw2_key`, `has_gemini_key`, `cache_build_number`)
 - **Background thread + state callback pattern**: UI spawns `std::thread::spawn` for blocking API calls; results written back via `crate::state::with_state(|s| ...)` — avoids channels, works with `Mutex<Option<T>>` global
@@ -149,4 +149,9 @@ Full finalization plan at `plan.md` in repo root. Sprint format: S##-T##.
 - **Gemini rate persistence pattern**: `GeminiClient::with_persistence()` loads prior `PersistedUsage` (day + requests_today) from JSON on construction; saves after every successful `generate()` call; day mismatch resets counter — survives addon reload
 - **BuildStorage JSON persistence pattern**: `BuildStorage::new(addon_dir)` writes one JSON file per saved build to `{addon_dir}/saves/{sanitized_name}.json`; `list()` reads all `.json` files and sorts by `timestamp` descending; `delete()` removes by sanitized name — no database, plain filesystem
 - **SavedBuild mirrors BuildSuggestion**: `SavedBuild` in `crates/core/src/types.rs` mirrors the `BuildSuggestion` display fields (label, stat_prefix, specializations, weapons, skills, rune, sigils, relic, explanation, changes_made, estimated_stats) plus persistence metadata (name, timestamp, character_name, game_mode) — allows round-trip save/load without data loss
+- **Error toast bar pattern**: `main_view.rs` checks `state.main.error.clone()` at render start; if present, renders colored text `[!] message` + dismiss button above separator; errors are set by API threads and cleared by user or on navigation — UI-friendly error surfacing without modal dialogs
+- **Settings tab info display pattern**: `render_settings_tab()` shows cache size (via `DataCache::estimate_size()`), clear cache button, Gemini quota remaining (via `client.remaining_today()`), and reset setup with confirmation dialog — aggregates diagnostic/utility functions in one place
+- **Resolve build refactoring pattern**: `resolve_build()` decomposed into `resolve_specs()`, `resolve_skills()`, `resolve_equipment()`, `resolve_pvp_amulet()` helper functions — each handles one subsystem, returns `Result<T, String>`, called in sequence to build up `ResolvedBuild` — improves testability and reduces function size
+- **Lenient fact deserializer pattern**: `deserialize_facts()` and `deserialize_traited_facts()` in `facts.rs` handle GW2 API responses that occasionally return fact objects without a `type` field — deserializes to `Vec<serde_json::Value>` first, then `filter_map(serde_json::from_value(...).ok())` silently skips unparseable entries; applied via `#[serde(default, deserialize_with = "...")]` on `facts` and `traited_facts` fields in `Skill`, `Trait`, and `TraitSkill`
+- **Lenient item batch deserialization pattern**: `download_all` items step fetches each 200-ID batch as `Vec<serde_json::Value>` then individually tries `serde_json::from_value::<models::Item>(val)` per entry, silently skipping items that fail — tolerates GW2 API inconsistencies in the ~100k item catalog without aborting the batch
 <!-- END AUTO-MANAGED -->

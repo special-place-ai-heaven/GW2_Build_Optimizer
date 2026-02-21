@@ -40,7 +40,7 @@ fn on_load() {
     log(
         LogLevel::Info,
         "GW2 Build Optimizer",
-        "v0.1.0 loaded. Press Ctrl+Shift+O to open.",
+        "v1.0.0 loaded. Press Ctrl+Shift+O to open.",
     );
 }
 

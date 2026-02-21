@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::facts::{Fact, TraitedFact};
+use super::facts::{deserialize_facts, deserialize_traited_facts, Fact, TraitedFact};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
@@ -19,9 +19,9 @@ pub struct Skill {
     #[serde(default)]
     pub professions: Vec<String>,
     pub slot: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_facts")]
     pub facts: Vec<Fact>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_traited_facts")]
     pub traited_facts: Vec<TraitedFact>,
     #[serde(default)]
     pub categories: Vec<String>,

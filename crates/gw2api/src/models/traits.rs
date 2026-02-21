@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::facts::{Fact, TraitedFact};
+use super::facts::{deserialize_facts, deserialize_traited_facts, Fact, TraitedFact};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trait {
@@ -17,9 +17,9 @@ pub struct Trait {
     pub tier: u32,
     pub order: u32,
     pub slot: String, // "Major" or "Minor"
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_facts")]
     pub facts: Vec<Fact>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_traited_facts")]
     pub traited_facts: Vec<TraitedFact>,
     #[serde(default)]
     pub skills: Vec<TraitSkill>,
@@ -32,9 +32,9 @@ pub struct TraitSkill {
     pub name: Option<String>,
     pub description: Option<String>,
     pub icon: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_facts")]
     pub facts: Vec<Fact>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_traited_facts")]
     pub traited_facts: Vec<TraitedFact>,
 }
 
