@@ -32,6 +32,12 @@ pub struct GameDb {
     // Skill ↔ palette ID mapping (for build template chat codes)
     pub skill_to_palette: HashMap<u32, u32>,
     pub palette_to_skill: HashMap<u32, u32>,
+
+    // Reverse indexes for synergy queries (condition/buff name → IDs that apply it)
+    pub traits_by_condition: HashMap<String, Vec<u32>>,
+    pub skills_by_condition: HashMap<String, Vec<u32>>,
+    pub traits_by_buff: HashMap<String, Vec<u32>>,
+    pub skills_by_buff: HashMap<String, Vec<u32>>,
 }
 
 impl GameDb {
@@ -144,6 +150,41 @@ impl GameDb {
             }
         }
 
+        // Build reverse indexes for synergy queries
+        let mut traits_by_condition: HashMap<String, Vec<u32>> = HashMap::new();
+        let mut traits_by_buff: HashMap<String, Vec<u32>> = HashMap::new();
+        for t in traits.values() {
+            for fact in &t.facts {
+                if let gw2_api::models::facts::Fact::Buff { status: Some(s), .. } = fact {
+                    if is_condition(s) {
+                        traits_by_condition.entry(s.clone()).or_default().push(t.id);
+                    } else if is_boon(s) {
+                        traits_by_buff.entry(s.clone()).or_default().push(t.id);
+                    }
+                }
+            }
+        }
+
+        let mut skills_by_condition: HashMap<String, Vec<u32>> = HashMap::new();
+        let mut skills_by_buff: HashMap<String, Vec<u32>> = HashMap::new();
+        for skill in skills.values() {
+            for fact in &skill.facts {
+                if let gw2_api::models::facts::Fact::Buff { status: Some(s), .. } = fact {
+                    if is_condition(s) {
+                        skills_by_condition.entry(s.clone()).or_default().push(skill.id);
+                    } else if is_boon(s) {
+                        skills_by_buff.entry(s.clone()).or_default().push(skill.id);
+                    }
+                }
+            }
+        }
+
+        // Deduplicate (a trait/skill may have multiple Buff facts for same condition)
+        for ids in traits_by_condition.values_mut() { ids.sort_unstable(); ids.dedup(); }
+        for ids in traits_by_buff.values_mut() { ids.sort_unstable(); ids.dedup(); }
+        for ids in skills_by_condition.values_mut() { ids.sort_unstable(); ids.dedup(); }
+        for ids in skills_by_buff.values_mut() { ids.sort_unstable(); ids.dedup(); }
+
         Ok(GameDb {
             items,
             itemstats,
@@ -161,6 +202,10 @@ impl GameDb {
             relics,
             skill_to_palette,
             palette_to_skill,
+            traits_by_condition,
+            skills_by_condition,
+            traits_by_buff,
+            skills_by_buff,
         })
     }
 
@@ -222,6 +267,38 @@ impl GameDb {
         self.specializations.get(&id)
     }
 
+    /// Get trait IDs that apply a specific condition.
+    pub fn traits_applying_condition(&self, condition: &str) -> Vec<&GW2Trait> {
+        self.traits_by_condition
+            .get(condition)
+            .map(|ids| ids.iter().filter_map(|id| self.traits.get(id)).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get skill IDs that apply a specific condition.
+    pub fn skills_applying_condition(&self, condition: &str) -> Vec<&Skill> {
+        self.skills_by_condition
+            .get(condition)
+            .map(|ids| ids.iter().filter_map(|id| self.skills.get(id)).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get trait IDs that grant a specific boon.
+    pub fn traits_granting_buff(&self, buff: &str) -> Vec<&GW2Trait> {
+        self.traits_by_buff
+            .get(buff)
+            .map(|ids| ids.iter().filter_map(|id| self.traits.get(id)).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get skill IDs that grant a specific boon.
+    pub fn skills_granting_buff(&self, buff: &str) -> Vec<&Skill> {
+        self.skills_by_buff
+            .get(buff)
+            .map(|ids| ids.iter().filter_map(|id| self.skills.get(id)).collect())
+            .unwrap_or_default()
+    }
+
     /// Summary stats for logging.
     pub fn summary(&self) -> String {
         format!(
@@ -237,4 +314,27 @@ impl GameDb {
             self.relics.len(),
         )
     }
+}
+
+/// GW2 damaging conditions.
+fn is_condition(status: &str) -> bool {
+    matches!(
+        status,
+        "Bleeding" | "Burning" | "Poison" | "Torment" | "Confusion"
+            | "Vulnerability" | "Weakness" | "Blind" | "Blinded"
+            | "Chill" | "Chilled" | "Cripple" | "Crippled"
+            | "Fear" | "Immobilize" | "Immobilized"
+            | "Slow" | "Taunt"
+    )
+}
+
+/// GW2 boons.
+fn is_boon(status: &str) -> bool {
+    matches!(
+        status,
+        "Might" | "Fury" | "Quickness" | "Alacrity"
+            | "Protection" | "Resolution" | "Regeneration"
+            | "Vigor" | "Stability" | "Swiftness"
+            | "Resistance" | "Aegis"
+    )
 }
