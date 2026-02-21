@@ -48,6 +48,8 @@ pub struct MainState {
     pub saved_builds_loaded: bool,
     pub save_name_input: String,
     pub save_status: Option<String>,
+    // Settings
+    pub confirm_reset: bool,
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]

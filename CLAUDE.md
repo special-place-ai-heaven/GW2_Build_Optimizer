@@ -98,8 +98,8 @@ Full finalization plan at `plan.md` in repo root. Sprint format: S##-T##.
 | S11 | DONE | Gemini→UI wiring (post-optimization enrichment + chat bar) |
 | S12 | DONE | Robustness (mutex poison logging, rate persistence, thread guards) |
 | S13 | DONE | Build persistence (Save/Load tab) |
-| S14 | TODO | PvP/WvW game mode support |
-| S15 | TODO | Polish & release prep |
+| S14 | DONE | PvP/WvW game mode support |
+| S15 | DONE | Polish & release prep |
 
 <!-- AUTO-MANAGED: conventions -->
 ## Conventions
