@@ -92,6 +92,32 @@ pub fn base_health(profession: &str) -> f64 {
     }
 }
 
+/// Base defense from a full set of Ascended armor, by armor weight class.
+/// Armor = Toughness + Defense. This returns the Defense portion from gear.
+/// Values are totals for a full 6-piece Ascended armor set at level 80
+/// (from GW2 wiki Defense rating table):
+///   Heavy (Warrior/Guardian/Revenant): 1271
+///   Medium (Engineer/Ranger/Thief): 1118
+///   Light (Elementalist/Mesmer/Necromancer): 967
+pub fn base_defense(profession: &str) -> f64 {
+    match profession {
+        "Warrior" | "Guardian" | "Revenant" => 1271.0,
+        "Engineer" | "Ranger" | "Thief" => 1118.0,
+        "Elementalist" | "Mesmer" | "Necromancer" => 967.0,
+        _ => 1118.0, // default to medium
+    }
+}
+
+/// Armor weight class for a profession.
+pub fn armor_weight(profession: &str) -> &'static str {
+    match profession {
+        "Warrior" | "Guardian" | "Revenant" => "Heavy",
+        "Engineer" | "Ranger" | "Thief" => "Medium",
+        "Elementalist" | "Mesmer" | "Necromancer" => "Light",
+        _ => "Medium",
+    }
+}
+
 /// Calculate stats from equipped gear using the itemstat formula.
 /// For each equipment piece: look up its attribute_adjustment and the stat prefix,
 /// then apply `attribute_adjustment * multiplier + value` for each stat.
@@ -398,7 +424,7 @@ pub fn compute_derived(stats: &StatBlock, profession: &str) -> DerivedStats {
     let effective_power =
         stats.power * (1.0 + (crit_chance / 100.0) * (crit_damage / 100.0 - 1.0));
     let health = base_health(profession) + stats.vitality * 10.0;
-    let armor = stats.toughness + 1000.0; // base defense varies by gear, approximate
+    let armor = stats.toughness + base_defense(profession);
 
     DerivedStats {
         crit_chance,
@@ -492,6 +518,26 @@ mod tests {
     }
 
     #[test]
+    fn test_base_defense() {
+        assert_eq!(base_defense("Warrior"), 1271.0);
+        assert_eq!(base_defense("Guardian"), 1271.0);
+        assert_eq!(base_defense("Revenant"), 1271.0);
+        assert_eq!(base_defense("Engineer"), 1118.0);
+        assert_eq!(base_defense("Ranger"), 1118.0);
+        assert_eq!(base_defense("Thief"), 1118.0);
+        assert_eq!(base_defense("Elementalist"), 967.0);
+        assert_eq!(base_defense("Mesmer"), 967.0);
+        assert_eq!(base_defense("Necromancer"), 967.0);
+    }
+
+    #[test]
+    fn test_armor_weight() {
+        assert_eq!(armor_weight("Warrior"), "Heavy");
+        assert_eq!(armor_weight("Thief"), "Medium");
+        assert_eq!(armor_weight("Elementalist"), "Light");
+    }
+
+    #[test]
     fn test_derived_stats_no_gear() {
         let stats = base_stats();
         let derived = compute_derived(&stats, "Warrior");
@@ -501,6 +547,8 @@ mod tests {
         assert!((derived.crit_damage - 150.0).abs() < 0.1);
         // Health: 9212 (profession base) + 1000 (base vitality) * 10 = 19212
         assert!((derived.health - 19212.0).abs() < 1.0);
+        // Armor: 1000 (base toughness) + 1271 (heavy armor defense) = 2271
+        assert!((derived.armor - 2271.0).abs() < 1.0);
     }
 
     #[test]

@@ -73,6 +73,7 @@ impl Archetype {
             Archetype::BoonSupport => StatWeights {
                 concentration: 1.0,
                 healing_power: 0.6,
+                expertise: 0.2,
                 vitality: 0.3,
                 toughness: 0.3,
                 ..StatWeights::default()
@@ -80,6 +81,7 @@ impl Archetype {
             Archetype::HealSupport => StatWeights {
                 healing_power: 1.0,
                 concentration: 0.5,
+                expertise: 0.15,
                 vitality: 0.3,
                 toughness: 0.3,
                 ..StatWeights::default()
@@ -106,7 +108,7 @@ impl Archetype {
                 "Viper's", "Sinister", "Grieving", "Trailblazer's", "Plaguedoctor's",
             ],
             Archetype::SustainHybrid => &[
-                "Marauder", "Valkyrie", "Berserker's", "Dragon's",
+                "Marauder", "Valkyrie", "Berserker's", "Dragon's", "Cavalier's",
             ],
             Archetype::Tank => &["Minstrel's", "Nomad's", "Trailblazer's", "Dire"],
             Archetype::BoonSupport => &[
@@ -164,23 +166,47 @@ pub fn score_stats(stats: &StatBlock, derived: &DerivedStats, archetype: &Archet
 /// Uses real DPS/healing/survivability numbers instead of raw stat weights.
 pub fn score_combat(perf: &CombatPerformance, archetype: &Archetype) -> f64 {
     match archetype {
-        Archetype::PowerDPS => perf.strike_dps_index / 50000.0,
-        Archetype::ConditionDPS => perf.condition_dps_index / 50000.0,
+        Archetype::PowerDPS => {
+            // Primary: strike DPS. Minor: crit-scaling reward.
+            perf.strike_dps_index / 50000.0
+        }
+        Archetype::ConditionDPS => {
+            // Primary: condition DPS. Duration multiplier rewards Expertise investment.
+            let dur_bonus = (perf.condi_duration_pct / 100.0).min(1.0) * 0.15;
+            perf.condition_dps_index / 50000.0 + dur_bonus
+        }
         Archetype::SustainHybrid => {
-            perf.total_dps_index / 80000.0 + perf.effective_health / 500000.0
+            // Balanced DPS + survivability, strike-leaning
+            perf.strike_dps_index / 60000.0
+                + perf.condition_dps_index / 120000.0
+                + perf.effective_health / 400000.0
         }
         Archetype::Tank => {
-            perf.effective_health / 200000.0 + perf.damage_reduction_pct / 100.0
+            // Maximize effective health and damage reduction
+            perf.effective_health / 200000.0
+                + perf.damage_reduction_pct / 100.0
+                + perf.healing_power_index / 10000.0
         }
         Archetype::BoonSupport => {
-            perf.boon_duration_pct / 100.0 + perf.healing_power_index / 5000.0
+            // Primary: boon duration. Secondary: healing. Tertiary: some DPS contribution.
+            perf.boon_duration_pct / 100.0
+                + perf.healing_power_index / 5000.0
+                + perf.condi_duration_pct / 500.0
+                + perf.total_dps_index / 300000.0
         }
         Archetype::HealSupport => {
-            perf.healing_power_index / 3000.0 + perf.boon_duration_pct / 200.0
+            // Primary: healing output. Secondary: boon duration for heal-boon hybrids.
+            perf.healing_power_index / 3000.0
+                + perf.boon_duration_pct / 200.0
+                + perf.condi_duration_pct / 500.0
+                + perf.effective_health / 800000.0
         }
         Archetype::CelestialHybrid => {
+            // Well-rounded: DPS + support + survivability, all weighted evenly
             perf.total_dps_index / 100000.0
                 + perf.boon_duration_pct / 200.0
+                + perf.condi_duration_pct / 300.0
+                + perf.healing_power_index / 8000.0
                 + perf.effective_health / 500000.0
         }
     }
