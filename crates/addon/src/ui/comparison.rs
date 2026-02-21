@@ -304,9 +304,12 @@ fn render_defenses(ui: &Ui, comparison: &ComparisonState, current_stats: Option<
             let cur = current_stats.cloned().unwrap_or_default();
             let health = cur.health;
             let armor = cur.armor;
-            let eff_hp = (health as f64 * armor as f64 / 2597.0) as i32;
+            // Blended EHP: 65% strike (uses armor), 35% condition (armor bypassed), no boon DR
+            let strike_ehp = health as f64 * armor as f64 / 2597.0;
+            let condition_ehp = health as f64;
+            let eff_hp = (strike_ehp * 0.65 + condition_ehp * 0.35) as i32;
             let dmg_red = 0.0; // No boon DR info without combat metrics
-            (health, armor, eff_hp as i32, dmg_red)
+            (health, armor, eff_hp, dmg_red)
         };
 
     // Use combat metrics for suggested build if available, else fall back to stats
@@ -318,7 +321,9 @@ fn render_defenses(ui: &Ui, comparison: &ComparisonState, current_stats: Option<
         } else {
             let health = sug_stats.health;
             let armor = sug_stats.armor;
-            let eff_hp = (health as f64 * armor as f64 / 2597.0) as i32;
+            let strike_ehp = health as f64 * armor as f64 / 2597.0;
+            let condition_ehp = health as f64;
+            let eff_hp = (strike_ehp * 0.65 + condition_ehp * 0.35) as i32;
             let dmg_red = 0.0; // No boon DR info without combat metrics
             (health, armor, eff_hp, dmg_red)
         };

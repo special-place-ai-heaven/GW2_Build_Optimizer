@@ -83,7 +83,7 @@ pub fn optimize(
 
     // Sort by score descending
     gear_candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-    gear_candidates.truncate(top_n * 2); // keep extra for spec combinations
+    gear_candidates.truncate(top_n * 3); // keep extra — traits can shift rankings significantly
 
     on_progress(OptimizeProgress {
         stage: "Evaluating specialization combinations...".into(),
