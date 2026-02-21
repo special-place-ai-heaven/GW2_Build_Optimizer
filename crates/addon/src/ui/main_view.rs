@@ -16,6 +16,16 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         load_game_db(state);
     }
 
+    // Error bar at top (dismissible)
+    if let Some(ref err) = state.main.error.clone() {
+        ui.text_colored([1.0, 0.3, 0.0, 1.0], &format!("[!] {}", err));
+        ui.same_line();
+        if ui.small_button("Dismiss##err") {
+            state.main.error = None;
+        }
+        ui.separator();
+    }
+
     // Left menu panel (fixed width)
     let menu_width = 180.0;
 
@@ -291,6 +301,35 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     ui.separator();
     ui.spacing();
 
+    // Cache size display
+    let cache_dir = state.addon_dir.join("cache");
+    let cache_size = calculate_dir_size(&cache_dir);
+    ui.text(&format!("Cache size: {}", format_bytes(cache_size)));
+    ui.same_line();
+    if ui.button_with_size("Clear Cache", [100.0, 0.0]) {
+        let _ = std::fs::remove_dir_all(&cache_dir);
+        state.config.cache_build_number = None;
+        let _ = state.config.save(&state.config_path);
+        state.main.game_db = None;
+    }
+
+    ui.spacing();
+
+    // Gemini quota display
+    let usage_path = state.addon_dir.join("gemini_usage.json");
+    if let Ok(json) = std::fs::read_to_string(&usage_path) {
+        if let Ok(usage) = serde_json::from_str::<serde_json::Value>(&json) {
+            let today = usage.get("requests_today").and_then(|v| v.as_u64()).unwrap_or(0);
+            ui.text(&format!("Gemini usage today: {} / 250 requests", today));
+        }
+    } else {
+        ui.text("Gemini usage today: 0 / 250 requests");
+    }
+
+    ui.spacing();
+    ui.separator();
+    ui.spacing();
+
     // Cache management
     if ui.button_with_size("Refresh Game Data", [200.0, 0.0]) {
         nexus::log::log(
@@ -302,8 +341,21 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
 
     ui.spacing();
 
-    if ui.button_with_size("Reset Setup", [200.0, 0.0]) {
-        state.screen = crate::state::Screen::Setup(crate::state::SetupStep::Gw2ApiKey);
+    // Reset Setup with confirmation
+    if !state.main.confirm_reset {
+        if ui.button_with_size("Reset Setup", [200.0, 0.0]) {
+            state.main.confirm_reset = true;
+        }
+    } else {
+        ui.text_colored([1.0, 0.3, 0.0, 1.0], "Are you sure? This will clear all settings.");
+        if ui.button_with_size("Yes, Reset", [100.0, 0.0]) {
+            state.main.confirm_reset = false;
+            state.screen = crate::state::Screen::Setup(crate::state::SetupStep::Gw2ApiKey);
+        }
+        ui.same_line();
+        if ui.button_with_size("Cancel", [100.0, 0.0]) {
+            state.main.confirm_reset = false;
+        }
     }
 
     ui.spacing();
@@ -311,9 +363,27 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
 
     // About
-    ui.text("GW2 Build Optimizer v0.1.0");
+    ui.text("GW2 Build Optimizer v1.0.0");
     ui.text("Powered by Google Gemini AI");
     ui.text_wrapped("Optimizes builds using GW2 API data and LLM reasoning about trait/sigil/rune/relic synergies.");
+}
+
+fn calculate_dir_size(path: &std::path::Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else { return 0; };
+    entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+        .sum()
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1_048_576 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{} B", bytes)
+    }
 }
 
 fn load_characters(state: &mut AddonState) {
@@ -413,46 +483,69 @@ fn resolve_build(
         .load("specializations").map_err(|e| e.to_string())?.unwrap_or_default();
     let traits: Vec<gw2_api::models::Trait> = cache
         .load("traits").map_err(|e| e.to_string())?.unwrap_or_default();
-    let skills: Vec<gw2_api::models::Skill> = cache
+    let skills_cache: Vec<gw2_api::models::Skill> = cache
         .load("skills").map_err(|e| e.to_string())?.unwrap_or_default();
     let items: Vec<gw2_api::models::Item> = cache
         .load("items").map_err(|e| e.to_string())?.unwrap_or_default();
+    let itemstats: Vec<gw2_api::models::ItemStat> = cache
+        .load("itemstats").ok().flatten().unwrap_or_default();
 
-    let find_item = |id: u32| -> Option<&gw2_api::models::Item> {
-        items.iter().find(|i| i.id == id)
-    };
+    let resolved_specs = resolve_specs(build, &specs, &traits);
+    let resolved_skills = resolve_skills(build, &skills_cache);
+    let (weapons, armor, trinkets_vec, rune, relic_resolved) =
+        resolve_equipment(equipment, &items, &itemstats);
+    let pvp_amulet = resolve_pvp_amulet(game_mode, equipment, cache);
+
+    Ok(ResolvedBuild {
+        character_name: character_name.to_string(),
+        profession: build.profession.clone().unwrap_or_default(),
+        game_mode: game_mode.clone(),
+        specializations: resolved_specs,
+        skills: resolved_skills,
+        weapons, armor, trinkets: trinkets_vec,
+        relic: relic_resolved, rune,
+        pvp_amulet,
+    })
+}
+
+fn resolve_specs(
+    build: &gw2_api::models::Build,
+    specs: &[gw2_api::models::Specialization],
+    traits: &[gw2_api::models::Trait],
+) -> Vec<gw2_core::types::ResolvedSpec> {
+    use gw2_core::types::*;
+    build.specializations.iter().filter_map(|sel| {
+        let spec_id = sel.id?;
+        let spec = specs.iter().find(|s| s.id == spec_id)?;
+        let traits_selected: Vec<ResolvedTrait> = sel.traits.iter().enumerate()
+            .filter_map(|(col, trait_id)| {
+                let tid = (*trait_id)?;
+                let t = traits.iter().find(|t| t.id == tid)?;
+                Some(ResolvedTrait {
+                    id: t.id, name: t.name.clone(),
+                    description: t.description.clone().unwrap_or_default(),
+                    column: col, selected: true,
+                })
+            }).collect();
+        Some(ResolvedSpec {
+            id: spec.id, name: spec.name.clone(), elite: spec.elite,
+            traits_selected, traits_available: Vec::new(),
+        })
+    }).collect()
+}
+
+fn resolve_skills(
+    build: &gw2_api::models::Build,
+    skills_cache: &[gw2_api::models::Skill],
+) -> gw2_core::types::ResolvedSkills {
+    use gw2_core::types::*;
     let find_skill = |id: u32| -> Option<SkillInfo> {
-        skills.iter().find(|s| s.id == id).map(|s| SkillInfo {
+        skills_cache.iter().find(|s| s.id == id).map(|s| SkillInfo {
             id: s.id,
             name: s.name.clone(),
         })
     };
-
-    // Resolve specializations
-    let resolved_specs: Vec<ResolvedSpec> = build
-        .specializations
-        .iter()
-        .filter_map(|sel| {
-            let spec_id = sel.id?;
-            let spec = specs.iter().find(|s| s.id == spec_id)?;
-            let traits_selected: Vec<ResolvedTrait> = sel.traits.iter().enumerate()
-                .filter_map(|(col, trait_id)| {
-                    let tid = (*trait_id)?;
-                    let t = traits.iter().find(|t| t.id == tid)?;
-                    Some(ResolvedTrait {
-                        id: t.id, name: t.name.clone(),
-                        description: t.description.clone().unwrap_or_default(),
-                        column: col, selected: true,
-                    })
-                }).collect();
-            Some(ResolvedSpec {
-                id: spec.id, name: spec.name.clone(), elite: spec.elite,
-                traits_selected, traits_available: Vec::new(),
-            })
-        }).collect();
-
-    // Resolve skills
-    let resolved_skills = if let Some(ref sk) = build.skills {
+    if let Some(ref sk) = build.skills {
         ResolvedSkills {
             heal: sk.heal.and_then(&find_skill),
             utilities: sk.utilities.iter().map(|id| id.and_then(&find_skill)).collect(),
@@ -460,19 +553,32 @@ fn resolve_build(
         }
     } else {
         ResolvedSkills::default()
+    }
+}
+
+fn resolve_equipment(
+    equipment: &gw2_api::models::EquipmentTab,
+    items: &[gw2_api::models::Item],
+    itemstats: &[gw2_api::models::ItemStat],
+) -> (
+    Vec<gw2_core::types::ResolvedWeaponSet>,
+    Vec<gw2_core::types::ResolvedGearPiece>,
+    Vec<gw2_core::types::ResolvedGearPiece>,
+    Option<gw2_core::types::ResolvedUpgrade>,
+    Option<gw2_core::types::ResolvedRelic>,
+) {
+    use gw2_core::types::*;
+
+    let find_item = |id: u32| -> Option<&gw2_api::models::Item> {
+        items.iter().find(|i| i.id == id)
     };
 
-    // Resolve equipment
-    let mut weapons = Vec::new();
     let mut armor = Vec::new();
     let mut trinkets_vec = Vec::new();
     let mut rune = None;
     let mut relic_resolved = None;
     let mut ws1 = ResolvedWeaponSet { label: "Set 1".into(), ..Default::default() };
     let mut ws2 = ResolvedWeaponSet { label: "Set 2".into(), ..Default::default() };
-
-    let itemstats: Vec<gw2_api::models::ItemStat> = cache
-        .load("itemstats").ok().flatten().unwrap_or_default();
 
     for piece in &equipment.equipment {
         let item = find_item(piece.id);
@@ -529,35 +635,30 @@ fn resolve_build(
         }
     }
 
+    let mut weapons = Vec::new();
     if ws1.main_hand.is_some() || ws1.off_hand.is_some() { weapons.push(ws1); }
     if ws2.main_hand.is_some() || ws2.off_hand.is_some() { weapons.push(ws2); }
 
-    // Resolve PvP amulet if game mode is PvP
-    let pvp_amulet = if *game_mode == GameMode::PvP {
-        if let Some(ref pvp_eq) = equipment.equipment_pvp {
-            if let Some(amulet_id) = pvp_eq.amulet {
-                let pvp_amulets: Vec<gw2_api::models::PvpAmulet> = cache
-                    .load("pvp_amulets").ok().flatten().unwrap_or_default();
-                pvp_amulets.iter().find(|a| a.id == amulet_id).map(|a| {
-                    ResolvedPvpAmulet {
-                        id: a.id,
-                        name: a.name.clone(),
-                        stats: a.attributes.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-                    }
-                })
-            } else { None }
-        } else { None }
-    } else { None };
+    (weapons, armor, trinkets_vec, rune, relic_resolved)
+}
 
-    Ok(ResolvedBuild {
-        character_name: character_name.to_string(),
-        profession: build.profession.clone().unwrap_or_default(),
-        game_mode: game_mode.clone(),
-        specializations: resolved_specs,
-        skills: resolved_skills,
-        weapons, armor, trinkets: trinkets_vec,
-        relic: relic_resolved, rune,
-        pvp_amulet,
+fn resolve_pvp_amulet(
+    game_mode: &gw2_core::types::GameMode,
+    equipment: &gw2_api::models::EquipmentTab,
+    cache: &gw2_api::cache::DataCache,
+) -> Option<gw2_core::types::ResolvedPvpAmulet> {
+    use gw2_core::types::*;
+    if *game_mode != GameMode::PvP { return None; }
+    let pvp_eq = equipment.equipment_pvp.as_ref()?;
+    let amulet_id = pvp_eq.amulet?;
+    let pvp_amulets: Vec<gw2_api::models::PvpAmulet> = cache
+        .load("pvp_amulets").ok().flatten().unwrap_or_default();
+    pvp_amulets.iter().find(|a| a.id == amulet_id).map(|a| {
+        ResolvedPvpAmulet {
+            id: a.id,
+            name: a.name.clone(),
+            stats: a.attributes.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+        }
     })
 }
 
