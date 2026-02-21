@@ -256,10 +256,15 @@ pub fn calculate_combat_performance(
 
     // GW2 damage formula: Damage = Power * coeff * weapon_strength / Armor
     // Armor is a linear divisor — NOT a diminishing-returns DR percentage.
-    // EHP = Health * (Armor / Reference_Armor) captures armor's full effect.
-    // Additional DR comes only from boons: Protection (33% strike) and Resolution (33% condi).
+    // Strike EHP = Health * (Armor / Reference_Armor) / (1 - Protection_DR)
+    // Condition EHP = Health / (1 - Resolution_DR) — conditions bypass armor entirely.
+    // Blended EHP: 65% strike / 35% condition weighting (typical PvE encounter mix).
     let protection_dr = if buffs.protection { 0.33 } else { 0.0 };
-    let effective_health = health * armor / REFERENCE_ARMOR / (1.0 - protection_dr);
+    let resolution_dr = if buffs.resolution { 0.33 } else { 0.0 };
+    let strike_ehp = health * armor / REFERENCE_ARMOR / (1.0 - protection_dr);
+    let condition_ehp = health / (1.0 - resolution_dr);
+    let effective_health = strike_ehp * 0.65 + condition_ehp * 0.35;
+    let blended_dr = protection_dr * 0.65 + resolution_dr * 0.35;
 
     CombatPerformance {
         effective_power,
@@ -272,7 +277,7 @@ pub fn calculate_combat_performance(
         condi_duration_pct: total_condi_duration,
         crit_chance,
         effective_health,
-        damage_reduction_pct: protection_dr * 100.0,
+        damage_reduction_pct: blended_dr * 100.0,
     }
 }
 
@@ -292,7 +297,7 @@ pub fn default_buff_profiles() -> Vec<BuffProfile> {
         BuffProfile {
             might_stacks: 15,
             fury: true,
-            protection: false,
+            protection: true,
             resolution: false,
             vulnerability_stacks: 0,
             label: "Party".into(),
@@ -300,8 +305,8 @@ pub fn default_buff_profiles() -> Vec<BuffProfile> {
         BuffProfile {
             might_stacks: 25,
             fury: true,
-            protection: false,
-            resolution: false,
+            protection: true,
+            resolution: true,
             vulnerability_stacks: 25,
             label: "Full Squad".into(),
         },
