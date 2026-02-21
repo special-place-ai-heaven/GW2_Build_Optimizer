@@ -4,7 +4,7 @@
 
 use nexus::imgui::{ChildWindow, Selectable, TreeNodeFlags, Ui};
 
-use gw2_core::types::{CombatMetrics, ResolvedBuild, StatBlock};
+use gw2_core::types::{CombatMetrics, ResolvedBuild, RotationBreakdown, StatBlock};
 
 /// A build suggestion from the optimizer + LLM.
 #[derive(Debug, Clone, Default)]
@@ -27,6 +27,8 @@ pub struct BuildSuggestion {
     pub combat_party: Option<CombatMetrics>,
     /// Combat metrics under Full Squad profile (Might x25, Fury, Vulnerability x25).
     pub combat_squad: Option<CombatMetrics>,
+    /// Rotation simulation breakdown (if simulation was run).
+    pub rotation: Option<RotationBreakdown>,
 }
 
 /// State for the comparison view.
@@ -112,6 +114,13 @@ pub fn render_comparison(
     // ═══ Defenses & Resistances ═══
     if ui.collapsing_header("Defenses & Resistances", TreeNodeFlags::DEFAULT_OPEN) {
         render_defenses(ui, comparison, current_stats, suggestion);
+    }
+
+    // ═══ Rotation Breakdown (from simulation) ═══
+    if let Some(ref rotation) = suggestion.rotation {
+        if ui.collapsing_header("Rotation Breakdown", TreeNodeFlags::DEFAULT_OPEN) {
+            render_rotation_breakdown(ui, rotation);
+        }
     }
 
     // ═══ LLM Explanation ═══
@@ -509,6 +518,61 @@ fn render_suggestion_summary(ui: &Ui, suggestion: &BuildSuggestion) {
     }
     if !suggestion.sigils.is_empty() {
         ui.text(&format!("Sigils: {}", suggestion.sigils.join(", ")));
+    }
+}
+
+/// Render rotation simulation breakdown: simulated DPS, condition uptimes, skill usage.
+fn render_rotation_breakdown(ui: &Ui, rotation: &RotationBreakdown) {
+    // DPS summary row
+    ui.text(format!(
+        "Simulated DPS: {} (Strike: {}, Condition: {})",
+        rotation.simulated_dps, rotation.strike_dps, rotation.condition_dps
+    ));
+    ui.spacing();
+
+    // Control metrics
+    if rotation.stunbreak_count > 0 || rotation.has_stability {
+        let mut parts = Vec::new();
+        if rotation.stunbreak_count > 0 {
+            parts.push(format!("Stunbreaks: {}", rotation.stunbreak_count));
+        }
+        if rotation.has_stability {
+            parts.push(format!("Stability: {:.0}%", rotation.stability_uptime * 100.0));
+        }
+        ui.text_colored([0.4, 0.9, 0.4, 1.0], parts.join("  |  "));
+        ui.spacing();
+    }
+
+    // Condition uptime
+    if !rotation.condition_uptime.is_empty() {
+        ui.text("Condition Uptime (avg stacks):");
+        for (name, stacks) in &rotation.condition_uptime {
+            if *stacks > 0.01 {
+                ui.text(format!("  {}: {:.1}", name, stacks));
+            }
+        }
+        ui.spacing();
+    }
+
+    // Buff uptime
+    if !rotation.buff_uptime.is_empty() {
+        ui.text("Buff Uptime:");
+        for (name, pct) in &rotation.buff_uptime {
+            if *pct > 0.01 {
+                ui.text(format!("  {}: {:.0}%", name, pct * 100.0));
+            }
+        }
+        ui.spacing();
+    }
+
+    // Skill usage table
+    if !rotation.skill_usage.is_empty() {
+        ui.text("Skill Usage:");
+        for (name, casts, dps) in &rotation.skill_usage {
+            if *casts > 0 {
+                ui.text(format!("  {} x{} ({} DPS)", name, casts, dps));
+            }
+        }
     }
 }
 

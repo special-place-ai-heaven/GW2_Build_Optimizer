@@ -12,7 +12,7 @@ use crate::combat::{self, CombatPerformance, DamageModifiers};
 use crate::engine::BuildCandidate;
 use crate::gamedb::GameDb;
 use crate::gemini::{FunctionDeclaration, Tool};
-use crate::scoring::{self, Archetype};
+use crate::scoring::{self, AggressionLevel, Archetype};
 use crate::stats;
 
 /// Runtime context for tool execution — holds references to all game data
@@ -22,6 +22,7 @@ pub struct ToolContext<'a> {
     pub profession_name: &'a str,
     pub candidates: &'a [BuildCandidate],
     pub current_build_summary: Option<&'a str>,
+    pub aggression_level: AggressionLevel,
 }
 
 /// Build the Gemini tool declarations for all available tools.
@@ -760,11 +761,12 @@ fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
         &full_stats, &derived, &mods, solo, ctx.profession_name,
     );
 
-    let score = scoring::score_combat(&perf, &archetype);
+    let score = scoring::score_combat_weighted(&perf, &archetype, &ctx.aggression_level);
 
     json!({
         "prefix": &itemstat.name,
         "archetype": archetype.label(),
+        "aggression": ctx.aggression_level.label(),
         "score": format!("{:.4}", score),
         "combat_summary": {
             "effective_power": perf.effective_power.round() as i32,

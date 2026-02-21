@@ -136,28 +136,6 @@ fn is_damaging_condition(status: &str) -> bool {
     )
 }
 
-/// Build rotation skills for an entire weapon set + utility bar from a profession's skills.
-/// Filters by profession name and collects weapon skills + heal/utility/elite.
-pub fn build_profession_rotation(
-    profession: &str,
-    skill_ids: &[u32],
-    db: &GameDb,
-) -> Vec<RotationSkill> {
-    let mut rotation = Vec::new();
-
-    // First add weapon skills (from skill_ids that are weapon-slot skills)
-    for &id in skill_ids {
-        if let Some(skill) = db.skills.get(&id) {
-            if skill.professions.contains(&profession.to_string()) || skill.professions.is_empty() {
-                let rs = skill_to_rotation(skill);
-                rotation.push(rs);
-            }
-        }
-    }
-
-    rotation
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

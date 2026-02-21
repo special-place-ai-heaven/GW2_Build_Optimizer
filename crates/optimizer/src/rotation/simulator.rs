@@ -352,7 +352,7 @@ fn condition_tick_damage(condition: &str, condition_damage: f64) -> f64 {
         "Burning" => 0.155 * condition_damage + 131.0,
         "Poison" => 0.06 * condition_damage + 33.5,
         "Torment" => 0.06 * condition_damage + 22.0,
-        "Confusion" => 0.0725 * condition_damage + 49.5, // passive tick only
+        "Confusion" => 0.195 * condition_damage + 95.5, // on skill use (GW2 wiki)
         _ => 0.0, // non-damaging conditions don't contribute DPS
     }
 }
@@ -469,6 +469,8 @@ mod tests {
         assert!((condition_tick_damage("Bleeding", cd) - 82.0).abs() < 0.1);
         assert!((condition_tick_damage("Burning", cd) - 286.0).abs() < 0.1);
         assert!((condition_tick_damage("Poison", cd) - 93.5).abs() < 0.1);
+        assert!((condition_tick_damage("Torment", cd) - 82.0).abs() < 0.1);
+        assert!((condition_tick_damage("Confusion", cd) - 290.5).abs() < 0.1);
         assert_eq!(condition_tick_damage("Vulnerability", cd), 0.0); // non-damaging
     }
 
