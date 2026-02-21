@@ -1657,6 +1657,7 @@ fn apply_gemini_response(
 }
 
 /// Call Gemini to enrich the top optimizer suggestion with LLM reasoning.
+/// Uses function calling (tool use) so Gemini can query game data and simulate builds.
 fn enrich_with_gemini(
     key: &str,
     profession_name: &str,
@@ -1672,34 +1673,33 @@ fn enrich_with_gemini(
     let client = gw2_optimizer::gemini::GeminiClient::with_persistence(key, usage_path)
         .map_err(|e| e.to_string())?;
 
-    let context = gw2_optimizer::prompts::build_game_context(profession_name, archetype, game_mode);
-    let spec_names: Vec<(u32, String)> = db.specializations.iter()
-        .map(|(&id, s)| (id, s.name.clone()))
-        .collect();
-    let trait_names: Vec<(u32, String)> = db.traits.iter()
-        .map(|(&id, t)| (id, t.name.clone()))
-        .collect();
-    let candidate_summaries: String = candidates.iter().take(3)
-        .map(|c| gw2_optimizer::prompts::summarize_build(c, &spec_names, &trait_names))
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let full_context = format!("{}\n\nTop optimizer candidates:\n{}", context, candidate_summaries);
-
-    let prompt = if let Some(summary) = current_build_summary {
-        gw2_optimizer::prompts::improve_build_prompt(
-            profession_name, archetype, game_mode, summary, &full_context,
+    // Build tool-aware prompt
+    let prompt = if current_build_summary.is_some() {
+        gw2_optimizer::prompts::improve_build_prompt_with_tools(
+            profession_name, archetype, game_mode,
         )
     } else {
-        let available_specs: Vec<(String, bool)> = db.specializations.values()
-            .filter(|s| s.profession == profession_name)
-            .map(|s| (s.name.clone(), s.elite))
-            .collect();
-        gw2_optimizer::prompts::new_build_prompt(
-            profession_name, archetype, game_mode, &available_specs, &full_context,
+        gw2_optimizer::prompts::new_build_prompt_with_tools(
+            profession_name, archetype, game_mode,
         )
     };
 
-    let response = client.generate_cached(&prompt).map_err(|e| e.to_string())?;
+    let tools = gw2_optimizer::gemini_tools::tool_declarations();
+    let build_summary_owned = current_build_summary.map(|s| s.to_string());
+    let ctx = gw2_optimizer::gemini_tools::ToolContext {
+        db,
+        profession_name,
+        candidates,
+        current_build_summary: build_summary_owned.as_deref(),
+    };
+
+    let response = client.generate_with_tools(
+        &prompt,
+        tools,
+        |name, args| gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx),
+        8,
+    ).map_err(|e| e.to_string())?;
+
     let gemini_build = gw2_optimizer::prompts::parse_gemini_build(&response)
         .map_err(|e| format!("Parse failed: {}", e))?;
 
@@ -1711,6 +1711,7 @@ fn enrich_with_gemini(
 }
 
 /// Send a chat message to Gemini for build refinement.
+/// Uses function calling so Gemini can query game data to answer questions.
 fn send_chat_message(state: &mut AddonState, message: String) {
     // Guard against concurrent chat messages
     if state.main.chat.waiting {
@@ -1732,32 +1733,58 @@ fn send_chat_message(state: &mut AddonState, message: String) {
         .map(|b| b.profession.clone())
         .unwrap_or_default();
     let build_summary = state.main.current_build.as_ref()
-        .map(|b| summarize_resolved_build(b))
-        .unwrap_or_default();
-    let game_mode_label = state.main.game_mode.label().to_string();
-    let context = gw2_optimizer::prompts::build_game_context(
-        &profession, &Archetype::PowerDPS, &game_mode_label,
-    );
+        .map(|b| summarize_resolved_build(b));
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
+    let db_clone = state.main.game_db.clone();
 
     std::thread::spawn(move || {
         if token.is_cancelled() { return; }
 
         let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
-            let prompt = gw2_optimizer::prompts::chat_refinement_prompt(
-                &profession, &build_summary, &message, &context,
-            );
             let usage_path = addon_dir.join("gemini_usage.json");
             let client = gw2_optimizer::gemini::GeminiClient::with_persistence(&gemini_key, usage_path)
                 .map_err(|e| e.to_string())?;
 
             if token.is_cancelled() { return Err("Cancelled".into()); }
 
-            let response = client.generate_cached(&prompt)
-                .map_err(|e| e.to_string())?;
-            gw2_optimizer::prompts::parse_gemini_build(&response)
-                .map_err(|e| format!("Parse failed: {}", e))
+            // Use tool-enabled generation if GameDb is available
+            if let Some(ref db) = db_clone {
+                let prompt = gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
+                    &profession, &message,
+                );
+                let tools = gw2_optimizer::gemini_tools::tool_declarations();
+                let empty_candidates = vec![];
+                let ctx = gw2_optimizer::gemini_tools::ToolContext {
+                    db,
+                    profession_name: &profession,
+                    candidates: &empty_candidates,
+                    current_build_summary: build_summary.as_deref(),
+                };
+
+                let response = client.generate_with_tools(
+                    &prompt,
+                    tools,
+                    |name, args| gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx),
+                    8,
+                ).map_err(|e| e.to_string())?;
+
+                gw2_optimizer::prompts::parse_gemini_build(&response)
+                    .map_err(|e| format!("Parse failed: {}", e))
+            } else {
+                // Fallback: no GameDb, use simple prompt
+                let build_summary_str = build_summary.as_deref().unwrap_or("");
+                let context = gw2_optimizer::prompts::build_game_context(
+                    &profession, &Archetype::PowerDPS, "PvE",
+                );
+                let prompt = gw2_optimizer::prompts::chat_refinement_prompt(
+                    &profession, build_summary_str, &message, &context,
+                );
+                let response = client.generate_cached(&prompt)
+                    .map_err(|e| e.to_string())?;
+                gw2_optimizer::prompts::parse_gemini_build(&response)
+                    .map_err(|e| format!("Parse failed: {}", e))
+            }
         })();
 
         if !token.is_cancelled() {
