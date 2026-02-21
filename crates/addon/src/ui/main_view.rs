@@ -2,7 +2,7 @@ use nexus::imgui::{ChildWindow, ComboBox, Selectable, Ui};
 use base64::Engine as _;
 
 use crate::state::{AddonState, MainTab};
-use gw2_optimizer::scoring::Archetype;
+use gw2_optimizer::scoring::{AggressionLevel, Archetype};
 
 mod build_display;
 
@@ -238,6 +238,7 @@ fn render_left_menu(ui: &Ui, state: &mut AddonState) {
         let selected = state.main.game_mode == *mode;
         if ui.radio_button_bool(mode.label(), selected) {
             state.main.game_mode = mode.clone();
+            state.main.aggression_index = AggressionLevel::default_for_mode(mode.label()).to_index() as i32;
             resolve_selected_build(state);
         }
     }
@@ -327,6 +328,19 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
         }
         ui.spacing();
     }
+
+    // Aggression level slider
+    ui.separator();
+    {
+        let level = AggressionLevel::from_index(state.main.aggression_index as usize);
+        ui.text(format!("Playstyle: {}", level.label()));
+    }
+    ui.set_next_item_width(200.0);
+    nexus::imgui::Slider::new("##aggression", 0, 4)
+        .display_format("")
+        .build(ui, &mut state.main.aggression_index);
+    ui.text_colored([0.6, 0.6, 0.6, 1.0], "Full Defense <-> Full Offense");
+    ui.spacing();
 
     // Show comparison if suggestions exist
     if !state.main.comparison.suggestions.is_empty() {
@@ -1372,6 +1386,7 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
         .map(|b| summarize_resolved_build(b));
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
+    let aggression = AggressionLevel::from_index(state.main.aggression_index as usize);
 
     state.main.optimizing = true;
     state.main.optimize_stage = "Starting...".into();
@@ -1404,7 +1419,7 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
                 },
                 5,
                 &game_mode,
-                None, // aggression level — uses default (FullOffense for backward compat)
+                Some(&aggression),
             );
 
             if token.is_cancelled() { return Err("Cancelled".into()); }

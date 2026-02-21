@@ -78,6 +78,9 @@ pub struct MainState {
     // Optimization state
     pub optimizing: bool,
     pub optimize_stage: String,
+    /// Aggression level slider index (0=FullDefense, 1=Defensive, 2=Balanced, 3=Aggressive, 4=FullOffense).
+    /// Default: 3 (Aggressive, matches PvE default). Adjusted when game mode changes.
+    pub aggression_index: i32,
     // Save/Load
     pub saved_builds: Vec<SavedBuild>,
     pub saved_builds_loaded: bool,
@@ -186,6 +189,8 @@ pub fn init(addon_dir: PathBuf) {
         setup.gemini_key_status = KeyStatus::Valid;
     }
 
+    let mut main = MainState::default();
+    main.aggression_index = 3; // Aggressive (PvE default)
     *lock_state() = Some(AddonState {
         window_visible: false,
         config,
@@ -193,7 +198,7 @@ pub fn init(addon_dir: PathBuf) {
         addon_dir,
         screen,
         setup,
-        main: MainState::default(),
+        main,
         cancel_token: CancellationToken::new(),
     });
 }
