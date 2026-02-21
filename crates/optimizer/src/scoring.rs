@@ -6,6 +6,84 @@ use serde::{Deserialize, Serialize};
 use crate::combat::CombatPerformance;
 use crate::stats::{DerivedStats, StatBlock};
 
+/// 5-stage aggression level slider.
+/// Determines the balance between damage output and survivability/control.
+/// Stage 1 = pure survivability, Stage 5 = pure damage, Stage 3 = balanced.
+///
+/// Design principle: "Pure damage is NOT the goal. The ability to DELIVER
+/// damage is the goal." The optimal position depends on game mode and build:
+/// - PvE: lean aggressive (mobs are predictable, healer supports you)
+/// - WvW/PvP: lean balanced or defensive (CC, stability, stunbreaks matter)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AggressionLevel {
+    /// Stage 1: Maximum survivability — tank, healer, bunker
+    FullDefense = 1,
+    /// Stage 2: Defensive lean — survivable damage dealer
+    Defensive = 2,
+    /// Stage 3: Balanced — damage + survive in equal measure
+    Balanced = 3,
+    /// Stage 4: Aggressive — damage-focused with minimal survival
+    Aggressive = 4,
+    /// Stage 5: Full glass cannon — maximum damage output
+    FullOffense = 5,
+}
+
+impl AggressionLevel {
+    pub const ALL: [AggressionLevel; 5] = [
+        AggressionLevel::FullDefense,
+        AggressionLevel::Defensive,
+        AggressionLevel::Balanced,
+        AggressionLevel::Aggressive,
+        AggressionLevel::FullOffense,
+    ];
+
+    pub fn label(&self) -> &str {
+        match self {
+            AggressionLevel::FullDefense => "Full Defense",
+            AggressionLevel::Defensive => "Defensive",
+            AggressionLevel::Balanced => "Balanced",
+            AggressionLevel::Aggressive => "Aggressive",
+            AggressionLevel::FullOffense => "Full Offense",
+        }
+    }
+
+    /// Default aggression level for a game mode.
+    pub fn default_for_mode(game_mode: &str) -> Self {
+        match game_mode {
+            "PvE" => AggressionLevel::Aggressive,
+            "WvW" => AggressionLevel::Balanced,
+            "PvP" => AggressionLevel::Balanced,
+            _ => AggressionLevel::Balanced,
+        }
+    }
+
+    /// Damage weight (0.0–1.0). Higher = more weight on DPS metrics.
+    pub fn damage_weight(&self) -> f64 {
+        match self {
+            AggressionLevel::FullDefense => 0.1,
+            AggressionLevel::Defensive => 0.3,
+            AggressionLevel::Balanced => 0.5,
+            AggressionLevel::Aggressive => 0.75,
+            AggressionLevel::FullOffense => 0.95,
+        }
+    }
+
+    /// Survivability weight (0.0–1.0). Higher = more weight on EHP/control.
+    pub fn survival_weight(&self) -> f64 {
+        1.0 - self.damage_weight()
+    }
+
+    /// Convert from slider index (0-4) to AggressionLevel.
+    pub fn from_index(idx: usize) -> Self {
+        Self::ALL[idx.min(4)]
+    }
+
+    /// Convert to slider index (0-4).
+    pub fn to_index(&self) -> usize {
+        (*self as usize).saturating_sub(1)
+    }
+}
+
 /// Build archetypes matching the UI's archetype selector.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Archetype {
@@ -214,6 +292,50 @@ pub fn score_combat(perf: &CombatPerformance, archetype: &Archetype) -> f64 {
     }
 }
 
+/// Score a build using both archetype weights AND aggression level.
+/// The archetype determines WHAT to optimize (power vs condi vs heal),
+/// while aggression level determines the DAMAGE vs SURVIVABILITY balance.
+///
+/// Formula: damage_component * damage_weight + survival_component * survival_weight
+pub fn score_combat_weighted(
+    perf: &CombatPerformance,
+    archetype: &Archetype,
+    aggression: &AggressionLevel,
+) -> f64 {
+    let dw = aggression.damage_weight();
+    let sw = aggression.survival_weight();
+
+    // Damage component — what the archetype cares about offensively
+    let damage_score = match archetype {
+        Archetype::PowerDPS => perf.strike_dps_index / 50000.0,
+        Archetype::ConditionDPS => {
+            let dur_bonus = (perf.condi_duration_pct / 100.0).min(1.0) * 0.15;
+            perf.condition_dps_index / 50000.0 + dur_bonus
+        }
+        Archetype::SustainHybrid => {
+            perf.strike_dps_index / 60000.0 + perf.condition_dps_index / 120000.0
+        }
+        Archetype::Tank => perf.healing_power_index / 10000.0,
+        Archetype::BoonSupport => {
+            perf.boon_duration_pct / 100.0 + perf.healing_power_index / 5000.0
+        }
+        Archetype::HealSupport => {
+            perf.healing_power_index / 3000.0 + perf.boon_duration_pct / 200.0
+        }
+        Archetype::CelestialHybrid => {
+            perf.total_dps_index / 100000.0
+                + perf.boon_duration_pct / 200.0
+                + perf.healing_power_index / 8000.0
+        }
+    };
+
+    // Survivability component — EHP and damage reduction
+    let survival_score = perf.effective_health / 200000.0
+        + perf.damage_reduction_pct / 100.0;
+
+    damage_score * dw + survival_score * sw
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,5 +482,93 @@ mod tests {
         let score_g = score_stats(&glass, &d, &Archetype::Tank);
 
         assert!(score_t > score_g, "Tanky stats should score higher for Tank archetype");
+    }
+
+    #[test]
+    fn test_aggression_level_weights() {
+        // Full offense = nearly all damage weight
+        assert!(AggressionLevel::FullOffense.damage_weight() > 0.9);
+        assert!(AggressionLevel::FullOffense.survival_weight() < 0.1);
+
+        // Full defense = nearly all survival weight
+        assert!(AggressionLevel::FullDefense.damage_weight() < 0.15);
+        assert!(AggressionLevel::FullDefense.survival_weight() > 0.85);
+
+        // Balanced = roughly equal
+        assert!((AggressionLevel::Balanced.damage_weight() - 0.5).abs() < 0.01);
+
+        // Weights always sum to 1.0
+        for level in &AggressionLevel::ALL {
+            let total = level.damage_weight() + level.survival_weight();
+            assert!((total - 1.0).abs() < 0.01, "Weights must sum to 1.0 for {:?}", level);
+        }
+    }
+
+    #[test]
+    fn test_aggression_level_index_roundtrip() {
+        for (i, level) in AggressionLevel::ALL.iter().enumerate() {
+            assert_eq!(level.to_index(), i);
+            assert_eq!(AggressionLevel::from_index(i), *level);
+        }
+    }
+
+    #[test]
+    fn test_aggression_default_for_mode() {
+        assert_eq!(AggressionLevel::default_for_mode("PvE"), AggressionLevel::Aggressive);
+        assert_eq!(AggressionLevel::default_for_mode("WvW"), AggressionLevel::Balanced);
+        assert_eq!(AggressionLevel::default_for_mode("PvP"), AggressionLevel::Balanced);
+    }
+
+    #[test]
+    fn test_score_combat_weighted_glass_vs_tanky() {
+        use crate::combat::{self, DamageModifiers, default_buff_profiles};
+        use crate::stats;
+
+        // Glass cannon: high damage, low survivability
+        let glass = StatBlock {
+            power: 2800.0,
+            precision: 2100.0,
+            ferocity: 1400.0,
+            toughness: 1000.0,
+            vitality: 1000.0,
+            ..Default::default()
+        };
+        let derived_g = stats::compute_derived(&glass, "Warrior");
+        let mods = DamageModifiers::default();
+        let solo = &default_buff_profiles()[0];
+        let perf_g = combat::calculate_combat_performance(
+            &glass, &derived_g, &mods, solo, "Warrior",
+        );
+
+        // Tanky build: low damage, high survivability
+        let tanky = StatBlock {
+            power: 1200.0,
+            precision: 1000.0,
+            toughness: 2500.0,
+            vitality: 2200.0,
+            ..Default::default()
+        };
+        let derived_t = stats::compute_derived(&tanky, "Warrior");
+        let perf_t = combat::calculate_combat_performance(
+            &tanky, &derived_t, &mods, solo, "Warrior",
+        );
+
+        // At Full Offense, glass should win
+        let score_g_offense = score_combat_weighted(&perf_g, &Archetype::PowerDPS, &AggressionLevel::FullOffense);
+        let score_t_offense = score_combat_weighted(&perf_t, &Archetype::PowerDPS, &AggressionLevel::FullOffense);
+        assert!(
+            score_g_offense > score_t_offense,
+            "Glass ({}) should beat tanky ({}) at FullOffense",
+            score_g_offense, score_t_offense
+        );
+
+        // At Full Defense, tanky should win
+        let score_g_defense = score_combat_weighted(&perf_g, &Archetype::PowerDPS, &AggressionLevel::FullDefense);
+        let score_t_defense = score_combat_weighted(&perf_t, &Archetype::PowerDPS, &AggressionLevel::FullDefense);
+        assert!(
+            score_t_defense > score_g_defense,
+            "Tanky ({}) should beat glass ({}) at FullDefense",
+            score_t_defense, score_g_defense
+        );
     }
 }
