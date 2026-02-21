@@ -1404,6 +1404,7 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
                 },
                 5,
                 &game_mode,
+                None, // aggression level — uses default (FullOffense for backward compat)
             );
 
             if token.is_cancelled() { return Err("Cancelled".into()); }

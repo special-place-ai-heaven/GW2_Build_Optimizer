@@ -11,7 +11,7 @@ use gw2_core::types::GameMode;
 use gw2_api::models::Fact;
 
 use crate::combat::{self, CombatPerformance, DamageModifiers};
-use crate::scoring::{score_combat, Archetype};
+use crate::scoring::{score_combat, score_combat_weighted, AggressionLevel, Archetype};
 use crate::search::{search_gear_prefixes, search_spec_combos, GearCandidate};
 use crate::stats;
 
@@ -54,9 +54,14 @@ pub fn optimize(
     mut on_progress: impl FnMut(OptimizeProgress),
     top_n: usize,
     game_mode: &GameMode,
+    aggression: Option<&AggressionLevel>,
 ) -> Vec<BuildCandidate> {
+    // Default to FullOffense for backward compatibility (matches old score_combat behavior)
+    let default_aggression = AggressionLevel::FullOffense;
+    let aggression = aggression.unwrap_or(&default_aggression);
+
     if *game_mode == GameMode::PvP {
-        return optimize_pvp(profession, archetype, specs_cache, traits_cache, &mut on_progress, top_n);
+        return optimize_pvp(profession, archetype, specs_cache, traits_cache, &mut on_progress, top_n, aggression);
     }
 
     on_progress(OptimizeProgress {
@@ -78,7 +83,7 @@ pub fn optimize(
         let perf = combat::calculate_combat_performance(
             &full_stats, &derived, &empty_mods, solo_profile, &profession.name,
         );
-        candidate.score = score_combat(&perf, archetype);
+        candidate.score = score_combat_weighted(&perf, archetype, aggression);
     }
 
     // Sort by score descending
@@ -137,7 +142,7 @@ pub fn optimize(
             let combat_perf = combat::calculate_combat_performance(
                 &full_stats, &derived, &modifiers, solo_profile, &profession.name,
             );
-            let score = score_combat(&combat_perf, archetype);
+            let score = score_combat_weighted(&combat_perf, archetype, aggression);
 
             all_candidates.push(BuildCandidate {
                 gear: gear.clone(),
@@ -182,6 +187,7 @@ fn optimize_pvp(
     traits_cache: &HashMap<u32, GW2Trait>,
     on_progress: &mut impl FnMut(OptimizeProgress),
     top_n: usize,
+    aggression: &AggressionLevel,
 ) -> Vec<BuildCandidate> {
     on_progress(OptimizeProgress {
         stage: "Evaluating PvP specialization combinations...".into(),
@@ -233,7 +239,7 @@ fn optimize_pvp(
         let combat_perf = combat::calculate_combat_performance(
             &full_stats, &derived, &modifiers, solo_profile, &profession.name,
         );
-        let score = score_combat(&combat_perf, archetype);
+        let score = score_combat_weighted(&combat_perf, archetype, aggression);
 
         all_candidates.push(BuildCandidate {
             gear: empty_gear.clone(),
@@ -584,6 +590,7 @@ mod tests {
             |_| {},
             3,
             &GameMode::PvE,
+            None,
         );
 
         assert!(!candidates.is_empty());
