@@ -46,6 +46,8 @@ pub fn tool_declarations() -> Vec<Tool> {
             decl_search_skills_by_effect(),
             decl_find_synergies(),
             decl_get_build_synergy_report(),
+            // Rotation simulator
+            decl_simulate_rotation(),
         ],
     }]
 }
@@ -70,6 +72,7 @@ pub fn execute_tool(name: &str, args: &Value, ctx: &ToolContext) -> Value {
         "search_skills_by_effect" => exec_search_skills_by_effect(args, ctx),
         "find_synergies" => exec_find_synergies(args, ctx),
         "get_build_synergy_report" => exec_get_build_synergy_report(args, ctx),
+        "simulate_rotation" => exec_simulate_rotation(args, ctx),
         _ => json!({ "error": format!("Unknown tool: {}", name) }),
     }
 }
@@ -368,6 +371,32 @@ fn decl_get_build_synergy_report() -> FunctionDeclaration {
                 }
             },
             "required": ["trait_ids"]
+        }),
+    }
+}
+
+fn decl_simulate_rotation() -> FunctionDeclaration {
+    FunctionDeclaration {
+        name: "simulate_rotation".into(),
+        description: "Simulate a skill rotation to estimate real DPS, condition uptime, buff uptime, and control metrics. Validates whether a build's skills actually work together over time.".into(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "skill_ids": {
+                    "type": "array",
+                    "items": { "type": "integer" },
+                    "description": "Skill IDs to include in the rotation (weapon skills + heal + utilities + elite)"
+                },
+                "gear_prefix": {
+                    "type": "string",
+                    "description": "Gear stat prefix (e.g. 'Berserker\\'s') for stat calculation"
+                },
+                "duration_seconds": {
+                    "type": "integer",
+                    "description": "Optional simulation duration (default 30 seconds)"
+                }
+            },
+            "required": ["skill_ids"]
         }),
     }
 }
@@ -1098,6 +1127,106 @@ fn exec_get_build_synergy_report(args: &Value, ctx: &ToolContext) -> Value {
     })
 }
 
+fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
+    use crate::rotation;
+
+    let skill_ids: Vec<u32> = args.get("skill_ids")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_u64().map(|n| n as u32)).collect())
+        .unwrap_or_default();
+
+    if skill_ids.is_empty() {
+        return json!({ "error": "No skill IDs provided" });
+    }
+
+    let duration_s = args.get("duration_seconds")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30) as u32;
+
+    // Get stats from gear prefix (or use sensible defaults)
+    let gear_prefix = args.get("gear_prefix").and_then(|v| v.as_str()).unwrap_or("Berserker's");
+    let (power, condition_damage, weapon_strength) = if let Some(istat) = ctx.db.itemstats.values()
+        .find(|is| is.name == gear_prefix)
+    {
+        let gear_stats = calculate_full_set_stats(istat);
+        let base = stats::base_stats();
+        let total = stats::StatBlock {
+            power: base.power + gear_stats.power,
+            precision: base.precision + gear_stats.precision,
+            condition_damage: base.condition_damage + gear_stats.condition_damage,
+            ..base
+        };
+        (total.power, total.condition_damage, 1100.0)
+    } else {
+        (2000.0, 1000.0, 1100.0) // fallback defaults
+    };
+
+    // Build rotation skills from the provided IDs
+    let rotation_skills = rotation::builder::build_rotation_skills(&skill_ids, ctx.db);
+
+    if rotation_skills.is_empty() {
+        return json!({ "error": "No valid skills found for the provided IDs" });
+    }
+
+    // Run simulation
+    let result = rotation::simulator::simulate(
+        &rotation_skills,
+        duration_s * 1000,
+        power,
+        condition_damage,
+        weapon_strength,
+    );
+
+    // Format condition uptimes
+    let mut condition_uptimes: Vec<Value> = result.condition_uptime.iter()
+        .map(|(name, avg_stacks)| json!({
+            "condition": name,
+            "avg_stacks": format!("{:.1}", avg_stacks)
+        }))
+        .collect();
+    condition_uptimes.sort_by(|a, b| {
+        a["condition"].as_str().cmp(&b["condition"].as_str())
+    });
+
+    // Format buff uptimes
+    let mut buff_uptimes: Vec<Value> = result.buff_uptime.iter()
+        .map(|(name, fraction)| json!({
+            "buff": name,
+            "uptime_pct": format!("{:.0}%", fraction * 100.0)
+        }))
+        .collect();
+    buff_uptimes.sort_by(|a, b| {
+        a["buff"].as_str().cmp(&b["buff"].as_str())
+    });
+
+    // Format skill usage
+    let skill_usage: Vec<Value> = result.skill_usage.iter()
+        .map(|su| json!({
+            "skill": &su.name,
+            "casts": su.cast_count,
+            "dps": format!("{:.0}", su.dps_contribution)
+        }))
+        .collect();
+
+    json!({
+        "duration_s": duration_s,
+        "dps": {
+            "strike": format!("{:.0}", result.strike_dps),
+            "condition": format!("{:.0}", result.condition_dps),
+            "total": format!("{:.0}", result.total_dps)
+        },
+        "condition_uptime": condition_uptimes,
+        "buff_uptime": buff_uptimes,
+        "skill_usage": skill_usage,
+        "control_metrics": {
+            "stunbreak_count": result.stunbreak_count,
+            "has_stability": result.has_stability,
+            "stability_uptime_pct": format!("{:.0}%", result.stability_uptime * 100.0)
+        },
+        "skills_simulated": rotation_skills.len()
+    })
+}
+
 // ─── Helpers ───
 
 /// Ascended attribute_adjustment per equipment slot (matches engine.rs exactly).
@@ -1528,7 +1657,7 @@ mod tests {
     fn test_tool_declarations_count() {
         let tools = tool_declarations();
         assert_eq!(tools.len(), 1); // Single tool block
-        assert_eq!(tools[0].function_declarations.len(), 17);
+        assert_eq!(tools[0].function_declarations.len(), 18);
     }
 
     #[test]
@@ -1548,6 +1677,7 @@ mod tests {
         assert!(names.contains(&"search_skills_by_effect"));
         assert!(names.contains(&"find_synergies"));
         assert!(names.contains(&"get_build_synergy_report"));
+        assert!(names.contains(&"simulate_rotation"));
     }
 
     #[test]

@@ -18,6 +18,8 @@ pub fn new_build_prompt(
 
 Available specializations: {specs}
 
+DESIGN PRINCIPLE: Pure damage output is NOT the goal. The ability to DELIVER damage is the goal. A build that can CC enemies, maintain stability, survive burst, and sustain pressure delivers more real damage than a glass cannon that gets interrupted. Consider: CC access, stunbreaks, stability, blocks, evades, condition cleanse alongside raw DPS.
+
 Consider the full combat loop: boon application, condition stacking, skill rotation order, cooldown management, and trait/sigil/rune/relic synergies. Every piece must work together as a codependent system.
 
 {context}
@@ -72,6 +74,8 @@ pub fn new_build_prompt_with_tools(
 
 Create an optimal {archetype} build for {profession} in {game_mode}.
 
+DESIGN PRINCIPLE: Pure damage output is NOT the goal. The ability to DELIVER damage is the goal. A build that can CC enemies, maintain stability, survive burst, and sustain pressure delivers more real damage than a glass cannon that gets interrupted. Every trait, skill, rune, sigil, and relic must work in concert. Consider: CC access, stunbreaks, stability, blocks, evades, condition cleanse alongside raw DPS.
+
 WORKFLOW — use your tools to make informed decisions:
 
 Phase 1 — Understand the landscape:
@@ -94,6 +98,7 @@ Phase 4 — Verify the complete build:
 11. Call find_synergies with your selected trait IDs + skill IDs to check for activated traited_facts (conditional bonuses)
 12. Call get_build_synergy_report for a full synergy analysis of the candidate build
 13. Call simulate_combat to verify the gear+trait combo performs well numerically
+14. Call simulate_rotation with selected skill IDs to see real DPS, condition uptime, buff uptime, and control metrics (stunbreaks, stability)
 
 Think step by step. Use synergy tools to discover and verify interactions rather than guessing. Every component (traits, skills, rune, sigils, relic) must synergize as a codependent system — a rune that boosts Burning duration is wasted if your build barely applies Burning.
 
@@ -138,6 +143,8 @@ pub fn improve_build_prompt_with_tools(
 
 Improve the player's current {archetype} build for {profession} in {game_mode}.
 
+DESIGN PRINCIPLE: Pure damage output is NOT the goal. The ability to DELIVER damage is the goal. Consider CC access, stunbreaks, stability, survivability, and control alongside raw DPS. A build that disables enemies and maintains pressure outperforms one that only maximizes numbers on a golem.
+
 WORKFLOW — use your tools:
 
 Phase 1 — Understand the current build:
@@ -156,6 +163,7 @@ Phase 2 — Find improvements via synergy analysis:
 
 Phase 3 — Verify:
 11. Call simulate_combat to compare performance before/after changes
+12. Call simulate_rotation with the skill set to validate condition uptime, buff uptime, and control metrics
 
 Focus on impactful changes. Explain WHY each change improves the build — cite specific trait-skill synergies, activated conditional bonuses, or proc chains you discovered via tools. Don't just swap to "meta" choices; demonstrate the interaction chain.
 
@@ -200,6 +208,7 @@ Use your tools to fulfill this request:
 - Use find_condition_sources / search_skills_by_effect / search_traits_by_effect for targeted searches
 - Call find_synergies to verify trait+skill interactions activate conditional bonuses
 - Call simulate_combat to evaluate performance
+- Call simulate_rotation to verify skill rotation DPS, condition/buff uptime, and control metrics
 - Call list_runes / list_sigils / list_relics for equipment options (check parsed bonuses and trigger conditions)
 
 After research, respond with a JSON build object showing modifications:
