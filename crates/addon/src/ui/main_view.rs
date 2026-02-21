@@ -137,10 +137,7 @@ fn render_main_content(ui: &Ui, state: &mut AddonState) {
             render_improve_tab(ui, state);
         }
         MainTab::SaveLoad => {
-            ui.text("Save / Load");
-            ui.separator();
-            ui.text_wrapped("Build saving and loading coming soon.");
-            ui.text_wrapped("Saved builds will appear here organized by character.");
+            render_saveload_tab(ui, state);
         }
         MainTab::Settings => {
             render_settings_tab(ui, state);
@@ -184,6 +181,11 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
                 stats.as_ref(),
                 &state.main.comparison,
             );
+        }
+
+        // Save Build button (shown when suggestions exist)
+        if !state.main.comparison.suggestions.is_empty() {
+            render_save_build_ui(ui, state);
         }
     }
 
@@ -246,6 +248,8 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                 &state.main.comparison,
             );
         }
+
+        render_save_build_ui(ui, state);
     }
 
     // Chat bar at bottom
@@ -951,4 +955,209 @@ fn send_chat_message(state: &mut AddonState, message: String) {
             }
         });
     });
+}
+
+// ─── Save/Load ───────────────────────────────────────────────────────────
+
+/// Render the save build UI (name input + Save button) below the comparison view.
+fn render_save_build_ui(ui: &Ui, state: &mut AddonState) {
+    ui.spacing();
+    ui.separator();
+    ui.text("Save Build:");
+    ui.same_line();
+    ui.set_next_item_width(200.0);
+    ui.input_text("##save_name", &mut state.main.save_name_input).build();
+    ui.same_line();
+
+    let can_save = !state.main.save_name_input.trim().is_empty();
+    if ui.button_with_size("Save", [60.0, 0.0]) && can_save {
+        let idx = state.main.comparison.selected_suggestion
+            .min(state.main.comparison.suggestions.len().saturating_sub(1));
+        let suggestion = &state.main.comparison.suggestions[idx];
+        let character_name = state.main.current_build.as_ref()
+            .map(|b| b.character_name.clone())
+            .unwrap_or_default();
+        let game_mode = state.main.game_mode.clone();
+        let saved = suggestion_to_saved(
+            &state.main.save_name_input,
+            &character_name,
+            &game_mode,
+            suggestion,
+        );
+
+        let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
+        match storage.save(&saved) {
+            Ok(()) => {
+                state.main.save_status = Some(format!("Saved '{}'", saved.name));
+                state.main.save_name_input.clear();
+                state.main.saved_builds_loaded = false; // force refresh
+            }
+            Err(e) => {
+                state.main.save_status = Some(format!("Save failed: {}", e));
+            }
+        }
+    }
+
+    if let Some(ref status) = state.main.save_status {
+        ui.same_line();
+        if status.starts_with("Save failed") {
+            ui.text_colored([1.0, 0.3, 0.0, 1.0], status);
+        } else {
+            ui.text_colored([0.0, 1.0, 0.0, 1.0], status);
+        }
+    }
+}
+
+/// Render the Save/Load tab.
+fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
+    ui.text("Saved Builds");
+    ui.separator();
+
+    // Lazy-load saved builds on first view
+    if !state.main.saved_builds_loaded {
+        let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
+        state.main.saved_builds = storage.list();
+        state.main.saved_builds_loaded = true;
+    }
+
+    if state.main.saved_builds.is_empty() {
+        ui.text_wrapped("No saved builds yet. Optimize a build and use the Save button to save it here.");
+        return;
+    }
+
+    ui.text(&format!("{} saved build(s):", state.main.saved_builds.len()));
+    ui.spacing();
+
+    // Snapshot for iteration (avoids borrow conflict with mut state)
+    let builds_snapshot: Vec<(String, String, String, String)> = state.main.saved_builds.iter()
+        .map(|b| {
+            let time = format_timestamp(b.timestamp);
+            (b.name.clone(), b.character_name.clone(), b.stat_prefix.clone(), time)
+        })
+        .collect();
+
+    let mut load_idx: Option<usize> = None;
+    let mut delete_idx: Option<usize> = None;
+
+    for (i, (name, character, prefix, time)) in builds_snapshot.iter().enumerate() {
+        ui.text_colored([0.6, 0.8, 1.0, 1.0], name);
+        ui.same_line();
+        ui.text_colored([0.7, 0.7, 0.7, 1.0], &format!("({})", character));
+
+        ui.text(&format!("  {} | {}", prefix, time));
+
+        ui.same_line();
+        if ui.button_with_size(&format!("Load##load_{}", i), [50.0, 0.0]) {
+            load_idx = Some(i);
+        }
+        ui.same_line();
+        if ui.button_with_size(&format!("Delete##del_{}", i), [50.0, 0.0]) {
+            delete_idx = Some(i);
+        }
+
+        ui.spacing();
+        ui.separator();
+    }
+
+    // Handle load
+    if let Some(idx) = load_idx {
+        let saved = state.main.saved_builds[idx].clone();
+        let suggestion = saved_to_suggestion(&saved);
+        state.main.comparison.suggestions = vec![suggestion];
+        state.main.comparison.selected_suggestion = 0;
+        state.main.comparison.error = None;
+        state.main.active_tab = MainTab::NewBuild;
+    }
+
+    // Handle delete
+    if let Some(idx) = delete_idx {
+        let name = state.main.saved_builds[idx].name.clone();
+        let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
+        let _ = storage.delete(&name);
+        state.main.saved_builds.remove(idx);
+    }
+}
+
+/// Convert a BuildSuggestion to a SavedBuild.
+fn suggestion_to_saved(
+    name: &str,
+    character_name: &str,
+    game_mode: &gw2_core::types::GameMode,
+    suggestion: &crate::ui::comparison::BuildSuggestion,
+) -> gw2_core::types::SavedBuild {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    gw2_core::types::SavedBuild {
+        name: name.trim().to_string(),
+        timestamp,
+        character_name: character_name.to_string(),
+        game_mode: game_mode.clone(),
+        label: suggestion.label.clone(),
+        stat_prefix: suggestion.stat_prefix.clone(),
+        specializations: suggestion.specializations.clone(),
+        weapons: suggestion.weapons.clone(),
+        skills: suggestion.skills.clone(),
+        rune: suggestion.rune.clone(),
+        sigils: suggestion.sigils.clone(),
+        relic: suggestion.relic.clone(),
+        explanation: suggestion.explanation.clone(),
+        changes_made: suggestion.changes_made.clone(),
+        estimated_stats: suggestion.estimated_stats.clone(),
+    }
+}
+
+/// Convert a SavedBuild back to a BuildSuggestion for display.
+fn saved_to_suggestion(
+    saved: &gw2_core::types::SavedBuild,
+) -> crate::ui::comparison::BuildSuggestion {
+    crate::ui::comparison::BuildSuggestion {
+        label: if saved.label.is_empty() { saved.name.clone() } else { saved.label.clone() },
+        build_summary: String::new(),
+        stat_prefix: saved.stat_prefix.clone(),
+        specializations: saved.specializations.clone(),
+        weapons: saved.weapons.clone(),
+        skills: saved.skills.clone(),
+        rune: saved.rune.clone(),
+        sigils: saved.sigils.clone(),
+        relic: saved.relic.clone(),
+        explanation: saved.explanation.clone(),
+        changes_made: saved.changes_made.clone(),
+        estimated_stats: saved.estimated_stats.clone(),
+    }
+}
+
+/// Format a Unix timestamp as a readable date string.
+fn format_timestamp(timestamp: u64) -> String {
+    // Simple date formatting without chrono dependency
+    let secs_per_day: u64 = 86400;
+    let days = timestamp / secs_per_day;
+    // Days since epoch to Y/M/D (simplified)
+    let mut y = 1970u64;
+    let mut remaining_days = days;
+    loop {
+        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        if remaining_days < days_in_year {
+            break;
+        }
+        remaining_days -= days_in_year;
+        y += 1;
+    }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let days_in_months: [u64; 12] = [
+        31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    let mut m = 0;
+    for (i, &dim) in days_in_months.iter().enumerate() {
+        if remaining_days < dim {
+            m = i;
+            break;
+        }
+        remaining_days -= dim;
+    }
+    format!("{:04}-{:02}-{:02}", y, m + 1, remaining_days + 1)
 }
