@@ -132,9 +132,11 @@ pub struct CombatPerformance {
     pub boon_duration_pct: f64,
     /// Total condition duration (capped 100%).
     pub condi_duration_pct: f64,
+    /// Critical hit chance percentage (0-100, clamped; includes Fury).
+    pub crit_chance: f64,
     /// Effective health: health * armor / reference.
     pub effective_health: f64,
-    /// Damage reduction percentage from armor (+ protection if active).
+    /// Damage reduction percentage from Protection boon (0% or 33%).
     pub damage_reduction_pct: f64,
 }
 
@@ -252,16 +254,12 @@ pub fn calculate_combat_performance(
     let health = stats::base_health(profession) + stats.vitality * 10.0;
     let armor = stats.toughness + stats::base_defense(profession);
 
-    // Damage reduction from armor
-    let armor_dr = armor / (armor + 2600.0);
+    // GW2 damage formula: Damage = Power * coeff * weapon_strength / Armor
+    // Armor is a linear divisor — NOT a diminishing-returns DR percentage.
+    // EHP = Health * (Armor / Reference_Armor) captures armor's full effect.
+    // Additional DR comes only from boons: Protection (33% strike) and Resolution (33% condi).
     let protection_dr = if buffs.protection { 0.33 } else { 0.0 };
-    // Combined: 1 - (1 - armor_dr) * (1 - protection_dr)
-    let total_dr = 1.0 - (1.0 - armor_dr) * (1.0 - protection_dr);
-
-    // Effective health: Health * Armor / reference * DR multiplier
-    // DR capped at 90% to prevent near-infinity values
-    let capped_dr = total_dr.min(0.9);
-    let effective_health = health * armor / REFERENCE_ARMOR / (1.0 - capped_dr);
+    let effective_health = health * armor / REFERENCE_ARMOR / (1.0 - protection_dr);
 
     CombatPerformance {
         effective_power,
@@ -272,8 +270,9 @@ pub fn calculate_combat_performance(
         healing_power_index,
         boon_duration_pct,
         condi_duration_pct: total_condi_duration,
+        crit_chance,
         effective_health,
-        damage_reduction_pct: total_dr * 100.0,
+        damage_reduction_pct: protection_dr * 100.0,
     }
 }
 
