@@ -2150,9 +2150,31 @@ fn suggestion_to_saved(
 }
 
 /// Convert a SavedBuild back to a BuildSuggestion for display.
+/// Recomputes combat metrics from estimated stats if available.
 fn saved_to_suggestion(
     saved: &gw2_core::types::SavedBuild,
 ) -> crate::ui::comparison::BuildSuggestion {
+    // Recompute combat metrics from saved stats (lossy i32→f64 but good enough for display)
+    let (combat_solo, combat_party, combat_squad) = saved.estimated_stats.as_ref()
+        .map(|est| {
+            let stats = gw2_optimizer::stats::StatBlock {
+                power: est.power as f64,
+                precision: est.precision as f64,
+                toughness: est.toughness as f64,
+                vitality: est.vitality as f64,
+                condition_damage: est.condition_damage as f64,
+                expertise: est.expertise as f64,
+                concentration: est.concentration as f64,
+                ferocity: est.ferocity as f64,
+                healing_power: est.healing_power as f64,
+            };
+            // Use a generic profession name — the exact profession mainly affects health
+            let derived = gw2_optimizer::stats::compute_derived(&stats, "Warrior");
+            let mods = gw2_optimizer::combat::DamageModifiers::default();
+            compute_3tier_combat(&stats, &derived, &mods, "Warrior")
+        })
+        .unwrap_or((None, None, None));
+
     crate::ui::comparison::BuildSuggestion {
         label: if saved.label.is_empty() { saved.name.clone() } else { saved.label.clone() },
         build_summary: String::new(),
@@ -2166,9 +2188,9 @@ fn saved_to_suggestion(
         explanation: saved.explanation.clone(),
         changes_made: saved.changes_made.clone(),
         estimated_stats: saved.estimated_stats.clone(),
-        combat_solo: None,
-        combat_party: None,
-        combat_squad: None,
+        combat_solo,
+        combat_party,
+        combat_squad,
         rotation: None,
     }
 }
