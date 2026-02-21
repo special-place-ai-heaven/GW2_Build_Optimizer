@@ -11,7 +11,7 @@ use gw2_core::types::GameMode;
 use gw2_api::models::Fact;
 
 use crate::combat::{self, CombatPerformance, DamageModifiers};
-use crate::scoring::{score_combat, score_combat_weighted, AggressionLevel, Archetype};
+use crate::scoring::{score_combat_weighted, AggressionLevel, Archetype};
 use crate::search::{search_gear_prefixes, search_spec_combos, GearCandidate};
 use crate::stats;
 
