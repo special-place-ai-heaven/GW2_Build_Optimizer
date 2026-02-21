@@ -11,6 +11,7 @@ use gw2_api::models::{
 };
 
 /// In-memory indexed game database loaded from cache.
+#[derive(Clone)]
 pub struct GameDb {
     pub items: HashMap<u32, Item>,
     pub itemstats: HashMap<u32, ItemStat>,

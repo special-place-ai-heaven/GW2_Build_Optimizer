@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 use gw2_core::config::AppConfig;
 use gw2_core::types::{GameMode, ResolvedBuild, StatBlock};
+use gw2_optimizer::gamedb::GameDb;
 use crate::ui::chat_bar::ChatBarState;
 use crate::ui::comparison::ComparisonState;
 
@@ -36,6 +37,12 @@ pub struct MainState {
     pub comparison: ComparisonState,
     // Chat bar
     pub chat: ChatBarState,
+    // GameDb (loaded once on main screen entry)
+    pub game_db: Option<GameDb>,
+    pub game_db_loading: bool,
+    // Optimization state
+    pub optimizing: bool,
+    pub optimize_stage: String,
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -93,7 +100,14 @@ pub struct DownloadState {
 }
 
 fn lock_state() -> std::sync::MutexGuard<'static, Option<AddonState>> {
-    STATE.lock().unwrap_or_else(|e| e.into_inner())
+    STATE.lock().unwrap_or_else(|e| {
+        nexus::log::log(
+            nexus::log::LogLevel::Warning,
+            "GW2BuildOpt",
+            "State mutex was poisoned, recovering",
+        );
+        e.into_inner()
+    })
 }
 
 pub fn init(addon_dir: PathBuf) {

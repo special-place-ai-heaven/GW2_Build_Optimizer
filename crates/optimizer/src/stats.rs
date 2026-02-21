@@ -275,6 +275,8 @@ pub fn calculate_infusion_stats(
 
 /// Calculate stat modifiers from equipped traits.
 /// Looks for `AttributeAdjust` facts which give flat stat bonuses.
+/// Also processes `traited_facts` — conditional bonuses that activate when
+/// the required trait is also equipped (overriding or supplementing base facts).
 pub fn calculate_trait_stats(
     equipped_trait_ids: &[u32],
     traits_cache: &HashMap<u32, Trait>,
@@ -286,14 +288,24 @@ pub fn calculate_trait_stats(
             continue;
         };
 
-        for fact in &t.facts {
-            if let Fact::AttributeAdjust {
-                value: Some(val),
-                target: Some(ref target),
-                ..
-            } = fact
-            {
-                stats.add(target, *val as f64);
+        // Collect indices of base facts overridden by active traited_facts
+        let overridden: Vec<u32> = t.traited_facts.iter()
+            .filter(|tf| equipped_trait_ids.contains(&tf.requires_trait))
+            .filter_map(|tf| tf.overrides)
+            .collect();
+
+        // Process base facts (skip overridden ones)
+        for (idx, fact) in t.facts.iter().enumerate() {
+            if overridden.contains(&(idx as u32)) {
+                continue;
+            }
+            apply_attribute_adjust(&mut stats, fact);
+        }
+
+        // Process active traited_facts
+        for tf in &t.traited_facts {
+            if equipped_trait_ids.contains(&tf.requires_trait) {
+                apply_attribute_adjust(&mut stats, &tf.fact);
             }
         }
     }
@@ -301,10 +313,23 @@ pub fn calculate_trait_stats(
     stats
 }
 
+/// Apply an AttributeAdjust fact to a stat block.
+fn apply_attribute_adjust(stats: &mut StatBlock, fact: &Fact) {
+    if let Fact::AttributeAdjust {
+        value: Some(val),
+        target: Some(ref target),
+        ..
+    } = fact
+    {
+        stats.add(target, *val as f64);
+    }
+}
+
 /// Calculate stat conversions from traits (BuffConversion facts).
 /// E.g., "10% of Precision becomes Ferocity".
 /// Uses a snapshot of stats before any conversions so all conversions
 /// read the same base values regardless of trait order.
+/// Also processes traited_facts that contain BuffConversion.
 pub fn apply_trait_conversions(
     stats: &mut StatBlock,
     equipped_trait_ids: &[u32],
@@ -317,19 +342,41 @@ pub fn apply_trait_conversions(
             continue;
         };
 
-        for fact in &t.facts {
-            if let Fact::BuffConversion {
-                source: Some(ref src),
-                percent: Some(pct),
-                target: Some(ref tgt),
-                ..
-            } = fact
-            {
-                let source_val = snapshot.get(src);
-                let bonus = source_val * pct / 100.0;
-                stats.add(tgt, bonus.round());
+        // Collect indices of base facts overridden by active traited_facts
+        let overridden: Vec<u32> = t.traited_facts.iter()
+            .filter(|tf| equipped_trait_ids.contains(&tf.requires_trait))
+            .filter_map(|tf| tf.overrides)
+            .collect();
+
+        // Process base facts (skip overridden ones)
+        for (idx, fact) in t.facts.iter().enumerate() {
+            if overridden.contains(&(idx as u32)) {
+                continue;
+            }
+            apply_buff_conversion(&mut *stats, &snapshot, fact);
+        }
+
+        // Process active traited_facts
+        for tf in &t.traited_facts {
+            if equipped_trait_ids.contains(&tf.requires_trait) {
+                apply_buff_conversion(&mut *stats, &snapshot, &tf.fact);
             }
         }
+    }
+}
+
+/// Apply a BuffConversion fact using the pre-conversion snapshot.
+fn apply_buff_conversion(stats: &mut StatBlock, snapshot: &StatBlock, fact: &Fact) {
+    if let Fact::BuffConversion {
+        source: Some(ref src),
+        percent: Some(pct),
+        target: Some(ref tgt),
+        ..
+    } = fact
+    {
+        let source_val = snapshot.get(src);
+        let bonus = source_val * pct / 100.0;
+        stats.add(tgt, bonus.round());
     }
 }
 
@@ -365,7 +412,6 @@ pub fn compute_derived(stats: &StatBlock, profession: &str) -> DerivedStats {
 /// Full stat calculation pipeline for PvE/WvW.
 /// NOTE: rune_id and sigil_ids are passed separately from equipment to avoid
 /// double-counting — calculate_gear_stats does NOT process piece.upgrades.
-/// TODO: Process traited_facts (conditional trait bonuses) in trait calculations.
 pub fn calculate_full_stats(
     equipment: &EquipmentTab,
     equipped_trait_ids: &[u32],
