@@ -46,7 +46,7 @@ struct SkillState {
     /// Milliseconds remaining before this skill can be used again.
     cooldown_remaining_ms: u32,
     /// Current position in auto-attack chain (for Weapon1 chain skills).
-    chain_position: u32,
+    _chain_position: u32,
 }
 
 /// Run a rotation simulation with the given skills and parameters.
@@ -97,7 +97,7 @@ impl SimState {
             .iter()
             .map(|_| SkillState {
                 cooldown_remaining_ms: 0,
-                chain_position: 0,
+                _chain_position: 0,
             })
             .collect();
 
