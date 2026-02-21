@@ -212,21 +212,56 @@ pub fn summarize_build(candidate: &BuildCandidate, spec_names: &[(u32, String)])
 pub fn build_game_context(
     _profession: &str,
     archetype: &Archetype,
+    game_mode: &str,
 ) -> String {
-    format!(
+    let base_rules = format!(
         r#"GW2 Build Rules:
 - 3 specialization slots: slots 1-2 core only, slot 3 can be elite
 - Per spec: 3 trait columns, pick 1 of 3 per column (top/mid/bottom)
 - 2 weapon sets (swappable in combat), each: 2-handed OR main+off-hand
+- Skills have cooldowns, ranges, combo fields/finishers
+- Traits can proc on crit, on heal, on dodge, on weapon swap etc.
+- Archetype goal: {archetype}"#,
+        archetype = archetype.label(),
+    );
+
+    let mode_context = match game_mode {
+        "WvW" => r#"
+WvW-Specific Rules (competitive mode — many stats/bonuses/effects are split and reduced vs PvE):
+- Uses the SAME gear, runes, sigils, and relics as PvE
 - 6 armor pieces with 1 rune each (same rune x6 for set bonus)
 - Sigils: 1 per 1H weapon, 2 per 2H (max 2 per set)
 - 1 relic slot (build-defining effect)
-- Archetype goal: {archetype}
+- Many skill coefficients, trait bonuses, and boon durations are reduced in WvW ("competitive split")
+- Survivability matters far more than PvE: toughness, vitality, sustain, and condition cleanse
+- Zerg play: AoE damage, boon support (Stability, Resistance, Aegis), cleave, and group healing
+- Roaming: 1v1/small group — burst + disengage + sustain + mobility
+- Crowd control (CC), stunbreaks, and stability uptime are essential
+- Boon corruption, boon strip, and condition cleanse are high-value utilities
+- Downstate cleave and rally mechanics affect build choices
+- Movement speed and swiftness uptime matter for repositioning
+- Consider: stability uptime, condi cleanse access, CC chain potential, escape tools, group synergy"#,
+        "PvP" => r#"
+PvP-Specific Rules (competitive mode — many stats/bonuses/effects are split and reduced vs PvE):
+- Stats come from an amulet (replaces all gear stats), NOT from individual gear pieces
+- Rune and sigil systems still apply but are standardized PvP versions
+- Many skill coefficients, trait bonuses, and boon durations are reduced in PvP ("competitive split")
+- 1v1 dueling ability, +1 rotation (arriving to help in fights), and node defense all matter
+- Burst windows, sustain between fights, and disengage/reset ability are crucial
+- Stunbreaks, condition cleanse, and stability access are essential
+- Relic still applies; choose for the game mode's fast-paced fights
+- Consider: stomping/rezzing, decapping, mobility between nodes"#,
+        _ => r#"
+PvE-Specific Rules:
+- 6 armor pieces with 1 rune each (same rune x6 for set bonus)
+- Sigils: 1 per 1H weapon, 2 per 2H (max 2 per set)
+- 1 relic slot (build-defining effect)
 - Consider: boon strip → vulnerability → damage rotation → buff uptime
-- Skills have cooldowns, ranges, combo fields/finishers
-- Traits can proc on crit, on heal, on dodge, on weapon swap etc."#,
-        archetype = archetype.label(),
-    )
+- DPS uptime and benchmark rotations matter
+- Group composition provides boons (Might, Fury, Quickness, Alacrity)"#,
+    };
+
+    format!("{}{}", base_rules, mode_context)
 }
 
 /// Parse a JSON build suggestion from Gemini's response text.
@@ -378,8 +413,13 @@ mod tests {
 
     #[test]
     fn test_game_context_mentions_archetype() {
-        let ctx = build_game_context("Warrior", &Archetype::PowerDPS);
+        let ctx = build_game_context("Warrior", &Archetype::PowerDPS, "PvE");
         assert!(ctx.contains("Power DPS"));
+        assert!(ctx.contains("PvE"));
+
+        let wvw_ctx = build_game_context("Warrior", &Archetype::PowerDPS, "WvW");
+        assert!(wvw_ctx.contains("WvW"));
+        assert!(wvw_ctx.contains("competitive split"));
     }
 
     #[test]

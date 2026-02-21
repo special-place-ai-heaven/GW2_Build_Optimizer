@@ -376,11 +376,14 @@ fn load_character_build(state: &mut AddonState, character_name: String) {
                 .ok_or("No equipment tabs found")?;
 
             let cache = gw2_api::cache::DataCache::new(&cache_dir);
+            let game_mode = crate::state::with_state(|s| s.main.game_mode.clone())
+                .unwrap_or_default();
             resolve_build(
                 &character_name,
                 &active_build.build,
                 active_equipment,
                 &cache,
+                &game_mode,
             )
         })();
 
@@ -402,6 +405,7 @@ fn resolve_build(
     build: &gw2_api::models::Build,
     equipment: &gw2_api::models::EquipmentTab,
     cache: &gw2_api::cache::DataCache,
+    game_mode: &gw2_core::types::GameMode,
 ) -> Result<gw2_core::types::ResolvedBuild, String> {
     use gw2_core::types::*;
 
@@ -528,15 +532,32 @@ fn resolve_build(
     if ws1.main_hand.is_some() || ws1.off_hand.is_some() { weapons.push(ws1); }
     if ws2.main_hand.is_some() || ws2.off_hand.is_some() { weapons.push(ws2); }
 
+    // Resolve PvP amulet if game mode is PvP
+    let pvp_amulet = if *game_mode == GameMode::PvP {
+        if let Some(ref pvp_eq) = equipment.equipment_pvp {
+            if let Some(amulet_id) = pvp_eq.amulet {
+                let pvp_amulets: Vec<gw2_api::models::PvpAmulet> = cache
+                    .load("pvp_amulets").ok().flatten().unwrap_or_default();
+                pvp_amulets.iter().find(|a| a.id == amulet_id).map(|a| {
+                    ResolvedPvpAmulet {
+                        id: a.id,
+                        name: a.name.clone(),
+                        stats: a.attributes.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+                    }
+                })
+            } else { None }
+        } else { None }
+    } else { None };
+
     Ok(ResolvedBuild {
         character_name: character_name.to_string(),
         profession: build.profession.clone().unwrap_or_default(),
-        game_mode: GameMode::default(),
+        game_mode: game_mode.clone(),
         specializations: resolved_specs,
         skills: resolved_skills,
         weapons, armor, trinkets: trinkets_vec,
         relic: relic_resolved, rune,
-        pvp_amulet: None,
+        pvp_amulet,
     })
 }
 
@@ -593,7 +614,8 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
     let db = state.main.game_db.clone();
     let profession_name = profession_name.to_string();
     let gemini_key = state.config.gemini_api_key.clone();
-    let game_mode_label = state.main.game_mode.label().to_string();
+    let game_mode = state.main.game_mode.clone();
+    let game_mode_label = game_mode.label().to_string();
     let current_build_summary = state.main.current_build.as_ref()
         .map(|b| summarize_resolved_build(b));
     let addon_dir = state.addon_dir.clone();
@@ -624,6 +646,7 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
                     });
                 },
                 5,
+                &game_mode,
             );
 
             let mut suggestions: Vec<crate::ui::comparison::BuildSuggestion> =
@@ -854,7 +877,7 @@ fn enrich_with_gemini(
     let client = gw2_optimizer::gemini::GeminiClient::with_persistence(key, usage_path)
         .map_err(|e| e.to_string())?;
 
-    let context = gw2_optimizer::prompts::build_game_context(profession_name, archetype);
+    let context = gw2_optimizer::prompts::build_game_context(profession_name, archetype, game_mode);
     let spec_names: Vec<(u32, String)> = db.specializations.iter()
         .map(|(&id, s)| (id, s.name.clone()))
         .collect();
@@ -908,8 +931,9 @@ fn send_chat_message(state: &mut AddonState, message: String) {
     let build_summary = state.main.current_build.as_ref()
         .map(|b| summarize_resolved_build(b))
         .unwrap_or_default();
+    let game_mode_label = state.main.game_mode.label().to_string();
     let context = gw2_optimizer::prompts::build_game_context(
-        &profession, &Archetype::PowerDPS,
+        &profession, &Archetype::PowerDPS, &game_mode_label,
     );
     let addon_dir = state.addon_dir.clone();
 

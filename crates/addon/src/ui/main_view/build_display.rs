@@ -3,7 +3,7 @@ use nexus::imgui::{TreeNodeFlags, Ui};
 use gw2_core::types::{ResolvedBuild, StatBlock};
 
 pub fn render_build(ui: &Ui, build: &ResolvedBuild, stats: Option<&StatBlock>) {
-    ui.text(&format!("{} — {}", build.character_name, build.profession));
+    ui.text(&format!("{} — {} ({})", build.character_name, build.profession, build.game_mode.label()));
     ui.separator();
 
     if ui.collapsing_header("Specializations", TreeNodeFlags::DEFAULT_OPEN) {
@@ -18,19 +18,30 @@ pub fn render_build(ui: &Ui, build: &ResolvedBuild, stats: Option<&StatBlock>) {
         render_weapons(ui, build);
     }
 
-    if ui.collapsing_header("Armor", TreeNodeFlags::DEFAULT_OPEN) {
-        render_armor(ui, build);
-    }
+    // PvP: show amulet instead of gear
+    if let Some(ref amulet) = build.pvp_amulet {
+        if ui.collapsing_header("PvP Amulet", TreeNodeFlags::DEFAULT_OPEN) {
+            ui.text_colored([0.9, 0.8, 0.3, 1.0], &format!("  {}", amulet.name));
+            for (attr, val) in &amulet.stats {
+                ui.text(&format!("    {}: +{}", attr, val));
+            }
+        }
+    } else {
+        // PvE/WvW: show full gear
+        if ui.collapsing_header("Armor", TreeNodeFlags::DEFAULT_OPEN) {
+            render_armor(ui, build);
+        }
 
-    if ui.collapsing_header("Trinkets", TreeNodeFlags::DEFAULT_OPEN) {
-        render_trinkets(ui, build);
-    }
+        if ui.collapsing_header("Trinkets", TreeNodeFlags::DEFAULT_OPEN) {
+            render_trinkets(ui, build);
+        }
 
-    if let Some(ref relic) = build.relic {
-        if ui.collapsing_header("Relic", TreeNodeFlags::DEFAULT_OPEN) {
-            ui.text(&format!("  {}", relic.name));
-            if !relic.description.is_empty() {
-                ui.text_colored([0.7, 0.7, 0.7, 1.0], &format!("  {}", relic.description));
+        if let Some(ref relic) = build.relic {
+            if ui.collapsing_header("Relic", TreeNodeFlags::DEFAULT_OPEN) {
+                ui.text(&format!("  {}", relic.name));
+                if !relic.description.is_empty() {
+                    ui.text_colored([0.7, 0.7, 0.7, 1.0], &format!("  {}", relic.description));
+                }
             }
         }
     }
