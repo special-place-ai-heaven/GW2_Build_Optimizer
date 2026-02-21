@@ -4,8 +4,9 @@
 //! Includes response caching to minimize quota usage.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +36,7 @@ pub struct GeminiClient {
     http: reqwest::blocking::Client,
     cache: Mutex<HashMap<String, CachedResponse>>,
     rate: Mutex<RateTracker>,
+    usage_path: Option<PathBuf>,
 }
 
 struct CachedResponse {
@@ -46,6 +48,23 @@ struct RateTracker {
     requests_this_minute: u32,
     minute_start: Instant,
     requests_today: u32,
+    /// Day number (Unix epoch / 86400) for daily counter reset.
+    current_day: u64,
+}
+
+/// Persisted usage data saved to disk between sessions.
+#[derive(Serialize, Deserialize)]
+struct PersistedUsage {
+    day: u64,
+    requests_today: u32,
+}
+
+fn current_epoch_day() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        / 86400
 }
 
 impl RateTracker {
@@ -54,10 +73,33 @@ impl RateTracker {
             requests_this_minute: 0,
             minute_start: Instant::now(),
             requests_today: 0,
+            current_day: current_epoch_day(),
+        }
+    }
+
+    fn from_persisted(persisted: PersistedUsage) -> Self {
+        let today = current_epoch_day();
+        let requests_today = if persisted.day == today {
+            persisted.requests_today
+        } else {
+            0 // new day, reset counter
+        };
+        Self {
+            requests_this_minute: 0,
+            minute_start: Instant::now(),
+            requests_today,
+            current_day: today,
         }
     }
 
     fn check(&mut self) -> Result<(), GeminiError> {
+        // Reset daily counter if the day changed
+        let today = current_epoch_day();
+        if today != self.current_day {
+            self.requests_today = 0;
+            self.current_day = today;
+        }
+
         let now = Instant::now();
         if now.duration_since(self.minute_start).as_secs() >= 60 {
             self.requests_this_minute = 0;
@@ -82,6 +124,13 @@ impl RateTracker {
 
     fn remaining_today(&self) -> u32 {
         250u32.saturating_sub(self.requests_today)
+    }
+
+    fn to_persisted(&self) -> PersistedUsage {
+        PersistedUsage {
+            day: self.current_day,
+            requests_today: self.requests_today,
+        }
     }
 }
 
@@ -120,6 +169,35 @@ impl GeminiClient {
             http,
             cache: Mutex::new(HashMap::new()),
             rate: Mutex::new(RateTracker::new()),
+            usage_path: None,
+        })
+    }
+
+    /// Create a client with persistent rate tracking.
+    /// Loads existing usage from `usage_path` and saves after each request.
+    pub fn with_persistence(api_key: &str, usage_path: PathBuf) -> Result<Self, GeminiError> {
+        let http = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()?;
+
+        let rate = if usage_path.exists() {
+            match std::fs::read_to_string(&usage_path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<PersistedUsage>(&s).ok())
+            {
+                Some(persisted) => RateTracker::from_persisted(persisted),
+                None => RateTracker::new(),
+            }
+        } else {
+            RateTracker::new()
+        };
+
+        Ok(Self {
+            api_key: api_key.to_string(),
+            http,
+            cache: Mutex::new(HashMap::new()),
+            rate: Mutex::new(rate),
+            usage_path: Some(usage_path),
         })
     }
 
@@ -199,10 +277,9 @@ impl GeminiClient {
         match status {
             200 => {
                 // Only count successful requests against quota
-                self.rate
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .record_success();
+                let mut rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
+                rate.record_success();
+                self.persist_usage(&rate);
             }
             401 | 403 => return Err(GeminiError::InvalidKey),
             429 => return Err(GeminiError::RateLimited),
@@ -219,6 +296,16 @@ impl GeminiClient {
             .and_then(|c| c.parts.into_iter().next())
             .map(|p| p.text)
             .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()))
+    }
+
+    /// Save rate tracker to disk if a persistence path is configured.
+    fn persist_usage(&self, rate: &RateTracker) {
+        if let Some(ref path) = self.usage_path {
+            let persisted = rate.to_persisted();
+            if let Ok(json) = serde_json::to_string(&persisted) {
+                let _ = std::fs::write(path, json);
+            }
+        }
     }
 
     /// Get remaining daily quota.

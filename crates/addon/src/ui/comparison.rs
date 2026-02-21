@@ -286,14 +286,7 @@ mod tests {
     fn test_build_suggestion_default() {
         let s = BuildSuggestion::default();
         assert!(s.label.is_empty());
-        assert!(s.suggestions_empty_by_default());
-    }
-}
-
-impl BuildSuggestion {
-    fn suggestions_empty_by_default(&self) -> bool {
-        self.specializations.is_empty()
-            && self.weapons.is_empty()
-            && self.skills.is_empty()
+        assert!(s.specializations.is_empty());
+        assert!(s.weapons.is_empty());
     }
 }

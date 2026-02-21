@@ -29,18 +29,22 @@ cargo build --release
 Rust workspace with 4 crates, compiles to a single DLL loaded by Nexus addon manager:
 
 ```
-crates/addon/     — cdylib: Nexus entry point, ImGui UI, keybinds (nexus-rs)
-  src/lib.rs      — export! macro, on_load/on_unload, keybind + render registration
-  src/state.rs    — AddonState: screen (Screen/SetupStep state machine), setup (SetupState transient wizard data), KeyStatus/DownloadState enums; with_state() mutable accessor; init() routes to correct SetupStep based on config
-  src/ui/mod.rs   — render() dispatches on Screen::Setup vs Screen::Main; render_main_placeholder stub
-  src/ui/setup.rs — 4-step setup wizard: GW2 key validation, Gemini key validation, data download with ProgressBar, completion; background thread validation writes back via with_state()
-crates/core/      — Shared types (types.rs), config (config.rs), storage (storage.rs)
-crates/gw2api/    — GW2 API v2 client + cache + download orchestration
-  src/client.rs   — Gw2Client: token-bucket rate limiter, get/fetch_all/fetch_by_ids, validate_api_key
-  src/cache.rs    — DataCache: JSON file cache keyed by build number, is_stale/save/load/clear_all
-  src/download.rs — download_all: 8-endpoint orchestration with DownloadProgress callback; fetch_equipment_items filters ~100k items to Exotic/Ascended/Legendary Armor/Weapon/Trinket/Back/UpgradeComponent/Relic
-  src/models/     — serde structs per API endpoint (see GW2 API Models table below)
-crates/optimizer/ — engine.rs (pipeline orchestration), gemini.rs (GeminiClient: gemini-2.5-flash via generativelanguage.googleapis.com, validate_key/generate, maps 401/403→InvalidKey, 429→RateLimited), scoring.rs, search.rs, stats.rs
+crates/addon/       — cdylib: Nexus entry point, ImGui UI, keybinds (nexus-rs)
+  src/lib.rs        — export! macro with UpdateProvider::GitHub + update_link, on_load/on_unload, keybind + render registration; ui module is pub
+  src/state.rs      — AddonState: screen (Screen/SetupStep state machine), setup (SetupState transient wizard data), main (MainState with GameDb, ComparisonState, ChatBarState, optimization state); with_state() accessor; init() routes to correct SetupStep based on config
+  src/ui/mod.rs     — render() dispatches on Screen::Setup vs Screen::Main; calls render_main() for main screen
+  src/ui/setup.rs   — 4-step setup wizard: GW2 key validation, Gemini key validation, data download with ProgressBar, completion; background thread validation writes back via with_state()
+  src/ui/main_view.rs — full main view: left menu (character picker, game mode radio, tab nav), render_new_build_tab() (archetype selector + comparison + chat bar), render_improve_tab(), render_settings_tab(); start_optimization() → engine::optimize() → enrich_with_gemini() pipeline; start_optimization_with_profession() avoids borrow conflicts; load_game_db() bg thread; resolve_build(), candidate_to_suggestion(); apply_gemini_response() non-destructive merge onto BuildSuggestion; enrich_with_gemini() selects new_build_prompt/improve_build_prompt based on current_build presence; send_chat_message() → chat_refinement_prompt → GeminiClient → pushes "Chat Refinement" BuildSuggestion; summarize_resolved_build() produces text block for LLM context; infer_archetype_from_build() uses max() over 5 stat pairs
+  src/ui/comparison.rs — BuildSuggestion + ComparisonState structs; render_comparison() with 2-column layout (current vs optimized), stat diff table, collapsing headers for "Why This Build?" and "Changes Made"; render_stat_diff() 4-col ImGui table with green/red/gray color coding by diff sign
+  src/ui/chat_bar.rs — ChatBarState + render_chat_bar()
+  src/ui/build_display.rs — render_build() for current build display
+crates/core/        — Shared types (types.rs), config (config.rs), storage (storage.rs)
+crates/gw2api/      — GW2 API v2 client + cache + download orchestration
+  src/client.rs     — Gw2Client: token-bucket rate limiter, get/fetch_all/fetch_by_ids, validate_api_key
+  src/cache.rs      — DataCache: JSON file cache keyed by build number, is_stale/save/load/clear_all
+  src/download.rs   — download_all: 8-endpoint orchestration with DownloadProgress callback; fetch_equipment_items filters ~100k items to Exotic/Ascended/Legendary Armor/Weapon/Trinket/Back/UpgradeComponent/Relic
+  src/models/       — serde structs per API endpoint (see GW2 API Models table below)
+crates/optimizer/   — engine.rs (pipeline orchestration), gamedb.rs (GameDb: pre-indexed HashMap lookups for all game data, derived indexes), gemini.rs (GeminiClient: gemini-2.5-flash via generativelanguage.googleapis.com, validate_key/generate, maps 401/403→InvalidKey, 429→RateLimited), prompts.rs (4 prompt builders: new_build_prompt, improve_build_prompt, chat_refinement_prompt with injection-guard, compare_builds_prompt; plus summarize_build, build_game_context; parse_build_response handles markdown fences + raw JSON; parse_gemini_build returns typed GeminiBuildResponse; GeminiBuildResponse struct mirrors BuildSuggestion fields), scoring.rs, search.rs, stats.rs
 ```
 
 **Key dependency**: `nexus` crate from [nexus-rs](https://github.com/Zerthox/nexus-rs) — provides Nexus addon API bindings with ImGui (via `imgui-rs`), keybinds, events, logging.
@@ -77,7 +81,7 @@ See `~/.claude/projects/.../memory/gw2-domain.md` for full build system referenc
 
 ## Sprint Plan
 
-Full plan at `~/.claude/plans/reflective-churning-quail.md`. Sprint format: S##-T##.
+Full finalization plan at `plan.md` in repo root. Sprint format: S##-T##.
 
 | Sprint | Status | Focus |
 |--------|--------|-------|
@@ -85,12 +89,17 @@ Full plan at `~/.claude/plans/reflective-churning-quail.md`. Sprint format: S##-
 | S02 | DONE | GW2 API data models (serde structs) |
 | S03 | DONE | API client, rate limiter, local cache |
 | S04 | DONE | Setup wizard UI (API keys + data download) |
-| S05 | TODO | Character loading & current build display |
-| S06 | TODO | Stat calculation engine |
-| S07 | TODO | Optimization engine |
-| S08 | TODO | Gemini LLM integration |
-| S09 | TODO | Comparison view & results UI |
-| S10 | TODO | Polish, testing, release prep |
+| S05 | DONE | Character loading & current build display |
+| S06 | DONE | Stat calculation engine |
+| S07 | DONE | Optimization engine |
+| S08 | DONE | Gemini LLM integration (GeminiClient, prompts, rate limiting) |
+| S09 | DONE | Comparison view & results UI |
+| S10 | DONE | Build display, GameDb loading, optimizer wiring |
+| S11 | DONE | Gemini→UI wiring (post-optimization enrichment + chat bar) |
+| S12 | TODO | Robustness (thread guards, rate persistence, traited facts) |
+| S13 | TODO | Build persistence (Save/Load tab) |
+| S14 | TODO | PvP/WvW game mode support |
+| S15 | TODO | Polish & release prep |
 
 <!-- AUTO-MANAGED: conventions -->
 ## Conventions
@@ -104,12 +113,13 @@ Full plan at `~/.claude/plans/reflective-churning-quail.md`. Sprint format: S##-
 - Keybind IDs are SCREAMING_SNAKE_CASE strings (e.g. `"GW2_BUILD_OPT_TOGGLE"`)
 - Background API validation: `std::thread::spawn` + `crate::state::with_state(|s| ...)` writes results back to global state — no channels needed
 - UI screen routing via `AddonState.screen: Screen` — set directly in response to button presses or init logic
+- Nexus `export!` macro supports auto-update distribution: include `provider: UpdateProvider::GitHub` and `update_link` for Nexus update metadata
 <!-- END AUTO-MANAGED -->
 
 <!-- AUTO-MANAGED: patterns -->
 ## Detected Patterns
 
-- **Stub module pattern**: unimplemented files contain a single comment `// <purpose>.\n// Will be populated in S##.` — do not add placeholder code
+- **Stub module pattern**: unimplemented files contain a single comment `// <purpose>.\n// Will be populated in S##.` — only `crates/core/src/storage.rs` remains as a stub; do not add placeholder code to stub files
 - **Workspace dep hoisting**: all shared deps (serde, serde_json, reqwest, thiserror, urlencoding, chrono) declared once in root `[workspace.dependencies]`, crates reference with `.workspace = true`
 - **State accessor pattern**: global state exposed via free functions (`init`, `toggle_window`, `is_window_visible`) rather than direct static access
 - **Crate internal visibility**: `mod state; mod ui;` kept private in addon; `pub mod` used in library crates (core, gw2api, optimizer)
@@ -126,4 +136,13 @@ Full plan at `~/.claude/plans/reflective-churning-quail.md`. Sprint format: S##-
 - **Background thread + state callback pattern**: UI spawns `std::thread::spawn` for blocking API calls; results written back via `crate::state::with_state(|s| ...)` — avoids channels, works with `Mutex<Option<T>>` global
 - **Wizard transient state pattern**: `SetupState` (input buffers, key status, download progress) embedded in `AddonState`, initialized via `#[derive(Default)]` — cleared implicitly on re-init
 - **Config completeness guard**: `AppConfig::is_setup_complete()` requires all three fields (gw2_api_key, gemini_api_key, cache_build_number) — single source of truth for setup routing and post-update cache validation
+- **Left menu + content split pattern**: fixed 180px `ChildWindow::new("##left_menu")` + fill-remaining `ChildWindow::new("##main_content").size([0.0, 0.0])` — standard main UI layout
+- **GameDb pre-index pattern**: `GameDb::load()` builds all `HashMap<u32, T>` indexes once from DataCache; optimizer queries by ID in O(1); derived indexes (skills_by_profession, traits_by_spec, items_by_type, runes/sigils/relics Vecs) built in same pass
+- **Borrow conflict avoidance pattern**: collect owned snapshots (`profession_name.clone()`, `stats_snapshot`) before block containing mutable state borrow — avoids simultaneous mut+immut borrow of `AddonState`
+- **Optimizer-to-UI type conversion**: `candidate_to_suggestion()` bridges `gw2_optimizer::engine::BuildCandidate` to `crate::ui::comparison::BuildSuggestion`; stat block f32 fields rounded to i32 via `.round() as i32`
+- **Prompt injection guard**: `chat_refinement_prompt` sanitizes user input — 300-char truncation, backtick filtering, XML delimiters (`<player_request>...</player_request>`) — treats player text as data, not instructions
+- **Gemini enrichment pattern**: post-optimization bg thread calls `enrich_with_gemini()` → builds context string from GameDb spec_names + candidate summaries → selects `new_build_prompt` or `improve_build_prompt` based on whether `current_build_summary` is present → calls `generate_cached()` → `parse_gemini_build()` → `apply_gemini_response()` onto first suggestion; Gemini errors logged as Warning and skipped, not surfaced as fatal
+- **Non-destructive Gemini merge**: `apply_gemini_response()` only overwrites `BuildSuggestion` fields when Gemini returned a non-empty value — preserves optimizer-computed stats while enriching explanation, skills, weapons, rune, sigils, relic, stat_prefix, changes_made
+- **Chat refinement as suggestion tab**: `send_chat_message()` creates a fresh `BuildSuggestion { label: "Chat Refinement", ..Default::default() }`, applies parsed Gemini response, pushes to `comparison.suggestions` and advances `selected_suggestion` — each chat turn becomes a selectable build tab in the comparison view
+- **Stat diff color coding**: `render_stat_diff()` colors each diff value green (`[0,1,0,1]`) for positive, red (`[1,0,0,1]`) for negative, gray (`[0.7,0.7,0.7,1]`) for zero; prepends "+" on positive values
 <!-- END AUTO-MANAGED -->

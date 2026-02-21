@@ -257,6 +257,96 @@ pub fn parse_build_response(response: &str) -> Result<serde_json::Value, String>
     serde_json::from_str(json_str).map_err(|e| format!("JSON parse error: {}", e))
 }
 
+/// Parsed build suggestion from Gemini response.
+#[derive(Debug, Clone, Default)]
+pub struct GeminiBuildResponse {
+    pub specializations: Vec<(String, Vec<String>)>, // (spec_name, [trait1, trait2, trait3])
+    pub weapons: Vec<String>,
+    pub skills: Vec<String>,
+    pub rune: String,
+    pub sigils: Vec<String>,
+    pub relic: String,
+    pub stat_prefix: String,
+    pub explanation: String,
+    pub changes_made: Vec<String>,
+}
+
+/// Parse a Gemini response into a typed build suggestion.
+/// Extracts JSON from markdown fences and maps fields.
+pub fn parse_gemini_build(response: &str) -> Result<GeminiBuildResponse, String> {
+    let json = parse_build_response(response)?;
+
+    let mut result = GeminiBuildResponse::default();
+
+    if let Some(v) = json.get("explanation").and_then(|v| v.as_str()) {
+        result.explanation = v.to_string();
+    }
+
+    if let Some(specs) = json.get("specializations").and_then(|v| v.as_array()) {
+        result.specializations = specs
+            .iter()
+            .filter_map(|s| {
+                let name = s.get("name")?.as_str()?.to_string();
+                let traits: Vec<String> = s
+                    .get("traits")?
+                    .as_array()?
+                    .iter()
+                    .filter_map(|t| t.as_str().map(String::from))
+                    .collect();
+                Some((name, traits))
+            })
+            .collect();
+    }
+
+    if let Some(weapons) = json.get("weapons") {
+        for set_key in &["set1", "set2"] {
+            if let Some(set) = weapons.get(*set_key) {
+                let main = set.get("main").and_then(|v| v.as_str()).unwrap_or("");
+                let off = set.get("off").and_then(|v| v.as_str());
+                let label = if *set_key == "set1" { "Set 1" } else { "Set 2" };
+                if let Some(off) = off.filter(|o| *o != "null" && !o.is_empty()) {
+                    result.weapons.push(format!("{}: {} / {}", label, main, off));
+                } else if !main.is_empty() {
+                    result.weapons.push(format!("{}: {}", label, main));
+                }
+            }
+        }
+    }
+
+    if let Some(skills) = json.get("skills") {
+        if let Some(heal) = skills.get("heal").and_then(|v| v.as_str()) {
+            result.skills.push(format!("Heal: {}", heal));
+        }
+        if let Some(utils) = skills.get("utilities").and_then(|v| v.as_array()) {
+            let names: Vec<&str> = utils.iter().filter_map(|v| v.as_str()).collect();
+            if !names.is_empty() {
+                result.skills.push(format!("Utils: {}", names.join(", ")));
+            }
+        }
+        if let Some(elite) = skills.get("elite").and_then(|v| v.as_str()) {
+            result.skills.push(format!("Elite: {}", elite));
+        }
+    }
+
+    if let Some(v) = json.get("rune").and_then(|v| v.as_str()) {
+        result.rune = v.to_string();
+    }
+    if let Some(arr) = json.get("sigils").and_then(|v| v.as_array()) {
+        result.sigils = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+    }
+    if let Some(v) = json.get("relic").and_then(|v| v.as_str()) {
+        result.relic = v.to_string();
+    }
+    if let Some(v) = json.get("stat_prefix").and_then(|v| v.as_str()) {
+        result.stat_prefix = v.to_string();
+    }
+    if let Some(arr) = json.get("changes_made").and_then(|v| v.as_array()) {
+        result.changes_made = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+    }
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,5 +380,44 @@ mod tests {
     fn test_game_context_mentions_archetype() {
         let ctx = build_game_context("Warrior", &Archetype::PowerDPS);
         assert!(ctx.contains("Power DPS"));
+    }
+
+    #[test]
+    fn test_parse_gemini_build_full() {
+        let response = r#"```json
+{
+  "specializations": [
+    {"name": "Arms", "traits": ["Furious", "Dual Wielding", "Burst Mastery"]},
+    {"name": "Discipline", "traits": ["Warrior's Sprint", "Inspiring Battle Standard", "Axe Mastery"]}
+  ],
+  "weapons": {
+    "set1": {"main": "Axe", "off": "Axe"},
+    "set2": {"main": "Greatsword", "off": null}
+  },
+  "skills": {
+    "heal": "Mending",
+    "utilities": ["Signet of Fury", "Banner of Strength", "Bull's Charge"],
+    "elite": "Signet of Rage"
+  },
+  "rune": "Superior Rune of the Scholar",
+  "sigils": ["Superior Sigil of Force", "Superior Sigil of Air"],
+  "relic": "Relic of the Thief",
+  "stat_prefix": "Berserker's",
+  "explanation": "Power build with high crit synergy.",
+  "changes_made": ["Switched to Axe/Axe for burst"]
+}
+```"#;
+        let build = parse_gemini_build(response).unwrap();
+        assert_eq!(build.specializations.len(), 2);
+        assert_eq!(build.specializations[0].0, "Arms");
+        assert_eq!(build.weapons.len(), 2);
+        assert!(build.weapons[1].contains("Greatsword"));
+        assert_eq!(build.skills.len(), 3);
+        assert_eq!(build.rune, "Superior Rune of the Scholar");
+        assert_eq!(build.sigils.len(), 2);
+        assert_eq!(build.relic, "Relic of the Thief");
+        assert_eq!(build.stat_prefix, "Berserker's");
+        assert!(!build.explanation.is_empty());
+        assert_eq!(build.changes_made.len(), 1);
     }
 }
