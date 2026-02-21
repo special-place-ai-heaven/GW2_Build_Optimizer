@@ -153,3 +153,24 @@ impl StatBlock {
         self.armor = self.toughness + 1000; // approximate, defense from gear adds too
     }
 }
+
+/// A saved optimizer build for persistence (Save/Load tab).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedBuild {
+    pub name: String,
+    pub timestamp: u64, // Unix epoch seconds
+    pub character_name: String,
+    pub game_mode: GameMode,
+    // Build suggestion data (mirrors BuildSuggestion fields)
+    pub label: String,
+    pub stat_prefix: String,
+    pub specializations: Vec<(String, Vec<String>)>,
+    pub weapons: Vec<String>,
+    pub skills: Vec<String>,
+    pub rune: String,
+    pub sigils: Vec<String>,
+    pub relic: String,
+    pub explanation: String,
+    pub changes_made: Vec<String>,
+    pub estimated_stats: Option<StatBlock>,
+}

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use gw2_core::config::AppConfig;
-use gw2_core::types::{GameMode, ResolvedBuild, StatBlock};
+use gw2_core::types::{GameMode, ResolvedBuild, SavedBuild, StatBlock};
 use gw2_optimizer::gamedb::GameDb;
 use crate::ui::chat_bar::ChatBarState;
 use crate::ui::comparison::ComparisonState;
@@ -43,6 +43,11 @@ pub struct MainState {
     // Optimization state
     pub optimizing: bool,
     pub optimize_stage: String,
+    // Save/Load
+    pub saved_builds: Vec<SavedBuild>,
+    pub saved_builds_loaded: bool,
+    pub save_name_input: String,
+    pub save_status: Option<String>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
