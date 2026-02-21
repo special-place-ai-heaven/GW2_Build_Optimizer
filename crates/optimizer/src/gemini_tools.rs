@@ -640,10 +640,14 @@ fn exec_get_optimizer_results(ctx: &ToolContext) -> Value {
                 "healing_power": c.stats.healing_power.round() as i32
             },
             "combat": {
+                "effective_power": c.combat.effective_power.round() as i32,
+                "crit_chance": format!("{:.1}%", c.combat.crit_chance),
                 "strike_dps_index": c.combat.strike_dps_index.round() as i32,
                 "condition_dps_index": c.combat.condition_dps_index.round() as i32,
                 "total_dps_index": c.combat.total_dps_index.round() as i32,
                 "healing_power_index": c.combat.healing_power_index.round() as i32,
+                "boon_duration": format!("{:.1}%", c.combat.boon_duration_pct),
+                "condi_duration": format!("{:.1}%", c.combat.condi_duration_pct),
                 "effective_health": c.combat.effective_health.round() as i32
             }
         })
