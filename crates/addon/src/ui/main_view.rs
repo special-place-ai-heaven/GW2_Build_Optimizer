@@ -1676,10 +1676,13 @@ fn enrich_with_gemini(
     let spec_names: Vec<(u32, String)> = db.specializations.iter()
         .map(|(&id, s)| (id, s.name.clone()))
         .collect();
+    let trait_names: Vec<(u32, String)> = db.traits.iter()
+        .map(|(&id, t)| (id, t.name.clone()))
+        .collect();
     let candidate_summaries: String = candidates.iter().take(3)
-        .map(|c| gw2_optimizer::prompts::summarize_build(c, &spec_names))
+        .map(|c| gw2_optimizer::prompts::summarize_build(c, &spec_names, &trait_names))
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("\n\n");
     let full_context = format!("{}\n\nTop optimizer candidates:\n{}", context, candidate_summaries);
 
     let prompt = if let Some(summary) = current_build_summary {
