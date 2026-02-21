@@ -1,9 +1,10 @@
 //! Side-by-side build comparison view.
-//! Shows current build vs optimized build with stat diffs and LLM explanation.
+//! Shows current build vs optimized build with full stat tables, bonuses,
+//! effects/resistances, and LLM explanation.
 
 use nexus::imgui::{ChildWindow, Selectable, TreeNodeFlags, Ui};
 
-use gw2_core::types::{ResolvedBuild, StatBlock};
+use gw2_core::types::{CombatMetrics, ResolvedBuild, StatBlock};
 
 /// A build suggestion from the optimizer + LLM.
 #[derive(Debug, Clone, Default)]
@@ -20,6 +21,12 @@ pub struct BuildSuggestion {
     pub explanation: String,
     pub changes_made: Vec<String>,
     pub estimated_stats: Option<StatBlock>,
+    /// Combat metrics under Solo profile (gear+traits only).
+    pub combat_solo: Option<CombatMetrics>,
+    /// Combat metrics under Party profile (Might x15, Fury).
+    pub combat_party: Option<CombatMetrics>,
+    /// Combat metrics under Full Squad profile (Might x25, Fury, Vulnerability x25).
+    pub combat_squad: Option<CombatMetrics>,
 }
 
 /// State for the comparison view.
@@ -29,6 +36,10 @@ pub struct ComparisonState {
     pub selected_suggestion: usize,
     pub loading: bool,
     pub error: Option<String>,
+    /// Combat metrics for the current build under each profile.
+    pub current_combat_solo: Option<CombatMetrics>,
+    pub current_combat_party: Option<CombatMetrics>,
+    pub current_combat_squad: Option<CombatMetrics>,
 }
 
 /// Render the comparison view: current build on left, suggestion on right.
@@ -71,7 +82,7 @@ pub fn render_comparison(
                 .size([0.0, 0.0])
                 .build(ui)
             {
-                // Selection handled by caller via return value
+                // Selection handled by caller
             }
             if i < tab_count - 1 {
                 ui.same_line();
@@ -82,17 +93,54 @@ pub fn render_comparison(
 
     let suggestion = &comparison.suggestions[comparison.selected_suggestion.min(tab_count - 1)];
 
-    // Two-column layout
+    // ═══ Build Components (side-by-side) ═══
+    render_build_side_by_side(ui, current_build, suggestion);
+
+    // ═══ Stats Table ═══
+    ui.spacing();
+    if ui.collapsing_header("Primary Attributes", TreeNodeFlags::DEFAULT_OPEN) {
+        render_primary_stats(ui, current_stats, suggestion.estimated_stats.as_ref());
+    }
+
+    // ═══ Combat Performance (3 tiers) ═══
+    if ui.collapsing_header("Combat Performance", TreeNodeFlags::DEFAULT_OPEN) {
+        render_combat_performance(ui, current_stats, suggestion);
+    }
+
+    // ═══ Defenses & Resistances ═══
+    if ui.collapsing_header("Defenses & Resistances", TreeNodeFlags::DEFAULT_OPEN) {
+        render_defenses(ui, current_stats, suggestion);
+    }
+
+    // ═══ LLM Explanation ═══
+    if !suggestion.explanation.is_empty() {
+        if ui.collapsing_header("Why This Build?", TreeNodeFlags::DEFAULT_OPEN) {
+            ui.text_wrapped(&suggestion.explanation);
+        }
+    }
+
+    // ═══ Changes Made ═══
+    if !suggestion.changes_made.is_empty() {
+        if ui.collapsing_header("Changes Made", TreeNodeFlags::DEFAULT_OPEN) {
+            for change in &suggestion.changes_made {
+                ui.bullet_text(change);
+            }
+        }
+    }
+}
+
+/// Render side-by-side build component comparison.
+fn render_build_side_by_side(ui: &Ui, current: &ResolvedBuild, suggestion: &BuildSuggestion) {
     let avail = ui.content_region_avail();
     let col_width = (avail[0] - 20.0) / 2.0;
 
     // Left column: Current Build
     ChildWindow::new("##current_col")
-        .size([col_width, 0.0])
+        .size([col_width, 300.0])
         .build(ui, || {
             ui.text_colored([0.6, 0.8, 1.0, 1.0], "CURRENT BUILD");
             ui.separator();
-            render_current_build_summary(ui, current_build);
+            render_current_build_summary(ui, current);
         });
 
     ui.same_line();
@@ -103,39 +151,235 @@ pub fn render_comparison(
 
     // Right column: Suggested Build
     ChildWindow::new("##suggested_col")
-        .size([col_width, 0.0])
+        .size([col_width, 300.0])
         .build(ui, || {
             ui.text_colored([0.3, 1.0, 0.3, 1.0], "OPTIMIZED BUILD");
             ui.separator();
             render_suggestion_summary(ui, suggestion);
         });
+}
 
-    // Stat diff panel (below both columns)
-    ui.spacing();
+/// Render all 9 primary attributes in a comparison table.
+fn render_primary_stats(ui: &Ui, current: Option<&StatBlock>, suggested: Option<&StatBlock>) {
+    let cur = current.cloned().unwrap_or_default();
+    let sug = suggested.cloned().unwrap_or_default();
+
+    let stats = [
+        ("Power",          cur.power,            sug.power),
+        ("Precision",      cur.precision,         sug.precision),
+        ("Ferocity",       cur.ferocity,          sug.ferocity),
+        ("Condition Dmg",  cur.condition_damage,  sug.condition_damage),
+        ("Expertise",      cur.expertise,         sug.expertise),
+        ("Concentration",  cur.concentration,     sug.concentration),
+        ("Toughness",      cur.toughness,         sug.toughness),
+        ("Vitality",       cur.vitality,          sug.vitality),
+        ("Healing Power",  cur.healing_power,     sug.healing_power),
+    ];
+
+    render_stat_table(ui, "##primary_stats", &stats);
+}
+
+/// Render combat performance metrics with three tiers: Solo, Party, Full Squad.
+fn render_combat_performance(ui: &Ui, current_stats: Option<&StatBlock>, suggestion: &BuildSuggestion) {
+    let tiers: Vec<(&str, [f32; 4], Option<&CombatMetrics>, Option<&CombatMetrics>)> = vec![
+        ("Solo (Gear + Traits)", [0.7, 0.85, 1.0, 1.0], None, suggestion.combat_solo.as_ref()),
+        ("Party (Might x15, Fury)", [1.0, 0.85, 0.4, 1.0], None, suggestion.combat_party.as_ref()),
+        ("Full Squad (Might x25, Fury, Vuln x25)", [0.3, 1.0, 0.3, 1.0], None, suggestion.combat_squad.as_ref()),
+    ];
+
+    // If we have current build stats, compute basic derived values for the "Current" column
+    let cur_stats = current_stats.cloned().unwrap_or_default();
+    let cur_crit = ((cur_stats.precision - 895).max(0) as f64 / 21.0).clamp(0.0, 100.0);
+    let cur_crit_dmg = 150.0 + cur_stats.ferocity as f64 / 15.0;
+    let cur_eff_power = cur_stats.power as f64 * (1.0 + (cur_crit / 100.0) * (cur_crit_dmg / 100.0 - 1.0));
+    let cur_boon_dur = (cur_stats.concentration as f64 / 15.0).clamp(0.0, 100.0);
+    let cur_condi_dur = (cur_stats.expertise as f64 / 15.0).clamp(0.0, 100.0);
+
+    for (label, color, _cur_combat, sug_combat) in &tiers {
+        ui.text_colored(*color, *label);
+
+        if let Some(sug) = sug_combat {
+            ui.columns(4, &format!("##{}_cols", label), true);
+            bonus_header(ui);
+
+            render_int_row(ui, "Effective Power", cur_eff_power as i32, sug.effective_power);
+            render_int_row(ui, "Strike DPS Index", 0, sug.strike_dps_index);
+            render_int_row(ui, "Condi DPS Index", 0, sug.condition_dps_index);
+            render_int_row(ui, "Total DPS Index", 0, sug.total_dps_index);
+            render_pct_row(ui, "Boon Duration", cur_boon_dur, sug.boon_duration_pct);
+            render_pct_row(ui, "Condi Duration", cur_condi_dur, sug.condi_duration_pct);
+            if sug.healing_index > 0 {
+                render_int_row(ui, "Healing Index", 0, sug.healing_index);
+            }
+
+            ui.columns(1, &format!("##{}_end", label), false);
+        } else {
+            ui.text_colored([0.5, 0.5, 0.5, 1.0], "  (not computed)");
+        }
+
+        ui.spacing();
+    }
+
+    // ─── Condition Tick Breakdown ───
+    if let Some(sug) = suggestion.combat_solo.as_ref() {
+        if sug.bleeding_tick > 0 || sug.burning_tick > 0 || sug.poison_tick > 0 {
+            ui.text_colored([0.9, 0.6, 0.2, 1.0], "Condition Ticks (per tick, Solo)");
+            ui.columns(3, "##condi_ticks", true);
+
+            ui.text_colored([0.8, 0.8, 0.2, 1.0], "Condition");
+            ui.next_column();
+            ui.text_colored([0.3, 1.0, 0.3, 1.0], "Optimized");
+            ui.next_column();
+            ui.text("Info");
+            ui.next_column();
+            ui.separator();
+
+            let ticks = [
+                ("Bleeding", sug.bleeding_tick, "per stack/sec"),
+                ("Burning", sug.burning_tick, "per stack/sec"),
+                ("Poison", sug.poison_tick, "per stack/sec"),
+                ("Torment", sug.torment_tick, "stationary"),
+                ("Confusion", sug.confusion_tick, "on skill use"),
+            ];
+
+            for (name, val, info) in &ticks {
+                if *val > 0 {
+                    ui.text(*name);
+                    ui.next_column();
+                    ui.text(&format!("{}", val));
+                    ui.next_column();
+                    ui.text_colored([0.5, 0.5, 0.5, 1.0], *info);
+                    ui.next_column();
+                }
+            }
+
+            ui.columns(1, "##condi_ticks_end", false);
+        }
+    }
+}
+
+fn bonus_header(ui: &Ui) {
+    ui.text_colored([0.8, 0.8, 0.2, 1.0], "Bonus");
+    ui.next_column();
+    ui.text_colored([0.6, 0.8, 1.0, 1.0], "Current");
+    ui.next_column();
+    ui.text_colored([0.3, 1.0, 0.3, 1.0], "Optimized");
+    ui.next_column();
+    ui.text("Diff");
+    ui.next_column();
+    ui.separator();
+}
+
+/// Render defenses and resistances.
+fn render_defenses(ui: &Ui, current: Option<&StatBlock>, suggestion: &BuildSuggestion) {
+    let cur = current.cloned().unwrap_or_default();
+    let sug_stats = suggestion.estimated_stats.clone().unwrap_or_default();
+
+    // Basic stats-derived values for current build
+    let cur_health = cur.vitality * 10 + 1645;
+    let cur_armor = cur.toughness + 1000;
+    let cur_eff_hp = (cur_health as f64 * cur_armor as f64 / 100.0) as i32;
+    let cur_dmg_red = (cur_armor as f64 / (cur_armor as f64 + 2600.0)) * 100.0;
+
+    // Use combat metrics for suggested build if available, else fall back to stats
+    let (sug_health, sug_armor, sug_eff_hp, sug_dmg_red) =
+        if let Some(ref combat) = suggestion.combat_solo {
+            let health = sug_stats.vitality * 10 + 1645;
+            let armor = sug_stats.toughness + 1000;
+            (health, armor, combat.effective_health as i32, combat.damage_reduction_pct)
+        } else {
+            let health = sug_stats.vitality * 10 + 1645;
+            let armor = sug_stats.toughness + 1000;
+            let eff_hp = (health as f64 * armor as f64 / 100.0) as i32;
+            let dmg_red = (armor as f64 / (armor as f64 + 2600.0)) * 100.0;
+            (health, armor, eff_hp, dmg_red)
+        };
+
+    let stats = [
+        ("Health", cur_health, sug_health),
+        ("Armor", cur_armor, sug_armor),
+        ("Effective HP", cur_eff_hp, sug_eff_hp),
+    ];
+
+    ui.columns(4, "##defense_cols", true);
+    ui.text_colored([0.8, 0.8, 0.2, 1.0], "Defense");
+    ui.next_column();
+    ui.text_colored([0.6, 0.8, 1.0, 1.0], "Current");
+    ui.next_column();
+    ui.text_colored([0.3, 1.0, 0.3, 1.0], "Optimized");
+    ui.next_column();
+    ui.text("Diff");
+    ui.next_column();
     ui.separator();
 
-    if let Some(ref est_stats) = suggestion.estimated_stats {
-        if let Some(cur_stats) = current_stats {
-            if ui.collapsing_header("Stat Comparison", TreeNodeFlags::DEFAULT_OPEN) {
-                render_stat_diff(ui, cur_stats, est_stats);
-            }
-        }
+    for (name, cur_val, sug_val) in &stats {
+        render_int_row(ui, name, *cur_val, *sug_val);
     }
 
-    // LLM explanation
-    if !suggestion.explanation.is_empty() {
-        if ui.collapsing_header("Why This Build?", TreeNodeFlags::DEFAULT_OPEN) {
-            ui.text_wrapped(&suggestion.explanation);
-        }
+    render_pct_row(ui, "Dmg Reduction", cur_dmg_red, sug_dmg_red);
+
+    ui.columns(1, "##end_defense", false);
+}
+
+/// Render a table row for integer stats with diff.
+fn render_int_row(ui: &Ui, name: &str, cur: i32, sug: i32) {
+    ui.text(name);
+    ui.next_column();
+    ui.text(&format!("{}", cur));
+    ui.next_column();
+    ui.text(&format!("{}", sug));
+    ui.next_column();
+    let diff = sug - cur;
+    let color = diff_color(diff as f64);
+    let sign = if diff > 0 { "+" } else { "" };
+    ui.text_colored(color, &format!("{}{}", sign, diff));
+    ui.next_column();
+}
+
+/// Render a table row for percentage stats with diff.
+fn render_pct_row(ui: &Ui, name: &str, cur: f64, sug: f64) {
+    ui.text(name);
+    ui.next_column();
+    ui.text(&format!("{:.1}%", cur));
+    ui.next_column();
+    ui.text(&format!("{:.1}%", sug));
+    ui.next_column();
+    let diff = sug - cur;
+    let color = diff_color(diff);
+    let sign = if diff > 0.0 { "+" } else { "" };
+    ui.text_colored(color, &format!("{}{:.1}%", sign, diff));
+    ui.next_column();
+}
+
+/// Render a stat comparison table with 4 columns.
+fn render_stat_table(ui: &Ui, id: &str, stats: &[(&str, i32, i32)]) {
+    ui.columns(4, id, true);
+
+    ui.text_colored([0.8, 0.8, 0.2, 1.0], "Attribute");
+    ui.next_column();
+    ui.text_colored([0.6, 0.8, 1.0, 1.0], "Current");
+    ui.next_column();
+    ui.text_colored([0.3, 1.0, 0.3, 1.0], "Optimized");
+    ui.next_column();
+    ui.text("Diff");
+    ui.next_column();
+    ui.separator();
+
+    for (name, cur, sug) in stats {
+        render_int_row(ui, name, *cur, *sug);
     }
 
-    // Changes made
-    if !suggestion.changes_made.is_empty() {
-        if ui.collapsing_header("Changes Made", TreeNodeFlags::DEFAULT_OPEN) {
-            for change in &suggestion.changes_made {
-                ui.bullet_text(change);
-            }
-        }
+    ui.columns(1, &format!("{}_end", id), false);
+}
+
+/// Color for a diff value: green=positive, red=negative, gray=zero.
+fn diff_color(diff: f64) -> [f32; 4] {
+    if diff > 0.5 {
+        [0.0, 1.0, 0.0, 1.0]
+    } else if diff < -0.5 {
+        [1.0, 0.0, 0.0, 1.0]
+    } else {
+        [0.7, 0.7, 0.7, 1.0]
     }
 }
 
@@ -143,7 +387,7 @@ fn render_current_build_summary(ui: &Ui, build: &ResolvedBuild) {
     // Specs
     for spec in &build.specializations {
         let elite = if spec.elite { " [E]" } else { "" };
-        ui.text(&format!("{}{}", spec.name, elite));
+        ui.text_colored([0.8, 0.6, 1.0, 1.0], &format!("{}{}", spec.name, elite));
         let traits: Vec<&str> = spec.traits_selected.iter().map(|t| t.name.as_str()).collect();
         if !traits.is_empty() {
             ui.text_colored([0.7, 0.7, 0.7, 1.0], &format!("  {}", traits.join(" | ")));
@@ -170,29 +414,38 @@ fn render_current_build_summary(ui: &Ui, build: &ResolvedBuild) {
         let mut parts = Vec::new();
         if let Some(ref mh) = set.main_hand { parts.push(mh.name.clone()); }
         if let Some(ref oh) = set.off_hand { parts.push(oh.name.clone()); }
-        ui.text(&format!("{}: {}", set.label, parts.join(" / ")));
+        if !parts.is_empty() {
+            ui.text(&format!("{}: {}", set.label, parts.join(" / ")));
+        }
+        if !set.sigils.is_empty() {
+            let sigil_names: Vec<&str> = set.sigils.iter().map(|s| s.name.as_str()).collect();
+            ui.text_colored([0.7, 0.7, 0.7, 1.0], &format!("  Sigils: {}", sigil_names.join(", ")));
+        }
     }
     ui.spacing();
 
     // Gear summary
-    if let Some(ref r) = build.rune {
-        ui.text(&format!("Rune: {}", r.name));
-    }
-    if let Some(ref r) = build.relic {
-        ui.text(&format!("Relic: {}", r.name));
-    }
     if !build.armor.is_empty() {
         let prefix = &build.armor[0].stat_prefix;
         if !prefix.is_empty() {
             ui.text(&format!("Gear: {}", prefix));
         }
     }
+    if let Some(ref r) = build.rune {
+        ui.text(&format!("Rune: {}", r.name));
+    }
+    if let Some(ref r) = build.relic {
+        ui.text(&format!("Relic: {}", r.name));
+    }
+    if let Some(ref a) = build.pvp_amulet {
+        ui.text(&format!("Amulet: {}", a.name));
+    }
 }
 
 fn render_suggestion_summary(ui: &Ui, suggestion: &BuildSuggestion) {
     // Specs
     for (spec_name, traits) in &suggestion.specializations {
-        ui.text(spec_name);
+        ui.text_colored([0.8, 0.6, 1.0, 1.0], spec_name);
         if !traits.is_empty() {
             ui.text_colored([0.7, 0.7, 0.7, 1.0], &format!("  {}", traits.join(" | ")));
         }
@@ -212,70 +465,18 @@ fn render_suggestion_summary(ui: &Ui, suggestion: &BuildSuggestion) {
     ui.spacing();
 
     // Gear
+    if !suggestion.stat_prefix.is_empty() {
+        ui.text(&format!("Gear: {}", suggestion.stat_prefix));
+    }
     if !suggestion.rune.is_empty() {
         ui.text(&format!("Rune: {}", suggestion.rune));
     }
     if !suggestion.relic.is_empty() {
         ui.text(&format!("Relic: {}", suggestion.relic));
     }
-    if !suggestion.stat_prefix.is_empty() {
-        ui.text(&format!("Gear: {}", suggestion.stat_prefix));
-    }
     if !suggestion.sigils.is_empty() {
         ui.text(&format!("Sigils: {}", suggestion.sigils.join(", ")));
     }
-}
-
-fn render_stat_diff(ui: &Ui, current: &StatBlock, suggested: &StatBlock) {
-    let stats = [
-        ("Power", current.power, suggested.power),
-        ("Precision", current.precision, suggested.precision),
-        ("Toughness", current.toughness, suggested.toughness),
-        ("Vitality", current.vitality, suggested.vitality),
-        ("Condi Dmg", current.condition_damage, suggested.condition_damage),
-        ("Expertise", current.expertise, suggested.expertise),
-        ("Concentration", current.concentration, suggested.concentration),
-        ("Ferocity", current.ferocity, suggested.ferocity),
-        ("Healing", current.healing_power, suggested.healing_power),
-    ];
-
-    ui.columns(4, "##stat_diff_cols", true);
-
-    ui.text("Stat");
-    ui.next_column();
-    ui.text("Current");
-    ui.next_column();
-    ui.text("Optimized");
-    ui.next_column();
-    ui.text("Diff");
-    ui.next_column();
-
-    ui.separator();
-
-    for (name, cur, sug) in &stats {
-        ui.text(name);
-        ui.next_column();
-
-        ui.text(&format!("{:.0}", cur));
-        ui.next_column();
-
-        ui.text(&format!("{:.0}", sug));
-        ui.next_column();
-
-        let diff = *sug - *cur;
-        let color = if diff > 0 {
-            [0.0, 1.0, 0.0, 1.0] // green = better
-        } else if diff < 0 {
-            [1.0, 0.0, 0.0, 1.0] // red = worse
-        } else {
-            [0.7, 0.7, 0.7, 1.0] // gray = same
-        };
-        let sign = if diff > 0 { "+" } else { "" };
-        ui.text_colored(color, &format!("{}{}", sign, diff));
-        ui.next_column();
-    }
-
-    ui.columns(1, "##end_diff", false);
 }
 
 #[cfg(test)]
@@ -288,5 +489,15 @@ mod tests {
         assert!(s.label.is_empty());
         assert!(s.specializations.is_empty());
         assert!(s.weapons.is_empty());
+    }
+
+    #[test]
+    fn test_diff_color() {
+        let green = diff_color(100.0);
+        assert_eq!(green, [0.0, 1.0, 0.0, 1.0]);
+        let red = diff_color(-50.0);
+        assert_eq!(red, [1.0, 0.0, 0.0, 1.0]);
+        let gray = diff_color(0.0);
+        assert_eq!(gray, [0.7, 0.7, 0.7, 1.0]);
     }
 }

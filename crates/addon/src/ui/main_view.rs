@@ -1,4 +1,5 @@
 use nexus::imgui::{ChildWindow, ComboBox, Selectable, Ui};
+use base64::Engine as _;
 
 use crate::state::{AddonState, MainTab};
 use gw2_optimizer::scoring::Archetype;
@@ -83,7 +84,104 @@ fn render_left_menu(ui: &Ui, state: &mut AddonState) {
         state.main.selected_character = Some(idx);
         state.main.current_build = None;
         state.main.current_stats = None;
-        load_character_build(state, name);
+        state.main.build_tabs.clear();
+        state.main.equipment_tabs.clear();
+        state.main.selected_build_tab = None;
+        state.main.selected_equipment_tab = None;
+        state.main.build_chat_code = None;
+        load_character_tabs(state, name);
+    }
+
+    // Build Template dropdown (shown when tabs are loaded)
+    if !state.main.build_tabs.is_empty() {
+        ui.spacing();
+        ui.text("Build Template:");
+        ui.set_next_item_width(-1.0);
+        let bt_preview = state.main.selected_build_tab
+            .and_then(|i| state.main.build_tabs.get(i))
+            .map(|t| {
+                let name = t.build.name.as_deref().unwrap_or("Unnamed");
+                format!("Tab {}: {}", t.tab, name)
+            })
+            .unwrap_or_else(|| "Select...".into());
+
+        let bt_count = state.main.build_tabs.len();
+        let bt_labels: Vec<(usize, String)> = state.main.build_tabs.iter().enumerate()
+            .map(|(i, t)| {
+                let name = t.build.name.as_deref().unwrap_or("Unnamed");
+                (i, format!("Tab {}: {}", t.tab, name))
+            }).collect();
+
+        let mut bt_changed: Option<usize> = None;
+        if bt_count > 0 {
+            if let Some(_combo) = ComboBox::new("##build_tab_select").preview_value(&bt_preview).begin(ui) {
+                for (i, label) in &bt_labels {
+                    let selected = state.main.selected_build_tab == Some(*i);
+                    if Selectable::new(label).selected(selected).build(ui) {
+                        if state.main.selected_build_tab != Some(*i) {
+                            bt_changed = Some(*i);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(idx) = bt_changed {
+            state.main.selected_build_tab = Some(idx);
+            update_build_chat_code(state);
+            resolve_selected_build(state);
+        }
+    }
+
+    // Equipment Template dropdown
+    if !state.main.equipment_tabs.is_empty() {
+        ui.spacing();
+        ui.text("Equipment Template:");
+        ui.set_next_item_width(-1.0);
+        let et_preview = state.main.selected_equipment_tab
+            .and_then(|i| state.main.equipment_tabs.get(i))
+            .map(|t| {
+                let name = t.name.as_deref().unwrap_or("Unnamed");
+                format!("Tab {}: {}", t.tab, name)
+            })
+            .unwrap_or_else(|| "Select...".into());
+
+        let et_count = state.main.equipment_tabs.len();
+        let et_labels: Vec<(usize, String)> = state.main.equipment_tabs.iter().enumerate()
+            .map(|(i, t)| {
+                let name = t.name.as_deref().unwrap_or("Unnamed");
+                (i, format!("Tab {}: {}", t.tab, name))
+            }).collect();
+
+        let mut et_changed: Option<usize> = None;
+        if et_count > 0 {
+            if let Some(_combo) = ComboBox::new("##equip_tab_select").preview_value(&et_preview).begin(ui) {
+                for (i, label) in &et_labels {
+                    let selected = state.main.selected_equipment_tab == Some(*i);
+                    if Selectable::new(label).selected(selected).build(ui) {
+                        if state.main.selected_equipment_tab != Some(*i) {
+                            et_changed = Some(*i);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(idx) = et_changed {
+            state.main.selected_equipment_tab = Some(idx);
+            resolve_selected_build(state);
+        }
+    }
+
+    // Build chat code display with Copy button
+    if let Some(ref code) = state.main.build_chat_code.clone() {
+        ui.spacing();
+        ui.text("Chat Code:");
+        ui.text_wrapped(code);
+        ui.same_line();
+        if ui.small_button("Copy##chatcode") {
+            ui.set_clipboard_text(code);
+        }
     }
 
     ui.spacing();
@@ -96,11 +194,7 @@ fn render_left_menu(ui: &Ui, state: &mut AddonState) {
         let selected = state.main.game_mode == *mode;
         if ui.radio_button_bool(mode.label(), selected) {
             state.main.game_mode = mode.clone();
-            if let Some(idx) = state.main.selected_character {
-                if let Some(name) = state.main.characters.get(idx).cloned() {
-                    load_character_build(state, name);
-                }
-            }
+            resolve_selected_build(state);
         }
     }
 
@@ -410,7 +504,8 @@ fn load_characters(state: &mut AddonState) {
     });
 }
 
-fn load_character_build(state: &mut AddonState, character_name: String) {
+/// Phase 1: Fetch build tabs + equipment tabs from API, store in state.
+fn load_character_tabs(state: &mut AddonState, character_name: String) {
     let Some(ref key) = state.config.gw2_api_key else {
         return;
     };
@@ -418,51 +513,100 @@ fn load_character_build(state: &mut AddonState, character_name: String) {
     state.main.build_loading = true;
     state.main.error = None;
     let key = key.clone();
-    let cache_dir = state.addon_dir.join("cache");
+    let expected_char = character_name.clone();
 
     std::thread::spawn(move || {
-        let result = (|| -> Result<gw2_core::types::ResolvedBuild, String> {
+        let result = (|| -> Result<(Vec<gw2_api::models::BuildTab>, Vec<gw2_api::models::EquipmentTab>), String> {
             let client = gw2_api::client::Gw2Client::with_key(&key)
                 .map_err(|e| e.to_string())?;
-
-            let build_tabs = client
-                .fetch_build_tabs(&character_name)
-                .map_err(|e| e.to_string())?;
-
-            let equipment_tabs = client
-                .fetch_equipment_tabs(&character_name)
-                .map_err(|e| e.to_string())?;
-
-            let active_build = build_tabs
-                .iter()
-                .find(|t| t.is_active)
-                .or(build_tabs.first())
-                .ok_or("No build tabs found")?;
-
-            let active_equipment = equipment_tabs
-                .iter()
-                .find(|t| t.is_active)
-                .or(equipment_tabs.first())
-                .ok_or("No equipment tabs found")?;
-
-            let cache = gw2_api::cache::DataCache::new(&cache_dir);
-            let game_mode = crate::state::with_state(|s| s.main.game_mode.clone())
-                .unwrap_or_default();
-            resolve_build(
-                &character_name,
-                &active_build.build,
-                active_equipment,
-                &cache,
-                &game_mode,
-            )
+            let build_tabs = client.fetch_build_tabs(&expected_char).map_err(|e| e.to_string())?;
+            let equipment_tabs = client.fetch_equipment_tabs(&expected_char).map_err(|e| e.to_string())?;
+            Ok((build_tabs, equipment_tabs))
         })();
 
         crate::state::with_state(|s| {
+            // Stale-result guard: discard if user switched characters
+            let current_char = s.main.selected_character
+                .and_then(|i| s.main.characters.get(i).cloned());
+            if current_char.as_deref() != Some(&expected_char) {
+                s.main.build_loading = false;
+                return;
+            }
+
+            match result {
+                Ok((build_tabs, equipment_tabs)) => {
+                    // Auto-select active tabs
+                    let bt_idx = build_tabs.iter().position(|t| t.is_active).unwrap_or(0);
+                    let et_idx = equipment_tabs.iter().position(|t| t.is_active).unwrap_or(0);
+                    s.main.build_tabs = build_tabs;
+                    s.main.equipment_tabs = equipment_tabs;
+                    s.main.selected_build_tab = if s.main.build_tabs.is_empty() { None } else { Some(bt_idx) };
+                    s.main.selected_equipment_tab = if s.main.equipment_tabs.is_empty() { None } else { Some(et_idx) };
+                    // Generate chat code for the selected build tab
+                    update_build_chat_code_inner(s);
+                    // Trigger Phase 2: resolve the selected build
+                    resolve_selected_build_inner(s);
+                }
+                Err(e) => {
+                    s.main.build_loading = false;
+                    s.main.error = Some(e);
+                }
+            }
+        });
+    });
+}
+
+/// Phase 2: Resolve build from currently selected tabs. Called on tab change or game mode change.
+fn resolve_selected_build(state: &mut AddonState) {
+    resolve_selected_build_inner(state);
+}
+
+fn resolve_selected_build_inner(state: &mut AddonState) {
+    let build_tab = state.main.selected_build_tab
+        .and_then(|i| state.main.build_tabs.get(i))
+        .cloned();
+    let equip_tab = state.main.selected_equipment_tab
+        .and_then(|i| state.main.equipment_tabs.get(i))
+        .cloned();
+
+    let (Some(bt), Some(et)) = (build_tab, equip_tab) else {
+        state.main.build_loading = false;
+        return;
+    };
+
+    let Some(ref key) = state.config.gw2_api_key else { return; };
+    let _ = key; // key not needed for resolve (uses cache)
+
+    state.main.build_loading = true;
+    state.main.error = None;
+    let cache_dir = state.addon_dir.join("cache");
+    let game_mode = state.main.game_mode.clone();
+    let char_name = state.main.selected_character
+        .and_then(|i| state.main.characters.get(i).cloned())
+        .unwrap_or_default();
+    let expected_char = char_name.clone();
+
+    std::thread::spawn(move || {
+        let cache = gw2_api::cache::DataCache::new(&cache_dir);
+        let result = resolve_build(&char_name, &bt.build, &et, &cache, &game_mode);
+
+        // Also calculate stats from the equipment + traits
+        let stats_result = calculate_current_stats(&bt.build, &et, &cache, &game_mode);
+
+        crate::state::with_state(|s| {
+            // Stale-result guard
+            let current_char = s.main.selected_character
+                .and_then(|i| s.main.characters.get(i).cloned());
+            if current_char.as_deref() != Some(&expected_char) {
+                s.main.build_loading = false;
+                return;
+            }
+
             s.main.build_loading = false;
             match result {
                 Ok(build) => {
                     s.main.current_build = Some(build);
-                    s.main.current_stats = None; // S06 will calculate
+                    s.main.current_stats = stats_result.ok();
                 }
                 Err(e) => s.main.error = Some(e),
             }
@@ -505,6 +649,130 @@ fn resolve_build(
         weapons, armor, trinkets: trinkets_vec,
         relic: relic_resolved, rune,
         pvp_amulet,
+    })
+}
+
+/// Calculate the current build's stats using the full stat pipeline.
+fn calculate_current_stats(
+    build: &gw2_api::models::Build,
+    equipment: &gw2_api::models::EquipmentTab,
+    cache: &gw2_api::cache::DataCache,
+    game_mode: &gw2_core::types::GameMode,
+) -> Result<gw2_core::types::StatBlock, String> {
+    use std::collections::HashMap;
+
+    let items_vec: Vec<gw2_api::models::Item> = cache
+        .load("items").map_err(|e| e.to_string())?.unwrap_or_default();
+    let itemstats_vec: Vec<gw2_api::models::ItemStat> = cache
+        .load("itemstats").map_err(|e| e.to_string())?.unwrap_or_default();
+    let traits_vec: Vec<gw2_api::models::Trait> = cache
+        .load("traits").map_err(|e| e.to_string())?.unwrap_or_default();
+    let pvp_amulets_vec: Vec<gw2_api::models::PvpAmulet> = cache
+        .load("pvp_amulets").ok().flatten().unwrap_or_default();
+
+    let items_cache: HashMap<u32, gw2_api::models::Item> =
+        items_vec.into_iter().map(|i| (i.id, i)).collect();
+    let itemstats_cache: HashMap<u32, gw2_api::models::ItemStat> =
+        itemstats_vec.into_iter().map(|i| (i.id, i)).collect();
+    let traits_cache: HashMap<u32, gw2_api::models::Trait> =
+        traits_vec.into_iter().map(|t| (t.id, t)).collect();
+
+    let profession = build.profession.clone().unwrap_or_default();
+
+    // PvP mode: stats come from amulet
+    if *game_mode == gw2_core::types::GameMode::PvP {
+        if let Some(ref pvp) = equipment.equipment_pvp {
+            if let Some(amulet_id) = pvp.amulet {
+                if let Some(amulet) = pvp_amulets_vec.iter().find(|a| a.id == amulet_id) {
+                    let opt_stats = gw2_optimizer::stats::calculate_pvp_stats(&amulet.attributes);
+                    let derived = gw2_optimizer::stats::compute_derived(&opt_stats, &profession);
+                    return Ok(gw2_core::types::StatBlock {
+                        power: opt_stats.power.round() as i32,
+                        precision: opt_stats.precision.round() as i32,
+                        toughness: opt_stats.toughness.round() as i32,
+                        vitality: opt_stats.vitality.round() as i32,
+                        condition_damage: opt_stats.condition_damage.round() as i32,
+                        expertise: opt_stats.expertise.round() as i32,
+                        concentration: opt_stats.concentration.round() as i32,
+                        ferocity: opt_stats.ferocity.round() as i32,
+                        healing_power: opt_stats.healing_power.round() as i32,
+                        crit_chance: derived.crit_chance,
+                        crit_damage: derived.crit_damage,
+                        health: derived.health.round() as i32,
+                        armor: derived.armor.round() as i32,
+                    });
+                }
+            }
+        }
+    }
+
+    // PvE/WvW: collect equipped trait IDs (major + minor)
+    let specs_vec: Vec<gw2_api::models::Specialization> = cache
+        .load("specializations").ok().flatten().unwrap_or_default();
+
+    let mut equipped_trait_ids = Vec::new();
+    for spec_sel in &build.specializations {
+        for &trait_id in &spec_sel.traits {
+            if let Some(tid) = trait_id {
+                equipped_trait_ids.push(tid);
+            }
+        }
+        // Also include minor traits from the spec
+        if let Some(spec_id) = spec_sel.id {
+            if let Some(spec) = specs_vec.iter().find(|s| s.id == spec_id) {
+                equipped_trait_ids.extend(&spec.minor_traits);
+            }
+        }
+    }
+
+    // Find rune ID (first upgrade component that's a rune)
+    let rune_id = equipment.equipment.iter()
+        .flat_map(|p| p.upgrades.iter())
+        .find_map(|&uid| {
+            items_cache.get(&uid).and_then(|item| {
+                item.details.as_ref().and_then(|d| {
+                    if d.detail_type.as_deref() == Some("Rune") { Some(uid) } else { None }
+                })
+            })
+        });
+
+    // Find sigil IDs
+    let sigil_ids: Vec<u32> = equipment.equipment.iter()
+        .flat_map(|p| p.upgrades.iter())
+        .filter_map(|&uid| {
+            items_cache.get(&uid).and_then(|item| {
+                item.details.as_ref().and_then(|d| {
+                    if d.detail_type.as_deref() == Some("Sigil") { Some(uid) } else { None }
+                })
+            })
+        })
+        .collect();
+
+    let (opt_stats, derived) = gw2_optimizer::stats::calculate_full_stats(
+        equipment,
+        &equipped_trait_ids,
+        rune_id,
+        &sigil_ids,
+        &profession,
+        &items_cache,
+        &itemstats_cache,
+        &traits_cache,
+    );
+
+    Ok(gw2_core::types::StatBlock {
+        power: opt_stats.power.round() as i32,
+        precision: opt_stats.precision.round() as i32,
+        toughness: opt_stats.toughness.round() as i32,
+        vitality: opt_stats.vitality.round() as i32,
+        condition_damage: opt_stats.condition_damage.round() as i32,
+        expertise: opt_stats.expertise.round() as i32,
+        concentration: opt_stats.concentration.round() as i32,
+        ferocity: opt_stats.ferocity.round() as i32,
+        healing_power: opt_stats.healing_power.round() as i32,
+        crit_chance: derived.crit_chance,
+        crit_damage: derived.crit_damage,
+        health: derived.health.round() as i32,
+        armor: derived.armor.round() as i32,
     })
 }
 
@@ -660,6 +928,147 @@ fn resolve_pvp_amulet(
             stats: a.attributes.iter().map(|(k, v)| (k.clone(), *v)).collect(),
         }
     })
+}
+
+/// Update build chat code from currently selected build tab.
+fn update_build_chat_code(state: &mut AddonState) {
+    update_build_chat_code_inner(state);
+}
+
+fn update_build_chat_code_inner(state: &mut AddonState) {
+    let build_tab = state.main.selected_build_tab
+        .and_then(|i| state.main.build_tabs.get(i));
+    let game_db = state.main.game_db.as_ref();
+
+    if let (Some(bt), Some(db)) = (build_tab, game_db) {
+        state.main.build_chat_code = generate_build_chat_code(&bt.build, db);
+    } else {
+        state.main.build_chat_code = None;
+    }
+}
+
+/// Generate GW2 build template chat code from a Build.
+/// Format: 0x0D + profession_code(1) + 3x(spec_id(1) + trait_bits(1)) + 10x skill_palette(2 LE)
+/// + 16 bytes profession-specific + base64 → [&...]
+fn generate_build_chat_code(
+    build: &gw2_api::models::Build,
+    db: &gw2_optimizer::gamedb::GameDb,
+) -> Option<String> {
+    let profession_name = build.profession.as_deref()?;
+    let profession = db.profession(profession_name)?;
+    let profession_code = profession.code? as u8;
+
+    let mut buf: Vec<u8> = Vec::with_capacity(44);
+    buf.push(0x0D); // chat code type: build template
+    buf.push(profession_code);
+
+    // 3 specialization slots: spec_id(1 byte) + trait_choices(1 byte)
+    for i in 0..3 {
+        if let Some(sel) = build.specializations.get(i) {
+            if let Some(spec_id) = sel.id {
+                buf.push(spec_id as u8);
+
+                // Encode trait choices as 2-bit positions packed into 1 byte
+                // Bits: 00CCBBAA where AA = col0, BB = col1, CC = col2
+                let spec = db.spec(spec_id);
+                let mut trait_byte: u8 = 0;
+                for (col, trait_id) in sel.traits.iter().enumerate() {
+                    if col >= 3 { break; }
+                    if let Some(tid) = trait_id {
+                        // Find position of this trait in the column (0=top, 1=mid, 2=bot)
+                        if let Some(spec_data) = spec {
+                            let col_start = col * 3;
+                            let position = spec_data.major_traits.iter()
+                                .skip(col_start).take(3)
+                                .position(|&mt| mt == *tid);
+                            if let Some(pos) = position {
+                                trait_byte |= ((pos as u8 + 1) & 0x03) << (col * 2);
+                            }
+                        }
+                    }
+                }
+                buf.push(trait_byte);
+            } else {
+                buf.push(0); // no spec
+                buf.push(0);
+            }
+        } else {
+            buf.push(0);
+            buf.push(0);
+        }
+    }
+
+    // 5 terrestrial skills as palette IDs (u16 LE): heal, util1, util2, util3, elite
+    // Interleaved with 5 aquatic skills
+    let terrestrial_skills = build.skills.as_ref().map(|sk| {
+        let mut ids = vec![sk.heal.unwrap_or(0)];
+        for u in &sk.utilities {
+            ids.push(u.unwrap_or(0));
+        }
+        while ids.len() < 4 { ids.push(0); }
+        ids.push(sk.elite.unwrap_or(0));
+        ids
+    }).unwrap_or_else(|| vec![0; 5]);
+
+    let aquatic_skills = build.aquatic_skills.as_ref().map(|sk| {
+        let mut ids = vec![sk.heal.unwrap_or(0)];
+        for u in &sk.utilities {
+            ids.push(u.unwrap_or(0));
+        }
+        while ids.len() < 4 { ids.push(0); }
+        ids.push(sk.elite.unwrap_or(0));
+        ids
+    }).unwrap_or_else(|| vec![0; 5]);
+
+    // Interleave: terr_heal, aqua_heal, terr_util1, aqua_util1, ..., terr_elite, aqua_elite
+    for i in 0..5 {
+        let t_skill = terrestrial_skills.get(i).copied().unwrap_or(0);
+        let t_palette = db.skill_to_palette.get(&t_skill).copied().unwrap_or(0);
+        buf.extend_from_slice(&(t_palette as u16).to_le_bytes());
+
+        let a_skill = aquatic_skills.get(i).copied().unwrap_or(0);
+        let a_palette = db.skill_to_palette.get(&a_skill).copied().unwrap_or(0);
+        buf.extend_from_slice(&(a_palette as u16).to_le_bytes());
+    }
+
+    // 16 bytes profession-specific data
+    match profession_name {
+        "Ranger" => {
+            // Ranger pets: 4 bytes (terrestrial1, terrestrial2, aquatic1, aquatic2) + 12 zeros
+            if let Some(ref pets) = build.pets {
+                for pet in pets.terrestrial.iter().take(2) {
+                    buf.push(pet.unwrap_or(0) as u8);
+                }
+                for pet in pets.aquatic.iter().take(2) {
+                    buf.push(pet.unwrap_or(0) as u8);
+                }
+            } else {
+                buf.extend_from_slice(&[0u8; 4]);
+            }
+            buf.extend_from_slice(&[0u8; 12]);
+        }
+        "Revenant" => {
+            // Revenant legends: 4 bytes (legend number parsed from "LegendN" ID) + 12 zeros
+            let legend_to_byte = |legend: &Option<String>| -> u8 {
+                legend.as_deref().and_then(|l| {
+                    l.strip_prefix("Legend").and_then(|n| n.parse::<u8>().ok())
+                }).unwrap_or(0)
+            };
+            let legends = &build.legends;
+            buf.push(legends.first().map(|l| legend_to_byte(l)).unwrap_or(0));
+            buf.push(legends.get(1).map(|l| legend_to_byte(l)).unwrap_or(0));
+            let aquatic_legends = &build.aquatic_legends;
+            buf.push(aquatic_legends.first().map(|l| legend_to_byte(l)).unwrap_or(0));
+            buf.push(aquatic_legends.get(1).map(|l| legend_to_byte(l)).unwrap_or(0));
+            buf.extend_from_slice(&[0u8; 12]);
+        }
+        _ => {
+            buf.extend_from_slice(&[0u8; 16]);
+        }
+    }
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&buf);
+    Some(format!("[&{}]", encoded))
 }
 
 /// Load GameDb once on main screen entry (S11-T06)
@@ -845,19 +1254,64 @@ fn candidate_to_suggestion(
         armor: candidate.derived.armor.round() as i32,
     });
 
+    // Compute combat metrics for all 3 buff profiles
+    let profiles = gw2_optimizer::combat::default_buff_profiles();
+    let profession_name = db.professions.values().next().map(|p| p.name.as_str()).unwrap_or("Warrior");
+    // Try to determine profession from elite spec
+    let prof_name = if let Some(elite_id) = candidate.elite_spec {
+        db.spec(elite_id)
+            .map(|s| s.profession.as_str())
+            .unwrap_or(profession_name)
+    } else if let Some(&core_id) = candidate.core_specs.first() {
+        db.spec(core_id)
+            .map(|s| s.profession.as_str())
+            .unwrap_or(profession_name)
+    } else {
+        profession_name
+    };
+
+    let compute_metrics = |profile: &gw2_optimizer::combat::BuffProfile| -> gw2_core::types::CombatMetrics {
+        let perf = gw2_optimizer::combat::calculate_combat_performance(
+            &candidate.stats, &candidate.derived, &candidate.modifiers, profile, prof_name,
+        );
+        gw2_core::types::CombatMetrics {
+            effective_power: perf.effective_power.round() as i32,
+            strike_dps_index: perf.strike_dps_index.round() as i32,
+            condition_dps_index: perf.condition_dps_index.round() as i32,
+            total_dps_index: perf.total_dps_index.round() as i32,
+            healing_index: perf.healing_power_index.round() as i32,
+            boon_duration_pct: perf.boon_duration_pct,
+            condi_duration_pct: perf.condi_duration_pct,
+            effective_health: perf.effective_health.round() as i32,
+            damage_reduction_pct: perf.damage_reduction_pct,
+            bleeding_tick: perf.condition_ticks.bleeding.round() as i32,
+            burning_tick: perf.condition_ticks.burning.round() as i32,
+            poison_tick: perf.condition_ticks.poison.round() as i32,
+            torment_tick: perf.condition_ticks.torment.round() as i32,
+            confusion_tick: perf.condition_ticks.confusion.round() as i32,
+        }
+    };
+
+    let combat_solo = profiles.get(0).map(&compute_metrics);
+    let combat_party = profiles.get(1).map(&compute_metrics);
+    let combat_squad = profiles.get(2).map(&compute_metrics);
+
     BuildSuggestion {
         label: format!("Score: {:.2}", candidate.score),
         build_summary: format!("Gear: {}", candidate.gear.stat_prefix_name),
         stat_prefix: candidate.gear.stat_prefix_name.clone(),
         specializations,
-        weapons: Vec::new(), // Not determined by optimizer yet
-        skills: Vec::new(),  // Not determined by optimizer yet
-        rune: String::new(), // Not determined by optimizer yet
-        sigils: Vec::new(),  // Not determined by optimizer yet
-        relic: String::new(), // Not determined by optimizer yet
-        explanation: String::new(), // LLM will fill this in S08
+        weapons: Vec::new(),
+        skills: Vec::new(),
+        rune: String::new(),
+        sigils: Vec::new(),
+        relic: String::new(),
+        explanation: String::new(),
         changes_made: Vec::new(),
         estimated_stats,
+        combat_solo,
+        combat_party,
+        combat_squad,
     }
 }
 
@@ -1253,6 +1707,9 @@ fn saved_to_suggestion(
         explanation: saved.explanation.clone(),
         changes_made: saved.changes_made.clone(),
         estimated_stats: saved.estimated_stats.clone(),
+        combat_solo: None,
+        combat_party: None,
+        combat_squad: None,
     }
 }
 

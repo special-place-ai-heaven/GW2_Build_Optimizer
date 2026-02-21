@@ -31,6 +31,12 @@ pub struct MainState {
     pub current_stats: Option<StatBlock>,
     pub build_loading: bool,
     pub error: Option<String>,
+    // Template selection
+    pub build_tabs: Vec<gw2_api::models::BuildTab>,
+    pub equipment_tabs: Vec<gw2_api::models::EquipmentTab>,
+    pub selected_build_tab: Option<usize>,
+    pub selected_equipment_tab: Option<usize>,
+    pub build_chat_code: Option<String>,
     // Left menu
     pub active_tab: MainTab,
     // Comparison view

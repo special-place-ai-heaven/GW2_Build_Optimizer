@@ -154,6 +154,28 @@ impl StatBlock {
     }
 }
 
+/// Combat performance metrics for UI display.
+/// Calculated from the optimizer's CombatPerformance struct,
+/// rounded to display-friendly values.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CombatMetrics {
+    pub effective_power: i32,
+    pub strike_dps_index: i32,
+    pub condition_dps_index: i32,
+    pub total_dps_index: i32,
+    pub healing_index: i32,
+    pub boon_duration_pct: f64,
+    pub condi_duration_pct: f64,
+    pub effective_health: i32,
+    pub damage_reduction_pct: f64,
+    // Condition breakdown
+    pub bleeding_tick: i32,
+    pub burning_tick: i32,
+    pub poison_tick: i32,
+    pub torment_tick: i32,
+    pub confusion_tick: i32,
+}
+
 /// A saved optimizer build for persistence (Save/Load tab).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedBuild {
