@@ -70,16 +70,16 @@ pub fn render_comparison(
     // Suggestion tabs
     let tab_count = comparison.suggestions.len();
     if tab_count > 1 {
-        ui.text("Suggestions:");
-        ui.same_line();
         for (i, suggestion) in comparison.suggestions.iter().enumerate() {
             let selected = comparison.selected_suggestion == i;
             let label = if suggestion.label.is_empty() {
                 format!("Build {}", i + 1)
+            } else if suggestion.label.starts_with("Score:") {
+                format!("Option {} ({})", i + 1, suggestion.stat_prefix)
             } else {
                 suggestion.label.clone()
             };
-            if Selectable::new(&format!("[{}]", label))
+            if Selectable::new(&format!("[{}]##sug_{}", label, i))
                 .selected(selected)
                 .size([0.0, 0.0])
                 .build(ui)
@@ -137,10 +137,15 @@ pub fn render_comparison(
 fn render_build_side_by_side(ui: &Ui, current: &ResolvedBuild, suggestion: &BuildSuggestion) {
     let avail = ui.content_region_avail();
     let col_width = (avail[0] - 20.0) / 2.0;
+    // Estimate height based on content (specializations + skills + weapons + gear lines)
+    let left_lines = current.specializations.len() * 2 + 4 + current.weapons.len() * 2 + 3;
+    let right_lines = suggestion.specializations.len() * 2 + suggestion.skills.len() + suggestion.weapons.len() + 4;
+    let max_lines = left_lines.max(right_lines).max(10);
+    let height = (max_lines as f32 * 18.0).min(400.0).max(200.0);
 
     // Left column: Current Build
     ChildWindow::new("##current_col")
-        .size([col_width, 300.0])
+        .size([col_width, height])
         .build(ui, || {
             ui.text_colored([0.6, 0.8, 1.0, 1.0], "CURRENT BUILD");
             ui.separator();
@@ -155,7 +160,7 @@ fn render_build_side_by_side(ui: &Ui, current: &ResolvedBuild, suggestion: &Buil
 
     // Right column: Suggested Build
     ChildWindow::new("##suggested_col")
-        .size([col_width, 300.0])
+        .size([col_width, height])
         .build(ui, || {
             ui.text_colored([0.3, 1.0, 0.3, 1.0], "OPTIMIZED BUILD");
             ui.separator();
@@ -219,7 +224,16 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
 
     // ─── Condition Tick Breakdown ───
     if let Some(sug) = suggestion.combat_solo.as_ref() {
-        if sug.bleeding_tick > 0 || sug.burning_tick > 0 || sug.poison_tick > 0 {
+        let ticks = [
+            ("Bleeding", sug.bleeding_tick, "per stack/sec"),
+            ("Burning", sug.burning_tick, "per stack/sec"),
+            ("Poison", sug.poison_tick, "per stack/sec"),
+            ("Torment", sug.torment_tick, "stationary"),
+            ("Confusion", sug.confusion_tick, "on skill use"),
+        ];
+        let ticks_to_show: Vec<_> = ticks.iter().filter(|(_, val, _)| *val > 0).collect();
+
+        if !ticks_to_show.is_empty() {
             ui.text_colored([0.9, 0.6, 0.2, 1.0], "Condition Ticks (per tick, Solo)");
             ui.columns(3, "##condi_ticks", true);
 
@@ -231,23 +245,13 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
             ui.next_column();
             ui.separator();
 
-            let ticks = [
-                ("Bleeding", sug.bleeding_tick, "per stack/sec"),
-                ("Burning", sug.burning_tick, "per stack/sec"),
-                ("Poison", sug.poison_tick, "per stack/sec"),
-                ("Torment", sug.torment_tick, "stationary"),
-                ("Confusion", sug.confusion_tick, "on skill use"),
-            ];
-
-            for (name, val, info) in &ticks {
-                if *val > 0 {
-                    ui.text(*name);
-                    ui.next_column();
-                    ui.text(&format!("{}", val));
-                    ui.next_column();
-                    ui.text_colored([0.5, 0.5, 0.5, 1.0], *info);
-                    ui.next_column();
-                }
+            for (name, val, info) in &ticks_to_show {
+                ui.text(*name);
+                ui.next_column();
+                ui.text(&format!("{}", val));
+                ui.next_column();
+                ui.text_colored([0.5, 0.5, 0.5, 1.0], *info);
+                ui.next_column();
             }
 
             ui.columns(1, "##condi_ticks_end", false);

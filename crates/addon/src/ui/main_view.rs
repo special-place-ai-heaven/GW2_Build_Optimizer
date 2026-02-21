@@ -17,6 +17,11 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         load_game_db(state);
     }
 
+    // Loading banner (GameDb)
+    if state.main.game_db_loading {
+        ui.text_colored([1.0, 1.0, 0.0, 1.0], "Loading game data...");
+    }
+
     // Error bar at top (dismissible)
     if let Some(ref err) = state.main.error.clone() {
         ui.text_colored([1.0, 0.3, 0.0, 1.0], &format!("[!] {}", err));
@@ -25,6 +30,30 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
             state.main.error = None;
         }
         ui.separator();
+    }
+
+    // Auto-dismiss save status after ~180 frames (~3s at 60fps)
+    if state.main.save_status.is_some() {
+        state.main.save_status_frames += 1;
+        if state.main.save_status_frames > 180 {
+            state.main.save_status = None;
+            state.main.save_status_frames = 0;
+        }
+    }
+
+    // Chat timeout recovery: if waiting > 1800 frames (~30s), unblock
+    if state.main.chat.waiting {
+        state.main.chat_wait_frames += 1;
+        if state.main.chat_wait_frames > 1800 {
+            state.main.chat.waiting = false;
+            state.main.chat_wait_frames = 0;
+            crate::ui::chat_bar::add_ai_response(
+                &mut state.main.chat,
+                "Request timed out. Please try again.".into(),
+            );
+        }
+    } else {
+        state.main.chat_wait_frames = 0;
     }
 
     // Left menu panel (fixed width)
@@ -173,15 +202,30 @@ fn render_left_menu(ui: &Ui, state: &mut AddonState) {
         }
     }
 
+    // Build resolution indicator
+    if state.main.build_loading {
+        ui.spacing();
+        ui.text_colored([1.0, 1.0, 0.0, 1.0], "Resolving build...");
+    }
+
     // Build chat code display with Copy button
     if let Some(ref code) = state.main.build_chat_code.clone() {
         ui.spacing();
         ui.text("Chat Code:");
-        ui.text_wrapped(code);
         ui.same_line();
-        if ui.small_button("Copy##chatcode") {
+        if state.main.copy_feedback_frames > 0 {
+            ui.text_colored([0.0, 1.0, 0.0, 1.0], "Copied!");
+            state.main.copy_feedback_frames -= 1;
+        } else if ui.small_button("Copy##chatcode") {
             ui.set_clipboard_text(code);
+            state.main.copy_feedback_frames = 120; // ~2 seconds
         }
+        // Show code below (read-only input for easy select-all)
+        ui.set_next_item_width(-1.0);
+        let mut code_buf = code.clone();
+        ui.input_text("##chat_code_display", &mut code_buf)
+            .read_only(true)
+            .build();
     }
 
     ui.spacing();
@@ -221,7 +265,11 @@ fn render_left_menu(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
     ui.separator();
     ui.spacing();
-    if ui.button_with_size("Refresh Data", [-1.0, 0.0]) {
+    if state.main.characters_loading {
+        let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+        ui.button_with_size("Refreshing...", [-1.0, 0.0]);
+        style.pop();
+    } else if ui.button_with_size("Refresh Data", [-1.0, 0.0]) {
         load_characters(state);
     }
 
@@ -254,7 +302,7 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
     ui.text("New Build");
     ui.separator();
 
-    // Show optimization progress (S11-T05)
+    // Show optimization progress
     if state.main.optimizing {
         ui.text_colored([1.0, 1.0, 0.0, 1.0], &format!("Optimizing: {}", state.main.optimize_stage));
         ui.spacing();
@@ -263,8 +311,18 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
     // Archetype selector
     ui.text("Select build archetype:");
     ui.spacing();
+    let optimizing = state.main.optimizing;
+    let game_db_ready = state.main.game_db.is_some();
     for archetype in &Archetype::ALL {
-        if ui.button_with_size(archetype.label(), [200.0, 0.0]) {
+        let disabled = optimizing || !game_db_ready;
+        if disabled {
+            let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+            ui.button_with_size(archetype.label(), [200.0, 0.0]);
+            style.pop();
+            if ui.is_item_hovered() {
+                ui.tooltip_text(if optimizing { "Optimization in progress..." } else { "Waiting for game data to load..." });
+            }
+        } else if ui.button_with_size(archetype.label(), [200.0, 0.0]) {
             start_optimization(state, archetype.clone(), None);
         }
         ui.spacing();
@@ -283,11 +341,18 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
             ) {
                 state.main.comparison.selected_suggestion = new_idx;
             }
+        } else {
+            ui.text_colored([1.0, 1.0, 0.0, 1.0], "Waiting for build data to load...");
         }
 
-        // Save Build button (shown when suggestions exist)
+        // Save Build button + Clear Results
         if !state.main.comparison.suggestions.is_empty() {
             render_save_build_ui(ui, state);
+            ui.spacing();
+            if ui.small_button("Clear Results") {
+                state.main.comparison.suggestions.clear();
+                state.main.comparison.error = None;
+            }
         }
     }
 
@@ -301,7 +366,7 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
 
 fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
     if state.main.build_loading {
-        ui.text("Loading build...");
+        ui.text_colored([1.0, 1.0, 0.0, 1.0], "Resolving build from API data...");
         return;
     }
 
@@ -313,7 +378,18 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
         .unwrap_or(Archetype::PowerDPS);
 
     // Check button press in separate scope to avoid borrow conflict
-    let should_optimize = state.main.current_build.is_some() && ui.button_with_size("Improve This Build", [200.0, 30.0]);
+    let improve_disabled = state.main.optimizing || state.main.game_db.is_none();
+    let should_optimize = if improve_disabled {
+        let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+        ui.button_with_size("Improve This Build", [200.0, 30.0]);
+        style.pop();
+        if ui.is_item_hovered() {
+            ui.tooltip_text(if state.main.optimizing { "Optimization in progress..." } else { "Waiting for game data to load..." });
+        }
+        false
+    } else {
+        state.main.current_build.is_some() && ui.button_with_size("Improve This Build", [200.0, 30.0])
+    };
 
     if let Some(ref build) = state.main.current_build {
         let stats = state.main.current_stats.clone();
@@ -354,6 +430,11 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
         }
 
         render_save_build_ui(ui, state);
+        ui.spacing();
+        if ui.small_button("Clear Results##improve") {
+            state.main.comparison.suggestions.clear();
+            state.main.comparison.error = None;
+        }
     }
 
     // Chat bar at bottom
@@ -426,13 +507,24 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     ui.separator();
     ui.spacing();
 
-    // Cache management
-    if ui.button_with_size("Refresh Game Data", [200.0, 0.0]) {
-        nexus::log::log(
-            nexus::log::LogLevel::Info,
-            "GW2 Build Optimizer",
-            "Refreshing game data cache...",
-        );
+    // Cache management — actually re-download game data
+    let refreshing = state.main.game_db_loading;
+    if refreshing {
+        let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+        ui.button_with_size("Refreshing...", [200.0, 0.0]);
+        style.pop();
+    } else if ui.button_with_size("Refresh Game Data", [200.0, 0.0]) {
+        // Clear cache and re-download
+        let cache_dir = state.addon_dir.join("cache");
+        let _ = std::fs::remove_dir_all(&cache_dir);
+        state.config.cache_build_number = None;
+        if let Err(e) = state.config.save(&state.config_path) {
+            nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+        }
+        state.main.game_db = None;
+        // Trigger re-download via setup flow
+        state.setup.download_progress = None;
+        start_game_data_refresh(state);
     }
 
     ui.spacing();
@@ -1094,6 +1186,82 @@ fn generate_build_chat_code(
     Some(format!("[&{}]", encoded))
 }
 
+/// Re-download game data from the GW2 API, then reload GameDb.
+fn start_game_data_refresh(state: &mut AddonState) {
+    state.main.game_db_loading = true;
+    let cache_dir = state.addon_dir.join("cache");
+    let config_path = state.config_path.clone();
+    let token = state.cancel_token.clone();
+
+    std::thread::spawn(move || {
+        if token.is_cancelled() { return; }
+
+        let client = match gw2_api::client::Gw2Client::without_key() {
+            Ok(c) => c,
+            Err(e) => {
+                crate::state::with_state(|s| {
+                    s.main.game_db_loading = false;
+                    s.main.error = Some(format!("Refresh failed: {}", e));
+                });
+                return;
+            }
+        };
+        let cache = gw2_api::cache::DataCache::new(&cache_dir);
+
+        let result = gw2_api::download::download_all(&client, &cache, |progress| {
+            if token.is_cancelled() { return; }
+            crate::state::with_state(|s| {
+                let detail = if let Some(ref d) = progress.detail {
+                    format!("Refreshing: {} ({})", progress.step_name, d)
+                } else {
+                    format!("Refreshing: {}", progress.step_name)
+                };
+                s.main.optimize_stage = detail;
+            });
+        });
+
+        if token.is_cancelled() { return; }
+
+        match result {
+            Ok(build_number) => {
+                // Save new build number
+                crate::state::with_state(|s| {
+                    s.config.cache_build_number = Some(build_number);
+                    if let Err(e) = s.config.save(&config_path) {
+                        nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                    }
+                });
+
+                // Reload GameDb from fresh cache
+                if token.is_cancelled() { return; }
+                let cache2 = gw2_api::cache::DataCache::new(&cache_dir);
+                let db_result = gw2_optimizer::gamedb::GameDb::load(&cache2);
+
+                if token.is_cancelled() { return; }
+
+                crate::state::with_state(|s| {
+                    s.main.game_db_loading = false;
+                    match db_result {
+                        Ok(db) => {
+                            nexus::log::log(nexus::log::LogLevel::Info, "GW2 Build Optimizer", "Game data refreshed successfully");
+                            s.main.game_db = Some(db);
+                        }
+                        Err(e) => {
+                            s.main.error = Some(format!("Failed to reload game data: {}", e));
+                        }
+                    }
+                });
+            }
+            Err(e) => {
+                crate::state::with_state(|s| {
+                    s.main.game_db_loading = false;
+                    s.main.error = Some(format!("Refresh failed: {}", e));
+                });
+            }
+        }
+    });
+}
+
 /// Load GameDb once on main screen entry (S11-T06)
 fn load_game_db(state: &mut AddonState) {
     state.main.game_db_loading = true;
@@ -1609,7 +1777,18 @@ fn render_save_build_ui(ui: &Ui, state: &mut AddonState) {
     ui.same_line();
 
     let can_save = !state.main.save_name_input.trim().is_empty();
-    if ui.button_with_size("Save", [60.0, 0.0]) && can_save {
+    let save_clicked = if can_save {
+        ui.button_with_size("Save", [60.0, 0.0])
+    } else {
+        let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+        ui.button_with_size("Save", [60.0, 0.0]);
+        style.pop();
+        if ui.is_item_hovered() {
+            ui.tooltip_text("Enter a build name first");
+        }
+        false
+    };
+    if save_clicked {
         let idx = state.main.comparison.selected_suggestion
             .min(state.main.comparison.suggestions.len().saturating_sub(1));
         let suggestion = &state.main.comparison.suggestions[idx];
@@ -1628,11 +1807,13 @@ fn render_save_build_ui(ui: &Ui, state: &mut AddonState) {
         match storage.save(&saved) {
             Ok(()) => {
                 state.main.save_status = Some(format!("Saved '{}'", saved.name));
+                state.main.save_status_frames = 0;
                 state.main.save_name_input.clear();
                 state.main.saved_builds_loaded = false; // force refresh
             }
             Err(e) => {
                 state.main.save_status = Some(format!("Save failed: {}", e));
+                state.main.save_status_frames = 0;
             }
         }
     }
@@ -1668,31 +1849,44 @@ fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
 
     // Snapshot for iteration (avoids borrow conflict with mut state)
-    let builds_snapshot: Vec<(String, String, String, String)> = state.main.saved_builds.iter()
+    let builds_snapshot: Vec<(String, String, String, String, String)> = state.main.saved_builds.iter()
         .map(|b| {
             let time = format_timestamp(b.timestamp);
-            (b.name.clone(), b.character_name.clone(), b.stat_prefix.clone(), time)
+            let mode = b.game_mode.label().to_string();
+            (b.name.clone(), b.character_name.clone(), b.stat_prefix.clone(), time, mode)
         })
         .collect();
 
     let mut load_idx: Option<usize> = None;
-    let mut delete_idx: Option<usize> = None;
+    let mut request_delete: Option<usize> = None;
 
-    for (i, (name, character, prefix, time)) in builds_snapshot.iter().enumerate() {
+    for (i, (name, character, prefix, time, mode)) in builds_snapshot.iter().enumerate() {
+        // Name + action buttons on one line
         ui.text_colored([0.6, 0.8, 1.0, 1.0], name);
-        ui.same_line();
-        ui.text_colored([0.7, 0.7, 0.7, 1.0], &format!("({})", character));
-
-        ui.text(&format!("  {} | {}", prefix, time));
-
         ui.same_line();
         if ui.button_with_size(&format!("Load##load_{}", i), [50.0, 0.0]) {
             load_idx = Some(i);
         }
         ui.same_line();
-        if ui.button_with_size(&format!("Delete##del_{}", i), [50.0, 0.0]) {
-            delete_idx = Some(i);
+
+        // Delete with confirmation
+        if state.main.confirm_delete == Some(i) {
+            ui.text_colored([1.0, 0.3, 0.0, 1.0], "Delete?");
+            ui.same_line();
+            if ui.small_button(&format!("Yes##confirm_del_{}", i)) {
+                request_delete = Some(i);
+                state.main.confirm_delete = None;
+            }
+            ui.same_line();
+            if ui.small_button(&format!("No##cancel_del_{}", i)) {
+                state.main.confirm_delete = None;
+            }
+        } else if ui.button_with_size(&format!("Delete##del_{}", i), [50.0, 0.0]) {
+            state.main.confirm_delete = Some(i);
         }
+
+        // Details on second line
+        ui.text_colored([0.7, 0.7, 0.7, 1.0], &format!("  {} | {} | {} | {}", character, mode, prefix, time));
 
         ui.spacing();
         ui.separator();
@@ -1708,12 +1902,23 @@ fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
         state.main.active_tab = MainTab::NewBuild;
     }
 
-    // Handle delete
-    if let Some(idx) = delete_idx {
+    // Handle delete (confirmed)
+    if let Some(idx) = request_delete {
         let name = state.main.saved_builds[idx].name.clone();
         let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
-        let _ = storage.delete(&name);
-        state.main.saved_builds.remove(idx);
+        match storage.delete(&name) {
+            Ok(()) => {
+                state.main.saved_builds.remove(idx);
+                // Reset confirmation index if it was beyond the removed item
+                if let Some(ref mut ci) = state.main.confirm_delete {
+                    if *ci > idx { *ci -= 1; }
+                    else if *ci == idx { state.main.confirm_delete = None; }
+                }
+            }
+            Err(e) => {
+                state.main.error = Some(format!("Delete failed: {}", e));
+            }
+        }
     }
 }
 
@@ -1773,12 +1978,14 @@ fn saved_to_suggestion(
     }
 }
 
-/// Format a Unix timestamp as a readable date string.
+/// Format a Unix timestamp as a readable date+time string (YYYY-MM-DD HH:MM).
 fn format_timestamp(timestamp: u64) -> String {
-    // Simple date formatting without chrono dependency
     let secs_per_day: u64 = 86400;
+    let day_secs = timestamp % secs_per_day;
+    let hours = day_secs / 3600;
+    let minutes = (day_secs % 3600) / 60;
     let days = timestamp / secs_per_day;
-    // Days since epoch to Y/M/D (simplified)
+    // Days since epoch to Y/M/D
     let mut y = 1970u64;
     let mut remaining_days = days;
     loop {
@@ -1793,7 +2000,7 @@ fn format_timestamp(timestamp: u64) -> String {
     let days_in_months: [u64; 12] = [
         31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
     ];
-    let mut m = 11; // default to December if loop doesn't break
+    let mut m = 11;
     for (i, &dim) in days_in_months.iter().enumerate() {
         if remaining_days < dim {
             m = i;
@@ -1801,5 +2008,5 @@ fn format_timestamp(timestamp: u64) -> String {
         }
         remaining_days -= dim;
     }
-    format!("{:04}-{:02}-{:02}", y, m + 1, remaining_days + 1)
+    format!("{:04}-{:02}-{:02} {:02}:{:02}", y, m + 1, remaining_days + 1, hours, minutes)
 }

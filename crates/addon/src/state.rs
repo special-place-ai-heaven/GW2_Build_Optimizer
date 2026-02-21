@@ -85,6 +85,15 @@ pub struct MainState {
     pub save_status: Option<String>,
     // Settings
     pub confirm_reset: bool,
+    // UX feedback
+    /// Frame counter for auto-dismissing save status messages (~180 frames ≈ 3s at 60fps).
+    pub save_status_frames: u32,
+    /// Index of the saved build pending delete confirmation (None = no dialog).
+    pub confirm_delete: Option<usize>,
+    /// Frame counter while chat is in "waiting" state; used for timeout recovery.
+    pub chat_wait_frames: u32,
+    /// Frame counter for "Copied!" tooltip feedback.
+    pub copy_feedback_frames: u32,
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]
