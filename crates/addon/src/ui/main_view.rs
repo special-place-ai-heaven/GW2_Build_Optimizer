@@ -832,34 +832,10 @@ fn calculate_current_stats(
                     };
                     // PvP: no trait/item modifiers, compute with default modifiers
                     let modifiers = gw2_optimizer::combat::DamageModifiers::default();
-                    let profiles = gw2_optimizer::combat::default_buff_profiles();
-                    let perf_to_metrics = |profile: &gw2_optimizer::combat::BuffProfile| -> gw2_core::types::CombatMetrics {
-                        let perf = gw2_optimizer::combat::calculate_combat_performance(
-                            &opt_stats, &derived, &modifiers, profile, &profession,
-                        );
-                        gw2_core::types::CombatMetrics {
-                            effective_power: perf.effective_power.round() as i32,
-                            strike_dps_index: perf.strike_dps_index.round() as i32,
-                            condition_dps_index: perf.condition_dps_index.round() as i32,
-                            total_dps_index: perf.total_dps_index.round() as i32,
-                            healing_index: perf.healing_power_index.round() as i32,
-                            crit_chance: perf.crit_chance,
-                            boon_duration_pct: perf.boon_duration_pct,
-                            condi_duration_pct: perf.condi_duration_pct,
-                            effective_health: perf.effective_health.round() as i32,
-                            damage_reduction_pct: perf.damage_reduction_pct,
-                            bleeding_tick: perf.condition_ticks.bleeding.round() as i32,
-                            burning_tick: perf.condition_ticks.burning.round() as i32,
-                            poison_tick: perf.condition_ticks.poison.round() as i32,
-                            torment_tick: perf.condition_ticks.torment.round() as i32,
-                            confusion_tick: perf.condition_ticks.confusion.round() as i32,
-                        }
-                    };
-                    return Ok((stats,
-                        profiles.get(0).map(&perf_to_metrics),
-                        profiles.get(1).map(&perf_to_metrics),
-                        profiles.get(2).map(&perf_to_metrics),
-                    ));
+                    let (solo, party, squad) = compute_3tier_combat(
+                        &opt_stats, &derived, &modifiers, &profession,
+                    );
+                    return Ok((stats, solo, party, squad));
                 }
             }
         }
@@ -932,32 +908,9 @@ fn calculate_current_stats(
     );
 
     // Compute 3-tier combat metrics for current build
-    let profiles = gw2_optimizer::combat::default_buff_profiles();
-    let perf_to_metrics = |profile: &gw2_optimizer::combat::BuffProfile| -> gw2_core::types::CombatMetrics {
-        let perf = gw2_optimizer::combat::calculate_combat_performance(
-            &opt_stats, &derived, &modifiers, profile, &profession,
-        );
-        gw2_core::types::CombatMetrics {
-            effective_power: perf.effective_power.round() as i32,
-            strike_dps_index: perf.strike_dps_index.round() as i32,
-            condition_dps_index: perf.condition_dps_index.round() as i32,
-            total_dps_index: perf.total_dps_index.round() as i32,
-            healing_index: perf.healing_power_index.round() as i32,
-            crit_chance: perf.crit_chance,
-            boon_duration_pct: perf.boon_duration_pct,
-            condi_duration_pct: perf.condi_duration_pct,
-            effective_health: perf.effective_health.round() as i32,
-            damage_reduction_pct: perf.damage_reduction_pct,
-            bleeding_tick: perf.condition_ticks.bleeding.round() as i32,
-            burning_tick: perf.condition_ticks.burning.round() as i32,
-            poison_tick: perf.condition_ticks.poison.round() as i32,
-            torment_tick: perf.condition_ticks.torment.round() as i32,
-            confusion_tick: perf.condition_ticks.confusion.round() as i32,
-        }
-    };
-    let combat_solo = profiles.get(0).map(&perf_to_metrics);
-    let combat_party = profiles.get(1).map(&perf_to_metrics);
-    let combat_squad = profiles.get(2).map(&perf_to_metrics);
+    let (combat_solo, combat_party, combat_squad) = compute_3tier_combat(
+        &opt_stats, &derived, &modifiers, &profession,
+    );
 
     Ok((gw2_core::types::StatBlock {
         power: opt_stats.power.round() as i32,
@@ -1509,6 +1462,44 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
     });
 }
 
+/// Convert CombatPerformance to the display-friendly CombatMetrics bridge type.
+fn perf_to_combat_metrics(perf: &gw2_optimizer::combat::CombatPerformance) -> gw2_core::types::CombatMetrics {
+    gw2_core::types::CombatMetrics {
+        effective_power: perf.effective_power.round() as i32,
+        strike_dps_index: perf.strike_dps_index.round() as i32,
+        condition_dps_index: perf.condition_dps_index.round() as i32,
+        total_dps_index: perf.total_dps_index.round() as i32,
+        healing_index: perf.healing_power_index.round() as i32,
+        crit_chance: perf.crit_chance,
+        boon_duration_pct: perf.boon_duration_pct,
+        condi_duration_pct: perf.condi_duration_pct,
+        effective_health: perf.effective_health.round() as i32,
+        damage_reduction_pct: perf.damage_reduction_pct,
+        bleeding_tick: perf.condition_ticks.bleeding.round() as i32,
+        burning_tick: perf.condition_ticks.burning.round() as i32,
+        poison_tick: perf.condition_ticks.poison.round() as i32,
+        torment_tick: perf.condition_ticks.torment.round() as i32,
+        confusion_tick: perf.condition_ticks.confusion.round() as i32,
+    }
+}
+
+/// Compute 3-tier combat metrics (Solo, Party, Full Squad) from stats + modifiers.
+fn compute_3tier_combat(
+    stats: &gw2_optimizer::stats::StatBlock,
+    derived: &gw2_optimizer::stats::DerivedStats,
+    modifiers: &gw2_optimizer::combat::DamageModifiers,
+    profession: &str,
+) -> (Option<gw2_core::types::CombatMetrics>, Option<gw2_core::types::CombatMetrics>, Option<gw2_core::types::CombatMetrics>) {
+    let profiles = gw2_optimizer::combat::default_buff_profiles();
+    let compute = |profile: &gw2_optimizer::combat::BuffProfile| -> gw2_core::types::CombatMetrics {
+        let perf = gw2_optimizer::combat::calculate_combat_performance(
+            stats, derived, modifiers, profile, profession,
+        );
+        perf_to_combat_metrics(&perf)
+    };
+    (profiles.get(0).map(&compute), profiles.get(1).map(&compute), profiles.get(2).map(&compute))
+}
+
 /// Convert BuildCandidate to BuildSuggestion for display (S11-T04)
 fn candidate_to_suggestion(
     candidate: &gw2_optimizer::engine::BuildCandidate,
@@ -1555,7 +1546,6 @@ fn candidate_to_suggestion(
     });
 
     // Compute combat metrics for all 3 buff profiles
-    let profiles = gw2_optimizer::combat::default_buff_profiles();
     let profession_name = db.professions.values().next().map(|p| p.name.as_str()).unwrap_or("Warrior");
     // Try to determine profession from elite spec
     let prof_name = if let Some(elite_id) = candidate.elite_spec {
@@ -1570,32 +1560,9 @@ fn candidate_to_suggestion(
         profession_name
     };
 
-    let compute_metrics = |profile: &gw2_optimizer::combat::BuffProfile| -> gw2_core::types::CombatMetrics {
-        let perf = gw2_optimizer::combat::calculate_combat_performance(
-            &candidate.stats, &candidate.derived, &candidate.modifiers, profile, prof_name,
-        );
-        gw2_core::types::CombatMetrics {
-            effective_power: perf.effective_power.round() as i32,
-            strike_dps_index: perf.strike_dps_index.round() as i32,
-            condition_dps_index: perf.condition_dps_index.round() as i32,
-            total_dps_index: perf.total_dps_index.round() as i32,
-            healing_index: perf.healing_power_index.round() as i32,
-            crit_chance: perf.crit_chance,
-            boon_duration_pct: perf.boon_duration_pct,
-            condi_duration_pct: perf.condi_duration_pct,
-            effective_health: perf.effective_health.round() as i32,
-            damage_reduction_pct: perf.damage_reduction_pct,
-            bleeding_tick: perf.condition_ticks.bleeding.round() as i32,
-            burning_tick: perf.condition_ticks.burning.round() as i32,
-            poison_tick: perf.condition_ticks.poison.round() as i32,
-            torment_tick: perf.condition_ticks.torment.round() as i32,
-            confusion_tick: perf.condition_ticks.confusion.round() as i32,
-        }
-    };
-
-    let combat_solo = profiles.get(0).map(&compute_metrics);
-    let combat_party = profiles.get(1).map(&compute_metrics);
-    let combat_squad = profiles.get(2).map(&compute_metrics);
+    let (combat_solo, combat_party, combat_squad) = compute_3tier_combat(
+        &candidate.stats, &candidate.derived, &candidate.modifiers, prof_name,
+    );
 
     BuildSuggestion {
         label: format!("Score: {:.2}", candidate.score),
