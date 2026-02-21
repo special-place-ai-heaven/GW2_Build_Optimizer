@@ -141,20 +141,79 @@ impl RateTracker {
     }
 }
 
+// ─── Gemini API Types ───
+
 #[derive(Serialize)]
 struct GenerateRequest {
     contents: Vec<Content>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<Tool>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct Content {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
     parts: Vec<Part>,
 }
 
-#[derive(Serialize, Deserialize)]
+/// A Part can carry text, a function call (from model), or a function response (from us).
+/// Uses flat optional fields for robust serde with the Gemini API.
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct Part {
-    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+    #[serde(rename = "functionCall", skip_serializing_if = "Option::is_none")]
+    function_call: Option<FunctionCall>,
+    #[serde(rename = "functionResponse", skip_serializing_if = "Option::is_none")]
+    function_response: Option<FunctionResponse>,
 }
+
+impl Part {
+    fn text(s: impl Into<String>) -> Self {
+        Part { text: Some(s.into()), function_call: None, function_response: None }
+    }
+
+    fn function_response(name: impl Into<String>, response: serde_json::Value) -> Self {
+        Part {
+            text: None,
+            function_call: None,
+            function_response: Some(FunctionResponse {
+                name: name.into(),
+                response,
+            }),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FunctionCall {
+    pub name: String,
+    pub args: serde_json::Value,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FunctionResponse {
+    pub name: String,
+    pub response: serde_json::Value,
+}
+
+// ─── Tool Declarations ───
+
+#[derive(Serialize, Debug, Clone)]
+pub struct Tool {
+    #[serde(rename = "functionDeclarations")]
+    pub function_declarations: Vec<FunctionDeclaration>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct FunctionDeclaration {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+// ─── Response Types ───
 
 #[derive(Deserialize)]
 struct GenerateResponse {
@@ -259,30 +318,92 @@ impl GeminiClient {
 
     /// Send a prompt to Gemini (no caching). Checks rate limits first.
     pub fn generate(&self, prompt: &str) -> Result<String, GeminiError> {
+        let request = GenerateRequest {
+            contents: vec![Content {
+                role: Some("user".into()),
+                parts: vec![Part::text(prompt)],
+            }],
+            tools: None,
+        };
+
+        let content = self.send_request(&request)?;
+        content.parts.into_iter()
+            .find_map(|p| p.text)
+            .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()))
+    }
+
+    /// Multi-turn generation with function calling (tool use).
+    /// Gemini can call tools to query game data and calculations.
+    /// Returns the final text response after all tool calls are resolved.
+    pub fn generate_with_tools(
+        &self,
+        prompt: &str,
+        tools: Vec<Tool>,
+        mut execute_tool: impl FnMut(&str, &serde_json::Value) -> serde_json::Value,
+        max_turns: usize,
+    ) -> Result<String, GeminiError> {
+        let mut contents = vec![Content {
+            role: Some("user".into()),
+            parts: vec![Part::text(prompt)],
+        }];
+
+        for _turn in 0..max_turns {
+            let request = GenerateRequest {
+                contents: contents.clone(),
+                tools: Some(tools.clone()),
+            };
+
+            let response_content = self.send_request(&request)?;
+
+            // Check if model wants to call a function
+            let function_calls: Vec<&FunctionCall> = response_content.parts.iter()
+                .filter_map(|p| p.function_call.as_ref())
+                .collect();
+
+            if function_calls.is_empty() {
+                // No function calls — extract final text response
+                return response_content.parts.into_iter()
+                    .find_map(|p| p.text)
+                    .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()));
+            }
+
+            // Add model's response to conversation history
+            contents.push(response_content.clone());
+
+            // Execute each function call and build response parts
+            let mut response_parts = Vec::new();
+            for fc in &function_calls {
+                let result = execute_tool(&fc.name, &fc.args);
+                response_parts.push(Part::function_response(&fc.name, result));
+            }
+
+            // Send function responses back
+            contents.push(Content {
+                role: Some("user".into()),
+                parts: response_parts,
+            });
+        }
+
+        Err(GeminiError::Parse(format!("Tool loop exceeded {} turns", max_turns)))
+    }
+
+    /// Low-level: send a request and return the response Content.
+    fn send_request(&self, request: &GenerateRequest) -> Result<Content, GeminiError> {
         // Atomically check rate limit and reserve a slot
         self.rate
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .check_and_reserve()?;
 
-        let request = GenerateRequest {
-            contents: vec![Content {
-                parts: vec![Part {
-                    text: prompt.to_string(),
-                }],
-            }],
-        };
-
         let resp = match self
             .http
             .post(GEMINI_GENERATE_URL)
             .header("x-goog-api-key", &self.api_key)
-            .json(&request)
+            .json(request)
             .send()
         {
             Ok(r) => r,
             Err(e) => {
-                // Request never reached server — release reserved slot
                 self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
                 return Err(GeminiError::Http(e));
             }
@@ -290,7 +411,7 @@ impl GeminiClient {
 
         let status = resp.status().as_u16();
         match status {
-            200 => {} // parse body below
+            200 => {}
             401 | 403 => return Err(GeminiError::InvalidKey),
             429 => return Err(GeminiError::RateLimited),
             _ => {
@@ -300,21 +421,19 @@ impl GeminiClient {
         }
 
         let body: GenerateResponse = resp.json()?;
-        let text = body
+        let content = body
             .candidates
             .and_then(|c| c.into_iter().next())
             .and_then(|c| c.content)
-            .and_then(|c| c.parts.into_iter().next())
-            .map(|p| p.text)
-            .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()))?;
+            .ok_or_else(|| GeminiError::Parse("No response content from Gemini".into()))?;
 
-        // Persist usage after successful parse
+        // Persist usage
         {
             let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
             self.persist_usage(&rate);
         }
 
-        Ok(text)
+        Ok(content)
     }
 
     /// Save rate tracker to disk if a persistence path is configured.

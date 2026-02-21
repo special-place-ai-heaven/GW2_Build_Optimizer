@@ -2,6 +2,7 @@ pub mod combat;
 pub mod engine;
 pub mod gamedb;
 pub mod gemini;
+pub mod gemini_tools;
 pub mod prompts;
 pub mod scoring;
 pub mod search;
