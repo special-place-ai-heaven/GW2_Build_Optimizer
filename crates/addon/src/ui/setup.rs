@@ -130,7 +130,9 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
                 if missing_required.is_empty() {
                     s.setup.gw2_key_status = KeyStatus::Valid;
                     s.config.gw2_api_key = Some(tx_key);
-                    let _ = s.config.save(&s.config_path);
+                    if let Err(e) = s.config.save(&s.config_path) {
+                        nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                    }
                 } else {
                     let names: Vec<_> = missing_required.iter().map(|s| s.to_string()).collect();
                     s.setup.gw2_key_status = KeyStatus::Invalid(
@@ -221,7 +223,9 @@ fn render_gemini_key_step(ui: &Ui, state: &mut AddonState) {
                 Ok(()) => {
                     s.setup.gemini_key_status = KeyStatus::Valid;
                     s.config.gemini_api_key = Some(key);
-                    let _ = s.config.save(&s.config_path);
+                    if let Err(e) = s.config.save(&s.config_path) {
+                        nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                    }
                 }
                 Err(e) => {
                     s.setup.gemini_key_status =
@@ -316,7 +320,9 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                     crate::state::with_state(|s| match result {
                         Ok(build) => {
                             s.config.cache_build_number = Some(build);
-                            let _ = s.config.save(&s.config_path);
+                            if let Err(e) = s.config.save(&s.config_path) {
+                        nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                    }
                             if let Some(ref mut dl) = s.setup.download_progress {
                                 dl.done = true;
                             }

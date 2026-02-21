@@ -26,6 +26,9 @@ impl BuildStorage {
         }
 
         let path = self.saves_dir.join(format!("{}.json", filename));
+        if path.exists() {
+            return Err(format!("A build named '{}' already exists", build.name));
+        }
         let json = serde_json::to_string_pretty(build)
             .map_err(|e| format!("Failed to serialize: {}", e))?;
         std::fs::write(&path, json)
@@ -48,8 +51,16 @@ impl BuildStorage {
                     .is_some_and(|ext| ext == "json")
             })
             .filter_map(|e| {
-                let json = std::fs::read_to_string(e.path()).ok()?;
-                serde_json::from_str(&json).ok()
+                let path = e.path();
+                let json = std::fs::read_to_string(&path).ok()?;
+                match serde_json::from_str(&json) {
+                    Ok(build) => Some(build),
+                    Err(_) => {
+                        // Corrupt save file — skip but don't crash
+                        eprintln!("Warning: corrupt save file skipped: {}", path.display());
+                        None
+                    }
+                }
             })
             .collect();
 
@@ -61,10 +72,11 @@ impl BuildStorage {
     pub fn delete(&self, name: &str) -> Result<(), String> {
         let filename = sanitize_filename(name);
         let path = self.saves_dir.join(format!("{}.json", filename));
-        if path.exists() {
-            std::fs::remove_file(&path)
-                .map_err(|e| format!("Failed to delete: {}", e))?;
+        if !path.exists() {
+            return Err(format!("Build '{}' not found on disk", name));
         }
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("Failed to delete: {}", e))?;
         Ok(())
     }
 }

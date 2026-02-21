@@ -72,9 +72,10 @@ pub fn render_chat_bar(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
 /// Add an AI response to chat history.
 pub fn add_ai_response(state: &mut ChatBarState, text: String) {
     state.waiting = false;
-    // Truncate long responses for chat display
-    let display = if text.len() > 200 {
-        format!("{}...", &text[..200])
+    // Truncate long responses for chat display (char-safe to avoid UTF-8 panic)
+    let display = if text.chars().count() > 200 {
+        let truncated: String = text.chars().take(200).collect();
+        format!("{}...", truncated)
     } else {
         text
     };

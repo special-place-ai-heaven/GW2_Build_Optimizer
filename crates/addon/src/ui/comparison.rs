@@ -43,26 +43,28 @@ pub struct ComparisonState {
 }
 
 /// Render the comparison view: current build on left, suggestion on right.
+/// Returns Some(index) if the user clicked a different suggestion tab.
 pub fn render_comparison(
     ui: &Ui,
     current_build: &ResolvedBuild,
     current_stats: Option<&StatBlock>,
     comparison: &ComparisonState,
-) {
+) -> Option<usize> {
+    let mut new_selection = None;
     if comparison.loading {
         ui.text("Optimizing build...");
         ui.text("Consulting Gemini for synergy analysis...");
-        return;
+        return None;
     }
 
     if let Some(ref err) = comparison.error {
         ui.text_colored([1.0, 0.3, 0.0, 1.0], &format!("Error: {}", err));
-        return;
+        return None;
     }
 
     if comparison.suggestions.is_empty() {
         ui.text("No suggestions available. Run the optimizer first.");
-        return;
+        return None;
     }
 
     // Suggestion tabs
@@ -82,7 +84,7 @@ pub fn render_comparison(
                 .size([0.0, 0.0])
                 .build(ui)
             {
-                // Selection handled by caller
+                new_selection = Some(i);
             }
             if i < tab_count - 1 {
                 ui.same_line();
@@ -104,12 +106,12 @@ pub fn render_comparison(
 
     // ═══ Combat Performance (3 tiers) ═══
     if ui.collapsing_header("Combat Performance", TreeNodeFlags::DEFAULT_OPEN) {
-        render_combat_performance(ui, current_stats, suggestion);
+        render_combat_performance(ui, comparison, suggestion);
     }
 
     // ═══ Defenses & Resistances ═══
     if ui.collapsing_header("Defenses & Resistances", TreeNodeFlags::DEFAULT_OPEN) {
-        render_defenses(ui, current_stats, suggestion);
+        render_defenses(ui, comparison, current_stats, suggestion);
     }
 
     // ═══ LLM Explanation ═══
@@ -127,6 +129,8 @@ pub fn render_comparison(
             }
         }
     }
+
+    new_selection
 }
 
 /// Render side-by-side build component comparison.
@@ -180,36 +184,29 @@ fn render_primary_stats(ui: &Ui, current: Option<&StatBlock>, suggested: Option<
 }
 
 /// Render combat performance metrics with three tiers: Solo, Party, Full Squad.
-fn render_combat_performance(ui: &Ui, current_stats: Option<&StatBlock>, suggestion: &BuildSuggestion) {
+fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: &BuildSuggestion) {
     let tiers: Vec<(&str, [f32; 4], Option<&CombatMetrics>, Option<&CombatMetrics>)> = vec![
-        ("Solo (Gear + Traits)", [0.7, 0.85, 1.0, 1.0], None, suggestion.combat_solo.as_ref()),
-        ("Party (Might x15, Fury)", [1.0, 0.85, 0.4, 1.0], None, suggestion.combat_party.as_ref()),
-        ("Full Squad (Might x25, Fury, Vuln x25)", [0.3, 1.0, 0.3, 1.0], None, suggestion.combat_squad.as_ref()),
+        ("Solo (Gear + Traits)", [0.7, 0.85, 1.0, 1.0], comparison.current_combat_solo.as_ref(), suggestion.combat_solo.as_ref()),
+        ("Party (Might x15, Fury)", [1.0, 0.85, 0.4, 1.0], comparison.current_combat_party.as_ref(), suggestion.combat_party.as_ref()),
+        ("Full Squad (Might x25, Fury, Vuln x25)", [0.3, 1.0, 0.3, 1.0], comparison.current_combat_squad.as_ref(), suggestion.combat_squad.as_ref()),
     ];
 
-    // If we have current build stats, compute basic derived values for the "Current" column
-    let cur_stats = current_stats.cloned().unwrap_or_default();
-    let cur_crit = ((cur_stats.precision - 895).max(0) as f64 / 21.0).clamp(0.0, 100.0);
-    let cur_crit_dmg = 150.0 + cur_stats.ferocity as f64 / 15.0;
-    let cur_eff_power = cur_stats.power as f64 * (1.0 + (cur_crit / 100.0) * (cur_crit_dmg / 100.0 - 1.0));
-    let cur_boon_dur = (cur_stats.concentration as f64 / 15.0).clamp(0.0, 100.0);
-    let cur_condi_dur = (cur_stats.expertise as f64 / 15.0).clamp(0.0, 100.0);
-
-    for (label, color, _cur_combat, sug_combat) in &tiers {
+    for (label, color, cur_combat, sug_combat) in &tiers {
         ui.text_colored(*color, *label);
 
         if let Some(sug) = sug_combat {
             ui.columns(4, &format!("##{}_cols", label), true);
             bonus_header(ui);
 
-            render_int_row(ui, "Effective Power", cur_eff_power as i32, sug.effective_power);
-            render_int_row(ui, "Strike DPS Index", 0, sug.strike_dps_index);
-            render_int_row(ui, "Condi DPS Index", 0, sug.condition_dps_index);
-            render_int_row(ui, "Total DPS Index", 0, sug.total_dps_index);
-            render_pct_row(ui, "Boon Duration", cur_boon_dur, sug.boon_duration_pct);
-            render_pct_row(ui, "Condi Duration", cur_condi_dur, sug.condi_duration_pct);
-            if sug.healing_index > 0 {
-                render_int_row(ui, "Healing Index", 0, sug.healing_index);
+            let cur = *cur_combat;
+            render_int_row(ui, "Effective Power", cur.map_or(0, |c| c.effective_power), sug.effective_power);
+            render_int_row(ui, "Strike DPS Index", cur.map_or(0, |c| c.strike_dps_index), sug.strike_dps_index);
+            render_int_row(ui, "Condi DPS Index", cur.map_or(0, |c| c.condition_dps_index), sug.condition_dps_index);
+            render_int_row(ui, "Total DPS Index", cur.map_or(0, |c| c.total_dps_index), sug.total_dps_index);
+            render_pct_row(ui, "Boon Duration", cur.map_or(0.0, |c| c.boon_duration_pct), sug.boon_duration_pct);
+            render_pct_row(ui, "Condi Duration", cur.map_or(0.0, |c| c.condi_duration_pct), sug.condi_duration_pct);
+            if sug.healing_index > 0 || cur.map_or(false, |c| c.healing_index > 0) {
+                render_int_row(ui, "Healing Index", cur.map_or(0, |c| c.healing_index), sug.healing_index);
             }
 
             ui.columns(1, &format!("##{}_end", label), false);
@@ -271,26 +268,35 @@ fn bonus_header(ui: &Ui) {
 }
 
 /// Render defenses and resistances.
-fn render_defenses(ui: &Ui, current: Option<&StatBlock>, suggestion: &BuildSuggestion) {
-    let cur = current.cloned().unwrap_or_default();
+fn render_defenses(ui: &Ui, comparison: &ComparisonState, current_stats: Option<&StatBlock>, suggestion: &BuildSuggestion) {
     let sug_stats = suggestion.estimated_stats.clone().unwrap_or_default();
 
-    // Basic stats-derived values for current build
-    let cur_health = cur.vitality * 10 + 1645;
-    let cur_armor = cur.toughness + 1000;
-    let cur_eff_hp = (cur_health as f64 * cur_armor as f64 / 100.0) as i32;
-    let cur_dmg_red = (cur_armor as f64 / (cur_armor as f64 + 2600.0)) * 100.0;
+    // Use current build combat metrics if available, else fall back to stats
+    let (cur_health, cur_armor, cur_eff_hp, cur_dmg_red) =
+        if let Some(ref combat) = comparison.current_combat_solo {
+            let cur = current_stats.cloned().unwrap_or_default();
+            let health = cur.health;
+            let armor = cur.armor;
+            (health, armor, combat.effective_health, combat.damage_reduction_pct)
+        } else {
+            let cur = current_stats.cloned().unwrap_or_default();
+            let health = cur.health;
+            let armor = cur.armor;
+            let eff_hp = (health as f64 * armor as f64 / 2597.0) as i32;
+            let dmg_red = (armor as f64 / (armor as f64 + 2600.0)) * 100.0;
+            (health, armor, eff_hp as i32, dmg_red)
+        };
 
     // Use combat metrics for suggested build if available, else fall back to stats
     let (sug_health, sug_armor, sug_eff_hp, sug_dmg_red) =
         if let Some(ref combat) = suggestion.combat_solo {
-            let health = sug_stats.vitality * 10 + 1645;
-            let armor = sug_stats.toughness + 1000;
+            let health = sug_stats.health;
+            let armor = sug_stats.armor;
             (health, armor, combat.effective_health as i32, combat.damage_reduction_pct)
         } else {
-            let health = sug_stats.vitality * 10 + 1645;
-            let armor = sug_stats.toughness + 1000;
-            let eff_hp = (health as f64 * armor as f64 / 100.0) as i32;
+            let health = sug_stats.health;
+            let armor = sug_stats.armor;
+            let eff_hp = (health as f64 * armor as f64 / 2597.0) as i32;
             let dmg_red = (armor as f64 / (armor as f64 + 2600.0)) * 100.0;
             (health, armor, eff_hp, dmg_red)
         };

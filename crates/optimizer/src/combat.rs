@@ -223,15 +223,20 @@ pub fn calculate_combat_performance(
     let base_condi_duration = (stats.expertise / 15.0).clamp(0.0, 100.0);
     let total_condi_duration = (base_condi_duration + modifiers.total_condi_duration_bonus()).clamp(0.0, 100.0);
 
-    // Condition DPS index: weighted sum of ticks * (1 + duration_bonus) * vuln
+    // Condition DPS index: weighted sum of ticks * per-condition duration multiplier * vuln
     // Weights represent typical condition application rates in a rotation
-    let condi_duration_mult = 1.0 + total_condi_duration / 100.0;
-    let condition_dps_index = (condition_ticks.bleeding * 3.0  // ~3 stacks average
-        + condition_ticks.burning * 2.0   // ~2 stacks average
-        + condition_ticks.poison * 1.0
-        + condition_ticks.torment * 1.5
-        + condition_ticks.confusion * 0.5)
-        * condi_duration_mult
+    // Per-condition duration: base (from Expertise) + global modifiers + specific modifiers
+    let bleed_dur = 1.0 + (base_condi_duration + modifiers.total_condi_duration_for("Bleeding")).clamp(0.0, 100.0) / 100.0;
+    let burn_dur = 1.0 + (base_condi_duration + modifiers.total_condi_duration_for("Burning")).clamp(0.0, 100.0) / 100.0;
+    let poison_dur = 1.0 + (base_condi_duration + modifiers.total_condi_duration_for("Poison")).clamp(0.0, 100.0) / 100.0;
+    let torment_dur = 1.0 + (base_condi_duration + modifiers.total_condi_duration_for("Torment")).clamp(0.0, 100.0) / 100.0;
+    let confuse_dur = 1.0 + (base_condi_duration + modifiers.total_condi_duration_for("Confusion")).clamp(0.0, 100.0) / 100.0;
+
+    let condition_dps_index = (condition_ticks.bleeding * 3.0 * bleed_dur  // ~3 stacks average
+        + condition_ticks.burning * 2.0 * burn_dur   // ~2 stacks average
+        + condition_ticks.poison * 1.0 * poison_dur
+        + condition_ticks.torment * 1.5 * torment_dur
+        + condition_ticks.confusion * 0.5 * confuse_dur)
         * vuln_mult;
 
     let total_dps_index = strike_dps_index + condition_dps_index;
@@ -253,7 +258,10 @@ pub fn calculate_combat_performance(
     // Combined: 1 - (1 - armor_dr) * (1 - protection_dr)
     let total_dr = 1.0 - (1.0 - armor_dr) * (1.0 - protection_dr);
 
-    let effective_health = health * armor / REFERENCE_ARMOR * (1.0 / (1.0 - total_dr));
+    // Effective health: Health * Armor / reference * DR multiplier
+    // DR capped at 90% to prevent near-infinity values
+    let capped_dr = total_dr.min(0.9);
+    let effective_health = health * armor / REFERENCE_ARMOR / (1.0 - capped_dr);
 
     CombatPerformance {
         effective_power,

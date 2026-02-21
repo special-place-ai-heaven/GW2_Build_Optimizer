@@ -105,6 +105,7 @@ pub fn optimize(
             for &spec_id in &spec_ids {
                 if let Some(spec) = specs_cache.get(&spec_id) {
                     trait_ids.extend(&spec.minor_traits);
+                    trait_ids.extend(&spec.major_traits);
                 }
             }
 
@@ -201,6 +202,7 @@ fn optimize_pvp(
         for &spec_id in &spec_ids {
             if let Some(spec) = specs_cache.get(&spec_id) {
                 trait_ids.extend(&spec.minor_traits);
+                trait_ids.extend(&spec.major_traits);
             }
         }
 
