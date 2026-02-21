@@ -87,7 +87,10 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
         // Run validation in a background thread.
         // Always populate scope table even if required scopes are missing.
         let tx_key = key.clone();
+        let token = state.cancel_token.clone();
         std::thread::spawn(move || {
+            if token.is_cancelled() { return; }
+
             let client = match gw2_api::client::Gw2Client::with_key(&tx_key) {
                 Ok(c) => c,
                 Err(e) => {
@@ -97,6 +100,8 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
                     return;
                 }
             };
+
+            if token.is_cancelled() { return; }
 
             // Fetch token info (always, to populate scope table)
             let info: gw2_api::client::TokenInfo = match client.get("tokeninfo") {
@@ -108,6 +113,8 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
                     return;
                 }
             };
+
+            if token.is_cancelled() { return; }
 
             let required = ["account", "characters", "builds"];
             let recommended = ["inventories", "unlocks"];
@@ -215,9 +222,14 @@ fn render_gemini_key_step(ui: &Ui, state: &mut AddonState) {
         let key = state.setup.gemini_key_input.clone();
         state.setup.gemini_key_status = KeyStatus::Validating;
 
+        let token = state.cancel_token.clone();
         std::thread::spawn(move || {
+            if token.is_cancelled() { return; }
+
             let result = gw2_optimizer::gemini::GeminiClient::new(&key)
                 .and_then(|c| c.validate_key());
+
+            if token.is_cancelled() { return; }
 
             crate::state::with_state(|s| match result {
                 Ok(()) => {
@@ -285,8 +297,11 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                 });
 
                 let cache_dir = state.addon_dir.join("cache");
+                let token = state.cancel_token.clone();
 
                 std::thread::spawn(move || {
+                    if token.is_cancelled() { return; }
+
                     let client = match gw2_api::client::Gw2Client::without_key() {
                         Ok(c) => c,
                         Err(e) => {
@@ -300,7 +315,9 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                     };
                     let cache = gw2_api::cache::DataCache::new(&cache_dir);
 
+                    let token_inner = token.clone();
                     let result = gw2_api::download::download_all(&client, &cache, |progress| {
+                        if token_inner.is_cancelled() { return; }
                         crate::state::with_state(|s| {
                             let name = if let Some(ref detail) = progress.detail {
                                 format!("{} ({})", progress.step_name, detail)
@@ -317,12 +334,14 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                         });
                     });
 
+                    if token.is_cancelled() { return; }
+
                     crate::state::with_state(|s| match result {
                         Ok(build) => {
                             s.config.cache_build_number = Some(build);
                             if let Err(e) = s.config.save(&s.config_path) {
-                        nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
-                    }
+                                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                            }
                             if let Some(ref mut dl) = s.setup.download_progress {
                                 dl.done = true;
                             }
