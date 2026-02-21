@@ -370,9 +370,9 @@ pub fn summarize_build(
     ));
 
     lines.push(format!(
-        "  Combat: StrikeDPS {:.0}, CondiDPS {:.0}, TotalDPS {:.0}, EffPower {:.0}, BoonDur {:.1}%, CondiDur {:.1}%, EffHP {:.0}",
+        "  Combat: StrikeDPS {:.0}, CondiDPS {:.0}, TotalDPS {:.0}, EffPower {:.0}, CritChance {:.1}%, BoonDur {:.1}%, CondiDur {:.1}%, EffHP {:.0}",
         c.strike_dps_index, c.condition_dps_index, c.total_dps_index,
-        c.effective_power, c.boon_duration_pct, c.condi_duration_pct, c.effective_health,
+        c.effective_power, c.crit_chance, c.boon_duration_pct, c.condi_duration_pct, c.effective_health,
     ));
 
     lines.push(format!("  Score: {:.3}", candidate.score));
