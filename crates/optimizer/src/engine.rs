@@ -8,6 +8,8 @@ use gw2_api::models::{
 };
 use gw2_core::types::GameMode;
 
+use gw2_api::models::Fact;
+
 use crate::combat::{self, CombatPerformance, DamageModifiers};
 use crate::scoring::{score_combat, Archetype};
 use crate::search::{search_gear_prefixes, search_spec_combos, GearCandidate};
@@ -19,6 +21,8 @@ pub struct BuildCandidate {
     pub gear: GearCandidate,
     pub elite_spec: Option<u32>,
     pub core_specs: Vec<u32>,
+    /// All equipped trait IDs (minor + selected major, 3 per spec column).
+    pub equipped_traits: Vec<u32>,
     pub stats: stats::StatBlock,
     pub derived: stats::DerivedStats,
     pub score: f64,
@@ -94,18 +98,22 @@ pub fn optimize(
 
     for gear in &gear_candidates {
         for (elite, cores) in &spec_combos {
-            // Collect trait IDs for stat calculation (minor traits auto-selected)
-            let mut trait_ids = Vec::new();
             let spec_ids: Vec<u32> = cores
                 .iter()
                 .copied()
                 .chain(elite.iter().copied())
                 .collect();
 
+            // Collect minor traits (always active) + best major trait per column
+            let mut trait_ids = Vec::new();
             for &spec_id in &spec_ids {
                 if let Some(spec) = specs_cache.get(&spec_id) {
                     trait_ids.extend(&spec.minor_traits);
-                    trait_ids.extend(&spec.major_traits);
+                    // Pick 1 best major trait per column (Adept/Master/Grandmaster)
+                    let best = select_best_major_traits(
+                        &spec.major_traits, archetype, traits_cache,
+                    );
+                    trait_ids.extend(best);
                 }
             }
 
@@ -135,6 +143,7 @@ pub fn optimize(
                 gear: gear.clone(),
                 elite_spec: *elite,
                 core_specs: cores.clone(),
+                equipped_traits: trait_ids,
                 stats: full_stats,
                 derived,
                 score,
@@ -192,17 +201,20 @@ fn optimize_pvp(
     let solo_profile = &combat::default_buff_profiles()[0];
 
     for (elite, cores) in &spec_combos {
-        let mut trait_ids = Vec::new();
         let spec_ids: Vec<u32> = cores
             .iter()
             .copied()
             .chain(elite.iter().copied())
             .collect();
 
+        let mut trait_ids = Vec::new();
         for &spec_id in &spec_ids {
             if let Some(spec) = specs_cache.get(&spec_id) {
                 trait_ids.extend(&spec.minor_traits);
-                trait_ids.extend(&spec.major_traits);
+                let best = select_best_major_traits(
+                    &spec.major_traits, archetype, traits_cache,
+                );
+                trait_ids.extend(best);
             }
         }
 
@@ -227,6 +239,7 @@ fn optimize_pvp(
             gear: empty_gear.clone(),
             elite_spec: *elite,
             core_specs: cores.clone(),
+            equipped_traits: trait_ids,
             stats: full_stats,
             derived,
             score,
@@ -298,6 +311,146 @@ fn attribute_adjustment_for_slot(slot: &str) -> f64 {
     }
 }
 
+/// Select the best major trait from each column (Adept/Master/Grandmaster) for an archetype.
+/// GW2 specialization major_traits layout: [A1, A2, A3, M1, M2, M3, G1, G2, G3]
+/// Each column has 3 choices; the player picks 1 per column = 3 total.
+/// This heuristic scores each trait's stat contributions + damage modifier relevance
+/// against the archetype weights and picks the best per column.
+fn select_best_major_traits(
+    major_traits: &[u32],
+    archetype: &Archetype,
+    traits_cache: &HashMap<u32, GW2Trait>,
+) -> Vec<u32> {
+    if major_traits.len() != 9 {
+        // Unexpected layout — return all as fallback (some specs may have fewer)
+        return major_traits.to_vec();
+    }
+
+    let weights = archetype.weights();
+    let mut selected = Vec::with_capacity(3);
+
+    // Process 3 columns: [0..3], [3..6], [6..9]
+    for col_start in (0..9).step_by(3) {
+        let column = &major_traits[col_start..col_start + 3];
+        let mut best_id = column[0];
+        let mut best_score = f64::NEG_INFINITY;
+
+        for &trait_id in column {
+            let score = score_trait_for_archetype(trait_id, &weights, traits_cache);
+            if score > best_score {
+                best_score = score;
+                best_id = trait_id;
+            }
+        }
+        selected.push(best_id);
+    }
+
+    selected
+}
+
+/// Score a single trait's relevance for an archetype by examining its facts.
+/// Looks at AttributeAdjust (flat stat bonuses) and Percent (damage modifiers).
+fn score_trait_for_archetype(
+    trait_id: u32,
+    weights: &crate::scoring::StatWeights,
+    traits_cache: &HashMap<u32, GW2Trait>,
+) -> f64 {
+    let Some(t) = traits_cache.get(&trait_id) else {
+        return 0.0;
+    };
+
+    let mut score = 0.0;
+
+    for fact in &t.facts {
+        score += score_fact(fact, weights);
+    }
+
+    // Also score traited_facts (activated by other traits — give partial credit)
+    for tf in &t.traited_facts {
+        score += score_fact(&tf.fact, weights) * 0.5;
+    }
+
+    score
+}
+
+/// Score a single fact's contribution to an archetype.
+fn score_fact(fact: &Fact, weights: &crate::scoring::StatWeights) -> f64 {
+    match fact {
+        Fact::AttributeAdjust {
+            value: Some(val),
+            target: Some(ref target),
+            ..
+        } => {
+            let w = match target.as_str() {
+                "Power" => weights.power,
+                "Precision" => weights.precision,
+                "Toughness" => weights.toughness,
+                "Vitality" => weights.vitality,
+                "ConditionDamage" => weights.condition_damage,
+                "ConditionDuration" | "Expertise" => weights.expertise,
+                "BoonDuration" | "Concentration" => weights.concentration,
+                "CritDamage" | "Ferocity" => weights.ferocity,
+                "Healing" | "HealingPower" => weights.healing_power,
+                _ => 0.0,
+            };
+            // Normalize: +100 stat with weight 1.0 → 0.033 (similar to stat scoring)
+            (*val as f64) / 3000.0 * w
+        }
+        Fact::Percent {
+            text: Some(ref text),
+            percent: Some(pct),
+            ..
+        } => {
+            let text_lower = text.to_lowercase();
+            // Damage-related percent modifiers are highly valuable for DPS archetypes
+            if text_lower.contains("damage") {
+                let dps_weight = (weights.power + weights.condition_damage) / 2.0;
+                pct / 100.0 * dps_weight
+            } else if text_lower.contains("critical") {
+                pct / 100.0 * weights.ferocity.max(weights.precision)
+            } else if text_lower.contains("healing") {
+                pct / 100.0 * weights.healing_power
+            } else if text_lower.contains("boon duration") {
+                pct / 100.0 * weights.concentration
+            } else if text_lower.contains("condition duration") {
+                pct / 100.0 * weights.expertise
+            } else {
+                0.0
+            }
+        }
+        Fact::BuffConversion {
+            percent: Some(pct),
+            source: Some(ref src),
+            target: Some(ref tgt),
+            ..
+        } => {
+            // Conversion is valuable if source stat is high for this archetype
+            // and target stat is also weighted
+            let src_w = match src.as_str() {
+                "Power" => weights.power,
+                "Precision" => weights.precision,
+                "Toughness" => weights.toughness,
+                "Vitality" => weights.vitality,
+                "ConditionDamage" => weights.condition_damage,
+                "Ferocity" => weights.ferocity,
+                _ => 0.0,
+            };
+            let tgt_w = match tgt.as_str() {
+                "Power" => weights.power,
+                "Precision" => weights.precision,
+                "Toughness" => weights.toughness,
+                "Vitality" => weights.vitality,
+                "ConditionDamage" => weights.condition_damage,
+                "Ferocity" => weights.ferocity,
+                "Healing" | "HealingPower" => weights.healing_power,
+                _ => 0.0,
+            };
+            pct / 100.0 * src_w * tgt_w
+        }
+        _ => 0.0,
+    }
+}
+
 fn stats_add(target: &mut stats::StatBlock, source: &stats::StatBlock) {
     target.power += source.power;
     target.precision += source.precision;
@@ -321,6 +474,67 @@ mod tests {
         assert_eq!(attribute_adjustment_for_slot("Amulet"), 157.0);
         assert_eq!(attribute_adjustment_for_slot("Leggings"), 171.0);
         assert_eq!(attribute_adjustment_for_slot("WeaponA1"), 251.0);
+    }
+
+    #[test]
+    fn test_select_best_major_traits_picks_one_per_column() {
+        // Create 9 traits: 3 columns × 3 rows
+        // Column 0 (Adept): traits 100, 101, 102
+        // Column 1 (Master): traits 200, 201, 202
+        // Column 2 (Grandmaster): traits 300, 301, 302
+        let major_traits = vec![100, 101, 102, 200, 201, 202, 300, 301, 302];
+
+        // With no traits in cache, should still return 3 traits (one per column)
+        let traits_cache = HashMap::new();
+        let selected = select_best_major_traits(&major_traits, &Archetype::PowerDPS, &traits_cache);
+        assert_eq!(selected.len(), 3);
+        // Each should come from a different column
+        assert!(major_traits[0..3].contains(&selected[0]));
+        assert!(major_traits[3..6].contains(&selected[1]));
+        assert!(major_traits[6..9].contains(&selected[2]));
+    }
+
+    #[test]
+    fn test_select_best_major_traits_prefers_power_for_power_dps() {
+        use gw2_api::models::Fact;
+
+        let major_traits = vec![100, 101, 102, 200, 201, 202, 300, 301, 302];
+        let mut traits_cache = HashMap::new();
+
+        // Trait 100: gives +150 Power (good for PowerDPS)
+        traits_cache.insert(100, GW2Trait {
+            id: 100, name: "Power Trait".into(), tier: 1, order: 0,
+            description: None, slot: "Major".into(), icon: None,
+            specialization: 1, skills: vec![],
+            facts: vec![Fact::AttributeAdjust {
+                text: Some("Power".into()), icon: None,
+                value: Some(150), target: Some("Power".into()),
+            }],
+            traited_facts: vec![],
+        });
+        // Trait 101: gives +150 Vitality (bad for PowerDPS)
+        traits_cache.insert(101, GW2Trait {
+            id: 101, name: "Vitality Trait".into(), tier: 1, order: 1,
+            description: None, slot: "Major".into(), icon: None,
+            specialization: 1, skills: vec![],
+            facts: vec![Fact::AttributeAdjust {
+                text: Some("Vitality".into()), icon: None,
+                value: Some(150), target: Some("Vitality".into()),
+            }],
+            traited_facts: vec![],
+        });
+        // Trait 102: nothing
+        traits_cache.insert(102, GW2Trait {
+            id: 102, name: "Empty Trait".into(), tier: 1, order: 2,
+            description: None, slot: "Major".into(), icon: None,
+            specialization: 1, skills: vec![],
+            facts: vec![],
+            traited_facts: vec![],
+        });
+
+        let selected = select_best_major_traits(&major_traits, &Archetype::PowerDPS, &traits_cache);
+        // First column should select trait 100 (Power bonus)
+        assert_eq!(selected[0], 100, "PowerDPS should prefer Power trait over Vitality");
     }
 
     #[test]

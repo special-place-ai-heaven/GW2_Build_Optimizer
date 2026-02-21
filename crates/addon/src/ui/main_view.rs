@@ -1428,12 +1428,12 @@ fn candidate_to_suggestion(
 ) -> crate::ui::comparison::BuildSuggestion {
     use crate::ui::comparison::BuildSuggestion;
 
-    // Get spec names
+    // Get spec names with actually selected traits (not all 9)
     let mut specializations = Vec::new();
     if let Some(elite_id) = candidate.elite_spec {
         if let Some(spec) = db.spec(elite_id) {
-            let traits: Vec<String> = spec.major_traits.iter()
-                .take(3)
+            let traits: Vec<String> = candidate.equipped_traits.iter()
+                .filter(|tid| spec.major_traits.contains(tid))
                 .filter_map(|&tid| db.traits.get(&tid).map(|t| t.name.clone()))
                 .collect();
             specializations.push((format!("{} [E]", spec.name), traits));
@@ -1441,8 +1441,8 @@ fn candidate_to_suggestion(
     }
     for &core_id in &candidate.core_specs {
         if let Some(spec) = db.spec(core_id) {
-            let traits: Vec<String> = spec.major_traits.iter()
-                .take(3)
+            let traits: Vec<String> = candidate.equipped_traits.iter()
+                .filter(|tid| spec.major_traits.contains(tid))
                 .filter_map(|&tid| db.traits.get(&tid).map(|t| t.name.clone()))
                 .collect();
             specializations.push((spec.name.clone(), traits));
