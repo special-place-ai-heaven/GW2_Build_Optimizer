@@ -2,6 +2,7 @@
 //! Facts describe the mechanical effects (damage, buffs, conditions, etc.)
 //! that are critical for the LLM to reason about synergies and rotations.
 
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 
 /// A mechanical fact describing an effect.
@@ -145,6 +146,32 @@ pub struct TraitedFact {
     pub fact: Fact,
 }
 
+/// Lenient deserializer for `Vec<Fact>` — skips facts that fail to parse
+/// (e.g. missing `type` field). The GW2 API occasionally returns fact objects
+/// without a `type` discriminator.
+pub fn deserialize_facts<'de, D>(deserializer: D) -> Result<Vec<Fact>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let values: Vec<serde_json::Value> = Vec::deserialize(deserializer)?;
+    Ok(values
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect())
+}
+
+/// Lenient deserializer for `Vec<TraitedFact>` — skips entries that fail to parse.
+pub fn deserialize_traited_facts<'de, D>(deserializer: D) -> Result<Vec<TraitedFact>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let values: Vec<serde_json::Value> = Vec::deserialize(deserializer)?;
+    Ok(values
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,5 +226,22 @@ mod tests {
             Fact::Recharge { value, .. } => assert_eq!(value, Some(8.0)),
             _ => panic!("Expected Recharge"),
         }
+    }
+
+    #[test]
+    fn test_lenient_facts_skips_missing_type() {
+        // Simulates GW2 API returning a fact without a "type" field
+        let json = r#"[
+            {"text": "Recharge", "type": "Recharge", "icon": "i.png", "value": 8},
+            {"text": "Some effect", "icon": "i.png", "value": 5},
+            {"text": "Range", "type": "Range", "icon": "i.png", "value": 300}
+        ]"#;
+        let values: Vec<serde_json::Value> = serde_json::from_str(json).unwrap();
+        let facts: Vec<Fact> = values
+            .into_iter()
+            .filter_map(|v| serde_json::from_value(v).ok())
+            .collect();
+        // The middle fact (missing type) should be skipped
+        assert_eq!(facts.len(), 2);
     }
 }
