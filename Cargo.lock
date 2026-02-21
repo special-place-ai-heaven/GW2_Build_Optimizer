@@ -319,6 +319,7 @@ dependencies = [
 name = "gw2-build-optimizer"
 version = "1.0.0"
 dependencies = [
+ "base64",
  "gw2-api",
  "gw2-core",
  "gw2-optimizer",

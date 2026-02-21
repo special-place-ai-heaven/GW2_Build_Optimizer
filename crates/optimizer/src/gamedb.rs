@@ -29,6 +29,9 @@ pub struct GameDb {
     pub runes: Vec<u32>,
     pub sigils: Vec<u32>,
     pub relics: Vec<u32>,
+    // Skill ↔ palette ID mapping (for build template chat codes)
+    pub skill_to_palette: HashMap<u32, u32>,
+    pub palette_to_skill: HashMap<u32, u32>,
 }
 
 impl GameDb {
@@ -107,6 +110,20 @@ impl GameDb {
         let mut sigils = Vec::new();
         let mut relics = Vec::new();
 
+        // Build skill ↔ palette ID maps from professions
+        let mut skill_to_palette: HashMap<u32, u32> = HashMap::new();
+        let mut palette_to_skill: HashMap<u32, u32> = HashMap::new();
+        for prof in professions.values() {
+            for pair in &prof.skills_by_palette {
+                if pair.len() == 2 {
+                    let palette_id = pair[0];
+                    let skill_id = pair[1];
+                    skill_to_palette.insert(skill_id, palette_id);
+                    palette_to_skill.insert(palette_id, skill_id);
+                }
+            }
+        }
+
         for item in items.values() {
             items_by_type
                 .entry(item.item_type.clone())
@@ -142,6 +159,8 @@ impl GameDb {
             runes,
             sigils,
             relics,
+            skill_to_palette,
+            palette_to_skill,
         })
     }
 

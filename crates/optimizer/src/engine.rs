@@ -8,7 +8,8 @@ use gw2_api::models::{
 };
 use gw2_core::types::GameMode;
 
-use crate::scoring::{score_stats, Archetype};
+use crate::combat::{self, CombatPerformance, DamageModifiers};
+use crate::scoring::{score_combat, Archetype};
 use crate::search::{search_gear_prefixes, search_spec_combos, GearCandidate};
 use crate::stats;
 
@@ -21,6 +22,10 @@ pub struct BuildCandidate {
     pub stats: stats::StatBlock,
     pub derived: stats::DerivedStats,
     pub score: f64,
+    /// Combat performance metrics (Solo profile) for display and scoring.
+    pub combat: CombatPerformance,
+    /// Extracted damage modifiers (for recalculating with different buff profiles).
+    pub modifiers: DamageModifiers,
 }
 
 /// Progress update during optimization.
@@ -58,14 +63,18 @@ pub fn optimize(
     // 1. Find best gear prefix combinations
     let mut gear_candidates = search_gear_prefixes(archetype, itemstats_cache);
 
-    // Score each gear candidate
+    // Score each gear candidate (preliminary — no traits/modifiers yet)
+    let empty_mods = DamageModifiers::default();
+    let solo_profile = &combat::default_buff_profiles()[0];
     for candidate in &mut gear_candidates {
-        // Build a mock equipment from the candidate's slot_stats
         let mock_stats = calculate_candidate_stats(candidate, itemstats_cache);
         let mut full_stats = stats::base_stats();
         stats_add(&mut full_stats, &mock_stats);
         let derived = stats::compute_derived(&full_stats, &profession.name);
-        candidate.score = score_stats(&full_stats, &derived, archetype);
+        let perf = combat::calculate_combat_performance(
+            &full_stats, &derived, &empty_mods, solo_profile, &profession.name,
+        );
+        candidate.score = score_combat(&perf, archetype);
     }
 
     // Sort by score descending
@@ -109,7 +118,17 @@ pub fn optimize(
             stats::apply_trait_conversions(&mut full_stats, &trait_ids, traits_cache);
 
             let derived = stats::compute_derived(&full_stats, &profession.name);
-            let score = score_stats(&full_stats, &derived, archetype);
+
+            // Extract damage modifiers from traits (no rune/sigil/relic in search phase)
+            let modifiers = combat::extract_damage_modifiers(
+                &trait_ids, None, &[], None, traits_cache, _items_cache,
+            );
+
+            // Calculate combat performance with Solo profile
+            let combat_perf = combat::calculate_combat_performance(
+                &full_stats, &derived, &modifiers, solo_profile, &profession.name,
+            );
+            let score = score_combat(&combat_perf, archetype);
 
             all_candidates.push(BuildCandidate {
                 gear: gear.clone(),
@@ -118,6 +137,8 @@ pub fn optimize(
                 stats: full_stats,
                 derived,
                 score,
+                combat: combat_perf,
+                modifiers,
             });
         }
     }
@@ -167,6 +188,8 @@ fn optimize_pvp(
         score: 0.0,
     };
 
+    let solo_profile = &combat::default_buff_profiles()[0];
+
     for (elite, cores) in &spec_combos {
         let mut trait_ids = Vec::new();
         let spec_ids: Vec<u32> = cores
@@ -188,7 +211,15 @@ fn optimize_pvp(
         stats::apply_trait_conversions(&mut full_stats, &trait_ids, traits_cache);
 
         let derived = stats::compute_derived(&full_stats, &profession.name);
-        let score = score_stats(&full_stats, &derived, archetype);
+
+        // Extract modifiers from traits only (PvP has no gear modifiers)
+        let modifiers = combat::extract_damage_modifiers(
+            &trait_ids, None, &[], None, traits_cache, &HashMap::new(),
+        );
+        let combat_perf = combat::calculate_combat_performance(
+            &full_stats, &derived, &modifiers, solo_profile, &profession.name,
+        );
+        let score = score_combat(&combat_perf, archetype);
 
         all_candidates.push(BuildCandidate {
             gear: empty_gear.clone(),
@@ -197,6 +228,8 @@ fn optimize_pvp(
             stats: full_stats,
             derived,
             score,
+            combat: combat_perf,
+            modifiers,
         });
     }
 
@@ -305,6 +338,7 @@ mod tests {
             specializations: vec![1, 2, 3, 4, 5],
             weapons: HashMap::new(),
             training: Vec::new(),
+            skills_by_palette: Vec::new(),
             icon: None,
             icon_big: None,
         };

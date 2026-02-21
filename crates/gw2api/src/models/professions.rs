@@ -15,6 +15,10 @@ pub struct Profession {
     pub weapons: HashMap<String, WeaponInfo>,
     #[serde(default)]
     pub training: Vec<Training>,
+    /// Palette ID to skill ID mapping. Each entry is [palette_id, skill_id].
+    /// Requires API schema version 2019-12-19T00:00:00.000Z or later.
+    #[serde(default)]
+    pub skills_by_palette: Vec<Vec<u32>>,
     pub icon: Option<String>,
     pub icon_big: Option<String>,
 }

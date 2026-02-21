@@ -80,9 +80,12 @@ pub fn download_all(
     }
     report(&mut on_progress, &mut step, "Skills", None);
 
-    // 5. Professions
+    // 5. Professions (use schema version that includes skills_by_palette)
     if cache.is_stale("professions", build) {
-        let data: Vec<models::Profession> = client.fetch_all("professions")?;
+        let data: Vec<models::Profession> = client.get_with_params(
+            "professions",
+            &[("ids", "all"), ("v", "2019-12-19T00:00:00.000Z")],
+        )?;
         cache.save("professions", &data, build).map_err(|e| ApiError::Api {
             status: 0,
             message: e.to_string(),
