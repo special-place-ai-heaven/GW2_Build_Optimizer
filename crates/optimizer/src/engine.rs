@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use gw2_api::models::{
     EquipmentTab, Item, ItemStat, Profession, Specialization, Trait as GW2Trait,
 };
+use gw2_core::types::GameMode;
 
 use crate::scoring::{score_stats, Archetype};
 use crate::search::{search_gear_prefixes, search_spec_combos, GearCandidate};
@@ -31,7 +32,8 @@ pub struct OptimizeProgress {
 
 /// Run the optimization pipeline for a given profession and archetype.
 /// Returns top N candidates ranked by score.
-/// This handles the deterministic parts; LLM reasoning is added in S08.
+/// For PvP, skips gear search (stats come from amulet) and only evaluates spec/trait combos.
+/// For PvE/WvW, runs full gear + spec search.
 pub fn optimize(
     profession: &Profession,
     archetype: &Archetype,
@@ -42,7 +44,12 @@ pub fn optimize(
     traits_cache: &HashMap<u32, GW2Trait>,
     mut on_progress: impl FnMut(OptimizeProgress),
     top_n: usize,
+    game_mode: &GameMode,
 ) -> Vec<BuildCandidate> {
+    if *game_mode == GameMode::PvP {
+        return optimize_pvp(profession, archetype, specs_cache, traits_cache, &mut on_progress, top_n);
+    }
+
     on_progress(OptimizeProgress {
         stage: "Searching gear combinations...".into(),
         done: false,
@@ -125,6 +132,81 @@ pub fn optimize(
         b.score
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    all_candidates.truncate(top_n);
+
+    on_progress(OptimizeProgress {
+        stage: "Done".into(),
+        done: true,
+    });
+
+    all_candidates
+}
+
+/// PvP optimization: specs + traits only (gear is replaced by amulet system).
+fn optimize_pvp(
+    profession: &Profession,
+    archetype: &Archetype,
+    specs_cache: &HashMap<u32, Specialization>,
+    traits_cache: &HashMap<u32, GW2Trait>,
+    on_progress: &mut impl FnMut(OptimizeProgress),
+    top_n: usize,
+) -> Vec<BuildCandidate> {
+    on_progress(OptimizeProgress {
+        stage: "Evaluating PvP specialization combinations...".into(),
+        done: false,
+    });
+
+    let spec_combos = search_spec_combos(&profession.specializations, specs_cache);
+    let mut all_candidates: Vec<BuildCandidate> = Vec::new();
+
+    // PvP: no gear search, use empty gear candidate
+    let empty_gear = GearCandidate {
+        slot_stats: HashMap::new(),
+        stat_prefix_name: "(PvP Amulet)".into(),
+        score: 0.0,
+    };
+
+    for (elite, cores) in &spec_combos {
+        let mut trait_ids = Vec::new();
+        let spec_ids: Vec<u32> = cores
+            .iter()
+            .copied()
+            .chain(elite.iter().copied())
+            .collect();
+
+        for &spec_id in &spec_ids {
+            if let Some(spec) = specs_cache.get(&spec_id) {
+                trait_ids.extend(&spec.minor_traits);
+            }
+        }
+
+        // PvP stats come from amulet (not gear), so only calculate trait bonuses
+        let trait_stats = stats::calculate_trait_stats(&trait_ids, traits_cache);
+        let mut full_stats = stats::base_stats();
+        stats_add(&mut full_stats, &trait_stats);
+        stats::apply_trait_conversions(&mut full_stats, &trait_ids, traits_cache);
+
+        let derived = stats::compute_derived(&full_stats, &profession.name);
+        let score = score_stats(&full_stats, &derived, archetype);
+
+        all_candidates.push(BuildCandidate {
+            gear: empty_gear.clone(),
+            elite_spec: *elite,
+            core_specs: cores.clone(),
+            stats: full_stats,
+            derived,
+            score,
+        });
+    }
+
+    on_progress(OptimizeProgress {
+        stage: "Ranking PvP candidates...".into(),
+        done: false,
+    });
+
+    all_candidates.sort_by(|a, b| {
+        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
     });
     all_candidates.truncate(top_n);
 
@@ -254,6 +336,7 @@ mod tests {
             &HashMap::new(),
             |_| {},
             3,
+            &GameMode::PvE,
         );
 
         assert!(!candidates.is_empty());
