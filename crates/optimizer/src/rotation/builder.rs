@@ -44,6 +44,17 @@ fn skill_to_rotation(skill: &Skill) -> RotationSkill {
         effects,
         next_chain: skill.next_chain,
         is_stunbreak,
+        weapon_set: 0, // default; caller can tag with set 1/2 via tag_weapon_set()
+    }
+}
+
+/// Tag weapon skills in a rotation with their weapon set number.
+/// Non-weapon skills (heal/utility/elite/profession) are left at set 0.
+pub fn tag_weapon_set(skills: &mut [RotationSkill], weapon_set: u8) {
+    for skill in skills.iter_mut() {
+        if skill.slot.is_weapon() {
+            skill.weapon_set = weapon_set;
+        }
     }
 }
 

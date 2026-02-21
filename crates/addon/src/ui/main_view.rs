@@ -1601,27 +1601,60 @@ fn candidate_to_suggestion(
 }
 
 /// Run rotation simulation for a suggestion's skills and attach the results.
+///
+/// Resolves ALL build skills: weapon skills from both weapon sets (tagged for
+/// weapon swap scheduling) + heal/utility/elite from the skills list.
+/// The simulator uses DPCT-optimal scheduling with automatic weapon swapping.
 fn simulate_suggestion_rotation(
     suggestion: &mut crate::ui::comparison::BuildSuggestion,
     db: &gw2_optimizer::gamedb::GameDb,
 ) {
-    if suggestion.skills.is_empty() {
+    if suggestion.skills.is_empty() && suggestion.weapons.is_empty() {
         return;
     }
 
-    // Resolve skill names to IDs
-    let skill_ids: Vec<u32> = suggestion.skills.iter()
-        .filter_map(|name| {
-            db.skills.values().find(|s| s.name.eq_ignore_ascii_case(name)).map(|s| s.id)
-        })
-        .collect();
+    let mut all_rotation_skills: Vec<gw2_optimizer::rotation::RotationSkill> = Vec::new();
 
-    if skill_ids.is_empty() {
-        return;
+    // 1. Resolve weapon skills from suggestion.weapons (format: "Set 1: Axe / Axe")
+    if !suggestion.weapons.is_empty() {
+        let profession = infer_profession_from_specs(&suggestion.specializations, db);
+        let weapon_sets = parse_weapon_sets(&suggestion.weapons);
+
+        for (set_num, weapon_types) in &weapon_sets {
+            let mut set_skill_ids: Vec<u32> = Vec::new();
+            for wtype in weapon_types {
+                for skill in db.skills.values() {
+                    if skill.weapon_type.as_deref() == Some(wtype.as_str())
+                        && skill.professions.iter().any(|p| p.eq_ignore_ascii_case(&profession))
+                        && skill.slot.as_deref().map(|s| s.starts_with("Weapon_")).unwrap_or(false)
+                        && !set_skill_ids.contains(&skill.id)
+                    {
+                        set_skill_ids.push(skill.id);
+                    }
+                }
+            }
+            if !set_skill_ids.is_empty() {
+                let mut set_skills = gw2_optimizer::rotation::builder::build_rotation_skills(&set_skill_ids, db);
+                gw2_optimizer::rotation::builder::tag_weapon_set(&mut set_skills, *set_num);
+                all_rotation_skills.extend(set_skills);
+            }
+        }
     }
 
-    let rotation_skills = gw2_optimizer::rotation::builder::build_rotation_skills(&skill_ids, db);
-    if rotation_skills.is_empty() {
+    // 2. Resolve heal/utility/elite from suggestion.skills
+    //    Format: "Heal: Name", "Utils: Name1, Name2, Name3", "Elite: Name"
+    let skill_names = parse_skill_names(&suggestion.skills);
+    for name in &skill_names {
+        if let Some(skill) = db.skills.values().find(|s| s.name.eq_ignore_ascii_case(name)) {
+            if !all_rotation_skills.iter().any(|rs| rs.skill_id == skill.id) {
+                let mut rs_vec = gw2_optimizer::rotation::builder::build_rotation_skills(&[skill.id], db);
+                // Non-weapon skills stay at weapon_set=0 (always available)
+                all_rotation_skills.append(&mut rs_vec);
+            }
+        }
+    }
+
+    if all_rotation_skills.is_empty() {
         return;
     }
 
@@ -1632,7 +1665,7 @@ fn simulate_suggestion_rotation(
     let weapon_strength = 1100.0; // reference weapon strength (same as combat.rs)
 
     let result = gw2_optimizer::rotation::simulator::simulate(
-        &rotation_skills, 0, power, condition_damage, weapon_strength,
+        &all_rotation_skills, 0, power, condition_damage, weapon_strength,
     );
 
     suggestion.rotation = Some(gw2_core::types::RotationBreakdown {
@@ -1648,6 +1681,75 @@ fn simulate_suggestion_rotation(
         has_stability: result.has_stability,
         stability_uptime: result.stability_uptime,
     });
+}
+
+/// Parse weapon sets from suggestion.weapons strings.
+/// Input format: "Set 1: Axe / Axe", "Set 2: Greatsword"
+/// Returns: [(1, ["Axe", "Axe"]), (2, ["Greatsword"])]
+fn parse_weapon_sets(weapons: &[String]) -> Vec<(u8, Vec<String>)> {
+    let mut sets = Vec::new();
+    for w in weapons {
+        let set_num = if w.starts_with("Set 1") { 1u8 }
+            else if w.starts_with("Set 2") { 2u8 }
+            else { 1u8 }; // fallback
+
+        let rest = w.split(':').nth(1).unwrap_or(w).trim();
+        let types: Vec<String> = rest.split('/')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && s != "null")
+            .collect();
+
+        if !types.is_empty() {
+            sets.push((set_num, types));
+        }
+    }
+    sets
+}
+
+/// Parse individual skill names from formatted suggestion.skills strings.
+/// "Heal: Mending" → "Mending"
+/// "Utils: Blood Reckoning, Bull's Charge, Signet of Fury" → 3 names
+/// "Elite: Head Butt" → "Head Butt"
+fn parse_skill_names(skills: &[String]) -> Vec<String> {
+    let mut names = Vec::new();
+    for s in skills {
+        if let Some(rest) = s.strip_prefix("Heal: ") {
+            names.push(rest.trim().to_string());
+        } else if let Some(rest) = s.strip_prefix("Utils: ") {
+            for name in rest.split(',') {
+                let name = name.trim();
+                if !name.is_empty() {
+                    names.push(name.to_string());
+                }
+            }
+        } else if let Some(rest) = s.strip_prefix("Elite: ") {
+            names.push(rest.trim().to_string());
+        } else {
+            // Fallback: try the whole string as a skill name
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                names.push(trimmed.to_string());
+            }
+        }
+    }
+    names
+}
+
+/// Infer profession name from specialization names in the suggestion.
+fn infer_profession_from_specs(
+    specs: &[(String, Vec<String>)],
+    db: &gw2_optimizer::gamedb::GameDb,
+) -> String {
+    for (spec_name, _) in specs {
+        let clean = spec_name.replace(" [E]", "");
+        for spec in db.specializations.values() {
+            if spec.name.eq_ignore_ascii_case(&clean) {
+                return spec.profession.clone();
+            }
+        }
+    }
+    // Fallback to first profession in db
+    db.professions.values().next().map(|p| p.name.clone()).unwrap_or_default()
 }
 
 /// Infer archetype from current build stats.
