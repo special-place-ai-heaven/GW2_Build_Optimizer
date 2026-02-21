@@ -3,7 +3,39 @@
 //! Designed to minimize token usage (Gemini free tier: 250 RPD, 10 RPM).
 
 use crate::engine::BuildCandidate;
-use crate::scoring::Archetype;
+use crate::scoring::{AggressionLevel, Archetype};
+
+/// Human-readable description of what an aggression level means.
+fn aggression_description(level: &AggressionLevel) -> &'static str {
+    match level {
+        AggressionLevel::FullDefense => "maximize survivability above all else — tanking, healing, bunker",
+        AggressionLevel::Defensive => "lean defensive — durable damage dealer who survives sustained pressure",
+        AggressionLevel::Balanced => "equal balance of damage output and survivability",
+        AggressionLevel::Aggressive => "lean aggressive — maximize damage with minimal survival tools",
+        AggressionLevel::FullOffense => "full glass cannon — maximize raw damage output regardless of survivability",
+    }
+}
+
+/// Build guidance text for Gemini based on the aggression level.
+fn aggression_context(level: &AggressionLevel) -> &'static str {
+    match level {
+        AggressionLevel::FullDefense => {
+            "Prioritize: Vitality, Toughness, Healing Power gear. Pick traits that grant damage reduction, barrier, protection uptime, health regeneration. Skills should include blocks, evades, stunbreaks, condition cleanse. Damage is secondary — focus on unkillable sustain."
+        }
+        AggressionLevel::Defensive => {
+            "Prioritize: hybrid gear (Trailblazer, Dire, Minstrel). Pick traits that balance damage with sustain — condition damage with Toughness, or healing with boon duration. Include 1-2 stunbreaks, condition cleanse, and at least one defensive cooldown. Damage should be meaningful but not at the cost of dying."
+        }
+        AggressionLevel::Balanced => {
+            "Prioritize: balanced gear (Celestial, Marauder, Diviner). Pick traits that offer both offensive output and defensive utility. Include stunbreaks, stability access, and moderate sustain. Both damage and survivability should be competitive — neither sacrificed."
+        }
+        AggressionLevel::Aggressive => {
+            "Prioritize: offensive gear (Berserker, Viper, Grieving). Pick damage-focused traits, but include at least one stunbreak and minimal sustain (a heal skill, one defensive utility). Glass is acceptable in PvE with a healer; in WvW/PvP ensure you can survive one burst combo."
+        }
+        AggressionLevel::FullOffense => {
+            "Prioritize: pure damage gear (Berserker for power, Viper for condi). Pick traits that maximize DPS — crit damage, condition damage modifiers, vulnerability application. All utility slots should be offensive (signets, banners, damage skills). Survivability is irrelevant — optimize purely for golem DPS benchmarks."
+        }
+    }
+}
 
 /// Build a prompt for generating a new build from scratch.
 pub fn new_build_prompt(
@@ -68,11 +100,16 @@ pub fn new_build_prompt_with_tools(
     profession: &str,
     archetype: &Archetype,
     game_mode: &str,
+    aggression: &AggressionLevel,
 ) -> String {
+    let aggression_guidance = aggression_context(aggression);
     format!(
         r#"You are an expert Guild Wars 2 build optimizer with access to the game's full database.
 
 Create an optimal {archetype} build for {profession} in {game_mode}.
+
+PLAYER PLAYSTYLE: The player has set their aggression slider to "{aggression_label}" ({aggression_desc}).
+{aggression_guidance}
 
 DESIGN PRINCIPLE: Pure damage output is NOT the goal. The ability to DELIVER damage is the goal. A build that can CC enemies, maintain stability, survive burst, and sustain pressure delivers more real damage than a glass cannon that gets interrupted. Every trait, skill, rune, sigil, and relic must work in concert. Consider: CC access, stunbreaks, stability, blocks, evades, condition cleanse alongside raw DPS.
 
@@ -129,6 +166,9 @@ After gathering data, respond with ONLY a JSON build object:
         archetype = archetype.label(),
         profession = profession,
         game_mode = game_mode,
+        aggression_label = aggression.label(),
+        aggression_desc = aggression_description(aggression),
+        aggression_guidance = aggression_guidance,
     )
 }
 
@@ -137,11 +177,16 @@ pub fn improve_build_prompt_with_tools(
     profession: &str,
     archetype: &Archetype,
     game_mode: &str,
+    aggression: &AggressionLevel,
 ) -> String {
+    let aggression_guidance = aggression_context(aggression);
     format!(
         r#"You are an expert Guild Wars 2 build optimizer with access to the game's full database.
 
 Improve the player's current {archetype} build for {profession} in {game_mode}.
+
+PLAYER PLAYSTYLE: The player has set their aggression slider to "{aggression_label}" ({aggression_desc}).
+{aggression_guidance}
 
 DESIGN PRINCIPLE: Pure damage output is NOT the goal. The ability to DELIVER damage is the goal. Consider CC access, stunbreaks, stability, survivability, and control alongside raw DPS. A build that disables enemies and maintains pressure outperforms one that only maximizes numbers on a golem.
 
@@ -184,6 +229,9 @@ After gathering data, respond with ONLY a JSON build object:
         archetype = archetype.label(),
         profession = profession,
         game_mode = game_mode,
+        aggression_label = aggression.label(),
+        aggression_desc = aggression_description(aggression),
+        aggression_guidance = aggression_guidance,
     )
 }
 
@@ -339,33 +387,6 @@ Consider all synergies (traits, sigils, runes, relics, skills) as a codependent 
         current_build = sanitized_build,
         request = sanitized_request,
         context = context,
-    )
-}
-
-/// Build a prompt for explaining the difference between two builds.
-pub fn compare_builds_prompt(
-    build_a_summary: &str,
-    build_b_summary: &str,
-    stat_diffs: &str,
-) -> String {
-    let build_a = sanitize_build_summary(build_a_summary);
-    let build_b = sanitize_build_summary(build_b_summary);
-    format!(
-        r#"You are a Guild Wars 2 build analyst. Compare these two builds:
-
-Build A:
-{build_a}
-
-Build B:
-{build_b}
-
-Stat differences:
-{diffs}
-
-Explain in 2-3 paragraphs which build is stronger and why. Focus on synergy differences, not just stat numbers. Consider the full combat loop."#,
-        build_a = build_a,
-        build_b = build_b,
-        diffs = stat_diffs,
     )
 }
 

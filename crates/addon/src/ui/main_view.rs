@@ -243,6 +243,18 @@ fn render_left_menu(ui: &Ui, state: &mut AddonState) {
         }
     }
 
+    // Aggression level slider (shared across tabs)
+    ui.spacing();
+    {
+        let level = AggressionLevel::from_index(state.main.aggression_index as usize);
+        ui.text(format!("Playstyle: {}", level.label()));
+    }
+    ui.set_next_item_width(-1.0);
+    nexus::imgui::Slider::new("##aggression", 0, 4)
+        .display_format("")
+        .build(ui, &mut state.main.aggression_index);
+    ui.text_colored([0.6, 0.6, 0.6, 1.0], "Defense <-> Offense");
+
     ui.spacing();
     ui.separator();
     ui.spacing();
@@ -328,19 +340,6 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
         }
         ui.spacing();
     }
-
-    // Aggression level slider
-    ui.separator();
-    {
-        let level = AggressionLevel::from_index(state.main.aggression_index as usize);
-        ui.text(format!("Playstyle: {}", level.label()));
-    }
-    ui.set_next_item_width(200.0);
-    nexus::imgui::Slider::new("##aggression", 0, 4)
-        .display_format("")
-        .build(ui, &mut state.main.aggression_index);
-    ui.text_colored([0.6, 0.6, 0.6, 1.0], "Full Defense <-> Full Offense");
-    ui.spacing();
 
     // Show comparison if suggestions exist
     if !state.main.comparison.suggestions.is_empty() {
@@ -1440,6 +1439,7 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
                     &profession_name,
                     &archetype,
                     &game_mode_label,
+                    aggression,
                     &candidates,
                     &db,
                     current_build_summary.as_deref(),
@@ -1596,7 +1596,58 @@ fn candidate_to_suggestion(
         combat_solo,
         combat_party,
         combat_squad,
+        rotation: None,
     }
+}
+
+/// Run rotation simulation for a suggestion's skills and attach the results.
+fn simulate_suggestion_rotation(
+    suggestion: &mut crate::ui::comparison::BuildSuggestion,
+    db: &gw2_optimizer::gamedb::GameDb,
+) {
+    if suggestion.skills.is_empty() {
+        return;
+    }
+
+    // Resolve skill names to IDs
+    let skill_ids: Vec<u32> = suggestion.skills.iter()
+        .filter_map(|name| {
+            db.skills.values().find(|s| s.name.eq_ignore_ascii_case(name)).map(|s| s.id)
+        })
+        .collect();
+
+    if skill_ids.is_empty() {
+        return;
+    }
+
+    let rotation_skills = gw2_optimizer::rotation::builder::build_rotation_skills(&skill_ids, db);
+    if rotation_skills.is_empty() {
+        return;
+    }
+
+    // Extract stats from estimated_stats for the simulation
+    let stats = suggestion.estimated_stats.as_ref();
+    let power = stats.map(|s| s.power as f64).unwrap_or(1000.0);
+    let condition_damage = stats.map(|s| s.condition_damage as f64).unwrap_or(0.0);
+    let weapon_strength = 1100.0; // reference weapon strength (same as combat.rs)
+
+    let result = gw2_optimizer::rotation::simulator::simulate(
+        &rotation_skills, 0, power, condition_damage, weapon_strength,
+    );
+
+    suggestion.rotation = Some(gw2_core::types::RotationBreakdown {
+        simulated_dps: result.total_dps.round() as i32,
+        strike_dps: result.strike_dps.round() as i32,
+        condition_dps: result.condition_dps.round() as i32,
+        condition_uptime: result.condition_uptime.into_iter().collect(),
+        buff_uptime: result.buff_uptime.into_iter().collect(),
+        skill_usage: result.skill_usage.iter()
+            .map(|su| (su.name.clone(), su.cast_count, su.dps_contribution.round() as i32))
+            .collect(),
+        stunbreak_count: result.stunbreak_count,
+        has_stability: result.has_stability,
+        stability_uptime: result.stability_uptime,
+    });
 }
 
 /// Infer archetype from current build stats.
@@ -1735,6 +1786,7 @@ fn enrich_with_gemini(
     profession_name: &str,
     archetype: &Archetype,
     game_mode: &str,
+    aggression: AggressionLevel,
     candidates: &[gw2_optimizer::engine::BuildCandidate],
     db: &gw2_optimizer::gamedb::GameDb,
     current_build_summary: Option<&str>,
@@ -1748,11 +1800,11 @@ fn enrich_with_gemini(
     // Build tool-aware prompt
     let prompt = if current_build_summary.is_some() {
         gw2_optimizer::prompts::improve_build_prompt_with_tools(
-            profession_name, archetype, game_mode,
+            profession_name, archetype, game_mode, &aggression,
         )
     } else {
         gw2_optimizer::prompts::new_build_prompt_with_tools(
-            profession_name, archetype, game_mode,
+            profession_name, archetype, game_mode, &aggression,
         )
     };
 
@@ -1763,6 +1815,7 @@ fn enrich_with_gemini(
         profession_name,
         candidates,
         current_build_summary: build_summary_owned.as_deref(),
+        aggression_level: aggression,
     };
 
     let response = client.generate_with_tools(
@@ -1777,6 +1830,8 @@ fn enrich_with_gemini(
 
     if let Some(first) = suggestions.first_mut() {
         apply_gemini_response(first, &gemini_build);
+        // Run rotation simulation now that Gemini has populated skills
+        simulate_suggestion_rotation(first, db);
     }
 
     Ok(())
@@ -1809,6 +1864,7 @@ fn send_chat_message(state: &mut AddonState, message: String) {
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
     let db_clone = state.main.game_db.clone();
+    let aggression = AggressionLevel::from_index(state.main.aggression_index as usize);
 
     std::thread::spawn(move || {
         if token.is_cancelled() { return; }
@@ -1832,6 +1888,7 @@ fn send_chat_message(state: &mut AddonState, message: String) {
                     profession_name: &profession,
                     candidates: &empty_candidates,
                     current_build_summary: build_summary.as_deref(),
+                    aggression_level: aggression,
                 };
 
                 let response = client.generate_with_tools(
@@ -1875,6 +1932,9 @@ fn send_chat_message(state: &mut AddonState, message: String) {
                             ..Default::default()
                         };
                         apply_gemini_response(&mut suggestion, &gemini_build);
+                        if let Some(ref db) = s.main.game_db {
+                            simulate_suggestion_rotation(&mut suggestion, db);
+                        }
                         s.main.comparison.suggestions.push(suggestion);
                         s.main.comparison.selected_suggestion =
                             s.main.comparison.suggestions.len() - 1;
@@ -2025,7 +2085,11 @@ fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
     // Handle load
     if let Some(idx) = load_idx {
         let saved = state.main.saved_builds[idx].clone();
-        let suggestion = saved_to_suggestion(&saved);
+        let mut suggestion = saved_to_suggestion(&saved);
+        // Run rotation simulation if GameDb is available
+        if let Some(ref db) = state.main.game_db {
+            simulate_suggestion_rotation(&mut suggestion, db);
+        }
         state.main.comparison.suggestions = vec![suggestion];
         state.main.comparison.selected_suggestion = 0;
         state.main.comparison.error = None;
@@ -2105,6 +2169,7 @@ fn saved_to_suggestion(
         combat_solo: None,
         combat_party: None,
         combat_squad: None,
+        rotation: None,
     }
 }
 

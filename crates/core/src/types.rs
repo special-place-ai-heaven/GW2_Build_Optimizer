@@ -184,6 +184,27 @@ pub struct CombatMetrics {
     pub confusion_tick: i32,
 }
 
+/// Rotation simulation breakdown for UI display.
+/// Shows simulated DPS, condition uptimes, buff uptimes, and skill usage.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RotationBreakdown {
+    pub simulated_dps: i32,
+    pub strike_dps: i32,
+    pub condition_dps: i32,
+    /// Average condition stacks (condition_name → avg_stacks).
+    pub condition_uptime: Vec<(String, f64)>,
+    /// Buff uptime percentages (buff_name → pct 0-100).
+    pub buff_uptime: Vec<(String, f64)>,
+    /// Skill usage in the rotation (name, cast_count, dps_contribution).
+    pub skill_usage: Vec<(String, u32, i32)>,
+    /// Number of stunbreaks in the skill bar.
+    pub stunbreak_count: u32,
+    /// Whether the build has stability access.
+    pub has_stability: bool,
+    /// Stability uptime percentage (0.0-1.0).
+    pub stability_uptime: f64,
+}
+
 /// A saved optimizer build for persistence (Save/Load tab).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedBuild {
