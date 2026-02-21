@@ -171,6 +171,7 @@ pub struct CombatMetrics {
     pub condition_dps_index: i32,
     pub total_dps_index: i32,
     pub healing_index: i32,
+    pub crit_chance: f64,
     pub boon_duration_pct: f64,
     pub condi_duration_pct: f64,
     pub effective_health: i32,

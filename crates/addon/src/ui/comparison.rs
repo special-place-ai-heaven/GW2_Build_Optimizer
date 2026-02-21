@@ -205,6 +205,7 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
 
             let cur = *cur_combat;
             render_int_row(ui, "Effective Power", cur.map_or(0, |c| c.effective_power), sug.effective_power);
+            render_pct_row(ui, "Crit Chance", cur.map_or(0.0, |c| c.crit_chance), sug.crit_chance);
             render_int_row(ui, "Strike DPS Index", cur.map_or(0, |c| c.strike_dps_index), sug.strike_dps_index);
             render_int_row(ui, "Condi DPS Index", cur.map_or(0, |c| c.condition_dps_index), sug.condition_dps_index);
             render_int_row(ui, "Total DPS Index", cur.map_or(0, |c| c.total_dps_index), sug.total_dps_index);
@@ -224,20 +225,25 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
 
     // ─── Condition Tick Breakdown ───
     if let Some(sug) = suggestion.combat_solo.as_ref() {
+        let cur = comparison.current_combat_solo.as_ref();
         let ticks = [
-            ("Bleeding", sug.bleeding_tick, "per stack/sec"),
-            ("Burning", sug.burning_tick, "per stack/sec"),
-            ("Poison", sug.poison_tick, "per stack/sec"),
-            ("Torment", sug.torment_tick, "stationary"),
-            ("Confusion", sug.confusion_tick, "on skill use"),
+            ("Bleeding", cur.map_or(0, |c| c.bleeding_tick), sug.bleeding_tick, "per stack/sec"),
+            ("Burning", cur.map_or(0, |c| c.burning_tick), sug.burning_tick, "per stack/sec"),
+            ("Poison", cur.map_or(0, |c| c.poison_tick), sug.poison_tick, "per stack/sec"),
+            ("Torment", cur.map_or(0, |c| c.torment_tick), sug.torment_tick, "stationary"),
+            ("Confusion", cur.map_or(0, |c| c.confusion_tick), sug.confusion_tick, "on skill use"),
         ];
-        let ticks_to_show: Vec<_> = ticks.iter().filter(|(_, val, _)| *val > 0).collect();
+        let ticks_to_show: Vec<_> = ticks.iter()
+            .filter(|(_, cur_v, sug_v, _)| *cur_v > 0 || *sug_v > 0)
+            .collect();
 
         if !ticks_to_show.is_empty() {
             ui.text_colored([0.9, 0.6, 0.2, 1.0], "Condition Ticks (per tick, Solo)");
-            ui.columns(3, "##condi_ticks", true);
+            ui.columns(4, "##condi_ticks", true);
 
             ui.text_colored([0.8, 0.8, 0.2, 1.0], "Condition");
+            ui.next_column();
+            ui.text_colored([0.6, 0.8, 1.0, 1.0], "Current");
             ui.next_column();
             ui.text_colored([0.3, 1.0, 0.3, 1.0], "Optimized");
             ui.next_column();
@@ -245,10 +251,22 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
             ui.next_column();
             ui.separator();
 
-            for (name, val, info) in &ticks_to_show {
+            for (name, cur_val, sug_val, info) in &ticks_to_show {
                 ui.text(*name);
                 ui.next_column();
-                ui.text(&format!("{}", val));
+                if *cur_val > 0 {
+                    ui.text(&format!("{}", cur_val));
+                } else {
+                    ui.text_colored([0.5, 0.5, 0.5, 1.0], "-");
+                }
+                ui.next_column();
+                let diff = *sug_val - *cur_val;
+                ui.text(&format!("{}", sug_val));
+                if *cur_val > 0 && diff != 0 {
+                    ui.same_line();
+                    let color = if diff > 0 { [0.0, 1.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0, 1.0] };
+                    ui.text_colored(color, &format!("({}{})", if diff > 0 { "+" } else { "" }, diff));
+                }
                 ui.next_column();
                 ui.text_colored([0.5, 0.5, 0.5, 1.0], *info);
                 ui.next_column();
@@ -287,7 +305,7 @@ fn render_defenses(ui: &Ui, comparison: &ComparisonState, current_stats: Option<
             let health = cur.health;
             let armor = cur.armor;
             let eff_hp = (health as f64 * armor as f64 / 2597.0) as i32;
-            let dmg_red = (armor as f64 / (armor as f64 + 2600.0)) * 100.0;
+            let dmg_red = 0.0; // No boon DR info without combat metrics
             (health, armor, eff_hp as i32, dmg_red)
         };
 
@@ -301,7 +319,7 @@ fn render_defenses(ui: &Ui, comparison: &ComparisonState, current_stats: Option<
             let health = sug_stats.health;
             let armor = sug_stats.armor;
             let eff_hp = (health as f64 * armor as f64 / 2597.0) as i32;
-            let dmg_red = (armor as f64 / (armor as f64 + 2600.0)) * 100.0;
+            let dmg_red = 0.0; // No boon DR info without combat metrics
             (health, armor, eff_hp, dmg_red)
         };
 

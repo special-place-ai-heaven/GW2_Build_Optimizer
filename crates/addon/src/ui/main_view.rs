@@ -718,7 +718,17 @@ fn resolve_selected_build_inner(state: &mut AddonState) {
             match result {
                 Ok(build) => {
                     s.main.current_build = Some(build);
-                    s.main.current_stats = stats_result.ok();
+                    match stats_result {
+                        Ok((stats, combat_solo, combat_party, combat_squad)) => {
+                            s.main.current_stats = Some(stats);
+                            s.main.comparison.current_combat_solo = combat_solo;
+                            s.main.comparison.current_combat_party = combat_party;
+                            s.main.comparison.current_combat_squad = combat_squad;
+                        }
+                        Err(_) => {
+                            s.main.current_stats = None;
+                        }
+                    }
                 }
                 Err(e) => s.main.error = Some(e),
             }
@@ -765,12 +775,19 @@ fn resolve_build(
 }
 
 /// Calculate the current build's stats using the full stat pipeline.
+type CombatBundle = (
+    gw2_core::types::StatBlock,
+    Option<gw2_core::types::CombatMetrics>,
+    Option<gw2_core::types::CombatMetrics>,
+    Option<gw2_core::types::CombatMetrics>,
+);
+
 fn calculate_current_stats(
     build: &gw2_api::models::Build,
     equipment: &gw2_api::models::EquipmentTab,
     cache: &gw2_api::cache::DataCache,
     game_mode: &gw2_core::types::GameMode,
-) -> Result<gw2_core::types::StatBlock, String> {
+) -> Result<CombatBundle, String> {
     use std::collections::HashMap;
 
     let items_vec: Vec<gw2_api::models::Item> = cache
@@ -798,7 +815,7 @@ fn calculate_current_stats(
                 if let Some(amulet) = pvp_amulets_vec.iter().find(|a| a.id == amulet_id) {
                     let opt_stats = gw2_optimizer::stats::calculate_pvp_stats(&amulet.attributes);
                     let derived = gw2_optimizer::stats::compute_derived(&opt_stats, &profession);
-                    return Ok(gw2_core::types::StatBlock {
+                    let stats = gw2_core::types::StatBlock {
                         power: opt_stats.power.round() as i32,
                         precision: opt_stats.precision.round() as i32,
                         toughness: opt_stats.toughness.round() as i32,
@@ -812,7 +829,37 @@ fn calculate_current_stats(
                         crit_damage: derived.crit_damage,
                         health: derived.health.round() as i32,
                         armor: derived.armor.round() as i32,
-                    });
+                    };
+                    // PvP: no trait/item modifiers, compute with default modifiers
+                    let modifiers = gw2_optimizer::combat::DamageModifiers::default();
+                    let profiles = gw2_optimizer::combat::default_buff_profiles();
+                    let perf_to_metrics = |profile: &gw2_optimizer::combat::BuffProfile| -> gw2_core::types::CombatMetrics {
+                        let perf = gw2_optimizer::combat::calculate_combat_performance(
+                            &opt_stats, &derived, &modifiers, profile, &profession,
+                        );
+                        gw2_core::types::CombatMetrics {
+                            effective_power: perf.effective_power.round() as i32,
+                            strike_dps_index: perf.strike_dps_index.round() as i32,
+                            condition_dps_index: perf.condition_dps_index.round() as i32,
+                            total_dps_index: perf.total_dps_index.round() as i32,
+                            healing_index: perf.healing_power_index.round() as i32,
+                            crit_chance: perf.crit_chance,
+                            boon_duration_pct: perf.boon_duration_pct,
+                            condi_duration_pct: perf.condi_duration_pct,
+                            effective_health: perf.effective_health.round() as i32,
+                            damage_reduction_pct: perf.damage_reduction_pct,
+                            bleeding_tick: perf.condition_ticks.bleeding.round() as i32,
+                            burning_tick: perf.condition_ticks.burning.round() as i32,
+                            poison_tick: perf.condition_ticks.poison.round() as i32,
+                            torment_tick: perf.condition_ticks.torment.round() as i32,
+                            confusion_tick: perf.condition_ticks.confusion.round() as i32,
+                        }
+                    };
+                    return Ok((stats,
+                        profiles.get(0).map(&perf_to_metrics),
+                        profiles.get(1).map(&perf_to_metrics),
+                        profiles.get(2).map(&perf_to_metrics),
+                    ));
                 }
             }
         }
@@ -871,7 +918,48 @@ fn calculate_current_stats(
         &traits_cache,
     );
 
-    Ok(gw2_core::types::StatBlock {
+    // Extract damage modifiers from equipped traits + items for combat metrics
+    let relic_id = equipment.equipment.iter()
+        .find(|p| p.slot == "Relic")
+        .map(|p| p.id);
+    let modifiers = gw2_optimizer::combat::extract_damage_modifiers(
+        &equipped_trait_ids,
+        rune_id,
+        &sigil_ids,
+        relic_id,
+        &traits_cache,
+        &items_cache,
+    );
+
+    // Compute 3-tier combat metrics for current build
+    let profiles = gw2_optimizer::combat::default_buff_profiles();
+    let perf_to_metrics = |profile: &gw2_optimizer::combat::BuffProfile| -> gw2_core::types::CombatMetrics {
+        let perf = gw2_optimizer::combat::calculate_combat_performance(
+            &opt_stats, &derived, &modifiers, profile, &profession,
+        );
+        gw2_core::types::CombatMetrics {
+            effective_power: perf.effective_power.round() as i32,
+            strike_dps_index: perf.strike_dps_index.round() as i32,
+            condition_dps_index: perf.condition_dps_index.round() as i32,
+            total_dps_index: perf.total_dps_index.round() as i32,
+            healing_index: perf.healing_power_index.round() as i32,
+            crit_chance: perf.crit_chance,
+            boon_duration_pct: perf.boon_duration_pct,
+            condi_duration_pct: perf.condi_duration_pct,
+            effective_health: perf.effective_health.round() as i32,
+            damage_reduction_pct: perf.damage_reduction_pct,
+            bleeding_tick: perf.condition_ticks.bleeding.round() as i32,
+            burning_tick: perf.condition_ticks.burning.round() as i32,
+            poison_tick: perf.condition_ticks.poison.round() as i32,
+            torment_tick: perf.condition_ticks.torment.round() as i32,
+            confusion_tick: perf.condition_ticks.confusion.round() as i32,
+        }
+    };
+    let combat_solo = profiles.get(0).map(&perf_to_metrics);
+    let combat_party = profiles.get(1).map(&perf_to_metrics);
+    let combat_squad = profiles.get(2).map(&perf_to_metrics);
+
+    Ok((gw2_core::types::StatBlock {
         power: opt_stats.power.round() as i32,
         precision: opt_stats.precision.round() as i32,
         toughness: opt_stats.toughness.round() as i32,
@@ -885,7 +973,7 @@ fn calculate_current_stats(
         crit_damage: derived.crit_damage,
         health: derived.health.round() as i32,
         armor: derived.armor.round() as i32,
-    })
+    }, combat_solo, combat_party, combat_squad))
 }
 
 fn resolve_specs(
@@ -1492,6 +1580,7 @@ fn candidate_to_suggestion(
             condition_dps_index: perf.condition_dps_index.round() as i32,
             total_dps_index: perf.total_dps_index.round() as i32,
             healing_index: perf.healing_power_index.round() as i32,
+            crit_chance: perf.crit_chance,
             boon_duration_pct: perf.boon_duration_pct,
             condi_duration_pct: perf.condi_duration_pct,
             effective_health: perf.effective_health.round() as i32,

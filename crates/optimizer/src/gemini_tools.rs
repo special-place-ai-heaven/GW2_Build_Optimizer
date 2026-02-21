@@ -826,6 +826,7 @@ fn format_combat_performance(perf: &CombatPerformance, label: &str) -> Value {
         "condition_dps_index": perf.condition_dps_index.round() as i32,
         "total_dps_index": perf.total_dps_index.round() as i32,
         "healing_power_index": perf.healing_power_index.round() as i32,
+        "crit_chance": format!("{:.1}%", perf.crit_chance),
         "boon_duration": format!("{:.1}%", perf.boon_duration_pct),
         "condi_duration": format!("{:.1}%", perf.condi_duration_pct),
         "effective_health": perf.effective_health.round() as i32,
