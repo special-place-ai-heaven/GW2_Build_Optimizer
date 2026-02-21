@@ -24,6 +24,9 @@ pub struct RotationSkill {
     pub next_chain: Option<u32>,
     /// Whether this skill is a stunbreak.
     pub is_stunbreak: bool,
+    /// Weapon set this skill belongs to (0=always available, 1=set1, 2=set2).
+    /// Non-weapon skills (heal/utility/elite) use 0.
+    pub weapon_set: u8,
 }
 
 /// Skill slot classification — determines priority and auto-attack behavior.
