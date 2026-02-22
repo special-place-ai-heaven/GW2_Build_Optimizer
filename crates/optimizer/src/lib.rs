@@ -1,6 +1,8 @@
 pub mod combat;
+pub mod context;
 pub mod engine;
 pub mod gamedb;
+pub mod validation;
 pub mod gemini;
 pub mod gemini_tools;
 pub mod prompts;

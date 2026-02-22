@@ -6,7 +6,7 @@ use crate::engine::BuildCandidate;
 use crate::scoring::OptimizationWeights;
 
 /// Build guidance text for Gemini based on the 5-axis optimization weights.
-fn weights_context(weights: &OptimizationWeights) -> String {
+pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
     let w = weights.clamped();
     let mut priorities = Vec::new();
     let mut guidance = Vec::new();
@@ -241,6 +241,114 @@ After gathering data, respond with ONLY a JSON build object:
     )
 }
 
+/// Build a synergy-focused prompt with pre-computed context embedded.
+/// Gemini receives ALL profession data upfront and reasons about synergies
+/// across traits, skills, runes, sigils, and relics in a single call.
+/// Tools remain available for optional verification.
+pub fn synergy_build_prompt(
+    profession: &str,
+    weights: &OptimizationWeights,
+    game_mode: &str,
+    pre_computed_context: &str,
+    current_build_summary: Option<&str>,
+) -> String {
+    let weights_guidance = weights_context(weights);
+    let summary = weights.summary_label();
+    let game_rules = build_game_context(profession, weights, game_mode);
+
+    let task = if current_build_summary.is_some() {
+        format!("Improve the player's current {summary} build for {profession} in {game_mode}.")
+    } else {
+        format!("Create an optimal {summary} build for {profession} in {game_mode}.")
+    };
+
+    let current_build_section = current_build_summary
+        .map(|s| {
+            let sanitized = sanitize_build_summary(s);
+            format!(
+                "\n\nCURRENT BUILD (what the player has equipped):\n{}\n\nYour goal: identify specific improvements with clear synergy reasoning. For each change, explain what it synergizes with and why it's better.",
+                sanitized
+            )
+        })
+        .unwrap_or_default();
+
+    format!(
+        r#"You are an expert Guild Wars 2 build optimizer with deep knowledge of trait-skill-equipment synergies.
+
+{task}
+
+{weights_guidance}
+
+{game_rules}
+
+SYNERGY REASONING — THIS IS CRITICAL:
+Every choice must synergize with other choices. A build is NOT a collection of individually good items — it's a codependent system where each piece amplifies others:
+- Traits that proc on conditions → pair with skills that apply those conditions
+- Rune 6-piece bonuses that amplify the build's core mechanic (e.g., Burning duration rune with a Burning-focused build)
+- Sigils that trigger on weapon swap → pair with weapon-swap-benefit traits
+- Sigils that trigger on crit → pair with high-crit builds
+- Relics that complete the synergy loop (e.g., heal-on-hit relic with frequent-hit skills)
+- Skill categories (Trap, Glyph, Survival, etc.) that interact with rune/trait category bonuses
+
+For EACH choice, think: "What does this synergize with? What chain does it create?"
+Build synergy chains: trait → skill → rune → sigil → relic
+
+Rules:
+- 3 specializations: slots 1-2 core, slot 3 can be elite
+- 1 trait per column per spec (Adept, Master, Grandmaster)
+- Runes: ALWAYS 6 of the same type (for the set bonus — never mix)
+- Sigils: 1 per weapon (2 for 2-handed), different per weapon set
+- 1 heal skill, 3 utility skills, 1 elite skill
+- 2 weapon sets (1 for Engineer/Elementalist)
+
+You have tools available for VERIFICATION. If you want to check specific trait details, verify synergy interactions, test combat performance, or validate rotation DPS — use them. The data below gives you the full landscape; tools let you drill deeper.
+
+=== COMPLETE GAME DATA ===
+
+{context}{current_build}
+
+After reasoning about synergies, respond with ONLY a JSON build object:
+```json
+{{
+  "specializations": [
+    {{"name": "SpecName1", "elite": false, "traits": ["trait1", "trait2", "trait3"]}},
+    {{"name": "SpecName2", "elite": false, "traits": ["trait1", "trait2", "trait3"]}},
+    {{"name": "SpecName3", "elite": true, "traits": ["trait1", "trait2", "trait3"]}}
+  ],
+  "weapons": {{
+    "set1": {{"main": "WeaponType", "off": "WeaponType or null"}},
+    "set2": {{"main": "WeaponType", "off": "WeaponType or null"}}
+  }},
+  "skills": {{
+    "heal": "SkillName",
+    "utilities": ["Skill1", "Skill2", "Skill3"],
+    "elite": "SkillName"
+  }},
+  "rune": "Full Rune Name (e.g. Superior Rune of the Scholar)",
+  "sigils": {{
+    "set1_main": "Full Sigil Name",
+    "set1_off": "Full Sigil Name",
+    "set2_main": "Full Sigil Name",
+    "set2_off": "Full Sigil Name"
+  }},
+  "relic": "Full Relic Name",
+  "stat_prefix": "PrefixName",
+  "synergy_explanation": "3-5 sentences explaining the synergy chains: how traits, skills, rune, sigils, and relic work together as a system.",
+  "changes": [
+    {{"slot": "What was changed", "from": "Old choice", "to": "New choice", "reason": "Why — cite the synergy"}}
+  ]
+}}
+```
+
+Every field is REQUIRED. Do not leave any field empty or null."#,
+        task = task,
+        weights_guidance = weights_guidance,
+        game_rules = game_rules,
+        context = pre_computed_context,
+        current_build = current_build_section,
+    )
+}
+
 /// Build a tool-aware prompt for chat refinement.
 pub fn chat_refinement_prompt_with_tools(
     profession: &str,
@@ -286,7 +394,7 @@ After research, respond with a JSON build object showing modifications:
 
 /// Sanitize build summary text for safe inclusion in prompts.
 /// Strips backticks (fence injection) and caps length.
-fn sanitize_build_summary(s: &str) -> String {
+pub(crate) fn sanitize_build_summary(s: &str) -> String {
     s.chars()
         .take(2000)
         .filter(|c| *c != '`' && *c != '<' && *c != '>')
@@ -553,6 +661,13 @@ pub struct GeminiBuildResponse {
     pub stat_prefix: String,
     pub explanation: String,
     pub changes_made: Vec<String>,
+    // New fields for synergy-driven optimization
+    /// Per-slot sigils map (set1_main, set1_off, set2_main, set2_off).
+    pub sigils_map: Option<std::collections::HashMap<String, String>>,
+    /// Detailed synergy explanation (replaces generic explanation in new format).
+    pub synergy_explanation: Option<String>,
+    /// Structured changes with slot/from/to/reason (new format).
+    pub changes_structured: Option<Vec<serde_json::Value>>,
 }
 
 /// Parse a Gemini response into a typed build suggestion.
@@ -615,17 +730,46 @@ pub fn parse_gemini_build(response: &str) -> Result<GeminiBuildResponse, String>
     if let Some(v) = json.get("rune").and_then(|v| v.as_str()) {
         result.rune = v.to_string();
     }
-    if let Some(arr) = json.get("sigils").and_then(|v| v.as_array()) {
-        result.sigils = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+    // Handle sigils as either flat array or per-slot object
+    if let Some(obj) = json.get("sigils").and_then(|v| v.as_object()) {
+        // New format: {"set1_main": "...", "set1_off": "...", ...}
+        let mut map = std::collections::HashMap::new();
+        for (k, v) in obj {
+            if let Some(s) = v.as_str() {
+                map.insert(k.clone(), s.to_string());
+            }
+        }
+        // Also flatten into sigils vec for backward compat
+        result.sigils = map.values().cloned().collect();
+        result.sigils_map = Some(map);
+    } else if let Some(arr) = json.get("sigils").and_then(|v| v.as_array()) {
+        // Old format: ["Sigil1", "Sigil2", ...]
+        result.sigils = arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
     }
+
     if let Some(v) = json.get("relic").and_then(|v| v.as_str()) {
         result.relic = v.to_string();
     }
     if let Some(v) = json.get("stat_prefix").and_then(|v| v.as_str()) {
         result.stat_prefix = v.to_string();
     }
+    // Old format: flat string array
     if let Some(arr) = json.get("changes_made").and_then(|v| v.as_array()) {
-        result.changes_made = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+        result.changes_made = arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+    }
+    // New format: synergy_explanation field
+    if let Some(v) = json.get("synergy_explanation").and_then(|v| v.as_str()) {
+        result.synergy_explanation = Some(v.to_string());
+    }
+    // New format: structured changes with slot/from/to/reason
+    if let Some(arr) = json.get("changes").and_then(|v| v.as_array()) {
+        result.changes_structured = Some(arr.clone());
     }
 
     Ok(result)
