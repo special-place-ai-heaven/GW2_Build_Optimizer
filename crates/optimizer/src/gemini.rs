@@ -10,10 +10,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-const GEMINI_GENERATE_URL: &str =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
-const GEMINI_MODELS_URL: &str =
-    "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_MODELS_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
 #[derive(Debug, thiserror::Error)]
 pub enum GeminiError {
@@ -33,10 +31,17 @@ pub enum GeminiError {
 
 pub struct GeminiClient {
     api_key: String,
+    model: String,
     http: reqwest::blocking::Client,
     cache: Mutex<HashMap<String, CachedResponse>>,
     rate: Mutex<RateTracker>,
     usage_path: Option<PathBuf>,
+}
+
+impl GeminiClient {
+    fn generate_url(&self) -> String {
+        format!("{}/{}:generateContent", GEMINI_API_BASE, self.model)
+    }
 }
 
 struct CachedResponse {
@@ -226,12 +231,13 @@ struct Candidate {
 }
 
 impl GeminiClient {
-    pub fn new(api_key: &str) -> Result<Self, GeminiError> {
+    pub fn new(api_key: &str, model: &str) -> Result<Self, GeminiError> {
         let http = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()?;
         Ok(Self {
             api_key: api_key.to_string(),
+            model: model.to_string(),
             http,
             cache: Mutex::new(HashMap::new()),
             rate: Mutex::new(RateTracker::new()),
@@ -241,7 +247,7 @@ impl GeminiClient {
 
     /// Create a client with persistent rate tracking.
     /// Loads existing usage from `usage_path` and saves after each request.
-    pub fn with_persistence(api_key: &str, usage_path: PathBuf) -> Result<Self, GeminiError> {
+    pub fn with_persistence(api_key: &str, model: &str, usage_path: PathBuf) -> Result<Self, GeminiError> {
         let http = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()?;
@@ -260,6 +266,7 @@ impl GeminiClient {
 
         Ok(Self {
             api_key: api_key.to_string(),
+            model: model.to_string(),
             http,
             cache: Mutex::new(HashMap::new()),
             rate: Mutex::new(rate),
@@ -421,9 +428,10 @@ impl GeminiClient {
             .unwrap_or_else(|e| e.into_inner())
             .check_and_reserve()?;
 
+        let url = self.generate_url();
         let resp = match self
             .http
-            .post(GEMINI_GENERATE_URL)
+            .post(&url)
             .header("x-goog-api-key", &self.api_key)
             .json(request)
             .send()
@@ -511,7 +519,7 @@ mod tests {
 
     #[test]
     fn test_remaining_quota() {
-        let client = GeminiClient::new("fake-key").unwrap();
+        let client = GeminiClient::new("fake-key", "gemini-2.5-flash").unwrap();
         assert_eq!(client.remaining_quota(), 250);
     }
 }

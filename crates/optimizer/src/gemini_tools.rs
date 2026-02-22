@@ -12,7 +12,7 @@ use crate::combat::{self, CombatPerformance, DamageModifiers};
 use crate::engine::BuildCandidate;
 use crate::gamedb::GameDb;
 use crate::gemini::{FunctionDeclaration, Tool};
-use crate::scoring::{self, AggressionLevel, Archetype};
+use crate::scoring::{self, OptimizationWeights};
 use crate::stats;
 
 /// Runtime context for tool execution — holds references to all game data
@@ -22,7 +22,7 @@ pub struct ToolContext<'a> {
     pub profession_name: &'a str,
     pub candidates: &'a [BuildCandidate],
     pub current_build_summary: Option<&'a str>,
-    pub aggression_level: AggressionLevel,
+    pub weights: OptimizationWeights,
 }
 
 /// Build the Gemini tool declarations for all available tools.
@@ -223,20 +223,16 @@ fn decl_simulate_combat() -> FunctionDeclaration {
 fn decl_score_build() -> FunctionDeclaration {
     FunctionDeclaration {
         name: "score_build".into(),
-        description: "Score a gear prefix against an archetype. Returns the combat-based score and breakdown.".into(),
+        description: "Score a gear prefix against the player's optimization weights. Returns the combat-based score and breakdown.".into(),
         parameters: json!({
             "type": "object",
             "properties": {
                 "gear_prefix": {
                     "type": "string",
                     "description": "Stat prefix name (e.g. 'Berserker\\'s')"
-                },
-                "archetype": {
-                    "type": "string",
-                    "description": "Archetype: PowerDPS, ConditionDPS, SustainHybrid, Tank, BoonSupport, HealSupport, CelestialHybrid"
                 }
             },
-            "required": ["gear_prefix", "archetype"]
+            "required": ["gear_prefix"]
         }),
     }
 }
@@ -739,9 +735,6 @@ fn exec_simulate_combat(args: &Value, ctx: &ToolContext) -> Value {
 
 fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
     let gear_prefix = args["gear_prefix"].as_str().unwrap_or("");
-    let archetype_str = args["archetype"].as_str().unwrap_or("PowerDPS");
-
-    let archetype = parse_archetype(archetype_str);
 
     let itemstat = ctx.db.itemstats.values()
         .find(|is| is.name.to_lowercase().contains(&gear_prefix.to_lowercase()));
@@ -761,12 +754,11 @@ fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
         &full_stats, &derived, &mods, solo, ctx.profession_name,
     );
 
-    let score = scoring::score_combat_weighted(&perf, &archetype, &ctx.aggression_level);
+    let score = scoring::score_with_weights(&perf, &ctx.weights);
 
     json!({
         "prefix": &itemstat.name,
-        "archetype": archetype.label(),
-        "aggression": ctx.aggression_level.label(),
+        "weights_summary": ctx.weights.summary_label(),
         "score": format!("{:.4}", score),
         "combat_summary": {
             "effective_power": perf.effective_power.round() as i32,
@@ -1624,32 +1616,9 @@ fn format_combat_performance(perf: &CombatPerformance, label: &str) -> Value {
     })
 }
 
-/// Parse archetype string to enum.
-fn parse_archetype(s: &str) -> Archetype {
-    match s {
-        "PowerDPS" | "Power DPS" => Archetype::PowerDPS,
-        "ConditionDPS" | "Condition DPS" => Archetype::ConditionDPS,
-        "SustainHybrid" | "Sustain Hybrid" => Archetype::SustainHybrid,
-        "Tank" => Archetype::Tank,
-        "BoonSupport" | "Boon Support" => Archetype::BoonSupport,
-        "HealSupport" | "Heal Support" => Archetype::HealSupport,
-        "CelestialHybrid" | "Celestial Hybrid" => Archetype::CelestialHybrid,
-        _ => Archetype::PowerDPS,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_archetype() {
-        assert_eq!(parse_archetype("PowerDPS"), Archetype::PowerDPS);
-        assert_eq!(parse_archetype("Power DPS"), Archetype::PowerDPS);
-        assert_eq!(parse_archetype("ConditionDPS"), Archetype::ConditionDPS);
-        assert_eq!(parse_archetype("Tank"), Archetype::Tank);
-        assert_eq!(parse_archetype("unknown"), Archetype::PowerDPS);
-    }
 
     #[test]
     fn test_tool_declarations_count() {

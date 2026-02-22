@@ -1,6 +1,7 @@
 pub mod chat_bar;
 pub mod comparison;
 mod main_view;
+pub mod radar_chart;
 mod setup;
 
 use nexus::imgui::{Condition, Ui, Window};

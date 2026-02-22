@@ -10,9 +10,26 @@ pub struct AppConfig {
     pub gw2_api_key: Option<String>,
     pub gemini_api_key: Option<String>,
     pub cache_build_number: Option<u32>,
+    /// Gemini model ID (e.g. "gemini-2.5-flash", "gemini-3-pro-preview").
+    /// Defaults to "gemini-2.5-flash" if not set.
+    #[serde(default)]
+    pub gemini_model: Option<String>,
 }
 
+/// Known Gemini models available for selection.
+pub const GEMINI_MODELS: &[(&str, &str)] = &[
+    ("gemini-2.5-flash", "Gemini 2.5 Flash (fast, free tier)"),
+    ("gemini-3-pro-preview", "Gemini 3 Pro Preview (advanced reasoning)"),
+    ("gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview (latest)"),
+];
+
+pub const DEFAULT_GEMINI_MODEL: &str = "gemini-2.5-flash";
+
 impl AppConfig {
+    pub fn gemini_model_id(&self) -> &str {
+        self.gemini_model.as_deref().unwrap_or(DEFAULT_GEMINI_MODEL)
+    }
+
     pub fn load(path: &Path) -> Self {
         std::fs::read_to_string(path)
             .ok()
@@ -69,6 +86,7 @@ mod tests {
             gw2_api_key: Some("test-key-123".into()),
             gemini_api_key: Some("gemini-key-456".into()),
             cache_build_number: Some(12345),
+            gemini_model: None,
         };
         config.save(&path).unwrap();
 
