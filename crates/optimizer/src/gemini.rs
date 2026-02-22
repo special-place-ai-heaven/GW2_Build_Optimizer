@@ -233,7 +233,7 @@ struct Candidate {
 impl GeminiClient {
     pub fn new(api_key: &str, model: &str) -> Result<Self, GeminiError> {
         let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
+            .timeout(std::time::Duration::from_secs(180))
             .build()?;
         Ok(Self {
             api_key: api_key.to_string(),
@@ -249,7 +249,7 @@ impl GeminiClient {
     /// Loads existing usage from `usage_path` and saves after each request.
     pub fn with_persistence(api_key: &str, model: &str, usage_path: PathBuf) -> Result<Self, GeminiError> {
         let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
+            .timeout(std::time::Duration::from_secs(180))
             .build()?;
 
         let rate = if usage_path.exists() {
@@ -421,7 +421,10 @@ impl GeminiClient {
     }
 
     /// Low-level: send a request and return the response Content.
+    /// Retries up to 2 times on transient server errors (500/503).
     fn send_request(&self, request: &GenerateRequest) -> Result<Content, GeminiError> {
+        const MAX_RETRIES: u32 = 3;
+
         // Atomically check rate limit and reserve a slot
         self.rate
             .lock()
@@ -429,45 +432,72 @@ impl GeminiClient {
             .check_and_reserve()?;
 
         let url = self.generate_url();
-        let resp = match self
-            .http
-            .post(&url)
-            .header("x-goog-api-key", &self.api_key)
-            .json(request)
-            .send()
-        {
-            Ok(r) => r,
-            Err(e) => {
-                self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
-                return Err(GeminiError::Http(e));
-            }
-        };
+        let mut last_error: Option<GeminiError> = None;
 
-        let status = resp.status().as_u16();
-        match status {
-            200 => {}
-            401 | 403 => return Err(GeminiError::InvalidKey),
-            429 => return Err(GeminiError::RateLimited),
-            _ => {
-                let body = resp.text().unwrap_or_default();
-                return Err(GeminiError::Api { status, message: body });
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                // Exponential backoff: 5s, 15s
+                let delay = std::time::Duration::from_secs(5 * (1 << (attempt - 1)));
+                std::thread::sleep(delay);
+            }
+
+            let resp = match self
+                .http
+                .post(&url)
+                .header("x-goog-api-key", &self.api_key)
+                .json(request)
+                .send()
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    if attempt == MAX_RETRIES - 1 {
+                        self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                        return Err(GeminiError::Http(e));
+                    }
+                    last_error = Some(GeminiError::Http(e));
+                    continue;
+                }
+            };
+
+            let status = resp.status().as_u16();
+            match status {
+                200 => {
+                    let body: GenerateResponse = resp.json()?;
+                    let content = body
+                        .candidates
+                        .and_then(|c| c.into_iter().next())
+                        .and_then(|c| c.content)
+                        .ok_or_else(|| GeminiError::Parse("No response content from Gemini".into()))?;
+
+                    // Persist usage
+                    {
+                        let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
+                        self.persist_usage(&rate);
+                    }
+
+                    return Ok(content);
+                }
+                401 | 403 => return Err(GeminiError::InvalidKey),
+                429 => return Err(GeminiError::RateLimited),
+                500 | 503 => {
+                    // Transient server error (ErrTimeout, overloaded) — retry
+                    let body = resp.text().unwrap_or_default();
+                    last_error = Some(GeminiError::Api { status, message: body });
+                    continue;
+                }
+                _ => {
+                    let body = resp.text().unwrap_or_default();
+                    return Err(GeminiError::Api { status, message: body });
+                }
             }
         }
 
-        let body: GenerateResponse = resp.json()?;
-        let content = body
-            .candidates
-            .and_then(|c| c.into_iter().next())
-            .and_then(|c| c.content)
-            .ok_or_else(|| GeminiError::Parse("No response content from Gemini".into()))?;
-
-        // Persist usage
-        {
-            let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
-            self.persist_usage(&rate);
-        }
-
-        Ok(content)
+        // All retries exhausted
+        self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+        Err(last_error.unwrap_or_else(|| GeminiError::Api {
+            status: 500,
+            message: "Gemini server error after retries".into(),
+        }))
     }
 
     /// Save rate tracker to disk if a persistence path is configured.
