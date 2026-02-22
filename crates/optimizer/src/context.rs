@@ -20,6 +20,8 @@ pub struct ContextConfig<'a> {
     pub game_mode: &'a str,
     pub gear_prefixes: Vec<&'a str>,
     pub current_build_summary: Option<&'a str>,
+    /// Deterministically selected gear prefix (authoritative, Gemini cannot override).
+    pub determined_prefix: Option<&'a str>,
 }
 
 /// Build the complete pre-computed context document for Gemini.
@@ -419,11 +421,19 @@ fn section_relics(db: &GameDb) -> String {
 
 /// Selected gear prefixes with their stat distributions.
 fn section_gear_prefixes(config: &ContextConfig) -> String {
-    let mut out = String::from("=== GEAR PREFIX OPTIONS ===\n");
-    out.push_str("(These stat sets were pre-selected based on your radar chart weights.)\n\n");
+    let mut out = String::from("=== GEAR PREFIX ===\n");
 
+    // Show the determined prefix prominently
+    if let Some(determined) = config.determined_prefix {
+        out.push_str(&format!(
+            "SELECTED PREFIX: {} (determined by player's radar chart weights — this is NON-NEGOTIABLE)\n\n",
+            determined
+        ));
+    }
+
+    out.push_str("Available options for reference:\n");
     for prefix_name in &config.gear_prefixes {
-        // Find the matching itemstat
+        let marker = if config.determined_prefix == Some(prefix_name) { " <<<SELECTED" } else { "" };
         if let Some(itemstat) = config
             .db
             .itemstats
@@ -440,9 +450,9 @@ fn section_gear_prefixes(config: &ContextConfig) -> String {
                     )
                 })
                 .collect();
-            out.push_str(&format!("{}: {}\n", itemstat.name, stats.join(", ")));
+            out.push_str(&format!("{}: {}{}\n", itemstat.name, stats.join(", "), marker));
         } else {
-            out.push_str(&format!("{}: (not found in game data)\n", prefix_name));
+            out.push_str(&format!("{}: (not found in game data){}\n", prefix_name, marker));
         }
     }
 

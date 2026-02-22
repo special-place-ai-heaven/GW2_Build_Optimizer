@@ -100,6 +100,22 @@ pub struct MainState {
     pub chat_wait_frames: u32,
     /// Frame counter for "Copied!" tooltip feedback.
     pub copy_feedback_frames: u32,
+    // API health
+    pub api_status: ApiStatus,
+    /// Frame counter for periodic API health checks (~3600 frames ≈ 60s at 60fps).
+    pub api_status_frames: u32,
+    /// Whether a health check is currently in flight.
+    pub api_health_checking: bool,
+}
+
+/// GW2 API health status, checked periodically via `/v2/build`.
+#[derive(Default, Debug, Clone, PartialEq)]
+pub enum ApiStatus {
+    #[default]
+    Unknown,
+    Online,
+    Degraded,
+    Offline,
 }
 
 #[derive(Default, Debug, Clone, PartialEq)]

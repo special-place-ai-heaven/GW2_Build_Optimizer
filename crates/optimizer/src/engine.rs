@@ -395,7 +395,7 @@ fn select_best_major_traits(
 
 /// Score a single trait's relevance for an archetype by examining its facts.
 /// Looks at AttributeAdjust (flat stat bonuses) and Percent (damage modifiers).
-fn score_trait_for_archetype(
+pub fn score_trait_for_archetype(
     trait_id: u32,
     weights: &crate::scoring::StatWeights,
     traits_cache: &HashMap<u32, GW2Trait>,
@@ -517,7 +517,7 @@ pub struct SynergyResult {
 
 /// Slot attribute adjustments for full Ascended gear set.
 /// Same values as engine.rs `attribute_adjustment_for_slot()` and gemini_tools.rs.
-const SLOT_ADJUSTMENTS: &[(&str, f64)] = &[
+pub const SLOT_ADJUSTMENTS: &[(&str, f64)] = &[
     ("Helm", 141.0), ("Shoulders", 141.0), ("Coat", 225.0),
     ("Gloves", 141.0), ("Leggings", 171.0), ("Boots", 141.0),
     ("WeaponA1", 251.0), ("WeaponA2", 125.0),
@@ -538,11 +538,15 @@ pub fn optimize_with_gemini(
     current_build_summary: Option<&str>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
-    // 1. Select gear prefixes using the hierarchical tier system
+    // 1. DETERMINISTIC gear prefix selection — this is authoritative, Gemini cannot override
     on_progress(OptimizeProgress {
-        stage: "Selecting gear prefixes...".into(),
+        stage: "Selecting gear prefix...".into(),
         done: false,
     });
+    let gear_match = scoring::select_gear_prefix(weights);
+    let determined_prefix = gear_match.primary;
+
+    // Also get the tier-based pool for context (Gemini sees what's available)
     let tier_prefixes = scoring::select_prefixes_by_tiers(weights);
     let gear_prefixes: Vec<&str> = tier_prefixes.iter().map(|s| *s).collect();
 
@@ -563,10 +567,11 @@ pub fn optimize_with_gemini(
         game_mode: mode_str,
         gear_prefixes,
         current_build_summary,
+        determined_prefix: Some(determined_prefix),
     };
     let pre_computed_context = context::build_gemini_context(&context_config);
 
-    // 3. Build the synergy-focused prompt
+    // 3. Build the synergy-focused prompt (includes determined prefix constraint)
     on_progress(OptimizeProgress {
         stage: "Preparing Gemini prompt...".into(),
         done: false,
@@ -577,6 +582,7 @@ pub fn optimize_with_gemini(
         mode_str,
         &pre_computed_context,
         current_build_summary,
+        Some(determined_prefix),
     );
 
     // 4. Call Gemini with tools available for optional verification
@@ -618,13 +624,19 @@ pub fn optimize_with_gemini(
         )
         .map_err(|e| format!("Gemini call failed: {}", e))?;
 
-    // 5. Parse the Gemini response
+    // 5. Parse the Gemini response and OVERRIDE the gear prefix
     on_progress(OptimizeProgress {
         stage: "Parsing Gemini build...".into(),
         done: false,
     });
-    let parsed = prompts::parse_gemini_build(&gemini_response)
+    let mut parsed = prompts::parse_gemini_build(&gemini_response)
         .map_err(|e| format!("Failed to parse Gemini response: {}", e))?;
+
+    // CRITICAL: Override Gemini's stat_prefix with our deterministic choice.
+    // Gemini is unreliable at following gear constraints — it frequently picks
+    // healing gear regardless of weight settings. The deterministic selector
+    // (cosine similarity against purpose profiles) is authoritative.
+    parsed.stat_prefix = determined_prefix.to_string();
 
     // 6. Validate against GameDb
     on_progress(OptimizeProgress {
@@ -691,7 +703,7 @@ pub fn optimize_with_gemini(
 }
 
 /// Calculate stats from a validated build: gear prefix + trait bonuses + conversions.
-fn calculate_validated_stats(
+pub fn calculate_validated_stats(
     validated: &ValidatedBuild,
     db: &GameDb,
     _profession_name: &str,
@@ -739,7 +751,7 @@ fn calculate_validated_stats(
 }
 
 /// Simulate a rotation from validated skill IDs.
-fn simulate_validated_rotation(
+pub fn simulate_validated_rotation(
     validated: &ValidatedBuild,
     db: &GameDb,
     stats: &stats::StatBlock,
@@ -825,6 +837,125 @@ fn add_weapon_skill_ids(
             }
         }
     }
+}
+
+/// Run the fully deterministic synergy optimization pipeline.
+/// No LLM calls — all selections are algorithmic via synergy scoring.
+/// Optional Gemini client is used only for explanation generation (not build selection).
+pub fn optimize_deterministic(
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    game_mode: &GameMode,
+    gemini_client: Option<&crate::gemini::GeminiClient>,
+    _current_build_summary: Option<&str>,
+    on_progress: &mut dyn FnMut(OptimizeProgress),
+) -> Result<SynergyResult, String> {
+    // 1. DETERMINISTIC gear prefix selection (reuse existing)
+    on_progress(OptimizeProgress {
+        stage: "Selecting gear prefix...".into(),
+        done: false,
+    });
+    let gear_match = scoring::select_gear_prefix(weights);
+    let determined_prefix = gear_match.primary;
+
+    // 2. Run the full synergy pipeline
+    let mut result = crate::synergy_pipeline::optimize_synergy(
+        db, profession_name, weights, game_mode, determined_prefix, on_progress,
+    )?;
+
+    // 3. Optional: LLM explanation pass
+    if let Some(client) = gemini_client {
+        on_progress(OptimizeProgress {
+            stage: "Generating build explanation...".into(),
+            done: false,
+        });
+
+        // Build a compact summary for the LLM
+        let specs_summary: Vec<String> = result.validated.specializations.iter()
+            .map(|s| {
+                let traits_str = s.trait_names.join(", ");
+                if s.elite {
+                    format!("{} (Elite): {}", s.name, traits_str)
+                } else {
+                    format!("{}: {}", s.name, traits_str)
+                }
+            })
+            .collect();
+
+        let rune_name = result.validated.rune.as_ref()
+            .map(|r| r.name.as_str())
+            .unwrap_or("None");
+        let sigil_names: Vec<&str> = result.validated.sigils.iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        let relic_name = result.validated.relic.as_ref()
+            .map(|r| r.name.as_str())
+            .unwrap_or("None");
+
+        let set1 = format!(
+            "{}{}",
+            result.validated.weapons.set1.main_hand.as_deref().unwrap_or("?"),
+            result.validated.weapons.set1.off_hand.as_deref()
+                .map(|o| format!(" / {}", o))
+                .unwrap_or_default()
+        );
+        let set2 = format!(
+            "{}{}",
+            result.validated.weapons.set2.main_hand.as_deref().unwrap_or("?"),
+            result.validated.weapons.set2.off_hand.as_deref()
+                .map(|o| format!(" / {}", o))
+                .unwrap_or_default()
+        );
+
+        let heal = result.validated.skills.heal.as_ref()
+            .map(|(_, n)| n.as_str())
+            .unwrap_or("?");
+        let utils: Vec<&str> = result.validated.skills.utilities.iter()
+            .filter_map(|u| u.as_ref().map(|(_, n)| n.as_str()))
+            .collect();
+        let elite = result.validated.skills.elite.as_ref()
+            .map(|(_, n)| n.as_str())
+            .unwrap_or("?");
+
+        let summary = format!(
+            "Profession: {}\nGear: {}\nSpecializations:\n{}\nWeapons: Set 1: {} | Set 2: {}\n\
+             Skills: Heal: {} | Utilities: {} | Elite: {}\n\
+             Rune: {}\nSigils: {}\nRelic: {}\n\
+             Combat (Solo): Strike DPS {:.0}, Condi DPS {:.0}, Total DPS {:.0}",
+            profession_name, determined_prefix,
+            specs_summary.join("\n"),
+            set1, set2,
+            heal, utils.join(", "), elite,
+            rune_name, sigil_names.join(", "), relic_name,
+            result.combat_solo.strike_dps_index,
+            result.combat_solo.condition_dps_index,
+            result.combat_solo.total_dps_index,
+        );
+
+        let prompt = format!(
+            "You are a Guild Wars 2 build expert. Explain why the following build works well together. \
+             Describe the key synergy chains between traits, rune, sigils, relic, and skills. \
+             Suggest a skill rotation priority. Keep it under 200 words.\n\n{}",
+            summary,
+        );
+
+        match client.generate(&prompt) {
+            Ok(explanation) => {
+                result.validated.synergy_explanation = explanation;
+            }
+            Err(_e) => {
+                // LLM explanation failed, keep the template explanation
+            }
+        }
+    }
+
+    on_progress(OptimizeProgress {
+        stage: "Done".into(),
+        done: true,
+    });
+
+    Ok(result)
 }
 
 #[cfg(test)]

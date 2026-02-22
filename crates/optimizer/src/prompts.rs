@@ -10,26 +10,62 @@ pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
     let w = weights.clamped();
     let mut priorities = Vec::new();
     let mut guidance = Vec::new();
+    let mut mandatory_prefix: Option<&str> = None;
+
+    // Determine the dominant axis (highest weight)
+    let axes = [
+        (w.power, "Power"),
+        (w.condition, "Condition"),
+        (w.sustain, "Sustain"),
+        (w.healing, "Heal"),
+        (w.disable, "Disable"),
+    ];
+    let max_weight = axes.iter().map(|(v, _)| *v).fold(0.0_f64, f64::max);
 
     if w.power > 0.3 {
         priorities.push(format!("Power damage ({:.0}%)", w.power * 100.0));
-        guidance.push("Prioritize: Power, Precision, Ferocity gear. Pick traits that boost strike damage, crit chance/damage. Weapons with high power coefficients.");
+        if w.power >= 0.8 {
+            guidance.push("MANDATORY: Use Berserker's or Assassin's gear (highest Power/Precision/Ferocity). Do NOT use any gear with Healing Power, Vitality, or Toughness as primary stat.");
+            mandatory_prefix = Some("Berserker's");
+        } else {
+            guidance.push("Prioritize: Power, Precision, Ferocity gear. Pick traits that boost strike damage, crit chance/damage.");
+        }
     }
     if w.condition > 0.3 {
         priorities.push(format!("Condition damage ({:.0}%)", w.condition * 100.0));
-        guidance.push("Prioritize: Condition Damage, Expertise gear. Pick traits that apply/extend conditions. Weapons with multi-hit or condition-applying skills.");
+        if w.condition >= 0.8 {
+            guidance.push("MANDATORY: Use Viper's gear (Condition Damage + Expertise + Power + Precision). If not available, use Sinister. Do NOT use gear where Condition Damage is a secondary stat (like Apothecary's, Ritualist's, or Dire). The primary stat MUST be Condition Damage.");
+            mandatory_prefix = Some("Viper's");
+        } else {
+            guidance.push("Prioritize: Condition Damage, Expertise gear. Pick traits that apply/extend conditions.");
+        }
     }
     if w.sustain > 0.3 {
         priorities.push(format!("Survivability ({:.0}%)", w.sustain * 100.0));
-        guidance.push("Prioritize: Toughness, Vitality gear. Pick traits granting damage reduction, barrier, protection. Include stunbreaks, blocks, evades, condition cleanse.");
+        if w.sustain >= 0.8 {
+            guidance.push("MANDATORY: Use Minstrel's or Nomad's gear (highest Toughness/Vitality). Do NOT use offensive gear.");
+            mandatory_prefix = Some("Minstrel's");
+        } else {
+            guidance.push("Prioritize: Toughness, Vitality gear. Pick traits granting damage reduction, barrier, protection.");
+        }
     }
     if w.healing > 0.3 {
         priorities.push(format!("Healing output ({:.0}%)", w.healing * 100.0));
-        guidance.push("Prioritize: Healing Power, Concentration gear. Pick traits that boost healing, grant regeneration, share boons. Healing-focused weapon sets.");
+        if w.healing >= 0.8 {
+            guidance.push("MANDATORY: Use Magi's or Harrier's gear (highest Healing Power). Do NOT use offensive gear.");
+            mandatory_prefix = Some("Magi's");
+        } else {
+            guidance.push("Prioritize: Healing Power, Concentration gear. Pick traits that boost healing.");
+        }
     }
     if w.disable > 0.3 {
         priorities.push(format!("CC/Disable ({:.0}%)", w.disable * 100.0));
-        guidance.push("Prioritize: Boon Duration, Expertise gear. Pick traits granting Stability, CC skills (stun, knockdown, daze, fear, pull). Include boon support and crowd control.");
+        if w.disable >= 0.8 {
+            guidance.push("MANDATORY: Use Diviner's or Ritualist's gear (highest boon/condi duration). Focus on CC skills.");
+            mandatory_prefix = Some("Diviner's");
+        } else {
+            guidance.push("Prioritize: Boon Duration, Expertise gear. Pick CC skills.");
+        }
     }
 
     if priorities.is_empty() {
@@ -37,10 +73,24 @@ pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
         guidance.push("Build a well-rounded character with decent damage, some sustain, and utility.");
     }
 
+    // Add dominant-axis enforcement when one axis is clearly dominant
+    let mut enforcement = String::new();
+    if max_weight >= 0.8 {
+        if let Some(prefix) = mandatory_prefix {
+            enforcement = format!(
+                "\n\nCRITICAL CONSTRAINT: The player's #1 priority axis is at {:.0}%. You MUST use \"{}\" as the stat_prefix. \
+                 Choosing any other stat prefix will produce a build the player explicitly does not want. \
+                 This is non-negotiable.",
+                max_weight * 100.0, prefix
+            );
+        }
+    }
+
     format!(
-        "PLAYER PRIORITIES (5-axis radar chart): {priorities}\n{guidance}",
+        "PLAYER PRIORITIES (5-axis radar chart): {priorities}\n{guidance}{enforcement}",
         priorities = priorities.join(", "),
         guidance = guidance.join("\n"),
+        enforcement = enforcement,
     )
 }
 
@@ -251,6 +301,7 @@ pub fn synergy_build_prompt(
     game_mode: &str,
     pre_computed_context: &str,
     current_build_summary: Option<&str>,
+    determined_prefix: Option<&str>,
 ) -> String {
     let weights_guidance = weights_context(weights);
     let summary = weights.summary_label();
@@ -272,12 +323,21 @@ pub fn synergy_build_prompt(
         })
         .unwrap_or_default();
 
+    let prefix_constraint = determined_prefix
+        .map(|p| format!(
+            "\n\nGEAR PREFIX (PRE-DETERMINED — DO NOT CHANGE):\nThe stat prefix \"{}\" has been algorithmically selected to match the player's radar chart weights. \
+             You MUST use \"{}\" as stat_prefix in your response. Do NOT substitute another prefix. \
+             All trait, skill, rune, sigil, and relic choices should synergize with {} gear stats.",
+            p, p, p
+        ))
+        .unwrap_or_default();
+
     format!(
         r#"You are an expert Guild Wars 2 build optimizer with deep knowledge of trait-skill-equipment synergies.
 
 {task}
 
-{weights_guidance}
+{weights_guidance}{prefix_constraint}
 
 {game_rules}
 
@@ -332,7 +392,7 @@ After reasoning about synergies, respond with ONLY a JSON build object:
     "set2_off": "Full Sigil Name"
   }},
   "relic": "Full Relic Name",
-  "stat_prefix": "PrefixName",
+  "stat_prefix": "{stat_prefix_value}",
   "synergy_explanation": "3-5 sentences explaining the synergy chains: how traits, skills, rune, sigils, and relic work together as a system.",
   "changes": [
     {{"slot": "What was changed", "from": "Old choice", "to": "New choice", "reason": "Why — cite the synergy"}}
@@ -343,9 +403,11 @@ After reasoning about synergies, respond with ONLY a JSON build object:
 Every field is REQUIRED. Do not leave any field empty or null."#,
         task = task,
         weights_guidance = weights_guidance,
+        prefix_constraint = prefix_constraint,
         game_rules = game_rules,
         context = pre_computed_context,
         current_build = current_build_section,
+        stat_prefix_value = determined_prefix.unwrap_or("PrefixName"),
     )
 }
 
@@ -858,7 +920,8 @@ mod tests {
     fn test_weights_context_power() {
         let ctx = weights_context(&OptimizationWeights::preset_power_dps());
         assert!(ctx.contains("Power damage"));
-        assert!(ctx.contains("Precision, Ferocity"));
+        assert!(ctx.contains("MANDATORY"), "Power at 1.0 should trigger mandatory constraint");
+        assert!(ctx.contains("Berserker"), "Power at 1.0 should mandate Berserker's gear");
     }
 
     #[test]
