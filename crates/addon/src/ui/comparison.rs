@@ -19,6 +19,8 @@ pub struct BuildSuggestion {
     pub sigils: Vec<String>,
     pub relic: String,
     pub explanation: String,
+    /// Synergy-focused explanation from the new pipeline (preferred over `explanation`).
+    pub synergy_explanation: String,
     pub changes_made: Vec<String>,
     pub estimated_stats: Option<StatBlock>,
     /// Combat metrics under Solo profile (gear+traits only).
@@ -124,9 +126,15 @@ pub fn render_comparison(
     }
 
     // ═══ LLM Explanation ═══
-    if !suggestion.explanation.is_empty() {
+    // Prefer synergy_explanation (from new pipeline), fall back to explanation (from old pipeline)
+    let explanation_text = if !suggestion.synergy_explanation.is_empty() {
+        &suggestion.synergy_explanation
+    } else {
+        &suggestion.explanation
+    };
+    if !explanation_text.is_empty() {
         if ui.collapsing_header("Why This Build?", TreeNodeFlags::DEFAULT_OPEN) {
-            ui.text_wrapped(&suggestion.explanation);
+            ui.text_wrapped(explanation_text);
         }
     }
 

@@ -1511,6 +1511,46 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                 if token.is_cancelled() { return Err("Cancelled".into()); }
 
                 let db = db.ok_or("GameDb not loaded")?;
+
+                // ═══ New synergy-driven pipeline (requires Gemini key) ═══
+                if let Some(ref key) = gemini_key {
+                    let usage_path = addon_dir.join("gemini_usage.json");
+                    let gemini_client = gw2_optimizer::gemini::GeminiClient::with_persistence(
+                        key, &gemini_model, usage_path,
+                    ).map_err(|e| e.to_string())?;
+
+                    let token_synergy = token.clone();
+                    match gw2_optimizer::engine::optimize_with_gemini(
+                        &db,
+                        &profession_name,
+                        &weights,
+                        &game_mode,
+                        &gemini_client,
+                        current_build_summary.as_deref(),
+                        &mut |progress| {
+                            if token_synergy.is_cancelled() { return; }
+                            crate::state::with_state(|s| {
+                                s.main.optimize_stage = progress.stage.clone();
+                            });
+                        },
+                    ) {
+                        Ok(synergy_result) => {
+                            if token.is_cancelled() { return Err("Cancelled".into()); }
+                            let suggestion = synergy_result_to_suggestion(&synergy_result);
+                            return Ok(vec![suggestion]);
+                        }
+                        Err(e) => {
+                            nexus::log::log(
+                                nexus::log::LogLevel::Warning,
+                                "GW2 Build Optimizer",
+                                &format!("Synergy pipeline failed, falling back to legacy: {}", e),
+                            );
+                            // Fall through to legacy pipeline
+                        }
+                    }
+                }
+
+                // ═══ Legacy pipeline (fallback or no Gemini key) ═══
                 let profession = db.profession(&profession_name)
                     .ok_or_else(|| format!("Profession '{}' not found in GameDb", profession_name))?;
 
@@ -1539,7 +1579,7 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                 let mut suggestions: Vec<crate::ui::comparison::BuildSuggestion> =
                     candidates.iter().map(|c| candidate_to_suggestion(c, &db)).collect();
 
-                // Enrich top suggestion with Gemini LLM reasoning
+                // Enrich top suggestion with Gemini LLM reasoning (legacy path)
                 if let Some(ref key) = gemini_key {
                     if token.is_cancelled() { return Err("Cancelled".into()); }
 
@@ -1723,12 +1763,141 @@ fn candidate_to_suggestion(
         sigils: Vec::new(),
         relic: String::new(),
         explanation: String::new(),
+        synergy_explanation: String::new(),
         changes_made: Vec::new(),
         estimated_stats,
         combat_solo,
         combat_party,
         combat_squad,
         rotation: None,
+    }
+}
+
+/// Convert a SynergyResult from the new pipeline into a BuildSuggestion for display.
+fn synergy_result_to_suggestion(
+    result: &gw2_optimizer::engine::SynergyResult,
+) -> crate::ui::comparison::BuildSuggestion {
+    use crate::ui::comparison::BuildSuggestion;
+
+    let v = &result.validated;
+
+    // Specializations: (name, [trait_name1, trait_name2, trait_name3])
+    let specializations: Vec<(String, Vec<String>)> = v.specializations.iter().map(|s| {
+        let label = if s.elite { format!("{} [E]", s.name) } else { s.name.clone() };
+        (label, s.trait_names.clone())
+    }).collect();
+
+    // Weapons: flatten into display strings like "Set 1: Sword / Shield"
+    let mut weapons = Vec::new();
+    let fmt_set = |set: &gw2_optimizer::validation::ValidatedWeaponSet, label: &str| -> Option<String> {
+        match (&set.main_hand, &set.off_hand) {
+            (Some(main), Some(off)) => Some(format!("{}: {} / {}", label, main, off)),
+            (Some(main), None) => Some(format!("{}: {}", label, main)),
+            _ => None,
+        }
+    };
+    if let Some(s) = fmt_set(&v.weapons.set1, "Set 1") { weapons.push(s); }
+    if let Some(s) = fmt_set(&v.weapons.set2, "Set 2") { weapons.push(s); }
+
+    // Skills: flatten into display strings
+    let mut skills = Vec::new();
+    if let Some((_, name)) = &v.skills.heal {
+        skills.push(format!("Heal: {}", name));
+    }
+    for util in &v.skills.utilities {
+        if let Some((_, name)) = util {
+            skills.push(format!("Utility: {}", name));
+        }
+    }
+    if let Some((_, name)) = &v.skills.elite {
+        skills.push(format!("Elite: {}", name));
+    }
+
+    // Sigils: flatten to display strings
+    let sigils: Vec<String> = v.sigils.iter().map(|s| s.name.clone()).collect();
+
+    // Convert stats from optimizer StatBlock (f64) to core StatBlock (i32)
+    let derived = gw2_optimizer::stats::compute_derived(&result.stats, "");
+    let estimated_stats = Some(gw2_core::types::StatBlock {
+        power: result.stats.power.round() as i32,
+        precision: result.stats.precision.round() as i32,
+        toughness: result.stats.toughness.round() as i32,
+        vitality: result.stats.vitality.round() as i32,
+        condition_damage: result.stats.condition_damage.round() as i32,
+        expertise: result.stats.expertise.round() as i32,
+        concentration: result.stats.concentration.round() as i32,
+        ferocity: result.stats.ferocity.round() as i32,
+        healing_power: result.stats.healing_power.round() as i32,
+        crit_chance: derived.crit_chance,
+        crit_damage: derived.crit_damage,
+        health: derived.health.round() as i32,
+        armor: derived.armor.round() as i32,
+    });
+
+    // Convert combat performance to CombatMetrics
+    let combat_solo = Some(perf_to_combat_metrics(&result.combat_solo));
+    let combat_party = Some(perf_to_combat_metrics(&result.combat_party));
+    let combat_squad = Some(perf_to_combat_metrics(&result.combat_squad));
+
+    // Convert rotation simulation result
+    let rotation = result.rotation.as_ref().map(|sim| {
+        gw2_core::types::RotationBreakdown {
+            simulated_dps: sim.total_dps.round() as i32,
+            strike_dps: sim.strike_dps.round() as i32,
+            condition_dps: sim.condition_dps.round() as i32,
+            condition_uptime: sim.condition_uptime.iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
+            buff_uptime: sim.buff_uptime.iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
+            skill_usage: sim.skill_usage.iter()
+                .map(|s| (s.name.clone(), s.cast_count, s.dps_contribution.round() as i32))
+                .collect(),
+            stunbreak_count: sim.stunbreak_count,
+            has_stability: sim.has_stability,
+            stability_uptime: sim.stability_uptime,
+        }
+    });
+
+    // Build changes_made from validated structured changes
+    let changes_made: Vec<String> = v.changes.iter().map(|c| {
+        if c.from.is_empty() {
+            format!("[{}] → {} ({})", c.slot, c.to, c.reason)
+        } else {
+            format!("[{}] {} → {} ({})", c.slot, c.from, c.to, c.reason)
+        }
+    }).collect();
+
+    // Warnings as additional info
+    let mut explanation = v.explanation.clone();
+    if !v.warnings.is_empty() {
+        if !explanation.is_empty() { explanation.push_str("\n\n"); }
+        explanation.push_str("Warnings: ");
+        explanation.push_str(&v.warnings.join("; "));
+    }
+
+    BuildSuggestion {
+        label: "Synergy Build".into(),
+        build_summary: format!(
+            "Gear: {}",
+            v.gear_prefix.as_ref().map(|p| p.name.as_str()).unwrap_or("Unknown")
+        ),
+        stat_prefix: v.gear_prefix.as_ref().map(|p| p.name.clone()).unwrap_or_default(),
+        specializations,
+        weapons,
+        skills,
+        rune: v.rune.as_ref().map(|r| r.name.clone()).unwrap_or_default(),
+        sigils,
+        relic: v.relic.as_ref().map(|r| r.name.clone()).unwrap_or_default(),
+        explanation,
+        synergy_explanation: v.synergy_explanation.clone(),
+        changes_made,
+        estimated_stats,
+        combat_solo,
+        combat_party,
+        combat_squad,
+        rotation,
     }
 }
 
@@ -1943,6 +2112,11 @@ fn apply_gemini_response(
 ) {
     if !gemini.explanation.is_empty() {
         suggestion.explanation = gemini.explanation.clone();
+    }
+    if let Some(ref synergy) = gemini.synergy_explanation {
+        if !synergy.is_empty() {
+            suggestion.synergy_explanation = synergy.clone();
+        }
     }
     if !gemini.specializations.is_empty() {
         suggestion.specializations = gemini.specializations.clone();
@@ -2426,6 +2600,7 @@ fn saved_to_suggestion(
         sigils: saved.sigils.clone(),
         relic: saved.relic.clone(),
         explanation: saved.explanation.clone(),
+        synergy_explanation: String::new(),
         changes_made: saved.changes_made.clone(),
         estimated_stats: saved.estimated_stats.clone(),
         combat_solo,

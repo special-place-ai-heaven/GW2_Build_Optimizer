@@ -11,9 +11,16 @@ use gw2_core::types::GameMode;
 use gw2_api::models::Fact;
 
 use crate::combat::{self, CombatPerformance, DamageModifiers};
-use crate::scoring::{score_with_weights, OptimizationWeights, StatWeights};
+use crate::context::{self, ContextConfig};
+use crate::gamedb::GameDb;
+use crate::gemini::GeminiClient;
+use crate::gemini_tools::{self, ToolContext};
+use crate::prompts;
+use crate::rotation;
+use crate::scoring::{self, score_with_weights, OptimizationWeights, StatWeights};
 use crate::search::{search_gear_prefixes, search_spec_combos, GearCandidate};
 use crate::stats;
+use crate::validation::{self, ValidatedBuild};
 
 /// A complete build candidate ready for comparison or LLM evaluation.
 #[derive(Debug, Clone)]
@@ -492,6 +499,331 @@ fn score_fact(fact: &Fact, weights: &crate::scoring::StatWeights) -> f64 {
             pct / 100.0 * src_w * tgt_w
         }
         _ => 0.0,
+    }
+}
+
+/// Result of the synergy-driven optimization pipeline.
+/// Contains a fully validated build with pre-computed combat metrics at 3 buff tiers.
+#[derive(Debug, Clone)]
+pub struct SynergyResult {
+    pub validated: ValidatedBuild,
+    pub stats: stats::StatBlock,
+    pub combat_solo: CombatPerformance,
+    pub combat_party: CombatPerformance,
+    pub combat_squad: CombatPerformance,
+    pub modifiers: DamageModifiers,
+    pub rotation: Option<rotation::SimulationResult>,
+}
+
+/// Slot attribute adjustments for full Ascended gear set.
+/// Same values as engine.rs `attribute_adjustment_for_slot()` and gemini_tools.rs.
+const SLOT_ADJUSTMENTS: &[(&str, f64)] = &[
+    ("Helm", 141.0), ("Shoulders", 141.0), ("Coat", 225.0),
+    ("Gloves", 141.0), ("Leggings", 171.0), ("Boots", 141.0),
+    ("WeaponA1", 251.0), ("WeaponA2", 125.0),
+    ("WeaponB1", 251.0), ("WeaponB2", 125.0),
+    ("Backpack", 63.0), ("Accessory1", 110.0), ("Accessory2", 110.0),
+    ("Amulet", 157.0), ("Ring1", 126.0), ("Ring2", 126.0),
+];
+
+/// Run the synergy-driven optimization pipeline.
+/// Sends ALL profession data to Gemini in a single prompt for holistic synergy reasoning.
+/// Returns a fully validated build with combat metrics at 3 buff tiers.
+pub fn optimize_with_gemini(
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    game_mode: &GameMode,
+    gemini_client: &GeminiClient,
+    current_build_summary: Option<&str>,
+    on_progress: &mut dyn FnMut(OptimizeProgress),
+) -> Result<SynergyResult, String> {
+    // 1. Select gear prefixes using the hierarchical tier system
+    on_progress(OptimizeProgress {
+        stage: "Selecting gear prefixes...".into(),
+        done: false,
+    });
+    let tier_prefixes = scoring::select_prefixes_by_tiers(weights);
+    let gear_prefixes: Vec<&str> = tier_prefixes.iter().map(|s| *s).collect();
+
+    // 2. Build comprehensive pre-computed context
+    on_progress(OptimizeProgress {
+        stage: "Building profession context...".into(),
+        done: false,
+    });
+    let mode_str = match game_mode {
+        GameMode::PvE => "PvE",
+        GameMode::PvP => "PvP",
+        GameMode::WvW => "WvW",
+    };
+    let context_config = ContextConfig {
+        db,
+        profession_name,
+        weights,
+        game_mode: mode_str,
+        gear_prefixes,
+        current_build_summary,
+    };
+    let pre_computed_context = context::build_gemini_context(&context_config);
+
+    // 3. Build the synergy-focused prompt
+    on_progress(OptimizeProgress {
+        stage: "Preparing Gemini prompt...".into(),
+        done: false,
+    });
+    let prompt = prompts::synergy_build_prompt(
+        profession_name,
+        weights,
+        mode_str,
+        &pre_computed_context,
+        current_build_summary,
+    );
+
+    // 4. Call Gemini with tools available for optional verification
+    on_progress(OptimizeProgress {
+        stage: "Gemini reasoning about synergies...".into(),
+        done: false,
+    });
+    let tools = gemini_tools::tool_declarations();
+    // Build a minimal ToolContext — candidates are empty since Gemini is choosing the build
+    let tool_ctx = ToolContext {
+        db,
+        profession_name,
+        candidates: &[],
+        current_build_summary,
+        weights: weights.clone(),
+    };
+    let gemini_response = gemini_client
+        .generate_with_tools_progress(
+            &prompt,
+            tools,
+            &mut |name, args| gemini_tools::execute_tool(name, args, &tool_ctx),
+            5, // max 5 tool-calling turns for verification
+            &mut |turn, max_turns, tool_names| {
+                let tool_list = if tool_names.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", tool_names.join(", "))
+                };
+                on_progress(OptimizeProgress {
+                    stage: format!(
+                        "Gemini reasoning [{}/{}]{}...",
+                        turn + 1,
+                        max_turns,
+                        tool_list
+                    ),
+                    done: false,
+                });
+            },
+        )
+        .map_err(|e| format!("Gemini call failed: {}", e))?;
+
+    // 5. Parse the Gemini response
+    on_progress(OptimizeProgress {
+        stage: "Parsing Gemini build...".into(),
+        done: false,
+    });
+    let parsed = prompts::parse_gemini_build(&gemini_response)
+        .map_err(|e| format!("Failed to parse Gemini response: {}", e))?;
+
+    // 6. Validate against GameDb
+    on_progress(OptimizeProgress {
+        stage: "Validating build...".into(),
+        done: false,
+    });
+    let validated = validation::validate_gemini_build(&parsed, db, profession_name);
+
+    // Check for blocking errors (no specializations resolved = build is unusable)
+    if validated.specializations.is_empty() {
+        return Err(format!(
+            "Validation failed — no specializations resolved. Errors: {}",
+            validated.errors.join("; ")
+        ));
+    }
+
+    // 7. Calculate stats from validated gear prefix + trait modifiers
+    on_progress(OptimizeProgress {
+        stage: "Calculating stats...".into(),
+        done: false,
+    });
+    let (full_stats, modifiers) =
+        calculate_validated_stats(&validated, db, profession_name);
+
+    let derived = stats::compute_derived(&full_stats, profession_name);
+
+    // 8. Compute 3-tier combat performance
+    on_progress(OptimizeProgress {
+        stage: "Computing combat performance...".into(),
+        done: false,
+    });
+    let buff_profiles = combat::default_buff_profiles();
+    let combat_solo = combat::calculate_combat_performance(
+        &full_stats, &derived, &modifiers, &buff_profiles[0], profession_name,
+    );
+    let combat_party = combat::calculate_combat_performance(
+        &full_stats, &derived, &modifiers, &buff_profiles[1], profession_name,
+    );
+    let combat_squad = combat::calculate_combat_performance(
+        &full_stats, &derived, &modifiers, &buff_profiles[2], profession_name,
+    );
+
+    // 9. Simulate rotation from validated skills
+    on_progress(OptimizeProgress {
+        stage: "Simulating rotation...".into(),
+        done: false,
+    });
+    let rotation_result = simulate_validated_rotation(&validated, db, &full_stats);
+
+    on_progress(OptimizeProgress {
+        stage: "Done".into(),
+        done: true,
+    });
+
+    Ok(SynergyResult {
+        validated,
+        stats: full_stats,
+        combat_solo,
+        combat_party,
+        combat_squad,
+        modifiers,
+        rotation: rotation_result,
+    })
+}
+
+/// Calculate stats from a validated build: gear prefix + trait bonuses + conversions.
+fn calculate_validated_stats(
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    _profession_name: &str,
+) -> (stats::StatBlock, DamageModifiers) {
+    let mut full_stats = stats::base_stats();
+
+    // Gear stats from validated prefix
+    if let Some(ref prefix) = validated.gear_prefix {
+        if let Some(itemstat) = db.itemstats.get(&prefix.itemstat_id) {
+            for &(_slot, adj) in SLOT_ADJUSTMENTS {
+                for attr in &itemstat.attributes {
+                    let value = (adj * attr.multiplier + attr.value as f64).round();
+                    full_stats.add(&attr.attribute, value);
+                }
+            }
+        }
+    }
+
+    // Collect all trait IDs from validated specializations
+    let all_trait_ids: Vec<u32> = validated
+        .specializations
+        .iter()
+        .flat_map(|s| s.all_trait_ids.iter().copied())
+        .collect();
+
+    // Trait stats
+    let trait_stats = stats::calculate_trait_stats(&all_trait_ids, &db.traits);
+    full_stats += &trait_stats;
+    stats::apply_trait_conversions(&mut full_stats, &all_trait_ids, &db.traits);
+
+    // Extract damage modifiers from traits + rune + sigils + relic
+    let rune_id = validated.rune.as_ref().map(|r| r.id);
+    let sigil_ids: Vec<u32> = validated.sigils.iter().map(|s| s.id).collect();
+    let relic_id = validated.relic.as_ref().map(|r| r.id);
+    let modifiers = combat::extract_damage_modifiers(
+        &all_trait_ids,
+        rune_id,
+        &sigil_ids,
+        relic_id,
+        &db.traits,
+        &db.items,
+    );
+
+    (full_stats, modifiers)
+}
+
+/// Simulate a rotation from validated skill IDs.
+fn simulate_validated_rotation(
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    stats: &stats::StatBlock,
+) -> Option<rotation::SimulationResult> {
+    // Collect all skill IDs from validated skills
+    let mut skill_ids: Vec<u32> = Vec::new();
+
+    if let Some((id, _)) = &validated.skills.heal {
+        skill_ids.push(*id);
+    }
+    for util in &validated.skills.utilities {
+        if let Some((id, _)) = util {
+            skill_ids.push(*id);
+        }
+    }
+    if let Some((id, _)) = &validated.skills.elite {
+        skill_ids.push(*id);
+    }
+
+    // Resolve weapon skills from validated weapon types
+    let profession_name = if let Some(spec) = validated.specializations.first() {
+        // Use the profession from the spec
+        db.specializations.get(&spec.spec_id)
+            .map(|s| s.profession.as_str())
+            .unwrap_or("")
+    } else {
+        ""
+    };
+
+    // Find weapon skills for each weapon set
+    if let Some(profession) = db.professions.values().find(|p| p.name == profession_name) {
+        // Set 1
+        if let Some(ref main) = validated.weapons.set1.main_hand {
+            add_weapon_skill_ids(&mut skill_ids, profession, main, db, 1);
+        }
+        if let Some(ref off) = validated.weapons.set1.off_hand {
+            add_weapon_skill_ids(&mut skill_ids, profession, off, db, 1);
+        }
+        // Set 2
+        if let Some(ref main) = validated.weapons.set2.main_hand {
+            add_weapon_skill_ids(&mut skill_ids, profession, main, db, 2);
+        }
+        if let Some(ref off) = validated.weapons.set2.off_hand {
+            add_weapon_skill_ids(&mut skill_ids, profession, off, db, 2);
+        }
+    }
+
+    if skill_ids.is_empty() {
+        return None;
+    }
+
+    let rotation_skills = rotation::builder::build_rotation_skills(&skill_ids, db);
+    if rotation_skills.is_empty() {
+        return None;
+    }
+
+    let power = stats.get("Power");
+    let condition_damage = stats.get("ConditionDamage");
+    let weapon_strength = 1100.0; // GW2 reference weapon strength
+
+    Some(rotation::simulator::simulate(
+        &rotation_skills,
+        0, // use default duration
+        power,
+        condition_damage,
+        weapon_strength,
+    ))
+}
+
+/// Add weapon skill IDs for a given weapon type from the profession's weapon data.
+fn add_weapon_skill_ids(
+    skill_ids: &mut Vec<u32>,
+    profession: &Profession,
+    weapon_type: &str,
+    db: &GameDb,
+    _weapon_set: u8,
+) {
+    if let Some(weapon_info) = profession.weapons.get(weapon_type) {
+        for skill_ref in &weapon_info.skills {
+            let id = skill_ref.id;
+            if db.skills.contains_key(&id) {
+                skill_ids.push(id);
+            }
+        }
     }
 }
 
