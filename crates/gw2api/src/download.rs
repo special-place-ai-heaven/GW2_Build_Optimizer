@@ -114,41 +114,45 @@ pub fn download_all(
     report(&mut on_progress, &mut step, "PvP Amulets", None);
 
     // 8. Items (filtered to equipment-relevant types) — largest step, ~100k items
+    // Uses fetch_by_ids (200-ID batches, 5 concurrent) with lenient per-item deserialization.
     if cache.is_stale("items", build) {
         let relevant_types = ["Armor", "Weapon", "Trinket", "Back", "UpgradeComponent", "Relic"];
         let relevant_rarities = ["Exotic", "Ascended", "Legendary"];
 
         // Get all item IDs first
+        on_progress(DownloadProgress {
+            current_step: step,
+            total_steps: TOTAL_STEPS,
+            step_name: "Items (equipment)".to_string(),
+            done: false,
+            detail: Some("fetching item IDs...".into()),
+        });
         let ids: Vec<serde_json::Value> = client.get("items")?;
-        let total_batches = (ids.len() + 199) / 200;
+
+        // Fetch all items as raw JSON values with live progress updates
+        let raw_items: Vec<serde_json::Value> = client.fetch_by_ids_with_progress(
+            "items",
+            &ids,
+            |fetched, total| {
+                on_progress(DownloadProgress {
+                    current_step: step,
+                    total_steps: TOTAL_STEPS,
+                    step_name: "Items (equipment)".to_string(),
+                    done: false,
+                    detail: Some(format!("{} / {} items fetched", fetched, total)),
+                });
+            },
+        )?;
+
+        // Filter to equipment-relevant items with lenient deserialization
         let mut equipment_items: Vec<models::Item> = Vec::new();
-
-        for (batch_idx, chunk) in ids.chunks(200).enumerate() {
-            // Report sub-progress for each batch (step is 7 here, use it so bar shows 7/8 not 8/8)
-            on_progress(DownloadProgress {
-                current_step: step,
-                total_steps: TOTAL_STEPS,
-                step_name: "Items (equipment)".to_string(),
-                done: false,
-                detail: Some(format!("batch {}/{}", batch_idx + 1, total_batches)),
-            });
-
-            let ids_str: Vec<String> = chunk.iter().map(|id| id.to_string().replace('"', "")).collect();
-            let joined = ids_str.join(",");
-
-            // Lenient deserialization: parse as Value, then try each item individually
-            let raw_items: Vec<serde_json::Value> =
-                client.get_with_params("items", &[("ids", &joined)])?;
-
-            for val in raw_items {
-                if let Ok(item) = serde_json::from_value::<models::Item>(val) {
-                    if relevant_types.contains(&item.item_type.as_str())
-                        && relevant_rarities.contains(&item.rarity.as_str())
-                    {
-                        equipment_items.push(item);
-                    }
+        for val in raw_items {
+            if let Ok(item) = serde_json::from_value::<models::Item>(val) {
+                if relevant_types.contains(&item.item_type.as_str())
+                    && relevant_rarities.contains(&item.rarity.as_str())
+                {
+                    equipment_items.push(item);
                 }
-                // Skip items that fail to deserialize
             }
         }
 

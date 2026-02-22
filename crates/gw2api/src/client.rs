@@ -12,7 +12,7 @@ const BASE_URL: &str = "https://api.guildwars2.com/v2";
 const MAX_BULK_IDS: usize = 200;
 const BUCKET_CAPACITY: u32 = 300;
 const REFILL_RATE: f64 = 5.0; // tokens per second
-const MAX_RETRIES: u32 = 3;
+const MAX_RETRIES: u32 = 5;
 
 /// Rate-limited GW2 API client.
 pub struct Gw2Client {
@@ -34,7 +34,10 @@ impl TokenBucket {
         }
     }
 
-    fn take(&mut self) {
+    /// Take a token, returning the duration to sleep if the bucket was empty.
+    /// The caller must sleep AFTER releasing the mutex lock to avoid blocking
+    /// other threads that want to check/take tokens concurrently.
+    fn take(&mut self) -> Option<Duration> {
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_refill).as_secs_f64();
         self.tokens = (self.tokens + elapsed * REFILL_RATE).min(BUCKET_CAPACITY as f64);
@@ -42,11 +45,11 @@ impl TokenBucket {
 
         if self.tokens < 1.0 {
             let wait = Duration::from_secs_f64((1.0 - self.tokens) / REFILL_RATE);
-            std::thread::sleep(wait);
-            self.last_refill = Instant::now();
             self.tokens = 0.0;
+            Some(wait)
         } else {
             self.tokens -= 1.0;
+            None
         }
     }
 }
@@ -105,19 +108,45 @@ impl Gw2Client {
     }
 
     /// Make a GET request with query parameters.
+    /// Builds query string manually to avoid URL-encoding commas in bulk ID requests.
+    /// Retries on connection errors (timeouts) AND server errors (502/503/504).
     pub fn get_with_params<T: DeserializeOwned>(
         &self,
         endpoint: &str,
         params: &[(&str, &str)],
     ) -> Result<T, ApiError> {
-        let url = if endpoint.starts_with("http") {
+        let base_url = if endpoint.starts_with("http") {
             endpoint.to_string()
         } else {
             format!("{}/{}", BASE_URL, endpoint.trim_start_matches('/'))
         };
 
+        // Build query string manually — reqwest's .query() encodes commas as %2C,
+        // which triples separator length and can exceed URL limits for bulk ID requests.
+        let url = if params.is_empty() {
+            base_url
+        } else {
+            let query = params.iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join("&");
+            format!("{}?{}", base_url, query)
+        };
+
+        let mut last_error: Option<ApiError> = None;
+
         for attempt in 0..MAX_RETRIES {
-            self.bucket.lock().unwrap_or_else(|e| e.into_inner()).take();
+            // Backoff before retries (not before first attempt)
+            if attempt > 0 {
+                let wait = Duration::from_millis(2000 * 2u64.pow(attempt - 1));
+                std::thread::sleep(wait);
+            }
+
+            // Take a token — sleep OUTSIDE the lock to allow concurrent threads
+            let sleep_dur = self.bucket.lock().unwrap_or_else(|e| e.into_inner()).take();
+            if let Some(wait) = sleep_dur {
+                std::thread::sleep(wait);
+            }
 
             let mut headers = HeaderMap::new();
             headers.insert(
@@ -125,66 +154,154 @@ impl Gw2Client {
                 HeaderValue::from_static("GW2BuildOptimizer/0.1"),
             );
             if let Some(ref key) = self.api_key {
-                let header_val = HeaderValue::from_str(&format!("Bearer {}", key))
-                    .map_err(|_| ApiError::Api {
+                let header_val = match HeaderValue::from_str(&format!("Bearer {}", key)) {
+                    Ok(v) => v,
+                    Err(_) => return Err(ApiError::Api {
                         status: 0,
                         message: "API key contains invalid characters".into(),
-                    })?;
+                    }),
+                };
                 headers.insert(AUTHORIZATION, header_val);
             }
 
-            let resp = self
-                .http
-                .get(&url)
-                .headers(headers)
-                .query(params)
-                .send()?;
+            // Connection errors (timeout, DNS, reset) are retryable — do NOT use `?`
+            let resp = match self.http.get(&url).headers(headers).send() {
+                Ok(resp) => resp,
+                Err(e) => {
+                    last_error = Some(ApiError::Http(e));
+                    continue; // retry on connection failure
+                }
+            };
 
             let status = resp.status().as_u16();
 
-            if status == 429 {
-                // Rate limited — exponential backoff
-                let wait = Duration::from_millis(1000 * 2u64.pow(attempt));
-                std::thread::sleep(wait);
-                continue;
+            // Retry on rate limit and server errors (502/503/504)
+            if status == 429 || status == 502 || status == 503 || status == 504 {
+                let body = resp.text().unwrap_or_default();
+                let clean_msg = if body.contains('<') {
+                    format!("Server error (HTTP {})", status)
+                } else if body.is_empty() {
+                    format!("HTTP {}", status)
+                } else {
+                    body
+                };
+                last_error = Some(ApiError::Api { status, message: clean_msg });
+                continue; // retry
             }
 
             if !resp.status().is_success() {
                 let body = resp.text().unwrap_or_default();
-                return Err(ApiError::Api {
-                    status,
-                    message: body,
-                });
+                let clean_msg = if body.contains('<') {
+                    format!("Server error (HTTP {})", status)
+                } else {
+                    body
+                };
+                return Err(ApiError::Api { status, message: clean_msg });
             }
 
-            let text = resp.text()?;
+            // Read body — connection can fail here too
+            let text = match resp.text() {
+                Ok(t) => t,
+                Err(e) => {
+                    last_error = Some(ApiError::Http(e));
+                    continue; // retry on read failure
+                }
+            };
+
             let parsed: T = serde_json::from_str(&text)?;
             return Ok(parsed);
         }
 
-        Err(ApiError::RateLimited(MAX_RETRIES))
+        // All retries exhausted
+        Err(last_error.unwrap_or_else(|| ApiError::Api {
+            status: 0,
+            message: "GW2 API unavailable after retries. Try again later.".into(),
+        }))
     }
 
     /// Fetch all IDs from an endpoint root, then bulk-fetch in batches of 200.
-    pub fn fetch_all<T: DeserializeOwned>(&self, endpoint: &str) -> Result<Vec<T>, ApiError> {
+    pub fn fetch_all<T: DeserializeOwned + Send>(&self, endpoint: &str) -> Result<Vec<T>, ApiError> {
         // First get all IDs
         let ids: Vec<serde_json::Value> = self.get(endpoint)?;
         self.fetch_by_ids(endpoint, &ids)
     }
 
-    /// Fetch items by a list of IDs in batches of 200.
-    pub fn fetch_by_ids<T: DeserializeOwned>(
+    /// Fetch items by a list of IDs in batches of 200, up to 5 concurrent.
+    pub fn fetch_by_ids<T: DeserializeOwned + Send>(
         &self,
         endpoint: &str,
         ids: &[serde_json::Value],
     ) -> Result<Vec<T>, ApiError> {
+        let batches: Vec<&[serde_json::Value]> = ids.chunks(MAX_BULK_IDS).collect();
         let mut results = Vec::with_capacity(ids.len());
 
-        for chunk in ids.chunks(MAX_BULK_IDS) {
-            let ids_str: Vec<String> = chunk.iter().map(|id| id.to_string().replace('"', "")).collect();
-            let joined = ids_str.join(",");
-            let batch: Vec<T> = self.get_with_params(endpoint, &[("ids", &joined)])?;
-            results.extend(batch);
+        // Process in groups of 5 concurrent fetches
+        for group in batches.chunks(5) {
+            let group_results: Vec<Result<Vec<T>, ApiError>> =
+                std::thread::scope(|s| {
+                    let handles: Vec<_> = group.iter().map(|chunk| {
+                        s.spawn(|| {
+                            let ids_str: Vec<String> = chunk.iter()
+                                .map(|id| id.to_string().replace('"', ""))
+                                .collect();
+                            let joined = ids_str.join(",");
+                            self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
+                        })
+                    }).collect();
+
+                    handles.into_iter().map(|h| {
+                        h.join().unwrap_or_else(|_| Err(ApiError::Api {
+                            status: 0,
+                            message: "Batch fetch thread panicked".into(),
+                        }))
+                    }).collect()
+                });
+
+            for batch_result in group_results {
+                results.extend(batch_result?);
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Like `fetch_by_ids` but calls `on_progress(fetched_so_far, total)` after each batch group.
+    pub fn fetch_by_ids_with_progress<T: DeserializeOwned + Send>(
+        &self,
+        endpoint: &str,
+        ids: &[serde_json::Value],
+        mut on_progress: impl FnMut(usize, usize),
+    ) -> Result<Vec<T>, ApiError> {
+        let batches: Vec<&[serde_json::Value]> = ids.chunks(MAX_BULK_IDS).collect();
+        let total = ids.len();
+        let mut results = Vec::with_capacity(total);
+
+        for group in batches.chunks(5) {
+            let group_results: Vec<Result<Vec<T>, ApiError>> =
+                std::thread::scope(|s| {
+                    let handles: Vec<_> = group.iter().map(|chunk| {
+                        s.spawn(|| {
+                            let ids_str: Vec<String> = chunk.iter()
+                                .map(|id| id.to_string().replace('"', ""))
+                                .collect();
+                            let joined = ids_str.join(",");
+                            self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
+                        })
+                    }).collect();
+
+                    handles.into_iter().map(|h| {
+                        h.join().unwrap_or_else(|_| Err(ApiError::Api {
+                            status: 0,
+                            message: "Batch fetch thread panicked".into(),
+                        }))
+                    }).collect()
+                });
+
+            for batch_result in group_results {
+                results.extend(batch_result?);
+            }
+
+            on_progress(results.len(), total);
         }
 
         Ok(results)
@@ -252,10 +369,9 @@ mod tests {
     #[test]
     fn test_token_bucket_starts_full() {
         let mut bucket = TokenBucket::new();
-        // Should not sleep when bucket is full
-        let start = Instant::now();
-        bucket.take();
-        assert!(start.elapsed() < Duration::from_millis(10));
+        // Should not need to sleep when bucket is full
+        let wait = bucket.take();
+        assert!(wait.is_none(), "Full bucket should not require sleeping");
     }
 
     #[test]

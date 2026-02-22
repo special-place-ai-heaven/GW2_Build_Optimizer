@@ -77,6 +77,17 @@ impl GameDb {
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
 
+        // Validate critical data is non-empty
+        if professions_vec.is_empty() {
+            return Err("No professions found in cache — game data may not be downloaded".into());
+        }
+        if specs_vec.is_empty() {
+            return Err("No specializations found in cache — game data may not be downloaded".into());
+        }
+        if itemstats_vec.is_empty() {
+            return Err("No item stats found in cache — game data may not be downloaded".into());
+        }
+
         // Build primary indexes (ID → data)
         let items: HashMap<u32, Item> = items_vec.into_iter().map(|i| (i.id, i)).collect();
         let itemstats: HashMap<u32, ItemStat> =

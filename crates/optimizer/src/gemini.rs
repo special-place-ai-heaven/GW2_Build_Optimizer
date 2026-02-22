@@ -342,6 +342,19 @@ impl GeminiClient {
         mut execute_tool: impl FnMut(&str, &serde_json::Value) -> serde_json::Value,
         max_turns: usize,
     ) -> Result<String, GeminiError> {
+        self.generate_with_tools_progress(prompt, tools, &mut execute_tool, max_turns, &mut |_, _, _| {})
+    }
+
+    /// Like `generate_with_tools` but calls `on_progress(turn, max_turns, tool_names)` after
+    /// each tool-calling round, so the UI can show what Gemini is doing.
+    pub fn generate_with_tools_progress(
+        &self,
+        prompt: &str,
+        tools: Vec<Tool>,
+        execute_tool: &mut dyn FnMut(&str, &serde_json::Value) -> serde_json::Value,
+        max_turns: usize,
+        on_progress: &mut dyn FnMut(usize, usize, &[String]),
+    ) -> Result<String, GeminiError> {
         let mut contents = vec![Content {
             role: Some("user".into()),
             parts: vec![Part::text(prompt)],
@@ -349,7 +362,7 @@ impl GeminiClient {
 
         let mut last_text: Option<String> = None;
 
-        for _turn in 0..max_turns {
+        for turn in 0..max_turns {
             let request = GenerateRequest {
                 contents: contents.clone(),
                 tools: Some(tools.clone()),
@@ -372,6 +385,10 @@ impl GeminiClient {
                 return last_text
                     .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()));
             }
+
+            // Report progress: which tools are being called this turn
+            let tool_names: Vec<String> = function_calls.iter().map(|fc| fc.name.clone()).collect();
+            on_progress(turn + 1, max_turns, &tool_names);
 
             // Add model's response to conversation history
             contents.push(response_content.clone());

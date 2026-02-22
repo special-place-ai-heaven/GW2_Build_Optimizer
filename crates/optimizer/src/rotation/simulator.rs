@@ -187,10 +187,19 @@ impl SimState {
                 continue;
             }
 
-            // Auto-attack = filler (always available, pick last)
+            // Auto-attack = filler (always available, pick last).
+            // Prefer the filler from the active weapon set over weapon_set==0.
             if skill.slot == SkillSlot::Weapon1 && skill.cooldown_ms == 0 {
-                if filler_idx.is_none() {
-                    filler_idx = Some(i);
+                match filler_idx {
+                    None => filler_idx = Some(i),
+                    Some(prev) => {
+                        // Upgrade to active-set filler if current filler is generic
+                        if self.skills[prev].weapon_set == 0
+                            && skill.weapon_set == self.active_weapon_set
+                        {
+                            filler_idx = Some(i);
+                        }
+                    }
                 }
                 continue;
             }

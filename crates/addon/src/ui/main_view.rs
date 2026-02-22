@@ -23,7 +23,7 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     }
 
     // Error bar at top (dismissible)
-    if let Some(ref err) = state.main.error.clone() {
+    if let Some(ref err) = state.main.error {
         ui.text_colored([1.0, 0.3, 0.0, 1.0], &format!("[!] {}", err));
         ui.same_line();
         if ui.small_button("Dismiss##err") {
@@ -341,6 +341,17 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
         ui.spacing();
     }
 
+    // Show optimization error even when no suggestions exist
+    if let Some(err) = state.main.comparison.error.clone() {
+        ui.separator();
+        ui.text_colored([1.0, 0.3, 0.0, 1.0], &format!("[!] Optimization error: {}", err));
+        ui.spacing();
+        if ui.small_button("Dismiss##opt_err") {
+            state.main.comparison.error = None;
+        }
+        ui.spacing();
+    }
+
     // Show comparison if suggestions exist
     if !state.main.comparison.suggestions.is_empty() {
         ui.separator();
@@ -359,13 +370,11 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
         }
 
         // Save Build button + Clear Results
-        if !state.main.comparison.suggestions.is_empty() {
-            render_save_build_ui(ui, state);
-            ui.spacing();
-            if ui.small_button("Clear Results") {
-                state.main.comparison.suggestions.clear();
-                state.main.comparison.error = None;
-            }
+        render_save_build_ui(ui, state);
+        ui.spacing();
+        if ui.small_button("Clear Results") {
+            state.main.comparison.suggestions.clear();
+            state.main.comparison.error = None;
         }
     }
 
@@ -425,6 +434,17 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
         if let Some(ref prof_name) = profession_name {
             start_optimization_with_profession(state, archetype, prof_name);
         }
+    }
+
+    // Show optimization error even when no suggestions exist
+    if let Some(err) = state.main.comparison.error.clone() {
+        ui.spacing();
+        ui.text_colored([1.0, 0.3, 0.0, 1.0], &format!("[!] Optimization error: {}", err));
+        ui.spacing();
+        if ui.small_button("Dismiss##opt_err_improve") {
+            state.main.comparison.error = None;
+        }
+        ui.spacing();
     }
 
     // Show comparison if suggestions exist (separate from build display)
@@ -1394,86 +1414,107 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
     state.main.comparison.error = None;
 
     std::thread::spawn(move || {
-        let result = (|| -> Result<Vec<crate::ui::comparison::BuildSuggestion>, String> {
-            if token.is_cancelled() { return Err("Cancelled".into()); }
-
-            let db = db.ok_or("GameDb not loaded")?;
-            let profession = db.profession(&profession_name)
-                .ok_or_else(|| format!("Profession {} not found", profession_name))?;
-
-            let token_progress = token.clone();
-            let candidates = gw2_optimizer::engine::optimize(
-                profession,
-                &archetype,
-                None,
-                &db.items,
-                &db.itemstats,
-                &db.specializations,
-                &db.traits,
-                |progress| {
-                    if token_progress.is_cancelled() { return; }
-                    crate::state::with_state(|s| {
-                        s.main.optimize_stage = progress.stage.clone();
-                    });
-                },
-                5,
-                &game_mode,
-                Some(&aggression),
-            );
-
-            if token.is_cancelled() { return Err("Cancelled".into()); }
-
-            let mut suggestions: Vec<crate::ui::comparison::BuildSuggestion> =
-                candidates.iter().map(|c| candidate_to_suggestion(c, &db)).collect();
-
-            // Enrich top suggestion with Gemini LLM reasoning
-            if let Some(ref key) = gemini_key {
+        let panic_token = token.clone();
+        let thread_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let result = (|| -> Result<Vec<crate::ui::comparison::BuildSuggestion>, String> {
                 if token.is_cancelled() { return Err("Cancelled".into()); }
 
-                crate::state::with_state(|s| {
-                    s.main.optimize_stage = "Consulting Gemini for synergy analysis...".into();
-                });
+                let db = db.ok_or("GameDb not loaded")?;
+                let profession = db.profession(&profession_name)
+                    .ok_or_else(|| format!("Profession '{}' not found in GameDb", profession_name))?;
 
-                match enrich_with_gemini(
-                    key,
-                    &profession_name,
+                let token_progress = token.clone();
+                let candidates = gw2_optimizer::engine::optimize(
+                    profession,
                     &archetype,
-                    &game_mode_label,
-                    aggression,
-                    &candidates,
-                    &db,
-                    current_build_summary.as_deref(),
-                    &mut suggestions,
-                    &addon_dir,
-                ) {
-                    Ok(()) => {}
-                    Err(e) => {
-                        nexus::log::log(
-                            nexus::log::LogLevel::Warning,
-                            "GW2 Build Optimizer",
-                            &format!("Gemini enrichment skipped: {}", e),
-                        );
+                    None,
+                    &db.items,
+                    &db.itemstats,
+                    &db.specializations,
+                    &db.traits,
+                    |progress| {
+                        if token_progress.is_cancelled() { return; }
+                        crate::state::with_state(|s| {
+                            s.main.optimize_stage = progress.stage.clone();
+                        });
+                    },
+                    5,
+                    &game_mode,
+                    Some(&aggression),
+                )?;
+
+                if token.is_cancelled() { return Err("Cancelled".into()); }
+
+                let mut suggestions: Vec<crate::ui::comparison::BuildSuggestion> =
+                    candidates.iter().map(|c| candidate_to_suggestion(c, &db)).collect();
+
+                // Enrich top suggestion with Gemini LLM reasoning
+                if let Some(ref key) = gemini_key {
+                    if token.is_cancelled() { return Err("Cancelled".into()); }
+
+                    crate::state::with_state(|s| {
+                        s.main.optimize_stage = "Consulting Gemini for synergy analysis...".into();
+                    });
+
+                    match enrich_with_gemini(
+                        key,
+                        &profession_name,
+                        &archetype,
+                        &game_mode_label,
+                        aggression,
+                        &candidates,
+                        &db,
+                        current_build_summary.as_deref(),
+                        &mut suggestions,
+                        &addon_dir,
+                    ) {
+                        Ok(()) => {}
+                        Err(e) => {
+                            nexus::log::log(
+                                nexus::log::LogLevel::Warning,
+                                "GW2 Build Optimizer",
+                                &format!("Gemini enrichment skipped: {}", e),
+                            );
+                        }
                     }
                 }
+
+                Ok(suggestions)
+            })();
+
+            if !token.is_cancelled() {
+                crate::state::with_state(|s| {
+                    s.main.optimizing = false;
+                    s.main.comparison.loading = false;
+                    match result {
+                        Ok(suggestions) => {
+                            s.main.comparison.suggestions = suggestions;
+                            s.main.comparison.selected_suggestion = 0;
+                        }
+                        Err(e) => {
+                            s.main.comparison.error = Some(e);
+                        }
+                    }
+                });
             }
+        }));
 
-            Ok(suggestions)
-        })();
-
-        if !token.is_cancelled() {
-            crate::state::with_state(|s| {
-                s.main.optimizing = false;
-                s.main.comparison.loading = false;
-                match result {
-                    Ok(suggestions) => {
-                        s.main.comparison.suggestions = suggestions;
-                        s.main.comparison.selected_suggestion = 0;
-                    }
-                    Err(e) => {
-                        s.main.comparison.error = Some(e);
-                    }
-                }
-            });
+        // If the thread panicked, recover and show error
+        if let Err(panic_info) = thread_result {
+            let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                format!("Internal error (panic): {}", s)
+            } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                format!("Internal error (panic): {}", s)
+            } else {
+                "Internal error: optimization thread panicked".into()
+            };
+            if !panic_token.is_cancelled() {
+                crate::state::with_state(|s| {
+                    s.main.optimizing = false;
+                    s.main.comparison.loading = false;
+                    s.main.comparison.error = Some(msg);
+                });
+            }
         }
     });
 }
@@ -1881,6 +1922,32 @@ fn apply_gemini_response(
     }
 }
 
+/// Convert Gemini tool function names to human-readable descriptions.
+fn humanize_tool_names(tool_names: &[String]) -> String {
+    let labels: Vec<&str> = tool_names.iter().map(|n| match n.as_str() {
+        "get_profession_info" => "reading profession",
+        "get_spec_traits" => "checking traits",
+        "get_trait_details" => "analyzing trait",
+        "get_skill_info" => "checking skill",
+        "list_runes" => "browsing runes",
+        "list_sigils" => "browsing sigils",
+        "list_relics" => "browsing relics",
+        "calculate_stats" => "calculating stats",
+        "simulate_combat" => "simulating combat",
+        "score_build" => "scoring build",
+        "get_current_build" => "reading current build",
+        "get_optimizer_results" => "reviewing candidates",
+        "search_traits_by_effect" => "searching trait synergies",
+        "find_condition_sources" => "finding condition sources",
+        "search_skills_by_effect" => "searching skill synergies",
+        "find_synergies" => "analyzing synergies",
+        "get_build_synergy_report" => "building synergy report",
+        "simulate_rotation" => "simulating rotation",
+        _ => "working",
+    }).collect();
+    labels.join(", ")
+}
+
 /// Call Gemini to enrich the top optimizer suggestion with LLM reasoning.
 /// Uses function calling (tool use) so Gemini can query game data and simulate builds.
 fn enrich_with_gemini(
@@ -1920,15 +1987,28 @@ fn enrich_with_gemini(
         aggression_level: aggression,
     };
 
-    let response = client.generate_with_tools(
+    let response = client.generate_with_tools_progress(
         &prompt,
         tools,
-        |name, args| gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx),
+        &mut |name, args| gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx),
         8,
+        &mut |turn, max_turns, tool_names| {
+            let tools_str = humanize_tool_names(tool_names);
+            crate::state::with_state(|s| {
+                s.main.optimize_stage = format!(
+                    "Gemini thinking ({}/{})... {}",
+                    turn, max_turns, tools_str
+                );
+            });
+        },
     ).map_err(|e| e.to_string())?;
 
     let gemini_build = gw2_optimizer::prompts::parse_gemini_build(&response)
         .map_err(|e| format!("Parse failed: {}", e))?;
+
+    crate::state::with_state(|s| {
+        s.main.optimize_stage = "Applying Gemini's build + simulating rotation...".into();
+    });
 
     if let Some(first) = suggestions.first_mut() {
         apply_gemini_response(first, &gemini_build);
@@ -1993,11 +2073,20 @@ fn send_chat_message(state: &mut AddonState, message: String) {
                     aggression_level: aggression,
                 };
 
-                let response = client.generate_with_tools(
+                let response = client.generate_with_tools_progress(
                     &prompt,
                     tools,
-                    |name, args| gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx),
+                    &mut |name, args| gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx),
                     8,
+                    &mut |turn, max_turns, tool_names| {
+                        let tools_str = humanize_tool_names(tool_names);
+                        crate::state::with_state(|s| {
+                            s.main.optimize_stage = format!(
+                                "Gemini thinking ({}/{})... {}",
+                                turn, max_turns, tools_str
+                            );
+                        });
+                    },
                 ).map_err(|e| e.to_string())?;
 
                 gw2_optimizer::prompts::parse_gemini_build(&response)

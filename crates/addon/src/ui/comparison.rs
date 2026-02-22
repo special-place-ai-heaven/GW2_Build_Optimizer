@@ -223,6 +223,8 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
             if sug.healing_index > 0 || cur.map_or(false, |c| c.healing_index > 0) {
                 render_int_row(ui, "Healing Index", cur.map_or(0, |c| c.healing_index), sug.healing_index);
             }
+            render_int_row(ui, "Effective HP", cur.map_or(0, |c| c.effective_health), sug.effective_health);
+            render_pct_row(ui, "Dmg Reduction", cur.map_or(0.0, |c| c.damage_reduction_pct), sug.damage_reduction_pct);
 
             ui.columns(1, &format!("##{}_end", label), false);
         } else {
@@ -298,49 +300,15 @@ fn bonus_header(ui: &Ui) {
     ui.separator();
 }
 
-/// Render defenses and resistances.
-fn render_defenses(ui: &Ui, comparison: &ComparisonState, current_stats: Option<&StatBlock>, suggestion: &BuildSuggestion) {
+/// Render defenses: Health and Armor (static stats that don't change with buff profile).
+/// Effective HP and Damage Reduction are shown per-tier in Combat Performance.
+fn render_defenses(ui: &Ui, _comparison: &ComparisonState, current_stats: Option<&StatBlock>, suggestion: &BuildSuggestion) {
     let sug_stats = suggestion.estimated_stats.clone().unwrap_or_default();
-
-    // Use current build combat metrics if available, else fall back to stats
-    let (cur_health, cur_armor, cur_eff_hp, cur_dmg_red) =
-        if let Some(ref combat) = comparison.current_combat_solo {
-            let cur = current_stats.cloned().unwrap_or_default();
-            let health = cur.health;
-            let armor = cur.armor;
-            (health, armor, combat.effective_health, combat.damage_reduction_pct)
-        } else {
-            let cur = current_stats.cloned().unwrap_or_default();
-            let health = cur.health;
-            let armor = cur.armor;
-            // Blended EHP: 65% strike (uses armor), 35% condition (armor bypassed), no boon DR
-            let strike_ehp = health as f64 * armor as f64 / 2597.0;
-            let condition_ehp = health as f64;
-            let eff_hp = (strike_ehp * 0.65 + condition_ehp * 0.35) as i32;
-            let dmg_red = 0.0; // No boon DR info without combat metrics
-            (health, armor, eff_hp, dmg_red)
-        };
-
-    // Use combat metrics for suggested build if available, else fall back to stats
-    let (sug_health, sug_armor, sug_eff_hp, sug_dmg_red) =
-        if let Some(ref combat) = suggestion.combat_solo {
-            let health = sug_stats.health;
-            let armor = sug_stats.armor;
-            (health, armor, combat.effective_health as i32, combat.damage_reduction_pct)
-        } else {
-            let health = sug_stats.health;
-            let armor = sug_stats.armor;
-            let strike_ehp = health as f64 * armor as f64 / 2597.0;
-            let condition_ehp = health as f64;
-            let eff_hp = (strike_ehp * 0.65 + condition_ehp * 0.35) as i32;
-            let dmg_red = 0.0; // No boon DR info without combat metrics
-            (health, armor, eff_hp, dmg_red)
-        };
+    let cur = current_stats.cloned().unwrap_or_default();
 
     let stats = [
-        ("Health", cur_health, sug_health),
-        ("Armor", cur_armor, sug_armor),
-        ("Effective HP", cur_eff_hp, sug_eff_hp),
+        ("Health", cur.health, sug_stats.health),
+        ("Armor", cur.armor, sug_stats.armor),
     ];
 
     ui.columns(4, "##defense_cols", true);
@@ -357,8 +325,6 @@ fn render_defenses(ui: &Ui, comparison: &ComparisonState, current_stats: Option<
     for (name, cur_val, sug_val) in &stats {
         render_int_row(ui, name, *cur_val, *sug_val);
     }
-
-    render_pct_row(ui, "Dmg Reduction", cur_dmg_red, sug_dmg_red);
 
     ui.columns(1, "##end_defense", false);
 }
