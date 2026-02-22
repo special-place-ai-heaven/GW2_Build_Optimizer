@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use gw2_core::config::AppConfig;
 use gw2_core::types::{GameMode, ResolvedBuild, SavedBuild, StatBlock};
 use gw2_optimizer::gamedb::GameDb;
+use gw2_optimizer::scoring::OptimizationWeights;
 use crate::ui::chat_bar::ChatBarState;
 use crate::ui::comparison::ComparisonState;
 
@@ -78,9 +79,11 @@ pub struct MainState {
     // Optimization state
     pub optimizing: bool,
     pub optimize_stage: String,
-    /// Aggression level slider index (0=FullDefense, 1=Defensive, 2=Balanced, 3=Aggressive, 4=FullOffense).
-    /// Default: 3 (Aggressive, matches PvE default). Adjusted when game mode changes.
-    pub aggression_index: i32,
+    /// 5-axis optimization weights (Power, Disable, Condition, Heal, Sustain).
+    /// Drives gear search, trait selection, and build scoring.
+    pub weights: OptimizationWeights,
+    /// Which radar chart axis is being dragged (None = no drag).
+    pub radar_dragging: Option<usize>,
     // Save/Load
     pub saved_builds: Vec<SavedBuild>,
     pub saved_builds_loaded: bool,
@@ -190,7 +193,7 @@ pub fn init(addon_dir: PathBuf) {
     }
 
     let mut main = MainState::default();
-    main.aggression_index = 3; // Aggressive (PvE default)
+    main.weights = OptimizationWeights::default_for_mode("PvE");
     *lock_state() = Some(AddonState {
         window_visible: false,
         config,

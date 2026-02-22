@@ -11,7 +11,7 @@ use gw2_core::types::GameMode;
 use gw2_api::models::Fact;
 
 use crate::combat::{self, CombatPerformance, DamageModifiers};
-use crate::scoring::{score_combat_weighted, AggressionLevel, Archetype};
+use crate::scoring::{score_with_weights, OptimizationWeights, StatWeights};
 use crate::search::{search_gear_prefixes, search_spec_combos, GearCandidate};
 use crate::stats;
 
@@ -45,7 +45,7 @@ pub struct OptimizeProgress {
 /// For PvE/WvW, runs full gear + spec search.
 pub fn optimize(
     profession: &Profession,
-    archetype: &Archetype,
+    weights: &OptimizationWeights,
     _current_equipment: Option<&EquipmentTab>,
     _items_cache: &HashMap<u32, Item>,
     itemstats_cache: &HashMap<u32, ItemStat>,
@@ -54,16 +54,12 @@ pub fn optimize(
     mut on_progress: impl FnMut(OptimizeProgress),
     top_n: usize,
     game_mode: &GameMode,
-    aggression: Option<&AggressionLevel>,
+    locked_elite_spec: Option<u32>,
 ) -> Result<Vec<BuildCandidate>, String> {
-    // Default to FullOffense for backward compatibility (matches old score_combat behavior)
-    let default_aggression = AggressionLevel::FullOffense;
-    let aggression = aggression.unwrap_or(&default_aggression);
-
     if *game_mode == GameMode::PvP {
-        return optimize_pvp(profession, archetype, specs_cache, traits_cache, &mut on_progress, top_n, aggression)
+        return optimize_pvp(profession, weights, specs_cache, traits_cache, &mut on_progress, top_n, locked_elite_spec)
             .and_then(|v| if v.is_empty() {
-                Err(format!("No PvP candidates found for {} / {:?}", profession.name, archetype))
+                Err(format!("No PvP candidates found for {} / {}", profession.name, weights.summary_label()))
             } else {
                 Ok(v)
             });
@@ -75,11 +71,11 @@ pub fn optimize(
     });
 
     // 1. Find best gear prefix combinations
-    let mut gear_candidates = search_gear_prefixes(archetype, itemstats_cache);
+    let mut gear_candidates = search_gear_prefixes(weights, itemstats_cache);
     if gear_candidates.is_empty() {
         return Err(format!(
-            "No gear stat prefixes found for {:?}. GameDb has {} itemstats loaded.",
-            archetype, itemstats_cache.len()
+            "No gear stat prefixes found for {}. GameDb has {} itemstats loaded.",
+            weights.summary_label(), itemstats_cache.len()
         ));
     }
 
@@ -94,7 +90,7 @@ pub fn optimize(
         let perf = combat::calculate_combat_performance(
             &full_stats, &derived, &empty_mods, solo_profile, &profession.name,
         );
-        candidate.score = score_combat_weighted(&perf, archetype, aggression);
+        candidate.score = score_with_weights(&perf, weights);
     }
 
     // Sort by score descending
@@ -107,7 +103,7 @@ pub fn optimize(
     });
 
     // 2. Find valid spec combinations
-    let spec_combos = search_spec_combos(&profession.specializations, specs_cache);
+    let spec_combos = search_spec_combos(&profession.specializations, specs_cache, locked_elite_spec);
     if spec_combos.is_empty() {
         let core_count = profession.specializations.iter()
             .filter(|id| specs_cache.get(id).is_some_and(|s| !s.elite))
@@ -123,6 +119,8 @@ pub fn optimize(
             profession.specializations.len()
         ));
     }
+
+    let stat_weights = weights.to_stat_weights();
 
     // 3. Combine gear + specs into full candidates
     let mut all_candidates: Vec<BuildCandidate> = Vec::new();
@@ -142,7 +140,7 @@ pub fn optimize(
                     trait_ids.extend(&spec.minor_traits);
                     // Pick 1 best major trait per column (Adept/Master/Grandmaster)
                     let best = select_best_major_traits(
-                        &spec.major_traits, archetype, traits_cache,
+                        &spec.major_traits, &stat_weights, traits_cache,
                     );
                     trait_ids.extend(best);
                 }
@@ -168,7 +166,7 @@ pub fn optimize(
             let combat_perf = combat::calculate_combat_performance(
                 &full_stats, &derived, &modifiers, solo_profile, &profession.name,
             );
-            let score = score_combat_weighted(&combat_perf, archetype, aggression);
+            let score = score_with_weights(&combat_perf, weights);
 
             all_candidates.push(BuildCandidate {
                 gear: gear.clone(),
@@ -204,8 +202,8 @@ pub fn optimize(
 
     if all_candidates.is_empty() {
         return Err(format!(
-            "Optimization produced 0 candidates from {} gear × {} spec combos for {} / {:?}",
-            gear_candidates.len(), spec_combos.len(), profession.name, archetype
+            "Optimization produced 0 candidates from {} gear × {} spec combos for {} / {}",
+            gear_candidates.len(), spec_combos.len(), profession.name, weights.summary_label()
         ));
     }
 
@@ -215,19 +213,19 @@ pub fn optimize(
 /// PvP optimization: specs + traits only (gear is replaced by amulet system).
 fn optimize_pvp(
     profession: &Profession,
-    archetype: &Archetype,
+    weights: &OptimizationWeights,
     specs_cache: &HashMap<u32, Specialization>,
     traits_cache: &HashMap<u32, GW2Trait>,
     on_progress: &mut impl FnMut(OptimizeProgress),
     top_n: usize,
-    aggression: &AggressionLevel,
+    locked_elite_spec: Option<u32>,
 ) -> Result<Vec<BuildCandidate>, String> {
     on_progress(OptimizeProgress {
         stage: "Evaluating PvP specialization combinations...".into(),
         done: false,
     });
 
-    let spec_combos = search_spec_combos(&profession.specializations, specs_cache);
+    let spec_combos = search_spec_combos(&profession.specializations, specs_cache, locked_elite_spec);
     let mut all_candidates: Vec<BuildCandidate> = Vec::new();
 
     // PvP: no gear search, use empty gear candidate
@@ -238,6 +236,7 @@ fn optimize_pvp(
     };
 
     let solo_profile = &combat::default_buff_profiles()[0];
+    let stat_weights = weights.to_stat_weights();
 
     for (elite, cores) in &spec_combos {
         let spec_ids: Vec<u32> = cores
@@ -251,7 +250,7 @@ fn optimize_pvp(
             if let Some(spec) = specs_cache.get(&spec_id) {
                 trait_ids.extend(&spec.minor_traits);
                 let best = select_best_major_traits(
-                    &spec.major_traits, archetype, traits_cache,
+                    &spec.major_traits, &stat_weights, traits_cache,
                 );
                 trait_ids.extend(best);
             }
@@ -272,7 +271,7 @@ fn optimize_pvp(
         let combat_perf = combat::calculate_combat_performance(
             &full_stats, &derived, &modifiers, solo_profile, &profession.name,
         );
-        let score = score_combat_weighted(&combat_perf, archetype, aggression);
+        let score = score_with_weights(&combat_perf, weights);
 
         all_candidates.push(BuildCandidate {
             gear: empty_gear.clone(),
@@ -357,7 +356,7 @@ fn attribute_adjustment_for_slot(slot: &str) -> f64 {
 /// against the archetype weights and picks the best per column.
 fn select_best_major_traits(
     major_traits: &[u32],
-    archetype: &Archetype,
+    stat_weights: &StatWeights,
     traits_cache: &HashMap<u32, GW2Trait>,
 ) -> Vec<u32> {
     if major_traits.len() != 9 {
@@ -365,7 +364,7 @@ fn select_best_major_traits(
         return major_traits.to_vec();
     }
 
-    let weights = archetype.weights();
+    let weights = stat_weights;
     let mut selected = Vec::with_capacity(3);
 
     // Process 3 columns: [0..3], [3..6], [6..9]
@@ -519,7 +518,8 @@ mod tests {
 
         // With no traits in cache, should still return 3 traits (one per column)
         let traits_cache = HashMap::new();
-        let selected = select_best_major_traits(&major_traits, &Archetype::PowerDPS, &traits_cache);
+        let power_weights = OptimizationWeights::preset_power_dps().to_stat_weights();
+        let selected = select_best_major_traits(&major_traits, &power_weights, &traits_cache);
         assert_eq!(selected.len(), 3);
         // Each should come from a different column
         assert!(major_traits[0..3].contains(&selected[0]));
@@ -565,7 +565,8 @@ mod tests {
             traited_facts: vec![],
         });
 
-        let selected = select_best_major_traits(&major_traits, &Archetype::PowerDPS, &traits_cache);
+        let power_weights = OptimizationWeights::preset_power_dps().to_stat_weights();
+        let selected = select_best_major_traits(&major_traits, &power_weights, &traits_cache);
         // First column should select trait 100 (Power bonus)
         assert_eq!(selected[0], 100, "PowerDPS should prefer Power trait over Vitality");
     }
@@ -614,7 +615,7 @@ mod tests {
 
         let candidates = optimize(
             &profession,
-            &Archetype::PowerDPS,
+            &OptimizationWeights::preset_power_dps(),
             None,
             &HashMap::new(),
             &itemstats,

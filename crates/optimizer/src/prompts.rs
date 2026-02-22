@@ -3,52 +3,63 @@
 //! Designed to minimize token usage (Gemini free tier: 250 RPD, 10 RPM).
 
 use crate::engine::BuildCandidate;
-use crate::scoring::{AggressionLevel, Archetype};
+use crate::scoring::OptimizationWeights;
 
-/// Human-readable description of what an aggression level means.
-fn aggression_description(level: &AggressionLevel) -> &'static str {
-    match level {
-        AggressionLevel::FullDefense => "maximize survivability above all else — tanking, healing, bunker",
-        AggressionLevel::Defensive => "lean defensive — durable damage dealer who survives sustained pressure",
-        AggressionLevel::Balanced => "equal balance of damage output and survivability",
-        AggressionLevel::Aggressive => "lean aggressive — maximize damage with minimal survival tools",
-        AggressionLevel::FullOffense => "full glass cannon — maximize raw damage output regardless of survivability",
-    }
-}
+/// Build guidance text for Gemini based on the 5-axis optimization weights.
+fn weights_context(weights: &OptimizationWeights) -> String {
+    let w = weights.clamped();
+    let mut priorities = Vec::new();
+    let mut guidance = Vec::new();
 
-/// Build guidance text for Gemini based on the aggression level.
-fn aggression_context(level: &AggressionLevel) -> &'static str {
-    match level {
-        AggressionLevel::FullDefense => {
-            "Prioritize: Vitality, Toughness, Healing Power gear. Pick traits that grant damage reduction, barrier, protection uptime, health regeneration. Skills should include blocks, evades, stunbreaks, condition cleanse. Damage is secondary — focus on unkillable sustain."
-        }
-        AggressionLevel::Defensive => {
-            "Prioritize: hybrid gear (Trailblazer, Dire, Minstrel). Pick traits that balance damage with sustain — condition damage with Toughness, or healing with boon duration. Include 1-2 stunbreaks, condition cleanse, and at least one defensive cooldown. Damage should be meaningful but not at the cost of dying."
-        }
-        AggressionLevel::Balanced => {
-            "Prioritize: balanced gear (Celestial, Marauder, Diviner). Pick traits that offer both offensive output and defensive utility. Include stunbreaks, stability access, and moderate sustain. Both damage and survivability should be competitive — neither sacrificed."
-        }
-        AggressionLevel::Aggressive => {
-            "Prioritize: offensive gear (Berserker, Viper, Grieving). Pick damage-focused traits, but include at least one stunbreak and minimal sustain (a heal skill, one defensive utility). Glass is acceptable in PvE with a healer; in WvW/PvP ensure you can survive one burst combo."
-        }
-        AggressionLevel::FullOffense => {
-            "Prioritize: pure damage gear (Berserker for power, Viper for condi). Pick traits that maximize DPS — crit damage, condition damage modifiers, vulnerability application. All utility slots should be offensive (signets, banners, damage skills). Survivability is irrelevant — optimize purely for golem DPS benchmarks."
-        }
+    if w.power > 0.3 {
+        priorities.push(format!("Power damage ({:.0}%)", w.power * 100.0));
+        guidance.push("Prioritize: Power, Precision, Ferocity gear. Pick traits that boost strike damage, crit chance/damage. Weapons with high power coefficients.");
     }
+    if w.condition > 0.3 {
+        priorities.push(format!("Condition damage ({:.0}%)", w.condition * 100.0));
+        guidance.push("Prioritize: Condition Damage, Expertise gear. Pick traits that apply/extend conditions. Weapons with multi-hit or condition-applying skills.");
+    }
+    if w.sustain > 0.3 {
+        priorities.push(format!("Survivability ({:.0}%)", w.sustain * 100.0));
+        guidance.push("Prioritize: Toughness, Vitality gear. Pick traits granting damage reduction, barrier, protection. Include stunbreaks, blocks, evades, condition cleanse.");
+    }
+    if w.healing > 0.3 {
+        priorities.push(format!("Healing output ({:.0}%)", w.healing * 100.0));
+        guidance.push("Prioritize: Healing Power, Concentration gear. Pick traits that boost healing, grant regeneration, share boons. Healing-focused weapon sets.");
+    }
+    if w.disable > 0.3 {
+        priorities.push(format!("CC/Disable ({:.0}%)", w.disable * 100.0));
+        guidance.push("Prioritize: Boon Duration, Expertise gear. Pick traits granting Stability, CC skills (stun, knockdown, daze, fear, pull). Include boon support and crowd control.");
+    }
+
+    if priorities.is_empty() {
+        priorities.push("Balanced across all axes".to_string());
+        guidance.push("Build a well-rounded character with decent damage, some sustain, and utility.");
+    }
+
+    format!(
+        "PLAYER PRIORITIES (5-axis radar chart): {priorities}\n{guidance}",
+        priorities = priorities.join(", "),
+        guidance = guidance.join("\n"),
+    )
 }
 
 /// Build a prompt for generating a new build from scratch.
 pub fn new_build_prompt(
     profession: &str,
-    archetype: &Archetype,
+    weights: &OptimizationWeights,
     game_mode: &str,
     available_specs: &[(String, bool)], // (name, is_elite)
     context: &str,                       // summarized game data
 ) -> String {
+    let weights_guidance = weights_context(weights);
+    let summary = weights.summary_label();
     format!(
-        r#"You are a Guild Wars 2 build optimizer. Create an optimal {archetype} build for {profession} in {game_mode}.
+        r#"You are a Guild Wars 2 build optimizer. Create an optimal {summary} build for {profession} in {game_mode}.
 
 Available specializations: {specs}
+
+{weights_guidance}
 
 DESIGN PRINCIPLE: Pure damage output is NOT the goal. The ability to DELIVER damage is the goal. A build that can CC enemies, maintain stability, survive burst, and sustain pressure delivers more real damage than a glass cannon that gets interrupted. Consider: CC access, stunbreaks, stability, blocks, evades, condition cleanse alongside raw DPS.
 
@@ -80,7 +91,7 @@ Respond with a JSON code block containing ONLY the build object:
   "explanation": "2-3 sentences explaining the build's synergies and rotation."
 }}
 ```"#,
-        archetype = archetype.label(),
+        summary = summary,
         profession = profession,
         game_mode = game_mode,
         specs = available_specs
@@ -90,6 +101,7 @@ Respond with a JSON code block containing ONLY the build object:
             })
             .collect::<Vec<_>>()
             .join(", "),
+        weights_guidance = weights_guidance,
         context = context,
     )
 }
@@ -98,18 +110,17 @@ Respond with a JSON code block containing ONLY the build object:
 /// Instructs Gemini to use available function calls to query game data.
 pub fn new_build_prompt_with_tools(
     profession: &str,
-    archetype: &Archetype,
+    weights: &OptimizationWeights,
     game_mode: &str,
-    aggression: &AggressionLevel,
 ) -> String {
-    let aggression_guidance = aggression_context(aggression);
+    let weights_guidance = weights_context(weights);
+    let summary = weights.summary_label();
     format!(
         r#"You are an expert Guild Wars 2 build optimizer with access to the game's full database.
 
-Create an optimal {archetype} build for {profession} in {game_mode}.
+Create an optimal {summary} build for {profession} in {game_mode}.
 
-PLAYER PLAYSTYLE: The player has set their aggression slider to "{aggression_label}" ({aggression_desc}).
-{aggression_guidance}
+{weights_guidance}
 
 DESIGN PRINCIPLE: Pure damage output is NOT the goal. The ability to DELIVER damage is the goal. A build that can CC enemies, maintain stability, survive burst, and sustain pressure delivers more real damage than a glass cannon that gets interrupted. Every trait, skill, rune, sigil, and relic must work in concert. Consider: CC access, stunbreaks, stability, blocks, evades, condition cleanse alongside raw DPS.
 
@@ -122,7 +133,7 @@ Phase 1 — Understand the landscape:
 Phase 2 — Deep synergy analysis (THIS IS CRITICAL):
 3. For each specialization you're considering, call get_spec_traits to see trait columns
 4. Call get_trait_details for key traits — check conditions_applied, buffs_applied, damage_modifiers, proc_triggers
-5. Use search_traits_by_effect to find traits that match the archetype (e.g. "condition_damage" for condi builds, "crit" for power)
+5. Use search_traits_by_effect to find traits that match the priorities (e.g. "condition_damage" for condi builds, "crit" for power)
 6. Use find_condition_sources to discover which skills/traits apply the build's key conditions (Bleeding, Burning, etc.)
 7. Use search_skills_by_effect to find skills that apply specific conditions, buffs, or combo fields
 8. Call get_skill_info for key skills — check chain skills, conditions_applied, buffs_applied, cooldowns
@@ -163,30 +174,27 @@ After gathering data, respond with ONLY a JSON build object:
   "explanation": "2-3 sentences explaining the build's synergies and rotation."
 }}
 ```"#,
-        archetype = archetype.label(),
+        summary = summary,
         profession = profession,
         game_mode = game_mode,
-        aggression_label = aggression.label(),
-        aggression_desc = aggression_description(aggression),
-        aggression_guidance = aggression_guidance,
+        weights_guidance = weights_guidance,
     )
 }
 
 /// Build a tool-aware prompt for improving an existing build.
 pub fn improve_build_prompt_with_tools(
     profession: &str,
-    archetype: &Archetype,
+    weights: &OptimizationWeights,
     game_mode: &str,
-    aggression: &AggressionLevel,
 ) -> String {
-    let aggression_guidance = aggression_context(aggression);
+    let weights_guidance = weights_context(weights);
+    let summary = weights.summary_label();
     format!(
         r#"You are an expert Guild Wars 2 build optimizer with access to the game's full database.
 
-Improve the player's current {archetype} build for {profession} in {game_mode}.
+Improve the player's current {summary} build for {profession} in {game_mode}.
 
-PLAYER PLAYSTYLE: The player has set their aggression slider to "{aggression_label}" ({aggression_desc}).
-{aggression_guidance}
+{weights_guidance}
 
 DESIGN PRINCIPLE: Pure damage output is NOT the goal. The ability to DELIVER damage is the goal. Consider CC access, stunbreaks, stability, survivability, and control alongside raw DPS. A build that disables enemies and maintains pressure outperforms one that only maximizes numbers on a golem.
 
@@ -200,7 +208,7 @@ Phase 1 — Understand the current build:
 Phase 2 — Find improvements via synergy analysis:
 4. Call get_spec_traits for each specialization to find better trait choices
 5. Call get_trait_details for traits you're considering — check conditions_applied, buffs_applied, proc_triggers, damage_modifiers
-6. Use search_traits_by_effect to find traits that better match the archetype
+6. Use search_traits_by_effect to find traits that better match the priorities
 7. Use find_condition_sources to check if the build's condition application matches its gear (e.g. Viper's gear with few Burning sources is wasteful)
 8. Use search_skills_by_effect to find skills that better synergize with chosen traits
 9. Call list_runes / list_sigils / list_relics — match trigger conditions and bonuses to the actual skill/trait kit
@@ -226,12 +234,10 @@ After gathering data, respond with ONLY a JSON build object:
   "explanation": "2-3 sentences explaining improvements."
 }}
 ```"#,
-        archetype = archetype.label(),
+        summary = summary,
         profession = profession,
         game_mode = game_mode,
-        aggression_label = aggression.label(),
-        aggression_desc = aggression_description(aggression),
-        aggression_guidance = aggression_guidance,
+        weights_guidance = weights_guidance,
     )
 }
 
@@ -290,19 +296,23 @@ fn sanitize_build_summary(s: &str) -> String {
 /// Build a prompt for improving an existing build.
 pub fn improve_build_prompt(
     profession: &str,
-    archetype: &Archetype,
+    weights: &OptimizationWeights,
     game_mode: &str,
     current_build_summary: &str,
     context: &str,
 ) -> String {
     let sanitized_build = sanitize_build_summary(current_build_summary);
+    let weights_guidance = weights_context(weights);
+    let summary = weights.summary_label();
     format!(
-        r#"You are a Guild Wars 2 build optimizer. Improve this {archetype} build for {profession} in {game_mode}.
+        r#"You are a Guild Wars 2 build optimizer. Improve this {summary} build for {profession} in {game_mode}.
 
 Current build:
 {current_build}
 
-Consider trait/sigil/rune/relic synergies, skill rotation, boon/condition interactions, and the full combat codependency matrix. Suggest changes that maximize {archetype} effectiveness.
+{weights_guidance}
+
+Consider trait/sigil/rune/relic synergies, skill rotation, boon/condition interactions, and the full combat codependency matrix. Suggest changes that maximize effectiveness for the player's priorities.
 
 {context}
 
@@ -331,10 +341,11 @@ Respond with ONLY a JSON object showing the improved build:
   "explanation": "2-3 sentences explaining why these changes improve the build."
 }}
 ```"#,
-        archetype = archetype.label(),
+        summary = summary,
         profession = profession,
         game_mode = game_mode,
         current_build = sanitized_build,
+        weights_guidance = weights_guidance,
         context = context,
     )
 }
@@ -441,9 +452,10 @@ pub fn summarize_build(
 /// Keeps under ~2000 tokens by summarizing only relevant data.
 pub fn build_game_context(
     _profession: &str,
-    archetype: &Archetype,
+    weights: &OptimizationWeights,
     game_mode: &str,
 ) -> String {
+    let summary = weights.summary_label();
     let base_rules = format!(
         r#"GW2 Build Rules:
 - 3 specialization slots: slots 1-2 core only, slot 3 can be elite
@@ -451,8 +463,8 @@ pub fn build_game_context(
 - 2 weapon sets (swappable in combat), each: 2-handed OR main+off-hand
 - Skills have cooldowns, ranges, combo fields/finishers
 - Traits can proc on crit, on heal, on dodge, on weapon swap etc.
-- Archetype goal: {archetype}"#,
-        archetype = archetype.label(),
+- Build priority: {summary}"#,
+        summary = summary,
     );
 
     let mode_context = match game_mode {
@@ -649,12 +661,12 @@ mod tests {
     }
 
     #[test]
-    fn test_game_context_mentions_archetype() {
-        let ctx = build_game_context("Warrior", &Archetype::PowerDPS, "PvE");
-        assert!(ctx.contains("Power DPS"));
+    fn test_game_context_mentions_priorities() {
+        let ctx = build_game_context("Warrior", &OptimizationWeights::preset_power_dps(), "PvE");
+        assert!(ctx.contains("Power"));
         assert!(ctx.contains("PvE"));
 
-        let wvw_ctx = build_game_context("Warrior", &Archetype::PowerDPS, "WvW");
+        let wvw_ctx = build_game_context("Warrior", &OptimizationWeights::preset_power_dps(), "WvW");
         assert!(wvw_ctx.contains("WvW"));
         assert!(wvw_ctx.contains("competitive split"));
     }
@@ -696,5 +708,19 @@ mod tests {
         assert_eq!(build.stat_prefix, "Berserker's");
         assert!(!build.explanation.is_empty());
         assert_eq!(build.changes_made.len(), 1);
+    }
+
+    #[test]
+    fn test_weights_context_power() {
+        let ctx = weights_context(&OptimizationWeights::preset_power_dps());
+        assert!(ctx.contains("Power damage"));
+        assert!(ctx.contains("Precision, Ferocity"));
+    }
+
+    #[test]
+    fn test_weights_context_balanced() {
+        let ctx = weights_context(&OptimizationWeights::preset_balanced());
+        assert!(ctx.contains("Power damage"));
+        assert!(ctx.contains("Survivability"));
     }
 }

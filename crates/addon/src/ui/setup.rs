@@ -226,7 +226,7 @@ fn render_gemini_key_step(ui: &Ui, state: &mut AddonState) {
         std::thread::spawn(move || {
             if token.is_cancelled() { return; }
 
-            let result = gw2_optimizer::gemini::GeminiClient::new(&key)
+            let result = gw2_optimizer::gemini::GeminiClient::new(&key, gw2_core::config::DEFAULT_GEMINI_MODEL)
                 .and_then(|c| c.validate_key());
 
             if token.is_cancelled() { return; }

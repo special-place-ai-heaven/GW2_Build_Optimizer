@@ -2,7 +2,7 @@ use nexus::imgui::{ChildWindow, ComboBox, Selectable, Ui};
 use base64::Engine as _;
 
 use crate::state::{AddonState, MainTab};
-use gw2_optimizer::scoring::{AggressionLevel, Archetype};
+use gw2_optimizer::scoring::OptimizationWeights;
 
 mod build_display;
 
@@ -17,9 +17,14 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         load_game_db(state);
     }
 
-    // Loading banner (GameDb)
+    // Loading banner (GameDb) — show download progress when refreshing
     if state.main.game_db_loading {
-        ui.text_colored([1.0, 1.0, 0.0, 1.0], "Loading game data...");
+        let stage = &state.main.optimize_stage;
+        if !stage.is_empty() {
+            ui.text_colored([1.0, 1.0, 0.0, 1.0], stage);
+        } else {
+            ui.text_colored([1.0, 1.0, 0.0, 1.0], "Loading game data...");
+        }
     }
 
     // Error bar at top (dismissible)
@@ -238,22 +243,15 @@ fn render_left_menu(ui: &Ui, state: &mut AddonState) {
         let selected = state.main.game_mode == *mode;
         if ui.radio_button_bool(mode.label(), selected) {
             state.main.game_mode = mode.clone();
-            state.main.aggression_index = AggressionLevel::default_for_mode(mode.label()).to_index() as i32;
+            state.main.weights = OptimizationWeights::default_for_mode(mode.label());
             resolve_selected_build(state);
         }
     }
 
-    // Aggression level slider (shared across tabs)
+    // Compact weights summary
     ui.spacing();
-    {
-        let level = AggressionLevel::from_index(state.main.aggression_index as usize);
-        ui.text(format!("Playstyle: {}", level.label()));
-    }
-    ui.set_next_item_width(-1.0);
-    nexus::imgui::Slider::new("##aggression", 0, 4)
-        .display_format("")
-        .build(ui, &mut state.main.aggression_index);
-    ui.text_colored([0.6, 0.6, 0.6, 1.0], "Defense <-> Offense");
+    let summary = state.main.weights.summary_label();
+    ui.text_colored([0.6, 0.8, 1.0, 1.0], &format!("Focus: {}", summary));
 
     ui.spacing();
     ui.separator();
@@ -321,24 +319,49 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
         ui.spacing();
     }
 
-    // Archetype selector
-    ui.text("Select build archetype:");
+    // Preset buttons
+    ui.text("Presets:");
+    if let Some(preset) = crate::ui::radar_chart::render_presets(ui) {
+        state.main.weights = preset;
+    }
     ui.spacing();
+
+    // Compute optimized overlay if suggestions exist
+    let optimized_axes = if !state.main.comparison.suggestions.is_empty() {
+        let idx = state.main.comparison.selected_suggestion
+            .min(state.main.comparison.suggestions.len() - 1);
+        state.main.comparison.suggestions[idx].combat_solo.as_ref()
+            .map(crate::ui::radar_chart::compute_axes_from_metrics)
+    } else {
+        None
+    };
+
+    // Radar chart (interactive weight setting) with optimized overlay
+    let _chart_modified = crate::ui::radar_chart::render_radar_chart(
+        ui,
+        &mut state.main.weights,
+        &mut state.main.radar_dragging,
+        None, // No current build overlay in New Build tab
+        optimized_axes.as_ref(),
+    );
+    if optimized_axes.is_some() {
+        crate::ui::radar_chart::render_legend(ui, false, true);
+    }
+    ui.spacing();
+
+    // Optimize button
     let optimizing = state.main.optimizing;
     let game_db_ready = state.main.game_db.is_some();
-    for archetype in &Archetype::ALL {
-        let disabled = optimizing || !game_db_ready;
-        if disabled {
-            let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-            ui.button_with_size(archetype.label(), [200.0, 0.0]);
-            style.pop();
-            if ui.is_item_hovered() {
-                ui.tooltip_text(if optimizing { "Optimization in progress..." } else { "Waiting for game data to load..." });
-            }
-        } else if ui.button_with_size(archetype.label(), [200.0, 0.0]) {
-            start_optimization(state, archetype.clone(), None);
+    let disabled = optimizing || !game_db_ready;
+    if disabled {
+        let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+        ui.button_with_size("Optimize Build", [200.0, 30.0]);
+        style.pop();
+        if ui.is_item_hovered() {
+            ui.tooltip_text(if optimizing { "Optimization in progress..." } else { "Waiting for game data to load..." });
         }
-        ui.spacing();
+    } else if ui.button_with_size("Optimize Build", [200.0, 30.0]) {
+        start_optimization(state);
     }
 
     // Show optimization error even when no suggestions exist
@@ -395,9 +418,11 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
     // Collect data for optimization before borrowing build
     let profession_name = state.main.current_build.as_ref().map(|b| b.profession.clone());
     let stats_snapshot = state.main.current_stats.clone();
-    let archetype = state.main.current_build.as_ref()
-        .map(|b| infer_archetype_from_build(b, stats_snapshot.as_ref()))
-        .unwrap_or(Archetype::PowerDPS);
+    // Infer weights from current build if not already set by user
+    let inferred_weights = crate::ui::radar_chart::infer_weights_from_stats(stats_snapshot.as_ref());
+    // Lock the current elite spec so Improve doesn't change it
+    let locked_elite_spec = state.main.current_build.as_ref()
+        .and_then(|b| b.specializations.iter().find(|s| s.elite).map(|s| s.id));
 
     // Check button press in separate scope to avoid borrow conflict
     let improve_disabled = state.main.optimizing || state.main.game_db.is_none();
@@ -413,6 +438,29 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
         state.main.current_build.is_some() && ui.button_with_size("Improve This Build", [200.0, 30.0])
     };
 
+    // Compute radar chart overlays from combat metrics
+    let current_axes = state.main.comparison.current_combat_solo.as_ref()
+        .map(crate::ui::radar_chart::compute_axes_from_metrics);
+    let optimized_axes = if !state.main.comparison.suggestions.is_empty() {
+        let idx = state.main.comparison.selected_suggestion
+            .min(state.main.comparison.suggestions.len() - 1);
+        state.main.comparison.suggestions[idx].combat_solo.as_ref()
+            .map(crate::ui::radar_chart::compute_axes_from_metrics)
+    } else {
+        None
+    };
+
+    // Radar chart with current build (amber) and optimized (green) overlays
+    let _chart_modified = crate::ui::radar_chart::render_radar_chart(
+        ui,
+        &mut state.main.weights,
+        &mut state.main.radar_dragging,
+        current_axes.as_ref(),
+        optimized_axes.as_ref(),
+    );
+    crate::ui::radar_chart::render_legend(ui, current_axes.is_some(), optimized_axes.is_some());
+    ui.spacing();
+
     if let Some(ref build) = state.main.current_build {
         let stats = state.main.current_stats.clone();
 
@@ -422,7 +470,7 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
         ui.spacing();
         ui.separator();
 
-        // Show optimization progress (S11-T05)
+        // Show optimization progress
         if state.main.optimizing {
             ui.text_colored([1.0, 1.0, 0.0, 1.0], &format!("Optimizing: {}", state.main.optimize_stage));
             ui.spacing();
@@ -432,7 +480,9 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
     // Handle optimization after the build borrow ends
     if should_optimize {
         if let Some(ref prof_name) = profession_name {
-            start_optimization_with_profession(state, archetype, prof_name);
+            // Use inferred weights from current build
+            state.main.weights = inferred_weights;
+            start_optimization_with_profession(state, prof_name, locked_elite_spec);
         }
     }
 
@@ -514,13 +564,21 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     let cache_size = calculate_dir_size(&cache_dir);
     ui.text(&format!("Cache size: {}", format_bytes(cache_size)));
     ui.same_line();
-    if ui.button_with_size("Clear Cache", [100.0, 0.0]) {
+    let already_refreshing = state.main.game_db_loading;
+    if already_refreshing {
+        let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+        ui.button_with_size("Clear Cache", [100.0, 0.0]);
+        style.pop();
+    } else if ui.button_with_size("Clear Cache", [100.0, 0.0]) {
         let _ = std::fs::remove_dir_all(&cache_dir);
         state.config.cache_build_number = None;
         if let Err(e) = state.config.save(&state.config_path) {
             nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
         }
         state.main.game_db = None;
+        // Auto-trigger re-download after clearing
+        state.setup.download_progress = None;
+        start_game_data_refresh(state);
     }
 
     ui.spacing();
@@ -537,12 +595,44 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     }
 
     ui.spacing();
+
+    // Gemini model selector
+    {
+        let current_model = state.config.gemini_model_id().to_string();
+        let models = gw2_core::config::GEMINI_MODELS;
+        let preview = models.iter()
+            .find(|(id, _)| *id == current_model)
+            .map(|(_, label)| *label)
+            .unwrap_or(&current_model);
+        ui.text("Gemini Model:");
+        ui.set_next_item_width(300.0);
+        if let Some(_combo) = ComboBox::new("##gemini_model").preview_value(preview).begin(ui) {
+            for &(id, label) in models {
+                let selected = id == current_model;
+                if Selectable::new(label).selected(selected).build(ui) {
+                    state.config.gemini_model = Some(id.to_string());
+                    if let Err(e) = state.config.save(&state.config_path) {
+                        nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                    }
+                }
+            }
+        }
+    }
+
+    ui.spacing();
     ui.separator();
     ui.spacing();
 
     // Cache management — actually re-download game data
     let refreshing = state.main.game_db_loading;
     if refreshing {
+        // Show download progress
+        let stage = &state.main.optimize_stage;
+        if !stage.is_empty() {
+            ui.text_colored([1.0, 1.0, 0.0, 1.0], stage);
+        } else {
+            ui.text_colored([1.0, 1.0, 0.0, 1.0], "Downloading game data...");
+        }
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
         ui.button_with_size("Refreshing...", [200.0, 0.0]);
         style.pop();
@@ -1370,7 +1460,7 @@ fn load_game_db(state: &mut AddonState) {
 }
 
 /// Start optimization in background thread (S11-T01, S11-T02, S11-T03)
-fn start_optimization(state: &mut AddonState, archetype: Archetype, _current_build: Option<&gw2_core::types::ResolvedBuild>) {
+fn start_optimization(state: &mut AddonState) {
     // Guard against concurrent optimization
     if state.main.optimizing {
         return;
@@ -1381,11 +1471,11 @@ fn start_optimization(state: &mut AddonState, archetype: Archetype, _current_bui
         .map(|b| b.profession.clone())
         .unwrap_or_default();
 
-    start_optimization_with_profession(state, archetype, &profession_name);
+    start_optimization_with_profession(state, &profession_name, None);
 }
 
 /// Start optimization with explicit profession name (avoids borrow conflicts)
-fn start_optimization_with_profession(state: &mut AddonState, archetype: Archetype, profession_name: &str) {
+fn start_optimization_with_profession(state: &mut AddonState, profession_name: &str, locked_elite_spec: Option<u32>) {
     if state.main.game_db.is_none() {
         state.main.error = Some("Game data not loaded. Wait for cache to load.".into());
         return;
@@ -1399,13 +1489,14 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
     let db = state.main.game_db.clone();
     let profession_name = profession_name.to_string();
     let gemini_key = state.config.gemini_api_key.clone();
+    let gemini_model = state.config.gemini_model_id().to_string();
     let game_mode = state.main.game_mode.clone();
     let game_mode_label = game_mode.label().to_string();
     let current_build_summary = state.main.current_build.as_ref()
         .map(|b| summarize_resolved_build(b));
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
-    let aggression = AggressionLevel::from_index(state.main.aggression_index as usize);
+    let weights = state.main.weights.clone();
 
     state.main.optimizing = true;
     state.main.optimize_stage = "Starting...".into();
@@ -1426,7 +1517,7 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
                 let token_progress = token.clone();
                 let candidates = gw2_optimizer::engine::optimize(
                     profession,
-                    &archetype,
+                    &weights,
                     None,
                     &db.items,
                     &db.itemstats,
@@ -1440,7 +1531,7 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
                     },
                     5,
                     &game_mode,
-                    Some(&aggression),
+                    locked_elite_spec,
                 )?;
 
                 if token.is_cancelled() { return Err("Cancelled".into()); }
@@ -1458,10 +1549,10 @@ fn start_optimization_with_profession(state: &mut AddonState, archetype: Archety
 
                     match enrich_with_gemini(
                         key,
+                        &gemini_model,
                         &profession_name,
-                        &archetype,
+                        &weights,
                         &game_mode_label,
-                        aggression,
                         &candidates,
                         &db,
                         current_build_summary.as_deref(),
@@ -1793,50 +1884,7 @@ fn infer_profession_from_specs(
     db.professions.values().next().map(|p| p.name.clone()).unwrap_or_default()
 }
 
-/// Infer archetype from current build stats.
-/// Compares stat investment above base (Power/Precision start at 1000)
-/// so gear-driven stats are properly weighted against base-zero stats.
-fn infer_archetype_from_build(_build: &gw2_core::types::ResolvedBuild, stats: Option<&gw2_core::types::StatBlock>) -> Archetype {
-    let Some(stats) = stats else {
-        return Archetype::PowerDPS;
-    };
-
-    // Investment above base values (Power & Precision base = 1000, rest = 0)
-    let power_inv = (stats.power - 1000).max(0);
-    let prec_inv = (stats.precision - 1000).max(0);
-
-    // Score each archetype based on stat investment signals
-    let scores: [(i32, Archetype); 7] = [
-        // PowerDPS: power + precision + ferocity
-        (power_inv + prec_inv + stats.ferocity, Archetype::PowerDPS),
-        // ConditionDPS: condition damage + expertise
-        (stats.condition_damage * 2 + stats.expertise, Archetype::ConditionDPS),
-        // SustainHybrid: balanced power + defense
-        (power_inv + prec_inv / 2 + stats.toughness / 2 + stats.vitality / 2, Archetype::SustainHybrid),
-        // Tank: toughness + vitality (scaled down since it's a sum of two)
-        (stats.toughness + stats.vitality, Archetype::Tank),
-        // BoonSupport: concentration-heavy
-        (stats.concentration * 3, Archetype::BoonSupport),
-        // HealSupport: healing-heavy
-        (stats.healing_power * 3, Archetype::HealSupport),
-        // CelestialHybrid: moderate everything (detect low variance across stats)
-        ({
-            let vals = [power_inv, prec_inv, stats.ferocity, stats.condition_damage,
-                        stats.expertise, stats.concentration, stats.healing_power,
-                        stats.toughness, stats.vitality];
-            let min = vals.iter().copied().min().unwrap_or(0);
-            let max = vals.iter().copied().max().unwrap_or(0);
-            // Low spread between min/max = Celestial-like; bonus if all stats are moderate
-            let spread_bonus = if max > 0 && max - min < max / 2 { min * 2 } else { 0 };
-            spread_bonus
-        }, Archetype::CelestialHybrid),
-    ];
-
-    scores.iter()
-        .max_by_key(|(v, _)| v)
-        .map(|(_, a)| a.clone())
-        .unwrap_or(Archetype::PowerDPS)
-}
+// infer_weights_from_stats is now in radar_chart.rs
 
 /// Summarize a ResolvedBuild as text for LLM prompts.
 fn summarize_resolved_build(build: &gw2_core::types::ResolvedBuild) -> String {
@@ -1952,10 +2000,10 @@ fn humanize_tool_names(tool_names: &[String]) -> String {
 /// Uses function calling (tool use) so Gemini can query game data and simulate builds.
 fn enrich_with_gemini(
     key: &str,
+    model: &str,
     profession_name: &str,
-    archetype: &Archetype,
+    weights: &OptimizationWeights,
     game_mode: &str,
-    aggression: AggressionLevel,
     candidates: &[gw2_optimizer::engine::BuildCandidate],
     db: &gw2_optimizer::gamedb::GameDb,
     current_build_summary: Option<&str>,
@@ -1963,17 +2011,17 @@ fn enrich_with_gemini(
     addon_dir: &std::path::Path,
 ) -> Result<(), String> {
     let usage_path = addon_dir.join("gemini_usage.json");
-    let client = gw2_optimizer::gemini::GeminiClient::with_persistence(key, usage_path)
+    let client = gw2_optimizer::gemini::GeminiClient::with_persistence(key, model, usage_path)
         .map_err(|e| e.to_string())?;
 
     // Build tool-aware prompt
     let prompt = if current_build_summary.is_some() {
         gw2_optimizer::prompts::improve_build_prompt_with_tools(
-            profession_name, archetype, game_mode, &aggression,
+            profession_name, weights, game_mode,
         )
     } else {
         gw2_optimizer::prompts::new_build_prompt_with_tools(
-            profession_name, archetype, game_mode, &aggression,
+            profession_name, weights, game_mode,
         )
     };
 
@@ -1984,7 +2032,7 @@ fn enrich_with_gemini(
         profession_name,
         candidates,
         current_build_summary: build_summary_owned.as_deref(),
-        aggression_level: aggression,
+        weights: weights.clone(),
     };
 
     let response = client.generate_with_tools_progress(
@@ -2043,17 +2091,18 @@ fn send_chat_message(state: &mut AddonState, message: String) {
         .unwrap_or_default();
     let build_summary = state.main.current_build.as_ref()
         .map(|b| summarize_resolved_build(b));
+    let gemini_model = state.config.gemini_model_id().to_string();
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
     let db_clone = state.main.game_db.clone();
-    let aggression = AggressionLevel::from_index(state.main.aggression_index as usize);
+    let weights = state.main.weights.clone();
 
     std::thread::spawn(move || {
         if token.is_cancelled() { return; }
 
         let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
             let usage_path = addon_dir.join("gemini_usage.json");
-            let client = gw2_optimizer::gemini::GeminiClient::with_persistence(&gemini_key, usage_path)
+            let client = gw2_optimizer::gemini::GeminiClient::with_persistence(&gemini_key, &gemini_model, usage_path)
                 .map_err(|e| e.to_string())?;
 
             if token.is_cancelled() { return Err("Cancelled".into()); }
@@ -2070,7 +2119,7 @@ fn send_chat_message(state: &mut AddonState, message: String) {
                     profession_name: &profession,
                     candidates: &empty_candidates,
                     current_build_summary: build_summary.as_deref(),
-                    aggression_level: aggression,
+                    weights: weights.clone(),
                 };
 
                 let response = client.generate_with_tools_progress(
@@ -2095,7 +2144,7 @@ fn send_chat_message(state: &mut AddonState, message: String) {
                 // Fallback: no GameDb, use simple prompt
                 let build_summary_str = build_summary.as_deref().unwrap_or("");
                 let context = gw2_optimizer::prompts::build_game_context(
-                    &profession, &Archetype::PowerDPS, "PvE",
+                    &profession, &weights, "PvE",
                 );
                 let prompt = gw2_optimizer::prompts::chat_refinement_prompt(
                     &profession, build_summary_str, &message, &context,
