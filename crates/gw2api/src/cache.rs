@@ -113,9 +113,82 @@ impl DataCache {
         self.path_for(key).exists()
     }
 
+    // --- Character-specific cache methods ---
+    // Character data changes independently of game patches, so these use
+    // simple JSON files without build-number invalidation.
+
+    /// Save character-specific data (build tabs, equipment tabs).
+    /// Key format: `char_{sanitized_name}_{data_type}.json`
+    pub fn save_character<T: Serialize>(
+        &self,
+        character: &str,
+        data_type: &str,
+        data: &T,
+    ) -> Result<(), CacheError> {
+        let key = format!("char_{}_{}", sanitize_name(character), data_type);
+        let path = self.path_for(&key);
+        let tmp_path = self.base_path.join(format!("{}.tmp", key));
+        let file = std::fs::File::create(&tmp_path)?;
+        let writer = BufWriter::new(file);
+        serde_json::to_writer(writer, data)?;
+        std::fs::rename(&tmp_path, &path)?;
+        Ok(())
+    }
+
+    /// Load character-specific cached data. Returns None if not cached.
+    pub fn load_character<T: DeserializeOwned>(
+        &self,
+        character: &str,
+        data_type: &str,
+    ) -> Result<Option<T>, CacheError> {
+        let key = format!("char_{}_{}", sanitize_name(character), data_type);
+        let path = self.path_for(&key);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let json = std::fs::read_to_string(&path)?;
+        let data: T = serde_json::from_str(&json)?;
+        Ok(Some(data))
+    }
+
+    /// Save the character name list.
+    pub fn save_characters(&self, characters: &[String]) -> Result<(), CacheError> {
+        let path = self.path_for("characters");
+        let tmp_path = self.base_path.join("characters.tmp");
+        let file = std::fs::File::create(&tmp_path)?;
+        let writer = BufWriter::new(file);
+        serde_json::to_writer(writer, characters)?;
+        std::fs::rename(&tmp_path, &path)?;
+        Ok(())
+    }
+
+    /// Load the cached character name list. Returns None if not cached.
+    pub fn load_characters(&self) -> Result<Option<Vec<String>>, CacheError> {
+        let path = self.path_for("characters");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let json = std::fs::read_to_string(&path)?;
+        let data: Vec<String> = serde_json::from_str(&json)?;
+        Ok(Some(data))
+    }
+
     fn path_for(&self, key: &str) -> PathBuf {
         self.base_path.join(format!("{}.json", key))
     }
+}
+
+/// Sanitize a character name for use in cache filenames.
+fn sanitize_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -165,5 +238,40 @@ mod tests {
         let cache = temp_cache();
         let result: Option<Vec<u32>> = cache.load("does_not_exist").unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_character_cache_roundtrip() {
+        let cache = temp_cache();
+        let tabs = vec!["tab1".to_string(), "tab2".to_string()];
+        cache.save_character("Fun Detected", "buildtabs", &tabs).unwrap();
+
+        let loaded: Option<Vec<String>> = cache.load_character("Fun Detected", "buildtabs").unwrap();
+        assert_eq!(loaded, Some(tabs));
+
+        // Different character returns None
+        let other: Option<Vec<String>> = cache.load_character("Other Char", "buildtabs").unwrap();
+        assert!(other.is_none());
+
+        cache.clear_all();
+    }
+
+    #[test]
+    fn test_characters_list_cache() {
+        let cache = temp_cache();
+        let chars = vec!["Alpha".into(), "Beta".into(), "Gamma".into()];
+        cache.save_characters(&chars).unwrap();
+
+        let loaded = cache.load_characters().unwrap();
+        assert_eq!(loaded, Some(chars));
+
+        cache.clear_all();
+    }
+
+    #[test]
+    fn test_sanitize_name() {
+        assert_eq!(super::sanitize_name("Fun Detected"), "fun_detected");
+        assert_eq!(super::sanitize_name("Ælfred's Toon"), "Ælfred_s_toon");
+        assert_eq!(super::sanitize_name("simple"), "simple");
     }
 }

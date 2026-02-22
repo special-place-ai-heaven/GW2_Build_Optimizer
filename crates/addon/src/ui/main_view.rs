@@ -17,6 +17,34 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         load_game_db(state);
     }
 
+    // Periodic API health check (~every 60s at 60fps)
+    state.main.api_status_frames += 1;
+    if state.main.api_status_frames >= 3600 || state.main.api_status == crate::state::ApiStatus::Unknown {
+        if !state.main.api_health_checking {
+            check_api_health(state);
+            state.main.api_status_frames = 0;
+        }
+    }
+
+    // API health indicator (top-right area)
+    {
+        let (dot, label, color) = match state.main.api_status {
+            crate::state::ApiStatus::Unknown => ("[o]", "Checking...", [0.5, 0.5, 0.5, 1.0]),
+            crate::state::ApiStatus::Online => ("[+]", "API Online", [0.0, 0.8, 0.0, 1.0]),
+            crate::state::ApiStatus::Degraded => ("[~]", "API Slow", [1.0, 0.8, 0.0, 1.0]),
+            crate::state::ApiStatus::Offline => ("[-]", "API Offline", [1.0, 0.2, 0.0, 1.0]),
+        };
+        ui.text_colored(color, &format!("{} {}", dot, label));
+        if ui.is_item_hovered() {
+            ui.tooltip_text(match state.main.api_status {
+                crate::state::ApiStatus::Unknown => "Checking GW2 API availability...",
+                crate::state::ApiStatus::Online => "GW2 API is responding normally.",
+                crate::state::ApiStatus::Degraded => "GW2 API is responding slowly (>5s).",
+                crate::state::ApiStatus::Offline => "GW2 API is unavailable. Cached data is being used.",
+            });
+        }
+    }
+
     // Loading banner (GameDb) — show download progress when refreshing
     if state.main.game_db_loading {
         let stage = &state.main.optimize_stage;
@@ -417,9 +445,6 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
 
     // Collect data for optimization before borrowing build
     let profession_name = state.main.current_build.as_ref().map(|b| b.profession.clone());
-    let stats_snapshot = state.main.current_stats.clone();
-    // Infer weights from current build if not already set by user
-    let inferred_weights = crate::ui::radar_chart::infer_weights_from_stats(stats_snapshot.as_ref());
     // Lock the current elite spec so Improve doesn't change it
     let locked_elite_spec = state.main.current_build.as_ref()
         .and_then(|b| b.specializations.iter().find(|s| s.elite).map(|s| s.id));
@@ -480,8 +505,8 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
     // Handle optimization after the build borrow ends
     if should_optimize {
         if let Some(ref prof_name) = profession_name {
-            // Use inferred weights from current build
-            state.main.weights = inferred_weights;
+            // Use the user's radar chart weights as-is — do NOT overwrite with inferred weights.
+            // The radar chart already reflects what the user wants.
             start_optimization_with_profession(state, prof_name, locked_elite_spec);
         }
     }
@@ -703,10 +728,23 @@ fn load_characters(state: &mut AddonState) {
         return;
     };
 
-    state.main.characters_loading = true;
     state.main.error = None;
+
+    // Phase 1: try loading from cache instantly
+    let cache_dir = state.addon_dir.join("cache");
+    let cache = gw2_api::cache::DataCache::new(&cache_dir);
+    if let Ok(Some(cached_chars)) = cache.load_characters() {
+        state.main.characters = cached_chars;
+        state.main.characters_loading = false;
+    } else {
+        // No cache — show loading indicator until API responds
+        state.main.characters_loading = true;
+    }
+
+    // Phase 2: background refresh from API
     let key = key.clone();
     let token = state.cancel_token.clone();
+    let had_cache = !state.main.characters.is_empty();
 
     std::thread::spawn(move || {
         if token.is_cancelled() { return; }
@@ -719,22 +757,75 @@ fn load_characters(state: &mut AddonState) {
         crate::state::with_state(|s| {
             s.main.characters_loading = false;
             match result {
-                Ok(chars) => s.main.characters = chars,
-                Err(e) => s.main.error = Some(e.to_string()),
+                Ok(fresh_chars) => {
+                    // Save to cache for next time
+                    let cache_dir = s.addon_dir.join("cache");
+                    let cache = gw2_api::cache::DataCache::new(&cache_dir);
+                    let _ = cache.save_characters(&fresh_chars);
+
+                    // Only update UI if data changed
+                    if s.main.characters != fresh_chars {
+                        s.main.characters = fresh_chars;
+                    }
+                }
+                Err(e) => {
+                    // If we had cached data, don't overwrite it with an error
+                    if !had_cache {
+                        s.main.error = Some(e.to_string());
+                    }
+                    // Update API health status on failure
+                    s.main.api_status = crate::state::ApiStatus::Offline;
+                }
             }
         });
     });
 }
 
-/// Phase 1: Fetch build tabs + equipment tabs from API, store in state.
+/// Apply fetched tabs to state: auto-select active tabs, generate chat code, resolve build.
+fn apply_character_tabs(
+    state: &mut AddonState,
+    build_tabs: Vec<gw2_api::models::BuildTab>,
+    equipment_tabs: Vec<gw2_api::models::EquipmentTab>,
+) {
+    let bt_idx = build_tabs.iter().position(|t| t.is_active).unwrap_or(0);
+    let et_idx = equipment_tabs.iter().position(|t| t.is_active).unwrap_or(0);
+    state.main.build_tabs = build_tabs;
+    state.main.equipment_tabs = equipment_tabs;
+    state.main.selected_build_tab = if state.main.build_tabs.is_empty() { None } else { Some(bt_idx) };
+    state.main.selected_equipment_tab = if state.main.equipment_tabs.is_empty() { None } else { Some(et_idx) };
+    update_build_chat_code_inner(state);
+    resolve_selected_build_inner(state);
+}
+
+/// Phase 1: Load character tabs from cache (instant) then refresh from API in background.
 fn load_character_tabs(state: &mut AddonState, character_name: String) {
-    let Some(ref key) = state.config.gw2_api_key else {
-        return;
+    let key = match state.config.gw2_api_key.clone() {
+        Some(k) => k,
+        None => return,
     };
 
-    state.main.build_loading = true;
     state.main.error = None;
-    let key = key.clone();
+
+    // Phase 1: try loading from cache instantly
+    let cache_dir = state.addon_dir.join("cache");
+    let cache = gw2_api::cache::DataCache::new(&cache_dir);
+    let cached_bt: Option<Vec<gw2_api::models::BuildTab>> =
+        cache.load_character(&character_name, "buildtabs").ok().flatten();
+    let cached_et: Option<Vec<gw2_api::models::EquipmentTab>> =
+        cache.load_character(&character_name, "equiptabs").ok().flatten();
+
+    let had_cache = if let (Some(bt), Some(et)) = (cached_bt, cached_et) {
+        // Cache hit — display immediately
+        apply_character_tabs(state, bt, et);
+        state.main.build_loading = false;
+        true
+    } else {
+        // No cache — show loading indicator
+        state.main.build_loading = true;
+        false
+    };
+
+    // Phase 2: background refresh from API
     let expected_char = character_name.clone();
     let token = state.cancel_token.clone();
 
@@ -762,22 +853,31 @@ fn load_character_tabs(state: &mut AddonState, character_name: String) {
             }
 
             match result {
-                Ok((build_tabs, equipment_tabs)) => {
-                    // Auto-select active tabs
-                    let bt_idx = build_tabs.iter().position(|t| t.is_active).unwrap_or(0);
-                    let et_idx = equipment_tabs.iter().position(|t| t.is_active).unwrap_or(0);
-                    s.main.build_tabs = build_tabs;
-                    s.main.equipment_tabs = equipment_tabs;
-                    s.main.selected_build_tab = if s.main.build_tabs.is_empty() { None } else { Some(bt_idx) };
-                    s.main.selected_equipment_tab = if s.main.equipment_tabs.is_empty() { None } else { Some(et_idx) };
-                    // Generate chat code for the selected build tab
-                    update_build_chat_code_inner(s);
-                    // Trigger Phase 2: resolve the selected build
-                    resolve_selected_build_inner(s);
+                Ok((fresh_bt, fresh_et)) => {
+                    // Save to cache for next time
+                    let cache_dir = s.addon_dir.join("cache");
+                    let cache = gw2_api::cache::DataCache::new(&cache_dir);
+                    let _ = cache.save_character(&expected_char, "buildtabs", &fresh_bt);
+                    let _ = cache.save_character(&expected_char, "equiptabs", &fresh_et);
+
+                    // Compare: only update UI if data actually changed
+                    let bt_changed = serde_json::to_string(&s.main.build_tabs).ok()
+                        != serde_json::to_string(&fresh_bt).ok();
+                    let et_changed = serde_json::to_string(&s.main.equipment_tabs).ok()
+                        != serde_json::to_string(&fresh_et).ok();
+
+                    if bt_changed || et_changed {
+                        apply_character_tabs(s, fresh_bt, fresh_et);
+                    }
+                    s.main.build_loading = false;
                 }
                 Err(e) => {
                     s.main.build_loading = false;
-                    s.main.error = Some(e);
+                    // If we had cached data, don't overwrite with error
+                    if !had_cache {
+                        s.main.error = Some(e);
+                    }
+                    s.main.api_status = crate::state::ApiStatus::Offline;
                 }
             }
         });
@@ -802,88 +902,53 @@ fn resolve_selected_build_inner(state: &mut AddonState) {
         return;
     };
 
-    let Some(ref key) = state.config.gw2_api_key else { return; };
-    let _ = key; // key not needed for resolve (uses cache)
+    // GameDb required — if not loaded yet, skip; load_game_db() will trigger resolve when ready
+    let Some(ref db) = state.main.game_db else {
+        return;
+    };
 
-    state.main.build_loading = true;
-    state.main.error = None;
-    let cache_dir = state.addon_dir.join("cache");
     let game_mode = state.main.game_mode.clone();
     let char_name = state.main.selected_character
         .and_then(|i| state.main.characters.get(i).cloned())
         .unwrap_or_default();
-    let expected_char = char_name.clone();
-    let token = state.cancel_token.clone();
 
-    std::thread::spawn(move || {
-        if token.is_cancelled() { return; }
+    // Synchronous resolve — all lookups are O(1) HashMap hits on the in-memory GameDb
+    state.main.build_loading = false;
+    state.main.error = None;
 
-        let cache = gw2_api::cache::DataCache::new(&cache_dir);
-        let result = resolve_build(&char_name, &bt.build, &et, &cache, &game_mode);
-
-        if token.is_cancelled() { return; }
-
-        // Also calculate stats from the equipment + traits
-        let stats_result = calculate_current_stats(&bt.build, &et, &cache, &game_mode);
-
-        if token.is_cancelled() { return; }
-
-        crate::state::with_state(|s| {
-            // Stale-result guard
-            let current_char = s.main.selected_character
-                .and_then(|i| s.main.characters.get(i).cloned());
-            if current_char.as_deref() != Some(&expected_char) {
-                s.main.build_loading = false;
-                return;
-            }
-
-            s.main.build_loading = false;
-            match result {
-                Ok(build) => {
-                    s.main.current_build = Some(build);
-                    match stats_result {
-                        Ok((stats, combat_solo, combat_party, combat_squad)) => {
-                            s.main.current_stats = Some(stats);
-                            s.main.comparison.current_combat_solo = combat_solo;
-                            s.main.comparison.current_combat_party = combat_party;
-                            s.main.comparison.current_combat_squad = combat_squad;
-                        }
-                        Err(_) => {
-                            s.main.current_stats = None;
-                        }
-                    }
+    match resolve_build_from_db(&char_name, &bt.build, &et, db, &game_mode) {
+        Ok(build) => {
+            state.main.current_build = Some(build);
+            match calculate_current_stats_from_db(&bt.build, &et, db, &game_mode) {
+                Ok((stats, combat_solo, combat_party, combat_squad)) => {
+                    state.main.current_stats = Some(stats);
+                    state.main.comparison.current_combat_solo = combat_solo;
+                    state.main.comparison.current_combat_party = combat_party;
+                    state.main.comparison.current_combat_squad = combat_squad;
                 }
-                Err(e) => s.main.error = Some(e),
+                Err(_) => {
+                    state.main.current_stats = None;
+                }
             }
-        });
-    });
+        }
+        Err(e) => state.main.error = Some(e),
+    }
 }
 
-fn resolve_build(
+/// Resolve the current build using the in-memory GameDb (O(1) lookups, zero disk I/O).
+fn resolve_build_from_db(
     character_name: &str,
     build: &gw2_api::models::Build,
     equipment: &gw2_api::models::EquipmentTab,
-    cache: &gw2_api::cache::DataCache,
+    db: &gw2_optimizer::gamedb::GameDb,
     game_mode: &gw2_core::types::GameMode,
 ) -> Result<gw2_core::types::ResolvedBuild, String> {
     use gw2_core::types::*;
 
-    let specs: Vec<gw2_api::models::Specialization> = cache
-        .load("specializations").map_err(|e| e.to_string())?.unwrap_or_default();
-    let traits: Vec<gw2_api::models::Trait> = cache
-        .load("traits").map_err(|e| e.to_string())?.unwrap_or_default();
-    let skills_cache: Vec<gw2_api::models::Skill> = cache
-        .load("skills").map_err(|e| e.to_string())?.unwrap_or_default();
-    let items: Vec<gw2_api::models::Item> = cache
-        .load("items").map_err(|e| e.to_string())?.unwrap_or_default();
-    let itemstats: Vec<gw2_api::models::ItemStat> = cache
-        .load("itemstats").ok().flatten().unwrap_or_default();
-
-    let resolved_specs = resolve_specs(build, &specs, &traits);
-    let resolved_skills = resolve_skills(build, &skills_cache);
-    let (weapons, armor, trinkets_vec, rune, relic_resolved) =
-        resolve_equipment(equipment, &items, &itemstats);
-    let pvp_amulet = resolve_pvp_amulet(game_mode, equipment, cache);
+    let resolved_specs = resolve_specs_db(build, db);
+    let resolved_skills = resolve_skills_db(build, db);
+    let (weapons, armor, trinkets_vec, rune, relic_resolved) = resolve_equipment_db(equipment, db);
+    let pvp_amulet = resolve_pvp_amulet_db(game_mode, equipment, db);
 
     Ok(ResolvedBuild {
         character_name: character_name.to_string(),
@@ -897,63 +962,23 @@ fn resolve_build(
     })
 }
 
-/// Calculate the current build's stats using the full stat pipeline.
-type CombatBundle = (
-    gw2_core::types::StatBlock,
-    Option<gw2_core::types::CombatMetrics>,
-    Option<gw2_core::types::CombatMetrics>,
-    Option<gw2_core::types::CombatMetrics>,
-);
-
-fn calculate_current_stats(
+/// Calculate current stats using the in-memory GameDb (O(1) lookups, zero disk I/O).
+fn calculate_current_stats_from_db(
     build: &gw2_api::models::Build,
     equipment: &gw2_api::models::EquipmentTab,
-    cache: &gw2_api::cache::DataCache,
+    db: &gw2_optimizer::gamedb::GameDb,
     game_mode: &gw2_core::types::GameMode,
 ) -> Result<CombatBundle, String> {
-    use std::collections::HashMap;
-
-    let items_vec: Vec<gw2_api::models::Item> = cache
-        .load("items").map_err(|e| e.to_string())?.unwrap_or_default();
-    let itemstats_vec: Vec<gw2_api::models::ItemStat> = cache
-        .load("itemstats").map_err(|e| e.to_string())?.unwrap_or_default();
-    let traits_vec: Vec<gw2_api::models::Trait> = cache
-        .load("traits").map_err(|e| e.to_string())?.unwrap_or_default();
-    let pvp_amulets_vec: Vec<gw2_api::models::PvpAmulet> = cache
-        .load("pvp_amulets").ok().flatten().unwrap_or_default();
-
-    let items_cache: HashMap<u32, gw2_api::models::Item> =
-        items_vec.into_iter().map(|i| (i.id, i)).collect();
-    let itemstats_cache: HashMap<u32, gw2_api::models::ItemStat> =
-        itemstats_vec.into_iter().map(|i| (i.id, i)).collect();
-    let traits_cache: HashMap<u32, gw2_api::models::Trait> =
-        traits_vec.into_iter().map(|t| (t.id, t)).collect();
-
     let profession = build.profession.clone().unwrap_or_default();
 
-    // PvP mode: stats come from amulet
+    // PvP mode: stats come from amulet (O(1) lookup in db.pvp_amulets)
     if *game_mode == gw2_core::types::GameMode::PvP {
         if let Some(ref pvp) = equipment.equipment_pvp {
             if let Some(amulet_id) = pvp.amulet {
-                if let Some(amulet) = pvp_amulets_vec.iter().find(|a| a.id == amulet_id) {
+                if let Some(amulet) = db.pvp_amulets.get(&amulet_id) {
                     let opt_stats = gw2_optimizer::stats::calculate_pvp_stats(&amulet.attributes);
                     let derived = gw2_optimizer::stats::compute_derived(&opt_stats, &profession);
-                    let stats = gw2_core::types::StatBlock {
-                        power: opt_stats.power.round() as i32,
-                        precision: opt_stats.precision.round() as i32,
-                        toughness: opt_stats.toughness.round() as i32,
-                        vitality: opt_stats.vitality.round() as i32,
-                        condition_damage: opt_stats.condition_damage.round() as i32,
-                        expertise: opt_stats.expertise.round() as i32,
-                        concentration: opt_stats.concentration.round() as i32,
-                        ferocity: opt_stats.ferocity.round() as i32,
-                        healing_power: opt_stats.healing_power.round() as i32,
-                        crit_chance: derived.crit_chance,
-                        crit_damage: derived.crit_damage,
-                        health: derived.health.round() as i32,
-                        armor: derived.armor.round() as i32,
-                    };
-                    // PvP: no trait/item modifiers, compute with default modifiers
+                    let stats = opt_stats_to_stat_block(&opt_stats, &derived);
                     let modifiers = gw2_optimizer::combat::DamageModifiers::default();
                     let (solo, party, squad) = compute_3tier_combat(
                         &opt_stats, &derived, &modifiers, &profession,
@@ -964,10 +989,7 @@ fn calculate_current_stats(
         }
     }
 
-    // PvE/WvW: collect equipped trait IDs (major + minor)
-    let specs_vec: Vec<gw2_api::models::Specialization> = cache
-        .load("specializations").ok().flatten().unwrap_or_default();
-
+    // PvE/WvW: collect equipped trait IDs (major + minor) via O(1) lookups
     let mut equipped_trait_ids = Vec::new();
     for spec_sel in &build.specializations {
         for &trait_id in &spec_sel.traits {
@@ -975,30 +997,28 @@ fn calculate_current_stats(
                 equipped_trait_ids.push(tid);
             }
         }
-        // Also include minor traits from the spec
         if let Some(spec_id) = spec_sel.id {
-            if let Some(spec) = specs_vec.iter().find(|s| s.id == spec_id) {
+            if let Some(spec) = db.specializations.get(&spec_id) {
                 equipped_trait_ids.extend(&spec.minor_traits);
             }
         }
     }
 
-    // Find rune ID (first upgrade component that's a rune)
+    // Find rune/sigil IDs from equipment upgrades (O(1) item lookups)
     let rune_id = equipment.equipment.iter()
         .flat_map(|p| p.upgrades.iter())
         .find_map(|&uid| {
-            items_cache.get(&uid).and_then(|item| {
+            db.items.get(&uid).and_then(|item| {
                 item.details.as_ref().and_then(|d| {
                     if d.detail_type.as_deref() == Some("Rune") { Some(uid) } else { None }
                 })
             })
         });
 
-    // Find sigil IDs
     let sigil_ids: Vec<u32> = equipment.equipment.iter()
         .flat_map(|p| p.upgrades.iter())
         .filter_map(|&uid| {
-            items_cache.get(&uid).and_then(|item| {
+            db.items.get(&uid).and_then(|item| {
                 item.details.as_ref().and_then(|d| {
                     if d.detail_type.as_deref() == Some("Sigil") { Some(uid) } else { None }
                 })
@@ -1006,18 +1026,18 @@ fn calculate_current_stats(
         })
         .collect();
 
+    // Pass GameDb's pre-indexed HashMaps directly — no copying needed
     let (opt_stats, derived) = gw2_optimizer::stats::calculate_full_stats(
         equipment,
         &equipped_trait_ids,
         rune_id,
         &sigil_ids,
         &profession,
-        &items_cache,
-        &itemstats_cache,
-        &traits_cache,
+        &db.items,
+        &db.itemstats,
+        &db.traits,
     );
 
-    // Extract damage modifiers from equipped traits + items for combat metrics
     let relic_id = equipment.equipment.iter()
         .find(|p| p.slot == "Relic")
         .map(|p| p.id);
@@ -1026,16 +1046,23 @@ fn calculate_current_stats(
         rune_id,
         &sigil_ids,
         relic_id,
-        &traits_cache,
-        &items_cache,
+        &db.traits,
+        &db.items,
     );
 
-    // Compute 3-tier combat metrics for current build
     let (combat_solo, combat_party, combat_squad) = compute_3tier_combat(
         &opt_stats, &derived, &modifiers, &profession,
     );
 
-    Ok((gw2_core::types::StatBlock {
+    Ok((opt_stats_to_stat_block(&opt_stats, &derived), combat_solo, combat_party, combat_squad))
+}
+
+/// Convert optimizer StatBlock + DerivedStats to display StatBlock.
+fn opt_stats_to_stat_block(
+    opt_stats: &gw2_optimizer::stats::StatBlock,
+    derived: &gw2_optimizer::stats::DerivedStats,
+) -> gw2_core::types::StatBlock {
+    gw2_core::types::StatBlock {
         power: opt_stats.power.round() as i32,
         precision: opt_stats.precision.round() as i32,
         toughness: opt_stats.toughness.round() as i32,
@@ -1049,22 +1076,30 @@ fn calculate_current_stats(
         crit_damage: derived.crit_damage,
         health: derived.health.round() as i32,
         armor: derived.armor.round() as i32,
-    }, combat_solo, combat_party, combat_squad))
+    }
 }
 
-fn resolve_specs(
+/// CombatBundle type alias for stat + 3-tier combat metrics.
+type CombatBundle = (
+    gw2_core::types::StatBlock,
+    Option<gw2_core::types::CombatMetrics>,
+    Option<gw2_core::types::CombatMetrics>,
+    Option<gw2_core::types::CombatMetrics>,
+);
+
+/// Resolve specializations using GameDb O(1) lookups.
+fn resolve_specs_db(
     build: &gw2_api::models::Build,
-    specs: &[gw2_api::models::Specialization],
-    traits: &[gw2_api::models::Trait],
+    db: &gw2_optimizer::gamedb::GameDb,
 ) -> Vec<gw2_core::types::ResolvedSpec> {
     use gw2_core::types::*;
     build.specializations.iter().filter_map(|sel| {
         let spec_id = sel.id?;
-        let spec = specs.iter().find(|s| s.id == spec_id)?;
+        let spec = db.specializations.get(&spec_id)?;
         let traits_selected: Vec<ResolvedTrait> = sel.traits.iter().enumerate()
             .filter_map(|(col, trait_id)| {
                 let tid = (*trait_id)?;
-                let t = traits.iter().find(|t| t.id == tid)?;
+                let t = db.traits.get(&tid)?;
                 Some(ResolvedTrait {
                     id: t.id, name: t.name.clone(),
                     description: t.description.clone().unwrap_or_default(),
@@ -1078,13 +1113,14 @@ fn resolve_specs(
     }).collect()
 }
 
-fn resolve_skills(
+/// Resolve skills using GameDb O(1) lookups.
+fn resolve_skills_db(
     build: &gw2_api::models::Build,
-    skills_cache: &[gw2_api::models::Skill],
+    db: &gw2_optimizer::gamedb::GameDb,
 ) -> gw2_core::types::ResolvedSkills {
     use gw2_core::types::*;
     let find_skill = |id: u32| -> Option<SkillInfo> {
-        skills_cache.iter().find(|s| s.id == id).map(|s| SkillInfo {
+        db.skills.get(&id).map(|s| SkillInfo {
             id: s.id,
             name: s.name.clone(),
         })
@@ -1100,10 +1136,10 @@ fn resolve_skills(
     }
 }
 
-fn resolve_equipment(
+/// Resolve equipment using GameDb O(1) lookups.
+fn resolve_equipment_db(
     equipment: &gw2_api::models::EquipmentTab,
-    items: &[gw2_api::models::Item],
-    itemstats: &[gw2_api::models::ItemStat],
+    db: &gw2_optimizer::gamedb::GameDb,
 ) -> (
     Vec<gw2_core::types::ResolvedWeaponSet>,
     Vec<gw2_core::types::ResolvedGearPiece>,
@@ -1113,10 +1149,6 @@ fn resolve_equipment(
 ) {
     use gw2_core::types::*;
 
-    let find_item = |id: u32| -> Option<&gw2_api::models::Item> {
-        items.iter().find(|i| i.id == id)
-    };
-
     let mut armor = Vec::new();
     let mut trinkets_vec = Vec::new();
     let mut rune = None;
@@ -1125,15 +1157,15 @@ fn resolve_equipment(
     let mut ws2 = ResolvedWeaponSet { label: "Set 2".into(), ..Default::default() };
 
     for piece in &equipment.equipment {
-        let item = find_item(piece.id);
+        let item = db.items.get(&piece.id);
         let item_name = item.map(|i| i.name.clone()).unwrap_or_else(|| format!("#{}", piece.id));
         let stat_prefix = piece.stats.as_ref()
-            .and_then(|s| itemstats.iter().find(|is| is.id == s.id).map(|is| is.name.clone()))
+            .and_then(|s| db.itemstats.get(&s.id).map(|is| is.name.clone()))
             .unwrap_or_default();
 
         let extract_sigils = |piece: &gw2_api::models::EquipmentPiece, ws: &mut ResolvedWeaponSet| {
             for &uid in &piece.upgrades {
-                if let Some(u) = find_item(uid) {
+                if let Some(u) = db.items.get(&uid) {
                     ws.sigils.push(UpgradeInfo { id: uid, name: u.name.clone() });
                 }
             }
@@ -1159,7 +1191,7 @@ fn resolve_equipment(
             "Helm" | "Shoulders" | "Coat" | "Gloves" | "Leggings" | "Boots" => {
                 if rune.is_none() {
                     if let Some(&uid) = piece.upgrades.first() {
-                        if let Some(u) = find_item(uid) {
+                        if let Some(u) = db.items.get(&uid) {
                             rune = Some(ResolvedUpgrade { id: uid, name: u.name.clone() });
                         }
                     }
@@ -1186,18 +1218,17 @@ fn resolve_equipment(
     (weapons, armor, trinkets_vec, rune, relic_resolved)
 }
 
-fn resolve_pvp_amulet(
+/// Resolve PvP amulet using GameDb O(1) lookup.
+fn resolve_pvp_amulet_db(
     game_mode: &gw2_core::types::GameMode,
     equipment: &gw2_api::models::EquipmentTab,
-    cache: &gw2_api::cache::DataCache,
+    db: &gw2_optimizer::gamedb::GameDb,
 ) -> Option<gw2_core::types::ResolvedPvpAmulet> {
     use gw2_core::types::*;
     if *game_mode != GameMode::PvP { return None; }
     let pvp_eq = equipment.equipment_pvp.as_ref()?;
     let amulet_id = pvp_eq.amulet?;
-    let pvp_amulets: Vec<gw2_api::models::PvpAmulet> = cache
-        .load("pvp_amulets").ok().flatten().unwrap_or_default();
-    pvp_amulets.iter().find(|a| a.id == amulet_id).map(|a| {
+    db.pvp_amulets.get(&amulet_id).map(|a| {
         ResolvedPvpAmulet {
             id: a.id,
             name: a.name.clone(),
@@ -1409,6 +1440,10 @@ fn start_game_data_refresh(state: &mut AddonState) {
                         Ok(db) => {
                             nexus::log::log(nexus::log::LogLevel::Info, "GW2 Build Optimizer", "Game data refreshed successfully");
                             s.main.game_db = Some(db);
+                            // Re-resolve build with fresh data
+                            if s.main.selected_build_tab.is_some() && s.main.selected_equipment_tab.is_some() {
+                                resolve_selected_build_inner(s);
+                            }
                         }
                         Err(e) => {
                             s.main.error = Some(format!("Failed to reload game data: {}", e));
@@ -1423,6 +1458,38 @@ fn start_game_data_refresh(state: &mut AddonState) {
                 });
             }
         }
+    });
+}
+
+/// Lightweight API health check: pings GET /v2/build (unauthenticated, returns a single integer).
+fn check_api_health(state: &mut AddonState) {
+    state.main.api_health_checking = true;
+    let token = state.cancel_token.clone();
+
+    std::thread::spawn(move || {
+        if token.is_cancelled() { return; }
+
+        let start = std::time::Instant::now();
+        let result = gw2_api::client::Gw2Client::without_key()
+            .and_then(|c| c.get_build_number());
+
+        if token.is_cancelled() { return; }
+
+        let status = match result {
+            Ok(_) => {
+                if start.elapsed().as_secs() >= 5 {
+                    crate::state::ApiStatus::Degraded
+                } else {
+                    crate::state::ApiStatus::Online
+                }
+            }
+            Err(_) => crate::state::ApiStatus::Offline,
+        };
+
+        crate::state::with_state(|s| {
+            s.main.api_status = status;
+            s.main.api_health_checking = false;
+        });
     });
 }
 
@@ -1450,6 +1517,10 @@ fn load_game_db(state: &mut AddonState) {
                         &db.summary(),
                     );
                     s.main.game_db = Some(db);
+                    // If build tabs were loaded before GameDb, trigger resolve now
+                    if s.main.selected_build_tab.is_some() && s.main.selected_equipment_tab.is_some() {
+                        resolve_selected_build_inner(s);
+                    }
                 }
                 Err(e) => {
                     s.main.error = Some(format!("Failed to load game data: {}", e));
@@ -1500,6 +1571,20 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
 
     state.main.optimizing = true;
     state.main.optimize_stage = "Starting...".into();
+
+    // Log the weights and deterministic gear prefix for debugging
+    let gear_match = gw2_optimizer::scoring::select_gear_prefix(&weights);
+    nexus::log::log(
+        nexus::log::LogLevel::Info,
+        "GW2BuildOpt",
+        &format!(
+            "Optimizing {}/{}: weights P={:.2} D={:.2} C={:.2} H={:.2} S={:.2} ({}) -> gear: {} (sim={:.3})",
+            profession_name, game_mode_label,
+            weights.power, weights.disable, weights.condition, weights.healing, weights.sustain,
+            weights.summary_label(),
+            gear_match.primary, gear_match.similarity,
+        ),
+    );
     state.main.comparison.suggestions.clear();
     state.main.comparison.loading = true;
     state.main.comparison.error = None;
@@ -1512,7 +1597,47 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
 
                 let db = db.ok_or("GameDb not loaded")?;
 
-                // ═══ New synergy-driven pipeline (requires Gemini key) ═══
+                // ═══ Primary: Deterministic synergy engine (no LLM for build selection) ═══
+                {
+                    let gemini_client_opt = gemini_key.as_ref().and_then(|key| {
+                        let usage_path = addon_dir.join("gemini_usage.json");
+                        gw2_optimizer::gemini::GeminiClient::with_persistence(
+                            key, &gemini_model, usage_path,
+                        ).ok()
+                    });
+
+                    let token_det = token.clone();
+                    match gw2_optimizer::engine::optimize_deterministic(
+                        &db,
+                        &profession_name,
+                        &weights,
+                        &game_mode,
+                        gemini_client_opt.as_ref(),
+                        current_build_summary.as_deref(),
+                        &mut |progress| {
+                            if token_det.is_cancelled() { return; }
+                            crate::state::with_state(|s| {
+                                s.main.optimize_stage = progress.stage.clone();
+                            });
+                        },
+                    ) {
+                        Ok(synergy_result) => {
+                            if token.is_cancelled() { return Err("Cancelled".into()); }
+                            let suggestion = synergy_result_to_suggestion(&synergy_result);
+                            return Ok(vec![suggestion]);
+                        }
+                        Err(e) => {
+                            nexus::log::log(
+                                nexus::log::LogLevel::Warning,
+                                "GW2 Build Optimizer",
+                                &format!("Deterministic engine failed, trying Gemini pipeline: {}", e),
+                            );
+                            // Fall through to Gemini pipeline
+                        }
+                    }
+                }
+
+                // ═══ Fallback 1: Gemini synergy pipeline (LLM-driven build selection) ═══
                 if let Some(ref key) = gemini_key {
                     let usage_path = addon_dir.join("gemini_usage.json");
                     let gemini_client = gw2_optimizer::gemini::GeminiClient::with_persistence(
@@ -1543,7 +1668,7 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                             nexus::log::log(
                                 nexus::log::LogLevel::Warning,
                                 "GW2 Build Optimizer",
-                                &format!("Synergy pipeline failed, falling back to legacy: {}", e),
+                                &format!("Gemini pipeline failed, falling back to legacy: {}", e),
                             );
                             // Fall through to legacy pipeline
                         }

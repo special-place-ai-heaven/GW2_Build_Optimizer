@@ -406,6 +406,14 @@ pub fn select_prefixes_by_tiers(weights: &OptimizationWeights) -> Vec<&'static s
     let w = weights.clamped();
     let mut prefixes = Vec::new();
 
+    // Detect if there's a dominant axis (≥ 0.8) — if so, secondary axes
+    // should only contribute higher-tier (more focused) sets to avoid
+    // diluting the candidate pool with off-focus gear.
+    let max_weight = [w.power, w.condition, w.sustain, w.healing, w.disable]
+        .iter()
+        .fold(0.0_f64, |a, &b| a.max(b));
+    let has_dominant = max_weight >= 0.8;
+
     let axes: [(f64, &[&[&str]; 5]); 5] = [
         (w.power, &POWER_TIERS),
         (w.condition, &CONDITION_TIERS),
@@ -415,9 +423,16 @@ pub fn select_prefixes_by_tiers(weights: &OptimizationWeights) -> Vec<&'static s
     ];
 
     for (weight, tiers) in &axes {
-        if *weight < 0.15 { continue; } // Skip negligible axes (below tier 1 threshold)
-        let tier = weight_to_tier(*weight); // 1-5
-        // Include this tier and all above (more focused sets are always appropriate)
+        if *weight < 0.15 { continue; } // Skip negligible axes
+
+        let mut tier = weight_to_tier(*weight); // 1-5
+
+        // When a dominant axis exists, raise the minimum tier for secondary axes
+        // so they only contribute focused sets (tier 4+), not broad low-tier ones.
+        if has_dominant && *weight < 0.6 {
+            tier = tier.max(4);
+        }
+
         for t in (tier - 1)..5 {
             prefixes.extend_from_slice(tiers[t]);
         }
@@ -429,6 +444,126 @@ pub fn select_prefixes_by_tiers(weights: &OptimizationWeights) -> Vec<&'static s
     prefixes.sort();
     prefixes.dedup();
     prefixes
+}
+
+// ─── Deterministic Gear Prefix Selection ───
+//
+// Maps radar chart weights to the closest GW2 gear prefix using cosine similarity.
+// Each prefix has a 5-axis "purpose profile" representing what kind of build uses it.
+// The profile with highest cosine similarity to the user's weights wins.
+//
+// This replaces LLM-driven gear selection, which was unreliable — Gemini would
+// ignore prompt constraints and pick healing gear regardless of weight settings.
+
+/// Result of deterministic gear prefix selection.
+#[derive(Debug, Clone)]
+pub struct GearPrefixMatch {
+    /// Best matching gear prefix name.
+    pub primary: &'static str,
+    /// Runner-up prefix (for potential mixing or context).
+    pub secondary: Option<&'static str>,
+    /// Cosine similarity score (0.0-1.0) — how well the primary matches.
+    pub similarity: f64,
+}
+
+/// Purpose profiles for all GW2 gear prefixes.
+/// Format: (name, [power, disable, condition, heal, sustain])
+/// Values represent "this prefix is intended for builds with these priorities."
+///
+/// Profiles are hand-tuned to match GW2 meta usage:
+/// - Pure DPS sets cluster at one axis extreme
+/// - Hybrid sets span two axes
+/// - Support sets span heal + sustain/disable
+const GEAR_PROFILES: &[(&str, [f64; 5])] = &[
+    // ── Pure Power DPS ──
+    ("Berserker's",    [1.0,  0.0,  0.0,  0.0,  0.0 ]),
+    ("Assassin's",     [0.95, 0.0,  0.0,  0.0,  0.0 ]),  // Prec-primary variant
+    // ── Power + Survivability ──
+    ("Marauder",       [0.75, 0.0,  0.0,  0.0,  0.25]),
+    ("Dragon's",       [0.75, 0.0,  0.0,  0.0,  0.25]),
+    ("Valkyrie",       [0.65, 0.0,  0.0,  0.0,  0.35]),
+    // ── Power + Condition hybrid ──
+    ("Grieving",       [0.5,  0.0,  0.5,  0.0,  0.0 ]),
+    // ── Condition DPS ──
+    ("Viper's",        [0.2,  0.15, 0.65, 0.0,  0.0 ]),  // Expertise gives some Disable
+    ("Sinister",       [0.15, 0.0,  0.85, 0.0,  0.0 ]),   // Pure offensive condi
+    // ── Condition + Sustain (tanky condi) ──
+    ("Trailblazer's",  [0.0,  0.1,  0.45, 0.0,  0.45]),
+    ("Dire",           [0.0,  0.0,  0.4,  0.0,  0.6 ]),
+    // ── Condition + Boon/Condi Duration ──
+    ("Ritualist's",    [0.0,  0.45, 0.45, 0.0,  0.1 ]),
+    // ── Condition + Healing ──
+    ("Plaguedoctor's", [0.0,  0.15, 0.35, 0.35, 0.15]),
+    // ── Pure Healer ──
+    ("Magi's",         [0.0,  0.0,  0.0,  0.85, 0.15]),
+    // ── Healing + Boon Support ──
+    ("Harrier's",      [0.1,  0.4,  0.0,  0.5,  0.0 ]),
+    ("Cleric's",       [0.2,  0.0,  0.0,  0.55, 0.25]),
+    // ── Heal Tank ──
+    ("Minstrel's",     [0.0,  0.25, 0.0,  0.35, 0.4 ]),
+    // ── Pure Tank ──
+    ("Nomad's",        [0.0,  0.0,  0.0,  0.1,  0.9 ]),
+    // ── Power Tank ──
+    ("Soldier's",      [0.35, 0.0,  0.0,  0.0,  0.65]),
+    ("Knight's",       [0.35, 0.0,  0.0,  0.0,  0.65]),
+    ("Cavalier's",     [0.3,  0.0,  0.0,  0.0,  0.7 ]),
+    // ── Power + Boon Duration ──
+    ("Diviner's",      [0.45, 0.55, 0.0,  0.0,  0.0 ]),
+    // ── Condition/Heal/Tank hybrid ──
+    ("Apothecary's",   [0.0,  0.0,  0.25, 0.4,  0.35]),
+    // ── Universal Hybrid ──
+    ("Celestial",      [0.3,  0.2,  0.3,  0.1,  0.1 ]),
+];
+
+/// Deterministically select the best gear prefix for the given radar chart weights.
+///
+/// Uses cosine similarity between the user's 5-axis weight vector and each
+/// gear prefix's purpose profile. Returns the best match and a runner-up.
+///
+/// This is the AUTHORITATIVE gear selection — Gemini does NOT get to override it.
+pub fn select_gear_prefix(weights: &OptimizationWeights) -> GearPrefixMatch {
+    let w = weights.clamped();
+    let user = [w.power, w.disable, w.condition, w.healing, w.sustain];
+
+    let user_mag = magnitude(&user);
+    if user_mag < 0.001 {
+        // All weights ~zero → default to Celestial
+        return GearPrefixMatch {
+            primary: "Celestial",
+            secondary: None,
+            similarity: 0.0,
+        };
+    }
+
+    let mut best = ("Celestial", 0.0_f64);
+    let mut second = ("Celestial", -1.0_f64);
+
+    for &(name, ref profile) in GEAR_PROFILES {
+        let prof_mag = magnitude(profile);
+        if prof_mag < 0.001 {
+            continue;
+        }
+        let dot: f64 = user.iter().zip(profile.iter()).map(|(a, b)| a * b).sum();
+        let cos = dot / (user_mag * prof_mag);
+
+        if cos > best.1 {
+            second = best;
+            best = (name, cos);
+        } else if cos > second.1 {
+            second = (name, cos);
+        }
+    }
+
+    GearPrefixMatch {
+        primary: best.0,
+        secondary: if second.1 > 0.0 { Some(second.0) } else { None },
+        similarity: best.1,
+    }
+}
+
+/// Euclidean magnitude of a 5-element vector.
+fn magnitude(v: &[f64; 5]) -> f64 {
+    v.iter().map(|x| x * x).sum::<f64>().sqrt()
 }
 
 #[cfg(test)]
@@ -739,6 +874,149 @@ mod tests {
                 name,
                 w.total(),
                 WEIGHT_BUDGET
+            );
+        }
+    }
+
+    // ─── Gear Prefix Selection Tests ───
+
+    #[test]
+    fn test_gear_prefix_power_max() {
+        let w = OptimizationWeights::preset_power_dps();
+        let m = select_gear_prefix(&w);
+        assert_eq!(m.primary, "Berserker's",
+            "Power max should select Berserker's, got {}", m.primary);
+    }
+
+    #[test]
+    fn test_gear_prefix_condi_dps() {
+        let w = OptimizationWeights::preset_condi_dps();
+        let m = select_gear_prefix(&w);
+        assert!(
+            m.primary == "Viper's" || m.primary == "Sinister",
+            "Condi DPS should select Viper's or Sinister, got {}", m.primary
+        );
+    }
+
+    #[test]
+    fn test_gear_prefix_condi_with_sustain_is_trailblazer() {
+        // User scenario: condition maxed, no power, some sustain
+        let w = OptimizationWeights {
+            power: 0.0, disable: 0.0, condition: 1.0, healing: 0.0, sustain: 0.5,
+        };
+        let m = select_gear_prefix(&w);
+        assert_eq!(m.primary, "Trailblazer's",
+            "Condition + Sustain should select Trailblazer's, got {} (sim={:.3})", m.primary, m.similarity);
+    }
+
+    #[test]
+    fn test_gear_prefix_condi_low_power_sustain_is_trailblazer() {
+        // User's exact example: "power at 1 or 0 and condi on 5"
+        // With remaining budget going to sustain
+        let w = OptimizationWeights {
+            power: 0.2, disable: 0.0, condition: 1.0, healing: 0.0, sustain: 0.5,
+        };
+        let m = select_gear_prefix(&w);
+        assert!(
+            m.primary == "Trailblazer's" || m.primary == "Viper's",
+            "Condi max + low power + sustain should select Trailblazer's or Viper's, got {}", m.primary
+        );
+    }
+
+    #[test]
+    fn test_gear_prefix_healer() {
+        let w = OptimizationWeights::preset_healer();
+        let m = select_gear_prefix(&w);
+        assert!(
+            m.primary == "Magi's" || m.primary == "Harrier's" || m.primary == "Minstrel's",
+            "Healer should select Magi's/Harrier's/Minstrel's, got {}", m.primary
+        );
+    }
+
+    #[test]
+    fn test_gear_prefix_tank() {
+        let w = OptimizationWeights::preset_tank();
+        let m = select_gear_prefix(&w);
+        assert!(
+            m.primary == "Nomad's" || m.primary == "Minstrel's" || m.primary == "Dire"
+            || m.primary == "Cavalier's" || m.primary == "Knight's" || m.primary == "Soldier's",
+            "Tank should select a defensive set, got {}", m.primary
+        );
+    }
+
+    #[test]
+    fn test_gear_prefix_celestial() {
+        let w = OptimizationWeights::preset_celestial();
+        let m = select_gear_prefix(&w);
+        // Celestial weights are evenly spread — should match Celestial profile
+        // or Viper's / Trailblazer's which also span multiple axes
+        assert!(m.similarity > 0.5,
+            "Celestial preset should have decent similarity, got {:.3}", m.similarity);
+    }
+
+    #[test]
+    fn test_gear_prefix_zero_weights_is_celestial() {
+        let w = OptimizationWeights {
+            power: 0.0, disable: 0.0, condition: 0.0, healing: 0.0, sustain: 0.0,
+        };
+        let m = select_gear_prefix(&w);
+        assert_eq!(m.primary, "Celestial",
+            "Zero weights should default to Celestial");
+    }
+
+    #[test]
+    fn test_gear_prefix_power_condi_hybrid_is_grieving() {
+        let w = OptimizationWeights {
+            power: 0.7, disable: 0.0, condition: 0.7, healing: 0.0, sustain: 0.0,
+        };
+        let m = select_gear_prefix(&w);
+        assert_eq!(m.primary, "Grieving",
+            "Equal Power+Condition should select Grieving, got {}", m.primary);
+    }
+
+    #[test]
+    fn test_gear_prefix_disable_focused_is_diviners() {
+        let w = OptimizationWeights {
+            power: 0.3, disable: 1.0, condition: 0.0, healing: 0.0, sustain: 0.0,
+        };
+        let m = select_gear_prefix(&w);
+        assert_eq!(m.primary, "Diviner's",
+            "Disable focused + some Power should select Diviner's, got {}", m.primary);
+    }
+
+    #[test]
+    fn test_gear_prefix_never_returns_healing_for_condi() {
+        // The bug: condition at 100% was returning healing builds
+        let cases = [
+            OptimizationWeights { power: 0.0, disable: 0.0, condition: 1.0, healing: 0.0, sustain: 0.0 },
+            OptimizationWeights { power: 0.2, disable: 0.2, condition: 1.0, healing: 0.0, sustain: 0.0 },
+            OptimizationWeights { power: 0.0, disable: 0.0, condition: 1.0, healing: 0.0, sustain: 0.5 },
+            OptimizationWeights { power: 0.5, disable: 0.0, condition: 0.8, healing: 0.0, sustain: 0.0 },
+        ];
+        let healing_prefixes = ["Magi's", "Harrier's", "Minstrel's", "Cleric's"];
+        for w in &cases {
+            let m = select_gear_prefix(w);
+            assert!(
+                !healing_prefixes.contains(&m.primary),
+                "Condition-focused weights P={:.1} D={:.1} C={:.1} H={:.1} S={:.1} should NOT return healing prefix, got {}",
+                w.power, w.disable, w.condition, w.healing, w.sustain, m.primary
+            );
+        }
+    }
+
+    #[test]
+    fn test_gear_prefix_never_returns_healing_for_power() {
+        let cases = [
+            OptimizationWeights::preset_power_dps(),
+            OptimizationWeights { power: 1.0, disable: 0.0, condition: 0.0, healing: 0.0, sustain: 0.3 },
+            OptimizationWeights { power: 0.8, disable: 0.2, condition: 0.0, healing: 0.0, sustain: 0.0 },
+        ];
+        let healing_prefixes = ["Magi's", "Harrier's", "Minstrel's", "Cleric's"];
+        for w in &cases {
+            let m = select_gear_prefix(w);
+            assert!(
+                !healing_prefixes.contains(&m.primary),
+                "Power-focused weights should NOT return healing prefix, got {}", m.primary
             );
         }
     }
