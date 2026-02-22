@@ -154,7 +154,6 @@ fn select_specs_and_traits(
     traits_cache: &HashMap<u32, GW2Trait>,
 ) -> Vec<SynergyCandidate> {
     let spec_combos = search_spec_combos(&profession.specializations, specs_cache, None);
-    let stat_weights = weights.to_stat_weights();
 
     let mut candidates = Vec::new();
 
@@ -212,11 +211,6 @@ fn select_specs_and_traits(
                             }
                         }
 
-                        // Add base trait scoring (stat weights)
-                        for &tid in &traits {
-                            score += engine::score_trait_for_archetype(tid, &stat_weights, traits_cache) * 2.0;
-                        }
-
                         // Intra-spec synergy
                         for i in 0..effects.len() {
                             let (syn, _) = compute_marginal_synergy(
@@ -272,11 +266,6 @@ fn select_specs_and_traits(
                     total_score += syn;
                     accumulated.push((ComponentId::Trait(tid), effs));
                 }
-            }
-
-            // Also add base stat-weight scoring
-            for &tid in &all_major {
-                total_score += engine::score_trait_for_archetype(tid, &stat_weights, &traits_cache) * 2.0;
             }
 
             candidates.push(SynergyCandidate {
@@ -695,23 +684,21 @@ fn rank_and_select(
         );
         let derived = stats::compute_derived(&stats, profession_name);
 
-        let modifiers = combat::extract_damage_modifiers(
-            &candidate.all_trait_ids,
-            candidate.rune.as_ref().map(|(id, _)| *id),
-            &candidate.sigils.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
-            candidate.relic.as_ref().map(|(id, _)| *id),
-            &db.traits,
-            &db.items,
-        );
+        // Use default (identity) modifiers for ranking to avoid trait fact inflation.
+        // extract_damage_modifiers() treats conditional/proc Fact::Percent values
+        // as permanent multipliers, producing total_strike_mult of 5-15x.
+        // The synergy scoring already evaluates trait modifier value.
+        let modifiers = combat::DamageModifiers::default();
 
         let combat_perf = combat::calculate_combat_performance(
             &stats, &derived, &modifiers, solo_profile, profession_name,
         );
 
         let combat_score = score_with_weights(&combat_perf, weights);
-        // Blend: 60% combat performance, 40% synergy score (normalized)
-        let synergy_normalized = candidate.score / 10.0; // Rough normalization
-        let final_score = combat_score * 0.6 + synergy_normalized.min(0.4) * 0.4;
+        // Blend: 40% combat performance (gear-only), 60% synergy score (captures trait value)
+        let max_synergy = candidates.iter().map(|c| c.score).fold(0.0_f64, f64::max).max(1.0);
+        let synergy_normalized = candidate.score / max_synergy;
+        let final_score = combat_score * 0.4 + synergy_normalized * 0.6;
 
         scored.push((idx, final_score));
     }
@@ -728,7 +715,7 @@ fn compute_candidate_stats(
 ) -> stats::StatBlock {
     let mut full_stats = stats::base_stats();
 
-    // Gear stats
+    // Gear stats (from prefix applied to each slot)
     if let Some(stat_id) = gear_prefix_id {
         if let Some(itemstat) = db.itemstats.get(&stat_id) {
             for &(_slot, adj) in engine::SLOT_ADJUSTMENTS {
@@ -740,9 +727,14 @@ fn compute_candidate_stats(
         }
     }
 
-    // Trait stats
-    let trait_stats = stats::calculate_trait_stats(&candidate.all_trait_ids, &db.traits);
-    full_stats += &trait_stats;
+    // NOTE: We intentionally do NOT call calculate_trait_stats() here.
+    // That function counts ALL Fact::AttributeAdjust from trait descriptions
+    // as permanent stat bonuses, but many are temporary buffs/procs
+    // (e.g. "gain 300 Power for 10s when X"). This inflates stats wildly.
+    // Trait effects are already evaluated through the NormalizedEffect synergy scoring.
+    //
+    // We do still apply trait stat conversions (BuffConversion facts) since those
+    // are typically permanent passives (e.g. "7% of Toughness becomes Power").
     stats::apply_trait_conversions(&mut full_stats, &candidate.all_trait_ids, &db.traits);
 
     full_stats
@@ -848,7 +840,9 @@ fn build_synergy_result(
     let full_stats = compute_candidate_stats(&candidate, db, gear_prefix_id);
     let derived = stats::compute_derived(&full_stats, profession_name);
 
-    let modifiers = combat::extract_damage_modifiers(
+    // Extract damage modifiers from traits/rune/sigils/relic, but cap to prevent
+    // inflation from conditional/proc Fact::Percent values being treated as permanent.
+    let mut modifiers = combat::extract_damage_modifiers(
         &candidate.all_trait_ids,
         candidate.rune.as_ref().map(|(id, _)| *id),
         &candidate.sigils.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
@@ -856,6 +850,15 @@ fn build_synergy_result(
         &db.traits,
         &db.items,
     );
+    // Cap multiplicative modifiers to realistic ranges.
+    // extract_damage_modifiers() treats conditional/proc Fact::Percent as permanent,
+    // producing runaway multiplication (total_strike_mult of 5-15x).
+    // In GW2, permanent trait modifiers rarely exceed ~30% total (3-4 sources of 5-7%).
+    // Keep only the top-3 largest modifiers from each category.
+    cap_modifiers_vec(&mut modifiers.strike_pct, 3);
+    cap_modifiers_vec(&mut modifiers.condition_pct, 3);
+    cap_modifiers_vec(&mut modifiers.crit_damage_pct, 3);
+    cap_modifiers_vec(&mut modifiers.healing_pct, 3);
 
     // 3-tier combat
     let buff_profiles = combat::default_buff_profiles();
@@ -890,4 +893,13 @@ fn build_synergy_result(
         modifiers,
         rotation: rotation_result,
     })
+}
+
+/// Keep only the top-N largest modifiers in a Vec, discarding the rest.
+/// Prevents runaway multiplicative inflation from conditional/proc trait facts.
+fn cap_modifiers_vec(v: &mut Vec<f64>, max_entries: usize) {
+    if v.len() > max_entries {
+        v.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+        v.truncate(max_entries);
+    }
 }
