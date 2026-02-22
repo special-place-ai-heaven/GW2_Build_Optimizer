@@ -240,7 +240,7 @@ pub fn chat_refinement_prompt_with_tools(
     profession: &str,
     user_request: &str,
 ) -> String {
-    let sanitized: String = user_request.chars().take(300).filter(|c| *c != '`').collect();
+    let sanitized: String = user_request.chars().take(300).filter(|c| *c != '`' && *c != '<' && *c != '>').collect();
     format!(
         r#"You are a Guild Wars 2 build advisor for {profession} with access to the game's full database.
 
@@ -283,7 +283,7 @@ After research, respond with a JSON build object showing modifications:
 fn sanitize_build_summary(s: &str) -> String {
     s.chars()
         .take(2000)
-        .filter(|c| *c != '`')
+        .filter(|c| *c != '`' && *c != '<' && *c != '>')
         .collect()
 }
 
@@ -351,7 +351,7 @@ pub fn chat_refinement_prompt(
     let sanitized_request: String = user_request
         .chars()
         .take(300)
-        .filter(|c| *c != '`')
+        .filter(|c| *c != '`' && *c != '<' && *c != '>')
         .collect();
     let sanitized_build = sanitize_build_summary(current_build_summary);
 

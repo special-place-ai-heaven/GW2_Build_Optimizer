@@ -1152,13 +1152,9 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
     {
         let gear_stats = calculate_full_set_stats(istat);
         let base = stats::base_stats();
-        let total = stats::StatBlock {
-            power: base.power + gear_stats.power,
-            precision: base.precision + gear_stats.precision,
-            condition_damage: base.condition_damage + gear_stats.condition_damage,
-            ..base
-        };
-        (total.power, total.condition_damage, 1100.0)
+        let power = base.power + gear_stats.power;
+        let condition_damage = base.condition_damage + gear_stats.condition_damage;
+        (power, condition_damage, 1100.0)
     } else {
         (2000.0, 1000.0, 1100.0) // fallback defaults
     };

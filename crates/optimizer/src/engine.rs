@@ -40,7 +40,7 @@ pub struct OptimizeProgress {
 }
 
 /// Run the optimization pipeline for a given profession and archetype.
-/// Returns top N candidates ranked by score.
+/// Returns top N candidates ranked by score, or an error describing why none were found.
 /// For PvP, skips gear search (stats come from amulet) and only evaluates spec/trait combos.
 /// For PvE/WvW, runs full gear + spec search.
 pub fn optimize(
@@ -55,13 +55,18 @@ pub fn optimize(
     top_n: usize,
     game_mode: &GameMode,
     aggression: Option<&AggressionLevel>,
-) -> Vec<BuildCandidate> {
+) -> Result<Vec<BuildCandidate>, String> {
     // Default to FullOffense for backward compatibility (matches old score_combat behavior)
     let default_aggression = AggressionLevel::FullOffense;
     let aggression = aggression.unwrap_or(&default_aggression);
 
     if *game_mode == GameMode::PvP {
-        return optimize_pvp(profession, archetype, specs_cache, traits_cache, &mut on_progress, top_n, aggression);
+        return optimize_pvp(profession, archetype, specs_cache, traits_cache, &mut on_progress, top_n, aggression)
+            .and_then(|v| if v.is_empty() {
+                Err(format!("No PvP candidates found for {} / {:?}", profession.name, archetype))
+            } else {
+                Ok(v)
+            });
     }
 
     on_progress(OptimizeProgress {
@@ -71,6 +76,12 @@ pub fn optimize(
 
     // 1. Find best gear prefix combinations
     let mut gear_candidates = search_gear_prefixes(archetype, itemstats_cache);
+    if gear_candidates.is_empty() {
+        return Err(format!(
+            "No gear stat prefixes found for {:?}. GameDb has {} itemstats loaded.",
+            archetype, itemstats_cache.len()
+        ));
+    }
 
     // Score each gear candidate (preliminary — no traits/modifiers yet)
     let empty_mods = DamageModifiers::default();
@@ -97,6 +108,21 @@ pub fn optimize(
 
     // 2. Find valid spec combinations
     let spec_combos = search_spec_combos(&profession.specializations, specs_cache);
+    if spec_combos.is_empty() {
+        let core_count = profession.specializations.iter()
+            .filter(|id| specs_cache.get(id).is_some_and(|s| !s.elite))
+            .count();
+        let elite_count = profession.specializations.iter()
+            .filter(|id| specs_cache.get(id).is_some_and(|s| s.elite))
+            .count();
+        return Err(format!(
+            "No valid spec combinations for {}. Has {} core specs (need ≥3) and {} elite specs. \
+             {} of {} spec IDs found in GameDb.",
+            profession.name, core_count, elite_count,
+            profession.specializations.iter().filter(|id| specs_cache.contains_key(id)).count(),
+            profession.specializations.len()
+        ));
+    }
 
     // 3. Combine gear + specs into full candidates
     let mut all_candidates: Vec<BuildCandidate> = Vec::new();
@@ -176,7 +202,14 @@ pub fn optimize(
         done: true,
     });
 
-    all_candidates
+    if all_candidates.is_empty() {
+        return Err(format!(
+            "Optimization produced 0 candidates from {} gear × {} spec combos for {} / {:?}",
+            gear_candidates.len(), spec_combos.len(), profession.name, archetype
+        ));
+    }
+
+    Ok(all_candidates)
 }
 
 /// PvP optimization: specs + traits only (gear is replaced by amulet system).
@@ -188,7 +221,7 @@ fn optimize_pvp(
     on_progress: &mut impl FnMut(OptimizeProgress),
     top_n: usize,
     aggression: &AggressionLevel,
-) -> Vec<BuildCandidate> {
+) -> Result<Vec<BuildCandidate>, String> {
     on_progress(OptimizeProgress {
         stage: "Evaluating PvP specialization combinations...".into(),
         done: false,
@@ -269,7 +302,7 @@ fn optimize_pvp(
         done: true,
     });
 
-    all_candidates
+    Ok(all_candidates)
 }
 
 /// Calculate approximate stats for a gear candidate using itemstat formulas.
@@ -591,7 +624,8 @@ mod tests {
             3,
             &GameMode::PvE,
             None,
-        );
+        )
+        .expect("optimize() should succeed with valid data");
 
         assert!(!candidates.is_empty());
         // Should be sorted by score descending

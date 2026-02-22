@@ -6,6 +6,15 @@ use serde::{Deserialize, Serialize};
 use crate::combat::CombatPerformance;
 use crate::stats::{DerivedStats, StatBlock};
 
+/// Normalization divisors for cross-archetype score comparison.
+/// These map typical high-end values to ~1.0 so scores across different
+/// archetypes occupy a comparable range. Empirically tuned — do not
+/// adjust without validating cross-archetype ordering.
+const STRIKE_DPS_NORM: f64 = 50000.0;
+const CONDI_DPS_NORM: f64 = 50000.0;
+const TOTAL_DPS_NORM: f64 = 100000.0;
+const EFFECTIVE_HEALTH_NORM: f64 = 200000.0;
+
 /// 5-stage aggression level slider.
 /// Determines the balance between damage output and survivability/control.
 /// Stage 1 = pure survivability, Stage 5 = pure damage, Stage 3 = balanced.
@@ -248,12 +257,12 @@ pub fn score_combat(perf: &CombatPerformance, archetype: &Archetype) -> f64 {
     match archetype {
         Archetype::PowerDPS => {
             // Primary: strike DPS. Minor: crit-scaling reward.
-            perf.strike_dps_index / 50000.0
+            perf.strike_dps_index / STRIKE_DPS_NORM
         }
         Archetype::ConditionDPS => {
             // Primary: condition DPS. Duration multiplier rewards Expertise investment.
             let dur_bonus = (perf.condi_duration_pct / 100.0).min(1.0) * 0.15;
-            perf.condition_dps_index / 50000.0 + dur_bonus
+            perf.condition_dps_index / CONDI_DPS_NORM + dur_bonus
         }
         Archetype::SustainHybrid => {
             // Balanced DPS + survivability, strike-leaning
@@ -263,7 +272,7 @@ pub fn score_combat(perf: &CombatPerformance, archetype: &Archetype) -> f64 {
         }
         Archetype::Tank => {
             // Maximize effective health and damage reduction
-            perf.effective_health / 200000.0
+            perf.effective_health / EFFECTIVE_HEALTH_NORM
                 + perf.damage_reduction_pct / 100.0
                 + perf.healing_power_index / 10000.0
         }
@@ -283,7 +292,7 @@ pub fn score_combat(perf: &CombatPerformance, archetype: &Archetype) -> f64 {
         }
         Archetype::CelestialHybrid => {
             // Well-rounded: DPS + support + survivability, all weighted evenly
-            perf.total_dps_index / 100000.0
+            perf.total_dps_index / TOTAL_DPS_NORM
                 + perf.boon_duration_pct / 200.0
                 + perf.condi_duration_pct / 300.0
                 + perf.healing_power_index / 8000.0
@@ -307,10 +316,10 @@ pub fn score_combat_weighted(
 
     // Damage component — what the archetype cares about offensively
     let damage_score = match archetype {
-        Archetype::PowerDPS => perf.strike_dps_index / 50000.0,
+        Archetype::PowerDPS => perf.strike_dps_index / STRIKE_DPS_NORM,
         Archetype::ConditionDPS => {
             let dur_bonus = (perf.condi_duration_pct / 100.0).min(1.0) * 0.15;
-            perf.condition_dps_index / 50000.0 + dur_bonus
+            perf.condition_dps_index / CONDI_DPS_NORM + dur_bonus
         }
         Archetype::SustainHybrid => {
             perf.strike_dps_index / 60000.0 + perf.condition_dps_index / 120000.0
@@ -323,14 +332,14 @@ pub fn score_combat_weighted(
             perf.healing_power_index / 3000.0 + perf.boon_duration_pct / 200.0
         }
         Archetype::CelestialHybrid => {
-            perf.total_dps_index / 100000.0
+            perf.total_dps_index / TOTAL_DPS_NORM
                 + perf.boon_duration_pct / 200.0
                 + perf.healing_power_index / 8000.0
         }
     };
 
     // Survivability component — EHP and damage reduction
-    let survival_score = perf.effective_health / 200000.0
+    let survival_score = perf.effective_health / EFFECTIVE_HEALTH_NORM
         + perf.damage_reduction_pct / 100.0;
 
     damage_score * dw + survival_score * sw
