@@ -302,6 +302,7 @@ pub fn synergy_build_prompt(
     pre_computed_context: &str,
     current_build_summary: Option<&str>,
     determined_prefix: Option<&str>,
+    locked_elite_spec: Option<&str>,
 ) -> String {
     let weights_guidance = weights_context(weights);
     let summary = weights.summary_label();
@@ -332,12 +333,21 @@ pub fn synergy_build_prompt(
         ))
         .unwrap_or_default();
 
+    let elite_spec_constraint = locked_elite_spec
+        .map(|spec| format!(
+            "\n\nELITE SPECIALIZATION (LOCKED — DO NOT CHANGE):\n\
+             The player has chosen \"{}\" as their elite specialization. You MUST include \"{}\" as one of the 3 specializations \
+             with \"elite\": true. Do NOT substitute a different elite spec. You MAY freely change the other 2 core specializations and ALL trait choices.",
+            spec, spec
+        ))
+        .unwrap_or_default();
+
     format!(
         r#"You are an expert Guild Wars 2 build optimizer with deep knowledge of trait-skill-equipment synergies.
 
 {task}
 
-{weights_guidance}{prefix_constraint}
+{weights_guidance}{prefix_constraint}{elite_spec_constraint}
 
 {game_rules}
 

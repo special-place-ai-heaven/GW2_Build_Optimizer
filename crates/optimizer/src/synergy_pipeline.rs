@@ -73,6 +73,7 @@ pub fn optimize_synergy(
     weights: &OptimizationWeights,
     _game_mode: &GameMode,
     gear_prefix_name: &str,
+    locked_elite_spec: Option<u32>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     let profession = db.profession(profession_name)
@@ -84,7 +85,7 @@ pub fn optimize_synergy(
         done: false,
     });
     let mut candidates = select_specs_and_traits(
-        profession, weights, &db.specializations, &db.traits,
+        profession, weights, &db.specializations, &db.traits, locked_elite_spec,
     );
 
     if candidates.is_empty() {
@@ -152,8 +153,9 @@ fn select_specs_and_traits(
     weights: &OptimizationWeights,
     specs_cache: &HashMap<u32, Specialization>,
     traits_cache: &HashMap<u32, GW2Trait>,
+    locked_elite_spec: Option<u32>,
 ) -> Vec<SynergyCandidate> {
-    let spec_combos = search_spec_combos(&profession.specializations, specs_cache, None);
+    let spec_combos = search_spec_combos(&profession.specializations, specs_cache, locked_elite_spec);
 
     let mut candidates = Vec::new();
 
