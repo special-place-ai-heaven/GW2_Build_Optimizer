@@ -93,6 +93,16 @@ pub struct MainState {
     pub save_status: Option<String>,
     // Settings
     pub confirm_reset: bool,
+    /// Input buffer for new API key entry in Settings (current provider).
+    pub settings_key_input: String,
+    /// Status of the last key validation attempt in Settings.
+    pub settings_key_status: Option<String>,
+    /// Whether the key validation passed (true = green, false = orange/red).
+    pub settings_key_valid: bool,
+    /// Optional warning (e.g. billing/quota) shown below the status message.
+    pub settings_key_warning: Option<String>,
+    /// Whether a key validation is in progress in Settings.
+    pub settings_key_validating: bool,
     // UX feedback
     /// Frame counter for auto-dismissing save status messages (~180 frames ≈ 3s at 60fps).
     pub save_status_frames: u32,
@@ -102,6 +112,13 @@ pub struct MainState {
     pub chat_wait_frames: u32,
     /// Frame counter for "Copied!" tooltip feedback.
     pub copy_feedback_frames: u32,
+    // Dynamic model list
+    /// Models fetched from the active provider's API: (id, display_name).
+    pub available_models: Vec<(String, String)>,
+    /// Whether a model list fetch is in progress.
+    pub models_loading: bool,
+    /// Error from the last model list fetch.
+    pub models_error: Option<String>,
     // API health
     pub api_status: ApiStatus,
     /// Frame counter for periodic API health checks (~3600 frames ≈ 60s at 60fps).
@@ -138,7 +155,7 @@ pub enum Screen {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SetupStep {
     Gw2ApiKey,
-    GeminiApiKey,
+    LlmApiKey,
     DataDownload,
     Complete,
 }
@@ -149,9 +166,9 @@ pub struct SetupState {
     pub gw2_key_input: String,
     pub gw2_key_status: KeyStatus,
     pub gw2_key_scopes: Vec<(String, bool)>, // (scope_name, present)
-    // Gemini key input
-    pub gemini_key_input: String,
-    pub gemini_key_status: KeyStatus,
+    // AI provider key input (provider-agnostic)
+    pub llm_key_input: String,
+    pub llm_key_status: KeyStatus,
     // Data download
     pub download_progress: Option<DownloadState>,
 }
@@ -191,11 +208,11 @@ pub fn init(addon_dir: PathBuf) {
 
     let screen = if config.is_setup_complete() {
         Screen::Main
-    } else if config.has_gw2_key() && config.has_gemini_key() {
+    } else if config.has_gw2_key() && config.has_active_llm_key() {
         // Keys present but cache missing — go to download
         Screen::Setup(SetupStep::DataDownload)
     } else if config.has_gw2_key() {
-        Screen::Setup(SetupStep::GeminiApiKey)
+        Screen::Setup(SetupStep::LlmApiKey)
     } else {
         Screen::Setup(SetupStep::Gw2ApiKey)
     };
@@ -205,9 +222,9 @@ pub fn init(addon_dir: PathBuf) {
         setup.gw2_key_input = key.clone();
         setup.gw2_key_status = KeyStatus::Valid;
     }
-    if let Some(ref key) = config.gemini_api_key {
-        setup.gemini_key_input = key.clone();
-        setup.gemini_key_status = KeyStatus::Valid;
+    if let Some(key) = config.active_api_key() {
+        setup.llm_key_input = key.to_string();
+        setup.llm_key_status = KeyStatus::Valid;
     }
 
     let mut main = MainState::default();

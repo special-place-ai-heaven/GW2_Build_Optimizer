@@ -293,6 +293,72 @@ impl GeminiClient {
         }
     }
 
+    /// List models that support content generation.
+    /// Calls `GET /v1beta/models` and filters by `supportedGenerationMethods`.
+    pub fn list_models(&self) -> Result<Vec<(String, String)>, GeminiError> {
+        let resp = self
+            .http
+            .get(GEMINI_MODELS_URL)
+            .header("x-goog-api-key", &self.api_key)
+            .send()?;
+
+        match resp.status().as_u16() {
+            200 => {}
+            401 | 403 => return Err(GeminiError::InvalidKey),
+            429 => return Err(GeminiError::RateLimited),
+            status => {
+                let body = resp.text().unwrap_or_default();
+                return Err(GeminiError::Api { status, message: body });
+            }
+        }
+
+        #[derive(Deserialize)]
+        struct ModelsResponse {
+            models: Option<Vec<ModelEntry>>,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ModelEntry {
+            name: Option<String>,
+            display_name: Option<String>,
+            supported_generation_methods: Option<Vec<String>>,
+        }
+
+        let body: ModelsResponse = resp
+            .json()
+            .map_err(|e| GeminiError::Parse(e.to_string()))?;
+
+        let models = body.models.unwrap_or_default();
+        let mut result: Vec<(String, String)> = models
+            .into_iter()
+            .filter(|m| {
+                m.supported_generation_methods
+                    .as_ref()
+                    .is_some_and(|methods| methods.iter().any(|m| m == "generateContent"))
+            })
+            .filter_map(|m| {
+                let name = m.name?;
+                // Strip "models/" prefix: "models/gemini-2.5-flash" → "gemini-2.5-flash"
+                let id = name.strip_prefix("models/").unwrap_or(&name).to_string();
+                let display = m.display_name.unwrap_or_else(|| id.clone());
+                Some((id, display))
+            })
+            .collect();
+
+        // Sort: models with "flash" first (cheapest), then alphabetically
+        result.sort_by(|a, b| {
+            let a_flash = a.0.contains("flash");
+            let b_flash = b.0.contains("flash");
+            match (a_flash, b_flash) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.0.cmp(&b.0),
+            }
+        });
+
+        Ok(result)
+    }
+
     /// Send a prompt to Gemini, using cache if available.
     /// Returns cached response if the same prompt was sent within 30 minutes.
     pub fn generate_cached(&self, prompt: &str) -> Result<String, GeminiError> {

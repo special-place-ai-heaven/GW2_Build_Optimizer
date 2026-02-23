@@ -9,10 +9,10 @@ pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
     ui.separator();
 
     // Step indicators
-    let steps = ["GW2 API Key", "Gemini API Key", "Download Data", "Done"];
+    let steps = ["GW2 API Key", "AI Provider Key", "Download Data", "Done"];
     let current_idx = match step {
         SetupStep::Gw2ApiKey => 0,
-        SetupStep::GeminiApiKey => 1,
+        SetupStep::LlmApiKey => 1,
         SetupStep::DataDownload => 2,
         SetupStep::Complete => 3,
     };
@@ -37,7 +37,7 @@ pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
 
     match step {
         SetupStep::Gw2ApiKey => render_gw2_key_step(ui, state),
-        SetupStep::GeminiApiKey => render_gemini_key_step(ui, state),
+        SetupStep::LlmApiKey => render_llm_key_step(ui, state),
         SetupStep::DataDownload => render_download_step(ui, state),
         SetupStep::Complete => render_complete_step(ui, state),
     }
@@ -181,67 +181,134 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
     if state.setup.gw2_key_status == KeyStatus::Valid {
         if ui.button_with_size("Next >>", [120.0, 0.0]) {
-            state.screen = Screen::Setup(SetupStep::GeminiApiKey);
+            state.screen = Screen::Setup(SetupStep::LlmApiKey);
         }
     }
 }
 
-fn render_gemini_key_step(ui: &Ui, state: &mut AddonState) {
-    ui.text("Step 2: Google Gemini API Key");
+fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
+    use gw2_core::config::LlmProvider;
+
+    ui.text("Step 2: AI Provider Setup");
     ui.spacing();
 
     ui.text_wrapped(
-        "Get a free Gemini API key from Google AI Studio. \
-         Copy the URL below and paste it in your browser:",
+        "Choose an AI provider and enter your API key. \
+         The optimizer uses AI for build synergy reasoning.",
     );
     ui.spacing();
 
-    let url = "https://aistudio.google.com/apikey";
+    // Provider radio buttons
+    ui.text("Provider:");
+    for provider in &LlmProvider::ALL {
+        let label = provider.label();
+        if ui.radio_button_bool(label, state.config.active_provider == *provider) {
+            if state.config.active_provider != *provider {
+                state.config.active_provider = provider.clone();
+                // Reset validation when switching providers
+                state.setup.llm_key_input.clear();
+                state.setup.llm_key_status = KeyStatus::NotValidated;
+                // Pre-fill if we already have a key for this provider
+                if let Some(key) = state.config.active_api_key() {
+                    state.setup.llm_key_input = key.to_string();
+                    state.setup.llm_key_status = KeyStatus::Valid;
+                }
+            }
+        }
+    }
+    ui.spacing();
+
+    // Provider-specific help text and URL
+    let (help_text, url, url_instructions) = match state.config.active_provider {
+        LlmProvider::Gemini => (
+            "Get a free Gemini API key from Google AI Studio:",
+            "https://aistudio.google.com/apikey",
+            "Click 'Create API key', select any project, and copy the key.",
+        ),
+        LlmProvider::OpenAI => (
+            "Get an OpenAI API key from the OpenAI platform:",
+            "https://platform.openai.com/api-keys",
+            "Click 'Create new secret key', name it, and copy the key.",
+        ),
+        LlmProvider::Anthropic => (
+            "Get an Anthropic API key from the Anthropic console:",
+            "https://console.anthropic.com/settings/keys",
+            "Click 'Create Key', name it, and copy the key.",
+        ),
+    };
+
+    ui.text_wrapped(help_text);
+    ui.spacing();
+
     let mut url_buf = String::from(url);
     ui.set_next_item_width(-1.0);
-    ui.input_text("##gemini_url", &mut url_buf).read_only(true).build();
+    ui.input_text("##llm_url", &mut url_buf).read_only(true).build();
     ui.spacing();
 
-    ui.text_wrapped(
-        "Click 'Create API key', select any project, and copy the key.",
-    );
+    ui.text_wrapped(url_instructions);
     ui.spacing();
 
     // Key input
-    ui.text("Paste your Gemini API key:");
+    let provider_label = state.config.active_provider.label();
+    ui.text(&format!("Paste your {} API key:", provider_label));
     ui.set_next_item_width(-1.0);
-    ui.input_text("##gemini_key", &mut state.setup.gemini_key_input)
-        .build();
+    ui.input_text("##llm_key", &mut state.setup.llm_key_input).build();
     ui.spacing();
 
     // Validate button
-    let can_validate = !state.setup.gemini_key_input.is_empty()
-        && state.setup.gemini_key_status != KeyStatus::Validating;
+    let can_validate = !state.setup.llm_key_input.is_empty()
+        && state.setup.llm_key_status != KeyStatus::Validating;
 
     if ui.button_with_size("Validate", [120.0, 0.0]) && can_validate {
-        let key = state.setup.gemini_key_input.clone();
-        state.setup.gemini_key_status = KeyStatus::Validating;
+        let key = state.setup.llm_key_input.clone();
+        let provider = state.config.active_provider.clone();
+        state.setup.llm_key_status = KeyStatus::Validating;
 
         let token = state.cancel_token.clone();
         std::thread::spawn(move || {
             if token.is_cancelled() { return; }
 
-            let result = gw2_optimizer::gemini::GeminiClient::new(&key, gw2_core::config::DEFAULT_GEMINI_MODEL)
-                .and_then(|c| c.validate_key());
+            let result = (|| -> Result<(), gw2_optimizer::llm::LlmError> {
+                use gw2_optimizer::llm::LlmClient;
+                match provider {
+                    LlmProvider::Gemini => {
+                        let c = gw2_optimizer::llm::gemini::GeminiLlmClient::new(
+                            &key, gw2_core::config::DEFAULT_GEMINI_MODEL,
+                        )?;
+                        c.validate_key()
+                    }
+                    LlmProvider::OpenAI => {
+                        let c = gw2_optimizer::llm::openai::OpenAiClient::new(
+                            &key, gw2_core::config::DEFAULT_OPENAI_MODEL,
+                        )?;
+                        c.validate_key()
+                    }
+                    LlmProvider::Anthropic => {
+                        let c = gw2_optimizer::llm::anthropic::AnthropicClient::new(
+                            &key, gw2_core::config::DEFAULT_ANTHROPIC_MODEL,
+                        )?;
+                        c.validate_key()
+                    }
+                }
+            })();
 
             if token.is_cancelled() { return; }
 
             crate::state::with_state(|s| match result {
                 Ok(()) => {
-                    s.setup.gemini_key_status = KeyStatus::Valid;
-                    s.config.gemini_api_key = Some(key);
+                    s.setup.llm_key_status = KeyStatus::Valid;
+                    // Store key in the correct provider slot
+                    match s.config.active_provider {
+                        LlmProvider::Gemini => { s.config.gemini_api_key = Some(key); }
+                        LlmProvider::OpenAI => { s.config.openai_api_key = Some(key); }
+                        LlmProvider::Anthropic => { s.config.anthropic_api_key = Some(key); }
+                    }
                     if let Err(e) = s.config.save(&s.config_path) {
                         nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
                     }
                 }
                 Err(e) => {
-                    s.setup.gemini_key_status =
-                        KeyStatus::Invalid(e.to_string());
+                    s.setup.llm_key_status = KeyStatus::Invalid(e.to_string());
                 }
             });
         });
@@ -249,7 +316,7 @@ fn render_gemini_key_step(ui: &Ui, state: &mut AddonState) {
 
     ui.same_line();
 
-    match &state.setup.gemini_key_status {
+    match &state.setup.llm_key_status {
         KeyStatus::NotValidated => ui.text("Enter your key and click Validate"),
         KeyStatus::Validating => ui.text("Validating..."),
         KeyStatus::Valid => {
@@ -265,7 +332,7 @@ fn render_gemini_key_step(ui: &Ui, state: &mut AddonState) {
     if ui.button_with_size("<< Back", [120.0, 0.0]) {
         state.screen = Screen::Setup(SetupStep::Gw2ApiKey);
     }
-    if state.setup.gemini_key_status == KeyStatus::Valid {
+    if state.setup.llm_key_status == KeyStatus::Valid {
         ui.same_line();
         if ui.button_with_size("Next >>", [120.0, 0.0]) {
             state.screen = Screen::Setup(SetupStep::DataDownload);
@@ -399,7 +466,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
     if !is_downloading {
         ui.spacing();
         if ui.button_with_size("<< Back", [120.0, 0.0]) {
-            state.screen = Screen::Setup(SetupStep::GeminiApiKey);
+            state.screen = Screen::Setup(SetupStep::LlmApiKey);
         }
     }
 }
