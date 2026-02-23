@@ -376,8 +376,8 @@ fn select_sigils(
     for candidate in candidates.iter_mut() {
         let mut selected_ids: Vec<u32> = Vec::new();
 
-        // Select 2 unique sigils greedily
-        for _slot in 0..2 {
+        // Select 4 sigils (2 per weapon set) greedily, no duplicates
+        for _slot in 0..4 {
             let mut best_score = f64::NEG_INFINITY;
             let mut best_sigil: Option<(u32, String)> = None;
             let mut best_effects: Vec<NormalizedEffect> = Vec::new();
@@ -524,8 +524,8 @@ fn select_weapons(
 
         for &(weapon, is_2h) in &available {
             // Skip if same as set 1 main
-            if best_set1.0.as_deref() == Some(weapon) && best_set1.1.is_none() && is_2h {
-                continue; // Same 2H weapon
+            if best_set1.0.as_deref() == Some(weapon) {
+                continue; // Don't reuse set 1's primary weapon in set 2
             }
 
             let info = &profession.weapons[weapon];
@@ -554,7 +554,12 @@ fn select_weapons(
         }
 
         candidate.weapons = (best_set1.0, best_set1.1, best_set2.0, best_set2.1);
-        candidate.score += best_set1_score + best_set2_score;
+        if best_set1_score.is_finite() {
+            candidate.score += best_set1_score;
+        }
+        if best_set2_score.is_finite() {
+            candidate.score += best_set2_score;
+        }
     }
 }
 
@@ -594,21 +599,47 @@ fn select_skills(
     let prof_skills = db.profession_skills(profession_name);
 
     for candidate in candidates.iter_mut() {
-        // Heal skill
-        let heals: Vec<&&Skill> = prof_skills.iter()
-            .filter(|s| s.slot.as_deref() == Some("Heal"))
+        // Filter skills by elite spec gate: only allow skills whose specialization
+        // is None (core skill) or matches one of the candidate's equipped specs.
+        let gated_skills: Vec<&&Skill> = prof_skills.iter()
+            .filter(|s| match s.specialization {
+                Some(spec_id) => candidate.spec_ids.contains(&spec_id),
+                None => true,
+            })
             .collect();
-        candidate.heal = pick_best_skill(&heals, weights, &candidate.accumulated);
+
+        // Heal skill
+        let heals: Vec<&&Skill> = gated_skills.iter()
+            .filter(|s| s.slot.as_deref() == Some("Heal"))
+            .copied()
+            .collect();
+        if let Some((id, name)) = pick_best_skill(&heals, weights, &candidate.accumulated) {
+            // Add heal effects to accumulated for subsequent skill synergy scoring
+            if let Some(skill) = db.skills.get(&id) {
+                let effects = extract_skill_effects(skill);
+                candidate.accumulated.push((ComponentId::Skill(id), effects));
+            }
+            candidate.heal = Some((id, name));
+        }
 
         // Elite skill
-        let elites: Vec<&&Skill> = prof_skills.iter()
+        let elites: Vec<&&Skill> = gated_skills.iter()
             .filter(|s| s.slot.as_deref() == Some("Elite"))
+            .copied()
             .collect();
-        candidate.elite_skill = pick_best_skill(&elites, weights, &candidate.accumulated);
+        if let Some((id, name)) = pick_best_skill(&elites, weights, &candidate.accumulated) {
+            // Add elite effects to accumulated for subsequent skill synergy scoring
+            if let Some(skill) = db.skills.get(&id) {
+                let effects = extract_skill_effects(skill);
+                candidate.accumulated.push((ComponentId::Skill(id), effects));
+            }
+            candidate.elite_skill = Some((id, name));
+        }
 
         // Utility skills (3, greedy sequential)
-        let utilities: Vec<&&Skill> = prof_skills.iter()
+        let utilities: Vec<&&Skill> = gated_skills.iter()
             .filter(|s| s.slot.as_deref() == Some("Utility"))
+            .copied()
             .collect();
 
         let mut used_ids: Vec<u32> = Vec::new();

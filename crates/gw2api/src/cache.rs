@@ -2,7 +2,7 @@
 //! Each cache file stores metadata (build number, timestamp) alongside the data.
 //! Cache is invalidated when the GW2 game build number changes.
 
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
@@ -43,8 +43,9 @@ impl DataCache {
         let path = self.path_for(key);
         let tmp_path = self.base_path.join(format!("{}.tmp", key));
         let file = std::fs::File::create(&tmp_path)?;
-        let writer = BufWriter::new(file);
-        serde_json::to_writer(writer, &entry)?;
+        let mut writer = BufWriter::new(file);
+        serde_json::to_writer(&mut writer, &entry)?;
+        writer.flush()?;
         std::fs::rename(&tmp_path, &path)?;
         Ok(())
     }
@@ -101,7 +102,7 @@ impl DataCache {
     pub fn clear_all(&self) {
         if let Ok(entries) = std::fs::read_dir(&self.base_path) {
             for entry in entries.flatten() {
-                if entry.path().extension().is_some_and(|ext| ext == "json") {
+                if entry.path().extension().is_some_and(|ext| ext == "json" || ext == "tmp") {
                     std::fs::remove_file(entry.path()).ok();
                 }
             }
@@ -129,8 +130,9 @@ impl DataCache {
         let path = self.path_for(&key);
         let tmp_path = self.base_path.join(format!("{}.tmp", key));
         let file = std::fs::File::create(&tmp_path)?;
-        let writer = BufWriter::new(file);
-        serde_json::to_writer(writer, data)?;
+        let mut writer = BufWriter::new(file);
+        serde_json::to_writer(&mut writer, data)?;
+        writer.flush()?;
         std::fs::rename(&tmp_path, &path)?;
         Ok(())
     }
@@ -156,8 +158,9 @@ impl DataCache {
         let path = self.path_for("characters");
         let tmp_path = self.base_path.join("characters.tmp");
         let file = std::fs::File::create(&tmp_path)?;
-        let writer = BufWriter::new(file);
-        serde_json::to_writer(writer, characters)?;
+        let mut writer = BufWriter::new(file);
+        serde_json::to_writer(&mut writer, characters)?;
+        writer.flush()?;
         std::fs::rename(&tmp_path, &path)?;
         Ok(())
     }
@@ -179,16 +182,19 @@ impl DataCache {
 }
 
 /// Sanitize a character name for use in cache filenames.
+/// Uses full Unicode lowercase for consistent normalization of non-ASCII names.
 fn sanitize_name(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
-                c.to_ascii_lowercase()
-            } else {
-                '_'
+    let mut result = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c.is_alphanumeric() || c == '-' || c == '_' {
+            for lc in c.to_lowercase() {
+                result.push(lc);
             }
-        })
-        .collect()
+        } else {
+            result.push('_');
+        }
+    }
+    result
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -271,7 +277,7 @@ mod tests {
     #[test]
     fn test_sanitize_name() {
         assert_eq!(super::sanitize_name("Fun Detected"), "fun_detected");
-        assert_eq!(super::sanitize_name("Ælfred's Toon"), "Ælfred_s_toon");
+        assert_eq!(super::sanitize_name("Ælfred's Toon"), "ælfred_s_toon");
         assert_eq!(super::sanitize_name("simple"), "simple");
     }
 }

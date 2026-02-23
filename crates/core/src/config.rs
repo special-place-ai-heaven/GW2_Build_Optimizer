@@ -31,10 +31,13 @@ impl AppConfig {
     }
 
     pub fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        match std::fs::read_to_string(path) {
+            Err(_) => Self::default(),
+            Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
+                eprintln!("Warning: config parse error ({}), using defaults", e);
+                Self::default()
+            }),
+        }
     }
 
     pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
@@ -43,7 +46,9 @@ impl AppConfig {
         }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        std::fs::write(path, json)
+        let tmp_path = path.with_extension("tmp");
+        std::fs::write(&tmp_path, &json)?;
+        std::fs::rename(&tmp_path, path)
     }
 
     pub fn has_gw2_key(&self) -> bool {
