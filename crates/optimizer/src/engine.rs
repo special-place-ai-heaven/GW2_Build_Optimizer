@@ -536,6 +536,7 @@ pub fn optimize_with_gemini(
     game_mode: &GameMode,
     llm_client: &dyn LlmClient,
     current_build_summary: Option<&str>,
+    locked_elite_spec: Option<u32>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     // 1. DETERMINISTIC gear prefix selection — this is authoritative, LLM cannot override
@@ -576,6 +577,9 @@ pub fn optimize_with_gemini(
         stage: "Preparing Gemini prompt...".into(),
         done: false,
     });
+    let locked_elite_name = locked_elite_spec.and_then(|id| {
+        db.specializations.get(&id).map(|s| s.name.as_str())
+    });
     let prompt = prompts::synergy_build_prompt(
         profession_name,
         weights,
@@ -583,6 +587,7 @@ pub fn optimize_with_gemini(
         &pre_computed_context,
         current_build_summary,
         Some(determined_prefix),
+        locked_elite_name,
     );
 
     // 4. Call LLM with tools available for optional verification
@@ -851,6 +856,7 @@ pub fn optimize_deterministic(
     game_mode: &GameMode,
     llm_client: Option<&dyn LlmClient>,
     _current_build_summary: Option<&str>,
+    locked_elite_spec: Option<u32>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     // 1. DETERMINISTIC gear prefix selection (reuse existing)
@@ -863,7 +869,7 @@ pub fn optimize_deterministic(
 
     // 2. Run the full synergy pipeline
     let mut result = crate::synergy_pipeline::optimize_synergy(
-        db, profession_name, weights, game_mode, determined_prefix, on_progress,
+        db, profession_name, weights, game_mode, determined_prefix, locked_elite_spec, on_progress,
     )?;
 
     // 3. Optional: LLM explanation pass

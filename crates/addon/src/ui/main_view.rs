@@ -1931,7 +1931,8 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                         &game_mode,
                         llm_ref,
                         current_build_summary.as_deref(),
-                        &mut |progress| {
+                        locked_elite_spec,
+                        &mut |progress: gw2_optimizer::engine::OptimizeProgress| {
                             if token_det.is_cancelled() { return; }
                             crate::state::with_state(|s| {
                                 s.main.optimize_stage = progress.stage.clone();
@@ -1967,6 +1968,7 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                         &game_mode,
                         llm_client.as_ref(),
                         current_build_summary.as_deref(),
+                        locked_elite_spec,
                         &mut |progress| {
                             if token_synergy.is_cancelled() { return; }
                             crate::state::with_state(|s| {
