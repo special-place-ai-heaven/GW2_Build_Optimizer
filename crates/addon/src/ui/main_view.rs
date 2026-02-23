@@ -564,136 +564,420 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     ui.separator();
     ui.spacing();
 
-    // API Keys
-    if let Some(ref key) = state.config.gw2_api_key {
-        let display = if key.chars().count() > 12 {
-            let prefix: String = key.chars().take(8).collect();
-            let suffix: String = key.chars().rev().take(4).collect::<String>().chars().rev().collect();
-            format!("{}...{}", prefix, suffix)
-        } else {
-            "****".into()
-        };
-        ui.text(&format!("GW2 API Key: {}", display));
-    }
-    if state.config.gemini_api_key.is_some() {
-        ui.text("Gemini API Key: configured");
-    }
-    if let Some(build) = state.config.cache_build_number {
-        ui.text(&format!("Cached game build: {}", build));
-    }
-
-    ui.spacing();
-    ui.separator();
-    ui.spacing();
-
-    // Cache size display
-    let cache_dir = state.addon_dir.join("cache");
-    let cache_size = calculate_dir_size(&cache_dir);
-    ui.text(&format!("Cache size: {}", format_bytes(cache_size)));
-    ui.same_line();
-    let already_refreshing = state.main.game_db_loading;
-    if already_refreshing {
-        let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        ui.button_with_size("Clear Cache", [100.0, 0.0]);
-        style.pop();
-    } else if ui.button_with_size("Clear Cache", [100.0, 0.0]) {
-        let _ = std::fs::remove_dir_all(&cache_dir);
-        state.config.cache_build_number = None;
-        if let Err(e) = state.config.save(&state.config_path) {
-            nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
-        }
-        state.main.game_db = None;
-        // Auto-trigger re-download after clearing
-        state.setup.download_progress = None;
-        start_game_data_refresh(state);
-    }
-
-    ui.spacing();
-
-    // Gemini quota display
-    let usage_path = state.addon_dir.join("gemini_usage.json");
-    if let Ok(json) = std::fs::read_to_string(&usage_path) {
-        if let Ok(usage) = serde_json::from_str::<serde_json::Value>(&json) {
-            let today = usage.get("requests_today").and_then(|v| v.as_u64()).unwrap_or(0);
-            ui.text(&format!("Gemini usage today: {} / 250 requests", today));
-        }
-    } else {
-        ui.text("Gemini usage today: 0 / 250 requests");
-    }
-
-    ui.spacing();
-
-    // Gemini model selector
+    // ═══ Section 1: AI Provider Configuration ═══
+    if nexus::imgui::CollapsingHeader::new("AI Provider Configuration")
+        .default_open(true)
+        .build(ui)
     {
-        let current_model = state.config.gemini_model_id().to_string();
-        let models = gw2_core::config::GEMINI_MODELS;
-        let preview = models.iter()
-            .find(|(id, _)| *id == current_model)
-            .map(|(_, label)| *label)
-            .unwrap_or(&current_model);
-        ui.text("Gemini Model:");
+        ui.indent();
+
+        // Provider radio buttons
+        let mut provider_changed = false;
+        for provider in &gw2_core::config::LlmProvider::ALL {
+            let is_selected = state.config.active_provider == *provider;
+            if ui.radio_button_bool(provider.label(), is_selected) && !is_selected {
+                state.config.active_provider = provider.clone();
+                provider_changed = true;
+            }
+        }
+        if provider_changed {
+            state.main.settings_key_input.clear();
+            state.main.settings_key_status = None;
+            state.main.settings_key_valid = false;
+            state.main.settings_key_warning = None;
+            state.main.available_models.clear();
+            state.main.models_error = None;
+            if let Err(e) = state.config.save(&state.config_path) {
+                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+            }
+        }
+
+        ui.spacing();
+
+        // Per-provider key status + input
+        let provider_label = state.config.active_provider.label().to_string();
+        let has_key = state.config.has_active_llm_key();
+        if has_key {
+            ui.text_colored([0.0, 1.0, 0.0, 1.0], &format!("{} API Key: configured", provider_label));
+        } else {
+            ui.text_colored([1.0, 0.5, 0.0, 1.0], &format!("{} API Key: not set", provider_label));
+        }
+
+        // Test Connection button (for already-saved key)
+        if has_key {
+            ui.same_line();
+            let validating = state.main.settings_key_validating;
+            if validating {
+                let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+                ui.button_with_size("Testing...", [120.0, 0.0]);
+                style.pop();
+            } else if ui.button_with_size("Test Connection", [120.0, 0.0]) {
+                state.main.settings_key_validating = true;
+                state.main.settings_key_status = Some("Testing connection...".into());
+                state.main.settings_key_valid = false;
+                state.main.settings_key_warning = None;
+                let addon_dir = state.addon_dir.clone();
+                let config_snapshot = state.config.clone();
+                let token = state.cancel_token.clone();
+                std::thread::spawn(move || {
+                    if token.is_cancelled() { return; }
+                    let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
+                        .map(|c| c.validate_key_detailed());
+                    if token.is_cancelled() { return; }
+                    crate::state::with_state(|s| {
+                        s.main.settings_key_validating = false;
+                        match result {
+                            Ok(validation) => {
+                                s.main.settings_key_valid = validation.valid;
+                                s.main.settings_key_status = Some(validation.message);
+                                s.main.settings_key_warning = validation.warning;
+                            }
+                            Err(e) => {
+                                s.main.settings_key_valid = false;
+                                s.main.settings_key_status = Some(format!("Connection failed: {}", e));
+                                s.main.settings_key_warning = None;
+                            }
+                        }
+                    });
+                });
+            }
+        }
+
+        // Key input + Save
         ui.set_next_item_width(300.0);
-        if let Some(_combo) = ComboBox::new("##gemini_model").preview_value(preview).begin(ui) {
-            for &(id, label) in models {
-                let selected = id == current_model;
+        ui.input_text(&format!("##{}_key_input", provider_label), &mut state.main.settings_key_input)
+            .hint("Enter new API key...")
+            .build();
+        ui.same_line();
+        let validating = state.main.settings_key_validating;
+        if validating {
+            let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+            ui.button_with_size("Saving...", [100.0, 0.0]);
+            style.pop();
+        } else if ui.button_with_size("Save Key", [100.0, 0.0]) {
+            let key = state.main.settings_key_input.trim().to_string();
+            if !key.is_empty() {
+                // Save key immediately
+                match state.config.active_provider {
+                    gw2_core::config::LlmProvider::Gemini => {
+                        state.config.gemini_api_key = Some(key.clone());
+                    }
+                    gw2_core::config::LlmProvider::OpenAI => {
+                        state.config.openai_api_key = Some(key.clone());
+                    }
+                    gw2_core::config::LlmProvider::Anthropic => {
+                        state.config.anthropic_api_key = Some(key.clone());
+                    }
+                }
+                if let Err(e) = state.config.save(&state.config_path) {
+                    nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                }
+                state.main.settings_key_input.clear();
+                state.main.settings_key_status = Some("Key saved. Validating...".into());
+                state.main.settings_key_valid = false;
+                state.main.settings_key_warning = None;
+
+                // Validate in background using detailed validation
+                state.main.settings_key_validating = true;
+                let addon_dir = state.addon_dir.clone();
+                let config_snapshot = state.config.clone();
+                let token = state.cancel_token.clone();
+                std::thread::spawn(move || {
+                    if token.is_cancelled() { return; }
+                    let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
+                        .map(|c| c.validate_key_detailed());
+                    if token.is_cancelled() { return; }
+                    crate::state::with_state(|s| {
+                        s.main.settings_key_validating = false;
+                        match result {
+                            Ok(validation) => {
+                                s.main.settings_key_valid = validation.valid;
+                                s.main.settings_key_status = Some(validation.message);
+                                s.main.settings_key_warning = validation.warning;
+                            }
+                            Err(e) => {
+                                s.main.settings_key_valid = false;
+                                s.main.settings_key_status = Some(format!("Key saved but validation failed: {}", e));
+                                s.main.settings_key_warning = None;
+                            }
+                        }
+                    });
+                });
+            }
+        }
+
+        // Status display
+        if let Some(ref status) = state.main.settings_key_status {
+            if state.main.settings_key_valid {
+                ui.text_colored([0.0, 1.0, 0.0, 1.0], status);
+            } else if status.contains("saved") || status.contains("Testing") || status.contains("Validating") {
+                ui.text_colored([0.7, 0.7, 0.7, 1.0], status);
+            } else {
+                ui.text_colored([1.0, 0.3, 0.3, 1.0], status);
+            }
+        }
+        // Warning display (billing/quota)
+        if let Some(ref warning) = state.main.settings_key_warning {
+            ui.text_colored([1.0, 0.7, 0.0, 1.0], &format!("  Warning: {}", warning));
+        }
+
+        ui.spacing();
+
+        // Model selector for the active provider (dynamic fetch with fallback)
+        let current_model = match state.config.active_provider {
+            gw2_core::config::LlmProvider::Gemini => state.config.gemini_model_id().to_string(),
+            gw2_core::config::LlmProvider::OpenAI => state.config.openai_model_id().to_string(),
+            gw2_core::config::LlmProvider::Anthropic => state.config.anthropic_model_id().to_string(),
+        };
+        let config_field = match state.config.active_provider {
+            gw2_core::config::LlmProvider::Gemini => "gemini",
+            gw2_core::config::LlmProvider::OpenAI => "openai",
+            gw2_core::config::LlmProvider::Anthropic => "anthropic",
+        };
+
+        // Auto-fetch models when list is empty, key exists, and not already loading
+        if state.main.available_models.is_empty() && !state.main.models_loading && has_key {
+            start_fetch_models(state);
+        }
+
+        // Build combined model list: dynamic fetched + hardcoded fallback
+        let display_models: Vec<(String, String)> = if !state.main.available_models.is_empty() {
+            state.main.available_models.clone()
+        } else {
+            // Fallback to hardcoded constants
+            let hardcoded: &[(&str, &str)] = match state.config.active_provider {
+                gw2_core::config::LlmProvider::Gemini => gw2_core::config::GEMINI_MODELS,
+                gw2_core::config::LlmProvider::OpenAI => gw2_core::config::OPENAI_MODELS,
+                gw2_core::config::LlmProvider::Anthropic => gw2_core::config::ANTHROPIC_MODELS,
+            };
+            hardcoded.iter().map(|(id, label)| (id.to_string(), label.to_string())).collect()
+        };
+
+        let preview = display_models.iter()
+            .find(|(id, _)| *id == current_model)
+            .map(|(_, label)| label.as_str())
+            .unwrap_or(&current_model);
+
+        ui.text("Model:");
+        ui.same_line();
+        ui.set_next_item_width(300.0);
+        if let Some(_combo) = ComboBox::new(&format!("##{}_model", config_field))
+            .preview_value(preview)
+            .begin(ui)
+        {
+            for (id, label) in &display_models {
+                let selected = *id == current_model;
                 if Selectable::new(label).selected(selected).build(ui) {
-                    state.config.gemini_model = Some(id.to_string());
+                    match state.config.active_provider {
+                        gw2_core::config::LlmProvider::Gemini => {
+                            state.config.gemini_model = Some(id.clone());
+                        }
+                        gw2_core::config::LlmProvider::OpenAI => {
+                            state.config.openai_model = Some(id.clone());
+                        }
+                        gw2_core::config::LlmProvider::Anthropic => {
+                            state.config.anthropic_model = Some(id.clone());
+                        }
+                    }
                     if let Err(e) = state.config.save(&state.config_path) {
                         nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
                     }
                 }
             }
         }
-    }
-
-    ui.spacing();
-    ui.separator();
-    ui.spacing();
-
-    // Cache management — actually re-download game data
-    let refreshing = state.main.game_db_loading;
-    if refreshing {
-        // Show download progress
-        let stage = &state.main.game_refresh_stage;
-        if !stage.is_empty() {
-            ui.text_colored([1.0, 1.0, 0.0, 1.0], stage);
-        } else {
-            ui.text_colored([1.0, 1.0, 0.0, 1.0], "Downloading game data...");
-        }
-        let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        ui.button_with_size("Refreshing...", [200.0, 0.0]);
-        style.pop();
-    } else if ui.button_with_size("Refresh Game Data", [200.0, 0.0]) {
-        // Clear cache and re-download
-        let cache_dir = state.addon_dir.join("cache");
-        let _ = std::fs::remove_dir_all(&cache_dir);
-        state.config.cache_build_number = None;
-        if let Err(e) = state.config.save(&state.config_path) {
-            nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
-        }
-        state.main.game_db = None;
-        // Trigger re-download via setup flow
-        state.setup.download_progress = None;
-        start_game_data_refresh(state);
-    }
-
-    ui.spacing();
-
-    // Reset Setup with confirmation
-    if !state.main.confirm_reset {
-        if ui.button_with_size("Reset Setup", [200.0, 0.0]) {
-            state.main.confirm_reset = true;
-        }
-    } else {
-        ui.text_colored([1.0, 0.3, 0.0, 1.0], "Are you sure? This will clear all settings.");
-        if ui.button_with_size("Yes, Reset", [100.0, 0.0]) {
-            state.main.confirm_reset = false;
-            state.screen = crate::state::Screen::Setup(crate::state::SetupStep::Gw2ApiKey);
-        }
         ui.same_line();
-        if ui.button_with_size("Cancel", [100.0, 0.0]) {
-            state.main.confirm_reset = false;
+        if state.main.models_loading {
+            ui.text_colored([0.7, 0.7, 0.7, 1.0], "Loading...");
+        } else if ui.button("Refresh Models") {
+            state.main.available_models.clear();
+            state.main.models_error = None;
+            start_fetch_models(state);
         }
+        if let Some(ref err) = state.main.models_error {
+            ui.text_colored([1.0, 0.5, 0.0, 1.0], &format!("  Model fetch: {}", err));
+        }
+
+        ui.spacing();
+
+        // Usage / quota display
+        let usage_filename = match state.config.active_provider {
+            gw2_core::config::LlmProvider::Gemini => "gemini_usage.json",
+            gw2_core::config::LlmProvider::OpenAI => "openai_usage.json",
+            gw2_core::config::LlmProvider::Anthropic => "anthropic_usage.json",
+        };
+        let usage_path = state.addon_dir.join(usage_filename);
+        if let Ok(json) = std::fs::read_to_string(&usage_path) {
+            if let Ok(usage) = serde_json::from_str::<serde_json::Value>(&json) {
+                let today = usage.get("requests_today").and_then(|v| v.as_u64()).unwrap_or(0);
+                ui.text(&format!("{} usage today: {} requests", provider_label, today));
+            }
+        } else {
+            ui.text(&format!("{} usage today: 0 requests", provider_label));
+        }
+
+        ui.unindent();
+        ui.spacing();
+    }
+
+    // ═══ Section 2: UI Preferences ═══
+    if nexus::imgui::CollapsingHeader::new("UI Preferences").build(ui) {
+        ui.indent();
+
+        // Window opacity slider
+        ui.text("Window Opacity:");
+        ui.set_next_item_width(200.0);
+        let mut opacity = state.config.window_opacity;
+        if nexus::imgui::Slider::new("##opacity", 0.3, 1.0)
+            .display_format("%.2f")
+            .build(ui, &mut opacity)
+        {
+            state.config.window_opacity = opacity;
+            if let Err(e) = state.config.save(&state.config_path) {
+                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+            }
+        }
+
+        // Font scale slider
+        ui.text("Font Scale:");
+        ui.set_next_item_width(200.0);
+        let mut scale = state.config.font_scale;
+        if nexus::imgui::Slider::new("##font_scale", 0.5, 2.0)
+            .display_format("%.2f")
+            .build(ui, &mut scale)
+        {
+            state.config.font_scale = scale;
+            if let Err(e) = state.config.save(&state.config_path) {
+                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+            }
+        }
+
+        ui.unindent();
+        ui.spacing();
+    }
+
+    // ═══ Section 3: Optimization Defaults ═══
+    if nexus::imgui::CollapsingHeader::new("Optimization Defaults").build(ui) {
+        ui.indent();
+
+        ui.text("Default Game Mode:");
+        let current_default = state.config.default_game_mode.clone().unwrap_or_else(|| "PvE".into());
+        for mode in &["PvE", "PvP", "WvW"] {
+            let is_selected = current_default == *mode;
+            if ui.radio_button_bool(mode, is_selected) && !is_selected {
+                state.config.default_game_mode = Some(mode.to_string());
+                if let Err(e) = state.config.save(&state.config_path) {
+                    nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                }
+            }
+        }
+
+        ui.unindent();
+        ui.spacing();
+    }
+
+    // ═══ Section 4: Cache & Data Management ═══
+    if nexus::imgui::CollapsingHeader::new("Cache & Data Management")
+        .default_open(true)
+        .build(ui)
+    {
+        ui.indent();
+
+        // GW2 API Key display
+        if let Some(ref key) = state.config.gw2_api_key {
+            let display = if key.chars().count() > 12 {
+                let prefix: String = key.chars().take(8).collect();
+                let suffix: String = key.chars().rev().take(4).collect::<String>().chars().rev().collect();
+                format!("{}...{}", prefix, suffix)
+            } else {
+                "****".into()
+            };
+            ui.text(&format!("GW2 API Key: {}", display));
+        }
+        if let Some(build) = state.config.cache_build_number {
+            ui.text(&format!("Cached game build: {}", build));
+        }
+
+        ui.spacing();
+
+        // Cache size + clear
+        let cache_dir = state.addon_dir.join("cache");
+        let cache_size = calculate_dir_size(&cache_dir);
+        ui.text(&format!("Cache size: {}", format_bytes(cache_size)));
+        ui.same_line();
+        let already_refreshing = state.main.game_db_loading;
+        if already_refreshing {
+            let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+            ui.button_with_size("Clear Cache", [100.0, 0.0]);
+            style.pop();
+        } else if ui.button_with_size("Clear Cache", [100.0, 0.0]) {
+            let _ = std::fs::remove_dir_all(&cache_dir);
+            state.config.cache_build_number = None;
+            if let Err(e) = state.config.save(&state.config_path) {
+                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+            }
+            state.main.game_db = None;
+            state.setup.download_progress = None;
+            start_game_data_refresh(state);
+        }
+
+        ui.spacing();
+
+        // Auto-refresh toggle
+        let mut auto_refresh = state.config.auto_refresh_cache;
+        if ui.checkbox("Auto-refresh cache on startup", &mut auto_refresh) {
+            state.config.auto_refresh_cache = auto_refresh;
+            if let Err(e) = state.config.save(&state.config_path) {
+                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+            }
+        }
+
+        ui.spacing();
+
+        // Refresh game data
+        let refreshing = state.main.game_db_loading;
+        if refreshing {
+            let stage = &state.main.game_refresh_stage;
+            if !stage.is_empty() {
+                ui.text_colored([1.0, 1.0, 0.0, 1.0], stage);
+            } else {
+                ui.text_colored([1.0, 1.0, 0.0, 1.0], "Downloading game data...");
+            }
+            let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+            ui.button_with_size("Refreshing...", [200.0, 0.0]);
+            style.pop();
+        } else if ui.button_with_size("Refresh Game Data", [200.0, 0.0]) {
+            let cache_dir_refresh = state.addon_dir.join("cache");
+            let _ = std::fs::remove_dir_all(&cache_dir_refresh);
+            state.config.cache_build_number = None;
+            if let Err(e) = state.config.save(&state.config_path) {
+                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+            }
+            state.main.game_db = None;
+            state.setup.download_progress = None;
+            start_game_data_refresh(state);
+        }
+
+        ui.spacing();
+
+        // Reset setup
+        if !state.main.confirm_reset {
+            if ui.button_with_size("Reset Setup", [200.0, 0.0]) {
+                state.main.confirm_reset = true;
+            }
+        } else {
+            ui.text_colored([1.0, 0.3, 0.0, 1.0], "Are you sure? This will clear all settings.");
+            if ui.button_with_size("Yes, Reset", [100.0, 0.0]) {
+                state.main.confirm_reset = false;
+                state.screen = crate::state::Screen::Setup(crate::state::SetupStep::Gw2ApiKey);
+            }
+            ui.same_line();
+            if ui.button_with_size("Cancel", [100.0, 0.0]) {
+                state.main.confirm_reset = false;
+            }
+        }
+
+        ui.unindent();
+        ui.spacing();
     }
 
     ui.spacing();
@@ -701,8 +985,9 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
 
     // About
+    let provider_label = state.config.active_provider.label();
     ui.text("GW2 Build Optimizer v1.0.0");
-    ui.text("Powered by Google Gemini AI");
+    ui.text(&format!("Powered by {} AI", provider_label));
     ui.text_wrapped("Optimizes builds using GW2 API data and LLM reasoning about trait/sigil/rune/relic synergies.");
 }
 
@@ -1383,6 +1668,37 @@ fn generate_build_chat_code(
     Some(format!("[&{}]", encoded))
 }
 
+/// Fetch available models from the active provider's API in a background thread.
+fn start_fetch_models(state: &mut AddonState) {
+    state.main.models_loading = true;
+    state.main.models_error = None;
+    let addon_dir = state.addon_dir.clone();
+    let config_snapshot = state.config.clone();
+    let token = state.cancel_token.clone();
+    std::thread::spawn(move || {
+        if token.is_cancelled() { return; }
+        let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
+            .map_err(|e| e.to_string())
+            .and_then(|c| c.list_models().map_err(|e| e.to_string()));
+        if token.is_cancelled() { return; }
+        crate::state::with_state(|s| {
+            s.main.models_loading = false;
+            match result {
+                Ok(models) => {
+                    s.main.available_models = models
+                        .into_iter()
+                        .map(|m| (m.id, m.display_name))
+                        .collect();
+                    s.main.models_error = None;
+                }
+                Err(e) => {
+                    s.main.models_error = Some(e);
+                }
+            }
+        });
+    });
+}
+
 /// Re-download game data from the GW2 API, then reload GameDb.
 fn start_game_data_refresh(state: &mut AddonState) {
     state.main.game_db_loading = true;
@@ -1563,8 +1879,7 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
 
     let db = state.main.game_db.clone();
     let profession_name = profession_name.to_string();
-    let gemini_key = state.config.gemini_api_key.clone();
-    let gemini_model = state.config.gemini_model_id().to_string();
+    let config = state.config.clone();
     let game_mode = state.main.game_mode.clone();
     let game_mode_label = game_mode.label().to_string();
     let current_build_summary = state.main.current_build.as_ref()
@@ -1603,20 +1918,18 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
 
                 // ═══ Primary: Deterministic synergy engine (no LLM for build selection) ═══
                 {
-                    let gemini_client_opt = gemini_key.as_ref().and_then(|key| {
-                        let usage_path = addon_dir.join("gemini_usage.json");
-                        gw2_optimizer::gemini::GeminiClient::with_persistence(
-                            key, &gemini_model, usage_path,
-                        ).ok()
-                    });
+                    let llm_client_opt: Option<Box<dyn gw2_optimizer::llm::LlmClient>> =
+                        gw2_optimizer::llm::create_client(&config, &addon_dir).ok();
 
                     let token_det = token.clone();
+                    let llm_ref: Option<&dyn gw2_optimizer::llm::LlmClient> =
+                        llm_client_opt.as_ref().map(|c| c.as_ref());
                     match gw2_optimizer::engine::optimize_deterministic(
                         &db,
                         &profession_name,
                         &weights,
                         &game_mode,
-                        gemini_client_opt.as_ref(),
+                        llm_ref,
                         current_build_summary.as_deref(),
                         &mut |progress| {
                             if token_det.is_cancelled() { return; }
@@ -1641,12 +1954,10 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                     }
                 }
 
-                // ═══ Fallback 1: Gemini synergy pipeline (LLM-driven build selection) ═══
-                if let Some(ref key) = gemini_key {
-                    let usage_path = addon_dir.join("gemini_usage.json");
-                    let gemini_client = gw2_optimizer::gemini::GeminiClient::with_persistence(
-                        key, &gemini_model, usage_path,
-                    ).map_err(|e| e.to_string())?;
+                // ═══ Fallback 1: LLM synergy pipeline (LLM-driven build selection) ═══
+                if config.has_active_llm_key() {
+                    let llm_client = gw2_optimizer::llm::create_client(&config, &addon_dir)
+                        .map_err(|e| e.to_string())?;
 
                     let token_synergy = token.clone();
                     match gw2_optimizer::engine::optimize_with_gemini(
@@ -1654,7 +1965,7 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                         &profession_name,
                         &weights,
                         &game_mode,
-                        &gemini_client,
+                        llm_client.as_ref(),
                         current_build_summary.as_deref(),
                         &mut |progress| {
                             if token_synergy.is_cancelled() { return; }
@@ -1672,7 +1983,7 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                             nexus::log::log(
                                 nexus::log::LogLevel::Warning,
                                 "GW2 Build Optimizer",
-                                &format!("Gemini pipeline failed, falling back to legacy: {}", e),
+                                &format!("LLM pipeline failed, falling back to legacy: {}", e),
                             );
                             // Fall through to legacy pipeline
                         }
@@ -1708,17 +2019,16 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                 let mut suggestions: Vec<crate::ui::comparison::BuildSuggestion> =
                     candidates.iter().map(|c| candidate_to_suggestion(c, &db)).collect();
 
-                // Enrich top suggestion with Gemini LLM reasoning (legacy path)
-                if let Some(ref key) = gemini_key {
+                // Enrich top suggestion with LLM reasoning (legacy path)
+                if config.has_active_llm_key() {
                     if token.is_cancelled() { return Err("Cancelled".into()); }
 
                     crate::state::with_state(|s| {
-                        s.main.optimize_stage = "Consulting Gemini for synergy analysis...".into();
+                        s.main.optimize_stage = "Consulting AI for synergy analysis...".into();
                     });
 
-                    match enrich_with_gemini(
-                        key,
-                        &gemini_model,
+                    match enrich_with_llm(
+                        &config,
                         &profession_name,
                         &weights,
                         &game_mode_label,
@@ -1733,7 +2043,7 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                             nexus::log::log(
                                 nexus::log::LogLevel::Warning,
                                 "GW2 Build Optimizer",
-                                &format!("Gemini enrichment skipped: {}", e),
+                                &format!("LLM enrichment skipped: {}", e),
                             );
                         }
                     }
@@ -2305,11 +2615,10 @@ fn humanize_tool_names(tool_names: &[String]) -> String {
     labels.join(", ")
 }
 
-/// Call Gemini to enrich the top optimizer suggestion with LLM reasoning.
-/// Uses function calling (tool use) so Gemini can query game data and simulate builds.
-fn enrich_with_gemini(
-    key: &str,
-    model: &str,
+/// Call the active LLM provider to enrich the top optimizer suggestion with AI reasoning.
+/// Uses function calling (tool use) so the LLM can query game data and simulate builds.
+fn enrich_with_llm(
+    config: &gw2_core::config::AppConfig,
     profession_name: &str,
     weights: &OptimizationWeights,
     game_mode: &str,
@@ -2319,8 +2628,7 @@ fn enrich_with_gemini(
     suggestions: &mut [crate::ui::comparison::BuildSuggestion],
     addon_dir: &std::path::Path,
 ) -> Result<(), String> {
-    let usage_path = addon_dir.join("gemini_usage.json");
-    let client = gw2_optimizer::gemini::GeminiClient::with_persistence(key, model, usage_path)
+    let client = gw2_optimizer::llm::create_client(config, addon_dir)
         .map_err(|e| e.to_string())?;
 
     // Build tool-aware prompt
@@ -2334,7 +2642,7 @@ fn enrich_with_gemini(
         )
     };
 
-    let tools = gw2_optimizer::gemini_tools::tool_declarations();
+    let tools = gw2_optimizer::llm::tools::tool_definitions();
     let build_summary_owned = current_build_summary.map(|s| s.to_string());
     let ctx = gw2_optimizer::gemini_tools::ToolContext {
         db,
@@ -2346,14 +2654,14 @@ fn enrich_with_gemini(
 
     let response = client.generate_with_tools_progress(
         &prompt,
-        tools,
-        &mut |name, args| gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx),
+        &tools,
+        &mut |name: &str, args: &serde_json::Value| gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx),
         8,
-        &mut |turn, max_turns, tool_names| {
+        &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
             let tools_str = humanize_tool_names(tool_names);
             crate::state::with_state(|s| {
                 s.main.optimize_stage = format!(
-                    "Gemini thinking ({}/{})... {}",
+                    "AI thinking ({}/{})... {}",
                     turn, max_turns, tools_str
                 );
             });
@@ -2363,7 +2671,7 @@ fn enrich_with_gemini(
     let gemini_build = gw2_optimizer::prompts::parse_gemini_build(&response)
         .map_err(|e| format!("Parse failed: {}", e))?;
 
-    // Validate Gemini's output against GameDb before applying
+    // Validate LLM's output against GameDb before applying
     let validated = gw2_optimizer::validation::validate_gemini_build(&gemini_build, db, profession_name);
     if !validated.errors.is_empty() {
         nexus::log::log(
@@ -2374,43 +2682,40 @@ fn enrich_with_gemini(
     }
 
     crate::state::with_state(|s| {
-        s.main.optimize_stage = "Applying Gemini's build + simulating rotation...".into();
+        s.main.optimize_stage = "Applying AI build + simulating rotation...".into();
     });
 
     if let Some(first) = suggestions.first_mut() {
         apply_gemini_response(first, &gemini_build);
-        // Run rotation simulation now that Gemini has populated skills
+        // Run rotation simulation now that LLM has populated skills
         simulate_suggestion_rotation(first, db);
     }
 
     Ok(())
 }
 
-/// Send a chat message to Gemini for build refinement.
-/// Uses function calling so Gemini can query game data to answer questions.
+/// Send a chat message to the active LLM provider for build refinement.
+/// Uses function calling so the LLM can query game data to answer questions.
 fn send_chat_message(state: &mut AddonState, message: String) {
     // Guard against concurrent chat messages
     if state.main.chat.waiting {
         return;
     }
 
-    let gemini_key = match state.config.gemini_api_key.clone() {
-        Some(key) => key,
-        None => {
-            crate::ui::chat_bar::add_ai_response(
-                &mut state.main.chat,
-                "No Gemini API key configured.".into(),
-            );
-            return;
-        }
-    };
+    if !state.config.has_active_llm_key() {
+        crate::ui::chat_bar::add_ai_response(
+            &mut state.main.chat,
+            "No AI API key configured. Set one in Settings.".into(),
+        );
+        return;
+    }
 
+    let config = state.config.clone();
     let profession = state.main.current_build.as_ref()
         .map(|b| b.profession.clone())
         .unwrap_or_default();
     let build_summary = state.main.current_build.as_ref()
         .map(|b| summarize_resolved_build(b));
-    let gemini_model = state.config.gemini_model_id().to_string();
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
     let db_clone = state.main.game_db.clone();
@@ -2420,8 +2725,7 @@ fn send_chat_message(state: &mut AddonState, message: String) {
         if token.is_cancelled() { return; }
 
         let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
-            let usage_path = addon_dir.join("gemini_usage.json");
-            let client = gw2_optimizer::gemini::GeminiClient::with_persistence(&gemini_key, &gemini_model, usage_path)
+            let client = gw2_optimizer::llm::create_client(&config, &addon_dir)
                 .map_err(|e| e.to_string())?;
 
             if token.is_cancelled() { return Err("Cancelled".into()); }
@@ -2431,7 +2735,7 @@ fn send_chat_message(state: &mut AddonState, message: String) {
                 let prompt = gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
                     &profession, &message,
                 );
-                let tools = gw2_optimizer::gemini_tools::tool_declarations();
+                let tools = gw2_optimizer::llm::tools::tool_definitions();
                 let empty_candidates = vec![];
                 let ctx = gw2_optimizer::gemini_tools::ToolContext {
                     db,
@@ -2443,14 +2747,14 @@ fn send_chat_message(state: &mut AddonState, message: String) {
 
                 let response = client.generate_with_tools_progress(
                     &prompt,
-                    tools,
-                    &mut |name, args| gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx),
+                    &tools,
+                    &mut |name: &str, args: &serde_json::Value| gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx),
                     8,
-                    &mut |turn, max_turns, tool_names| {
+                    &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
                         let tools_str = humanize_tool_names(tool_names);
                         crate::state::with_state(|s| {
                             s.main.optimize_stage = format!(
-                                "Gemini thinking ({}/{})... {}",
+                                "AI thinking ({}/{})... {}",
                                 turn, max_turns, tools_str
                             );
                         });

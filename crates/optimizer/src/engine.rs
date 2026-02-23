@@ -13,7 +13,7 @@ use gw2_api::models::Fact;
 use crate::combat::{self, CombatPerformance, DamageModifiers};
 use crate::context::{self, ContextConfig};
 use crate::gamedb::GameDb;
-use crate::gemini::GeminiClient;
+use crate::llm::LlmClient;
 use crate::gemini_tools::{self, ToolContext};
 use crate::prompts;
 use crate::rotation;
@@ -534,11 +534,11 @@ pub fn optimize_with_gemini(
     profession_name: &str,
     weights: &OptimizationWeights,
     game_mode: &GameMode,
-    gemini_client: &GeminiClient,
+    llm_client: &dyn LlmClient,
     current_build_summary: Option<&str>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
-    // 1. DETERMINISTIC gear prefix selection — this is authoritative, Gemini cannot override
+    // 1. DETERMINISTIC gear prefix selection — this is authoritative, LLM cannot override
     on_progress(OptimizeProgress {
         stage: "Selecting gear prefix...".into(),
         done: false,
@@ -585,13 +585,13 @@ pub fn optimize_with_gemini(
         Some(determined_prefix),
     );
 
-    // 4. Call Gemini with tools available for optional verification
+    // 4. Call LLM with tools available for optional verification
     on_progress(OptimizeProgress {
-        stage: "Gemini reasoning about synergies...".into(),
+        stage: format!("{} reasoning about synergies...", llm_client.provider_name()),
         done: false,
     });
-    let tools = gemini_tools::tool_declarations();
-    // Build a minimal ToolContext — candidates are empty since Gemini is choosing the build
+    let tools = crate::llm::tools::tool_definitions();
+    // Build a minimal ToolContext — candidates are empty since the LLM is choosing the build
     let tool_ctx = ToolContext {
         db,
         profession_name,
@@ -599,13 +599,14 @@ pub fn optimize_with_gemini(
         current_build_summary,
         weights: weights.clone(),
     };
-    let gemini_response = gemini_client
+    let provider_name = llm_client.provider_name().to_string();
+    let llm_response = llm_client
         .generate_with_tools_progress(
             &prompt,
-            tools,
-            &mut |name, args| gemini_tools::execute_tool(name, args, &tool_ctx),
+            &tools,
+            &mut |name: &str, args: &serde_json::Value| gemini_tools::execute_tool(name, args, &tool_ctx),
             5, // max 5 tool-calling turns for verification
-            &mut |turn, max_turns, tool_names| {
+            &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
                 let tool_list = if tool_names.is_empty() {
                     String::new()
                 } else {
@@ -613,7 +614,8 @@ pub fn optimize_with_gemini(
                 };
                 on_progress(OptimizeProgress {
                     stage: format!(
-                        "Gemini reasoning [{}/{}]{}...",
+                        "{} reasoning [{}/{}]{}...",
+                        provider_name,
                         turn + 1,
                         max_turns,
                         tool_list
@@ -622,14 +624,14 @@ pub fn optimize_with_gemini(
                 });
             },
         )
-        .map_err(|e| format!("Gemini call failed: {}", e))?;
+        .map_err(|e| format!("LLM call failed: {}", e))?;
 
     // 5. Parse the Gemini response and OVERRIDE the gear prefix
     on_progress(OptimizeProgress {
         stage: "Parsing Gemini build...".into(),
         done: false,
     });
-    let mut parsed = prompts::parse_gemini_build(&gemini_response)
+    let mut parsed = prompts::parse_gemini_build(&llm_response)
         .map_err(|e| format!("Failed to parse Gemini response: {}", e))?;
 
     // CRITICAL: Override Gemini's stat_prefix with our deterministic choice.
@@ -847,7 +849,7 @@ pub fn optimize_deterministic(
     profession_name: &str,
     weights: &OptimizationWeights,
     game_mode: &GameMode,
-    gemini_client: Option<&crate::gemini::GeminiClient>,
+    llm_client: Option<&dyn LlmClient>,
     _current_build_summary: Option<&str>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
@@ -865,7 +867,7 @@ pub fn optimize_deterministic(
     )?;
 
     // 3. Optional: LLM explanation pass
-    if let Some(client) = gemini_client {
+    if let Some(client) = llm_client {
         on_progress(OptimizeProgress {
             stage: "Generating build explanation...".into(),
             done: false,

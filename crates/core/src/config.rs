@@ -5,15 +5,101 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// Which LLM provider is active.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LlmProvider {
+    #[default]
+    Gemini,
+    OpenAI,
+    Anthropic,
+}
+
+impl LlmProvider {
+    pub const ALL: [LlmProvider; 3] = [LlmProvider::Gemini, LlmProvider::OpenAI, LlmProvider::Anthropic];
+
+    pub fn label(&self) -> &str {
+        match self {
+            LlmProvider::Gemini => "Google Gemini",
+            LlmProvider::OpenAI => "OpenAI",
+            LlmProvider::Anthropic => "Anthropic (Claude)",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub gw2_api_key: Option<String>,
-    pub gemini_api_key: Option<String>,
     pub cache_build_number: Option<u32>,
-    /// Gemini model ID (e.g. "gemini-2.5-flash", "gemini-3-pro-preview").
-    /// Defaults to "gemini-2.5-flash" if not set.
+
+    // ─── AI Provider Configuration ───
+    /// Active LLM provider. Defaults to Gemini for backward compat.
+    #[serde(default)]
+    pub active_provider: LlmProvider,
+
+    /// Gemini API key (Google AI Studio).
+    pub gemini_api_key: Option<String>,
+    /// Gemini model ID (e.g. "gemini-2.5-flash").
     #[serde(default)]
     pub gemini_model: Option<String>,
+
+    /// OpenAI API key.
+    #[serde(default)]
+    pub openai_api_key: Option<String>,
+    /// OpenAI model ID (e.g. "gpt-4o").
+    #[serde(default)]
+    pub openai_model: Option<String>,
+
+    /// Anthropic API key.
+    #[serde(default)]
+    pub anthropic_api_key: Option<String>,
+    /// Anthropic model ID (e.g. "claude-sonnet-4-6").
+    #[serde(default)]
+    pub anthropic_model: Option<String>,
+
+    // ─── UI Preferences ───
+    /// Window opacity (0.0–1.0). Default 1.0.
+    #[serde(default = "default_opacity")]
+    pub window_opacity: f32,
+    /// Font scale multiplier. Default 1.0.
+    #[serde(default = "default_font_scale")]
+    pub font_scale: f32,
+
+    // ─── Optimization Defaults ───
+    /// Default game mode for new optimizations.
+    #[serde(default)]
+    pub default_game_mode: Option<String>,
+
+    // ─── Cache & Data ───
+    /// Auto-refresh game data cache on startup.
+    #[serde(default)]
+    pub auto_refresh_cache: bool,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            gw2_api_key: None,
+            cache_build_number: None,
+            active_provider: LlmProvider::default(),
+            gemini_api_key: None,
+            gemini_model: None,
+            openai_api_key: None,
+            openai_model: None,
+            anthropic_api_key: None,
+            anthropic_model: None,
+            window_opacity: 1.0,
+            font_scale: 1.0,
+            default_game_mode: None,
+            auto_refresh_cache: false,
+        }
+    }
+}
+
+fn default_opacity() -> f32 {
+    1.0
+}
+fn default_font_scale() -> f32 {
+    1.0
 }
 
 /// Known Gemini models available for selection.
@@ -25,9 +111,52 @@ pub const GEMINI_MODELS: &[(&str, &str)] = &[
 
 pub const DEFAULT_GEMINI_MODEL: &str = "gemini-2.5-flash";
 
+/// Known OpenAI models available for selection.
+pub const OPENAI_MODELS: &[(&str, &str)] = &[
+    ("gpt-4o", "GPT-4o (multimodal, fast)"),
+    ("gpt-4o-mini", "GPT-4o Mini (cheaper, fast)"),
+    ("o3-mini", "o3-mini (reasoning)"),
+];
+
+pub const DEFAULT_OPENAI_MODEL: &str = "gpt-4o";
+
+/// Known Anthropic models available for selection.
+pub const ANTHROPIC_MODELS: &[(&str, &str)] = &[
+    ("claude-sonnet-4-6", "Claude Sonnet 4.6 (balanced)"),
+    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5 (fast, cheap)"),
+];
+
+pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-6";
+
 impl AppConfig {
     pub fn gemini_model_id(&self) -> &str {
         self.gemini_model.as_deref().unwrap_or(DEFAULT_GEMINI_MODEL)
+    }
+
+    pub fn openai_model_id(&self) -> &str {
+        self.openai_model.as_deref().unwrap_or(DEFAULT_OPENAI_MODEL)
+    }
+
+    pub fn anthropic_model_id(&self) -> &str {
+        self.anthropic_model.as_deref().unwrap_or(DEFAULT_ANTHROPIC_MODEL)
+    }
+
+    /// Get the model ID for the currently active provider.
+    pub fn active_model_id(&self) -> &str {
+        match self.active_provider {
+            LlmProvider::Gemini => self.gemini_model_id(),
+            LlmProvider::OpenAI => self.openai_model_id(),
+            LlmProvider::Anthropic => self.anthropic_model_id(),
+        }
+    }
+
+    /// Get the API key for the currently active provider.
+    pub fn active_api_key(&self) -> Option<&str> {
+        match self.active_provider {
+            LlmProvider::Gemini => self.gemini_api_key.as_deref(),
+            LlmProvider::OpenAI => self.openai_api_key.as_deref(),
+            LlmProvider::Anthropic => self.anthropic_api_key.as_deref(),
+        }
     }
 
     pub fn load(path: &Path) -> Self {
@@ -59,8 +188,26 @@ impl AppConfig {
         self.gemini_api_key.as_ref().is_some_and(|k| !k.is_empty())
     }
 
+    pub fn has_openai_key(&self) -> bool {
+        self.openai_api_key.as_ref().is_some_and(|k| !k.is_empty())
+    }
+
+    pub fn has_anthropic_key(&self) -> bool {
+        self.anthropic_api_key.as_ref().is_some_and(|k| !k.is_empty())
+    }
+
+    /// Whether the active provider has a valid API key.
+    pub fn has_active_llm_key(&self) -> bool {
+        match self.active_provider {
+            LlmProvider::Gemini => self.has_gemini_key(),
+            LlmProvider::OpenAI => self.has_openai_key(),
+            LlmProvider::Anthropic => self.has_anthropic_key(),
+        }
+    }
+
+    /// Setup is complete when GW2 key + any LLM key + cache are all present.
     pub fn is_setup_complete(&self) -> bool {
-        self.has_gw2_key() && self.has_gemini_key() && self.cache_build_number.is_some()
+        self.has_gw2_key() && self.has_active_llm_key() && self.cache_build_number.is_some()
     }
 
     pub fn config_path(addon_dir: &Path) -> PathBuf {
@@ -79,6 +226,9 @@ mod tests {
         assert!(!config.is_setup_complete());
         assert!(!config.has_gw2_key());
         assert!(!config.has_gemini_key());
+        assert_eq!(config.active_provider, LlmProvider::Gemini);
+        assert_eq!(config.window_opacity, 1.0);
+        assert_eq!(config.font_scale, 1.0);
     }
 
     #[test]
@@ -91,7 +241,7 @@ mod tests {
             gw2_api_key: Some("test-key-123".into()),
             gemini_api_key: Some("gemini-key-456".into()),
             cache_build_number: Some(12345),
-            gemini_model: None,
+            ..Default::default()
         };
         config.save(&path).unwrap();
 
@@ -100,5 +250,62 @@ mod tests {
         assert!(loaded.is_setup_complete());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_backward_compat_old_config() {
+        // Simulate an old config.json that only has the original 3 fields
+        let json = r#"{
+            "gw2_api_key": "old-key",
+            "gemini_api_key": "old-gemini-key",
+            "cache_build_number": 12345
+        }"#;
+        let config: AppConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.active_provider, LlmProvider::Gemini);
+        assert!(config.openai_api_key.is_none());
+        assert!(config.anthropic_api_key.is_none());
+        assert_eq!(config.window_opacity, 1.0);
+        assert_eq!(config.font_scale, 1.0);
+        assert!(!config.auto_refresh_cache);
+        assert!(config.is_setup_complete());
+    }
+
+    #[test]
+    fn test_openai_provider_setup_complete() {
+        let config = AppConfig {
+            gw2_api_key: Some("gw2-key".into()),
+            active_provider: LlmProvider::OpenAI,
+            openai_api_key: Some("sk-test123".into()),
+            cache_build_number: Some(12345),
+            ..Default::default()
+        };
+        assert!(config.is_setup_complete());
+        assert_eq!(config.active_model_id(), "gpt-4o");
+    }
+
+    #[test]
+    fn test_anthropic_provider_setup_complete() {
+        let config = AppConfig {
+            gw2_api_key: Some("gw2-key".into()),
+            active_provider: LlmProvider::Anthropic,
+            anthropic_api_key: Some("sk-ant-test123".into()),
+            cache_build_number: Some(12345),
+            ..Default::default()
+        };
+        assert!(config.is_setup_complete());
+        assert_eq!(config.active_model_id(), "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn test_provider_mismatch_not_complete() {
+        // Has a Gemini key but active provider is OpenAI (no OpenAI key)
+        let config = AppConfig {
+            gw2_api_key: Some("gw2-key".into()),
+            active_provider: LlmProvider::OpenAI,
+            gemini_api_key: Some("gemini-key".into()),
+            cache_build_number: Some(12345),
+            ..Default::default()
+        };
+        assert!(!config.is_setup_complete());
     }
 }
