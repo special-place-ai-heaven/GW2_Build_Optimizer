@@ -109,6 +109,12 @@ pub fn validate_gemini_build(
 
     // Validate each component
     validate_specializations(response, db, profession_name, &mut result);
+    if result.specializations.len() != 3 {
+        result.errors.push(format!(
+            "Expected 3 specializations, got {}",
+            result.specializations.len()
+        ));
+    }
     validate_weapons(response, db, profession_name, &mut result);
     validate_skills(response, db, profession_name, &mut result);
     validate_rune(response, db, &mut result);
@@ -250,7 +256,7 @@ fn validate_weapon_set(
             set.main_hand = Some(mh.clone());
         } else {
             result
-                .warnings
+                .errors
                 .push(format!("{}: weapon '{}' not available for {}", label, mh, prof.name));
         }
     }
@@ -261,7 +267,7 @@ fn validate_weapon_set(
             set.off_hand = Some(oh.clone());
         } else {
             result
-                .warnings
+                .errors
                 .push(format!("{}: weapon '{}' not available for {}", label, oh, prof.name));
         }
     }
@@ -324,6 +330,7 @@ fn validate_skills(
 
 fn validate_rune(response: &GeminiBuildResponse, db: &GameDb, result: &mut ValidatedBuild) {
     if response.rune.is_empty() {
+        result.warnings.push("Rune field is empty — no rune selected".into());
         return;
     }
 
@@ -358,6 +365,7 @@ fn validate_sigils(response: &GeminiBuildResponse, db: &GameDb, result: &mut Val
 
 fn validate_relic(response: &GeminiBuildResponse, db: &GameDb, result: &mut ValidatedBuild) {
     if response.relic.is_empty() {
+        result.warnings.push("Relic field is empty — no relic selected".into());
         return;
     }
 
@@ -420,12 +428,11 @@ fn find_spec_by_name<'a>(
         }
     }
 
-    // Fallback: case-insensitive contains
+    // Fallback: case-insensitive contains (spec name contains search string only).
+    // Do NOT check the reverse direction — prevents "Ber" matching "Berserker".
     for id in prof_spec_ids {
         if let Some(spec) = db.spec(*id) {
-            if spec.name.to_lowercase().contains(&needle)
-                || needle.contains(&spec.name.to_lowercase())
-            {
+            if spec.name.to_lowercase().contains(&needle) {
                 return Some(spec);
             }
         }
@@ -446,11 +453,13 @@ fn find_trait_by_name<'a>(name: &str, major_traits: &[&'a GW2Trait]) -> Option<&
         return Some(t);
     }
 
-    // Contains match
+    // Contains match: only check if trait name contains the search needle.
+    // Do NOT check the reverse (needle contains trait name) — that causes
+    // "Empowered" to match input "Power" or "Swift" to match "Swift Empowerment".
     major_traits
         .iter()
         .find(|t| {
-            t.name.to_lowercase().contains(&needle) || needle.contains(&t.name.to_lowercase())
+            t.name.to_lowercase().contains(&needle)
         })
         .copied()
 }
@@ -524,10 +533,32 @@ fn find_item_by_name(
         });
     }
 
-    // Contains match
+    // Item name contains search string
     let found = items.iter().find(|i| {
         let item_lower = i.name.to_lowercase();
-        item_lower.contains(&needle) || needle.contains(&item_lower)
+        item_lower.contains(&needle)
+    });
+
+    if let Some(item) = found {
+        result.warnings.push(format!(
+            "{} '{}' fuzzy-matched to '{}'",
+            item_type, name, item.name
+        ));
+        return Some(ValidatedItem {
+            id: item.id,
+            name: item.name.clone(),
+        });
+    }
+
+    // Last resort: search string contains item name.
+    // Require minimum 8 chars AND item name must be >= 50% of search string length
+    // to prevent spurious matches on short common words (e.g. "Fire" matching inside
+    // a hallucinated long name).
+    let found = items.iter().find(|i| {
+        let item_lower = i.name.to_lowercase();
+        item_lower.len() >= 8
+            && needle.contains(&item_lower)
+            && item_lower.len() * 2 >= needle.len()
     });
 
     if let Some(item) = found {

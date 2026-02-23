@@ -126,24 +126,7 @@ fn extract_effects(facts: &[Fact]) -> Vec<SkillEffect> {
 fn is_damaging_condition(status: &str) -> bool {
     matches!(
         status,
-        "Bleeding"
-            | "Burning"
-            | "Poison"
-            | "Torment"
-            | "Confusion"
-            | "Vulnerability"
-            | "Weakness"
-            | "Blind"
-            | "Blinded"
-            | "Chill"
-            | "Chilled"
-            | "Cripple"
-            | "Crippled"
-            | "Fear"
-            | "Immobilize"
-            | "Immobilized"
-            | "Slow"
-            | "Taunt"
+        "Bleeding" | "Burning" | "Poison" | "Torment" | "Confusion"
     )
 }
 

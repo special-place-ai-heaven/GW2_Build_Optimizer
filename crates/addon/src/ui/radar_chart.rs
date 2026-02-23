@@ -243,9 +243,6 @@ pub fn render_legend(ui: &Ui, show_current: bool, show_optimized: bool) {
     }
     if show_optimized {
         ui.text_colored(OPTIMIZED_OUTLINE, "-- Optimized Build");
-        if show_current {
-            ui.same_line();
-        }
     }
     ui.text_colored(WEIGHTS_OUTLINE, "-- Target Weights");
 }

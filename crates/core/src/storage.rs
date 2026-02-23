@@ -1,6 +1,8 @@
 //! Build persistence — save/load optimizer results as JSON files.
 //! Each saved build is one JSON file in `{addon_dir}/saves/`.
 
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::types::SavedBuild;
@@ -16,6 +18,7 @@ impl BuildStorage {
     }
 
     /// Save a build to disk. Filename is derived from the build name.
+    /// Uses atomic create_new to prevent TOCTOU race and detect collisions.
     pub fn save(&self, build: &SavedBuild) -> Result<(), String> {
         std::fs::create_dir_all(&self.saves_dir)
             .map_err(|e| format!("Failed to create saves dir: {}", e))?;
@@ -26,12 +29,26 @@ impl BuildStorage {
         }
 
         let path = self.saves_dir.join(format!("{}.json", filename));
-        if path.exists() {
-            return Err(format!("A build named '{}' already exists", build.name));
-        }
         let json = serde_json::to_string_pretty(build)
             .map_err(|e| format!("Failed to serialize: {}", e))?;
-        std::fs::write(&path, json)
+
+        // Atomic create — fails if file already exists (no TOCTOU race)
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    format!(
+                        "A build with filename '{}' already exists (names that differ only in special characters collide)",
+                        filename
+                    )
+                } else {
+                    format!("Failed to create {}: {}", path.display(), e)
+                }
+            })?;
+
+        file.write_all(json.as_bytes())
             .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
 
         Ok(())
@@ -128,6 +145,7 @@ mod tests {
             sigils: vec![],
             relic: String::new(),
             explanation: String::new(),
+            synergy_explanation: String::new(),
             changes_made: vec![],
             estimated_stats: None,
         };

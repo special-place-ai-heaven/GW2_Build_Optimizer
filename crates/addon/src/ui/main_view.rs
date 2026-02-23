@@ -47,7 +47,7 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
 
     // Loading banner (GameDb) — show download progress when refreshing
     if state.main.game_db_loading {
-        let stage = &state.main.optimize_stage;
+        let stage = &state.main.game_refresh_stage;
         if !stage.is_empty() {
             ui.text_colored([1.0, 1.0, 0.0, 1.0], stage);
         } else {
@@ -566,8 +566,10 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
 
     // API Keys
     if let Some(ref key) = state.config.gw2_api_key {
-        let display = if key.len() > 12 {
-            format!("{}...{}", &key[..8], &key[key.len() - 4..])
+        let display = if key.chars().count() > 12 {
+            let prefix: String = key.chars().take(8).collect();
+            let suffix: String = key.chars().rev().take(4).collect::<String>().chars().rev().collect();
+            format!("{}...{}", prefix, suffix)
         } else {
             "****".into()
         };
@@ -652,7 +654,7 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     let refreshing = state.main.game_db_loading;
     if refreshing {
         // Show download progress
-        let stage = &state.main.optimize_stage;
+        let stage = &state.main.game_refresh_stage;
         if !stage.is_empty() {
             ui.text_colored([1.0, 1.0, 0.0, 1.0], stage);
         } else {
@@ -1411,7 +1413,7 @@ fn start_game_data_refresh(state: &mut AddonState) {
                 } else {
                     format!("Refreshing: {}", progress.step_name)
                 };
-                s.main.optimize_stage = detail;
+                s.main.game_refresh_stage = detail;
             });
         });
 
@@ -1436,6 +1438,7 @@ fn start_game_data_refresh(state: &mut AddonState) {
 
                 crate::state::with_state(|s| {
                     s.main.game_db_loading = false;
+                    s.main.game_refresh_stage = String::new();
                     match db_result {
                         Ok(db) => {
                             nexus::log::log(nexus::log::LogLevel::Info, "GW2 Build Optimizer", "Game data refreshed successfully");
@@ -1454,6 +1457,7 @@ fn start_game_data_refresh(state: &mut AddonState) {
             Err(e) => {
                 crate::state::with_state(|s| {
                     s.main.game_db_loading = false;
+                    s.main.game_refresh_stage = String::new();
                     s.main.error = Some(format!("Refresh failed: {}", e));
                 });
             }
@@ -1623,7 +1627,7 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                     ) {
                         Ok(synergy_result) => {
                             if token.is_cancelled() { return Err("Cancelled".into()); }
-                            let suggestion = synergy_result_to_suggestion(&synergy_result);
+                            let suggestion = synergy_result_to_suggestion(&synergy_result, &profession_name);
                             return Ok(vec![suggestion]);
                         }
                         Err(e) => {
@@ -1661,7 +1665,7 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                     ) {
                         Ok(synergy_result) => {
                             if token.is_cancelled() { return Err("Cancelled".into()); }
-                            let suggestion = synergy_result_to_suggestion(&synergy_result);
+                            let suggestion = synergy_result_to_suggestion(&synergy_result, &profession_name);
                             return Ok(vec![suggestion]);
                         }
                         Err(e) => {
@@ -1901,6 +1905,7 @@ fn candidate_to_suggestion(
 /// Convert a SynergyResult from the new pipeline into a BuildSuggestion for display.
 fn synergy_result_to_suggestion(
     result: &gw2_optimizer::engine::SynergyResult,
+    profession_name: &str,
 ) -> crate::ui::comparison::BuildSuggestion {
     use crate::ui::comparison::BuildSuggestion;
 
@@ -1942,7 +1947,7 @@ fn synergy_result_to_suggestion(
     let sigils: Vec<String> = v.sigils.iter().map(|s| s.name.clone()).collect();
 
     // Convert stats from optimizer StatBlock (f64) to core StatBlock (i32)
-    let derived = gw2_optimizer::stats::compute_derived(&result.stats, "");
+    let derived = gw2_optimizer::stats::compute_derived(&result.stats, profession_name);
     let estimated_stats = Some(gw2_core::types::StatBlock {
         power: result.stats.power.round() as i32,
         precision: result.stats.precision.round() as i32,
@@ -2150,6 +2155,11 @@ fn parse_skill_names(skills: &[String]) -> Vec<String> {
             }
         } else if let Some(rest) = s.strip_prefix("Elite: ") {
             names.push(rest.trim().to_string());
+        } else if let Some(rest) = s.strip_prefix("Utility: ") {
+            let name = rest.trim();
+            if !name.is_empty() {
+                names.push(name.to_string());
+            }
         } else {
             // Fallback: try the whole string as a skill name
             let trimmed = s.trim();
@@ -2353,6 +2363,16 @@ fn enrich_with_gemini(
     let gemini_build = gw2_optimizer::prompts::parse_gemini_build(&response)
         .map_err(|e| format!("Parse failed: {}", e))?;
 
+    // Validate Gemini's output against GameDb before applying
+    let validated = gw2_optimizer::validation::validate_gemini_build(&gemini_build, db, profession_name);
+    if !validated.errors.is_empty() {
+        nexus::log::log(
+            nexus::log::LogLevel::Warning,
+            "GW2BuildOpt",
+            &format!("Legacy enrichment validation errors: {}", validated.errors.join("; ")),
+        );
+    }
+
     crate::state::with_state(|s| {
         s.main.optimize_stage = "Applying Gemini's build + simulating rotation...".into();
     });
@@ -2455,6 +2475,22 @@ fn send_chat_message(state: &mut AddonState, message: String) {
             }
         })();
 
+        // Validate Gemini's response against GameDb before applying (if available)
+        let validated_result = result.as_ref().ok().and_then(|gemini_build| {
+            db_clone.as_ref().map(|db| {
+                let validated = gw2_optimizer::validation::validate_gemini_build(gemini_build, db, &profession);
+                if !validated.errors.is_empty() {
+                    nexus::log::log(
+                        nexus::log::LogLevel::Warning,
+                        "GW2BuildOpt",
+                        &format!("Chat refinement validation errors: {}", validated.errors.join("; ")),
+                    );
+                }
+                validated
+            })
+        });
+        let _ = validated_result; // Validation logged; apply_gemini_response uses raw parsed fields
+
         if !token.is_cancelled() {
             crate::state::with_state(|s| {
                 match result {
@@ -2474,6 +2510,7 @@ fn send_chat_message(state: &mut AddonState, message: String) {
                         if let Some(ref db) = s.main.game_db {
                             simulate_suggestion_rotation(&mut suggestion, db);
                         }
+                        s.main.comparison.error = None;
                         s.main.comparison.suggestions.push(suggestion);
                         s.main.comparison.selected_suggestion =
                             s.main.comparison.suggestions.len() - 1;
@@ -2683,6 +2720,7 @@ fn suggestion_to_saved(
         sigils: suggestion.sigils.clone(),
         relic: suggestion.relic.clone(),
         explanation: suggestion.explanation.clone(),
+        synergy_explanation: suggestion.synergy_explanation.clone(),
         changes_made: suggestion.changes_made.clone(),
         estimated_stats: suggestion.estimated_stats.clone(),
     }
@@ -2725,7 +2763,7 @@ fn saved_to_suggestion(
         sigils: saved.sigils.clone(),
         relic: saved.relic.clone(),
         explanation: saved.explanation.clone(),
-        synergy_explanation: String::new(),
+        synergy_explanation: saved.synergy_explanation.clone(),
         changes_made: saved.changes_made.clone(),
         estimated_stats: saved.estimated_stats.clone(),
         combat_solo,

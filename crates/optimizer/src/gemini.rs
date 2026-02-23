@@ -462,7 +462,13 @@ impl GeminiClient {
             let status = resp.status().as_u16();
             match status {
                 200 => {
-                    let body: GenerateResponse = resp.json()?;
+                    let body: GenerateResponse = match resp.json() {
+                        Ok(b) => b,
+                        Err(e) => {
+                            self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                            return Err(GeminiError::Http(e));
+                        }
+                    };
                     let content = body
                         .candidates
                         .and_then(|c| c.into_iter().next())
@@ -477,8 +483,14 @@ impl GeminiClient {
 
                     return Ok(content);
                 }
-                401 | 403 => return Err(GeminiError::InvalidKey),
-                429 => return Err(GeminiError::RateLimited),
+                401 | 403 => {
+                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                    return Err(GeminiError::InvalidKey);
+                }
+                429 => {
+                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                    return Err(GeminiError::RateLimited);
+                }
                 500 | 503 => {
                     // Transient server error (ErrTimeout, overloaded) — retry
                     let body = resp.text().unwrap_or_default();

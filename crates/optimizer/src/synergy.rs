@@ -239,13 +239,14 @@ pub fn extract_sigil_effects(sigil: &Item) -> Vec<NormalizedEffect> {
             percent: 5.0,
         });
     } else if name_lower.contains("sigil of impact") {
+        // +3% damage while foe is stunned/knocked down; actual uptime 5-15% in PvE
         effects.push(NormalizedEffect::ProcEffect {
             trigger: ProcTrigger::OnHit,
             effect: Box::new(NormalizedEffect::DamageModifier {
                 category: DamageCategory::Strike,
                 percent: 3.0,
             }),
-            estimated_uptime: 0.5,
+            estimated_uptime: 0.1,
         });
     } else if name_lower.contains("sigil of the night") {
         effects.push(NormalizedEffect::ProcEffect {
@@ -353,13 +354,14 @@ pub fn extract_relic_effects(relic: &Item) -> Vec<NormalizedEffect> {
     let name_lower = relic.name.to_lowercase();
 
     if name_lower.contains("relic of the thief") {
+        // +1% per boon up to 10%; with good boon coverage ~85% effective uptime at 8-10 stacks
         effects.push(NormalizedEffect::ProcEffect {
             trigger: ProcTrigger::Passive,
             effect: Box::new(NormalizedEffect::DamageModifier {
                 category: DamageCategory::Strike,
                 percent: 10.0,
             }),
-            estimated_uptime: 0.5,
+            estimated_uptime: 0.85,
         });
     } else if name_lower.contains("relic of fireworks") {
         effects.push(NormalizedEffect::ProcEffect {
@@ -380,13 +382,14 @@ pub fn extract_relic_effects(relic: &Item) -> Vec<NormalizedEffect> {
             estimated_uptime: 0.85,
         });
     } else if name_lower.contains("relic of the aristocracy") {
+        // +1% per boon up to 5%; with good boon coverage ~80% effective uptime at 4-5 stacks
         effects.push(NormalizedEffect::ProcEffect {
             trigger: ProcTrigger::Passive,
             effect: Box::new(NormalizedEffect::DamageModifier {
                 category: DamageCategory::Strike,
                 percent: 5.0,
             }),
-            estimated_uptime: 0.5,
+            estimated_uptime: 0.8,
         });
     } else if name_lower.contains("relic of cerus") {
         effects.push(NormalizedEffect::ProcEffect {
@@ -550,20 +553,10 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
                 });
             }
         }
-        Fact::Damage {
-            hit_count,
-            dmg_multiplier,
-            ..
-        } => {
-            // Damage facts contribute to the strike damage evaluation
-            let hits = hit_count.unwrap_or(1) as f64;
-            let mult = dmg_multiplier.unwrap_or(1.0);
-            if hits * mult > 0.01 {
-                effects.push(NormalizedEffect::DamageModifier {
-                    category: DamageCategory::Strike,
-                    percent: hits * mult * 0.5, // Normalized contribution
-                });
-            }
+        Fact::Damage { .. } => {
+            // Damage facts represent direct hit damage, not percentage modifiers.
+            // Treating them as DamageModifier inflates modifier stacking calculations.
+            // Direct damage is handled by the rotation simulator, not the synergy engine.
         }
         _ => {}
     }
@@ -747,7 +740,7 @@ pub fn compute_marginal_synergy(
     weights: &OptimizationWeights,
 ) -> (f64, Vec<SynergyLink>) {
     let mut synergy = 0.0;
-    let links = Vec::new();
+    let mut links = Vec::new();
 
     // Flatten existing effects for quick scanning
     let all_existing: Vec<(&ComponentId, &NormalizedEffect)> = existing_effects
@@ -763,15 +756,16 @@ pub fn compute_marginal_synergy(
                     if *tid == *requires_trait_id {
                         let bonus = score_normalized_effect(effect, weights) * 0.6;
                         synergy += bonus;
+                        links.push(SynergyLink {
+                            source: existing_id.clone(),
+                            source_name: format!("Trait {}", tid),
+                            target: existing_id.clone(),
+                            target_name: "Conditional effect".into(),
+                            link_type: SynergyLinkType::TraitedFact,
+                            score: bonus,
+                            description: "Equipped trait activates a conditional effect upgrade.".into(),
+                        });
                     }
-                }
-            }
-            // Also check reverse
-            if let NormalizedEffect::Conditional { requires_trait_id, effect, .. } = existing_eff {
-                if let ComponentId::Trait(_) = ComponentId::Trait(0) {
-                    // Check if any new effect comes from the required trait
-                    // This is handled at the pipeline level, not here
-                    let _ = (requires_trait_id, effect);
                 }
             }
 
@@ -781,6 +775,15 @@ pub fn compute_marginal_synergy(
                     if applied == needed {
                         let bonus = score_normalized_effect(effect, weights) * 0.5;
                         synergy += bonus;
+                        links.push(SynergyLink {
+                            source: existing_id.clone(),
+                            source_name: format!("Benefits from {}", needed),
+                            target: existing_id.clone(),
+                            target_name: format!("Applies {}", applied),
+                            link_type: SynergyLinkType::EnablerPayoff,
+                            score: bonus,
+                            description: format!("{} application enables a bonus effect.", applied),
+                        });
                     }
                 }
             }
@@ -789,6 +792,15 @@ pub fn compute_marginal_synergy(
                     if applied == needed {
                         let bonus = score_normalized_effect(effect, weights) * 0.5;
                         synergy += bonus;
+                        links.push(SynergyLink {
+                            source: existing_id.clone(),
+                            source_name: format!("Applies {}", applied),
+                            target: existing_id.clone(),
+                            target_name: format!("Benefits from {}", needed),
+                            link_type: SynergyLinkType::EnablerPayoff,
+                            score: bonus,
+                            description: format!("Existing {} application feeds into a bonus effect.", applied),
+                        });
                     }
                 }
             }
@@ -799,6 +811,15 @@ pub fn compute_marginal_synergy(
                     if s1 == s2 {
                         let bonus = condition_importance(s1) * 0.03 * weights.condition;
                         synergy += bonus;
+                        links.push(SynergyLink {
+                            source: existing_id.clone(),
+                            source_name: format!("{} source", s2),
+                            target: existing_id.clone(),
+                            target_name: format!("{} source", s1),
+                            link_type: SynergyLinkType::ConditionStacking,
+                            score: bonus,
+                            description: format!("Multiple sources of {} stack for higher sustained damage.", s1),
+                        });
                     }
                 }
             }
@@ -807,10 +828,21 @@ pub fn compute_marginal_synergy(
             if let NormalizedEffect::DamageModifier { category: c1, percent: p1 } = new_eff {
                 if let NormalizedEffect::DamageModifier { category: c2, percent: p2 } = existing_eff {
                     if c1 == c2 {
-                        // Multiplicative interaction bonus: having 5% + 10% is better than 15% from one source
                         let interaction = (p1 / 100.0) * (p2 / 100.0);
                         let w = weight_for_damage_category(c1, weights);
-                        synergy += interaction * w * 0.5;
+                        let bonus = interaction * w * 0.5;
+                        synergy += bonus;
+                        if bonus > 0.001 {
+                            links.push(SynergyLink {
+                                source: existing_id.clone(),
+                                source_name: format!("{:?} +{}%", c2, p2),
+                                target: existing_id.clone(),
+                                target_name: format!("{:?} +{}%", c1, p1),
+                                link_type: SynergyLinkType::ModifierStacking,
+                                score: bonus,
+                                description: format!("Stacking {:?} damage modifiers multiply for greater effect.", c1),
+                            });
+                        }
                     }
                 }
             }
@@ -819,14 +851,34 @@ pub fn compute_marginal_synergy(
             if let NormalizedEffect::AppliesStatus { status, is_condition: true, .. } = new_eff {
                 if let NormalizedEffect::DurationBonus { kind, .. } = existing_eff {
                     if duration_matches_condition(kind, status) {
-                        synergy += 0.03 * weights.condition;
+                        let bonus = 0.03 * weights.condition;
+                        synergy += bonus;
+                        links.push(SynergyLink {
+                            source: existing_id.clone(),
+                            source_name: format!("{:?} duration", kind),
+                            target: existing_id.clone(),
+                            target_name: format!("{} application", status),
+                            link_type: SynergyLinkType::DurationAlignment,
+                            score: bonus,
+                            description: format!("{} duration bonus extends {} ticks for more damage.", status, status),
+                        });
                     }
                 }
             }
             if let NormalizedEffect::DurationBonus { kind, .. } = new_eff {
                 if let NormalizedEffect::AppliesStatus { status, is_condition: true, .. } = existing_eff {
                     if duration_matches_condition(kind, status) {
-                        synergy += 0.03 * weights.condition;
+                        let bonus = 0.03 * weights.condition;
+                        synergy += bonus;
+                        links.push(SynergyLink {
+                            source: existing_id.clone(),
+                            source_name: format!("{} application", status),
+                            target: existing_id.clone(),
+                            target_name: format!("{:?} duration", kind),
+                            link_type: SynergyLinkType::DurationAlignment,
+                            score: bonus,
+                            description: format!("Existing {} application benefits from added duration bonus.", status),
+                        });
                     }
                 }
             }

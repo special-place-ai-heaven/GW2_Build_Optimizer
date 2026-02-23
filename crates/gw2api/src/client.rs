@@ -123,11 +123,16 @@ impl Gw2Client {
 
         // Build query string manually — reqwest's .query() encodes commas as %2C,
         // which triples separator length and can exceed URL limits for bulk ID requests.
+        // We URL-encode values for safety but preserve commas (GW2 API uses them as
+        // list separators in bulk ID requests).
         let url = if params.is_empty() {
             base_url
         } else {
             let query = params.iter()
-                .map(|(k, v)| format!("{}={}", k, v))
+                .map(|(k, v)| {
+                    let encoded = urlencoding::encode(v).into_owned().replace("%2C", ",");
+                    format!("{}={}", k, encoded)
+                })
                 .collect::<Vec<_>>()
                 .join("&");
             format!("{}?{}", base_url, query)
@@ -138,14 +143,20 @@ impl Gw2Client {
         for attempt in 0..MAX_RETRIES {
             // Backoff before retries (not before first attempt)
             if attempt > 0 {
-                let wait = Duration::from_millis(2000 * 2u64.pow(attempt - 1));
+                let wait = Duration::from_millis(
+                    (2000u64.saturating_mul(2u64.saturating_pow(attempt - 1))).min(30_000)
+                );
                 std::thread::sleep(wait);
             }
 
-            // Take a token — sleep OUTSIDE the lock to allow concurrent threads
-            let sleep_dur = self.bucket.lock().unwrap_or_else(|e| e.into_inner()).take();
-            if let Some(wait) = sleep_dur {
-                std::thread::sleep(wait);
+            // Take a token — sleep OUTSIDE the lock to allow concurrent threads.
+            // Loop until we actually acquire a token (sleep may not refill enough).
+            loop {
+                let sleep_dur = self.bucket.lock().unwrap_or_else(|e| e.into_inner()).take();
+                match sleep_dur {
+                    None => break,
+                    Some(wait) => std::thread::sleep(wait),
+                }
             }
 
             let mut headers = HeaderMap::new();

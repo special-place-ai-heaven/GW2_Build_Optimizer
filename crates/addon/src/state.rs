@@ -76,6 +76,8 @@ pub struct MainState {
     // GameDb (loaded once on main screen entry)
     pub game_db: Option<GameDb>,
     pub game_db_loading: bool,
+    /// Progress text for game data refresh (separate from optimize_stage to avoid clobbering).
+    pub game_refresh_stage: String,
     // Optimization state
     pub optimizing: bool,
     pub optimize_stage: String,

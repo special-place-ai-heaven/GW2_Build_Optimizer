@@ -146,18 +146,29 @@ pub struct StatBlock {
 
 impl StatBlock {
     /// Compute derived stats from base stats.
-    /// `profession` determines base health: Warrior/Necro=9212, medium=5922, light=1645.
+    /// `profession` determines base health (HP class) and base defense (armor weight class).
+    /// NOTE: GW2 HP classes and armor classes do NOT align!
+    /// HP: High (Warrior, Necromancer), Medium (Rev, Engi, Ranger, Mesmer), Low (Guardian, Thief, Ele)
+    /// Armor: Heavy (Warrior, Guardian, Revenant), Medium (Ranger, Engi, Thief), Light (Ele, Mes, Necro)
     pub fn compute_derived(&mut self, profession: &str) {
         self.crit_chance = ((self.precision - 895) as f64 / 21.0).clamp(0.0, 100.0);
         self.crit_damage = 150.0 + self.ferocity as f64 / 15.0;
+        // HP class (different from armor class!)
         let base_hp = match profession {
             "Warrior" | "Necromancer" => 9212,
             "Revenant" | "Engineer" | "Ranger" | "Mesmer" => 5922,
             "Guardian" | "Thief" | "Elementalist" => 1645,
-            _ => 5922, // default to medium
+            _ => 5922,
+        };
+        // Armor weight class (different from HP class!)
+        let base_defense = match profession {
+            "Warrior" | "Guardian" | "Revenant" => 1271,          // Heavy
+            "Ranger" | "Engineer" | "Thief" => 1000,              // Medium
+            "Elementalist" | "Mesmer" | "Necromancer" => 967,     // Light
+            _ => 1000,
         };
         self.health = self.vitality * 10 + base_hp;
-        self.armor = self.toughness + 1000; // approximate, defense from gear adds too
+        self.armor = self.toughness + base_defense;
     }
 }
 
@@ -222,6 +233,8 @@ pub struct SavedBuild {
     pub sigils: Vec<String>,
     pub relic: String,
     pub explanation: String,
+    #[serde(default)]
+    pub synergy_explanation: String,
     pub changes_made: Vec<String>,
     pub estimated_stats: Option<StatBlock>,
 }
