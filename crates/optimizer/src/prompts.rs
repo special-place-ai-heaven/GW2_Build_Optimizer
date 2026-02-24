@@ -302,7 +302,7 @@ pub fn synergy_build_prompt(
     pre_computed_context: &str,
     current_build_summary: Option<&str>,
     determined_prefix: Option<&str>,
-    locked_elite_spec: Option<&str>,
+    lock_constraints: Option<&str>,
 ) -> String {
     let weights_guidance = weights_context(weights);
     let summary = weights.summary_label();
@@ -333,12 +333,13 @@ pub fn synergy_build_prompt(
         ))
         .unwrap_or_default();
 
-    let elite_spec_constraint = locked_elite_spec
-        .map(|spec| format!(
-            "\n\nELITE SPECIALIZATION (LOCKED — DO NOT CHANGE):\n\
-             The player has chosen \"{}\" as their elite specialization. You MUST include \"{}\" as one of the 3 specializations \
-             with \"elite\": true. Do NOT substitute a different elite spec. You MAY freely change the other 2 core specializations and ALL trait choices.",
-            spec, spec
+    let elite_spec_constraint = lock_constraints
+        .map(|constraints| format!(
+            "\n\nBUILD LOCKS (DO NOT CHANGE THESE):\n\
+             The player has locked the following build components. You MUST preserve them exactly.\n\
+             {}\n\
+             You MAY freely change any unlocked specializations, traits, skills, and gear choices.",
+            constraints
         ))
         .unwrap_or_default();
 

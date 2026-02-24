@@ -73,7 +73,7 @@ pub fn optimize_synergy(
     weights: &OptimizationWeights,
     _game_mode: &GameMode,
     gear_prefix_name: &str,
-    locked_elite_spec: Option<u32>,
+    locks: &gw2_core::types::BuildLocks,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     let profession = db.profession(profession_name)
@@ -85,7 +85,7 @@ pub fn optimize_synergy(
         done: false,
     });
     let mut candidates = select_specs_and_traits(
-        profession, weights, &db.specializations, &db.traits, locked_elite_spec,
+        profession, weights, &db.specializations, &db.traits, locks,
     );
 
     if candidates.is_empty() {
@@ -153,9 +153,9 @@ fn select_specs_and_traits(
     weights: &OptimizationWeights,
     specs_cache: &HashMap<u32, Specialization>,
     traits_cache: &HashMap<u32, GW2Trait>,
-    locked_elite_spec: Option<u32>,
+    locks: &gw2_core::types::BuildLocks,
 ) -> Vec<SynergyCandidate> {
-    let spec_combos = search_spec_combos(&profession.specializations, specs_cache, locked_elite_spec);
+    let spec_combos = search_spec_combos(&profession.specializations, specs_cache, locks);
 
     let mut candidates = Vec::new();
 
@@ -184,11 +184,32 @@ fn select_specs_and_traits(
                 continue;
             }
 
-            // Enumerate all 27 trait combos (3^3)
+            // Check trait locks for this spec
+            let trait_lock = locks.trait_locks.get(&spec_id);
+
+            // Build ranges for each column: locked = single option, unlocked = 0..3
+            let adept_range: Vec<usize> = if let Some(locked_id) = trait_lock.and_then(|t| t[0]) {
+                // Find which index (0,1,2) this locked trait is at in the Adept column
+                (0..3).filter(|&i| spec.major_traits[i] == locked_id).collect()
+            } else {
+                vec![0, 1, 2]
+            };
+            let master_range: Vec<usize> = if let Some(locked_id) = trait_lock.and_then(|t| t[1]) {
+                (0..3).filter(|&i| spec.major_traits[3 + i] == locked_id).collect()
+            } else {
+                vec![0, 1, 2]
+            };
+            let grandmaster_range: Vec<usize> = if let Some(locked_id) = trait_lock.and_then(|t| t[2]) {
+                (0..3).filter(|&i| spec.major_traits[6 + i] == locked_id).collect()
+            } else {
+                vec![0, 1, 2]
+            };
+
+            // Enumerate trait combos (respecting locks — locked columns have 1 option)
             let mut configs: Vec<(Vec<u32>, f64)> = Vec::new();
-            for a in 0..3 {
-                for m in 0..3 {
-                    for g in 0..3 {
+            for &a in &adept_range {
+                for &m in &master_range {
+                    for &g in &grandmaster_range {
                         let traits = vec![
                             spec.major_traits[a],       // Adept
                             spec.major_traits[3 + m],   // Master

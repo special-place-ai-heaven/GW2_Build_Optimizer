@@ -1,6 +1,7 @@
 //! Core domain types for resolved builds.
 //! A "resolved" build has all IDs expanded to full data from the cache.
 
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// A fully resolved character build with all data expanded.
@@ -35,6 +36,63 @@ impl GameMode {
             GameMode::PvE => "PvE",
             GameMode::PvP => "PvP",
             GameMode::WvW => "WvW",
+        }
+    }
+}
+
+/// Granular lock constraints for the optimizer.
+/// Controls which specializations and trait choices are preserved vs. free to change.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BuildLocks {
+    /// Spec locks by slot (0, 1, 2). None = optimizer decides, Some(id) = must use this spec.
+    pub specs: [Option<u32>; 3],
+    /// Trait locks: spec_id → [Adept, Master, Grandmaster]. None = free, Some(id) = locked trait.
+    #[serde(default)]
+    pub trait_locks: HashMap<u32, [Option<u32>; 3]>,
+}
+
+impl BuildLocks {
+    /// Get the locked elite spec ID (slot 2), for backward-compatible optimizer paths.
+    pub fn locked_elite_id(&self) -> Option<u32> {
+        self.specs[2]
+    }
+
+    /// Check if any locks are set at all.
+    pub fn has_any_locks(&self) -> bool {
+        self.specs.iter().any(|s| s.is_some())
+            || self.trait_locks.values().any(|cols| cols.iter().any(|c| c.is_some()))
+    }
+
+    /// Get locked trait for a specific spec and column (0=Adept, 1=Master, 2=Grandmaster).
+    pub fn locked_trait(&self, spec_id: u32, column: usize) -> Option<u32> {
+        self.trait_locks.get(&spec_id).and_then(|cols| cols.get(column).copied().flatten())
+    }
+
+    /// Build a text description of all active locks for prompt generation.
+    pub fn describe_constraints(&self) -> String {
+        let mut parts = Vec::new();
+        for (slot, spec) in self.specs.iter().enumerate() {
+            if let Some(id) = spec {
+                parts.push(format!("Slot {} spec locked to ID {}", slot + 1, id));
+            }
+        }
+        for (spec_id, cols) in &self.trait_locks {
+            for (col, trait_id) in cols.iter().enumerate() {
+                if let Some(tid) = trait_id {
+                    let tier = match col {
+                        0 => "Adept",
+                        1 => "Master",
+                        2 => "Grandmaster",
+                        _ => "Unknown",
+                    };
+                    parts.push(format!("Spec {} {} trait locked to ID {}", spec_id, tier, tid));
+                }
+            }
+        }
+        if parts.is_empty() {
+            String::new()
+        } else {
+            parts.join("; ")
         }
     }
 }

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use gw2_core::config::AppConfig;
-use gw2_core::types::{GameMode, ResolvedBuild, SavedBuild, StatBlock};
+use gw2_core::types::{BuildLocks, GameMode, ResolvedBuild, SavedBuild, StatBlock};
 use gw2_optimizer::gamedb::GameDb;
 use gw2_optimizer::scoring::OptimizationWeights;
 use crate::ui::chat_bar::ChatBarState;
@@ -125,6 +125,11 @@ pub struct MainState {
     pub api_status_frames: u32,
     /// Whether a health check is currently in flight.
     pub api_health_checking: bool,
+    // Spec & Trait Locks
+    /// Granular lock constraints for optimizer (which specs/traits to preserve).
+    pub build_locks: BuildLocks,
+    /// Whether the locks panel is expanded in the left menu.
+    pub locks_panel_expanded: bool,
 }
 
 /// GW2 API health status, checked periodically via `/v2/build`.
@@ -228,7 +233,14 @@ pub fn init(addon_dir: PathBuf) {
     }
 
     let mut main = MainState::default();
-    main.weights = OptimizationWeights::default_for_mode("PvE");
+    // Apply saved default game mode from config
+    let default_mode_label = config.default_game_mode.as_deref().unwrap_or("PvE");
+    main.game_mode = match default_mode_label {
+        "PvP" => gw2_core::types::GameMode::PvP,
+        "WvW" => gw2_core::types::GameMode::WvW,
+        _ => gw2_core::types::GameMode::PvE,
+    };
+    main.weights = OptimizationWeights::default_for_mode(main.game_mode.label());
     *lock_state() = Some(AddonState {
         window_visible: false,
         config,

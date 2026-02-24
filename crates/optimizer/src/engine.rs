@@ -46,6 +46,35 @@ pub struct OptimizeProgress {
     pub done: bool,
 }
 
+/// Build a human-readable description of lock constraints using GameDb names.
+/// Used for LLM prompt generation so Gemini knows what to preserve.
+fn describe_lock_constraints(locks: &gw2_core::types::BuildLocks, db: &GameDb) -> String {
+    if !locks.has_any_locks() {
+        return String::new();
+    }
+    let mut parts = Vec::new();
+    for (slot, spec_id) in locks.specs.iter().enumerate() {
+        if let Some(id) = spec_id {
+            let name = db.specializations.get(id).map(|s| s.name.as_str()).unwrap_or("Unknown");
+            let elite = db.specializations.get(id).is_some_and(|s| s.elite);
+            let elite_tag = if elite { " (Elite)" } else { "" };
+            parts.push(format!("Slot {} LOCKED to \"{}\"{}", slot + 1, name, elite_tag));
+
+            // Trait locks for this spec
+            if let Some(trait_cols) = locks.trait_locks.get(id) {
+                for (col, trait_id) in trait_cols.iter().enumerate() {
+                    if let Some(tid) = trait_id {
+                        let tier = match col { 0 => "Adept", 1 => "Master", _ => "Grandmaster" };
+                        let tname = db.traits.get(tid).map(|t| t.name.as_str()).unwrap_or("Unknown");
+                        parts.push(format!("  {} trait LOCKED to \"{}\"", tier, tname));
+                    }
+                }
+            }
+        }
+    }
+    parts.join("\n")
+}
+
 /// Run the optimization pipeline for a given profession and archetype.
 /// Returns top N candidates ranked by score, or an error describing why none were found.
 /// For PvP, skips gear search (stats come from amulet) and only evaluates spec/trait combos.
@@ -61,10 +90,10 @@ pub fn optimize(
     mut on_progress: impl FnMut(OptimizeProgress),
     top_n: usize,
     game_mode: &GameMode,
-    locked_elite_spec: Option<u32>,
+    locks: &gw2_core::types::BuildLocks,
 ) -> Result<Vec<BuildCandidate>, String> {
     if *game_mode == GameMode::PvP {
-        return optimize_pvp(profession, weights, specs_cache, traits_cache, &mut on_progress, top_n, locked_elite_spec)
+        return optimize_pvp(profession, weights, specs_cache, traits_cache, &mut on_progress, top_n, locks)
             .and_then(|v| if v.is_empty() {
                 Err(format!("No PvP candidates found for {} / {}", profession.name, weights.summary_label()))
             } else {
@@ -110,7 +139,7 @@ pub fn optimize(
     });
 
     // 2. Find valid spec combinations
-    let spec_combos = search_spec_combos(&profession.specializations, specs_cache, locked_elite_spec);
+    let spec_combos = search_spec_combos(&profession.specializations, specs_cache, locks);
     if spec_combos.is_empty() {
         let core_count = profession.specializations.iter()
             .filter(|id| specs_cache.get(id).is_some_and(|s| !s.elite))
@@ -147,7 +176,7 @@ pub fn optimize(
                     trait_ids.extend(&spec.minor_traits);
                     // Pick 1 best major trait per column (Adept/Master/Grandmaster)
                     let best = select_best_major_traits(
-                        &spec.major_traits, &stat_weights, traits_cache,
+                        &spec.major_traits, &stat_weights, traits_cache, locks, spec_id,
                     );
                     trait_ids.extend(best);
                 }
@@ -225,14 +254,14 @@ fn optimize_pvp(
     traits_cache: &HashMap<u32, GW2Trait>,
     on_progress: &mut impl FnMut(OptimizeProgress),
     top_n: usize,
-    locked_elite_spec: Option<u32>,
+    locks: &gw2_core::types::BuildLocks,
 ) -> Result<Vec<BuildCandidate>, String> {
     on_progress(OptimizeProgress {
         stage: "Evaluating PvP specialization combinations...".into(),
         done: false,
     });
 
-    let spec_combos = search_spec_combos(&profession.specializations, specs_cache, locked_elite_spec);
+    let spec_combos = search_spec_combos(&profession.specializations, specs_cache, locks);
     let mut all_candidates: Vec<BuildCandidate> = Vec::new();
 
     // PvP: no gear search, use empty gear candidate
@@ -257,7 +286,7 @@ fn optimize_pvp(
             if let Some(spec) = specs_cache.get(&spec_id) {
                 trait_ids.extend(&spec.minor_traits);
                 let best = select_best_major_traits(
-                    &spec.major_traits, &stat_weights, traits_cache,
+                    &spec.major_traits, &stat_weights, traits_cache, locks, spec_id,
                 );
                 trait_ids.extend(best);
             }
@@ -365,6 +394,8 @@ fn select_best_major_traits(
     major_traits: &[u32],
     stat_weights: &StatWeights,
     traits_cache: &HashMap<u32, GW2Trait>,
+    locks: &gw2_core::types::BuildLocks,
+    spec_id: u32,
 ) -> Vec<u32> {
     if major_traits.len() != 9 {
         // Unexpected layout — return all as fallback (some specs may have fewer)
@@ -373,10 +404,20 @@ fn select_best_major_traits(
 
     let weights = stat_weights;
     let mut selected = Vec::with_capacity(3);
+    let trait_lock = locks.trait_locks.get(&spec_id);
 
     // Process 3 columns: [0..3], [3..6], [6..9]
-    for col_start in (0..9).step_by(3) {
+    for (col_idx, col_start) in (0..9).step_by(3).enumerate() {
         let column = &major_traits[col_start..col_start + 3];
+
+        // Check if this column is locked
+        if let Some(locked_id) = trait_lock.and_then(|t| t[col_idx]) {
+            if column.contains(&locked_id) {
+                selected.push(locked_id);
+                continue;
+            }
+        }
+
         let mut best_id = column[0];
         let mut best_score = f64::NEG_INFINITY;
 
@@ -536,7 +577,7 @@ pub fn optimize_with_gemini(
     game_mode: &GameMode,
     llm_client: &dyn LlmClient,
     current_build_summary: Option<&str>,
-    locked_elite_spec: Option<u32>,
+    locks: &gw2_core::types::BuildLocks,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     // 1. DETERMINISTIC gear prefix selection — this is authoritative, LLM cannot override
@@ -577,9 +618,8 @@ pub fn optimize_with_gemini(
         stage: "Preparing Gemini prompt...".into(),
         done: false,
     });
-    let locked_elite_name = locked_elite_spec.and_then(|id| {
-        db.specializations.get(&id).map(|s| s.name.as_str())
-    });
+    let lock_constraints = describe_lock_constraints(locks, db);
+    let lock_constraint_ref = if lock_constraints.is_empty() { None } else { Some(lock_constraints.as_str()) };
     let prompt = prompts::synergy_build_prompt(
         profession_name,
         weights,
@@ -587,7 +627,7 @@ pub fn optimize_with_gemini(
         &pre_computed_context,
         current_build_summary,
         Some(determined_prefix),
-        locked_elite_name,
+        lock_constraint_ref,
     );
 
     // 4. Call LLM with tools available for optional verification
@@ -856,7 +896,7 @@ pub fn optimize_deterministic(
     game_mode: &GameMode,
     llm_client: Option<&dyn LlmClient>,
     _current_build_summary: Option<&str>,
-    locked_elite_spec: Option<u32>,
+    locks: &gw2_core::types::BuildLocks,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     // 1. DETERMINISTIC gear prefix selection (reuse existing)
@@ -869,7 +909,7 @@ pub fn optimize_deterministic(
 
     // 2. Run the full synergy pipeline
     let mut result = crate::synergy_pipeline::optimize_synergy(
-        db, profession_name, weights, game_mode, determined_prefix, locked_elite_spec, on_progress,
+        db, profession_name, weights, game_mode, determined_prefix, locks, on_progress,
     )?;
 
     // 3. Optional: LLM explanation pass
@@ -990,7 +1030,8 @@ mod tests {
         // With no traits in cache, should still return 3 traits (one per column)
         let traits_cache = HashMap::new();
         let power_weights = OptimizationWeights::preset_power_dps().to_stat_weights();
-        let selected = select_best_major_traits(&major_traits, &power_weights, &traits_cache);
+        let no_locks = gw2_core::types::BuildLocks::default();
+        let selected = select_best_major_traits(&major_traits, &power_weights, &traits_cache, &no_locks, 0);
         assert_eq!(selected.len(), 3);
         // Each should come from a different column
         assert!(major_traits[0..3].contains(&selected[0]));
@@ -1037,7 +1078,8 @@ mod tests {
         });
 
         let power_weights = OptimizationWeights::preset_power_dps().to_stat_weights();
-        let selected = select_best_major_traits(&major_traits, &power_weights, &traits_cache);
+        let no_locks = gw2_core::types::BuildLocks::default();
+        let selected = select_best_major_traits(&major_traits, &power_weights, &traits_cache, &no_locks, 1);
         // First column should select trait 100 (Power bonus)
         assert_eq!(selected[0], 100, "PowerDPS should prefer Power trait over Vitality");
     }
@@ -1084,6 +1126,7 @@ mod tests {
             });
         }
 
+        let no_locks = gw2_core::types::BuildLocks::default();
         let candidates = optimize(
             &profession,
             &OptimizationWeights::preset_power_dps(),
@@ -1095,7 +1138,7 @@ mod tests {
             |_| {},
             3,
             &GameMode::PvE,
-            None,
+            &no_locks,
         )
         .expect("optimize() should succeed with valid data");
 

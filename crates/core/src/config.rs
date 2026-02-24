@@ -64,6 +64,20 @@ pub struct AppConfig {
     #[serde(default = "default_font_scale")]
     pub font_scale: f32,
 
+    // ─── Layout Tuning ───
+    /// Left panel width in pixels. Default 255.
+    #[serde(default = "default_left_panel_width")]
+    pub left_panel_width: f32,
+    /// Inner padding for left panel (px from edge). Default 6.
+    #[serde(default = "default_panel_padding")]
+    pub panel_padding: f32,
+    /// Vertical spacing between sections (px). Default 4.
+    #[serde(default = "default_section_spacing")]
+    pub section_spacing: f32,
+    /// Content area left indent (px). Default 4.
+    #[serde(default = "default_content_indent")]
+    pub content_indent: f32,
+
     // ─── Optimization Defaults ───
     /// Default game mode for new optimizations.
     #[serde(default)]
@@ -89,6 +103,10 @@ impl Default for AppConfig {
             anthropic_model: None,
             window_opacity: 1.0,
             font_scale: 1.0,
+            left_panel_width: 255.0,
+            panel_padding: 6.0,
+            section_spacing: 4.0,
+            content_indent: 4.0,
             default_game_mode: None,
             auto_refresh_cache: false,
         }
@@ -100,6 +118,18 @@ fn default_opacity() -> f32 {
 }
 fn default_font_scale() -> f32 {
     1.0
+}
+fn default_left_panel_width() -> f32 {
+    255.0
+}
+fn default_panel_padding() -> f32 {
+    6.0
+}
+fn default_section_spacing() -> f32 {
+    4.0
+}
+fn default_content_indent() -> f32 {
+    4.0
 }
 
 /// Known Gemini models available for selection.
