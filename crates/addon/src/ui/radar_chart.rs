@@ -221,15 +221,16 @@ fn draw_filled_polygon(
     }
 }
 
-/// Render compact preset buttons in a row.
+/// Render preset buttons in a compact grid (2 per row).
 /// Returns Some(preset_weights) if a preset was clicked.
 pub fn render_presets(ui: &Ui) -> Option<OptimizationWeights> {
     let mut result = None;
+    let btn_width = (ui.content_region_avail()[0] - 6.0) / 2.0;
     for (i, (name, preset_fn)) in OptimizationWeights::PRESETS.iter().enumerate() {
-        if i > 0 {
+        if i % 2 == 1 {
             ui.same_line();
         }
-        if ui.small_button(name) {
+        if ui.button_with_size(name, [btn_width, 0.0]) {
             result = Some(preset_fn());
         }
     }

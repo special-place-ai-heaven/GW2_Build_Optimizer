@@ -133,7 +133,7 @@ fn build_mixed_candidate(
 pub fn search_spec_combos(
     profession_specs: &[u32],
     all_specs: &HashMap<u32, Specialization>,
-    locked_elite_spec: Option<u32>,
+    locks: &gw2_core::types::BuildLocks,
 ) -> Vec<(Option<u32>, Vec<u32>)> {
     let mut combos = Vec::new();
 
@@ -149,27 +149,79 @@ pub fn search_spec_combos(
         .copied()
         .collect();
 
+    let locked_elite = locks.locked_elite_id();
+    // Check if slot 0 and slot 1 are locked to specific core specs
+    let locked_slot0 = locks.specs[0];
+    let locked_slot1 = locks.specs[1];
+
     // With each elite spec + 2 core specs (elite fills slot 3)
     for &elite in &elite_specs {
         // If elite spec is locked, skip all others
-        if let Some(locked) = locked_elite_spec {
+        if let Some(locked) = locked_elite {
             if elite != locked {
                 continue;
             }
         }
-        for i in 0..core_specs.len() {
-            for j in (i + 1)..core_specs.len() {
-                combos.push((Some(elite), vec![core_specs[i], core_specs[j]]));
+        // Generate core spec pairs for slots 0 and 1
+        let slot0_candidates: Vec<u32> = if let Some(locked0) = locked_slot0 {
+            // Slot 0 is locked — only this spec
+            if core_specs.contains(&locked0) { vec![locked0] } else { continue; }
+        } else {
+            core_specs.clone()
+        };
+        let slot1_candidates: Vec<u32> = if let Some(locked1) = locked_slot1 {
+            if core_specs.contains(&locked1) { vec![locked1] } else { continue; }
+        } else {
+            core_specs.clone()
+        };
+
+        for &s0 in &slot0_candidates {
+            for &s1 in &slot1_candidates {
+                if s0 == s1 { continue; } // Can't pick same spec twice
+                // Normalize order for dedup (smaller first) unless locked
+                let pair = if locked_slot0.is_some() || locked_slot1.is_some() {
+                    (s0, s1)
+                } else if s0 < s1 {
+                    (s0, s1)
+                } else {
+                    continue; // skip reversed pair to avoid duplicates
+                };
+                combos.push((Some(elite), vec![pair.0, pair.1]));
             }
         }
     }
 
     // Without elite spec: 3 core specs (only when no elite is locked)
-    if locked_elite_spec.is_none() {
-        for i in 0..core_specs.len() {
-            for j in (i + 1)..core_specs.len() {
-                for k in (j + 1)..core_specs.len() {
-                    combos.push((None, vec![core_specs[i], core_specs[j], core_specs[k]]));
+    if locked_elite.is_none() {
+        let slot0_candidates: Vec<u32> = if let Some(locked0) = locked_slot0 {
+            if core_specs.contains(&locked0) { vec![locked0] } else { vec![] }
+        } else {
+            core_specs.clone()
+        };
+        let slot1_candidates: Vec<u32> = if let Some(locked1) = locked_slot1 {
+            if core_specs.contains(&locked1) { vec![locked1] } else { vec![] }
+        } else {
+            core_specs.clone()
+        };
+        // Slot 2 (normally elite) can be a core spec if no elite is locked
+        let slot2_candidates: Vec<u32> = if let Some(locked2) = locks.specs[2] {
+            if core_specs.contains(&locked2) { vec![locked2] } else { vec![] }
+        } else {
+            core_specs.clone()
+        };
+
+        for &s0 in &slot0_candidates {
+            for &s1 in &slot1_candidates {
+                if s1 == s0 { continue; }
+                for &s2 in &slot2_candidates {
+                    if s2 == s0 || s2 == s1 { continue; }
+                    // Deduplicate: only keep combos where ids are in ascending order
+                    // unless specific slots are locked
+                    let any_locked = locked_slot0.is_some() || locked_slot1.is_some() || locks.specs[2].is_some();
+                    if !any_locked && !(s0 < s1 && s1 < s2) {
+                        continue;
+                    }
+                    combos.push((None, vec![s0, s1, s2]));
                 }
             }
         }

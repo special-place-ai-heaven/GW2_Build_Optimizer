@@ -2,9 +2,11 @@
 //! Shows current build vs optimized build with full stat tables, bonuses,
 //! effects/resistances, and LLM explanation.
 
-use nexus::imgui::{ChildWindow, Selectable, TreeNodeFlags, Ui};
+use nexus::imgui::{Selectable, TreeNodeFlags, Ui};
 
 use gw2_core::types::{CombatMetrics, ResolvedBuild, RotationBreakdown, StatBlock};
+
+use super::gear_diff::{compute_build_diff, ChangeStatus, SlotDiff};
 
 /// A build suggestion from the optimizer + LLM.
 #[derive(Debug, Clone, Default)]
@@ -99,8 +101,8 @@ pub fn render_comparison(
 
     let suggestion = &comparison.suggestions[comparison.selected_suggestion.min(tab_count - 1)];
 
-    // ═══ Build Components (side-by-side) ═══
-    render_build_side_by_side(ui, current_build, suggestion);
+    // ═══ Equipment Comparison ═══
+    render_gear_comparison(ui, current_build, suggestion);
 
     // ═══ Stats Table ═══
     ui.spacing();
@@ -150,39 +152,95 @@ pub fn render_comparison(
     new_selection
 }
 
-/// Render side-by-side build component comparison.
-fn render_build_side_by_side(ui: &Ui, current: &ResolvedBuild, suggestion: &BuildSuggestion) {
-    let avail = ui.content_region_avail();
-    let col_width = (avail[0] - 20.0) / 2.0;
-    // Estimate height based on content (specializations + skills + weapons + gear lines)
-    let left_lines = current.specializations.len() * 2 + 4 + current.weapons.len() * 2 + 3;
-    let right_lines = suggestion.specializations.len() * 2 + suggestion.skills.len() + suggestion.weapons.len() + 4;
-    let max_lines = left_lines.max(right_lines).max(10);
-    let height = (max_lines as f32 * 18.0).min(400.0).max(200.0);
+/// Render gear comparison table: per-slot diff between current and optimized build.
+fn render_gear_comparison(ui: &Ui, current: &ResolvedBuild, suggestion: &BuildSuggestion) {
+    let diff = compute_build_diff(current, suggestion);
 
-    // Left column: Current Build
-    ChildWindow::new("##current_col")
-        .size([col_width, height])
-        .build(ui, || {
-            ui.text_colored([0.6, 0.8, 1.0, 1.0], "CURRENT BUILD");
-            ui.separator();
-            render_current_build_summary(ui, current);
-        });
+    // ── Specializations ──
+    if ui.collapsing_header("Specializations", TreeNodeFlags::DEFAULT_OPEN) {
+        ui.columns(4, "##spec_diff", true);
+        diff_header(ui);
+        for (spec_diff, trait_diff) in &diff.specializations {
+            render_diff_row(ui, spec_diff);
+            render_diff_row(ui, trait_diff);
+        }
+        ui.columns(1, "##spec_diff_end", false);
+    }
 
-    ui.same_line();
+    // ── Skills ──
+    if ui.collapsing_header("Skills", TreeNodeFlags::DEFAULT_OPEN) {
+        ui.columns(4, "##skill_diff", true);
+        diff_header(ui);
+        for skill in &diff.skills {
+            render_diff_row(ui, skill);
+        }
+        ui.columns(1, "##skill_diff_end", false);
+    }
 
-    // Divider
-    ui.text("|");
-    ui.same_line();
+    // ── Weapons & Sigils ──
+    if ui.collapsing_header("Weapons & Sigils", TreeNodeFlags::DEFAULT_OPEN) {
+        ui.columns(4, "##weapon_diff", true);
+        diff_header(ui);
+        for (weapon_diff, sigil_diff) in &diff.weapon_sets {
+            render_diff_row(ui, weapon_diff);
+            render_diff_row(ui, sigil_diff);
+        }
+        ui.columns(1, "##weapon_diff_end", false);
+    }
 
-    // Right column: Suggested Build
-    ChildWindow::new("##suggested_col")
-        .size([col_width, height])
-        .build(ui, || {
-            ui.text_colored([0.3, 1.0, 0.3, 1.0], "OPTIMIZED BUILD");
-            ui.separator();
-            render_suggestion_summary(ui, suggestion);
-        });
+    // ── Upgrades ──
+    if ui.collapsing_header("Upgrades", TreeNodeFlags::DEFAULT_OPEN) {
+        ui.columns(4, "##upgrade_diff", true);
+        diff_header(ui);
+        render_diff_row(ui, &diff.gear_prefix);
+        render_diff_row(ui, &diff.rune);
+        render_diff_row(ui, &diff.relic);
+        ui.columns(1, "##upgrade_diff_end", false);
+    }
+}
+
+/// Render the 4-column header for diff tables.
+fn diff_header(ui: &Ui) {
+    ui.text_colored([0.8, 0.8, 0.2, 1.0], "Slot");
+    ui.next_column();
+    ui.text_colored([0.6, 0.8, 1.0, 1.0], "Current");
+    ui.next_column();
+    ui.text_colored([0.3, 1.0, 0.3, 1.0], "Optimized");
+    ui.next_column();
+    ui.text("");
+    ui.next_column();
+    ui.separator();
+}
+
+/// Render one row in a 4-column diff table.
+fn render_diff_row(ui: &Ui, diff: &SlotDiff) {
+    let (indicator, indicator_color) = match diff.status {
+        ChangeStatus::Unchanged => ("=", [0.4, 0.4, 0.4, 0.6]),
+        ChangeStatus::Changed => ("*", [1.0, 0.85, 0.3, 1.0]),
+    };
+
+    let (cur_color, opt_color) = match diff.status {
+        ChangeStatus::Unchanged => ([0.5, 0.5, 0.5, 1.0], [0.5, 0.5, 0.5, 1.0]),
+        ChangeStatus::Changed => ([0.6, 0.8, 1.0, 1.0], [1.0, 0.85, 0.3, 1.0]),
+    };
+
+    // Slot label — indent sub-rows
+    let is_sub = diff.slot_label.starts_with("  ");
+    if is_sub {
+        ui.text_colored([0.6, 0.6, 0.6, 1.0], &diff.slot_label);
+    } else {
+        ui.text(&diff.slot_label);
+    }
+    ui.next_column();
+
+    ui.text_colored(cur_color, &diff.current_value);
+    ui.next_column();
+
+    ui.text_colored(opt_color, &diff.proposed_value);
+    ui.next_column();
+
+    ui.text_colored(indicator_color, indicator);
+    ui.next_column();
 }
 
 /// Render all 9 primary attributes in a comparison table.
@@ -399,101 +457,6 @@ fn diff_color(diff: f64) -> [f32; 4] {
     }
 }
 
-fn render_current_build_summary(ui: &Ui, build: &ResolvedBuild) {
-    // Specs
-    for spec in &build.specializations {
-        let elite = if spec.elite { " [E]" } else { "" };
-        ui.text_colored([0.8, 0.6, 1.0, 1.0], &format!("{}{}", spec.name, elite));
-        let traits: Vec<&str> = spec.traits_selected.iter().map(|t| t.name.as_str()).collect();
-        if !traits.is_empty() {
-            ui.text_colored([0.7, 0.7, 0.7, 1.0], &format!("  {}", traits.join(" | ")));
-        }
-    }
-    ui.spacing();
-
-    // Skills
-    if let Some(ref h) = build.skills.heal {
-        ui.text(&format!("Heal: {}", h.name));
-    }
-    let utils: Vec<String> = build.skills.utilities.iter()
-        .filter_map(|u| u.as_ref().map(|s| s.name.clone())).collect();
-    if !utils.is_empty() {
-        ui.text(&format!("Utils: {}", utils.join(", ")));
-    }
-    if let Some(ref e) = build.skills.elite {
-        ui.text(&format!("Elite: {}", e.name));
-    }
-    ui.spacing();
-
-    // Weapons
-    for set in &build.weapons {
-        let mut parts = Vec::new();
-        if let Some(ref mh) = set.main_hand { parts.push(mh.name.clone()); }
-        if let Some(ref oh) = set.off_hand { parts.push(oh.name.clone()); }
-        if !parts.is_empty() {
-            ui.text(&format!("{}: {}", set.label, parts.join(" / ")));
-        }
-        if !set.sigils.is_empty() {
-            let sigil_names: Vec<&str> = set.sigils.iter().map(|s| s.name.as_str()).collect();
-            ui.text_colored([0.7, 0.7, 0.7, 1.0], &format!("  Sigils: {}", sigil_names.join(", ")));
-        }
-    }
-    ui.spacing();
-
-    // Gear summary
-    if !build.armor.is_empty() {
-        let prefix = &build.armor[0].stat_prefix;
-        if !prefix.is_empty() {
-            ui.text(&format!("Gear: {}", prefix));
-        }
-    }
-    if let Some(ref r) = build.rune {
-        ui.text(&format!("Rune: {}", r.name));
-    }
-    if let Some(ref r) = build.relic {
-        ui.text(&format!("Relic: {}", r.name));
-    }
-    if let Some(ref a) = build.pvp_amulet {
-        ui.text(&format!("Amulet: {}", a.name));
-    }
-}
-
-fn render_suggestion_summary(ui: &Ui, suggestion: &BuildSuggestion) {
-    // Specs
-    for (spec_name, traits) in &suggestion.specializations {
-        ui.text_colored([0.8, 0.6, 1.0, 1.0], spec_name);
-        if !traits.is_empty() {
-            ui.text_colored([0.7, 0.7, 0.7, 1.0], &format!("  {}", traits.join(" | ")));
-        }
-    }
-    ui.spacing();
-
-    // Skills
-    for skill in &suggestion.skills {
-        ui.text(skill);
-    }
-    ui.spacing();
-
-    // Weapons
-    for weapon in &suggestion.weapons {
-        ui.text(weapon);
-    }
-    ui.spacing();
-
-    // Gear
-    if !suggestion.stat_prefix.is_empty() {
-        ui.text(&format!("Gear: {}", suggestion.stat_prefix));
-    }
-    if !suggestion.rune.is_empty() {
-        ui.text(&format!("Rune: {}", suggestion.rune));
-    }
-    if !suggestion.relic.is_empty() {
-        ui.text(&format!("Relic: {}", suggestion.relic));
-    }
-    if !suggestion.sigils.is_empty() {
-        ui.text(&format!("Sigils: {}", suggestion.sigils.join(", ")));
-    }
-}
 
 /// Render rotation simulation breakdown: simulated DPS, condition uptimes, skill usage.
 fn render_rotation_breakdown(ui: &Ui, rotation: &RotationBreakdown) {
