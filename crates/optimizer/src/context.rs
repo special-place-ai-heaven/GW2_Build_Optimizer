@@ -375,7 +375,17 @@ fn section_runes(db: &GameDb) -> String {
 
 /// ALL Superior Sigils with their effect descriptions.
 fn section_sigils(db: &GameDb) -> String {
-    let mut out = String::from("=== ALL SUPERIOR SIGILS ===\n\n");
+    let mut out = String::from(
+        "=== ALL SUPERIOR SIGILS ===\n\
+         \n\
+         SIGIL RULES:\n\
+         - 4 sigil slots total: 2 per weapon set (Set 1 main/off, Set 2 main/off).\n\
+         - No duplicate sigils WITHIN a weapon set (Set 1 must have 2 different sigils).\n\
+         - The same sigil CAN appear in BOTH weapon sets (e.g. Sigil of Force in Set 1 AND Set 2).\n\
+         - Passive stat sigils (Force, Accuracy, Bloodlust…) are always active.\n\
+         - On-swap/on-crit sigils have internal cooldowns — frequency matters for their value.\n\
+         \n",
+    );
 
     let mut sigils: Vec<&Item> = db
         .all_sigils()
