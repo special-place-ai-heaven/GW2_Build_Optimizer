@@ -147,9 +147,9 @@ fn bleeding_tick(condition_damage: f64) -> f64 {
     0.06 * condition_damage + 22.0
 }
 
-/// Calculate burning tick damage: 0.155 * CondDmg + 131
+/// Calculate burning tick damage: 0.155 * CondDmg + 131.75
 fn burning_tick(condition_damage: f64) -> f64 {
-    0.155 * condition_damage + 131.0
+    0.155 * condition_damage + 131.75
 }
 
 /// Calculate poison tick damage: 0.06 * CondDmg + 33.5
@@ -164,9 +164,11 @@ fn torment_tick(condition_damage: f64) -> f64 {
     0.0375 * condition_damage + 31.875
 }
 
-/// Calculate confusion tick damage (on skill use): 0.195 * CondDmg + 95.5
+/// Calculate confusion tick damage (on skill use): 0.0175 * CondDmg + 11
+/// GW2 wiki level 80 formula for confusion activation damage per stack.
+/// Models approximately one enemy skill activation per second as the tick rate.
 fn confusion_tick(condition_damage: f64) -> f64 {
-    0.195 * condition_damage + 95.5
+    0.0175 * condition_damage + 11.0
 }
 
 /// Calculate all condition tick damage values.
@@ -701,10 +703,10 @@ mod tests {
         let mods = DamageModifiers::default();
         let ticks = calculate_condition_ticks(0.0, &mods);
         assert!((ticks.bleeding - 22.0).abs() < 0.1);
-        assert!((ticks.burning - 131.0).abs() < 0.1);
+        assert!((ticks.burning - 131.75).abs() < 0.1);
         assert!((ticks.poison - 33.5).abs() < 0.1);
         assert!((ticks.torment - 31.875).abs() < 0.1); // 0.0375*0 + 31.875
-        assert!((ticks.confusion - 95.5).abs() < 0.1);
+        assert!((ticks.confusion - 11.0).abs() < 0.1);
     }
 
     #[test]
@@ -714,14 +716,14 @@ mod tests {
         let ticks = calculate_condition_ticks(2000.0, &mods);
         // Bleeding: 0.06 * 2000 + 22 = 142
         assert!((ticks.bleeding - 142.0).abs() < 0.1);
-        // Burning: 0.155 * 2000 + 131 = 441
-        assert!((ticks.burning - 441.0).abs() < 0.1);
+        // Burning: 0.155 * 2000 + 131.75 = 441.75
+        assert!((ticks.burning - 441.75).abs() < 0.1);
         // Poison: 0.06 * 2000 + 33.5 = 153.5
         assert!((ticks.poison - 153.5).abs() < 0.1);
         // Torment: 0.0375 * 2000 + 31.875 = 75 + 31.875 = 106.875
         assert!((ticks.torment - 106.875).abs() < 0.1);
-        // Confusion: 0.195 * 2000 + 95.5 = 485.5
-        assert!((ticks.confusion - 485.5).abs() < 0.1);
+        // Confusion: 0.0175 * 2000 + 11 = 35 + 11 = 46.0
+        assert!((ticks.confusion - 46.0).abs() < 0.1);
     }
 
     #[test]
@@ -736,8 +738,8 @@ mod tests {
         let ticks = calculate_condition_ticks(1000.0, &mods);
         // Bleeding: (0.06 * 1000 + 22) * 1.10 = 82 * 1.10 = 90.2
         assert!((ticks.bleeding - 90.2).abs() < 0.1);
-        // Burning: (0.155 * 1000 + 131) * 1.10 * 1.20 = 286 * 1.32 = 377.52
-        assert!((ticks.burning - 377.52).abs() < 0.1);
+        // Burning: (0.155 * 1000 + 131.75) * 1.10 * 1.20 = 286.75 * 1.32 = 378.51
+        assert!((ticks.burning - 378.51).abs() < 0.1);
     }
 
     #[test]

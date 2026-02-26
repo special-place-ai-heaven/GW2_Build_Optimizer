@@ -534,10 +534,10 @@ fn estimate_buff_dps_value(
 fn condition_tick_damage(condition: &str, condition_damage: f64) -> f64 {
     match condition {
         "Bleeding" => 0.06 * condition_damage + 22.0,
-        "Burning" => 0.155 * condition_damage + 131.0,
+        "Burning" => 0.155 * condition_damage + 131.75,
         "Poison" => 0.06 * condition_damage + 33.5,
         "Torment" => 0.0375 * condition_damage + 31.875, // stationary: wiki formula 0.0375*CD + (0.375*80) + 1.875
-        "Confusion" => 0.195 * condition_damage + 95.5,
+        "Confusion" => 0.0175 * condition_damage + 11.0, // on-use: wiki formula 0.0175*CD + 11 per activation
         _ => 0.0,
     }
 }
@@ -655,10 +655,10 @@ mod tests {
     fn test_condition_tick_damage_formulas() {
         let cd = 1000.0;
         assert!((condition_tick_damage("Bleeding", cd) - 82.0).abs() < 0.1);
-        assert!((condition_tick_damage("Burning", cd) - 286.0).abs() < 0.1);
+        assert!((condition_tick_damage("Burning", cd) - 286.75).abs() < 0.1);  // 0.155*1000 + 131.75
         assert!((condition_tick_damage("Poison", cd) - 93.5).abs() < 0.1);
         assert!((condition_tick_damage("Torment", cd) - 69.375).abs() < 0.1); // 0.0375*1000 + 31.875
-        assert!((condition_tick_damage("Confusion", cd) - 290.5).abs() < 0.1);
+        assert!((condition_tick_damage("Confusion", cd) - 28.5).abs() < 0.1);  // 0.0175*1000 + 11
         assert_eq!(condition_tick_damage("Vulnerability", cd), 0.0);
     }
 
