@@ -107,6 +107,33 @@ fn extract_effects(facts: &[Fact]) -> Vec<SkillEffect> {
                     });
                 }
             }
+            // PrefixedBuff has the same combat-relevant fields as Buff (status, duration,
+            // apply_count) but also carries a textual prefix describing the application
+            // context (e.g. "To nearby enemies", "On hit"). The effects are identical
+            // for simulation purposes — handle them the same way.
+            Fact::PrefixedBuff {
+                status: Some(status),
+                duration,
+                apply_count,
+                ..
+            } => {
+                let stacks = apply_count.unwrap_or(1);
+                let duration_ms = duration.unwrap_or(0) * 1000;
+
+                if is_damaging_condition(status) {
+                    effects.push(SkillEffect::ApplyCondition {
+                        condition: status.clone(),
+                        stacks,
+                        duration_ms,
+                    });
+                } else {
+                    effects.push(SkillEffect::ApplyBuff {
+                        buff: status.clone(),
+                        stacks,
+                        duration_ms,
+                    });
+                }
+            }
             Fact::ComboField {
                 field_type: Some(ft),
                 ..
@@ -255,6 +282,36 @@ mod tests {
                 assert_eq!(*duration_ms, 10000);
             }
             _ => panic!("Expected ApplyBuff"),
+        }
+    }
+
+    #[test]
+    fn test_extract_effects_prefixed_buff_condition() {
+        // PrefixedBuff is used by AoE and on-hit effects; must be handled same as Buff.
+        use gw2_api::models::facts::BuffPrefix;
+        let facts = vec![Fact::PrefixedBuff {
+            text: None,
+            icon: None,
+            status: Some("Bleeding".into()),
+            duration: Some(5),
+            apply_count: Some(3),
+            description: None,
+            prefix: Some(BuffPrefix {
+                text: Some("To nearby enemies".into()),
+                icon: None,
+                status: None,
+                description: None,
+            }),
+        }];
+        let effects = extract_effects(&facts);
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            SkillEffect::ApplyCondition { condition, stacks, duration_ms } => {
+                assert_eq!(condition, "Bleeding");
+                assert_eq!(*stacks, 3);
+                assert_eq!(*duration_ms, 5000);
+            }
+            _ => panic!("Expected ApplyCondition from PrefixedBuff"),
         }
     }
 
