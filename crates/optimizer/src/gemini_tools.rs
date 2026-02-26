@@ -1252,7 +1252,8 @@ fn summarize_trait_facts(t: &GW2Trait) -> Vec<String> {
                     effects.push(format!("{}: {}", text, val));
                 }
             }
-            Fact::Buff { status, duration, .. } => {
+            Fact::Buff { status, duration, .. }
+            | Fact::PrefixedBuff { status, duration, .. } => {
                 if let Some(status) = status {
                     let dur = duration.map(|d| format!(" ({}s)", d)).unwrap_or_default();
                     effects.push(format!("Applies {}{}", status, dur));
