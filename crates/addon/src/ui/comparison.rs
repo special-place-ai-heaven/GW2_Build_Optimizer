@@ -59,7 +59,7 @@ pub fn render_comparison(
     let mut new_selection = None;
     if comparison.loading {
         ui.text("Optimizing build...");
-        ui.text("Consulting Gemini for synergy analysis...");
+        ui.text("Running AI synergy analysis...");
         return None;
     }
 
@@ -85,7 +85,7 @@ pub fn render_comparison(
             } else {
                 suggestion.label.clone()
             };
-            if Selectable::new(&format!("[{}]##sug_{}", label, i))
+            if Selectable::new(&format!("{}##sug_{}", label, i))
                 .selected(selected)
                 .size([0.0, 0.0])
                 .build(ui)
@@ -279,18 +279,18 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
             bonus_header(ui);
 
             let cur = *cur_combat;
-            render_int_row(ui, "Effective Power", cur.map_or(0, |c| c.effective_power), sug.effective_power);
-            render_pct_row(ui, "Crit Chance", cur.map_or(0.0, |c| c.crit_chance), sug.crit_chance);
-            render_int_row(ui, "Strike DPS Index", cur.map_or(0, |c| c.strike_dps_index), sug.strike_dps_index);
-            render_int_row(ui, "Condi DPS Index", cur.map_or(0, |c| c.condition_dps_index), sug.condition_dps_index);
-            render_int_row(ui, "Total DPS Index", cur.map_or(0, |c| c.total_dps_index), sug.total_dps_index);
-            render_pct_row(ui, "Boon Duration", cur.map_or(0.0, |c| c.boon_duration_pct), sug.boon_duration_pct);
-            render_pct_row(ui, "Condi Duration", cur.map_or(0.0, |c| c.condi_duration_pct), sug.condi_duration_pct);
+            render_int_row_opt(ui, "Effective Power", cur.map(|c| c.effective_power), sug.effective_power);
+            render_pct_row_opt(ui, "Crit Chance", cur.map(|c| c.crit_chance), sug.crit_chance);
+            render_int_row_opt(ui, "Strike DPS Index", cur.map(|c| c.strike_dps_index), sug.strike_dps_index);
+            render_int_row_opt(ui, "Condi DPS Index", cur.map(|c| c.condition_dps_index), sug.condition_dps_index);
+            render_int_row_opt(ui, "Total DPS Index", cur.map(|c| c.total_dps_index), sug.total_dps_index);
+            render_pct_row_opt(ui, "Boon Duration", cur.map(|c| c.boon_duration_pct), sug.boon_duration_pct);
+            render_pct_row_opt(ui, "Condi Duration", cur.map(|c| c.condi_duration_pct), sug.condi_duration_pct);
             if sug.healing_index > 0 || cur.map_or(false, |c| c.healing_index > 0) {
-                render_int_row(ui, "Healing Index", cur.map_or(0, |c| c.healing_index), sug.healing_index);
+                render_int_row_opt(ui, "Healing Index", cur.map(|c| c.healing_index), sug.healing_index);
             }
-            render_int_row(ui, "Effective HP", cur.map_or(0, |c| c.effective_health), sug.effective_health);
-            render_pct_row(ui, "Dmg Reduction", cur.map_or(0.0, |c| c.damage_reduction_pct), sug.damage_reduction_pct);
+            render_int_row_opt(ui, "Effective HP", cur.map(|c| c.effective_health), sug.effective_health);
+            render_pct_row_opt(ui, "Dmg Reduction", cur.map(|c| c.damage_reduction_pct), sug.damage_reduction_pct);
 
             ui.columns(1, &format!("##{}_end", label), false);
         } else {
@@ -355,7 +355,7 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
 }
 
 fn bonus_header(ui: &Ui) {
-    ui.text_colored([0.8, 0.8, 0.2, 1.0], "Bonus");
+    ui.text_colored([0.8, 0.8, 0.2, 1.0], "Metric");
     ui.next_column();
     ui.text_colored([0.6, 0.8, 1.0, 1.0], "Current");
     ui.next_column();
@@ -410,18 +410,50 @@ fn render_int_row(ui: &Ui, name: &str, cur: i32, sug: i32) {
     ui.next_column();
 }
 
-/// Render a table row for percentage stats with diff.
-fn render_pct_row(ui: &Ui, name: &str, cur: f64, sug: f64) {
+
+/// Render an integer row where the current value may be absent (shows "—" for current and diff).
+fn render_int_row_opt(ui: &Ui, name: &str, cur: Option<i32>, sug: i32) {
     ui.text(name);
     ui.next_column();
-    ui.text(&format!("{:.1}%", cur));
+    if let Some(c) = cur {
+        ui.text(&format!("{}", c));
+        ui.next_column();
+        ui.text(&format!("{}", sug));
+        ui.next_column();
+        let diff = sug - c;
+        let color = diff_color(diff as f64);
+        let sign = if diff > 0 { "+" } else { "" };
+        ui.text_colored(color, &format!("{}{}", sign, diff));
+    } else {
+        ui.text_colored([0.5, 0.5, 0.5, 1.0], "\u{2014}"); // em-dash
+        ui.next_column();
+        ui.text(&format!("{}", sug));
+        ui.next_column();
+        ui.text_colored([0.5, 0.5, 0.5, 1.0], "\u{2014}");
+    }
     ui.next_column();
-    ui.text(&format!("{:.1}%", sug));
+}
+
+/// Render a percentage row where the current value may be absent.
+fn render_pct_row_opt(ui: &Ui, name: &str, cur: Option<f64>, sug: f64) {
+    ui.text(name);
     ui.next_column();
-    let diff = sug - cur;
-    let color = diff_color(diff);
-    let sign = if diff > 0.0 { "+" } else { "" };
-    ui.text_colored(color, &format!("{}{:.1}%", sign, diff));
+    if let Some(c) = cur {
+        ui.text(&format!("{:.1}%", c));
+        ui.next_column();
+        ui.text(&format!("{:.1}%", sug));
+        ui.next_column();
+        let diff = sug - c;
+        let color = diff_color(diff);
+        let sign = if diff > 0.0 { "+" } else { "" };
+        ui.text_colored(color, &format!("{}{:.1}%", sign, diff));
+    } else {
+        ui.text_colored([0.5, 0.5, 0.5, 1.0], "\u{2014}");
+        ui.next_column();
+        ui.text(&format!("{:.1}%", sug));
+        ui.next_column();
+        ui.text_colored([0.5, 0.5, 0.5, 1.0], "\u{2014}");
+    }
     ui.next_column();
 }
 
