@@ -132,11 +132,12 @@ fn default_content_indent() -> f32 {
     4.0
 }
 
-/// Known Gemini models available for selection (fallback when list_models() fails).
+/// Known Gemini models — fallback shown when list_models() API call fails.
+/// The Settings tab populates this list dynamically from the API at runtime.
 pub const GEMINI_MODELS: &[(&str, &str)] = &[
     ("gemini-2.5-flash", "Gemini 2.5 Flash (fast, free tier)"),
-    ("gemini-2.5-pro-preview", "Gemini 2.5 Pro Preview (advanced reasoning)"),
-    ("gemini-2.0-flash", "Gemini 2.0 Flash (stable, fast)"),
+    ("gemini-3-pro-preview", "Gemini 3 Pro Preview (advanced reasoning)"),
+    ("gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview (latest)"),
 ];
 
 pub const DEFAULT_GEMINI_MODEL: &str = "gemini-2.5-flash";
