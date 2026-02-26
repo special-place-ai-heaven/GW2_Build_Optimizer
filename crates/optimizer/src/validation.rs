@@ -281,6 +281,9 @@ fn validate_weapon_set(
         .map(|s| s.spec_id)
         .collect();
 
+    // Elite spec weapon gate: collect weapons that need a spec not in the build.
+    // These are HARD errors — the player cannot equip them without the required spec.
+    let mut gated_weapons: Vec<String> = Vec::new();
     for weapon_name in [&set.main_hand, &set.off_hand].into_iter().flatten() {
         if let Some(info) = prof.weapons.get(weapon_name.as_str()) {
             if let Some(required_spec) = info.specialization {
@@ -289,13 +292,19 @@ fn validate_weapon_set(
                         .spec(required_spec)
                         .map(|s| s.name.as_str())
                         .unwrap_or("unknown");
-                    result.warnings.push(format!(
-                        "{}: '{}' requires {} but it's not in the build",
+                    result.errors.push(format!(
+                        "{}: '{}' requires {} (not equipped) — weapon cannot be used",
                         label, weapon_name, spec_name
                     ));
+                    gated_weapons.push(weapon_name.clone());
                 }
             }
         }
+    }
+    // Remove gated weapons from the validated set so downstream code can't apply them.
+    for w in &gated_weapons {
+        if set.main_hand.as_deref() == Some(w.as_str()) { set.main_hand = None; }
+        if set.off_hand.as_deref()  == Some(w.as_str()) { set.off_hand  = None; }
     }
 
     set
