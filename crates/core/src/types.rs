@@ -221,7 +221,7 @@ impl StatBlock {
         // Armor weight class (different from HP class!)
         let base_defense = match profession {
             "Warrior" | "Guardian" | "Revenant" => 1271,          // Heavy
-            "Ranger" | "Engineer" | "Thief" => 1000,              // Medium
+            "Ranger" | "Engineer" | "Thief" => 1118,              // Medium
             "Elementalist" | "Mesmer" | "Necromancer" => 967,     // Light
             _ => 1000,
         };
