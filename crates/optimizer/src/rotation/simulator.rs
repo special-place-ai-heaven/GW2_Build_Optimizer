@@ -288,7 +288,11 @@ impl SimState {
                     stacks,
                     duration_ms,
                 } => {
-                    for _ in 0..*stacks {
+                    // GW2 caps most conditions at 25 stacks; enforce cap to avoid overestimating DPS.
+                    const CONDITION_STACK_CAP: usize = 25;
+                    let current = self.conditions.iter().filter(|s| s.condition == *condition).count();
+                    let can_apply = (*stacks as usize).min(CONDITION_STACK_CAP.saturating_sub(current));
+                    for _ in 0..can_apply {
                         self.conditions.push(ConditionStack {
                             condition: condition.clone(),
                             remaining_ms: *duration_ms,
@@ -496,9 +500,14 @@ fn estimate_buff_dps_value(
     let duration_s = duration_ms as f64 / 1000.0;
     match buff {
         "Might" => {
-            // Each Might stack = +30 power, translated to extra DPS over buff duration.
-            let extra_power = 30.0 * stacks as f64;
-            extra_power * weapon_strength / REFERENCE_ARMOR * duration_s
+            // Each Might stack = +30 Power AND +30 Condition Damage (GW2 mechanic).
+            let stacks_f = stacks as f64;
+            // Power contribution: extra_power * weapon_strength / armor
+            let power_value = 30.0 * stacks_f * weapon_strength / REFERENCE_ARMOR * duration_s;
+            // Condition Damage contribution: 30 * CD_coefficient * duration.
+            // Use bleeding coefficient (0.06) as a conservative typical-condition estimate.
+            let condi_value = 30.0 * stacks_f * 0.06 * duration_s;
+            power_value + condi_value
         }
         "Fury" => {
             // Fury = +20% crit chance → roughly +15% DPS for the duration.
