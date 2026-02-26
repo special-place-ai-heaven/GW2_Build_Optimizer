@@ -593,6 +593,15 @@ fn select_weapons(
                         best_set2 = (Some(weapon.to_string()), Some(off_weapon.to_string()));
                     }
                 }
+
+                // Main-hand only (no off-hand) — mirrors Set 1 lines 555-560.
+                // Without this, Set 2 can never be main-hand-only even when that
+                // scores higher than any main+offhand combination.
+                let score = score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
+                if score > best_set2_score {
+                    best_set2_score = score;
+                    best_set2 = (Some(weapon.to_string()), None);
+                }
             }
         }
 
