@@ -488,6 +488,9 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
 
         if let Some(idx) = bt_changed {
             state.main.selected_build_tab = Some(idx);
+            state.main.comparison.suggestions.clear();
+            state.main.comparison.selected_suggestion = 0;
+            state.main.comparison.error = None;
             update_build_chat_code(state);
             resolve_selected_build(state);
         }
@@ -527,6 +530,9 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
 
         if let Some(idx) = et_changed {
             state.main.selected_equipment_tab = Some(idx);
+            state.main.comparison.suggestions.clear();
+            state.main.comparison.selected_suggestion = 0;
+            state.main.comparison.error = None;
             resolve_selected_build(state);
         }
     }
