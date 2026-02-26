@@ -793,7 +793,7 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                     } else {
                         sug.label.clone()
                     };
-                    if Selectable::new(&format!("[{}]##sug_{}", label, i))
+                    if Selectable::new(&format!("{}##sug_{}", label, i))
                         .selected(selected)
                         .size([0.0, 0.0])
                         .build(ui)
@@ -1216,6 +1216,7 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     }
 
     // ═══ Section 2: UI Preferences ═══
+    ui.dummy([0.0, 8.0]);
     build_display::render_card_header(ui, "UI PREFERENCES", [1.0, 0.88, 0.35, 1.0]);
     {
 
@@ -1328,6 +1329,7 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     }
 
     // ═══ Section 3: Optimization Defaults ═══
+    ui.dummy([0.0, 8.0]);
     build_display::render_card_header(ui, "OPTIMIZATION DEFAULTS", [1.0, 0.88, 0.35, 1.0]);
     {
 
@@ -1346,6 +1348,7 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     }
 
     // ═══ Section 4: Cache & Data Management ═══
+    ui.dummy([0.0, 8.0]);
     build_display::render_card_header(ui, "CACHE & DATA", [1.0, 0.88, 0.35, 1.0]);
     {
 
@@ -3420,6 +3423,7 @@ fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
     );
 
     if state.main.saved_builds.is_empty() {
+        ui.spacing();
         ui.text_colored([0.5, 0.5, 0.5, 1.0], "No saved builds yet.");
         ui.text_colored([0.5, 0.5, 0.5, 1.0], "Optimize a build, then use Save to store it here.");
         return;
