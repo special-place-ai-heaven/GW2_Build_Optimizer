@@ -320,8 +320,14 @@ impl SimState {
         // Set cooldown (0 for auto-attacks)
         self.skill_states[idx].cooldown_remaining_ms = cooldown;
 
-        // Next action = now + cast_time + human delay
-        self.next_action_ms = self.current_time_ms + cast_time + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS;
+        // Quickness reduces cast time: skills execute at 1.5× speed (66.7% of normal time).
+        // GW2 mechanic: "skills and actions execute 50% faster" = cast * 2/3.
+        // Quickness does NOT reduce cooldowns.
+        let quickness_active = self.buffs.iter().any(|b| b.buff == "Quickness");
+        let effective_cast = if quickness_active { cast_time * 2 / 3 } else { cast_time };
+
+        // Next action = now + effective_cast + human delay
+        self.next_action_ms = self.current_time_ms + effective_cast + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS;
     }
 
     /// Tick all active conditions — apply damage for each stack, remove expired.
