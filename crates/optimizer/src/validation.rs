@@ -307,7 +307,24 @@ fn validate_skills(
     profession_name: &str,
     result: &mut ValidatedBuild,
 ) {
-    let prof_skills = db.profession_skills(profession_name);
+    // Determine which elite spec (if any) is equipped — used to gate elite spec skills.
+    let equipped_elite_spec_id: Option<u32> = result
+        .specializations
+        .iter()
+        .find(|s| s.elite)
+        .map(|s| s.spec_id);
+
+    // Filter to only core skills (specialization == None) or skills from the equipped elite spec.
+    // This prevents cross-spec skill suggestions from slipping through (e.g. Berserker using
+    // a Spellbreaker utility when Spellbreaker is not equipped).
+    let all_prof_skills = db.profession_skills(profession_name);
+    let prof_skills: Vec<&Skill> = all_prof_skills
+        .into_iter()
+        .filter(|s| match s.specialization {
+            None => true,
+            Some(spec_id) => Some(spec_id) == equipped_elite_spec_id,
+        })
+        .collect();
 
     // Parse skill names from the response
     let (heal_name, utility_names, elite_name) = parse_skill_names_from_response(response);
