@@ -127,9 +127,9 @@ pub fn base_stats() -> StatBlock {
 /// Vitality is added separately in compute_derived: health = base + vitality * 10.
 pub fn base_health(profession: &str) -> f64 {
     match profession {
-        "Warrior" | "Necromancer" => 9212.0,
-        "Revenant" | "Engineer" | "Ranger" | "Mesmer" => 5922.0,
-        "Guardian" | "Thief" | "Elementalist" => 1645.0,
+        "Warrior" | "Guardian" => 9212.0,
+        "Revenant" | "Engineer" | "Ranger" | "Mesmer" | "Necromancer" => 5922.0,
+        "Thief" | "Elementalist" => 1645.0,
         _ => 5922.0, // default to medium
     }
 }
@@ -554,9 +554,16 @@ mod tests {
 
     #[test]
     fn test_base_health() {
+        // High HP: Warrior, Guardian
         assert_eq!(base_health("Warrior"), 9212.0);
-        assert_eq!(base_health("Guardian"), 1645.0);
+        assert_eq!(base_health("Guardian"), 9212.0);
+        // Medium HP: Revenant, Engineer, Ranger, Mesmer, Necromancer
         assert_eq!(base_health("Ranger"), 5922.0);
+        assert_eq!(base_health("Necromancer"), 5922.0);
+        assert_eq!(base_health("Revenant"), 5922.0);
+        // Low HP: Thief, Elementalist
+        assert_eq!(base_health("Thief"), 1645.0);
+        assert_eq!(base_health("Elementalist"), 1645.0);
     }
 
     #[test]
