@@ -692,10 +692,17 @@ pub fn optimize_with_gemini(
     });
     let validated = validation::validate_gemini_build(&parsed, db, profession_name);
 
-    // Check for blocking errors (no specializations resolved = build is unusable)
+    // Check for blocking errors: no specializations, OR any hard validation error
+    // (e.g., elite-spec-gated weapon without the required spec equipped).
     if validated.specializations.is_empty() {
         return Err(format!(
             "Validation failed — no specializations resolved. Errors: {}",
+            validated.errors.join("; ")
+        ));
+    }
+    if !validated.errors.is_empty() {
+        return Err(format!(
+            "Validation failed — build has hard errors: {}",
             validated.errors.join("; ")
         ));
     }
