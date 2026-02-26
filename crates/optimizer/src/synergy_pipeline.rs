@@ -187,20 +187,25 @@ fn select_specs_and_traits(
             // Check trait locks for this spec
             let trait_lock = locks.trait_locks.get(&spec_id);
 
-            // Build ranges for each column: locked = single option, unlocked = 0..3
+            // Build ranges for each column: locked = single option, unlocked = 0..3.
+            // If a locked trait ID is not found in that column (data mismatch), fall back
+            // to all 3 options rather than producing an empty range (which collapses the
+            // cross-product to zero candidates with no error message).
             let adept_range: Vec<usize> = if let Some(locked_id) = trait_lock.and_then(|t| t[0]) {
-                // Find which index (0,1,2) this locked trait is at in the Adept column
-                (0..3).filter(|&i| spec.major_traits[i] == locked_id).collect()
+                let r: Vec<usize> = (0..3).filter(|&i| spec.major_traits[i] == locked_id).collect();
+                if r.is_empty() { vec![0, 1, 2] } else { r }
             } else {
                 vec![0, 1, 2]
             };
             let master_range: Vec<usize> = if let Some(locked_id) = trait_lock.and_then(|t| t[1]) {
-                (0..3).filter(|&i| spec.major_traits[3 + i] == locked_id).collect()
+                let r: Vec<usize> = (0..3).filter(|&i| spec.major_traits[3 + i] == locked_id).collect();
+                if r.is_empty() { vec![0, 1, 2] } else { r }
             } else {
                 vec![0, 1, 2]
             };
             let grandmaster_range: Vec<usize> = if let Some(locked_id) = trait_lock.and_then(|t| t[2]) {
-                (0..3).filter(|&i| spec.major_traits[6 + i] == locked_id).collect()
+                let r: Vec<usize> = (0..3).filter(|&i| spec.major_traits[6 + i] == locked_id).collect();
+                if r.is_empty() { vec![0, 1, 2] } else { r }
             } else {
                 vec![0, 1, 2]
             };
@@ -738,7 +743,11 @@ fn rank_and_select(
     weights: &OptimizationWeights,
 ) -> Result<SynergyCandidate, String> {
     if candidates.is_empty() {
-        return Err("No candidates produced by synergy pipeline".into());
+        return Err(format!(
+            "No valid spec/trait combinations found for {}. \
+             If trait locks are set, verify locked traits belong to the selected specializations.",
+            profession_name
+        ));
     }
 
     // Re-score candidates with full combat performance

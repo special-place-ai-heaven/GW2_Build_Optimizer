@@ -1659,7 +1659,12 @@ fn resolve_selected_build_inner(state: &mut AddonState) {
                     state.main.comparison.current_combat_squad = combat_squad;
                 }
                 Err(_) => {
+                    // Clear stats AND combat metrics together — stale combat data from
+                    // a previous build would be shown alongside the new current_build.
                     state.main.current_stats = None;
+                    state.main.comparison.current_combat_solo = None;
+                    state.main.comparison.current_combat_party = None;
+                    state.main.comparison.current_combat_squad = None;
                 }
             }
         }
@@ -1668,7 +1673,8 @@ fn resolve_selected_build_inner(state: &mut AddonState) {
 }
 
 /// Auto-populate BuildLocks from the current resolved build.
-/// Locks all 3 spec slots and all selected traits — user then unlocks what they want changed.
+/// Locks only the elite specialization slot (slot 2) so the optimizer preserves the
+/// profession identity. Core specs and all traits remain unlocked by default.
 fn auto_populate_locks(build: &gw2_core::types::ResolvedBuild, locks: &mut gw2_core::types::BuildLocks) {
     // Start with everything unlocked
     locks.specs = [None; 3];
