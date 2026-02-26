@@ -189,13 +189,22 @@ impl AppConfig {
         }
     }
 
-    pub fn load(path: &Path) -> Self {
+    /// Load config from disk. Returns `(config, error_message)` where
+    /// `error_message` is Some if the file existed but could not be parsed.
+    /// Callers should surface parse errors to the user — settings were reset.
+    pub fn load(path: &Path) -> (Self, Option<String>) {
         match std::fs::read_to_string(path) {
-            Err(_) => Self::default(),
-            Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-                eprintln!("Warning: config parse error ({}), using defaults", e);
-                Self::default()
-            }),
+            Err(_) => (Self::default(), None),
+            Ok(s) => match serde_json::from_str::<Self>(&s) {
+                Ok(cfg) => (cfg, None),
+                Err(e) => {
+                    let msg = format!(
+                        "config.json could not be parsed ({}). All settings reset to defaults.",
+                        e
+                    );
+                    (Self::default(), Some(msg))
+                }
+            },
         }
     }
 
@@ -275,7 +284,8 @@ mod tests {
         };
         config.save(&path).unwrap();
 
-        let loaded = AppConfig::load(&path);
+        let (loaded, err) = AppConfig::load(&path);
+        assert!(err.is_none(), "unexpected parse error: {:?}", err);
         assert_eq!(loaded.gw2_api_key.as_deref(), Some("test-key-123"));
         assert!(loaded.is_setup_complete());
 

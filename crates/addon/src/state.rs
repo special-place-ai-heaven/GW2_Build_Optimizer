@@ -209,7 +209,7 @@ fn lock_state() -> std::sync::MutexGuard<'static, Option<AddonState>> {
 
 pub fn init(addon_dir: PathBuf) {
     let config_path = AppConfig::config_path(&addon_dir);
-    let config = AppConfig::load(&config_path);
+    let (config, config_err) = AppConfig::load(&config_path);
 
     let screen = if config.is_setup_complete() {
         Screen::Main
@@ -233,6 +233,8 @@ pub fn init(addon_dir: PathBuf) {
     }
 
     let mut main = MainState::default();
+    // Surface any config parse error in the UI status bar
+    main.error = config_err;
     // Apply saved default game mode from config
     let default_mode_label = config.default_game_mode.as_deref().unwrap_or("PvE");
     main.game_mode = match default_mode_label {
