@@ -651,12 +651,13 @@ fn select_skills(
             .filter(|s| s.slot.as_deref() == Some("Heal"))
             .copied()
             .collect();
-        if let Some((id, name)) = pick_best_skill(&heals, weights, &candidate.accumulated) {
+        if let Some((id, name, links)) = pick_best_skill(&heals, weights, &candidate.accumulated) {
             // Add heal effects to accumulated for subsequent skill synergy scoring
             if let Some(skill) = db.skills.get(&id) {
                 let effects = extract_skill_effects(skill);
                 candidate.accumulated.push((ComponentId::Skill(id), effects));
             }
+            candidate.synergy_links.extend(links);
             candidate.heal = Some((id, name));
         }
 
@@ -665,12 +666,13 @@ fn select_skills(
             .filter(|s| s.slot.as_deref() == Some("Elite"))
             .copied()
             .collect();
-        if let Some((id, name)) = pick_best_skill(&elites, weights, &candidate.accumulated) {
+        if let Some((id, name, links)) = pick_best_skill(&elites, weights, &candidate.accumulated) {
             // Add elite effects to accumulated for subsequent skill synergy scoring
             if let Some(skill) = db.skills.get(&id) {
                 let effects = extract_skill_effects(skill);
                 candidate.accumulated.push((ComponentId::Skill(id), effects));
             }
+            candidate.synergy_links.extend(links);
             candidate.elite_skill = Some((id, name));
         }
 
@@ -687,13 +689,14 @@ fn select_skills(
                 .copied()
                 .collect();
 
-            if let Some((id, name)) = pick_best_skill(&available, weights, &candidate.accumulated) {
+            if let Some((id, name, links)) = pick_best_skill(&available, weights, &candidate.accumulated) {
                 used_ids.push(id);
                 // Add effects to accumulated for next utility selection
                 if let Some(skill) = db.skills.get(&id) {
                     let effects = extract_skill_effects(skill);
                     candidate.accumulated.push((ComponentId::Skill(id), effects));
                 }
+                candidate.synergy_links.extend(links);
                 candidate.utilities.push((id, name));
             }
         }
@@ -704,21 +707,21 @@ fn pick_best_skill(
     skills: &[&&Skill],
     weights: &OptimizationWeights,
     accumulated: &[(ComponentId, Vec<NormalizedEffect>)],
-) -> Option<(u32, String)> {
+) -> Option<(u32, String, Vec<SynergyLink>)> {
     let mut best_score = f64::NEG_INFINITY;
-    let mut best: Option<(u32, String)> = None;
+    let mut best: Option<(u32, String, Vec<SynergyLink>)> = None;
 
     for &&skill in skills {
         let effects = extract_skill_effects(skill);
         let base: f64 = effects.iter()
             .map(|e| score_normalized_effect(e, weights))
             .sum();
-        let (syn, _) = compute_marginal_synergy(&effects, accumulated, weights);
+        let (syn, links) = compute_marginal_synergy(&effects, accumulated, weights);
 
         let total = base + syn;
         if total > best_score {
             best_score = total;
-            best = Some((skill.id, skill.name.clone()));
+            best = Some((skill.id, skill.name.clone(), links));
         }
     }
 
