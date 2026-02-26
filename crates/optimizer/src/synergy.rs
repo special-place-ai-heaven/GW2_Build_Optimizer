@@ -619,7 +619,13 @@ fn parse_rune_bonus_to_effects(bonus: &str) -> Vec<NormalizedEffect> {
                         kind: DurationKind::AllBoon,
                         percent: value,
                     });
-                } else if rest.contains("damage") && !rest.contains("condition") {
+                } else if rest.contains("condition") && rest.contains("damage") {
+                    // "+X% Condition Damage" — percentage bonus to all condition damage output.
+                    effects.push(NormalizedEffect::DamageModifier {
+                        category: DamageCategory::Condition,
+                        percent: value,
+                    });
+                } else if rest.contains("damage") {
                     effects.push(NormalizedEffect::DamageModifier {
                         category: DamageCategory::Strike,
                         percent: value,
