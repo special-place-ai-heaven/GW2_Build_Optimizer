@@ -2376,6 +2376,11 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
     let token = state.cancel_token.clone();
     let weights = state.main.weights.clone();
     let build_locks = state.main.build_locks.clone();
+    // Capture selection snapshot so results can be discarded if the user switches
+    // character or build tab while optimization is running (TOCTOU guard).
+    let optimizing_for_char = state.main.selected_character;
+    let optimizing_for_build_tab = state.main.selected_build_tab;
+    let optimizing_for_equip_tab = state.main.selected_equipment_tab;
 
     state.main.optimizing = true;
     state.main.optimize_stage = "Starting...".into();
@@ -2547,6 +2552,16 @@ fn start_optimization_with_profession(state: &mut AddonState, profession_name: &
                 crate::state::with_state(|s| {
                     s.main.optimizing = false;
                     s.main.comparison.loading = false;
+                    // Discard results if the user switched character or build tab while
+                    // optimization was running — showing results for a different context
+                    // would silently corrupt the comparison panel.
+                    let context_changed =
+                        s.main.selected_character != optimizing_for_char
+                        || s.main.selected_build_tab != optimizing_for_build_tab
+                        || s.main.selected_equipment_tab != optimizing_for_equip_tab;
+                    if context_changed {
+                        return;
+                    }
                     match result {
                         Ok(suggestions) => {
                             s.main.comparison.suggestions = suggestions;

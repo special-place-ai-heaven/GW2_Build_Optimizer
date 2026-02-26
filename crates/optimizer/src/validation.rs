@@ -143,8 +143,9 @@ fn validate_specializations(
     let mut elite_count = 0;
 
     for (spec_name, trait_names) in &response.specializations {
-        // Case-insensitive spec lookup
-        let spec = find_spec_by_name(db, spec_name, &prof_spec_ids);
+        // Strip display-only " [E]" suffix that the LLM or UI may include for elite specs
+        let spec_name_clean = spec_name.trim_end_matches(" [E]");
+        let spec = find_spec_by_name(db, spec_name_clean, &prof_spec_ids);
 
         let Some(spec) = spec else {
             result
