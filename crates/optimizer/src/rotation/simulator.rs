@@ -323,8 +323,9 @@ impl SimState {
         // Quickness reduces cast time: skills execute at 1.5× speed (66.7% of normal time).
         // GW2 mechanic: "skills and actions execute 50% faster" = cast * 2/3.
         // Quickness does NOT reduce cooldowns.
+        // Round-half-up via (n*2 + 1)/3 to avoid systematic floor bias from integer division.
         let quickness_active = self.buffs.iter().any(|b| b.buff == "Quickness");
-        let effective_cast = if quickness_active { cast_time * 2 / 3 } else { cast_time };
+        let effective_cast = if quickness_active { (cast_time * 2 + 1) / 3 } else { cast_time };
 
         // Next action = now + effective_cast + human delay
         self.next_action_ms = self.current_time_ms + effective_cast + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS;
