@@ -206,16 +206,16 @@ impl StatBlock {
     /// Compute derived stats from base stats.
     /// `profession` determines base health (HP class) and base defense (armor weight class).
     /// NOTE: GW2 HP classes and armor classes do NOT align!
-    /// HP: High (Warrior, Necromancer), Medium (Rev, Engi, Ranger, Mesmer), Low (Guardian, Thief, Ele)
+    /// HP: High (Warrior, Guardian), Medium (Rev, Engi, Ranger, Mesmer, Necro), Low (Thief, Ele)
     /// Armor: Heavy (Warrior, Guardian, Revenant), Medium (Ranger, Engi, Thief), Light (Ele, Mes, Necro)
     pub fn compute_derived(&mut self, profession: &str) {
         self.crit_chance = ((self.precision - 895) as f64 / 21.0).clamp(0.0, 100.0);
         self.crit_damage = 150.0 + self.ferocity as f64 / 15.0;
         // HP class (different from armor class!)
         let base_hp = match profession {
-            "Warrior" | "Necromancer" => 9212,
-            "Revenant" | "Engineer" | "Ranger" | "Mesmer" => 5922,
-            "Guardian" | "Thief" | "Elementalist" => 1645,
+            "Warrior" | "Guardian" => 9212,
+            "Revenant" | "Engineer" | "Ranger" | "Mesmer" | "Necromancer" => 5922,
+            "Thief" | "Elementalist" => 1645,
             _ => 5922,
         };
         // Armor weight class (different from HP class!)
