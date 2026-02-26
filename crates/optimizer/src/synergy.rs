@@ -968,13 +968,13 @@ fn weight_for_damage_category(cat: &DamageCategory, weights: &OptimizationWeight
 
 fn condition_importance(status: &str) -> f64 {
     match status {
-        "Burning" => 1.0,       // Highest tick damage
-        "Bleeding" => 0.7,      // Stacks well
-        "Torment" => 0.6,
-        "Poison" => 0.5,
-        "Confusion" => 0.4,
-        "Vulnerability" => 0.8, // Force multiplier
-        _ => 0.2,               // CC conditions
+        "Burning" => 1.0,       // Highest tick damage: 0.155*CD + 131.75
+        "Bleeding" => 0.7,      // Stacks to 25: 0.06*CD + 22
+        "Torment" => 0.6,       // Stationary: 0.0375*CD + 31.875; moving: 2×
+        "Poison" => 0.5,        // 0.06*CD + 33.5, also -33% healing
+        "Confusion" => 0.1,     // On-use only: 0.0175*CD + 11 (~10% of Burning DPS)
+        "Vulnerability" => 0.8, // Force multiplier (+1% all damage per stack)
+        _ => 0.2,               // CC conditions (Immobilize, Chill, etc.)
     }
 }
 
