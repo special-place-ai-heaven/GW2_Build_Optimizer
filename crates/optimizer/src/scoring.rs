@@ -7,17 +7,19 @@ use serde::{Deserialize, Serialize};
 use crate::combat::CombatPerformance;
 
 /// Normalization divisors for cross-axis score comparison.
-/// These map realistic Solo-profile maximums to ~1.0 so per-axis scores
-/// occupy the same 0.0–1.0 range and no single axis can dominate.
+/// These are calibrated ceiling values (not typical build averages), chosen so
+/// well-optimized builds approach 1.0 without hitting the cap from gear alone.
+/// Headroom above typical values is intentional — it rewards optimal trait+rune+sigil
+/// synergy on top of the gear prefix.
 ///
-/// Calibrated against typical fully-geared Ascended builds:
-/// - Berserker Warrior Solo: strike_dps_index ≈ 2200
-/// - Viper Necro Solo: condition_dps_index ≈ 3000
-/// - Minstrel Guardian Solo: effective_health ≈ 45000
-/// - Minstrel/Harrier Druid: healing_power_index ≈ 1500
+/// Observed ranges for fully-geared Ascended Solo builds:
+/// - Berserker Warrior (gear only):  strike_dps_index ≈ 2200 → norm 3000 gives ~0.73
+/// - Viper Necro (gear only):        condition_dps_index ≈ 3000 → norm 3500 gives ~0.86
+/// - Minstrel Guardian:              effective_health ≈ 45000 → norm 50000 gives ~0.90
+/// - Minstrel/Harrier Druid:         healing_power_index ≈ 1500 → norm 1500 is ~1.0
 ///
-/// All per-axis scores are capped at 1.0 in score_with_weights() so
-/// even extreme builds cannot exceed the normalized range.
+/// Trait/rune/sigil synergy can push builds significantly above gear-only values.
+/// All per-axis scores are capped at 1.0 in score_with_weights().
 pub const STRIKE_DPS_NORM: f64 = 3000.0;
 pub const CONDI_DPS_NORM: f64 = 3500.0;
 pub const EFFECTIVE_HEALTH_NORM: f64 = 50000.0;

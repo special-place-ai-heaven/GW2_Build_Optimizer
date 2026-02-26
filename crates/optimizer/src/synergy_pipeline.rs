@@ -278,6 +278,7 @@ fn select_specs_and_traits(
             // Score with full cross-spec synergy
             let mut total_score = 0.0;
             let mut accumulated = Vec::new();
+            let mut all_links: Vec<SynergyLink> = Vec::new();
 
             for &tid in &all_trait_ids {
                 if let Some(t) = traits_cache.get(&tid) {
@@ -285,11 +286,16 @@ fn select_specs_and_traits(
                     for eff in &effs {
                         total_score += score_normalized_effect(eff, weights);
                     }
-                    let (syn, _) = compute_marginal_synergy(&effs, &accumulated, weights);
+                    let (syn, links) = compute_marginal_synergy(&effs, &accumulated, weights);
                     total_score += syn;
+                    all_links.extend(links);
                     accumulated.push((ComponentId::Trait(tid), effs));
                 }
             }
+
+            // Keep top 10 most impactful synergy links to avoid explanation clutter
+            all_links.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            all_links.truncate(10);
 
             candidates.push(SynergyCandidate {
                 spec_ids: spec_ids.clone(),
@@ -305,7 +311,7 @@ fn select_specs_and_traits(
                 heal: None,
                 utilities: Vec::new(),
                 elite_skill: None,
-                synergy_links: Vec::new(),
+                synergy_links: all_links,
             });
         }
     }
@@ -356,6 +362,7 @@ fn select_rune(
         let mut best_score = f64::NEG_INFINITY;
         let mut best_rune: Option<(u32, String)> = None;
         let mut best_effects: Vec<NormalizedEffect> = Vec::new();
+        let mut best_links: Vec<SynergyLink> = Vec::new();
 
         for &&rune in &superior_runes {
             let effects = extract_rune_effects(rune);
@@ -365,18 +372,20 @@ fn select_rune(
                 .map(|e| score_normalized_effect(e, weights))
                 .sum();
 
-            // Synergy with existing traits
-            let (syn, _) = compute_marginal_synergy(&effects, &candidate.accumulated, weights);
+            // Synergy with existing traits/specs
+            let (syn, links) = compute_marginal_synergy(&effects, &candidate.accumulated, weights);
 
             let total = base + syn;
             if total > best_score {
                 best_score = total;
                 best_rune = Some((rune.id, rune.name.clone()));
                 best_effects = effects;
+                best_links = links;
             }
         }
 
         if let Some(rune) = best_rune {
+            candidate.synergy_links.extend(best_links);
             candidate.accumulated.push((ComponentId::Rune(rune.0), best_effects));
             candidate.rune = Some(rune);
             candidate.score += best_score;
@@ -404,6 +413,7 @@ fn select_sigils(
             let mut best_score = f64::NEG_INFINITY;
             let mut best_sigil: Option<(u32, String)> = None;
             let mut best_effects: Vec<NormalizedEffect> = Vec::new();
+            let mut best_links: Vec<SynergyLink> = Vec::new();
 
             for &&sigil in &superior_sigils {
                 if selected_ids.contains(&sigil.id) {
@@ -414,18 +424,20 @@ fn select_sigils(
                 let base: f64 = effects.iter()
                     .map(|e| score_normalized_effect(e, weights))
                     .sum();
-                let (syn, _) = compute_marginal_synergy(&effects, &candidate.accumulated, weights);
+                let (syn, links) = compute_marginal_synergy(&effects, &candidate.accumulated, weights);
 
                 let total = base + syn;
                 if total > best_score {
                     best_score = total;
                     best_sigil = Some((sigil.id, sigil.name.clone()));
                     best_effects = effects;
+                    best_links = links;
                 }
             }
 
             if let Some(sigil) = best_sigil {
                 selected_ids.push(sigil.0);
+                candidate.synergy_links.extend(best_links);
                 candidate.accumulated.push((ComponentId::Sigil(sigil.0), best_effects));
                 candidate.sigils.push(sigil);
                 candidate.score += best_score;
@@ -447,6 +459,7 @@ fn select_relic(
         let mut best_score = f64::NEG_INFINITY;
         let mut best_relic: Option<(u32, String)> = None;
         let mut best_effects: Vec<NormalizedEffect> = Vec::new();
+        let mut best_links: Vec<SynergyLink> = Vec::new();
 
         for &relic in &relics {
             let effects = extract_relic_effects(relic);
@@ -454,17 +467,19 @@ fn select_relic(
             let base: f64 = effects.iter()
                 .map(|e| score_normalized_effect(e, weights))
                 .sum();
-            let (syn, _) = compute_marginal_synergy(&effects, &candidate.accumulated, weights);
+            let (syn, links) = compute_marginal_synergy(&effects, &candidate.accumulated, weights);
 
             let total = base + syn;
             if total > best_score {
                 best_score = total;
                 best_relic = Some((relic.id, relic.name.clone()));
                 best_effects = effects;
+                best_links = links;
             }
         }
 
         if let Some(relic) = best_relic {
+            candidate.synergy_links.extend(best_links);
             candidate.accumulated.push((ComponentId::Relic(relic.0), best_effects));
             candidate.relic = Some(relic);
             candidate.score += best_score;
