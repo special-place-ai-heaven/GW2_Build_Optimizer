@@ -100,7 +100,7 @@ pub struct ConditionTicks {
 pub struct BuffProfile {
     /// Might stacks (0-25). Each stack = +30 Power, +30 Condition Damage.
     pub might_stacks: u32,
-    /// Fury: +25% critical chance (additive).
+    /// Fury: +20% critical chance (additive).
     pub fury: bool,
     /// Protection: -33% incoming strike damage.
     pub protection: bool,
@@ -196,7 +196,7 @@ pub fn calculate_combat_performance(
     // Apply buff stats
     let might_power = buffs.might_stacks as f64 * 30.0;
     let might_condi = buffs.might_stacks as f64 * 30.0;
-    let fury_crit = if buffs.fury { 25.0 } else { 0.0 };
+    let fury_crit = if buffs.fury { 20.0 } else { 0.0 };
 
     let total_power = stats.power + might_power;
     let total_precision = stats.precision;
