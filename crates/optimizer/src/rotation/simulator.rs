@@ -501,7 +501,7 @@ fn estimate_buff_dps_value(
             extra_power * weapon_strength / REFERENCE_ARMOR * duration_s
         }
         "Fury" => {
-            // Fury = +25% crit chance → roughly +15% DPS for the duration.
+            // Fury = +20% crit chance → roughly +15% DPS for the duration.
             let base_hit = power * weapon_strength / REFERENCE_ARMOR;
             base_hit * 0.15 * duration_s * (stacks.min(1) as f64)
         }
