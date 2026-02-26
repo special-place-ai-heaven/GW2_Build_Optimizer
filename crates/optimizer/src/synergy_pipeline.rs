@@ -411,41 +411,46 @@ fn select_sigils(
         .collect();
 
     for candidate in candidates.iter_mut() {
-        let mut selected_ids: Vec<u32> = Vec::new();
+        // GW2 sigil rule: duplicates are forbidden *within* a weapon set (Set 1 or Set 2),
+        // but the same sigil type IS allowed in both sets independently.
+        // We select 2 sigils per set with separate dedup sets.
+        for set_idx in 0..2usize {
+            let _ = set_idx; // slot identity only used for ordering; sets are symmetric
+            let mut set_ids: Vec<u32> = Vec::new();
 
-        // Select 4 sigils (2 per weapon set) greedily, no duplicates
-        for _slot in 0..4 {
-            let mut best_score = f64::NEG_INFINITY;
-            let mut best_sigil: Option<(u32, String)> = None;
-            let mut best_effects: Vec<NormalizedEffect> = Vec::new();
-            let mut best_links: Vec<SynergyLink> = Vec::new();
+            for _slot in 0..2 {
+                let mut best_score = f64::NEG_INFINITY;
+                let mut best_sigil: Option<(u32, String)> = None;
+                let mut best_effects: Vec<NormalizedEffect> = Vec::new();
+                let mut best_links: Vec<SynergyLink> = Vec::new();
 
-            for &&sigil in &superior_sigils {
-                if selected_ids.contains(&sigil.id) {
-                    continue; // No duplicate sigils
+                for &&sigil in &superior_sigils {
+                    if set_ids.contains(&sigil.id) {
+                        continue; // No duplicate sigils within this weapon set
+                    }
+
+                    let effects = extract_sigil_effects(sigil);
+                    let base: f64 = effects.iter()
+                        .map(|e| score_normalized_effect(e, weights))
+                        .sum();
+                    let (syn, links) = compute_marginal_synergy(&effects, &candidate.accumulated, weights);
+
+                    let total = base + syn;
+                    if total > best_score {
+                        best_score = total;
+                        best_sigil = Some((sigil.id, sigil.name.clone()));
+                        best_effects = effects;
+                        best_links = links;
+                    }
                 }
 
-                let effects = extract_sigil_effects(sigil);
-                let base: f64 = effects.iter()
-                    .map(|e| score_normalized_effect(e, weights))
-                    .sum();
-                let (syn, links) = compute_marginal_synergy(&effects, &candidate.accumulated, weights);
-
-                let total = base + syn;
-                if total > best_score {
-                    best_score = total;
-                    best_sigil = Some((sigil.id, sigil.name.clone()));
-                    best_effects = effects;
-                    best_links = links;
+                if let Some(sigil) = best_sigil {
+                    set_ids.push(sigil.0);
+                    candidate.synergy_links.extend(best_links);
+                    candidate.accumulated.push((ComponentId::Sigil(sigil.0), best_effects));
+                    candidate.sigils.push(sigil);
+                    candidate.score += best_score;
                 }
-            }
-
-            if let Some(sigil) = best_sigil {
-                selected_ids.push(sigil.0);
-                candidate.synergy_links.extend(best_links);
-                candidate.accumulated.push((ComponentId::Sigil(sigil.0), best_effects));
-                candidate.sigils.push(sigil);
-                candidate.score += best_score;
             }
         }
     }
