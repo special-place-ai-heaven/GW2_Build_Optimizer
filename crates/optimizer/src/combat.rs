@@ -157,9 +157,11 @@ fn poison_tick(condition_damage: f64) -> f64 {
     0.06 * condition_damage + 33.5
 }
 
-/// Calculate torment tick damage (stationary): 0.06 * CondDmg + 22
+/// Calculate torment tick damage (stationary): 0.0375 * CondDmg + 31.875
+/// GW2 wiki formula at level 80: (0.0375 * CD) + (0.375 * 80) + 1.875
+/// Moving torment deals 2x this value; stationary is the conservative baseline.
 fn torment_tick(condition_damage: f64) -> f64 {
-    0.06 * condition_damage + 22.0
+    0.0375 * condition_damage + 31.875
 }
 
 /// Calculate confusion tick damage (on skill use): 0.195 * CondDmg + 95.5
@@ -701,7 +703,7 @@ mod tests {
         assert!((ticks.bleeding - 22.0).abs() < 0.1);
         assert!((ticks.burning - 131.0).abs() < 0.1);
         assert!((ticks.poison - 33.5).abs() < 0.1);
-        assert!((ticks.torment - 22.0).abs() < 0.1);
+        assert!((ticks.torment - 31.875).abs() < 0.1); // 0.0375*0 + 31.875
         assert!((ticks.confusion - 95.5).abs() < 0.1);
     }
 
@@ -716,8 +718,8 @@ mod tests {
         assert!((ticks.burning - 441.0).abs() < 0.1);
         // Poison: 0.06 * 2000 + 33.5 = 153.5
         assert!((ticks.poison - 153.5).abs() < 0.1);
-        // Torment: 0.06 * 2000 + 22 = 142
-        assert!((ticks.torment - 142.0).abs() < 0.1);
+        // Torment: 0.0375 * 2000 + 31.875 = 75 + 31.875 = 106.875
+        assert!((ticks.torment - 106.875).abs() < 0.1);
         // Confusion: 0.195 * 2000 + 95.5 = 485.5
         assert!((ticks.confusion - 485.5).abs() < 0.1);
     }

@@ -521,7 +521,7 @@ fn condition_tick_damage(condition: &str, condition_damage: f64) -> f64 {
         "Bleeding" => 0.06 * condition_damage + 22.0,
         "Burning" => 0.155 * condition_damage + 131.0,
         "Poison" => 0.06 * condition_damage + 33.5,
-        "Torment" => 0.06 * condition_damage + 22.0,
+        "Torment" => 0.0375 * condition_damage + 31.875, // stationary: wiki formula 0.0375*CD + (0.375*80) + 1.875
         "Confusion" => 0.195 * condition_damage + 95.5,
         _ => 0.0,
     }
@@ -642,7 +642,7 @@ mod tests {
         assert!((condition_tick_damage("Bleeding", cd) - 82.0).abs() < 0.1);
         assert!((condition_tick_damage("Burning", cd) - 286.0).abs() < 0.1);
         assert!((condition_tick_damage("Poison", cd) - 93.5).abs() < 0.1);
-        assert!((condition_tick_damage("Torment", cd) - 82.0).abs() < 0.1);
+        assert!((condition_tick_damage("Torment", cd) - 69.375).abs() < 0.1); // 0.0375*1000 + 31.875
         assert!((condition_tick_damage("Confusion", cd) - 290.5).abs() < 0.1);
         assert_eq!(condition_tick_damage("Vulnerability", cd), 0.0);
     }
