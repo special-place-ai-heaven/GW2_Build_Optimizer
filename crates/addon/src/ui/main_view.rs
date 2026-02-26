@@ -441,6 +441,15 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
         state.main.selected_build_tab = None;
         state.main.selected_equipment_tab = None;
         state.main.build_chat_code = None;
+        // Clear prior character's suggestions, combat metrics, and locks — the new
+        // character may be a different profession with different specs entirely.
+        state.main.comparison.suggestions.clear();
+        state.main.comparison.selected_suggestion = 0;
+        state.main.comparison.error = None;
+        state.main.comparison.current_combat_solo = None;
+        state.main.comparison.current_combat_party = None;
+        state.main.comparison.current_combat_squad = None;
+        state.main.build_locks = gw2_core::types::BuildLocks::default();
         load_character_tabs(state, name);
     }
 
@@ -557,6 +566,12 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         if ui.radio_button_bool(mode.label(), selected) {
             state.main.game_mode = mode.clone();
             state.main.weights = OptimizationWeights::default_for_mode(mode.label());
+            // Clear suggestions from the prior mode — PvE results are invalid for PvP
+            // and vice versa. Locks are also reset since mode changes affect stat scaling.
+            state.main.comparison.suggestions.clear();
+            state.main.comparison.selected_suggestion = 0;
+            state.main.comparison.error = None;
+            state.main.build_locks = gw2_core::types::BuildLocks::default();
             resolve_selected_build(state);
         }
         ui.same_line();
