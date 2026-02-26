@@ -539,6 +539,24 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
                 stacks: apply_count.unwrap_or(1),
             });
         }
+        // PrefixedBuff has the same combat-relevant fields as Buff (status, duration,
+        // apply_count) but also carries a textual prefix describing the application
+        // context (e.g. "To nearby enemies", "On hit"). The effects are identical
+        // for synergy scoring purposes — handle them the same way.
+        Fact::PrefixedBuff {
+            status: Some(ref status),
+            duration: Some(dur),
+            apply_count,
+            ..
+        } => {
+            let is_cond = is_condition(status);
+            effects.push(NormalizedEffect::AppliesStatus {
+                status: status.clone(),
+                is_condition: is_cond,
+                duration_s: *dur,
+                stacks: apply_count.unwrap_or(1),
+            });
+        }
         Fact::BuffConversion {
             percent: Some(pct),
             source: Some(ref src),
