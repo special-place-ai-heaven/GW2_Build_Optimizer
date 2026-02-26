@@ -781,14 +781,23 @@ fn compute_candidate_stats(
         }
     }
 
-    // NOTE: We intentionally do NOT call calculate_trait_stats() here.
-    // That function counts ALL Fact::AttributeAdjust from trait descriptions
-    // as permanent stat bonuses, but many are temporary buffs/procs
-    // (e.g. "gain 300 Power for 10s when X"). This inflates stats wildly.
-    // Trait effects are already evaluated through the NormalizedEffect synergy scoring.
-    //
-    // We do still apply trait stat conversions (BuffConversion facts) since those
-    // are typically permanent passives (e.g. "7% of Toughness becomes Power").
+    // Include trait flat stat bonuses (AttributeAdjust facts) so that estimated stats
+    // use the same calculation as calculate_full_stats() on the current build.
+    // Both sides of the comparison now include trait stat bonuses, making them
+    // apples-to-apples. The same function is used for current build stats display.
+    let trait_stats = stats::calculate_trait_stats(&candidate.all_trait_ids, &db.traits);
+    full_stats.power += trait_stats.power;
+    full_stats.precision += trait_stats.precision;
+    full_stats.toughness += trait_stats.toughness;
+    full_stats.vitality += trait_stats.vitality;
+    full_stats.condition_damage += trait_stats.condition_damage;
+    full_stats.expertise += trait_stats.expertise;
+    full_stats.concentration += trait_stats.concentration;
+    full_stats.ferocity += trait_stats.ferocity;
+    full_stats.healing_power += trait_stats.healing_power;
+
+    // Trait stat conversions (BuffConversion facts — permanent passives like
+    // "7% of Toughness becomes Power"). Applied after flat bonuses.
     stats::apply_trait_conversions(&mut full_stats, &candidate.all_trait_ids, &db.traits);
 
     full_stats

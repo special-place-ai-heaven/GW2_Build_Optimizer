@@ -818,6 +818,7 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                         );
                     }
                     ui.next_column();
+                    ui.indent_by(6.0);
                     // RIGHT: Optimized Build header + read-only specs
                     build_display::render_card_header(ui, "OPTIMIZED BUILD", [0.3, 1.0, 0.5, 1.0]);
                     {
@@ -828,6 +829,7 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                             &suggestion.specializations,
                         );
                     }
+                    ui.unindent_by(6.0);
                     ui.columns(1, "##imp_spec_end", false);
 
                     // ── SKILLS SECTION ──
@@ -835,7 +837,9 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                     ui.set_column_offset(1, col1_offset);
                     build_display::render_build_skills(ui, &build);
                     ui.next_column();
+                    ui.indent_by(6.0);
                     build_display::render_suggestion_skills(ui, &suggestion);
+                    ui.unindent_by(6.0);
                     ui.columns(1, "##imp_skills_end", false);
 
                     // ── WEAPONS SECTION ──
@@ -843,7 +847,9 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                     ui.set_column_offset(1, col1_offset);
                     build_display::render_build_weapons(ui, &build);
                     ui.next_column();
+                    ui.indent_by(6.0);
                     build_display::render_suggestion_weapons(ui, &suggestion);
+                    ui.unindent_by(6.0);
                     ui.columns(1, "##imp_weapons_end", false);
 
                     // ── GEAR SECTION ──
@@ -851,7 +857,9 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                     ui.set_column_offset(1, col1_offset);
                     build_display::render_build_gear(ui, &build);
                     ui.next_column();
+                    ui.indent_by(6.0);
                     build_display::render_suggestion_gear(ui, &suggestion);
+                    ui.unindent_by(6.0);
                     ui.columns(1, "##imp_gear_end", false);
 
                     // ── STATS SECTION ──
@@ -859,7 +867,9 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                     ui.set_column_offset(1, col1_offset);
                     build_display::render_build_stats(ui, stats.as_ref(), suggestion.estimated_stats.as_ref());
                     ui.next_column();
+                    ui.indent_by(6.0);
                     build_display::render_suggestion_stats(ui, &suggestion, stats.as_ref());
+                    ui.unindent_by(6.0);
                     ui.columns(1, "##imp_stats_end", false);
 
                     // ── COMBAT PERFORMANCE SECTION ──
@@ -867,7 +877,9 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                     ui.set_column_offset(1, col1_offset);
                     build_display::render_build_combat(ui, current_combat_solo.as_ref(), suggestion.combat_solo.as_ref());
                     ui.next_column();
+                    ui.indent_by(6.0);
                     build_display::render_suggestion_combat(ui, &suggestion, current_combat_solo.as_ref());
+                    ui.unindent_by(6.0);
                     ui.columns(1, "##imp_combat_end", false);
 
                     // ── ROTATION BREAKDOWN (full-width) ──
