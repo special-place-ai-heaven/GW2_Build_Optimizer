@@ -1,0 +1,79 @@
+# generated: 2026-03-03
+# project: GW2_Build_Optimizer
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: docs/stories
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Mark epic as 'in-progress' when starting work on its first story
+# - SM typically creates next story ONLY after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then Dev runs code-review (fresh context, ideally different LLM)
+# - Story files live in: docs/stories/ (not this directory)
+# - Epic file: _bmad-output/planning-artifacts/epic-1-production-readiness.md
+
+# DEPENDENCY / ORDER GATES:
+# =========================
+# These gates are HARD BLOCKS — do not start a story until its gate is clear.
+#
+# Slot 1 — p1-01-ci-pipeline         UNBLOCKED (start here)
+# Slot 2 — p1-02-addon-tests         BLOCKED until: p1-01 DONE
+# Slot 3 — p2-04-trait-fuzzy-match   BLOCKED until: p1-01 DONE  [parallel with Slot 2 ok]
+# Slot 4 — p1-03-main-view-decomp    BLOCKED until: p1-01 DONE + p1-02 DONE
+# Slot 5 — p2-01-condition-weights   BLOCKED until: p1-01 DONE  [p1-03 recommended-complete]
+#
+# SPECIAL CONSTRAINT — gw2_addon single-thread test requirement:
+#   Tests in crates/addon/ share a global static Mutex<Option<AddonState>>.
+#   Running them in parallel DEADLOCKS the test binary.
+#   Required invocation: cargo test -p gw2_addon -- --test-threads=1
+#   CI MUST use split test steps after p1-02 merges:
+#     Step A: cargo test --package gw2_addon -- --test-threads=1
+#     Step B: cargo test --workspace --exclude gw2_addon
+#   Story p1-02 owns the ci.yml update; this constraint is captured in p1-02 AC10.
+
+generated: "2026-03-03"
+project: GW2_Build_Optimizer
+project_key: NOKEY
+tracking_system: file-system
+story_location: docs/stories
+
+development_status:
+  # ── Epic 1: Production Readiness Sprint ───────────────────────────────────
+  epic-1: in-progress
+
+  # Slot 1 — DONE. Story: docs/stories/P1-01-ci-pipeline.md
+  p1-01-ci-pipeline: done
+
+  # Slot 2 — DONE. Story: docs/stories/P1-02-addon-tests.md
+  # NOTE: ci.yml updated — P1-01 TODO resolved; addon tests now split single-threaded.
+  p1-02-addon-tests: done
+
+  # Slot 3 — DONE. Story: docs/stories/P2-04-trait-fuzzy-match.md
+  p2-04-trait-fuzzy-match: done
+
+  # Slot 4 — DONE. Story: docs/stories/P1-03-main-view-decomp.md
+  p1-03-main-view-decomp: done
+
+  # Slot 5 — BLOCKED until p1-01 done; p1-03 recommended-complete before merge.
+  # Story: docs/stories/P2-01-condition-weights.md
+  p2-01-condition-weights: ready-for-dev
+
+  epic-1-retrospective: optional
