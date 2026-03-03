@@ -1,0 +1,840 @@
+//! Anthropic provider — implements `LlmClient` for Claude models.
+//! Uses the Anthropic Messages API with tool use.
+//! Auth: `x-api-key` header + `anthropic-version: 2023-06-01`.
+//!
+//! Key differences from OpenAI/Gemini:
+//! - System prompt is a top-level `system` field, not a message
+//! - Tool results use `tool_result` content blocks with `tool_use_id`
+//! - `max_tokens` is mandatory
+//! - Response content is an array of typed blocks (text, tool_use)
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use super::{KeyValidationResult, LlmClient, LlmError, ToolDefinition};
+
+const ANTHROPIC_API_BASE: &str = "https://api.anthropic.com/v1";
+const ANTHROPIC_VERSION: &str = "2023-06-01";
+
+pub struct AnthropicClient {
+    api_key: String,
+    model: String,
+    http: reqwest::blocking::Client,
+    cache: Mutex<HashMap<String, CachedResponse>>,
+    rate: Mutex<RateTracker>,
+    usage_path: Option<PathBuf>,
+}
+
+struct CachedResponse {
+    text: String,
+    cached_at: Instant,
+}
+
+struct RateTracker {
+    requests_this_minute: u32,
+    minute_start: Instant,
+    requests_today: u32,
+    current_day: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PersistedUsage {
+    day: u64,
+    requests_today: u32,
+}
+
+fn current_epoch_day() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        / 86400
+}
+
+impl RateTracker {
+    fn new() -> Self {
+        Self {
+            requests_this_minute: 0,
+            minute_start: Instant::now(),
+            requests_today: 0,
+            current_day: current_epoch_day(),
+        }
+    }
+
+    fn from_persisted(persisted: PersistedUsage) -> Self {
+        let today = current_epoch_day();
+        let requests_today = if persisted.day == today {
+            persisted.requests_today
+        } else {
+            0
+        };
+        Self {
+            requests_this_minute: 0,
+            minute_start: Instant::now(),
+            requests_today,
+            current_day: today,
+        }
+    }
+
+    fn check_and_reserve(&mut self) -> Result<(), LlmError> {
+        let today = current_epoch_day();
+        if today != self.current_day {
+            self.requests_today = 0;
+            self.current_day = today;
+        }
+
+        let now = Instant::now();
+        if now.duration_since(self.minute_start).as_secs() >= 60 {
+            self.requests_this_minute = 0;
+            self.minute_start = now;
+        }
+
+        // Anthropic rate limits vary by tier; use conservative defaults
+        if self.requests_this_minute >= 50 {
+            return Err(LlmError::RateLimited);
+        }
+
+        self.requests_this_minute += 1;
+        self.requests_today += 1;
+        Ok(())
+    }
+
+    fn undo_reserve(&mut self) {
+        self.requests_this_minute = self.requests_this_minute.saturating_sub(1);
+        self.requests_today = self.requests_today.saturating_sub(1);
+    }
+
+    fn remaining_today(&self) -> u32 {
+        10000u32.saturating_sub(self.requests_today)
+    }
+
+    fn to_persisted(&self) -> PersistedUsage {
+        PersistedUsage {
+            day: self.current_day,
+            requests_today: self.requests_today,
+        }
+    }
+}
+
+// ─── Anthropic API Types ───
+
+#[derive(Serialize)]
+struct MessagesRequest {
+    model: String,
+    max_tokens: u32,
+    messages: Vec<AnthropicMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<AnthropicTool>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct AnthropicMessage {
+    role: String,
+    content: AnthropicContent,
+}
+
+/// Anthropic content can be a simple string or an array of content blocks.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(untagged)]
+enum AnthropicContent {
+    Text(String),
+    Blocks(Vec<ContentBlock>),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type")]
+enum ContentBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "tool_use")]
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+    },
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct AnthropicTool {
+    name: String,
+    description: String,
+    input_schema: Value,
+}
+
+#[derive(Deserialize)]
+struct MessagesResponse {
+    content: Option<Vec<ContentBlock>>,
+    #[allow(dead_code)]
+    stop_reason: Option<String>,
+}
+
+impl AnthropicClient {
+    pub fn new(api_key: &str, model: &str) -> Result<Self, LlmError> {
+        let http = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(180))
+            .build()
+            .map_err(|e| LlmError::Http(e.to_string()))?;
+        Ok(Self {
+            api_key: api_key.to_string(),
+            model: model.to_string(),
+            http,
+            cache: Mutex::new(HashMap::new()),
+            rate: Mutex::new(RateTracker::new()),
+            usage_path: None,
+        })
+    }
+
+    pub fn with_persistence(
+        api_key: &str,
+        model: &str,
+        usage_path: PathBuf,
+    ) -> Result<Self, LlmError> {
+        let http = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(180))
+            .build()
+            .map_err(|e| LlmError::Http(e.to_string()))?;
+
+        let rate = if usage_path.exists() {
+            match std::fs::read_to_string(&usage_path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<PersistedUsage>(&s).ok())
+            {
+                Some(persisted) => RateTracker::from_persisted(persisted),
+                None => RateTracker::new(),
+            }
+        } else {
+            RateTracker::new()
+        };
+
+        Ok(Self {
+            api_key: api_key.to_string(),
+            model: model.to_string(),
+            http,
+            cache: Mutex::new(HashMap::new()),
+            rate: Mutex::new(rate),
+            usage_path: Some(usage_path),
+        })
+    }
+
+    fn send_messages(
+        &self,
+        messages: &[AnthropicMessage],
+        system: Option<&str>,
+        tools: Option<&[ToolDefinition]>,
+        max_tokens: u32,
+    ) -> Result<MessagesResponse, LlmError> {
+        const MAX_RETRIES: u32 = 3;
+
+        self.rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .check_and_reserve()?;
+
+        let anthropic_tools = tools.map(|defs| {
+            defs.iter()
+                .map(|td| AnthropicTool {
+                    name: td.name.clone(),
+                    description: td.description.clone(),
+                    input_schema: td.parameters.clone(),
+                })
+                .collect::<Vec<_>>()
+        });
+
+        let request = MessagesRequest {
+            model: self.model.clone(),
+            max_tokens,
+            messages: messages.to_vec(),
+            system: system.map(|s| s.to_string()),
+            tools: anthropic_tools,
+        };
+
+        let url = format!("{}/messages", ANTHROPIC_API_BASE);
+        let mut last_error: Option<LlmError> = None;
+
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                let delay = std::time::Duration::from_secs(5 * (1 << (attempt - 1)));
+                std::thread::sleep(delay);
+            }
+
+            let resp = match self
+                .http
+                .post(&url)
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", ANTHROPIC_VERSION)
+                .header("Content-Type", "application/json")
+                .json(&request)
+                .send()
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    if attempt == MAX_RETRIES - 1 {
+                        self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                        return Err(LlmError::Http(e.to_string()));
+                    }
+                    last_error = Some(LlmError::Http(e.to_string()));
+                    continue;
+                }
+            };
+
+            let status = resp.status().as_u16();
+            match status {
+                200 => {
+                    let body: MessagesResponse = match resp.json() {
+                        Ok(b) => b,
+                        Err(e) => {
+                            self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                            return Err(LlmError::Http(e.to_string()));
+                        }
+                    };
+
+                    // Persist usage
+                    {
+                        let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
+                        self.persist_usage(&rate);
+                    }
+
+                    return Ok(body);
+                }
+                401 => {
+                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                    return Err(LlmError::InvalidKey);
+                }
+                429 => {
+                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                    return Err(LlmError::RateLimited);
+                }
+                500 | 502 | 503 | 529 => {
+                    // 529 = Anthropic overloaded
+                    let body = resp.text().unwrap_or_default();
+                    last_error = Some(LlmError::Api { status, message: body });
+                    continue;
+                }
+                _ => {
+                    let body = resp.text().unwrap_or_default();
+                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                    return Err(LlmError::Api { status, message: body });
+                }
+            }
+        }
+
+        self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+        Err(last_error.unwrap_or_else(|| LlmError::Api {
+            status: 500,
+            message: "Anthropic server error after retries".into(),
+        }))
+    }
+
+    fn persist_usage(&self, rate: &RateTracker) {
+        if let Some(ref path) = self.usage_path {
+            let persisted = rate.to_persisted();
+            if let Ok(json) = serde_json::to_string(&persisted) {
+                let _ = std::fs::write(path, json);
+            }
+        }
+    }
+}
+
+/// Extract text from Anthropic content blocks.
+fn extract_text(blocks: &[ContentBlock]) -> Option<String> {
+    let texts: Vec<&str> = blocks
+        .iter()
+        .filter_map(|b| match b {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    if texts.is_empty() {
+        None
+    } else {
+        Some(texts.join(""))
+    }
+}
+
+/// Extract tool use blocks from content.
+fn extract_tool_uses(blocks: &[ContentBlock]) -> Vec<(String, String, Value)> {
+    blocks
+        .iter()
+        .filter_map(|b| match b {
+            ContentBlock::ToolUse { id, name, input } => {
+                Some((id.clone(), name.clone(), input.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+impl LlmClient for AnthropicClient {
+    fn provider_name(&self) -> &str {
+        "Anthropic"
+    }
+
+    fn validate_key(&self) -> Result<(), LlmError> {
+        // Anthropic doesn't have a models list endpoint like OpenAI/Gemini.
+        // Use a minimal messages call with max_tokens=1 to validate the key.
+        let messages = vec![AnthropicMessage {
+            role: "user".to_string(),
+            content: AnthropicContent::Text("Hi".to_string()),
+        }];
+
+        let request = MessagesRequest {
+            model: self.model.clone(),
+            max_tokens: 1,
+            messages,
+            system: None,
+            tools: None,
+        };
+
+        let url = format!("{}/messages", ANTHROPIC_API_BASE);
+        let resp = self
+            .http
+            .post(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .map_err(|e| LlmError::Http(e.to_string()))?;
+
+        match resp.status().as_u16() {
+            200 => Ok(()),
+            401 => Err(LlmError::InvalidKey),
+            // 400 with "credit balance" means key is valid but account has no credits.
+            // 403 means key is valid but account is disabled/restricted.
+            // Accept these as valid keys — billing is a separate concern.
+            400 | 403 => {
+                let body = resp.text().unwrap_or_default();
+                if body.contains("credit balance") || body.contains("billing")
+                    || body.contains("disabled") || body.contains("permission")
+                {
+                    Ok(())
+                } else {
+                    Err(LlmError::Api { status: 400, message: body })
+                }
+            }
+            429 => Ok(()), // Rate limited means key is valid
+            status => {
+                let body = resp.text().unwrap_or_default();
+                Err(LlmError::Api { status, message: body })
+            }
+        }
+    }
+
+    fn validate_key_detailed(&self) -> KeyValidationResult {
+        let messages = vec![AnthropicMessage {
+            role: "user".to_string(),
+            content: AnthropicContent::Text("Hi".to_string()),
+        }];
+
+        let request = MessagesRequest {
+            model: self.model.clone(),
+            max_tokens: 1,
+            messages,
+            system: None,
+            tools: None,
+        };
+
+        let url = format!("{}/messages", ANTHROPIC_API_BASE);
+        let resp = match self
+            .http
+            .post(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+        {
+            Ok(r) => r,
+            Err(e) => {
+                return KeyValidationResult {
+                    valid: false,
+                    message: "Cannot connect to Anthropic API. Check your internet connection.".into(),
+                    warning: Some(e.to_string()),
+                };
+            }
+        };
+
+        let status = resp.status().as_u16();
+        let body = resp.text().unwrap_or_default();
+
+        match status {
+            200 => KeyValidationResult {
+                valid: true,
+                message: "Anthropic key validated successfully!".into(),
+                warning: None,
+            },
+            401 => KeyValidationResult {
+                valid: false,
+                message: "Invalid Anthropic API key. Check that you copied the full key from console.anthropic.com/settings/keys.".into(),
+                warning: None,
+            },
+            400 if body.contains("credit balance") || body.contains("billing") => KeyValidationResult {
+                valid: true,
+                message: "Anthropic key is valid!".into(),
+                warning: Some("Your account has no credits. Add credits at console.anthropic.com to use this provider.".into()),
+            },
+            403 => KeyValidationResult {
+                valid: true,
+                message: "Anthropic key is valid!".into(),
+                warning: Some("Your account may be restricted. Check console.anthropic.com/settings for details.".into()),
+            },
+            429 => KeyValidationResult {
+                valid: true,
+                message: "Anthropic key is valid!".into(),
+                warning: Some("Currently rate-limited. Try again shortly.".into()),
+            },
+            _ => KeyValidationResult {
+                valid: false,
+                message: format!("Anthropic API error (HTTP {}).", status),
+                warning: if body.is_empty() { None } else { Some(body) },
+            },
+        }
+    }
+
+    fn generate(&self, prompt: &str) -> Result<String, LlmError> {
+        let messages = vec![AnthropicMessage {
+            role: "user".to_string(),
+            content: AnthropicContent::Text(prompt.to_string()),
+        }];
+
+        let response = self.send_messages(&messages, None, None, 8192)?;
+        let blocks = response
+            .content
+            .ok_or_else(|| LlmError::Parse("No content from Anthropic".into()))?;
+        extract_text(&blocks)
+            .ok_or_else(|| LlmError::Parse("No text in Anthropic response".into()))
+    }
+
+    fn generate_cached(&self, prompt: &str) -> Result<String, LlmError> {
+        let key = prompt.to_string();
+
+        {
+            let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(cached) = cache.get(&key) {
+                if cached.cached_at.elapsed().as_secs() < 1800 {
+                    return Ok(cached.text.clone());
+                }
+            }
+        }
+
+        let text = self.generate(prompt)?;
+
+        {
+            let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.insert(
+                key,
+                CachedResponse {
+                    text: text.clone(),
+                    cached_at: Instant::now(),
+                },
+            );
+        }
+
+        Ok(text)
+    }
+
+    fn generate_with_tools_progress(
+        &self,
+        prompt: &str,
+        tools: &[ToolDefinition],
+        execute_tool: &mut dyn FnMut(&str, &Value) -> Value,
+        max_turns: usize,
+        on_progress: &mut dyn FnMut(usize, usize, &[String]),
+    ) -> Result<String, LlmError> {
+        let mut messages = vec![AnthropicMessage {
+            role: "user".to_string(),
+            content: AnthropicContent::Text(prompt.to_string()),
+        }];
+
+        let mut last_text: Option<String> = None;
+
+        for turn in 0..max_turns {
+            let response = self.send_messages(&messages, None, Some(tools), 4096)?;
+
+            let blocks = response
+                .content
+                .unwrap_or_default();
+
+            // Capture text
+            if let Some(text) = extract_text(&blocks) {
+                last_text = Some(text);
+            }
+
+            // Check for tool use
+            let tool_uses = extract_tool_uses(&blocks);
+            if tool_uses.is_empty() {
+                // No tool calls — return text
+                return last_text
+                    .ok_or_else(|| LlmError::Parse("No response text from Anthropic".into()));
+            }
+
+            // Report progress
+            let tool_names: Vec<String> = tool_uses.iter().map(|(_, name, _)| name.clone()).collect();
+            on_progress(turn + 1, max_turns, &tool_names);
+
+            // Add assistant message with all content blocks
+            messages.push(AnthropicMessage {
+                role: "assistant".to_string(),
+                content: AnthropicContent::Blocks(blocks),
+            });
+
+            // Execute each tool and build result blocks
+            let mut result_blocks = Vec::new();
+            for (tool_use_id, name, input) in &tool_uses {
+                let result = execute_tool(name, input);
+                let result_str = serde_json::to_string(&result).unwrap_or_default();
+                result_blocks.push(ContentBlock::ToolResult {
+                    tool_use_id: tool_use_id.clone(),
+                    content: result_str,
+                });
+            }
+
+            // Tool results go in a user message
+            messages.push(AnthropicMessage {
+                role: "user".to_string(),
+                content: AnthropicContent::Blocks(result_blocks),
+            });
+        }
+
+        // Max turns exceeded
+        last_text.ok_or_else(|| {
+            LlmError::Parse(format!(
+                "Tool loop exceeded {} turns with no text response",
+                max_turns
+            ))
+        })
+    }
+
+    fn list_models(&self) -> Result<Vec<super::ModelInfo>, LlmError> {
+        let url = format!("{}/models", ANTHROPIC_API_BASE);
+        let resp = self
+            .http
+            .get(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .send()
+            .map_err(|e| LlmError::Http(e.to_string()))?;
+
+        match resp.status().as_u16() {
+            200 => {}
+            401 => return Err(LlmError::InvalidKey),
+            429 => return Err(LlmError::RateLimited),
+            status => {
+                let body = resp.text().unwrap_or_default();
+                return Err(LlmError::Api { status, message: body });
+            }
+        }
+
+        #[derive(Deserialize)]
+        struct ModelsResponse {
+            data: Option<Vec<ModelEntry>>,
+        }
+        #[derive(Deserialize)]
+        struct ModelEntry {
+            id: String,
+            display_name: Option<String>,
+        }
+
+        let body: ModelsResponse = resp
+            .json()
+            .map_err(|e| LlmError::Parse(e.to_string()))?;
+
+        let entries = body.data.unwrap_or_default();
+
+        let mut models: Vec<super::ModelInfo> = entries
+            .into_iter()
+            .map(|m| super::ModelInfo {
+                display_name: m.display_name.unwrap_or_else(|| m.id.clone()),
+                id: m.id,
+            })
+            .collect();
+
+        // Sort by ID (alphabetical puts claude-haiku before claude-sonnet, etc.)
+        models.sort_by(|a, b| a.id.cmp(&b.id));
+
+        Ok(models)
+    }
+
+    fn remaining_quota(&self) -> u32 {
+        self.rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remaining_today()
+    }
+
+    fn clear_cache(&self) {
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.clear();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_provider_name() {
+        let client = AnthropicClient::new("fake-key", "claude-sonnet-4-6").unwrap();
+        assert_eq!(client.provider_name(), "Anthropic");
+    }
+
+    #[test]
+    fn test_remaining_quota_default() {
+        let client = AnthropicClient::new("fake-key", "claude-sonnet-4-6").unwrap();
+        assert_eq!(client.remaining_quota(), 10000);
+    }
+
+    #[test]
+    fn test_tool_definition_to_anthropic_format() {
+        let defs = vec![ToolDefinition {
+            name: "get_profession_info".into(),
+            description: "Get profession details".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "profession": { "type": "string" }
+                },
+                "required": ["profession"]
+            }),
+        }];
+
+        let anthropic_tools: Vec<AnthropicTool> = defs
+            .iter()
+            .map(|td| AnthropicTool {
+                name: td.name.clone(),
+                description: td.description.clone(),
+                input_schema: td.parameters.clone(),
+            })
+            .collect();
+
+        assert_eq!(anthropic_tools.len(), 1);
+        assert_eq!(anthropic_tools[0].name, "get_profession_info");
+
+        // Verify serialization format
+        let json = serde_json::to_value(&anthropic_tools[0]).unwrap();
+        assert_eq!(json["name"], "get_profession_info");
+        assert_eq!(json["input_schema"]["type"], "object");
+    }
+
+    #[test]
+    fn test_content_block_serialization() {
+        let text_block = ContentBlock::Text { text: "Hello".into() };
+        let json = serde_json::to_value(&text_block).unwrap();
+        assert_eq!(json["type"], "text");
+        assert_eq!(json["text"], "Hello");
+
+        let tool_use = ContentBlock::ToolUse {
+            id: "toolu_123".into(),
+            name: "get_profession_info".into(),
+            input: serde_json::json!({"profession": "Warrior"}),
+        };
+        let json = serde_json::to_value(&tool_use).unwrap();
+        assert_eq!(json["type"], "tool_use");
+        assert_eq!(json["id"], "toolu_123");
+        assert_eq!(json["name"], "get_profession_info");
+
+        let tool_result = ContentBlock::ToolResult {
+            tool_use_id: "toolu_123".into(),
+            content: r#"{"name":"Warrior"}"#.into(),
+        };
+        let json = serde_json::to_value(&tool_result).unwrap();
+        assert_eq!(json["type"], "tool_result");
+        assert_eq!(json["tool_use_id"], "toolu_123");
+    }
+
+    #[test]
+    fn test_extract_text_from_blocks() {
+        let blocks = vec![
+            ContentBlock::Text { text: "Hello ".into() },
+            ContentBlock::ToolUse {
+                id: "t1".into(),
+                name: "test".into(),
+                input: Value::Null,
+            },
+            ContentBlock::Text { text: "world".into() },
+        ];
+        assert_eq!(extract_text(&blocks), Some("Hello world".into()));
+    }
+
+    #[test]
+    fn test_extract_text_empty_blocks() {
+        let blocks = vec![ContentBlock::ToolUse {
+            id: "t1".into(),
+            name: "test".into(),
+            input: Value::Null,
+        }];
+        assert_eq!(extract_text(&blocks), None);
+    }
+
+    #[test]
+    fn test_extract_tool_uses() {
+        let blocks = vec![
+            ContentBlock::Text { text: "Let me check".into() },
+            ContentBlock::ToolUse {
+                id: "toolu_1".into(),
+                name: "get_profession_info".into(),
+                input: serde_json::json!({"profession": "Warrior"}),
+            },
+            ContentBlock::ToolUse {
+                id: "toolu_2".into(),
+                name: "get_spec_traits".into(),
+                input: serde_json::json!({"spec_name": "Berserker"}),
+            },
+        ];
+
+        let uses = extract_tool_uses(&blocks);
+        assert_eq!(uses.len(), 2);
+        assert_eq!(uses[0].0, "toolu_1");
+        assert_eq!(uses[0].1, "get_profession_info");
+        assert_eq!(uses[1].0, "toolu_2");
+        assert_eq!(uses[1].1, "get_spec_traits");
+    }
+
+    #[test]
+    fn test_rate_tracker_rpm_limit() {
+        let mut tracker = RateTracker::new();
+        for _ in 0..50 {
+            assert!(tracker.check_and_reserve().is_ok());
+        }
+        assert!(tracker.check_and_reserve().is_err());
+    }
+
+    #[test]
+    fn test_anthropic_content_text_serialization() {
+        let msg = AnthropicMessage {
+            role: "user".to_string(),
+            content: AnthropicContent::Text("Hello".to_string()),
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["role"], "user");
+        assert_eq!(json["content"], "Hello");
+    }
+
+    #[test]
+    fn test_anthropic_content_blocks_serialization() {
+        let msg = AnthropicMessage {
+            role: "user".to_string(),
+            content: AnthropicContent::Blocks(vec![ContentBlock::ToolResult {
+                tool_use_id: "toolu_123".into(),
+                content: r#"{"ok": true}"#.into(),
+            }]),
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["role"], "user");
+        assert!(json["content"].is_array());
+        assert_eq!(json["content"][0]["type"], "tool_result");
+    }
+}

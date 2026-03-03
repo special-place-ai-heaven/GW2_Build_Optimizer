@@ -1,307 +1,107 @@
-# My Agent
+# CLAUDE.md
 
-## Overview
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-This is an autonomous AI agent powered by [thepopebot](https://github.com/stephengpope/thepopebot). It uses a **two-layer architecture**:
+## Project
 
-1. **Event Handler** — A Next.js server that orchestrates everything: web UI, Telegram chat, cron scheduling, webhook triggers, and job creation.
-2. **Docker Agent** — A container that runs the Pi coding agent for autonomous task execution. Each job gets its own branch, container, and PR.
+**GW2 Build Optimizer v1.0.0** — In-game Guild Wars 2 addon (Nexus plugin) that optimizes character builds across all game modes (PvE, PvP, WvW). Uses the GW2 API for game/character data and a pluggable LLM backend (Gemini, OpenAI, or Anthropic) for build reasoning. Feature complete (S01-S15).
 
-All core logic lives in the `thepopebot` npm package. This project is a scaffolded shell — thin Next.js wiring, user-editable configuration, GitHub Actions workflows, and Docker files.
+## Build & Development
 
-## Directory Structure
-
-```
-project-root/
-├── CLAUDE.md                          # This file (project documentation)
-├── next.config.mjs                    # Next.js config (wraps withThepopebot())
-├── instrumentation.js                 # Server startup hook (re-exports from package)
-├── middleware.js                       # Auth middleware (re-exports from package)
-├── .env                               # API keys and tokens (gitignored)
-├── package.json
-│
-├── app/                               # Next.js app directory (page shells + client components)
-│   ├── api/[...thepopebot]/route.js   # Catch-all API route (re-exports from package)
-│   ├── stream/chat/route.js           # Chat streaming endpoint (session auth)
-│   └── components/                    # Client-side components
-│
-├── config/                            # Agent configuration (user-editable)
-│   ├── SOUL.md                        # Personality, identity, and values
-│   ├── JOB_PLANNING.md                # Event handler LLM system prompt
-│   ├── JOB_AGENT.md                   # Agent runtime environment docs
-│   ├── JOB_SUMMARY.md                 # Prompt for summarizing completed jobs
-│   ├── HEARTBEAT.md                   # Self-monitoring / heartbeat behavior
-│   ├── SKILL_BUILDING_GUIDE.md             # Guide for building agent skills
-│   ├── CRONS.json                     # Scheduled job definitions
-│   └── TRIGGERS.json                  # Webhook trigger definitions
-│
-├── .github/workflows/                 # GitHub Actions
-├── docker/                            # Docker files (job agent + event handler)
-├── skills/                            # All available agent skills
-│   └── active/                        # Symlinks to active skills (shared by Pi + Claude Code)
-├── .pi/skills → skills/active         # Pi reads skills from here
-├── .claude/skills → skills/active     # Claude Code reads skills from here
-├── cron/                              # Scripts for command-type cron actions
-├── triggers/                          # Scripts for command-type trigger actions
-├── logs/                              # Per-job output (logs/<JOB_ID>/job.md + session .jsonl)
-└── data/                              # SQLite database (data/thepopebot.sqlite)
+```bash
+cargo check              # Fast compilation check
+cargo build --release    # Produces target/release/gw2_build_optimizer.dll
+# Deploy: copy DLL to C:\GAMES\Guild Wars 2\addons\
 ```
 
-## Two-Layer Architecture
+## Architecture
+
+Rust workspace, 4 crates → single DLL loaded by Nexus addon manager:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│  ┌──────────────────┐         ┌──────────────────┐                     │
-│  │  Event Handler   │ ──1──►  │     GitHub       │                     │
-│  │  (creates job)   │         │ (job/* branch)   │                     │
-│  └────────▲─────────┘         └────────┬─────────┘                     │
-│           │                            │                               │
-│           │                            2 (triggers run-job.yml)        │
-│           │                            │                               │
-│           │                            ▼                               │
-│           │                   ┌──────────────────┐                     │
-│           │                   │  Docker Agent    │                     │
-│           │                   │  (runs Pi, PRs)  │                     │
-│           │                   └────────┬─────────┘                     │
-│           │                            │                               │
-│           │                            3 (creates PR)                  │
-│           │                            │                               │
-│           │                            ▼                               │
-│           │                   ┌──────────────────┐                     │
-│           │                   │     GitHub       │                     │
-│           │                   │   (PR opened)    │                     │
-│           │                   └────────┬─────────┘                     │
-│           │                            │                               │
-│           │                            4a (auto-merge.yml)             │
-│           │                            4b (notify-pr-complete.yml)     │
-│           │                            │                               │
-│           5 (notification → web UI     │                               │
-│              and Telegram)             │                               │
-│           └────────────────────────────┘                               │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+crates/addon/       — cdylib: Nexus entry point, ImGui UI, keybinds (nexus-rs)
+crates/core/        — Shared types (ResolvedBuild, StatBlock, CombatMetrics, SavedBuild),
+                      config (AppConfig + LlmProvider + per-provider keys/models), storage
+crates/gw2api/      — GW2 API v2 client (rate limiter, cache, download orchestration, serde models)
+crates/optimizer/   — Engine (3-tier fallback: deterministic synergy → Gemini pipeline → legacy),
+                      combat math, scoring, validation, synergy pipeline, rotation simulator,
+                      llm/ (LlmClient trait + Gemini/OpenAI/Anthropic providers), prompts, context
 ```
 
-**Event Handler** (this Next.js server): Receives requests (web UI, Telegram, webhooks, cron timers), creates jobs by pushing a `job/<uuid>` branch to GitHub, and manages the web interface.
+**Key dependency**: `nexus` crate from [nexus-rs](https://github.com/Zerthox/nexus-rs) — Nexus addon API with ImGui.
 
-**Docker Agent**: A container spun up by GitHub Actions (`run-job.yml`) that clones the job branch, runs the Pi coding agent with the job prompt, commits results, and opens a PR.
+### Optimization Pipeline (3-tier fallback)
 
-## Job Lifecycle
+1. `engine::optimize_deterministic()` — pure-Rust synergy pipeline, no LLM needed
+2. `engine::optimize_with_gemini()` — cosine-sim gear prefix + pre-computed context (~40-50K tokens) + single LLM call + validation
+3. Legacy `engine::optimize()` → `enrich_with_gemini()` — deterministic gear+spec search enriched post-hoc
 
-1. **Job created** — Event handler calls `createJob()` (via chat, cron, trigger, or API)
-2. **Branch pushed** — A `job/<uuid>` branch is created with `logs/<uuid>/job.md` containing the task prompt
-3. **Workflow triggers** — `run-job.yml` fires on `job/*` branch creation
-4. **Container runs** — Docker agent clones the branch, builds `SYSTEM.md` from `config/SOUL.md` + `config/AGENT.md`, runs Pi with the job prompt, and logs the session to `logs/<uuid>/`
-5. **PR created** — Agent commits results and opens a pull request
-6. **Auto-merge** — `auto-merge.yml` squash-merges the PR if all changed files fall within `ALLOWED_PATHS` prefixes (default: `/logs`)
-7. **Notification** — `notify-pr-complete.yml` sends job results back to the event handler, which creates a notification in the web UI and sends a Telegram message
+Each tier falls back to the next on failure with a Warning log.
 
-## Action Types
+### LLM Provider Abstraction (`crates/optimizer/src/llm/`)
 
-Both cron jobs and webhook triggers use the same dispatch system. Every action has a `type` field:
+`LlmClient` trait (Send+Sync, &self) with `create_client(config, addon_dir)` factory. Each provider handles wire format internally:
+- **Gemini**: `functionDeclarations`, x-goog-api-key header, rate tracking (10 RPM, 250 RPD)
+- **OpenAI**: Chat Completions, JSON-string tool args, tool_call_id, Bearer auth
+- **Anthropic**: Messages API, content blocks, x-api-key header, 529 retry, max_tokens mandatory
+- `list_models()` fetches available models from each provider's API; Settings tab auto-fetches with hardcoded fallback
+- `validate_key_detailed()` → `KeyValidationResult { valid, message, warning }` — separates auth from billing
 
-| | `agent` (default) | `command` | `webhook` |
-|---|---|---|---|
-| **Uses LLM** | Yes — spins up Pi in Docker | No | No |
-| **Runtime** | Minutes to hours | Milliseconds to seconds | Milliseconds to seconds |
-| **Cost** | LLM API calls + GitHub Actions | Free (runs on event handler) | Free (runs on event handler) |
-| **Use case** | Tasks that need to think, reason, write code | Shell scripts, file operations | Call external APIs, forward webhooks |
+## GW2 Domain Context
 
-If the task needs to *think*, use `agent`. If it just needs to *do*, use `command`. If it needs to *call an external service*, use `webhook`.
+See `~/.claude/projects/.../memory/gw2-domain.md` for full reference. Key points:
+- 9 professions, 5 core + ~4 elite specs each; 3 spec slots (slot 3 can be elite)
+- 3 trait columns per spec (pick 1 of 3 each)
+- Gear: 2 weapon sets + sigils, 6 armor + runes, 6 trinkets, 1 relic
+- PvP uses amulet system instead of gear
+- Stat formula: `attribute_adjustment * multiplier + value`
+- GW2 API: 300 burst, 5/sec refill, max 200 IDs per bulk request
 
-### Agent action
-```json
-{ "type": "agent", "job": "Analyze the logs and write a summary report" }
-```
-Creates a Docker Agent job. The `job` string is passed as-is to the LLM as its task prompt.
+## Conventions
 
-### Command action
-```json
-{ "type": "command", "command": "node cleanup.js --older-than 7d" }
-```
-Runs a shell command on the event handler. Working directory: `cron/` for crons, `triggers/` for triggers.
+- Rust 2021, workspace deps hoisted to root `Cargo.toml`
+- Global state: `Mutex<Option<AddonState>>` static; access via `with_state(|s| ...)`
+- Background work: `std::thread::spawn` + `with_state()` callback (no channels)
+- All bg threads clone `CancellationToken` (Arc<AtomicBool>) and check `is_cancelled()`
+- ImGui via nexus-rs: `Window::new().build(ui, || { ... })`
+- Screen routing: `AddonState.screen: Screen` enum drives render dispatch
+- Config: `AppConfig` with atomic save (.tmp + rename); `is_setup_complete()` = gw2_key + active_llm_key + cache
+- Borrow conflicts: clone owned values before mutable state borrows (Rust borrow checker)
+- UTF-8 safe: use `text.chars().take(N).collect()` never `&text[..N]` (panics on multibyte)
 
-### Webhook action
-```json
-{
-  "type": "webhook",
-  "url": "https://api.example.com/notify",
-  "method": "POST",
-  "headers": { "Authorization": "Bearer token" },
-  "vars": { "source": "my-agent" }
-}
-```
-Makes an HTTP request. `GET` skips the body. `POST` (default) sends `{ ...vars }` or `{ ...vars, data: <incoming payload> }` when triggered by a webhook.
+## Critical Patterns (Gotchas)
 
-## Cron Jobs
+- **HP-class ≠ armor-class**: GW2 health and armor classes don't align by profession. Two separate lookup tables required.
+- **Stat alias normalization**: GW2 API uses both old ("ConditionDuration") and new ("Expertise") attribute names. `StatBlock::add/get` normalizes both.
+- **Traited-fact overrides**: Active traited_facts replace base facts by index. Must collect override indices first, then skip overridden base facts.
+- **Rune bonuses are strings**: Rune tier bonuses come as unstructured text ("+7% Burning Duration"), not structured Facts. Parsed via `parse_rune_modifier()`.
+- **Gemini prefix override**: Gemini ignores gear constraints. `select_gear_prefix()` (cosine similarity) is authoritative — Gemini's choice is always overwritten.
+- **Validation before apply**: Always call `validate_gemini_build()` before `apply_gemini_response()`. Gemini hallucinates specs/weapons.
+- **Elite spec skill gating**: Filter skills by `Skill::specialization` — only core skills (None) or equipped elite spec skills allowed.
+- **Billing-tolerant key validation**: HTTP 401 = invalid key. 400/403/429 with billing keywords = valid key, billing issue. Don't reject valid keys.
+- **Lenient deserialization**: GW2 API facts sometimes lack a `type` field. Use `filter_map(from_value(...).ok())` to skip unparseable entries.
+- **Panic recovery**: Optimization bg thread wrapped in `catch_unwind` — prevents mutex poisoning on panic.
+- **score_with_weights normalization**: Constants (STRIKE_DPS_NORM=3000, etc.) are empirically tuned. Don't adjust without cross-build validation.
+- **WEIGHT_BUDGET=2.0**: Models GW2 gear trade-offs. `set_constrained()` proportionally scales other axes. Don't change the constant.
+- **Manual query strings for GW2 API**: reqwest `.query()` URL-encodes commas as %2C. Build query strings manually to preserve `ids=1,2,3`.
 
-Defined in `config/CRONS.json`, loaded at server startup by `node-cron`.
+<!-- MANUAL -->
+## Custom Notes
 
-```json
-[
-  {
-    "name": "Daily Check",
-    "schedule": "0 9 * * *",
-    "type": "agent",
-    "job": "Review recent activity and summarize findings",
-    "enabled": true
-  }
-]
-```
+Add project-specific notes here. This section is never auto-modified.
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | Yes | Display name |
-| `schedule` | Yes | Cron expression (e.g., `0 9 * * *` = daily at 9am) |
-| `type` | No | `agent` (default), `command`, or `webhook` |
-| `job` | For agent | Task prompt passed to the LLM |
-| `command` | For command | Shell command (runs in `cron/` directory) |
-| `url` | For webhook | Target URL |
-| `method` | For webhook | `GET` or `POST` (default: `POST`) |
-| `headers` | For webhook | Custom request headers |
-| `vars` | For webhook | Key-value pairs merged into request body |
-| `enabled` | No | Set `false` to disable (default: `true`) |
-| `llm_provider` | No | Override LLM provider for this cron (agent type only) |
-| `llm_model` | No | Override LLM model for this cron (agent type only) |
+<!-- END MANUAL -->
 
-## Webhook Triggers
+---
 
-Defined in `config/TRIGGERS.json`, loaded at server startup. Triggers fire on POST requests to watched paths (after auth, before route handler, fire-and-forget).
+## thepopebot Agent
 
-```json
-[
-  {
-    "name": "GitHub Push",
-    "watch_path": "/webhook/github-push",
-    "enabled": true,
-    "actions": [
-      {
-        "type": "agent",
-        "job": "Review the push to {{body.ref}}: {{body.head_commit.message}}"
-      }
-    ]
-  }
-]
-```
+This repo also hosts an autonomous AI agent powered by [thepopebot](https://github.com/stephengpope/thepopebot). The agent files live alongside the Rust project:
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | Yes | Display name |
-| `watch_path` | Yes | URL path to watch (e.g., `/webhook/github-push`) |
-| `actions` | Yes | Array of actions to fire (same fields as cron actions) |
-| `enabled` | No | Set `false` to disable (default: `true`) |
+- `config/` — Agent personality (`SOUL.md`), job prompts, cron schedules, webhook triggers
+- `skills/` — Agent capabilities (browser, search, etc.)
+- `docker/` — Docker containers for the event handler and job runner
+- `.github/workflows/` — GitHub Actions for running agent jobs
+- `app/` — Next.js web UI (chat interface, job monitor, settings)
 
-**Template tokens** for `job` and `command` strings:
-
-| Token | Resolves to |
-|-------|-------------|
-| `{{body}}` | Entire request body as JSON |
-| `{{body.field}}` | Nested field from request body |
-| `{{query}}` | All query parameters as JSON |
-| `{{query.field}}` | Specific query parameter |
-| `{{headers}}` | All request headers as JSON |
-| `{{headers.field}}` | Specific request header |
-
-## API Endpoints
-
-All API routes are under `/api/`, handled by the catch-all route.
-
-| Endpoint | Method | Auth | Purpose |
-|----------|--------|------|---------|
-| `/api/create-job` | POST | `x-api-key` | Create a new autonomous agent job |
-| `/api/telegram/webhook` | POST | `TELEGRAM_WEBHOOK_SECRET` | Telegram bot webhook |
-| `/api/telegram/register` | POST | `x-api-key` | Register Telegram webhook URL |
-| `/api/github/webhook` | POST | `GH_WEBHOOK_SECRET` | Receive notifications from GitHub Actions |
-| `/api/jobs/status` | GET | `x-api-key` | Check status of running/queued jobs |
-| `/api/ping` | GET | Public | Health check |
-
-**`x-api-key`**: Database-backed API keys generated through the web UI (Settings > Secrets). Keys are SHA-256 hashed, verified with timing-safe comparison. Format: `tpb_` prefix + 64 hex characters.
-
-## Web Interface
-
-Accessible after login at `APP_URL`. Routes: `/` (chat), `/chats` (history), `/chat/[chatId]` (resume chat), `/settings/crons`, `/settings/triggers`, `/settings/secrets` (API keys), `/swarm` (job monitor), `/notifications`, `/login` (auth / first-time admin setup).
-
-## Authentication
-
-NextAuth v5 with Credentials provider (email/password), JWT in httpOnly cookies. First visit creates admin account. Browser UI uses Server Actions with `requireAuth()`. API routes use `x-api-key` header. Chat streaming uses a dedicated route at `/stream/chat` with `auth()` session check.
-
-## Database
-
-SQLite via Drizzle ORM at `data/thepopebot.sqlite`. Auto-initialized and auto-migrated on server startup. Tables: `users`, `chats`, `messages`, `notifications`, `subscriptions`, `settings` (key-value store, also stores API keys). Column naming: camelCase in JS → snake_case in SQL.
-
-## GitHub Actions Workflows
-
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `run-job.yml` | `job/*` branch created | Runs the Docker agent container |
-| `rebuild-event-handler.yml` | Push to `main` | Rebuilds server (fast path or Docker restart) |
-| `upgrade-event-handler.yml` | Manual `workflow_dispatch` | Creates PR to upgrade thepopebot package |
-| `build-image.yml` | `docker/job-pi-coding-agent/**` changes | Builds Pi coding agent Docker image to GHCR |
-| `auto-merge.yml` | Job PR opened | Squash-merges if changes are within `ALLOWED_PATHS` |
-| `notify-pr-complete.yml` | After `auto-merge.yml` | Sends job completion notification |
-| `notify-job-failed.yml` | `run-job.yml` fails | Sends failure notification |
-
-## GitHub Secrets & Variables
-
-### Secrets (prefix-based naming)
-
-| Prefix | Purpose | Visible to LLM? | Example |
-|--------|---------|------------------|---------|
-| `AGENT_` | Protected credentials for Docker agent | No (filtered by env-sanitizer) | `AGENT_GH_TOKEN`, `AGENT_ANTHROPIC_API_KEY` |
-| `AGENT_LLM_` | LLM-accessible credentials for Docker agent | Yes | `AGENT_LLM_BRAVE_API_KEY` |
-| *(none)* | Workflow-only secrets (never passed to container) | N/A | `GH_WEBHOOK_SECRET` |
-
-`AGENT_*` secrets are collected into a `SECRETS` JSON object by `run-job.yml` (prefix stripped) and exported as env vars in the container. `AGENT_LLM_*` go into `LLM_SECRETS` and are not filtered from the LLM's bash environment.
-
-### Repository Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `APP_URL` | Public URL for the event handler | Required |
-| `AUTO_MERGE` | Set to `"false"` to disable auto-merge | Enabled |
-| `ALLOWED_PATHS` | Comma-separated path prefixes for auto-merge | `/logs` |
-| `JOB_IMAGE_URL` | Docker image for job agent (GHCR URLs trigger auto-builds) | Default thepopebot image |
-| `EVENT_HANDLER_IMAGE_URL` | Docker image for event handler | Default thepopebot image |
-| `RUNS_ON` | GitHub Actions runner label | `ubuntu-latest` |
-| `LLM_PROVIDER` | LLM provider for Docker agent | `anthropic` |
-| `LLM_MODEL` | LLM model name for Docker agent | Provider default |
-
-## Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `APP_URL` | Public URL for webhooks and Telegram | Yes |
-| `AUTH_SECRET` | NextAuth session encryption (auto-generated) | Yes |
-| `GH_TOKEN` | GitHub PAT for creating branches/files | Yes |
-| `GH_OWNER` | GitHub repository owner | Yes |
-| `GH_REPO` | GitHub repository name | Yes |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token | For Telegram |
-| `TELEGRAM_WEBHOOK_SECRET` | Telegram webhook validation secret | No |
-| `TELEGRAM_CHAT_ID` | Default chat ID for notifications | For Telegram |
-| `GH_WEBHOOK_SECRET` | GitHub Actions webhook auth | For notifications |
-| `LLM_PROVIDER` | `anthropic`, `openai`, `google`, or `custom` | No (default: `anthropic`) |
-| `LLM_MODEL` | Model name override | No |
-| `LLM_MAX_TOKENS` | Max tokens for LLM responses | No (default: 4096) |
-| `ANTHROPIC_API_KEY` | Anthropic API key | For anthropic provider |
-| `OPENAI_API_KEY` | OpenAI API key / Whisper | For openai provider |
-| `OPENAI_BASE_URL` | Custom OpenAI-compatible base URL | For custom provider |
-| `GOOGLE_API_KEY` | Google API key | For google provider |
-| `CUSTOM_API_KEY` | Custom provider API key | For custom provider |
-| `DATABASE_PATH` | Override SQLite DB location | No |
-
-## Customization
-
-User-editable config files in `config/`: `SOUL.md` (personality), `JOB_PLANNING.md` (LLM system prompt), `JOB_AGENT.md` (runtime docs), `JOB_SUMMARY.md` (job summaries), `HEARTBEAT.md` (self-monitoring), `SKILL_BUILDING_GUIDE.md` (skill guide), `CRONS.json` (scheduled jobs), `TRIGGERS.json` (webhook triggers).
-
-Skills in `skills/` are activated by symlinking into `skills/active/`. Both `.pi/skills` and `.claude/skills` point to `skills/active/`. Scripts for command-type actions go in `cron/` and `triggers/`.
-
-### Markdown includes and variables
-
-Config markdown files support includes and built-in variables (processed by the package's `render-md.js`):
-
-| Syntax | Description |
-|--------|-------------|
-| `{{ filepath.md }}` | Include another file (relative to project root, recursive with circular detection) |
-| `{{datetime}}` | Current ISO timestamp |
-| `{{skills}}` | Dynamic bullet list of active skill descriptions from `skills/active/*/SKILL.md` frontmatter — never hardcode skill names, this is resolved at runtime |
+The agent runs at `http://localhost:3000` (or your configured `APP_URL`). Run `docker compose up` to start it.
