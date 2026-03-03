@@ -723,7 +723,7 @@ mod tests {
         let mods = DamageModifiers::default();
         let solo = &default_buff_profiles()[0];
         let perf = combat::calculate_combat_performance(
-            &berserker, &derived, &mods, solo, "Warrior",
+            &berserker, &derived, &mods, solo, &combat::ConditionWeights::default_pve(), "Warrior",
         );
 
         let tanky = crate::stats::StatBlock {
@@ -732,7 +732,7 @@ mod tests {
         };
         let derived_t = stats::compute_derived(&tanky, "Warrior");
         let perf_t = combat::calculate_combat_performance(
-            &tanky, &derived_t, &mods, solo, "Warrior",
+            &tanky, &derived_t, &mods, solo, &combat::ConditionWeights::default_pve(), "Warrior",
         );
 
         // Power weights → berserker wins
@@ -764,7 +764,7 @@ mod tests {
         let mods = DamageModifiers::default();
         let solo = &default_buff_profiles()[0];
         let perf_v = combat::calculate_combat_performance(
-            &viper, &derived_v, &mods, solo, "Necromancer",
+            &viper, &derived_v, &mods, solo, &combat::ConditionWeights::default_pve(), "Necromancer",
         );
 
         let berserker = crate::stats::StatBlock {
@@ -773,7 +773,7 @@ mod tests {
         };
         let derived_b = stats::compute_derived(&berserker, "Necromancer");
         let perf_b = combat::calculate_combat_performance(
-            &berserker, &derived_b, &mods, solo, "Necromancer",
+            &berserker, &derived_b, &mods, solo, &combat::ConditionWeights::default_pve(), "Necromancer",
         );
 
         let condi_w = OptimizationWeights::preset_condi_dps();
@@ -839,7 +839,7 @@ mod tests {
         let mods = DamageModifiers::default();
         let solo = &default_buff_profiles()[0];
         let perf_t = combat::calculate_combat_performance(
-            &trailblazer, &derived_t, &mods, solo, "Ranger",
+            &trailblazer, &derived_t, &mods, solo, &combat::ConditionWeights::default_pve(), "Ranger",
         );
 
         let minstrel = stats::StatBlock {
@@ -850,7 +850,7 @@ mod tests {
         };
         let derived_m = stats::compute_derived(&minstrel, "Ranger");
         let perf_m = combat::calculate_combat_performance(
-            &minstrel, &derived_m, &mods, solo, "Ranger",
+            &minstrel, &derived_m, &mods, solo, &combat::ConditionWeights::default_pve(), "Ranger",
         );
 
         let w = OptimizationWeights {

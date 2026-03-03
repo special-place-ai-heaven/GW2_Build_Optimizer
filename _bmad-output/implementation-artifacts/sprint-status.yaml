@@ -57,7 +57,7 @@ story_location: docs/stories
 
 development_status:
   # ── Epic 1: Production Readiness Sprint ───────────────────────────────────
-  epic-1: in-progress
+  epic-1: done
 
   # Slot 1 — DONE. Story: docs/stories/P1-01-ci-pipeline.md
   p1-01-ci-pipeline: done
@@ -72,8 +72,7 @@ development_status:
   # Slot 4 — DONE. Story: docs/stories/P1-03-main-view-decomp.md
   p1-03-main-view-decomp: done
 
-  # Slot 5 — BLOCKED until p1-01 done; p1-03 recommended-complete before merge.
-  # Story: docs/stories/P2-01-condition-weights.md
-  p2-01-condition-weights: ready-for-dev
+  # Slot 5 — DONE. Story: docs/stories/P2-01-condition-weights.md
+  p2-01-condition-weights: done
 
   epic-1-retrospective: optional

@@ -118,13 +118,16 @@ pub fn optimize(
     // Score each gear candidate (preliminary — no traits/modifiers yet)
     let empty_mods = DamageModifiers::default();
     let solo_profile = &combat::default_buff_profiles()[0];
+    let cw = combat::condition_weights_for_profession(&profession.name);
     for candidate in &mut gear_candidates {
         let mock_stats = calculate_candidate_stats(candidate, itemstats_cache);
         let mut full_stats = stats::base_stats();
         full_stats += &mock_stats;
         let derived = stats::compute_derived(&full_stats, &profession.name);
         let perf = combat::calculate_combat_performance(
-            &full_stats, &derived, &empty_mods, solo_profile, &profession.name,
+            &full_stats, &derived, &empty_mods, solo_profile,
+            &cw,
+            &profession.name,
         );
         candidate.score = score_with_weights(&perf, weights);
     }
@@ -200,7 +203,9 @@ pub fn optimize(
 
             // Calculate combat performance with Solo profile
             let combat_perf = combat::calculate_combat_performance(
-                &full_stats, &derived, &modifiers, solo_profile, &profession.name,
+                &full_stats, &derived, &modifiers, solo_profile,
+                &cw,
+                &profession.name,
             );
             let score = score_with_weights(&combat_perf, weights);
 
@@ -305,7 +310,9 @@ fn optimize_pvp(
             &trait_ids, None, &[], None, traits_cache, &HashMap::new(),
         );
         let combat_perf = combat::calculate_combat_performance(
-            &full_stats, &derived, &modifiers, solo_profile, &profession.name,
+            &full_stats, &derived, &modifiers, solo_profile,
+            &combat::condition_weights_for_profession(&profession.name),
+            &profession.name,
         );
         let score = score_with_weights(&combat_perf, weights);
 
@@ -723,14 +730,15 @@ pub fn optimize_with_gemini(
         done: false,
     });
     let buff_profiles = combat::default_buff_profiles();
+    let cw = combat::condition_weights_for_profession(profession_name);
     let combat_solo = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[0], profession_name,
+        &full_stats, &derived, &modifiers, &buff_profiles[0], &cw, profession_name,
     );
     let combat_party = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[1], profession_name,
+        &full_stats, &derived, &modifiers, &buff_profiles[1], &cw, profession_name,
     );
     let combat_squad = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[2], profession_name,
+        &full_stats, &derived, &modifiers, &buff_profiles[2], &cw, profession_name,
     );
 
     // 9. Simulate rotation from validated skills

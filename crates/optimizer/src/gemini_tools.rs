@@ -720,9 +720,10 @@ fn exec_simulate_combat(args: &Value, ctx: &ToolContext) -> Value {
 
     // Simulate under all 3 buff profiles
     let profiles = combat::default_buff_profiles();
+    let cw = combat::condition_weights_for_profession(ctx.profession_name);
     let results: Vec<Value> = profiles.iter().map(|bp| {
         let perf = combat::calculate_combat_performance(
-            &full_stats, &derived, &modifiers, bp, ctx.profession_name,
+            &full_stats, &derived, &modifiers, bp, &cw, ctx.profession_name,
         );
         format_combat_performance(&perf, &bp.label)
     }).collect();
@@ -751,7 +752,9 @@ fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
     let mods = DamageModifiers::default();
     let solo = &combat::default_buff_profiles()[0];
     let perf = combat::calculate_combat_performance(
-        &full_stats, &derived, &mods, solo, ctx.profession_name,
+        &full_stats, &derived, &mods, solo,
+        &combat::condition_weights_for_profession(ctx.profession_name),
+        ctx.profession_name,
     );
 
     let score = scoring::score_with_weights(&perf, &ctx.weights);

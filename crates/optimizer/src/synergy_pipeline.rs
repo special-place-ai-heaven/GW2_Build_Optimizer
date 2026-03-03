@@ -786,7 +786,9 @@ fn rank_and_select(
         let modifiers = combat::DamageModifiers::default();
 
         let combat_perf = combat::calculate_combat_performance(
-            &stats, &derived, &modifiers, solo_profile, profession_name,
+            &stats, &derived, &modifiers, solo_profile,
+            &combat::condition_weights_for_profession(profession_name),
+            profession_name,
         );
 
         let combat_score = score_with_weights(&combat_perf, weights);
@@ -966,14 +968,15 @@ fn build_synergy_result(
 
     // 3-tier combat
     let buff_profiles = combat::default_buff_profiles();
+    let cw = combat::condition_weights_for_profession(profession_name);
     let combat_solo = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[0], profession_name,
+        &full_stats, &derived, &modifiers, &buff_profiles[0], &cw, profession_name,
     );
     let combat_party = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[1], profession_name,
+        &full_stats, &derived, &modifiers, &buff_profiles[1], &cw, profession_name,
     );
     let combat_squad = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[2], profession_name,
+        &full_stats, &derived, &modifiers, &buff_profiles[2], &cw, profession_name,
     );
 
     // Rotation
