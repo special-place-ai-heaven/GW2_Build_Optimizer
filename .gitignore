@@ -1,5 +1,4 @@
 # Credentials - NEVER commit these
-
 .env
 .env.local
 *.pem
@@ -22,6 +21,10 @@ node_modules/
 .next-new/
 .next-old/
 out/
+
+# Rust
+/target
+*.pdb
 
 # OS files
 .DS_Store
