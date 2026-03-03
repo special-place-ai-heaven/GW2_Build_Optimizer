@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# The gw2_addon crate (crates/addon/) contains tests that share a global
+# static Mutex<Option<AddonState>>.  Running those tests in parallel DEADLOCKS
+# the test binary.  The two-step split below keeps addon tests single-threaded
+# while all other crates continue to benefit from parallel test execution.
+
+jobs:
+  test:
+    name: Check and Test
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check (type-check, no codegen)
+        run: cargo check --workspace
+
+      - name: Test addon crate (single-threaded — global static STATE mutex)
+        run: cargo test --package gw2-build-optimizer -- --test-threads=1
+        # gw2-build-optimizer tests share STATE: Mutex<Option<AddonState>>.
+        # Parallel threads deadlock on the mutex; --test-threads=1 is required.
+
+      - name: Test all other crates
+        run: cargo test --workspace --exclude gw2-build-optimizer
+        # Live API tests are gated with #[ignore] and require real API keys.
+        # They are NOT run here. To run them manually:
+        #   cargo test --workspace -- --include-ignored
+        # See: crates/gw2api/tests/live_download.rs
+        #      crates/optimizer/tests/live_llm.rs

@@ -182,6 +182,64 @@ pub fn calculate_condition_ticks(condition_damage: f64, modifiers: &DamageModifi
     }
 }
 
+// ─── Condition Stack Weights ───
+
+/// Per-condition stack-count weights for a typical rotation.
+///
+/// These represent approximate average stack counts maintained in a full rotation.
+/// Source: GW2 Wiki rotation data, empirically conservative estimates for PvE.
+#[derive(Debug, Clone)]
+pub struct ConditionWeights {
+    /// Average Bleeding stacks maintained in rotation.
+    pub bleeding: f64,
+    /// Average Burning stacks maintained in rotation.
+    pub burning: f64,
+    /// Average Poison stacks maintained in rotation.
+    pub poison: f64,
+    /// Average Torment stacks maintained in rotation.
+    pub torment: f64,
+    /// Confusion weight (near-zero in PvE — triggers on target skill activation).
+    pub confusion: f64,
+}
+
+impl ConditionWeights {
+    /// Generic PvE fallback — original hardcoded values preserved exactly.
+    pub fn default_pve() -> Self {
+        Self { bleeding: 3.0, burning: 2.0, poison: 1.0, torment: 1.5, confusion: 0.5 }
+    }
+
+    /// Necromancer group (Scourge, Harbinger): heavy Bleeding + Torment, minimal Burning.
+    ///
+    /// Scourge maintains ~8-12 Bleeding and ~5-8 Torment stacks. Burning is rare (0-2 stacks).
+    /// Confusion is ~0.1 in PvE auto-attack rotations.
+    pub fn necro_group() -> Self {
+        Self { bleeding: 8.0, burning: 1.0, poison: 1.5, torment: 6.0, confusion: 0.1 }
+    }
+
+    /// Firebrand group (Firebrand, Willbender, Guardian): heavy Burning, minimal others.
+    ///
+    /// Firebrand's Tome of Justice sustains 8-10 Burning stacks. Bleeding/Torment are
+    /// incidental (1-2 stacks). Confusion does not appear in standard Firebrand rotations.
+    pub fn firebrand_group() -> Self {
+        Self { bleeding: 1.0, burning: 8.0, poison: 0.5, torment: 1.0, confusion: 0.0 }
+    }
+}
+
+/// Dispatch to the appropriate condition weight preset for the given profession name.
+///
+/// Accepts both base profession names (as returned by the GW2 API `profession.name` field,
+/// e.g., `"Necromancer"`, `"Guardian"`) and elite specialization names (e.g., `"Scourge"`,
+/// `"Firebrand"`) for forward-compatibility. In the current optimization pipeline, only base
+/// profession names are passed; the elite-spec arms are retained for callers that may supply
+/// elite-spec context directly.
+pub fn condition_weights_for_profession(profession: &str) -> ConditionWeights {
+    match profession {
+        "Necromancer" | "Scourge" | "Harbinger" => ConditionWeights::necro_group(),
+        "Guardian" | "Firebrand" | "Willbender" => ConditionWeights::firebrand_group(),
+        _ => ConditionWeights::default_pve(),
+    }
+}
+
 // ─── Combat Performance Calculation ───
 
 /// Reference target armor for DPS index calculations (typical raid boss).
@@ -195,6 +253,7 @@ pub fn calculate_combat_performance(
     _derived: &DerivedStats,
     modifiers: &DamageModifiers,
     buffs: &BuffProfile,
+    condition_weights: &ConditionWeights,
     profession: &str,
 ) -> CombatPerformance {
     // Apply buff stats
@@ -238,11 +297,11 @@ pub fn calculate_combat_performance(
     let torment_dur = 1.0 + (base_condi_duration + modifiers.total_condi_duration_for("Torment")).clamp(0.0, 100.0) / 100.0;
     let confuse_dur = 1.0 + (base_condi_duration + modifiers.total_condi_duration_for("Confusion")).clamp(0.0, 100.0) / 100.0;
 
-    let condition_dps_index = (condition_ticks.bleeding * 3.0 * bleed_dur  // ~3 stacks average
-        + condition_ticks.burning * 2.0 * burn_dur   // ~2 stacks average
-        + condition_ticks.poison * 1.0 * poison_dur
-        + condition_ticks.torment * 1.5 * torment_dur
-        + condition_ticks.confusion * 0.5 * confuse_dur)
+    let condition_dps_index = (condition_ticks.bleeding * condition_weights.bleeding * bleed_dur
+        + condition_ticks.burning * condition_weights.burning * burn_dur
+        + condition_ticks.poison * condition_weights.poison * poison_dur
+        + condition_ticks.torment * condition_weights.torment * torment_dur
+        + condition_ticks.confusion * condition_weights.confusion * confuse_dur)
         * vuln_mult;
 
     let total_dps_index = strike_dps_index + condition_dps_index;
@@ -766,7 +825,7 @@ mod tests {
         let mods = DamageModifiers::default();
         let solo = default_buff_profiles().into_iter().find(|b| b.label == "Solo").unwrap();
 
-        let perf = calculate_combat_performance(&stats, &derived, &mods, &solo, "Warrior");
+        let perf = calculate_combat_performance(&stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Warrior");
 
         // Effective power should be > raw power due to crits
         assert!(perf.effective_power > 2800.0);
@@ -794,8 +853,8 @@ mod tests {
         let solo = profiles.iter().find(|b| b.label == "Solo").unwrap();
         let squad = profiles.iter().find(|b| b.label == "Full Squad").unwrap();
 
-        let perf_solo = calculate_combat_performance(&stats, &derived, &mods, solo, "Warrior");
-        let perf_squad = calculate_combat_performance(&stats, &derived, &mods, squad, "Warrior");
+        let perf_solo = calculate_combat_performance(&stats, &derived, &mods, solo, &ConditionWeights::default_pve(), "Warrior");
+        let perf_squad = calculate_combat_performance(&stats, &derived, &mods, squad, &ConditionWeights::default_pve(), "Warrior");
 
         // Squad should have higher DPS (Might + Fury + Vulnerability)
         assert!(perf_squad.strike_dps_index > perf_solo.strike_dps_index);
@@ -818,7 +877,7 @@ mod tests {
         let mods = DamageModifiers::default();
         let solo = default_buff_profiles().into_iter().find(|b| b.label == "Solo").unwrap();
 
-        let perf = calculate_combat_performance(&stats, &derived, &mods, &solo, "Necromancer");
+        let perf = calculate_combat_performance(&stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Necromancer");
 
         // Condition DPS index should be significant
         assert!(perf.condition_dps_index > 500.0);
@@ -1001,10 +1060,140 @@ mod tests {
             label: "With Prot".into(),
         };
 
-        let perf_without = calculate_combat_performance(&stats, &derived, &mods, &without, "Guardian");
-        let perf_with = calculate_combat_performance(&stats, &derived, &mods, &with, "Guardian");
+        let perf_without = calculate_combat_performance(&stats, &derived, &mods, &without, &ConditionWeights::default_pve(), "Guardian");
+        let perf_with = calculate_combat_performance(&stats, &derived, &mods, &with, &ConditionWeights::default_pve(), "Guardian");
 
         assert!(perf_with.damage_reduction_pct > perf_without.damage_reduction_pct);
         assert!(perf_with.effective_health > perf_without.effective_health);
+    }
+
+    // ─── Profession-Aware Condition Weight Tests (P2-01) ───
+
+    #[test]
+    fn test_firebrand_weights_amplify_burning_score() {
+        // Same stat block: firebrand preset should produce higher condition_dps_index
+        // than default_pve when burning tick is dominant (high condition_damage → large burn tick).
+        let stats = StatBlock {
+            condition_damage: 2000.0,
+            expertise: 400.0,
+            power: 1000.0,
+            precision: 1000.0,
+            toughness: 1000.0,
+            vitality: 1000.0,
+            ..Default::default()
+        };
+        let derived = stats::compute_derived(&stats, "Guardian");
+        let mods = DamageModifiers::default();
+        let solo = default_buff_profiles().into_iter().find(|b| b.label == "Solo").unwrap();
+
+        let perf_default = calculate_combat_performance(
+            &stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Guardian",
+        );
+        let perf_firebrand = calculate_combat_performance(
+            &stats, &derived, &mods, &solo, &ConditionWeights::firebrand_group(), "Guardian",
+        );
+
+        // Firebrand has burning=8.0 vs default burning=2.0; burning tick (0.155*2000+131.75=441.75)
+        // is the largest per-tick value, so firebrand preset should score higher.
+        assert!(
+            perf_firebrand.condition_dps_index > perf_default.condition_dps_index,
+            "firebrand preset (condi={:.1}) should exceed default_pve (condi={:.1}) \
+             when burning tick dominates",
+            perf_firebrand.condition_dps_index,
+            perf_default.condition_dps_index,
+        );
+        // strike and effective_health are unaffected
+        assert!((perf_firebrand.strike_dps_index - perf_default.strike_dps_index).abs() < 0.01);
+        assert!((perf_firebrand.effective_health - perf_default.effective_health).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_necro_weights_amplify_bleeding_torment_score() {
+        // Same stat block: necro preset should produce higher condition_dps_index
+        // than default_pve when bleeding+torment ticks are dominant.
+        let stats = StatBlock {
+            condition_damage: 2000.0,
+            expertise: 400.0,
+            power: 1000.0,
+            precision: 1000.0,
+            toughness: 1000.0,
+            vitality: 1000.0,
+            ..Default::default()
+        };
+        let derived = stats::compute_derived(&stats, "Necromancer");
+        let mods = DamageModifiers::default();
+        let solo = default_buff_profiles().into_iter().find(|b| b.label == "Solo").unwrap();
+
+        let perf_default = calculate_combat_performance(
+            &stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Necromancer",
+        );
+        let perf_necro = calculate_combat_performance(
+            &stats, &derived, &mods, &solo, &ConditionWeights::necro_group(), "Necromancer",
+        );
+
+        // Necro: bleeding=8.0 (vs 3.0), torment=6.0 (vs 1.5); these two combined dominate.
+        // Tick values: bleeding=142, torment=106.875 vs burning=441.75 (which necro weights at 1.0).
+        // 8*142 + 6*106.875 = 1136 + 641.25 = 1777.25 vs default 3*142 + 2*441.75 + 1.5*106.875
+        // = 426 + 883.5 + 160.3 = 1469.8 → necro wins.
+        assert!(
+            perf_necro.condition_dps_index > perf_default.condition_dps_index,
+            "necro_group preset (condi={:.1}) should exceed default_pve (condi={:.1}) \
+             when bleeding+torment ticks dominate",
+            perf_necro.condition_dps_index,
+            perf_default.condition_dps_index,
+        );
+        assert!((perf_necro.strike_dps_index - perf_default.strike_dps_index).abs() < 0.01);
+        assert!((perf_necro.effective_health - perf_default.effective_health).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_condition_weights_for_profession_dispatch() {
+        // Necromancer → necro_group (all 5 fields)
+        let w = condition_weights_for_profession("Necromancer");
+        assert!((w.bleeding - 8.0).abs() < 0.001);
+        assert!((w.burning - 1.0).abs() < 0.001);
+        assert!((w.poison - 1.5).abs() < 0.001);
+        assert!((w.torment - 6.0).abs() < 0.001);
+        assert!((w.confusion - 0.1).abs() < 0.001);
+
+        // Scourge and Harbinger also → necro_group (key differentiating fields)
+        let ws = condition_weights_for_profession("Scourge");
+        assert!((ws.bleeding - 8.0).abs() < 0.001);
+        assert!((ws.torment - 6.0).abs() < 0.001);
+        let wh = condition_weights_for_profession("Harbinger");
+        assert!((wh.bleeding - 8.0).abs() < 0.001);
+        assert!((wh.torment - 6.0).abs() < 0.001);
+
+        // Guardian → firebrand_group (all 5 fields)
+        let g = condition_weights_for_profession("Guardian");
+        assert!((g.bleeding - 1.0).abs() < 0.001);
+        assert!((g.burning - 8.0).abs() < 0.001);
+        assert!((g.poison - 0.5).abs() < 0.001);
+        assert!((g.torment - 1.0).abs() < 0.001);
+        assert!((g.confusion - 0.0).abs() < 0.001);
+
+        // Firebrand and Willbender also → firebrand_group (key differentiating fields)
+        let fb = condition_weights_for_profession("Firebrand");
+        assert!((fb.burning - 8.0).abs() < 0.001);
+        assert!((fb.bleeding - 1.0).abs() < 0.001);
+        let wb = condition_weights_for_profession("Willbender");
+        assert!((wb.burning - 8.0).abs() < 0.001);
+        assert!((wb.bleeding - 1.0).abs() < 0.001);
+
+        // Warrior → default_pve (all 5 fields)
+        let dw = condition_weights_for_profession("Warrior");
+        assert!((dw.bleeding - 3.0).abs() < 0.001);
+        assert!((dw.burning - 2.0).abs() < 0.001);
+        assert!((dw.poison - 1.0).abs() < 0.001);
+        assert!((dw.torment - 1.5).abs() < 0.001);
+        assert!((dw.confusion - 0.5).abs() < 0.001);
+
+        // Unknown profession → default_pve (all 5 fields)
+        let unk = condition_weights_for_profession("ElementalistVariant");
+        assert!((unk.bleeding - 3.0).abs() < 0.001);
+        assert!((unk.burning - 2.0).abs() < 0.001);
+        assert!((unk.poison - 1.0).abs() < 0.001);
+        assert!((unk.torment - 1.5).abs() < 0.001);
+        assert!((unk.confusion - 0.5).abs() < 0.001);
     }
 }
