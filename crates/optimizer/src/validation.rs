@@ -483,11 +483,15 @@ fn find_trait_by_name<'a>(name: &str, major_traits: &[&'a GW2Trait]) -> Option<&
     // Contains match: only check if trait name contains the search needle.
     // Do NOT check the reverse (needle contains trait name) — that causes
     // "Empowered" to match input "Power" or "Swift" to match "Swift Empowerment".
+    // Minimum needle length guard: short needles (< 5 chars) over-match on long
+    // trait names. A 4-char LLM hallucination like "swif" would otherwise silently
+    // match "Swift Retribution". Exact matches (above) are exempt from this guard.
+    if needle.len() < 5 {
+        return None;
+    }
     major_traits
         .iter()
-        .find(|t| {
-            t.name.to_lowercase().contains(&needle)
-        })
+        .find(|t| t.name.to_lowercase().contains(&needle))
         .copied()
 }
 
@@ -814,5 +818,46 @@ mod tests {
         assert_eq!(tier_label(1), "Adept");
         assert_eq!(tier_label(2), "Master");
         assert_eq!(tier_label(3), "Grandmaster");
+    }
+
+    // ── find_trait_by_name() length guard ────────────────────────────────────
+
+    fn make_trait(id: u32, name: &str) -> GW2Trait {
+        GW2Trait {
+            id,
+            name: name.into(),
+            icon: None,
+            description: None,
+            specialization: 0,
+            tier: 1,
+            order: 0,
+            slot: "Major".into(),
+            facts: vec![],
+            traited_facts: vec![],
+            skills: vec![],
+        }
+    }
+
+    #[test]
+    fn test_find_trait_short_needle_no_contains_match() {
+        // needle "swif" (4 chars) is a substring of "Swift Retribution".
+        // Exact match fails ("swift retribution" != "swif").
+        // Length guard (< 5) must block the contains fallback → None.
+        let t = make_trait(1, "Swift Retribution");
+        let traits = vec![&t];
+        let result = find_trait_by_name("swif", &traits);
+        assert!(result.is_none(), "4-char needle must not match via contains fallback");
+    }
+
+    #[test]
+    fn test_find_trait_needle_ge5_contains_match() {
+        // needle "valor" (5 chars) is a substring of "Valorous Recovery".
+        // Exact match fails ("valorous recovery" != "valor").
+        // Length guard passes (5 >= 5) → contains fires → Some.
+        let t = make_trait(2, "Valorous Recovery");
+        let traits = vec![&t];
+        let result = find_trait_by_name("valor", &traits);
+        assert!(result.is_some(), "5-char needle must match via contains fallback");
+        assert_eq!(result.unwrap().id, 2);
     }
 }

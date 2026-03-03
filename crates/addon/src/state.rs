@@ -286,3 +286,215 @@ where
 {
     lock_state().as_mut().map(f)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gw2_core::config::AppConfig;
+    use gw2_optimizer::scoring::OptimizationWeights;
+
+    /// Reset the global STATE to None for test isolation.
+    /// Call as the first line of every test that calls init(), clear(), or with_state().
+    /// Required: tests share a global static Mutex — without this, a prior test's
+    /// init() leaves state set, causing the next test to start with stale data.
+    fn reset_state() {
+        *super::lock_state() = None;
+    }
+
+    /// Write `config` as config.json inside a per-test temp dir and return the dir.
+    /// AppConfig::save() creates parent dirs automatically.
+    fn config_in_tempdir(config: &AppConfig, label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("gw2_state_test_{}_{}", std::process::id(), label));
+        let cfg_path = AppConfig::config_path(&dir);
+        config.save(&cfg_path).unwrap();
+        dir
+    }
+
+    // ── CancellationToken ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_cancel_token_new_is_not_cancelled() {
+        let token = CancellationToken::new();
+        assert!(!token.is_cancelled());
+    }
+
+    #[test]
+    fn test_cancel_token_cancel_sets_flag() {
+        let token = CancellationToken::new();
+        token.cancel();
+        assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn test_cancel_token_clone_sees_cancellation() {
+        // Verifies that clones share the same Arc<AtomicBool> — threads cloning
+        // the token at spawn time will see the cancellation signal from clear().
+        let token = CancellationToken::new();
+        let clone = token.clone();
+        token.cancel();
+        assert!(clone.is_cancelled());
+    }
+
+    // ── MainState::default() — initial loading-flag safety ────────────────────
+    //
+    // Risk: non-optimizer background threads in main_view.rs (lines 1501, 1584,
+    // 2168, 2199, 2279, 2312, 3233) have no catch_unwind.  A panic in any of
+    // those threads leaves these flags stuck `true` permanently.  This test
+    // verifies the safe initial boundary: all flags must start false so any
+    // stuck-flag regression is immediately visible as a state divergence.
+
+    #[test]
+    fn test_main_state_default_fields() {
+        let main = MainState::default();
+        assert!(main.characters.is_empty(), "characters must start empty");
+        assert!(!main.optimizing,          "optimizing must start false");
+        assert!(!main.characters_loading,  "characters_loading must start false (stuck-loading-flag risk)");
+        assert!(!main.game_db_loading,     "game_db_loading must start false (stuck-loading-flag risk)");
+        assert!(!main.build_loading,       "build_loading must start false (stuck-loading-flag risk)");
+        assert_eq!(
+            main.weights,
+            OptimizationWeights::default(),
+            "default weights should be preset_balanced; init() overrides to PvE default"
+        );
+        assert!(
+            main.build_locks.specs.iter().all(|s| s.is_none()),
+            "build_locks.specs must start as [None; 3]"
+        );
+        assert!(
+            main.build_locks.trait_locks.is_empty(),
+            "build_locks.trait_locks must start empty"
+        );
+    }
+
+    // ── init() screen routing ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_init_routes_to_gw2_key_when_no_keys() {
+        reset_state();
+        // No config.json in the dir → AppConfig::load returns default (no keys).
+        let dir = std::env::temp_dir()
+            .join(format!("gw2_state_test_{}_no_keys", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir);
+        let screen = with_state(|s| s.screen.clone()).unwrap();
+        assert_eq!(screen, Screen::Setup(SetupStep::Gw2ApiKey));
+        reset_state();
+    }
+
+    #[test]
+    fn test_init_routes_to_llm_key_when_only_gw2_key() {
+        reset_state();
+        let config = AppConfig {
+            gw2_api_key: Some("test-gw2-key".into()),
+            ..Default::default()
+        };
+        let dir = config_in_tempdir(&config, "gw2_only");
+        init(dir);
+        let screen = with_state(|s| s.screen.clone()).unwrap();
+        assert_eq!(screen, Screen::Setup(SetupStep::LlmApiKey));
+        reset_state();
+    }
+
+    #[test]
+    fn test_init_routes_to_data_download_when_keys_present_no_cache() {
+        reset_state();
+        let config = AppConfig {
+            gw2_api_key: Some("test-gw2-key".into()),
+            gemini_api_key: Some("test-gemini-key".into()),
+            cache_build_number: None,
+            ..Default::default()
+        };
+        let dir = config_in_tempdir(&config, "keys_no_cache");
+        init(dir);
+        let screen = with_state(|s| s.screen.clone()).unwrap();
+        assert_eq!(screen, Screen::Setup(SetupStep::DataDownload));
+        reset_state();
+    }
+
+    #[test]
+    fn test_init_routes_to_main_when_setup_complete() {
+        reset_state();
+        let config = AppConfig {
+            gw2_api_key: Some("test-gw2-key".into()),
+            gemini_api_key: Some("test-gemini-key".into()),
+            cache_build_number: Some(12345),
+            ..Default::default()
+        };
+        let dir = config_in_tempdir(&config, "setup_complete");
+        init(dir);
+        let screen = with_state(|s| s.screen.clone()).unwrap();
+        assert_eq!(screen, Screen::Main);
+        reset_state();
+    }
+
+    // ── init() loading-flag safety ────────────────────────────────────────────
+    // Complementary to test_main_state_default_fields: confirms init() itself
+    // never sets any loading flag — they are set exclusively by background threads.
+    // If this test fails, it means init() started a background op without a
+    // matching clear path, introducing a permanent stuck-flag risk.
+
+    #[test]
+    fn test_init_loading_flags_start_false() {
+        reset_state();
+        let dir = std::env::temp_dir()
+            .join(format!("gw2_state_test_{}_loading_flags", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir);
+        with_state(|s| {
+            assert!(!s.main.optimizing,         "optimizing must be false after init");
+            assert!(!s.main.characters_loading, "characters_loading must be false after init");
+            assert!(!s.main.game_db_loading,    "game_db_loading must be false after init");
+            assert!(!s.main.build_loading,      "build_loading must be false after init");
+        });
+        reset_state();
+    }
+
+    // ── with_state ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_with_state_returns_none_when_uninitialized() {
+        reset_state();
+        let result = with_state(|_s| 42);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_with_state_invokes_closure_when_initialized() {
+        reset_state();
+        let dir = std::env::temp_dir()
+            .join(format!("gw2_state_test_{}_with_state_init", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir);
+        let result = with_state(|s| s.window_visible);
+        assert_eq!(result, Some(false));
+        reset_state();
+    }
+
+    // ── clear() ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_clear_cancels_token() {
+        reset_state();
+        let dir = std::env::temp_dir()
+            .join(format!("gw2_state_test_{}_clear_cancel", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir);
+        let token = with_state(|s| s.cancel_token.clone()).unwrap();
+        assert!(!token.is_cancelled(), "token must not be cancelled before clear");
+        clear();
+        assert!(token.is_cancelled(), "token clone must see cancellation after clear");
+    }
+
+    #[test]
+    fn test_clear_drops_state() {
+        reset_state();
+        let dir = std::env::temp_dir()
+            .join(format!("gw2_state_test_{}_clear_drops", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir);
+        assert!(with_state(|_s| ()).is_some(), "state must be Some after init");
+        clear();
+        assert!(with_state(|_s| ()).is_none(), "state must be None after clear");
+    }
+}
