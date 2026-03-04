@@ -1,4 +1,4 @@
-# generated: 2026-03-03
+# generated: 2026-03-04 (updated: Epic 2 planning, P2-02 + P2-03 stories created)
 # project: GW2_Build_Optimizer
 # project_key: NOKEY
 # tracking_system: file-system
@@ -40,6 +40,13 @@
 # Slot 4 — p1-03-main-view-decomp    BLOCKED until: p1-01 DONE + p1-02 DONE
 # Slot 5 — p2-01-condition-weights   BLOCKED until: p1-01 DONE  [p1-03 recommended-complete]
 #
+# ── Epic 2 Gates ──────────────────────────────────────────────────────────────────────────
+# Slot 6 — p2-02-condition-dispatch-integration-test  UNBLOCKED (independent)
+# Slot 7 — p2-03-catch-unwind-hardening              UNBLOCKED (independent)
+# Slot 8 — p2-05-per-elite-spec-condition-presets    BLOCKED until: p2-02 DONE
+# Slot 9 — p2-06-project-context-refresh             UNBLOCKED (any time; doc-only)
+# Future  — p3-01-coverage-reporting                 BLOCKED until: p2-03 DONE
+#
 # SPECIAL CONSTRAINT — gw2_addon single-thread test requirement:
 #   Tests in crates/addon/ share a global static Mutex<Option<AddonState>>.
 #   Running them in parallel DEADLOCKS the test binary.
@@ -76,3 +83,22 @@ development_status:
   p2-01-condition-weights: done
 
   epic-1-retrospective: done
+
+  # ── Epic 2: Quality Hardening + Domain Accuracy ───────────────────────────
+  epic-2: in-progress
+
+  # Slot 6 — READY. Story: docs/stories/P2-02-condition-dispatch-integration-test.md
+  # GATE: None (independent). P2-05 is BLOCKED until this is done.
+  p2-02-condition-dispatch-integration-test: ready-for-dev
+
+  # Slot 7 — READY. Story: docs/stories/P2-03-catch-unwind-hardening.md
+  # GATE: None (independent). P3-01 is BLOCKED until this is done.
+  p2-03-catch-unwind-hardening: ready-for-dev
+
+  # Slot 8 — BACKLOG. Depends on P2-02 (extends its integration test).
+  p2-05-per-elite-spec-condition-presets: backlog
+
+  # Slot 9 — BACKLOG. Independent; good session-opener task.
+  p2-06-project-context-refresh: backlog
+
+  epic-2-retrospective: optional
