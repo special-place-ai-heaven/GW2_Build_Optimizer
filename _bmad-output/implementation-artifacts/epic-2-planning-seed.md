@@ -1,7 +1,7 @@
 # Epic 2 Planning Seed
 
 _Generated: 2026-03-04 from Epic 1 retrospective_
-_Status: Draft — requires sprint-planning session to create story files and update sprint-status.yaml_
+_Status: Active — P2-02 and P2-03 story files created (2026-03-04); sprint-status.yaml updated; P2-05/P2-06 remain backlog_
 
 ---
 
@@ -171,9 +171,9 @@ P3-01 (coverage)                 ── after P2-03 (addon threads now safe to i
 | 1 | Fix stale `project-context.md` CI line | Rob | ✅ Done (2026-03-04) |
 | 2 | Publish DoD additions to `docs/definition-of-done.md` | Bob (SM) | ✅ Done (2026-03-04) |
 | 3 | SM story-drafting checklist in `docs/definition-of-done.md` | Bob (SM) | ✅ Done (2026-03-04) |
-| 4 | Draft P2-02 story file | Bob (SM) | ⏳ Pending sprint-planning |
-| 5 | Draft P2-03 story file | Bob (SM) | ⏳ Pending sprint-planning |
-| 6 | Apply SM-1/SM-2/SM-3 to Epic 2 story drafts | Bob (SM) | ⏳ Ongoing |
+| 4 | Draft P2-02 story file | Bob (SM) | ✅ Done (2026-03-04) |
+| 5 | Draft P2-03 story file | Bob (SM) | ✅ Done (2026-03-04) |
+| 6 | Apply SM-1/SM-2/SM-3 to Epic 2 story drafts | Bob (SM) | ✅ Done (2026-03-04) |
 | 7 | Apply DoD-1/DoD-2 to Epic 2 story closures | Dev + SM | ⏳ Ongoing |
 | 8 | Build + deploy Epic 1 DLL | Rob | ⏳ Pending |
 
