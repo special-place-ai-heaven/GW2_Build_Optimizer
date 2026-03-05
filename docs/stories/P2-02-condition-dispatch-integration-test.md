@@ -1,6 +1,6 @@
 # Story P2-02: End-to-End Condition Dispatch Integration Test
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -25,10 +25,10 @@ so that a future accidental reversion to `default_pve()` at any call site is imm
 
 ```bash
 # Run the new integration test directly
-cargo test --package gw2_optimizer -- test_profession_dispatch_affects_condi_score
+cargo test --package gw2-optimizer -- test_profession_dispatch_affects_condi_score
 
 # Confirm existing combat tests still pass
-cargo test --package gw2_optimizer -- combat
+cargo test --package gw2-optimizer -- combat
 
 # Full workspace check
 cargo check --workspace
@@ -45,20 +45,20 @@ cargo test --package gw2-build-optimizer -- --test-threads=1
    - Second call: `&ConditionWeights::default_pve()`, profession `"Warrior"`
 4. The test asserts: `necro_result.condition_dps_index > default_result.condition_dps_index`.
 5. The test is entirely self-contained — uses only stack construction patterns already present in the `combat.rs` test module; no external fixtures, no API calls, no GameDb.
-6. `cargo test --package gw2_optimizer -- test_profession_dispatch_affects_condi_score` exits 0 with the test passing (not merely filtered out).
+6. `cargo test --package gw2-optimizer -- test_profession_dispatch_affects_condi_score` exits 0 with the test passing (not merely filtered out).
 7. All pre-existing `combat.rs` tests continue to pass with identical expected values — no production code is touched.
 
 ## Tasks / Subtasks
 
-- [ ] Add integration test (AC 1–6)
-  - [ ] Open `crates/optimizer/src/combat.rs` and locate the `#[cfg(test)]` module
-  - [ ] Copy an existing `StatBlock`/`DerivedStats`/`DamageModifiers`/`BuffProfile` construction pattern from a nearby test
-  - [ ] Set `condition_ticks.bleeding_stacks = 10.0` (or similar) and `torment_stacks = 6.0` to create a condi-heavy profile
-  - [ ] Call `calculate_combat_performance()` with `&ConditionWeights::necro_group()` and `"Necromancer"`; capture as `necro_result`
-  - [ ] Call `calculate_combat_performance()` with `&ConditionWeights::default_pve()` and `"Warrior"`; capture as `default_result`
-  - [ ] Assert `necro_result.condition_dps_index > default_result.condition_dps_index`
-- [ ] Verify pre-existing tests still pass (AC 7)
-  - [ ] Run `cargo test --package gw2_optimizer -- combat` — all existing tests must pass
+- [x] Add integration test (AC 1–6)
+  - [x] Open `crates/optimizer/src/combat.rs` and locate the `#[cfg(test)]` module
+  - [x] Copy an existing `StatBlock`/`DerivedStats`/`DamageModifiers`/`BuffProfile` construction pattern from a nearby test
+  - [x] Set `condition_damage: 2000.0` and `expertise: 400.0` to create a condi-heavy profile (ticks computed internally)
+  - [x] Call `calculate_combat_performance()` with `&ConditionWeights::necro_group()` and `"Necromancer"`; capture as `necro_result`
+  - [x] Call `calculate_combat_performance()` with `&ConditionWeights::default_pve()` and `"Warrior"`; capture as `default_result`
+  - [x] Assert `necro_result.condition_dps_index > default_result.condition_dps_index`
+- [x] Verify pre-existing tests still pass (AC 7)
+  - [x] Run `cargo test --package gw2-optimizer -- combat` — all existing tests must pass
 
 ## Dev Notes
 
@@ -82,7 +82,7 @@ cargo test --package gw2-build-optimizer -- --test-threads=1
 
 ### Agent Model Used
 
-_to be filled_
+Claude Opus 4.6
 
 ### Debug Log References
 
@@ -90,12 +90,18 @@ None.
 
 ### Completion Notes List
 
-_to be filled_
+- Added `test_profession_dispatch_affects_condi_score` to `crates/optimizer/src/combat.rs` test module
+- Test uses identical construction pattern to `test_necro_weights_amplify_bleeding_torment_score` (StatBlock with condition_damage=2000, expertise=400)
+- Calls `condition_weights_for_profession()` to dispatch weights, then `calculate_combat_performance()` — true end-to-end dispatch test
+- Asserts `necro_result.condition_dps_index > default_result.condition_dps_index` + strike_dps_index invariant
+- All 7 ACs satisfied: correct test name (AC1), bleeding+torment profile (AC2), two calls with different weights/professions (AC3), assertion (AC4), self-contained (AC5), test passes (AC6), no regressions (AC7)
+- Full workspace: 185 tests pass (165 optimizer + 20 addon), 0 failures
 
 ### File List
 
-_to be filled_
+- Modified: `crates/optimizer/src/combat.rs` — added 1 new `#[test]` function
 
 ## Change Log
 
-_to be filled_
+- 2026-03-05: Added end-to-end integration test `test_profession_dispatch_affects_condi_score` verifying condition weight dispatch flows through to `condition_dps_index` output
+- 2026-03-05: Code review fixes — H1: fixed package name in verification commands (`gw2_optimizer` → `gw2-optimizer`); M1+M2: rewrote test to call `condition_weights_for_profession()` for true end-to-end dispatch coverage (was bypassing dispatch function); L1: added strike_dps_index invariant assertion; L2: fixed task subtask description
