@@ -29,6 +29,7 @@ pub(super) fn load_characters(state: &mut AddonState) {
     let had_cache = !state.main.characters.is_empty();
 
     std::thread::spawn(move || {
+        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if token.is_cancelled() { return; }
 
         let result = gw2_api::client::Gw2Client::with_key(&key)
@@ -60,6 +61,17 @@ pub(super) fn load_characters(state: &mut AddonState) {
                 }
             }
         });
+        }));
+        if let Err(_) = panic_result {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                "bg thread panicked: load_characters",
+            );
+            crate::state::with_state(|s| {
+                s.main.characters_loading = false;
+            });
+        }
     });
 }
 
@@ -112,6 +124,7 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
     let token = state.cancel_token.clone();
 
     std::thread::spawn(move || {
+        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if token.is_cancelled() { return; }
 
         let result = (|| -> Result<(Vec<gw2_api::models::BuildTab>, Vec<gw2_api::models::EquipmentTab>), String> {
@@ -163,6 +176,17 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
                 }
             }
         });
+        }));
+        if let Err(_) = panic_result {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                "bg thread panicked: load_character_tabs",
+            );
+            crate::state::with_state(|s| {
+                s.main.build_loading = false;
+            });
+        }
     });
 }
 

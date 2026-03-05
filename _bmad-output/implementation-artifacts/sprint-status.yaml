@@ -45,6 +45,7 @@
 # Slot 7 — p2-03-catch-unwind-hardening              UNBLOCKED (independent)
 # Slot 8 — p2-05-per-elite-spec-condition-presets    BLOCKED until: p2-02 DONE
 # Slot 9 — p2-06-project-context-refresh             UNBLOCKED (any time; doc-only)
+# Slot 10 — p2-07-saved-build-profession-and-crash-safety  UNBLOCKED (independent)
 # Future  — p3-01-coverage-reporting                 BLOCKED until: p2-03 DONE
 #
 # SPECIAL CONSTRAINT — gw2_addon single-thread test requirement:
@@ -89,16 +90,20 @@ development_status:
 
   # Slot 6 — READY. Story: docs/stories/P2-02-condition-dispatch-integration-test.md
   # GATE: None (independent). P2-05 is BLOCKED until this is done.
-  p2-02-condition-dispatch-integration-test: ready-for-dev
+  p2-02-condition-dispatch-integration-test: done
 
   # Slot 7 — READY. Story: docs/stories/P2-03-catch-unwind-hardening.md
   # GATE: None (independent). P3-01 is BLOCKED until this is done.
-  p2-03-catch-unwind-hardening: ready-for-dev
+  p2-03-catch-unwind-hardening: review
 
   # Slot 8 — BACKLOG. Depends on P2-02 (extends its integration test).
   p2-05-per-elite-spec-condition-presets: backlog
 
   # Slot 9 — BACKLOG. Independent; good session-opener task.
   p2-06-project-context-refresh: backlog
+
+  # Slot 10 — BACKLOG. Story: docs/stories/P2-07-saved-build-profession-and-crash-safety.md
+  # GATE: None (independent). Save/Load correctness + crash-safe writes.
+  p2-07-saved-build-profession-and-crash-safety: ready-for-dev
 
   epic-2-retrospective: optional

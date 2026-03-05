@@ -1021,6 +1021,7 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
                 let config_snapshot = state.config.clone();
                 let token = state.cancel_token.clone();
                 std::thread::spawn(move || {
+                    let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     if token.is_cancelled() { return; }
                     let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
                         .map(|c| c.validate_key_detailed());
@@ -1040,6 +1041,17 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
                             }
                         }
                     });
+                    }));
+                    if let Err(_) = panic_result {
+                        nexus::log::log(
+                            nexus::log::LogLevel::Warning,
+                            "GW2BuildOpt",
+                            "bg thread panicked: settings_test_connection",
+                        );
+                        crate::state::with_state(|s| {
+                            s.main.settings_key_validating = false;
+                        });
+                    }
                 });
             }
         }
@@ -1084,6 +1096,7 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
                 let config_snapshot = state.config.clone();
                 let token = state.cancel_token.clone();
                 std::thread::spawn(move || {
+                    let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     if token.is_cancelled() { return; }
                     let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
                         .map(|c| c.validate_key_detailed());
@@ -1103,6 +1116,17 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
                             }
                         }
                     });
+                    }));
+                    if let Err(_) = panic_result {
+                        nexus::log::log(
+                            nexus::log::LogLevel::Warning,
+                            "GW2BuildOpt",
+                            "bg thread panicked: settings_save_key_validation",
+                        );
+                        crate::state::with_state(|s| {
+                            s.main.settings_key_validating = false;
+                        });
+                    }
                 });
             }
         }
