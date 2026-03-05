@@ -198,11 +198,10 @@ pub struct DownloadState {
 
 fn lock_state() -> std::sync::MutexGuard<'static, Option<AddonState>> {
     STATE.lock().unwrap_or_else(|e| {
-        nexus::log::log(
-            nexus::log::LogLevel::Warning,
-            "GW2BuildOpt",
-            "State mutex was poisoned, recovering",
-        );
+        // Use eprintln! — nexus::log::log() can panic if the addon API
+        // isn't initialized yet (or in tests), and panic recovery code
+        // must never itself panic.
+        eprintln!("[GW2BuildOpt] State mutex was poisoned, recovering");
         e.into_inner()
     })
 }
@@ -510,24 +509,21 @@ mod tests {
         let dir = std::env::temp_dir()
             .join(format!("gw2_state_test_{}_panic_chat", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        init(dir);
-        // Simulate: flag set before thread spawn
+        init(dir.clone());
         with_state(|s| s.main.chat.waiting = true);
 
-        // Simulate: catch_unwind catches a panic in the thread body
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             panic!("simulated panic in send_chat_message");
         }));
 
-        // Simulate: Err arm clears the flag (matching production code)
-        if let Err(_) = result {
+        if result.is_err() {
             with_state(|s| s.main.chat.waiting = false);
         }
 
-        // Assert: flag is cleared and state is accessible
         let waiting = with_state(|s| s.main.chat.waiting);
         assert_eq!(waiting, Some(false), "chat.waiting must be cleared after panic");
         reset_state();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -536,20 +532,21 @@ mod tests {
         let dir = std::env::temp_dir()
             .join(format!("gw2_state_test_{}_panic_models", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        init(dir);
+        init(dir.clone());
         with_state(|s| s.main.models_loading = true);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             panic!("simulated panic in start_fetch_models");
         }));
 
-        if let Err(_) = result {
+        if result.is_err() {
             with_state(|s| s.main.models_loading = false);
         }
 
         let loading = with_state(|s| s.main.models_loading);
         assert_eq!(loading, Some(false), "models_loading must be cleared after panic");
         reset_state();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -558,20 +555,21 @@ mod tests {
         let dir = std::env::temp_dir()
             .join(format!("gw2_state_test_{}_panic_chars", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        init(dir);
+        init(dir.clone());
         with_state(|s| s.main.characters_loading = true);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             panic!("simulated panic in load_characters");
         }));
 
-        if let Err(_) = result {
+        if result.is_err() {
             with_state(|s| s.main.characters_loading = false);
         }
 
         let loading = with_state(|s| s.main.characters_loading);
         assert_eq!(loading, Some(false), "characters_loading must be cleared after panic");
         reset_state();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -580,14 +578,14 @@ mod tests {
         let dir = std::env::temp_dir()
             .join(format!("gw2_state_test_{}_panic_setup", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        init(dir);
+        init(dir.clone());
         with_state(|s| s.setup.gw2_key_status = KeyStatus::Validating);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             panic!("simulated panic in setup_gw2_key_validation");
         }));
 
-        if let Err(_) = result {
+        if result.is_err() {
             with_state(|s| {
                 s.setup.gw2_key_status = KeyStatus::Invalid("thread panicked".into());
             });
@@ -599,5 +597,38 @@ mod tests {
             "gw2_key_status must be reset to Invalid after panic, got {:?}", status
         );
         reset_state();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_catch_unwind_mutex_poison_recovery() {
+        // Exercises the real danger scenario: a panic INSIDE with_state() poisons
+        // the mutex, and subsequent with_state() calls must still succeed via
+        // lock_state()'s unwrap_or_else(|e| e.into_inner()) recovery.
+        reset_state();
+        let dir = std::env::temp_dir()
+            .join(format!("gw2_state_test_{}_panic_poison", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir.clone());
+        with_state(|s| s.main.characters_loading = true);
+
+        // Panic inside with_state — this poisons the mutex
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_state(|_s| {
+                panic!("simulated panic inside with_state callback");
+            });
+        }));
+        assert!(result.is_err(), "catch_unwind must capture the panic");
+
+        // After poison: with_state must still work (lock_state recovers)
+        with_state(|s| s.main.characters_loading = false);
+        let loading = with_state(|s| s.main.characters_loading);
+        assert_eq!(
+            loading,
+            Some(false),
+            "with_state must work after mutex poison recovery"
+        );
+        reset_state();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
