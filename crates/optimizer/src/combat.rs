@@ -1196,4 +1196,53 @@ mod tests {
         assert!((unk.torment - 1.5).abs() < 0.001);
         assert!((unk.confusion - 0.5).abs() < 0.001);
     }
+
+    #[test]
+    fn test_profession_dispatch_affects_condi_score() {
+        // End-to-end integration: condition_weights_for_profession("Necromancer")
+        // dispatches to necro_group() which should produce a higher condition_dps_index
+        // than condition_weights_for_profession("Warrior") (-> default_pve()),
+        // given a condition-heavy profile (bleeding + torment dominant).
+        //
+        // This catches any accidental reversion of the dispatch function to always
+        // return default_pve(), because the scoring difference is too large for
+        // floating-point rounding to close.
+        let stats = StatBlock {
+            condition_damage: 2000.0,
+            expertise: 400.0,
+            power: 1000.0,
+            precision: 1000.0,
+            toughness: 1000.0,
+            vitality: 1000.0,
+            ..Default::default()
+        };
+        let derived = stats::compute_derived(&stats, "Necromancer");
+        let mods = DamageModifiers::default();
+        let solo = default_buff_profiles().into_iter().find(|b| b.label == "Solo").unwrap();
+
+        // Dispatch: Necromancer -> necro_group (bleeding=8.0, torment=6.0)
+        let necro_weights = condition_weights_for_profession("Necromancer");
+        let necro_result = calculate_combat_performance(
+            &stats, &derived, &mods, &solo, &necro_weights, "Necromancer",
+        );
+        // Dispatch: Warrior -> default_pve (bleeding=3.0, torment=1.5)
+        let warrior_weights = condition_weights_for_profession("Warrior");
+        let default_result = calculate_combat_performance(
+            &stats, &derived, &mods, &solo, &warrior_weights, "Warrior",
+        );
+
+        // necro_group scores ~116 weighted units vs default_pve ~39 — gap is definitive.
+        assert!(
+            necro_result.condition_dps_index > default_result.condition_dps_index,
+            "Necromancer dispatch (condi_dps={:.1}) should exceed Warrior dispatch (condi_dps={:.1}) \
+             when bleeding+torment ticks are dominant",
+            necro_result.condition_dps_index,
+            default_result.condition_dps_index,
+        );
+        // Strike DPS should be identical — condition weights don't affect power damage.
+        assert!(
+            (necro_result.strike_dps_index - default_result.strike_dps_index).abs() < 0.01,
+            "strike_dps_index should be unaffected by condition weight dispatch",
+        );
+    }
 }
