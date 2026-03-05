@@ -7,8 +7,8 @@ use gw2_core::types::{CombatMetrics, ResolvedBuild, RotationBreakdown, StatBlock
 // ─── Color palette ───
 
 const SECTION_HEADER_BG: [f32; 4] = [0.28, 0.24, 0.12, 0.95]; // warm dark gold header
-// Body bg is not drawn (would cover text due to DrawList ordering).
-// Card look comes from header + border + accent line.
+                                                              // Body bg is not drawn (would cover text due to DrawList ordering).
+                                                              // Card look comes from header + border + accent line.
 const SPEC_COLOR: [f32; 4] = [0.85, 0.65, 1.0, 1.0]; // purple spec names
 const TRAIT_COLOR: [f32; 4] = [0.65, 0.8, 1.0, 1.0]; // light blue traits
 const GEAR_COLOR: [f32; 4] = [1.0, 0.85, 0.3, 1.0]; // bright gold for gear
@@ -19,20 +19,28 @@ const SECTION_TITLE_COLOR: [f32; 4] = [1.0, 0.88, 0.35, 1.0]; // bright gold tit
 const ACCENT_LINE_COLOR: [f32; 4] = [0.7, 0.55, 0.15, 0.5]; // subtle gold accent
 const CARD_BORDER_COLOR: [f32; 4] = [0.35, 0.3, 0.15, 0.4]; // dim gold border
 
-const STAT_BETTER: [f32; 4] = [0.3, 1.0, 0.4, 1.0];  // green — this stat is higher
-const STAT_WORSE: [f32; 4] = [1.0, 0.35, 0.3, 1.0];  // red — this stat is lower
+const STAT_BETTER: [f32; 4] = [0.3, 1.0, 0.4, 1.0]; // green — this stat is higher
+const STAT_WORSE: [f32; 4] = [1.0, 0.35, 0.3, 1.0]; // red — this stat is lower
 
 /// Pick color for a stat value based on comparison: green if better, red if worse, default if equal.
 fn stat_color(val: i32, compare: i32) -> [f32; 4] {
-    if val > compare { STAT_BETTER }
-    else if val < compare { STAT_WORSE }
-    else { VALUE_COLOR }
+    if val > compare {
+        STAT_BETTER
+    } else if val < compare {
+        STAT_WORSE
+    } else {
+        VALUE_COLOR
+    }
 }
 
 fn stat_color_f64(val: f64, compare: f64) -> [f32; 4] {
-    if val > compare + 0.1 { STAT_BETTER }
-    else if val < compare - 0.1 { STAT_WORSE }
-    else { VALUE_COLOR }
+    if val > compare + 0.1 {
+        STAT_BETTER
+    } else if val < compare - 0.1 {
+        STAT_WORSE
+    } else {
+        VALUE_COLOR
+    }
 }
 
 const CARD_ROUNDING: f32 = 5.0;
@@ -245,7 +253,12 @@ pub fn render_build_card(ui: &Ui, build: &ResolvedBuild, stats: Option<&StatBloc
 
 /// Render a build card without the Specializations section (used when lock panel replaces it).
 /// `compare_stats`: if provided, stat values are colored green/red relative to these.
-pub fn render_build_card_no_specs(ui: &Ui, build: &ResolvedBuild, stats: Option<&StatBlock>, compare_stats: Option<&StatBlock>) {
+pub fn render_build_card_no_specs(
+    ui: &Ui,
+    build: &ResolvedBuild,
+    stats: Option<&StatBlock>,
+    compare_stats: Option<&StatBlock>,
+) {
     render_build_skills(ui, build);
     render_build_weapons(ui, build);
     render_build_gear(ui, build);
@@ -333,7 +346,11 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
 /// Render a suggestion card without the Specializations section (used when optimized specs panel replaces it).
 /// `compare_stats`: if provided, stat values are colored green/red relative to these (the current build's stats).
 #[allow(dead_code)]
-pub fn render_suggestion_card_no_specs(ui: &Ui, suggestion: &super::super::comparison::BuildSuggestion, compare_stats: Option<&StatBlock>) {
+pub fn render_suggestion_card_no_specs(
+    ui: &Ui,
+    suggestion: &super::super::comparison::BuildSuggestion,
+    compare_stats: Option<&StatBlock>,
+) {
     render_suggestion_skills(ui, suggestion);
     render_suggestion_weapons(ui, suggestion);
     render_suggestion_gear(ui, suggestion);
@@ -362,7 +379,10 @@ pub fn render_build_skills(ui: &Ui, build: &ResolvedBuild) {
         if let Some(ref h) = build.skills.heal {
             render_label_value(ui, "Heal", &h.name);
         }
-        let utils: Vec<String> = build.skills.utilities.iter()
+        let utils: Vec<String> = build
+            .skills
+            .utilities
+            .iter()
             .filter_map(|u| u.as_ref().map(|s| s.name.clone()))
             .collect();
         for (i, name) in utils.iter().enumerate() {
@@ -400,7 +420,9 @@ pub fn render_build_weapons(ui: &Ui, build: &ResolvedBuild) {
 pub fn render_build_gear(ui: &Ui, build: &ResolvedBuild) {
     render_card_section(ui, "GEAR", |ui| {
         if !build.armor.is_empty() {
-            let mut prefixes: Vec<&str> = build.armor.iter()
+            let mut prefixes: Vec<&str> = build
+                .armor
+                .iter()
                 .map(|a| a.stat_prefix.as_str())
                 .filter(|p| !p.is_empty())
                 .collect();
@@ -444,12 +466,19 @@ pub fn render_build_stats(ui: &Ui, stats: Option<&StatBlock>, compare_stats: Opt
             for (name, val, cmp_val) in &rows {
                 ui.text_colored(LABEL_COLOR, &format!("  {}: ", name));
                 ui.same_line();
-                let color = if compare_stats.is_some() { stat_color(*val, *cmp_val) } else { VALUE_COLOR };
+                let color = if compare_stats.is_some() {
+                    stat_color(*val, *cmp_val)
+                } else {
+                    VALUE_COLOR
+                };
                 ui.text_colored(color, &format!("{}", val));
             }
             ui.text_colored(
                 DIM_COLOR,
-                &format!("  Crit {:.1}% | HP {} | Armor {}", s.crit_chance, s.health, s.armor),
+                &format!(
+                    "  Crit {:.1}% | HP {} | Armor {}",
+                    s.crit_chance, s.health, s.armor
+                ),
             );
         });
     }
@@ -471,7 +500,10 @@ pub fn render_suggestion_weapons(ui: &Ui, suggestion: &super::super::comparison:
             ui.text_colored(VALUE_COLOR, &format!("  {}", weapon));
         }
         if !suggestion.sigils.is_empty() {
-            ui.text_colored(DIM_COLOR, &format!("  Sigils: {}", suggestion.sigils.join(", ")));
+            ui.text_colored(
+                DIM_COLOR,
+                &format!("  Sigils: {}", suggestion.sigils.join(", ")),
+            );
         }
     });
 }
@@ -493,7 +525,11 @@ pub fn render_suggestion_gear(ui: &Ui, suggestion: &super::super::comparison::Bu
 
 /// Render the STATS section for the suggestion (single-column, no inner columns).
 /// Color-coded against compare_stats if provided.
-pub fn render_suggestion_stats(ui: &Ui, suggestion: &super::super::comparison::BuildSuggestion, compare_stats: Option<&StatBlock>) {
+pub fn render_suggestion_stats(
+    ui: &Ui,
+    suggestion: &super::super::comparison::BuildSuggestion,
+    compare_stats: Option<&StatBlock>,
+) {
     if let Some(ref s) = suggestion.estimated_stats {
         render_card_section(ui, "STATS", |ui| {
             let cmp = compare_stats.cloned().unwrap_or_default();
@@ -510,12 +546,19 @@ pub fn render_suggestion_stats(ui: &Ui, suggestion: &super::super::comparison::B
             for (name, val, cmp_val) in &rows {
                 ui.text_colored(LABEL_COLOR, &format!("  {}: ", name));
                 ui.same_line();
-                let color = if compare_stats.is_some() { stat_color(*val, *cmp_val) } else { VALUE_COLOR };
+                let color = if compare_stats.is_some() {
+                    stat_color(*val, *cmp_val)
+                } else {
+                    VALUE_COLOR
+                };
                 ui.text_colored(color, &format!("{}", val));
             }
             ui.text_colored(
                 DIM_COLOR,
-                &format!("  Crit {:.1}% | HP {} | Armor {}", s.crit_chance, s.health, s.armor),
+                &format!(
+                    "  Crit {:.1}% | HP {} | Armor {}",
+                    s.crit_chance, s.health, s.armor
+                ),
             );
         });
     }
@@ -526,33 +569,89 @@ pub fn render_suggestion_stats(ui: &Ui, suggestion: &super::super::comparison::B
 fn render_combat_int(ui: &Ui, label: &str, val: i32, cmp_val: i32, has_cmp: bool) {
     ui.text_colored(LABEL_COLOR, &format!("  {}: ", label));
     ui.same_line();
-    let color = if has_cmp { stat_color(val, cmp_val) } else { VALUE_COLOR };
+    let color = if has_cmp {
+        stat_color(val, cmp_val)
+    } else {
+        VALUE_COLOR
+    };
     ui.text_colored(color, &format!("{}", val));
 }
 
 fn render_combat_pct(ui: &Ui, label: &str, val: f64, cmp_val: f64, has_cmp: bool) {
     ui.text_colored(LABEL_COLOR, &format!("  {}: ", label));
     ui.same_line();
-    let color = if has_cmp { stat_color_f64(val, cmp_val) } else { VALUE_COLOR };
+    let color = if has_cmp {
+        stat_color_f64(val, cmp_val)
+    } else {
+        VALUE_COLOR
+    };
     ui.text_colored(color, &format!("{:.1}%", val));
 }
 
 fn render_combat_metrics_inner(ui: &Ui, c: &CombatMetrics, cmp: &CombatMetrics, has_cmp: bool) {
-    render_combat_int(ui, "Effective Power", c.effective_power, cmp.effective_power, has_cmp);
+    render_combat_int(
+        ui,
+        "Effective Power",
+        c.effective_power,
+        cmp.effective_power,
+        has_cmp,
+    );
     render_combat_pct(ui, "Crit Chance", c.crit_chance, cmp.crit_chance, has_cmp);
-    render_combat_int(ui, "Strike DPS", c.strike_dps_index, cmp.strike_dps_index, has_cmp);
-    render_combat_int(ui, "Condi DPS", c.condition_dps_index, cmp.condition_dps_index, has_cmp);
-    render_combat_int(ui, "Total DPS", c.total_dps_index, cmp.total_dps_index, has_cmp);
+    render_combat_int(
+        ui,
+        "Strike DPS",
+        c.strike_dps_index,
+        cmp.strike_dps_index,
+        has_cmp,
+    );
+    render_combat_int(
+        ui,
+        "Condi DPS",
+        c.condition_dps_index,
+        cmp.condition_dps_index,
+        has_cmp,
+    );
+    render_combat_int(
+        ui,
+        "Total DPS",
+        c.total_dps_index,
+        cmp.total_dps_index,
+        has_cmp,
+    );
     if c.boon_duration_pct > 0.1 || cmp.boon_duration_pct > 0.1 {
-        render_combat_pct(ui, "Boon Duration", c.boon_duration_pct, cmp.boon_duration_pct, has_cmp);
+        render_combat_pct(
+            ui,
+            "Boon Duration",
+            c.boon_duration_pct,
+            cmp.boon_duration_pct,
+            has_cmp,
+        );
     }
     if c.condi_duration_pct > 0.1 || cmp.condi_duration_pct > 0.1 {
-        render_combat_pct(ui, "Condi Duration", c.condi_duration_pct, cmp.condi_duration_pct, has_cmp);
+        render_combat_pct(
+            ui,
+            "Condi Duration",
+            c.condi_duration_pct,
+            cmp.condi_duration_pct,
+            has_cmp,
+        );
     }
     if c.healing_index > 0 || cmp.healing_index > 0 {
-        render_combat_int(ui, "Healing Index", c.healing_index, cmp.healing_index, has_cmp);
+        render_combat_int(
+            ui,
+            "Healing Index",
+            c.healing_index,
+            cmp.healing_index,
+            has_cmp,
+        );
     }
-    render_combat_int(ui, "Effective HP", c.effective_health, cmp.effective_health, has_cmp);
+    render_combat_int(
+        ui,
+        "Effective HP",
+        c.effective_health,
+        cmp.effective_health,
+        has_cmp,
+    );
 }
 
 /// Render COMBAT PERFORMANCE section for the current build.
@@ -592,22 +691,30 @@ pub fn render_suggestion_combat(
 /// Render rotation breakdown section (full-width).
 pub fn render_rotation_section(ui: &Ui, rotation: &RotationBreakdown) {
     render_card_section(ui, "ROTATION BREAKDOWN", |ui| {
-        ui.text_colored(VALUE_COLOR, &format!(
-            "  Simulated DPS: {}  (Strike: {} | Condi: {})",
-            rotation.simulated_dps, rotation.strike_dps, rotation.condition_dps
-        ));
+        ui.text_colored(
+            VALUE_COLOR,
+            &format!(
+                "  Simulated DPS: {}  (Strike: {} | Condi: {})",
+                rotation.simulated_dps, rotation.strike_dps, rotation.condition_dps
+            ),
+        );
         if rotation.stunbreak_count > 0 || rotation.has_stability {
             let mut parts = Vec::new();
             if rotation.stunbreak_count > 0 {
                 parts.push(format!("Stunbreaks: {}", rotation.stunbreak_count));
             }
             if rotation.has_stability {
-                parts.push(format!("Stability: {:.0}%", rotation.stability_uptime * 100.0));
+                parts.push(format!(
+                    "Stability: {:.0}%",
+                    rotation.stability_uptime * 100.0
+                ));
             }
             ui.text_colored([0.4, 0.9, 0.4, 1.0], &format!("  {}", parts.join("  |  ")));
         }
         if !rotation.condition_uptime.is_empty() {
-            let uptimes: Vec<String> = rotation.condition_uptime.iter()
+            let uptimes: Vec<String> = rotation
+                .condition_uptime
+                .iter()
                 .filter(|(_, s)| *s > 0.01)
                 .map(|(name, stacks)| format!("{}: {:.1}", name, stacks))
                 .collect();
@@ -638,11 +745,15 @@ pub fn render_why_section(ui: &Ui, explanation: &str, changes: &[String]) {
     let width = ui.content_region_avail()[0];
     {
         let draw_list = ui.get_window_draw_list();
-        draw_list.add_rect(
-            [pos[0] - 2.0, pos[1]],
-            [pos[0] + width + 2.0, pos[1] + 22.0],
-            [0.18, 0.14, 0.06, 0.95],
-        ).filled(true).rounding(3.0).build();
+        draw_list
+            .add_rect(
+                [pos[0] - 2.0, pos[1]],
+                [pos[0] + width + 2.0, pos[1] + 22.0],
+                [0.18, 0.14, 0.06, 0.95],
+            )
+            .filled(true)
+            .rounding(3.0)
+            .build();
         draw_list.add_text(
             [pos[0] + 8.0, pos[1] + 3.0],
             SECTION_TITLE_COLOR,
