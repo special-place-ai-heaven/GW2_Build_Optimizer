@@ -9,6 +9,7 @@ pub(super) fn start_fetch_models(state: &mut AddonState) {
     let config_snapshot = state.config.clone();
     let token = state.cancel_token.clone();
     std::thread::spawn(move || {
+        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if token.is_cancelled() { return; }
         let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
             .map_err(|e| e.to_string())
@@ -29,6 +30,17 @@ pub(super) fn start_fetch_models(state: &mut AddonState) {
                 }
             }
         });
+        }));
+        if let Err(_) = panic_result {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                "bg thread panicked: start_fetch_models",
+            );
+            crate::state::with_state(|s| {
+                s.main.models_loading = false;
+            });
+        }
     });
 }
 
@@ -40,6 +52,7 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
     let token = state.cancel_token.clone();
 
     std::thread::spawn(move || {
+        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if token.is_cancelled() { return; }
 
         let client = match gw2_api::client::Gw2Client::without_key() {
@@ -111,6 +124,18 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                 });
             }
         }
+        }));
+        if let Err(_) = panic_result {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                "bg thread panicked: start_game_data_refresh",
+            );
+            crate::state::with_state(|s| {
+                s.main.game_db_loading = false;
+                s.main.game_refresh_stage = String::new();
+            });
+        }
     });
 }
 
@@ -120,6 +145,7 @@ pub(super) fn check_api_health(state: &mut AddonState) {
     let token = state.cancel_token.clone();
 
     std::thread::spawn(move || {
+        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if token.is_cancelled() { return; }
 
         let start = std::time::Instant::now();
@@ -143,6 +169,17 @@ pub(super) fn check_api_health(state: &mut AddonState) {
             s.main.api_status = status;
             s.main.api_health_checking = false;
         });
+        }));
+        if let Err(_) = panic_result {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                "bg thread panicked: check_api_health",
+            );
+            crate::state::with_state(|s| {
+                s.main.api_health_checking = false;
+            });
+        }
     });
 }
 
@@ -153,6 +190,7 @@ pub(super) fn load_game_db(state: &mut AddonState) {
     let token = state.cancel_token.clone();
 
     std::thread::spawn(move || {
+        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if token.is_cancelled() { return; }
 
         let cache = gw2_api::cache::DataCache::new(&cache_dir);
@@ -180,6 +218,17 @@ pub(super) fn load_game_db(state: &mut AddonState) {
                 }
             }
         });
+        }));
+        if let Err(_) = panic_result {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                "bg thread panicked: load_game_db",
+            );
+            crate::state::with_state(|s| {
+                s.main.game_db_loading = false;
+            });
+        }
     });
 }
 

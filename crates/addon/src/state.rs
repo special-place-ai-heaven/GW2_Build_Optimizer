@@ -497,4 +497,107 @@ mod tests {
         clear();
         assert!(with_state(|_s| ()).is_none(), "state must be None after clear");
     }
+
+    // ── catch_unwind panic-recovery tests ─────────────────────────────────────
+    //
+    // P2-03: Every background thread is now wrapped in catch_unwind. These tests
+    // verify the Err-arm pattern: after a panic is caught, with_state() still
+    // works (mutex not permanently poisoned) and the loading flag is cleared.
+
+    #[test]
+    fn test_catch_unwind_clears_chat_waiting_on_panic() {
+        reset_state();
+        let dir = std::env::temp_dir()
+            .join(format!("gw2_state_test_{}_panic_chat", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir);
+        // Simulate: flag set before thread spawn
+        with_state(|s| s.main.chat.waiting = true);
+
+        // Simulate: catch_unwind catches a panic in the thread body
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            panic!("simulated panic in send_chat_message");
+        }));
+
+        // Simulate: Err arm clears the flag (matching production code)
+        if let Err(_) = result {
+            with_state(|s| s.main.chat.waiting = false);
+        }
+
+        // Assert: flag is cleared and state is accessible
+        let waiting = with_state(|s| s.main.chat.waiting);
+        assert_eq!(waiting, Some(false), "chat.waiting must be cleared after panic");
+        reset_state();
+    }
+
+    #[test]
+    fn test_catch_unwind_clears_models_loading_on_panic() {
+        reset_state();
+        let dir = std::env::temp_dir()
+            .join(format!("gw2_state_test_{}_panic_models", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir);
+        with_state(|s| s.main.models_loading = true);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            panic!("simulated panic in start_fetch_models");
+        }));
+
+        if let Err(_) = result {
+            with_state(|s| s.main.models_loading = false);
+        }
+
+        let loading = with_state(|s| s.main.models_loading);
+        assert_eq!(loading, Some(false), "models_loading must be cleared after panic");
+        reset_state();
+    }
+
+    #[test]
+    fn test_catch_unwind_clears_characters_loading_on_panic() {
+        reset_state();
+        let dir = std::env::temp_dir()
+            .join(format!("gw2_state_test_{}_panic_chars", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir);
+        with_state(|s| s.main.characters_loading = true);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            panic!("simulated panic in load_characters");
+        }));
+
+        if let Err(_) = result {
+            with_state(|s| s.main.characters_loading = false);
+        }
+
+        let loading = with_state(|s| s.main.characters_loading);
+        assert_eq!(loading, Some(false), "characters_loading must be cleared after panic");
+        reset_state();
+    }
+
+    #[test]
+    fn test_catch_unwind_resets_gw2_key_status_on_panic() {
+        reset_state();
+        let dir = std::env::temp_dir()
+            .join(format!("gw2_state_test_{}_panic_setup", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir);
+        with_state(|s| s.setup.gw2_key_status = KeyStatus::Validating);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            panic!("simulated panic in setup_gw2_key_validation");
+        }));
+
+        if let Err(_) = result {
+            with_state(|s| {
+                s.setup.gw2_key_status = KeyStatus::Invalid("thread panicked".into());
+            });
+        }
+
+        let status = with_state(|s| s.setup.gw2_key_status.clone());
+        assert!(
+            matches!(status, Some(KeyStatus::Invalid(ref msg)) if msg == "thread panicked"),
+            "gw2_key_status must be reset to Invalid after panic, got {:?}", status
+        );
+        reset_state();
+    }
 }

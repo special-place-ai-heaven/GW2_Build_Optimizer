@@ -855,6 +855,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     let weights = state.main.weights.clone();
 
     std::thread::spawn(move || {
+        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if token.is_cancelled() { return; }
 
         let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
@@ -959,6 +960,17 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         );
                     }
                 }
+            });
+        }
+        }));
+        if let Err(_) = panic_result {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                "bg thread panicked: send_chat_message",
+            );
+            crate::state::with_state(|s| {
+                s.main.chat.waiting = false;
             });
         }
     });
