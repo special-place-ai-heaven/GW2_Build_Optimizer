@@ -1,5 +1,5 @@
-use crate::state::{AddonState, MainTab};
 use super::stats::compute_3tier_combat;
+use crate::state::{AddonState, MainTab};
 
 /// CombatBundle type alias for stat + 3-tier combat metrics.
 type CombatBundle = (
@@ -15,10 +15,14 @@ pub(super) fn resolve_selected_build(state: &mut AddonState) {
 }
 
 pub(super) fn resolve_selected_build_inner(state: &mut AddonState) {
-    let build_tab = state.main.selected_build_tab
+    let build_tab = state
+        .main
+        .selected_build_tab
         .and_then(|i| state.main.build_tabs.get(i))
         .cloned();
-    let equip_tab = state.main.selected_equipment_tab
+    let equip_tab = state
+        .main
+        .selected_equipment_tab
         .and_then(|i| state.main.equipment_tabs.get(i))
         .cloned();
 
@@ -33,7 +37,9 @@ pub(super) fn resolve_selected_build_inner(state: &mut AddonState) {
     };
 
     let game_mode = state.main.game_mode.clone();
-    let char_name = state.main.selected_character
+    let char_name = state
+        .main
+        .selected_character
         .and_then(|i| state.main.characters.get(i).cloned())
         .unwrap_or_default();
 
@@ -72,7 +78,10 @@ pub(super) fn resolve_selected_build_inner(state: &mut AddonState) {
 /// Auto-populate BuildLocks from the current resolved build.
 /// Locks only the elite specialization slot (slot 2) so the optimizer preserves the
 /// profession identity. Core specs and all traits remain unlocked by default.
-pub(super) fn auto_populate_locks(build: &gw2_core::types::ResolvedBuild, locks: &mut gw2_core::types::BuildLocks) {
+pub(super) fn auto_populate_locks(
+    build: &gw2_core::types::ResolvedBuild,
+    locks: &mut gw2_core::types::BuildLocks,
+) {
     // Start with everything unlocked
     locks.specs = [None; 3];
     locks.trait_locks.clear();
@@ -106,8 +115,11 @@ fn resolve_build_from_db(
         game_mode: game_mode.clone(),
         specializations: resolved_specs,
         skills: resolved_skills,
-        weapons, armor, trinkets: trinkets_vec,
-        relic: relic_resolved, rune,
+        weapons,
+        armor,
+        trinkets: trinkets_vec,
+        relic: relic_resolved,
+        rune,
         pvp_amulet,
     })
 }
@@ -130,9 +142,8 @@ fn calculate_current_stats_from_db(
                     let derived = gw2_optimizer::stats::compute_derived(&opt_stats, &profession);
                     let stats = opt_stats_to_stat_block(&opt_stats, &derived);
                     let modifiers = gw2_optimizer::combat::DamageModifiers::default();
-                    let (solo, party, squad) = compute_3tier_combat(
-                        &opt_stats, &derived, &modifiers, &profession,
-                    );
+                    let (solo, party, squad) =
+                        compute_3tier_combat(&opt_stats, &derived, &modifiers, &profession);
                     return Ok((stats, solo, party, squad));
                 }
             }
@@ -155,22 +166,34 @@ fn calculate_current_stats_from_db(
     }
 
     // Find rune/sigil IDs from equipment upgrades (O(1) item lookups)
-    let rune_id = equipment.equipment.iter()
+    let rune_id = equipment
+        .equipment
+        .iter()
         .flat_map(|p| p.upgrades.iter())
         .find_map(|&uid| {
             db.items.get(&uid).and_then(|item| {
                 item.details.as_ref().and_then(|d| {
-                    if d.detail_type.as_deref() == Some("Rune") { Some(uid) } else { None }
+                    if d.detail_type.as_deref() == Some("Rune") {
+                        Some(uid)
+                    } else {
+                        None
+                    }
                 })
             })
         });
 
-    let sigil_ids: Vec<u32> = equipment.equipment.iter()
+    let sigil_ids: Vec<u32> = equipment
+        .equipment
+        .iter()
         .flat_map(|p| p.upgrades.iter())
         .filter_map(|&uid| {
             db.items.get(&uid).and_then(|item| {
                 item.details.as_ref().and_then(|d| {
-                    if d.detail_type.as_deref() == Some("Sigil") { Some(uid) } else { None }
+                    if d.detail_type.as_deref() == Some("Sigil") {
+                        Some(uid)
+                    } else {
+                        None
+                    }
                 })
             })
         })
@@ -188,7 +211,9 @@ fn calculate_current_stats_from_db(
         &db.traits,
     );
 
-    let relic_id = equipment.equipment.iter()
+    let relic_id = equipment
+        .equipment
+        .iter()
         .find(|p| p.slot == "Relic")
         .map(|p| p.id);
     let modifiers = gw2_optimizer::combat::extract_damage_modifiers(
@@ -200,11 +225,15 @@ fn calculate_current_stats_from_db(
         &db.items,
     );
 
-    let (combat_solo, combat_party, combat_squad) = compute_3tier_combat(
-        &opt_stats, &derived, &modifiers, &profession,
-    );
+    let (combat_solo, combat_party, combat_squad) =
+        compute_3tier_combat(&opt_stats, &derived, &modifiers, &profession);
 
-    Ok((opt_stats_to_stat_block(&opt_stats, &derived), combat_solo, combat_party, combat_squad))
+    Ok((
+        opt_stats_to_stat_block(&opt_stats, &derived),
+        combat_solo,
+        combat_party,
+        combat_squad,
+    ))
 }
 
 /// Convert optimizer StatBlock + DerivedStats to display StatBlock.
@@ -235,24 +264,37 @@ fn resolve_specs_db(
     db: &gw2_optimizer::gamedb::GameDb,
 ) -> Vec<gw2_core::types::ResolvedSpec> {
     use gw2_core::types::*;
-    build.specializations.iter().filter_map(|sel| {
-        let spec_id = sel.id?;
-        let spec = db.specializations.get(&spec_id)?;
-        let traits_selected: Vec<ResolvedTrait> = sel.traits.iter().enumerate()
-            .filter_map(|(col, trait_id)| {
-                let tid = (*trait_id)?;
-                let t = db.traits.get(&tid)?;
-                Some(ResolvedTrait {
-                    id: t.id, name: t.name.clone(),
-                    description: t.description.clone().unwrap_or_default(),
-                    column: col, selected: true,
+    build
+        .specializations
+        .iter()
+        .filter_map(|sel| {
+            let spec_id = sel.id?;
+            let spec = db.specializations.get(&spec_id)?;
+            let traits_selected: Vec<ResolvedTrait> = sel
+                .traits
+                .iter()
+                .enumerate()
+                .filter_map(|(col, trait_id)| {
+                    let tid = (*trait_id)?;
+                    let t = db.traits.get(&tid)?;
+                    Some(ResolvedTrait {
+                        id: t.id,
+                        name: t.name.clone(),
+                        description: t.description.clone().unwrap_or_default(),
+                        column: col,
+                        selected: true,
+                    })
                 })
-            }).collect();
-        Some(ResolvedSpec {
-            id: spec.id, name: spec.name.clone(), elite: spec.elite,
-            traits_selected, traits_available: Vec::new(),
+                .collect();
+            Some(ResolvedSpec {
+                id: spec.id,
+                name: spec.name.clone(),
+                elite: spec.elite,
+                traits_selected,
+                traits_available: Vec::new(),
+            })
         })
-    }).collect()
+        .collect()
 }
 
 /// Resolve skills using GameDb O(1) lookups.
@@ -270,7 +312,11 @@ fn resolve_skills_db(
     if let Some(ref sk) = build.skills {
         ResolvedSkills {
             heal: sk.heal.and_then(&find_skill),
-            utilities: sk.utilities.iter().map(|id| id.and_then(&find_skill)).collect(),
+            utilities: sk
+                .utilities
+                .iter()
+                .map(|id| id.and_then(&find_skill))
+                .collect(),
             elite: sk.elite.and_then(&find_skill),
         }
     } else {
@@ -295,57 +341,105 @@ fn resolve_equipment_db(
     let mut trinkets_vec = Vec::new();
     let mut rune = None;
     let mut relic_resolved = None;
-    let mut ws1 = ResolvedWeaponSet { label: "Set 1".into(), ..Default::default() };
-    let mut ws2 = ResolvedWeaponSet { label: "Set 2".into(), ..Default::default() };
+    let mut ws1 = ResolvedWeaponSet {
+        label: "Set 1".into(),
+        ..Default::default()
+    };
+    let mut ws2 = ResolvedWeaponSet {
+        label: "Set 2".into(),
+        ..Default::default()
+    };
 
     for piece in &equipment.equipment {
         let item = db.items.get(&piece.id);
-        let item_name = item.map(|i| i.name.clone()).unwrap_or_else(|| format!("#{}", piece.id));
-        let stat_prefix = piece.stats.as_ref()
+        let item_name = item
+            .map(|i| i.name.clone())
+            .unwrap_or_else(|| format!("#{}", piece.id));
+        let stat_prefix = piece
+            .stats
+            .as_ref()
             .and_then(|s| db.itemstats.get(&s.id).map(|is| is.name.clone()))
             .unwrap_or_default();
 
-        let extract_sigils = |piece: &gw2_api::models::EquipmentPiece, ws: &mut ResolvedWeaponSet| {
+        let extract_sigils = |piece: &gw2_api::models::EquipmentPiece,
+                              ws: &mut ResolvedWeaponSet| {
             for &uid in &piece.upgrades {
                 if let Some(u) = db.items.get(&uid) {
-                    ws.sigils.push(UpgradeInfo { id: uid, name: u.name.clone() });
+                    ws.sigils.push(UpgradeInfo {
+                        id: uid,
+                        name: u.name.clone(),
+                    });
                 }
             }
         };
 
         match piece.slot.as_str() {
             "WeaponA1" => {
-                ws1.main_hand = Some(WeaponInfo { name: item_name, weapon_type: item.and_then(|i| i.details.as_ref()?.detail_type.clone()).unwrap_or_default() });
+                ws1.main_hand = Some(WeaponInfo {
+                    name: item_name,
+                    weapon_type: item
+                        .and_then(|i| i.details.as_ref()?.detail_type.clone())
+                        .unwrap_or_default(),
+                });
                 extract_sigils(piece, &mut ws1);
             }
             "WeaponA2" => {
-                ws1.off_hand = Some(WeaponInfo { name: item_name, weapon_type: item.and_then(|i| i.details.as_ref()?.detail_type.clone()).unwrap_or_default() });
+                ws1.off_hand = Some(WeaponInfo {
+                    name: item_name,
+                    weapon_type: item
+                        .and_then(|i| i.details.as_ref()?.detail_type.clone())
+                        .unwrap_or_default(),
+                });
                 extract_sigils(piece, &mut ws1);
             }
             "WeaponB1" => {
-                ws2.main_hand = Some(WeaponInfo { name: item_name, weapon_type: item.and_then(|i| i.details.as_ref()?.detail_type.clone()).unwrap_or_default() });
+                ws2.main_hand = Some(WeaponInfo {
+                    name: item_name,
+                    weapon_type: item
+                        .and_then(|i| i.details.as_ref()?.detail_type.clone())
+                        .unwrap_or_default(),
+                });
                 extract_sigils(piece, &mut ws2);
             }
             "WeaponB2" => {
-                ws2.off_hand = Some(WeaponInfo { name: item_name, weapon_type: item.and_then(|i| i.details.as_ref()?.detail_type.clone()).unwrap_or_default() });
+                ws2.off_hand = Some(WeaponInfo {
+                    name: item_name,
+                    weapon_type: item
+                        .and_then(|i| i.details.as_ref()?.detail_type.clone())
+                        .unwrap_or_default(),
+                });
                 extract_sigils(piece, &mut ws2);
             }
             "Helm" | "Shoulders" | "Coat" | "Gloves" | "Leggings" | "Boots" => {
                 if rune.is_none() {
                     if let Some(&uid) = piece.upgrades.first() {
                         if let Some(u) = db.items.get(&uid) {
-                            rune = Some(ResolvedUpgrade { id: uid, name: u.name.clone() });
+                            rune = Some(ResolvedUpgrade {
+                                id: uid,
+                                name: u.name.clone(),
+                            });
                         }
                     }
                 }
-                armor.push(ResolvedGearPiece { slot: piece.slot.clone(), name: item_name, stat_prefix, infusions: Vec::new() });
+                armor.push(ResolvedGearPiece {
+                    slot: piece.slot.clone(),
+                    name: item_name,
+                    stat_prefix,
+                    infusions: Vec::new(),
+                });
             }
             "Backpack" | "Accessory1" | "Accessory2" | "Amulet" | "Ring1" | "Ring2" => {
-                trinkets_vec.push(ResolvedGearPiece { slot: piece.slot.clone(), name: item_name, stat_prefix, infusions: Vec::new() });
+                trinkets_vec.push(ResolvedGearPiece {
+                    slot: piece.slot.clone(),
+                    name: item_name,
+                    stat_prefix,
+                    infusions: Vec::new(),
+                });
             }
             "Relic" => {
                 relic_resolved = Some(ResolvedRelic {
-                    id: piece.id, name: item_name,
+                    id: piece.id,
+                    name: item_name,
                     description: item.and_then(|i| i.description.clone()).unwrap_or_default(),
                 });
             }
@@ -354,8 +448,12 @@ fn resolve_equipment_db(
     }
 
     let mut weapons = Vec::new();
-    if ws1.main_hand.is_some() || ws1.off_hand.is_some() { weapons.push(ws1); }
-    if ws2.main_hand.is_some() || ws2.off_hand.is_some() { weapons.push(ws2); }
+    if ws1.main_hand.is_some() || ws1.off_hand.is_some() {
+        weapons.push(ws1);
+    }
+    if ws2.main_hand.is_some() || ws2.off_hand.is_some() {
+        weapons.push(ws2);
+    }
 
     (weapons, armor, trinkets_vec, rune, relic_resolved)
 }
@@ -367,14 +465,14 @@ fn resolve_pvp_amulet_db(
     db: &gw2_optimizer::gamedb::GameDb,
 ) -> Option<gw2_core::types::ResolvedPvpAmulet> {
     use gw2_core::types::*;
-    if *game_mode != GameMode::PvP { return None; }
+    if *game_mode != GameMode::PvP {
+        return None;
+    }
     let pvp_eq = equipment.equipment_pvp.as_ref()?;
     let amulet_id = pvp_eq.amulet?;
-    db.pvp_amulets.get(&amulet_id).map(|a| {
-        ResolvedPvpAmulet {
-            id: a.id,
-            name: a.name.clone(),
-            stats: a.attributes.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-        }
+    db.pvp_amulets.get(&amulet_id).map(|a| ResolvedPvpAmulet {
+        id: a.id,
+        name: a.name.clone(),
+        stats: a.attributes.iter().map(|(k, v)| (k.clone(), *v)).collect(),
     })
 }

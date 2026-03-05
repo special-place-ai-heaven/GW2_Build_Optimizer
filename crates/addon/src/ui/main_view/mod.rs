@@ -4,10 +4,10 @@ use crate::state::{AddonState, MainTab};
 use gw2_optimizer::scoring::OptimizationWeights;
 
 mod build_display;
-mod lock_panel;
 mod character;
-mod resolution;
+mod lock_panel;
 mod optimization;
+mod resolution;
 mod stats;
 
 // ─── Color palette (shared with build_display) ───
@@ -22,9 +22,18 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     let scale = state.config.font_scale;
     ui.set_window_font_scale(scale);
     // Scale element sizes proportionally
-    let _s1 = ui.push_style_var(nexus::imgui::StyleVar::FramePadding([4.0 * scale, 3.0 * scale]));
-    let _s2 = ui.push_style_var(nexus::imgui::StyleVar::ItemSpacing([8.0 * scale, 4.0 * scale]));
-    let _s3 = ui.push_style_var(nexus::imgui::StyleVar::ItemInnerSpacing([4.0 * scale, 4.0 * scale]));
+    let _s1 = ui.push_style_var(nexus::imgui::StyleVar::FramePadding([
+        4.0 * scale,
+        3.0 * scale,
+    ]));
+    let _s2 = ui.push_style_var(nexus::imgui::StyleVar::ItemSpacing([
+        8.0 * scale,
+        4.0 * scale,
+    ]));
+    let _s3 = ui.push_style_var(nexus::imgui::StyleVar::ItemInnerSpacing([
+        4.0 * scale,
+        4.0 * scale,
+    ]));
 
     // Trigger character load on first render
     if state.main.characters.is_empty() && !state.main.characters_loading {
@@ -38,7 +47,9 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
 
     // Periodic API health check (~every 60s at 60fps)
     state.main.api_status_frames += 1;
-    if state.main.api_status_frames >= 3600 || state.main.api_status == crate::state::ApiStatus::Unknown {
+    if state.main.api_status_frames >= 3600
+        || state.main.api_status == crate::state::ApiStatus::Unknown
+    {
         if !state.main.api_health_checking {
             stats::check_api_health(state);
             state.main.api_status_frames = 0;
@@ -110,11 +121,14 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
         let start = ui.cursor_screen_pos();
         let width = ui.content_region_avail()[0];
         let draw_list = ui.get_window_draw_list();
-        draw_list.add_rect(
-            [start[0] - 1.0, start[1]],
-            [start[0] + width + 1.0, start[1] + 18.0],
-            HEADER_BG,
-        ).filled(true).build();
+        draw_list
+            .add_rect(
+                [start[0] - 1.0, start[1]],
+                [start[0] + width + 1.0, start[1] + 18.0],
+                HEADER_BG,
+            )
+            .filled(true)
+            .build();
     }
 
     // API health indicator
@@ -130,7 +144,9 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
             crate::state::ApiStatus::Unknown => "Checking GW2 API availability...",
             crate::state::ApiStatus::Online => "GW2 API is responding normally.",
             crate::state::ApiStatus::Degraded => "GW2 API is responding slowly (>5s).",
-            crate::state::ApiStatus::Offline => "GW2 API is unavailable. Cached data is being used.",
+            crate::state::ApiStatus::Offline => {
+                "GW2 API is unavailable. Cached data is being used."
+            }
         });
     }
 
@@ -148,7 +164,10 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
     // Optimization progress
     if state.main.optimizing {
         ui.same_line();
-        ui.text_colored([1.0, 1.0, 0.0, 1.0], &format!("| {}", state.main.optimize_stage));
+        ui.text_colored(
+            [1.0, 1.0, 0.0, 1.0],
+            &format!("| {}", state.main.optimize_stage),
+        );
     }
 
     // Error bar (dismissible)
@@ -165,11 +184,14 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
         let pos = ui.cursor_screen_pos();
         let width = ui.content_region_avail()[0];
         let draw_list = ui.get_window_draw_list();
-        draw_list.add_line(
-            [pos[0] - 1.0, pos[1]],
-            [pos[0] + width + 1.0, pos[1]],
-            ACCENT_COLOR,
-        ).thickness(1.0).build();
+        draw_list
+            .add_line(
+                [pos[0] - 1.0, pos[1]],
+                [pos[0] + width + 1.0, pos[1]],
+                ACCENT_COLOR,
+            )
+            .thickness(1.0)
+            .build();
     }
     ui.dummy([0.0, 2.0]);
 }
@@ -185,27 +207,37 @@ fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i32) {
         let draw_list = ui.get_window_draw_list();
 
         // Dark card background
-        draw_list.add_rect(
-            [start[0], start[1]],
-            [start[0] + width, start[1] + 62.0],
-            [0.10, 0.10, 0.16, 0.95],
-        ).filled(true).rounding(6.0).build();
+        draw_list
+            .add_rect(
+                [start[0], start[1]],
+                [start[0] + width, start[1] + 62.0],
+                [0.10, 0.10, 0.16, 0.95],
+            )
+            .filled(true)
+            .rounding(6.0)
+            .build();
 
         // Animated accent stripe at top (sweeping cyan glow)
         let cycle = (frame_count % 180) as f32 / 180.0;
         let glow_x = start[0] + cycle * width;
         let glow_half = width * 0.15;
-        draw_list.add_rect(
-            [(glow_x - glow_half).max(start[0]), start[1]],
-            [(glow_x + glow_half).min(start[0] + width), start[1] + 3.0],
-            [0.3, 0.9, 1.0, 0.9],
-        ).filled(true).build();
+        draw_list
+            .add_rect(
+                [(glow_x - glow_half).max(start[0]), start[1]],
+                [(glow_x + glow_half).min(start[0] + width), start[1] + 3.0],
+                [0.3, 0.9, 1.0, 0.9],
+            )
+            .filled(true)
+            .build();
         // Dimmer full-width stripe underneath
-        draw_list.add_rect(
-            [start[0], start[1]],
-            [start[0] + width, start[1] + 3.0],
-            [0.2, 0.5, 0.7, 0.3],
-        ).filled(true).build();
+        draw_list
+            .add_rect(
+                [start[0], start[1]],
+                [start[0] + width, start[1] + 3.0],
+                [0.2, 0.5, 0.7, 0.3],
+            )
+            .filled(true)
+            .build();
 
         // Spinner dots (3 pulsing dots)
         let dot_y = start[1] + 18.0;
@@ -213,11 +245,10 @@ fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i32) {
             let phase = ((frame_count + i * 20) % 60) as f32 / 60.0;
             let alpha = 0.3 + 0.7 * (phase * std::f32::consts::PI * 2.0).sin().abs();
             let dot_x = start[0] + 16.0 + i as f32 * 12.0;
-            draw_list.add_circle(
-                [dot_x, dot_y],
-                3.5,
-                [0.3_f32, 0.8, 1.0, alpha],
-            ).filled(true).build();
+            draw_list
+                .add_circle([dot_x, dot_y], 3.5, [0.3_f32, 0.8, 1.0, alpha])
+                .filled(true)
+                .build();
         }
 
         // "OPTIMIZING..." title
@@ -228,7 +259,11 @@ fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i32) {
         );
 
         // Stage detail text
-        let detail = if stage.is_empty() { "Starting optimization pipeline..." } else { stage };
+        let detail = if stage.is_empty() {
+            "Starting optimization pipeline..."
+        } else {
+            stage
+        };
         draw_list.add_text(
             [start[0] + 16.0, start[1] + 34.0],
             [0.6, 0.65, 0.75, 1.0],
@@ -238,28 +273,42 @@ fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i32) {
         // Animated progress bar at bottom
         let bar_y = start[1] + 56.0;
         // Background
-        draw_list.add_rect(
-            [start[0] + 8.0, bar_y],
-            [start[0] + width - 8.0, bar_y + 4.0],
-            [0.15, 0.15, 0.2, 0.6],
-        ).filled(true).rounding(2.0).build();
+        draw_list
+            .add_rect(
+                [start[0] + 8.0, bar_y],
+                [start[0] + width - 8.0, bar_y + 4.0],
+                [0.15, 0.15, 0.2, 0.6],
+            )
+            .filled(true)
+            .rounding(2.0)
+            .build();
         // Sweeping fill
         let bar_inner = width - 16.0;
         let sweep_width = bar_inner * 0.35;
         let sweep_cycle = ((frame_count % 150) as f32) / 150.0;
         let sweep_x = start[0] + 8.0 + sweep_cycle * (bar_inner + sweep_width) - sweep_width;
-        draw_list.add_rect(
-            [sweep_x.max(start[0] + 8.0), bar_y],
-            [(sweep_x + sweep_width).min(start[0] + width - 8.0), bar_y + 4.0],
-            [0.3, 0.8, 1.0, 0.7],
-        ).filled(true).rounding(2.0).build();
+        draw_list
+            .add_rect(
+                [sweep_x.max(start[0] + 8.0), bar_y],
+                [
+                    (sweep_x + sweep_width).min(start[0] + width - 8.0),
+                    bar_y + 4.0,
+                ],
+                [0.3, 0.8, 1.0, 0.7],
+            )
+            .filled(true)
+            .rounding(2.0)
+            .build();
 
         // Border
-        draw_list.add_rect(
-            [start[0], start[1]],
-            [start[0] + width, start[1] + 62.0],
-            [0.25, 0.5, 0.7, 0.3],
-        ).rounding(6.0).build();
+        draw_list
+            .add_rect(
+                [start[0], start[1]],
+                [start[0] + width, start[1] + 62.0],
+                [0.25, 0.5, 0.7, 0.3],
+            )
+            .rounding(6.0)
+            .build();
     }
 
     ui.dummy([0.0, 66.0]);
@@ -278,7 +327,9 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
     let start_y = ui.cursor_screen_pos()[1];
 
     for (i, (tab, label)) in tabs.iter().enumerate() {
-        if i > 0 { ui.same_line(); }
+        if i > 0 {
+            ui.same_line();
+        }
 
         let is_active = state.main.active_tab == *tab;
         let btn_pos = ui.cursor_screen_pos();
@@ -297,11 +348,14 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
                 // Hover underline
                 let text_size = ui.calc_text_size(label);
                 let draw_list = ui.get_window_draw_list();
-                draw_list.add_line(
-                    [btn_pos[0], btn_pos[1] + text_size[1] + 1.0],
-                    [btn_pos[0] + text_size[0], btn_pos[1] + text_size[1] + 1.0],
-                    [0.6, 0.5, 0.3, 0.5],
-                ).thickness(1.0).build();
+                draw_list
+                    .add_line(
+                        [btn_pos[0], btn_pos[1] + text_size[1] + 1.0],
+                        [btn_pos[0] + text_size[0], btn_pos[1] + text_size[1] + 1.0],
+                        [0.6, 0.5, 0.3, 0.5],
+                    )
+                    .thickness(1.0)
+                    .build();
             }
             if ui.is_item_clicked() {
                 state.main.active_tab = tab.clone();
@@ -313,7 +367,10 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
                     MainTab::Improve => {
                         if let Some(ref build) = state.main.current_build {
                             let build_clone = build.clone();
-                            resolution::auto_populate_locks(&build_clone, &mut state.main.build_locks);
+                            resolution::auto_populate_locks(
+                                &build_clone,
+                                &mut state.main.build_locks,
+                            );
                         }
                     }
                     _ => {}
@@ -325,11 +382,14 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
         if is_active {
             let text_size = ui.calc_text_size(label);
             let draw_list = ui.get_window_draw_list();
-            draw_list.add_line(
-                [btn_pos[0], btn_pos[1] + text_size[1] + 2.0],
-                [btn_pos[0] + text_size[0], btn_pos[1] + text_size[1] + 2.0],
-                [1.0, 0.75, 0.2, 0.9],
-            ).thickness(2.0).build();
+            draw_list
+                .add_line(
+                    [btn_pos[0], btn_pos[1] + text_size[1] + 2.0],
+                    [btn_pos[0] + text_size[0], btn_pos[1] + text_size[1] + 2.0],
+                    [1.0, 0.75, 0.2, 0.9],
+                )
+                .thickness(2.0)
+                .build();
         }
 
         // Tab separator
@@ -384,16 +444,15 @@ fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
         let pos = ui.cursor_screen_pos();
         let width = ui.content_region_avail()[0];
         let draw_list = ui.get_window_draw_list();
-        draw_list.add_rect(
-            [pos[0], pos[1]],
-            [pos[0] + width, pos[1] + 18.0],
-            [0.22, 0.19, 0.10, 0.9],
-        ).filled(true).build();
-        draw_list.add_text(
-            [pos[0] + 6.0, pos[1] + 2.0],
-            [0.85, 0.72, 0.3, 1.0],
-            title,
-        );
+        draw_list
+            .add_rect(
+                [pos[0], pos[1]],
+                [pos[0] + width, pos[1] + 18.0],
+                [0.22, 0.19, 0.10, 0.9],
+            )
+            .filled(true)
+            .build();
+        draw_list.add_text([pos[0] + 6.0, pos[1] + 2.0], [0.85, 0.72, 0.3, 1.0], title);
     }
     ui.dummy([0.0, 20.0]);
     ui.dummy([0.0, spacing * 0.5]); // gap below
@@ -424,7 +483,10 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
     let chars_snapshot = state.main.characters.clone();
     let mut new_selection: Option<(usize, String)> = None;
 
-    if let Some(_combo) = ComboBox::new("##char_select").preview_value(&preview).begin(ui) {
+    if let Some(_combo) = ComboBox::new("##char_select")
+        .preview_value(&preview)
+        .begin(ui)
+    {
         for (i, name) in chars_snapshot.iter().enumerate() {
             let selected = state.main.selected_character == Some(i);
             if Selectable::new(name).selected(selected).build(ui) {
@@ -461,7 +523,9 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
         ui.spacing();
         ui.text_colored([0.6, 0.6, 0.7, 1.0], "Build:");
         ui.set_next_item_width(-1.0);
-        let bt_preview = state.main.selected_build_tab
+        let bt_preview = state
+            .main
+            .selected_build_tab
             .and_then(|i| state.main.build_tabs.get(i))
             .map(|t| {
                 let name = t.build.name.as_deref().unwrap_or("Unnamed");
@@ -469,15 +533,23 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
             })
             .unwrap_or_else(|| "Select...".into());
 
-        let bt_labels: Vec<(usize, String)> = state.main.build_tabs.iter().enumerate()
+        let bt_labels: Vec<(usize, String)> = state
+            .main
+            .build_tabs
+            .iter()
+            .enumerate()
             .map(|(i, t)| {
                 let name = t.build.name.as_deref().unwrap_or("Unnamed");
                 (i, format!("Tab {}: {}", t.tab, name))
-            }).collect();
+            })
+            .collect();
 
         let mut bt_changed: Option<usize> = None;
         if !bt_labels.is_empty() {
-            if let Some(_combo) = ComboBox::new("##build_tab_select").preview_value(&bt_preview).begin(ui) {
+            if let Some(_combo) = ComboBox::new("##build_tab_select")
+                .preview_value(&bt_preview)
+                .begin(ui)
+            {
                 for (i, label) in &bt_labels {
                     let selected = state.main.selected_build_tab == Some(*i);
                     if Selectable::new(label).selected(selected).build(ui) {
@@ -503,7 +575,9 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
     if !state.main.equipment_tabs.is_empty() {
         ui.text_colored([0.6, 0.6, 0.7, 1.0], "Equipment:");
         ui.set_next_item_width(-1.0);
-        let et_preview = state.main.selected_equipment_tab
+        let et_preview = state
+            .main
+            .selected_equipment_tab
             .and_then(|i| state.main.equipment_tabs.get(i))
             .map(|t| {
                 let name = t.name.as_deref().unwrap_or("Unnamed");
@@ -511,15 +585,23 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
             })
             .unwrap_or_else(|| "Select...".into());
 
-        let et_labels: Vec<(usize, String)> = state.main.equipment_tabs.iter().enumerate()
+        let et_labels: Vec<(usize, String)> = state
+            .main
+            .equipment_tabs
+            .iter()
+            .enumerate()
             .map(|(i, t)| {
                 let name = t.name.as_deref().unwrap_or("Unnamed");
                 (i, format!("Tab {}: {}", t.tab, name))
-            }).collect();
+            })
+            .collect();
 
         let mut et_changed: Option<usize> = None;
         if !et_labels.is_empty() {
-            if let Some(_combo) = ComboBox::new("##equip_tab_select").preview_value(&et_preview).begin(ui) {
+            if let Some(_combo) = ComboBox::new("##equip_tab_select")
+                .preview_value(&et_preview)
+                .begin(ui)
+            {
                 for (i, label) in &et_labels {
                     let selected = state.main.selected_equipment_tab == Some(*i);
                     if Selectable::new(label).selected(selected).build(ui) {
@@ -591,12 +673,21 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     render_left_section_header(ui, "OPTIMIZATION WEIGHTS", state.config.section_spacing);
 
     // Compute overlays for radar chart
-    let current_axes = state.main.comparison.current_combat_solo.as_ref()
+    let current_axes = state
+        .main
+        .comparison
+        .current_combat_solo
+        .as_ref()
         .map(crate::ui::radar_chart::compute_axes_from_metrics);
     let optimized_axes = if !state.main.comparison.suggestions.is_empty() {
-        let idx = state.main.comparison.selected_suggestion
+        let idx = state
+            .main
+            .comparison
+            .selected_suggestion
             .min(state.main.comparison.suggestions.len() - 1);
-        state.main.comparison.suggestions[idx].combat_solo.as_ref()
+        state.main.comparison.suggestions[idx]
+            .combat_solo
+            .as_ref()
             .map(crate::ui::radar_chart::compute_axes_from_metrics)
     } else {
         None
@@ -607,7 +698,11 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         ui,
         &mut state.main.weights,
         &mut state.main.radar_dragging,
-        if show_current { current_axes.as_ref() } else { None },
+        if show_current {
+            current_axes.as_ref()
+        } else {
+            None
+        },
         optimized_axes.as_ref(),
     );
     if current_axes.is_some() || optimized_axes.is_some() {
@@ -633,8 +728,13 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     render_left_section_header(ui, "ACTIONS", state.config.section_spacing);
 
     let is_improve = state.main.active_tab == MainTab::Improve;
-    let btn_label = if is_improve { "Improve Build" } else { "Optimize Build" };
-    let disabled = state.main.optimizing || state.main.game_db.is_none()
+    let btn_label = if is_improve {
+        "Improve Build"
+    } else {
+        "Optimize Build"
+    };
+    let disabled = state.main.optimizing
+        || state.main.game_db.is_none()
         || (is_improve && state.main.current_build.is_none());
 
     if disabled {
@@ -642,13 +742,21 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         ui.button_with_size(btn_label, [-1.0, 28.0]);
         style.pop();
         if ui.is_item_hovered() {
-            ui.tooltip_text(if state.main.optimizing { "Optimization in progress..." }
-                else if state.main.game_db.is_none() { "Waiting for game data to load..." }
-                else { "Select a character first" });
+            ui.tooltip_text(if state.main.optimizing {
+                "Optimization in progress..."
+            } else if state.main.game_db.is_none() {
+                "Waiting for game data to load..."
+            } else {
+                "Select a character first"
+            });
         }
     } else if ui.button_with_size(btn_label, [-1.0, 28.0]) {
         if is_improve {
-            let profession_name = state.main.current_build.as_ref().map(|b| b.profession.clone());
+            let profession_name = state
+                .main
+                .current_build
+                .as_ref()
+                .map(|b| b.profession.clone());
             if let Some(ref prof_name) = profession_name {
                 optimization::start_optimization_with_profession(state, prof_name);
             }
@@ -688,7 +796,10 @@ fn render_main_content(ui: &Ui, state: &mut AddonState) {
 
 fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
     if state.main.selected_character.is_none() {
-        ui.text_colored([0.6, 0.6, 0.7, 1.0], "Select a character from the left panel to create a new build.");
+        ui.text_colored(
+            [0.6, 0.6, 0.7, 1.0],
+            "Select a character from the left panel to create a new build.",
+        );
         return;
     }
 
@@ -735,7 +846,10 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
         let stats = state.main.current_stats.clone();
         build_display::render_build_card(ui, build, stats.as_ref());
     } else {
-        ui.text_colored([0.5, 0.5, 0.5, 1.0], "Use the Optimize Build button in the left panel.");
+        ui.text_colored(
+            [0.5, 0.5, 0.5, 1.0],
+            "Use the Optimize Build button in the left panel.",
+        );
     }
 
     // Chat bar at bottom
@@ -777,11 +891,19 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
         let build = state.main.current_build.clone().unwrap();
         let stats = state.main.current_stats.clone();
         let profession_name = build.profession.clone();
-        let current_specs: Vec<(u32, Vec<u32>)> = build.specializations.iter().map(|spec| {
-            let selected_ids: Vec<u32> = spec.traits_selected.iter()
-                .filter(|t| t.selected).map(|t| t.id).collect();
-            (spec.id, selected_ids)
-        }).collect();
+        let current_specs: Vec<(u32, Vec<u32>)> = build
+            .specializations
+            .iter()
+            .map(|spec| {
+                let selected_ids: Vec<u32> = spec
+                    .traits_selected
+                    .iter()
+                    .filter(|t| t.selected)
+                    .map(|t| t.id)
+                    .collect();
+                (spec.id, selected_ids)
+            })
+            .collect();
 
         if has_suggestion {
             // Suggestion tabs above panels
@@ -803,7 +925,9 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                     {
                         state.main.comparison.selected_suggestion = i;
                     }
-                    if i < tab_count - 1 { ui.same_line(); }
+                    if i < tab_count - 1 {
+                        ui.same_line();
+                    }
                 }
                 ui.spacing();
             }
@@ -811,7 +935,10 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
             let avail_after = ui.content_region_avail();
             let scroll_height = avail_after[1] - 60.0; // room for save + chat
 
-            let idx = state.main.comparison.selected_suggestion
+            let idx = state
+                .main
+                .comparison
+                .selected_suggestion
                 .min(state.main.comparison.suggestions.len() - 1);
             let suggestion = state.main.comparison.suggestions[idx].clone();
             let current_combat_solo = state.main.comparison.current_combat_solo.clone();
@@ -889,7 +1016,11 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                     // ── STATS SECTION ──
                     ui.columns(2, "##imp_stats", false);
                     ui.set_column_offset(1, col1_offset);
-                    build_display::render_build_stats(ui, stats.as_ref(), suggestion.estimated_stats.as_ref());
+                    build_display::render_build_stats(
+                        ui,
+                        stats.as_ref(),
+                        suggestion.estimated_stats.as_ref(),
+                    );
                     ui.next_column();
                     ui.indent_by(6.0);
                     build_display::render_suggestion_stats(ui, &suggestion, stats.as_ref());
@@ -899,10 +1030,18 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                     // ── COMBAT PERFORMANCE SECTION ──
                     ui.columns(2, "##imp_combat", false);
                     ui.set_column_offset(1, col1_offset);
-                    build_display::render_build_combat(ui, current_combat_solo.as_ref(), suggestion.combat_solo.as_ref());
+                    build_display::render_build_combat(
+                        ui,
+                        current_combat_solo.as_ref(),
+                        suggestion.combat_solo.as_ref(),
+                    );
                     ui.next_column();
                     ui.indent_by(6.0);
-                    build_display::render_suggestion_combat(ui, &suggestion, current_combat_solo.as_ref());
+                    build_display::render_suggestion_combat(
+                        ui,
+                        &suggestion,
+                        current_combat_solo.as_ref(),
+                    );
                     ui.unindent_by(6.0);
                     ui.columns(1, "##imp_combat_end", false);
 
@@ -945,7 +1084,10 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
     } else if state.main.selected_character.is_some() {
         ui.text_colored([0.5, 0.5, 0.5, 1.0], "Loading character build...");
     } else {
-        ui.text_colored([0.5, 0.5, 0.5, 1.0], "Select a character from the left panel.");
+        ui.text_colored(
+            [0.5, 0.5, 0.5, 1.0],
+            "Select a character from the left panel.",
+        );
     }
 
     // Save build UI + clear button
@@ -971,7 +1113,6 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     // ═══ Section 1: AI Provider Configuration ═══
     build_display::render_card_header(ui, "AI PROVIDER", [1.0, 0.88, 0.35, 1.0]);
     {
-
         // Provider radio buttons
         let mut provider_changed = false;
         for provider in &gw2_core::config::LlmProvider::ALL {
@@ -989,7 +1130,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
             state.main.available_models.clear();
             state.main.models_error = None;
             if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                nexus::log::log(
+                    nexus::log::LogLevel::Warning,
+                    "GW2BuildOpt",
+                    &format!("Config save failed: {}", e),
+                );
             }
         }
 
@@ -999,9 +1144,15 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         let provider_label = state.config.active_provider.label().to_string();
         let has_key = state.config.has_active_llm_key();
         if has_key {
-            ui.text_colored([0.0, 1.0, 0.0, 1.0], &format!("{} API Key: configured", provider_label));
+            ui.text_colored(
+                [0.0, 1.0, 0.0, 1.0],
+                &format!("{} API Key: configured", provider_label),
+            );
         } else {
-            ui.text_colored([1.0, 0.5, 0.0, 1.0], &format!("{} API Key: not set", provider_label));
+            ui.text_colored(
+                [1.0, 0.5, 0.0, 1.0],
+                &format!("{} API Key: not set", provider_label),
+            );
         }
 
         // Test Connection button (for already-saved key)
@@ -1021,28 +1172,35 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
                 let config_snapshot = state.config.clone();
                 let token = state.cancel_token.clone();
                 std::thread::spawn(move || {
-                    let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    if token.is_cancelled() { return; }
-                    let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
-                        .map(|c| c.validate_key_detailed());
-                    if token.is_cancelled() { return; }
-                    crate::state::with_state(|s| {
-                        s.main.settings_key_validating = false;
-                        match result {
-                            Ok(validation) => {
-                                s.main.settings_key_valid = validation.valid;
-                                s.main.settings_key_status = Some(validation.message);
-                                s.main.settings_key_warning = validation.warning;
+                    let panic_result =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            if token.is_cancelled() {
+                                return;
                             }
-                            Err(e) => {
-                                s.main.settings_key_valid = false;
-                                s.main.settings_key_status = Some(format!("Connection failed: {}", e));
-                                s.main.settings_key_warning = None;
+                            let result =
+                                gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
+                                    .map(|c| c.validate_key_detailed());
+                            if token.is_cancelled() {
+                                return;
                             }
-                        }
-                    });
-                    }));
-                    if let Err(_) = panic_result {
+                            crate::state::with_state(|s| {
+                                s.main.settings_key_validating = false;
+                                match result {
+                                    Ok(validation) => {
+                                        s.main.settings_key_valid = validation.valid;
+                                        s.main.settings_key_status = Some(validation.message);
+                                        s.main.settings_key_warning = validation.warning;
+                                    }
+                                    Err(e) => {
+                                        s.main.settings_key_valid = false;
+                                        s.main.settings_key_status =
+                                            Some(format!("Connection failed: {}", e));
+                                        s.main.settings_key_warning = None;
+                                    }
+                                }
+                            });
+                        }));
+                    if panic_result.is_err() {
                         nexus::log::log(
                             nexus::log::LogLevel::Warning,
                             "GW2BuildOpt",
@@ -1058,9 +1216,12 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
 
         // Key input + Save
         ui.set_next_item_width(300.0);
-        ui.input_text(&format!("##{}_key_input", provider_label), &mut state.main.settings_key_input)
-            .hint("Enter new API key...")
-            .build();
+        ui.input_text(
+            &format!("##{}_key_input", provider_label),
+            &mut state.main.settings_key_input,
+        )
+        .hint("Enter new API key...")
+        .build();
         ui.same_line();
         let validating = state.main.settings_key_validating;
         if validating {
@@ -1083,7 +1244,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
                     }
                 }
                 if let Err(e) = state.config.save(&state.config_path) {
-                    nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                    nexus::log::log(
+                        nexus::log::LogLevel::Warning,
+                        "GW2BuildOpt",
+                        &format!("Config save failed: {}", e),
+                    );
                 }
                 state.main.settings_key_input.clear();
                 state.main.settings_key_status = Some("Key saved. Validating...".into());
@@ -1096,28 +1261,35 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
                 let config_snapshot = state.config.clone();
                 let token = state.cancel_token.clone();
                 std::thread::spawn(move || {
-                    let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    if token.is_cancelled() { return; }
-                    let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
-                        .map(|c| c.validate_key_detailed());
-                    if token.is_cancelled() { return; }
-                    crate::state::with_state(|s| {
-                        s.main.settings_key_validating = false;
-                        match result {
-                            Ok(validation) => {
-                                s.main.settings_key_valid = validation.valid;
-                                s.main.settings_key_status = Some(validation.message);
-                                s.main.settings_key_warning = validation.warning;
+                    let panic_result =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            if token.is_cancelled() {
+                                return;
                             }
-                            Err(e) => {
-                                s.main.settings_key_valid = false;
-                                s.main.settings_key_status = Some(format!("Key saved but validation failed: {}", e));
-                                s.main.settings_key_warning = None;
+                            let result =
+                                gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
+                                    .map(|c| c.validate_key_detailed());
+                            if token.is_cancelled() {
+                                return;
                             }
-                        }
-                    });
-                    }));
-                    if let Err(_) = panic_result {
+                            crate::state::with_state(|s| {
+                                s.main.settings_key_validating = false;
+                                match result {
+                                    Ok(validation) => {
+                                        s.main.settings_key_valid = validation.valid;
+                                        s.main.settings_key_status = Some(validation.message);
+                                        s.main.settings_key_warning = validation.warning;
+                                    }
+                                    Err(e) => {
+                                        s.main.settings_key_valid = false;
+                                        s.main.settings_key_status =
+                                            Some(format!("Key saved but validation failed: {}", e));
+                                        s.main.settings_key_warning = None;
+                                    }
+                                }
+                            });
+                        }));
+                    if panic_result.is_err() {
                         nexus::log::log(
                             nexus::log::LogLevel::Warning,
                             "GW2BuildOpt",
@@ -1135,7 +1307,10 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         if let Some(ref status) = state.main.settings_key_status {
             if state.main.settings_key_valid {
                 ui.text_colored([0.0, 1.0, 0.0, 1.0], status);
-            } else if status.contains("saved") || status.contains("Testing") || status.contains("Validating") {
+            } else if status.contains("saved")
+                || status.contains("Testing")
+                || status.contains("Validating")
+            {
                 ui.text_colored([0.7, 0.7, 0.7, 1.0], status);
             } else {
                 ui.text_colored([1.0, 0.3, 0.3, 1.0], status);
@@ -1152,7 +1327,9 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         let current_model = match state.config.active_provider {
             gw2_core::config::LlmProvider::Gemini => state.config.gemini_model_id().to_string(),
             gw2_core::config::LlmProvider::OpenAI => state.config.openai_model_id().to_string(),
-            gw2_core::config::LlmProvider::Anthropic => state.config.anthropic_model_id().to_string(),
+            gw2_core::config::LlmProvider::Anthropic => {
+                state.config.anthropic_model_id().to_string()
+            }
         };
         let config_field = match state.config.active_provider {
             gw2_core::config::LlmProvider::Gemini => "gemini",
@@ -1175,10 +1352,14 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
                 gw2_core::config::LlmProvider::OpenAI => gw2_core::config::OPENAI_MODELS,
                 gw2_core::config::LlmProvider::Anthropic => gw2_core::config::ANTHROPIC_MODELS,
             };
-            hardcoded.iter().map(|(id, label)| (id.to_string(), label.to_string())).collect()
+            hardcoded
+                .iter()
+                .map(|(id, label)| (id.to_string(), label.to_string()))
+                .collect()
         };
 
-        let preview = display_models.iter()
+        let preview = display_models
+            .iter()
             .find(|(id, _)| *id == current_model)
             .map(|(_, label)| label.as_str())
             .unwrap_or(&current_model);
@@ -1205,7 +1386,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
                         }
                     }
                     if let Err(e) = state.config.save(&state.config_path) {
-                        nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                        nexus::log::log(
+                            nexus::log::LogLevel::Warning,
+                            "GW2BuildOpt",
+                            &format!("Config save failed: {}", e),
+                        );
                     }
                 }
             }
@@ -1233,20 +1418,24 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         let usage_path = state.addon_dir.join(usage_filename);
         if let Ok(json) = std::fs::read_to_string(&usage_path) {
             if let Ok(usage) = serde_json::from_str::<serde_json::Value>(&json) {
-                let today = usage.get("requests_today").and_then(|v| v.as_u64()).unwrap_or(0);
-                ui.text(&format!("{} usage today: {} requests", provider_label, today));
+                let today = usage
+                    .get("requests_today")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                ui.text(&format!(
+                    "{} usage today: {} requests",
+                    provider_label, today
+                ));
             }
         } else {
             ui.text(&format!("{} usage today: 0 requests", provider_label));
         }
-
     }
 
     // ═══ Section 2: UI Preferences ═══
     ui.dummy([0.0, 8.0]);
     build_display::render_card_header(ui, "UI PREFERENCES", [1.0, 0.88, 0.35, 1.0]);
     {
-
         // Window opacity slider
         ui.text("Window Opacity:");
         ui.set_next_item_width(200.0);
@@ -1257,7 +1446,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         {
             state.config.window_opacity = opacity;
             if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                nexus::log::log(
+                    nexus::log::LogLevel::Warning,
+                    "GW2BuildOpt",
+                    &format!("Config save failed: {}", e),
+                );
             }
         }
 
@@ -1271,7 +1464,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         {
             state.config.font_scale = scale;
             if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                nexus::log::log(
+                    nexus::log::LogLevel::Warning,
+                    "GW2BuildOpt",
+                    &format!("Config save failed: {}", e),
+                );
             }
         }
 
@@ -1292,7 +1489,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         {
             state.config.left_panel_width = lpw.clamp(180.0, 400.0);
             if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                nexus::log::log(
+                    nexus::log::LogLevel::Warning,
+                    "GW2BuildOpt",
+                    &format!("Config save failed: {}", e),
+                );
             }
         }
 
@@ -1307,7 +1508,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         {
             state.config.panel_padding = pp.clamp(0.0, 20.0);
             if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                nexus::log::log(
+                    nexus::log::LogLevel::Warning,
+                    "GW2BuildOpt",
+                    &format!("Config save failed: {}", e),
+                );
             }
         }
 
@@ -1322,7 +1527,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         {
             state.config.section_spacing = ss.clamp(0.0, 16.0);
             if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                nexus::log::log(
+                    nexus::log::LogLevel::Warning,
+                    "GW2BuildOpt",
+                    &format!("Config save failed: {}", e),
+                );
             }
         }
 
@@ -1337,7 +1546,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         {
             state.config.content_indent = ci.clamp(0.0, 20.0);
             if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                nexus::log::log(
+                    nexus::log::LogLevel::Warning,
+                    "GW2BuildOpt",
+                    &format!("Config save failed: {}", e),
+                );
             }
         }
 
@@ -1349,41 +1562,56 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
             state.config.section_spacing = 4.0;
             state.config.content_indent = 4.0;
             if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                nexus::log::log(
+                    nexus::log::LogLevel::Warning,
+                    "GW2BuildOpt",
+                    &format!("Config save failed: {}", e),
+                );
             }
         }
-
     }
 
     // ═══ Section 3: Optimization Defaults ═══
     ui.dummy([0.0, 8.0]);
     build_display::render_card_header(ui, "OPTIMIZATION DEFAULTS", [1.0, 0.88, 0.35, 1.0]);
     {
-
         ui.text("Default Game Mode:");
-        let current_default = state.config.default_game_mode.clone().unwrap_or_else(|| "PvE".into());
+        let current_default = state
+            .config
+            .default_game_mode
+            .clone()
+            .unwrap_or_else(|| "PvE".into());
         for mode in &["PvE", "PvP", "WvW"] {
             let is_selected = current_default == *mode;
             if ui.radio_button_bool(mode, is_selected) && !is_selected {
                 state.config.default_game_mode = Some(mode.to_string());
                 if let Err(e) = state.config.save(&state.config_path) {
-                    nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                    nexus::log::log(
+                        nexus::log::LogLevel::Warning,
+                        "GW2BuildOpt",
+                        &format!("Config save failed: {}", e),
+                    );
                 }
             }
         }
-
     }
 
     // ═══ Section 4: Cache & Data Management ═══
     ui.dummy([0.0, 8.0]);
     build_display::render_card_header(ui, "CACHE & DATA", [1.0, 0.88, 0.35, 1.0]);
     {
-
         // GW2 API Key display
         if let Some(ref key) = state.config.gw2_api_key {
             let display = if key.chars().count() > 12 {
                 let prefix: String = key.chars().take(8).collect();
-                let suffix: String = key.chars().rev().take(4).collect::<String>().chars().rev().collect();
+                let suffix: String = key
+                    .chars()
+                    .rev()
+                    .take(4)
+                    .collect::<String>()
+                    .chars()
+                    .rev()
+                    .collect();
                 format!("{}...{}", prefix, suffix)
             } else {
                 "****".into()
@@ -1410,7 +1638,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
             let _ = std::fs::remove_dir_all(&cache_dir);
             state.config.cache_build_number = None;
             if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                nexus::log::log(
+                    nexus::log::LogLevel::Warning,
+                    "GW2BuildOpt",
+                    &format!("Config save failed: {}", e),
+                );
             }
             state.main.game_db = None;
             state.setup.download_progress = None;
@@ -1424,7 +1656,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         if ui.checkbox("Auto-refresh cache on startup", &mut auto_refresh) {
             state.config.auto_refresh_cache = auto_refresh;
             if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                nexus::log::log(
+                    nexus::log::LogLevel::Warning,
+                    "GW2BuildOpt",
+                    &format!("Config save failed: {}", e),
+                );
             }
         }
 
@@ -1447,7 +1683,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
             let _ = std::fs::remove_dir_all(&cache_dir_refresh);
             state.config.cache_build_number = None;
             if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &format!("Config save failed: {}", e));
+                nexus::log::log(
+                    nexus::log::LogLevel::Warning,
+                    "GW2BuildOpt",
+                    &format!("Config save failed: {}", e),
+                );
             }
             state.main.game_db = None;
             state.setup.download_progress = None;
@@ -1462,7 +1702,10 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
                 state.main.confirm_reset = true;
             }
         } else {
-            ui.text_colored([1.0, 0.3, 0.0, 1.0], "Are you sure? This will clear all settings.");
+            ui.text_colored(
+                [1.0, 0.3, 0.0, 1.0],
+                "Are you sure? This will clear all settings.",
+            );
             if ui.button_with_size("Yes, Reset", [100.0, 0.0]) {
                 state.main.confirm_reset = false;
                 state.screen = crate::state::Screen::Setup(crate::state::SetupStep::Gw2ApiKey);
@@ -1472,7 +1715,6 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
                 state.main.confirm_reset = false;
             }
         }
-
     }
 
     ui.spacing();
@@ -1480,11 +1722,16 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     // About
     ui.text_colored([0.5, 0.5, 0.5, 1.0], "GW2 Build Optimizer v1.0.0");
     let provider_label = state.config.active_provider.label();
-    ui.text_colored([0.5, 0.5, 0.5, 1.0], &format!("Powered by {} AI", provider_label));
+    ui.text_colored(
+        [0.5, 0.5, 0.5, 1.0],
+        &format!("Powered by {} AI", provider_label),
+    );
 }
 
 fn calculate_dir_size(path: &std::path::Path) -> u64 {
-    let Ok(entries) = std::fs::read_dir(path) else { return 0; };
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
     entries
         .filter_map(|e| e.ok())
         .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
@@ -1513,7 +1760,8 @@ fn render_save_build_ui(ui: &Ui, state: &mut AddonState) {
     ui.text("Save Build:");
     ui.same_line();
     ui.set_next_item_width(200.0);
-    ui.input_text("##save_name", &mut state.main.save_name_input).build();
+    ui.input_text("##save_name", &mut state.main.save_name_input)
+        .build();
     ui.same_line();
 
     let can_save = !state.main.save_name_input.trim().is_empty();
@@ -1529,10 +1777,16 @@ fn render_save_build_ui(ui: &Ui, state: &mut AddonState) {
         false
     };
     if save_clicked {
-        let idx = state.main.comparison.selected_suggestion
+        let idx = state
+            .main
+            .comparison
+            .selected_suggestion
             .min(state.main.comparison.suggestions.len().saturating_sub(1));
         let suggestion = &state.main.comparison.suggestions[idx];
-        let character_name = state.main.current_build.as_ref()
+        let character_name = state
+            .main
+            .current_build
+            .as_ref()
             .map(|b| b.character_name.clone())
             .unwrap_or_default();
         let game_mode = state.main.game_mode.clone();
@@ -1586,16 +1840,28 @@ fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
     if state.main.saved_builds.is_empty() {
         ui.spacing();
         ui.text_colored([0.5, 0.5, 0.5, 1.0], "No saved builds yet.");
-        ui.text_colored([0.5, 0.5, 0.5, 1.0], "Optimize a build, then use Save to store it here.");
+        ui.text_colored(
+            [0.5, 0.5, 0.5, 1.0],
+            "Optimize a build, then use Save to store it here.",
+        );
         return;
     }
 
     // Snapshot for iteration (avoids borrow conflict with mut state)
-    let builds_snapshot: Vec<(String, String, String, String, String)> = state.main.saved_builds.iter()
+    let builds_snapshot: Vec<(String, String, String, String, String)> = state
+        .main
+        .saved_builds
+        .iter()
         .map(|b| {
             let time = format_timestamp(b.timestamp);
             let mode = b.game_mode.label().to_string();
-            (b.name.clone(), b.character_name.clone(), b.stat_prefix.clone(), time, mode)
+            (
+                b.name.clone(),
+                b.character_name.clone(),
+                b.stat_prefix.clone(),
+                time,
+                mode,
+            )
         })
         .collect();
 
@@ -1628,7 +1894,10 @@ fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
         }
 
         // Details on second line
-        ui.text_colored([0.55, 0.55, 0.55, 1.0], &format!("  {} | {} | {} | {}", character, mode, prefix, time));
+        ui.text_colored(
+            [0.55, 0.55, 0.55, 1.0],
+            &format!("  {} | {} | {} | {}", character, mode, prefix, time),
+        );
 
         ui.spacing();
     }
@@ -1656,8 +1925,11 @@ fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
                 state.main.saved_builds.remove(idx);
                 // Reset confirmation index if it was beyond the removed item
                 if let Some(ref mut ci) = state.main.confirm_delete {
-                    if *ci > idx { *ci -= 1; }
-                    else if *ci == idx { state.main.confirm_delete = None; }
+                    if *ci > idx {
+                        *ci -= 1;
+                    } else if *ci == idx {
+                        state.main.confirm_delete = None;
+                    }
                 }
             }
             Err(e) => {
@@ -1707,7 +1979,9 @@ fn saved_to_suggestion(
     saved: &gw2_core::types::SavedBuild,
 ) -> crate::ui::comparison::BuildSuggestion {
     // Recompute combat metrics from saved stats (lossy i32→f64 but good enough for display)
-    let (combat_solo, combat_party, combat_squad) = saved.estimated_stats.as_ref()
+    let (combat_solo, combat_party, combat_squad) = saved
+        .estimated_stats
+        .as_ref()
         .map(|est| {
             let stats = gw2_optimizer::stats::StatBlock {
                 power: est.power as f64,
@@ -1728,7 +2002,11 @@ fn saved_to_suggestion(
         .unwrap_or((None, None, None));
 
     crate::ui::comparison::BuildSuggestion {
-        label: if saved.label.is_empty() { saved.name.clone() } else { saved.label.clone() },
+        label: if saved.label.is_empty() {
+            saved.name.clone()
+        } else {
+            saved.label.clone()
+        },
         build_summary: String::new(),
         stat_prefix: saved.stat_prefix.clone(),
         specializations: saved.specializations.clone(),
@@ -1759,7 +2037,11 @@ fn format_timestamp(timestamp: u64) -> String {
     let mut y = 1970u64;
     let mut remaining_days = days;
     loop {
-        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+            366
+        } else {
+            365
+        };
         if remaining_days < days_in_year {
             break;
         }
@@ -1768,7 +2050,18 @@ fn format_timestamp(timestamp: u64) -> String {
     }
     let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
     let days_in_months: [u64; 12] = [
-        31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
     ];
     let mut m = 11;
     for (i, &dim) in days_in_months.iter().enumerate() {
@@ -1778,5 +2071,12 @@ fn format_timestamp(timestamp: u64) -> String {
         }
         remaining_days -= dim;
     }
-    format!("{:04}-{:02}-{:02} {:02}:{:02}", y, m + 1, remaining_days + 1, hours, minutes)
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        y,
+        m + 1,
+        remaining_days + 1,
+        hours,
+        minutes
+    )
 }

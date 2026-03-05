@@ -1,7 +1,7 @@
 use base64::Engine as _;
 
-use crate::state::AddonState;
 use super::resolution::resolve_selected_build_inner;
+use crate::state::AddonState;
 
 /// Phase 1: Load characters from cache (instant) then refresh from API in background.
 pub(super) fn load_characters(state: &mut AddonState) {
@@ -30,39 +30,43 @@ pub(super) fn load_characters(state: &mut AddonState) {
 
     std::thread::spawn(move || {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if token.is_cancelled() { return; }
-
-        let result = gw2_api::client::Gw2Client::with_key(&key)
-            .and_then(|c| c.fetch_characters());
-
-        if token.is_cancelled() { return; }
-
-        crate::state::with_state(|s| {
-            s.main.characters_loading = false;
-            match result {
-                Ok(fresh_chars) => {
-                    // Save to cache for next time
-                    let cache_dir = s.addon_dir.join("cache");
-                    let cache = gw2_api::cache::DataCache::new(&cache_dir);
-                    let _ = cache.save_characters(&fresh_chars);
-
-                    // Only update UI if data changed
-                    if s.main.characters != fresh_chars {
-                        s.main.characters = fresh_chars;
-                    }
-                }
-                Err(e) => {
-                    // If we had cached data, don't overwrite it with an error
-                    if !had_cache {
-                        s.main.error = Some(e.to_string());
-                    }
-                    // Update API health status on failure
-                    s.main.api_status = crate::state::ApiStatus::Offline;
-                }
+            if token.is_cancelled() {
+                return;
             }
-        });
+
+            let result =
+                gw2_api::client::Gw2Client::with_key(&key).and_then(|c| c.fetch_characters());
+
+            if token.is_cancelled() {
+                return;
+            }
+
+            crate::state::with_state(|s| {
+                s.main.characters_loading = false;
+                match result {
+                    Ok(fresh_chars) => {
+                        // Save to cache for next time
+                        let cache_dir = s.addon_dir.join("cache");
+                        let cache = gw2_api::cache::DataCache::new(&cache_dir);
+                        let _ = cache.save_characters(&fresh_chars);
+
+                        // Only update UI if data changed
+                        if s.main.characters != fresh_chars {
+                            s.main.characters = fresh_chars;
+                        }
+                    }
+                    Err(e) => {
+                        // If we had cached data, don't overwrite it with an error
+                        if !had_cache {
+                            s.main.error = Some(e.to_string());
+                        }
+                        // Update API health status on failure
+                        s.main.api_status = crate::state::ApiStatus::Offline;
+                    }
+                }
+            });
         }));
-        if let Err(_) = panic_result {
+        if panic_result.is_err() {
             nexus::log::log(
                 nexus::log::LogLevel::Warning,
                 "GW2BuildOpt",
@@ -85,8 +89,16 @@ fn apply_character_tabs(
     let et_idx = equipment_tabs.iter().position(|t| t.is_active).unwrap_or(0);
     state.main.build_tabs = build_tabs;
     state.main.equipment_tabs = equipment_tabs;
-    state.main.selected_build_tab = if state.main.build_tabs.is_empty() { None } else { Some(bt_idx) };
-    state.main.selected_equipment_tab = if state.main.equipment_tabs.is_empty() { None } else { Some(et_idx) };
+    state.main.selected_build_tab = if state.main.build_tabs.is_empty() {
+        None
+    } else {
+        Some(bt_idx)
+    };
+    state.main.selected_equipment_tab = if state.main.equipment_tabs.is_empty() {
+        None
+    } else {
+        Some(et_idx)
+    };
     update_build_chat_code_inner(state);
     resolve_selected_build_inner(state);
 }
@@ -103,10 +115,14 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
     // Phase 1: try loading from cache instantly
     let cache_dir = state.addon_dir.join("cache");
     let cache = gw2_api::cache::DataCache::new(&cache_dir);
-    let cached_bt: Option<Vec<gw2_api::models::BuildTab>> =
-        cache.load_character(&character_name, "buildtabs").ok().flatten();
-    let cached_et: Option<Vec<gw2_api::models::EquipmentTab>> =
-        cache.load_character(&character_name, "equiptabs").ok().flatten();
+    let cached_bt: Option<Vec<gw2_api::models::BuildTab>> = cache
+        .load_character(&character_name, "buildtabs")
+        .ok()
+        .flatten();
+    let cached_et: Option<Vec<gw2_api::models::EquipmentTab>> = cache
+        .load_character(&character_name, "equiptabs")
+        .ok()
+        .flatten();
 
     let had_cache = if let (Some(bt), Some(et)) = (cached_bt, cached_et) {
         // Cache hit — display immediately
@@ -125,9 +141,11 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
 
     std::thread::spawn(move || {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if token.is_cancelled() { return; }
+            if token.is_cancelled() {
+                return;
+            }
 
-        let result = (|| -> Result<(Vec<gw2_api::models::BuildTab>, Vec<gw2_api::models::EquipmentTab>), String> {
+            let result = (|| -> Result<(Vec<gw2_api::models::BuildTab>, Vec<gw2_api::models::EquipmentTab>), String> {
             let client = gw2_api::client::Gw2Client::with_key(&key)
                 .map_err(|e| e.to_string())?;
             let build_tabs = client.fetch_build_tabs(&character_name)
@@ -137,47 +155,50 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
             Ok((build_tabs, equip_tabs))
         })();
 
-        if token.is_cancelled() { return; }
+            if token.is_cancelled() {
+                return;
+            }
 
-        crate::state::with_state(|s| {
-            // Only apply if user hasn't switched to a different character
-            if s.main.selected_character
-                .and_then(|i| s.main.characters.get(i))
-                .map(|n| n == &expected_char)
-                .unwrap_or(false)
-            {
-                match result {
-                    Ok((fresh_bt, fresh_et)) => {
-                        // Save to cache
-                        let cache_dir = s.addon_dir.join("cache");
-                        let cache = gw2_api::cache::DataCache::new(&cache_dir);
-                        let _ = cache.save_character(&expected_char, "buildtabs", &fresh_bt);
-                        let _ = cache.save_character(&expected_char, "equiptabs", &fresh_et);
+            crate::state::with_state(|s| {
+                // Only apply if user hasn't switched to a different character
+                if s.main
+                    .selected_character
+                    .and_then(|i| s.main.characters.get(i))
+                    .map(|n| n == &expected_char)
+                    .unwrap_or(false)
+                {
+                    match result {
+                        Ok((fresh_bt, fresh_et)) => {
+                            // Save to cache
+                            let cache_dir = s.addon_dir.join("cache");
+                            let cache = gw2_api::cache::DataCache::new(&cache_dir);
+                            let _ = cache.save_character(&expected_char, "buildtabs", &fresh_bt);
+                            let _ = cache.save_character(&expected_char, "equiptabs", &fresh_et);
 
-                        // Compare: only update UI if data actually changed
-                        let bt_changed = serde_json::to_string(&s.main.build_tabs).ok()
-                            != serde_json::to_string(&fresh_bt).ok();
-                        let et_changed = serde_json::to_string(&s.main.equipment_tabs).ok()
-                            != serde_json::to_string(&fresh_et).ok();
+                            // Compare: only update UI if data actually changed
+                            let bt_changed = serde_json::to_string(&s.main.build_tabs).ok()
+                                != serde_json::to_string(&fresh_bt).ok();
+                            let et_changed = serde_json::to_string(&s.main.equipment_tabs).ok()
+                                != serde_json::to_string(&fresh_et).ok();
 
-                        if bt_changed || et_changed {
-                            apply_character_tabs(s, fresh_bt, fresh_et);
+                            if bt_changed || et_changed {
+                                apply_character_tabs(s, fresh_bt, fresh_et);
+                            }
+                            s.main.build_loading = false;
                         }
-                        s.main.build_loading = false;
-                    }
-                    Err(e) => {
-                        s.main.build_loading = false;
-                        // If we had cached data, don't overwrite with error
-                        if !had_cache {
-                            s.main.error = Some(e);
+                        Err(e) => {
+                            s.main.build_loading = false;
+                            // If we had cached data, don't overwrite with error
+                            if !had_cache {
+                                s.main.error = Some(e);
+                            }
+                            s.main.api_status = crate::state::ApiStatus::Offline;
                         }
-                        s.main.api_status = crate::state::ApiStatus::Offline;
                     }
                 }
-            }
-        });
+            });
         }));
-        if let Err(_) = panic_result {
+        if panic_result.is_err() {
             nexus::log::log(
                 nexus::log::LogLevel::Warning,
                 "GW2BuildOpt",
@@ -196,7 +217,9 @@ pub(super) fn update_build_chat_code(state: &mut AddonState) {
 }
 
 fn update_build_chat_code_inner(state: &mut AddonState) {
-    let build_tab = state.main.selected_build_tab
+    let build_tab = state
+        .main
+        .selected_build_tab
         .and_then(|i| state.main.build_tabs.get(i));
     let game_db = state.main.game_db.as_ref();
 
@@ -217,7 +240,9 @@ fn generate_build_chat_code(
     let profession_name = build.profession.as_deref()?;
     let profession = db.profession(profession_name)?;
     let code = profession.code?;
-    if code > 255 { return None; }
+    if code > 255 {
+        return None;
+    }
     let profession_code = code as u8;
 
     let mut buf: Vec<u8> = Vec::with_capacity(44);
@@ -228,7 +253,9 @@ fn generate_build_chat_code(
     for i in 0..3 {
         if let Some(sel) = build.specializations.get(i) {
             if let Some(spec_id) = sel.id {
-                if spec_id > 255 { return None; }
+                if spec_id > 255 {
+                    return None;
+                }
                 buf.push(spec_id as u8);
 
                 // Encode trait choices as 2-bit positions packed into 1 byte
@@ -236,13 +263,18 @@ fn generate_build_chat_code(
                 let spec = db.spec(spec_id);
                 let mut trait_byte: u8 = 0;
                 for (col, trait_id) in sel.traits.iter().enumerate() {
-                    if col >= 3 { break; }
+                    if col >= 3 {
+                        break;
+                    }
                     if let Some(tid) = trait_id {
                         // Find position of this trait in the column (0=top, 1=mid, 2=bot)
                         if let Some(spec_data) = spec {
                             let col_start = col * 3;
-                            let position = spec_data.major_traits.iter()
-                                .skip(col_start).take(3)
+                            let position = spec_data
+                                .major_traits
+                                .iter()
+                                .skip(col_start)
+                                .take(3)
                                 .position(|&mt| mt == *tid);
                             if let Some(pos) = position {
                                 trait_byte |= ((pos as u8 + 1) & 0x03) << (col * 2);
@@ -263,25 +295,37 @@ fn generate_build_chat_code(
 
     // 5 terrestrial skills as palette IDs (u16 LE): heal, util1, util2, util3, elite
     // Interleaved with 5 aquatic skills
-    let terrestrial_skills = build.skills.as_ref().map(|sk| {
-        let mut ids = vec![sk.heal.unwrap_or(0)];
-        for u in &sk.utilities {
-            ids.push(u.unwrap_or(0));
-        }
-        while ids.len() < 4 { ids.push(0); }
-        ids.push(sk.elite.unwrap_or(0));
-        ids
-    }).unwrap_or_else(|| vec![0; 5]);
+    let terrestrial_skills = build
+        .skills
+        .as_ref()
+        .map(|sk| {
+            let mut ids = vec![sk.heal.unwrap_or(0)];
+            for u in &sk.utilities {
+                ids.push(u.unwrap_or(0));
+            }
+            while ids.len() < 4 {
+                ids.push(0);
+            }
+            ids.push(sk.elite.unwrap_or(0));
+            ids
+        })
+        .unwrap_or_else(|| vec![0; 5]);
 
-    let aquatic_skills = build.aquatic_skills.as_ref().map(|sk| {
-        let mut ids = vec![sk.heal.unwrap_or(0)];
-        for u in &sk.utilities {
-            ids.push(u.unwrap_or(0));
-        }
-        while ids.len() < 4 { ids.push(0); }
-        ids.push(sk.elite.unwrap_or(0));
-        ids
-    }).unwrap_or_else(|| vec![0; 5]);
+    let aquatic_skills = build
+        .aquatic_skills
+        .as_ref()
+        .map(|sk| {
+            let mut ids = vec![sk.heal.unwrap_or(0)];
+            for u in &sk.utilities {
+                ids.push(u.unwrap_or(0));
+            }
+            while ids.len() < 4 {
+                ids.push(0);
+            }
+            ids.push(sk.elite.unwrap_or(0));
+            ids
+        })
+        .unwrap_or_else(|| vec![0; 5]);
 
     // Interleave: terr_heal, aqua_heal, terr_util1, aqua_util1, ..., terr_elite, aqua_elite
     for i in 0..5 {
@@ -313,16 +357,27 @@ fn generate_build_chat_code(
         "Revenant" => {
             // Revenant legends: 4 bytes (legend number parsed from "LegendN" ID) + 12 zeros
             let legend_to_byte = |legend: &Option<String>| -> u8 {
-                legend.as_deref().and_then(|l| {
-                    l.strip_prefix("Legend").and_then(|n| n.parse::<u8>().ok())
-                }).unwrap_or(0)
+                legend
+                    .as_deref()
+                    .and_then(|l| l.strip_prefix("Legend").and_then(|n| n.parse::<u8>().ok()))
+                    .unwrap_or(0)
             };
             let legends = &build.legends;
             buf.push(legends.first().map(|l| legend_to_byte(l)).unwrap_or(0));
             buf.push(legends.get(1).map(|l| legend_to_byte(l)).unwrap_or(0));
             let aquatic_legends = &build.aquatic_legends;
-            buf.push(aquatic_legends.first().map(|l| legend_to_byte(l)).unwrap_or(0));
-            buf.push(aquatic_legends.get(1).map(|l| legend_to_byte(l)).unwrap_or(0));
+            buf.push(
+                aquatic_legends
+                    .first()
+                    .map(|l| legend_to_byte(l))
+                    .unwrap_or(0),
+            );
+            buf.push(
+                aquatic_legends
+                    .get(1)
+                    .map(|l| legend_to_byte(l))
+                    .unwrap_or(0),
+            );
             buf.extend_from_slice(&[0u8; 12]);
         }
         _ => {

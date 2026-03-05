@@ -1,6 +1,6 @@
+use super::stats::{compute_3tier_combat, perf_to_combat_metrics};
 use crate::state::AddonState;
 use gw2_optimizer::scoring::OptimizationWeights;
-use super::stats::{compute_3tier_combat, perf_to_combat_metrics};
 
 /// Start optimization in background thread (S11-T01, S11-T02, S11-T03)
 pub(super) fn start_optimization(state: &mut AddonState) {
@@ -10,7 +10,10 @@ pub(super) fn start_optimization(state: &mut AddonState) {
     }
 
     // Get profession from current build
-    let profession_name = state.main.current_build.as_ref()
+    let profession_name = state
+        .main
+        .current_build
+        .as_ref()
         .map(|b| b.profession.clone())
         .unwrap_or_default();
 
@@ -35,7 +38,10 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
     let config = state.config.clone();
     let game_mode = state.main.game_mode.clone();
     let game_mode_label = game_mode.label().to_string();
-    let current_build_summary = state.main.current_build.as_ref()
+    let current_build_summary = state
+        .main
+        .current_build
+        .as_ref()
         .map(|b| summarize_resolved_build(b));
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
@@ -71,7 +77,9 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
         let panic_token = token.clone();
         let thread_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let result = (|| -> Result<Vec<crate::ui::comparison::BuildSuggestion>, String> {
-                if token.is_cancelled() { return Err("Cancelled".into()); }
+                if token.is_cancelled() {
+                    return Err("Cancelled".into());
+                }
 
                 let db = db.ok_or("GameDb not loaded")?;
 
@@ -92,22 +100,30 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                         current_build_summary.as_deref(),
                         &build_locks,
                         &mut |progress: gw2_optimizer::engine::OptimizeProgress| {
-                            if token_det.is_cancelled() { return; }
+                            if token_det.is_cancelled() {
+                                return;
+                            }
                             crate::state::with_state(|s| {
                                 s.main.optimize_stage = progress.stage.clone();
                             });
                         },
                     ) {
                         Ok(synergy_result) => {
-                            if token.is_cancelled() { return Err("Cancelled".into()); }
-                            let suggestion = synergy_result_to_suggestion(&synergy_result, &profession_name);
+                            if token.is_cancelled() {
+                                return Err("Cancelled".into());
+                            }
+                            let suggestion =
+                                synergy_result_to_suggestion(&synergy_result, &profession_name);
                             return Ok(vec![suggestion]);
                         }
                         Err(e) => {
                             nexus::log::log(
                                 nexus::log::LogLevel::Warning,
                                 "GW2 Build Optimizer",
-                                &format!("Deterministic engine failed, trying Gemini pipeline: {}", e),
+                                &format!(
+                                    "Deterministic engine failed, trying Gemini pipeline: {}",
+                                    e
+                                ),
                             );
                             // Fall through to Gemini pipeline
                         }
@@ -129,15 +145,20 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                         current_build_summary.as_deref(),
                         &build_locks,
                         &mut |progress| {
-                            if token_synergy.is_cancelled() { return; }
+                            if token_synergy.is_cancelled() {
+                                return;
+                            }
                             crate::state::with_state(|s| {
                                 s.main.optimize_stage = progress.stage.clone();
                             });
                         },
                     ) {
                         Ok(synergy_result) => {
-                            if token.is_cancelled() { return Err("Cancelled".into()); }
-                            let suggestion = synergy_result_to_suggestion(&synergy_result, &profession_name);
+                            if token.is_cancelled() {
+                                return Err("Cancelled".into());
+                            }
+                            let suggestion =
+                                synergy_result_to_suggestion(&synergy_result, &profession_name);
                             return Ok(vec![suggestion]);
                         }
                         Err(e) => {
@@ -152,8 +173,9 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                 }
 
                 // ═══ Legacy pipeline (fallback or no Gemini key) ═══
-                let profession = db.profession(&profession_name)
-                    .ok_or_else(|| format!("Profession '{}' not found in GameDb", profession_name))?;
+                let profession = db.profession(&profession_name).ok_or_else(|| {
+                    format!("Profession '{}' not found in GameDb", profession_name)
+                })?;
 
                 let token_progress = token.clone();
                 let candidates = gw2_optimizer::engine::optimize(
@@ -165,7 +187,9 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     &db.specializations,
                     &db.traits,
                     |progress| {
-                        if token_progress.is_cancelled() { return; }
+                        if token_progress.is_cancelled() {
+                            return;
+                        }
                         crate::state::with_state(|s| {
                             s.main.optimize_stage = progress.stage.clone();
                         });
@@ -175,14 +199,20 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     &build_locks,
                 )?;
 
-                if token.is_cancelled() { return Err("Cancelled".into()); }
+                if token.is_cancelled() {
+                    return Err("Cancelled".into());
+                }
 
-                let mut suggestions: Vec<crate::ui::comparison::BuildSuggestion> =
-                    candidates.iter().map(|c| candidate_to_suggestion(c, &db)).collect();
+                let mut suggestions: Vec<crate::ui::comparison::BuildSuggestion> = candidates
+                    .iter()
+                    .map(|c| candidate_to_suggestion(c, &db))
+                    .collect();
 
                 // Enrich top suggestion with LLM reasoning (legacy path)
                 if config.has_active_llm_key() {
-                    if token.is_cancelled() { return Err("Cancelled".into()); }
+                    if token.is_cancelled() {
+                        return Err("Cancelled".into());
+                    }
 
                     crate::state::with_state(|s| {
                         s.main.optimize_stage = "Consulting AI for synergy analysis...".into();
@@ -220,8 +250,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     // Discard results if the user switched character or build tab while
                     // optimization was running — showing results for a different context
                     // would silently corrupt the comparison panel.
-                    let context_changed =
-                        s.main.selected_character != optimizing_for_char
+                    let context_changed = s.main.selected_character != optimizing_for_char
                         || s.main.selected_build_tab != optimizing_for_build_tab
                         || s.main.selected_equipment_tab != optimizing_for_equip_tab;
                     if context_changed {
@@ -270,22 +299,35 @@ fn synergy_result_to_suggestion(
     let v = &result.validated;
 
     // Specializations: (name, [trait_name1, trait_name2, trait_name3])
-    let specializations: Vec<(String, Vec<String>)> = v.specializations.iter().map(|s| {
-        let label = if s.elite { format!("{} [E]", s.name) } else { s.name.clone() };
-        (label, s.trait_names.clone())
-    }).collect();
+    let specializations: Vec<(String, Vec<String>)> = v
+        .specializations
+        .iter()
+        .map(|s| {
+            let label = if s.elite {
+                format!("{} [E]", s.name)
+            } else {
+                s.name.clone()
+            };
+            (label, s.trait_names.clone())
+        })
+        .collect();
 
     // Weapons: flatten into display strings like "Set 1: Sword / Shield"
     let mut weapons = Vec::new();
-    let fmt_set = |set: &gw2_optimizer::validation::ValidatedWeaponSet, label: &str| -> Option<String> {
-        match (&set.main_hand, &set.off_hand) {
-            (Some(main), Some(off)) => Some(format!("{}: {} / {}", label, main, off)),
-            (Some(main), None) => Some(format!("{}: {}", label, main)),
-            _ => None,
-        }
-    };
-    if let Some(s) = fmt_set(&v.weapons.set1, "Set 1") { weapons.push(s); }
-    if let Some(s) = fmt_set(&v.weapons.set2, "Set 2") { weapons.push(s); }
+    let fmt_set =
+        |set: &gw2_optimizer::validation::ValidatedWeaponSet, label: &str| -> Option<String> {
+            match (&set.main_hand, &set.off_hand) {
+                (Some(main), Some(off)) => Some(format!("{}: {} / {}", label, main, off)),
+                (Some(main), None) => Some(format!("{}: {}", label, main)),
+                _ => None,
+            }
+        };
+    if let Some(s) = fmt_set(&v.weapons.set1, "Set 1") {
+        weapons.push(s);
+    }
+    if let Some(s) = fmt_set(&v.weapons.set2, "Set 2") {
+        weapons.push(s);
+    }
 
     // Skills: flatten into display strings
     let mut skills = Vec::new();
@@ -328,39 +370,58 @@ fn synergy_result_to_suggestion(
     let combat_squad = Some(perf_to_combat_metrics(&result.combat_squad));
 
     // Convert rotation simulation result
-    let rotation = result.rotation.as_ref().map(|sim| {
-        gw2_core::types::RotationBreakdown {
+    let rotation = result
+        .rotation
+        .as_ref()
+        .map(|sim| gw2_core::types::RotationBreakdown {
             simulated_dps: sim.total_dps.round() as i32,
             strike_dps: sim.strike_dps.round() as i32,
             condition_dps: sim.condition_dps.round() as i32,
-            condition_uptime: sim.condition_uptime.iter()
+            condition_uptime: sim
+                .condition_uptime
+                .iter()
                 .map(|(k, v)| (k.clone(), *v))
                 .collect(),
-            buff_uptime: sim.buff_uptime.iter()
+            buff_uptime: sim
+                .buff_uptime
+                .iter()
                 .map(|(k, v)| (k.clone(), *v))
                 .collect(),
-            skill_usage: sim.skill_usage.iter()
-                .map(|s| (s.name.clone(), s.cast_count, s.dps_contribution.round() as i32))
+            skill_usage: sim
+                .skill_usage
+                .iter()
+                .map(|s| {
+                    (
+                        s.name.clone(),
+                        s.cast_count,
+                        s.dps_contribution.round() as i32,
+                    )
+                })
                 .collect(),
             stunbreak_count: sim.stunbreak_count,
             has_stability: sim.has_stability,
             stability_uptime: sim.stability_uptime,
-        }
-    });
+        });
 
     // Build changes_made from validated structured changes
-    let changes_made: Vec<String> = v.changes.iter().map(|c| {
-        if c.from.is_empty() {
-            format!("[{}] → {} ({})", c.slot, c.to, c.reason)
-        } else {
-            format!("[{}] {} → {} ({})", c.slot, c.from, c.to, c.reason)
-        }
-    }).collect();
+    let changes_made: Vec<String> = v
+        .changes
+        .iter()
+        .map(|c| {
+            if c.from.is_empty() {
+                format!("[{}] → {} ({})", c.slot, c.to, c.reason)
+            } else {
+                format!("[{}] {} → {} ({})", c.slot, c.from, c.to, c.reason)
+            }
+        })
+        .collect();
 
     // Warnings as additional info
     let mut explanation = v.explanation.clone();
     if !v.warnings.is_empty() {
-        if !explanation.is_empty() { explanation.push_str("\n\n"); }
+        if !explanation.is_empty() {
+            explanation.push_str("\n\n");
+        }
         explanation.push_str("Warnings: ");
         explanation.push_str(&v.warnings.join("; "));
     }
@@ -369,9 +430,16 @@ fn synergy_result_to_suggestion(
         label: "Synergy Build".into(),
         build_summary: format!(
             "Gear: {}",
-            v.gear_prefix.as_ref().map(|p| p.name.as_str()).unwrap_or("Unknown")
+            v.gear_prefix
+                .as_ref()
+                .map(|p| p.name.as_str())
+                .unwrap_or("Unknown")
         ),
-        stat_prefix: v.gear_prefix.as_ref().map(|p| p.name.clone()).unwrap_or_default(),
+        stat_prefix: v
+            .gear_prefix
+            .as_ref()
+            .map(|p| p.name.clone())
+            .unwrap_or_default(),
         specializations,
         weapons,
         skills,
@@ -400,7 +468,9 @@ fn candidate_to_suggestion(
     let mut specializations = Vec::new();
     if let Some(elite_id) = candidate.elite_spec {
         if let Some(spec) = db.spec(elite_id) {
-            let traits: Vec<String> = candidate.equipped_traits.iter()
+            let traits: Vec<String> = candidate
+                .equipped_traits
+                .iter()
                 .filter(|tid| spec.major_traits.contains(tid))
                 .filter_map(|&tid| db.traits.get(&tid).map(|t| t.name.clone()))
                 .collect();
@@ -409,7 +479,9 @@ fn candidate_to_suggestion(
     }
     for &core_id in &candidate.core_specs {
         if let Some(spec) = db.spec(core_id) {
-            let traits: Vec<String> = candidate.equipped_traits.iter()
+            let traits: Vec<String> = candidate
+                .equipped_traits
+                .iter()
                 .filter(|tid| spec.major_traits.contains(tid))
                 .filter_map(|&tid| db.traits.get(&tid).map(|t| t.name.clone()))
                 .collect();
@@ -435,7 +507,12 @@ fn candidate_to_suggestion(
     });
 
     // Compute combat metrics for all 3 buff profiles
-    let profession_name = db.professions.values().next().map(|p| p.name.as_str()).unwrap_or("Warrior");
+    let profession_name = db
+        .professions
+        .values()
+        .next()
+        .map(|p| p.name.as_str())
+        .unwrap_or("Warrior");
     // Try to determine profession from elite spec
     let prof_name = if let Some(elite_id) = candidate.elite_spec {
         db.spec(elite_id)
@@ -450,7 +527,10 @@ fn candidate_to_suggestion(
     };
 
     let (combat_solo, combat_party, combat_squad) = compute_3tier_combat(
-        &candidate.stats, &candidate.derived, &candidate.modifiers, prof_name,
+        &candidate.stats,
+        &candidate.derived,
+        &candidate.modifiers,
+        prof_name,
     );
 
     BuildSuggestion {
@@ -499,8 +579,15 @@ pub(super) fn simulate_suggestion_rotation(
             for wtype in weapon_types {
                 for skill in db.skills.values() {
                     if skill.weapon_type.as_deref() == Some(wtype.as_str())
-                        && skill.professions.iter().any(|p| p.eq_ignore_ascii_case(&profession))
-                        && skill.slot.as_deref().map(|s| s.starts_with("Weapon_")).unwrap_or(false)
+                        && skill
+                            .professions
+                            .iter()
+                            .any(|p| p.eq_ignore_ascii_case(&profession))
+                        && skill
+                            .slot
+                            .as_deref()
+                            .map(|s| s.starts_with("Weapon_"))
+                            .unwrap_or(false)
                         && !set_skill_ids.contains(&skill.id)
                     {
                         set_skill_ids.push(skill.id);
@@ -508,7 +595,8 @@ pub(super) fn simulate_suggestion_rotation(
                 }
             }
             if !set_skill_ids.is_empty() {
-                let mut set_skills = gw2_optimizer::rotation::builder::build_rotation_skills(&set_skill_ids, db);
+                let mut set_skills =
+                    gw2_optimizer::rotation::builder::build_rotation_skills(&set_skill_ids, db);
                 gw2_optimizer::rotation::builder::tag_weapon_set(&mut set_skills, *set_num);
                 all_rotation_skills.extend(set_skills);
             }
@@ -519,9 +607,14 @@ pub(super) fn simulate_suggestion_rotation(
     //    Format: "Heal: Name", "Utils: Name1, Name2, Name3", "Elite: Name"
     let skill_names = parse_skill_names(&suggestion.skills);
     for name in &skill_names {
-        if let Some(skill) = db.skills.values().find(|s| s.name.eq_ignore_ascii_case(name)) {
+        if let Some(skill) = db
+            .skills
+            .values()
+            .find(|s| s.name.eq_ignore_ascii_case(name))
+        {
             if !all_rotation_skills.iter().any(|rs| rs.skill_id == skill.id) {
-                let mut rs_vec = gw2_optimizer::rotation::builder::build_rotation_skills(&[skill.id], db);
+                let mut rs_vec =
+                    gw2_optimizer::rotation::builder::build_rotation_skills(&[skill.id], db);
                 // Non-weapon skills stay at weapon_set=0 (always available)
                 all_rotation_skills.append(&mut rs_vec);
             }
@@ -539,7 +632,11 @@ pub(super) fn simulate_suggestion_rotation(
     let weapon_strength = 1100.0; // reference weapon strength (same as combat.rs)
 
     let result = gw2_optimizer::rotation::simulator::simulate(
-        &all_rotation_skills, 0, power, condition_damage, weapon_strength,
+        &all_rotation_skills,
+        0,
+        power,
+        condition_damage,
+        weapon_strength,
     );
 
     suggestion.rotation = Some(gw2_core::types::RotationBreakdown {
@@ -548,8 +645,16 @@ pub(super) fn simulate_suggestion_rotation(
         condition_dps: result.condition_dps.round() as i32,
         condition_uptime: result.condition_uptime.into_iter().collect(),
         buff_uptime: result.buff_uptime.into_iter().collect(),
-        skill_usage: result.skill_usage.iter()
-            .map(|su| (su.name.clone(), su.cast_count, su.dps_contribution.round() as i32))
+        skill_usage: result
+            .skill_usage
+            .iter()
+            .map(|su| {
+                (
+                    su.name.clone(),
+                    su.cast_count,
+                    su.dps_contribution.round() as i32,
+                )
+            })
             .collect(),
         stunbreak_count: result.stunbreak_count,
         has_stability: result.has_stability,
@@ -563,12 +668,17 @@ pub(super) fn simulate_suggestion_rotation(
 fn parse_weapon_sets(weapons: &[String]) -> Vec<(u8, Vec<String>)> {
     let mut sets = Vec::new();
     for w in weapons {
-        let set_num = if w.starts_with("Set 1") { 1u8 }
-            else if w.starts_with("Set 2") { 2u8 }
-            else { 1u8 }; // fallback
+        let set_num = if w.starts_with("Set 1") {
+            1u8
+        } else if w.starts_with("Set 2") {
+            2u8
+        } else {
+            1u8
+        }; // fallback
 
         let rest = w.split(':').nth(1).unwrap_or(w).trim();
-        let types: Vec<String> = rest.split('/')
+        let types: Vec<String> = rest
+            .split('/')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty() && s != "null")
             .collect();
@@ -628,7 +738,11 @@ fn infer_profession_from_specs(
         }
     }
     // Fallback to first profession in db
-    db.professions.values().next().map(|p| p.name.clone()).unwrap_or_default()
+    db.professions
+        .values()
+        .next()
+        .map(|p| p.name.clone())
+        .unwrap_or_default()
 }
 
 // infer_weights_from_stats is now in radar_chart.rs
@@ -639,12 +753,15 @@ fn summarize_resolved_build(build: &gw2_core::types::ResolvedBuild) -> String {
 
     parts.push(format!("Profession: {}", build.profession));
 
-    let specs: Vec<String> = build.specializations.iter()
+    let specs: Vec<String> = build
+        .specializations
+        .iter()
         .map(|s| {
             let elite = if s.elite { " [E]" } else { "" };
             let traits: Vec<&str> = s.traits_selected.iter().map(|t| t.name.as_str()).collect();
             format!("{}{}: {}", s.name, elite, traits.join(", "))
-        }).collect();
+        })
+        .collect();
     if !specs.is_empty() {
         parts.push(format!("Specs: {}", specs.join(" | ")));
     }
@@ -652,8 +769,12 @@ fn summarize_resolved_build(build: &gw2_core::types::ResolvedBuild) -> String {
     if let Some(ref h) = build.skills.heal {
         parts.push(format!("Heal: {}", h.name));
     }
-    let utils: Vec<String> = build.skills.utilities.iter()
-        .filter_map(|u| u.as_ref().map(|s| s.name.clone())).collect();
+    let utils: Vec<String> = build
+        .skills
+        .utilities
+        .iter()
+        .filter_map(|u| u.as_ref().map(|s| s.name.clone()))
+        .collect();
     if !utils.is_empty() {
         parts.push(format!("Utils: {}", utils.join(", ")));
     }
@@ -663,8 +784,12 @@ fn summarize_resolved_build(build: &gw2_core::types::ResolvedBuild) -> String {
 
     for set in &build.weapons {
         let mut w = Vec::new();
-        if let Some(ref mh) = set.main_hand { w.push(mh.weapon_type.clone()); }
-        if let Some(ref oh) = set.off_hand { w.push(oh.weapon_type.clone()); }
+        if let Some(ref mh) = set.main_hand {
+            w.push(mh.weapon_type.clone());
+        }
+        if let Some(ref oh) = set.off_hand {
+            w.push(oh.weapon_type.clone());
+        }
         if !w.is_empty() {
             parts.push(format!("{}: {}", set.label, w.join(" / ")));
         }
@@ -724,27 +849,30 @@ fn apply_gemini_response(
 
 /// Convert Gemini tool function names to human-readable descriptions.
 fn humanize_tool_names(tool_names: &[String]) -> String {
-    let labels: Vec<&str> = tool_names.iter().map(|n| match n.as_str() {
-        "get_profession_info" => "reading profession",
-        "get_spec_traits" => "checking traits",
-        "get_trait_details" => "analyzing trait",
-        "get_skill_info" => "checking skill",
-        "list_runes" => "browsing runes",
-        "list_sigils" => "browsing sigils",
-        "list_relics" => "browsing relics",
-        "calculate_stats" => "calculating stats",
-        "simulate_combat" => "simulating combat",
-        "score_build" => "scoring build",
-        "get_current_build" => "reading current build",
-        "get_optimizer_results" => "reviewing candidates",
-        "search_traits_by_effect" => "searching trait synergies",
-        "find_condition_sources" => "finding condition sources",
-        "search_skills_by_effect" => "searching skill synergies",
-        "find_synergies" => "analyzing synergies",
-        "get_build_synergy_report" => "building synergy report",
-        "simulate_rotation" => "simulating rotation",
-        _ => "working",
-    }).collect();
+    let labels: Vec<&str> = tool_names
+        .iter()
+        .map(|n| match n.as_str() {
+            "get_profession_info" => "reading profession",
+            "get_spec_traits" => "checking traits",
+            "get_trait_details" => "analyzing trait",
+            "get_skill_info" => "checking skill",
+            "list_runes" => "browsing runes",
+            "list_sigils" => "browsing sigils",
+            "list_relics" => "browsing relics",
+            "calculate_stats" => "calculating stats",
+            "simulate_combat" => "simulating combat",
+            "score_build" => "scoring build",
+            "get_current_build" => "reading current build",
+            "get_optimizer_results" => "reviewing candidates",
+            "search_traits_by_effect" => "searching trait synergies",
+            "find_condition_sources" => "finding condition sources",
+            "search_skills_by_effect" => "searching skill synergies",
+            "find_synergies" => "analyzing synergies",
+            "get_build_synergy_report" => "building synergy report",
+            "simulate_rotation" => "simulating rotation",
+            _ => "working",
+        })
+        .collect();
     labels.join(", ")
 }
 
@@ -761,18 +889,13 @@ fn enrich_with_llm(
     suggestions: &mut [crate::ui::comparison::BuildSuggestion],
     addon_dir: &std::path::Path,
 ) -> Result<(), String> {
-    let client = gw2_optimizer::llm::create_client(config, addon_dir)
-        .map_err(|e| e.to_string())?;
+    let client = gw2_optimizer::llm::create_client(config, addon_dir).map_err(|e| e.to_string())?;
 
     // Build tool-aware prompt
     let prompt = if current_build_summary.is_some() {
-        gw2_optimizer::prompts::improve_build_prompt_with_tools(
-            profession_name, weights, game_mode,
-        )
+        gw2_optimizer::prompts::improve_build_prompt_with_tools(profession_name, weights, game_mode)
     } else {
-        gw2_optimizer::prompts::new_build_prompt_with_tools(
-            profession_name, weights, game_mode,
-        )
+        gw2_optimizer::prompts::new_build_prompt_with_tools(profession_name, weights, game_mode)
     };
 
     let tools = gw2_optimizer::llm::tools::tool_definitions();
@@ -785,32 +908,38 @@ fn enrich_with_llm(
         weights: weights.clone(),
     };
 
-    let response = client.generate_with_tools_progress(
-        &prompt,
-        &tools,
-        &mut |name: &str, args: &serde_json::Value| gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx),
-        8,
-        &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
-            let tools_str = humanize_tool_names(tool_names);
-            crate::state::with_state(|s| {
-                s.main.optimize_stage = format!(
-                    "AI thinking ({}/{})... {}",
-                    turn, max_turns, tools_str
-                );
-            });
-        },
-    ).map_err(|e| e.to_string())?;
+    let response = client
+        .generate_with_tools_progress(
+            &prompt,
+            &tools,
+            &mut |name: &str, args: &serde_json::Value| {
+                gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx)
+            },
+            8,
+            &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
+                let tools_str = humanize_tool_names(tool_names);
+                crate::state::with_state(|s| {
+                    s.main.optimize_stage =
+                        format!("AI thinking ({}/{})... {}", turn, max_turns, tools_str);
+                });
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
     let gemini_build = gw2_optimizer::prompts::parse_gemini_build(&response)
         .map_err(|e| format!("Parse failed: {}", e))?;
 
     // Validate LLM's output against GameDb before applying
-    let validated = gw2_optimizer::validation::validate_gemini_build(&gemini_build, db, profession_name);
+    let validated =
+        gw2_optimizer::validation::validate_gemini_build(&gemini_build, db, profession_name);
     if !validated.errors.is_empty() {
         nexus::log::log(
             nexus::log::LogLevel::Warning,
             "GW2BuildOpt",
-            &format!("Legacy enrichment validation errors: {}", validated.errors.join("; ")),
+            &format!(
+                "Legacy enrichment validation errors: {}",
+                validated.errors.join("; ")
+            ),
         );
     }
 
@@ -844,10 +973,16 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     }
 
     let config = state.config.clone();
-    let profession = state.main.current_build.as_ref()
+    let profession = state
+        .main
+        .current_build
+        .as_ref()
         .map(|b| b.profession.clone())
         .unwrap_or_default();
-    let build_summary = state.main.current_build.as_ref()
+    let build_summary = state
+        .main
+        .current_build
+        .as_ref()
         .map(|b| summarize_resolved_build(b));
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
@@ -856,82 +991,98 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
 
     std::thread::spawn(move || {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if token.is_cancelled() { return; }
-
-        let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
-            let client = gw2_optimizer::llm::create_client(&config, &addon_dir)
-                .map_err(|e| e.to_string())?;
-
-            if token.is_cancelled() { return Err("Cancelled".into()); }
-
-            // Use tool-enabled generation if GameDb is available
-            if let Some(ref db) = db_clone {
-                let prompt = gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
-                    &profession, &message,
-                );
-                let tools = gw2_optimizer::llm::tools::tool_definitions();
-                let empty_candidates = vec![];
-                let ctx = gw2_optimizer::gemini_tools::ToolContext {
-                    db,
-                    profession_name: &profession,
-                    candidates: &empty_candidates,
-                    current_build_summary: build_summary.as_deref(),
-                    weights: weights.clone(),
-                };
-
-                let response = client.generate_with_tools_progress(
-                    &prompt,
-                    &tools,
-                    &mut |name: &str, args: &serde_json::Value| gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx),
-                    8,
-                    &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
-                        let tools_str = humanize_tool_names(tool_names);
-                        crate::state::with_state(|s| {
-                            s.main.optimize_stage = format!(
-                                "AI thinking ({}/{})... {}",
-                                turn, max_turns, tools_str
-                            );
-                        });
-                    },
-                ).map_err(|e| e.to_string())?;
-
-                gw2_optimizer::prompts::parse_gemini_build(&response)
-                    .map_err(|e| format!("Parse failed: {}", e))
-            } else {
-                // Fallback: no GameDb, use simple prompt
-                let build_summary_str = build_summary.as_deref().unwrap_or("");
-                let context = gw2_optimizer::prompts::build_game_context(
-                    &profession, &weights, "PvE",
-                );
-                let prompt = gw2_optimizer::prompts::chat_refinement_prompt(
-                    &profession, build_summary_str, &message, &context,
-                );
-                let response = client.generate_cached(&prompt)
-                    .map_err(|e| e.to_string())?;
-                gw2_optimizer::prompts::parse_gemini_build(&response)
-                    .map_err(|e| format!("Parse failed: {}", e))
+            if token.is_cancelled() {
+                return;
             }
-        })();
 
-        // Validate Gemini's response against GameDb before applying (if available)
-        let validated_result = result.as_ref().ok().and_then(|gemini_build| {
-            db_clone.as_ref().map(|db| {
-                let validated = gw2_optimizer::validation::validate_gemini_build(gemini_build, db, &profession);
-                if !validated.errors.is_empty() {
-                    nexus::log::log(
-                        nexus::log::LogLevel::Warning,
-                        "GW2BuildOpt",
-                        &format!("Chat refinement validation errors: {}", validated.errors.join("; ")),
-                    );
+            let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
+                let client = gw2_optimizer::llm::create_client(&config, &addon_dir)
+                    .map_err(|e| e.to_string())?;
+
+                if token.is_cancelled() {
+                    return Err("Cancelled".into());
                 }
-                validated
-            })
-        });
-        let _ = validated_result; // Validation logged; apply_gemini_response uses raw parsed fields
 
-        if !token.is_cancelled() {
-            crate::state::with_state(|s| {
-                match result {
+                // Use tool-enabled generation if GameDb is available
+                if let Some(ref db) = db_clone {
+                    let prompt = gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
+                        &profession,
+                        &message,
+                    );
+                    let tools = gw2_optimizer::llm::tools::tool_definitions();
+                    let empty_candidates = vec![];
+                    let ctx = gw2_optimizer::gemini_tools::ToolContext {
+                        db,
+                        profession_name: &profession,
+                        candidates: &empty_candidates,
+                        current_build_summary: build_summary.as_deref(),
+                        weights: weights.clone(),
+                    };
+
+                    let response = client
+                        .generate_with_tools_progress(
+                            &prompt,
+                            &tools,
+                            &mut |name: &str, args: &serde_json::Value| {
+                                gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx)
+                            },
+                            8,
+                            &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
+                                let tools_str = humanize_tool_names(tool_names);
+                                crate::state::with_state(|s| {
+                                    s.main.optimize_stage = format!(
+                                        "AI thinking ({}/{})... {}",
+                                        turn, max_turns, tools_str
+                                    );
+                                });
+                            },
+                        )
+                        .map_err(|e| e.to_string())?;
+
+                    gw2_optimizer::prompts::parse_gemini_build(&response)
+                        .map_err(|e| format!("Parse failed: {}", e))
+                } else {
+                    // Fallback: no GameDb, use simple prompt
+                    let build_summary_str = build_summary.as_deref().unwrap_or("");
+                    let context =
+                        gw2_optimizer::prompts::build_game_context(&profession, &weights, "PvE");
+                    let prompt = gw2_optimizer::prompts::chat_refinement_prompt(
+                        &profession,
+                        build_summary_str,
+                        &message,
+                        &context,
+                    );
+                    let response = client.generate_cached(&prompt).map_err(|e| e.to_string())?;
+                    gw2_optimizer::prompts::parse_gemini_build(&response)
+                        .map_err(|e| format!("Parse failed: {}", e))
+                }
+            })();
+
+            // Validate Gemini's response against GameDb before applying (if available)
+            let validated_result = result.as_ref().ok().and_then(|gemini_build| {
+                db_clone.as_ref().map(|db| {
+                    let validated = gw2_optimizer::validation::validate_gemini_build(
+                        gemini_build,
+                        db,
+                        &profession,
+                    );
+                    if !validated.errors.is_empty() {
+                        nexus::log::log(
+                            nexus::log::LogLevel::Warning,
+                            "GW2BuildOpt",
+                            &format!(
+                                "Chat refinement validation errors: {}",
+                                validated.errors.join("; ")
+                            ),
+                        );
+                    }
+                    validated
+                })
+            });
+            let _ = validated_result; // Validation logged; apply_gemini_response uses raw parsed fields
+
+            if !token.is_cancelled() {
+                crate::state::with_state(|s| match result {
                     Ok(gemini_build) => {
                         let display = if gemini_build.explanation.is_empty() {
                             "Build updated.".to_string()
@@ -959,11 +1110,10 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             format!("Error: {}", e),
                         );
                     }
-                }
-            });
-        }
+                });
+            }
         }));
-        if let Err(_) = panic_result {
+        if panic_result.is_err() {
             nexus::log::log(
                 nexus::log::LogLevel::Warning,
                 "GW2BuildOpt",

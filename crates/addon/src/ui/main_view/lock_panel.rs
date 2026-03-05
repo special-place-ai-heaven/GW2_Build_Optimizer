@@ -2,20 +2,20 @@
 //! Renders hexagons (specs) + 3×3 circle grids (traits) in the content area.
 //! Click to lock/unlock — locked items are preserved by the optimizer.
 
-use nexus::imgui::Ui;
 use gw2_core::types::BuildLocks;
 use gw2_optimizer::gamedb::GameDb;
+use nexus::imgui::Ui;
 
 // ─── Colors ───
 
-const LOCKED_COLOR: [f32; 4] = [1.0, 0.85, 0.2, 1.0];    // Gold — locked
-const SELECTED_COLOR: [f32; 4] = [0.5, 0.8, 1.0, 1.0];    // Cyan — selected but unlocked
-const DIM_COLOR: [f32; 4] = [0.35, 0.35, 0.35, 0.8];      // Gray — unselected
-const AVAILABLE_COLOR: [f32; 4] = [0.5, 0.5, 0.5, 0.6];   // Dim — available but not selected
-const LABEL_COLOR: [f32; 4] = [0.75, 0.75, 0.8, 1.0];     // Light gray text
-const ELITE_COLOR: [f32; 4] = [1.0, 0.6, 0.2, 1.0];       // Orange for elite marker
-const HEADER_COLOR: [f32; 4] = [0.85, 0.72, 0.3, 1.0];    // Gold header
-const LOCK_ICON_COLOR: [f32; 4] = [1.0, 0.85, 0.2, 0.8];  // Lock indicator ring
+const LOCKED_COLOR: [f32; 4] = [1.0, 0.85, 0.2, 1.0]; // Gold — locked
+const SELECTED_COLOR: [f32; 4] = [0.5, 0.8, 1.0, 1.0]; // Cyan — selected but unlocked
+const DIM_COLOR: [f32; 4] = [0.35, 0.35, 0.35, 0.8]; // Gray — unselected
+const AVAILABLE_COLOR: [f32; 4] = [0.5, 0.5, 0.5, 0.6]; // Dim — available but not selected
+const LABEL_COLOR: [f32; 4] = [0.75, 0.75, 0.8, 1.0]; // Light gray text
+const ELITE_COLOR: [f32; 4] = [1.0, 0.6, 0.2, 1.0]; // Orange for elite marker
+const HEADER_COLOR: [f32; 4] = [0.85, 0.72, 0.3, 1.0]; // Gold header
+const LOCK_ICON_COLOR: [f32; 4] = [1.0, 0.85, 0.2, 0.8]; // Lock indicator ring
 
 fn color_u32(c: [f32; 4]) -> u32 {
     let r = (c[0] * 255.0) as u32;
@@ -47,7 +47,8 @@ fn draw_hexagon(
         // Draw as triangles from center
         for i in 0..6 {
             let next = (i + 1) % 6;
-            draw_list.add_triangle(center, points[i], points[next], color)
+            draw_list
+                .add_triangle(center, points[i], points[next], color)
                 .filled(true)
                 .build();
         }
@@ -55,7 +56,10 @@ fn draw_hexagon(
     // Outline
     for i in 0..6 {
         let next = (i + 1) % 6;
-        draw_list.add_line(points[i], points[next], color).thickness(2.0).build();
+        draw_list
+            .add_line(points[i], points[next], color)
+            .thickness(2.0)
+            .build();
     }
 }
 
@@ -93,16 +97,27 @@ pub fn render_lock_panel(
         let pos = ui.cursor_screen_pos();
         let width = ui.content_region_avail()[0];
         let draw_list = ui.get_window_draw_list();
-        draw_list.add_rect(
-            [pos[0], pos[1]],
-            [pos[0] + width, pos[1] + 18.0],
-            [0.22, 0.19, 0.10, 0.9],
-        ).filled(true).build();
-        draw_list.add_text([pos[0] + 6.0, pos[1] + 2.0], HEADER_COLOR, "SPEC & TRAIT LOCKS");
+        draw_list
+            .add_rect(
+                [pos[0], pos[1]],
+                [pos[0] + width, pos[1] + 18.0],
+                [0.22, 0.19, 0.10, 0.9],
+            )
+            .filled(true)
+            .build();
+        draw_list.add_text(
+            [pos[0] + 6.0, pos[1] + 2.0],
+            HEADER_COLOR,
+            "SPEC & TRAIT LOCKS",
+        );
         // Collapse indicator
         let indicator = if *expanded { "v" } else { ">" };
         let iw = ui.calc_text_size(indicator)[0];
-        draw_list.add_text([pos[0] + width - iw - 6.0, pos[1] + 2.0], HEADER_COLOR, indicator);
+        draw_list.add_text(
+            [pos[0] + width - iw - 6.0, pos[1] + 2.0],
+            HEADER_COLOR,
+            indicator,
+        );
     }
     // Invisible button for click detection on the header
     if ui.invisible_button("##locks_header", [ui.content_region_avail()[0], 18.0]) {
@@ -129,12 +144,16 @@ pub fn render_lock_panel(
     };
 
     // Gather available specs for this profession (reserved for future spec picker)
-    let _core_specs: Vec<(u32, &str)> = profession.specializations.iter()
+    let _core_specs: Vec<(u32, &str)> = profession
+        .specializations
+        .iter()
         .filter_map(|&id| db.specializations.get(&id))
         .filter(|s| !s.elite)
         .map(|s| (s.id, s.name.as_str()))
         .collect();
-    let _elite_specs: Vec<(u32, &str)> = profession.specializations.iter()
+    let _elite_specs: Vec<(u32, &str)> = profession
+        .specializations
+        .iter()
         .filter_map(|&id| db.specializations.get(&id))
         .filter(|s| s.elite)
         .map(|s| (s.id, s.name.as_str()))
@@ -158,7 +177,7 @@ pub fn render_lock_panel(
     for slot in 0..3_usize {
         let row_start = ui.cursor_screen_pos();
         let total_row_height = hex_radius * 2.0 + 22.0 * s; // hex + name below
-        // Reserve enough height for the grid (max of hex height or 3 trait rows)
+                                                            // Reserve enough height for the grid (max of hex height or 3 trait rows)
         let grid_height = row_height * 3.0 + 8.0 * s;
         let section_height = total_row_height.max(grid_height);
 
@@ -175,9 +194,9 @@ pub fn render_lock_panel(
             .map(|s| s.name.as_str())
             .or_else(|| {
                 // Fall back to current build spec for this slot
-                current_specs.get(slot).and_then(|(id, _)| {
-                    db.specializations.get(id).map(|s| s.name.as_str())
-                })
+                current_specs
+                    .get(slot)
+                    .and_then(|(id, _)| db.specializations.get(id).map(|s| s.name.as_str()))
             })
             .unwrap_or("(empty)");
         let is_elite = spec_id
@@ -190,13 +209,26 @@ pub fn render_lock_panel(
             // Draw hexagon
             let hex_color = if spec_locked { LOCKED_COLOR } else { DIM_COLOR };
             if spec_locked {
-                draw_hexagon(&draw_list, hex_center, hex_radius, color_u32([0.3, 0.25, 0.05, 0.6]), true);
+                draw_hexagon(
+                    &draw_list,
+                    hex_center,
+                    hex_radius,
+                    color_u32([0.3, 0.25, 0.05, 0.6]),
+                    true,
+                );
             }
-            draw_hexagon(&draw_list, hex_center, hex_radius, color_u32(hex_color), false);
+            draw_hexagon(
+                &draw_list,
+                hex_center,
+                hex_radius,
+                color_u32(hex_color),
+                false,
+            );
 
             // Lock ring around hexagon when locked
             if spec_locked {
-                draw_list.add_circle(hex_center, hex_radius + 3.0, color_u32(LOCK_ICON_COLOR))
+                draw_list
+                    .add_circle(hex_center, hex_radius + 3.0, color_u32(LOCK_ICON_COLOR))
                     .thickness(2.0)
                     .build();
             }
@@ -258,7 +290,8 @@ pub fn render_lock_panel(
         // ── Trait grid (3 columns × 3 rows) ──
         // Only show traits when a spec is set (locked or from current build)
         let active_spec_id = spec_id.or_else(|| current_specs.get(slot).map(|(id, _)| *id));
-        let selected_traits: Vec<u32> = current_specs.get(slot)
+        let selected_traits: Vec<u32> = current_specs
+            .get(slot)
             .map(|(_, traits)| traits.clone())
             .unwrap_or_default();
 
@@ -279,7 +312,9 @@ pub fn render_lock_panel(
                             let cy = grid_y + row as f32 * row_height + row_height / 2.0;
 
                             let is_selected = selected_traits.contains(&trait_id);
-                            let is_locked = locks.locked_trait(sid, col).is_some_and(|id| id == trait_id);
+                            let is_locked = locks
+                                .locked_trait(sid, col)
+                                .is_some_and(|id| id == trait_id);
 
                             {
                                 let draw_list = ui.get_window_draw_list();
@@ -294,23 +329,35 @@ pub fn render_lock_panel(
                                 };
 
                                 if is_selected || is_locked {
-                                    draw_list.add_circle([cx, cy], circle_radius, color_u32(fill_color))
-                                        .filled(true).build();
+                                    draw_list
+                                        .add_circle([cx, cy], circle_radius, color_u32(fill_color))
+                                        .filled(true)
+                                        .build();
                                 }
-                                draw_list.add_circle([cx, cy], circle_radius, color_u32(outline_color))
+                                draw_list
+                                    .add_circle([cx, cy], circle_radius, color_u32(outline_color))
                                     .build();
 
                                 // Lock ring
                                 if is_locked {
-                                    draw_list.add_circle([cx, cy], circle_radius + 3.0, color_u32(LOCK_ICON_COLOR))
+                                    draw_list
+                                        .add_circle(
+                                            [cx, cy],
+                                            circle_radius + 3.0,
+                                            color_u32(LOCK_ICON_COLOR),
+                                        )
                                         .thickness(1.5)
                                         .build();
                                 }
 
                                 // Trait name to the right of circle
-                                let text_color = if is_locked { LOCKED_COLOR }
-                                    else if is_selected { SELECTED_COLOR }
-                                    else { DIM_COLOR };
+                                let text_color = if is_locked {
+                                    LOCKED_COLOR
+                                } else if is_selected {
+                                    SELECTED_COLOR
+                                } else {
+                                    DIM_COLOR
+                                };
                                 draw_list.add_text(
                                     [cx + circle_radius + 6.0, cy - 6.0],
                                     color_u32(text_color),
@@ -344,7 +391,8 @@ pub fn render_lock_panel(
                                         }
                                     } else {
                                         // Lock this trait (and select it)
-                                        let entry = locks.trait_locks.entry(sid).or_insert([None; 3]);
+                                        let entry =
+                                            locks.trait_locks.entry(sid).or_insert([None; 3]);
                                         entry[col] = Some(trait_id);
                                         // Also lock the spec if not already
                                         if locks.specs[slot].is_none() {
@@ -376,11 +424,13 @@ pub fn render_lock_panel(
         {
             let sep_pos = ui.cursor_screen_pos();
             let draw_list = ui.get_window_draw_list();
-            draw_list.add_line(
-                [sep_pos[0], sep_pos[1] - 2.0],
-                [sep_pos[0] + avail_width, sep_pos[1] - 2.0],
-                color_u32([0.3, 0.25, 0.1, 0.3]),
-            ).build();
+            draw_list
+                .add_line(
+                    [sep_pos[0], sep_pos[1] - 2.0],
+                    [sep_pos[0] + avail_width, sep_pos[1] - 2.0],
+                    color_u32([0.3, 0.25, 0.1, 0.3]),
+                )
+                .build();
         }
     }
 
@@ -417,7 +467,12 @@ pub fn render_lock_panel(
 
     // Lock count indicator
     let lock_count = locks.specs.iter().filter(|s| s.is_some()).count()
-        + locks.trait_locks.values().flat_map(|c| c.iter()).filter(|t| t.is_some()).count();
+        + locks
+            .trait_locks
+            .values()
+            .flat_map(|c| c.iter())
+            .filter(|t| t.is_some())
+            .count();
     if lock_count > 0 {
         ui.text_colored(LOCKED_COLOR, &format!("  {} locks active", lock_count));
     }
@@ -440,12 +495,19 @@ pub fn render_optimized_specs_panel(
         let pos = ui.cursor_screen_pos();
         let width = ui.content_region_avail()[0];
         let draw_list = ui.get_window_draw_list();
-        draw_list.add_rect(
-            [pos[0], pos[1]],
-            [pos[0] + width, pos[1] + 18.0],
-            [0.10, 0.19, 0.12, 0.9],
-        ).filled(true).build();
-        draw_list.add_text([pos[0] + 6.0, pos[1] + 2.0], color_u32([0.3, 1.0, 0.5, 1.0]), "OPTIMIZED SPECS & TRAITS");
+        draw_list
+            .add_rect(
+                [pos[0], pos[1]],
+                [pos[0] + width, pos[1] + 18.0],
+                [0.10, 0.19, 0.12, 0.9],
+            )
+            .filled(true)
+            .build();
+        draw_list.add_text(
+            [pos[0] + 6.0, pos[1] + 2.0],
+            color_u32([0.3, 1.0, 0.5, 1.0]),
+            "OPTIMIZED SPECS & TRAITS",
+        );
     }
     ui.dummy([ui.content_region_avail()[0], 18.0]);
     ui.dummy([0.0, spacing * 0.5]);
@@ -468,12 +530,14 @@ pub fn render_optimized_specs_panel(
 
     // Look up spec info from DB for visual rendering
     // Build name→spec map from DB
-    let spec_by_name: std::collections::HashMap<&str, &gw2_api::models::Specialization> =
-        db.map(|db| {
-            db.specializations.values()
+    let spec_by_name: std::collections::HashMap<&str, &gw2_api::models::Specialization> = db
+        .map(|db| {
+            db.specializations
+                .values()
                 .map(|sp| (sp.name.as_str(), sp))
                 .collect()
-        }).unwrap_or_default();
+        })
+        .unwrap_or_default();
 
     for (slot, (spec_name, trait_names)) in suggestion_specs.iter().enumerate() {
         let row_start = ui.cursor_screen_pos();
@@ -484,8 +548,7 @@ pub fn render_optimized_specs_panel(
         // Strip " [E]" suffix for DB lookup (suggestion names include elite marker)
         let lookup_name = spec_name.strip_suffix(" [E]").unwrap_or(spec_name.as_str());
         let spec_info = spec_by_name.get(lookup_name);
-        let is_elite = spec_info.is_some_and(|s| s.elite)
-            || spec_name.ends_with(" [E]");
+        let is_elite = spec_info.is_some_and(|s| s.elite) || spec_name.ends_with(" [E]");
 
         // ── Hexagon (spec identity) ──
         let hex_center = [
@@ -498,8 +561,20 @@ pub fn render_optimized_specs_panel(
         {
             let draw_list = ui.get_window_draw_list();
             // Filled hexagon
-            draw_hexagon(&draw_list, hex_center, hex_radius, color_u32([0.05, 0.2, 0.1, 0.6]), true);
-            draw_hexagon(&draw_list, hex_center, hex_radius, color_u32(optimized_color), false);
+            draw_hexagon(
+                &draw_list,
+                hex_center,
+                hex_radius,
+                color_u32([0.05, 0.2, 0.1, 0.6]),
+                true,
+            );
+            draw_hexagon(
+                &draw_list,
+                hex_center,
+                hex_radius,
+                color_u32(optimized_color),
+                false,
+            );
 
             // Elite marker
             if is_elite {
@@ -553,14 +628,21 @@ pub fn render_optimized_specs_panel(
                             };
 
                             if is_selected {
-                                draw_list.add_circle([cx, cy], circle_radius, color_u32(fill_color))
-                                    .filled(true).build();
+                                draw_list
+                                    .add_circle([cx, cy], circle_radius, color_u32(fill_color))
+                                    .filled(true)
+                                    .build();
                             }
-                            draw_list.add_circle([cx, cy], circle_radius, color_u32(outline_color))
+                            draw_list
+                                .add_circle([cx, cy], circle_radius, color_u32(outline_color))
                                 .build();
 
                             // Trait name
-                            let text_color = if is_selected { optimized_color } else { DIM_COLOR };
+                            let text_color = if is_selected {
+                                optimized_color
+                            } else {
+                                DIM_COLOR
+                            };
                             draw_list.add_text(
                                 [cx + circle_radius + 6.0, cy - 6.0],
                                 color_u32(text_color),
@@ -607,11 +689,13 @@ pub fn render_optimized_specs_panel(
         {
             let sep_pos = ui.cursor_screen_pos();
             let draw_list = ui.get_window_draw_list();
-            draw_list.add_line(
-                [sep_pos[0], sep_pos[1] - 2.0],
-                [sep_pos[0] + avail_width, sep_pos[1] - 2.0],
-                color_u32([0.1, 0.25, 0.1, 0.3]),
-            ).build();
+            draw_list
+                .add_line(
+                    [sep_pos[0], sep_pos[1] - 2.0],
+                    [sep_pos[0] + avail_width, sep_pos[1] - 2.0],
+                    color_u32([0.1, 0.25, 0.1, 0.3]),
+                )
+                .build();
         }
     }
 }
