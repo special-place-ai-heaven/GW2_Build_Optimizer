@@ -208,12 +208,19 @@ impl ConditionWeights {
         Self { bleeding: 3.0, burning: 2.0, poison: 1.0, torment: 1.5, confusion: 0.5 }
     }
 
-    /// Necromancer group (Scourge, Harbinger): heavy Bleeding + Torment, minimal Burning.
+    /// Necromancer group (Necromancer, Scourge): heavy Bleeding + Torment, minimal Burning.
     ///
     /// Scourge maintains ~8-12 Bleeding and ~5-8 Torment stacks. Burning is rare (0-2 stacks).
     /// Confusion is ~0.1 in PvE auto-attack rotations.
     pub fn necro_group() -> Self {
         Self { bleeding: 8.0, burning: 1.0, poison: 1.5, torment: 6.0, confusion: 0.1 }
+    }
+
+    /// Harbinger: higher Poison than base Necromancer (pistol/elixir kit), less Bleeding
+    /// (fewer shade pulses), slightly less Torment (no shade-based application).
+    /// Provisional estimates pending rotation profiling (Epic 3 P3-14).
+    pub fn harbinger_preset() -> Self {
+        Self { bleeding: 5.0, burning: 0.5, poison: 3.0, torment: 5.0, confusion: 0.1 }
     }
 
     /// Firebrand group (Firebrand, Willbender, Guardian): heavy Burning, minimal others.
@@ -229,12 +236,12 @@ impl ConditionWeights {
 ///
 /// Accepts both base profession names (as returned by the GW2 API `profession.name` field,
 /// e.g., `"Necromancer"`, `"Guardian"`) and elite specialization names (e.g., `"Scourge"`,
-/// `"Firebrand"`) for forward-compatibility. In the current optimization pipeline, only base
-/// profession names are passed; the elite-spec arms are retained for callers that may supply
-/// elite-spec context directly.
+/// `"Firebrand"`, `"Harbinger"`) for forward-compatibility. Harbinger has its own preset
+/// distinct from the shared necro_group (Necromancer/Scourge).
 pub fn condition_weights_for_profession(profession: &str) -> ConditionWeights {
     match profession {
-        "Necromancer" | "Scourge" | "Harbinger" => ConditionWeights::necro_group(),
+        "Harbinger" => ConditionWeights::harbinger_preset(),
+        "Necromancer" | "Scourge" => ConditionWeights::necro_group(),
         "Guardian" | "Firebrand" | "Willbender" => ConditionWeights::firebrand_group(),
         _ => ConditionWeights::default_pve(),
     }
@@ -1156,13 +1163,18 @@ mod tests {
         assert!((w.torment - 6.0).abs() < 0.001);
         assert!((w.confusion - 0.1).abs() < 0.001);
 
-        // Scourge and Harbinger also → necro_group (key differentiating fields)
+        // Scourge → necro_group (key differentiating fields)
         let ws = condition_weights_for_profession("Scourge");
         assert!((ws.bleeding - 8.0).abs() < 0.001);
         assert!((ws.torment - 6.0).abs() < 0.001);
+
+        // Harbinger → harbinger_preset (all 5 fields)
         let wh = condition_weights_for_profession("Harbinger");
-        assert!((wh.bleeding - 8.0).abs() < 0.001);
-        assert!((wh.torment - 6.0).abs() < 0.001);
+        assert!((wh.bleeding - 5.0).abs() < 0.001);
+        assert!((wh.burning - 0.5).abs() < 0.001);
+        assert!((wh.poison - 3.0).abs() < 0.001);
+        assert!((wh.torment - 5.0).abs() < 0.001);
+        assert!((wh.confusion - 0.1).abs() < 0.001);
 
         // Guardian → firebrand_group (all 5 fields)
         let g = condition_weights_for_profession("Guardian");
@@ -1195,6 +1207,46 @@ mod tests {
         assert!((unk.poison - 1.0).abs() < 0.001);
         assert!((unk.torment - 1.5).abs() < 0.001);
         assert!((unk.confusion - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_harbinger_weights_differ_from_necro() {
+        // Harbinger preset should produce a different condition_dps_index than necro_group
+        // given identical condition-heavy stats, proving the presets are meaningfully distinct.
+        let stats = StatBlock {
+            condition_damage: 2000.0,
+            expertise: 400.0,
+            power: 1000.0,
+            precision: 1000.0,
+            toughness: 1000.0,
+            vitality: 1000.0,
+            ..Default::default()
+        };
+        let derived = stats::compute_derived(&stats, "Necromancer");
+        let mods = DamageModifiers::default();
+        let solo = default_buff_profiles().into_iter().find(|b| b.label == "Solo").unwrap();
+
+        let harbinger_result = calculate_combat_performance(
+            &stats, &derived, &mods, &solo, &ConditionWeights::harbinger_preset(), "Necromancer",
+        );
+        let necro_result = calculate_combat_performance(
+            &stats, &derived, &mods, &solo, &ConditionWeights::necro_group(), "Necromancer",
+        );
+
+        // Presets differ in bleeding (5.0 vs 8.0), poison (3.0 vs 1.5), torment (5.0 vs 6.0),
+        // burning (0.5 vs 1.0) — condition_dps_index must diverge.
+        assert!(
+            (harbinger_result.condition_dps_index - necro_result.condition_dps_index).abs() > 0.01,
+            "harbinger_preset (condi={:.1}) and necro_group (condi={:.1}) must produce \
+             different condition_dps_index values",
+            harbinger_result.condition_dps_index,
+            necro_result.condition_dps_index,
+        );
+        // Strike DPS unaffected by condition weights.
+        assert!(
+            (harbinger_result.strike_dps_index - necro_result.strike_dps_index).abs() < 0.01,
+            "strike_dps_index should be identical between harbinger and necro presets",
+        );
     }
 
     #[test]
