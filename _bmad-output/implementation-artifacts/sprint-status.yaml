@@ -180,8 +180,8 @@ development_status:
   p3-08-patch-manifest-ledger: done
 
   # P3-09: Balance Override Datasets and Unknown-Value Handling (FR10, FR14)
-  # BLOCKED until: p3-08 DONE. HIGH RISK.
-  p3-09-balance-overrides-unknown-values: backlog
+  # STORY: docs/stories/P3-09-balance-overrides.md. HIGH RISK.
+  p3-09-balance-overrides-unknown-values: ready-for-dev
 
   # P3-10a: NormalizedEffect Types, Schema, and Contracts (FR12 partial)
   # BLOCKED until: p3-04 + p3-08 + p3-09 DONE (Review Gate RG-1). HIGH RISK.
@@ -192,8 +192,8 @@ development_status:
   p3-10b-effect-extraction-population: backlog
 
   # P3-11: PvP Optimizer Path Separation (FR9)
-  # BLOCKED until: p3-02 DONE (conditional: p3-07 if PvP data integration needed)
-  p3-11-pvp-path-separation: backlog
+  # STORY: docs/stories/P3-11-pvp-path-separation.md
+  p3-11-pvp-path-separation: ready-for-dev
 
   # P3-12: WvW Non-Fallback Behavior (FR11)
   # BLOCKED until: p3-09 DONE
