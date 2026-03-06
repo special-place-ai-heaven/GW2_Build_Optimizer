@@ -1,0 +1,23 @@
+{
+  "base_primary_attribute": 1000,
+  "vitality_to_health": 10,
+  "precision_offset": 895,
+  "precision_per_crit_pct": 21,
+  "ferocity_per_crit_damage_pct": 15,
+  "base_crit_damage_pct": 150,
+  "expertise_per_condition_duration_pct": 15,
+  "concentration_per_boon_duration_pct": 15,
+  "condition_duration_cap": 1.0,
+  "boon_duration_cap": 1.0,
+  "tooltip_reference_armor": 2597,
+  "evidence_level": "Factual",
+  "sources": [
+    "https://wiki.guildwars2.com/wiki/Attribute",
+    "https://wiki.guildwars2.com/wiki/Critical_Chance",
+    "https://wiki.guildwars2.com/wiki/Ferocity",
+    "https://wiki.guildwars2.com/wiki/Damage",
+    "https://wiki.guildwars2.com/wiki/Health",
+    "https://wiki.guildwars2.com/wiki/Boon#Boon_duration",
+    "https://wiki.guildwars2.com/wiki/Condition#Condition_duration"
+  ]
+}

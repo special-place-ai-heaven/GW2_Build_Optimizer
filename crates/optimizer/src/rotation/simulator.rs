@@ -32,8 +32,11 @@ const WEAPON_SWAP_COOLDOWN_MS: u32 = 10_000;
 /// Conditions tick every 1 second.
 const CONDITION_TICK_INTERVAL_MS: u32 = 1000;
 
-/// Reference armor value for damage calculation.
-const REFERENCE_ARMOR: f64 = 2597.0;
+/// Reference armor value for damage calculation, loaded from data.
+/// Source: https://wiki.guildwars2.com/wiki/Damage
+fn reference_armor() -> f64 {
+    crate::data::universal_formulas::formulas().tooltip_reference_armor
+}
 
 /// Active condition stack being tracked.
 #[derive(Debug, Clone)]
@@ -279,7 +282,7 @@ impl SimState {
                     dmg_multiplier,
                 } => {
                     let damage =
-                        weapon_strength * power / REFERENCE_ARMOR * dmg_multiplier * (*hit_count as f64);
+                        weapon_strength * power / reference_armor() * dmg_multiplier * (*hit_count as f64);
                     self.total_strike_damage += damage;
                     *self.skill_damage.entry(skill_id).or_insert(0.0) += damage;
                 }
@@ -465,7 +468,7 @@ fn skill_dps_efficiency(
                 dmg_multiplier,
             } => {
                 total_damage_value +=
-                    weapon_strength * power / REFERENCE_ARMOR * dmg_multiplier * (*hit_count as f64);
+                    weapon_strength * power / reference_armor() * dmg_multiplier * (*hit_count as f64);
             }
             SkillEffect::ApplyCondition {
                 condition,
@@ -510,7 +513,7 @@ fn estimate_buff_dps_value(
             // Each Might stack = +30 Power AND +30 Condition Damage (GW2 mechanic).
             let stacks_f = stacks as f64;
             // Power contribution: extra_power * weapon_strength / armor
-            let power_value = 30.0 * stacks_f * weapon_strength / REFERENCE_ARMOR * duration_s;
+            let power_value = 30.0 * stacks_f * weapon_strength / reference_armor() * duration_s;
             // Condition Damage contribution: 30 * CD_coefficient * duration.
             // Use bleeding coefficient (0.06) as a conservative typical-condition estimate.
             let condi_value = 30.0 * stacks_f * 0.06 * duration_s;
@@ -518,12 +521,12 @@ fn estimate_buff_dps_value(
         }
         "Fury" => {
             // Fury = +20% crit chance → roughly +15% DPS for the duration.
-            let base_hit = power * weapon_strength / REFERENCE_ARMOR;
+            let base_hit = power * weapon_strength / reference_armor();
             base_hit * 0.15 * duration_s * (stacks.min(1) as f64)
         }
         "Quickness" => {
             // Quickness = +50% attack speed → massive DPS multiplier.
-            let base_hit = power * weapon_strength / REFERENCE_ARMOR;
+            let base_hit = power * weapon_strength / reference_armor();
             base_hit * 0.5 * duration_s * (stacks.min(1) as f64)
         }
         _ => 0.0, // Stability, Resistance, etc. don't directly increase DPS

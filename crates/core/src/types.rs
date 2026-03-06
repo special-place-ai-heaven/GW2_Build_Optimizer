@@ -207,9 +207,16 @@ impl StatBlock {
     /// `base_health` and `base_defense` are profession-specific values from loaded
     /// profession profiles (data/profession_profiles.json). Callers get these values
     /// from the optimizer crate's stats::base_health() / stats::base_defense().
+    ///
     /// NOTE: GW2 HP classes and armor classes do NOT align!
     /// HP: High (Warrior, Necromancer), Medium (Rev, Engi, Ranger, Mesmer), Low (Guardian, Thief, Ele)
     /// Armor: Heavy (Warrior, Guardian, Revenant), Medium (Ranger, Engi, Thief), Light (Ele, Mes, Necro)
+    ///
+    /// NOTE: The canonical source for formula constants (895, 21, 150, 15, 10) is
+    /// `data/formulas/universal.json`. The active runtime paths in
+    /// `crates/optimizer/src/{stats,combat}.rs` use loaded values from that file.
+    /// This method retains hardcoded values because `core` cannot depend on `optimizer`.
+    /// If callers are added, inject constants as parameters or move this to `optimizer`.
     pub fn compute_derived(&mut self, base_health: i32, base_defense: i32) {
         self.crit_chance = ((self.precision - 895) as f64 / 21.0).clamp(0.0, 100.0);
         self.crit_damage = 150.0 + self.ferocity as f64 / 15.0;
