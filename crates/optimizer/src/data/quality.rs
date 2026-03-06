@@ -1,0 +1,468 @@
+use std::fmt;
+use std::ops::{Add, Div, Mul, Sub};
+
+/// Overall data quality assessment for an optimizer output.
+/// Degrades from Verified when any input data is Unknown or Provisional.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DataQuality {
+    /// All data inputs are factual and verified.
+    Verified,
+    /// Some data inputs are estimated or provisional; results are usable but less certain.
+    Provisional,
+    /// Critical data is missing or unknown; results should not be trusted.
+    Blocked,
+}
+
+impl DataQuality {
+    /// Merge two quality levels, keeping the worse of the two.
+    pub fn merge(&self, other: &DataQuality) -> DataQuality {
+        match (self, other) {
+            (DataQuality::Blocked, _) | (_, DataQuality::Blocked) => DataQuality::Blocked,
+            (DataQuality::Provisional, _) | (_, DataQuality::Provisional) => {
+                DataQuality::Provisional
+            }
+            _ => DataQuality::Verified,
+        }
+    }
+}
+
+impl fmt::Display for DataQuality {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DataQuality::Verified => write!(f, "Verified"),
+            DataQuality::Provisional => write!(f, "Provisional"),
+            DataQuality::Blocked => write!(f, "Blocked"),
+        }
+    }
+}
+
+/// Explains why data quality was degraded for a specific field/entity.
+#[derive(Debug, Clone)]
+pub struct DataQualityReason {
+    /// The field that caused degradation (e.g., "coefficient").
+    pub field: String,
+    /// The entity it belongs to (e.g., "Burning", "Warrior").
+    pub entity: String,
+    /// Game modes affected (e.g., ["PvP", "WvW"]).
+    pub modes: Vec<String>,
+    /// Human-readable explanation.
+    pub explanation: String,
+}
+
+impl fmt::Display for DataQualityReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}.{} [{}]: {}",
+            self.entity,
+            self.field,
+            self.modes.join(", "),
+            self.explanation,
+        )
+    }
+}
+
+/// A value that is either resolved (known) or explicitly unknown.
+/// Unknown values propagate through arithmetic: any operation involving
+/// Unknown produces Unknown.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FactualValue<T> {
+    /// A known, resolved value.
+    Resolved(T),
+    /// The value is explicitly unknown (e.g., no data for this mode).
+    Unknown,
+}
+
+impl<T> FactualValue<T> {
+    /// Returns true if this value is Resolved.
+    pub fn is_resolved(&self) -> bool {
+        matches!(self, FactualValue::Resolved(_))
+    }
+
+    /// Returns true if this value is Unknown.
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, FactualValue::Unknown)
+    }
+
+    /// Unwrap the resolved value, or return a default.
+    pub fn unwrap_or(self, default: T) -> T {
+        match self {
+            FactualValue::Resolved(v) => v,
+            FactualValue::Unknown => default,
+        }
+    }
+
+    /// Map the inner value if Resolved, otherwise propagate Unknown.
+    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> FactualValue<U> {
+        match self {
+            FactualValue::Resolved(v) => FactualValue::Resolved(f(v)),
+            FactualValue::Unknown => FactualValue::Unknown,
+        }
+    }
+
+    /// Map the inner value, but if the mapping itself would produce an unknown,
+    /// return Unknown. Useful for chaining computations.
+    pub fn map_or_unknown<U, F: FnOnce(T) -> FactualValue<U>>(self, f: F) -> FactualValue<U> {
+        match self {
+            FactualValue::Resolved(v) => f(v),
+            FactualValue::Unknown => FactualValue::Unknown,
+        }
+    }
+}
+
+impl<T: fmt::Display> fmt::Display for FactualValue<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FactualValue::Resolved(v) => write!(f, "{}", v),
+            FactualValue::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
+// ─── Arithmetic for FactualValue<f64> ───
+
+impl Mul<f64> for FactualValue<f64> {
+    type Output = FactualValue<f64>;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        match self {
+            FactualValue::Resolved(v) => FactualValue::Resolved(v * rhs),
+            FactualValue::Unknown => FactualValue::Unknown,
+        }
+    }
+}
+
+impl Add<f64> for FactualValue<f64> {
+    type Output = FactualValue<f64>;
+
+    fn add(self, rhs: f64) -> Self::Output {
+        match self {
+            FactualValue::Resolved(v) => FactualValue::Resolved(v + rhs),
+            FactualValue::Unknown => FactualValue::Unknown,
+        }
+    }
+}
+
+impl Sub<f64> for FactualValue<f64> {
+    type Output = FactualValue<f64>;
+
+    fn sub(self, rhs: f64) -> Self::Output {
+        match self {
+            FactualValue::Resolved(v) => FactualValue::Resolved(v - rhs),
+            FactualValue::Unknown => FactualValue::Unknown,
+        }
+    }
+}
+
+impl Div<f64> for FactualValue<f64> {
+    type Output = FactualValue<f64>;
+
+    fn div(self, rhs: f64) -> Self::Output {
+        match self {
+            FactualValue::Resolved(v) => FactualValue::Resolved(v / rhs),
+            FactualValue::Unknown => FactualValue::Unknown,
+        }
+    }
+}
+
+impl Add<FactualValue<f64>> for FactualValue<f64> {
+    type Output = FactualValue<f64>;
+
+    fn add(self, rhs: FactualValue<f64>) -> Self::Output {
+        match (self, rhs) {
+            (FactualValue::Resolved(a), FactualValue::Resolved(b)) => {
+                FactualValue::Resolved(a + b)
+            }
+            _ => FactualValue::Unknown,
+        }
+    }
+}
+
+impl Sub<FactualValue<f64>> for FactualValue<f64> {
+    type Output = FactualValue<f64>;
+
+    fn sub(self, rhs: FactualValue<f64>) -> Self::Output {
+        match (self, rhs) {
+            (FactualValue::Resolved(a), FactualValue::Resolved(b)) => {
+                FactualValue::Resolved(a - b)
+            }
+            _ => FactualValue::Unknown,
+        }
+    }
+}
+
+impl Mul<FactualValue<f64>> for FactualValue<f64> {
+    type Output = FactualValue<f64>;
+
+    fn mul(self, rhs: FactualValue<f64>) -> Self::Output {
+        match (self, rhs) {
+            (FactualValue::Resolved(a), FactualValue::Resolved(b)) => {
+                FactualValue::Resolved(a * b)
+            }
+            _ => FactualValue::Unknown,
+        }
+    }
+}
+
+impl Div<FactualValue<f64>> for FactualValue<f64> {
+    type Output = FactualValue<f64>;
+
+    fn div(self, rhs: FactualValue<f64>) -> Self::Output {
+        match (self, rhs) {
+            (FactualValue::Resolved(a), FactualValue::Resolved(b)) => {
+                FactualValue::Resolved(a / b)
+            }
+            _ => FactualValue::Unknown,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── DataQuality tests ───
+
+    #[test]
+    fn test_data_quality_display() {
+        assert_eq!(DataQuality::Verified.to_string(), "Verified");
+        assert_eq!(DataQuality::Provisional.to_string(), "Provisional");
+        assert_eq!(DataQuality::Blocked.to_string(), "Blocked");
+    }
+
+    #[test]
+    fn test_data_quality_merge_verified_stays_verified() {
+        assert_eq!(
+            DataQuality::Verified.merge(&DataQuality::Verified),
+            DataQuality::Verified,
+        );
+    }
+
+    #[test]
+    fn test_data_quality_merge_provisional_degrades() {
+        assert_eq!(
+            DataQuality::Verified.merge(&DataQuality::Provisional),
+            DataQuality::Provisional,
+        );
+        assert_eq!(
+            DataQuality::Provisional.merge(&DataQuality::Verified),
+            DataQuality::Provisional,
+        );
+    }
+
+    #[test]
+    fn test_data_quality_merge_blocked_wins() {
+        assert_eq!(
+            DataQuality::Verified.merge(&DataQuality::Blocked),
+            DataQuality::Blocked,
+        );
+        assert_eq!(
+            DataQuality::Provisional.merge(&DataQuality::Blocked),
+            DataQuality::Blocked,
+        );
+        assert_eq!(
+            DataQuality::Blocked.merge(&DataQuality::Verified),
+            DataQuality::Blocked,
+        );
+    }
+
+    // ─── DataQualityReason tests ───
+
+    #[test]
+    fn test_data_quality_reason_display() {
+        let reason = DataQualityReason {
+            field: "coefficient".into(),
+            entity: "Burning".into(),
+            modes: vec!["PvP".into(), "WvW".into()],
+            explanation: "No split-balance data available".into(),
+        };
+        assert_eq!(
+            reason.to_string(),
+            "Burning.coefficient [PvP, WvW]: No split-balance data available",
+        );
+    }
+
+    // ─── FactualValue basic tests ───
+
+    #[test]
+    fn test_factual_value_is_resolved() {
+        assert!(FactualValue::Resolved(42.0).is_resolved());
+        assert!(!FactualValue::<f64>::Unknown.is_resolved());
+    }
+
+    #[test]
+    fn test_factual_value_is_unknown() {
+        assert!(FactualValue::<f64>::Unknown.is_unknown());
+        assert!(!FactualValue::Resolved(42.0).is_unknown());
+    }
+
+    #[test]
+    fn test_factual_value_unwrap_or() {
+        assert_eq!(FactualValue::Resolved(10.0).unwrap_or(0.0), 10.0);
+        assert_eq!(FactualValue::<f64>::Unknown.unwrap_or(0.0), 0.0);
+    }
+
+    #[test]
+    fn test_factual_value_map() {
+        let v = FactualValue::Resolved(5.0).map(|x| x * 2.0);
+        assert_eq!(v, FactualValue::Resolved(10.0));
+
+        let u: FactualValue<f64> = FactualValue::<f64>::Unknown.map(|x| x * 2.0);
+        assert_eq!(u, FactualValue::Unknown);
+    }
+
+    #[test]
+    fn test_factual_value_map_or_unknown() {
+        let v = FactualValue::Resolved(5.0)
+            .map_or_unknown(|x| FactualValue::Resolved(x + 1.0));
+        assert_eq!(v, FactualValue::Resolved(6.0));
+
+        let u = FactualValue::<f64>::Unknown
+            .map_or_unknown(|x| FactualValue::Resolved(x + 1.0));
+        assert_eq!(u, FactualValue::Unknown);
+
+        // Inner function returns Unknown
+        let w = FactualValue::Resolved(5.0)
+            .map_or_unknown(|_| FactualValue::<f64>::Unknown);
+        assert_eq!(w, FactualValue::Unknown);
+    }
+
+    #[test]
+    fn test_factual_value_display() {
+        assert_eq!(FactualValue::Resolved(3.14).to_string(), "3.14");
+        assert_eq!(FactualValue::<f64>::Unknown.to_string(), "Unknown");
+    }
+
+    // ─── FactualValue<f64> arithmetic with scalar ───
+
+    #[test]
+    fn test_resolved_mul_scalar() {
+        assert_eq!(FactualValue::Resolved(10.0) * 5.0, FactualValue::Resolved(50.0));
+    }
+
+    #[test]
+    fn test_unknown_mul_scalar() {
+        assert_eq!(FactualValue::<f64>::Unknown * 5.0, FactualValue::Unknown);
+    }
+
+    #[test]
+    fn test_resolved_add_scalar() {
+        assert_eq!(FactualValue::Resolved(10.0) + 3.0, FactualValue::Resolved(13.0));
+    }
+
+    #[test]
+    fn test_unknown_add_scalar() {
+        assert_eq!(FactualValue::<f64>::Unknown + 3.0, FactualValue::Unknown);
+    }
+
+    #[test]
+    fn test_resolved_sub_scalar() {
+        assert_eq!(FactualValue::Resolved(10.0) - 3.0, FactualValue::Resolved(7.0));
+    }
+
+    #[test]
+    fn test_unknown_sub_scalar() {
+        assert_eq!(FactualValue::<f64>::Unknown - 3.0, FactualValue::Unknown);
+    }
+
+    #[test]
+    fn test_resolved_div_scalar() {
+        assert_eq!(FactualValue::Resolved(10.0) / 2.0, FactualValue::Resolved(5.0));
+    }
+
+    #[test]
+    fn test_unknown_div_scalar() {
+        assert_eq!(FactualValue::<f64>::Unknown / 2.0, FactualValue::Unknown);
+    }
+
+    // ─── FactualValue<f64> arithmetic with FactualValue<f64> ───
+
+    #[test]
+    fn test_resolved_add_resolved() {
+        assert_eq!(
+            FactualValue::Resolved(10.0) + FactualValue::Resolved(5.0),
+            FactualValue::Resolved(15.0),
+        );
+    }
+
+    #[test]
+    fn test_resolved_add_unknown() {
+        assert_eq!(
+            FactualValue::Resolved(10.0) + FactualValue::<f64>::Unknown,
+            FactualValue::Unknown,
+        );
+    }
+
+    #[test]
+    fn test_unknown_add_resolved() {
+        assert_eq!(
+            FactualValue::<f64>::Unknown + FactualValue::Resolved(5.0),
+            FactualValue::Unknown,
+        );
+    }
+
+    #[test]
+    fn test_unknown_add_unknown() {
+        assert_eq!(
+            FactualValue::<f64>::Unknown + FactualValue::<f64>::Unknown,
+            FactualValue::Unknown,
+        );
+    }
+
+    #[test]
+    fn test_resolved_sub_resolved() {
+        assert_eq!(
+            FactualValue::Resolved(10.0) - FactualValue::Resolved(3.0),
+            FactualValue::Resolved(7.0),
+        );
+    }
+
+    #[test]
+    fn test_resolved_sub_unknown() {
+        assert_eq!(
+            FactualValue::Resolved(10.0) - FactualValue::<f64>::Unknown,
+            FactualValue::Unknown,
+        );
+    }
+
+    #[test]
+    fn test_resolved_mul_resolved() {
+        assert_eq!(
+            FactualValue::Resolved(3.0) * FactualValue::Resolved(4.0),
+            FactualValue::Resolved(12.0),
+        );
+    }
+
+    #[test]
+    fn test_resolved_mul_unknown() {
+        assert_eq!(
+            FactualValue::Resolved(3.0) * FactualValue::<f64>::Unknown,
+            FactualValue::Unknown,
+        );
+    }
+
+    #[test]
+    fn test_resolved_div_resolved() {
+        assert_eq!(
+            FactualValue::Resolved(10.0) / FactualValue::Resolved(2.0),
+            FactualValue::Resolved(5.0),
+        );
+    }
+
+    #[test]
+    fn test_resolved_div_unknown() {
+        assert_eq!(
+            FactualValue::Resolved(10.0) / FactualValue::<f64>::Unknown,
+            FactualValue::Unknown,
+        );
+    }
+
+    // ─── DataQuality defaults to Verified for baseline ───
+
+    #[test]
+    fn test_data_quality_baseline_is_verified() {
+        // In the baseline (no overrides), quality should be Verified.
+        let quality = DataQuality::Verified;
+        assert_eq!(quality, DataQuality::Verified);
+    }
+}

@@ -1006,6 +1006,8 @@ fn build_synergy_result(
         combat_squad,
         modifiers,
         rotation: rotation_result,
+        data_quality: data::DataQuality::Verified,
+        quality_reasons: vec![],
     })
 }
 
