@@ -39,6 +39,10 @@ pub struct BuildCandidate {
     pub combat: CombatPerformance,
     /// Extracted damage modifiers (for recalculating with different buff profiles).
     pub modifiers: DamageModifiers,
+    /// Overall data quality assessment for this candidate's inputs.
+    pub data_quality: data::DataQuality,
+    /// Reasons for any data quality degradation.
+    pub quality_reasons: Vec<data::DataQualityReason>,
 }
 
 /// Progress update during optimization.
@@ -223,6 +227,8 @@ pub fn optimize(
                 score,
                 combat: combat_perf,
                 modifiers,
+                data_quality: data::DataQuality::Verified,
+                quality_reasons: vec![],
             });
         }
     }
@@ -332,6 +338,8 @@ fn optimize_pvp(
             score,
             combat: combat_perf,
             modifiers,
+            data_quality: data::DataQuality::Verified,
+            quality_reasons: vec![],
         });
     }
 
@@ -579,6 +587,10 @@ pub struct SynergyResult {
     pub combat_squad: CombatPerformance,
     pub modifiers: DamageModifiers,
     pub rotation: Option<rotation::SimulationResult>,
+    /// Overall data quality assessment for this result's inputs.
+    pub data_quality: data::DataQuality,
+    /// Reasons for any data quality degradation.
+    pub quality_reasons: Vec<data::DataQualityReason>,
 }
 
 /// Run the synergy-driven optimization pipeline.
@@ -769,6 +781,8 @@ pub fn optimize_with_gemini(
         combat_squad,
         modifiers,
         rotation: rotation_result,
+        data_quality: data::DataQuality::Verified,
+        quality_reasons: vec![],
     })
 }
 
