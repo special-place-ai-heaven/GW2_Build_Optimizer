@@ -134,7 +134,7 @@ pub fn optimize(
 
     // Score each gear candidate (preliminary — no traits/modifiers yet)
     let empty_mods = DamageModifiers::default();
-    let solo_profile = &combat::default_buff_profiles(ctx)[0];
+    let solo_profile = &combat::buff_profiles_for_profession(&profession.name, ctx)[0];
     let cw = combat::condition_weights_for_profession(&profession.name, ctx);
     for candidate in &mut gear_candidates {
         let mock_stats = calculate_candidate_stats(candidate, itemstats_cache);
@@ -307,7 +307,7 @@ fn optimize_pvp(
         score: 0.0,
     };
 
-    let solo_profile = &combat::default_buff_profiles(ctx)[0];
+    let solo_profile = &combat::buff_profiles_for_profession(&profession.name, ctx)[0];
     let stat_weights = weights.to_stat_weights();
     let cw = combat::condition_weights_for_profession(&profession.name, ctx);
 
@@ -784,7 +784,7 @@ pub fn optimize_with_gemini(
         stage: "Computing combat performance...".into(),
         done: false,
     });
-    let buff_profiles = combat::default_buff_profiles(ctx);
+    let buff_profiles = combat::buff_profiles_for_profession(profession_name, ctx);
     let cw = combat::condition_weights_for_profession(profession_name, ctx);
     let combat_solo = combat::calculate_combat_performance(
         &full_stats, &derived, &modifiers, &buff_profiles[0], &cw, profession_name, ctx,

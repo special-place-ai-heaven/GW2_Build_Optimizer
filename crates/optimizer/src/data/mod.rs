@@ -7,6 +7,7 @@ pub mod normalized_effects;
 pub mod patch_ledger;
 pub mod profession_profiles;
 pub mod quality;
+pub mod rotation_profiles;
 pub mod slot_budgets;
 pub mod universal_formulas;
 
@@ -21,6 +22,10 @@ pub use normalized_effects::{
 };
 pub use patch_ledger::PatchLedger;
 pub use profession_profiles::ProfessionProfiles;
+pub use rotation_profiles::{
+    ApplicationMetrics, BuffProfileFromScenario, ConditionWeightsFromProfile, GenerationMetrics,
+    RotationProfile, RotationProfileData, ScenarioProfile, TargetBehavior,
+};
 pub use quality::{DataQuality, DataQualityReason, FactualValue};
 pub use slot_budgets::{
     SlotBudgets, SlotType, StatShape, EQUIPMENT_SLOTS, stat_shape_from_attr_count,
@@ -109,6 +114,9 @@ pub fn initialize() -> DataState {
         errors.extend(errs);
     }
     if let Err(errs) = normalized_effects::try_load_normalized_effects() {
+        errors.extend(errs);
+    }
+    if let Err(errs) = rotation_profiles::try_load_rotation_profiles() {
         errors.extend(errs);
     }
 
