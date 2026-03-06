@@ -311,3 +311,36 @@ P3-07 can either: (a) replace `attribute_adjustment_for_slot()` with a lookup in
 - [Source: crates/optimizer/src/data/profession_profiles.rs] -- P3-01 loader pattern to follow
 - [Source: crates/optimizer/src/scoring.rs:444] -- Celestial always included in candidate pool
 - [Source: crates/gw2api/src/models/itemstats.rs] -- `ItemStat` and `StatAttribute` structs (formula inputs)
+
+## Dev Agent Record
+
+### Implementation Summary
+
+**Status**: done
+
+**Files created**:
+- `data/slot_budgets/level80_ascended.json` — 36 entries (12 slots x 3 shapes), all evidence_level: Factual
+- `crates/optimizer/src/data/slot_budgets.rs` — loader with `SlotBudgets`, `SlotType`, `StatShape`, `SlotBudgetEntry`, `SlotBudgetError`
+
+**Files modified**:
+- `crates/optimizer/src/data/mod.rs` — added `pub mod slot_budgets;` and `pub use slot_budgets::SlotBudgets;`
+
+**Tests**: 18 new tests, all passing (198 total in optimizer crate, 0 failures)
+
+### Derivation Method
+
+All stat values derived from GW2 API `attribute_adjustment` per slot combined with `itemstat` multiplier/value formulas:
+
+- **Attribute adjustments** verified via `API:2/items` for 12 representative items (Zojja's armor set items 48073-48078, Zojja's Blade 46774, Zojja's Claymore 46762, Mark of the Tethyos Houses 39273, Magister's Field Journal 39232, Ring of Red Death 75669, Beta Fractal Capacitor 37039)
+- **ThreeStat** values verified directly from API item attributes (all 12 slots)
+- **FourStat** values computed from Viper's multipliers (0.3/0.165), cross-verified against API:2/items/74083 (Commander's 2H ShortBow: major=215, minor=118)
+- **CelestialLike** values computed from Celestial multipliers (0.165), cross-verified against API:2/items/74081 (Celestial Ring: all stats=57)
+- **Weight class invariance** confirmed across Heavy (48073-48078), Medium (48085-48090), Light (48079-48084) armor sets
+
+### Key Correction from Story Estimates
+
+The story's "Expected ThreeStat Values Per Slot" table (lines 172-186) contained **incorrect** values for armor slots. The story assumed a single multiplier formula for all items, but the GW2 API uses different itemstat combos:
+- Armor/weapons: stat_id 161 (multiplier only, value=0)
+- Trinkets: stat_ids 584/599 (multiplier + base value 32/18)
+
+Actual API-verified armor values differ from the story estimates (e.g., Helm: actual=63/45 vs story estimate=81/53).
