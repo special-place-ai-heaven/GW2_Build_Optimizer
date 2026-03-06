@@ -189,7 +189,7 @@ development_status:
 
   # P3-10b: Effect Extraction and Population (FR12 partial)
   # BLOCKED until: p3-10a DONE (Review Gate RG-2). HIGH RISK.
-  p3-10b-effect-extraction-population: ready-for-dev
+  p3-10b-effect-extraction-population: done
 
   # P3-11: PvP Optimizer Path Separation (FR9)
   # STORY: docs/stories/P3-11-pvp-path-separation.md
