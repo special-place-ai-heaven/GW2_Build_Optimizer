@@ -1,0 +1,190 @@
+{
+  "_schema": "Boon and combat modifier definitions with mode-specific values",
+  "_precedence_rule": "Per-mode entries (PvE/PvP/WvW) take absolute precedence over all_modes. Loader resolves at load time — no runtime precedence logic needed.",
+  "_evidence_level_key": "Factual = from wiki/API, Derived = computed from factual, Heuristic = estimate",
+  "_corruption_reference": "Boon-to-condition corruption mapping from https://wiki.guildwars2.com/wiki/Boon#Boon_corruption",
+
+  "Fury": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "max_duration": 30,
+    "effect_class": "OffensiveStat",
+    "effects": {
+      "PvE": { "crit_chance_bonus": 0.25 },
+      "PvP": { "crit_chance_bonus": 0.20 },
+      "WvW": { "crit_chance_bonus": 0.20 }
+    },
+    "counterpart_condition": "Blinded",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Fury"]
+  },
+
+  "Might": {
+    "stacking_mode": "Intensity",
+    "max_stacks": 25,
+    "max_duration": 30,
+    "effect_class": "OffensiveStat",
+    "effects": {
+      "all_modes": {
+        "power_per_stack": 30,
+        "condition_damage_per_stack": 30
+      }
+    },
+    "counterpart_condition": "Weakness",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Might"]
+  },
+
+  "Protection": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "max_duration": 30,
+    "effect_class": "Defensive",
+    "effects": {
+      "all_modes": {
+        "incoming_strike_multiplier": 0.67
+      }
+    },
+    "counterpart_condition": "Vulnerability",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Protection"]
+  },
+
+  "Resolution": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "max_duration": 30,
+    "effect_class": "Defensive",
+    "effects": {
+      "all_modes": {
+        "incoming_condition_multiplier": 0.67
+      }
+    },
+    "counterpart_condition": "Confusion",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Resolution"]
+  },
+
+  "Vulnerability": {
+    "stacking_mode": "Intensity",
+    "max_stacks": 25,
+    "max_duration": 30,
+    "effect_class": "Debuff",
+    "effects": {
+      "all_modes": {
+        "incoming_damage_pct_per_stack": 0.01
+      }
+    },
+    "secondary_effects": "Increases strike and condition damage taken",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Vulnerability"]
+  },
+
+  "Quickness": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "max_duration": 30,
+    "effect_class": "OffensiveThroughput",
+    "effects": {
+      "all_modes": {}
+    },
+    "special_mechanics": "Increases action speed; changes cast throughput, not a stat modifier",
+    "counterpart_condition": "Slow",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Quickness"]
+  },
+
+  "Alacrity": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "max_duration": 30,
+    "effect_class": "OffensiveThroughput",
+    "effects": {
+      "all_modes": {}
+    },
+    "special_mechanics": "Reduces skill recharge time; changes skill frequency, not a stat modifier",
+    "counterpart_condition": "Slow",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Alacrity"]
+  },
+
+  "Aegis": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "max_duration": 30,
+    "effect_class": "Defensive",
+    "effects": {
+      "all_modes": {}
+    },
+    "special_mechanics": "Blocks next incoming attack; consumed on block",
+    "counterpart_condition": "Blinded",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Aegis"]
+  },
+
+  "Stability": {
+    "stacking_mode": "Intensity",
+    "max_stacks": 25,
+    "max_duration": 30,
+    "effect_class": "Defensive",
+    "effects": {
+      "all_modes": {}
+    },
+    "counterpart_condition": "Fear",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Stability"]
+  },
+
+  "Resistance": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "max_duration": 30,
+    "effect_class": "Defensive",
+    "effects": {
+      "all_modes": {}
+    },
+    "special_mechanics": "Nondamaging conditions ineffective while active; does not remove them",
+    "counterpart_condition": "Chilled",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Resistance"]
+  },
+
+  "Regeneration": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "max_duration": 30,
+    "effect_class": "Sustain",
+    "effects": {
+      "all_modes": {}
+    },
+    "counterpart_condition": "Poisoned",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Regeneration"]
+  },
+
+  "Vigor": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "max_duration": 30,
+    "effect_class": "Sustain",
+    "effects": {
+      "all_modes": {}
+    },
+    "counterpart_condition": "Crippled",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Vigor"]
+  },
+
+  "Swiftness": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "max_duration": 60,
+    "effect_class": "Utility",
+    "effects": {
+      "all_modes": {}
+    },
+    "counterpart_condition": "Crippled",
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Swiftness"]
+  }
+}

@@ -1,0 +1,296 @@
+{
+  "_schema": "Condition damage formulas per mode. All formulas are level 80.",
+  "_formula": "damage_per_tick = condition_damage_coeff * Condition_Damage + base_per_tick",
+  "_multi_state": "Torment and Confusion have sub-entries for movement/skill-use state dimensions",
+  "_evidence_level_key": "Factual = from wiki/API, Derived = computed from factual, Heuristic = estimate",
+  "_verification": {
+    "L1_burning": "Source-of-truth doc says base=131. Previous code used 131.75. Wiki: https://wiki.guildwars2.com/wiki/Burning — resolved to 131.0 per source-of-truth.",
+    "L2_torment": "Source-of-truth doc values verified. Previous code had only stationary 0.0375*CD+31.875 which was dramatically wrong. Wiki: https://wiki.guildwars2.com/wiki/Torment",
+    "L3_confusion": "Source-of-truth doc values verified. Previous code had only on-use 0.0175*CD+11.0 which was dramatically wrong. Wiki: https://wiki.guildwars2.com/wiki/Confusion"
+  },
+
+  "Bleeding": {
+    "stacking_mode": "Intensity",
+    "max_stacks": 1500,
+    "effect_class": "Damage",
+    "formulas": {
+      "PvE": {
+        "base_per_tick": 22.0,
+        "condition_damage_coeff": 0.06,
+        "delivery": "tick"
+      },
+      "PvP": {
+        "base_per_tick": 22.0,
+        "condition_damage_coeff": 0.06,
+        "delivery": "tick"
+      },
+      "WvW": {
+        "base_per_tick": 22.0,
+        "condition_damage_coeff": 0.06,
+        "delivery": "tick"
+      }
+    },
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Bleeding"]
+  },
+
+  "Burning": {
+    "stacking_mode": "Intensity",
+    "max_stacks": 1500,
+    "effect_class": "Damage",
+    "formulas": {
+      "PvE": {
+        "base_per_tick": 131.0,
+        "condition_damage_coeff": 0.155,
+        "delivery": "tick"
+      },
+      "PvP": {
+        "base_per_tick": 131.0,
+        "condition_damage_coeff": 0.155,
+        "delivery": "tick"
+      },
+      "WvW": {
+        "base_per_tick": 131.0,
+        "condition_damage_coeff": 0.155,
+        "delivery": "tick"
+      }
+    },
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Burning"]
+  },
+
+  "Poisoned": {
+    "stacking_mode": "Intensity",
+    "max_stacks": 1500,
+    "effect_class": "Damage",
+    "secondary_effects": "Reduces healing effectiveness by 33%",
+    "formulas": {
+      "PvE": {
+        "base_per_tick": 33.5,
+        "condition_damage_coeff": 0.06,
+        "delivery": "tick"
+      },
+      "PvP": {
+        "base_per_tick": 33.5,
+        "condition_damage_coeff": 0.06,
+        "delivery": "tick"
+      },
+      "WvW": {
+        "base_per_tick": 33.5,
+        "condition_damage_coeff": 0.06,
+        "delivery": "tick"
+      }
+    },
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Poisoned"]
+  },
+
+  "Torment": {
+    "stacking_mode": "Intensity",
+    "max_stacks": 1500,
+    "effect_class": "Damage",
+    "formulas": {
+      "PvE": {
+        "stationary": {
+          "base_per_tick": 31.8,
+          "condition_damage_coeff": 0.09
+        },
+        "moving": {
+          "base_per_tick": 22.0,
+          "condition_damage_coeff": 0.06
+        }
+      },
+      "PvP": {
+        "stationary": {
+          "base_per_tick": 26.0,
+          "condition_damage_coeff": 0.07
+        },
+        "moving": {
+          "base_per_tick": 19.8,
+          "condition_damage_coeff": 0.054
+        }
+      },
+      "WvW": {
+        "stationary": {
+          "base_per_tick": 26.0,
+          "condition_damage_coeff": 0.07
+        },
+        "moving": {
+          "base_per_tick": 19.8,
+          "condition_damage_coeff": 0.054
+        }
+      }
+    },
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Torment"]
+  },
+
+  "Confusion": {
+    "stacking_mode": "Intensity",
+    "max_stacks": 1500,
+    "effect_class": "Damage",
+    "formulas": {
+      "PvE": {
+        "over_time": {
+          "base_per_tick": 18.25,
+          "condition_damage_coeff": 0.05
+        },
+        "on_skill_use": {
+          "base_per_tick": 16.24,
+          "condition_damage_coeff": 0.0325
+        }
+      },
+      "PvP": {
+        "over_time": {
+          "base_per_tick": 10.0,
+          "condition_damage_coeff": 0.0
+        },
+        "on_skill_use": {
+          "base_per_tick": 49.5,
+          "condition_damage_coeff": 0.0975
+        }
+      },
+      "WvW": {
+        "over_time": {
+          "base_per_tick": 10.0,
+          "condition_damage_coeff": 0.0
+        },
+        "on_skill_use": {
+          "base_per_tick": 49.5,
+          "condition_damage_coeff": 0.0975
+        }
+      }
+    },
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Confusion"]
+  },
+
+  "Vulnerability": {
+    "stacking_mode": "Intensity",
+    "max_stacks": 25,
+    "effect_class": "Debuff",
+    "formulas": {
+      "PvE": {
+        "incoming_damage_pct_per_stack": 0.01
+      },
+      "PvP": {
+        "incoming_damage_pct_per_stack": 0.01
+      },
+      "WvW": {
+        "incoming_damage_pct_per_stack": 0.01
+      }
+    },
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Vulnerability"]
+  },
+
+  "Weakness": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "effect_class": "Suppression",
+    "suppression_effects": {
+      "channels": ["strike_output", "dodge_economy"],
+      "description": "-50% endurance regen, glancing blows"
+    },
+    "formulas": {},
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Weakness"]
+  },
+
+  "Blinded": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "effect_class": "Suppression",
+    "suppression_effects": {
+      "channels": ["strike_output"]
+    },
+    "special_mechanics": "Next outgoing attack misses; consumed per hit",
+    "formulas": {},
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Blinded"]
+  },
+
+  "Slow": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "effect_class": "Suppression",
+    "suppression_effects": {
+      "channels": ["action_throughput"]
+    },
+    "formulas": {},
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Slow"]
+  },
+
+  "Chilled": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "effect_class": "Suppression",
+    "suppression_effects": {
+      "channels": ["skill_frequency", "positioning"]
+    },
+    "formulas": {},
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Chilled"]
+  },
+
+  "Immobile": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "effect_class": "Control",
+    "suppression_effects": {
+      "channels": ["positioning"]
+    },
+    "formulas": {},
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Immobile"]
+  },
+
+  "Crippled": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "effect_class": "Control",
+    "suppression_effects": {
+      "channels": ["positioning"]
+    },
+    "formulas": {},
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Crippled"]
+  },
+
+  "Fear": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "effect_class": "Control",
+    "suppression_effects": {
+      "channels": ["action_throughput", "positioning"]
+    },
+    "formulas": {},
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Fear"]
+  },
+
+  "Taunt": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "effect_class": "Control",
+    "suppression_effects": {
+      "channels": ["action_throughput"]
+    },
+    "formulas": {},
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Taunt"]
+  },
+
+  "Daze": {
+    "stacking_mode": "Duration",
+    "max_stacks": 1,
+    "effect_class": "Control",
+    "suppression_effects": {
+      "channels": ["action_throughput"]
+    },
+    "formulas": {},
+    "evidence_level": "Factual",
+    "sources": ["https://wiki.guildwars2.com/wiki/Daze"]
+  }
+}
