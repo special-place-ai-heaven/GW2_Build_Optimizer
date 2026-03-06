@@ -1,6 +1,6 @@
 # Story 3.05: Duration Formulas
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -54,31 +54,28 @@ grep -n "clamp(0.0, 100.0)" crates/optimizer/src/combat.rs  # should only remain
 
 ### 1. Create duration formula functions (AC: 1, 2, 3, 4, 5, 6, 8)
 
-- [ ] Add duration formula functions in `crates/optimizer/src/combat.rs` (or a new `duration.rs` if preferred)
-  - [ ] `fn condition_duration_multiplier(base_duration: f64, expertise: f64, global_condi_dur_bonus: f64, specific_condi_dur_bonus: f64, cap: f64, _ctx: &BalanceContext) -> f64`
+- [x] Add duration formula functions in `crates/optimizer/src/combat.rs` (or a new `duration.rs` if preferred)
+  - [x] `fn condition_duration_multiplied(base_duration: f64, expertise: f64, global_condi_dur_bonus: f64, specific_condi_dur_bonus: f64, cap: f64, _ctx: &BalanceContext) -> f64`
     - Computes: `base_duration * (1.0 + ((expertise / 1500.0) + global_condi_dur_bonus + specific_condi_dur_bonus).min(cap))`
     - The divisor 1500.0 is derived from the expertise constant (15 expertise per 1% = 15/0.01 = 1500)
-  - [ ] `fn boon_duration_multiplier(base_duration: f64, concentration: f64, global_boon_dur_bonus: f64, cap: f64, _ctx: &BalanceContext) -> f64`
+  - [x] `fn boon_duration_multiplied(base_duration: f64, concentration: f64, global_boon_dur_bonus: f64, cap: f64, _ctx: &BalanceContext) -> f64`
     - Computes: `base_duration * (1.0 + ((concentration / 1500.0) + global_boon_dur_bonus).min(cap))`
-  - [ ] `fn condition_duration_bonus(expertise: f64, global_condi_pct: f64, specific_condi_pct: f64, cap: f64) -> f64`
+  - [x] `fn condition_duration_bonus(expertise: f64, global_condi_pct: f64, specific_condi_pct: f64, cap: f64, _ctx: &BalanceContext) -> f64`
     - Returns the capped bonus ratio: `((expertise / 1500.0) + global_condi_pct + specific_condi_pct).min(cap)`
     - Useful for the existing `condi_duration_pct` / per-condition `*_dur` calculation in `calculate_combat_performance()`
-  - [ ] `fn boon_duration_bonus(concentration: f64, global_boon_pct: f64, cap: f64) -> f64`
+  - [x] `fn boon_duration_bonus(concentration: f64, global_boon_pct: f64, cap: f64, _ctx: &BalanceContext) -> f64`
     - Returns the capped bonus ratio: `((concentration / 1500.0) + global_boon_pct).min(cap)`
 
 ### 2. Replace hardcoded duration math in `calculate_combat_performance()` (AC: 7)
 
 File: `crates/optimizer/src/combat.rs`, lines ~303-330
 
-- [ ] Replace `(stats.expertise / 15.0).clamp(0.0, 100.0)` (line ~304) with a call to the new duration bonus function
+- [x] Replace `(stats.expertise / 15.0).clamp(0.0, 100.0)` (line ~304) with a call to the new duration bonus function
   - Current code works in percentage-point space (0-100); new code should work in ratio space (0.0-1.0) for consistency with `universal.json` cap convention
-  - **Decision point**: The existing code uses percentage points throughout `DamageModifiers` and `CombatPerformance`. The dev agent must decide whether to:
-    - (a) Convert duration internals to ratio space (0.0-1.0) and update `DamageModifiers` methods + `CombatPerformance` fields, OR
-    - (b) Keep percentage-point space and derive the cap as `condition_duration_cap * 100.0` from loaded data
-  - Option (b) is lower risk for this story; option (a) is cleaner long-term but has wider blast radius
-- [ ] Replace `(stats.concentration / 15.0).clamp(0.0, 100.0)` (line ~329) similarly
-- [ ] Replace per-condition duration lines (~310-314): use the new `condition_duration_bonus()` function with per-condition specific modifiers
-- [ ] Ensure `condi_duration_pct` and `boon_duration_pct` fields on `CombatPerformance` still report correct values for UI display
+  - **Decision**: Chose hybrid approach — duration functions work in ratio space (0.0-1.0), call sites convert to percentage points (×100.0) for `CombatPerformance` fields. Minimal blast radius, clean functions.
+- [x] Replace `(stats.concentration / 15.0).clamp(0.0, 100.0)` (line ~329) similarly
+- [x] Replace per-condition duration lines (~310-314): use the new `condition_duration_bonus()` function with per-condition specific modifiers
+- [x] Ensure `condi_duration_pct` and `boon_duration_pct` fields on `CombatPerformance` still report correct values for UI display
 
 ### 3. Integrate with P3-03 loaded data (blocked on P3-03) (AC: 7)
 
@@ -87,24 +84,25 @@ File: `crates/optimizer/src/combat.rs`, lines ~303-330
   - Actually: `expertise_per_condition_duration_pct: 15` means "15 Expertise = 1 percentage point". So bonus ratio = `expertise / (expertise_per_condition_duration_pct * 100)` = `expertise / 1500`
 - [ ] Replace literal cap values with reads from loaded `condition_duration_cap` and `boon_duration_cap`
 - [ ] Same for `concentration_per_boon_duration_pct`
+NOTE: Task 3 is intentionally left unchecked — blocked on P3-03. Constants are defined as named consts with TODO comments referencing P3-03.
 
 ### 4. Write tests with source citations (AC: 9, 10)
 
-- [ ] `test_condition_duration_basic` -- 450 Expertise + 20% Burning Duration modifier: `3.0 * (1 + 450/1500 + 0.20) = 3.0 * 1.50 = 4.5s`. Source: wiki/Expertise
-- [ ] `test_boon_duration_basic` -- 600 Concentration: `5.0 * (1 + 600/1500) = 5.0 * 1.40 = 7.0s`. Source: wiki/Boon_Duration
-- [ ] `test_condition_duration_cap` -- 1800 Expertise + 30% modifier: raw bonus = 1800/1500 + 0.30 = 1.50, capped at 1.0. Result: `3.0 * (1 + 1.0) = 6.0s`. Source: wiki/Condition_Duration ("maximum 100%")
-- [ ] `test_boon_duration_cap` -- 2000 Concentration: raw bonus = 2000/1500 = 1.333, capped at 1.0. Result: `5.0 * 2.0 = 10.0s`. Source: wiki/Boon_Duration ("maximum 100%")
-- [ ] `test_condition_duration_additive_stacking` -- global 10% + specific Burning 20% + Expertise 300: bonus = 300/1500 + 0.10 + 0.20 = 0.50. Result: `4.0 * 1.50 = 6.0s`
-- [ ] `test_zero_expertise_zero_modifiers` -- 0 Expertise, no modifiers: bonus = 0.0. `base * 1.0 = base`
-- [ ] `test_duration_bonus_ratio_values` -- verify `condition_duration_bonus()` and `boon_duration_bonus()` return correct ratio values for known inputs
-- [ ] `test_combat_performance_condi_duration_matches` -- existing test `test_condi_build_has_high_condi_dps` (expertise 600, expects ~40% duration) still passes with new implementation
-- [ ] `test_balance_context_accepted` -- verify duration functions compile and run with `BalanceContext::pve()` parameter (signature future-proofing)
+- [x] `test_condition_duration_basic` -- 450 Expertise + 20% Burning Duration modifier: `3.0 * (1 + 450/1500 + 0.20) = 3.0 * 1.50 = 4.5s`. Source: wiki/Expertise
+- [x] `test_boon_duration_basic` -- 600 Concentration: `5.0 * (1 + 600/1500) = 5.0 * 1.40 = 7.0s`. Source: wiki/Boon_Duration
+- [x] `test_condition_duration_cap` -- 1800 Expertise + 30% modifier: raw bonus = 1800/1500 + 0.30 = 1.50, capped at 1.0. Result: `3.0 * (1 + 1.0) = 6.0s`. Source: wiki/Condition_Duration ("maximum 100%")
+- [x] `test_boon_duration_cap` -- 2000 Concentration: raw bonus = 2000/1500 = 1.333, capped at 1.0. Result: `5.0 * 2.0 = 10.0s`. Source: wiki/Boon_Duration ("maximum 100%")
+- [x] `test_condition_duration_additive_stacking` -- global 10% + specific Burning 20% + Expertise 300: bonus = 300/1500 + 0.10 + 0.20 = 0.50. Result: `4.0 * 1.50 = 6.0s`
+- [x] `test_zero_expertise_zero_modifiers` -- 0 Expertise, no modifiers: bonus = 0.0. `base * 1.0 = base`
+- [x] `test_duration_bonus_ratio_values` -- verify `condition_duration_bonus()` and `boon_duration_bonus()` return correct ratio values for known inputs
+- [x] `test_combat_performance_condi_duration_matches` -- existing test `test_condi_build_has_high_condi_dps` (expertise 600, expects ~40% duration) still passes with new implementation
+- [x] `test_balance_context_accepted` -- verify duration functions compile and run with `BalanceContext::pve()` parameter (signature future-proofing)
 
 ### 5. Verify existing tests still pass (AC: 7)
 
-- [ ] Run full `cargo test --package gw2-optimizer` -- no regressions
-- [ ] Specifically verify `test_condi_build_has_high_condi_dps` (combat.rs ~888) still expects `condi_duration_pct` ~40.0 for 600 Expertise
-- [ ] Verify `test_parse_rune_modifier_*` tests still pass (these test modifier extraction, not duration math)
+- [x] Run full `cargo test --package gw2-optimizer` -- no regressions (189 passed, 0 failed)
+- [x] Specifically verify `test_condi_build_has_high_condi_dps` (combat.rs ~888) still expects `condi_duration_pct` ~40.0 for 600 Expertise
+- [x] Verify `test_parse_rune_modifier_*` tests still pass (these test modifier extraction, not duration math)
 
 ## Dev Notes
 
