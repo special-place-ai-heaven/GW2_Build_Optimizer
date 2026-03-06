@@ -206,7 +206,7 @@ development_status:
   # Phase C -- Heuristic Layer and Scoring Isolation
   # P3-14: Rotation Profiles and Heuristic Uptime Population (FR13, D7)
   # BLOCKED until: p3-04 + p3-07 + p3-10b DONE. HIGH RISK.
-  p3-14-rotation-profiles: backlog
+  p3-14-rotation-profiles: done
 
   # P3-15: Objective Profiles and Typed State-Aware Scorer Isolation (FR20, D6)
   # BLOCKED until: p3-14 + p3-10b + p3-13 DONE. HIGH RISK.
