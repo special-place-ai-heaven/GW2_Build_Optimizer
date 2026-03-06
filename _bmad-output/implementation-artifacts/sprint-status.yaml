@@ -173,11 +173,11 @@ development_status:
   # Phase B -- Data Infrastructure and Mode Paths
   # P3-07: Typed Loaders and Hardcoded Constant Replacement (FR17, FR18, D5)
   # STORY: docs/stories/P3-07-typed-loaders.md
-  p3-07-typed-loaders: ready-for-dev
+  p3-07-typed-loaders: done
 
   # P3-08: Patch Manifest and Patch Ledger Infrastructure (FR21, FR22)
   # STORY: docs/stories/P3-08-patch-manifest-ledger.md
-  p3-08-patch-manifest-ledger: ready-for-dev
+  p3-08-patch-manifest-ledger: done
 
   # P3-09: Balance Override Datasets and Unknown-Value Handling (FR10, FR14)
   # BLOCKED until: p3-08 DONE. HIGH RISK.
