@@ -17,7 +17,7 @@ pub use boon_condition_formulas::{BoonFormulas, ConditionFormulas, boons, condit
 pub use manifests::{PatchManifest, check_staleness};
 pub use normalized_effects::{
     EffectCategory, NormalizedEffect, SourceType, StackingRule, StatusOperation, TriggerRule,
-    UptimeModel,
+    UptimeModel, map_legacy_effect, score_effect,
 };
 pub use patch_ledger::PatchLedger;
 pub use profession_profiles::ProfessionProfiles;
