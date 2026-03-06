@@ -10,6 +10,7 @@ use gw2_api::models::{Fact, ItemStat, Trait as GW2Trait};
 
 use crate::balance::BalanceContext;
 use crate::combat::{self, CombatPerformance, DamageModifiers};
+use crate::data;
 use crate::engine::BuildCandidate;
 use crate::gamedb::GameDb;
 use crate::gemini::{FunctionDeclaration, Tool};
@@ -1225,24 +1226,17 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
 
 // ─── Helpers ───
 
-/// Ascended attribute_adjustment per equipment slot (matches engine.rs exactly).
-const SLOT_ADJUSTMENTS: &[(&str, f64)] = &[
-    ("Helm", 141.0), ("Shoulders", 141.0), ("Coat", 225.0),
-    ("Gloves", 141.0), ("Leggings", 171.0), ("Boots", 141.0),
-    ("WeaponA1", 251.0), ("WeaponA2", 125.0),
-    ("WeaponB1", 251.0), ("WeaponB2", 125.0),
-    ("Backpack", 63.0), ("Accessory1", 110.0), ("Accessory2", 110.0),
-    ("Amulet", 157.0), ("Ring1", 126.0), ("Ring2", 126.0),
-];
-
-/// Calculate gear stats for a full set of one prefix using per-slot attribute adjustments.
-/// Uses the same formula as engine.rs: `adjustment * multiplier + value` per slot.
+/// Calculate gear stats for a full set of one prefix using slot budget data.
+/// Iterates all 16 equipment slots and applies budget-based major/minor values.
 fn calculate_full_set_stats(itemstat: &ItemStat) -> stats::StatBlock {
     let mut gear_stats = stats::StatBlock::default();
-    for &(_slot, adj) in SLOT_ADJUSTMENTS {
-        for attr in &itemstat.attributes {
-            let value = (adj * attr.multiplier + attr.value as f64).round();
-            gear_stats.add(&attr.attribute, value);
+    let budgets = data::slot_budgets::slot_budgets();
+    let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
+    for &(slot_type, _) in data::EQUIPMENT_SLOTS {
+        if let Some(budget) = budgets.get(slot_type, shape) {
+            crate::engine::add_budget_stats_for_itemstat(
+                &mut gear_stats, itemstat, budget,
+            );
         }
     }
     gear_stats
