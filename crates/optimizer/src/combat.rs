@@ -251,9 +251,8 @@ pub fn condition_weights_for_profession(profession: &str, _ctx: &BalanceContext)
 
 // ─── Combat Performance Calculation ───
 
-/// Reference target armor for DPS index calculations (typical raid boss).
-const REFERENCE_ARMOR: f64 = 2597.0;
 /// Reference weapon strength (Ascended greatsword average).
+/// This is an empirical reference baseline, NOT a wiki formula constant.
 const REFERENCE_WEAPON_STRENGTH: f64 = 1100.0;
 
 /// Calculate full combat performance metrics for a build.
@@ -282,9 +281,12 @@ pub fn calculate_combat_performance(
     let total_condition_damage = stats.condition_damage + might_condi;
 
     // Crit chance: base from precision + fury
-    let crit_chance = (((total_precision - 895.0) / 21.0) + fury_crit).clamp(0.0, 100.0);
-    // Crit damage: 150% + ferocity/15 + trait bonuses
-    let crit_damage = 150.0 + stats.ferocity / 15.0 + modifiers.total_crit_damage_bonus();
+    // Source: https://wiki.guildwars2.com/wiki/Critical_Chance
+    let f = crate::data::universal_formulas::formulas();
+    let crit_chance = (f.crit_chance(total_precision) + fury_crit).clamp(0.0, 100.0);
+    // Crit damage: base + ferocity component + trait bonuses
+    // Source: https://wiki.guildwars2.com/wiki/Ferocity
+    let crit_damage = f.crit_damage(stats.ferocity) + modifiers.total_crit_damage_bonus();
 
     // Effective power with strike modifiers
     let crit_factor = 1.0 + (crit_chance / 100.0) * (crit_damage / 100.0 - 1.0);
@@ -295,13 +297,13 @@ pub fn calculate_combat_performance(
 
     // Strike DPS index (normalized)
     let strike_dps_index =
-        effective_power * vuln_mult * REFERENCE_WEAPON_STRENGTH / REFERENCE_ARMOR;
+        effective_power * vuln_mult * REFERENCE_WEAPON_STRENGTH / f.tooltip_reference_armor;
 
     // Condition ticks (with modifiers applied)
     let condition_ticks = calculate_condition_ticks(total_condition_damage, modifiers, ctx);
 
     // Condition duration from expertise + modifiers
-    let base_condi_duration = (stats.expertise / 15.0).clamp(0.0, 100.0);
+    let base_condi_duration = (stats.expertise / f.expertise_per_condition_duration_pct).clamp(0.0, 100.0);
     let total_condi_duration = (base_condi_duration + modifiers.total_condi_duration_bonus()).clamp(0.0, 100.0);
 
     // Condition DPS index: weighted sum of ticks * per-condition duration multiplier * vuln
@@ -326,11 +328,12 @@ pub fn calculate_combat_performance(
     let healing_power_index = stats.healing_power * modifiers.total_healing_mult();
 
     // Boon duration from concentration + modifiers
-    let base_boon_duration = (stats.concentration / 15.0).clamp(0.0, 100.0);
+    let base_boon_duration = (stats.concentration / f.concentration_per_boon_duration_pct).clamp(0.0, 100.0);
     let boon_duration_pct = (base_boon_duration + modifiers.total_boon_duration_bonus()).clamp(0.0, 100.0);
 
     // Survivability
-    let health = stats::base_health(profession) + stats.vitality * 10.0;
+    // Source: https://wiki.guildwars2.com/wiki/Health
+    let health = stats::base_health(profession) + stats.vitality * f.vitality_to_health;
     let armor = stats.toughness + stats::base_defense(profession);
 
     // GW2 damage formula: Damage = Power * coeff * weapon_strength / Armor
@@ -340,7 +343,7 @@ pub fn calculate_combat_performance(
     // Blended EHP: 65% strike / 35% condition weighting (typical PvE encounter mix).
     let protection_dr = if buffs.protection { 0.33 } else { 0.0 };
     let resolution_dr = if buffs.resolution { 0.33 } else { 0.0 };
-    let strike_ehp = health * armor / REFERENCE_ARMOR / (1.0 - protection_dr);
+    let strike_ehp = health * armor / f.tooltip_reference_armor / (1.0 - protection_dr);
     let condition_ehp = health / (1.0 - resolution_dr);
     let effective_health = strike_ehp * 0.65 + condition_ehp * 0.35;
     let blended_dr = protection_dr * 0.65 + resolution_dr * 0.35;
