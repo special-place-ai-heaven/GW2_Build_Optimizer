@@ -495,10 +495,13 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                             "bg thread panicked: setup_data_download",
                         );
                         crate::state::with_state(|s| {
-                            if let Some(ref mut dl) = s.setup.download_progress {
-                                dl.error = Some("thread panicked".into());
-                                dl.done = true;
-                            }
+                            s.setup.download_progress = Some(crate::state::DownloadState {
+                                current_step: 0,
+                                total_steps: 0,
+                                step_name: String::new(),
+                                done: true,
+                                error: Some("thread panicked".into()),
+                            });
                         });
                     }
                 });
