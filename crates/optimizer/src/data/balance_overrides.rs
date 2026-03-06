@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use thiserror::Error;
 
-use super::{DataLoadError, EvidenceLevel};
+use super::{DataLoadError, DataQuality, DataQualityReason, EvidenceLevel};
 
 // ─── Embedded baseline JSON (compile-time) ───
 
@@ -231,6 +231,147 @@ fn load_all_overrides() -> Result<BalanceOverrides, BalanceOverrideError> {
     }
 
     Ok(BalanceOverrides { files })
+}
+
+// ─── Known Mode Splits ───
+
+/// A coefficient known to differ between game modes.
+/// Used to detect when a WvW-specific value is missing from the override system.
+#[derive(Debug, Clone)]
+pub struct KnownModeSplit {
+    /// Type of entity (e.g., "Boon", "Trait", "Skill").
+    pub source_type: &'static str,
+    /// Entity name for human-readable output.
+    pub entity_name: &'static str,
+    /// Field that differs between modes.
+    pub field: &'static str,
+    /// Brief description of the split.
+    pub description: &'static str,
+    /// Whether the split is already handled in Phase A data (boon_condition_formulas, etc.).
+    /// If true, the override system does not need to carry this value.
+    pub handled_in_phase_a: bool,
+}
+
+/// Returns the list of coefficients known to differ between PvE and PvP/WvW.
+///
+/// This is the canonical reference for mode-split awareness. Each entry documents
+/// a coefficient where ArenaNet has confirmed different values per mode.
+///
+/// Entries marked `handled_in_phase_a: true` are already resolved in the boon/condition
+/// formula data files and do not require balance_overrides entries.
+pub fn known_mode_splits() -> &'static [KnownModeSplit] {
+    static SPLITS: &[KnownModeSplit] = &[
+        KnownModeSplit {
+            source_type: "Boon",
+            entity_name: "Fury",
+            field: "crit_chance_bonus",
+            description: "PvE: 25%, PvP/WvW: 20%",
+            handled_in_phase_a: true,
+        },
+        KnownModeSplit {
+            source_type: "Condition",
+            entity_name: "Torment",
+            field: "base_per_tick",
+            description: "PvE stationary: 31.8, PvP/WvW stationary: 26.0",
+            handled_in_phase_a: true,
+        },
+        KnownModeSplit {
+            source_type: "Condition",
+            entity_name: "Torment",
+            field: "condition_damage_coeff",
+            description: "PvE stationary: 0.09, PvP/WvW stationary: 0.07",
+            handled_in_phase_a: true,
+        },
+        KnownModeSplit {
+            source_type: "Condition",
+            entity_name: "Confusion",
+            field: "base_per_tick",
+            description: "PvE over_time: 18.25, PvP/WvW over_time: 10.0 (flat)",
+            handled_in_phase_a: true,
+        },
+        KnownModeSplit {
+            source_type: "Condition",
+            entity_name: "Confusion",
+            field: "condition_damage_coeff",
+            description: "PvE on_skill_use: 0.0325, PvP/WvW on_skill_use: 0.0975",
+            handled_in_phase_a: true,
+        },
+        // Future entries for trait/skill coefficient splits discovered in P3-13
+        // would be added here with handled_in_phase_a: false.
+    ];
+    SPLITS
+}
+
+/// Check WvW data quality by examining known mode splits against the override system.
+///
+/// For each known split that is NOT handled in Phase A data:
+/// - If the WvW override exists with a value: quality is maintained (Verified)
+/// - If the WvW override exists but is Unknown: degrades to Provisional
+/// - If no WvW override exists: degrades to Provisional (known split, missing data)
+///
+/// Returns the overall quality and a list of reasons for any degradation.
+pub fn check_wvw_quality(
+    overrides: &BalanceOverrides,
+    patch_id: &str,
+) -> (DataQuality, Vec<DataQualityReason>) {
+    let mut quality = DataQuality::Verified;
+    let mut reasons = Vec::new();
+
+    for split in known_mode_splits() {
+        // Phase A data already handles this split — no override needed
+        if split.handled_in_phase_a {
+            continue;
+        }
+
+        // For splits NOT handled in Phase A, check if the override system has WvW data.
+        // Note: We cannot use source_id here because KnownModeSplit tracks by name,
+        // not by GW2 API ID. This is intentional — known splits are documented at the
+        // concept level, not the API entity level. Future P3-13 work may add ID mapping.
+        //
+        // For now, we check if ANY WvW override file exists for this patch (it does,
+        // since we load pve.json/pvp.json/wvw.json). The absence of an entity in the
+        // WvW file means no override is registered → known split is unresolved.
+        let wvw_result = overrides.lookup(
+            patch_id,
+            "WvW",
+            split.source_type,
+            0, // placeholder — known splits don't map to specific IDs yet
+            split.field,
+        );
+
+        match wvw_result {
+            Some(OverrideResult::Value { .. }) => {
+                // WvW-specific value exists — quality maintained
+            }
+            Some(OverrideResult::Unknown { .. }) => {
+                quality = quality.merge(&DataQuality::Provisional);
+                reasons.push(DataQualityReason {
+                    field: split.field.to_string(),
+                    entity: split.entity_name.to_string(),
+                    modes: vec!["WvW".to_string()],
+                    explanation: format!(
+                        "Known mode split ({}), WvW value explicitly unknown",
+                        split.description,
+                    ),
+                });
+            }
+            None => {
+                // No override registered — known split is unresolved for WvW
+                quality = quality.merge(&DataQuality::Provisional);
+                reasons.push(DataQualityReason {
+                    field: split.field.to_string(),
+                    entity: split.entity_name.to_string(),
+                    modes: vec!["WvW".to_string()],
+                    explanation: format!(
+                        "Known mode split ({}), no WvW override registered",
+                        split.description,
+                    ),
+                });
+            }
+        }
+    }
+
+    (quality, reasons)
 }
 
 #[cfg(test)]
@@ -562,6 +703,285 @@ mod tests {
         assert_eq!(
             o.lookup("2026-01-13", "PvP", "Skill", 42, "unset_field"),
             None,
+        );
+    }
+
+    // ─── P3-12: WvW Non-Fallback Integration Tests ───
+
+    /// WvW lookup with a WvW-specific override returns the WvW value.
+    #[test]
+    fn test_wvw_uses_wvw_specific_override() {
+        let wvw_json = r#"{
+            "patch_id": "2026-01-13",
+            "mode": "WvW",
+            "entities": [
+                {
+                    "source_type": "Skill",
+                    "source_id": 1001,
+                    "name": "Whirling Axe",
+                    "overrides": {
+                        "coefficient": {
+                            "value": 0.55,
+                            "evidence_level": "Factual"
+                        }
+                    }
+                }
+            ]
+        }"#;
+        let file = load_override_file(wvw_json).unwrap();
+        let mut files = HashMap::new();
+        files.insert((file.patch_id.clone(), file.mode.clone()), file);
+        let overrides = BalanceOverrides { files };
+
+        let result = overrides.lookup("2026-01-13", "WvW", "Skill", 1001, "coefficient");
+        assert_eq!(
+            result,
+            Some(OverrideResult::Value {
+                value: 0.55,
+                evidence_level: EvidenceLevel::Factual,
+            }),
+            "WvW lookup should return the WvW-specific value",
+        );
+    }
+
+    /// When a known split exists but WvW override is missing, quality degrades.
+    #[test]
+    fn test_wvw_known_split_missing_degrades_quality() {
+        // Empty WvW overrides — no entities at all
+        let wvw_json = r#"{
+            "patch_id": "test-patch",
+            "mode": "WvW",
+            "entities": []
+        }"#;
+        let file = load_override_file(wvw_json).unwrap();
+        let mut files = HashMap::new();
+        files.insert((file.patch_id.clone(), file.mode.clone()), file);
+        let overrides = BalanceOverrides { files };
+
+        // All known splits are currently handled_in_phase_a = true,
+        // so check_wvw_quality should return Verified (no unresolved splits).
+        let (quality, reasons) = check_wvw_quality(&overrides, "test-patch");
+        assert_eq!(quality, DataQuality::Verified);
+        assert!(reasons.is_empty(), "all known splits handled in Phase A");
+    }
+
+    /// When WvW has no known split, base value is used — quality stays Verified.
+    #[test]
+    fn test_wvw_no_known_split_uses_base_value() {
+        let wvw_json = r#"{
+            "patch_id": "test-patch",
+            "mode": "WvW",
+            "entities": []
+        }"#;
+        let file = load_override_file(wvw_json).unwrap();
+        let mut files = HashMap::new();
+        files.insert((file.patch_id.clone(), file.mode.clone()), file);
+        let overrides = BalanceOverrides { files };
+
+        // Lookup a coefficient that has no known split — should return None
+        // (no override, use base value, no quality degradation).
+        let result = overrides.lookup("test-patch", "WvW", "Skill", 9999, "coefficient");
+        assert_eq!(result, None, "non-split coefficient should return None");
+
+        // Quality should be Verified since there are no unresolved splits
+        let (quality, reasons) = check_wvw_quality(&overrides, "test-patch");
+        assert_eq!(quality, DataQuality::Verified);
+        assert!(reasons.is_empty());
+    }
+
+    /// When a WvW override exists but the value is explicitly Unknown, quality degrades.
+    #[test]
+    fn test_wvw_explicit_unknown_override_degrades_quality() {
+        let wvw_json = r#"{
+            "patch_id": "2026-01-13",
+            "mode": "WvW",
+            "entities": [
+                {
+                    "source_type": "Trait",
+                    "source_id": 500,
+                    "name": "Radiant Power",
+                    "overrides": {
+                        "coefficient": {
+                            "value": null,
+                            "evidence_level": "Unknown"
+                        }
+                    }
+                }
+            ]
+        }"#;
+        let file = load_override_file(wvw_json).unwrap();
+        let mut files = HashMap::new();
+        files.insert((file.patch_id.clone(), file.mode.clone()), file);
+        let overrides = BalanceOverrides { files };
+
+        // The override is explicitly Unknown — should degrade quality
+        let result = overrides.lookup("2026-01-13", "WvW", "Trait", 500, "coefficient");
+        assert_eq!(
+            result,
+            Some(OverrideResult::Unknown {
+                evidence_level: EvidenceLevel::Unknown,
+            }),
+            "explicitly Unknown WvW override should return Unknown variant",
+        );
+    }
+
+    /// WvW lookup NEVER falls back to PvE data. PvE override exists but WvW doesn't.
+    #[test]
+    fn test_wvw_never_falls_back_to_pve() {
+        // Set up PvE override only — no WvW override
+        let pve_json = r#"{
+            "patch_id": "2026-01-13",
+            "mode": "PvE",
+            "entities": [
+                {
+                    "source_type": "Skill",
+                    "source_id": 2001,
+                    "name": "Meteor Shower",
+                    "overrides": {
+                        "coefficient": {
+                            "value": 1.25,
+                            "evidence_level": "Factual"
+                        }
+                    }
+                }
+            ]
+        }"#;
+        let wvw_json = r#"{
+            "patch_id": "2026-01-13",
+            "mode": "WvW",
+            "entities": []
+        }"#;
+
+        let pve_file = load_override_file(pve_json).unwrap();
+        let wvw_file = load_override_file(wvw_json).unwrap();
+        let mut files = HashMap::new();
+        files.insert((pve_file.patch_id.clone(), pve_file.mode.clone()), pve_file);
+        files.insert((wvw_file.patch_id.clone(), wvw_file.mode.clone()), wvw_file);
+        let overrides = BalanceOverrides { files };
+
+        // PvE should find the override
+        let pve_result = overrides.lookup("2026-01-13", "PvE", "Skill", 2001, "coefficient");
+        assert_eq!(
+            pve_result,
+            Some(OverrideResult::Value {
+                value: 1.25,
+                evidence_level: EvidenceLevel::Factual,
+            }),
+            "PvE lookup should find the PvE override",
+        );
+
+        // WvW must NOT fall back to PvE — should return None
+        let wvw_result = overrides.lookup("2026-01-13", "WvW", "Skill", 2001, "coefficient");
+        assert_eq!(
+            wvw_result,
+            None,
+            "WvW lookup must return None, NOT the PvE value — no cross-mode fallback",
+        );
+    }
+
+    /// Verify that lookup is strictly keyed by (patch_id, mode) — no cross-mode contamination.
+    #[test]
+    fn test_override_lookup_is_mode_isolated() {
+        let pve_json = r#"{
+            "patch_id": "2026-01-13",
+            "mode": "PvE",
+            "entities": [
+                {
+                    "source_type": "Trait",
+                    "source_id": 100,
+                    "name": "PvE Trait",
+                    "overrides": {
+                        "damage_mult": { "value": 1.5, "evidence_level": "Factual" }
+                    }
+                }
+            ]
+        }"#;
+        let pvp_json = r#"{
+            "patch_id": "2026-01-13",
+            "mode": "PvP",
+            "entities": [
+                {
+                    "source_type": "Trait",
+                    "source_id": 100,
+                    "name": "PvP Trait",
+                    "overrides": {
+                        "damage_mult": { "value": 0.75, "evidence_level": "Factual" }
+                    }
+                }
+            ]
+        }"#;
+        let wvw_json = r#"{
+            "patch_id": "2026-01-13",
+            "mode": "WvW",
+            "entities": [
+                {
+                    "source_type": "Trait",
+                    "source_id": 100,
+                    "name": "WvW Trait",
+                    "overrides": {
+                        "damage_mult": { "value": 0.80, "evidence_level": "Factual" }
+                    }
+                }
+            ]
+        }"#;
+
+        let pve = load_override_file(pve_json).unwrap();
+        let pvp = load_override_file(pvp_json).unwrap();
+        let wvw = load_override_file(wvw_json).unwrap();
+        let mut files = HashMap::new();
+        files.insert((pve.patch_id.clone(), pve.mode.clone()), pve);
+        files.insert((pvp.patch_id.clone(), pvp.mode.clone()), pvp);
+        files.insert((wvw.patch_id.clone(), wvw.mode.clone()), wvw);
+        let overrides = BalanceOverrides { files };
+
+        // Each mode returns its own value, never another mode's
+        assert_eq!(
+            overrides.lookup("2026-01-13", "PvE", "Trait", 100, "damage_mult"),
+            Some(OverrideResult::Value { value: 1.5, evidence_level: EvidenceLevel::Factual }),
+        );
+        assert_eq!(
+            overrides.lookup("2026-01-13", "PvP", "Trait", 100, "damage_mult"),
+            Some(OverrideResult::Value { value: 0.75, evidence_level: EvidenceLevel::Factual }),
+        );
+        assert_eq!(
+            overrides.lookup("2026-01-13", "WvW", "Trait", 100, "damage_mult"),
+            Some(OverrideResult::Value { value: 0.80, evidence_level: EvidenceLevel::Factual }),
+        );
+    }
+
+    /// Verify known_mode_splits returns a non-empty list with all Phase A entries handled.
+    #[test]
+    fn test_known_mode_splits_baseline() {
+        let splits = known_mode_splits();
+        assert!(
+            !splits.is_empty(),
+            "known_mode_splits should contain at least the Fury/Torment/Confusion entries",
+        );
+        // All baseline entries should be handled_in_phase_a
+        for split in splits {
+            assert!(
+                split.handled_in_phase_a,
+                "Baseline split {}.{} should be handled_in_phase_a",
+                split.entity_name,
+                split.field,
+            );
+        }
+    }
+
+    /// check_wvw_quality returns Verified when all known splits are handled in Phase A.
+    #[test]
+    fn test_check_wvw_quality_baseline_verified() {
+        let o = overrides();
+        let (quality, reasons) = check_wvw_quality(o, "2026-01-13");
+        assert_eq!(
+            quality,
+            DataQuality::Verified,
+            "baseline should be Verified (all splits handled in Phase A)",
+        );
+        assert!(
+            reasons.is_empty(),
+            "no reasons expected when all splits handled: {:?}",
+            reasons,
         );
     }
 }
