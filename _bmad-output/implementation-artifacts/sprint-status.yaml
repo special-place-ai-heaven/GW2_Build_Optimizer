@@ -164,7 +164,7 @@ development_status:
 
   # P3-05: Duration Formulas (FR7)
   # BLOCKED until: p3-02 DONE
-  p3-05-duration-formulas: ready-for-dev
+  p3-05-duration-formulas: review
 
   # P3-06: Canonical Slot-Budget Dataset (FR8)
   # UNBLOCKED (independent dataset)
