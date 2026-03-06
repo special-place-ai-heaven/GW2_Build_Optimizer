@@ -148,11 +148,11 @@ development_status:
   # Phase A -- Factual Engine Correctness
   # P3-01: Profession Profiles and Health/Armor Truth (FR1, D1)
   # STORY: docs/stories/P3-01-profession-profiles.md
-  p3-01-profession-profiles: ready-for-dev
+  p3-01-profession-profiles: done
 
   # P3-02: BalanceContext Type and Game-Mode Plumbing (FR2)
   # BLOCKED until: p3-01 DONE
-  p3-02-balance-context: backlog
+  p3-02-balance-context: done
 
   # P3-03: Universal Attribute and Strike Damage Formulas (FR3, FR4)
   # BLOCKED until: p3-02 DONE
@@ -215,6 +215,6 @@ development_status:
   # Standalone
   # P3-16: Save/Load Profession Persistence and Crash Safety (FR19, D8)
   # BLOCKED until: p3-01 DONE. Supersedes P2-07.
-  p3-16-save-load-persistence: backlog
+  p3-16-save-load-persistence: done
 
   epic-3-retrospective: optional

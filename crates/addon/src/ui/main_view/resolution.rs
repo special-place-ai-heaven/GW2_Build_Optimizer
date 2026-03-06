@@ -134,6 +134,7 @@ fn calculate_current_stats_from_db(
     let profession = build.profession.clone().unwrap_or_default();
 
     // PvP mode: stats come from amulet (O(1) lookup in db.pvp_amulets)
+    let balance_ctx = gw2_optimizer::balance::BalanceContext::new(game_mode.clone());
     if *game_mode == gw2_core::types::GameMode::PvP {
         if let Some(ref pvp) = equipment.equipment_pvp {
             if let Some(amulet_id) = pvp.amulet {
@@ -143,7 +144,7 @@ fn calculate_current_stats_from_db(
                     let stats = opt_stats_to_stat_block(&opt_stats, &derived);
                     let modifiers = gw2_optimizer::combat::DamageModifiers::default();
                     let (solo, party, squad) =
-                        compute_3tier_combat(&opt_stats, &derived, &modifiers, &profession);
+                        compute_3tier_combat(&opt_stats, &derived, &modifiers, &profession, &balance_ctx);
                     return Ok((stats, solo, party, squad));
                 }
             }
@@ -223,10 +224,11 @@ fn calculate_current_stats_from_db(
         relic_id,
         &db.traits,
         &db.items,
+        &balance_ctx,
     );
 
     let (combat_solo, combat_party, combat_squad) =
-        compute_3tier_combat(&opt_stats, &derived, &modifiers, &profession);
+        compute_3tier_combat(&opt_stats, &derived, &modifiers, &profession, &balance_ctx);
 
     Ok((
         opt_stats_to_stat_block(&opt_stats, &derived),

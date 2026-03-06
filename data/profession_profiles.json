@@ -1,0 +1,110 @@
+[
+  {
+    "profession": "Warrior",
+    "armor_weight": "Heavy",
+    "health_class": "High",
+    "base_health_level_80": 9212,
+    "base_defense_level_80": 1271,
+    "evidence_level": "Factual",
+    "sources": [
+      "https://wiki.guildwars2.com/wiki/Health",
+      "https://wiki.guildwars2.com/wiki/Armor"
+    ]
+  },
+  {
+    "profession": "Guardian",
+    "armor_weight": "Heavy",
+    "health_class": "Low",
+    "base_health_level_80": 1645,
+    "base_defense_level_80": 1271,
+    "evidence_level": "Factual",
+    "sources": [
+      "https://wiki.guildwars2.com/wiki/Health",
+      "https://wiki.guildwars2.com/wiki/Armor"
+    ]
+  },
+  {
+    "profession": "Revenant",
+    "armor_weight": "Heavy",
+    "health_class": "Medium",
+    "base_health_level_80": 5922,
+    "base_defense_level_80": 1271,
+    "evidence_level": "Factual",
+    "sources": [
+      "https://wiki.guildwars2.com/wiki/Health",
+      "https://wiki.guildwars2.com/wiki/Armor"
+    ]
+  },
+  {
+    "profession": "Engineer",
+    "armor_weight": "Medium",
+    "health_class": "Medium",
+    "base_health_level_80": 5922,
+    "base_defense_level_80": 1118,
+    "evidence_level": "Factual",
+    "sources": [
+      "https://wiki.guildwars2.com/wiki/Health",
+      "https://wiki.guildwars2.com/wiki/Armor"
+    ]
+  },
+  {
+    "profession": "Ranger",
+    "armor_weight": "Medium",
+    "health_class": "Medium",
+    "base_health_level_80": 5922,
+    "base_defense_level_80": 1118,
+    "evidence_level": "Factual",
+    "sources": [
+      "https://wiki.guildwars2.com/wiki/Health",
+      "https://wiki.guildwars2.com/wiki/Armor"
+    ]
+  },
+  {
+    "profession": "Thief",
+    "armor_weight": "Medium",
+    "health_class": "Low",
+    "base_health_level_80": 1645,
+    "base_defense_level_80": 1118,
+    "evidence_level": "Factual",
+    "sources": [
+      "https://wiki.guildwars2.com/wiki/Health",
+      "https://wiki.guildwars2.com/wiki/Armor"
+    ]
+  },
+  {
+    "profession": "Elementalist",
+    "armor_weight": "Light",
+    "health_class": "Low",
+    "base_health_level_80": 1645,
+    "base_defense_level_80": 967,
+    "evidence_level": "Factual",
+    "sources": [
+      "https://wiki.guildwars2.com/wiki/Health",
+      "https://wiki.guildwars2.com/wiki/Armor"
+    ]
+  },
+  {
+    "profession": "Mesmer",
+    "armor_weight": "Light",
+    "health_class": "Medium",
+    "base_health_level_80": 5922,
+    "base_defense_level_80": 967,
+    "evidence_level": "Factual",
+    "sources": [
+      "https://wiki.guildwars2.com/wiki/Health",
+      "https://wiki.guildwars2.com/wiki/Armor"
+    ]
+  },
+  {
+    "profession": "Necromancer",
+    "armor_weight": "Light",
+    "health_class": "High",
+    "base_health_level_80": 9212,
+    "base_defense_level_80": 967,
+    "evidence_level": "Factual",
+    "sources": [
+      "https://wiki.guildwars2.com/wiki/Health",
+      "https://wiki.guildwars2.com/wiki/Armor"
+    ]
+  }
+]

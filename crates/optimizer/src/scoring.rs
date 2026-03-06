@@ -712,18 +712,20 @@ mod tests {
 
     #[test]
     fn test_score_power_build_higher_with_power_weights() {
+        use crate::balance::BalanceContext;
         use crate::combat::{self, DamageModifiers, default_buff_profiles};
         use crate::stats;
 
+        let ctx = BalanceContext::pve();
         let berserker = crate::stats::StatBlock {
             power: 2800.0, precision: 2100.0, ferocity: 1400.0,
             toughness: 1000.0, vitality: 1000.0, ..Default::default()
         };
         let derived = stats::compute_derived(&berserker, "Warrior");
         let mods = DamageModifiers::default();
-        let solo = &default_buff_profiles()[0];
+        let solo = &default_buff_profiles(&ctx)[0];
         let perf = combat::calculate_combat_performance(
-            &berserker, &derived, &mods, solo, &combat::ConditionWeights::default_pve(), "Warrior",
+            &berserker, &derived, &mods, solo, &combat::ConditionWeights::default_pve(), "Warrior", &ctx,
         );
 
         let tanky = crate::stats::StatBlock {
@@ -732,7 +734,7 @@ mod tests {
         };
         let derived_t = stats::compute_derived(&tanky, "Warrior");
         let perf_t = combat::calculate_combat_performance(
-            &tanky, &derived_t, &mods, solo, &combat::ConditionWeights::default_pve(), "Warrior",
+            &tanky, &derived_t, &mods, solo, &combat::ConditionWeights::default_pve(), "Warrior", &ctx,
         );
 
         // Power weights → berserker wins
@@ -752,9 +754,11 @@ mod tests {
 
     #[test]
     fn test_score_condi_build_higher_with_condi_weights() {
+        use crate::balance::BalanceContext;
         use crate::combat::{self, DamageModifiers, default_buff_profiles};
         use crate::stats;
 
+        let ctx = BalanceContext::pve();
         let viper = crate::stats::StatBlock {
             power: 1800.0, precision: 1600.0, condition_damage: 2200.0,
             expertise: 600.0, toughness: 1000.0, vitality: 1000.0,
@@ -762,9 +766,9 @@ mod tests {
         };
         let derived_v = stats::compute_derived(&viper, "Necromancer");
         let mods = DamageModifiers::default();
-        let solo = &default_buff_profiles()[0];
+        let solo = &default_buff_profiles(&ctx)[0];
         let perf_v = combat::calculate_combat_performance(
-            &viper, &derived_v, &mods, solo, &combat::ConditionWeights::default_pve(), "Necromancer",
+            &viper, &derived_v, &mods, solo, &combat::ConditionWeights::default_pve(), "Necromancer", &ctx,
         );
 
         let berserker = crate::stats::StatBlock {
@@ -773,7 +777,7 @@ mod tests {
         };
         let derived_b = stats::compute_derived(&berserker, "Necromancer");
         let perf_b = combat::calculate_combat_performance(
-            &berserker, &derived_b, &mods, solo, &combat::ConditionWeights::default_pve(), "Necromancer",
+            &berserker, &derived_b, &mods, solo, &combat::ConditionWeights::default_pve(), "Necromancer", &ctx,
         );
 
         let condi_w = OptimizationWeights::preset_condi_dps();
@@ -826,9 +830,11 @@ mod tests {
         // Trailblazer's (CondDmg) must score higher than Minstrel's (zero CondDmg)
         // with condition-focused weights. Now ensured by tier selection excluding
         // Minstrel's, but scoring should also reflect this correctly.
+        use crate::balance::BalanceContext;
         use crate::combat::{self, DamageModifiers, default_buff_profiles};
         use crate::stats;
 
+        let ctx = BalanceContext::pve();
         let trailblazer = stats::StatBlock {
             power: 1000.0, precision: 1000.0,
             condition_damage: 2000.0, expertise: 900.0,
@@ -837,9 +843,9 @@ mod tests {
         };
         let derived_t = stats::compute_derived(&trailblazer, "Ranger");
         let mods = DamageModifiers::default();
-        let solo = &default_buff_profiles()[0];
+        let solo = &default_buff_profiles(&ctx)[0];
         let perf_t = combat::calculate_combat_performance(
-            &trailblazer, &derived_t, &mods, solo, &combat::ConditionWeights::default_pve(), "Ranger",
+            &trailblazer, &derived_t, &mods, solo, &combat::ConditionWeights::default_pve(), "Ranger", &ctx,
         );
 
         let minstrel = stats::StatBlock {
@@ -850,7 +856,7 @@ mod tests {
         };
         let derived_m = stats::compute_derived(&minstrel, "Ranger");
         let perf_m = combat::calculate_combat_performance(
-            &minstrel, &derived_m, &mods, solo, &combat::ConditionWeights::default_pve(), "Ranger",
+            &minstrel, &derived_m, &mods, solo, &combat::ConditionWeights::default_pve(), "Ranger", &ctx,
         );
 
         let w = OptimizationWeights {

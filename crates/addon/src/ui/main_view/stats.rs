@@ -294,16 +294,17 @@ pub(super) fn compute_3tier_combat(
     derived: &gw2_optimizer::stats::DerivedStats,
     modifiers: &gw2_optimizer::combat::DamageModifiers,
     profession: &str,
+    balance_ctx: &gw2_optimizer::balance::BalanceContext,
 ) -> (
     Option<gw2_core::types::CombatMetrics>,
     Option<gw2_core::types::CombatMetrics>,
     Option<gw2_core::types::CombatMetrics>,
 ) {
-    let profiles = gw2_optimizer::combat::default_buff_profiles();
-    let cw = gw2_optimizer::combat::condition_weights_for_profession(profession);
+    let profiles = gw2_optimizer::combat::default_buff_profiles(balance_ctx);
+    let cw = gw2_optimizer::combat::condition_weights_for_profession(profession, balance_ctx);
     let compute = |profile: &gw2_optimizer::combat::BuffProfile| -> gw2_core::types::CombatMetrics {
         let perf = gw2_optimizer::combat::calculate_combat_performance(
-            stats, derived, modifiers, profile, &cw, profession,
+            stats, derived, modifiers, profile, &cw, profession, balance_ctx,
         );
         perf_to_combat_metrics(&perf)
     };

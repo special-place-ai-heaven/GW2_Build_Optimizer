@@ -125,39 +125,30 @@ pub fn base_stats() -> StatBlock {
 
 /// Base health by profession (at level 80, NOT including vitality).
 /// Vitality is added separately in compute_derived: health = base + vitality * 10.
+/// Values loaded from data/profession_profiles.json via the data module.
+/// Source: https://wiki.guildwars2.com/wiki/Health
 pub fn base_health(profession: &str) -> f64 {
-    match profession {
-        "Warrior" | "Guardian" => 9212.0,
-        "Revenant" | "Engineer" | "Ranger" | "Mesmer" | "Necromancer" => 5922.0,
-        "Thief" | "Elementalist" => 1645.0,
-        _ => 5922.0, // default to medium
-    }
+    crate::data::profession_profiles::profiles()
+        .base_health(profession)
+        .unwrap_or(5922.0) // default to medium for unknown professions
 }
 
 /// Base defense from a full set of Ascended armor, by armor weight class.
-/// Armor = Toughness + Defense. This returns the Defense portion from gear.
-/// Values are totals for a full 6-piece Ascended armor set at level 80
-/// (from GW2 wiki Defense rating table):
-///   Heavy (Warrior/Guardian/Revenant): 1271
-///   Medium (Engineer/Ranger/Thief): 1118
-///   Light (Elementalist/Mesmer/Necromancer): 967
+/// Values loaded from data/profession_profiles.json via the data module.
+/// Source: https://wiki.guildwars2.com/wiki/Armor
 pub fn base_defense(profession: &str) -> f64 {
-    match profession {
-        "Warrior" | "Guardian" | "Revenant" => 1271.0,
-        "Engineer" | "Ranger" | "Thief" => 1118.0,
-        "Elementalist" | "Mesmer" | "Necromancer" => 967.0,
-        _ => 1118.0, // default to medium
-    }
+    crate::data::profession_profiles::profiles()
+        .base_defense(profession)
+        .unwrap_or(1118.0) // default to medium for unknown professions
 }
 
 /// Armor weight class for a profession.
+/// Values loaded from data/profession_profiles.json via the data module.
 pub fn armor_weight(profession: &str) -> &'static str {
-    match profession {
-        "Warrior" | "Guardian" | "Revenant" => "Heavy",
-        "Engineer" | "Ranger" | "Thief" => "Medium",
-        "Elementalist" | "Mesmer" | "Necromancer" => "Light",
-        _ => "Medium",
-    }
+    // OnceLock profiles live for 'static, so we can return &'static str
+    crate::data::profession_profiles::profiles()
+        .armor_weight(profession)
+        .unwrap_or("Medium")
 }
 
 /// Calculate stats from equipped gear using the itemstat formula.
@@ -554,14 +545,17 @@ mod tests {
 
     #[test]
     fn test_base_health() {
-        // High HP: Warrior, Guardian
+        // Source: https://wiki.guildwars2.com/wiki/Health
+        // High HP (9212): Warrior, Necromancer
         assert_eq!(base_health("Warrior"), 9212.0);
-        assert_eq!(base_health("Guardian"), 9212.0);
-        // Medium HP: Revenant, Engineer, Ranger, Mesmer, Necromancer
+        assert_eq!(base_health("Necromancer"), 9212.0);
+        // Medium HP (5922): Revenant, Engineer, Ranger, Mesmer
         assert_eq!(base_health("Ranger"), 5922.0);
-        assert_eq!(base_health("Necromancer"), 5922.0);
         assert_eq!(base_health("Revenant"), 5922.0);
-        // Low HP: Thief, Elementalist
+        assert_eq!(base_health("Engineer"), 5922.0);
+        assert_eq!(base_health("Mesmer"), 5922.0);
+        // Low HP (1645): Guardian, Thief, Elementalist
+        assert_eq!(base_health("Guardian"), 1645.0);
         assert_eq!(base_health("Thief"), 1645.0);
         assert_eq!(base_health("Elementalist"), 1645.0);
     }

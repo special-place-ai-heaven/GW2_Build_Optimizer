@@ -1,6 +1,6 @@
 # Story 3.01: Profession Profiles and Health/Armor Truth
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -37,10 +37,10 @@ so that all derived stats (effective HP, toughness, damage mitigation) are accur
 
 ```bash
 # Run all tests (optimizer crate has the loader + integration tests)
-cargo test --package gw2-build-optimizer-engine -v
+cargo test --package gw2-optimizer -v
 
 # Run core crate tests (compute_derived uses profiles)
-cargo test --package gw2-build-optimizer-core -v
+cargo test --package gw2-core -v
 
 # Verify data file exists and has 9 entries
 cat data/profession_profiles.json | python -c "import json,sys; d=json.load(sys.stdin); assert len(d)==9, f'Expected 9, got {len(d)}'"
@@ -56,50 +56,58 @@ git diff --name-only -- '*.rs' | grep -v 'stats.rs\|types.rs\|lib.rs\|data/\|com
 
 ## Tasks / Subtasks
 
-- [ ] Create `data/profession_profiles.json` with all 9 professions (AC: 1, 2, 3, 4, 5)
-  - [ ] Each entry: profession, armor_weight, health_class, base_health_level_80, base_defense_level_80, evidence_level, sources
-  - [ ] Guardian: Heavy armor, Low health (1645), defense 1271
-  - [ ] Necromancer: Light armor, High health (9212), defense 967
-  - [ ] Warrior: Heavy armor, High health (9212), defense 1271
-  - [ ] Remaining 6 professions with correct values per source-of-truth
-- [ ] Create `crates/optimizer/src/data/mod.rs` module root (AC: 6)
-  - [ ] Define `ProfessionProfile` struct matching JSON schema
-  - [ ] Define enums: `ArmorWeightClass` (Heavy/Medium/Light), `HealthClass` (High/Medium/Low), `EvidenceLevel` (Factual/Derived/Heuristic/Unknown)
-  - [ ] Implement `load_profession_profiles(path) -> Result<Vec<ProfessionProfile>, ProfessionProfileError>`
-  - [ ] Typed error enum `ProfessionProfileError`: IoError, ParseError, ValidationError(String)
-  - [ ] Validation: exactly 9 entries, no duplicate professions, defense matches armor class, all enums valid
-- [ ] Create `crates/optimizer/src/data/profession_profiles.rs` with lookup helpers (AC: 7)
-  - [ ] `ProfessionProfiles` wrapper struct with `HashMap<String, ProfessionProfile>` for O(1) lookup
-  - [ ] `fn base_health(&self, profession: &str) -> Option<f64>`
-  - [ ] `fn base_defense(&self, profession: &str) -> Option<f64>`
-  - [ ] `fn armor_weight(&self, profession: &str) -> Option<&str>`
-  - [ ] Register `data` module in `crates/optimizer/src/lib.rs`
-- [ ] Replace hardcoded lookups in `crates/optimizer/src/stats.rs` (AC: 7)
-  - [ ] `base_health()` delegates to loaded profiles (keep function signature for backward compat or refactor callers)
-  - [ ] `base_defense()` delegates to loaded profiles
-  - [ ] `armor_weight()` delegates to loaded profiles
-  - [ ] Update callers at lines ~468-469 (`compute_combat_performance`)
-- [ ] Replace hardcoded lookups in `crates/optimizer/src/combat.rs` (AC: 7)
-  - [ ] Lines ~324-325: `calculate_combat_performance()` uses loaded profiles
-- [ ] Replace hardcoded match arms in `crates/core/src/types.rs` (AC: 8)
-  - [ ] `StatBlock::compute_derived()` — remove inline `base_hp` and `base_defense` match arms
-  - [ ] Design decision: either pass base values as parameters, or pass a profile reference
-- [ ] Write tests with source citations (AC: 6, 10)
-  - [ ] `test_guardian_health_class_is_low` — asserts 1645, cites wiki Health page
-  - [ ] `test_necromancer_health_class_is_high` — asserts 9212, cites wiki Health page
-  - [ ] `test_all_9_professions_present` — loader rejects < 9 or > 9
-  - [ ] `test_duplicate_profession_rejected` — loader rejects duplicate entry
-  - [ ] `test_malformed_enum_rejected` — loader rejects invalid armor_weight/health_class
-  - [ ] `test_defense_matches_armor_class` — validates cross-field consistency
-  - [ ] `test_base_health_values_match_source_of_truth` — all 9 professions correct
-  - [ ] `test_base_defense_values_match_source_of_truth` — all 9 professions correct
-- [ ] Update `_bmad-output/project-context.md` health class table (AC: 9)
-  - [ ] Guardian: HIGH -> LOW in the HP class listing
-  - [ ] Necromancer: MEDIUM -> HIGH in the HP class listing
-  - [ ] Update base values line: HP = 9212 / 5922 / 1645 (confirm ordering)
-- [ ] Update existing tests in `stats.rs` to expect corrected values
-  - [ ] `test_base_health`: Guardian -> 1645.0, Necromancer -> 9212.0
-  - [ ] Tests should cite source in comments
+- [x] Create `data/profession_profiles.json` with all 9 professions (AC: 1, 2, 3, 4, 5)
+  - [x] Each entry: profession, armor_weight, health_class, base_health_level_80, base_defense_level_80, evidence_level, sources
+  - [x] Guardian: Heavy armor, Low health (1645), defense 1271
+  - [x] Necromancer: Light armor, High health (9212), defense 967
+  - [x] Warrior: Heavy armor, High health (9212), defense 1271
+  - [x] Remaining 6 professions with correct values per source-of-truth
+- [x] Create `crates/optimizer/src/data/mod.rs` module root (AC: 6)
+  - [x] Define `ProfessionProfile` struct matching JSON schema
+  - [x] Define enums: `ArmorWeightClass` (Heavy/Medium/Light), `HealthClass` (High/Medium/Low), `EvidenceLevel` (Factual/Derived/Heuristic/Unknown)
+  - [x] Implement `load_profession_profiles(json) -> Result<ProfessionProfiles, ProfessionProfileError>`
+  - [x] Typed error enum `ProfessionProfileError`: ParseError, ValidationError(String)
+  - [x] Validation: exactly 9 entries, no duplicate professions, defense matches armor class, health matches health class, all enums valid
+- [x] Create `crates/optimizer/src/data/profession_profiles.rs` with lookup helpers (AC: 7)
+  - [x] `ProfessionProfiles` wrapper struct with `HashMap<String, ProfessionProfile>` for O(1) lookup
+  - [x] `fn base_health(&self, profession: &str) -> Option<f64>`
+  - [x] `fn base_defense(&self, profession: &str) -> Option<f64>`
+  - [x] `fn armor_weight(&self, profession: &str) -> Option<&str>`
+  - [x] Register `data` module in `crates/optimizer/src/lib.rs`
+  - [x] `OnceLock<ProfessionProfiles>` with `include_str!` for compile-time embedding
+  - [x] `profiles()` function for global access
+- [x] Replace hardcoded lookups in `crates/optimizer/src/stats.rs` (AC: 7)
+  - [x] `base_health()` delegates to loaded profiles (signature preserved for backward compat)
+  - [x] `base_defense()` delegates to loaded profiles
+  - [x] `armor_weight()` delegates to loaded profiles
+  - [x] Callers at lines ~468-469 unchanged (they call base_health/base_defense which now delegate)
+- [x] Replace hardcoded lookups in `crates/optimizer/src/combat.rs` (AC: 7)
+  - [x] Lines ~324-325: already call `stats::base_health`/`stats::base_defense` — automatically use profiles
+- [x] Replace hardcoded match arms in `crates/core/src/types.rs` (AC: 8)
+  - [x] `StatBlock::compute_derived()` — changed to accept `base_health: i32, base_defense: i32` parameters
+  - [x] Design decision: pass base values as parameters (avoids cross-crate data dependency)
+  - [x] Method was dead code (no callers found) — kept with new signature for future use
+- [x] Write tests with source citations (AC: 6, 10)
+  - [x] `test_guardian_health_class_is_low` — asserts 1645, cites wiki Health page
+  - [x] `test_necromancer_health_class_is_high` — asserts 9212, cites wiki Health page
+  - [x] `test_all_9_professions_present` — all 9 professions present in loaded data
+  - [x] `test_duplicate_profession_rejected` — loader rejects duplicate entry (9 entries, one duplicated, exercises HashSet path)
+  - [x] `test_malformed_enum_rejected` — loader rejects invalid armor_weight
+  - [x] `test_defense_armor_class_mismatch_rejected` — validates cross-field consistency
+  - [x] `test_base_health_values_match_source_of_truth` — all 9 professions correct
+  - [x] `test_base_defense_values_match_source_of_truth` — all 9 professions correct
+  - [x] `test_armor_weight_values` — all 9 professions correct
+  - [x] `test_unknown_profession_returns_none` — unknown names return None
+  - [x] `test_health_class_mismatch_rejected` — validates cross-field health/class consistency
+  - [x] `test_fewer_than_9_rejected` — loader rejects < 9 entries
+  - [x] `test_embedded_profiles_load_successfully` — validates the embedded JSON
+- [x] Update `_bmad-output/project-context.md` health class table (AC: 9)
+  - [x] Guardian: HIGH -> LOW in the HP class listing
+  - [x] Necromancer: MEDIUM -> HIGH in the HP class listing
+  - [x] Added note: values loaded from `data/profession_profiles.json`
+- [x] Update existing tests in `stats.rs` to expect corrected values
+  - [x] `test_base_health`: Guardian -> 1645.0, Necromancer -> 9212.0
+  - [x] Tests cite source in comments
 
 ## Dev Notes
 
@@ -203,10 +211,37 @@ Sources:
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.6
 
 ### Debug Log References
 
+None — clean implementation, no debugging required.
+
 ### Completion Notes List
 
+- Created `data/profession_profiles.json` with all 9 professions, correct Guardian=Low (1645) and Necromancer=High (9212) values
+- Created `crates/optimizer/src/data/` module: `mod.rs` + `profession_profiles.rs`
+- Used `include_str!` + `OnceLock` pattern: JSON embedded at compile time, parsed lazily, O(1) HashMap lookups
+- Replaced 3 hardcoded match-arm functions in `stats.rs` with delegations to loaded profiles
+- Changed `StatBlock::compute_derived()` in `types.rs` to accept `base_health`/`base_defense` as parameters (method was dead code — no callers)
+- `combat.rs` already called `stats::base_health`/`stats::base_defense` — no changes needed there
+- Existing `stats.rs` tests updated to expect corrected values
+- 13 new tests in `profession_profiles.rs` with wiki source citations (12 original + 1 added in review)
+- All tests pass across all 4 crates (179 optimizer, 25 addon, 8 core)
+- project-context.md health class table corrected
+
+### Change Log
+
+- 2026-03-06: P3-01 implemented — profession profiles loaded from JSON, D1 fixed (Guardian/Necromancer health classes)
+- 2026-03-06: Code review fixes — H1: rewrote duplicate test to exercise HashSet path (9 entries); H2: fixed Verification package names; M1: added Engineer to stats::test_base_health; M2: added test_health_class_mismatch_rejected
+
 ### File List
+
+- `data/profession_profiles.json` — NEW: canonical profession profile data (9 entries)
+- `crates/optimizer/src/data/mod.rs` — NEW: data module root
+- `crates/optimizer/src/data/profession_profiles.rs` — NEW: loader, types, OnceLock, 12 tests
+- `crates/optimizer/src/lib.rs` — MODIFIED: added `pub mod data`
+- `crates/optimizer/src/stats.rs` — MODIFIED: base_health/base_defense/armor_weight delegate to profiles; test_base_health corrected
+- `crates/core/src/types.rs` — MODIFIED: compute_derived() takes base_health/base_defense params instead of inline match
+- `_bmad-output/project-context.md` — MODIFIED: health class table corrected
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — MODIFIED: p3-01 status tracking

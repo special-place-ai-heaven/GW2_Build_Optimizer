@@ -4,7 +4,7 @@ user_name: 'Rob'
 date: '2026-03-06'
 sections_completed: ['technology_stack', 'language_rules', 'framework_rules', 'testing_rules', 'quality_rules', 'workflow_rules', 'critical_rules']
 status: 'complete'
-rule_count: 83
+rule_count: 94
 optimized_for_llm: true
 ---
 
@@ -115,8 +115,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 #### GW2 Domain Correctness
 
-- **HP class ≠ armor class — the #1 gotcha** — two completely separate lookup tables required. Never infer HP class from armor class. Necromancer = LIGHT armor but MEDIUM HP. Revenant = HEAVY armor but MEDIUM HP.
-  - HP: HIGH = {Warrior, Guardian} | MEDIUM = {Revenant, Engineer, Ranger, Mesmer, Necromancer} | LOW = {Thief, Elementalist}
+- **HP class ≠ armor class — the #1 gotcha** — two completely separate lookup tables required. Never infer HP class from armor class. Guardian = HEAVY armor but LOW HP. Necromancer = LIGHT armor but HIGH HP. Values loaded from `data/profession_profiles.json` (not hardcoded).
+  - HP: HIGH = {Warrior, Necromancer} | MEDIUM = {Revenant, Engineer, Ranger, Mesmer} | LOW = {Guardian, Thief, Elementalist}
   - Armor: HEAVY = {Warrior, Guardian, Revenant} | MEDIUM = {Ranger, Engineer, Thief} | LIGHT = {Elementalist, Mesmer, Necromancer}
   - Formulas: `health = vitality * 10 + base_hp`, `armor = toughness + base_defense`
   - Base values: HP = 9212 / 5922 / 1645 · Defense = 1271 / 1118 / 967 (see `docs/optimizer-source-of-truth.md` for authoritative values)
@@ -163,6 +163,15 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **Gemini rate limits are tracked internally**: 10 RPM / 250 RPD. Don't rely on API errors to surface quota exhaustion.
 - **Elite-spec weapon gate is a hard error, not a warning** — `validation.rs::validate_weapon_set()` pushes weapons requiring an unequipped elite spec to `result.errors` AND nulls them out in the returned `ValidatedWeaponSet`. `engine.rs` rejects the LLM build when `validated.errors` is non-empty (not only when `validated.specializations` is empty). **Test implication**: any test checking `validated.warnings` for a spec-gated weapon must be updated to check `validated.errors`.
 
+#### BalanceContext (P3-02)
+
+- **`BalanceContext` is a first-class architectural type** — defined in `crates/optimizer/src/balance.rs`. Carries `game_mode: GameMode` and `patch_id: String` through all mode-sensitive calculations. Constructed once at addon entry points and threaded by reference (`&BalanceContext`).
+- **All mode-sensitive functions accept `&BalanceContext`** — `combat.rs` functions (`calculate_combat_performance`, `calculate_condition_ticks`, `default_buff_profiles`, `condition_weights_for_profession`, `extract_damage_modifiers`), `engine.rs` entry points (`optimize`, `optimize_pvp`, `optimize_with_gemini`, `optimize_deterministic`), `synergy_pipeline.rs` (`optimize_synergy`, `rank_and_select`, `build_synergy_result`), and `gemini_tools.rs` (`ToolContext.balance_ctx`).
+- **`patch_id` is temporary** — sourced from a snapshot constant (`"snapshot-2026-03-06"`). Authoritative manifest-backed sourcing deferred to P3-08.
+- **Fury crit bonus is the first mode split** — PvE = 25% crit chance, PvP/WvW = 20% crit chance (source: wiki/Fury). Implemented in `combat.rs::calculate_combat_performance()` via `ctx.game_mode` match.
+- **No `_game_mode` parameters remain** — all former `game_mode: &GameMode` params in optimizer functions were replaced with `ctx: &BalanceContext`. Internal code accesses `ctx.game_mode` where enum matching is needed.
+- **Convenience constructors for tests** — `BalanceContext::pve()`, `BalanceContext::pvp()`, `BalanceContext::wvw()`. All existing tests use `BalanceContext::pve()`.
+
 #### Optimization Pipeline Rules
 
 - **3-tier fallback**: deterministic synergy → Gemini pipeline → legacy `optimize()`. Each tier falls back to the next on failure with a Warning log.
@@ -182,6 +191,10 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **All GW2 API struct fields that may be absent must be `Option<T>`** — the API omits fields rather than sending `null`. Non-optional fields cause silent deserialization failures.
 - **Use `filter_map(from_value(...).ok())` for fact collections** — facts sometimes lack a `type` field. Skip unparseable entries silently rather than failing the whole response.
 - **Atomic save applies to ALL persistent writes** — not just `AppConfig`. Any file the addon writes that must survive a mid-write crash (config, cache index, build saves) must use the `.tmp` + `std::fs::rename` pattern.
+- **`BuildStorage` uses crash-safe writes** — `save_new()` and `save_overwrite()` both use the `.tmp` + `std::fs::rename` pattern. `save_new()` fails if the target `.json` exists; `save_overwrite()` fails if it doesn't. The convenience `save(build, overwrite)` dispatches between them.
+- **`SavedBuild.profession` persistence** — `SavedBuild` stores `profession: String` with `#[serde(default)]`. On load, empty profession (pre-P3-16 saves) falls back to `"Warrior"` with a log warning. New saves always capture the active character's profession.
+- **DamageModifiers reconstructed from saved builds** — `saved_to_suggestion()` resolves spec/trait/rune/sigil/relic names against `GameDb` to reconstruct `DamageModifiers` via `extract_damage_modifiers()`. Unresolvable entities are skipped with warnings, not zeroed.
+- **`SavedBuild` version fields** — `engine_version: String` (from `CARGO_PKG_VERSION`) and `balance_manifest_version: Option<String>` (None until P3-08). Both `#[serde(default)]`, informational only.
 
 ---
 
@@ -199,4 +212,4 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Remove rules that become obvious over time
 - Re-run `/bmad-bmm-generate-project-context` in a fresh session to regenerate from code
 
-_Last Updated: 2026-03-06 (refreshed post-Epic-2: +12 rules for catch_unwind all threads, nexus logging, visibility, main_view submodules, test isolation, ConditionWeights dispatch, optimization panic safety)_
+_Last Updated: 2026-03-06 (P3-01/P3-02/P3-16: +11 rules for BalanceContext, Fury mode split, crash-safe BuildStorage, SavedBuild profession/version fields, DamageModifiers reconstruction)_

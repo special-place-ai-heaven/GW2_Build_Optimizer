@@ -1,5 +1,6 @@
 use super::stats::{compute_3tier_combat, perf_to_combat_metrics};
 use crate::state::AddonState;
+use gw2_optimizer::balance::BalanceContext;
 use gw2_optimizer::scoring::OptimizationWeights;
 
 /// Start optimization in background thread (S11-T01, S11-T02, S11-T03)
@@ -38,6 +39,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
     let config = state.config.clone();
     let game_mode = state.main.game_mode.clone();
     let game_mode_label = game_mode.label().to_string();
+    let balance_ctx = BalanceContext::new(game_mode.clone());
     let current_build_summary = state
         .main
         .current_build
@@ -95,7 +97,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                         &db,
                         &profession_name,
                         &weights,
-                        &game_mode,
+                        &balance_ctx,
                         llm_ref,
                         current_build_summary.as_deref(),
                         &build_locks,
@@ -140,7 +142,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                         &db,
                         &profession_name,
                         &weights,
-                        &game_mode,
+                        &balance_ctx,
                         llm_client.as_ref(),
                         current_build_summary.as_deref(),
                         &build_locks,
@@ -195,7 +197,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                         });
                     },
                     5,
-                    &game_mode,
+                    &balance_ctx,
                     &build_locks,
                 )?;
 
@@ -205,7 +207,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
 
                 let mut suggestions: Vec<crate::ui::comparison::BuildSuggestion> = candidates
                     .iter()
-                    .map(|c| candidate_to_suggestion(c, &db))
+                    .map(|c| candidate_to_suggestion(c, &db, &balance_ctx))
                     .collect();
 
                 // Enrich top suggestion with LLM reasoning (legacy path)
@@ -228,6 +230,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                         current_build_summary.as_deref(),
                         &mut suggestions,
                         &addon_dir,
+                        &balance_ctx,
                     ) {
                         Ok(()) => {}
                         Err(e) => {
@@ -461,6 +464,7 @@ fn synergy_result_to_suggestion(
 fn candidate_to_suggestion(
     candidate: &gw2_optimizer::engine::BuildCandidate,
     db: &gw2_optimizer::gamedb::GameDb,
+    balance_ctx: &BalanceContext,
 ) -> crate::ui::comparison::BuildSuggestion {
     use crate::ui::comparison::BuildSuggestion;
 
@@ -531,6 +535,7 @@ fn candidate_to_suggestion(
         &candidate.derived,
         &candidate.modifiers,
         prof_name,
+        balance_ctx,
     );
 
     BuildSuggestion {
@@ -888,6 +893,7 @@ fn enrich_with_llm(
     current_build_summary: Option<&str>,
     suggestions: &mut [crate::ui::comparison::BuildSuggestion],
     addon_dir: &std::path::Path,
+    balance_ctx: &BalanceContext,
 ) -> Result<(), String> {
     let client = gw2_optimizer::llm::create_client(config, addon_dir).map_err(|e| e.to_string())?;
 
@@ -906,6 +912,7 @@ fn enrich_with_llm(
         candidates,
         current_build_summary: build_summary_owned.as_deref(),
         weights: weights.clone(),
+        balance_ctx,
     };
 
     let response = client
@@ -988,6 +995,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     let token = state.cancel_token.clone();
     let db_clone = state.main.game_db.clone();
     let weights = state.main.weights.clone();
+    let chat_balance_ctx = BalanceContext::new(state.main.game_mode.clone());
 
     std::thread::spawn(move || {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1017,6 +1025,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         candidates: &empty_candidates,
                         current_build_summary: build_summary.as_deref(),
                         weights: weights.clone(),
+                        balance_ctx: &chat_balance_ctx,
                     };
 
                     let response = client

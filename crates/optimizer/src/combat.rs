@@ -6,7 +6,9 @@
 use std::collections::HashMap;
 
 use gw2_api::models::{Fact, Item, Trait};
+use gw2_core::types::GameMode;
 
+use crate::balance::BalanceContext;
 use crate::stats::{self, DerivedStats, StatBlock};
 
 /// Percentage-based damage modifiers from traits, runes, sigils, relics.
@@ -172,7 +174,7 @@ fn confusion_tick(condition_damage: f64) -> f64 {
 }
 
 /// Calculate all condition tick damage values.
-pub fn calculate_condition_ticks(condition_damage: f64, modifiers: &DamageModifiers) -> ConditionTicks {
+pub fn calculate_condition_ticks(condition_damage: f64, modifiers: &DamageModifiers, _ctx: &BalanceContext) -> ConditionTicks {
     ConditionTicks {
         bleeding: bleeding_tick(condition_damage) * modifiers.total_condi_mult_for("Bleeding"),
         burning: burning_tick(condition_damage) * modifiers.total_condi_mult_for("Burning"),
@@ -238,7 +240,7 @@ impl ConditionWeights {
 /// e.g., `"Necromancer"`, `"Guardian"`) and elite specialization names (e.g., `"Scourge"`,
 /// `"Firebrand"`, `"Harbinger"`) for forward-compatibility. Harbinger has its own preset
 /// distinct from the shared necro_group (Necromancer/Scourge).
-pub fn condition_weights_for_profession(profession: &str) -> ConditionWeights {
+pub fn condition_weights_for_profession(profession: &str, _ctx: &BalanceContext) -> ConditionWeights {
     match profession {
         "Harbinger" => ConditionWeights::harbinger_preset(),
         "Necromancer" | "Scourge" => ConditionWeights::necro_group(),
@@ -262,11 +264,18 @@ pub fn calculate_combat_performance(
     buffs: &BuffProfile,
     condition_weights: &ConditionWeights,
     profession: &str,
+    ctx: &BalanceContext,
 ) -> CombatPerformance {
     // Apply buff stats
     let might_power = buffs.might_stacks as f64 * 30.0;
     let might_condi = buffs.might_stacks as f64 * 30.0;
-    let fury_crit = if buffs.fury { 20.0 } else { 0.0 };
+    // Fury crit bonus: PvE = 25%, PvP/WvW = 20%
+    // Source: https://wiki.guildwars2.com/wiki/Fury
+    let fury_crit_bonus = match ctx.game_mode {
+        GameMode::PvE => 25.0,
+        GameMode::PvP | GameMode::WvW => 20.0,
+    };
+    let fury_crit = if buffs.fury { fury_crit_bonus } else { 0.0 };
 
     let total_power = stats.power + might_power;
     let total_precision = stats.precision;
@@ -289,7 +298,7 @@ pub fn calculate_combat_performance(
         effective_power * vuln_mult * REFERENCE_WEAPON_STRENGTH / REFERENCE_ARMOR;
 
     // Condition ticks (with modifiers applied)
-    let condition_ticks = calculate_condition_ticks(total_condition_damage, modifiers);
+    let condition_ticks = calculate_condition_ticks(total_condition_damage, modifiers, ctx);
 
     // Condition duration from expertise + modifiers
     let base_condi_duration = (stats.expertise / 15.0).clamp(0.0, 100.0);
@@ -354,7 +363,7 @@ pub fn calculate_combat_performance(
 // ─── Buff Profiles ───
 
 /// Returns the three standard buff profiles: Solo, Party, Full Squad.
-pub fn default_buff_profiles() -> Vec<BuffProfile> {
+pub fn default_buff_profiles(_ctx: &BalanceContext) -> Vec<BuffProfile> {
     vec![
         BuffProfile {
             might_stacks: 0,
@@ -393,6 +402,7 @@ pub fn extract_damage_modifiers(
     relic_id: Option<u32>,
     traits_cache: &HashMap<u32, Trait>,
     items_cache: &HashMap<u32, Item>,
+    _ctx: &BalanceContext,
 ) -> DamageModifiers {
     let mut mods = DamageModifiers::default();
 
@@ -762,12 +772,14 @@ fn capitalize(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::balance::BalanceContext;
 
     #[test]
     fn test_condition_tick_formulas() {
         // With 0 condition damage — base values only
         let mods = DamageModifiers::default();
-        let ticks = calculate_condition_ticks(0.0, &mods);
+        let ctx = BalanceContext::pve();
+        let ticks = calculate_condition_ticks(0.0, &mods, &ctx);
         assert!((ticks.bleeding - 22.0).abs() < 0.1);
         assert!((ticks.burning - 131.75).abs() < 0.1);
         assert!((ticks.poison - 33.5).abs() < 0.1);
@@ -779,7 +791,8 @@ mod tests {
     fn test_condition_tick_with_stats() {
         // With 2000 condition damage (typical Viper build)
         let mods = DamageModifiers::default();
-        let ticks = calculate_condition_ticks(2000.0, &mods);
+        let ctx = BalanceContext::pve();
+        let ticks = calculate_condition_ticks(2000.0, &mods, &ctx);
         // Bleeding: 0.06 * 2000 + 22 = 142
         assert!((ticks.bleeding - 142.0).abs() < 0.1);
         // Burning: 0.155 * 2000 + 131.75 = 441.75
@@ -801,7 +814,8 @@ mod tests {
             .or_default()
             .push(0.20); // +20% burning damage specifically
 
-        let ticks = calculate_condition_ticks(1000.0, &mods);
+        let ctx = BalanceContext::pve();
+        let ticks = calculate_condition_ticks(1000.0, &mods, &ctx);
         // Bleeding: (0.06 * 1000 + 22) * 1.10 = 82 * 1.10 = 90.2
         assert!((ticks.bleeding - 90.2).abs() < 0.1);
         // Burning: (0.155 * 1000 + 131.75) * 1.10 * 1.20 = 286.75 * 1.32 = 378.51
@@ -819,6 +833,7 @@ mod tests {
 
     #[test]
     fn test_solo_combat_performance() {
+        let ctx = BalanceContext::pve();
         // Berserker build: ~2800 Power, ~2100 Precision, ~1400 Ferocity
         let stats = StatBlock {
             power: 2800.0,
@@ -830,9 +845,9 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Warrior");
         let mods = DamageModifiers::default();
-        let solo = default_buff_profiles().into_iter().find(|b| b.label == "Solo").unwrap();
+        let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
 
-        let perf = calculate_combat_performance(&stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Warrior");
+        let perf = calculate_combat_performance(&stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Warrior", &ctx);
 
         // Effective power should be > raw power due to crits
         assert!(perf.effective_power > 2800.0);
@@ -846,6 +861,7 @@ mod tests {
 
     #[test]
     fn test_squad_buffs_increase_performance() {
+        let ctx = BalanceContext::pve();
         let stats = StatBlock {
             power: 2800.0,
             precision: 2100.0,
@@ -856,12 +872,12 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Warrior");
         let mods = DamageModifiers::default();
-        let profiles = default_buff_profiles();
+        let profiles = default_buff_profiles(&ctx);
         let solo = profiles.iter().find(|b| b.label == "Solo").unwrap();
         let squad = profiles.iter().find(|b| b.label == "Full Squad").unwrap();
 
-        let perf_solo = calculate_combat_performance(&stats, &derived, &mods, solo, &ConditionWeights::default_pve(), "Warrior");
-        let perf_squad = calculate_combat_performance(&stats, &derived, &mods, squad, &ConditionWeights::default_pve(), "Warrior");
+        let perf_solo = calculate_combat_performance(&stats, &derived, &mods, solo, &ConditionWeights::default_pve(), "Warrior", &ctx);
+        let perf_squad = calculate_combat_performance(&stats, &derived, &mods, squad, &ConditionWeights::default_pve(), "Warrior", &ctx);
 
         // Squad should have higher DPS (Might + Fury + Vulnerability)
         assert!(perf_squad.strike_dps_index > perf_solo.strike_dps_index);
@@ -870,6 +886,7 @@ mod tests {
 
     #[test]
     fn test_condi_build_has_high_condi_dps() {
+        let ctx = BalanceContext::pve();
         // Viper build: high condi damage + expertise
         let stats = StatBlock {
             power: 1800.0,
@@ -882,9 +899,9 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Necromancer");
         let mods = DamageModifiers::default();
-        let solo = default_buff_profiles().into_iter().find(|b| b.label == "Solo").unwrap();
+        let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
 
-        let perf = calculate_combat_performance(&stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Necromancer");
+        let perf = calculate_combat_performance(&stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Necromancer", &ctx);
 
         // Condition DPS index should be significant
         assert!(perf.condition_dps_index > 500.0);
@@ -1026,7 +1043,8 @@ mod tests {
 
     #[test]
     fn test_default_buff_profiles() {
-        let profiles = default_buff_profiles();
+        let ctx = BalanceContext::pve();
+        let profiles = default_buff_profiles(&ctx);
         assert_eq!(profiles.len(), 3);
         assert_eq!(profiles[0].label, "Solo");
         assert_eq!(profiles[0].might_stacks, 0);
@@ -1040,6 +1058,7 @@ mod tests {
 
     #[test]
     fn test_protection_increases_survivability() {
+        let ctx = BalanceContext::pve();
         let stats = StatBlock {
             power: 1000.0,
             precision: 1000.0,
@@ -1067,8 +1086,8 @@ mod tests {
             label: "With Prot".into(),
         };
 
-        let perf_without = calculate_combat_performance(&stats, &derived, &mods, &without, &ConditionWeights::default_pve(), "Guardian");
-        let perf_with = calculate_combat_performance(&stats, &derived, &mods, &with, &ConditionWeights::default_pve(), "Guardian");
+        let perf_without = calculate_combat_performance(&stats, &derived, &mods, &without, &ConditionWeights::default_pve(), "Guardian", &ctx);
+        let perf_with = calculate_combat_performance(&stats, &derived, &mods, &with, &ConditionWeights::default_pve(), "Guardian", &ctx);
 
         assert!(perf_with.damage_reduction_pct > perf_without.damage_reduction_pct);
         assert!(perf_with.effective_health > perf_without.effective_health);
@@ -1078,6 +1097,7 @@ mod tests {
 
     #[test]
     fn test_firebrand_weights_amplify_burning_score() {
+        let ctx = BalanceContext::pve();
         // Same stat block: firebrand preset should produce higher condition_dps_index
         // than default_pve when burning tick is dominant (high condition_damage → large burn tick).
         let stats = StatBlock {
@@ -1091,13 +1111,13 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Guardian");
         let mods = DamageModifiers::default();
-        let solo = default_buff_profiles().into_iter().find(|b| b.label == "Solo").unwrap();
+        let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
 
         let perf_default = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Guardian",
+            &stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Guardian", &ctx,
         );
         let perf_firebrand = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &ConditionWeights::firebrand_group(), "Guardian",
+            &stats, &derived, &mods, &solo, &ConditionWeights::firebrand_group(), "Guardian", &ctx,
         );
 
         // Firebrand has burning=8.0 vs default burning=2.0; burning tick (0.155*2000+131.75=441.75)
@@ -1116,6 +1136,7 @@ mod tests {
 
     #[test]
     fn test_necro_weights_amplify_bleeding_torment_score() {
+        let ctx = BalanceContext::pve();
         // Same stat block: necro preset should produce higher condition_dps_index
         // than default_pve when bleeding+torment ticks are dominant.
         let stats = StatBlock {
@@ -1129,13 +1150,13 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Necromancer");
         let mods = DamageModifiers::default();
-        let solo = default_buff_profiles().into_iter().find(|b| b.label == "Solo").unwrap();
+        let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
 
         let perf_default = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Necromancer",
+            &stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Necromancer", &ctx,
         );
         let perf_necro = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &ConditionWeights::necro_group(), "Necromancer",
+            &stats, &derived, &mods, &solo, &ConditionWeights::necro_group(), "Necromancer", &ctx,
         );
 
         // Necro: bleeding=8.0 (vs 3.0), torment=6.0 (vs 1.5); these two combined dominate.
@@ -1155,8 +1176,9 @@ mod tests {
 
     #[test]
     fn test_condition_weights_for_profession_dispatch() {
+        let ctx = BalanceContext::pve();
         // Necromancer → necro_group (all 5 fields)
-        let w = condition_weights_for_profession("Necromancer");
+        let w = condition_weights_for_profession("Necromancer", &ctx);
         assert!((w.bleeding - 8.0).abs() < 0.001);
         assert!((w.burning - 1.0).abs() < 0.001);
         assert!((w.poison - 1.5).abs() < 0.001);
@@ -1164,12 +1186,12 @@ mod tests {
         assert!((w.confusion - 0.1).abs() < 0.001);
 
         // Scourge → necro_group (key differentiating fields)
-        let ws = condition_weights_for_profession("Scourge");
+        let ws = condition_weights_for_profession("Scourge", &ctx);
         assert!((ws.bleeding - 8.0).abs() < 0.001);
         assert!((ws.torment - 6.0).abs() < 0.001);
 
         // Harbinger → harbinger_preset (all 5 fields)
-        let wh = condition_weights_for_profession("Harbinger");
+        let wh = condition_weights_for_profession("Harbinger", &ctx);
         assert!((wh.bleeding - 5.0).abs() < 0.001);
         assert!((wh.burning - 0.5).abs() < 0.001);
         assert!((wh.poison - 3.0).abs() < 0.001);
@@ -1177,7 +1199,7 @@ mod tests {
         assert!((wh.confusion - 0.1).abs() < 0.001);
 
         // Guardian → firebrand_group (all 5 fields)
-        let g = condition_weights_for_profession("Guardian");
+        let g = condition_weights_for_profession("Guardian", &ctx);
         assert!((g.bleeding - 1.0).abs() < 0.001);
         assert!((g.burning - 8.0).abs() < 0.001);
         assert!((g.poison - 0.5).abs() < 0.001);
@@ -1185,15 +1207,15 @@ mod tests {
         assert!((g.confusion - 0.0).abs() < 0.001);
 
         // Firebrand and Willbender also → firebrand_group (key differentiating fields)
-        let fb = condition_weights_for_profession("Firebrand");
+        let fb = condition_weights_for_profession("Firebrand", &ctx);
         assert!((fb.burning - 8.0).abs() < 0.001);
         assert!((fb.bleeding - 1.0).abs() < 0.001);
-        let wb = condition_weights_for_profession("Willbender");
+        let wb = condition_weights_for_profession("Willbender", &ctx);
         assert!((wb.burning - 8.0).abs() < 0.001);
         assert!((wb.bleeding - 1.0).abs() < 0.001);
 
         // Warrior → default_pve (all 5 fields)
-        let dw = condition_weights_for_profession("Warrior");
+        let dw = condition_weights_for_profession("Warrior", &ctx);
         assert!((dw.bleeding - 3.0).abs() < 0.001);
         assert!((dw.burning - 2.0).abs() < 0.001);
         assert!((dw.poison - 1.0).abs() < 0.001);
@@ -1201,7 +1223,7 @@ mod tests {
         assert!((dw.confusion - 0.5).abs() < 0.001);
 
         // Unknown profession → default_pve (all 5 fields)
-        let unk = condition_weights_for_profession("ElementalistVariant");
+        let unk = condition_weights_for_profession("ElementalistVariant", &ctx);
         assert!((unk.bleeding - 3.0).abs() < 0.001);
         assert!((unk.burning - 2.0).abs() < 0.001);
         assert!((unk.poison - 1.0).abs() < 0.001);
@@ -1211,6 +1233,7 @@ mod tests {
 
     #[test]
     fn test_harbinger_weights_differ_from_necro() {
+        let ctx = BalanceContext::pve();
         // Harbinger preset should produce a different condition_dps_index than necro_group
         // given identical condition-heavy stats, proving the presets are meaningfully distinct.
         let stats = StatBlock {
@@ -1224,13 +1247,13 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Necromancer");
         let mods = DamageModifiers::default();
-        let solo = default_buff_profiles().into_iter().find(|b| b.label == "Solo").unwrap();
+        let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
 
         let harbinger_result = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &ConditionWeights::harbinger_preset(), "Necromancer",
+            &stats, &derived, &mods, &solo, &ConditionWeights::harbinger_preset(), "Necromancer", &ctx,
         );
         let necro_result = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &ConditionWeights::necro_group(), "Necromancer",
+            &stats, &derived, &mods, &solo, &ConditionWeights::necro_group(), "Necromancer", &ctx,
         );
 
         // Presets differ in bleeding (5.0 vs 8.0), poison (3.0 vs 1.5), torment (5.0 vs 6.0),
@@ -1251,6 +1274,7 @@ mod tests {
 
     #[test]
     fn test_profession_dispatch_affects_condi_score() {
+        let ctx = BalanceContext::pve();
         // End-to-end integration: condition_weights_for_profession("Necromancer")
         // dispatches to necro_group() which should produce a higher condition_dps_index
         // than condition_weights_for_profession("Warrior") (-> default_pve()),
@@ -1270,17 +1294,17 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Necromancer");
         let mods = DamageModifiers::default();
-        let solo = default_buff_profiles().into_iter().find(|b| b.label == "Solo").unwrap();
+        let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
 
         // Dispatch: Necromancer -> necro_group (bleeding=8.0, torment=6.0)
-        let necro_weights = condition_weights_for_profession("Necromancer");
+        let necro_weights = condition_weights_for_profession("Necromancer", &ctx);
         let necro_result = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &necro_weights, "Necromancer",
+            &stats, &derived, &mods, &solo, &necro_weights, "Necromancer", &ctx,
         );
         // Dispatch: Warrior -> default_pve (bleeding=3.0, torment=1.5)
-        let warrior_weights = condition_weights_for_profession("Warrior");
+        let warrior_weights = condition_weights_for_profession("Warrior", &ctx);
         let default_result = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &warrior_weights, "Warrior",
+            &stats, &derived, &mods, &solo, &warrior_weights, "Warrior", &ctx,
         );
 
         // necro_group scores ~116 weighted units vs default_pve ~39 — gap is definitive.
@@ -1295,6 +1319,90 @@ mod tests {
         assert!(
             (necro_result.strike_dps_index - default_result.strike_dps_index).abs() < 0.01,
             "strike_dps_index should be unaffected by condition weight dispatch",
+        );
+    }
+
+    // ─── Mode-Differentiation Test (P3-02 AC 6) ───
+
+    #[test]
+    fn test_fury_crit_bonus_pve_vs_pvp() {
+        // PvE Fury grants 25% crit chance, PvP/WvW Fury grants 20%.
+        // With Fury active, the same stats should produce higher effective_power
+        // in PvE than in PvP due to the 5% crit chance difference.
+        let ctx_pve = BalanceContext::pve();
+        let ctx_pvp = BalanceContext::pvp();
+
+        let stats = StatBlock {
+            power: 2500.0,
+            precision: 1500.0,
+            ferocity: 1000.0,
+            toughness: 1000.0,
+            vitality: 1000.0,
+            ..Default::default()
+        };
+        let derived = stats::compute_derived(&stats, "Warrior");
+        let mods = DamageModifiers::default();
+
+        // Buff profile with Fury active
+        let fury_profile = BuffProfile {
+            might_stacks: 0,
+            fury: true,
+            protection: false,
+            resolution: false,
+            vulnerability_stacks: 0,
+            label: "Fury Only".into(),
+        };
+
+        let perf_pve = calculate_combat_performance(
+            &stats, &derived, &mods, &fury_profile,
+            &ConditionWeights::default_pve(), "Warrior", &ctx_pve,
+        );
+        let perf_pvp = calculate_combat_performance(
+            &stats, &derived, &mods, &fury_profile,
+            &ConditionWeights::default_pve(), "Warrior", &ctx_pvp,
+        );
+
+        // PvE should have higher effective power (25% Fury crit vs 20% PvP Fury crit)
+        assert!(
+            perf_pve.effective_power > perf_pvp.effective_power,
+            "PvE effective_power ({:.1}) should exceed PvP ({:.1}) due to Fury crit bonus \
+             (25% PvE vs 20% PvP)",
+            perf_pve.effective_power,
+            perf_pvp.effective_power,
+        );
+
+        // Strike DPS index should also be higher in PvE
+        assert!(
+            perf_pve.strike_dps_index > perf_pvp.strike_dps_index,
+            "PvE strike_dps ({:.1}) should exceed PvP ({:.1})",
+            perf_pve.strike_dps_index,
+            perf_pvp.strike_dps_index,
+        );
+
+        // Without Fury, results should be identical across modes
+        let no_fury = BuffProfile {
+            might_stacks: 0,
+            fury: false,
+            protection: false,
+            resolution: false,
+            vulnerability_stacks: 0,
+            label: "No Buffs".into(),
+        };
+
+        let perf_pve_no = calculate_combat_performance(
+            &stats, &derived, &mods, &no_fury,
+            &ConditionWeights::default_pve(), "Warrior", &ctx_pve,
+        );
+        let perf_pvp_no = calculate_combat_performance(
+            &stats, &derived, &mods, &no_fury,
+            &ConditionWeights::default_pve(), "Warrior", &ctx_pvp,
+        );
+
+        assert!(
+            (perf_pve_no.effective_power - perf_pvp_no.effective_power).abs() < 0.01,
+            "Without Fury, PvE ({:.1}) and PvP ({:.1}) effective_power should be identical",
+            perf_pve_no.effective_power,
+            perf_pvp_no.effective_power,
         );
     }
 }
