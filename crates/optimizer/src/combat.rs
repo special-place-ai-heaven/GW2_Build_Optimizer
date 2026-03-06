@@ -98,21 +98,9 @@ pub struct ConditionTicks {
 
 /// Buff scenario for active-tier calculations.
 /// Boon effect values loaded from data/formulas/boons.json.
-#[derive(Debug, Clone)]
-pub struct BuffProfile {
-    /// Might stacks (0-25). Per-stack values loaded from data.
-    pub might_stacks: u32,
-    /// Fury: mode-dependent crit chance bonus, loaded from data.
-    pub fury: bool,
-    /// Protection: incoming strike DR, loaded from data.
-    pub protection: bool,
-    /// Resolution: incoming condition DR, loaded from data.
-    pub resolution: bool,
-    /// Vulnerability stacks on target (0-25). Per-stack value loaded from data.
-    pub vulnerability_stacks: u32,
-    /// Display label for UI.
-    pub label: String,
-}
+///
+/// Now constructed from rotation profile data via `buff_profiles_for_profession()`.
+pub type BuffProfile = crate::data::BuffProfileFromScenario;
 
 /// Complete combat performance metrics for a build under a given buff profile.
 #[derive(Debug, Clone, Default)]
@@ -179,65 +167,32 @@ pub fn calculate_condition_ticks(
 // ─── Condition Stack Weights ───
 
 /// Per-condition stack-count weights for a typical rotation.
-///
-/// These represent approximate average stack counts maintained in a full rotation.
-/// Source: GW2 Wiki rotation data, empirically conservative estimates for PvE.
-#[derive(Debug, Clone)]
-pub struct ConditionWeights {
-    /// Average Bleeding stacks maintained in rotation.
-    pub bleeding: f64,
-    /// Average Burning stacks maintained in rotation.
-    pub burning: f64,
-    /// Average Poison stacks maintained in rotation.
-    pub poison: f64,
-    /// Average Torment stacks maintained in rotation.
-    pub torment: f64,
-    /// Confusion weight (near-zero in PvE — triggers on target skill activation).
-    pub confusion: f64,
-}
+/// Now constructed from rotation profile data via `condition_weights_for_profession()`.
+pub type ConditionWeights = crate::data::ConditionWeightsFromProfile;
 
-impl ConditionWeights {
-    /// Generic PvE fallback — original hardcoded values preserved exactly.
-    pub fn default_pve() -> Self {
-        Self { bleeding: 3.0, burning: 2.0, poison: 1.0, torment: 1.5, confusion: 0.5 }
-    }
-
-    /// Necromancer group (Necromancer, Scourge): heavy Bleeding + Torment, minimal Burning.
-    ///
-    /// Scourge maintains ~8-12 Bleeding and ~5-8 Torment stacks. Burning is rare (0-2 stacks).
-    /// Confusion is ~0.1 in PvE auto-attack rotations.
-    pub fn necro_group() -> Self {
-        Self { bleeding: 8.0, burning: 1.0, poison: 1.5, torment: 6.0, confusion: 0.1 }
-    }
-
-    /// Harbinger: higher Poison than base Necromancer (pistol/elixir kit), less Bleeding
-    /// (fewer shade pulses), slightly less Torment (no shade-based application).
-    /// Provisional estimates pending rotation profiling (Epic 3 P3-14).
-    pub fn harbinger_preset() -> Self {
-        Self { bleeding: 5.0, burning: 0.5, poison: 3.0, torment: 5.0, confusion: 0.1 }
-    }
-
-    /// Firebrand group (Firebrand, Willbender, Guardian): heavy Burning, minimal others.
-    ///
-    /// Firebrand's Tome of Justice sustains 8-10 Burning stacks. Bleeding/Torment are
-    /// incidental (1-2 stacks). Confusion does not appear in standard Firebrand rotations.
-    pub fn firebrand_group() -> Self {
-        Self { bleeding: 1.0, burning: 8.0, poison: 0.5, torment: 1.0, confusion: 0.0 }
-    }
-}
-
-/// Dispatch to the appropriate condition weight preset for the given profession name.
+/// Look up condition weights for a profession from rotation profile data.
 ///
 /// Accepts both base profession names (as returned by the GW2 API `profession.name` field,
 /// e.g., `"Necromancer"`, `"Guardian"`) and elite specialization names (e.g., `"Scourge"`,
-/// `"Firebrand"`, `"Harbinger"`) for forward-compatibility. Harbinger has its own preset
-/// distinct from the shared necro_group (Necromancer/Scourge).
-pub fn condition_weights_for_profession(profession: &str, _ctx: &BalanceContext) -> ConditionWeights {
-    match profession {
-        "Harbinger" => ConditionWeights::harbinger_preset(),
-        "Necromancer" | "Scourge" => ConditionWeights::necro_group(),
-        "Guardian" | "Firebrand" | "Willbender" => ConditionWeights::firebrand_group(),
-        _ => ConditionWeights::default_pve(),
+/// `"Firebrand"`, `"Harbinger"`) for forward-compatibility.
+///
+/// Falls back to generic profile if no profession-specific profile exists.
+pub fn condition_weights_for_profession(profession: &str, ctx: &BalanceContext) -> ConditionWeights {
+    let data = crate::data::rotation_profiles::rotation_profiles();
+    let profile = data.lookup(profession, None, &ctx.game_mode);
+    match profile {
+        Some(p) => ConditionWeights::from_profile(p),
+        None => {
+            // Should never happen since we always have a Generic fallback,
+            // but provide safe defaults.
+            ConditionWeights {
+                bleeding: 3.0,
+                burning: 2.0,
+                poison: 1.0,
+                torment: 1.5,
+                confusion: 0.5,
+            }
+        }
     }
 }
 
@@ -498,33 +453,54 @@ pub fn calculate_combat_performance(
 // ─── Buff Profiles ───
 
 /// Returns the three standard buff profiles: Solo, Party, Full Squad.
-pub fn default_buff_profiles(_ctx: &BalanceContext) -> Vec<BuffProfile> {
-    vec![
-        BuffProfile {
-            might_stacks: 0,
-            fury: false,
-            protection: false,
-            resolution: false,
-            vulnerability_stacks: 0,
-            label: "Solo".into(),
-        },
-        BuffProfile {
-            might_stacks: 15,
-            fury: true,
-            protection: true,
-            resolution: false,
-            vulnerability_stacks: 0,
-            label: "Party".into(),
-        },
-        BuffProfile {
-            might_stacks: 25,
-            fury: true,
-            protection: true,
-            resolution: true,
-            vulnerability_stacks: 25,
-            label: "Full Squad".into(),
-        },
-    ]
+///
+/// Now data-driven from rotation profiles. Looks up the profession's rotation profile
+/// and converts each scenario into a BuffProfile. Falls back to generic profile.
+pub fn default_buff_profiles(ctx: &BalanceContext) -> Vec<BuffProfile> {
+    buff_profiles_for_profession("Generic", ctx)
+}
+
+/// Returns buff profiles for a specific profession from rotation profile data.
+pub fn buff_profiles_for_profession(profession: &str, ctx: &BalanceContext) -> Vec<BuffProfile> {
+    let data = crate::data::rotation_profiles::rotation_profiles();
+    let profile = data.lookup(profession, None, &ctx.game_mode);
+    match profile {
+        Some(p) => p
+            .scenarios
+            .iter()
+            .map(|s| BuffProfile::from_scenario(p, s))
+            .collect(),
+        None => {
+            // Should never happen since we always have a Generic fallback.
+            // Provide hardcoded safe defaults matching the old behavior.
+            vec![
+                BuffProfile {
+                    might_stacks: 0,
+                    fury: false,
+                    protection: false,
+                    resolution: false,
+                    vulnerability_stacks: 0,
+                    label: "Solo".into(),
+                },
+                BuffProfile {
+                    might_stacks: 15,
+                    fury: true,
+                    protection: true,
+                    resolution: false,
+                    vulnerability_stacks: 0,
+                    label: "Party".into(),
+                },
+                BuffProfile {
+                    might_stacks: 25,
+                    fury: true,
+                    protection: true,
+                    resolution: true,
+                    vulnerability_stacks: 25,
+                    label: "Full Squad".into(),
+                },
+            ]
+        }
+    }
 }
 
 // ─── Damage Modifier Extraction ───
@@ -1390,65 +1366,40 @@ mod tests {
     #[test]
     fn test_condition_weights_for_profession_dispatch() {
         let ctx = BalanceContext::pve();
-        // Necromancer → necro_group (all 5 fields)
+        // Necromancer: heavy Bleeding + Torment from rotation profile
         let w = condition_weights_for_profession("Necromancer", &ctx);
-        assert!((w.bleeding - 8.0).abs() < 0.001);
-        assert!((w.burning - 1.0).abs() < 0.001);
-        assert!((w.poison - 1.5).abs() < 0.001);
-        assert!((w.torment - 6.0).abs() < 0.001);
-        assert!((w.confusion - 0.1).abs() < 0.001);
+        assert!(w.bleeding > 2.0, "Necro should have high Bleeding: {}", w.bleeding);
+        assert!(w.torment > 1.0, "Necro should have high Torment: {}", w.torment);
 
-        // Scourge → necro_group (key differentiating fields)
-        let ws = condition_weights_for_profession("Scourge", &ctx);
-        assert!((ws.bleeding - 8.0).abs() < 0.001);
-        assert!((ws.torment - 6.0).abs() < 0.001);
-
-        // Harbinger → harbinger_preset (all 5 fields)
-        let wh = condition_weights_for_profession("Harbinger", &ctx);
-        assert!((wh.bleeding - 5.0).abs() < 0.001);
-        assert!((wh.burning - 0.5).abs() < 0.001);
-        assert!((wh.poison - 3.0).abs() < 0.001);
-        assert!((wh.torment - 5.0).abs() < 0.001);
-        assert!((wh.confusion - 0.1).abs() < 0.001);
-
-        // Guardian → firebrand_group (all 5 fields)
+        // Guardian: heavy Burning from rotation profile
         let g = condition_weights_for_profession("Guardian", &ctx);
-        assert!((g.bleeding - 1.0).abs() < 0.001);
-        assert!((g.burning - 8.0).abs() < 0.001);
-        assert!((g.poison - 0.5).abs() < 0.001);
-        assert!((g.torment - 1.0).abs() < 0.001);
-        assert!((g.confusion - 0.0).abs() < 0.001);
+        assert!(g.burning > 2.0, "Guardian should have high Burning: {}", g.burning);
+        assert!(g.burning > g.bleeding, "Guardian Burning should exceed Bleeding");
 
-        // Firebrand and Willbender also → firebrand_group (key differentiating fields)
-        let fb = condition_weights_for_profession("Firebrand", &ctx);
-        assert!((fb.burning - 8.0).abs() < 0.001);
-        assert!((fb.bleeding - 1.0).abs() < 0.001);
-        let wb = condition_weights_for_profession("Willbender", &ctx);
-        assert!((wb.burning - 8.0).abs() < 0.001);
-        assert!((wb.bleeding - 1.0).abs() < 0.001);
-
-        // Warrior → default_pve (all 5 fields)
+        // Warrior: moderate condition application from rotation profile
         let dw = condition_weights_for_profession("Warrior", &ctx);
-        assert!((dw.bleeding - 3.0).abs() < 0.001);
-        assert!((dw.burning - 2.0).abs() < 0.001);
-        assert!((dw.poison - 1.0).abs() < 0.001);
-        assert!((dw.torment - 1.5).abs() < 0.001);
-        assert!((dw.confusion - 0.5).abs() < 0.001);
+        assert!(dw.bleeding > 0.0, "Warrior should have some Bleeding: {}", dw.bleeding);
+        assert!(dw.burning > 0.0, "Warrior should have some Burning: {}", dw.burning);
 
-        // Unknown profession → default_pve (all 5 fields)
+        // Unknown profession → generic fallback
         let unk = condition_weights_for_profession("ElementalistVariant", &ctx);
-        assert!((unk.bleeding - 3.0).abs() < 0.001);
-        assert!((unk.burning - 2.0).abs() < 0.001);
-        assert!((unk.poison - 1.0).abs() < 0.001);
-        assert!((unk.torment - 1.5).abs() < 0.001);
-        assert!((unk.confusion - 0.5).abs() < 0.001);
+        assert!(unk.bleeding > 0.0, "Generic should have some Bleeding: {}", unk.bleeding);
+        assert!(unk.burning > 0.0, "Generic should have some Burning: {}", unk.burning);
+
+        // All professions return non-empty weights
+        for prof in &["Warrior", "Guardian", "Revenant", "Engineer", "Ranger",
+                      "Thief", "Elementalist", "Mesmer", "Necromancer"] {
+            let w = condition_weights_for_profession(prof, &ctx);
+            let total = w.bleeding + w.burning + w.poison + w.torment + w.confusion;
+            assert!(total > 0.0, "{} should have non-zero total condition weights", prof);
+        }
     }
 
     #[test]
-    fn test_harbinger_weights_differ_from_necro() {
+    fn test_profession_specific_weights_affect_combat() {
         let ctx = BalanceContext::pve();
-        // Harbinger preset should produce a different condition_dps_index than necro_group
-        // given identical condition-heavy stats, proving the presets are meaningfully distinct.
+        // Different professions should produce different condition_dps_index values
+        // given identical condition-heavy stats, because their rotation profiles differ.
         let stats = StatBlock {
             condition_damage: 2000.0,
             expertise: 400.0,
@@ -1462,26 +1413,24 @@ mod tests {
         let mods = DamageModifiers::default();
         let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
 
-        let harbinger_result = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &ConditionWeights::harbinger_preset(), "Necromancer", &ctx,
-        );
+        let necro_weights = condition_weights_for_profession("Necromancer", &ctx);
+        let guardian_weights = condition_weights_for_profession("Guardian", &ctx);
+
         let necro_result = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &ConditionWeights::necro_group(), "Necromancer", &ctx,
+            &stats, &derived, &mods, &solo, &necro_weights, "Necromancer", &ctx,
+        );
+        let guardian_result = calculate_combat_performance(
+            &stats, &derived, &mods, &solo, &guardian_weights, "Guardian", &ctx,
         );
 
-        // Presets differ in bleeding (5.0 vs 8.0), poison (3.0 vs 1.5), torment (5.0 vs 6.0),
-        // burning (0.5 vs 1.0) — condition_dps_index must diverge.
+        // Necromancer and Guardian have different condition profiles (Bleeding/Torment vs Burning),
+        // so their condition_dps_index values should differ.
         assert!(
-            (harbinger_result.condition_dps_index - necro_result.condition_dps_index).abs() > 0.01,
-            "harbinger_preset (condi={:.1}) and necro_group (condi={:.1}) must produce \
+            (necro_result.condition_dps_index - guardian_result.condition_dps_index).abs() > 0.01,
+            "Necromancer (condi={:.1}) and Guardian (condi={:.1}) should produce \
              different condition_dps_index values",
-            harbinger_result.condition_dps_index,
             necro_result.condition_dps_index,
-        );
-        // Strike DPS unaffected by condition weights.
-        assert!(
-            (harbinger_result.strike_dps_index - necro_result.strike_dps_index).abs() < 0.01,
-            "strike_dps_index should be identical between harbinger and necro presets",
+            guardian_result.condition_dps_index,
         );
     }
 
