@@ -204,28 +204,16 @@ pub struct StatBlock {
 
 impl StatBlock {
     /// Compute derived stats from base stats.
-    /// `profession` determines base health (HP class) and base defense (armor weight class).
+    /// `base_health` and `base_defense` are profession-specific values from loaded
+    /// profession profiles (data/profession_profiles.json). Callers get these values
+    /// from the optimizer crate's stats::base_health() / stats::base_defense().
     /// NOTE: GW2 HP classes and armor classes do NOT align!
-    /// HP: High (Warrior, Guardian), Medium (Rev, Engi, Ranger, Mesmer, Necro), Low (Thief, Ele)
+    /// HP: High (Warrior, Necromancer), Medium (Rev, Engi, Ranger, Mesmer), Low (Guardian, Thief, Ele)
     /// Armor: Heavy (Warrior, Guardian, Revenant), Medium (Ranger, Engi, Thief), Light (Ele, Mes, Necro)
-    pub fn compute_derived(&mut self, profession: &str) {
+    pub fn compute_derived(&mut self, base_health: i32, base_defense: i32) {
         self.crit_chance = ((self.precision - 895) as f64 / 21.0).clamp(0.0, 100.0);
         self.crit_damage = 150.0 + self.ferocity as f64 / 15.0;
-        // HP class (different from armor class!)
-        let base_hp = match profession {
-            "Warrior" | "Guardian" => 9212,
-            "Revenant" | "Engineer" | "Ranger" | "Mesmer" | "Necromancer" => 5922,
-            "Thief" | "Elementalist" => 1645,
-            _ => 5922,
-        };
-        // Armor weight class (different from HP class!)
-        let base_defense = match profession {
-            "Warrior" | "Guardian" | "Revenant" => 1271,          // Heavy
-            "Ranger" | "Engineer" | "Thief" => 1118,              // Medium
-            "Elementalist" | "Mesmer" | "Necromancer" => 967,     // Light
-            _ => 1000,
-        };
-        self.health = self.vitality * 10 + base_hp;
+        self.health = self.vitality * 10 + base_health;
         self.armor = self.toughness + base_defense;
     }
 }
@@ -281,6 +269,16 @@ pub struct SavedBuild {
     pub timestamp: u64, // Unix epoch seconds
     pub character_name: String,
     pub game_mode: GameMode,
+    /// Profession name (e.g. "Necromancer"). Empty for pre-P3-16 saves;
+    /// treated as "Warrior" fallback at load time (backward-compat shim).
+    #[serde(default)]
+    pub profession: String,
+    /// Engine version that created this save (informational, e.g. "1.0.0").
+    #[serde(default)]
+    pub engine_version: String,
+    /// Balance manifest version used when this save was created (P3-08, future).
+    #[serde(default)]
+    pub balance_manifest_version: Option<String>,
     // Build suggestion data (mirrors BuildSuggestion fields)
     pub label: String,
     pub stat_prefix: String,

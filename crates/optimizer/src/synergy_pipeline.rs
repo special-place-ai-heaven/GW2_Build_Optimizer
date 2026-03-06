@@ -14,8 +14,7 @@
 use std::collections::HashMap;
 
 use gw2_api::models::{Profession, Skill, Specialization, Trait as GW2Trait};
-use gw2_core::types::GameMode;
-
+use crate::balance::BalanceContext;
 use crate::combat;
 use crate::engine::{self, OptimizeProgress, SynergyResult};
 use crate::gamedb::GameDb;
@@ -71,7 +70,7 @@ pub fn optimize_synergy(
     db: &GameDb,
     profession_name: &str,
     weights: &OptimizationWeights,
-    _game_mode: &GameMode,
+    ctx: &BalanceContext,
     gear_prefix_name: &str,
     locks: &gw2_core::types::BuildLocks,
     on_progress: &mut dyn FnMut(OptimizeProgress),
@@ -134,7 +133,7 @@ pub fn optimize_synergy(
     });
 
     let best = rank_and_select(
-        &candidates, db, profession_name, gear_prefix_name, weights,
+        &candidates, db, profession_name, gear_prefix_name, weights, ctx,
     )?;
 
     // Convert to SynergyResult
@@ -143,7 +142,7 @@ pub fn optimize_synergy(
         done: false,
     });
 
-    build_synergy_result(best, db, profession_name, gear_prefix_name, weights, on_progress)
+    build_synergy_result(best, db, profession_name, gear_prefix_name, weights, ctx, on_progress)
 }
 
 // ─── Stage 2: Specs + Traits ───
@@ -755,6 +754,7 @@ fn rank_and_select(
     profession_name: &str,
     gear_prefix_name: &str,
     weights: &OptimizationWeights,
+    ctx: &BalanceContext,
 ) -> Result<SynergyCandidate, String> {
     if candidates.is_empty() {
         return Err(format!(
@@ -771,7 +771,7 @@ fn rank_and_select(
         .find(|is| is.name.contains(gear_prefix_name))
         .map(|is| is.id);
 
-    let solo_profile = &combat::default_buff_profiles()[0];
+    let solo_profile = &combat::default_buff_profiles(ctx)[0];
 
     for (idx, candidate) in candidates.iter().enumerate() {
         let stats = compute_candidate_stats(
@@ -787,8 +787,9 @@ fn rank_and_select(
 
         let combat_perf = combat::calculate_combat_performance(
             &stats, &derived, &modifiers, solo_profile,
-            &combat::condition_weights_for_profession(profession_name),
+            &combat::condition_weights_for_profession(profession_name, ctx),
             profession_name,
+            ctx,
         );
 
         let combat_score = score_with_weights(&combat_perf, weights);
@@ -854,6 +855,7 @@ fn build_synergy_result(
     profession_name: &str,
     gear_prefix_name: &str,
     _weights: &OptimizationWeights,
+    ctx: &BalanceContext,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     // Build ValidatedBuild
@@ -955,6 +957,7 @@ fn build_synergy_result(
         candidate.relic.as_ref().map(|(id, _)| *id),
         &db.traits,
         &db.items,
+        ctx,
     );
     // Cap multiplicative modifiers to realistic ranges.
     // extract_damage_modifiers() treats conditional/proc Fact::Percent as permanent,
@@ -967,16 +970,16 @@ fn build_synergy_result(
     cap_modifiers_vec(&mut modifiers.healing_pct, 3);
 
     // 3-tier combat
-    let buff_profiles = combat::default_buff_profiles();
-    let cw = combat::condition_weights_for_profession(profession_name);
+    let buff_profiles = combat::default_buff_profiles(ctx);
+    let cw = combat::condition_weights_for_profession(profession_name, ctx);
     let combat_solo = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[0], &cw, profession_name,
+        &full_stats, &derived, &modifiers, &buff_profiles[0], &cw, profession_name, ctx,
     );
     let combat_party = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[1], &cw, profession_name,
+        &full_stats, &derived, &modifiers, &buff_profiles[1], &cw, profession_name, ctx,
     );
     let combat_squad = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[2], &cw, profession_name,
+        &full_stats, &derived, &modifiers, &buff_profiles[2], &cw, profession_name, ctx,
     );
 
     // Rotation

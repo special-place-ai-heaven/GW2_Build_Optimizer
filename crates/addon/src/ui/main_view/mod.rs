@@ -1789,16 +1789,23 @@ fn render_save_build_ui(ui: &Ui, state: &mut AddonState) {
             .as_ref()
             .map(|b| b.character_name.clone())
             .unwrap_or_default();
+        let profession = state
+            .main
+            .current_build
+            .as_ref()
+            .map(|b| b.profession.clone())
+            .unwrap_or_default();
         let game_mode = state.main.game_mode.clone();
         let saved = suggestion_to_saved(
             &state.main.save_name_input,
             &character_name,
+            &profession,
             &game_mode,
             suggestion,
         );
 
         let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
-        match storage.save(&saved) {
+        match storage.save_new(&saved) {
             Ok(()) => {
                 state.main.save_status = Some(format!("Saved '{}'", saved.name));
                 state.main.save_status_frames = 0;
@@ -1905,7 +1912,8 @@ fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
     // Handle load
     if let Some(idx) = load_idx {
         let saved = state.main.saved_builds[idx].clone();
-        let mut suggestion = saved_to_suggestion(&saved);
+        let db_ref = state.main.game_db.as_ref();
+        let mut suggestion = saved_to_suggestion(&saved, db_ref);
         // Run rotation simulation if GameDb is available
         if let Some(ref db) = state.main.game_db {
             optimization::simulate_suggestion_rotation(&mut suggestion, db);
@@ -1943,6 +1951,7 @@ fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
 fn suggestion_to_saved(
     name: &str,
     character_name: &str,
+    profession: &str,
     game_mode: &gw2_core::types::GameMode,
     suggestion: &crate::ui::comparison::BuildSuggestion,
 ) -> gw2_core::types::SavedBuild {
@@ -1958,6 +1967,9 @@ fn suggestion_to_saved(
         timestamp,
         character_name: character_name.to_string(),
         game_mode: game_mode.clone(),
+        profession: profession.to_string(),
+        engine_version: env!("CARGO_PKG_VERSION").to_string(),
+        balance_manifest_version: None, // TODO: populate from BalanceContext (P3-08)
         label: suggestion.label.clone(),
         stat_prefix: suggestion.stat_prefix.clone(),
         specializations: suggestion.specializations.clone(),
@@ -1975,9 +1987,30 @@ fn suggestion_to_saved(
 
 /// Convert a SavedBuild back to a BuildSuggestion for display.
 /// Recomputes combat metrics from estimated stats if available.
+/// When `game_db` is provided, reconstructs DamageModifiers from saved
+/// spec/trait/rune/sigil/relic names for accurate combat metric recomputation.
 fn saved_to_suggestion(
     saved: &gw2_core::types::SavedBuild,
+    game_db: Option<&gw2_optimizer::gamedb::GameDb>,
 ) -> crate::ui::comparison::BuildSuggestion {
+    // Determine profession — fallback to "Warrior" for pre-P3-16 saves
+    let profession = if saved.profession.is_empty() {
+        nexus::log::log(
+            nexus::log::LogLevel::Warning,
+            "GW2BuildOpt",
+            "Loaded build with empty profession — falling back to Warrior",
+        );
+        "Warrior"
+    } else {
+        &saved.profession
+    };
+
+    // Reconstruct DamageModifiers from saved build config if GameDb is available.
+    let ctx = gw2_optimizer::balance::BalanceContext::new(saved.game_mode.clone());
+    let mods = game_db
+        .map(|db| reconstruct_damage_modifiers(saved, db, &ctx))
+        .unwrap_or_default();
+
     // Recompute combat metrics from saved stats (lossy i32→f64 but good enough for display)
     let (combat_solo, combat_party, combat_squad) = saved
         .estimated_stats
@@ -1994,10 +2027,8 @@ fn saved_to_suggestion(
                 ferocity: est.ferocity as f64,
                 healing_power: est.healing_power as f64,
             };
-            // Use a generic profession name — the exact profession mainly affects health
-            let derived = gw2_optimizer::stats::compute_derived(&stats, "Warrior");
-            let mods = gw2_optimizer::combat::DamageModifiers::default();
-            stats::compute_3tier_combat(&stats, &derived, &mods, "Warrior")
+            let derived = gw2_optimizer::stats::compute_derived(&stats, profession);
+            stats::compute_3tier_combat(&stats, &derived, &mods, profession, &ctx)
         })
         .unwrap_or((None, None, None));
 
@@ -2024,6 +2055,135 @@ fn saved_to_suggestion(
         combat_squad,
         rotation: None,
     }
+}
+
+/// Reconstruct DamageModifiers from a saved build by resolving spec/trait/rune/sigil/relic
+/// names against GameDb. Unresolvable entities are skipped with a warning.
+fn reconstruct_damage_modifiers(
+    saved: &gw2_core::types::SavedBuild,
+    db: &gw2_optimizer::gamedb::GameDb,
+    ctx: &gw2_optimizer::balance::BalanceContext,
+) -> gw2_optimizer::combat::DamageModifiers {
+    let mut equipped_trait_ids: Vec<u32> = Vec::new();
+
+    // Resolve specialization + trait names to IDs
+    for (spec_name, trait_names) in &saved.specializations {
+        let spec = db
+            .specializations
+            .values()
+            .find(|s| s.name == *spec_name);
+        let Some(spec) = spec else {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                &format!(
+                    "Could not resolve spec '{}' for modifier reconstruction — skipping",
+                    spec_name
+                ),
+            );
+            continue;
+        };
+
+        for trait_name in trait_names {
+            let trait_id = db
+                .traits_by_spec
+                .get(&spec.id)
+                .and_then(|ids| {
+                    ids.iter()
+                        .filter_map(|id| db.traits.get(id))
+                        .find(|t| t.name == *trait_name)
+                        .map(|t| t.id)
+                });
+            match trait_id {
+                Some(id) => equipped_trait_ids.push(id),
+                None => {
+                    nexus::log::log(
+                        nexus::log::LogLevel::Warning,
+                        "GW2BuildOpt",
+                        &format!(
+                            "Could not resolve trait '{}' in spec '{}' — skipping",
+                            trait_name, spec_name
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    // Resolve rune name to ID
+    let rune_id = if !saved.rune.is_empty() {
+        let found = db
+            .runes
+            .iter()
+            .filter_map(|id| db.items.get(id))
+            .find(|item| item.name == saved.rune)
+            .map(|item| item.id);
+        if found.is_none() {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                &format!("Could not resolve rune '{}' — skipping", saved.rune),
+            );
+        }
+        found
+    } else {
+        None
+    };
+
+    // Resolve sigil names to IDs
+    let sigil_ids: Vec<u32> = saved
+        .sigils
+        .iter()
+        .filter_map(|name| {
+            if name.is_empty() {
+                return None;
+            }
+            let found = db
+                .sigils
+                .iter()
+                .filter_map(|id| db.items.get(id))
+                .find(|item| item.name == *name)
+                .map(|item| item.id);
+            if found.is_none() {
+                nexus::log::log(
+                    nexus::log::LogLevel::Warning,
+                    "GW2BuildOpt",
+                    &format!("Could not resolve sigil '{}' — skipping", name),
+                );
+            }
+            found
+        })
+        .collect();
+
+    // Resolve relic name to ID
+    let relic_id = if !saved.relic.is_empty() {
+        let found = db
+            .relics
+            .iter()
+            .filter_map(|id| db.items.get(id))
+            .find(|item| item.name == saved.relic)
+            .map(|item| item.id);
+        if found.is_none() {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                &format!("Could not resolve relic '{}' — skipping", saved.relic),
+            );
+        }
+        found
+    } else {
+        None
+    };
+
+    gw2_optimizer::combat::extract_damage_modifiers(
+        &equipped_trait_ids,
+        rune_id,
+        &sigil_ids,
+        relic_id,
+        &db.traits,
+        &db.items,
+        ctx,
+    )
 }
 
 /// Format a Unix timestamp as a readable date+time string (YYYY-MM-DD HH:MM).

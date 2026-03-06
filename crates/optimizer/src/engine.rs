@@ -10,6 +10,7 @@ use gw2_core::types::GameMode;
 
 use gw2_api::models::Fact;
 
+use crate::balance::BalanceContext;
 use crate::combat::{self, CombatPerformance, DamageModifiers};
 use crate::context::{self, ContextConfig};
 use crate::gamedb::GameDb;
@@ -89,11 +90,11 @@ pub fn optimize(
     traits_cache: &HashMap<u32, GW2Trait>,
     mut on_progress: impl FnMut(OptimizeProgress),
     top_n: usize,
-    game_mode: &GameMode,
+    ctx: &BalanceContext,
     locks: &gw2_core::types::BuildLocks,
 ) -> Result<Vec<BuildCandidate>, String> {
-    if *game_mode == GameMode::PvP {
-        return optimize_pvp(profession, weights, specs_cache, traits_cache, &mut on_progress, top_n, locks)
+    if ctx.game_mode == GameMode::PvP {
+        return optimize_pvp(profession, weights, specs_cache, traits_cache, &mut on_progress, top_n, locks, ctx)
             .and_then(|v| if v.is_empty() {
                 Err(format!("No PvP candidates found for {} / {}", profession.name, weights.summary_label()))
             } else {
@@ -117,8 +118,8 @@ pub fn optimize(
 
     // Score each gear candidate (preliminary — no traits/modifiers yet)
     let empty_mods = DamageModifiers::default();
-    let solo_profile = &combat::default_buff_profiles()[0];
-    let cw = combat::condition_weights_for_profession(&profession.name);
+    let solo_profile = &combat::default_buff_profiles(ctx)[0];
+    let cw = combat::condition_weights_for_profession(&profession.name, ctx);
     for candidate in &mut gear_candidates {
         let mock_stats = calculate_candidate_stats(candidate, itemstats_cache);
         let mut full_stats = stats::base_stats();
@@ -128,6 +129,7 @@ pub fn optimize(
             &full_stats, &derived, &empty_mods, solo_profile,
             &cw,
             &profession.name,
+            ctx,
         );
         candidate.score = score_with_weights(&perf, weights);
     }
@@ -198,7 +200,7 @@ pub fn optimize(
 
             // Extract damage modifiers from traits (no rune/sigil/relic in search phase)
             let modifiers = combat::extract_damage_modifiers(
-                &trait_ids, None, &[], None, traits_cache, _items_cache,
+                &trait_ids, None, &[], None, traits_cache, _items_cache, ctx,
             );
 
             // Calculate combat performance with Solo profile
@@ -206,6 +208,7 @@ pub fn optimize(
                 &full_stats, &derived, &modifiers, solo_profile,
                 &cw,
                 &profession.name,
+                ctx,
             );
             let score = score_with_weights(&combat_perf, weights);
 
@@ -260,6 +263,7 @@ fn optimize_pvp(
     on_progress: &mut impl FnMut(OptimizeProgress),
     top_n: usize,
     locks: &gw2_core::types::BuildLocks,
+    ctx: &BalanceContext,
 ) -> Result<Vec<BuildCandidate>, String> {
     on_progress(OptimizeProgress {
         stage: "Evaluating PvP specialization combinations...".into(),
@@ -276,7 +280,7 @@ fn optimize_pvp(
         score: 0.0,
     };
 
-    let solo_profile = &combat::default_buff_profiles()[0];
+    let solo_profile = &combat::default_buff_profiles(ctx)[0];
     let stat_weights = weights.to_stat_weights();
 
     for (elite, cores) in &spec_combos {
@@ -307,12 +311,13 @@ fn optimize_pvp(
 
         // Extract modifiers from traits only (PvP has no gear modifiers)
         let modifiers = combat::extract_damage_modifiers(
-            &trait_ids, None, &[], None, traits_cache, &HashMap::new(),
+            &trait_ids, None, &[], None, traits_cache, &HashMap::new(), ctx,
         );
         let combat_perf = combat::calculate_combat_performance(
             &full_stats, &derived, &modifiers, solo_profile,
-            &combat::condition_weights_for_profession(&profession.name),
+            &combat::condition_weights_for_profession(&profession.name, ctx),
             &profession.name,
+            ctx,
         );
         let score = score_with_weights(&combat_perf, weights);
 
@@ -581,7 +586,7 @@ pub fn optimize_with_gemini(
     db: &GameDb,
     profession_name: &str,
     weights: &OptimizationWeights,
-    game_mode: &GameMode,
+    ctx: &BalanceContext,
     llm_client: &dyn LlmClient,
     current_build_summary: Option<&str>,
     locks: &gw2_core::types::BuildLocks,
@@ -604,7 +609,7 @@ pub fn optimize_with_gemini(
         stage: "Building profession context...".into(),
         done: false,
     });
-    let mode_str = match game_mode {
+    let mode_str = match ctx.game_mode {
         GameMode::PvE => "PvE",
         GameMode::PvP => "PvP",
         GameMode::WvW => "WvW",
@@ -650,6 +655,7 @@ pub fn optimize_with_gemini(
         candidates: &[],
         current_build_summary,
         weights: weights.clone(),
+        balance_ctx: ctx,
     };
     let provider_name = llm_client.provider_name().to_string();
     let llm_response = llm_client
@@ -720,7 +726,7 @@ pub fn optimize_with_gemini(
         done: false,
     });
     let (full_stats, modifiers) =
-        calculate_validated_stats(&validated, db, profession_name);
+        calculate_validated_stats(&validated, db, profession_name, ctx);
 
     let derived = stats::compute_derived(&full_stats, profession_name);
 
@@ -729,16 +735,16 @@ pub fn optimize_with_gemini(
         stage: "Computing combat performance...".into(),
         done: false,
     });
-    let buff_profiles = combat::default_buff_profiles();
-    let cw = combat::condition_weights_for_profession(profession_name);
+    let buff_profiles = combat::default_buff_profiles(ctx);
+    let cw = combat::condition_weights_for_profession(profession_name, ctx);
     let combat_solo = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[0], &cw, profession_name,
+        &full_stats, &derived, &modifiers, &buff_profiles[0], &cw, profession_name, ctx,
     );
     let combat_party = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[1], &cw, profession_name,
+        &full_stats, &derived, &modifiers, &buff_profiles[1], &cw, profession_name, ctx,
     );
     let combat_squad = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[2], &cw, profession_name,
+        &full_stats, &derived, &modifiers, &buff_profiles[2], &cw, profession_name, ctx,
     );
 
     // 9. Simulate rotation from validated skills
@@ -769,6 +775,7 @@ pub fn calculate_validated_stats(
     validated: &ValidatedBuild,
     db: &GameDb,
     _profession_name: &str,
+    ctx: &BalanceContext,
 ) -> (stats::StatBlock, DamageModifiers) {
     let mut full_stats = stats::base_stats();
 
@@ -807,6 +814,7 @@ pub fn calculate_validated_stats(
         relic_id,
         &db.traits,
         &db.items,
+        ctx,
     );
 
     (full_stats, modifiers)
@@ -908,7 +916,7 @@ pub fn optimize_deterministic(
     db: &GameDb,
     profession_name: &str,
     weights: &OptimizationWeights,
-    game_mode: &GameMode,
+    ctx: &BalanceContext,
     llm_client: Option<&dyn LlmClient>,
     _current_build_summary: Option<&str>,
     locks: &gw2_core::types::BuildLocks,
@@ -924,7 +932,7 @@ pub fn optimize_deterministic(
 
     // 2. Run the full synergy pipeline
     let mut result = crate::synergy_pipeline::optimize_synergy(
-        db, profession_name, weights, game_mode, determined_prefix, locks, on_progress,
+        db, profession_name, weights, ctx, determined_prefix, locks, on_progress,
     )?;
 
     // 3. Optional: LLM explanation pass
@@ -1142,6 +1150,7 @@ mod tests {
         }
 
         let no_locks = gw2_core::types::BuildLocks::default();
+        let ctx = crate::balance::BalanceContext::pve();
         let candidates = optimize(
             &profession,
             &OptimizationWeights::preset_power_dps(),
@@ -1152,7 +1161,7 @@ mod tests {
             &HashMap::new(),
             |_| {},
             3,
-            &GameMode::PvE,
+            &ctx,
             &no_locks,
         )
         .expect("optimize() should succeed with valid data");

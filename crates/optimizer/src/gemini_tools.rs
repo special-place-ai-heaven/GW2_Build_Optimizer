@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 
 use gw2_api::models::{Fact, ItemStat, Trait as GW2Trait};
 
+use crate::balance::BalanceContext;
 use crate::combat::{self, CombatPerformance, DamageModifiers};
 use crate::engine::BuildCandidate;
 use crate::gamedb::GameDb;
@@ -23,6 +24,7 @@ pub struct ToolContext<'a> {
     pub candidates: &'a [BuildCandidate],
     pub current_build_summary: Option<&'a str>,
     pub weights: OptimizationWeights,
+    pub balance_ctx: &'a BalanceContext,
 }
 
 /// Build the Gemini tool declarations for all available tools.
@@ -715,15 +717,15 @@ fn exec_simulate_combat(args: &Value, ctx: &ToolContext) -> Value {
     let modifiers = if trait_ids.is_empty() {
         DamageModifiers::default()
     } else {
-        combat::extract_damage_modifiers(&trait_ids, None, &[], None, &ctx.db.traits, &ctx.db.items)
+        combat::extract_damage_modifiers(&trait_ids, None, &[], None, &ctx.db.traits, &ctx.db.items, ctx.balance_ctx)
     };
 
     // Simulate under all 3 buff profiles
-    let profiles = combat::default_buff_profiles();
-    let cw = combat::condition_weights_for_profession(ctx.profession_name);
+    let profiles = combat::default_buff_profiles(ctx.balance_ctx);
+    let cw = combat::condition_weights_for_profession(ctx.profession_name, ctx.balance_ctx);
     let results: Vec<Value> = profiles.iter().map(|bp| {
         let perf = combat::calculate_combat_performance(
-            &full_stats, &derived, &modifiers, bp, &cw, ctx.profession_name,
+            &full_stats, &derived, &modifiers, bp, &cw, ctx.profession_name, ctx.balance_ctx,
         );
         format_combat_performance(&perf, &bp.label)
     }).collect();
@@ -750,11 +752,12 @@ fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
     let derived = stats::compute_derived(&full_stats, ctx.profession_name);
 
     let mods = DamageModifiers::default();
-    let solo = &combat::default_buff_profiles()[0];
+    let solo = &combat::default_buff_profiles(ctx.balance_ctx)[0];
     let perf = combat::calculate_combat_performance(
         &full_stats, &derived, &mods, solo,
-        &combat::condition_weights_for_profession(ctx.profession_name),
+        &combat::condition_weights_for_profession(ctx.profession_name, ctx.balance_ctx),
         ctx.profession_name,
+        ctx.balance_ctx,
     );
 
     let score = scoring::score_with_weights(&perf, &ctx.weights);
@@ -1076,7 +1079,7 @@ fn exec_get_build_synergy_report(args: &Value, ctx: &ToolContext) -> Value {
 
     // 2. Damage modifiers from traits
     let modifiers = combat::extract_damage_modifiers(
-        &trait_ids, None, &[], None, &ctx.db.traits, &ctx.db.items,
+        &trait_ids, None, &[], None, &ctx.db.traits, &ctx.db.items, ctx.balance_ctx,
     );
 
     // 3. All conditions the build can apply

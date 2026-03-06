@@ -1,6 +1,11 @@
 # Story P2-07: SavedBuild Profession Persistence & Crash-Safe Writes
 
-Status: ready-for-dev
+Status: superseded
+
+> **Superseded by P3-16.** All scope from P2-07 has been absorbed into Story 3.16
+> (Save/Load Profession Persistence and Crash Safety). P3-16 extends the original
+> P2-07 scope with engine_version/balance_manifest_version fields, save_new/save_overwrite
+> API split, and DamageModifiers reconstruction from saved build config.
 
 ## Story
 
