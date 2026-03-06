@@ -740,8 +740,8 @@ pub fn score_normalized_effect(effect: &NormalizedEffect, weights: &Optimization
         }
         NormalizedEffect::DurationBonus { kind, percent } => {
             let w = match kind {
-                DurationKind::AllCondition => weights.condition * 0.8 + weights.disable * 0.3,
-                DurationKind::AllBoon => weights.disable * 0.6 + weights.healing * 0.3,
+                DurationKind::AllCondition => weights.condition * 0.8 + weights.control * 0.3,
+                DurationKind::AllBoon => weights.boon_support * 0.4 + weights.control * 0.2 + weights.healing * 0.3,
                 DurationKind::SpecificCondition(_) => weights.condition * 0.5,
             };
             percent / 100.0 * w
@@ -947,9 +947,9 @@ fn weight_for_stat(stat: &StatType, weights: &OptimizationWeights) -> f64 {
         StatType::Power => weights.power * 0.8,
         StatType::Precision => weights.power * 0.6 + weights.condition * 0.2,
         StatType::Ferocity => weights.power * 0.5,
-        StatType::ConditionDamage => weights.condition * 0.8 + weights.disable * 0.2,
-        StatType::Expertise => weights.condition * 0.6 + weights.disable * 0.4,
-        StatType::Concentration => weights.disable * 0.5 + weights.healing * 0.3,
+        StatType::ConditionDamage => weights.condition * 0.8 + weights.control * 0.2,
+        StatType::Expertise => weights.condition * 0.6 + weights.control * 0.4,
+        StatType::Concentration => weights.boon_support * 0.5 + weights.control * 0.2 + weights.healing * 0.3,
         StatType::HealingPower => weights.healing * 0.9,
         StatType::Toughness => weights.sustain * 0.8,
         StatType::Vitality => weights.sustain * 0.7,
@@ -983,12 +983,12 @@ fn boon_weight(status: &str, weights: &OptimizationWeights) -> f64 {
         "Might" => weights.power * 0.5 + weights.condition * 0.5,
         "Fury" => weights.power * 0.7,
         "Quickness" => weights.power * 0.5 + weights.condition * 0.3,
-        "Alacrity" => weights.disable * 0.4 + weights.power * 0.2,
+        "Alacrity" => weights.boon_support * 0.4 + weights.power * 0.2,
         "Protection" => weights.sustain * 0.6,
         "Resolution" => weights.sustain * 0.4,
         "Regeneration" => weights.healing * 0.4,
         "Vigor" => weights.sustain * 0.3,
-        "Stability" => weights.disable * 0.5 + weights.sustain * 0.3,
+        "Stability" => weights.control * 0.3 + weights.sustain * 0.3 + weights.boon_support * 0.2,
         "Swiftness" => 0.05,
         "Resistance" => weights.sustain * 0.4,
         "Aegis" => weights.sustain * 0.5,

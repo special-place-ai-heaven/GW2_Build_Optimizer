@@ -6,6 +6,7 @@ pub mod boon_condition_formulas;
 mod consistency_tests;
 pub mod manifests;
 pub mod normalized_effects;
+pub mod objective_profiles;
 pub mod patch_ledger;
 pub mod profession_profiles;
 pub mod quality;
@@ -24,6 +25,9 @@ pub use normalized_effects::{
 };
 pub use patch_ledger::PatchLedger;
 pub use profession_profiles::ProfessionProfiles;
+pub use objective_profiles::{
+    ObjectiveProfile, ObjectiveProfileData, ObjectiveProfileFile,
+};
 pub use rotation_profiles::{
     ApplicationMetrics, BuffProfileFromScenario, ConditionWeightsFromProfile, GenerationMetrics,
     RotationProfile, RotationProfileData, ScenarioProfile, TargetBehavior,
@@ -119,6 +123,9 @@ pub fn initialize() -> DataState {
         errors.extend(errs);
     }
     if let Err(errs) = rotation_profiles::try_load_rotation_profiles() {
+        errors.extend(errs);
+    }
+    if let Err(errs) = objective_profiles::try_load_objective_profiles() {
         errors.extend(errs);
     }
 

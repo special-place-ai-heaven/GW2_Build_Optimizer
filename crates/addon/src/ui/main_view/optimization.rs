@@ -64,9 +64,9 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
         nexus::log::LogLevel::Info,
         "GW2BuildOpt",
         &format!(
-            "Optimizing {}/{}: weights P={:.2} D={:.2} C={:.2} H={:.2} S={:.2} ({}) -> gear: {} (sim={:.3})",
+            "Optimizing {}/{}: weights P={:.2} C={:.2} B={:.2} H={:.2} S={:.2} Ctrl={:.2} ({}) -> gear: {} (sim={:.3})",
             profession_name, game_mode_label,
-            weights.power, weights.disable, weights.condition, weights.healing, weights.sustain,
+            weights.power, weights.condition, weights.boon_support, weights.healing, weights.sustain, weights.control,
             weights.summary_label(),
             gear_match.primary, gear_match.similarity,
         ),

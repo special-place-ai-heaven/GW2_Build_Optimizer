@@ -534,12 +534,12 @@ pub fn score_effect(effect: &NormalizedEffect, weights: &OptimizationWeights) ->
             base_value / 100.0 * weights.power * 0.8
         }
         EffectCategory::BoonDurationPct => {
-            // Boon duration benefits disable (boon support) and healing
-            base_value / 100.0 * (weights.disable * 0.6 + weights.healing * 0.3)
+            // Boon duration benefits boon support and healing
+            base_value / 100.0 * (weights.boon_support * 0.4 + weights.control * 0.2 + weights.healing * 0.3)
         }
         EffectCategory::ConditionDurationPct => {
-            // Condition duration benefits condition DPS and CC/disable
-            base_value / 100.0 * (weights.condition * 0.8 + weights.disable * 0.3)
+            // Condition duration benefits condition DPS and control
+            base_value / 100.0 * (weights.condition * 0.8 + weights.control * 0.3)
         }
         EffectCategory::SpecificConditionDurationPct => {
             base_value / 100.0 * weights.condition * 0.5
@@ -571,15 +571,15 @@ pub fn score_effect(effect: &NormalizedEffect, weights: &OptimizationWeights) ->
         }
         EffectCategory::RemovesBoon => {
             // Boon removal is useful in PvP/WvW, modest in PvE
-            base_value.min(5.0) * 0.02 * weights.disable * 0.5
+            base_value.min(5.0) * 0.02 * weights.control * 0.5
         }
         EffectCategory::StealsBoon => {
             // Boon theft = removal + self-application
-            base_value.min(5.0) * 0.03 * weights.disable
+            base_value.min(5.0) * 0.03 * weights.control
         }
         EffectCategory::CorruptsBoon => {
             // Boon corruption: strong in competitive modes
-            base_value.min(5.0) * 0.03 * (weights.disable * 0.5 + weights.condition * 0.3)
+            base_value.min(5.0) * 0.03 * (weights.control * 0.5 + weights.condition * 0.3)
         }
         EffectCategory::RemovesCondition => {
             // Condition removal: sustain and healing value
@@ -596,8 +596,8 @@ pub fn score_effect(effect: &NormalizedEffect, weights: &OptimizationWeights) ->
 
         // Special categories
         EffectCategory::DefianceDamage => {
-            // Defiance break value: primarily disable axis
-            base_value / 1000.0 * weights.disable * 0.5
+            // Defiance break value: primarily control axis
+            base_value / 1000.0 * weights.control * 0.5
         }
         EffectCategory::ProcEffect => {
             // Proc scoring: the value is the inner magnitude
@@ -675,12 +675,12 @@ fn status_weight_for_scoring(
         "Might" => weights.power * 0.5 + weights.condition * 0.5,
         "Fury" => weights.power * 0.7,
         "Quickness" => weights.power * 0.5 + weights.condition * 0.3,
-        "Alacrity" => weights.disable * 0.4 + weights.power * 0.2,
+        "Alacrity" => weights.boon_support * 0.4 + weights.power * 0.2,
         "Protection" => weights.sustain * 0.6,
         "Resolution" => weights.sustain * 0.4,
         "Regeneration" => weights.healing * 0.4,
         "Vigor" => weights.sustain * 0.3,
-        "Stability" => weights.disable * 0.5 + weights.sustain * 0.3,
+        "Stability" => weights.control * 0.3 + weights.sustain * 0.3 + weights.boon_support * 0.2,
         "Resistance" => weights.sustain * 0.4,
         "Aegis" => weights.sustain * 0.5,
         _ => 0.05,
@@ -1916,10 +1916,11 @@ mod tests {
     fn test_score_effect_flat_stat() {
         let weights = OptimizationWeights {
             power: 1.0,
-            disable: 0.0,
             condition: 0.0,
+            boon_support: 0.0,
             healing: 0.0,
             sustain: 0.0,
+            control: 0.0,
         };
         let mut effect = minimal_effect("score_flat_stat");
         effect.category = EffectCategory::FlatStat;
@@ -1934,10 +1935,11 @@ mod tests {
     fn test_score_effect_strike_damage() {
         let weights = OptimizationWeights {
             power: 1.0,
-            disable: 0.0,
             condition: 0.0,
+            boon_support: 0.0,
             healing: 0.0,
             sustain: 0.0,
+            control: 0.0,
         };
         let mut effect = minimal_effect("score_strike");
         effect.category = EffectCategory::StrikeDamagePct;
@@ -1955,10 +1957,11 @@ mod tests {
     fn test_score_effect_unknown_value_returns_zero() {
         let weights = OptimizationWeights {
             power: 1.0,
-            disable: 0.5,
             condition: 0.5,
+            boon_support: 0.2,
             healing: 0.3,
             sustain: 0.3,
+            control: 0.3,
         };
         let mut effect = minimal_effect("score_unknown");
         effect.value = FactualValue::Unknown;
@@ -2144,10 +2147,11 @@ mod tests {
         // New scorer should produce similar magnitude as old for comparable inputs
         let weights = OptimizationWeights {
             power: 0.8,
-            disable: 0.1,
             condition: 0.2,
+            boon_support: 0.05,
             healing: 0.0,
             sustain: 0.1,
+            control: 0.05,
         };
 
         // Old: StatBonus(Power, 150)
