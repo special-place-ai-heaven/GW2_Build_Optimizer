@@ -5,7 +5,7 @@
 use crate::engine::BuildCandidate;
 use crate::scoring::OptimizationWeights;
 
-/// Build guidance text for Gemini based on the 5-axis optimization weights.
+/// Build guidance text for Gemini based on the 6-axis optimization weights.
 pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
     let w = weights.clamped();
     let mut priorities = Vec::new();
@@ -16,9 +16,10 @@ pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
     let axes = [
         (w.power, "Power"),
         (w.condition, "Condition"),
+        (w.boon_support, "Boon Support"),
         (w.sustain, "Sustain"),
         (w.healing, "Heal"),
-        (w.disable, "Disable"),
+        (w.control, "Control"),
     ];
     let max_weight = axes.iter().map(|(v, _)| *v).fold(0.0_f64, f64::max);
 
@@ -40,6 +41,15 @@ pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
             guidance.push("Prioritize: Condition Damage, Expertise gear. Pick traits that apply/extend conditions.");
         }
     }
+    if w.boon_support > 0.3 {
+        priorities.push(format!("Boon Support ({:.0}%)", w.boon_support * 100.0));
+        if w.boon_support >= 0.8 {
+            guidance.push("MANDATORY: Use Harrier's or Diviner's gear (highest Concentration). Focus on boon generation and uptime.");
+            mandatory_prefix = Some("Harrier's");
+        } else {
+            guidance.push("Prioritize: Concentration gear. Pick traits that generate and share boons.");
+        }
+    }
     if w.sustain > 0.3 {
         priorities.push(format!("Survivability ({:.0}%)", w.sustain * 100.0));
         if w.sustain >= 0.8 {
@@ -58,13 +68,13 @@ pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
             guidance.push("Prioritize: Healing Power, Concentration gear. Pick traits that boost healing.");
         }
     }
-    if w.disable > 0.3 {
-        priorities.push(format!("CC/Disable ({:.0}%)", w.disable * 100.0));
-        if w.disable >= 0.8 {
-            guidance.push("MANDATORY: Use Diviner's or Ritualist's gear (highest boon/condi duration). Focus on CC skills.");
+    if w.control > 0.3 {
+        priorities.push(format!("Control/CC ({:.0}%)", w.control * 100.0));
+        if w.control >= 0.8 {
+            guidance.push("MANDATORY: Use Diviner's or Ritualist's gear (highest boon/condi duration). Focus on CC skills and boon denial.");
             mandatory_prefix = Some("Diviner's");
         } else {
-            guidance.push("Prioritize: Boon Duration, Expertise gear. Pick CC skills.");
+            guidance.push("Prioritize: Expertise gear. Pick CC skills and boon corruption/stripping.");
         }
     }
 
@@ -87,7 +97,7 @@ pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
     }
 
     format!(
-        "PLAYER PRIORITIES (5-axis radar chart): {priorities}\n{guidance}{enforcement}",
+        "PLAYER PRIORITIES (6-axis radar chart): {priorities}\n{guidance}{enforcement}",
         priorities = priorities.join(", "),
         guidance = guidance.join("\n"),
         enforcement = enforcement,

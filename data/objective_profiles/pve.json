@@ -1,0 +1,310 @@
+{
+  "mode": "PvE",
+  "profiles": [
+    {
+      "objective_profile_id": "PvE_Power_DPS",
+      "axis_weights": {
+        "power": 1.0,
+        "condition": 0.0,
+        "boon_support": 0.0,
+        "healing": 0.0,
+        "sustain": 0.1,
+        "control": 0.0
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.9,
+        "Fury": 0.8,
+        "Quickness": 0.7,
+        "Alacrity": 0.6,
+        "Swiftness": 0.2,
+        "Protection": 0.1,
+        "Regeneration": 0.05,
+        "Vigor": 0.1,
+        "Aegis": 0.05,
+        "Stability": 0.05,
+        "Resistance": 0.05,
+        "Resolution": 0.1
+      },
+      "condition_priorities": {
+        "Burning": 0.4,
+        "Bleeding": 0.3,
+        "Poison": 0.2,
+        "Torment": 0.3,
+        "Confusion": 0.1,
+        "Vulnerability": 0.9,
+        "Weakness": 0.1,
+        "Blind": 0.05,
+        "Crippled": 0.05,
+        "Immobilize": 0.05,
+        "Slow": 0.05,
+        "Chilled": 0.05,
+        "Fear": 0.05,
+        "Taunt": 0.05
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.1,
+        "steals_boon": 0.15,
+        "corrupts_boon": 0.2,
+        "removes_condition": 0.3,
+        "converts_condition_to_boon": 0.35,
+        "transfers_condition": 0.15
+      },
+      "is_mode_default": true,
+      "notes": "Pure strike DPS build. Migration-equivalent to preset_power_dps(). Prioritizes offensive boons (Might, Fury, Quickness). Vulnerability is the highest condition priority because it amplifies strike damage. Minimal sustain investment.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvE_Condi_DPS",
+      "axis_weights": {
+        "power": 0.2,
+        "condition": 1.0,
+        "boon_support": 0.0,
+        "healing": 0.0,
+        "sustain": 0.1,
+        "control": 0.2
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.7,
+        "Fury": 0.5,
+        "Quickness": 0.7,
+        "Alacrity": 0.6,
+        "Swiftness": 0.2,
+        "Protection": 0.1,
+        "Regeneration": 0.05,
+        "Vigor": 0.1,
+        "Aegis": 0.05,
+        "Stability": 0.05,
+        "Resistance": 0.05,
+        "Resolution": 0.05
+      },
+      "condition_priorities": {
+        "Burning": 0.9,
+        "Bleeding": 0.85,
+        "Poison": 0.7,
+        "Torment": 0.8,
+        "Confusion": 0.6,
+        "Vulnerability": 0.5,
+        "Weakness": 0.1,
+        "Blind": 0.05,
+        "Crippled": 0.05,
+        "Immobilize": 0.05,
+        "Slow": 0.05,
+        "Chilled": 0.05,
+        "Fear": 0.05,
+        "Taunt": 0.05
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.1,
+        "steals_boon": 0.15,
+        "corrupts_boon": 0.25,
+        "removes_condition": 0.2,
+        "converts_condition_to_boon": 0.25,
+        "transfers_condition": 0.2
+      },
+      "is_mode_default": false,
+      "notes": "Condition DPS build. Migration-equivalent to preset_condi_dps(). Prioritizes damaging conditions (Burning, Bleeding, Torment). Some control investment for condition duration (Expertise). Power secondary for hybrid damage.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvE_Boon_Support",
+      "axis_weights": {
+        "power": 0.1,
+        "condition": 0.0,
+        "boon_support": 1.0,
+        "healing": 0.3,
+        "sustain": 0.2,
+        "control": 0.2
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 1.0,
+        "Fury": 0.9,
+        "Quickness": 1.0,
+        "Alacrity": 1.0,
+        "Swiftness": 0.5,
+        "Protection": 0.7,
+        "Regeneration": 0.4,
+        "Vigor": 0.3,
+        "Aegis": 0.4,
+        "Stability": 0.6,
+        "Resistance": 0.3,
+        "Resolution": 0.3
+      },
+      "condition_priorities": {
+        "Burning": 0.1,
+        "Bleeding": 0.1,
+        "Poison": 0.1,
+        "Torment": 0.1,
+        "Confusion": 0.05,
+        "Vulnerability": 0.4,
+        "Weakness": 0.3,
+        "Blind": 0.1,
+        "Crippled": 0.05,
+        "Immobilize": 0.05,
+        "Slow": 0.1,
+        "Chilled": 0.1,
+        "Fear": 0.05,
+        "Taunt": 0.05
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.1,
+        "steals_boon": 0.15,
+        "corrupts_boon": 0.1,
+        "removes_condition": 0.6,
+        "converts_condition_to_boon": 0.7,
+        "transfers_condition": 0.2
+      },
+      "is_mode_default": false,
+      "notes": "Boon support build (Quickness/Alacrity provider). High boon_support axis weight values boon generation and duration. Moderate healing and sustain for group survivability. Condition cleanse interaction operations valued for group sustain.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvE_Healer",
+      "axis_weights": {
+        "power": 0.0,
+        "condition": 0.0,
+        "boon_support": 0.2,
+        "healing": 1.0,
+        "sustain": 0.4,
+        "control": 0.2
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.4,
+        "Fury": 0.3,
+        "Quickness": 0.5,
+        "Alacrity": 0.5,
+        "Swiftness": 0.3,
+        "Protection": 0.8,
+        "Regeneration": 1.0,
+        "Vigor": 0.4,
+        "Aegis": 0.7,
+        "Stability": 0.5,
+        "Resistance": 0.6,
+        "Resolution": 0.5
+      },
+      "condition_priorities": {
+        "Burning": 0.05,
+        "Bleeding": 0.05,
+        "Poison": 0.1,
+        "Torment": 0.05,
+        "Confusion": 0.05,
+        "Vulnerability": 0.2,
+        "Weakness": 0.3,
+        "Blind": 0.1,
+        "Crippled": 0.05,
+        "Immobilize": 0.05,
+        "Slow": 0.1,
+        "Chilled": 0.1,
+        "Fear": 0.05,
+        "Taunt": 0.05
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.05,
+        "steals_boon": 0.1,
+        "corrupts_boon": 0.05,
+        "removes_condition": 0.9,
+        "converts_condition_to_boon": 0.95,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": false,
+      "notes": "Pure healer build. Migration-equivalent to preset_healer(). Prioritizes Regeneration, Protection, Aegis boons. High condition removal interaction priority for group sustain. Sustain secondary for self-survivability.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvE_Hybrid_Support",
+      "axis_weights": {
+        "power": 0.3,
+        "condition": 0.1,
+        "boon_support": 0.6,
+        "healing": 0.5,
+        "sustain": 0.3,
+        "control": 0.2
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.8,
+        "Fury": 0.7,
+        "Quickness": 0.8,
+        "Alacrity": 0.8,
+        "Swiftness": 0.4,
+        "Protection": 0.6,
+        "Regeneration": 0.5,
+        "Vigor": 0.3,
+        "Aegis": 0.4,
+        "Stability": 0.5,
+        "Resistance": 0.3,
+        "Resolution": 0.3
+      },
+      "condition_priorities": {
+        "Burning": 0.2,
+        "Bleeding": 0.15,
+        "Poison": 0.15,
+        "Torment": 0.15,
+        "Confusion": 0.1,
+        "Vulnerability": 0.5,
+        "Weakness": 0.3,
+        "Blind": 0.1,
+        "Crippled": 0.05,
+        "Immobilize": 0.05,
+        "Slow": 0.1,
+        "Chilled": 0.1,
+        "Fear": 0.05,
+        "Taunt": 0.05
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.1,
+        "steals_boon": 0.15,
+        "corrupts_boon": 0.1,
+        "removes_condition": 0.7,
+        "converts_condition_to_boon": 0.75,
+        "transfers_condition": 0.2
+      },
+      "is_mode_default": false,
+      "notes": "Hybrid support build combining boon support with healing and some DPS contribution. Similar to Harrier/Celestial support builds. Balanced boon priorities with emphasis on offensive boons for group DPS and protective boons for group sustain.",
+      "evidence_level": "Heuristic"
+    }
+  ]
+}

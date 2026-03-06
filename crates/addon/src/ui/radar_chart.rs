@@ -1,4 +1,4 @@
-//! Interactive 5-axis radar chart for optimization weights and build comparison.
+//! Interactive 6-axis radar chart for optimization weights and build comparison.
 //! Uses ImGui DrawList for custom rendering with dual-polygon overlay support.
 
 use nexus::imgui::Ui;
@@ -7,13 +7,14 @@ use gw2_optimizer::scoring::{
     STRIKE_DPS_NORM, CONDI_DPS_NORM, EFFECTIVE_HEALTH_NORM, HEALING_NORM,
 };
 
-/// Axis colors (RGBA) for each of the 5 axes.
-const AXIS_COLORS: [[f32; 4]; 5] = [
-    [1.0, 0.3, 0.3, 1.0], // Power — red
-    [1.0, 0.8, 0.2, 1.0], // Disable — yellow
-    [0.4, 1.0, 0.4, 1.0], // Condition — green
-    [0.3, 0.7, 1.0, 1.0], // Heal — blue
-    [0.8, 0.4, 1.0, 1.0], // Sustain — purple
+/// Axis colors (RGBA) for each of the 6 axes.
+const AXIS_COLORS: [[f32; 4]; 6] = [
+    [1.0, 0.3, 0.3, 1.0], // Power -- red
+    [0.4, 1.0, 0.4, 1.0], // Condition -- green
+    [0.2, 0.6, 1.0, 1.0], // Boon Support -- blue
+    [0.3, 0.9, 1.0, 1.0], // Heal -- cyan
+    [0.8, 0.4, 1.0, 1.0], // Sustain -- purple
+    [1.0, 0.8, 0.2, 1.0], // Control -- yellow
 ];
 
 /// Color for the user's weight polygon (semi-transparent cyan).
@@ -28,6 +29,8 @@ const CURRENT_OUTLINE: [f32; 4] = [1.0, 0.7, 0.2, 0.7];
 const OPTIMIZED_FILL: [f32; 4] = [0.2, 1.0, 0.4, 0.15];
 const OPTIMIZED_OUTLINE: [f32; 4] = [0.2, 1.0, 0.4, 0.7];
 
+const NUM_AXES: usize = 6;
+
 /// Convert RGBA [f32;4] to ImGui packed u32 color.
 fn color_u32(c: [f32; 4]) -> u32 {
     let r = (c[0] * 255.0) as u32;
@@ -40,7 +43,8 @@ fn color_u32(c: [f32; 4]) -> u32 {
 /// Calculate the position of a point on axis `i` at `value` (0.0-1.0).
 /// Axis 0 = top (12 o'clock), going clockwise.
 fn axis_point(center: [f32; 2], radius: f32, axis_index: usize, value: f32) -> [f32; 2] {
-    let angle = std::f32::consts::PI * 2.0 * (axis_index as f32) / 5.0 - std::f32::consts::FRAC_PI_2;
+    let angle = std::f32::consts::PI * 2.0 * (axis_index as f32) / NUM_AXES as f32
+        - std::f32::consts::FRAC_PI_2;
     [
         center[0] + radius * value * angle.cos(),
         center[1] + radius * value * angle.sin(),
@@ -53,8 +57,8 @@ pub fn render_radar_chart(
     ui: &Ui,
     weights: &mut OptimizationWeights,
     dragging: &mut Option<usize>,
-    current_build_perf: Option<&[f64; 5]>,
-    optimized_perf: Option<&[f64; 5]>,
+    current_build_perf: Option<&[f64; 6]>,
+    optimized_perf: Option<&[f64; 6]>,
 ) -> bool {
     let mut modified = false;
     let size = 200.0_f32;
@@ -71,18 +75,18 @@ pub fn render_radar_chart(
     draw_list.add_circle(center, radius + 2.0, color_u32([0.15, 0.15, 0.15, 0.8]))
         .filled(true).build();
 
-    // Concentric pentagons (grid lines at 25%, 50%, 75%, 100%)
+    // Concentric hexagons (grid lines at 25%, 50%, 75%, 100%)
     for level in &[0.25_f32, 0.5, 0.75, 1.0] {
         let grid_color = color_u32([0.3, 0.3, 0.3, 0.4]);
-        for i in 0..5 {
+        for i in 0..NUM_AXES {
             let p1 = axis_point(center, radius, i, *level);
-            let p2 = axis_point(center, radius, (i + 1) % 5, *level);
+            let p2 = axis_point(center, radius, (i + 1) % NUM_AXES, *level);
             draw_list.add_line(p1, p2, grid_color).build();
         }
     }
 
     // Axis lines from center
-    for i in 0..5 {
+    for i in 0..NUM_AXES {
         let p = axis_point(center, radius, i, 1.0);
         draw_list.add_line(center, p, color_u32([0.4, 0.4, 0.4, 0.5])).build();
     }
@@ -99,8 +103,7 @@ pub fn render_radar_chart(
 
     // Weights polygon (interactive, cyan)
     let w = weights.as_array();
-    let w_f32: [f64; 5] = w;
-    draw_filled_polygon(&draw_list, center, radius, &w_f32, WEIGHTS_FILL, WEIGHTS_OUTLINE);
+    draw_filled_polygon(&draw_list, center, radius, &w, WEIGHTS_FILL, WEIGHTS_OUTLINE);
 
     // Handle dragging
     let mouse_pos = ui.io().mouse_pos;
@@ -109,7 +112,7 @@ pub fn render_radar_chart(
     if mouse_down {
         if dragging.is_none() {
             // Check if mouse is near a handle (start drag)
-            for i in 0..5 {
+            for i in 0..NUM_AXES {
                 let handle_pos = axis_point(center, radius, i, w[i] as f32);
                 let dx = mouse_pos[0] - handle_pos[0];
                 let dy = mouse_pos[1] - handle_pos[1];
@@ -125,7 +128,7 @@ pub fn render_radar_chart(
             // Project mouse position onto axis
             let dx = mouse_pos[0] - center[0];
             let dy = mouse_pos[1] - center[1];
-            let angle = std::f32::consts::PI * 2.0 * (axis as f32) / 5.0
+            let angle = std::f32::consts::PI * 2.0 * (axis as f32) / NUM_AXES as f32
                 - std::f32::consts::FRAC_PI_2;
             let axis_dx = angle.cos();
             let axis_dy = angle.sin();
@@ -139,7 +142,7 @@ pub fn render_radar_chart(
     }
 
     // Draw handles (filled circles at each weight point)
-    for i in 0..5 {
+    for i in 0..NUM_AXES {
         let handle_pos = axis_point(center, radius, i, w[i] as f32);
         let is_dragged = *dragging == Some(i);
         let handle_radius = if is_dragged { 7.0 } else { 5.0 };
@@ -153,7 +156,7 @@ pub fn render_radar_chart(
     }
 
     // Axis labels + percentage
-    for i in 0..5 {
+    for i in 0..NUM_AXES {
         let label_pos = axis_point(center, radius + 16.0, i, 1.0);
         let label = format!("{} {:.0}%", AXIS_LABELS[i], w[i] * 100.0);
         let text_size = ui.calc_text_size(&label);
@@ -181,9 +184,9 @@ pub fn render_radar_chart(
 
     // Fill
     let bar_color = if budget_pct > 0.95 {
-        [1.0, 0.4, 0.2, 0.9] // near max — orange
+        [1.0, 0.4, 0.2, 0.9] // near max -- orange
     } else {
-        [0.3, 0.8, 1.0, 0.7] // normal — cyan
+        [0.3, 0.8, 1.0, 0.7] // normal -- cyan
     };
     draw_list.add_rect(
         [bar_x, bar_y],
@@ -194,12 +197,12 @@ pub fn render_radar_chart(
     modified
 }
 
-/// Draw a filled polygon with outline for 5 axis values.
+/// Draw a filled polygon with outline for 6 axis values.
 fn draw_filled_polygon(
     draw_list: &nexus::imgui::DrawListMut,
     center: [f32; 2],
     radius: f32,
-    values: &[f64; 5],
+    values: &[f64; 6],
     fill_color: [f32; 4],
     outline_color: [f32; 4],
 ) {
@@ -207,16 +210,16 @@ fn draw_filled_polygon(
     let outline = color_u32(outline_color);
 
     // Filled triangles (fan from center)
-    for i in 0..5 {
+    for i in 0..NUM_AXES {
         let p1 = axis_point(center, radius, i, values[i] as f32);
-        let p2 = axis_point(center, radius, (i + 1) % 5, values[(i + 1) % 5] as f32);
+        let p2 = axis_point(center, radius, (i + 1) % NUM_AXES, values[(i + 1) % NUM_AXES] as f32);
         draw_list.add_triangle(center, p1, p2, fill).filled(true).build();
     }
 
     // Outline
-    for i in 0..5 {
+    for i in 0..NUM_AXES {
         let p1 = axis_point(center, radius, i, values[i] as f32);
-        let p2 = axis_point(center, radius, (i + 1) % 5, values[(i + 1) % 5] as f32);
+        let p2 = axis_point(center, radius, (i + 1) % NUM_AXES, values[(i + 1) % NUM_AXES] as f32);
         draw_list.add_line(p1, p2, outline).thickness(2.0).build();
     }
 }
@@ -248,51 +251,47 @@ pub fn render_legend(ui: &Ui, show_current: bool, show_optimized: bool) {
     ui.text_colored(WEIGHTS_OUTLINE, "-- Target Weights");
 }
 
-/// Compute 5-axis performance values from CombatPerformance, normalized 0.0-1.0.
-/// Normalization is relative to reasonable per-class baselines.
-/// `profession` is used to adjust expectations per class.
+/// Compute 6-axis performance values from CombatPerformance, normalized 0.0-1.0.
 pub fn compute_performance_axes(
     perf: &gw2_optimizer::combat::CombatPerformance,
     _profession: &str,
-) -> [f64; 5] {
-    // Normalize each axis to 0.0-1.0 using the same constants as score_with_weights()
-    // so the radar chart visual matches actual scoring behavior.
+) -> [f64; 6] {
     let power = (perf.strike_dps_index / STRIKE_DPS_NORM).min(1.0);
-    let disable = ((perf.boon_duration_pct / 100.0) * 0.5
-        + (perf.condi_duration_pct / 100.0) * 0.5)
-        .min(1.0);
     let condition = ((perf.condition_dps_index / CONDI_DPS_NORM)
         + (perf.condi_duration_pct / 100.0).min(1.0) * 0.15)
         .min(1.0);
+    let boon_support = (perf.boon_duration_pct / 100.0).min(1.0);
     let heal = (perf.healing_power_index / HEALING_NORM).min(1.0);
     let sustain = ((perf.effective_health / EFFECTIVE_HEALTH_NORM)
         + perf.damage_reduction_pct / 100.0)
         .min(1.0);
+    let control = (perf.condi_duration_pct / 100.0 * 0.6
+        + perf.boon_duration_pct / 100.0 * 0.4)
+        .min(1.0);
 
-    [power, disable, condition, heal, sustain]
+    [power, condition, boon_support, heal, sustain, control]
 }
 
-/// Compute 5-axis performance values from CombatMetrics (i32 UI type).
-/// Same normalization as `compute_performance_axes` but works with the
-/// rounded integer metrics stored on BuildSuggestion and ComparisonState.
-pub fn compute_axes_from_metrics(m: &gw2_core::types::CombatMetrics) -> [f64; 5] {
+/// Compute 6-axis performance values from CombatMetrics (i32 UI type).
+pub fn compute_axes_from_metrics(m: &gw2_core::types::CombatMetrics) -> [f64; 6] {
     let power = (m.strike_dps_index as f64 / STRIKE_DPS_NORM).min(1.0);
-    let disable = ((m.boon_duration_pct / 100.0) * 0.5
-        + (m.condi_duration_pct / 100.0) * 0.5)
-        .min(1.0);
     let condition = ((m.condition_dps_index as f64 / CONDI_DPS_NORM)
         + (m.condi_duration_pct / 100.0).min(1.0) * 0.15)
         .min(1.0);
+    let boon_support = (m.boon_duration_pct / 100.0).min(1.0);
     let heal = (m.healing_index as f64 / HEALING_NORM).min(1.0);
     let sustain = ((m.effective_health as f64 / EFFECTIVE_HEALTH_NORM)
         + m.damage_reduction_pct / 100.0)
         .min(1.0);
+    let control = (m.condi_duration_pct / 100.0 * 0.6
+        + m.boon_duration_pct / 100.0 * 0.4)
+        .min(1.0);
 
-    [power, disable, condition, heal, sustain]
+    [power, condition, boon_support, heal, sustain, control]
 }
 
 /// Infer optimization weights from current build stats.
-/// Maps stat investment patterns to the 5-axis weight space.
+/// Maps stat investment patterns to the 6-axis weight space.
 pub fn infer_weights_from_stats(stats: Option<&gw2_core::types::StatBlock>) -> OptimizationWeights {
     let Some(stats) = stats else {
         return OptimizationWeights::preset_balanced();
@@ -316,18 +315,20 @@ pub fn infer_weights_from_stats(stats: Option<&gw2_core::types::StatBlock>) -> O
     let condition = ((cd_inv * 2.0 + exp_inv) / (max_inv * 3.0)).clamp(0.0, 1.0);
     let sustain = ((tough_inv + vit_inv) / (max_inv * 2.0)).clamp(0.0, 1.0);
     let healing = (hp_inv / max_inv).clamp(0.0, 1.0);
-    let disable = ((conc_inv + exp_inv * 0.5) / (max_inv * 1.5)).clamp(0.0, 1.0);
+    let boon_support = (conc_inv / max_inv).clamp(0.0, 1.0);
+    let control = ((exp_inv * 0.5) / max_inv).clamp(0.0, 1.0);
 
-    // Normalize to respect weight budget — real gear can't max everything
-    let mut w = OptimizationWeights { power, disable, condition, healing, sustain };
+    // Normalize to respect weight budget
+    let mut w = OptimizationWeights { power, condition, boon_support, healing, sustain, control };
     let total = w.total();
     if total > gw2_optimizer::scoring::WEIGHT_BUDGET {
         let scale = gw2_optimizer::scoring::WEIGHT_BUDGET / total;
         w.power *= scale;
-        w.disable *= scale;
         w.condition *= scale;
+        w.boon_support *= scale;
         w.healing *= scale;
         w.sustain *= scale;
+        w.control *= scale;
     }
     w
 }
