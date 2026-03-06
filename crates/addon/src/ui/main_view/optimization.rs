@@ -199,6 +199,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     5,
                     &balance_ctx,
                     &build_locks,
+                    &db.pvp_amulets,
                 )?;
 
                 if token.is_cancelled() {
