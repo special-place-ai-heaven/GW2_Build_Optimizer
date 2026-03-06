@@ -156,19 +156,19 @@ development_status:
 
   # P3-03: Universal Attribute and Strike Damage Formulas (FR3, FR4)
   # BLOCKED until: p3-02 DONE
-  p3-03-attribute-strike-formulas: backlog
+  p3-03-attribute-strike-formulas: ready-for-dev
 
   # P3-04: Mode-Aware Boon Values and Condition Formulas (FR5, FR6, D2/D3/D4)
   # BLOCKED until: p3-02 DONE
-  p3-04-boon-condition-formulas: backlog
+  p3-04-boon-condition-formulas: ready-for-dev
 
   # P3-05: Duration Formulas (FR7)
   # BLOCKED until: p3-02 DONE
-  p3-05-duration-formulas: backlog
+  p3-05-duration-formulas: ready-for-dev
 
   # P3-06: Canonical Slot-Budget Dataset (FR8)
   # UNBLOCKED (independent dataset)
-  p3-06-slot-budget-dataset: backlog
+  p3-06-slot-budget-dataset: ready-for-dev
 
   # Phase B -- Data Infrastructure and Mode Paths
   # P3-07: Typed Loaders and Hardcoded Constant Replacement (FR17, FR18, D5)
