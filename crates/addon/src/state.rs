@@ -81,7 +81,7 @@ pub struct MainState {
     // Optimization state
     pub optimizing: bool,
     pub optimize_stage: String,
-    /// 5-axis optimization weights (Power, Disable, Condition, Heal, Sustain).
+    /// 6-axis optimization weights (Power, Condition, Boon Support, Heal, Sustain, Control).
     /// Drives gear search, trait selection, and build scoring.
     pub weights: OptimizationWeights,
     /// Which radar chart axis is being dragged (None = no drag).

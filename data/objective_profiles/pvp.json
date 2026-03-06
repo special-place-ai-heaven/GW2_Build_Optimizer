@@ -1,0 +1,249 @@
+{
+  "mode": "PvP",
+  "profiles": [
+    {
+      "objective_profile_id": "PvP_Burst",
+      "axis_weights": {
+        "power": 0.8,
+        "condition": 0.1,
+        "boon_support": 0.1,
+        "healing": 0.1,
+        "sustain": 0.3,
+        "control": 0.4
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.7,
+        "Fury": 0.8,
+        "Quickness": 0.9,
+        "Alacrity": 0.3,
+        "Swiftness": 0.6,
+        "Protection": 0.3,
+        "Regeneration": 0.2,
+        "Vigor": 0.5,
+        "Aegis": 0.6,
+        "Stability": 0.7,
+        "Resistance": 0.4,
+        "Resolution": 0.3
+      },
+      "condition_priorities": {
+        "Burning": 0.3,
+        "Bleeding": 0.2,
+        "Poison": 0.4,
+        "Torment": 0.2,
+        "Confusion": 0.3,
+        "Vulnerability": 0.7,
+        "Weakness": 0.5,
+        "Blind": 0.6,
+        "Crippled": 0.5,
+        "Immobilize": 0.8,
+        "Slow": 0.6,
+        "Chilled": 0.5,
+        "Fear": 0.7,
+        "Taunt": 0.4
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.5,
+        "steals_boon": 0.6,
+        "corrupts_boon": 0.6,
+        "removes_condition": 0.5,
+        "converts_condition_to_boon": 0.5,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": true,
+      "notes": "PvP burst build focused on spike damage with CC setup. High control investment for setting up kills. Immobilize, Fear, and Blind are high condition priorities for kill windows. Stability valued highly for uninterrupted burst.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvP_Sustain",
+      "axis_weights": {
+        "power": 0.2,
+        "condition": 0.2,
+        "boon_support": 0.2,
+        "healing": 0.5,
+        "sustain": 0.7,
+        "control": 0.2
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.3,
+        "Fury": 0.3,
+        "Quickness": 0.3,
+        "Alacrity": 0.3,
+        "Swiftness": 0.5,
+        "Protection": 0.9,
+        "Regeneration": 0.9,
+        "Vigor": 0.6,
+        "Aegis": 0.8,
+        "Stability": 0.8,
+        "Resistance": 0.8,
+        "Resolution": 0.6
+      },
+      "condition_priorities": {
+        "Burning": 0.2,
+        "Bleeding": 0.2,
+        "Poison": 0.3,
+        "Torment": 0.2,
+        "Confusion": 0.2,
+        "Vulnerability": 0.3,
+        "Weakness": 0.5,
+        "Blind": 0.3,
+        "Crippled": 0.3,
+        "Immobilize": 0.3,
+        "Slow": 0.3,
+        "Chilled": 0.3,
+        "Fear": 0.2,
+        "Taunt": 0.2
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.2,
+        "steals_boon": 0.3,
+        "corrupts_boon": 0.2,
+        "removes_condition": 0.9,
+        "converts_condition_to_boon": 0.95,
+        "transfers_condition": 0.4
+      },
+      "is_mode_default": false,
+      "notes": "PvP sustain/bunker build for point holding. Prioritizes defensive boons (Protection, Regeneration, Aegis, Stability, Resistance). High condition removal and conversion interaction priorities for self-sustain. Moderate damage for pressure.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvP_Boon_Pressure",
+      "axis_weights": {
+        "power": 0.3,
+        "condition": 0.2,
+        "boon_support": 0.5,
+        "healing": 0.3,
+        "sustain": 0.3,
+        "control": 0.4
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.8,
+        "Fury": 0.7,
+        "Quickness": 0.8,
+        "Alacrity": 0.7,
+        "Swiftness": 0.5,
+        "Protection": 0.6,
+        "Regeneration": 0.5,
+        "Vigor": 0.4,
+        "Aegis": 0.5,
+        "Stability": 0.7,
+        "Resistance": 0.5,
+        "Resolution": 0.4
+      },
+      "condition_priorities": {
+        "Burning": 0.3,
+        "Bleeding": 0.2,
+        "Poison": 0.4,
+        "Torment": 0.2,
+        "Confusion": 0.3,
+        "Vulnerability": 0.5,
+        "Weakness": 0.5,
+        "Blind": 0.3,
+        "Crippled": 0.3,
+        "Immobilize": 0.4,
+        "Slow": 0.4,
+        "Chilled": 0.4,
+        "Fear": 0.3,
+        "Taunt": 0.3
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.5,
+        "steals_boon": 0.7,
+        "corrupts_boon": 0.7,
+        "removes_condition": 0.6,
+        "converts_condition_to_boon": 0.6,
+        "transfers_condition": 0.4
+      },
+      "is_mode_default": false,
+      "notes": "PvP boon duelist build combining boon support for team with denial for enemies. High boon theft and corruption interaction priorities for boon pressure gameplay. Balanced damage contribution through both strike and conditions.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvP_Control_Disruptor",
+      "axis_weights": {
+        "power": 0.3,
+        "condition": 0.3,
+        "boon_support": 0.1,
+        "healing": 0.2,
+        "sustain": 0.3,
+        "control": 0.8
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.4,
+        "Fury": 0.4,
+        "Quickness": 0.3,
+        "Alacrity": 0.3,
+        "Swiftness": 0.5,
+        "Protection": 0.4,
+        "Regeneration": 0.3,
+        "Vigor": 0.4,
+        "Aegis": 0.4,
+        "Stability": 0.8,
+        "Resistance": 0.5,
+        "Resolution": 0.3
+      },
+      "condition_priorities": {
+        "Burning": 0.3,
+        "Bleeding": 0.2,
+        "Poison": 0.5,
+        "Torment": 0.3,
+        "Confusion": 0.5,
+        "Vulnerability": 0.5,
+        "Weakness": 0.7,
+        "Blind": 0.7,
+        "Crippled": 0.7,
+        "Immobilize": 0.9,
+        "Slow": 0.8,
+        "Chilled": 0.8,
+        "Fear": 0.9,
+        "Taunt": 0.6
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.7,
+        "steals_boon": 0.8,
+        "corrupts_boon": 0.9,
+        "removes_condition": 0.4,
+        "converts_condition_to_boon": 0.4,
+        "transfers_condition": 0.6
+      },
+      "is_mode_default": false,
+      "notes": "PvP control/disruptor build focused on CC, boon denial, and condition pressure. High control axis for Fear, Immobilize, Slow, Chilled. Corruption and theft interactions highly valued for disrupting enemy boons. Moderate sustain for self-preservation.",
+      "evidence_level": "Heuristic"
+    }
+  ]
+}
