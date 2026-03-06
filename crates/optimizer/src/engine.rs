@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use gw2_api::models::{
-    EquipmentTab, Item, ItemStat, Profession, Specialization, Trait as GW2Trait,
+    EquipmentTab, Item, ItemStat, Profession, PvpAmulet, Specialization, Trait as GW2Trait,
 };
 use gw2_core::types::GameMode;
 
@@ -24,6 +24,14 @@ use crate::search::{search_gear_prefixes, search_spec_combos, GearCandidate};
 use crate::stats;
 use crate::validation::{self, ValidatedBuild};
 
+/// Selected PvP amulet in a build candidate (PvP mode only).
+#[derive(Debug, Clone)]
+pub struct PvpAmuletCandidate {
+    pub id: u32,
+    pub name: String,
+    pub stats: HashMap<String, i32>,
+}
+
 /// A complete build candidate ready for comparison or LLM evaluation.
 #[derive(Debug, Clone)]
 pub struct BuildCandidate {
@@ -39,6 +47,8 @@ pub struct BuildCandidate {
     pub combat: CombatPerformance,
     /// Extracted damage modifiers (for recalculating with different buff profiles).
     pub modifiers: DamageModifiers,
+    /// Selected PvP amulet (only set in PvP mode; None for PvE/WvW).
+    pub pvp_amulet: Option<PvpAmuletCandidate>,
 }
 
 /// Progress update during optimization.
@@ -93,9 +103,10 @@ pub fn optimize(
     top_n: usize,
     ctx: &BalanceContext,
     locks: &gw2_core::types::BuildLocks,
+    pvp_amulets: &HashMap<u32, PvpAmulet>,
 ) -> Result<Vec<BuildCandidate>, String> {
     if ctx.game_mode == GameMode::PvP {
-        return optimize_pvp(profession, weights, specs_cache, traits_cache, &mut on_progress, top_n, locks, ctx)
+        return optimize_pvp(profession, weights, specs_cache, traits_cache, &mut on_progress, top_n, locks, ctx, pvp_amulets)
             .and_then(|v| if v.is_empty() {
                 Err(format!("No PvP candidates found for {} / {}", profession.name, weights.summary_label()))
             } else {
@@ -223,6 +234,7 @@ pub fn optimize(
                 score,
                 combat: combat_perf,
                 modifiers,
+                pvp_amulet: None,
             });
         }
     }
@@ -255,7 +267,10 @@ pub fn optimize(
     Ok(all_candidates)
 }
 
-/// PvP optimization: specs + traits only (gear is replaced by amulet system).
+/// PvP optimization: iterates PvP amulets × spec/trait combos (gear is replaced by amulet system).
+/// PvP amulet stats REPLACE gear stats — the stat block is: base_stats + amulet + traits.
+/// Slot-budget data is NOT loaded during PvP optimization.
+/// Returns an error if no PvP amulet data is available (no silent zero-stat fallback).
 fn optimize_pvp(
     profession: &Profession,
     weights: &OptimizationWeights,
@@ -265,9 +280,14 @@ fn optimize_pvp(
     top_n: usize,
     locks: &gw2_core::types::BuildLocks,
     ctx: &BalanceContext,
+    pvp_amulets: &HashMap<u32, PvpAmulet>,
 ) -> Result<Vec<BuildCandidate>, String> {
+    if pvp_amulets.is_empty() {
+        return Err("No PvP amulet data available. Download game data first.".to_string());
+    }
+
     on_progress(OptimizeProgress {
-        stage: "Evaluating PvP specialization combinations...".into(),
+        stage: "Evaluating PvP amulet × specialization combinations...".into(),
         done: false,
     });
 
@@ -283,56 +303,71 @@ fn optimize_pvp(
 
     let solo_profile = &combat::default_buff_profiles(ctx)[0];
     let stat_weights = weights.to_stat_weights();
+    let cw = combat::condition_weights_for_profession(&profession.name, ctx);
 
-    for (elite, cores) in &spec_combos {
-        let spec_ids: Vec<u32> = cores
-            .iter()
-            .copied()
-            .chain(elite.iter().copied())
-            .collect();
+    for amulet in pvp_amulets.values() {
+        for (elite, cores) in &spec_combos {
+            let spec_ids: Vec<u32> = cores
+                .iter()
+                .copied()
+                .chain(elite.iter().copied())
+                .collect();
 
-        let mut trait_ids = Vec::new();
-        for &spec_id in &spec_ids {
-            if let Some(spec) = specs_cache.get(&spec_id) {
-                trait_ids.extend(&spec.minor_traits);
-                let best = select_best_major_traits(
-                    &spec.major_traits, &stat_weights, traits_cache, locks, spec_id,
-                );
-                trait_ids.extend(best);
+            let mut trait_ids = Vec::new();
+            for &spec_id in &spec_ids {
+                if let Some(spec) = specs_cache.get(&spec_id) {
+                    trait_ids.extend(&spec.minor_traits);
+                    let best = select_best_major_traits(
+                        &spec.major_traits, &stat_weights, traits_cache, locks, spec_id,
+                    );
+                    trait_ids.extend(best);
+                }
             }
+
+            // PvP stat block: base_stats + amulet stats + trait stats (no gear)
+            let mut full_stats = stats::base_stats();
+
+            // Apply amulet stats (replaces gear stats)
+            for (attr, &value) in &amulet.attributes {
+                full_stats.add(attr, value as f64);
+            }
+
+            // Apply trait stats
+            let trait_stats = stats::calculate_trait_stats(&trait_ids, traits_cache);
+            full_stats += &trait_stats;
+            stats::apply_trait_conversions(&mut full_stats, &trait_ids, traits_cache);
+
+            let derived = stats::compute_derived(&full_stats, &profession.name);
+
+            // Extract modifiers from traits only (PvP has no gear modifiers)
+            let modifiers = combat::extract_damage_modifiers(
+                &trait_ids, None, &[], None, traits_cache, &HashMap::new(), ctx,
+            );
+            let combat_perf = combat::calculate_combat_performance(
+                &full_stats, &derived, &modifiers, solo_profile,
+                &cw,
+                &profession.name,
+                ctx,
+            );
+            let score = score_with_weights(&combat_perf, weights);
+
+            all_candidates.push(BuildCandidate {
+                gear: empty_gear.clone(),
+                elite_spec: *elite,
+                core_specs: cores.clone(),
+                equipped_traits: trait_ids,
+                stats: full_stats,
+                derived,
+                score,
+                combat: combat_perf,
+                modifiers,
+                pvp_amulet: Some(PvpAmuletCandidate {
+                    id: amulet.id,
+                    name: amulet.name.clone(),
+                    stats: amulet.attributes.clone(),
+                }),
+            });
         }
-
-        // PvP stats come from amulet (not gear), so only calculate trait bonuses
-        let trait_stats = stats::calculate_trait_stats(&trait_ids, traits_cache);
-        let mut full_stats = stats::base_stats();
-        full_stats += &trait_stats;
-        stats::apply_trait_conversions(&mut full_stats, &trait_ids, traits_cache);
-
-        let derived = stats::compute_derived(&full_stats, &profession.name);
-
-        // Extract modifiers from traits only (PvP has no gear modifiers)
-        let modifiers = combat::extract_damage_modifiers(
-            &trait_ids, None, &[], None, traits_cache, &HashMap::new(), ctx,
-        );
-        let combat_perf = combat::calculate_combat_performance(
-            &full_stats, &derived, &modifiers, solo_profile,
-            &combat::condition_weights_for_profession(&profession.name, ctx),
-            &profession.name,
-            ctx,
-        );
-        let score = score_with_weights(&combat_perf, weights);
-
-        all_candidates.push(BuildCandidate {
-            gear: empty_gear.clone(),
-            elite_spec: *elite,
-            core_specs: cores.clone(),
-            equipped_traits: trait_ids,
-            stats: full_stats,
-            derived,
-            score,
-            combat: combat_perf,
-            modifiers,
-        });
     }
 
     on_progress(OptimizeProgress {
@@ -1192,6 +1227,7 @@ mod tests {
             3,
             &ctx,
             &no_locks,
+            &HashMap::new(), // no PvP amulets needed for PvE
         )
         .expect("optimize() should succeed with valid data");
 
@@ -1199,6 +1235,237 @@ mod tests {
         // Should be sorted by score descending
         for i in 1..candidates.len() {
             assert!(candidates[i - 1].score >= candidates[i].score);
+        }
+    }
+
+    /// Helper to build a minimal Warrior profession with 5 core specs for PvP tests.
+    fn test_warrior_profession_and_specs() -> (Profession, HashMap<u32, Specialization>) {
+        let profession = Profession {
+            id: "Warrior".into(),
+            name: "Warrior".into(),
+            code: None,
+            specializations: vec![1, 2, 3, 4, 5],
+            weapons: HashMap::new(),
+            training: Vec::new(),
+            skills_by_palette: Vec::new(),
+            icon: None,
+            icon_big: None,
+        };
+        let mut specs = HashMap::new();
+        for id in 1..=5u32 {
+            specs.insert(id, Specialization {
+                id,
+                name: format!("Spec{}", id),
+                profession: "Warrior".into(),
+                elite: false,
+                minor_traits: Vec::new(),
+                major_traits: Vec::new(),
+                weapon_trait: None,
+                icon: None,
+                background: None,
+                profession_icon: None,
+                profession_icon_big: None,
+            });
+        }
+        (profession, specs)
+    }
+
+    #[test]
+    fn test_pvp_mode_dispatches_to_pvp_path() {
+        let (profession, specs) = test_warrior_profession_and_specs();
+        let mut pvp_amulets = HashMap::new();
+        pvp_amulets.insert(4, PvpAmulet {
+            id: 4,
+            name: "Assassin Amulet".into(),
+            icon: None,
+            attributes: {
+                let mut m = HashMap::new();
+                m.insert("Power".into(), 900);
+                m.insert("Precision".into(), 1200);
+                m.insert("CritDamage".into(), 900);
+                m
+            },
+        });
+
+        let no_locks = gw2_core::types::BuildLocks::default();
+        let ctx = crate::balance::BalanceContext::pvp();
+        let candidates = optimize(
+            &profession,
+            &OptimizationWeights::preset_power_dps(),
+            None,
+            &HashMap::new(),
+            &HashMap::new(), // no itemstats needed for PvP
+            &specs,
+            &HashMap::new(),
+            |_| {},
+            3,
+            &ctx,
+            &no_locks,
+            &pvp_amulets,
+        )
+        .expect("PvP optimize should succeed with amulet data");
+
+        assert!(!candidates.is_empty());
+        // All PvP candidates should have a pvp_amulet set
+        for c in &candidates {
+            assert!(c.pvp_amulet.is_some(), "PvP candidate should have pvp_amulet set");
+        }
+    }
+
+    #[test]
+    fn test_pvp_amulet_stats_applied_to_base() {
+        let (profession, specs) = test_warrior_profession_and_specs();
+        let mut pvp_amulets = HashMap::new();
+        pvp_amulets.insert(4, PvpAmulet {
+            id: 4,
+            name: "Assassin Amulet".into(),
+            icon: None,
+            attributes: {
+                let mut m = HashMap::new();
+                m.insert("Power".into(), 900);
+                m.insert("Precision".into(), 1200);
+                m.insert("CritDamage".into(), 900);
+                m
+            },
+        });
+
+        let no_locks = gw2_core::types::BuildLocks::default();
+        let ctx = crate::balance::BalanceContext::pvp();
+        let candidates = optimize(
+            &profession,
+            &OptimizationWeights::preset_power_dps(),
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            &specs,
+            &HashMap::new(),
+            |_| {},
+            3,
+            &ctx,
+            &no_locks,
+            &pvp_amulets,
+        )
+        .expect("PvP optimize should succeed");
+
+        // With Assassin Amulet: base 1000 + amulet 900 Power = 1900
+        let c = &candidates[0];
+        assert!(
+            (c.stats.power - 1900.0).abs() < 1.0,
+            "Power should be base 1000 + 900 amulet = 1900, got {}",
+            c.stats.power
+        );
+        assert!(
+            (c.stats.precision - 2200.0).abs() < 1.0,
+            "Precision should be base 1000 + 1200 amulet = 2200, got {}",
+            c.stats.precision
+        );
+        // CritDamage maps to ferocity (base 0 + 900)
+        assert!(
+            (c.stats.ferocity - 900.0).abs() < 1.0,
+            "Ferocity should be 0 base + 900 amulet = 900, got {}",
+            c.stats.ferocity
+        );
+    }
+
+    #[test]
+    fn test_pvp_error_on_empty_amulets() {
+        let (profession, specs) = test_warrior_profession_and_specs();
+        let no_locks = gw2_core::types::BuildLocks::default();
+        let ctx = crate::balance::BalanceContext::pvp();
+        let result = optimize(
+            &profession,
+            &OptimizationWeights::preset_power_dps(),
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+            &specs,
+            &HashMap::new(),
+            |_| {},
+            3,
+            &ctx,
+            &no_locks,
+            &HashMap::new(), // empty pvp_amulets
+        );
+
+        assert!(result.is_err(), "PvP optimization should error with no amulet data");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("No PvP amulet data"),
+            "Error should mention missing amulet data, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_pvp_no_slot_budgets_used() {
+        // PvP path should work even with no itemstats (slot budgets not used)
+        let (profession, specs) = test_warrior_profession_and_specs();
+        let mut pvp_amulets = HashMap::new();
+        pvp_amulets.insert(1, PvpAmulet {
+            id: 1,
+            name: "Test Amulet".into(),
+            icon: None,
+            attributes: {
+                let mut m = HashMap::new();
+                m.insert("Power".into(), 500);
+                m
+            },
+        });
+
+        let no_locks = gw2_core::types::BuildLocks::default();
+        let ctx = crate::balance::BalanceContext::pvp();
+        // Pass completely empty itemstats — PvP path should not need them
+        let result = optimize(
+            &profession,
+            &OptimizationWeights::preset_power_dps(),
+            None,
+            &HashMap::new(),
+            &HashMap::new(), // empty itemstats
+            &specs,
+            &HashMap::new(),
+            |_| {},
+            3,
+            &ctx,
+            &no_locks,
+            &pvp_amulets,
+        );
+
+        assert!(result.is_ok(), "PvP path should succeed without itemstats: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_pve_candidates_have_no_pvp_amulet() {
+        let mut itemstats = HashMap::new();
+        itemstats.insert(584, ItemStat {
+            id: 584,
+            name: "Berserker's".into(),
+            attributes: vec![
+                gw2_api::models::StatAttribute { attribute: "Power".into(), multiplier: 0.35, value: 32 },
+                gw2_api::models::StatAttribute { attribute: "Precision".into(), multiplier: 0.25, value: 18 },
+                gw2_api::models::StatAttribute { attribute: "CritDamage".into(), multiplier: 0.25, value: 18 },
+            ],
+        });
+        let (profession, specs) = test_warrior_profession_and_specs();
+        let no_locks = gw2_core::types::BuildLocks::default();
+        let ctx = crate::balance::BalanceContext::pve();
+        let candidates = optimize(
+            &profession,
+            &OptimizationWeights::preset_power_dps(),
+            None,
+            &HashMap::new(),
+            &itemstats,
+            &specs,
+            &HashMap::new(),
+            |_| {},
+            3,
+            &ctx,
+            &no_locks,
+            &HashMap::new(),
+        )
+        .expect("PvE optimize should succeed");
+
+        for c in &candidates {
+            assert!(c.pvp_amulet.is_none(), "PvE candidates should have pvp_amulet = None");
         }
     }
 }
