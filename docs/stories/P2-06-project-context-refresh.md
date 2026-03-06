@@ -1,6 +1,6 @@
 # Story 2.06: project-context.md Refresh
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -47,21 +47,21 @@ git diff --name-only -- '*.rs'  # should be empty
 
 ## Tasks / Subtasks
 
-- [ ] Read current `_bmad-output/project-context.md` thoroughly (AC: 8)
-  - [ ] Identify every rule that references pre-P2-03 state (single catch_unwind, missing test patterns)
-  - [ ] Identify rules that are now redundant or outdated
-- [ ] Run `/bmad-bmm-generate-project-context` to regenerate from current code (AC: 7)
-  - [ ] Execute in a fresh session context for clean analysis
-  - [ ] Compare generated output against current file to find gaps
-- [ ] Update stale `catch_unwind` rule to reflect all 12 bg threads (AC: 1)
-- [ ] Add `reset_state()` test isolation pattern to Testing Rules (AC: 2)
-- [ ] Promote `--test-threads=1` constraint to Testing Rules section (AC: 3)
-- [ ] Add `ConditionWeights` parameter rule to Critical Rules (AC: 4)
-- [ ] Add module layout documentation for `main_view/` submodule structure (AC: 5)
-- [ ] Add Harbinger dispatch note to condition scoring context (AC: 6)
-- [ ] Remove or update any outdated rules found in review (AC: 8)
-- [ ] Update YAML frontmatter (date, rule_count) (AC: 9)
-- [ ] Commit to repo (AC: 10)
+- [x] Read current `_bmad-output/project-context.md` thoroughly (AC: 8)
+  - [x] Identify every rule that references pre-P2-03 state (single catch_unwind, missing test patterns)
+  - [x] Identify rules that are now redundant or outdated
+- [x] Run `/bmad-bmm-generate-project-context` to regenerate from current code (AC: 7)
+  - [x] Execute in a fresh session context for clean analysis
+  - [x] Compare generated output against current file to find gaps
+- [x] Update stale `catch_unwind` rule to reflect all 12 bg threads (AC: 1)
+- [x] Add `reset_state()` test isolation pattern to Testing Rules (AC: 2)
+- [x] Promote `--test-threads=1` constraint to Testing Rules section (AC: 3)
+- [x] Add `ConditionWeights` parameter rule to Critical Rules (AC: 4)
+- [x] Add module layout documentation for `main_view/` submodule structure (AC: 5)
+- [x] Add Harbinger dispatch note to condition scoring context (AC: 6)
+- [x] Remove or update any outdated rules found in review (AC: 8)
+- [x] Update YAML frontmatter (date, rule_count) (AC: 9)
+- [x] Commit to repo (AC: 10)
 
 ## Dev Notes
 
@@ -114,10 +114,28 @@ git diff --name-only -- '*.rs'  # should be empty
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.6
 
 ### Debug Log References
 
+None — documentation-only story, no debugging required.
+
 ### Completion Notes List
 
+- All 10 ACs verified against committed `_bmad-output/project-context.md` (commit `8c60e19`)
+- Generator run produced 83 rules (up from 71), 12 new rules added
+- Key additions: catch_unwind all 12 threads (AC1), reset_state() pattern (AC2), --test-threads=1 in Testing Rules (AC3), ConditionWeights dispatch (AC4), main_view/ submodule structure (AC5), Harbinger preset dispatch (AC6)
+- Outdated rules reviewed and updated (AC8); frontmatter reflects current state (AC9)
+- No `.rs` files modified — confirmed via `git show --stat 8c60e19`
+- Story tracking updated retroactively (tasks were completed but not checked off in original commit)
+
+### Change Log
+
+- 2026-03-06: project-context.md refreshed with 83 rules (commit `8c60e19`)
+- 2026-03-06: Story tracking rectified — all tasks marked complete, status set to done
+
 ### File List
+
+- `_bmad-output/project-context.md` — updated (83 rules, 12 new)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — updated
+- `docs/stories/P2-06-project-context-refresh.md` — created + tracking completed

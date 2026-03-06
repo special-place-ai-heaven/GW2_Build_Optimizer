@@ -132,9 +132,9 @@ development_status:
   # GATE: P2-02 DONE (extends its integration test).
   p2-05-per-elite-spec-condition-presets: done
 
-  # Slot 9 -- READY-FOR-DEV. Story: docs/stories/P2-06-project-context-refresh.md
+  # Slot 9 -- DONE. Story: docs/stories/P2-06-project-context-refresh.md
   # GATE: None (independent). Good session-opener task.
-  p2-06-project-context-refresh: ready-for-dev
+  p2-06-project-context-refresh: done
 
   # Slot 10 -- READY-FOR-DEV. Story: docs/stories/P2-07-saved-build-profession-and-crash-safety.md
   # GATE: None (independent). NOTE: P3-16 supersedes -- all P2-07 scope absorbed.
