@@ -1,6 +1,6 @@
 # Story P2-03: Background Thread catch_unwind Hardening
 
-Status: review
+Status: done
 
 ## Story
 
@@ -59,7 +59,7 @@ grep -n "catch_unwind" crates/addon/src/ui/main_view/optimization.rs
    - `setup.rs` — LLM key validation thread (line ~268) — flag: `state.setup.llm_key_status`
    - `setup.rs` — game data download thread (line ~369) — flag: `state.setup.download_progress`
 2. In each new `Err(_)` panic arm:
-   - `log::warn!("bg thread panicked: <descriptive context>")` is emitted (e.g., `"bg thread panicked: send_chat_message"`, `"bg thread panicked: load_characters"`).
+   - `nexus::log::log(Warning, "GW2BuildOpt", "bg thread panicked: <descriptive context>")` is emitted (e.g., `"bg thread panicked: send_chat_message"`, `"bg thread panicked: load_characters"`). Note: uses `nexus::log::log` since the `log` crate is not a dependency of the addon crate.
    - The relevant loading flag is cleared via `with_state(|s| { s.main.<flag> = false; })` (or equivalent to end the spinner state).
 3. Each wrapped thread retains its existing `CancellationToken` check at the top of the spawn body and after each blocking operation — wrapping must not remove or reorder these.
 4. After wrapping, `grep -rn "thread::spawn" crates/addon/src/ui/main_view/ | wc -l` still outputs **10** and `grep -rn "thread::spawn" crates/addon/src/ui/setup.rs | wc -l` outputs **3** (no spawns added or removed).
@@ -169,10 +169,11 @@ None.
   - `setup_data_download` → `download_progress.error = Some("thread panicked")` + `done = true`
 - Added 4 panic-recovery tests in `state.rs` (optimization, stats, character, setup groups)
 - Spawn count verified: 10 in main_view, 3 in setup.rs (unchanged)
-- All 219 tests pass (24 addon + 165 optimizer + 22 gw2api + 8 core), zero regressions
+- All 220 tests pass (25 addon + 165 optimizer + 22 gw2api + 8 core), zero regressions
 - `cargo check --workspace` exits with zero errors and zero warnings
 - Used `nexus::log::log` instead of `log::warn!` since the `log` crate is not a dependency of the addon crate
 - Existing `catch_unwind` in `start_optimization_with_profession` (optimization.rs:72) preserved unchanged
+- **Test limitation (acknowledged)**: Panic-recovery tests verify the pattern (catch_unwind + with_state flag clear) in isolation, not the production thread code paths. This is a deliberate design choice — actual thread functions require network/API access. A flag-to-thread mapping error in production Err arms would not be caught by these tests.
 
 ### File List
 
@@ -186,4 +187,5 @@ None.
 ## Change Log
 
 - 2026-03-05: Scope expanded — added 3 setup.rs thread spawns (lines ~91, ~268, ~369) to close full panic-hardening bug class. Added setup group panic-recovery test requirement. Updated ACs, tasks, verification, and dev notes.
-- 2026-03-06: Implementation complete — all 12 threads wrapped in catch_unwind, 4 panic-recovery tests added, all 219 tests pass, zero warnings.
+- 2026-03-06: Implementation complete — all 12 threads wrapped in catch_unwind, 4 panic-recovery tests added, all 220 tests pass, zero warnings.
+- 2026-03-06: Code review fixes — (M2) check_api_health Err arm now sets api_status=Offline, (M3) setup_data_download Err arm sets download_progress unconditionally, (L1) test count corrected 219→220, (L2) AC2 text updated to reflect nexus::log::log usage.

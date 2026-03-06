@@ -203,6 +203,7 @@ pub(super) fn check_api_health(state: &mut AddonState) {
                 "bg thread panicked: check_api_health",
             );
             crate::state::with_state(|s| {
+                s.main.api_status = crate::state::ApiStatus::Offline;
                 s.main.api_health_checking = false;
             });
         }
