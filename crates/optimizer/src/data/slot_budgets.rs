@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 use thiserror::Error;
 
-use super::EvidenceLevel;
+use super::{DataLoadError, EvidenceLevel};
 
 /// Canonical JSON embedded at compile time from data/slot_budgets/level80_ascended.json.
 const SLOT_BUDGETS_JSON: &str =
@@ -20,6 +20,24 @@ pub fn slot_budgets() -> &'static SlotBudgets {
     BUDGETS.get_or_init(|| {
         load_slot_budgets(SLOT_BUDGETS_JSON)
             .expect("embedded level80_ascended.json is invalid")
+    })
+}
+
+/// Try to load slot budgets from the embedded JSON, returning typed errors
+/// on failure. Does NOT store in OnceLock — used for health-check validation.
+pub fn try_load_slot_budgets() -> Result<SlotBudgets, Vec<DataLoadError>> {
+    load_slot_budgets(SLOT_BUDGETS_JSON).map_err(|e| {
+        vec![match e {
+            SlotBudgetError::ParseError(pe) => DataLoadError::ParseError {
+                source: "slot_budgets".into(),
+                detail: pe.to_string(),
+            },
+            SlotBudgetError::ValidationError(msg) => DataLoadError::ValidationError {
+                source: "slot_budgets".into(),
+                field: String::new(),
+                reason: msg,
+            },
+        }]
     })
 }
 
@@ -63,6 +81,33 @@ impl SlotType {
         SlotType::Ring,
         SlotType::BackItem,
     ];
+
+    /// Map a GW2 API equipment slot name to a `SlotType`.
+    ///
+    /// API slot names: "Helm", "Shoulders", "Coat", "Gloves", "Leggings",
+    /// "Boots", "WeaponA1", "WeaponA2", "WeaponB1", "WeaponB2", "Backpack",
+    /// "Accessory1", "Accessory2", "Amulet", "Ring1", "Ring2".
+    ///
+    /// Weapon main-hand slots (WeaponA1, WeaponB1) map to `WeaponTwoHand`
+    /// because main-hand could be two-handed; off-hand slots (WeaponA2,
+    /// WeaponB2) map to `WeaponOneHand`.
+    pub fn from_api_slot(slot: &str) -> Option<SlotType> {
+        match slot {
+            "Helm" => Some(SlotType::Helm),
+            "Shoulders" => Some(SlotType::Shoulders),
+            "Coat" => Some(SlotType::Coat),
+            "Gloves" => Some(SlotType::Gloves),
+            "Leggings" => Some(SlotType::Leggings),
+            "Boots" => Some(SlotType::Boots),
+            "WeaponA1" | "WeaponB1" => Some(SlotType::WeaponTwoHand),
+            "WeaponA2" | "WeaponB2" => Some(SlotType::WeaponOneHand),
+            "Backpack" => Some(SlotType::BackItem),
+            "Accessory1" | "Accessory2" => Some(SlotType::Accessory),
+            "Amulet" => Some(SlotType::Amulet),
+            "Ring1" | "Ring2" => Some(SlotType::Ring),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
@@ -105,6 +150,28 @@ pub struct SlotBudgets {
     map: HashMap<(SlotType, StatShape), SlotBudgetEntry>,
 }
 
+/// Full Ascended equipment set: 16 slots with their `SlotType`.
+/// Matches the layout of the old `SLOT_ADJUSTMENTS` constant:
+/// 6 armor + 4 weapons (2 weapon sets × main+off) + 6 trinkets.
+pub const EQUIPMENT_SLOTS: &[(SlotType, &str)] = &[
+    (SlotType::Helm, "Helm"),
+    (SlotType::Shoulders, "Shoulders"),
+    (SlotType::Coat, "Coat"),
+    (SlotType::Gloves, "Gloves"),
+    (SlotType::Leggings, "Leggings"),
+    (SlotType::Boots, "Boots"),
+    (SlotType::WeaponTwoHand, "WeaponA1"),   // main-hand = two-hand budget
+    (SlotType::WeaponOneHand, "WeaponA2"),   // off-hand = one-hand budget
+    (SlotType::WeaponTwoHand, "WeaponB1"),   // main-hand = two-hand budget
+    (SlotType::WeaponOneHand, "WeaponB2"),   // off-hand = one-hand budget
+    (SlotType::BackItem, "Backpack"),
+    (SlotType::Accessory, "Accessory1"),
+    (SlotType::Accessory, "Accessory2"),
+    (SlotType::Amulet, "Amulet"),
+    (SlotType::Ring, "Ring1"),
+    (SlotType::Ring, "Ring2"),
+];
+
 impl SlotBudgets {
     /// Look up the budget entry for a specific slot and stat shape.
     pub fn get(
@@ -118,6 +185,43 @@ impl SlotBudgets {
     /// Number of loaded entries.
     pub fn len(&self) -> usize {
         self.map.len()
+    }
+
+    /// Look up the ThreeStat major value for an API equipment slot name.
+    /// Returns the pre-computed final stat value for the major attribute.
+    ///
+    /// This replaces the old `attribute_adjustment_for_slot()` function.
+    /// Falls back to 0 for unknown slot names.
+    pub fn major_for_api_slot(&self, slot: &str) -> i32 {
+        SlotType::from_api_slot(slot)
+            .and_then(|st| self.get(st, StatShape::ThreeStat))
+            .map(|e| e.major)
+            .unwrap_or(0)
+    }
+
+    /// Get the budget entry for a slot type, using the stat shape inferred
+    /// from the number of itemstat attributes.
+    ///
+    /// - 3 attributes → ThreeStat
+    /// - 4 attributes → FourStat
+    /// - 7+ attributes → CelestialLike
+    /// - Other → ThreeStat (safe fallback)
+    pub fn get_for_attr_count(
+        &self,
+        slot: SlotType,
+        attr_count: usize,
+    ) -> Option<&SlotBudgetEntry> {
+        let shape = stat_shape_from_attr_count(attr_count);
+        self.get(slot, shape)
+    }
+}
+
+/// Determine the stat shape from the number of attributes in an itemstat.
+pub fn stat_shape_from_attr_count(attr_count: usize) -> StatShape {
+    match attr_count {
+        4 => StatShape::FourStat,
+        7..=9 => StatShape::CelestialLike,
+        _ => StatShape::ThreeStat,
     }
 }
 

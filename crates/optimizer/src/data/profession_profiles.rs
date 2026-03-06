@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use thiserror::Error;
 
-use super::EvidenceLevel;
+use super::{DataLoadError, EvidenceLevel};
 
 /// Canonical JSON embedded at compile time from data/profession_profiles.json.
 const PROFESSION_PROFILES_JSON: &str =
@@ -19,6 +19,24 @@ pub fn profiles() -> &'static ProfessionProfiles {
     PROFILES.get_or_init(|| {
         load_profession_profiles(PROFESSION_PROFILES_JSON)
             .expect("embedded profession_profiles.json is invalid")
+    })
+}
+
+/// Try to load profession profiles from the embedded JSON, returning typed errors
+/// on failure. Does NOT store in OnceLock — used for health-check validation.
+pub fn try_load_profession_profiles() -> Result<ProfessionProfiles, Vec<DataLoadError>> {
+    load_profession_profiles(PROFESSION_PROFILES_JSON).map_err(|e| {
+        vec![match e {
+            ProfessionProfileError::ParseError(pe) => DataLoadError::ParseError {
+                source: "profession_profiles".into(),
+                detail: pe.to_string(),
+            },
+            ProfessionProfileError::ValidationError(msg) => DataLoadError::ValidationError {
+                source: "profession_profiles".into(),
+                field: String::new(),
+                reason: msg,
+            },
+        }]
     })
 }
 
