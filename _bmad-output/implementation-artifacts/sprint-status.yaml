@@ -185,7 +185,7 @@ development_status:
 
   # P3-10a: NormalizedEffect Types, Schema, and Contracts (FR12 partial)
   # BLOCKED until: p3-04 + p3-08 + p3-09 DONE (Review Gate RG-1). HIGH RISK.
-  p3-10a-normalized-effect-types: ready-for-dev
+  p3-10a-normalized-effect-types: done
 
   # P3-10b: Effect Extraction and Population (FR12 partial)
   # BLOCKED until: p3-10a DONE (Review Gate RG-2). HIGH RISK.
@@ -197,7 +197,7 @@ development_status:
 
   # P3-12: WvW Non-Fallback Behavior (FR11)
   # BLOCKED until: p3-09 DONE
-  p3-12-wvw-non-fallback: ready-for-dev
+  p3-12-wvw-non-fallback: done
 
   # P3-13: Factorized Dependency Tables and Evidence Classification (FR15, FR16)
   # BLOCKED until: p3-10b DONE (Review Gate RG-3)
