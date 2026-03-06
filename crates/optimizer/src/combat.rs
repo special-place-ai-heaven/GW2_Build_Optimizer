@@ -241,6 +241,118 @@ pub fn condition_weights_for_profession(profession: &str, _ctx: &BalanceContext)
     }
 }
 
+// ─── Duration Formulas ───
+//
+// Sources:
+// - https://wiki.guildwars2.com/wiki/Expertise (condition duration)
+// - https://wiki.guildwars2.com/wiki/Concentration (boon duration)
+// - https://wiki.guildwars2.com/wiki/Boon_Duration (cap at 100%)
+// - https://wiki.guildwars2.com/wiki/Condition_Duration (cap at 100%)
+//
+// The divisor 1500 derives from: 15 Expertise = 1 percentage point = 0.01 ratio,
+// so 1 Expertise = 1/1500 ratio.
+// TODO: read divisor from loaded universal formulas (P3-03) once available
+
+/// Divisor for converting Expertise to condition duration bonus ratio.
+/// 15 Expertise = 1% = 0.01, so 1 Expertise = 1/1500.
+/// Source: wiki/Expertise — "15 points of Expertise = 1% Condition Duration"
+// TODO: derive from loaded `expertise_per_condition_duration_pct` (P3-03)
+const EXPERTISE_DIVISOR: f64 = 1500.0;
+
+/// Divisor for converting Concentration to boon duration bonus ratio.
+/// 15 Concentration = 1% = 0.01, so 1 Concentration = 1/1500.
+/// Source: wiki/Concentration — "15 points of Concentration = 1% Boon Duration"
+// TODO: derive from loaded `concentration_per_boon_duration_pct` (P3-03)
+const CONCENTRATION_DIVISOR: f64 = 1500.0;
+
+/// Maximum condition duration bonus as a ratio (1.0 = 100% bonus = double duration).
+/// Source: wiki/Condition_Duration — "maximum 100%"
+// TODO: read from loaded `condition_duration_cap` (P3-03)
+const CONDITION_DURATION_CAP: f64 = 1.0;
+
+/// Maximum boon duration bonus as a ratio (1.0 = 100% bonus = double duration).
+/// Source: wiki/Boon_Duration — "maximum 100%"
+// TODO: read from loaded `boon_duration_cap` (P3-03)
+const BOON_DURATION_CAP: f64 = 1.0;
+
+/// Compute the capped condition duration bonus as a ratio (0.0–1.0).
+///
+/// Formula: `((expertise / 1500) + global_condi_bonus + specific_condi_bonus).min(cap)`
+///
+/// All modifier inputs are ratios (e.g. 0.10 = 10%). The cap is also a ratio
+/// (1.0 = 100% bonus = double base duration).
+///
+/// Source: https://wiki.guildwars2.com/wiki/Expertise
+pub fn condition_duration_bonus(
+    expertise: f64,
+    global_condi_bonus: f64,
+    specific_condi_bonus: f64,
+    cap: f64,
+    _ctx: &BalanceContext,
+) -> f64 {
+    ((expertise / EXPERTISE_DIVISOR) + global_condi_bonus + specific_condi_bonus)
+        .max(0.0)
+        .min(cap)
+}
+
+/// Compute the outgoing condition duration after applying the duration bonus.
+///
+/// Formula: `base_duration * (1.0 + capped_bonus)`
+///
+/// Source: https://wiki.guildwars2.com/wiki/Expertise
+pub fn condition_duration_multiplied(
+    base_duration: f64,
+    expertise: f64,
+    global_condi_bonus: f64,
+    specific_condi_bonus: f64,
+    cap: f64,
+    ctx: &BalanceContext,
+) -> f64 {
+    let bonus = condition_duration_bonus(
+        expertise,
+        global_condi_bonus,
+        specific_condi_bonus,
+        cap,
+        ctx,
+    );
+    base_duration * (1.0 + bonus)
+}
+
+/// Compute the capped boon duration bonus as a ratio (0.0–1.0).
+///
+/// Formula: `((concentration / 1500) + global_boon_bonus).min(cap)`
+///
+/// All modifier inputs are ratios (e.g. 0.10 = 10%). The cap is also a ratio
+/// (1.0 = 100% bonus = double base duration).
+///
+/// Source: https://wiki.guildwars2.com/wiki/Boon_Duration
+pub fn boon_duration_bonus(
+    concentration: f64,
+    global_boon_bonus: f64,
+    cap: f64,
+    _ctx: &BalanceContext,
+) -> f64 {
+    ((concentration / CONCENTRATION_DIVISOR) + global_boon_bonus)
+        .max(0.0)
+        .min(cap)
+}
+
+/// Compute the outgoing boon duration after applying the duration bonus.
+///
+/// Formula: `base_duration * (1.0 + capped_bonus)`
+///
+/// Source: https://wiki.guildwars2.com/wiki/Boon_Duration
+pub fn boon_duration_multiplied(
+    base_duration: f64,
+    concentration: f64,
+    global_boon_bonus: f64,
+    cap: f64,
+    ctx: &BalanceContext,
+) -> f64 {
+    let bonus = boon_duration_bonus(concentration, global_boon_bonus, cap, ctx);
+    base_duration * (1.0 + bonus)
+}
+
 // ─── Combat Performance Calculation ───
 
 /// Reference weapon strength (Ascended greatsword average).
@@ -294,18 +406,35 @@ pub fn calculate_combat_performance(
     // Condition ticks (with modifiers applied)
     let condition_ticks = calculate_condition_ticks(total_condition_damage, modifiers, ctx);
 
-    // Condition duration from expertise + modifiers
-    let base_condi_duration = (stats.expertise / f.expertise_per_condition_duration_pct).clamp(0.0, 100.0);
-    let total_condi_duration = (base_condi_duration + modifiers.total_condi_duration_bonus()).clamp(0.0, 100.0);
+    // Condition duration from Expertise + modifiers
+    // Global condi duration bonus as ratio (e.g. 0.10 for 10%)
+    let global_condi_ratio: f64 = modifiers.condi_duration_pct.iter().sum();
+    // Overall condition duration bonus (no per-condition specifics) for UI display
+    let total_condi_bonus = condition_duration_bonus(
+        stats.expertise, global_condi_ratio, 0.0, CONDITION_DURATION_CAP, ctx,
+    );
+    // CombatPerformance.condi_duration_pct is percentage points (0-100)
+    let total_condi_duration = total_condi_bonus * 100.0;
 
     // Condition DPS index: weighted sum of ticks * per-condition duration multiplier * vuln
     // Weights represent typical condition application rates in a rotation
-    // Per-condition duration: base (from Expertise) + global modifiers + specific modifiers
-    let bleed_dur = 1.0 + (base_condi_duration + modifiers.total_condi_duration_for("Bleeding")).clamp(0.0, 100.0) / 100.0;
-    let burn_dur = 1.0 + (base_condi_duration + modifiers.total_condi_duration_for("Burning")).clamp(0.0, 100.0) / 100.0;
-    let poison_dur = 1.0 + (base_condi_duration + modifiers.total_condi_duration_for("Poison")).clamp(0.0, 100.0) / 100.0;
-    let torment_dur = 1.0 + (base_condi_duration + modifiers.total_condi_duration_for("Torment")).clamp(0.0, 100.0) / 100.0;
-    let confuse_dur = 1.0 + (base_condi_duration + modifiers.total_condi_duration_for("Confusion")).clamp(0.0, 100.0) / 100.0;
+    // Per-condition duration multiplier: 1 + capped(expertise_bonus + global + specific)
+    let condi_dur_for = |condition: &str| -> f64 {
+        let specific: f64 = modifiers
+            .specific_condi_duration
+            .get(condition)
+            .map(|v| v.iter().sum())
+            .unwrap_or(0.0);
+        1.0 + condition_duration_bonus(
+            stats.expertise, global_condi_ratio, specific,
+            CONDITION_DURATION_CAP, ctx,
+        )
+    };
+    let bleed_dur = condi_dur_for("Bleeding");
+    let burn_dur = condi_dur_for("Burning");
+    let poison_dur = condi_dur_for("Poison");
+    let torment_dur = condi_dur_for("Torment");
+    let confuse_dur = condi_dur_for("Confusion");
 
     let condition_dps_index = (condition_ticks.bleeding * condition_weights.bleeding * bleed_dur
         + condition_ticks.burning * condition_weights.burning * burn_dur
@@ -319,9 +448,11 @@ pub fn calculate_combat_performance(
     // Healing power index
     let healing_power_index = stats.healing_power * modifiers.total_healing_mult();
 
-    // Boon duration from concentration + modifiers
-    let base_boon_duration = (stats.concentration / f.concentration_per_boon_duration_pct).clamp(0.0, 100.0);
-    let boon_duration_pct = (base_boon_duration + modifiers.total_boon_duration_bonus()).clamp(0.0, 100.0);
+    // Boon duration from Concentration + modifiers
+    let global_boon_ratio: f64 = modifiers.boon_duration_pct.iter().sum();
+    let boon_duration_pct = boon_duration_bonus(
+        stats.concentration, global_boon_ratio, BOON_DURATION_CAP, ctx,
+    ) * 100.0;
 
     // Survivability
     // Source: https://wiki.guildwars2.com/wiki/Health
@@ -1485,6 +1616,223 @@ mod tests {
             "Without Fury, PvE ({:.1}) and PvP ({:.1}) effective_power should be identical",
             perf_pve_no.effective_power,
             perf_pvp_no.effective_power,
+        );
+    }
+
+    // ─── Duration Formula Tests (P3-05) ───
+
+    #[test]
+    fn test_condition_duration_basic() {
+        // 450 Expertise + 20% Burning Duration modifier.
+        // bonus = 450/1500 + 0.20 = 0.30 + 0.20 = 0.50
+        // result = 3.0 * (1 + 0.50) = 3.0 * 1.50 = 4.5s
+        // Source: https://wiki.guildwars2.com/wiki/Expertise
+        let ctx = BalanceContext::pve();
+        let result = condition_duration_multiplied(
+            3.0, 450.0, 0.0, 0.20, CONDITION_DURATION_CAP, &ctx,
+        );
+        assert!(
+            (result - 4.5).abs() < 0.001,
+            "Expected 4.5, got {result}",
+        );
+    }
+
+    #[test]
+    fn test_boon_duration_basic() {
+        // 600 Concentration: bonus = 600/1500 = 0.40
+        // result = 5.0 * (1 + 0.40) = 5.0 * 1.40 = 7.0s
+        // Source: https://wiki.guildwars2.com/wiki/Boon_Duration
+        let ctx = BalanceContext::pve();
+        let result = boon_duration_multiplied(
+            5.0, 600.0, 0.0, BOON_DURATION_CAP, &ctx,
+        );
+        assert!(
+            (result - 7.0).abs() < 0.001,
+            "Expected 7.0, got {result}",
+        );
+    }
+
+    #[test]
+    fn test_condition_duration_cap() {
+        // 1800 Expertise + 30% modifier: raw = 1800/1500 + 0.30 = 1.50, capped at 1.0
+        // result = 3.0 * (1 + 1.0) = 6.0s
+        // Source: https://wiki.guildwars2.com/wiki/Condition_Duration ("maximum 100%")
+        let ctx = BalanceContext::pve();
+        let result = condition_duration_multiplied(
+            3.0, 1800.0, 0.0, 0.30, CONDITION_DURATION_CAP, &ctx,
+        );
+        assert!(
+            (result - 6.0).abs() < 0.001,
+            "Expected 6.0 (capped), got {result}",
+        );
+    }
+
+    #[test]
+    fn test_boon_duration_cap() {
+        // 2000 Concentration: raw = 2000/1500 = 1.333, capped at 1.0
+        // result = 5.0 * (1 + 1.0) = 10.0s
+        // Source: https://wiki.guildwars2.com/wiki/Boon_Duration ("maximum 100%")
+        let ctx = BalanceContext::pve();
+        let result = boon_duration_multiplied(
+            5.0, 2000.0, 0.0, BOON_DURATION_CAP, &ctx,
+        );
+        assert!(
+            (result - 10.0).abs() < 0.001,
+            "Expected 10.0 (capped), got {result}",
+        );
+    }
+
+    #[test]
+    fn test_condition_duration_additive_stacking() {
+        // global 10% + specific Burning 20% + Expertise 300
+        // bonus = 300/1500 + 0.10 + 0.20 = 0.20 + 0.10 + 0.20 = 0.50
+        // result = 4.0 * (1 + 0.50) = 4.0 * 1.50 = 6.0s
+        // Source: https://wiki.guildwars2.com/wiki/Expertise
+        let ctx = BalanceContext::pve();
+        let result = condition_duration_multiplied(
+            4.0, 300.0, 0.10, 0.20, CONDITION_DURATION_CAP, &ctx,
+        );
+        assert!(
+            (result - 6.0).abs() < 0.001,
+            "Expected 6.0, got {result}",
+        );
+    }
+
+    #[test]
+    fn test_zero_expertise_zero_modifiers() {
+        // 0 Expertise, no modifiers: bonus = 0.0, multiplier = 1.0
+        // result = base * 1.0 = base
+        // Source: https://wiki.guildwars2.com/wiki/Expertise
+        let ctx = BalanceContext::pve();
+        let result = condition_duration_multiplied(
+            5.0, 0.0, 0.0, 0.0, CONDITION_DURATION_CAP, &ctx,
+        );
+        assert!(
+            (result - 5.0).abs() < 0.001,
+            "Expected 5.0, got {result}",
+        );
+
+        let boon_result = boon_duration_multiplied(
+            5.0, 0.0, 0.0, BOON_DURATION_CAP, &ctx,
+        );
+        assert!(
+            (boon_result - 5.0).abs() < 0.001,
+            "Expected 5.0, got {boon_result}",
+        );
+    }
+
+    #[test]
+    fn test_duration_bonus_ratio_values() {
+        // Verify condition_duration_bonus and boon_duration_bonus return correct ratios.
+        // Source: https://wiki.guildwars2.com/wiki/Expertise, wiki/Concentration
+        let ctx = BalanceContext::pve();
+
+        // 750 Expertise, 5% global, 10% specific: 750/1500 + 0.05 + 0.10 = 0.65
+        let condi = condition_duration_bonus(
+            750.0, 0.05, 0.10, CONDITION_DURATION_CAP, &ctx,
+        );
+        assert!(
+            (condi - 0.65).abs() < 0.001,
+            "Expected 0.65, got {condi}",
+        );
+
+        // 900 Concentration, 10% global: 900/1500 + 0.10 = 0.60 + 0.10 = 0.70
+        let boon = boon_duration_bonus(
+            900.0, 0.10, BOON_DURATION_CAP, &ctx,
+        );
+        assert!(
+            (boon - 0.70).abs() < 0.001,
+            "Expected 0.70, got {boon}",
+        );
+
+        // Capped: 1500 Expertise, 20% global, 10% specific:
+        // 1500/1500 + 0.20 + 0.10 = 1.30 -> capped at 1.0
+        let capped = condition_duration_bonus(
+            1500.0, 0.20, 0.10, CONDITION_DURATION_CAP, &ctx,
+        );
+        assert!(
+            (capped - 1.0).abs() < 0.001,
+            "Expected 1.0 (capped), got {capped}",
+        );
+    }
+
+    #[test]
+    fn test_combat_performance_condi_duration_matches() {
+        // Existing test: 600 Expertise, no modifiers → condi_duration_pct ~40.0
+        // 600/1500 = 0.40 ratio = 40.0 percentage points
+        // Source: https://wiki.guildwars2.com/wiki/Expertise
+        let ctx = BalanceContext::pve();
+        let stats = StatBlock {
+            power: 1800.0,
+            precision: 1600.0,
+            condition_damage: 2200.0,
+            expertise: 600.0,
+            toughness: 1000.0,
+            vitality: 1000.0,
+            ..Default::default()
+        };
+        let derived = stats::compute_derived(&stats, "Necromancer");
+        let mods = DamageModifiers::default();
+        let solo = default_buff_profiles(&ctx)
+            .into_iter()
+            .find(|b| b.label == "Solo")
+            .unwrap();
+
+        let perf = calculate_combat_performance(
+            &stats, &derived, &mods, &solo,
+            &ConditionWeights::default_pve(), "Necromancer", &ctx,
+        );
+
+        assert!(
+            (perf.condi_duration_pct - 40.0).abs() < 0.1,
+            "Expected ~40.0 condi_duration_pct, got {}",
+            perf.condi_duration_pct,
+        );
+    }
+
+    #[test]
+    fn test_balance_context_accepted() {
+        // Verify duration functions compile and run with all BalanceContext variants.
+        // This is a signature future-proofing test — the formulas are currently
+        // mode-invariant, so results should be identical across modes.
+        let pve = BalanceContext::pve();
+        let pvp = BalanceContext::pvp();
+        let wvw = BalanceContext::wvw();
+
+        let condi_pve = condition_duration_bonus(
+            600.0, 0.10, 0.05, CONDITION_DURATION_CAP, &pve,
+        );
+        let condi_pvp = condition_duration_bonus(
+            600.0, 0.10, 0.05, CONDITION_DURATION_CAP, &pvp,
+        );
+        let condi_wvw = condition_duration_bonus(
+            600.0, 0.10, 0.05, CONDITION_DURATION_CAP, &wvw,
+        );
+        assert!(
+            (condi_pve - condi_pvp).abs() < 0.001,
+            "PvE and PvP should match (currently mode-invariant)",
+        );
+        assert!(
+            (condi_pve - condi_wvw).abs() < 0.001,
+            "PvE and WvW should match (currently mode-invariant)",
+        );
+
+        let boon_pve = boon_duration_bonus(
+            600.0, 0.10, BOON_DURATION_CAP, &pve,
+        );
+        let boon_pvp = boon_duration_bonus(
+            600.0, 0.10, BOON_DURATION_CAP, &pvp,
+        );
+        let boon_wvw = boon_duration_bonus(
+            600.0, 0.10, BOON_DURATION_CAP, &wvw,
+        );
+        assert!(
+            (boon_pve - boon_pvp).abs() < 0.001,
+            "PvE and PvP boon should match (currently mode-invariant)",
+        );
+        assert!(
+            (boon_pve - boon_wvw).abs() < 0.001,
+            "PvE and WvW boon should match (currently mode-invariant)",
         );
     }
 }
