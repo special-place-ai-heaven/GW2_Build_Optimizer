@@ -17,7 +17,38 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use thiserror::Error;
 
+use super::quality::FactualValue;
 use super::{DataLoadError, EvidenceLevel};
+
+/// Serde helper for `Option<FactualValue<T>>` with 3-state JSON mapping:
+/// - field absent → None (not applicable)
+/// - null → Some(Unknown) (applicable but value not yet sourced)
+/// - value → Some(Resolved(v)) (factually known)
+mod optional_factual {
+    use super::super::quality::FactualValue;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<T: Serialize, S: Serializer>(
+        value: &Option<FactualValue<T>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            None => serializer.serialize_none(),
+            Some(fv) => fv.serialize(serializer),
+        }
+    }
+
+    pub fn deserialize<'de, T: Deserialize<'de>, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<FactualValue<T>>, D::Error> {
+        // When this is called, the field IS present in JSON
+        let opt = Option::<T>::deserialize(deserializer)?;
+        Ok(Some(match opt {
+            Some(v) => FactualValue::Resolved(v),
+            None => FactualValue::Unknown,
+        }))
+    }
+}
 
 // ─── Embedded baseline JSON (compile-time) ───
 
@@ -183,8 +214,8 @@ pub enum UptimeModelKind {
 pub struct UptimeModel {
     pub kind: UptimeModelKind,
     /// Fractional uptime (0.0 to 1.0). Only meaningful for `Estimated` or `Derived` kinds.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub uptime: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    pub uptime: Option<FactualValue<f64>>,
 }
 
 // ─── StatusOperation ───
@@ -247,21 +278,21 @@ pub struct StatusOperation {
     /// How the amount value is interpreted.
     pub amount_mode: AmountMode,
     /// Numeric amount (stacks, duration, charges, or count depending on mode).
-    pub amount_value: f64,
+    pub amount_value: FactualValue<f64>,
     /// Base duration of the applied status in milliseconds, if applicable.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_duration_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    pub base_duration_ms: Option<FactualValue<u32>>,
     /// How many/what kind of targets are affected.
     pub target_scope: TargetScope,
     /// Maximum number of targets affected. `None` means unlimited or N/A.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    pub target_count: Option<FactualValue<u32>>,
     /// Internal cooldown of this specific operation in milliseconds.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub internal_cooldown_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    pub internal_cooldown_ms: Option<FactualValue<u32>>,
     /// Multiplier applied to the source's boon/condition duration stat.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_duration_multiplier: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    pub source_duration_multiplier: Option<FactualValue<f64>>,
 }
 
 // ─── NormalizedEffect ───
@@ -281,7 +312,7 @@ pub struct NormalizedEffect {
     /// Category of effect — determines interpretation and stacking behavior.
     pub category: EffectCategory,
     /// Primary numeric value of the effect (meaning depends on category).
-    pub value: f64,
+    pub value: FactualValue<f64>,
     /// How this effect stacks with other effects of the same category.
     pub stacking_rule: StackingRule,
     /// When this effect activates.
@@ -297,14 +328,14 @@ pub struct NormalizedEffect {
     // Timer/cap metadata
 
     /// Duration of the effect in seconds, if applicable.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effect_duration: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    pub effect_duration: Option<FactualValue<f64>>,
     /// Internal cooldown in seconds, if applicable.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub internal_cooldown: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    pub internal_cooldown: Option<FactualValue<f64>>,
     /// Maximum number of stacks this effect can have.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_stacks: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    pub max_stacks: Option<FactualValue<u32>>,
 
     // Interaction payload (for status operation categories)
 
@@ -323,7 +354,7 @@ pub struct NormalizedEffect {
 // ─── File wrapper ───
 
 /// A single normalized effects file for one game mode in a specific patch.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NormalizedEffectsFile {
     pub patch_id: String,
     pub mode: String,
@@ -470,7 +501,7 @@ mod tests {
             source_id: 100,
             source_name: "Test Trait".to_string(),
             category: EffectCategory::FlatStat,
-            value: 150.0,
+            value: FactualValue::Resolved(150.0),
             stacking_rule: StackingRule::Additive,
             trigger_rule: TriggerRule::Passive,
             uptime_model: UptimeModel {
@@ -494,29 +525,29 @@ mod tests {
             source_id: 214,
             source_name: "Signet of Fury".to_string(),
             category: EffectCategory::AppliesBoon,
-            value: 1.0,
+            value: FactualValue::Resolved(1.0),
             stacking_rule: StackingRule::NonStacking,
             trigger_rule: TriggerRule::OnCrit,
             uptime_model: UptimeModel {
                 kind: UptimeModelKind::Estimated,
-                uptime: Some(0.6),
+                uptime: Some(FactualValue::Resolved(0.6)),
             },
             evidence_level: EvidenceLevel::Heuristic,
             source: Some("https://wiki.guildwars2.com/wiki/Signet_of_Fury".to_string()),
-            effect_duration: Some(10.0),
-            internal_cooldown: Some(1.0),
-            max_stacks: Some(25),
+            effect_duration: Some(FactualValue::Resolved(10.0)),
+            internal_cooldown: Some(FactualValue::Resolved(1.0)),
+            max_stacks: Some(FactualValue::Resolved(25)),
             status_operation: Some(StatusOperation {
                 operation_type: OperationType::AppliesBoon,
                 target_side: TargetSide::Self_,
                 status_kind: "Might".to_string(),
                 amount_mode: AmountMode::Stacks,
-                amount_value: 1.0,
-                base_duration_ms: Some(8000),
+                amount_value: FactualValue::Resolved(1.0),
+                base_duration_ms: Some(FactualValue::Resolved(8000)),
                 target_scope: TargetScope::Self_,
                 target_count: None,
-                internal_cooldown_ms: Some(1000),
-                source_duration_multiplier: Some(1.0),
+                internal_cooldown_ms: Some(FactualValue::Resolved(1000)),
+                source_duration_multiplier: Some(FactualValue::Resolved(1.0)),
             }),
             inner_category: None,
         }
@@ -782,7 +813,7 @@ mod tests {
         let mut effect = minimal_effect("bad_uptime");
         effect.uptime_model = UptimeModel {
             kind: UptimeModelKind::Estimated,
-            uptime: Some(0.5),
+            uptime: Some(FactualValue::Resolved(0.5)),
         };
         effect.evidence_level = EvidenceLevel::Factual; // Wrong! Should be Heuristic.
         let file = NormalizedEffectsFile {
@@ -806,7 +837,7 @@ mod tests {
     fn test_validation_passive_with_icd() {
         let mut effect = minimal_effect("passive_icd");
         effect.trigger_rule = TriggerRule::Passive;
-        effect.internal_cooldown = Some(1.0);
+        effect.internal_cooldown = Some(FactualValue::Resolved(1.0));
         let file = NormalizedEffectsFile {
             patch_id: "2026-01-13".to_string(),
             mode: "PvE".to_string(),
@@ -998,18 +1029,18 @@ mod tests {
         assert_eq!(effect.category, EffectCategory::AppliesBoon);
         assert_eq!(effect.trigger_rule, TriggerRule::OnCrit);
         assert_eq!(effect.evidence_level, EvidenceLevel::Heuristic);
-        assert_eq!(effect.max_stacks, Some(25));
+        assert_eq!(effect.max_stacks, Some(FactualValue::Resolved(25)));
 
         let op = effect.status_operation.as_ref().expect("should have status_operation");
         assert_eq!(op.operation_type, OperationType::AppliesBoon);
         assert_eq!(op.target_side, TargetSide::Self_);
         assert_eq!(op.status_kind, "Might");
         assert_eq!(op.amount_mode, AmountMode::Stacks);
-        assert_eq!(op.amount_value, 1.0);
-        assert_eq!(op.base_duration_ms, Some(8000));
+        assert_eq!(op.amount_value, FactualValue::Resolved(1.0));
+        assert_eq!(op.base_duration_ms, Some(FactualValue::Resolved(8000)));
         assert_eq!(op.target_scope, TargetScope::Self_);
-        assert_eq!(op.target_count, None);
-        assert_eq!(op.internal_cooldown_ms, Some(1000));
+        assert_eq!(op.target_count, Some(FactualValue::Unknown));
+        assert_eq!(op.internal_cooldown_ms, Some(FactualValue::Resolved(1000)));
     }
 
     // ─── 13. TargetSide/TargetScope "self" rename ───
@@ -1048,7 +1079,7 @@ mod tests {
         let mut effect = minimal_effect("estimated_ok");
         effect.uptime_model = UptimeModel {
             kind: UptimeModelKind::Estimated,
-            uptime: Some(0.75),
+            uptime: Some(FactualValue::Resolved(0.75)),
         };
         effect.evidence_level = EvidenceLevel::Heuristic; // Correct!
         // Non-passive to avoid ICD conflict
@@ -1133,11 +1164,11 @@ mod tests {
             target_side: TargetSide::Enemy,
             status_kind: "Stability".to_string(),
             amount_mode: AmountMode::Stacks,
-            amount_value: 2.0,
+            amount_value: FactualValue::Resolved(2.0),
             base_duration_ms: None,
             target_scope: TargetScope::Area,
-            target_count: Some(5),
-            internal_cooldown_ms: Some(3000),
+            target_count: Some(FactualValue::Resolved(5)),
+            internal_cooldown_ms: Some(FactualValue::Resolved(3000)),
             source_duration_multiplier: None,
         };
         let json = serde_json::to_string(&op).unwrap();
@@ -1162,7 +1193,7 @@ mod tests {
     fn test_serde_roundtrip_uptime_model_estimated() {
         let model = UptimeModel {
             kind: UptimeModelKind::Estimated,
-            uptime: Some(0.85),
+            uptime: Some(FactualValue::Resolved(0.85)),
         };
         let json = serde_json::to_string(&model).unwrap();
         let parsed: UptimeModel = serde_json::from_str(&json).unwrap();
@@ -1221,7 +1252,7 @@ mod tests {
     fn test_on_crit_with_icd_is_valid() {
         let mut effect = minimal_effect("crit_icd");
         effect.trigger_rule = TriggerRule::OnCrit;
-        effect.internal_cooldown = Some(1.0);
+        effect.internal_cooldown = Some(FactualValue::Resolved(1.0));
         let file = NormalizedEffectsFile {
             patch_id: "2026-01-13".to_string(),
             mode: "PvE".to_string(),
@@ -1229,5 +1260,117 @@ mod tests {
         };
         let result = validate_effects_file(&file);
         assert!(result.is_ok(), "OnCrit + ICD should be valid: {:?}", result.err());
+    }
+
+    // ─── FactualValue deserialization: null → Unknown ───
+
+    #[test]
+    fn test_value_null_deserializes_to_unknown() {
+        let json = r#"{
+            "effect_id": "test_unknown_value",
+            "source_type": "Trait",
+            "source_id": 1,
+            "source_name": "Test",
+            "category": "FlatStat",
+            "value": null,
+            "stacking_rule": "Additive",
+            "trigger_rule": "Passive",
+            "uptime_model": { "kind": "AlwaysOn" },
+            "evidence_level": "Unknown"
+        }"#;
+        let effect: NormalizedEffect = serde_json::from_str(json).unwrap();
+        assert_eq!(effect.value, FactualValue::Unknown);
+    }
+
+    // ─── 3-state Option<FactualValue<T>> test ───
+
+    #[test]
+    fn test_three_state_option_factual_value() {
+        // State 1: field absent → None
+        let json = r#"{
+            "effect_id": "test_absent",
+            "source_type": "Trait",
+            "source_id": 1,
+            "source_name": "Test",
+            "category": "FlatStat",
+            "value": 100.0,
+            "stacking_rule": "Additive",
+            "trigger_rule": "Passive",
+            "uptime_model": { "kind": "AlwaysOn" },
+            "evidence_level": "Factual"
+        }"#;
+        let effect: NormalizedEffect = serde_json::from_str(json).unwrap();
+        assert_eq!(effect.effect_duration, None, "absent field → None");
+        assert_eq!(effect.max_stacks, None, "absent field → None");
+
+        // State 2: field = null → Some(Unknown)
+        let json = r#"{
+            "effect_id": "test_null",
+            "source_type": "Trait",
+            "source_id": 1,
+            "source_name": "Test",
+            "category": "FlatStat",
+            "value": 100.0,
+            "stacking_rule": "Additive",
+            "trigger_rule": "Passive",
+            "uptime_model": { "kind": "AlwaysOn" },
+            "evidence_level": "Factual",
+            "effect_duration": null,
+            "max_stacks": null
+        }"#;
+        let effect: NormalizedEffect = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            effect.effect_duration,
+            Some(FactualValue::Unknown),
+            "null → Some(Unknown)"
+        );
+        assert_eq!(
+            effect.max_stacks,
+            Some(FactualValue::Unknown),
+            "null → Some(Unknown)"
+        );
+
+        // State 3: field = value → Some(Resolved(v))
+        let json = r#"{
+            "effect_id": "test_resolved",
+            "source_type": "Trait",
+            "source_id": 1,
+            "source_name": "Test",
+            "category": "FlatStat",
+            "value": 100.0,
+            "stacking_rule": "Additive",
+            "trigger_rule": "Passive",
+            "uptime_model": { "kind": "AlwaysOn" },
+            "evidence_level": "Factual",
+            "effect_duration": 5.0,
+            "max_stacks": 10
+        }"#;
+        let effect: NormalizedEffect = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            effect.effect_duration,
+            Some(FactualValue::Resolved(5.0)),
+            "value → Some(Resolved)"
+        );
+        assert_eq!(
+            effect.max_stacks,
+            Some(FactualValue::Resolved(10)),
+            "value → Some(Resolved)"
+        );
+    }
+
+    // ─── StatusOperation with FactualValue fields ───
+
+    #[test]
+    fn test_status_operation_amount_value_unknown() {
+        let json = r#"{
+            "operation_type": "AppliesBoon",
+            "target_side": "self",
+            "status_kind": "Might",
+            "amount_mode": "Stacks",
+            "amount_value": null,
+            "target_scope": "self"
+        }"#;
+        let op: StatusOperation = serde_json::from_str(json).unwrap();
+        assert_eq!(op.amount_value, FactualValue::Unknown);
     }
 }

@@ -1,3 +1,4 @@
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::ops::{Add, Div, Mul, Sub};
 
@@ -116,6 +117,25 @@ impl<T: fmt::Display> fmt::Display for FactualValue<T> {
             FactualValue::Resolved(v) => write!(f, "{}", v),
             FactualValue::Unknown => write!(f, "Unknown"),
         }
+    }
+}
+
+impl<T: Serialize> Serialize for FactualValue<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            FactualValue::Resolved(v) => v.serialize(serializer),
+            FactualValue::Unknown => serializer.serialize_none(),
+        }
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for FactualValue<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let opt = Option::<T>::deserialize(deserializer)?;
+        Ok(match opt {
+            Some(v) => FactualValue::Resolved(v),
+            None => FactualValue::Unknown,
+        })
     }
 }
 
@@ -464,5 +484,25 @@ mod tests {
         // In the baseline (no overrides), quality should be Verified.
         let quality = DataQuality::Verified;
         assert_eq!(quality, DataQuality::Verified);
+    }
+
+    // ─── FactualValue serde tests ───
+
+    #[test]
+    fn test_factual_value_serde_resolved() {
+        let v: FactualValue<f64> = FactualValue::Resolved(0.5);
+        let json = serde_json::to_string(&v).unwrap();
+        assert_eq!(json, "0.5");
+        let deserialized: FactualValue<f64> = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, FactualValue::Resolved(0.5));
+    }
+
+    #[test]
+    fn test_factual_value_serde_unknown() {
+        let v: FactualValue<f64> = FactualValue::Unknown;
+        let json = serde_json::to_string(&v).unwrap();
+        assert_eq!(json, "null");
+        let deserialized: FactualValue<f64> = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, FactualValue::Unknown);
     }
 }
