@@ -721,8 +721,8 @@ fn exec_simulate_combat(args: &Value, ctx: &ToolContext) -> Value {
         combat::extract_damage_modifiers(&trait_ids, None, &[], None, &ctx.db.traits, &ctx.db.items, ctx.balance_ctx)
     };
 
-    // Simulate under all 3 buff profiles
-    let profiles = combat::default_buff_profiles(ctx.balance_ctx);
+    // Simulate under all 3 buff profiles using profession-specific rotation profile data
+    let profiles = combat::buff_profiles_for_profession(ctx.profession_name, ctx.balance_ctx);
     let cw = combat::condition_weights_for_profession(ctx.profession_name, ctx.balance_ctx);
     let results: Vec<Value> = profiles.iter().map(|bp| {
         let perf = combat::calculate_combat_performance(
@@ -753,7 +753,7 @@ fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
     let derived = stats::compute_derived(&full_stats, ctx.profession_name);
 
     let mods = DamageModifiers::default();
-    let solo = &combat::default_buff_profiles(ctx.balance_ctx)[0];
+    let solo = &combat::buff_profiles_for_profession(ctx.profession_name, ctx.balance_ctx)[0];
     let perf = combat::calculate_combat_performance(
         &full_stats, &derived, &mods, solo,
         &combat::condition_weights_for_profession(ctx.profession_name, ctx.balance_ctx),

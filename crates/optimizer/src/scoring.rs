@@ -831,7 +831,7 @@ mod tests {
         // with condition-focused weights. Now ensured by tier selection excluding
         // Minstrel's, but scoring should also reflect this correctly.
         use crate::balance::BalanceContext;
-        use crate::combat::{self, DamageModifiers, default_buff_profiles};
+        use crate::combat::{self, DamageModifiers, condition_weights_for_profession};
         use crate::stats;
 
         let ctx = BalanceContext::pve();
@@ -843,9 +843,11 @@ mod tests {
         };
         let derived_t = stats::compute_derived(&trailblazer, "Ranger");
         let mods = DamageModifiers::default();
-        let solo = &default_buff_profiles(&ctx)[0];
+        // Use Ranger-specific condition weights from rotation profile data
+        let cw = condition_weights_for_profession("Ranger", &ctx);
+        let solo = &combat::buff_profiles_for_profession("Ranger", &ctx)[0];
         let perf_t = combat::calculate_combat_performance(
-            &trailblazer, &derived_t, &mods, solo, &combat::ConditionWeights::default_pve(), "Ranger", &ctx,
+            &trailblazer, &derived_t, &mods, solo, &cw, "Ranger", &ctx,
         );
 
         let minstrel = stats::StatBlock {
@@ -856,11 +858,12 @@ mod tests {
         };
         let derived_m = stats::compute_derived(&minstrel, "Ranger");
         let perf_m = combat::calculate_combat_performance(
-            &minstrel, &derived_m, &mods, solo, &combat::ConditionWeights::default_pve(), "Ranger", &ctx,
+            &minstrel, &derived_m, &mods, solo, &cw, "Ranger", &ctx,
         );
 
+        // Condition-dominant weights: condition DPS most important
         let w = OptimizationWeights {
-            power: 0.07, disable: 0.07, condition: 0.67, healing: 0.52, sustain: 0.67,
+            power: 0.07, disable: 0.07, condition: 0.93, healing: 0.33, sustain: 0.67,
         };
 
         let score_trail = score_with_weights(&perf_t, &w);

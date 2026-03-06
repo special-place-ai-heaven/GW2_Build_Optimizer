@@ -1,0 +1,295 @@
+[
+  {
+    "profile_id": "wvw_generic_fallback",
+    "profession": "Generic",
+    "elite_spec": null,
+    "objective_profile_id": null,
+    "boon_generation": {},
+    "boon_uptime": {
+      "Might": 0.5,
+      "Fury": 0.4,
+      "Protection": 0.4,
+      "Resolution": 0.2,
+      "Stability": 0.3
+    },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 1.0 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 0.8 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 0.5 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 0.5 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 0.2 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 3.0 }
+    },
+    "incoming_suppression": {
+      "Cripple": 0.15,
+      "Immobilize": 0.1
+    },
+    "target_behavior": {
+      "movement_fraction": 0.6,
+      "skill_use_frequency_per_second": 0.5
+    },
+    "scenarios": [
+      {
+        "scenario_id": "solo",
+        "label": "Solo",
+        "might_stacks": 0.0,
+        "vulnerability_stacks": 0.0,
+        "boon_overrides": null
+      },
+      {
+        "scenario_id": "party",
+        "label": "Party",
+        "might_stacks": 10.0,
+        "vulnerability_stacks": 5.0,
+        "boon_overrides": {
+          "Fury": 0.6,
+          "Protection": 0.6,
+          "Stability": 0.4
+        }
+      },
+      {
+        "scenario_id": "full_squad",
+        "label": "Full Squad",
+        "might_stacks": 20.0,
+        "vulnerability_stacks": 15.0,
+        "boon_overrides": {
+          "Fury": 0.9,
+          "Protection": 0.9,
+          "Resolution": 0.6,
+          "Stability": 0.7
+        }
+      }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Generic WvW fallback. Higher movement and Stability uptime due to zerg combat. Conditions cleansed more frequently."
+  },
+  {
+    "profile_id": "wvw_warrior_core",
+    "profession": "Warrior",
+    "elite_spec": null,
+    "objective_profile_id": null,
+    "boon_generation": { "Might": { "mode": "IntensityRate", "avg_stacks_per_second": 0.6 } },
+    "boon_uptime": { "Might": 0.6, "Fury": 0.5, "Protection": 0.4, "Resolution": 0.2, "Stability": 0.3 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 1.5 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 1.0 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 0.2 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 0.3 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 5.0 }
+    },
+    "incoming_suppression": {},
+    "target_behavior": { "movement_fraction": 0.5, "skill_use_frequency_per_second": 0.5 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 4.0, "vulnerability_stacks": 3.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 12.0, "vulnerability_stacks": 8.0, "boon_overrides": { "Fury": 0.7, "Protection": 0.6, "Stability": 0.4 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 22.0, "vulnerability_stacks": 18.0, "boon_overrides": { "Fury": 0.9, "Protection": 0.9, "Resolution": 0.5, "Stability": 0.7 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Warrior WvW: frontline melee, Might generation, moderate condi."
+  },
+  {
+    "profile_id": "wvw_guardian_core",
+    "profession": "Guardian",
+    "elite_spec": null,
+    "objective_profile_id": null,
+    "boon_generation": {
+      "Might": { "mode": "IntensityRate", "avg_stacks_per_second": 0.5 },
+      "Protection": { "mode": "DurationRate", "avg_duration_ms_per_second": 350.0 },
+      "Stability": { "mode": "IntensityRate", "avg_stacks_per_second": 0.3 }
+    },
+    "boon_uptime": { "Might": 0.6, "Fury": 0.5, "Protection": 0.6, "Resolution": 0.4, "Stability": 0.4 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 0.3 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 3.0 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 0.2 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 0.0 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 4.0 }
+    },
+    "incoming_suppression": {},
+    "target_behavior": { "movement_fraction": 0.5, "skill_use_frequency_per_second": 0.5 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 3.0, "vulnerability_stacks": 2.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 12.0, "vulnerability_stacks": 8.0, "boon_overrides": { "Fury": 0.7, "Protection": 0.7, "Stability": 0.5 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 22.0, "vulnerability_stacks": 18.0, "boon_overrides": { "Fury": 0.9, "Protection": 0.9, "Resolution": 0.6, "Stability": 0.7 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Guardian WvW: frontline support, Burning pressure, strong boon generation."
+  },
+  {
+    "profile_id": "wvw_revenant_core",
+    "profession": "Revenant",
+    "elite_spec": null,
+    "objective_profile_id": null,
+    "boon_generation": { "Might": { "mode": "IntensityRate", "avg_stacks_per_second": 0.3 } },
+    "boon_uptime": { "Might": 0.5, "Fury": 0.5, "Protection": 0.4, "Resolution": 0.2, "Stability": 0.3 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 0.8 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 1.0 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 0.2 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 2.5 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 5.0 }
+    },
+    "incoming_suppression": {},
+    "target_behavior": { "movement_fraction": 0.5, "skill_use_frequency_per_second": 0.5 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 3.0, "vulnerability_stacks": 3.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 12.0, "vulnerability_stacks": 8.0, "boon_overrides": { "Fury": 0.7, "Protection": 0.6, "Stability": 0.4 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 22.0, "vulnerability_stacks": 18.0, "boon_overrides": { "Fury": 0.9, "Protection": 0.9, "Resolution": 0.5, "Stability": 0.7 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Revenant WvW: Torment pressure via Mallyx, legend swapping utility."
+  },
+  {
+    "profile_id": "wvw_engineer_core",
+    "profession": "Engineer",
+    "elite_spec": null,
+    "objective_profile_id": null,
+    "boon_generation": { "Might": { "mode": "IntensityRate", "avg_stacks_per_second": 0.3 } },
+    "boon_uptime": { "Might": 0.4, "Fury": 0.4, "Protection": 0.3, "Resolution": 0.1, "Stability": 0.2 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 2.0 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 2.0 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 0.8 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 0.2 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 0.5 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 5.0 }
+    },
+    "incoming_suppression": {},
+    "target_behavior": { "movement_fraction": 0.5, "skill_use_frequency_per_second": 0.5 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 2.0, "vulnerability_stacks": 3.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 12.0, "vulnerability_stacks": 8.0, "boon_overrides": { "Fury": 0.6, "Protection": 0.5, "Stability": 0.3 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 22.0, "vulnerability_stacks": 18.0, "boon_overrides": { "Fury": 0.9, "Protection": 0.8, "Resolution": 0.4, "Stability": 0.6 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Engineer WvW: AoE condition pressure, mortar kit."
+  },
+  {
+    "profile_id": "wvw_ranger_core",
+    "profession": "Ranger",
+    "elite_spec": null,
+    "objective_profile_id": null,
+    "boon_generation": { "Might": { "mode": "IntensityRate", "avg_stacks_per_second": 0.3 } },
+    "boon_uptime": { "Might": 0.4, "Fury": 0.5, "Protection": 0.3, "Resolution": 0.1, "Stability": 0.2 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 2.5 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 0.5 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 1.5 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 0.3 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 6.0 }
+    },
+    "incoming_suppression": {},
+    "target_behavior": { "movement_fraction": 0.5, "skill_use_frequency_per_second": 0.5 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 3.0, "vulnerability_stacks": 4.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 12.0, "vulnerability_stacks": 8.0, "boon_overrides": { "Fury": 0.7, "Protection": 0.5, "Stability": 0.3 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 22.0, "vulnerability_stacks": 18.0, "boon_overrides": { "Fury": 0.9, "Protection": 0.8, "Resolution": 0.4, "Stability": 0.6 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Ranger WvW: Bleeding/Poison via shortbow and pet."
+  },
+  {
+    "profile_id": "wvw_thief_core",
+    "profession": "Thief",
+    "elite_spec": null,
+    "objective_profile_id": null,
+    "boon_generation": {},
+    "boon_uptime": { "Might": 0.3, "Fury": 0.4, "Protection": 0.2, "Resolution": 0.1, "Stability": 0.1 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 1.5 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 0.2 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 2.0 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 1.0 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 0.2 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 3.0 }
+    },
+    "incoming_suppression": {},
+    "target_behavior": { "movement_fraction": 0.6, "skill_use_frequency_per_second": 0.5 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 2.0, "vulnerability_stacks": 2.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 10.0, "vulnerability_stacks": 6.0, "boon_overrides": { "Fury": 0.6, "Protection": 0.4, "Stability": 0.3 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 20.0, "vulnerability_stacks": 15.0, "boon_overrides": { "Fury": 0.85, "Protection": 0.7, "Resolution": 0.3, "Stability": 0.5 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Thief WvW: roamer/ganker, Poison-heavy, high mobility."
+  },
+  {
+    "profile_id": "wvw_elementalist_core",
+    "profession": "Elementalist",
+    "elite_spec": null,
+    "objective_profile_id": null,
+    "boon_generation": { "Might": { "mode": "IntensityRate", "avg_stacks_per_second": 0.5 } },
+    "boon_uptime": { "Might": 0.5, "Fury": 0.5, "Protection": 0.3, "Resolution": 0.1, "Stability": 0.2 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 2.0 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 3.0 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 0.2 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 0.3 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 0.2 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 5.0 }
+    },
+    "incoming_suppression": {},
+    "target_behavior": { "movement_fraction": 0.5, "skill_use_frequency_per_second": 0.5 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 4.0, "vulnerability_stacks": 3.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 12.0, "vulnerability_stacks": 8.0, "boon_overrides": { "Fury": 0.7, "Protection": 0.5, "Stability": 0.3 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 22.0, "vulnerability_stacks": 18.0, "boon_overrides": { "Fury": 0.9, "Protection": 0.8, "Resolution": 0.4, "Stability": 0.6 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Elementalist WvW: AoE Burning, staff meteor shower, frontline support."
+  },
+  {
+    "profile_id": "wvw_mesmer_core",
+    "profession": "Mesmer",
+    "elite_spec": null,
+    "objective_profile_id": null,
+    "boon_generation": {},
+    "boon_uptime": { "Might": 0.4, "Fury": 0.4, "Protection": 0.3, "Resolution": 0.1, "Stability": 0.3 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 1.5 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 0.3 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 2.0 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 2.0 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 4.0 }
+    },
+    "incoming_suppression": {},
+    "target_behavior": { "movement_fraction": 0.5, "skill_use_frequency_per_second": 0.5 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 2.0, "vulnerability_stacks": 3.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 12.0, "vulnerability_stacks": 6.0, "boon_overrides": { "Fury": 0.6, "Protection": 0.5, "Stability": 0.4 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 22.0, "vulnerability_stacks": 15.0, "boon_overrides": { "Fury": 0.85, "Protection": 0.8, "Resolution": 0.4, "Stability": 0.6 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Mesmer WvW: Confusion/Torment via clones, portal utility."
+  },
+  {
+    "profile_id": "wvw_necromancer_core",
+    "profession": "Necromancer",
+    "elite_spec": null,
+    "objective_profile_id": null,
+    "boon_generation": {},
+    "boon_uptime": { "Might": 0.4, "Fury": 0.3, "Protection": 0.3, "Resolution": 0.1, "Stability": 0.2 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 3.0 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 0.3 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 0.5 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 2.5 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 5.0 }
+    },
+    "incoming_suppression": { "Fear": 0.1 },
+    "target_behavior": { "movement_fraction": 0.5, "skill_use_frequency_per_second": 0.5 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 2.0, "vulnerability_stacks": 3.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 12.0, "vulnerability_stacks": 8.0, "boon_overrides": { "Fury": 0.5, "Protection": 0.5, "Stability": 0.3 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 22.0, "vulnerability_stacks": 18.0, "boon_overrides": { "Fury": 0.85, "Protection": 0.8, "Resolution": 0.4, "Stability": 0.6 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Necromancer WvW: Bleeding/Torment AoE via Scourge shades, Fear pressure."
+  }
+]
