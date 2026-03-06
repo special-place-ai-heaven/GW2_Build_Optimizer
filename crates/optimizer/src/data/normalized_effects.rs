@@ -19,6 +19,8 @@ use thiserror::Error;
 
 use super::quality::FactualValue;
 use super::{DataLoadError, EvidenceLevel};
+use crate::scoring::OptimizationWeights;
+use crate::synergy;
 
 /// Serde helper for `Option<FactualValue<T>>` with 3-state JSON mapping:
 /// - field absent → None (not applicable)
@@ -488,6 +490,524 @@ fn load_all_effects() -> Result<NormalizedEffectsData, NormalizedEffectError> {
     Ok(NormalizedEffectsData { files })
 }
 
+// ─── Scoring ───
+
+/// Score a NormalizedEffect using the new 23-category type system.
+/// Produces values comparable to `synergy::score_normalized_effect()`.
+///
+/// Returns 0.0 for Unknown values (can't score what we don't know).
+pub fn score_effect(effect: &NormalizedEffect, weights: &OptimizationWeights) -> f64 {
+    let base_value = match effect.value {
+        FactualValue::Resolved(v) => v,
+        FactualValue::Unknown => return 0.0,
+    };
+
+    let uptime = effect_uptime(effect);
+
+    let raw_score = match &effect.category {
+        // Numeric modifier categories
+        EffectCategory::FlatStat => {
+            // +100 stat with weight 1.0 → ~0.033 (matching existing normalization)
+            // Use average of power/condition as proxy for generic stat value
+            let w = (weights.power + weights.condition) * 0.5;
+            base_value / 3000.0 * w
+        }
+        EffectCategory::StatConversion => {
+            // Conversion percent → value depends on source/target stat interaction
+            // Conservative: treat as fractional stat bonus
+            let w = (weights.power + weights.condition) * 0.4;
+            base_value / 100.0 * w
+        }
+        EffectCategory::StrikeDamagePct => {
+            // +5% strike damage → 0.05 * weight
+            base_value / 100.0 * weights.power
+        }
+        EffectCategory::ConditionDamagePct => {
+            base_value / 100.0 * weights.condition
+        }
+        EffectCategory::SpecificConditionDamagePct => {
+            // Specific condition damage is less universally useful
+            base_value / 100.0 * weights.condition * 0.8
+        }
+        EffectCategory::CritDamagePct => {
+            // Crit damage primarily benefits strike builds
+            base_value / 100.0 * weights.power * 0.8
+        }
+        EffectCategory::BoonDurationPct => {
+            // Boon duration benefits disable (boon support) and healing
+            base_value / 100.0 * (weights.disable * 0.6 + weights.healing * 0.3)
+        }
+        EffectCategory::ConditionDurationPct => {
+            // Condition duration benefits condition DPS and CC/disable
+            base_value / 100.0 * (weights.condition * 0.8 + weights.disable * 0.3)
+        }
+        EffectCategory::SpecificConditionDurationPct => {
+            base_value / 100.0 * weights.condition * 0.5
+        }
+        EffectCategory::OutgoingHealingPct => {
+            base_value / 100.0 * weights.healing
+        }
+        EffectCategory::IncomingStrikeMultiplier => {
+            // Damage reduction: lower is better. Value < 1.0 = damage reduction.
+            // Score the reduction amount (1.0 - multiplier) as sustain benefit.
+            let reduction = (1.0 - base_value).max(0.0);
+            reduction * weights.sustain * 2.0
+        }
+        EffectCategory::IncomingConditionMultiplier => {
+            let reduction = (1.0 - base_value).max(0.0);
+            reduction * weights.sustain * 1.5
+        }
+
+        // Status operation categories
+        EffectCategory::AppliesBoon => {
+            // Boon application: value is amount (stacks/duration)
+            let boon_w = status_weight_for_scoring(effect, weights, false);
+            base_value.min(5.0) * 0.02 * boon_w + boon_w * 0.05
+        }
+        EffectCategory::AppliesCondition => {
+            // Condition application: value is stacks
+            let cond_w = status_weight_for_scoring(effect, weights, true);
+            base_value.min(5.0) * 0.02 * cond_w + cond_importance_from_op(effect) * 0.03 * weights.condition
+        }
+        EffectCategory::RemovesBoon => {
+            // Boon removal is useful in PvP/WvW, modest in PvE
+            base_value.min(5.0) * 0.02 * weights.disable * 0.5
+        }
+        EffectCategory::StealsBoon => {
+            // Boon theft = removal + self-application
+            base_value.min(5.0) * 0.03 * weights.disable
+        }
+        EffectCategory::CorruptsBoon => {
+            // Boon corruption: strong in competitive modes
+            base_value.min(5.0) * 0.03 * (weights.disable * 0.5 + weights.condition * 0.3)
+        }
+        EffectCategory::RemovesCondition => {
+            // Condition removal: sustain and healing value
+            base_value.min(5.0) * 0.02 * (weights.sustain * 0.4 + weights.healing * 0.4)
+        }
+        EffectCategory::ConvertsConditionToBoon => {
+            // Double value: removes condition AND applies boon
+            base_value.min(5.0) * 0.04 * (weights.sustain * 0.3 + weights.healing * 0.3)
+        }
+        EffectCategory::TransfersCondition => {
+            // Transfer: removes from self, applies to enemy
+            base_value.min(5.0) * 0.03 * (weights.sustain * 0.3 + weights.condition * 0.3)
+        }
+
+        // Special categories
+        EffectCategory::DefianceDamage => {
+            // Defiance break value: primarily disable axis
+            base_value / 1000.0 * weights.disable * 0.5
+        }
+        EffectCategory::ProcEffect => {
+            // Proc scoring: the value is the inner magnitude
+            // uptime applied below
+            base_value / 3000.0 * weights.power
+        }
+        EffectCategory::TriggeredEffect => {
+            // Triggered: score based on inner_category at reduced effective uptime
+            let inner_w = match &effect.inner_category {
+                Some(EffectCategory::StrikeDamagePct) => weights.power,
+                Some(EffectCategory::ConditionDamagePct) => weights.condition,
+                Some(EffectCategory::CritDamagePct) => weights.power * 0.8,
+                Some(EffectCategory::FlatStat) => (weights.power + weights.condition) * 0.4,
+                Some(EffectCategory::OutgoingHealingPct) => weights.healing,
+                _ => 0.3, // Conservative default
+            };
+            base_value / 100.0 * inner_w * 0.5
+        }
+    };
+
+    // Apply uptime for non-passive triggers
+    match effect.trigger_rule {
+        TriggerRule::Passive => raw_score,
+        _ => raw_score * uptime,
+    }
+}
+
+/// Compute effective uptime for an effect based on its uptime model.
+fn effect_uptime(effect: &NormalizedEffect) -> f64 {
+    match &effect.uptime_model.kind {
+        UptimeModelKind::AlwaysOn => 1.0,
+        UptimeModelKind::Estimated => {
+            effect
+                .uptime_model
+                .uptime
+                .as_ref()
+                .and_then(|fv| match fv {
+                    FactualValue::Resolved(v) => Some(*v),
+                    _ => None,
+                })
+                .unwrap_or(0.5)
+        }
+        UptimeModelKind::Derived => {
+            // Use provided uptime if available, else 0.5 placeholder
+            effect
+                .uptime_model
+                .uptime
+                .as_ref()
+                .and_then(|fv| match fv {
+                    FactualValue::Resolved(v) => Some(*v),
+                    _ => None,
+                })
+                .unwrap_or(0.5)
+        }
+        UptimeModelKind::Unknown => 0.3, // Conservative estimate
+    }
+}
+
+/// Get weight for a boon/condition status application based on the StatusOperation payload.
+fn status_weight_for_scoring(
+    effect: &NormalizedEffect,
+    weights: &OptimizationWeights,
+    is_condition: bool,
+) -> f64 {
+    if is_condition {
+        return weights.condition;
+    }
+    // For boons, check the specific boon name if available
+    let status_kind = effect
+        .status_operation
+        .as_ref()
+        .map(|op| op.status_kind.as_str())
+        .unwrap_or("");
+    match status_kind {
+        "Might" => weights.power * 0.5 + weights.condition * 0.5,
+        "Fury" => weights.power * 0.7,
+        "Quickness" => weights.power * 0.5 + weights.condition * 0.3,
+        "Alacrity" => weights.disable * 0.4 + weights.power * 0.2,
+        "Protection" => weights.sustain * 0.6,
+        "Resolution" => weights.sustain * 0.4,
+        "Regeneration" => weights.healing * 0.4,
+        "Vigor" => weights.sustain * 0.3,
+        "Stability" => weights.disable * 0.5 + weights.sustain * 0.3,
+        "Resistance" => weights.sustain * 0.4,
+        "Aegis" => weights.sustain * 0.5,
+        _ => 0.05,
+    }
+}
+
+/// Get condition importance from StatusOperation payload.
+fn cond_importance_from_op(effect: &NormalizedEffect) -> f64 {
+    let status_kind = effect
+        .status_operation
+        .as_ref()
+        .map(|op| op.status_kind.as_str())
+        .unwrap_or("");
+    match status_kind {
+        "Burning" => 1.0,
+        "Vulnerability" => 0.8,
+        "Bleeding" => 0.7,
+        "Torment" => 0.6,
+        "Poison" => 0.5,
+        "Confusion" => 0.1,
+        _ => 0.2,
+    }
+}
+
+// ─── Legacy Mapping ───
+
+/// Map a legacy 8-variant `synergy::NormalizedEffect` to the new 23-category
+/// `NormalizedEffect`. Useful for Phase 2 migration from old extractors.
+///
+/// The `effect_index` disambiguates multiple effects from the same source.
+pub fn map_legacy_effect(
+    old: &synergy::NormalizedEffect,
+    source_type: SourceType,
+    source_id: u32,
+    source_name: &str,
+    effect_index: usize,
+) -> NormalizedEffect {
+    let source_prefix = match source_type {
+        SourceType::Trait => "trait",
+        SourceType::Skill => "skill",
+        SourceType::Rune => "rune",
+        SourceType::Sigil => "sigil",
+        SourceType::Relic => "relic",
+    };
+    let effect_id = format!("{}:{}:{}", source_prefix, source_id, effect_index);
+
+    match old {
+        synergy::NormalizedEffect::StatBonus { stat, value } => NormalizedEffect {
+            effect_id,
+            source_type,
+            source_id,
+            source_name: source_name.to_string(),
+            category: EffectCategory::FlatStat,
+            value: FactualValue::Resolved(*value),
+            stacking_rule: StackingRule::Additive,
+            trigger_rule: TriggerRule::Passive,
+            uptime_model: UptimeModel {
+                kind: UptimeModelKind::AlwaysOn,
+                uptime: None,
+            },
+            evidence_level: EvidenceLevel::Derived,
+            source: None,
+            effect_duration: None,
+            internal_cooldown: None,
+            max_stacks: None,
+            status_operation: None,
+            inner_category: Some(map_stat_type_to_hint(stat)),
+        },
+        synergy::NormalizedEffect::DamageModifier { category, percent } => {
+            let (cat, inner) = map_damage_category(category);
+            NormalizedEffect {
+                effect_id,
+                source_type,
+                source_id,
+                source_name: source_name.to_string(),
+                category: cat,
+                value: FactualValue::Resolved(*percent),
+                stacking_rule: StackingRule::Multiplicative,
+                trigger_rule: TriggerRule::Passive,
+                uptime_model: UptimeModel {
+                    kind: UptimeModelKind::AlwaysOn,
+                    uptime: None,
+                },
+                evidence_level: EvidenceLevel::Derived,
+                source: None,
+                effect_duration: None,
+                internal_cooldown: None,
+                max_stacks: None,
+                status_operation: None,
+                inner_category: inner,
+            }
+        }
+        synergy::NormalizedEffect::AppliesStatus {
+            status,
+            is_condition,
+            duration_s,
+            stacks,
+        } => {
+            let cat = if *is_condition {
+                EffectCategory::AppliesCondition
+            } else {
+                EffectCategory::AppliesBoon
+            };
+            let op_type = if *is_condition {
+                OperationType::AppliesCondition
+            } else {
+                OperationType::AppliesBoon
+            };
+            NormalizedEffect {
+                effect_id,
+                source_type,
+                source_id,
+                source_name: source_name.to_string(),
+                category: cat,
+                value: FactualValue::Resolved(*stacks as f64),
+                stacking_rule: StackingRule::NonStacking,
+                trigger_rule: TriggerRule::Passive,
+                uptime_model: UptimeModel {
+                    kind: UptimeModelKind::AlwaysOn,
+                    uptime: None,
+                },
+                evidence_level: EvidenceLevel::Derived,
+                source: None,
+                effect_duration: Some(FactualValue::Resolved(*duration_s as f64)),
+                internal_cooldown: None,
+                max_stacks: None,
+                status_operation: Some(StatusOperation {
+                    operation_type: op_type,
+                    target_side: if *is_condition {
+                        TargetSide::Enemy
+                    } else {
+                        TargetSide::Self_
+                    },
+                    status_kind: status.clone(),
+                    amount_mode: AmountMode::Stacks,
+                    amount_value: FactualValue::Resolved(*stacks as f64),
+                    base_duration_ms: Some(FactualValue::Resolved(duration_s * 1000)),
+                    target_scope: if *is_condition {
+                        TargetScope::SingleTarget
+                    } else {
+                        TargetScope::Self_
+                    },
+                    target_count: None,
+                    internal_cooldown_ms: None,
+                    source_duration_multiplier: None,
+                }),
+                inner_category: None,
+            }
+        }
+        synergy::NormalizedEffect::BenefitsFromStatus { status, effect } => {
+            // Map inner effect, then wrap as TriggeredEffect with Conditional trigger
+            let inner = map_legacy_effect(effect, source_type.clone(), source_id, source_name, effect_index + 100);
+            let inner_cat = inner.category.clone();
+            NormalizedEffect {
+                effect_id,
+                source_type,
+                source_id,
+                source_name: source_name.to_string(),
+                category: EffectCategory::TriggeredEffect,
+                value: inner.value.clone(),
+                stacking_rule: StackingRule::NonStacking,
+                trigger_rule: TriggerRule::Conditional,
+                uptime_model: UptimeModel {
+                    kind: UptimeModelKind::Unknown,
+                    uptime: None,
+                },
+                evidence_level: EvidenceLevel::Derived,
+                source: Some(format!("Benefits from {}", status)),
+                effect_duration: None,
+                internal_cooldown: None,
+                max_stacks: None,
+                status_operation: None,
+                inner_category: Some(inner_cat),
+            }
+        }
+        synergy::NormalizedEffect::StatConversion {
+            source: _,
+            target: _,
+            percent,
+        } => NormalizedEffect {
+            effect_id,
+            source_type,
+            source_id,
+            source_name: source_name.to_string(),
+            category: EffectCategory::StatConversion,
+            value: FactualValue::Resolved(*percent),
+            stacking_rule: StackingRule::Additive,
+            trigger_rule: TriggerRule::Passive,
+            uptime_model: UptimeModel {
+                kind: UptimeModelKind::AlwaysOn,
+                uptime: None,
+            },
+            evidence_level: EvidenceLevel::Derived,
+            source: None,
+            effect_duration: None,
+            internal_cooldown: None,
+            max_stacks: None,
+            status_operation: None,
+            inner_category: None,
+        },
+        synergy::NormalizedEffect::DurationBonus { kind, percent } => {
+            let cat = match kind {
+                synergy::DurationKind::AllCondition => EffectCategory::ConditionDurationPct,
+                synergy::DurationKind::AllBoon => EffectCategory::BoonDurationPct,
+                synergy::DurationKind::SpecificCondition(_) => {
+                    EffectCategory::SpecificConditionDurationPct
+                }
+            };
+            NormalizedEffect {
+                effect_id,
+                source_type,
+                source_id,
+                source_name: source_name.to_string(),
+                category: cat,
+                value: FactualValue::Resolved(*percent),
+                stacking_rule: StackingRule::Additive,
+                trigger_rule: TriggerRule::Passive,
+                uptime_model: UptimeModel {
+                    kind: UptimeModelKind::AlwaysOn,
+                    uptime: None,
+                },
+                evidence_level: EvidenceLevel::Derived,
+                source: None,
+                effect_duration: None,
+                internal_cooldown: None,
+                max_stacks: None,
+                status_operation: None,
+                inner_category: None,
+            }
+        }
+        synergy::NormalizedEffect::Conditional {
+            requires_trait_id: _,
+            overrides_index: _,
+            effect,
+        } => {
+            // Map inner effect but mark as Conditional trigger
+            let mut mapped = map_legacy_effect(
+                effect,
+                source_type,
+                source_id,
+                source_name,
+                effect_index,
+            );
+            mapped.effect_id = effect_id;
+            mapped.trigger_rule = TriggerRule::Conditional;
+            mapped.evidence_level = EvidenceLevel::Derived;
+            mapped
+        }
+        synergy::NormalizedEffect::ProcEffect {
+            trigger,
+            effect,
+            estimated_uptime,
+        } => {
+            let inner = map_legacy_effect(
+                effect,
+                source_type.clone(),
+                source_id,
+                source_name,
+                effect_index + 200,
+            );
+            let trigger_rule = match trigger {
+                synergy::ProcTrigger::OnCrit => TriggerRule::OnCrit,
+                synergy::ProcTrigger::OnHit => TriggerRule::OnHit,
+                synergy::ProcTrigger::OnDodge | synergy::ProcTrigger::OnWeaponSwap => {
+                    TriggerRule::OnSkillUse
+                }
+                synergy::ProcTrigger::OnKill => TriggerRule::OnHit,
+                synergy::ProcTrigger::OnHealthThreshold => TriggerRule::OnHealthThreshold,
+                synergy::ProcTrigger::Passive => TriggerRule::Passive,
+            };
+            NormalizedEffect {
+                effect_id,
+                source_type,
+                source_id,
+                source_name: source_name.to_string(),
+                category: EffectCategory::ProcEffect,
+                value: inner.value.clone(),
+                stacking_rule: StackingRule::NonStacking,
+                trigger_rule,
+                uptime_model: UptimeModel {
+                    kind: UptimeModelKind::Estimated,
+                    uptime: Some(FactualValue::Resolved(*estimated_uptime)),
+                },
+                evidence_level: EvidenceLevel::Heuristic,
+                source: None,
+                effect_duration: inner.effect_duration.clone(),
+                internal_cooldown: None,
+                max_stacks: None,
+                status_operation: inner.status_operation.clone(),
+                inner_category: Some(inner.category.clone()),
+            }
+        }
+    }
+}
+
+/// Map a legacy `StatType` to a hint category for `inner_category`.
+fn map_stat_type_to_hint(stat: &synergy::StatType) -> EffectCategory {
+    match stat {
+        synergy::StatType::Power | synergy::StatType::Precision | synergy::StatType::Ferocity => {
+            EffectCategory::StrikeDamagePct
+        }
+        synergy::StatType::ConditionDamage | synergy::StatType::Expertise => {
+            EffectCategory::ConditionDamagePct
+        }
+        synergy::StatType::Concentration => EffectCategory::BoonDurationPct,
+        synergy::StatType::HealingPower => EffectCategory::OutgoingHealingPct,
+        synergy::StatType::Toughness | synergy::StatType::Vitality => {
+            EffectCategory::IncomingStrikeMultiplier
+        }
+    }
+}
+
+/// Map a legacy `DamageCategory` to new category.
+fn map_damage_category(
+    category: &synergy::DamageCategory,
+) -> (EffectCategory, Option<EffectCategory>) {
+    match category {
+        synergy::DamageCategory::Strike => (EffectCategory::StrikeDamagePct, None),
+        synergy::DamageCategory::Condition => (EffectCategory::ConditionDamagePct, None),
+        synergy::DamageCategory::SpecificCondition(_) => {
+            (EffectCategory::SpecificConditionDamagePct, None)
+        }
+        synergy::DamageCategory::Crit => (EffectCategory::CritDamagePct, None),
+        synergy::DamageCategory::Healing => (EffectCategory::OutgoingHealingPct, None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -934,7 +1454,12 @@ mod tests {
     fn test_embedded_effects_load_successfully() {
         let data = effects();
         assert_eq!(data.file_count(), 3, "expected 3 effects files (PvE, PvP, WvW)");
-        assert_eq!(data.effect_count(), 0, "baseline has no effects");
+        // P3-10b populates baseline with representative effects
+        assert!(
+            data.effect_count() >= 20,
+            "expected at least 20 total effects, got {}",
+            data.effect_count(),
+        );
     }
 
     #[test]
@@ -944,17 +1469,28 @@ mod tests {
     }
 
     #[test]
-    fn test_effects_for_returns_empty_slice() {
+    fn test_effects_for_returns_populated_slices() {
         let data = effects();
         let pve = data.effects_for("2026-01-13", "PvE");
         assert!(pve.is_some(), "PvE effects should exist");
-        assert!(pve.unwrap().is_empty(), "baseline PvE should have no effects");
+        assert!(
+            !pve.unwrap().is_empty(),
+            "PvE should have populated effects after P3-10b"
+        );
 
         let pvp = data.effects_for("2026-01-13", "PvP");
         assert!(pvp.is_some(), "PvP effects should exist");
+        assert!(
+            !pvp.unwrap().is_empty(),
+            "PvP should have populated effects after P3-10b"
+        );
 
         let wvw = data.effects_for("2026-01-13", "WvW");
         assert!(wvw.is_some(), "WvW effects should exist");
+        assert!(
+            !wvw.unwrap().is_empty(),
+            "WvW should have populated effects after P3-10b"
+        );
     }
 
     #[test]
@@ -1372,5 +1908,358 @@ mod tests {
         }"#;
         let op: StatusOperation = serde_json::from_str(json).unwrap();
         assert_eq!(op.amount_value, FactualValue::Unknown);
+    }
+
+    // ─── P3-10b: score_effect tests ───
+
+    #[test]
+    fn test_score_effect_flat_stat() {
+        let weights = OptimizationWeights {
+            power: 1.0,
+            disable: 0.0,
+            condition: 0.0,
+            healing: 0.0,
+            sustain: 0.0,
+        };
+        let mut effect = minimal_effect("score_flat_stat");
+        effect.category = EffectCategory::FlatStat;
+        effect.value = FactualValue::Resolved(150.0);
+        let score = score_effect(&effect, &weights);
+        // 150 / 3000 * (1.0 + 0.0) * 0.5 = 0.025
+        assert!(score > 0.01, "FlatStat should produce positive score, got {}", score);
+        assert!(score < 0.1, "FlatStat +150 should be modest, got {}", score);
+    }
+
+    #[test]
+    fn test_score_effect_strike_damage() {
+        let weights = OptimizationWeights {
+            power: 1.0,
+            disable: 0.0,
+            condition: 0.0,
+            healing: 0.0,
+            sustain: 0.0,
+        };
+        let mut effect = minimal_effect("score_strike");
+        effect.category = EffectCategory::StrikeDamagePct;
+        effect.value = FactualValue::Resolved(5.0);
+        let score = score_effect(&effect, &weights);
+        // 5.0 / 100 * 1.0 = 0.05
+        assert!(
+            (score - 0.05).abs() < 0.001,
+            "StrikeDamagePct +5% should score ~0.05, got {}",
+            score,
+        );
+    }
+
+    #[test]
+    fn test_score_effect_unknown_value_returns_zero() {
+        let weights = OptimizationWeights {
+            power: 1.0,
+            disable: 0.5,
+            condition: 0.5,
+            healing: 0.3,
+            sustain: 0.3,
+        };
+        let mut effect = minimal_effect("score_unknown");
+        effect.value = FactualValue::Unknown;
+        let score = score_effect(&effect, &weights);
+        assert!(
+            (score - 0.0).abs() < f64::EPSILON,
+            "Unknown value should score 0.0, got {}",
+            score,
+        );
+    }
+
+    // ─── P3-10b: map_legacy_effect tests ───
+
+    #[test]
+    fn test_map_legacy_stat_bonus() {
+        let old = synergy::NormalizedEffect::StatBonus {
+            stat: synergy::StatType::Power,
+            value: 150.0,
+        };
+        let new = map_legacy_effect(&old, SourceType::Trait, 100, "Test Trait", 0);
+        assert_eq!(new.category, EffectCategory::FlatStat);
+        assert_eq!(new.value, FactualValue::Resolved(150.0));
+        assert_eq!(new.trigger_rule, TriggerRule::Passive);
+        assert_eq!(new.stacking_rule, StackingRule::Additive);
+        assert_eq!(new.effect_id, "trait:100:0");
+        assert_eq!(new.evidence_level, EvidenceLevel::Derived);
+    }
+
+    #[test]
+    fn test_map_legacy_damage_modifier() {
+        let old = synergy::NormalizedEffect::DamageModifier {
+            category: synergy::DamageCategory::Strike,
+            percent: 5.0,
+        };
+        let new = map_legacy_effect(&old, SourceType::Sigil, 24615, "Sigil of Force", 0);
+        assert_eq!(new.category, EffectCategory::StrikeDamagePct);
+        assert_eq!(new.value, FactualValue::Resolved(5.0));
+        assert_eq!(new.stacking_rule, StackingRule::Multiplicative);
+        assert_eq!(new.effect_id, "sigil:24615:0");
+    }
+
+    #[test]
+    fn test_map_legacy_applies_status_condition() {
+        let old = synergy::NormalizedEffect::AppliesStatus {
+            status: "Bleeding".into(),
+            is_condition: true,
+            duration_s: 5,
+            stacks: 3,
+        };
+        let new = map_legacy_effect(&old, SourceType::Sigil, 24560, "Sigil of Earth", 0);
+        assert_eq!(new.category, EffectCategory::AppliesCondition);
+        assert_eq!(new.value, FactualValue::Resolved(3.0));
+        let op = new.status_operation.as_ref().expect("should have status_operation");
+        assert_eq!(op.operation_type, OperationType::AppliesCondition);
+        assert_eq!(op.status_kind, "Bleeding");
+        assert_eq!(op.amount_mode, AmountMode::Stacks);
+        assert_eq!(op.amount_value, FactualValue::Resolved(3.0));
+        assert_eq!(op.base_duration_ms, Some(FactualValue::Resolved(5000)));
+        assert_eq!(op.target_side, TargetSide::Enemy);
+        assert_eq!(op.target_scope, TargetScope::SingleTarget);
+    }
+
+    #[test]
+    fn test_map_legacy_applies_status_boon() {
+        let old = synergy::NormalizedEffect::AppliesStatus {
+            status: "Might".into(),
+            is_condition: false,
+            duration_s: 8,
+            stacks: 1,
+        };
+        let new = map_legacy_effect(&old, SourceType::Trait, 214, "Phalanx Strength", 0);
+        assert_eq!(new.category, EffectCategory::AppliesBoon);
+        let op = new.status_operation.as_ref().expect("should have status_operation");
+        assert_eq!(op.operation_type, OperationType::AppliesBoon);
+        assert_eq!(op.status_kind, "Might");
+        assert_eq!(op.target_side, TargetSide::Self_);
+        assert_eq!(op.target_scope, TargetScope::Self_);
+    }
+
+    // ─── P3-10b: baseline data tests ───
+
+    #[test]
+    fn test_baseline_data_loads_and_validates() {
+        // All three baseline files load and pass validation
+        let data = effects();
+        assert_eq!(data.file_count(), 3);
+
+        // PvE should have the most entries
+        let pve = data.effects_for("2026-01-13", "PvE").unwrap();
+        assert!(
+            pve.len() >= 20,
+            "PvE should have at least 20 representative entries, got {}",
+            pve.len(),
+        );
+
+        // All entries should have unique effect_ids (validation already ensures this,
+        // but verify it held through deserialization)
+        let mut ids: HashSet<&str> = HashSet::new();
+        for effect in pve {
+            assert!(
+                ids.insert(&effect.effect_id),
+                "duplicate effect_id in PvE baseline: {}",
+                effect.effect_id,
+            );
+        }
+    }
+
+    #[test]
+    fn test_mode_split_effect() {
+        // Same source should have different values in PvE vs PvP
+        let data = effects();
+        let pve = data.effects_for("2026-01-13", "PvE").unwrap();
+        let pvp = data.effects_for("2026-01-13", "PvP").unwrap();
+
+        // Find Sigil of Force in PvE (5% strike damage)
+        let pve_force = pve
+            .iter()
+            .find(|e| e.effect_id == "sigil:24615:0")
+            .expect("Sigil of Force should be in PvE baseline");
+        // Find Sigil of Force in PvP (different value)
+        let pvp_force = pvp
+            .iter()
+            .find(|e| e.effect_id == "sigil:24615:0")
+            .expect("Sigil of Force should be in PvP baseline");
+
+        // PvE Sigil of Force: +5% strike damage
+        assert_eq!(pve_force.value, FactualValue::Resolved(5.0));
+        // PvP Sigil of Force: +3% (split balance)
+        assert_eq!(pvp_force.value, FactualValue::Resolved(3.0));
+        // Values should differ between modes
+        assert_ne!(pve_force.value, pvp_force.value);
+    }
+
+    #[test]
+    fn test_proc_vs_triggered_boundary() {
+        // Verify ProcEffect has inner_category and correct trigger
+        let data = effects();
+        let pve = data.effects_for("2026-01-13", "PvE").unwrap();
+
+        // Find a ProcEffect entry (Sigil of Fire)
+        let proc_effect = pve
+            .iter()
+            .find(|e| e.category == EffectCategory::ProcEffect)
+            .expect("should have at least one ProcEffect in PvE baseline");
+
+        // ProcEffect should have inner_category
+        assert!(
+            proc_effect.inner_category.is_some(),
+            "ProcEffect should have inner_category, effect: {}",
+            proc_effect.effect_id,
+        );
+        // ProcEffect trigger should not be Passive
+        assert_ne!(
+            proc_effect.trigger_rule,
+            TriggerRule::Passive,
+            "ProcEffect should have non-passive trigger"
+        );
+
+        // Find a TriggeredEffect entry
+        let triggered = pve
+            .iter()
+            .find(|e| e.category == EffectCategory::TriggeredEffect)
+            .expect("should have at least one TriggeredEffect in PvE baseline");
+
+        // TriggeredEffect must have inner_category (validation enforces this)
+        assert!(
+            triggered.inner_category.is_some(),
+            "TriggeredEffect should have inner_category"
+        );
+        // TriggeredEffect typically uses Conditional or OnHealthThreshold
+        assert!(
+            matches!(
+                triggered.trigger_rule,
+                TriggerRule::Conditional | TriggerRule::OnHealthThreshold
+            ),
+            "TriggeredEffect should have Conditional or OnHealthThreshold trigger, got {:?}",
+            triggered.trigger_rule,
+        );
+    }
+
+    #[test]
+    fn test_score_comparable_to_legacy() {
+        // New scorer should produce similar magnitude as old for comparable inputs
+        let weights = OptimizationWeights {
+            power: 0.8,
+            disable: 0.1,
+            condition: 0.2,
+            healing: 0.0,
+            sustain: 0.1,
+        };
+
+        // Old: StatBonus(Power, 150)
+        let old_stat = synergy::NormalizedEffect::StatBonus {
+            stat: synergy::StatType::Power,
+            value: 150.0,
+        };
+        let old_score = synergy::score_normalized_effect(&old_stat, &weights);
+
+        // New: equivalent FlatStat effect
+        let mut new_eff = minimal_effect("compare_flat_stat");
+        new_eff.category = EffectCategory::FlatStat;
+        new_eff.value = FactualValue::Resolved(150.0);
+        let new_score = score_effect(&new_eff, &weights);
+
+        // Both should be positive and in similar ballpark (within 5x)
+        assert!(old_score > 0.0, "old score should be positive");
+        assert!(new_score > 0.0, "new score should be positive");
+        let ratio = if old_score > new_score {
+            old_score / new_score
+        } else {
+            new_score / old_score
+        };
+        assert!(
+            ratio < 5.0,
+            "scores should be comparable magnitude: old={}, new={}, ratio={}",
+            old_score,
+            new_score,
+            ratio,
+        );
+
+        // Old: DamageModifier(Strike, 5%)
+        let old_dmg = synergy::NormalizedEffect::DamageModifier {
+            category: synergy::DamageCategory::Strike,
+            percent: 5.0,
+        };
+        let old_dmg_score = synergy::score_normalized_effect(&old_dmg, &weights);
+
+        let mut new_dmg = minimal_effect("compare_strike_dmg");
+        new_dmg.category = EffectCategory::StrikeDamagePct;
+        new_dmg.value = FactualValue::Resolved(5.0);
+        let new_dmg_score = score_effect(&new_dmg, &weights);
+
+        assert!(old_dmg_score > 0.0);
+        assert!(new_dmg_score > 0.0);
+        let dmg_ratio = if old_dmg_score > new_dmg_score {
+            old_dmg_score / new_dmg_score
+        } else {
+            new_dmg_score / old_dmg_score
+        };
+        assert!(
+            dmg_ratio < 5.0,
+            "damage scores should be comparable: old={}, new={}, ratio={}",
+            old_dmg_score,
+            new_dmg_score,
+            dmg_ratio,
+        );
+    }
+
+    // ─── P3-10b: category coverage in baseline ───
+
+    #[test]
+    fn test_baseline_category_coverage() {
+        let data = effects();
+        let pve = data.effects_for("2026-01-13", "PvE").unwrap();
+
+        // Collect all categories present in PvE baseline
+        let categories: HashSet<String> = pve
+            .iter()
+            .map(|e| format!("{:?}", e.category))
+            .collect();
+
+        // Must cover at least these core categories
+        let required = [
+            "FlatStat",
+            "StrikeDamagePct",
+            "ConditionDamagePct",
+            "AppliesBoon",
+            "AppliesCondition",
+            "ProcEffect",
+            "TriggeredEffect",
+        ];
+        for cat in &required {
+            assert!(
+                categories.contains(*cat),
+                "PvE baseline must cover category {}, found: {:?}",
+                cat,
+                categories,
+            );
+        }
+    }
+
+    // ─── P3-10b: source type coverage ───
+
+    #[test]
+    fn test_baseline_source_type_coverage() {
+        let data = effects();
+        let pve = data.effects_for("2026-01-13", "PvE").unwrap();
+
+        let source_types: HashSet<String> = pve
+            .iter()
+            .map(|e| format!("{:?}", e.source_type))
+            .collect();
+
+        // Should have Trait, Rune, Sigil at minimum
+        for st in &["Trait", "Rune", "Sigil"] {
+            assert!(
+                source_types.contains(*st),
+                "PvE baseline must include source type {}, found: {:?}",
+                st,
+                source_types,
+            );
+        }
     }
 }
