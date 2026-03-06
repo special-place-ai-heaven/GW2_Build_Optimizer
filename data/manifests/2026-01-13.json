@@ -1,0 +1,15 @@
+{
+  "patch_id": "2026-01-13",
+  "game_build_id": 175218,
+  "release_date": "2026-01-13",
+  "inherits_from": null,
+  "sources": [
+    {
+      "kind": "baseline",
+      "url": "https://wiki.guildwars2.com/wiki/Game_updates/2025"
+    }
+  ],
+  "supported_modes": ["PvE", "PvP", "WvW"],
+  "status": "active",
+  "authoring_notes": "Initial baseline snapshot. game_build_id is the first locally verified build number at authoring time. This manifest anchors to the closest verified supported build."
+}
