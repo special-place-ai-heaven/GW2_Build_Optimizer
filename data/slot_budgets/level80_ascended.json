@@ -1,0 +1,305 @@
+{
+  "rarity": "Ascended",
+  "level": 80,
+  "entries": [
+    {
+      "slot": "Helm",
+      "shape": "ThreeStat",
+      "major": 63,
+      "minor": 45,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Helm",
+      "shape": "FourStat",
+      "major": 54,
+      "minor": 30,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Helm",
+      "shape": "CelestialLike",
+      "major": 30,
+      "minor": 30,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Shoulders",
+      "shape": "ThreeStat",
+      "major": 47,
+      "minor": 34,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Shoulders",
+      "shape": "FourStat",
+      "major": 40,
+      "minor": 22,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Shoulders",
+      "shape": "CelestialLike",
+      "major": 22,
+      "minor": 22,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Coat",
+      "shape": "ThreeStat",
+      "major": 141,
+      "minor": 101,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Coat",
+      "shape": "FourStat",
+      "major": 121,
+      "minor": 67,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Coat",
+      "shape": "CelestialLike",
+      "major": 67,
+      "minor": 67,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Gloves",
+      "shape": "ThreeStat",
+      "major": 47,
+      "minor": 34,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Gloves",
+      "shape": "FourStat",
+      "major": 40,
+      "minor": 22,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Gloves",
+      "shape": "CelestialLike",
+      "major": 22,
+      "minor": 22,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Leggings",
+      "shape": "ThreeStat",
+      "major": 94,
+      "minor": 67,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Leggings",
+      "shape": "FourStat",
+      "major": 81,
+      "minor": 44,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Leggings",
+      "shape": "CelestialLike",
+      "major": 44,
+      "minor": 44,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Boots",
+      "shape": "ThreeStat",
+      "major": 47,
+      "minor": 34,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Boots",
+      "shape": "FourStat",
+      "major": 40,
+      "minor": 22,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Boots",
+      "shape": "CelestialLike",
+      "major": 22,
+      "minor": 22,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "WeaponOneHand",
+      "shape": "ThreeStat",
+      "major": 125,
+      "minor": 90,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "WeaponOneHand",
+      "shape": "FourStat",
+      "major": 108,
+      "minor": 59,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "WeaponOneHand",
+      "shape": "CelestialLike",
+      "major": 59,
+      "minor": 59,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "WeaponTwoHand",
+      "shape": "ThreeStat",
+      "major": 251,
+      "minor": 179,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "WeaponTwoHand",
+      "shape": "FourStat",
+      "major": 215,
+      "minor": 118,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "WeaponTwoHand",
+      "shape": "CelestialLike",
+      "major": 118,
+      "minor": 118,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Amulet",
+      "shape": "ThreeStat",
+      "major": 157,
+      "minor": 108,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Amulet",
+      "shape": "FourStat",
+      "major": 133,
+      "minor": 71,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Amulet",
+      "shape": "CelestialLike",
+      "major": 72,
+      "minor": 72,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Accessory",
+      "shape": "ThreeStat",
+      "major": 110,
+      "minor": 74,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Accessory",
+      "shape": "FourStat",
+      "major": 92,
+      "minor": 49,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Accessory",
+      "shape": "CelestialLike",
+      "major": 50,
+      "minor": 50,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Ring",
+      "shape": "ThreeStat",
+      "major": 126,
+      "minor": 85,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Ring",
+      "shape": "FourStat",
+      "major": 106,
+      "minor": 56,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "Ring",
+      "shape": "CelestialLike",
+      "major": 57,
+      "minor": 57,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "BackItem",
+      "shape": "ThreeStat",
+      "major": 63,
+      "minor": 40,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "BackItem",
+      "shape": "FourStat",
+      "major": 52,
+      "minor": 27,
+      "evidence_level": "Factual"
+    },
+    {
+      "slot": "BackItem",
+      "shape": "CelestialLike",
+      "major": 28,
+      "minor": 28,
+      "evidence_level": "Factual"
+    }
+  ],
+  "sources": [
+    "https://api.guildwars2.com/v2/items",
+    "https://api.guildwars2.com/v2/itemstats",
+    "https://wiki.guildwars2.com/wiki/Attribute_combinations"
+  ],
+  "derivation_items": {
+    "Helm_ThreeStat": 48075,
+    "Shoulders_ThreeStat": 48077,
+    "Coat_ThreeStat": 48073,
+    "Gloves_ThreeStat": 48074,
+    "Leggings_ThreeStat": 48076,
+    "Boots_ThreeStat": 48078,
+    "WeaponOneHand_ThreeStat": 46774,
+    "WeaponTwoHand_ThreeStat": 46762,
+    "Amulet_ThreeStat": 39273,
+    "Accessory_ThreeStat": 39232,
+    "Ring_ThreeStat": 75669,
+    "BackItem_ThreeStat": 37039,
+    "WeaponTwoHand_FourStat_verified": 74083,
+    "Ring_CelestialLike_verified": 74081
+  },
+  "derivation_notes": {
+    "method": "Values derived from GW2 API attribute_adjustment per slot and itemstat multiplier/value combos, then verified against concrete items.",
+    "attribute_adjustments": {
+      "Helm": 179.256,
+      "Shoulders": 134.442,
+      "Coat": 403.326,
+      "Gloves": 134.442,
+      "Leggings": 268.884,
+      "Boots": 134.442,
+      "WeaponOneHand": 358.512,
+      "WeaponTwoHand": 717.024,
+      "Amulet": 358.512,
+      "Accessory": 224.07,
+      "Ring": 268.884,
+      "BackItem": 89.628
+    },
+    "itemstat_formulas": {
+      "ThreeStat_armor_weapons": "stat_id 161: major = round(adj * 0.35), minor = round(adj * 0.25)",
+      "ThreeStat_trinkets": "stat_id 584/599: major = round(adj * 0.35 + 32), minor = round(adj * 0.25 + 18)",
+      "FourStat_armor_weapons": "stat_id 1153: major = round(adj * 0.3), minor = round(adj * 0.165)",
+      "FourStat_trinkets": "stat_id 1130: major = round(adj * 0.3 + 25), minor = round(adj * 0.165 + 12)",
+      "CelestialLike_armor_weapons": "stat_id 559: all = round(adj * 0.165)",
+      "CelestialLike_trinkets": "stat_id 588: all = round(adj * 0.165 + 13)"
+    },
+    "weight_class_invariance": "Verified: Heavy (48073-48078), Medium (48085-48090), Light (48079-48084) all produce identical stat values per slot."
+  }
+}
