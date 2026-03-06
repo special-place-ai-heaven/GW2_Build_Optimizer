@@ -1,16 +1,20 @@
 use serde::Deserialize;
 
+pub mod balance_overrides;
 pub mod boon_condition_formulas;
 pub mod manifests;
 pub mod patch_ledger;
 pub mod profession_profiles;
+pub mod quality;
 pub mod slot_budgets;
 pub mod universal_formulas;
 
+pub use balance_overrides::{BalanceOverrides, OverrideResult};
 pub use boon_condition_formulas::{BoonFormulas, ConditionFormulas, boons, conditions};
 pub use manifests::{PatchManifest, check_staleness};
 pub use patch_ledger::PatchLedger;
 pub use profession_profiles::ProfessionProfiles;
+pub use quality::{DataQuality, DataQualityReason, FactualValue};
 pub use slot_budgets::{
     SlotBudgets, SlotType, StatShape, EQUIPMENT_SLOTS, stat_shape_from_attr_count,
 };
@@ -92,6 +96,9 @@ pub fn initialize() -> DataState {
         errors.extend(errs);
     }
     if let Err(errs) = slot_budgets::try_load_slot_budgets() {
+        errors.extend(errs);
+    }
+    if let Err(errs) = balance_overrides::try_load_balance_overrides() {
         errors.extend(errs);
     }
 
