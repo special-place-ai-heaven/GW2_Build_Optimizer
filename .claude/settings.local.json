@@ -60,7 +60,11 @@
       "WebFetch(domain:platform.openai.com)",
       "WebFetch(domain:ai.google.dev)",
       "WebFetch(domain:docs.anthropic.com)",
-      "Bash(cargo metadata:*)"
+      "Bash(cargo metadata:*)",
+      "mcp__serena__replace_symbol_body",
+      "Bash(rustfmt:*)",
+      "Bash(rustup component:*)",
+      "mcp__serena__find_referencing_symbols"
     ]
   }
 }

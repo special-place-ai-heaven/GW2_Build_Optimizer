@@ -1,10 +1,10 @@
 ---
 project_name: 'GW2_Build_Optimizer'
 user_name: 'Rob'
-date: '2026-03-03'
+date: '2026-03-06'
 sections_completed: ['technology_stack', 'language_rules', 'framework_rules', 'testing_rules', 'quality_rules', 'workflow_rules', 'critical_rules']
 status: 'complete'
-rule_count: 71
+rule_count: 83
 optimized_for_llm: true
 ---
 
@@ -18,8 +18,9 @@ _This file contains critical rules and patterns that AI agents must follow when 
 
 - **Language**: Rust 2021 edition
 - **Crate type**: `cdylib` (single DLL — `gw2_build_optimizer.dll`)
+- **Runtime**: in-process DLL loaded by Nexus addon manager into the GW2 game client — addon code shares the game's process and render thread
 - **Workspace**: 4 crates (`addon`, `core`, `gw2api`, `optimizer`)
-- **nexus** (git: `https://github.com/zerthox/nexus-rs`, features: `["serde"]`) — Nexus addon API + ImGui
+- **nexus** (git: `https://github.com/zerthox/nexus-rs`, features: `["serde"]`) — Nexus addon API + ImGui. Pinned to git rev, not a crate version — `cargo update` won't bump it.
 - **serde** 1.x + **serde_json** 1.x — serialization
 - **reqwest** 0.12 (features: `["blocking", "json"]`) — HTTP client (synchronous, **not** async)
 - **thiserror** 2.x — error type derivation
@@ -28,7 +29,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **base64** 0.22 — encoding
 - **Build**: `cargo build --release` → `target/release/gw2_build_optimizer.dll`
 - **Deploy**: copy DLL to `C:\GAMES\Guild Wars 2\addons\`
-- **Tests**: native `#[test]` only — no external test framework
+- **Tests**: native `#[test]` only — no external test framework. ~221 tests across 4 crates.
+- **CI**: GitHub Actions on `windows-latest` — two-step split: addon single-threaded (`--test-threads=1`, hard requirement), all other crates parallel
 
 ## Critical Implementation Rules
 
@@ -47,7 +49,10 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **Workspace deps are hoisted** — all shared dependency versions live in root `Cargo.toml` under `[workspace.dependencies]`. Crate-level files use `.workspace = true`. Never pin a version in a crate `Cargo.toml` if it's already in the workspace.
 - **`#[serde(default)]` on all new optional fields** — ensures backward compatibility when loading old saved configs/cache files that predate the field.
 - **`thiserror` for all error types** — use `#[derive(thiserror::Error)]` + `#[error("...")]`. Don't implement `Display` or `Error` manually.
-- **Poison recovery on Mutex** — the global state mutex uses `.unwrap_or_else(|e| e.into_inner())`. Never call `.unwrap()` directly on the state lock — a panicking background thread would permanently deadlock the addon.
+- **Poison recovery on Mutex** — the global state mutex uses `.unwrap_or_else(|e| e.into_inner())` via `lock_state()` in `state.rs`. Never call `.unwrap()` directly on the state lock — a panicking background thread would permanently deadlock the addon.
+- **`catch_unwind` on ALL background threads** — every `std::thread::spawn` body is wrapped in `std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { ... }))`. The `Err` arm must: (1) log via `nexus::log::log(LogLevel::Warning, ...)`, (2) clear the relevant loading flag via `with_state`. Currently 12 wrapped threads across `setup.rs`, `stats.rs`, `character.rs`, `optimization.rs`, `mod.rs`. When adding a new thread, follow this pattern.
+- **Logging uses `nexus::log::log()`, NOT the `log` crate** — format: `nexus::log::log(LogLevel::Warning, "GW2BuildOpt", "message")`. The standard `log` crate is not wired — `log::warn!()` calls are silently dropped.
+- **Visibility: `pub` or module-private** — no `pub(crate)` pattern in this project. Sub-module functions use `pub(super)` to expose to the parent module only. Don't make internal helpers `pub`.
 
 ### Framework-Specific Rules (Nexus / ImGui)
 
@@ -65,6 +70,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **Cancellation check: start AND after each blocking op** — check `token.is_cancelled()` at thread start and after every API call / file read. A single check at the top is insufficient.
 - **All Nexus registrations (keybinds, events) must happen in `addon_load`** — late registration is silently ignored.
 - **Use `Condition::FirstUseEver` for window size** — `Condition::Always` resets the user's custom size every frame, preventing resize.
+- **`main_view/` submodule structure** — `mod.rs` (render dispatch + screen routing), `stats.rs` (game data + API health threads), `character.rs` (character loading threads), `optimization.rs` (3-tier optimizer + chat threads), `build_display.rs` (build result rendering), `resolution.rs` (build resolution logic), `lock_panel.rs` (spec/trait lock UI). Sub-panel functions are `pub(super)`, called from `mod.rs::render_main()`. Don't create new top-level files in `ui/` — extend existing submodules.
 
 ### Testing Rules
 
@@ -78,16 +84,19 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **Live API tests are gated with `#[ignore]`** — `crates/gw2api/tests/live_download.rs` and `crates/optimizer/tests/live_llm.rs` hit real APIs. Never remove `#[ignore]`; these are run manually only.
 - **No mocking framework** — test real behavior with real structs. For HTTP-dependent code, use integration tests with real API keys (run manually) rather than mocked responses.
 - **Temp paths in I/O tests** — use `std::env::temp_dir()` with a unique filename to avoid test collisions. Clean up after the test.
-- **`catch_unwind` behavior** — the optimizer bg thread is wrapped in `catch_unwind` to prevent mutex poisoning. Tests exercising panic recovery should verify the mutex is still accessible after the panic.
+- **`catch_unwind` behavior** — all 12 background threads are wrapped in `catch_unwind` to prevent mutex poisoning. Tests exercising panic recovery should verify: (1) the mutex is still accessible after the panic via `lock_state()`'s `unwrap_or_else(|e| e.into_inner())`, (2) the loading flag is cleared in the `Err` arm.
+- **`reset_state()` for addon test isolation** — `reset_state()` in `state.rs` clears the global `STATE` mutex to `None`. Every addon test that touches `init()`, `clear()`, or `with_state()` must call it first. Without it, test order dependencies cause flaky failures.
+- **Addon crate tests are single-threaded** — `cargo test --package gw2-build-optimizer -- --test-threads=1` is mandatory, not optional. The global `Mutex<Option<AddonState>>` static is shared across all addon tests. Multi-threaded execution causes intermittent deadlocks. CI enforces this.
 
 ### Code Quality & Style Rules
 
 - **Line length**: 100 characters.
 - **snake_case everywhere** — functions, variables, modules, and file names use `snake_case`. Types and traits use `PascalCase`. Constants use `SCREAMING_SNAKE_CASE`.
-- **Module layout mirrors crate structure** — UI sub-modules live under `src/ui/`. Sub-panels of a view live in `src/ui/<view_name>/` with a `<view_name>.rs` parent module. Don't create deep nesting without clear justification.
+- **Module layout mirrors crate structure** — UI sub-modules live under `src/ui/`. Sub-panels of a view live in `src/ui/<view_name>/` with a `mod.rs` parent module (not `<view_name>.rs`). The `main_view/mod.rs` pattern is authoritative. Don't create deep nesting without clear justification.
+- **Module organization** — flat `<name>.rs` files for single-file modules (e.g., `setup.rs`). Directory + `mod.rs` for multi-file modules (e.g., `main_view/mod.rs`). Never mix both styles for the same module.
 - **File names match module names** — `main_view.rs` exports `pub fn render_main(...)`. The file name is the public API surface hint.
 - **No doc comments on unchanged code** — don't add `///` or `//!` to code you didn't write or modify. Comments are added only where logic is non-obvious.
-- **Inline comments for GW2 domain constants** — when a magic number comes from the GW2 game engine (e.g., `895` for base precision, `21.0` for crit scaling, `9212` for Guardian base HP), annotate with a comment explaining the source.
+- **Inline comments for GW2 domain constants** — when a magic number comes from the GW2 game engine (e.g., `895` for base precision, `21.0` for crit scaling, `9212` for Guardian base HP), annotate with a comment explaining the source. Source values from `docs/optimizer-source-of-truth.md` or the GW2 wiki — never from memory.
 - **`#[allow(...)]` is explicit, never broad** — never `#![allow(warnings)]` at crate level. Suppress specific lints only at the specific item that needs it.
 - **Error propagation with `?`** — use `?` for fallible operations in functions returning `Result`. Use `.unwrap()` / `.expect()` only in tests or on values guaranteed by construction.
 - **`Default::default()` for zero-init structs** — structs with many fields use `#[derive(Default)]` and are initialized with `StructName { field: val, ..Default::default() }`.
@@ -99,7 +108,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **DLL name is fixed**: `gw2_build_optimizer.dll` is the Nexus addon identifier. Never rename it or change `[lib] name` in `Cargo.toml`.
 - **Config atomic save pattern** — always write to `.tmp` then `std::fs::rename` to the final path. Direct writes corrupt saved configs on mid-write crash.
 - **Cache lives in `{addon_dir}/cache/`** — all cached API data is stored relative to the runtime addon directory. Never hardcode `C:\GAMES\...` in source code.
-- **CI pipeline**: `.github/workflows/ci.yml` runs on every push/PR to `main`. Two steps: `cargo test --package gw2-build-optimizer -- --test-threads=1` (addon, single-threaded — global static STATE mutex deadlock risk), then `cargo test --workspace --exclude gw2-build-optimizer` (all other crates). Live API tests (`#[ignore]`) are excluded from CI; run manually with `-- --include-ignored`.
+- **CI pipeline**: `.github/workflows/ci.yml` runs `cargo check --workspace` + two-step test split (see Technology Stack). Live API tests (`#[ignore]`) are excluded from CI; run manually with `-- --include-ignored`.
 - **Commit message style**: conventional commit prefixes (`fix:`, `feat:`, `refactor:`). Match the existing history style.
 
 ### Critical Don't-Miss Rules
@@ -110,7 +119,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
   - HP: HIGH = {Warrior, Guardian} | MEDIUM = {Revenant, Engineer, Ranger, Mesmer, Necromancer} | LOW = {Thief, Elementalist}
   - Armor: HEAVY = {Warrior, Guardian, Revenant} | MEDIUM = {Ranger, Engineer, Thief} | LIGHT = {Elementalist, Mesmer, Necromancer}
   - Formulas: `health = vitality * 10 + base_hp`, `armor = toughness + base_defense`
-  - Base values: HP = 9212 / 5922 / 1645 · Defense = 1271 / 1118 / 967
+  - Base values: HP = 9212 / 5922 / 1645 · Defense = 1271 / 1118 / 967 (see `docs/optimizer-source-of-truth.md` for authoritative values)
 - **Stat attribute aliases** — GW2 API uses both old and new names interchangeably. Both must map to the same `StatBlock` field:
   - `"ConditionDuration"` = `"Expertise"` · `"BoonDuration"` = `"Concentration"`
   - `"CritDamage"` = `"Ferocity"` · `"Healing"` = `"HealingPower"`
@@ -128,7 +137,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
   | Torment (stationary) | `0.0375 * CD + 31.875` | `0.06 * CD + 22.0` (bleeding copy-paste error) |
   | Confusion (on-activation) | `0.0175 * CD + 11.0` | `0.195 * CD + 95.5` (pre-2016, ~10× overestimate) |
 - **Confusion ticks on target skill use, not a timer** — `condition_importance` weight must reflect encounter skill-use frequency. Near-zero in PvE auto-attack scenarios. Do not model identically to Bleeding/Burning/Poison.
-- **GW2 conditions cap at 25 stacks per condition type** — the cap is independent per condition: 25 Bleeding stacks AND 25 Burning stacks are separate limits, not a global total. `rotation/simulator.rs` enforces `CONDITION_STACK_CAP = 25` via `can_apply = stacks.min(25 - current_count_for_that_condition)`. Missing this cap causes high-application builds to overestimate condition DPS without bound.
+- **GW2 conditions cap at 25 stacks per condition type** — the cap is independent per condition: 25 Bleeding stacks AND 25 Burning stacks are separate limits, not a global total. Enforced independently in `rotation/simulator.rs` (`CONDITION_STACK_CAP = 25`) AND in `combat.rs` (`ConditionTicks` usage). If you modify cap logic, check BOTH locations. Missing this cap causes high-application builds to overestimate condition DPS without bound.
 - **Sigil deduplication is per-weapon-set, not global** — GW2 forbids duplicate sigils WITHIN one weapon set. The same sigil IS valid in both Set 1 AND Set 2 independently (e.g. Sigil of Force in Set 1 + Sigil of Force in Set 2 = cumulative effect). `synergy_pipeline.rs` must use per-set dedup tracking. A global `HashSet` across both sets incorrectly blocks this valid configuration.
 - **Elite spec skill gating** — filter skills by `Skill::specialization`: only core skills (`None`) or the equipped elite spec's skills are valid. Never include off-spec elite skills.
 - **GW2 API query strings** — `reqwest`'s `.query()` URL-encodes commas as `%2C`, breaking bulk requests. Build query strings manually: `format!("ids={}", ids.join(","))`.
@@ -140,6 +149,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **Gemini prefix is always overwritten** — Gemini's gear choice is ignored. `select_gear_prefix()` (cosine similarity) is authoritative. Never trust or forward Gemini's gear selection.
 - **`validate_gemini_build()` is not optional** — it checks that spec names exist in `GameDb`, weapons are valid for the profession, and trait IDs are real. Skipping it causes panics on hallucinated names. Always call it before `apply_gemini_response()`.
 - **Validation failure triggers tier 3 fallback** — when `validate_gemini_build()` rejects the LLM response, the engine falls back to legacy `optimize()` with a Warning log. It does not surface an error to the user.
+- **`validate_key_detailed()` returns 3 fields** — `KeyValidationResult { valid, message, warning }`. The `warning` field separates auth success from billing issues. New providers must populate all three — missing `warning` shows false-positive green in Settings UI.
 - **Billing-tolerant key validation**:
   - HTTP 401 → `InvalidKey` (reject key)
   - HTTP 429 → `RateLimited` (valid key, quota exhausted)
@@ -156,6 +166,8 @@ _This file contains critical rules and patterns that AI agents must follow when 
 #### Optimization Pipeline Rules
 
 - **3-tier fallback**: deterministic synergy → Gemini pipeline → legacy `optimize()`. Each tier falls back to the next on failure with a Warning log.
+- **All optimization tiers run inside `catch_unwind`** — if any tier panics, it falls through to the next. New optimization paths must be added within the existing `catch_unwind` boundary in `optimization.rs`, not outside it.
+- **`calculate_combat_performance()` takes `&ConditionWeights`** — callers must pass `condition_weights_for_profession(profession_name)`, not `ConditionWeights::default_pve()` directly. The dispatch function maps profession/elite-spec names to tuned presets: `"Harbinger"` → `harbinger_preset()`, `"Necromancer" | "Scourge"` → `necro_group()`, `"Guardian" | "Firebrand" | "Willbender"` → `firebrand_group()`, all others → `default_pve()`.
 - **Synergy pipeline is primary; legacy `optimize()` is last-resort fallback** — new optimizer logic belongs in `synergy_pipeline.rs`, not the legacy path.
 - **`GameDb` is authoritative for all build resolution** — all spec, skill, trait, and item lookups use O(1) `GameDb` HashMap lookups. "During resolve" means any code reachable from `optimize_*()`, including rotation simulator, synergy scorer, and trait-fact evaluator. No disk I/O anywhere in that call tree.
 - **`BuildLocks` must be respected in ALL optimizer paths** — call `build_locks.is_spec_locked()` and `build_locks.is_trait_locked()` before mutating any spec or trait slot. This applies to `engine.rs`, `synergy_pipeline.rs`, `search.rs`, and any new path or helper added in the future.
@@ -187,4 +199,4 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - Remove rules that become obvious over time
 - Re-run `/bmad-bmm-generate-project-context` in a fresh session to regenerate from code
 
-_Last Updated: 2026-03-03 (updated with 8 new rules from recent fix commits)_
+_Last Updated: 2026-03-06 (refreshed post-Epic-2: +12 rules for catch_unwind all threads, nexus logging, visibility, main_view submodules, test isolation, ConditionWeights dispatch, optimization panic safety)_
