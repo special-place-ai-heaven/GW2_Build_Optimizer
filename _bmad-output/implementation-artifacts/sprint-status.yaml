@@ -181,7 +181,7 @@ development_status:
 
   # P3-09: Balance Override Datasets and Unknown-Value Handling (FR10, FR14)
   # STORY: docs/stories/P3-09-balance-overrides.md. HIGH RISK.
-  p3-09-balance-overrides-unknown-values: ready-for-dev
+  p3-09-balance-overrides-unknown-values: done
 
   # P3-10a: NormalizedEffect Types, Schema, and Contracts (FR12 partial)
   # BLOCKED until: p3-04 + p3-08 + p3-09 DONE (Review Gate RG-1). HIGH RISK.
@@ -193,7 +193,7 @@ development_status:
 
   # P3-11: PvP Optimizer Path Separation (FR9)
   # STORY: docs/stories/P3-11-pvp-path-separation.md
-  p3-11-pvp-path-separation: ready-for-dev
+  p3-11-pvp-path-separation: done
 
   # P3-12: WvW Non-Fallback Behavior (FR11)
   # BLOCKED until: p3-09 DONE
