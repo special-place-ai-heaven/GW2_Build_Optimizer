@@ -201,7 +201,7 @@ development_status:
 
   # P3-13: Factorized Dependency Tables and Evidence Classification (FR15, FR16)
   # BLOCKED until: p3-10b DONE (Review Gate RG-3)
-  p3-13-dependency-tables-evidence: backlog
+  p3-13-dependency-tables-evidence: done
 
   # Phase C -- Heuristic Layer and Scoring Isolation
   # P3-14: Rotation Profiles and Heuristic Uptime Population (FR13, D7)
