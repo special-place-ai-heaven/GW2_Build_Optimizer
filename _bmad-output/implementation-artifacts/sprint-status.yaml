@@ -1,4 +1,4 @@
-# generated: 2026-03-04 (updated: Epic 2 planning, P2-02 + P2-03 stories created)
+# generated: 2026-03-06
 # project: GW2_Build_Optimizer
 # project_key: NOKEY
 # tracking_system: file-system
@@ -28,82 +28,192 @@
 # - SM typically creates next story ONLY after previous one is 'done' to incorporate learnings
 # - Dev moves story to 'review', then Dev runs code-review (fresh context, ideally different LLM)
 # - Story files live in: docs/stories/ (not this directory)
-# - Epic file: _bmad-output/planning-artifacts/epic-1-production-readiness.md
+# - Epic 1 file: _bmad-output/planning-artifacts/epic-1-production-readiness.md
+# - Epic 2 seed: _bmad-output/implementation-artifacts/epic-2-planning-seed.md
+# - Epic 3 file: _bmad-output/planning-artifacts/epics.md
 
 # DEPENDENCY / ORDER GATES:
 # =========================
-# These gates are HARD BLOCKS — do not start a story until its gate is clear.
+# These gates are HARD BLOCKS -- do not start a story until its gate is clear.
 #
-# Slot 1 — p1-01-ci-pipeline         UNBLOCKED (start here)
-# Slot 2 — p1-02-addon-tests         BLOCKED until: p1-01 DONE
-# Slot 3 — p2-04-trait-fuzzy-match   BLOCKED until: p1-01 DONE  [parallel with Slot 2 ok]
-# Slot 4 — p1-03-main-view-decomp    BLOCKED until: p1-01 DONE + p1-02 DONE
-# Slot 5 — p2-01-condition-weights   BLOCKED until: p1-01 DONE  [p1-03 recommended-complete]
+# -- Epic 1 (DONE) ----------------------------------------------------------
+# All 5 stories completed. Retrospective done.
 #
-# ── Epic 2 Gates ──────────────────────────────────────────────────────────────────────────
-# Slot 6 — p2-02-condition-dispatch-integration-test  UNBLOCKED (independent)
-# Slot 7 — p2-03-catch-unwind-hardening              UNBLOCKED (independent)
-# Slot 8 — p2-05-per-elite-spec-condition-presets    BLOCKED until: p2-02 DONE
-# Slot 9 — p2-06-project-context-refresh             UNBLOCKED (any time; doc-only)
-# Slot 10 — p2-07-saved-build-profession-and-crash-safety  UNBLOCKED (independent)
-# Future  — p3-01-coverage-reporting                 BLOCKED until: p2-03 DONE
+# -- Epic 2 Gates ------------------------------------------------------------
+# Slot 6  -- p2-02-condition-dispatch-integration-test  DONE
+# Slot 7  -- p2-03-catch-unwind-hardening               REVIEW (in code review)
+# Slot 8  -- p2-05-per-elite-spec-condition-presets      BLOCKED until: p2-02 DONE
+# Slot 9  -- p2-06-project-context-refresh               UNBLOCKED (any time; doc-only)
+# Slot 10 -- p2-07-saved-build-profession-and-crash-safety  UNBLOCKED (independent)
+#            NOTE: P3-16 supersedes P2-07 -- all P2-07 scope absorbed into P3-16
 #
-# SPECIAL CONSTRAINT — gw2_addon single-thread test requirement:
-#   Tests in crates/addon/ share a global static Mutex<Option<AddonState>>.
-#   Running them in parallel DEADLOCKS the test binary.
-#   Required invocation: cargo test -p gw2_addon -- --test-threads=1
-#   CI MUST use split test steps after p1-02 merges:
-#     Step A: cargo test --package gw2_addon -- --test-threads=1
-#     Step B: cargo test --workspace --exclude gw2_addon
-#   Story p1-02 owns the ci.yml update; this constraint is captured in p1-02 AC10.
+# -- Epic 3 Gates (Phase A) --------------------------------------------------
+# p3-01  UNBLOCKED (start here)
+# p3-02  BLOCKED until: p3-01 DONE
+# p3-03  BLOCKED until: p3-02 DONE (needs BalanceContext)
+# p3-04  BLOCKED until: p3-02 DONE (needs BalanceContext)
+# p3-05  BLOCKED until: p3-02 DONE (needs BalanceContext)
+# p3-06  UNBLOCKED (independent dataset)
+#
+# -- Epic 3 Gates (Phase B) --------------------------------------------------
+# p3-07  BLOCKED until: p3-01 through p3-06 DONE (data files must exist)
+# p3-08  BLOCKED until: Phase A DONE (parallel with p3-07 ok)
+# p3-09  BLOCKED until: p3-08 DONE
+# p3-10a BLOCKED until: p3-04 DONE + p3-08 DONE + p3-09 DONE (Review Gate RG-1)
+# p3-10b BLOCKED until: p3-10a DONE (Review Gate RG-2)
+# p3-11  BLOCKED until: p3-02 DONE (conditional: p3-07 if PvP data integration needed)
+# p3-12  BLOCKED until: p3-09 DONE
+# p3-13  BLOCKED until: p3-10b DONE (Review Gate RG-3)
+#
+# -- Epic 3 Gates (Phase C) --------------------------------------------------
+# p3-14  BLOCKED until: p3-04 DONE + p3-07 DONE + p3-10b DONE
+# p3-15  BLOCKED until: p3-14 DONE + p3-10b DONE + p3-13 DONE
+#
+# -- Epic 3 Standalone -------------------------------------------------------
+# p3-16  BLOCKED until: p3-01 DONE (needs profession profiles only)
+#         Recommended: start early, parallel with p3-02
+#
+# REVIEW GATES:
+# =============
+# RG-1: After p3-09 completes, before p3-10a and p3-12 proceed
+# RG-2: After p3-10a completes, before p3-10b proceeds
+# RG-3: After p3-10b completes, before p3-13 proceeds
+#
+# PARALLELIZATION OPPORTUNITIES:
+# ==============================
+# After p3-01: p3-02 + p3-16 in parallel
+# After Phase A: p3-07 + p3-08 in parallel
+# After p3-02: p3-11 (conditionally)
+# p3-03, p3-05, p3-06: mutually independent (can overlap)
+#
+# MVD-1 MILESTONE: After p3-07 (+ p3-16 ideally) -- optimizer releasable with correct math
+#
+# SPECIAL CONSTRAINT -- gw2_addon single-thread test requirement:
+#   cargo test -p gw2_addon -- --test-threads=1
 
-generated: "2026-03-03"
+generated: "2026-03-06"
 project: GW2_Build_Optimizer
 project_key: NOKEY
 tracking_system: file-system
 story_location: docs/stories
 
 development_status:
-  # ── Epic 1: Production Readiness Sprint ───────────────────────────────────
+  # -- Epic 1: Production Readiness Sprint ------------------------------------
   epic-1: done
 
-  # Slot 1 — DONE. Story: docs/stories/P1-01-ci-pipeline.md
+  # Slot 1 -- DONE. Story: docs/stories/P1-01-ci-pipeline.md
   p1-01-ci-pipeline: done
 
-  # Slot 2 — DONE. Story: docs/stories/P1-02-addon-tests.md
-  # NOTE: ci.yml updated — P1-01 TODO resolved; addon tests now split single-threaded.
+  # Slot 2 -- DONE. Story: docs/stories/P1-02-addon-tests.md
   p1-02-addon-tests: done
 
-  # Slot 3 — DONE. Story: docs/stories/P2-04-trait-fuzzy-match.md
+  # Slot 3 -- DONE. Story: docs/stories/P2-04-trait-fuzzy-match.md
   p2-04-trait-fuzzy-match: done
 
-  # Slot 4 — DONE. Story: docs/stories/P1-03-main-view-decomp.md
+  # Slot 4 -- DONE. Story: docs/stories/P1-03-main-view-decomp.md
   p1-03-main-view-decomp: done
 
-  # Slot 5 — DONE. Story: docs/stories/P2-01-condition-weights.md
+  # Slot 5 -- DONE. Story: docs/stories/P2-01-condition-weights.md
   p2-01-condition-weights: done
 
   epic-1-retrospective: done
 
-  # ── Epic 2: Quality Hardening + Domain Accuracy ───────────────────────────
+  # -- Epic 2: Quality Hardening + Domain Accuracy ----------------------------
   epic-2: in-progress
 
-  # Slot 6 — READY. Story: docs/stories/P2-02-condition-dispatch-integration-test.md
-  # GATE: None (independent). P2-05 is BLOCKED until this is done.
+  # Slot 6 -- DONE. Story: docs/stories/P2-02-condition-dispatch-integration-test.md
   p2-02-condition-dispatch-integration-test: done
 
-  # Slot 7 — READY. Story: docs/stories/P2-03-catch-unwind-hardening.md
-  # GATE: None (independent). P3-01 is BLOCKED until this is done.
-  p2-03-catch-unwind-hardening: review
+  # Slot 7 -- DONE. Story: docs/stories/P2-03-catch-unwind-hardening.md
+  # GATE: None (independent). P3-01 coverage blocked until this is done.
+  p2-03-catch-unwind-hardening: done
 
-  # Slot 8 — BACKLOG. Depends on P2-02 (extends its integration test).
-  p2-05-per-elite-spec-condition-presets: backlog
+  # Slot 8 -- DONE. Story: docs/stories/P2-05-per-elite-spec-condition-presets.md
+  # GATE: P2-02 DONE (extends its integration test).
+  p2-05-per-elite-spec-condition-presets: done
 
-  # Slot 9 — BACKLOG. Independent; good session-opener task.
-  p2-06-project-context-refresh: backlog
+  # Slot 9 -- READY-FOR-DEV. Story: docs/stories/P2-06-project-context-refresh.md
+  # GATE: None (independent). Good session-opener task.
+  p2-06-project-context-refresh: ready-for-dev
 
-  # Slot 10 — BACKLOG. Story: docs/stories/P2-07-saved-build-profession-and-crash-safety.md
-  # GATE: None (independent). Save/Load correctness + crash-safe writes.
+  # Slot 10 -- READY-FOR-DEV. Story: docs/stories/P2-07-saved-build-profession-and-crash-safety.md
+  # GATE: None (independent). NOTE: P3-16 supersedes -- all P2-07 scope absorbed.
   p2-07-saved-build-profession-and-crash-safety: ready-for-dev
 
   epic-2-retrospective: optional
+
+  # -- Epic 3: Optimizer Correctness Overhaul & Patch-Aware Architecture ------
+  epic-3: backlog
+
+  # Phase A -- Factual Engine Correctness
+  # P3-01: Profession Profiles and Health/Armor Truth (FR1, D1)
+  p3-01-profession-profiles: backlog
+
+  # P3-02: BalanceContext Type and Game-Mode Plumbing (FR2)
+  # BLOCKED until: p3-01 DONE
+  p3-02-balance-context: backlog
+
+  # P3-03: Universal Attribute and Strike Damage Formulas (FR3, FR4)
+  # BLOCKED until: p3-02 DONE
+  p3-03-attribute-strike-formulas: backlog
+
+  # P3-04: Mode-Aware Boon Values and Condition Formulas (FR5, FR6, D2/D3/D4)
+  # BLOCKED until: p3-02 DONE
+  p3-04-boon-condition-formulas: backlog
+
+  # P3-05: Duration Formulas (FR7)
+  # BLOCKED until: p3-02 DONE
+  p3-05-duration-formulas: backlog
+
+  # P3-06: Canonical Slot-Budget Dataset (FR8)
+  # UNBLOCKED (independent dataset)
+  p3-06-slot-budget-dataset: backlog
+
+  # Phase B -- Data Infrastructure and Mode Paths
+  # P3-07: Typed Loaders and Hardcoded Constant Replacement (FR17, FR18, D5)
+  # BLOCKED until: Phase A DONE (p3-01 through p3-06)
+  p3-07-typed-loaders: backlog
+
+  # P3-08: Patch Manifest and Patch Ledger Infrastructure (FR21, FR22)
+  # BLOCKED until: Phase A DONE (parallel with p3-07 ok)
+  p3-08-patch-manifest-ledger: backlog
+
+  # P3-09: Balance Override Datasets and Unknown-Value Handling (FR10, FR14)
+  # BLOCKED until: p3-08 DONE. HIGH RISK.
+  p3-09-balance-overrides-unknown-values: backlog
+
+  # P3-10a: NormalizedEffect Types, Schema, and Contracts (FR12 partial)
+  # BLOCKED until: p3-04 + p3-08 + p3-09 DONE (Review Gate RG-1). HIGH RISK.
+  p3-10a-normalized-effect-types: backlog
+
+  # P3-10b: Effect Extraction and Population (FR12 partial)
+  # BLOCKED until: p3-10a DONE (Review Gate RG-2). HIGH RISK.
+  p3-10b-effect-extraction-population: backlog
+
+  # P3-11: PvP Optimizer Path Separation (FR9)
+  # BLOCKED until: p3-02 DONE (conditional: p3-07 if PvP data integration needed)
+  p3-11-pvp-path-separation: backlog
+
+  # P3-12: WvW Non-Fallback Behavior (FR11)
+  # BLOCKED until: p3-09 DONE
+  p3-12-wvw-non-fallback: backlog
+
+  # P3-13: Factorized Dependency Tables and Evidence Classification (FR15, FR16)
+  # BLOCKED until: p3-10b DONE (Review Gate RG-3)
+  p3-13-dependency-tables-evidence: backlog
+
+  # Phase C -- Heuristic Layer and Scoring Isolation
+  # P3-14: Rotation Profiles and Heuristic Uptime Population (FR13, D7)
+  # BLOCKED until: p3-04 + p3-07 + p3-10b DONE. HIGH RISK.
+  p3-14-rotation-profiles: backlog
+
+  # P3-15: Objective Profiles and Typed State-Aware Scorer Isolation (FR20, D6)
+  # BLOCKED until: p3-14 + p3-10b + p3-13 DONE. HIGH RISK.
+  p3-15-objective-profiles-scorer: backlog
+
+  # Standalone
+  # P3-16: Save/Load Profession Persistence and Crash Safety (FR19, D8)
+  # BLOCKED until: p3-01 DONE. Supersedes P2-07.
+  p3-16-save-load-persistence: backlog
+
+  epic-3-retrospective: optional
