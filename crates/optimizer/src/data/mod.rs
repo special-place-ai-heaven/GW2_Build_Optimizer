@@ -9,7 +9,9 @@ pub mod quality;
 pub mod slot_budgets;
 pub mod universal_formulas;
 
-pub use balance_overrides::{BalanceOverrides, OverrideResult};
+pub use balance_overrides::{
+    BalanceOverrides, KnownModeSplit, OverrideResult, check_wvw_quality, known_mode_splits,
+};
 pub use boon_condition_formulas::{BoonFormulas, ConditionFormulas, boons, conditions};
 pub use manifests::{PatchManifest, check_staleness};
 pub use patch_ledger::PatchLedger;
