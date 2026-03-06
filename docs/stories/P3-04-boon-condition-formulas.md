@@ -1,6 +1,6 @@
 # Story 3.04: Mode-Aware Boon Values and Condition Formulas
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
