@@ -128,15 +128,23 @@ _This file contains critical rules and patterns that AI agents must follow when 
   2. Apply base facts, skipping overridden indices
   3. Apply active `traited_facts` (only where `requires_trait` is in equipped traits)
   Skipping step 1 or wrong ordering causes double-counted stat bonuses.
-- **Condition tick rounding is `round_half_up`**, not `floor` — applies to tick accumulation and Quickness-modified cast times. Exact level-80 formulas live in **both** `crates/optimizer/src/combat.rs` AND `crates/optimizer/src/rotation/simulator.rs`. These files are **intentionally separate** (StatBlock scoring vs. real-time tick simulation) — do NOT merge them; always update both together:
-  | Condition | Formula | Common Wrong Value |
-  |-----------|---------|-------------------|
-  | Bleeding | `0.06 * CD + 22.0` | — |
-  | Burning | `0.155 * CD + 131.75` | `+ 131.0` (off by 0.75/tick) |
-  | Poison | `0.06 * CD + 33.5` | — |
-  | Torment (stationary) | `0.0375 * CD + 31.875` | `0.06 * CD + 22.0` (bleeding copy-paste error) |
-  | Confusion (on-activation) | `0.0175 * CD + 11.0` | `0.195 * CD + 95.5` (pre-2016, ~10× overestimate) |
+- **Condition tick rounding is `round_half_up`**, not `floor` — applies to tick accumulation and Quickness-modified cast times. Level-80 formulas are loaded from `data/formulas/conditions.json` and shared by both `crates/optimizer/src/combat.rs` AND `crates/optimizer/src/rotation/simulator.rs` via `data::conditions()`. These files are **intentionally separate** (StatBlock scoring vs. real-time tick simulation) — do NOT merge them. Canonical formulas (source: wiki, verified P3-04):
+  | Condition | Mode | State | Formula |
+  |-----------|------|-------|---------|
+  | Bleeding | all | — | `0.06 * CD + 22.0` |
+  | Burning | all | — | `0.155 * CD + 131.0` |
+  | Poison | all | — | `0.06 * CD + 33.5` |
+  | Torment | PvE | stationary | `0.09 * CD + 31.8` |
+  | Torment | PvE | moving | `0.06 * CD + 22.0` |
+  | Torment | PvP/WvW | stationary | `0.07 * CD + 26.0` |
+  | Torment | PvP/WvW | moving | `0.054 * CD + 19.8` |
+  | Confusion | PvE | over-time | `0.05 * CD + 18.25` |
+  | Confusion | PvE | on-skill-use | `0.0325 * CD + 16.24` |
+  | Confusion | PvP/WvW | over-time | `10.0` (flat) |
+  | Confusion | PvP/WvW | on-skill-use | `0.0975 * CD + 49.5` |
 - **Confusion ticks on target skill use, not a timer** — `condition_importance` weight must reflect encounter skill-use frequency. Near-zero in PvE auto-attack scenarios. Do not model identically to Bleeding/Burning/Poison.
+- **Fury crit bonus is mode-split** — PvE = 25% crit chance, PvP/WvW = 20% crit chance. Loaded from `data/formulas/boons.json`. Source: https://wiki.guildwars2.com/wiki/Fury
+- **Boon/condition values loaded from data files** — All boon constants (Might, Fury, Protection, Resolution, Vulnerability) and condition formulas are loaded from `data/formulas/boons.json` and `data/formulas/conditions.json` via `data::boons()` and `data::conditions()`. No hardcoded values in `combat.rs` or `rotation/simulator.rs`.
 - **GW2 conditions cap at 25 stacks per condition type** — the cap is independent per condition: 25 Bleeding stacks AND 25 Burning stacks are separate limits, not a global total. Enforced independently in `rotation/simulator.rs` (`CONDITION_STACK_CAP = 25`) AND in `combat.rs` (`ConditionTicks` usage). If you modify cap logic, check BOTH locations. Missing this cap causes high-application builds to overestimate condition DPS without bound.
 - **Sigil deduplication is per-weapon-set, not global** — GW2 forbids duplicate sigils WITHIN one weapon set. The same sigil IS valid in both Set 1 AND Set 2 independently (e.g. Sigil of Force in Set 1 + Sigil of Force in Set 2 = cumulative effect). `synergy_pipeline.rs` must use per-set dedup tracking. A global `HashSet` across both sets incorrectly blocks this valid configuration.
 - **Elite spec skill gating** — filter skills by `Skill::specialization`: only core skills (`None`) or the equipped elite spec's skills are valid. Never include off-spec elite skills.
@@ -168,7 +176,7 @@ _This file contains critical rules and patterns that AI agents must follow when 
 - **`BalanceContext` is a first-class architectural type** — defined in `crates/optimizer/src/balance.rs`. Carries `game_mode: GameMode` and `patch_id: String` through all mode-sensitive calculations. Constructed once at addon entry points and threaded by reference (`&BalanceContext`).
 - **All mode-sensitive functions accept `&BalanceContext`** — `combat.rs` functions (`calculate_combat_performance`, `calculate_condition_ticks`, `default_buff_profiles`, `condition_weights_for_profession`, `extract_damage_modifiers`), `engine.rs` entry points (`optimize`, `optimize_pvp`, `optimize_with_gemini`, `optimize_deterministic`), `synergy_pipeline.rs` (`optimize_synergy`, `rank_and_select`, `build_synergy_result`), and `gemini_tools.rs` (`ToolContext.balance_ctx`).
 - **`patch_id` is temporary** — sourced from a snapshot constant (`"snapshot-2026-03-06"`). Authoritative manifest-backed sourcing deferred to P3-08.
-- **Fury crit bonus is the first mode split** — PvE = 25% crit chance, PvP/WvW = 20% crit chance (source: wiki/Fury). Implemented in `combat.rs::calculate_combat_performance()` via `ctx.game_mode` match.
+- **Fury crit bonus is the first mode split** — PvE = 25% crit chance, PvP/WvW = 20% crit chance (source: wiki/Fury). Loaded from `data/formulas/boons.json` via `data::boons().fury_crit_bonus(mode)`. No hardcoded match in `combat.rs`.
 - **No `_game_mode` parameters remain** — all former `game_mode: &GameMode` params in optimizer functions were replaced with `ctx: &BalanceContext`. Internal code accesses `ctx.game_mode` where enum matching is needed.
 - **Convenience constructors for tests** — `BalanceContext::pve()`, `BalanceContext::pvp()`, `BalanceContext::wvw()`. All existing tests use `BalanceContext::pve()`.
 

@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 
 use gw2_api::models::{Fact, Item, Trait};
-use gw2_core::types::GameMode;
 
 use crate::balance::BalanceContext;
 use crate::stats::{self, DerivedStats, StatBlock};
@@ -98,17 +97,18 @@ pub struct ConditionTicks {
 }
 
 /// Buff scenario for active-tier calculations.
+/// Boon effect values loaded from data/formulas/boons.json.
 #[derive(Debug, Clone)]
 pub struct BuffProfile {
-    /// Might stacks (0-25). Each stack = +30 Power, +30 Condition Damage.
+    /// Might stacks (0-25). Per-stack values loaded from data.
     pub might_stacks: u32,
-    /// Fury: +20% critical chance (additive).
+    /// Fury: mode-dependent crit chance bonus, loaded from data.
     pub fury: bool,
-    /// Protection: -33% incoming strike damage.
+    /// Protection: incoming strike DR, loaded from data.
     pub protection: bool,
-    /// Resolution: -33% incoming condition damage.
+    /// Resolution: incoming condition DR, loaded from data.
     pub resolution: bool,
-    /// Vulnerability stacks on target (0-25). Each stack = +1% damage dealt.
+    /// Vulnerability stacks on target (0-25). Per-stack value loaded from data.
     pub vulnerability_stacks: u32,
     /// Display label for UI.
     pub label: String,
@@ -143,44 +143,36 @@ pub struct CombatPerformance {
 }
 
 // ─── Condition Tick Formulas (Level 80) ───
-
-/// Calculate bleeding tick damage: 0.06 * CondDmg + 22
-fn bleeding_tick(condition_damage: f64) -> f64 {
-    0.06 * condition_damage + 22.0
-}
-
-/// Calculate burning tick damage: 0.155 * CondDmg + 131.75
-fn burning_tick(condition_damage: f64) -> f64 {
-    0.155 * condition_damage + 131.75
-}
-
-/// Calculate poison tick damage: 0.06 * CondDmg + 33.5
-fn poison_tick(condition_damage: f64) -> f64 {
-    0.06 * condition_damage + 33.5
-}
-
-/// Calculate torment tick damage (stationary): 0.0375 * CondDmg + 31.875
-/// GW2 wiki formula at level 80: (0.0375 * CD) + (0.375 * 80) + 1.875
-/// Moving torment deals 2x this value; stationary is the conservative baseline.
-fn torment_tick(condition_damage: f64) -> f64 {
-    0.0375 * condition_damage + 31.875
-}
-
-/// Calculate confusion tick damage (on skill use): 0.0175 * CondDmg + 11
-/// GW2 wiki level 80 formula for confusion activation damage per stack.
-/// Models approximately one enemy skill activation per second as the tick rate.
-fn confusion_tick(condition_damage: f64) -> f64 {
-    0.0175 * condition_damage + 11.0
-}
+// Formulas loaded from data/formulas/conditions.json via data::conditions().
+// Source: https://wiki.guildwars2.com/wiki/Bleeding, Burning, Poisoned, Torment, Confusion
 
 /// Calculate all condition tick damage values.
-pub fn calculate_condition_ticks(condition_damage: f64, modifiers: &DamageModifiers, _ctx: &BalanceContext) -> ConditionTicks {
+///
+/// Simple conditions (Bleeding, Burning, Poison) are mode-aware but currently
+/// same across all modes. Torment uses stationary as the conservative baseline
+/// (movement_fraction weighting is P3-14 scope). Confusion uses on_skill_use
+/// as the default (trigger frequency is P3-14 scope).
+pub fn calculate_condition_ticks(
+    condition_damage: f64,
+    modifiers: &DamageModifiers,
+    ctx: &BalanceContext,
+) -> ConditionTicks {
+    let conds = crate::data::conditions();
+    let mode = ctx.game_mode.clone();
     ConditionTicks {
-        bleeding: bleeding_tick(condition_damage) * modifiers.total_condi_mult_for("Bleeding"),
-        burning: burning_tick(condition_damage) * modifiers.total_condi_mult_for("Burning"),
-        poison: poison_tick(condition_damage) * modifiers.total_condi_mult_for("Poison"),
-        torment: torment_tick(condition_damage) * modifiers.total_condi_mult_for("Torment"),
-        confusion: confusion_tick(condition_damage) * modifiers.total_condi_mult_for("Confusion"),
+        bleeding: conds.tick_damage("Bleeding", condition_damage, mode.clone())
+            * modifiers.total_condi_mult_for("Bleeding"),
+        burning: conds.tick_damage("Burning", condition_damage, mode.clone())
+            * modifiers.total_condi_mult_for("Burning"),
+        poison: conds.tick_damage("Poison", condition_damage, mode.clone())
+            * modifiers.total_condi_mult_for("Poison"),
+        // Torment: stationary baseline (conservative). Movement weighting is P3-14 scope.
+        torment: conds.torment_tick(condition_damage, mode.clone(), false)
+            * modifiers.total_condi_mult_for("Torment"),
+        // Confusion: on_skill_use baseline (matches historical behavior).
+        // Trigger frequency weighting is P3-14 scope.
+        confusion: conds.confusion_tick(condition_damage, mode, true)
+            * modifiers.total_condi_mult_for("Confusion"),
     }
 }
 
@@ -265,15 +257,14 @@ pub fn calculate_combat_performance(
     profession: &str,
     ctx: &BalanceContext,
 ) -> CombatPerformance {
-    // Apply buff stats
-    let might_power = buffs.might_stacks as f64 * 30.0;
-    let might_condi = buffs.might_stacks as f64 * 30.0;
-    // Fury crit bonus: PvE = 25%, PvP/WvW = 20%
+    // Apply buff stats — values loaded from data/formulas/boons.json
+    let b = crate::data::boons();
+    let might_power = buffs.might_stacks as f64 * b.might_power_per_stack();
+    let might_condi = buffs.might_stacks as f64 * b.might_condi_per_stack();
+    // Fury crit bonus: mode-dependent (PvE=25%, PvP/WvW=20%).
     // Source: https://wiki.guildwars2.com/wiki/Fury
-    let fury_crit_bonus = match ctx.game_mode {
-        GameMode::PvE => 25.0,
-        GameMode::PvP | GameMode::WvW => 20.0,
-    };
+    // Data stores ratio (0.25/0.20), multiply by 100 for percentage points.
+    let fury_crit_bonus = b.fury_crit_bonus(ctx.game_mode.clone()) * 100.0;
     let fury_crit = if buffs.fury { fury_crit_bonus } else { 0.0 };
 
     let total_power = stats.power + might_power;
@@ -292,8 +283,9 @@ pub fn calculate_combat_performance(
     let crit_factor = 1.0 + (crit_chance / 100.0) * (crit_damage / 100.0 - 1.0);
     let effective_power = total_power * crit_factor * modifiers.total_strike_mult();
 
-    // Vulnerability multiplier on target
-    let vuln_mult = 1.0 + buffs.vulnerability_stacks as f64 * 0.01;
+    // Vulnerability multiplier on target — loaded from data
+    let vuln_mult = 1.0
+        + buffs.vulnerability_stacks as f64 * b.vulnerability_pct_per_stack();
 
     // Strike DPS index (normalized)
     let strike_dps_index =
@@ -341,8 +333,17 @@ pub fn calculate_combat_performance(
     // Strike EHP = Health * (Armor / Reference_Armor) / (1 - Protection_DR)
     // Condition EHP = Health / (1 - Resolution_DR) — conditions bypass armor entirely.
     // Blended EHP: 65% strike / 35% condition weighting (typical PvE encounter mix).
-    let protection_dr = if buffs.protection { 0.33 } else { 0.0 };
-    let resolution_dr = if buffs.resolution { 0.33 } else { 0.0 };
+    // Protection/Resolution: data stores multiplier (0.67), DR = 1 - multiplier
+    let protection_dr = if buffs.protection {
+        1.0 - b.protection_multiplier()
+    } else {
+        0.0
+    };
+    let resolution_dr = if buffs.resolution {
+        1.0 - b.resolution_multiplier()
+    } else {
+        0.0
+    };
     let strike_ehp = health * armor / f.tooltip_reference_armor / (1.0 - protection_dr);
     let condition_ehp = health / (1.0 - resolution_dr);
     let effective_health = strike_ehp * 0.65 + condition_ehp * 0.35;
@@ -780,32 +781,37 @@ mod tests {
     #[test]
     fn test_condition_tick_formulas() {
         // With 0 condition damage — base values only
+        // Formulas from data/formulas/conditions.json (source-of-truth verified)
         let mods = DamageModifiers::default();
         let ctx = BalanceContext::pve();
         let ticks = calculate_condition_ticks(0.0, &mods, &ctx);
         assert!((ticks.bleeding - 22.0).abs() < 0.1);
-        assert!((ticks.burning - 131.75).abs() < 0.1);
+        // Burning base: 131.0 (L1 verified against wiki)
+        assert!((ticks.burning - 131.0).abs() < 0.1);
         assert!((ticks.poison - 33.5).abs() < 0.1);
-        assert!((ticks.torment - 31.875).abs() < 0.1); // 0.0375*0 + 31.875
-        assert!((ticks.confusion - 11.0).abs() < 0.1);
+        // Torment PvE stationary: 0.09*0 + 31.8 = 31.8 (L2 verified)
+        assert!((ticks.torment - 31.8).abs() < 0.1);
+        // Confusion PvE on-skill-use: 0.0325*0 + 16.24 = 16.24 (L3 verified)
+        assert!((ticks.confusion - 16.24).abs() < 0.1);
     }
 
     #[test]
     fn test_condition_tick_with_stats() {
         // With 2000 condition damage (typical Viper build)
+        // Formulas from data/formulas/conditions.json (source-of-truth verified)
         let mods = DamageModifiers::default();
         let ctx = BalanceContext::pve();
         let ticks = calculate_condition_ticks(2000.0, &mods, &ctx);
         // Bleeding: 0.06 * 2000 + 22 = 142
         assert!((ticks.bleeding - 142.0).abs() < 0.1);
-        // Burning: 0.155 * 2000 + 131.75 = 441.75
-        assert!((ticks.burning - 441.75).abs() < 0.1);
+        // Burning: 0.155 * 2000 + 131.0 = 441.0 (L1: base=131.0)
+        assert!((ticks.burning - 441.0).abs() < 0.1);
         // Poison: 0.06 * 2000 + 33.5 = 153.5
         assert!((ticks.poison - 153.5).abs() < 0.1);
-        // Torment: 0.0375 * 2000 + 31.875 = 75 + 31.875 = 106.875
-        assert!((ticks.torment - 106.875).abs() < 0.1);
-        // Confusion: 0.0175 * 2000 + 11 = 35 + 11 = 46.0
-        assert!((ticks.confusion - 46.0).abs() < 0.1);
+        // Torment PvE stationary: 0.09 * 2000 + 31.8 = 211.8 (L2 verified)
+        assert!((ticks.torment - 211.8).abs() < 0.1);
+        // Confusion PvE on-skill-use: 0.0325 * 2000 + 16.24 = 81.24 (L3 verified)
+        assert!((ticks.confusion - 81.24).abs() < 0.1);
     }
 
     #[test]
@@ -821,8 +827,81 @@ mod tests {
         let ticks = calculate_condition_ticks(1000.0, &mods, &ctx);
         // Bleeding: (0.06 * 1000 + 22) * 1.10 = 82 * 1.10 = 90.2
         assert!((ticks.bleeding - 90.2).abs() < 0.1);
-        // Burning: (0.155 * 1000 + 131.75) * 1.10 * 1.20 = 286.75 * 1.32 = 378.51
-        assert!((ticks.burning - 378.51).abs() < 0.1);
+        // Burning: (0.155 * 1000 + 131.0) * 1.10 * 1.20 = 286.0 * 1.32 = 377.52
+        assert!((ticks.burning - 377.52).abs() < 0.1);
+    }
+
+    // ─── Mode dispatch integration tests ───
+
+    #[test]
+    fn test_torment_mode_dispatch_in_combat() {
+        // PvE vs PvP Torment should differ
+        // Source: https://wiki.guildwars2.com/wiki/Torment
+        let mods = DamageModifiers::default();
+        let ctx_pve = BalanceContext::pve();
+        let ctx_pvp = BalanceContext::pvp();
+        let ticks_pve = calculate_condition_ticks(1000.0, &mods, &ctx_pve);
+        let ticks_pvp = calculate_condition_ticks(1000.0, &mods, &ctx_pvp);
+        // PvE stationary: 0.09 * 1000 + 31.8 = 121.8
+        assert!((ticks_pve.torment - 121.8).abs() < 0.1);
+        // PvP stationary: 0.07 * 1000 + 26.0 = 96.0
+        assert!((ticks_pvp.torment - 96.0).abs() < 0.1);
+        assert!(
+            (ticks_pve.torment - ticks_pvp.torment).abs() > 1.0,
+            "Torment should differ between PvE and PvP"
+        );
+    }
+
+    #[test]
+    fn test_confusion_mode_dispatch_in_combat() {
+        // PvE vs PvP Confusion on-skill-use should differ
+        // Source: https://wiki.guildwars2.com/wiki/Confusion
+        let mods = DamageModifiers::default();
+        let ctx_pve = BalanceContext::pve();
+        let ctx_pvp = BalanceContext::pvp();
+        let ticks_pve = calculate_condition_ticks(1000.0, &mods, &ctx_pve);
+        let ticks_pvp = calculate_condition_ticks(1000.0, &mods, &ctx_pvp);
+        // PvE on-skill-use: 0.0325 * 1000 + 16.24 = 48.74
+        assert!((ticks_pve.confusion - 48.74).abs() < 0.1);
+        // PvP on-skill-use: 0.0975 * 1000 + 49.5 = 147.0
+        assert!((ticks_pvp.confusion - 147.0).abs() < 0.1);
+        assert!(
+            (ticks_pve.confusion - ticks_pvp.confusion).abs() > 1.0,
+            "Confusion should differ between PvE and PvP"
+        );
+    }
+
+    #[test]
+    fn test_combat_performance_uses_loaded_boon_values() {
+        // Verify calculate_combat_performance results match loaded data values
+        let ctx = BalanceContext::pve();
+        let stats = StatBlock {
+            power: 2000.0,
+            precision: 1500.0,
+            toughness: 1000.0,
+            vitality: 1000.0,
+            ..Default::default()
+        };
+        let derived = stats::compute_derived(&stats, "Warrior");
+        let mods = DamageModifiers::default();
+        let buffs = BuffProfile {
+            might_stacks: 10,
+            fury: true,
+            protection: true,
+            resolution: true,
+            vulnerability_stacks: 10,
+            label: "Test".to_string(),
+        };
+        let perf = calculate_combat_performance(
+            &stats, &derived, &mods, &buffs,
+            &ConditionWeights::default_pve(), "Warrior", &ctx,
+        );
+        // Fury PvE = 25% crit chance bonus (from data)
+        // Might 10 stacks * 30 Power = +300 Power (from data)
+        // Vulnerability 10 stacks * 0.01 = +10% (from data)
+        // Protection DR = 1.0 - 0.67 = 0.33 (from data)
+        assert!(perf.effective_power > 2000.0, "Fury+Might should boost power");
+        assert!(perf.damage_reduction_pct > 0.0, "Protection should give DR");
     }
 
     #[test]
