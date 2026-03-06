@@ -606,6 +606,8 @@ Schema:
 }
 ```
 
+Numeric fields use FactualValue semantics: a JSON value means Resolved, `null` means Unknown. For `Option<FactualValue<T>>` fields (e.g., `effect_duration`, `internal_cooldown`, `max_stacks`, `uptime`), three states are distinguished: field absent = not applicable (`None`), field = `null` = applicable but unsourced (`Some(Unknown)`), field = value = factually known (`Some(Resolved(v))`).
+
 Required enums:
 
 - `category`
@@ -613,8 +615,9 @@ Required enums:
 - `trigger_rule`
 - `uptime_model.kind`
 
-Recommended categories:
+Canonical categories (23):
 
+Modifier categories (1-12):
 - `FlatStat`
 - `StatConversion`
 - `StrikeDamagePct`
@@ -627,10 +630,23 @@ Recommended categories:
 - `OutgoingHealingPct`
 - `IncomingStrikeMultiplier`
 - `IncomingConditionMultiplier`
-- `AppliesBoon`
-- `AppliesCondition`
+
+Application categories (13-14):
+- `AppliesBoon` (carries StatusOperation payload)
+- `AppliesCondition` (carries StatusOperation payload)
+
+Interaction categories (15-20):
+- `RemovesBoon` (carries StatusOperation payload)
+- `StealsBoon` (carries StatusOperation payload)
+- `CorruptsBoon` (carries StatusOperation payload)
+- `RemovesCondition` (carries StatusOperation payload)
+- `ConvertsConditionToBoon` (carries StatusOperation payload)
+- `TransfersCondition` (carries StatusOperation payload)
+
+Control/proc/meta categories (21-23):
 - `DefianceDamage`
-- `ProcDamage`
+- `ProcEffect` (proc IS the final output)
+- `TriggeredEffect` (trigger GATES another effect; carries `inner_category`)
 
 Validation rules:
 
