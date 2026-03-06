@@ -510,17 +510,22 @@ fn estimate_buff_dps_value(
     let duration_s = duration_ms as f64 / 1000.0;
     match buff {
         "Might" => {
-            // Each Might stack = +30 Power AND +30 Condition Damage (GW2 mechanic).
+            // Might per-stack values loaded from data/formulas/boons.json.
+            let b = crate::data::boons();
             let stacks_f = stacks as f64;
+            let might_power = b.might_power_per_stack();
+            let might_condi = b.might_condi_per_stack();
             // Power contribution: extra_power * weapon_strength / armor
-            let power_value = 30.0 * stacks_f * weapon_strength / reference_armor() * duration_s;
-            // Condition Damage contribution: 30 * CD_coefficient * duration.
+            let power_value =
+                might_power * stacks_f * weapon_strength / reference_armor() * duration_s;
+            // Condition Damage contribution: condi_per_stack * CD_coefficient * duration.
             // Use bleeding coefficient (0.06) as a conservative typical-condition estimate.
-            let condi_value = 30.0 * stacks_f * 0.06 * duration_s;
+            let condi_value = might_condi * stacks_f * 0.06 * duration_s;
             power_value + condi_value
         }
         "Fury" => {
-            // Fury = +20% crit chance → roughly +15% DPS for the duration.
+            // Fury: mode-dependent crit chance bonus (loaded from data).
+            // Using PvE default here; TODO: P3-XX thread BalanceContext through simulator.
             let base_hit = power * weapon_strength / reference_armor();
             base_hit * 0.15 * duration_s * (stacks.min(1) as f64)
         }
@@ -534,15 +539,18 @@ fn estimate_buff_dps_value(
 }
 
 /// Condition tick damage formula (GW2 level 80, per tick).
-/// Uses the same formulas as combat.rs.
+/// Delegates to data-driven formulas loaded from data/formulas/conditions.json.
+/// Uses PvE mode as default. TODO: P3-XX thread BalanceContext through simulator.
+/// Torment uses stationary baseline; Confusion uses on_skill_use baseline.
 fn condition_tick_damage(condition: &str, condition_damage: f64) -> f64 {
+    use gw2_core::types::GameMode;
+    let conds = crate::data::conditions();
     match condition {
-        "Bleeding" => 0.06 * condition_damage + 22.0,
-        "Burning" => 0.155 * condition_damage + 131.75,
-        "Poison" => 0.06 * condition_damage + 33.5,
-        "Torment" => 0.0375 * condition_damage + 31.875, // stationary: wiki formula 0.0375*CD + (0.375*80) + 1.875
-        "Confusion" => 0.0175 * condition_damage + 11.0, // on-use: wiki formula 0.0175*CD + 11 per activation
-        _ => 0.0,
+        "Torment" => conds.torment_tick(condition_damage, GameMode::PvE, false),
+        "Confusion" => {
+            conds.confusion_tick(condition_damage, GameMode::PvE, true)
+        }
+        _ => conds.tick_damage(condition, condition_damage, GameMode::PvE),
     }
 }
 
@@ -657,12 +665,16 @@ mod tests {
 
     #[test]
     fn test_condition_tick_damage_formulas() {
+        // Formulas loaded from data/formulas/conditions.json (PvE default)
         let cd = 1000.0;
         assert!((condition_tick_damage("Bleeding", cd) - 82.0).abs() < 0.1);
-        assert!((condition_tick_damage("Burning", cd) - 286.75).abs() < 0.1);  // 0.155*1000 + 131.75
+        // Burning: 0.155*1000 + 131.0 = 286.0 (L1: base=131.0)
+        assert!((condition_tick_damage("Burning", cd) - 286.0).abs() < 0.1);
         assert!((condition_tick_damage("Poison", cd) - 93.5).abs() < 0.1);
-        assert!((condition_tick_damage("Torment", cd) - 69.375).abs() < 0.1); // 0.0375*1000 + 31.875
-        assert!((condition_tick_damage("Confusion", cd) - 28.5).abs() < 0.1);  // 0.0175*1000 + 11
+        // Torment PvE stationary: 0.09*1000 + 31.8 = 121.8 (L2 verified)
+        assert!((condition_tick_damage("Torment", cd) - 121.8).abs() < 0.1);
+        // Confusion PvE on-skill-use: 0.0325*1000 + 16.24 = 48.74 (L3 verified)
+        assert!((condition_tick_damage("Confusion", cd) - 48.74).abs() < 0.1);
         assert_eq!(condition_tick_damage("Vulnerability", cd), 0.0);
     }
 
