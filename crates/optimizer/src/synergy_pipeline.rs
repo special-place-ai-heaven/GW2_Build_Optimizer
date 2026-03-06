@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use gw2_api::models::{Profession, Skill, Specialization, Trait as GW2Trait};
 use crate::balance::BalanceContext;
 use crate::combat;
+use crate::data;
 use crate::engine::{self, OptimizeProgress, SynergyResult};
 use crate::gamedb::GameDb;
 use crate::scoring::{score_with_weights, OptimizationWeights};
@@ -813,13 +814,16 @@ fn compute_candidate_stats(
 ) -> stats::StatBlock {
     let mut full_stats = stats::base_stats();
 
-    // Gear stats (from prefix applied to each slot)
+    // Gear stats (from prefix applied to each slot via slot budget data)
     if let Some(stat_id) = gear_prefix_id {
         if let Some(itemstat) = db.itemstats.get(&stat_id) {
-            for &(_slot, adj) in engine::SLOT_ADJUSTMENTS {
-                for attr in &itemstat.attributes {
-                    let value = (adj * attr.multiplier + attr.value as f64).round();
-                    full_stats.add(&attr.attribute, value);
+            let budgets = data::slot_budgets::slot_budgets();
+            let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
+            for &(slot_type, _) in data::EQUIPMENT_SLOTS {
+                if let Some(budget) = budgets.get(slot_type, shape) {
+                    engine::add_budget_stats_for_itemstat(
+                        &mut full_stats, itemstat, budget,
+                    );
                 }
             }
         }
