@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod balance_overrides;
 pub mod boon_condition_formulas;
+#[cfg(test)]
+mod consistency_tests;
 pub mod manifests;
 pub mod normalized_effects;
 pub mod patch_ledger;
