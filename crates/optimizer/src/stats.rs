@@ -111,14 +111,16 @@ pub struct DerivedStats {
 }
 
 /// Level 80 base stats per profession.
-/// All professions get 1000 in Power, Precision, Toughness, Vitality at level 80.
-/// Health pool varies by profession.
+/// All professions get base_primary_attribute (1000) in Power, Precision, Toughness,
+/// Vitality at level 80. Health pool varies by profession.
+/// Source: https://wiki.guildwars2.com/wiki/Attribute
 pub fn base_stats() -> StatBlock {
+    let base = crate::data::universal_formulas::formulas().base_primary_attribute;
     StatBlock {
-        power: 1000.0,
-        precision: 1000.0,
-        toughness: 1000.0,
-        vitality: 1000.0,
+        power: base,
+        precision: base,
+        toughness: base,
+        vitality: base,
         ..Default::default()
     }
 }
@@ -451,12 +453,17 @@ pub fn calculate_pvp_stats(amulet_attributes: &HashMap<String, i32>) -> StatBloc
 }
 
 /// Compute derived combat stats from primary stats.
+/// Formula constants loaded from data/formulas/universal.json.
+/// Source: https://wiki.guildwars2.com/wiki/Critical_Chance (crit chance)
+/// Source: https://wiki.guildwars2.com/wiki/Ferocity (crit damage)
+/// Source: https://wiki.guildwars2.com/wiki/Health (health)
 pub fn compute_derived(stats: &StatBlock, profession: &str) -> DerivedStats {
-    let crit_chance = ((stats.precision - 895.0) / 21.0).clamp(0.0, 100.0);
-    let crit_damage = 150.0 + stats.ferocity / 15.0;
+    let f = crate::data::universal_formulas::formulas();
+    let crit_chance = f.crit_chance(stats.precision).clamp(0.0, 100.0);
+    let crit_damage = f.crit_damage(stats.ferocity);
     let effective_power =
         stats.power * (1.0 + (crit_chance / 100.0) * (crit_damage / 100.0 - 1.0));
-    let health = base_health(profession) + stats.vitality * 10.0;
+    let health = base_health(profession) + stats.vitality * f.vitality_to_health;
     let armor = stats.toughness + base_defense(profession);
 
     DerivedStats {
@@ -584,10 +591,13 @@ mod tests {
     fn test_derived_stats_no_gear() {
         let stats = base_stats();
         let derived = compute_derived(&stats, "Warrior");
+        // Source: https://wiki.guildwars2.com/wiki/Critical_Chance
         // Precision 1000: crit chance = (1000 - 895) / 21 = 5.0%
         assert!((derived.crit_chance - 5.0).abs() < 0.1);
-        // Ferocity 0: crit damage = 150%
+        // Source: https://wiki.guildwars2.com/wiki/Ferocity
+        // Ferocity 0: crit damage = 150.0 + 0/15 = 150%
         assert!((derived.crit_damage - 150.0).abs() < 0.1);
+        // Source: https://wiki.guildwars2.com/wiki/Health
         // Health: 9212 (profession base) + 1000 (base vitality) * 10 = 19212
         assert!((derived.health - 19212.0).abs() < 1.0);
         // Armor: 1000 (base toughness) + 1271 (heavy armor defense) = 2271

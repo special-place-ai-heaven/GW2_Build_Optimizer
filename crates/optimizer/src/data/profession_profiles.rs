@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use thiserror::Error;
 
+use super::EvidenceLevel;
+
 /// Canonical JSON embedded at compile time from data/profession_profiles.json.
 const PROFESSION_PROFILES_JSON: &str =
     include_str!("../../../../data/profession_profiles.json");
@@ -40,14 +42,6 @@ pub enum HealthClass {
     High,
     Medium,
     Low,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-pub enum EvidenceLevel {
-    Factual,
-    Derived,
-    Heuristic,
-    Unknown,
 }
 
 #[derive(Debug, Clone, Deserialize)]

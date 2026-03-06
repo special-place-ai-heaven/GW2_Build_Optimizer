@@ -1,6 +1,6 @@
 # Story 3.03: Universal Attribute and Strike Damage Formulas
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -84,8 +84,8 @@ grep -n 'const REFERENCE_ARMOR' crates/optimizer/src/combat.rs crates/optimizer/
 
 ### Task 1: Create `data/formulas/universal.json` (AC: 1, 6, 7)
 
-- [ ] Create `data/formulas/` directory
-- [ ] Create `data/formulas/universal.json` with all constants:
+- [x] Create `data/formulas/` directory
+- [x] Create `data/formulas/universal.json` with all constants:
   ```json
   {
     "base_primary_attribute": 1000,
@@ -111,16 +111,16 @@ grep -n 'const REFERENCE_ARMOR' crates/optimizer/src/combat.rs crates/optimizer/
     ]
   }
   ```
-- [ ] Verify no mode-specific fields are present (no `game_mode`, no `pve_*`/`pvp_*`/`wvw_*` keys)
+- [x] Verify no mode-specific fields are present (no `game_mode`, no `pve_*`/`pvp_*`/`wvw_*` keys)
 
 ### Task 2: Create `crates/optimizer/src/data/universal_formulas.rs` loader (AC: 1, 7, 8)
 
-- [ ] Create `crates/optimizer/src/data/universal_formulas.rs`
-- [ ] Follow the P3-01 pattern: `include_str!` + `OnceLock` + typed struct + validation
+- [x] Create `crates/optimizer/src/data/universal_formulas.rs`
+- [x] Follow the P3-01 pattern: `include_str!` + `OnceLock` + typed struct + validation
   - `const UNIVERSAL_FORMULAS_JSON: &str = include_str!("../../../../data/formulas/universal.json");`
   - `static FORMULAS: OnceLock<UniversalFormulas> = OnceLock::new();`
   - `pub fn formulas() -> &'static UniversalFormulas`
-- [ ] Define `UniversalFormulas` struct with typed fields:
+- [x] Define `UniversalFormulas` struct with typed fields:
   ```rust
   #[derive(Debug, Clone, Deserialize)]
   pub struct UniversalFormulas {
@@ -139,15 +139,15 @@ grep -n 'const REFERENCE_ARMOR' crates/optimizer/src/combat.rs crates/optimizer/
       pub sources: Vec<String>,
   }
   ```
-- [ ] Reuse `EvidenceLevel` enum from `profession_profiles.rs` (move to `data/mod.rs` if needed, or import)
-- [ ] Define `UniversalFormulaError` typed error enum: `ParseError`, `ValidationError(String)`
-- [ ] Implement `load_universal_formulas(json: &str) -> Result<UniversalFormulas, UniversalFormulaError>`
-- [ ] Validation rules:
+- [x] Reuse `EvidenceLevel` enum from `profession_profiles.rs` (moved to `data/mod.rs` for shared use)
+- [x] Define `UniversalFormulaError` typed error enum: `ParseError`, `ValidationError(String)`
+- [x] Implement `load_universal_formulas(json: &str) -> Result<UniversalFormulas, UniversalFormulaError>`
+- [x] Validation rules:
   - All numeric fields must be positive (> 0)
   - `condition_duration_cap` and `boon_duration_cap` must be exactly 1.0 (hard constraint for universal)
   - `evidence_level` must be `Factual` (no derived/heuristic/unknown allowed in universal.json)
   - No extra unexpected fields (use `#[serde(deny_unknown_fields)]` on a wrapper if needed, or validate manually)
-- [ ] Add convenience methods on `UniversalFormulas`:
+- [x] Add convenience methods on `UniversalFormulas`:
   ```rust
   /// Critical chance from Precision (percentage points, 0-100).
   /// Formula: (precision - precision_offset) / precision_per_crit_pct
@@ -168,8 +168,8 @@ grep -n 'const REFERENCE_ARMOR' crates/optimizer/src/combat.rs crates/optimizer/
 
 ### Task 3: Register module in `crates/optimizer/src/data/mod.rs` (AC: 8)
 
-- [ ] Add `pub mod universal_formulas;` to `crates/optimizer/src/data/mod.rs` (currently line 1)
-- [ ] Add `pub use universal_formulas::UniversalFormulas;` for convenience re-export
+- [x] Add `pub mod universal_formulas;` to `crates/optimizer/src/data/mod.rs`
+- [x] Add `pub use universal_formulas::UniversalFormulas;` for convenience re-export
 
 ### Task 4: Replace hardcoded constants in `crates/optimizer/src/stats.rs` (AC: 2, 3, 5, 8)
 
@@ -180,10 +180,10 @@ Current hardcoded locations:
 - **Line 459** (`compute_derived()`): `stats.vitality * 10.0` -- vitality_to_health. Replace with `formulas().vitality_to_health`.
 
 Changes:
-- [ ] `base_stats()`: replace `1000.0` literals with `formulas().base_primary_attribute`
-- [ ] `compute_derived()`: replace crit_chance calculation with `formulas().crit_chance(stats.precision).clamp(0.0, 100.0)`
-- [ ] `compute_derived()`: replace crit_damage calculation with `formulas().crit_damage(stats.ferocity)`
-- [ ] `compute_derived()`: replace `stats.vitality * 10.0` with `stats.vitality * formulas().vitality_to_health`
+- [x] `base_stats()`: replace `1000.0` literals with `formulas().base_primary_attribute`
+- [x] `compute_derived()`: replace crit_chance calculation with `formulas().crit_chance(stats.precision).clamp(0.0, 100.0)`
+- [x] `compute_derived()`: replace crit_damage calculation with `formulas().crit_damage(stats.ferocity)`
+- [x] `compute_derived()`: replace `stats.vitality * 10.0` with `stats.vitality * formulas().vitality_to_health`
 
 ### Task 5: Replace hardcoded constants in `crates/optimizer/src/combat.rs` (AC: 2, 3, 4, 5, 8)
 
@@ -198,13 +198,13 @@ Current hardcoded locations:
 - **Line 343** (`calculate_combat_performance()`): `REFERENCE_ARMOR` in strike_ehp calculation.
 
 Changes:
-- [ ] Remove `const REFERENCE_ARMOR: f64 = 2597.0;` (line 255)
-- [ ] Replace crit_chance formula (line 285) with `formulas().crit_chance(total_precision)` (fury added separately, as it currently is)
-- [ ] Replace crit_damage formula (line 287) with `formulas().crit_damage(stats.ferocity) + modifiers.total_crit_damage_bonus()`
-- [ ] Replace `REFERENCE_ARMOR` usages (lines 298, 343) with `formulas().tooltip_reference_armor`
-- [ ] Replace expertise divisor (line 304) with `formulas().expertise_per_condition_duration_pct`
-- [ ] Replace concentration divisor (line 329) with `formulas().concentration_per_boon_duration_pct`
-- [ ] Replace vitality multiplier (line 333) with `formulas().vitality_to_health`
+- [x] Remove `const REFERENCE_ARMOR: f64 = 2597.0;`
+- [x] Replace crit_chance formula with `formulas().crit_chance(total_precision)` (fury added separately)
+- [x] Replace crit_damage formula with `formulas().crit_damage(stats.ferocity) + modifiers.total_crit_damage_bonus()`
+- [x] Replace `REFERENCE_ARMOR` usages with `f.tooltip_reference_armor`
+- [x] Replace expertise divisor with `f.expertise_per_condition_duration_pct`
+- [x] Replace concentration divisor with `f.concentration_per_boon_duration_pct`
+- [x] Replace vitality multiplier with `f.vitality_to_health`
 
 ### Task 6: Replace hardcoded constant in `crates/optimizer/src/rotation/simulator.rs` (AC: 8)
 
@@ -212,8 +212,8 @@ Current hardcoded location:
 - **Line 36** (`const REFERENCE_ARMOR: f64 = 2597.0;`): tooltip_reference_armor.
 
 Changes:
-- [ ] Remove `const REFERENCE_ARMOR: f64 = 2597.0;` (line 36)
-- [ ] Replace all uses of `REFERENCE_ARMOR` in the simulator with `crate::data::universal_formulas::formulas().tooltip_reference_armor`
+- [x] Remove `const REFERENCE_ARMOR: f64 = 2597.0;`
+- [x] Replace all uses of `REFERENCE_ARMOR` in the simulator with `reference_armor()` helper that loads from data
 
 ### Task 7: Update `crates/core/src/types.rs` compute_derived (AC: 2, 3, 5, 8)
 
@@ -229,36 +229,37 @@ Design decision: `types.rs` is in the `core` crate which should not depend on th
 
 Recommended: **(c) Leave types.rs compute_derived as-is** with an updated comment noting the constants are canonical in `data/formulas/universal.json` and this method should be updated if callers are added. The runtime paths in optimizer crate are the ones that matter and are fully data-driven after Tasks 4-6.
 
-- [ ] Add a doc comment to `StatBlock::compute_derived()` in `types.rs` noting that the canonical source for these constants is `data/formulas/universal.json` and that the active runtime paths in `crates/optimizer/src/{stats,combat}.rs` use loaded values
-- [ ] If the dev agent finds active callers of `types.rs::compute_derived()`, escalate -- it needs parameter injection
+- [x] Add a doc comment to `StatBlock::compute_derived()` in `types.rs` noting that the canonical source for these constants is `data/formulas/universal.json` and that the active runtime paths in `crates/optimizer/src/{stats,combat}.rs` use loaded values
+- [x] Confirmed: no active callers of `types.rs::compute_derived()` -- all callers use `stats::compute_derived()` in the optimizer crate
 
 ### Task 8: Write tests with source citations (AC: 2, 3, 4, 5, 9, 10)
 
 Tests in `crates/optimizer/src/data/universal_formulas.rs`:
-- [ ] `test_embedded_formulas_load_successfully` -- validates the embedded JSON parses and passes validation
-- [ ] `test_crit_chance_base_precision` -- Precision 1000: `(1000 - 895) / 21 = 5.0%`. Source: https://wiki.guildwars2.com/wiki/Critical_Chance
-- [ ] `test_crit_chance_high_precision` -- Precision 2000: `(2000 - 895) / 21 = 52.619%`. Source: https://wiki.guildwars2.com/wiki/Critical_Chance
-- [ ] `test_crit_chance_capped` -- Precision 5000: raw value exceeds 100, result capped at 100.0
-- [ ] `test_crit_damage_zero_ferocity` -- Ferocity 0: `150.0 + 0/15 = 150.0%`. Source: https://wiki.guildwars2.com/wiki/Ferocity
-- [ ] `test_crit_damage_with_ferocity` -- Ferocity 300: `150.0 + 300/15 = 170.0%`. Source: https://wiki.guildwars2.com/wiki/Ferocity
-- [ ] `test_health_from_vitality` -- Vitality 1000, base_health 9212: `9212 + 1000*10 = 19212`. Source: https://wiki.guildwars2.com/wiki/Health
-- [ ] `test_strike_damage_formula` -- Power 2000, skill_damage 500, target_armor 2597: `500 * (2000/1000) * (2597/2597) = 1000.0`. Source: https://wiki.guildwars2.com/wiki/Damage
-- [ ] `test_strike_damage_with_different_armor` -- Power 2000, skill_damage 500, target_armor 2000: `500 * (2000/1000) * (2597/2000) = 1298.5`. Demonstrates armor scaling.
-- [ ] `test_tooltip_reference_armor_value` -- `formulas().tooltip_reference_armor == 2597.0`. Source: https://wiki.guildwars2.com/wiki/Damage
-- [ ] `test_base_primary_attribute_value` -- `formulas().base_primary_attribute == 1000.0`. Source: https://wiki.guildwars2.com/wiki/Attribute
-- [ ] `test_validation_rejects_negative_values` -- JSON with negative precision_offset is rejected
-- [ ] `test_validation_rejects_non_factual` -- JSON with `evidence_level: "Heuristic"` is rejected
-- [ ] `test_validation_rejects_wrong_caps` -- JSON with `condition_duration_cap: 2.0` is rejected
+- [x] `test_embedded_formulas_load_successfully` -- validates the embedded JSON parses and passes validation
+- [x] `test_crit_chance_base_precision` -- Precision 1000: `(1000 - 895) / 21 = 5.0%`. Source: https://wiki.guildwars2.com/wiki/Critical_Chance
+- [x] `test_crit_chance_high_precision` -- Precision 2000: `(2000 - 895) / 21 = 52.619%`. Source: https://wiki.guildwars2.com/wiki/Critical_Chance
+- [x] `test_crit_chance_capped` -- Precision 5000: raw value exceeds 100, result capped at 100.0
+- [x] `test_crit_damage_zero_ferocity` -- Ferocity 0: `150.0 + 0/15 = 150.0%`. Source: https://wiki.guildwars2.com/wiki/Ferocity
+- [x] `test_crit_damage_with_ferocity` -- Ferocity 300: `150.0 + 300/15 = 170.0%`. Source: https://wiki.guildwars2.com/wiki/Ferocity
+- [x] `test_health_from_vitality` -- Vitality 1000, base_health 9212: `9212 + 1000*10 = 19212`. Source: https://wiki.guildwars2.com/wiki/Health
+- [x] `test_strike_damage_formula` -- Power 2000, skill_damage 500, target_armor 2597: `500 * (2000/1000) * (2597/2597) = 1000.0`. Source: https://wiki.guildwars2.com/wiki/Damage
+- [x] `test_strike_damage_with_different_armor` -- Power 2000, skill_damage 500, target_armor 2000: `500 * (2000/1000) * (2597/2000) = 1298.5`. Demonstrates armor scaling.
+- [x] `test_tooltip_reference_armor_value` -- `formulas().tooltip_reference_armor == 2597.0`. Source: https://wiki.guildwars2.com/wiki/Damage
+- [x] `test_base_primary_attribute_value` -- `formulas().base_primary_attribute == 1000.0`. Source: https://wiki.guildwars2.com/wiki/Attribute
+- [x] `test_validation_rejects_negative_values` -- JSON with negative precision_offset is rejected
+- [x] `test_validation_rejects_non_factual` -- JSON with `evidence_level: "Heuristic"` is rejected
+- [x] `test_validation_rejects_wrong_caps` -- JSON with `condition_duration_cap: 2.0` is rejected
 
 Tests in existing test modules (updated):
-- [ ] Update `stats.rs::test_derived_stats_no_gear` comment to cite wiki source for the formula constants
-- [ ] Update `combat.rs` test comments to cite wiki sources where they verify formula outputs
+- [x] Update `stats.rs::test_derived_stats_no_gear` comment to cite wiki source for the formula constants
+- [x] Update `combat.rs` test comments to cite wiki sources where they verify formula outputs (sources already present in combat.rs tests)
 
 ### Task 9: Verify existing tests still pass (AC: 8)
 
-- [ ] `cargo test --package gw2-optimizer -v` -- all existing tests pass with loaded constants (values are identical, just sourced differently)
-- [ ] `cargo test --package gw2-core -v` -- core tests unaffected
-- [ ] Verify no behavior change -- every replaced constant has the same numeric value as before
+- [x] `cargo test --package gw2-optimizer -v` -- all 194 tests pass with loaded constants (values identical, just sourced differently)
+- [x] `cargo test --package gw2-core -v` -- all 15 core tests pass, unaffected
+- [x] `cargo test -p gw2-build-optimizer -- --test-threads=1` -- all 25 addon tests pass
+- [x] Verify no behavior change -- every replaced constant has the same numeric value as before
 
 ## Dev Notes
 
@@ -351,3 +352,33 @@ Tests in existing test modules (updated):
 - [Source: https://wiki.guildwars2.com/wiki/Damage] -- strike damage formula, tooltip_reference_armor (2597)
 - [Source: https://wiki.guildwars2.com/wiki/Health] -- vitality-to-health multiplier
 - [Source: https://wiki.guildwars2.com/wiki/Attribute] -- base primary attribute (1000 at level 80)
+
+## Dev Agent Record
+
+**Implemented by**: Claude Opus 4.6
+**Date**: 2026-03-06
+
+### Changes Made
+
+1. **Created `data/formulas/universal.json`** -- 11 numeric constants + evidence_level + sources array. `#[serde(deny_unknown_fields)]` enforced on the struct.
+
+2. **Created `crates/optimizer/src/data/universal_formulas.rs`** -- Full P3-01 pattern: `include_str!` + `OnceLock` + typed `UniversalFormulas` struct + `load_universal_formulas()` + validation + 4 convenience methods (`crit_chance`, `crit_damage`, `health`, `strike_damage`). 14 tests with wiki source citations.
+
+3. **Moved `EvidenceLevel` to `data/mod.rs`** -- Shared across `profession_profiles.rs` and `universal_formulas.rs`. Updated `profession_profiles.rs` to import via `use super::EvidenceLevel`.
+
+4. **Updated `data/mod.rs`** -- Added `pub mod universal_formulas` and `pub use universal_formulas::UniversalFormulas`.
+
+5. **Replaced hardcoded constants in `stats.rs`** -- `base_stats()` uses `formulas().base_primary_attribute`; `compute_derived()` uses `formulas().crit_chance()`, `formulas().crit_damage()`, `formulas().vitality_to_health`. Added wiki source comments to `test_derived_stats_no_gear`.
+
+6. **Replaced hardcoded constants in `combat.rs`** -- Removed `const REFERENCE_ARMOR`. `calculate_combat_performance()` now uses a single `let f = formulas()` binding for crit_chance, crit_damage, tooltip_reference_armor, expertise divisor, concentration divisor, and vitality_to_health.
+
+7. **Replaced hardcoded constant in `rotation/simulator.rs`** -- Replaced `const REFERENCE_ARMOR` with `fn reference_armor()` that loads from data. All 5 usages updated.
+
+8. **Updated `core/types.rs`** -- Added doc comment to `StatBlock::compute_derived()` explaining that canonical constants are in `data/formulas/universal.json` and active runtime paths use loaded values. Confirmed zero active callers of this method.
+
+### Test Results
+
+- `gw2-optimizer`: 194 passed, 0 failed, 9 ignored (live API tests)
+- `gw2-core`: 15 passed, 0 failed
+- `gw2-build-optimizer`: 25 passed, 0 failed
+- Full workspace `cargo check`: clean compilation
