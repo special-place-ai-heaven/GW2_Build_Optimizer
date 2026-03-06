@@ -171,6 +171,7 @@ Schema:
 ```json
 {
   "patch_id": "2026-01-13",
+  "game_build_id": 175218,
   "release_date": "2026-01-13",
   "inherits_from": "2025-11-25",
   "sources": [
@@ -180,15 +181,25 @@ Schema:
     }
   ],
   "supported_modes": ["PvE", "PvP", "WvW"],
-  "status": "active"
+  "status": "active",
+  "authoring_notes": "Optional free-text notes for manifest authors."
 }
 ```
+
+Fields:
+
+- `game_build_id` (integer, required): The GW2 client build number this manifest was verified against. Used by staleness detection to warn when the live game build diverges from the data snapshot. The value is informational — it does not gate optimizer functionality.
+- `authoring_notes` (string, optional): Free-text notes from the manifest author explaining context, limitations, or baseline assumptions.
 
 Validation rules:
 
 1. `patch_id` must equal filename stem
-2. `inherits_from` may be null only for the earliest snapshot
-3. at least one `source` is required
+2. `game_build_id` must be > 0
+3. `inherits_from` may be null only for the earliest snapshot
+4. at least one `source` is required
+5. `status` must be one of: `active`, `superseded`, `draft`
+6. `supported_modes` must be non-empty
+7. Set validation: no duplicate `patch_id`, no circular inheritance, no two `active` manifests in the same lineage
 
 ## Schema 2: Profession Profiles
 

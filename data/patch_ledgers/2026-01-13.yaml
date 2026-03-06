@@ -1,0 +1,14 @@
+patch_id: "2026-01-13"
+inherits_from: null
+changes: []
+# Baseline snapshot — no prior diff to record.
+# Future patches will have entries like:
+# - source_type: skill
+#   source_id: 12345
+#   source_name: "Fireball"
+#   mode: PvE
+#   field: "damage_coefficient"
+#   old_value: "0.8"
+#   new_value: "0.9"
+#   evidence_level: Factual
+#   source: "https://wiki.guildwars2.com/wiki/..."
