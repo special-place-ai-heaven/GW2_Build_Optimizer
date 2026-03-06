@@ -13,6 +13,7 @@ use gw2_api::models::Fact;
 use crate::balance::BalanceContext;
 use crate::combat::{self, CombatPerformance, DamageModifiers};
 use crate::context::{self, ContextConfig};
+use crate::data;
 use crate::gamedb::GameDb;
 use crate::llm::LlmClient;
 use crate::gemini_tools::{self, ToolContext};
@@ -352,48 +353,60 @@ fn optimize_pvp(
     Ok(all_candidates)
 }
 
-/// Calculate approximate stats for a gear candidate using itemstat formulas.
-/// Uses a typical Ascended attribute_adjustment per slot type.
+/// Calculate approximate stats for a gear candidate using slot budget data.
+/// Looks up per-slot budget values from loaded `SlotBudgets` data.
 fn calculate_candidate_stats(
     candidate: &GearCandidate,
     itemstats_cache: &HashMap<u32, ItemStat>,
 ) -> stats::StatBlock {
     let mut stats = stats::StatBlock::default();
+    let budgets = data::slot_budgets::slot_budgets();
 
     for (slot, &stat_id) in &candidate.slot_stats {
         let Some(itemstat) = itemstats_cache.get(&stat_id) else {
             continue;
         };
 
-        let adj = attribute_adjustment_for_slot(slot);
+        let Some(slot_type) = data::SlotType::from_api_slot(slot) else {
+            continue;
+        };
+        let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
+        let Some(budget) = budgets.get(slot_type, shape) else {
+            continue;
+        };
 
-        for attr in &itemstat.attributes {
-            let value = adj * attr.multiplier + attr.value as f64;
-            stats.add(&attr.attribute, value.round());
-        }
+        add_budget_stats_for_itemstat(&mut stats, itemstat, budget);
     }
 
     stats
 }
 
-/// Typical Ascended attribute_adjustment values by equipment slot.
-/// In GW2, attribute_adjustment is the same across armor weight classes —
-/// only the defense rating differs (handled by base_defense in stats.rs).
-fn attribute_adjustment_for_slot(slot: &str) -> f64 {
-    match slot {
-        // Armor (Ascended) — same attribute_adjustment regardless of weight class
-        "Helm" | "Shoulders" | "Gloves" | "Boots" => 141.0,
-        "Coat" => 225.0,
-        "Leggings" => 171.0,
-        // Weapons (Ascended)
-        "WeaponA1" | "WeaponB1" => 251.0, // main-hand / two-handed
-        "WeaponA2" | "WeaponB2" => 125.0, // off-hand
-        // Trinkets (Ascended)
-        "Backpack" => 63.0,
-        "Accessory1" | "Accessory2" => 110.0,
-        "Amulet" => 157.0,
-        "Ring1" | "Ring2" => 126.0,
-        _ => 100.0,
+/// Add stat values from a slot budget entry, classifying each itemstat
+/// attribute as major or minor based on its multiplier relative to the
+/// highest multiplier in the set.
+pub fn add_budget_stats_for_itemstat(
+    stats: &mut stats::StatBlock,
+    itemstat: &ItemStat,
+    budget: &data::slot_budgets::SlotBudgetEntry,
+) {
+    if itemstat.attributes.is_empty() {
+        return;
+    }
+    let max_mult = itemstat
+        .attributes
+        .iter()
+        .map(|a| a.multiplier)
+        .fold(f64::NEG_INFINITY, f64::max);
+    for attr in &itemstat.attributes {
+        // An attribute is "major" if its multiplier is the highest (or within
+        // a small tolerance to handle floating-point). For CelestialLike,
+        // all multipliers are equal, and major == minor in the budget.
+        let value = if (attr.multiplier - max_mult).abs() < 0.001 {
+            budget.major as f64
+        } else {
+            budget.minor as f64
+        };
+        stats.add(&attr.attribute, value);
     }
 }
 
@@ -567,17 +580,6 @@ pub struct SynergyResult {
     pub modifiers: DamageModifiers,
     pub rotation: Option<rotation::SimulationResult>,
 }
-
-/// Slot attribute adjustments for full Ascended gear set.
-/// Same values as engine.rs `attribute_adjustment_for_slot()` and gemini_tools.rs.
-pub const SLOT_ADJUSTMENTS: &[(&str, f64)] = &[
-    ("Helm", 141.0), ("Shoulders", 141.0), ("Coat", 225.0),
-    ("Gloves", 141.0), ("Leggings", 171.0), ("Boots", 141.0),
-    ("WeaponA1", 251.0), ("WeaponA2", 125.0),
-    ("WeaponB1", 251.0), ("WeaponB2", 125.0),
-    ("Backpack", 63.0), ("Accessory1", 110.0), ("Accessory2", 110.0),
-    ("Amulet", 157.0), ("Ring1", 126.0), ("Ring2", 126.0),
-];
 
 /// Run the synergy-driven optimization pipeline.
 /// Sends ALL profession data to Gemini in a single prompt for holistic synergy reasoning.
@@ -779,13 +781,16 @@ pub fn calculate_validated_stats(
 ) -> (stats::StatBlock, DamageModifiers) {
     let mut full_stats = stats::base_stats();
 
-    // Gear stats from validated prefix
+    // Gear stats from validated prefix using slot budget data
     if let Some(ref prefix) = validated.gear_prefix {
         if let Some(itemstat) = db.itemstats.get(&prefix.itemstat_id) {
-            for &(_slot, adj) in SLOT_ADJUSTMENTS {
-                for attr in &itemstat.attributes {
-                    let value = (adj * attr.multiplier + attr.value as f64).round();
-                    full_stats.add(&attr.attribute, value);
+            let budgets = data::slot_budgets::slot_budgets();
+            let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
+            for &(slot_type, _) in data::EQUIPMENT_SLOTS {
+                if let Some(budget) = budgets.get(slot_type, shape) {
+                    add_budget_stats_for_itemstat(
+                        &mut full_stats, itemstat, budget,
+                    );
                 }
             }
         }
@@ -1034,12 +1039,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_attribute_adjustment_slots() {
-        assert_eq!(attribute_adjustment_for_slot("Coat"), 225.0);
-        assert_eq!(attribute_adjustment_for_slot("Helm"), 141.0);
-        assert_eq!(attribute_adjustment_for_slot("Amulet"), 157.0);
-        assert_eq!(attribute_adjustment_for_slot("Leggings"), 171.0);
-        assert_eq!(attribute_adjustment_for_slot("WeaponA1"), 251.0);
+    fn test_slot_budget_lookups() {
+        // Verify slot budget data is accessible and returns expected ThreeStat major values.
+        // Source: data/slot_budgets/level80_ascended.json (verified from GW2 API items)
+        let budgets = data::slot_budgets::slot_budgets();
+        assert_eq!(
+            budgets.major_for_api_slot("Coat"), 141,
+            "Coat ThreeStat major should be 141"
+        );
+        assert_eq!(
+            budgets.major_for_api_slot("Helm"), 63,
+            "Helm ThreeStat major should be 63"
+        );
+        assert_eq!(
+            budgets.major_for_api_slot("Amulet"), 157,
+            "Amulet ThreeStat major should be 157"
+        );
+        assert_eq!(
+            budgets.major_for_api_slot("Leggings"), 94,
+            "Leggings ThreeStat major should be 94"
+        );
+        // WeaponA1 maps to WeaponTwoHand
+        assert_eq!(
+            budgets.major_for_api_slot("WeaponA1"), 251,
+            "WeaponA1 (TwoHand) ThreeStat major should be 251"
+        );
+        // WeaponA2 maps to WeaponOneHand
+        assert_eq!(
+            budgets.major_for_api_slot("WeaponA2"), 125,
+            "WeaponA2 (OneHand) ThreeStat major should be 125"
+        );
     }
 
     #[test]
