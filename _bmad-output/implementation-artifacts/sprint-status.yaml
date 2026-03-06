@@ -143,11 +143,12 @@ development_status:
   epic-2-retrospective: optional
 
   # -- Epic 3: Optimizer Correctness Overhaul & Patch-Aware Architecture ------
-  epic-3: backlog
+  epic-3: in-progress
 
   # Phase A -- Factual Engine Correctness
   # P3-01: Profession Profiles and Health/Armor Truth (FR1, D1)
-  p3-01-profession-profiles: backlog
+  # STORY: docs/stories/P3-01-profession-profiles.md
+  p3-01-profession-profiles: ready-for-dev
 
   # P3-02: BalanceContext Type and Game-Mode Plumbing (FR2)
   # BLOCKED until: p3-01 DONE
