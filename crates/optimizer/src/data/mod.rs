@@ -1,8 +1,9 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub mod balance_overrides;
 pub mod boon_condition_formulas;
 pub mod manifests;
+pub mod normalized_effects;
 pub mod patch_ledger;
 pub mod profession_profiles;
 pub mod quality;
@@ -12,6 +13,10 @@ pub mod universal_formulas;
 pub use balance_overrides::{BalanceOverrides, OverrideResult};
 pub use boon_condition_formulas::{BoonFormulas, ConditionFormulas, boons, conditions};
 pub use manifests::{PatchManifest, check_staleness};
+pub use normalized_effects::{
+    EffectCategory, NormalizedEffect, SourceType, StackingRule, StatusOperation, TriggerRule,
+    UptimeModel,
+};
 pub use patch_ledger::PatchLedger;
 pub use profession_profiles::ProfessionProfiles;
 pub use quality::{DataQuality, DataQualityReason, FactualValue};
@@ -25,7 +30,7 @@ pub use universal_formulas::UniversalFormulas;
 /// - Derived: calculated from factual data using known formulas.
 /// - Heuristic: empirically tuned or estimated values.
 /// - Unknown: unverified or placeholder values.
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum EvidenceLevel {
     Factual,
     Derived,
@@ -99,6 +104,9 @@ pub fn initialize() -> DataState {
         errors.extend(errs);
     }
     if let Err(errs) = balance_overrides::try_load_balance_overrides() {
+        errors.extend(errs);
+    }
+    if let Err(errs) = normalized_effects::try_load_normalized_effects() {
         errors.extend(errs);
     }
 
