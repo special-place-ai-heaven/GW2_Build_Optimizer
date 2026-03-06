@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 use thiserror::Error;
 
-use super::profession_profiles::EvidenceLevel;
+use super::EvidenceLevel;
 
 /// Canonical JSON embedded at compile time from data/slot_budgets/level80_ascended.json.
 const SLOT_BUDGETS_JSON: &str =
