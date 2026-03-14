@@ -980,6 +980,8 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         return;
     }
 
+    state.main.chat.waiting = true;
+
     let config = state.config.clone();
     let profession = state
         .main

@@ -855,7 +855,6 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
     // Chat bar at bottom
     ui.spacing();
     if let Some(msg) = crate::ui::chat_bar::render_chat_bar(ui, &mut state.main.chat) {
-        state.main.chat.waiting = true;
         optimization::send_chat_message(state, msg);
     }
 }
@@ -1103,7 +1102,6 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
     // Chat bar at bottom
     if state.main.current_build.is_some() {
         if let Some(msg) = crate::ui::chat_bar::render_chat_bar(ui, &mut state.main.chat) {
-            state.main.chat.waiting = true;
             optimization::send_chat_message(state, msg);
         }
     }
