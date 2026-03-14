@@ -33,10 +33,10 @@ const NUM_AXES: usize = 6;
 
 /// Convert RGBA [f32;4] to ImGui packed u32 color.
 fn color_u32(c: [f32; 4]) -> u32 {
-    let r = (c[0] * 255.0) as u32;
-    let g = (c[1] * 255.0) as u32;
-    let b = (c[2] * 255.0) as u32;
-    let a = (c[3] * 255.0) as u32;
+    let r = (c[0] * 255.0).clamp(0.0, 255.0) as u32;
+    let g = (c[1] * 255.0).clamp(0.0, 255.0) as u32;
+    let b = (c[2] * 255.0).clamp(0.0, 255.0) as u32;
+    let a = (c[3] * 255.0).clamp(0.0, 255.0) as u32;
     (a << 24) | (b << 16) | (g << 8) | r
 }
 

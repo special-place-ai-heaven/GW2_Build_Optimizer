@@ -18,10 +18,10 @@ const HEADER_COLOR: [f32; 4] = [0.85, 0.72, 0.3, 1.0]; // Gold header
 const LOCK_ICON_COLOR: [f32; 4] = [1.0, 0.85, 0.2, 0.8]; // Lock indicator ring
 
 fn color_u32(c: [f32; 4]) -> u32 {
-    let r = (c[0] * 255.0) as u32;
-    let g = (c[1] * 255.0) as u32;
-    let b = (c[2] * 255.0) as u32;
-    let a = (c[3] * 255.0) as u32;
+    let r = (c[0] * 255.0).clamp(0.0, 255.0) as u32;
+    let g = (c[1] * 255.0).clamp(0.0, 255.0) as u32;
+    let b = (c[2] * 255.0).clamp(0.0, 255.0) as u32;
+    let a = (c[3] * 255.0).clamp(0.0, 255.0) as u32;
     (a << 24) | (b << 16) | (g << 8) | r
 }
 

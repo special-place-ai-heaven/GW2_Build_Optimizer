@@ -774,6 +774,9 @@ fn rank_and_select(
 
     let solo_profile = &combat::buff_profiles_for_profession(profession_name, ctx)[0];
 
+    // Compute max synergy once (loop-invariant) — candidates don't change during ranking
+    let max_synergy = candidates.iter().map(|c| c.score).fold(0.0_f64, f64::max).max(1.0);
+
     for (idx, candidate) in candidates.iter().enumerate() {
         let stats = compute_candidate_stats(
             candidate, db, gear_prefix_id,
@@ -795,7 +798,6 @@ fn rank_and_select(
 
         let combat_score = score_with_weights(&combat_perf, weights);
         // Blend: 40% combat performance (gear-only), 60% synergy score (captures trait value)
-        let max_synergy = candidates.iter().map(|c| c.score).fold(0.0_f64, f64::max).max(1.0);
         let synergy_normalized = candidate.score / max_synergy;
         let final_score = combat_score * 0.4 + synergy_normalized * 0.6;
 
