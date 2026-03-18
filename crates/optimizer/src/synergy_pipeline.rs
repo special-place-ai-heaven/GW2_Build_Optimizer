@@ -1021,3 +1021,593 @@ fn cap_modifiers_vec(v: &mut Vec<f64>, max_entries: usize) {
         v.truncate(max_entries);
     }
 }
+
+#[cfg(test)]
+mod runtime_diagnostics_tests {
+    use super::*;
+
+    use gw2_api::models::{
+        EquipmentPiece, EquipmentStats, EquipmentTab, Fact, Item, ItemDetails, ItemStat,
+        Profession, Specialization, StatAttribute, Trait as GW2Trait,
+    };
+
+    use crate::balance::BalanceContext;
+    use crate::scoring::{score_with_weights, OptimizationWeights};
+
+    fn make_damage_trait(id: u32, specialization: u32, pct: f64) -> GW2Trait {
+        GW2Trait {
+            id,
+            name: format!("Diag Damage Trait {}", id),
+            icon: None,
+            description: Some(format!("Damage increased by {}%", pct)),
+            specialization,
+            tier: 1,
+            order: 0,
+            slot: "Major".into(),
+            facts: vec![Fact::Percent {
+                text: Some(format!("Damage increased by {}%", pct)),
+                icon: None,
+                percent: Some(pct),
+            }],
+            traited_facts: vec![],
+            skills: vec![],
+        }
+    }
+
+    fn make_vitality_trait(id: u32, specialization: u32, val: i32) -> GW2Trait {
+        GW2Trait {
+            id,
+            name: format!("Diag Vitality Trait {}", id),
+            icon: None,
+            description: Some(format!("+{} Vitality", val)),
+            specialization,
+            tier: 1,
+            order: 0,
+            slot: "Major".into(),
+            facts: vec![Fact::AttributeAdjust {
+                text: Some("Vitality".into()),
+                icon: None,
+                value: Some(val),
+                target: Some("Vitality".into()),
+            }],
+            traited_facts: vec![],
+            skills: vec![],
+        }
+    }
+
+    fn make_spec(spec_id: u32, elite: bool, profession: &str, minor: u32, major: [u32; 9]) -> Specialization {
+        Specialization {
+            id: spec_id,
+            name: format!("DiagSpec{}", spec_id),
+            profession: profession.into(),
+            elite,
+            minor_traits: vec![minor],
+            major_traits: major.to_vec(),
+            weapon_trait: None,
+            icon: None,
+            background: None,
+            profession_icon: None,
+            profession_icon_big: None,
+        }
+    }
+
+    fn make_equipment_item(id: u32) -> Item {
+        Item {
+            id,
+            name: "Diag Ascended Armor Piece".into(),
+            description: None,
+            icon: None,
+            item_type: "Armor".into(),
+            rarity: "Ascended".into(),
+            level: 80,
+            vendor_value: Some(1),
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec!["PvE".into(), "WvW".into()],
+            restrictions: vec![],
+            details: Some(ItemDetails {
+                detail_type: Some("Helm".into()),
+                weight_class: Some("Heavy".into()),
+                defense: Some(127),
+                damage_type: None,
+                min_power: None,
+                max_power: None,
+                suffix: None,
+                bonuses: vec![],
+                infusion_upgrade_flags: vec![],
+                infusion_slots: vec![],
+                attribute_adjustment: Some(141.0),
+                infix_upgrade: None,
+                suffix_item_id: None,
+                secondary_suffix_item_id: None,
+                stat_choices: vec![584],
+            }),
+        }
+    }
+
+    fn make_diag_db() -> GameDb {
+        let mut itemstats = HashMap::new();
+        // Canonical berserker-like profile.
+        itemstats.insert(
+            584,
+            ItemStat {
+                id: 584,
+                name: "Berserker's".into(),
+                attributes: vec![
+                    StatAttribute {
+                        attribute: "Power".into(),
+                        multiplier: 0.35,
+                        value: 32,
+                    },
+                    StatAttribute {
+                        attribute: "Precision".into(),
+                        multiplier: 0.25,
+                        value: 18,
+                    },
+                    StatAttribute {
+                        attribute: "CritDamage".into(),
+                        multiplier: 0.25,
+                        value: 18,
+                    },
+                ],
+            },
+        );
+        // Ambiguous contains-match profile; weak on purpose.
+        itemstats.insert(
+            1584,
+            ItemStat {
+                id: 1584,
+                name: "Berserker's Echo".into(),
+                attributes: vec![
+                    StatAttribute {
+                        attribute: "Power".into(),
+                        multiplier: 0.05,
+                        value: 0,
+                    },
+                    StatAttribute {
+                        attribute: "Precision".into(),
+                        multiplier: 0.05,
+                        value: 0,
+                    },
+                    StatAttribute {
+                        attribute: "CritDamage".into(),
+                        multiplier: 0.05,
+                        value: 0,
+                    },
+                ],
+            },
+        );
+
+        let mut traits = HashMap::new();
+
+        // Spec 10 traits
+        traits.insert(1001, make_damage_trait(1001, 10, 40.0)); // minor
+        traits.insert(1010, make_damage_trait(1010, 10, 40.0));
+        traits.insert(1011, make_vitality_trait(1011, 10, 150));
+        traits.insert(1012, make_vitality_trait(1012, 10, 150));
+        traits.insert(1020, make_damage_trait(1020, 10, 40.0));
+        traits.insert(1021, make_vitality_trait(1021, 10, 150));
+        traits.insert(1022, make_vitality_trait(1022, 10, 150));
+        traits.insert(1030, make_damage_trait(1030, 10, 40.0));
+        traits.insert(1031, make_vitality_trait(1031, 10, 150));
+        traits.insert(1032, make_vitality_trait(1032, 10, 150));
+
+        // Spec 11 traits
+        traits.insert(1101, make_damage_trait(1101, 11, 40.0)); // minor
+        traits.insert(1110, make_damage_trait(1110, 11, 40.0));
+        traits.insert(1111, make_vitality_trait(1111, 11, 150));
+        traits.insert(1112, make_vitality_trait(1112, 11, 150));
+        traits.insert(1120, make_damage_trait(1120, 11, 40.0));
+        traits.insert(1121, make_vitality_trait(1121, 11, 150));
+        traits.insert(1122, make_vitality_trait(1122, 11, 150));
+        traits.insert(1130, make_damage_trait(1130, 11, 40.0));
+        traits.insert(1131, make_vitality_trait(1131, 11, 150));
+        traits.insert(1132, make_vitality_trait(1132, 11, 150));
+
+        // Spec 12 traits
+        traits.insert(1201, make_damage_trait(1201, 12, 40.0)); // minor
+        traits.insert(1210, make_damage_trait(1210, 12, 40.0));
+        traits.insert(1211, make_vitality_trait(1211, 12, 150));
+        traits.insert(1212, make_vitality_trait(1212, 12, 150));
+        traits.insert(1220, make_damage_trait(1220, 12, 40.0));
+        traits.insert(1221, make_vitality_trait(1221, 12, 150));
+        traits.insert(1222, make_vitality_trait(1222, 12, 150));
+        traits.insert(1230, make_damage_trait(1230, 12, 40.0));
+        traits.insert(1231, make_vitality_trait(1231, 12, 150));
+        traits.insert(1232, make_vitality_trait(1232, 12, 150));
+
+        // Elite spec 30 traits
+        traits.insert(1301, make_damage_trait(1301, 30, 40.0)); // minor
+        traits.insert(1310, make_damage_trait(1310, 30, 40.0));
+        traits.insert(1311, make_vitality_trait(1311, 30, 150));
+        traits.insert(1312, make_vitality_trait(1312, 30, 150));
+        traits.insert(1320, make_damage_trait(1320, 30, 40.0));
+        traits.insert(1321, make_vitality_trait(1321, 30, 150));
+        traits.insert(1322, make_vitality_trait(1322, 30, 150));
+        traits.insert(1330, make_damage_trait(1330, 30, 40.0));
+        traits.insert(1331, make_vitality_trait(1331, 30, 150));
+        traits.insert(1332, make_vitality_trait(1332, 30, 150));
+
+        let mut specializations = HashMap::new();
+        specializations.insert(
+            10,
+            make_spec(10, false, "Warrior", 1001, [1010, 1011, 1012, 1020, 1021, 1022, 1030, 1031, 1032]),
+        );
+        specializations.insert(
+            11,
+            make_spec(11, false, "Warrior", 1101, [1110, 1111, 1112, 1120, 1121, 1122, 1130, 1131, 1132]),
+        );
+        specializations.insert(
+            12,
+            make_spec(12, false, "Warrior", 1201, [1210, 1211, 1212, 1220, 1221, 1222, 1230, 1231, 1232]),
+        );
+        specializations.insert(
+            30,
+            make_spec(30, true, "Warrior", 1301, [1310, 1311, 1312, 1320, 1321, 1322, 1330, 1331, 1332]),
+        );
+
+        let profession = Profession {
+            id: "Warrior".into(),
+            name: "Warrior".into(),
+            code: None,
+            specializations: vec![10, 11, 12, 30],
+            weapons: HashMap::new(),
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+
+        let mut professions = HashMap::new();
+        professions.insert("Warrior".into(), profession);
+
+        let mut items = HashMap::new();
+        items.insert(1000, make_equipment_item(1000));
+
+        let mut traits_by_spec: HashMap<u32, Vec<u32>> = HashMap::new();
+        for t in traits.values() {
+            traits_by_spec.entry(t.specialization).or_default().push(t.id);
+        }
+
+        GameDb {
+            items,
+            itemstats,
+            skills: HashMap::new(),
+            traits,
+            specializations,
+            professions,
+            legends: HashMap::new(),
+            pvp_amulets: HashMap::new(),
+            skills_by_profession: HashMap::new(),
+            traits_by_spec,
+            items_by_type: HashMap::new(),
+            runes: vec![],
+            sigils: vec![],
+            relics: vec![],
+            skill_to_palette: HashMap::new(),
+            palette_to_skill: HashMap::new(),
+            traits_by_condition: HashMap::new(),
+            skills_by_condition: HashMap::new(),
+            traits_by_buff: HashMap::new(),
+            skills_by_buff: HashMap::new(),
+        }
+    }
+
+    fn loaded_build_trait_ids(db: &GameDb, spec_ids: &[u32]) -> Vec<u32> {
+        let mut out = Vec::new();
+        for spec_id in spec_ids {
+            let spec = db.specializations.get(spec_id).expect("spec should exist");
+            out.extend(spec.minor_traits.iter().copied());
+            // Simulate loaded build selecting first trait in each column.
+            if spec.major_traits.len() == 9 {
+                out.push(spec.major_traits[0]);
+                out.push(spec.major_traits[3]);
+                out.push(spec.major_traits[6]);
+            }
+        }
+        out
+    }
+
+    fn loaded_equipment(itemstat_id: u32) -> EquipmentTab {
+        let mut equipment = Vec::new();
+        for &slot in crate::search::STAT_SLOTS {
+            equipment.push(EquipmentPiece {
+                id: 1000,
+                slot: slot.to_string(),
+                location: Some("Equipped".into()),
+                skin: None,
+                upgrades: vec![],
+                infusions: vec![],
+                binding: None,
+                bound_to: None,
+                dyes: vec![],
+                stats: Some(EquipmentStats {
+                    id: itemstat_id,
+                    attributes: None,
+                }),
+            });
+        }
+
+        EquipmentTab {
+            tab: 1,
+            name: Some("Diag Equip".into()),
+            is_active: true,
+            equipment,
+            equipment_pvp: None,
+        }
+    }
+
+    #[test]
+    fn test_runtime_non_improvement_diagnostics_two_contexts() {
+        // TEMP DIAGNOSTIC: runtime trace to reproduce "optimizer suggestion never beats loaded build".
+        let db = make_diag_db();
+        let weights = OptimizationWeights::preset_power_dps();
+        let ctx = BalanceContext::pve();
+        let gear_prefix = crate::scoring::select_gear_prefix(&weights).primary;
+
+        let contexts: Vec<(&str, gw2_core::types::BuildLocks, Vec<u32>)> = vec![
+            (
+                "Context-A (unlocked, loaded spec set: 10/11/30)",
+                gw2_core::types::BuildLocks::default(),
+                vec![10, 11, 30],
+            ),
+            (
+                "Context-B (Improve-style elite lock slot2=30, loaded spec set: 10/12/30)",
+                {
+                    let mut l = gw2_core::types::BuildLocks::default();
+                    l.specs[2] = Some(30);
+                    l
+                },
+                vec![10, 12, 30],
+            ),
+        ];
+
+        for (name, locks, loaded_specs) in contexts {
+            println!("\n================ {} ================", name);
+            println!(
+                "weights: P={:.2} C={:.2} B={:.2} H={:.2} S={:.2} Ctrl={:.2} [{}]",
+                weights.power,
+                weights.condition,
+                weights.boon_support,
+                weights.healing,
+                weights.sustain,
+                weights.control,
+                weights.summary_label()
+            );
+            println!(
+                "locks: specs={:?}, trait_lock_specs={}",
+                locks.specs,
+                locks.trait_locks.len()
+            );
+            println!("deterministic prefix: {}", gear_prefix);
+
+            let prefix_matches: Vec<(u32, String)> = db
+                .itemstats
+                .values()
+                .filter(|is| is.name.contains(gear_prefix))
+                .map(|is| (is.id, is.name.clone()))
+                .collect();
+            println!("prefix contains() matches: {:?}", prefix_matches);
+
+            // ---- Baseline current-build computation (mirrors addon current-build path contracts) ----
+            let loaded_trait_ids = loaded_build_trait_ids(&db, &loaded_specs);
+            let equipment = loaded_equipment(584);
+            let (baseline_stats, baseline_derived) = crate::stats::calculate_full_stats(
+                &equipment,
+                &loaded_trait_ids,
+                None,
+                &[],
+                "Warrior",
+                &db.items,
+                &db.itemstats,
+                &db.traits,
+            );
+            let baseline_mods = crate::combat::extract_damage_modifiers(
+                &loaded_trait_ids,
+                None,
+                &[],
+                None,
+                &db.traits,
+                &db.items,
+                &ctx,
+            );
+            let baseline_perf = crate::combat::calculate_combat_performance(
+                &baseline_stats,
+                &baseline_derived,
+                &baseline_mods,
+                &crate::combat::buff_profiles_for_profession("Warrior", &ctx)[0],
+                &crate::combat::condition_weights_for_profession("Warrior", &ctx),
+                "Warrior",
+                &ctx,
+            );
+            let baseline_score = score_with_weights(&baseline_perf, &weights);
+            println!(
+                "baseline stats/perf: power={:.1}, precision={:.1}, strike_dps={:.1}, total_dps={:.1}, score={:.4}",
+                baseline_stats.power,
+                baseline_stats.precision,
+                baseline_perf.strike_dps_index,
+                baseline_perf.total_dps_index,
+                baseline_score
+            );
+            println!(
+                "baseline modifiers: strike_mod_count={}, total_strike_mult={:.4}",
+                baseline_mods.strike_pct.len(),
+                baseline_mods.total_strike_mult()
+            );
+
+            // ---- Candidate generation and top pre-ranking traces ----
+            let profession = db.profession("Warrior").expect("profession should exist");
+            let mut candidates = select_specs_and_traits(
+                profession,
+                &weights,
+                &db.specializations,
+                &db.traits,
+                &locks,
+            );
+            assert!(
+                !candidates.is_empty(),
+                "diagnostic setup should produce candidates"
+            );
+            select_rune(&mut candidates, &db, &weights);
+            select_sigils(&mut candidates, &db, &weights);
+            select_relic(&mut candidates, &db, &weights);
+            select_weapons(&mut candidates, profession, &db, &weights);
+            select_skills(&mut candidates, &db, "Warrior", &weights);
+
+            println!("candidate_count_after_pipeline: {}", candidates.len());
+            let mut synergy_only: Vec<(usize, f64, Vec<u32>)> = candidates
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (i, c.score, c.spec_ids.clone()))
+                .collect();
+            synergy_only.sort_by(|a, b| {
+                b.1.partial_cmp(&a.1)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            for (rank, (idx, score, specs)) in synergy_only.iter().take(5).enumerate() {
+                println!(
+                    "pre-rank synergy #{:<2} idx={} score={:.4} specs={:?}",
+                    rank + 1,
+                    idx,
+                    score,
+                    specs
+                );
+            }
+
+            // ---- Ranking traces (combat_score without modifiers + final blend) ----
+            let gear_prefix_id = db
+                .itemstats
+                .values()
+                .find(|is| is.name.contains(gear_prefix))
+                .map(|is| is.id);
+            println!("ranking contains() chosen gear_prefix_id: {:?}", gear_prefix_id);
+            let max_synergy = candidates
+                .iter()
+                .map(|c| c.score)
+                .fold(0.0_f64, f64::max)
+                .max(1.0);
+            let mut ranked_preview: Vec<(usize, f64, f64, f64, Vec<u32>)> = Vec::new();
+            for (idx, c) in candidates.iter().enumerate() {
+                let stats = compute_candidate_stats(c, &db, gear_prefix_id);
+                let derived = crate::stats::compute_derived(&stats, "Warrior");
+                let combat_perf = crate::combat::calculate_combat_performance(
+                    &stats,
+                    &derived,
+                    &crate::combat::DamageModifiers::default(),
+                    &crate::combat::buff_profiles_for_profession("Warrior", &ctx)[0],
+                    &crate::combat::condition_weights_for_profession("Warrior", &ctx),
+                    "Warrior",
+                    &ctx,
+                );
+                let combat_score = score_with_weights(&combat_perf, &weights);
+                let final_score = combat_score * 0.4 + (c.score / max_synergy) * 0.6;
+                ranked_preview.push((
+                    idx,
+                    c.score,
+                    combat_score,
+                    final_score,
+                    c.spec_ids.clone(),
+                ));
+            }
+            ranked_preview.sort_by(|a, b| {
+                b.3.partial_cmp(&a.3)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            for (rank, (idx, syn, combat_score, final_score, specs)) in
+                ranked_preview.iter().take(5).enumerate()
+            {
+                println!(
+                    "rank-trace #{:<2} idx={} synergy={:.4} combat(no_mods)={:.4} final={:.4} specs={:?}",
+                    rank + 1,
+                    idx,
+                    syn,
+                    combat_score,
+                    final_score,
+                    specs
+                );
+            }
+
+            let selected = rank_and_select(&candidates, &db, "Warrior", gear_prefix, &weights, &ctx)
+                .expect("rank_and_select should produce best candidate");
+
+            // ---- Final suggestion trace (with capped modifiers, as used by deterministic output) ----
+            let mut progress = |_p: crate::engine::OptimizeProgress| {};
+            let result = build_synergy_result(
+                selected.clone(),
+                &db,
+                "Warrior",
+                gear_prefix,
+                &weights,
+                &ctx,
+                &mut progress,
+            )
+            .expect("build_synergy_result should succeed");
+
+            let suggestion_score = score_with_weights(&result.combat_solo, &weights);
+            println!(
+                "final suggestion: strike_dps={:.1}, total_dps={:.1}, score={:.4}, capped_total_strike_mult={:.4}",
+                result.combat_solo.strike_dps_index,
+                result.combat_solo.total_dps_index,
+                suggestion_score,
+                result.modifiers.total_strike_mult()
+            );
+            println!(
+                "validated gear prefix resolved in result: {:?}",
+                result
+                    .validated
+                    .gear_prefix
+                    .as_ref()
+                    .map(|p| (p.itemstat_id, p.name.clone()))
+            );
+
+            // Uncapped candidate combat for direct contract mismatch visibility.
+            let uncapped_mods = crate::combat::extract_damage_modifiers(
+                &selected.all_trait_ids,
+                selected.rune.as_ref().map(|(id, _)| *id),
+                &selected.sigils.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+                selected.relic.as_ref().map(|(id, _)| *id),
+                &db.traits,
+                &db.items,
+                &ctx,
+            );
+            let selected_stats = compute_candidate_stats(
+                &selected,
+                &db,
+                result.validated.gear_prefix.as_ref().map(|p| p.itemstat_id),
+            );
+            let selected_derived = crate::stats::compute_derived(&selected_stats, "Warrior");
+            let uncapped_perf = crate::combat::calculate_combat_performance(
+                &selected_stats,
+                &selected_derived,
+                &uncapped_mods,
+                &crate::combat::buff_profiles_for_profession("Warrior", &ctx)[0],
+                &crate::combat::condition_weights_for_profession("Warrior", &ctx),
+                "Warrior",
+                &ctx,
+            );
+            let uncapped_score = score_with_weights(&uncapped_perf, &weights);
+            println!(
+                "uncapped selected candidate: strike_mod_count={}, total_strike_mult={:.4}, score={:.4}",
+                uncapped_mods.strike_pct.len(),
+                uncapped_mods.total_strike_mult(),
+                uncapped_score
+            );
+
+            println!(
+                "comparison: baseline_score={:.4} vs suggestion_score={:.4} (delta={:.4})",
+                baseline_score,
+                suggestion_score,
+                suggestion_score - baseline_score
+            );
+
+            assert!(
+                baseline_perf.total_dps_index >= result.combat_solo.total_dps_index,
+                "repro expected: loaded baseline total_dps should be >= suggestion in {}, got baseline_total_dps={:.1}, suggestion_total_dps={:.1}",
+                name,
+                baseline_perf.total_dps_index,
+                result.combat_solo.total_dps_index
+            );
+        }
+    }
+}
