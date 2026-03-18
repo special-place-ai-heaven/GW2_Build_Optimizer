@@ -1,6 +1,6 @@
 # Story 3.16: Save/Load Profession Persistence and Crash Safety
 
-Status: review
+Status: done
 
 ## Story
 
@@ -95,10 +95,10 @@ grep -n "tmp\|rename" crates/core/src/storage.rs
   - [x] Create `SavedBuild` with `profession = "Necromancer"`, `engine_version = "1.0.0"`, `balance_manifest_version = Some("2026-03-06")`
   - [x] Serialize to JSON and deserialize back
   - [x] Assert all fields preserved
-- [ ] Write modifier-reconstruction test (AC: 11) — deferred: requires constructing a minimal GameDb from scratch, which needs a fully populated DataCache. Modifier reconstruction is tested at the integration level when loading builds with GameDb present. The `reconstruct_damage_modifiers()` function is exercised through the `saved_to_suggestion()` path.
-  - [ ] Create `SavedBuild` with known specs/traits/rune/sigils
-  - [ ] Mock or construct minimal GameDb with those entities
-  - [ ] Verify reconstructed `DamageModifiers` differ from `DamageModifiers::default()`
+- [x] Write modifier-reconstruction coverage (AC: 11) — automated tests now cover both `reconstruct_damage_modifiers()` and the `saved_to_suggestion()` reconstruction path.
+  - [x] Create `SavedBuild` fixtures with known specs/traits/rune/sigils
+  - [x] Exercise reconstruction path against GameDb-backed test data
+  - [x] Verify reconstructed `DamageModifiers` differ from `DamageModifiers::default()`
 - [x] Write crash-safety test (AC: 12)
   - [x] Test `save_new`: verify `.tmp` written then renamed to `.json`
   - [x] Test `save_new` collision: verify error if `.json` already exists
@@ -114,25 +114,25 @@ grep -n "tmp\|rename" crates/core/src/storage.rs
 ## Dev Notes
 
 - **This story supersedes P2-07** — all P2-07 acceptance criteria are satisfied by P3-16. P2-07 status should be marked as superseded.
-- **Current save bug**: `saved_to_suggestion()` at `crates/addon/src/ui/main_view/mod.rs:~1998` hardcodes `"Warrior"` for ALL loaded builds. This means a Necromancer build saved and reloaded shows Warrior health (9212) instead of Necromancer health (9212 — same coincidentally) but Guardian (1645 Low) would show as Warrior (9212 High) — a ~5.6x health error.
-- **Current DamageModifiers bug**: Same function uses `DamageModifiers::default()` (all empty) instead of reconstructing from saved traits/rune/sigils. This means no trait modifiers, no rune bonuses, no sigil effects are reflected in loaded combat metrics.
+- **Profession load path (implemented)**: `saved_to_suggestion()` at `crates/addon/src/ui/main_view/mod.rs:~1998` uses the saved profession with fallback `"Warrior"` only when the saved profession is empty (backward-compatibility shim for older saves).
+- **Damage modifier reconstruction (implemented)**: Same function reconstructs modifiers from saved traits/rune/sigils via `reconstruct_damage_modifiers()` rather than using `DamageModifiers::default()`. This ensures trait, rune, sigil, and related upgrade modifiers are reflected in loaded combat metrics.
 - **Entity resolution challenge**: `SavedBuild` stores components by name (strings), not IDs. Resolution against GameDb must use name-based lookup. If name collisions or ambiguity arise, document the limitation and log warnings.
 
-### Current Save Flow (What Exists)
+### Save Flow (Implemented)
 
 1. User enters build name in Save tab text input
 2. Clicks "Save" button → `suggestion_to_saved()` constructs `SavedBuild`
-3. `BuildStorage::save()` writes to `{addon_dir}/saves/{sanitized_name}.json`
-4. Current write is NOT crash-safe (direct `File::create` + write, no temp file)
-5. Current uses `OpenOptions::create_new(true)` to prevent overwrites
+3. `BuildStorage` writes save files under `{addon_dir}/saves/{sanitized_name}.json` via crash-safe `.tmp` + `rename`
+4. Save path uses crash-safe temp-write + atomic rename
+5. Save API uses explicit create-vs-overwrite semantics (`save_new` / `save_overwrite`)
 
-### Current Load Flow (What's Broken)
+### Load Flow (Implemented)
 
 1. Saved builds lazy-loaded from `{addon_dir}/saves/*.json` on first tab view
 2. User clicks "Load" → `saved_to_suggestion()` converts to `BuildSuggestion`
-3. **BUG**: Uses `"Warrior"` hardcoded for profession (line ~1998)
-4. **BUG**: Uses `DamageModifiers::default()` (line ~2000)
-5. Calls `compute_3tier_combat()` with wrong profession and empty modifiers
+3. Uses `saved.profession`, with `"Warrior"` fallback only for empty profession values (backward compatibility).
+4. Reconstructs modifiers via `reconstruct_damage_modifiers()` instead of `DamageModifiers::default()`.
+5. Recomputes combat output using resolved profession and reconstructed modifiers.
 
 ### Crash-Safe Write Pattern (from config.rs:212-221)
 
@@ -176,7 +176,7 @@ Follow this exact pattern. `std::fs::rename` is atomic on most filesystems.
 - [Source: crates/core/src/storage.rs:22-55] — current BuildStorage::save()
 - [Source: crates/core/src/config.rs:212-221] — AppConfig atomic save pattern to follow
 - [Source: crates/addon/src/ui/main_view/mod.rs:~1943-1974] — suggestion_to_saved()
-- [Source: crates/addon/src/ui/main_view/mod.rs:~1978-2027] — saved_to_suggestion() (contains bugs)
+- [Source: crates/addon/src/ui/main_view/mod.rs:~1978-2027] — saved_to_suggestion() (load path implementation)
 - [Source: crates/optimizer/src/combat.rs:388-455] — extract_damage_modifiers()
 - [Source: _bmad-output/planning-artifacts/epics.md#Story 3.16] — epic-level AC and requirements
 - [Source: docs/stories/P2-07-saved-build-profession-and-crash-safety.md] — superseded story
@@ -193,7 +193,7 @@ None.
 
 ### Completion Notes List
 
-- All 14 ACs implemented except AC 11 (modifier reconstruction test) which requires constructing a GameDb from scratch — deferred as noted in tasks.
+- All 14 ACs implemented, including AC 11 via automated reconstruction coverage for both `reconstruct_damage_modifiers()` and the `saved_to_suggestion()` reconstruction path.
 - `saved_to_suggestion()` now accepts `Option<&GameDb>` and uses `reconstruct_damage_modifiers()` to resolve names to IDs.
 - `nexus::log::log()` used for all warnings (not the `log` crate, per project conventions).
 - `engine_version` uses `env!("CARGO_PKG_VERSION")` which resolves to the workspace version "1.0.0".

@@ -2238,3 +2238,253 @@ fn format_timestamp(timestamp: u64) -> String {
         minutes
     )
 }
+
+
+#[cfg(test)]
+mod tests {
+    fn build_saved_for_modifier_reconstruction() -> gw2_core::types::SavedBuild {
+        gw2_core::types::SavedBuild {
+            name: "test-save".into(),
+            timestamp: 0,
+            character_name: "Test Character".into(),
+            game_mode: gw2_core::types::GameMode::PvE,
+            profession: "Warrior".into(),
+            engine_version: "test".into(),
+            balance_manifest_version: None,
+            label: "Test Build".into(),
+            stat_prefix: "Viper's".into(),
+            specializations: vec![(
+                "Test Spec".into(),
+                vec!["Test Condition Trait".into()],
+            )],
+            weapons: vec![],
+            skills: vec![],
+            rune: "Superior Rune of Test".into(),
+            sigils: vec!["Superior Sigil of Bursting".into()],
+            relic: "Relic of the Nightmare".into(),
+            explanation: String::new(),
+            synergy_explanation: String::new(),
+            changes_made: vec![],
+            estimated_stats: Some(gw2_core::types::StatBlock {
+                power: 1800,
+                precision: 1800,
+                toughness: 1200,
+                vitality: 1200,
+                condition_damage: 1800,
+                expertise: 0,
+                concentration: 0,
+                ferocity: 0,
+                healing_power: 0,
+                crit_chance: 0.0,
+                crit_damage: 0.0,
+                health: 0,
+                armor: 0,
+            }),
+        }
+    }
+
+    fn build_test_gamedb_for_modifier_reconstruction() -> gw2_optimizer::gamedb::GameDb {
+        let trait_id = 1001u32;
+        let spec_id = 5001u32;
+        let rune_id = 2001u32;
+        let sigil_id = 2002u32;
+        let relic_id = 2003u32;
+
+        let mut traits = std::collections::HashMap::new();
+        traits.insert(
+            trait_id,
+            gw2_api::models::Trait {
+                id: trait_id,
+                name: "Test Condition Trait".into(),
+                icon: None,
+                description: None,
+                specialization: spec_id,
+                tier: 1,
+                order: 0,
+                slot: "Major".into(),
+                facts: vec![gw2_api::models::Fact::Percent {
+                    text: Some("Increase condition damage by 20%".into()),
+                    icon: None,
+                    percent: Some(20.0),
+                }],
+                traited_facts: vec![],
+                skills: vec![],
+            },
+        );
+
+        let mut specializations = std::collections::HashMap::new();
+        specializations.insert(
+            spec_id,
+            gw2_api::models::Specialization {
+                id: spec_id,
+                name: "Test Spec".into(),
+                profession: "Warrior".into(),
+                elite: false,
+                minor_traits: vec![],
+                major_traits: vec![trait_id],
+                weapon_trait: None,
+                icon: None,
+                background: None,
+                profession_icon: None,
+                profession_icon_big: None,
+            },
+        );
+
+        let mut items = std::collections::HashMap::new();
+        items.insert(
+            rune_id,
+            gw2_api::models::Item {
+                id: rune_id,
+                name: "Superior Rune of Test".into(),
+                description: None,
+                icon: None,
+                item_type: "UpgradeComponent".into(),
+                rarity: "Exotic".into(),
+                level: 80,
+                vendor_value: None,
+                chat_link: None,
+                default_skin: None,
+                flags: vec![],
+                game_types: vec![],
+                restrictions: vec![],
+                details: Some(gw2_api::models::ItemDetails {
+                    detail_type: Some("UpgradeComponent".into()),
+                    weight_class: None,
+                    defense: None,
+                    damage_type: None,
+                    min_power: None,
+                    max_power: None,
+                    suffix: None,
+                    bonuses: vec!["+20% Condition Duration".into()],
+                    infusion_upgrade_flags: vec![],
+                    infusion_slots: vec![],
+                    attribute_adjustment: None,
+                    infix_upgrade: None,
+                    suffix_item_id: None,
+                    secondary_suffix_item_id: None,
+                    stat_choices: vec![],
+                }),
+            },
+        );
+        items.insert(
+            sigil_id,
+            gw2_api::models::Item {
+                id: sigil_id,
+                name: "Superior Sigil of Bursting".into(),
+                description: None,
+                icon: None,
+                item_type: "UpgradeComponent".into(),
+                rarity: "Exotic".into(),
+                level: 80,
+                vendor_value: None,
+                chat_link: None,
+                default_skin: None,
+                flags: vec![],
+                game_types: vec![],
+                restrictions: vec![],
+                details: None,
+            },
+        );
+        items.insert(
+            relic_id,
+            gw2_api::models::Item {
+                id: relic_id,
+                name: "Relic of the Nightmare".into(),
+                description: None,
+                icon: None,
+                item_type: "Relic".into(),
+                rarity: "Exotic".into(),
+                level: 80,
+                vendor_value: None,
+                chat_link: None,
+                default_skin: None,
+                flags: vec![],
+                game_types: vec![],
+                restrictions: vec![],
+                details: None,
+            },
+        );
+
+        let mut traits_by_spec = std::collections::HashMap::new();
+        traits_by_spec.insert(spec_id, vec![trait_id]);
+
+        gw2_optimizer::gamedb::GameDb {
+            items,
+            itemstats: std::collections::HashMap::new(),
+            skills: std::collections::HashMap::new(),
+            traits,
+            specializations,
+            professions: std::collections::HashMap::new(),
+            legends: std::collections::HashMap::new(),
+            pvp_amulets: std::collections::HashMap::new(),
+            skills_by_profession: std::collections::HashMap::new(),
+            traits_by_spec,
+            items_by_type: std::collections::HashMap::new(),
+            runes: vec![rune_id],
+            sigils: vec![sigil_id],
+            relics: vec![relic_id],
+            skill_to_palette: std::collections::HashMap::new(),
+            palette_to_skill: std::collections::HashMap::new(),
+            traits_by_condition: std::collections::HashMap::new(),
+            skills_by_condition: std::collections::HashMap::new(),
+            traits_by_buff: std::collections::HashMap::new(),
+            skills_by_buff: std::collections::HashMap::new(),
+        }
+    }
+
+    fn contains_approx(values: &[f64], expected: f64) -> bool {
+        values.iter().any(|v| (v - expected).abs() < 1e-9)
+    }
+
+    #[test]
+    fn test_reconstruct_damage_modifiers_resolves_saved_entities() {
+        let saved = build_saved_for_modifier_reconstruction();
+        let db = build_test_gamedb_for_modifier_reconstruction();
+        let ctx = gw2_optimizer::balance::BalanceContext::new(saved.game_mode.clone());
+
+        let mods = super::reconstruct_damage_modifiers(&saved, &db, &ctx);
+
+        assert!(
+            contains_approx(&mods.condition_pct, 0.20),
+            "expected trait-based +20% condition damage to be reconstructed"
+        );
+        assert!(
+            contains_approx(&mods.condition_pct, 0.06),
+            "expected sigil-based +6% condition damage to be reconstructed"
+        );
+        assert!(
+            contains_approx(&mods.condi_duration_pct, 0.20),
+            "expected rune-based +20% condition duration to be reconstructed"
+        );
+        assert!(
+            contains_approx(&mods.condi_duration_pct, 0.10),
+            "expected relic-based +10% condition duration to be reconstructed"
+        );
+    }
+
+    #[test]
+    fn test_saved_to_suggestion_load_path_uses_reconstructed_modifiers() {
+        let saved = build_saved_for_modifier_reconstruction();
+        let db = build_test_gamedb_for_modifier_reconstruction();
+
+        let without_db = super::saved_to_suggestion(&saved, None);
+        let with_db = super::saved_to_suggestion(&saved, Some(&db));
+
+        let without_solo = without_db
+            .combat_solo
+            .expect("saved test fixture should produce combat metrics without GameDb");
+        let with_solo = with_db
+            .combat_solo
+            .expect("saved test fixture should produce combat metrics with GameDb");
+
+        assert!(
+            with_solo.condition_dps_index > without_solo.condition_dps_index,
+            "load path with GameDb should reconstruct condition modifiers instead of defaulting"
+        );
+        assert!(
+            with_solo.total_dps_index > without_solo.total_dps_index,
+            "total DPS should reflect reconstructed modifiers on load"
+        );
+    }
+}
+

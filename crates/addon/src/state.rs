@@ -292,6 +292,21 @@ mod tests {
     use gw2_core::config::AppConfig;
     use gw2_optimizer::scoring::OptimizationWeights;
 
+    // Global state tests mutate the same static STATE mutex. Parallel execution can
+    // make one test reset/replace state while another is asserting, causing flaky
+    // None/stale-value results. Serialize these tests with a dedicated lock.
+    static TEST_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn state_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        let current = std::thread::current();
+        let test_name = current.name().unwrap_or("<unnamed>");
+        eprintln!(
+            "[GW2BuildOpt][state::tests] acquiring shared STATE test lock: {}",
+            test_name
+        );
+        TEST_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Reset the global STATE to None for test isolation.
     /// Call as the first line of every test that calls init(), clear(), or with_state().
     /// Required: tests share a global static Mutex — without this, a prior test's
@@ -370,6 +385,7 @@ mod tests {
 
     #[test]
     fn test_init_routes_to_gw2_key_when_no_keys() {
+        let _serial = state_test_guard();
         reset_state();
         // No config.json in the dir → AppConfig::load returns default (no keys).
         let dir = std::env::temp_dir()
@@ -383,6 +399,7 @@ mod tests {
 
     #[test]
     fn test_init_routes_to_llm_key_when_only_gw2_key() {
+        let _serial = state_test_guard();
         reset_state();
         let config = AppConfig {
             gw2_api_key: Some("test-gw2-key".into()),
@@ -397,6 +414,7 @@ mod tests {
 
     #[test]
     fn test_init_routes_to_data_download_when_keys_present_no_cache() {
+        let _serial = state_test_guard();
         reset_state();
         let config = AppConfig {
             gw2_api_key: Some("test-gw2-key".into()),
@@ -413,6 +431,7 @@ mod tests {
 
     #[test]
     fn test_init_routes_to_main_when_setup_complete() {
+        let _serial = state_test_guard();
         reset_state();
         let config = AppConfig {
             gw2_api_key: Some("test-gw2-key".into()),
@@ -435,6 +454,7 @@ mod tests {
 
     #[test]
     fn test_init_loading_flags_start_false() {
+        let _serial = state_test_guard();
         reset_state();
         let dir = std::env::temp_dir()
             .join(format!("gw2_state_test_{}_loading_flags", std::process::id()));
@@ -453,6 +473,7 @@ mod tests {
 
     #[test]
     fn test_with_state_returns_none_when_uninitialized() {
+        let _serial = state_test_guard();
         reset_state();
         let result = with_state(|_s| 42);
         assert!(result.is_none());
@@ -460,6 +481,7 @@ mod tests {
 
     #[test]
     fn test_with_state_invokes_closure_when_initialized() {
+        let _serial = state_test_guard();
         reset_state();
         let dir = std::env::temp_dir()
             .join(format!("gw2_state_test_{}_with_state_init", std::process::id()));
@@ -474,6 +496,7 @@ mod tests {
 
     #[test]
     fn test_clear_cancels_token() {
+        let _serial = state_test_guard();
         reset_state();
         let dir = std::env::temp_dir()
             .join(format!("gw2_state_test_{}_clear_cancel", std::process::id()));
@@ -487,6 +510,7 @@ mod tests {
 
     #[test]
     fn test_clear_drops_state() {
+        let _serial = state_test_guard();
         reset_state();
         let dir = std::env::temp_dir()
             .join(format!("gw2_state_test_{}_clear_drops", std::process::id()));
@@ -505,6 +529,7 @@ mod tests {
 
     #[test]
     fn test_catch_unwind_clears_chat_waiting_on_panic() {
+        let _serial = state_test_guard();
         reset_state();
         let dir = std::env::temp_dir()
             .join(format!("gw2_state_test_{}_panic_chat", std::process::id()));
@@ -528,6 +553,7 @@ mod tests {
 
     #[test]
     fn test_catch_unwind_clears_models_loading_on_panic() {
+        let _serial = state_test_guard();
         reset_state();
         let dir = std::env::temp_dir()
             .join(format!("gw2_state_test_{}_panic_models", std::process::id()));
@@ -551,6 +577,7 @@ mod tests {
 
     #[test]
     fn test_catch_unwind_clears_characters_loading_on_panic() {
+        let _serial = state_test_guard();
         reset_state();
         let dir = std::env::temp_dir()
             .join(format!("gw2_state_test_{}_panic_chars", std::process::id()));
@@ -574,6 +601,7 @@ mod tests {
 
     #[test]
     fn test_catch_unwind_resets_gw2_key_status_on_panic() {
+        let _serial = state_test_guard();
         reset_state();
         let dir = std::env::temp_dir()
             .join(format!("gw2_state_test_{}_panic_setup", std::process::id()));
@@ -602,6 +630,7 @@ mod tests {
 
     #[test]
     fn test_catch_unwind_mutex_poison_recovery() {
+        let _serial = state_test_guard();
         // Exercises the real danger scenario: a panic INSIDE with_state() poisons
         // the mutex, and subsequent with_state() calls must still succeed via
         // lock_state()'s unwrap_or_else(|e| e.into_inner()) recovery.
