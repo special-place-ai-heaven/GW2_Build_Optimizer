@@ -450,11 +450,12 @@ fn select_sigils(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Opt
 
     for candidate in candidates.iter_mut() {
         // GW2 sigil rule: duplicates are forbidden *within* a weapon set (Set 1 or Set 2),
-        // but the same sigil type IS allowed in both sets independently.
-        // We select 2 sigils per set with separate dedup sets.
+        // but the same sigil family (e.g. "Sigil of Force") IS allowed in both sets
+        // independently. We select 2 sigils per set with separate dedup sets.
         for set_idx in 0..2usize {
             let _ = set_idx; // slot identity only used for ordering; sets are symmetric
             let mut set_ids: Vec<u32> = Vec::new();
+            let mut set_families: Vec<String> = Vec::new();
 
             for _slot in 0..2 {
                 let mut best_score = f64::NEG_INFINITY;
@@ -463,8 +464,15 @@ fn select_sigils(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Opt
                 let mut best_links: Vec<SynergyLink> = Vec::new();
 
                 for &&sigil in &superior_sigils {
+                    // Prevent duplicates within a weapon set. Some sigils exist as
+                    // multiple items with the same display name (e.g. PvE/PvP versions),
+                    // so we dedupe by a normalized "family" key rather than raw ID.
                     if set_ids.contains(&sigil.id) {
-                        continue; // No duplicate sigils within this weapon set
+                        continue;
+                    }
+                    let family = normalize_sigil_family(&sigil.name);
+                    if set_families.iter().any(|f| f == &family) {
+                        continue;
                     }
 
                     let effects = extract_sigil_effects(sigil);
@@ -486,6 +494,7 @@ fn select_sigils(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Opt
 
                 if let Some(sigil) = best_sigil {
                     set_ids.push(sigil.0);
+                    set_families.push(normalize_sigil_family(&sigil.1));
                     candidate.synergy_links.extend(best_links);
                     candidate
                         .accumulated
@@ -499,6 +508,12 @@ fn select_sigils(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Opt
 }
 
 // ─── Stage 5: Relic ───
+
+fn normalize_sigil_family(name: &str) -> String {
+    let mut base = name.replace(" (PvP)", "");
+    base.make_ascii_lowercase();
+    base.trim().to_string()
+}
 
 fn select_relic(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &OptimizationWeights) {
     let relics = db.all_relics();

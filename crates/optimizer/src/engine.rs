@@ -944,6 +944,14 @@ pub fn calculate_validated_stats(
         }
     }
 
+    // Rune and sigil flat stat bonuses (permanent stats only).
+    let rune_id = validated.rune.as_ref().map(|r| r.id);
+    let sigil_ids: Vec<u32> = validated.sigils.iter().map(|s| s.id).collect();
+    let rune_stats = stats::calculate_rune_stats(rune_id, &db.items);
+    full_stats += &rune_stats;
+    let sigil_stats = stats::calculate_sigil_stats(&sigil_ids, &db.items);
+    full_stats += &sigil_stats;
+
     // Collect all trait IDs from validated specializations
     let all_trait_ids: Vec<u32> = validated
         .specializations
@@ -957,8 +965,6 @@ pub fn calculate_validated_stats(
     stats::apply_trait_conversions(&mut full_stats, &all_trait_ids, &db.traits);
 
     // Extract damage modifiers from traits + rune + sigils + relic
-    let rune_id = validated.rune.as_ref().map(|r| r.id);
-    let sigil_ids: Vec<u32> = validated.sigils.iter().map(|s| s.id).collect();
     let relic_id = validated.relic.as_ref().map(|r| r.id);
     let modifiers = combat::extract_damage_modifiers(
         &all_trait_ids,
