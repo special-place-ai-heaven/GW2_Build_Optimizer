@@ -1295,6 +1295,45 @@ pub fn optimize_deterministic(
     Ok(result)
 }
 
+/// Run the v2 beam/evolutionary search.
+///
+/// Seeds from the synergy pipeline, then performs a bounded beam search over
+/// complete build states using the gated referee as the fitness function.
+/// No LLM calls are made.  Completes within `SearchConfig::time_limit_secs`
+/// (default 28 s, well under the 30 s SLA).
+pub fn optimize_v2(
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &crate::scenario::ScenarioSpec,
+    locks: &gw2_core::types::BuildLocks,
+    on_progress: &mut dyn FnMut(OptimizeProgress),
+) -> Result<SynergyResult, String> {
+    use crate::search_v2::SearchConfig;
+
+    on_progress(OptimizeProgress {
+        stage: "Running v2 search...".into(),
+        done: false,
+    });
+    let config = SearchConfig::default();
+    let best = crate::search_v2::optimize_v2_search(
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+        locks,
+        &config,
+        on_progress,
+    )?;
+    on_progress(OptimizeProgress {
+        stage: "Done".into(),
+        done: true,
+    });
+    Ok(synergy_result_from_validated(best, db, profession_name, ctx))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

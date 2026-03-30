@@ -63,13 +63,13 @@ pub struct ValidatedSkills {
     pub elite: Option<(u32, String)>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ValidatedItem {
     pub id: u32,
     pub name: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ValidatedGearPrefix {
     pub itemstat_id: u32,
     pub name: String,
