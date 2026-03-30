@@ -494,9 +494,9 @@ fn render_wvw_sub_role(ui: &Ui, state: &mut AddonState) {
         if ui.is_item_hovered() {
             ui.tooltip_text(tooltip);
         }
-        ui.same_line();
+        // Stack vertically to avoid clipping on narrow left panels.
+        ui.spacing();
     }
-    ui.new_line();
 }
 
 /// Character picker + build/equip template dropdowns.
