@@ -4,14 +4,22 @@
 //! `optimize_v2()`.  The search loop (T02) builds on top of the primitives
 //! defined here.
 
+use std::time::Instant;
+
+use crate::balance::BalanceContext;
+use crate::engine::OptimizeProgress;
 use crate::gamedb::GameDb;
-use crate::referee::RefereeReport;
+use crate::referee::{self, RefereeReport};
+use crate::scenario::ScenarioSpec;
+use crate::scoring::{self, OptimizationWeights};
+use crate::synergy_pipeline;
 use crate::validation::{ValidatedBuild, ValidatedGearPrefix, ValidatedItem};
 
 // ─── Core types ──────────────────────────────────────────────────────────────
 
 /// A single candidate on the beam: a fully-validated build together with its
 /// referee evaluation (score, viability, stats, …).
+#[derive(Clone)]
 pub struct BeamCandidate {
     pub validated: ValidatedBuild,
     pub report: RefereeReport,
@@ -61,6 +69,130 @@ pub fn generate_neighbors(
     neighbors.extend(swap_utility_skills(candidate, db, profession_name));
 
     neighbors
+}
+
+// ─── Beam search entry point ──────────────────────────────────────────────────
+
+/// Run the beam/evolutionary search over complete build states.
+///
+/// Seeds from the synergy pipeline, then iteratively expands neighbors,
+/// evaluates each with the gated referee, keeps the top `config.beam_width`
+/// candidates, and returns the best `ValidatedBuild` found within the
+/// time/evaluation budget.
+///
+/// Returns `Err` if seeding fails (e.g. unknown profession).
+pub fn optimize_v2_search(
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+    locks: &gw2_core::types::BuildLocks,
+    config: &SearchConfig,
+    on_progress: &mut dyn FnMut(OptimizeProgress),
+) -> Result<ValidatedBuild, String> {
+    // Step 1: select gear prefix (cosine sim).
+    let gear_match = scoring::select_gear_prefix(weights);
+    let prefix_name = gear_match.primary;
+
+    // Step 2: seed from synergy pipeline.
+    on_progress(OptimizeProgress {
+        stage: "Seeding from synergy pipeline...".into(),
+        done: false,
+    });
+    let seed_result = synergy_pipeline::optimize_synergy(
+        db,
+        profession_name,
+        weights,
+        ctx,
+        prefix_name,
+        locks,
+        &mut |_| {},
+    )?;
+
+    // Step 3: evaluate seed.
+    let seed_report = referee::evaluate_validated_build(
+        &seed_result.validated,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+    );
+
+    // Step 4: initialise beam.
+    let mut beam: Vec<BeamCandidate> = vec![BeamCandidate {
+        validated: seed_result.validated,
+        report: seed_report,
+    }];
+
+    let start = Instant::now();
+    let mut eval_count = 0usize;
+
+    // Step 5: beam loop.
+    while eval_count < config.eval_budget
+        && start.elapsed().as_secs() < config.time_limit_secs
+    {
+        let mut next: Vec<BeamCandidate> = Vec::new();
+
+        // Elitism: keep current beam members in the candidate pool.
+        next.extend(beam.iter().cloned());
+
+        // Budget per candidate to avoid spending all evals on a single member.
+        let budget_per =
+            config.eval_budget.saturating_sub(eval_count) / beam.len().max(1);
+        let neighbor_cap = budget_per.min(30).max(1);
+
+        for candidate in &beam {
+            let neighbors = generate_neighbors(candidate, db, profession_name);
+            for neighbor in neighbors.into_iter().take(neighbor_cap) {
+                if eval_count >= config.eval_budget {
+                    break;
+                }
+                let report = referee::evaluate_validated_build(
+                    &neighbor,
+                    db,
+                    profession_name,
+                    weights,
+                    ctx,
+                    scenario,
+                );
+                eval_count += 1;
+                next.push(BeamCandidate {
+                    validated: neighbor,
+                    report,
+                });
+            }
+        }
+
+        // Sort: higher user_intent_score first.
+        next.sort_by(|a, b| {
+            b.report
+                .user_intent_score
+                .partial_cmp(&a.report.user_intent_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // De-duplicate by (score, gear_prefix, rune) to keep diversity.
+        next.dedup_by(|a, b| {
+            a.report.user_intent_score == b.report.user_intent_score
+                && a.validated.gear_prefix == b.validated.gear_prefix
+                && a.validated.rune == b.validated.rune
+        });
+
+        next.truncate(config.beam_width);
+
+        if next.is_empty() {
+            break;
+        }
+        beam = next;
+    }
+
+    // Step 6: return best.
+    beam.into_iter()
+        .next()
+        .map(|c| c.validated)
+        .ok_or_else(|| "No candidates survived beam search".to_string())
 }
 
 // ─── Individual mutation operators (private helpers) ─────────────────────────
@@ -415,6 +547,56 @@ mod tests {
         assert!(
             rune_ids.contains(&102),
             "expected rune ID 102 in neighbors"
+        );
+    }
+
+    /// optimize_v2_search on an empty DB (no professions) must return Err and
+    /// must not panic.
+    #[test]
+    fn test_optimize_v2_search_empty_db_returns_err() {
+        use crate::scenario::{CombatTier, OptimizationTarget, ScenarioSpec, TargetProfile};
+        use gw2_core::types::{BuildLocks, GameMode};
+
+        let db = empty_db();
+        let weights = OptimizationWeights::default();
+        let ctx = crate::balance::BalanceContext::new(GameMode::PvE);
+        let scenario = ScenarioSpec {
+            game_mode: GameMode::PvE,
+            combat_tier: CombatTier::Solo,
+            target_profile: TargetProfile::Single,
+            optimization_target: OptimizationTarget {
+                label: String::new(),
+            },
+            patch_id: None,
+        };
+        let locks = BuildLocks::default();
+        let config = SearchConfig::default();
+
+        let result = optimize_v2_search(
+            &db,
+            "Guardian",
+            &weights,
+            &ctx,
+            &scenario,
+            &locks,
+            &config,
+            &mut |_| {},
+        );
+
+        assert!(
+            result.is_err(),
+            "expected Err from optimize_v2_search with empty DB, got Ok"
+        );
+    }
+
+    /// SearchConfig::default() must have the expected sentinel values.
+    #[test]
+    fn test_search_config_default() {
+        let config = SearchConfig::default();
+        assert_eq!(config.beam_width, 10, "default beam_width should be 10");
+        assert_eq!(
+            config.eval_budget, 200,
+            "default eval_budget should be 200"
         );
     }
 }
