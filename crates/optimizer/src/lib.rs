@@ -14,6 +14,7 @@ pub mod rotation;
 pub mod scenario;
 pub mod scoring;
 pub mod search;
+pub mod search_v2;
 pub mod stats;
 pub mod synergy;
 pub mod synergy_pipeline;
