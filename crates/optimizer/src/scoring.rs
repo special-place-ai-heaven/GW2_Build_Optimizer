@@ -23,7 +23,14 @@ pub const BOON_SUPPORT_NORM: f64 = 1.0;
 pub const CONTROL_NORM: f64 = 1.0;
 
 /// 6-axis radar chart labels, in render order (clockwise from top).
-pub const AXIS_LABELS: [&str; 6] = ["Power", "Condition", "Boon Spt", "Heal", "Sustain", "Control"];
+pub const AXIS_LABELS: [&str; 6] = [
+    "Power",
+    "Condition",
+    "Boon Spt",
+    "Heal",
+    "Sustain",
+    "Control",
+];
 
 /// Default total weight budget. Now loaded from objective profile data at runtime.
 /// This constant is kept for backward compatibility with code that doesn't have
@@ -82,8 +89,7 @@ impl OptimizationWeights {
 
     /// Sum of all weights.
     pub fn total(&self) -> f64 {
-        self.power + self.condition + self.boon_support
-            + self.healing + self.sustain + self.control
+        self.power + self.condition + self.boon_support + self.healing + self.sustain + self.control
     }
 
     /// Get weight by axis index (0=Power, 1=Condition, 2=BoonSupport, 3=Heal, 4=Sustain, 5=Control).
@@ -163,7 +169,14 @@ impl OptimizationWeights {
 
     /// Return weights as an array in axis order.
     pub fn as_array(&self) -> [f64; 6] {
-        [self.power, self.condition, self.boon_support, self.healing, self.sustain, self.control]
+        [
+            self.power,
+            self.condition,
+            self.boon_support,
+            self.healing,
+            self.sustain,
+            self.control,
+        ]
     }
 
     /// Human-readable summary of the dominant priorities.
@@ -224,27 +237,62 @@ impl OptimizationWeights {
     // compatibility and quick access without needing a profile reference.
 
     pub fn preset_power_dps() -> Self {
-        Self { power: 1.0, condition: 0.0, boon_support: 0.0, healing: 0.0, sustain: 0.1, control: 0.0 }
+        Self {
+            power: 1.0,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.1,
+            control: 0.0,
+        }
         // total = 1.1
     }
 
     pub fn preset_condi_dps() -> Self {
-        Self { power: 0.2, condition: 1.0, boon_support: 0.0, healing: 0.0, sustain: 0.1, control: 0.2 }
+        Self {
+            power: 0.2,
+            condition: 1.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.1,
+            control: 0.2,
+        }
         // total = 1.5
     }
 
     pub fn preset_tank() -> Self {
-        Self { power: 0.1, condition: 0.0, boon_support: 0.0, healing: 0.3, sustain: 1.0, control: 0.2 }
+        Self {
+            power: 0.1,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 0.3,
+            sustain: 1.0,
+            control: 0.2,
+        }
         // total = 1.6
     }
 
     pub fn preset_healer() -> Self {
-        Self { power: 0.0, condition: 0.0, boon_support: 0.2, healing: 1.0, sustain: 0.4, control: 0.0 }
+        Self {
+            power: 0.0,
+            condition: 0.0,
+            boon_support: 0.2,
+            healing: 1.0,
+            sustain: 0.4,
+            control: 0.0,
+        }
         // total = 1.6
     }
 
     pub fn preset_balanced() -> Self {
-        Self { power: 0.4, condition: 0.3, boon_support: 0.2, healing: 0.2, sustain: 0.4, control: 0.3 }
+        Self {
+            power: 0.4,
+            condition: 0.3,
+            boon_support: 0.2,
+            healing: 0.2,
+            sustain: 0.4,
+            control: 0.3,
+        }
         // total = 1.8
     }
 
@@ -374,12 +422,18 @@ impl ObjectiveScorer {
 
     /// Get condition priority, defaulting to 0.5 if not specified.
     pub fn condition_priority(&self, condition_name: &str) -> f64 {
-        self.condition_priorities.get(condition_name).copied().unwrap_or(0.5)
+        self.condition_priorities
+            .get(condition_name)
+            .copied()
+            .unwrap_or(0.5)
     }
 
     /// Get interaction operation priority, defaulting to 0.5 if not specified.
     pub fn interaction_priority(&self, operation: &str) -> f64 {
-        self.interaction_priorities.get(operation).copied().unwrap_or(0.5)
+        self.interaction_priorities
+            .get(operation)
+            .copied()
+            .unwrap_or(0.5)
     }
 }
 
@@ -409,9 +463,8 @@ pub fn score_with_weights(perf: &CombatPerformance, weights: &OptimizationWeight
     // Boon Support: proxy via boon duration (boon uptime contribution)
     let boon_support_score = (perf.boon_duration_pct / 100.0).min(1.0);
     // Control: proxy via condi duration (CC condition duration) + some boon duration (stability etc.)
-    let control_score = (perf.condi_duration_pct / 100.0 * 0.6
-        + perf.boon_duration_pct / 100.0 * 0.4)
-        .min(1.0);
+    let control_score =
+        (perf.condi_duration_pct / 100.0 * 0.6 + perf.boon_duration_pct / 100.0 * 0.4).min(1.0);
 
     let raw = (w.power * power_score
         + w.condition * condition_score
@@ -426,8 +479,12 @@ pub fn score_with_weights(perf: &CombatPerformance, weights: &OptimizationWeight
     // neglected axes compound.
     let axis_weights = w.as_array();
     let axis_scores = [
-        power_score, condition_score, boon_support_score,
-        healing_score, sustain_score, control_score,
+        power_score,
+        condition_score,
+        boon_support_score,
+        healing_score,
+        sustain_score,
+        control_score,
     ];
     let mut penalty = 1.0;
     for i in 0..6 {
@@ -452,58 +509,64 @@ pub fn score_with_weights(perf: &CombatPerformance, weights: &OptimizationWeight
 
 /// Power axis tiers: strike DPS (Power / Precision / Ferocity)
 const POWER_TIERS: [&[&str]; 5] = [
-    &["Cleric's"],                                           // Tier 1: HP/Pow/Tou -- minor Power
-    &["Soldier's", "Knight's", "Cavalier's", "Harrier's"],   // Tier 2: some Power, not primary
-    &["Valkyrie", "Diviner's", "Viper's", "Sinister"],       // Tier 3: moderate Power presence
-    &["Marauder", "Dragon's", "Grieving"],                    // Tier 4: Power-major with 1 extra
-    &["Berserker's", "Assassin's"],                           // Tier 5: pure Pow/Prec/Fer
+    &["Cleric's"], // Tier 1: HP/Pow/Tou -- minor Power
+    &["Soldier's", "Knight's", "Cavalier's", "Harrier's"], // Tier 2: some Power, not primary
+    &["Valkyrie", "Diviner's", "Viper's", "Sinister"], // Tier 3: moderate Power presence
+    &["Marauder", "Dragon's", "Grieving"], // Tier 4: Power-major with 1 extra
+    &["Berserker's", "Assassin's"], // Tier 5: pure Pow/Prec/Fer
 ];
 
 /// Condition axis tiers: DoT damage (ConditionDamage / Expertise)
 const CONDITION_TIERS: [&[&str]; 5] = [
-    &[],                                                      // Tier 1: very few sets carry minor CD
-    &["Apothecary's"],                                        // Tier 2: HP/CD/Tou -- CD as secondary
-    &["Dire", "Ritualist's", "Plaguedoctor's"],               // Tier 3: moderate CD presence
-    &["Trailblazer's", "Grieving"],                           // Tier 4: CD-major + secondary
-    &["Viper's", "Sinister"],                                 // Tier 5: pure CD offensive
+    &[],                                        // Tier 1: very few sets carry minor CD
+    &["Apothecary's"],                          // Tier 2: HP/CD/Tou -- CD as secondary
+    &["Dire", "Ritualist's", "Plaguedoctor's"], // Tier 3: moderate CD presence
+    &["Trailblazer's", "Grieving"],             // Tier 4: CD-major + secondary
+    &["Viper's", "Sinister"],                   // Tier 5: pure CD offensive
 ];
 
 /// Sustain axis tiers: survivability (Toughness / Vitality)
 const SUSTAIN_TIERS: [&[&str]; 5] = [
-    &["Magi's", "Apothecary's"],                              // Tier 1: Vit as minor stat
-    &["Ritualist's", "Plaguedoctor's", "Cleric's"],           // Tier 2: some survivability
+    &["Magi's", "Apothecary's"], // Tier 1: Vit as minor stat
+    &["Ritualist's", "Plaguedoctor's", "Cleric's"], // Tier 2: some survivability
     &["Knight's", "Cavalier's", "Valkyrie", "Marauder", "Dragon's"], // Tier 3: Vit or Tou secondary
-    &["Trailblazer's", "Dire", "Soldier's"],                  // Tier 4: Tou+Vit as major component
-    &["Nomad's", "Minstrel's"],                               // Tier 5: max Toughness + Vitality
+    &["Trailblazer's", "Dire", "Soldier's"], // Tier 4: Tou+Vit as major component
+    &["Nomad's", "Minstrel's"],  // Tier 5: max Toughness + Vitality
 ];
 
 /// Heal axis tiers: healing output (HealingPower)
 const HEAL_TIERS: [&[&str]; 5] = [
-    &[],                                                      // Tier 1: very few sets carry minor HP
-    &[],                                                      // Tier 2: (Celestial handles this)
-    &["Plaguedoctor's", "Apothecary's", "Nomad's"],           // Tier 3: moderate HP
-    &["Harrier's", "Cleric's"],                               // Tier 4: HP prominent
-    &["Magi's", "Minstrel's"],                                // Tier 5: HP as primary stat
+    &[],                                            // Tier 1: very few sets carry minor HP
+    &[],                                            // Tier 2: (Celestial handles this)
+    &["Plaguedoctor's", "Apothecary's", "Nomad's"], // Tier 3: moderate HP
+    &["Harrier's", "Cleric's"],                     // Tier 4: HP prominent
+    &["Magi's", "Minstrel's"],                      // Tier 5: HP as primary stat
 ];
 
 /// Control/Boon Support axis tiers: CC/boon/condi duration (Concentration / Expertise)
 /// Combined tier table for both control and boon_support axes -- both care about
 /// duration stats (Concentration, Expertise) in gear.
 const CONTROL_TIERS: [&[&str]; 5] = [
-    &[],                                                      // Tier 1: very few sets carry minor duration
-    &[],                                                      // Tier 2: (Celestial handles this)
-    &["Viper's", "Trailblazer's", "Plaguedoctor's"],          // Tier 3: Exp or Conc as secondary
-    &["Harrier's"],                                           // Tier 4: Concentration + Power + HP
-    &["Diviner's", "Ritualist's"],                            // Tier 5: high Conc or Exp
+    &[],                                             // Tier 1: very few sets carry minor duration
+    &[],                                             // Tier 2: (Celestial handles this)
+    &["Viper's", "Trailblazer's", "Plaguedoctor's"], // Tier 3: Exp or Conc as secondary
+    &["Harrier's"],                                  // Tier 4: Concentration + Power + HP
+    &["Diviner's", "Ritualist's"],                   // Tier 5: high Conc or Exp
 ];
 
 /// Convert a weight value (0.0-1.0) to a tier level (1-5).
 fn weight_to_tier(w: f64) -> usize {
-    if w >= 0.8 { 5 }
-    else if w >= 0.6 { 4 }
-    else if w >= 0.4 { 3 }
-    else if w >= 0.2 { 2 }
-    else { 1 }
+    if w >= 0.8 {
+        5
+    } else if w >= 0.6 {
+        4
+    } else if w >= 0.4 {
+        3
+    } else if w >= 0.2 {
+        2
+    } else {
+        1
+    }
 }
 
 /// Select stat prefixes using hierarchical tier tables.
@@ -538,7 +601,9 @@ pub fn select_prefixes_by_tiers(weights: &OptimizationWeights) -> Vec<&'static s
     ];
 
     for (weight, tiers) in &axes {
-        if *weight < 0.15 { continue; }
+        if *weight < 0.15 {
+            continue;
+        }
 
         let mut tier = weight_to_tier(*weight);
 
@@ -581,43 +646,43 @@ pub struct GearPrefixMatch {
 /// Values represent "this prefix is intended for builds with these priorities."
 const GEAR_PROFILES: &[(&str, [f64; 6])] = &[
     // -- Pure Power DPS --
-    ("Berserker's",    [1.0,  0.0,  0.0,  0.0,  0.0,  0.0 ]),
-    ("Assassin's",     [0.95, 0.0,  0.0,  0.0,  0.0,  0.0 ]),
+    ("Berserker's", [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+    ("Assassin's", [0.95, 0.0, 0.0, 0.0, 0.0, 0.0]),
     // -- Power + Survivability --
-    ("Marauder",       [0.75, 0.0,  0.0,  0.0,  0.25, 0.0 ]),
-    ("Dragon's",       [0.75, 0.0,  0.0,  0.0,  0.25, 0.0 ]),
-    ("Valkyrie",       [0.65, 0.0,  0.0,  0.0,  0.35, 0.0 ]),
+    ("Marauder", [0.75, 0.0, 0.0, 0.0, 0.25, 0.0]),
+    ("Dragon's", [0.75, 0.0, 0.0, 0.0, 0.25, 0.0]),
+    ("Valkyrie", [0.65, 0.0, 0.0, 0.0, 0.35, 0.0]),
     // -- Power + Condition hybrid --
-    ("Grieving",       [0.5,  0.5,  0.0,  0.0,  0.0,  0.0 ]),
+    ("Grieving", [0.5, 0.5, 0.0, 0.0, 0.0, 0.0]),
     // -- Condition DPS --
-    ("Viper's",        [0.2,  0.65, 0.0,  0.0,  0.0,  0.15]),
-    ("Sinister",       [0.15, 0.85, 0.0,  0.0,  0.0,  0.0 ]),
+    ("Viper's", [0.2, 0.65, 0.0, 0.0, 0.0, 0.15]),
+    ("Sinister", [0.15, 0.85, 0.0, 0.0, 0.0, 0.0]),
     // -- Condition + Sustain (tanky condi) --
-    ("Trailblazer's",  [0.0,  0.45, 0.0,  0.0,  0.45, 0.1 ]),
-    ("Dire",           [0.0,  0.4,  0.0,  0.0,  0.6,  0.0 ]),
+    ("Trailblazer's", [0.0, 0.45, 0.0, 0.0, 0.45, 0.1]),
+    ("Dire", [0.0, 0.4, 0.0, 0.0, 0.6, 0.0]),
     // -- Condition + Boon/Condi Duration --
-    ("Ritualist's",    [0.0,  0.45, 0.2,  0.0,  0.1,  0.25]),
+    ("Ritualist's", [0.0, 0.45, 0.2, 0.0, 0.1, 0.25]),
     // -- Condition + Healing --
-    ("Plaguedoctor's", [0.0,  0.35, 0.0,  0.35, 0.15, 0.15]),
+    ("Plaguedoctor's", [0.0, 0.35, 0.0, 0.35, 0.15, 0.15]),
     // -- Pure Healer --
-    ("Magi's",         [0.0,  0.0,  0.0,  0.85, 0.15, 0.0 ]),
+    ("Magi's", [0.0, 0.0, 0.0, 0.85, 0.15, 0.0]),
     // -- Healing + Boon Support --
-    ("Harrier's",      [0.1,  0.0,  0.4,  0.5,  0.0,  0.0 ]),
-    ("Cleric's",       [0.2,  0.0,  0.0,  0.55, 0.25, 0.0 ]),
+    ("Harrier's", [0.1, 0.0, 0.4, 0.5, 0.0, 0.0]),
+    ("Cleric's", [0.2, 0.0, 0.0, 0.55, 0.25, 0.0]),
     // -- Heal Tank --
-    ("Minstrel's",     [0.0,  0.0,  0.25, 0.35, 0.4,  0.0 ]),
+    ("Minstrel's", [0.0, 0.0, 0.25, 0.35, 0.4, 0.0]),
     // -- Pure Tank --
-    ("Nomad's",        [0.0,  0.0,  0.0,  0.1,  0.9,  0.0 ]),
+    ("Nomad's", [0.0, 0.0, 0.0, 0.1, 0.9, 0.0]),
     // -- Power Tank --
-    ("Soldier's",      [0.35, 0.0,  0.0,  0.0,  0.65, 0.0 ]),
-    ("Knight's",       [0.35, 0.0,  0.0,  0.0,  0.65, 0.0 ]),
-    ("Cavalier's",     [0.3,  0.0,  0.0,  0.0,  0.7,  0.0 ]),
+    ("Soldier's", [0.35, 0.0, 0.0, 0.0, 0.65, 0.0]),
+    ("Knight's", [0.35, 0.0, 0.0, 0.0, 0.65, 0.0]),
+    ("Cavalier's", [0.3, 0.0, 0.0, 0.0, 0.7, 0.0]),
     // -- Power + Boon Duration --
-    ("Diviner's",      [0.45, 0.0,  0.35, 0.0,  0.0,  0.2 ]),
+    ("Diviner's", [0.45, 0.0, 0.35, 0.0, 0.0, 0.2]),
     // -- Condition/Heal/Tank hybrid --
-    ("Apothecary's",   [0.0,  0.25, 0.0,  0.4,  0.35, 0.0 ]),
+    ("Apothecary's", [0.0, 0.25, 0.0, 0.4, 0.35, 0.0]),
     // -- Universal Hybrid --
-    ("Celestial",      [0.25, 0.25, 0.1,  0.1,  0.1,  0.2 ]),
+    ("Celestial", [0.25, 0.25, 0.1, 0.1, 0.1, 0.2]),
 ];
 
 /// Deterministically select the best gear prefix for the given radar chart weights.
@@ -677,7 +742,12 @@ mod tests {
     #[test]
     fn test_weights_clamped() {
         let w = OptimizationWeights {
-            power: 1.5, condition: 0.5, boon_support: 0.0, healing: 0.0, sustain: 1.0, control: -0.5,
+            power: 1.5,
+            condition: 0.5,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 1.0,
+            control: -0.5,
         };
         let c = w.clamped();
         assert_eq!(c.power, 1.0);
@@ -706,7 +776,11 @@ mod tests {
     fn test_weights_summary_label() {
         let w = OptimizationWeights::preset_power_dps();
         let label = w.summary_label();
-        assert!(label.contains("Power"), "Power DPS should show Power, got: {}", label);
+        assert!(
+            label.contains("Power"),
+            "Power DPS should show Power, got: {}",
+            label
+        );
     }
 
     #[test]
@@ -724,8 +798,14 @@ mod tests {
         // Old serialized data with "disable" field should deserialize into "control"
         let json = r#"{"power":0.5,"disable":0.3,"condition":0.2,"healing":0.1,"sustain":0.4}"#;
         let w: OptimizationWeights = serde_json::from_str(json).expect("should deserialize");
-        assert!((w.control - 0.3).abs() < 0.001, "disable should alias to control");
-        assert!((w.boon_support - 0.0).abs() < 0.001, "boon_support should default to 0.0");
+        assert!(
+            (w.control - 0.3).abs() < 0.001,
+            "disable should alias to control"
+        );
+        assert!(
+            (w.boon_support - 0.0).abs() < 0.001,
+            "boon_support should default to 0.0"
+        );
     }
 
     #[test]
@@ -740,58 +820,135 @@ mod tests {
     fn test_tier_power_max_focused() {
         let w = OptimizationWeights::preset_power_dps();
         let prefixes = select_prefixes_by_tiers(&w);
-        assert!(prefixes.contains(&"Berserker's"), "Power max should include Berserker's");
-        assert!(prefixes.contains(&"Assassin's"), "Power max should include Assassin's");
-        assert!(prefixes.contains(&"Celestial"), "Should always include Celestial");
-        assert!(!prefixes.contains(&"Minstrel's"), "Power max should not include Minstrel's");
-        assert!(!prefixes.contains(&"Magi's"), "Power max should not include Magi's");
-        assert!(!prefixes.contains(&"Nomad's"), "Power max should not include Nomad's");
+        assert!(
+            prefixes.contains(&"Berserker's"),
+            "Power max should include Berserker's"
+        );
+        assert!(
+            prefixes.contains(&"Assassin's"),
+            "Power max should include Assassin's"
+        );
+        assert!(
+            prefixes.contains(&"Celestial"),
+            "Should always include Celestial"
+        );
+        assert!(
+            !prefixes.contains(&"Minstrel's"),
+            "Power max should not include Minstrel's"
+        );
+        assert!(
+            !prefixes.contains(&"Magi's"),
+            "Power max should not include Magi's"
+        );
+        assert!(
+            !prefixes.contains(&"Nomad's"),
+            "Power max should not include Nomad's"
+        );
     }
 
     #[test]
     fn test_tier_condi_dps_focused() {
         let w = OptimizationWeights::preset_condi_dps();
         let prefixes = select_prefixes_by_tiers(&w);
-        assert!(prefixes.contains(&"Viper's"), "Condi DPS should include Viper's");
-        assert!(prefixes.contains(&"Sinister"), "Condi DPS should include Sinister");
-        assert!(!prefixes.contains(&"Minstrel's"), "Condi DPS should not include Minstrel's");
-        assert!(!prefixes.contains(&"Magi's"), "Condi DPS should not include Magi's");
+        assert!(
+            prefixes.contains(&"Viper's"),
+            "Condi DPS should include Viper's"
+        );
+        assert!(
+            prefixes.contains(&"Sinister"),
+            "Condi DPS should include Sinister"
+        );
+        assert!(
+            !prefixes.contains(&"Minstrel's"),
+            "Condi DPS should not include Minstrel's"
+        );
+        assert!(
+            !prefixes.contains(&"Magi's"),
+            "Condi DPS should not include Magi's"
+        );
     }
 
     #[test]
     fn test_tier_condi_sustain_heal_no_berserker() {
         let w = OptimizationWeights {
-            power: 0.07, condition: 0.67, boon_support: 0.0, healing: 0.52, sustain: 0.67, control: 0.07,
+            power: 0.07,
+            condition: 0.67,
+            boon_support: 0.0,
+            healing: 0.52,
+            sustain: 0.67,
+            control: 0.07,
         };
         let prefixes = select_prefixes_by_tiers(&w);
-        assert!(prefixes.contains(&"Viper's"), "Should include Viper's (condition tier 5)");
-        assert!(prefixes.contains(&"Trailblazer's"), "Should include Trailblazer's (condition+sustain tier 4)");
-        assert!(prefixes.contains(&"Dire"), "Should include Dire (condition tier 3)");
-        assert!(prefixes.contains(&"Magi's"), "Should include Magi's (heal tier 5)");
-        assert!(!prefixes.contains(&"Berserker's"), "Power axis is negligible -- no Berserker's");
-        assert!(!prefixes.contains(&"Assassin's"), "Power axis is negligible -- no Assassin's");
+        assert!(
+            prefixes.contains(&"Viper's"),
+            "Should include Viper's (condition tier 5)"
+        );
+        assert!(
+            prefixes.contains(&"Trailblazer's"),
+            "Should include Trailblazer's (condition+sustain tier 4)"
+        );
+        assert!(
+            prefixes.contains(&"Dire"),
+            "Should include Dire (condition tier 3)"
+        );
+        assert!(
+            prefixes.contains(&"Magi's"),
+            "Should include Magi's (heal tier 5)"
+        );
+        assert!(
+            !prefixes.contains(&"Berserker's"),
+            "Power axis is negligible -- no Berserker's"
+        );
+        assert!(
+            !prefixes.contains(&"Assassin's"),
+            "Power axis is negligible -- no Assassin's"
+        );
     }
 
     #[test]
     fn test_tier_healer_includes_minstrels() {
         let w = OptimizationWeights::preset_healer();
         let prefixes = select_prefixes_by_tiers(&w);
-        assert!(prefixes.contains(&"Minstrel's"), "Healer preset should include Minstrel's");
-        assert!(prefixes.contains(&"Magi's"), "Healer preset should include Magi's");
-        assert!(prefixes.contains(&"Harrier's"), "Healer preset should include Harrier's");
+        assert!(
+            prefixes.contains(&"Minstrel's"),
+            "Healer preset should include Minstrel's"
+        );
+        assert!(
+            prefixes.contains(&"Magi's"),
+            "Healer preset should include Magi's"
+        );
+        assert!(
+            prefixes.contains(&"Harrier's"),
+            "Healer preset should include Harrier's"
+        );
     }
 
     #[test]
     fn test_tier_always_has_celestial() {
-        let w = OptimizationWeights { power: 0.0, condition: 0.0, boon_support: 0.0, healing: 0.0, sustain: 0.0, control: 0.0 };
+        let w = OptimizationWeights {
+            power: 0.0,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.0,
+            control: 0.0,
+        };
         let prefixes = select_prefixes_by_tiers(&w);
-        assert!(prefixes.contains(&"Celestial"), "Should always include Celestial");
+        assert!(
+            prefixes.contains(&"Celestial"),
+            "Should always include Celestial"
+        );
     }
 
     #[test]
     fn test_tier_power_condi_dual_focus() {
         let w = OptimizationWeights {
-            power: 0.7, condition: 0.7, boon_support: 0.0, healing: 0.0, sustain: 0.0, control: 0.0,
+            power: 0.7,
+            condition: 0.7,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.0,
+            control: 0.0,
         };
         let prefixes = select_prefixes_by_tiers(&w);
         assert!(prefixes.contains(&"Berserker's"));
@@ -809,7 +966,11 @@ mod tests {
         let w = OptimizationWeights::preset_balanced();
         let prefixes = select_prefixes_by_tiers(&w);
         assert!(prefixes.contains(&"Berserker's"));
-        assert!(prefixes.len() >= 6, "Balanced should have broad selection, got {}", prefixes.len());
+        assert!(
+            prefixes.len() >= 6,
+            "Balanced should have broad selection, got {}",
+            prefixes.len()
+        );
     }
 
     #[test]
@@ -829,28 +990,47 @@ mod tests {
     #[test]
     fn test_score_power_build_higher_with_power_weights() {
         use crate::balance::BalanceContext;
-        use crate::combat::{self, DamageModifiers, default_buff_profiles};
+        use crate::combat::{self, default_buff_profiles, DamageModifiers};
         use crate::stats;
 
         let ctx = BalanceContext::pve();
         let berserker = crate::stats::StatBlock {
-            power: 2800.0, precision: 2100.0, ferocity: 1400.0,
-            toughness: 1000.0, vitality: 1000.0, ..Default::default()
+            power: 2800.0,
+            precision: 2100.0,
+            ferocity: 1400.0,
+            toughness: 1000.0,
+            vitality: 1000.0,
+            ..Default::default()
         };
         let derived = stats::compute_derived(&berserker, "Warrior");
         let mods = DamageModifiers::default();
         let solo = &default_buff_profiles(&ctx)[0];
         let perf = combat::calculate_combat_performance(
-            &berserker, &derived, &mods, solo, &combat::ConditionWeights::default_pve(), "Warrior", &ctx,
+            &berserker,
+            &derived,
+            &mods,
+            solo,
+            &combat::ConditionWeights::default_pve(),
+            "Warrior",
+            &ctx,
         );
 
         let tanky = crate::stats::StatBlock {
-            power: 1200.0, precision: 1000.0, toughness: 2500.0,
-            vitality: 2200.0, ..Default::default()
+            power: 1200.0,
+            precision: 1000.0,
+            toughness: 2500.0,
+            vitality: 2200.0,
+            ..Default::default()
         };
         let derived_t = stats::compute_derived(&tanky, "Warrior");
         let perf_t = combat::calculate_combat_performance(
-            &tanky, &derived_t, &mods, solo, &combat::ConditionWeights::default_pve(), "Warrior", &ctx,
+            &tanky,
+            &derived_t,
+            &mods,
+            solo,
+            &combat::ConditionWeights::default_pve(),
+            "Warrior",
+            &ctx,
         );
 
         let power_w = OptimizationWeights::preset_power_dps();
@@ -869,29 +1049,49 @@ mod tests {
     #[test]
     fn test_score_condi_build_higher_with_condi_weights() {
         use crate::balance::BalanceContext;
-        use crate::combat::{self, DamageModifiers, default_buff_profiles};
+        use crate::combat::{self, default_buff_profiles, DamageModifiers};
         use crate::stats;
 
         let ctx = BalanceContext::pve();
         let viper = crate::stats::StatBlock {
-            power: 1800.0, precision: 1600.0, condition_damage: 2200.0,
-            expertise: 600.0, toughness: 1000.0, vitality: 1000.0,
+            power: 1800.0,
+            precision: 1600.0,
+            condition_damage: 2200.0,
+            expertise: 600.0,
+            toughness: 1000.0,
+            vitality: 1000.0,
             ..Default::default()
         };
         let derived_v = stats::compute_derived(&viper, "Necromancer");
         let mods = DamageModifiers::default();
         let solo = &default_buff_profiles(&ctx)[0];
         let perf_v = combat::calculate_combat_performance(
-            &viper, &derived_v, &mods, solo, &combat::ConditionWeights::default_pve(), "Necromancer", &ctx,
+            &viper,
+            &derived_v,
+            &mods,
+            solo,
+            &combat::ConditionWeights::default_pve(),
+            "Necromancer",
+            &ctx,
         );
 
         let berserker = crate::stats::StatBlock {
-            power: 2800.0, precision: 2100.0, ferocity: 1400.0,
-            toughness: 1000.0, vitality: 1000.0, ..Default::default()
+            power: 2800.0,
+            precision: 2100.0,
+            ferocity: 1400.0,
+            toughness: 1000.0,
+            vitality: 1000.0,
+            ..Default::default()
         };
         let derived_b = stats::compute_derived(&berserker, "Necromancer");
         let perf_b = combat::calculate_combat_performance(
-            &berserker, &derived_b, &mods, solo, &combat::ConditionWeights::default_pve(), "Necromancer", &ctx,
+            &berserker,
+            &derived_b,
+            &mods,
+            solo,
+            &combat::ConditionWeights::default_pve(),
+            "Necromancer",
+            &ctx,
         );
 
         let condi_w = OptimizationWeights::preset_condi_dps();
@@ -921,7 +1121,10 @@ mod tests {
             w.total(),
             WEIGHT_BUDGET
         );
-        assert!((w.condition - 1.0).abs() < 0.001, "Dragged axis should be at 1.0");
+        assert!(
+            (w.condition - 1.0).abs() < 0.001,
+            "Dragged axis should be at 1.0"
+        );
         assert!(
             w.power < 1.0,
             "Power should have decreased from 1.0, got {}",
@@ -932,7 +1135,12 @@ mod tests {
     #[test]
     fn test_set_constrained_from_zero_others() {
         let mut w = OptimizationWeights {
-            power: 0.0, condition: 0.0, boon_support: 0.0, healing: 0.0, sustain: 0.0, control: 0.0,
+            power: 0.0,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.0,
+            control: 0.0,
         };
         w.set_constrained(0, 1.0);
         assert!((w.power - 1.0).abs() < 0.001);
@@ -942,14 +1150,17 @@ mod tests {
     #[test]
     fn test_score_trailblazer_beats_minstrel_condi_weights() {
         use crate::balance::BalanceContext;
-        use crate::combat::{self, DamageModifiers, condition_weights_for_profession};
+        use crate::combat::{self, condition_weights_for_profession, DamageModifiers};
         use crate::stats;
 
         let ctx = BalanceContext::pve();
         let trailblazer = stats::StatBlock {
-            power: 1000.0, precision: 1000.0,
-            condition_damage: 2000.0, expertise: 900.0,
-            toughness: 1500.0, vitality: 1500.0,
+            power: 1000.0,
+            precision: 1000.0,
+            condition_damage: 2000.0,
+            expertise: 900.0,
+            toughness: 1500.0,
+            vitality: 1500.0,
             ..Default::default()
         };
         let derived_t = stats::compute_derived(&trailblazer, "Ranger");
@@ -957,13 +1168,22 @@ mod tests {
         let cw = condition_weights_for_profession("Ranger", &ctx);
         let solo = &combat::buff_profiles_for_profession("Ranger", &ctx)[0];
         let perf_t = combat::calculate_combat_performance(
-            &trailblazer, &derived_t, &mods, solo, &cw, "Ranger", &ctx,
+            &trailblazer,
+            &derived_t,
+            &mods,
+            solo,
+            &cw,
+            "Ranger",
+            &ctx,
         );
 
         let minstrel = stats::StatBlock {
-            power: 1200.0, precision: 1000.0,
-            toughness: 2000.0, vitality: 2000.0,
-            healing_power: 1500.0, concentration: 600.0,
+            power: 1200.0,
+            precision: 1000.0,
+            toughness: 2000.0,
+            vitality: 2000.0,
+            healing_power: 1500.0,
+            concentration: 600.0,
             ..Default::default()
         };
         let derived_m = stats::compute_derived(&minstrel, "Ranger");
@@ -972,7 +1192,12 @@ mod tests {
         );
 
         let w = OptimizationWeights {
-            power: 0.07, condition: 0.93, boon_support: 0.0, healing: 0.33, sustain: 0.67, control: 0.0,
+            power: 0.07,
+            condition: 0.93,
+            boon_support: 0.0,
+            healing: 0.33,
+            sustain: 0.67,
+            control: 0.0,
         };
 
         let score_trail = score_with_weights(&perf_t, &w);
@@ -1004,8 +1229,11 @@ mod tests {
     fn test_gear_prefix_power_max() {
         let w = OptimizationWeights::preset_power_dps();
         let m = select_gear_prefix(&w);
-        assert_eq!(m.primary, "Berserker's",
-            "Power max should select Berserker's, got {}", m.primary);
+        assert_eq!(
+            m.primary, "Berserker's",
+            "Power max should select Berserker's, got {}",
+            m.primary
+        );
     }
 
     #[test]
@@ -1014,29 +1242,44 @@ mod tests {
         let m = select_gear_prefix(&w);
         assert!(
             m.primary == "Viper's" || m.primary == "Sinister",
-            "Condi DPS should select Viper's or Sinister, got {}", m.primary
+            "Condi DPS should select Viper's or Sinister, got {}",
+            m.primary
         );
     }
 
     #[test]
     fn test_gear_prefix_condi_with_sustain_is_trailblazer() {
         let w = OptimizationWeights {
-            power: 0.0, condition: 1.0, boon_support: 0.0, healing: 0.0, sustain: 0.5, control: 0.0,
+            power: 0.0,
+            condition: 1.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.5,
+            control: 0.0,
         };
         let m = select_gear_prefix(&w);
-        assert_eq!(m.primary, "Trailblazer's",
-            "Condition + Sustain should select Trailblazer's, got {} (sim={:.3})", m.primary, m.similarity);
+        assert_eq!(
+            m.primary, "Trailblazer's",
+            "Condition + Sustain should select Trailblazer's, got {} (sim={:.3})",
+            m.primary, m.similarity
+        );
     }
 
     #[test]
     fn test_gear_prefix_condi_low_power_sustain_is_trailblazer() {
         let w = OptimizationWeights {
-            power: 0.2, condition: 1.0, boon_support: 0.0, healing: 0.0, sustain: 0.5, control: 0.0,
+            power: 0.2,
+            condition: 1.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.5,
+            control: 0.0,
         };
         let m = select_gear_prefix(&w);
         assert!(
             m.primary == "Trailblazer's" || m.primary == "Viper's",
-            "Condi max + low power + sustain should select Trailblazer's or Viper's, got {}", m.primary
+            "Condi max + low power + sustain should select Trailblazer's or Viper's, got {}",
+            m.primary
         );
     }
 
@@ -1046,7 +1289,8 @@ mod tests {
         let m = select_gear_prefix(&w);
         assert!(
             m.primary == "Magi's" || m.primary == "Harrier's" || m.primary == "Minstrel's",
-            "Healer should select Magi's/Harrier's/Minstrel's, got {}", m.primary
+            "Healer should select Magi's/Harrier's/Minstrel's, got {}",
+            m.primary
         );
     }
 
@@ -1055,9 +1299,14 @@ mod tests {
         let w = OptimizationWeights::preset_tank();
         let m = select_gear_prefix(&w);
         assert!(
-            m.primary == "Nomad's" || m.primary == "Minstrel's" || m.primary == "Dire"
-            || m.primary == "Cavalier's" || m.primary == "Knight's" || m.primary == "Soldier's",
-            "Tank should select a defensive set, got {}", m.primary
+            m.primary == "Nomad's"
+                || m.primary == "Minstrel's"
+                || m.primary == "Dire"
+                || m.primary == "Cavalier's"
+                || m.primary == "Knight's"
+                || m.primary == "Soldier's",
+            "Tank should select a defensive set, got {}",
+            m.primary
         );
     }
 
@@ -1065,50 +1314,102 @@ mod tests {
     fn test_gear_prefix_celestial() {
         let w = OptimizationWeights::preset_celestial();
         let m = select_gear_prefix(&w);
-        assert!(m.similarity > 0.5,
-            "Celestial preset should have decent similarity, got {:.3}", m.similarity);
+        assert!(
+            m.similarity > 0.5,
+            "Celestial preset should have decent similarity, got {:.3}",
+            m.similarity
+        );
     }
 
     #[test]
     fn test_gear_prefix_zero_weights_is_celestial() {
         let w = OptimizationWeights {
-            power: 0.0, condition: 0.0, boon_support: 0.0, healing: 0.0, sustain: 0.0, control: 0.0,
+            power: 0.0,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.0,
+            control: 0.0,
         };
         let m = select_gear_prefix(&w);
-        assert_eq!(m.primary, "Celestial",
-            "Zero weights should default to Celestial");
+        assert_eq!(
+            m.primary, "Celestial",
+            "Zero weights should default to Celestial"
+        );
     }
 
     #[test]
     fn test_gear_prefix_power_condi_hybrid_is_grieving() {
         let w = OptimizationWeights {
-            power: 0.7, condition: 0.7, boon_support: 0.0, healing: 0.0, sustain: 0.0, control: 0.0,
+            power: 0.7,
+            condition: 0.7,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.0,
+            control: 0.0,
         };
         let m = select_gear_prefix(&w);
-        assert_eq!(m.primary, "Grieving",
-            "Equal Power+Condition should select Grieving, got {}", m.primary);
+        assert_eq!(
+            m.primary, "Grieving",
+            "Equal Power+Condition should select Grieving, got {}",
+            m.primary
+        );
     }
 
     #[test]
     fn test_gear_prefix_control_focused_is_diviners() {
         let w = OptimizationWeights {
-            power: 0.3, condition: 0.0, boon_support: 0.0, healing: 0.0, sustain: 0.0, control: 1.0,
+            power: 0.3,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.0,
+            control: 1.0,
         };
         let m = select_gear_prefix(&w);
         // Diviner's or Ritualist's -- both have high control/duration component
         assert!(
             m.primary == "Diviner's" || m.primary == "Ritualist's" || m.primary == "Celestial",
-            "Control focused + some Power should select Diviner's/Ritualist's, got {}", m.primary
+            "Control focused + some Power should select Diviner's/Ritualist's, got {}",
+            m.primary
         );
     }
 
     #[test]
     fn test_gear_prefix_never_returns_healing_for_condi() {
         let cases = [
-            OptimizationWeights { power: 0.0, condition: 1.0, boon_support: 0.0, healing: 0.0, sustain: 0.0, control: 0.0 },
-            OptimizationWeights { power: 0.2, condition: 1.0, boon_support: 0.0, healing: 0.0, sustain: 0.0, control: 0.2 },
-            OptimizationWeights { power: 0.0, condition: 1.0, boon_support: 0.0, healing: 0.0, sustain: 0.5, control: 0.0 },
-            OptimizationWeights { power: 0.5, condition: 0.8, boon_support: 0.0, healing: 0.0, sustain: 0.0, control: 0.0 },
+            OptimizationWeights {
+                power: 0.0,
+                condition: 1.0,
+                boon_support: 0.0,
+                healing: 0.0,
+                sustain: 0.0,
+                control: 0.0,
+            },
+            OptimizationWeights {
+                power: 0.2,
+                condition: 1.0,
+                boon_support: 0.0,
+                healing: 0.0,
+                sustain: 0.0,
+                control: 0.2,
+            },
+            OptimizationWeights {
+                power: 0.0,
+                condition: 1.0,
+                boon_support: 0.0,
+                healing: 0.0,
+                sustain: 0.5,
+                control: 0.0,
+            },
+            OptimizationWeights {
+                power: 0.5,
+                condition: 0.8,
+                boon_support: 0.0,
+                healing: 0.0,
+                sustain: 0.0,
+                control: 0.0,
+            },
         ];
         let healing_prefixes = ["Magi's", "Harrier's", "Minstrel's", "Cleric's"];
         for w in &cases {
@@ -1125,15 +1426,30 @@ mod tests {
     fn test_gear_prefix_never_returns_healing_for_power() {
         let cases = [
             OptimizationWeights::preset_power_dps(),
-            OptimizationWeights { power: 1.0, condition: 0.0, boon_support: 0.0, healing: 0.0, sustain: 0.3, control: 0.0 },
-            OptimizationWeights { power: 0.8, condition: 0.0, boon_support: 0.0, healing: 0.0, sustain: 0.0, control: 0.2 },
+            OptimizationWeights {
+                power: 1.0,
+                condition: 0.0,
+                boon_support: 0.0,
+                healing: 0.0,
+                sustain: 0.3,
+                control: 0.0,
+            },
+            OptimizationWeights {
+                power: 0.8,
+                condition: 0.0,
+                boon_support: 0.0,
+                healing: 0.0,
+                sustain: 0.0,
+                control: 0.2,
+            },
         ];
         let healing_prefixes = ["Magi's", "Harrier's", "Minstrel's", "Cleric's"];
         for w in &cases {
             let m = select_gear_prefix(w);
             assert!(
                 !healing_prefixes.contains(&m.primary),
-                "Power-focused weights should NOT return healing prefix, got {}", m.primary
+                "Power-focused weights should NOT return healing prefix, got {}",
+                m.primary
             );
         }
     }
@@ -1163,7 +1479,10 @@ mod tests {
         let w = OptimizationWeights::preset_power_dps();
         let scorer = ObjectiveScorer::from_mode(w, "PvE");
         let might_prio = scorer.boon_priority("Might");
-        assert!(might_prio > 0.0, "Might should have positive priority in PvE");
+        assert!(
+            might_prio > 0.0,
+            "Might should have positive priority in PvE"
+        );
         // Unknown boon returns 0.5 default
         let unknown = scorer.boon_priority("Unknown");
         assert!((unknown - 0.5).abs() < 0.001);
@@ -1174,7 +1493,10 @@ mod tests {
         let w = OptimizationWeights::preset_condi_dps();
         let scorer = ObjectiveScorer::from_mode(w, "PvE");
         let burning_prio = scorer.condition_priority("Burning");
-        assert!(burning_prio > 0.0, "Burning should have positive priority in PvE Condi");
+        assert!(
+            burning_prio > 0.0,
+            "Burning should have positive priority in PvE Condi"
+        );
     }
 
     #[test]

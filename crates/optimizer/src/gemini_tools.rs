@@ -165,7 +165,8 @@ fn decl_list_runes() -> FunctionDeclaration {
 fn decl_list_sigils() -> FunctionDeclaration {
     FunctionDeclaration {
         name: "list_sigils".into(),
-        description: "List top sigils with their effects. Returns the most relevant Superior sigils.".into(),
+        description:
+            "List top sigils with their effects. Returns the most relevant Superior sigils.".into(),
         parameters: json!({
             "type": "object",
             "properties": {}
@@ -243,7 +244,8 @@ fn decl_score_build() -> FunctionDeclaration {
 fn decl_get_current_build() -> FunctionDeclaration {
     FunctionDeclaration {
         name: "get_current_build".into(),
-        description: "Get a summary of the player's currently equipped build (if available).".into(),
+        description: "Get a summary of the player's currently equipped build (if available)."
+            .into(),
         parameters: json!({
             "type": "object",
             "properties": {}
@@ -411,27 +413,37 @@ fn exec_get_profession_info(args: &Value, ctx: &ToolContext) -> Value {
     };
 
     // Gather specializations
-    let specs: Vec<Value> = prof.specializations.iter().filter_map(|&id| {
-        ctx.db.spec(id).map(|s| json!({
-            "id": s.id,
-            "name": &s.name,
-            "elite": s.elite
-        }))
-    }).collect();
+    let specs: Vec<Value> = prof
+        .specializations
+        .iter()
+        .filter_map(|&id| {
+            ctx.db.spec(id).map(|s| {
+                json!({
+                    "id": s.id,
+                    "name": &s.name,
+                    "elite": s.elite
+                })
+            })
+        })
+        .collect();
 
     // Gather weapons with hand info
-    let weapons: Vec<Value> = prof.weapons.iter().map(|(name, info)| {
-        let mut w = json!({
-            "name": name,
-            "flags": &info.flags
-        });
-        if let Some(spec_id) = info.specialization {
-            if let Some(spec) = ctx.db.spec(spec_id) {
-                w["requires_elite"] = json!(&spec.name);
+    let weapons: Vec<Value> = prof
+        .weapons
+        .iter()
+        .map(|(name, info)| {
+            let mut w = json!({
+                "name": name,
+                "flags": &info.flags
+            });
+            if let Some(spec_id) = info.specialization {
+                if let Some(spec) = ctx.db.spec(spec_id) {
+                    w["requires_elite"] = json!(&spec.name);
+                }
             }
-        }
-        w
-    }).collect();
+            w
+        })
+        .collect();
 
     json!({
         "profession": &prof.name,
@@ -444,7 +456,10 @@ fn exec_get_spec_traits(args: &Value, ctx: &ToolContext) -> Value {
     let spec_name = args["spec_name"].as_str().unwrap_or("");
 
     // Find spec by name (case-insensitive substring match)
-    let spec = ctx.db.specializations.values()
+    let spec = ctx
+        .db
+        .specializations
+        .values()
         .find(|s| s.name.to_lowercase().contains(&spec_name.to_lowercase()));
 
     let Some(spec) = spec else {
@@ -452,14 +467,20 @@ fn exec_get_spec_traits(args: &Value, ctx: &ToolContext) -> Value {
     };
 
     // Minor traits (always active)
-    let minors: Vec<Value> = spec.minor_traits.iter().filter_map(|&id| {
-        ctx.db.traits.get(&id).map(|t| json!({
-            "id": t.id,
-            "name": &t.name,
-            "tier": t.tier,
-            "description": t.description.as_deref().unwrap_or("")
-        }))
-    }).collect();
+    let minors: Vec<Value> = spec
+        .minor_traits
+        .iter()
+        .filter_map(|&id| {
+            ctx.db.traits.get(&id).map(|t| {
+                json!({
+                    "id": t.id,
+                    "name": &t.name,
+                    "tier": t.tier,
+                    "description": t.description.as_deref().unwrap_or("")
+                })
+            })
+        })
+        .collect();
 
     // Major traits organized by column (tier)
     let mut columns: HashMap<u32, Vec<Value>> = HashMap::new();
@@ -496,28 +517,37 @@ fn exec_get_spec_traits(args: &Value, ctx: &ToolContext) -> Value {
 fn exec_get_trait_details(args: &Value, ctx: &ToolContext) -> Value {
     let trait_name = args["trait_name"].as_str().unwrap_or("");
 
-    let t = ctx.db.traits.values()
+    let t = ctx
+        .db
+        .traits
+        .values()
         .find(|t| t.name.to_lowercase().contains(&trait_name.to_lowercase()));
 
     let Some(t) = t else {
         return json!({ "error": format!("Trait '{}' not found", trait_name) });
     };
 
-    let spec_name = ctx.db.spec(t.specialization)
+    let spec_name = ctx
+        .db
+        .spec(t.specialization)
         .map(|s| s.name.as_str())
         .unwrap_or("Unknown");
 
     let facts: Vec<Value> = t.facts.iter().map(format_fact).collect();
-    let traited: Vec<Value> = t.traited_facts.iter().map(|tf| {
-        let mut v = format_fact(&tf.fact);
-        if let Some(req) = ctx.db.traits.get(&tf.requires_trait) {
-            v["requires_trait"] = json!(&req.name);
-        }
-        if let Some(idx) = tf.overrides {
-            v["overrides_fact_index"] = json!(idx);
-        }
-        v
-    }).collect();
+    let traited: Vec<Value> = t
+        .traited_facts
+        .iter()
+        .map(|tf| {
+            let mut v = format_fact(&tf.fact);
+            if let Some(req) = ctx.db.traits.get(&tf.requires_trait) {
+                v["requires_trait"] = json!(&req.name);
+            }
+            if let Some(idx) = tf.overrides {
+                v["overrides_fact_index"] = json!(idx);
+            }
+            v
+        })
+        .collect();
 
     // Synergy summaries
     let conditions_applied = extract_conditions(&t.facts);
@@ -547,7 +577,10 @@ fn exec_get_skill_info(args: &Value, ctx: &ToolContext) -> Value {
     let skill_name = args["skill_name"].as_str().unwrap_or("");
 
     // Find matching skills, preferring profession match
-    let mut matches: Vec<_> = ctx.db.skills.values()
+    let mut matches: Vec<_> = ctx
+        .db
+        .skills
+        .values()
         .filter(|s| s.name.to_lowercase().contains(&skill_name.to_lowercase()))
         .collect();
 
@@ -587,15 +620,21 @@ fn exec_get_skill_info(args: &Value, ctx: &ToolContext) -> Value {
 }
 
 fn exec_list_runes(ctx: &ToolContext) -> Value {
-    let mut runes: Vec<Value> = ctx.db.all_runes().iter()
+    let mut runes: Vec<Value> = ctx
+        .db
+        .all_runes()
+        .iter()
         .filter(|item| item.name.contains("Superior"))
         .take(40)
         .map(|item| {
-            let raw_bonuses = item.details.as_ref()
+            let raw_bonuses = item
+                .details
+                .as_ref()
                 .map(|d| &d.bonuses)
                 .cloned()
                 .unwrap_or_default();
-            let parsed_bonuses: Vec<Value> = raw_bonuses.iter()
+            let parsed_bonuses: Vec<Value> = raw_bonuses
+                .iter()
                 .map(|b| parse_rune_bonus_structured(b))
                 .collect();
             json!({
@@ -614,7 +653,10 @@ fn exec_list_runes(ctx: &ToolContext) -> Value {
 }
 
 fn exec_list_sigils(ctx: &ToolContext) -> Value {
-    let mut sigils: Vec<Value> = ctx.db.all_sigils().iter()
+    let mut sigils: Vec<Value> = ctx
+        .db
+        .all_sigils()
+        .iter()
         .filter(|item| item.name.contains("Superior"))
         .take(40)
         .map(|item| {
@@ -636,7 +678,10 @@ fn exec_list_sigils(ctx: &ToolContext) -> Value {
 }
 
 fn exec_list_relics(ctx: &ToolContext) -> Value {
-    let mut relics: Vec<Value> = ctx.db.all_relics().iter()
+    let mut relics: Vec<Value> = ctx
+        .db
+        .all_relics()
+        .iter()
         .take(40)
         .map(|item| {
             let desc = item.description.as_deref().unwrap_or("");
@@ -659,7 +704,10 @@ fn exec_list_relics(ctx: &ToolContext) -> Value {
 fn exec_calculate_stats(args: &Value, ctx: &ToolContext) -> Value {
     let gear_prefix = args["gear_prefix"].as_str().unwrap_or("");
 
-    let itemstat = ctx.db.itemstats.values()
+    let itemstat = ctx
+        .db
+        .itemstats
+        .values()
         .find(|is| is.name.to_lowercase().contains(&gear_prefix.to_lowercase()));
 
     let Some(itemstat) = itemstat else {
@@ -697,7 +745,10 @@ fn exec_calculate_stats(args: &Value, ctx: &ToolContext) -> Value {
 fn exec_simulate_combat(args: &Value, ctx: &ToolContext) -> Value {
     let gear_prefix = args["gear_prefix"].as_str().unwrap_or("");
 
-    let itemstat = ctx.db.itemstats.values()
+    let itemstat = ctx
+        .db
+        .itemstats
+        .values()
         .find(|is| is.name.to_lowercase().contains(&gear_prefix.to_lowercase()));
 
     let Some(itemstat) = itemstat else {
@@ -710,26 +761,48 @@ fn exec_simulate_combat(args: &Value, ctx: &ToolContext) -> Value {
     let derived = stats::compute_derived(&full_stats, ctx.profession_name);
 
     // Extract damage modifiers from traits if provided
-    let trait_ids: Vec<u32> = args.get("trait_ids")
+    let trait_ids: Vec<u32> = args
+        .get("trait_ids")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_u64().map(|n| n as u32)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_u64().map(|n| n as u32))
+                .collect()
+        })
         .unwrap_or_default();
 
     let modifiers = if trait_ids.is_empty() {
         DamageModifiers::default()
     } else {
-        combat::extract_damage_modifiers(&trait_ids, None, &[], None, &ctx.db.traits, &ctx.db.items, ctx.balance_ctx)
+        combat::extract_damage_modifiers(
+            &trait_ids,
+            None,
+            &[],
+            None,
+            &ctx.db.traits,
+            &ctx.db.items,
+            ctx.balance_ctx,
+        )
     };
 
     // Simulate under all 3 buff profiles using profession-specific rotation profile data
     let profiles = combat::buff_profiles_for_profession(ctx.profession_name, ctx.balance_ctx);
     let cw = combat::condition_weights_for_profession(ctx.profession_name, ctx.balance_ctx);
-    let results: Vec<Value> = profiles.iter().map(|bp| {
-        let perf = combat::calculate_combat_performance(
-            &full_stats, &derived, &modifiers, bp, &cw, ctx.profession_name, ctx.balance_ctx,
-        );
-        format_combat_performance(&perf, &bp.label)
-    }).collect();
+    let results: Vec<Value> = profiles
+        .iter()
+        .map(|bp| {
+            let perf = combat::calculate_combat_performance(
+                &full_stats,
+                &derived,
+                &modifiers,
+                bp,
+                &cw,
+                ctx.profession_name,
+                ctx.balance_ctx,
+            );
+            format_combat_performance(&perf, &bp.label)
+        })
+        .collect();
 
     json!({
         "prefix": &itemstat.name,
@@ -740,7 +813,10 @@ fn exec_simulate_combat(args: &Value, ctx: &ToolContext) -> Value {
 fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
     let gear_prefix = args["gear_prefix"].as_str().unwrap_or("");
 
-    let itemstat = ctx.db.itemstats.values()
+    let itemstat = ctx
+        .db
+        .itemstats
+        .values()
         .find(|is| is.name.to_lowercase().contains(&gear_prefix.to_lowercase()));
 
     let Some(itemstat) = itemstat else {
@@ -755,7 +831,10 @@ fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
     let mods = DamageModifiers::default();
     let solo = &combat::buff_profiles_for_profession(ctx.profession_name, ctx.balance_ctx)[0];
     let perf = combat::calculate_combat_performance(
-        &full_stats, &derived, &mods, solo,
+        &full_stats,
+        &derived,
+        &mods,
+        solo,
         &combat::condition_weights_for_profession(ctx.profession_name, ctx.balance_ctx),
         ctx.profession_name,
         ctx.balance_ctx,
@@ -797,45 +876,54 @@ fn exec_get_optimizer_results(ctx: &ToolContext) -> Value {
         return json!({ "candidates": [], "message": "No optimizer results available" });
     }
 
-    let results: Vec<Value> = ctx.candidates.iter().take(5).map(|c| {
-        let spec_names: Vec<String> = c.core_specs.iter()
-            .chain(c.elite_spec.iter())
-            .filter_map(|&id| ctx.db.spec(id).map(|s| s.name.clone()))
-            .collect();
+    let results: Vec<Value> = ctx
+        .candidates
+        .iter()
+        .take(5)
+        .map(|c| {
+            let spec_names: Vec<String> = c
+                .core_specs
+                .iter()
+                .chain(c.elite_spec.iter())
+                .filter_map(|&id| ctx.db.spec(id).map(|s| s.name.clone()))
+                .collect();
 
-        let trait_names: Vec<String> = c.equipped_traits.iter()
-            .filter_map(|&id| ctx.db.traits.get(&id).map(|t| t.name.clone()))
-            .collect();
+            let trait_names: Vec<String> = c
+                .equipped_traits
+                .iter()
+                .filter_map(|&id| ctx.db.traits.get(&id).map(|t| t.name.clone()))
+                .collect();
 
-        json!({
-            "gear_prefix": &c.gear.stat_prefix_name,
-            "score": format!("{:.4}", c.score),
-            "specializations": spec_names,
-            "equipped_traits": trait_names,
-            "stats": {
-                "power": c.stats.power.round() as i32,
-                "precision": c.stats.precision.round() as i32,
-                "toughness": c.stats.toughness.round() as i32,
-                "vitality": c.stats.vitality.round() as i32,
-                "condition_damage": c.stats.condition_damage.round() as i32,
-                "ferocity": c.stats.ferocity.round() as i32,
-                "expertise": c.stats.expertise.round() as i32,
-                "concentration": c.stats.concentration.round() as i32,
-                "healing_power": c.stats.healing_power.round() as i32
-            },
-            "combat": {
-                "effective_power": c.combat.effective_power.round() as i32,
-                "crit_chance": format!("{:.1}%", c.combat.crit_chance),
-                "strike_dps_index": c.combat.strike_dps_index.round() as i32,
-                "condition_dps_index": c.combat.condition_dps_index.round() as i32,
-                "total_dps_index": c.combat.total_dps_index.round() as i32,
-                "healing_power_index": c.combat.healing_power_index.round() as i32,
-                "boon_duration": format!("{:.1}%", c.combat.boon_duration_pct),
-                "condi_duration": format!("{:.1}%", c.combat.condi_duration_pct),
-                "effective_health": c.combat.effective_health.round() as i32
-            }
+            json!({
+                "gear_prefix": &c.gear.stat_prefix_name,
+                "score": format!("{:.4}", c.score),
+                "specializations": spec_names,
+                "equipped_traits": trait_names,
+                "stats": {
+                    "power": c.stats.power.round() as i32,
+                    "precision": c.stats.precision.round() as i32,
+                    "toughness": c.stats.toughness.round() as i32,
+                    "vitality": c.stats.vitality.round() as i32,
+                    "condition_damage": c.stats.condition_damage.round() as i32,
+                    "ferocity": c.stats.ferocity.round() as i32,
+                    "expertise": c.stats.expertise.round() as i32,
+                    "concentration": c.stats.concentration.round() as i32,
+                    "healing_power": c.stats.healing_power.round() as i32
+                },
+                "combat": {
+                    "effective_power": c.combat.effective_power.round() as i32,
+                    "crit_chance": format!("{:.1}%", c.combat.crit_chance),
+                    "strike_dps_index": c.combat.strike_dps_index.round() as i32,
+                    "condition_dps_index": c.combat.condition_dps_index.round() as i32,
+                    "total_dps_index": c.combat.total_dps_index.round() as i32,
+                    "healing_power_index": c.combat.healing_power_index.round() as i32,
+                    "boon_duration": format!("{:.1}%", c.combat.boon_duration_pct),
+                    "condi_duration": format!("{:.1}%", c.combat.condi_duration_pct),
+                    "effective_health": c.combat.effective_health.round() as i32
+                }
+            })
         })
-    }).collect();
+        .collect();
 
     json!({ "candidates": results })
 }
@@ -853,7 +941,9 @@ fn exec_search_traits_by_effect(args: &Value, ctx: &ToolContext) -> Value {
         if let Some(prof) = profession_filter {
             let spec = ctx.db.spec(t.specialization);
             if let Some(spec) = spec {
-                if spec.profession != prof { continue; }
+                if spec.profession != prof {
+                    continue;
+                }
             }
         }
 
@@ -886,8 +976,11 @@ fn exec_search_traits_by_effect(args: &Value, ctx: &ToolContext) -> Value {
         };
 
         if matches {
-            let spec_name = ctx.db.spec(t.specialization)
-                .map(|s| s.name.as_str()).unwrap_or("Unknown");
+            let spec_name = ctx
+                .db
+                .spec(t.specialization)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
             let effects = summarize_trait_facts(t);
             results.push(json!({
                 "id": t.id,
@@ -896,7 +989,9 @@ fn exec_search_traits_by_effect(args: &Value, ctx: &ToolContext) -> Value {
                 "tier": t.tier,
                 "key_effects": effects
             }));
-            if results.len() >= 20 { break; }
+            if results.len() >= 20 {
+                break;
+            }
         }
     }
 
@@ -905,23 +1000,38 @@ fn exec_search_traits_by_effect(args: &Value, ctx: &ToolContext) -> Value {
 
 fn exec_find_condition_sources(args: &Value, ctx: &ToolContext) -> Value {
     let condition = args["condition"].as_str().unwrap_or("");
-    let profession_filter = args.get("profession").and_then(|v| v.as_str())
+    let profession_filter = args
+        .get("profession")
+        .and_then(|v| v.as_str())
         .unwrap_or(ctx.profession_name);
 
     // Find traits that apply this condition
-    let trait_sources: Vec<Value> = ctx.db.traits_applying_condition(condition).iter()
+    let trait_sources: Vec<Value> = ctx
+        .db
+        .traits_applying_condition(condition)
+        .iter()
         .filter(|t| {
-            ctx.db.spec(t.specialization)
+            ctx.db
+                .spec(t.specialization)
                 .map(|s| s.profession == profession_filter)
                 .unwrap_or(false)
         })
         .take(15)
         .map(|t| {
-            let spec_name = ctx.db.spec(t.specialization)
-                .map(|s| s.name.as_str()).unwrap_or("Unknown");
+            let spec_name = ctx
+                .db
+                .spec(t.specialization)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
             // Find the specific Buff fact for this condition
             let detail = t.facts.iter().find_map(|f| {
-                if let Fact::Buff { status: Some(s), duration, apply_count, .. } = f {
+                if let Fact::Buff {
+                    status: Some(s),
+                    duration,
+                    apply_count,
+                    ..
+                } = f
+                {
                     if s == condition {
                         return Some(json!({
                             "stacks": apply_count.unwrap_or(1),
@@ -938,15 +1048,25 @@ fn exec_find_condition_sources(args: &Value, ctx: &ToolContext) -> Value {
                 "tier": t.tier,
                 "application": detail
             })
-        }).collect();
+        })
+        .collect();
 
     // Find skills that apply this condition
-    let skill_sources: Vec<Value> = ctx.db.skills_applying_condition(condition).iter()
+    let skill_sources: Vec<Value> = ctx
+        .db
+        .skills_applying_condition(condition)
+        .iter()
         .filter(|s| s.professions.contains(&profession_filter.to_string()))
         .take(20)
         .map(|skill| {
             let detail = skill.facts.iter().find_map(|f| {
-                if let Fact::Buff { status: Some(s), duration, apply_count, .. } = f {
+                if let Fact::Buff {
+                    status: Some(s),
+                    duration,
+                    apply_count,
+                    ..
+                } = f
+                {
                     if s == condition {
                         return Some(json!({
                             "stacks": apply_count.unwrap_or(1),
@@ -963,7 +1083,8 @@ fn exec_find_condition_sources(args: &Value, ctx: &ToolContext) -> Value {
                 "weapon_type": skill.weapon_type.as_deref().unwrap_or(""),
                 "application": detail
             })
-        }).collect();
+        })
+        .collect();
 
     json!({
         "condition": condition,
@@ -975,28 +1096,39 @@ fn exec_find_condition_sources(args: &Value, ctx: &ToolContext) -> Value {
 
 fn exec_search_skills_by_effect(args: &Value, ctx: &ToolContext) -> Value {
     let effect = args["effect"].as_str().unwrap_or("");
-    let profession_filter = args.get("profession").and_then(|v| v.as_str())
+    let profession_filter = args
+        .get("profession")
+        .and_then(|v| v.as_str())
         .unwrap_or(ctx.profession_name);
     let weapon_filter = args.get("weapon_type").and_then(|v| v.as_str());
 
     let mut results: Vec<Value> = Vec::new();
 
     for skill in ctx.db.skills.values() {
-        if !skill.professions.contains(&profession_filter.to_string()) { continue; }
+        if !skill.professions.contains(&profession_filter.to_string()) {
+            continue;
+        }
         if let Some(wt) = weapon_filter {
-            if skill.weapon_type.as_deref() != Some(wt) { continue; }
+            if skill.weapon_type.as_deref() != Some(wt) {
+                continue;
+            }
         }
 
         let matches = skill.facts.iter().any(|f| match f {
-            Fact::Buff { status: Some(s), .. } | Fact::PrefixedBuff { status: Some(s), .. } => {
-                s.to_lowercase().contains(&effect.to_lowercase())
+            Fact::Buff {
+                status: Some(s), ..
             }
-            Fact::ComboField { field_type: Some(ft), .. } => {
-                ft.to_lowercase().contains(&effect.to_lowercase())
-            }
-            Fact::ComboFinisher { finisher_type: Some(ft), .. } => {
-                ft.to_lowercase().contains(&effect.to_lowercase())
-            }
+            | Fact::PrefixedBuff {
+                status: Some(s), ..
+            } => s.to_lowercase().contains(&effect.to_lowercase()),
+            Fact::ComboField {
+                field_type: Some(ft),
+                ..
+            } => ft.to_lowercase().contains(&effect.to_lowercase()),
+            Fact::ComboFinisher {
+                finisher_type: Some(ft),
+                ..
+            } => ft.to_lowercase().contains(&effect.to_lowercase()),
             _ => false,
         });
 
@@ -1011,7 +1143,9 @@ fn exec_search_skills_by_effect(args: &Value, ctx: &ToolContext) -> Value {
                 "conditions_applied": conditions,
                 "buffs_applied": buffs
             }));
-            if results.len() >= 20 { break; }
+            if results.len() >= 20 {
+                break;
+            }
         }
     }
 
@@ -1019,21 +1153,32 @@ fn exec_search_skills_by_effect(args: &Value, ctx: &ToolContext) -> Value {
 }
 
 fn exec_find_synergies(args: &Value, ctx: &ToolContext) -> Value {
-    let trait_ids: Vec<u32> = args.get("trait_ids")
+    let trait_ids: Vec<u32> = args
+        .get("trait_ids")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_u64().map(|n| n as u32)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_u64().map(|n| n as u32))
+                .collect()
+        })
         .unwrap_or_default();
 
     let trait_id_set: std::collections::HashSet<u32> = trait_ids.iter().copied().collect();
     let mut activated_synergies: Vec<Value> = Vec::new();
 
     for &tid in &trait_ids {
-        let Some(t) = ctx.db.traits.get(&tid) else { continue; };
+        let Some(t) = ctx.db.traits.get(&tid) else {
+            continue;
+        };
 
         for tf in &t.traited_facts {
             if trait_id_set.contains(&tf.requires_trait) {
-                let req_name = ctx.db.traits.get(&tf.requires_trait)
-                    .map(|r| r.name.as_str()).unwrap_or("Unknown");
+                let req_name = ctx
+                    .db
+                    .traits
+                    .get(&tf.requires_trait)
+                    .map(|r| r.name.as_str())
+                    .unwrap_or("Unknown");
                 let fact_json = format_fact(&tf.fact);
                 activated_synergies.push(json!({
                     "trait": &t.name,
@@ -1050,7 +1195,9 @@ fn exec_find_synergies(args: &Value, ctx: &ToolContext) -> Value {
     // Also check what conditions the selected traits apply
     let mut conditions_from_traits: Vec<Value> = Vec::new();
     for &tid in &trait_ids {
-        let Some(t) = ctx.db.traits.get(&tid) else { continue; };
+        let Some(t) = ctx.db.traits.get(&tid) else {
+            continue;
+        };
         let condis = extract_conditions(&t.facts);
         if !condis.is_empty() {
             conditions_from_traits.push(json!({
@@ -1068,11 +1215,19 @@ fn exec_find_synergies(args: &Value, ctx: &ToolContext) -> Value {
 }
 
 fn exec_get_build_synergy_report(args: &Value, ctx: &ToolContext) -> Value {
-    let trait_ids: Vec<u32> = args.get("trait_ids")
+    let trait_ids: Vec<u32> = args
+        .get("trait_ids")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_u64().map(|n| n as u32)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_u64().map(|n| n as u32))
+                .collect()
+        })
         .unwrap_or_default();
-    let gear_prefix = args.get("gear_prefix").and_then(|v| v.as_str()).unwrap_or("");
+    let gear_prefix = args
+        .get("gear_prefix")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let rune_name = args.get("rune_name").and_then(|v| v.as_str());
 
     // 1. Trait synergies (activated traited_facts)
@@ -1080,7 +1235,13 @@ fn exec_get_build_synergy_report(args: &Value, ctx: &ToolContext) -> Value {
 
     // 2. Damage modifiers from traits
     let modifiers = combat::extract_damage_modifiers(
-        &trait_ids, None, &[], None, &ctx.db.traits, &ctx.db.items, ctx.balance_ctx,
+        &trait_ids,
+        None,
+        &[],
+        None,
+        &ctx.db.traits,
+        &ctx.db.items,
+        ctx.balance_ctx,
     );
 
     // 3. All conditions the build can apply
@@ -1088,12 +1249,16 @@ fn exec_get_build_synergy_report(args: &Value, ctx: &ToolContext) -> Value {
     for &tid in &trait_ids {
         if let Some(t) = ctx.db.traits.get(&tid) {
             for f in &t.facts {
-                if let Fact::Buff { status: Some(s), .. } = f {
-                    let conditions = [
-                        "Bleeding", "Burning", "Poison", "Torment", "Confusion",
-                    ];
+                if let Fact::Buff {
+                    status: Some(s), ..
+                } = f
+                {
+                    let conditions = ["Bleeding", "Burning", "Poison", "Torment", "Confusion"];
                     if conditions.contains(&s.as_str()) {
-                        all_conditions.entry(s.clone()).or_default().push(t.name.clone());
+                        all_conditions
+                            .entry(s.clone())
+                            .or_default()
+                            .push(t.name.clone());
                     }
                 }
             }
@@ -1102,12 +1267,21 @@ fn exec_get_build_synergy_report(args: &Value, ctx: &ToolContext) -> Value {
 
     // 4. Rune synergy (if specified)
     let rune_info = rune_name.and_then(|name| {
-        ctx.db.all_runes().iter()
+        ctx.db
+            .all_runes()
+            .iter()
             .find(|r| r.name.to_lowercase().contains(&name.to_lowercase()))
             .map(|item| {
-                let bonuses = item.details.as_ref()
-                    .map(|d| &d.bonuses).cloned().unwrap_or_default();
-                let parsed: Vec<Value> = bonuses.iter().map(|b| parse_rune_bonus_structured(b)).collect();
+                let bonuses = item
+                    .details
+                    .as_ref()
+                    .map(|d| &d.bonuses)
+                    .cloned()
+                    .unwrap_or_default();
+                let parsed: Vec<Value> = bonuses
+                    .iter()
+                    .map(|b| parse_rune_bonus_structured(b))
+                    .collect();
                 json!({ "name": &item.name, "bonuses": parsed })
             })
     });
@@ -1131,32 +1305,40 @@ fn exec_get_build_synergy_report(args: &Value, ctx: &ToolContext) -> Value {
 fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
     use crate::rotation;
 
-    let skill_ids: Vec<u32> = args.get("skill_ids")
+    let skill_ids: Vec<u32> = args
+        .get("skill_ids")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_u64().map(|n| n as u32)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_u64().map(|n| n as u32))
+                .collect()
+        })
         .unwrap_or_default();
 
     if skill_ids.is_empty() {
         return json!({ "error": "No skill IDs provided" });
     }
 
-    let duration_s = args.get("duration_seconds")
+    let duration_s = args
+        .get("duration_seconds")
         .and_then(|v| v.as_u64())
         .unwrap_or(30) as u32;
 
     // Get stats from gear prefix (or use sensible defaults)
-    let gear_prefix = args.get("gear_prefix").and_then(|v| v.as_str()).unwrap_or("Berserker's");
-    let (power, condition_damage, weapon_strength) = if let Some(istat) = ctx.db.itemstats.values()
-        .find(|is| is.name == gear_prefix)
-    {
-        let gear_stats = calculate_full_set_stats(istat);
-        let base = stats::base_stats();
-        let power = base.power + gear_stats.power;
-        let condition_damage = base.condition_damage + gear_stats.condition_damage;
-        (power, condition_damage, 1100.0)
-    } else {
-        (2000.0, 1000.0, 1100.0) // fallback defaults
-    };
+    let gear_prefix = args
+        .get("gear_prefix")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Berserker's");
+    let (power, condition_damage, weapon_strength) =
+        if let Some(istat) = ctx.db.itemstats.values().find(|is| is.name == gear_prefix) {
+            let gear_stats = calculate_full_set_stats(istat);
+            let base = stats::base_stats();
+            let power = base.power + gear_stats.power;
+            let condition_damage = base.condition_damage + gear_stats.condition_damage;
+            (power, condition_damage, 1100.0)
+        } else {
+            (2000.0, 1000.0, 1100.0) // fallback defaults
+        };
 
     // Build rotation skills from the provided IDs
     let rotation_skills = rotation::builder::build_rotation_skills(&skill_ids, ctx.db);
@@ -1175,34 +1357,42 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
     );
 
     // Format condition uptimes
-    let mut condition_uptimes: Vec<Value> = result.condition_uptime.iter()
-        .map(|(name, avg_stacks)| json!({
-            "condition": name,
-            "avg_stacks": format!("{:.1}", avg_stacks)
-        }))
+    let mut condition_uptimes: Vec<Value> = result
+        .condition_uptime
+        .iter()
+        .map(|(name, avg_stacks)| {
+            json!({
+                "condition": name,
+                "avg_stacks": format!("{:.1}", avg_stacks)
+            })
+        })
         .collect();
-    condition_uptimes.sort_by(|a, b| {
-        a["condition"].as_str().cmp(&b["condition"].as_str())
-    });
+    condition_uptimes.sort_by(|a, b| a["condition"].as_str().cmp(&b["condition"].as_str()));
 
     // Format buff uptimes
-    let mut buff_uptimes: Vec<Value> = result.buff_uptime.iter()
-        .map(|(name, fraction)| json!({
-            "buff": name,
-            "uptime_pct": format!("{:.0}%", fraction * 100.0)
-        }))
+    let mut buff_uptimes: Vec<Value> = result
+        .buff_uptime
+        .iter()
+        .map(|(name, fraction)| {
+            json!({
+                "buff": name,
+                "uptime_pct": format!("{:.0}%", fraction * 100.0)
+            })
+        })
         .collect();
-    buff_uptimes.sort_by(|a, b| {
-        a["buff"].as_str().cmp(&b["buff"].as_str())
-    });
+    buff_uptimes.sort_by(|a, b| a["buff"].as_str().cmp(&b["buff"].as_str()));
 
     // Format skill usage
-    let skill_usage: Vec<Value> = result.skill_usage.iter()
-        .map(|su| json!({
-            "skill": &su.name,
-            "casts": su.cast_count,
-            "dps": format!("{:.0}", su.dps_contribution)
-        }))
+    let skill_usage: Vec<Value> = result
+        .skill_usage
+        .iter()
+        .map(|su| {
+            json!({
+                "skill": &su.name,
+                "casts": su.cast_count,
+                "dps": format!("{:.0}", su.dps_contribution)
+            })
+        })
         .collect();
 
     json!({
@@ -1234,9 +1424,7 @@ fn calculate_full_set_stats(itemstat: &ItemStat) -> stats::StatBlock {
     let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
     for &(slot_type, _) in data::EQUIPMENT_SLOTS {
         if let Some(budget) = budgets.get(slot_type, shape) {
-            crate::engine::add_budget_stats_for_itemstat(
-                &mut gear_stats, itemstat, budget,
-            );
+            crate::engine::add_budget_stats_for_itemstat(&mut gear_stats, itemstat, budget);
         }
     }
     gear_stats
@@ -1252,14 +1440,22 @@ fn summarize_trait_facts(t: &GW2Trait) -> Vec<String> {
                     effects.push(format!("{}: {}", text, val));
                 }
             }
-            Fact::Buff { status, duration, .. }
-            | Fact::PrefixedBuff { status, duration, .. } => {
+            Fact::Buff {
+                status, duration, ..
+            }
+            | Fact::PrefixedBuff {
+                status, duration, ..
+            } => {
                 if let Some(status) = status {
                     let dur = duration.map(|d| format!(" ({}s)", d)).unwrap_or_default();
                     effects.push(format!("Applies {}{}", status, dur));
                 }
             }
-            Fact::Damage { hit_count, dmg_multiplier, .. } => {
+            Fact::Damage {
+                hit_count,
+                dmg_multiplier,
+                ..
+            } => {
                 let hits = hit_count.unwrap_or(1);
                 let mult = dmg_multiplier.unwrap_or(1.0);
                 effects.push(format!("Damage: {}x {:.2}", hits, mult));
@@ -1281,78 +1477,131 @@ fn summarize_trait_facts(t: &GW2Trait) -> Vec<String> {
 /// Extract conditions applied by a set of facts.
 fn extract_conditions(facts: &[Fact]) -> Vec<Value> {
     let conditions = [
-        "Bleeding", "Burning", "Poison", "Torment", "Confusion",
-        "Vulnerability", "Weakness", "Blind", "Blinded",
-        "Chill", "Chilled", "Cripple", "Crippled",
-        "Fear", "Immobilize", "Immobilized", "Slow", "Taunt",
+        "Bleeding",
+        "Burning",
+        "Poison",
+        "Torment",
+        "Confusion",
+        "Vulnerability",
+        "Weakness",
+        "Blind",
+        "Blinded",
+        "Chill",
+        "Chilled",
+        "Cripple",
+        "Crippled",
+        "Fear",
+        "Immobilize",
+        "Immobilized",
+        "Slow",
+        "Taunt",
     ];
-    facts.iter().filter_map(|f| {
-        match f {
-            Fact::Buff { status: Some(s), duration, apply_count, .. }
-            | Fact::PrefixedBuff { status: Some(s), duration, apply_count, .. }
-                if conditions.contains(&s.as_str()) =>
-            {
-                Some(json!({
-                    "condition": s,
-                    "stacks": apply_count.unwrap_or(1),
-                    "duration_s": duration.unwrap_or(0)
-                }))
+    facts
+        .iter()
+        .filter_map(|f| match f {
+            Fact::Buff {
+                status: Some(s),
+                duration,
+                apply_count,
+                ..
             }
+            | Fact::PrefixedBuff {
+                status: Some(s),
+                duration,
+                apply_count,
+                ..
+            } if conditions.contains(&s.as_str()) => Some(json!({
+                "condition": s,
+                "stacks": apply_count.unwrap_or(1),
+                "duration_s": duration.unwrap_or(0)
+            })),
             _ => None,
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 /// Extract boons/buffs applied by a set of facts.
 fn extract_buffs(facts: &[Fact]) -> Vec<Value> {
     let boons = [
-        "Might", "Fury", "Quickness", "Alacrity", "Protection",
-        "Resolution", "Regeneration", "Vigor", "Stability",
-        "Swiftness", "Resistance", "Aegis",
+        "Might",
+        "Fury",
+        "Quickness",
+        "Alacrity",
+        "Protection",
+        "Resolution",
+        "Regeneration",
+        "Vigor",
+        "Stability",
+        "Swiftness",
+        "Resistance",
+        "Aegis",
     ];
-    facts.iter().filter_map(|f| {
-        match f {
-            Fact::Buff { status: Some(s), duration, apply_count, .. }
-            | Fact::PrefixedBuff { status: Some(s), duration, apply_count, .. }
-                if boons.contains(&s.as_str()) =>
-            {
-                Some(json!({
-                    "buff": s,
-                    "stacks": apply_count.unwrap_or(1),
-                    "duration_s": duration.unwrap_or(0)
-                }))
+    facts
+        .iter()
+        .filter_map(|f| match f {
+            Fact::Buff {
+                status: Some(s),
+                duration,
+                apply_count,
+                ..
             }
+            | Fact::PrefixedBuff {
+                status: Some(s),
+                duration,
+                apply_count,
+                ..
+            } if boons.contains(&s.as_str()) => Some(json!({
+                "buff": s,
+                "stacks": apply_count.unwrap_or(1),
+                "duration_s": duration.unwrap_or(0)
+            })),
             _ => None,
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 /// Extract stat bonuses from AttributeAdjust facts.
 fn extract_stat_bonuses(facts: &[Fact]) -> Vec<Value> {
-    facts.iter().filter_map(|f| {
-        if let Fact::AttributeAdjust { target, value: Some(val), .. } = f {
-            Some(json!({
-                "stat": target.as_deref().unwrap_or("unknown"),
-                "value": val
-            }))
-        } else {
-            None
-        }
-    }).collect()
+    facts
+        .iter()
+        .filter_map(|f| {
+            if let Fact::AttributeAdjust {
+                target,
+                value: Some(val),
+                ..
+            } = f
+            {
+                Some(json!({
+                    "stat": target.as_deref().unwrap_or("unknown"),
+                    "value": val
+                }))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// Extract damage modifier percentages from Percent facts.
 fn extract_damage_modifiers_from_facts(facts: &[Fact]) -> Vec<Value> {
-    facts.iter().filter_map(|f| {
-        if let Fact::Percent { text, percent: Some(pct), .. } = f {
-            Some(json!({
-                "description": text.as_deref().unwrap_or(""),
-                "percent": pct
-            }))
-        } else {
-            None
-        }
-    }).collect()
+    facts
+        .iter()
+        .filter_map(|f| {
+            if let Fact::Percent {
+                text,
+                percent: Some(pct),
+                ..
+            } = f
+            {
+                Some(json!({
+                    "description": text.as_deref().unwrap_or(""),
+                    "percent": pct
+                }))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// Detect proc triggers by scanning fact descriptions.
@@ -1389,7 +1638,8 @@ fn detect_proc_triggers(facts: &[Fact], description: Option<&str>) -> Vec<String
     // Check fact descriptions
     for fact in facts {
         match fact {
-            Fact::Buff { text: Some(t), .. } | Fact::Percent { text: Some(t), .. }
+            Fact::Buff { text: Some(t), .. }
+            | Fact::Percent { text: Some(t), .. }
             | Fact::AttributeAdjust { text: Some(t), .. }
             | Fact::Damage { text: Some(t), .. } => check_text(t),
             _ => {}
@@ -1455,8 +1705,15 @@ fn parse_rune_bonus_structured(bonus: &str) -> Value {
 /// Extract a stat bonus like "+125 Power" from text.
 fn extract_stat_bonus(text: &str) -> Option<Value> {
     let stats = [
-        "Power", "Precision", "Toughness", "Vitality", "Ferocity",
-        "Condition Damage", "Expertise", "Concentration", "Healing Power",
+        "Power",
+        "Precision",
+        "Toughness",
+        "Vitality",
+        "Ferocity",
+        "Condition Damage",
+        "Expertise",
+        "Concentration",
+        "Healing Power",
     ];
     for stat in &stats {
         if text.contains(stat) {
@@ -1478,9 +1735,17 @@ fn extract_number(text: &str) -> Option<f64> {
     let mut num_str = String::new();
     let mut found_digit = false;
     for ch in text.chars() {
-        if ch.is_ascii_digit() || (ch == '.' && found_digit) || (ch == '+' && !found_digit) || (ch == '-' && !found_digit) {
-            if ch != '+' { num_str.push(ch); }
-            if ch.is_ascii_digit() { found_digit = true; }
+        if ch.is_ascii_digit()
+            || (ch == '.' && found_digit)
+            || (ch == '+' && !found_digit)
+            || (ch == '-' && !found_digit)
+        {
+            if ch != '+' {
+                num_str.push(ch);
+            }
+            if ch.is_ascii_digit() {
+                found_digit = true;
+            }
         } else if found_digit {
             break;
         }
@@ -1491,27 +1756,49 @@ fn extract_number(text: &str) -> Option<f64> {
 /// Format a single Fact into a JSON value for tool responses.
 fn format_fact(fact: &Fact) -> Value {
     match fact {
-        Fact::AttributeAdjust { text, target, value, .. } => json!({
+        Fact::AttributeAdjust {
+            text,
+            target,
+            value,
+            ..
+        } => json!({
             "type": "AttributeAdjust",
             "text": text,
             "target": target,
             "value": value
         }),
-        Fact::Buff { text, status, duration, apply_count, .. } => json!({
+        Fact::Buff {
+            text,
+            status,
+            duration,
+            apply_count,
+            ..
+        } => json!({
             "type": "Buff",
             "text": text,
             "status": status,
             "duration": duration,
             "apply_count": apply_count
         }),
-        Fact::BuffConversion { text, source, target, percent, .. } => json!({
+        Fact::BuffConversion {
+            text,
+            source,
+            target,
+            percent,
+            ..
+        } => json!({
             "type": "BuffConversion",
             "text": text,
             "source": source,
             "target": target,
             "percent": percent
         }),
-        Fact::Damage { text, hit_count, dmg_multiplier, .. } => json!({
+        Fact::Damage {
+            text,
+            hit_count,
+            dmg_multiplier,
+            ..
+        } => json!({
             "type": "Damage",
             "text": text,
             "hit_count": hit_count,
@@ -1537,12 +1824,19 @@ fn format_fact(fact: &Fact) -> Value {
             "text": text,
             "duration": duration
         }),
-        Fact::ComboField { text, field_type, .. } => json!({
+        Fact::ComboField {
+            text, field_type, ..
+        } => json!({
             "type": "ComboField",
             "text": text,
             "field_type": field_type
         }),
-        Fact::ComboFinisher { text, finisher_type, percent, .. } => json!({
+        Fact::ComboFinisher {
+            text,
+            finisher_type,
+            percent,
+            ..
+        } => json!({
             "type": "ComboFinisher",
             "text": text,
             "finisher_type": finisher_type,
@@ -1572,7 +1866,13 @@ fn format_fact(fact: &Fact) -> Value {
             "type": "NoData",
             "text": text
         }),
-        Fact::PrefixedBuff { text, status, duration, apply_count, .. } => json!({
+        Fact::PrefixedBuff {
+            text,
+            status,
+            duration,
+            apply_count,
+            ..
+        } => json!({
             "type": "PrefixedBuff",
             "text": text,
             "status": status,
@@ -1584,7 +1884,9 @@ fn format_fact(fact: &Fact) -> Value {
             "text": text,
             "value": value
         }),
-        Fact::HealingAdjust { text, hit_count, .. } => json!({
+        Fact::HealingAdjust {
+            text, hit_count, ..
+        } => json!({
             "type": "HealingAdjust",
             "text": text,
             "hit_count": hit_count
@@ -1631,7 +1933,9 @@ mod tests {
     #[test]
     fn test_tool_declarations_have_names() {
         let tools = tool_declarations();
-        let names: Vec<&str> = tools[0].function_declarations.iter()
+        let names: Vec<&str> = tools[0]
+            .function_declarations
+            .iter()
             .map(|d| d.name.as_str())
             .collect();
         assert!(names.contains(&"get_profession_info"));

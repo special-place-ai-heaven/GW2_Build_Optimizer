@@ -136,9 +136,7 @@ fn validate_specializations(
     result: &mut ValidatedBuild,
 ) {
     let prof = db.profession(profession_name);
-    let prof_spec_ids: Vec<u32> = prof
-        .map(|p| p.specializations.clone())
-        .unwrap_or_default();
+    let prof_spec_ids: Vec<u32> = prof.map(|p| p.specializations.clone()).unwrap_or_default();
 
     let mut elite_count = 0;
 
@@ -148,9 +146,10 @@ fn validate_specializations(
         let spec = find_spec_by_name(db, spec_name_clean, &prof_spec_ids);
 
         let Some(spec) = spec else {
-            result
-                .errors
-                .push(format!("Specialization '{}' not found for {}", spec_name, profession_name));
+            result.errors.push(format!(
+                "Specialization '{}' not found for {}",
+                spec_name, profession_name
+            ));
             continue;
         };
 
@@ -190,7 +189,10 @@ fn validate_specializations(
                 if let Some(existing) = used_tiers.get(&t.tier) {
                     result.warnings.push(format!(
                         "Spec '{}': tier {} has '{}' and '{}' — keeping first",
-                        spec.name, tier_label(t.tier), existing, t.name
+                        spec.name,
+                        tier_label(t.tier),
+                        existing,
+                        t.name
                     ));
                     continue;
                 }
@@ -256,9 +258,10 @@ fn validate_weapon_set(
         if let Some(_info) = find_weapon(mh, prof) {
             set.main_hand = Some(mh.clone());
         } else {
-            result
-                .errors
-                .push(format!("{}: weapon '{}' not available for {}", label, mh, prof.name));
+            result.errors.push(format!(
+                "{}: weapon '{}' not available for {}",
+                label, mh, prof.name
+            ));
         }
     }
 
@@ -267,9 +270,10 @@ fn validate_weapon_set(
         if let Some(_info) = find_weapon(oh, prof) {
             set.off_hand = Some(oh.clone());
         } else {
-            result
-                .errors
-                .push(format!("{}: weapon '{}' not available for {}", label, oh, prof.name));
+            result.errors.push(format!(
+                "{}: weapon '{}' not available for {}",
+                label, oh, prof.name
+            ));
         }
     }
 
@@ -303,8 +307,12 @@ fn validate_weapon_set(
     }
     // Remove gated weapons from the validated set so downstream code can't apply them.
     for w in &gated_weapons {
-        if set.main_hand.as_deref() == Some(w.as_str()) { set.main_hand = None; }
-        if set.off_hand.as_deref()  == Some(w.as_str()) { set.off_hand  = None; }
+        if set.main_hand.as_deref() == Some(w.as_str()) {
+            set.main_hand = None;
+        }
+        if set.off_hand.as_deref() == Some(w.as_str()) {
+            set.off_hand = None;
+        }
     }
 
     set
@@ -357,7 +365,9 @@ fn validate_skills(
 
 fn validate_rune(response: &GeminiBuildResponse, db: &GameDb, result: &mut ValidatedBuild) {
     if response.rune.is_empty() {
-        result.warnings.push("Rune field is empty — no rune selected".into());
+        result
+            .warnings
+            .push("Rune field is empty — no rune selected".into());
         return;
     }
 
@@ -392,7 +402,9 @@ fn validate_sigils(response: &GeminiBuildResponse, db: &GameDb, result: &mut Val
 
 fn validate_relic(response: &GeminiBuildResponse, db: &GameDb, result: &mut ValidatedBuild) {
     if response.relic.is_empty() {
-        result.warnings.push("Relic field is empty — no relic selected".into());
+        result
+            .warnings
+            .push("Relic field is empty — no relic selected".into());
         return;
     }
 
@@ -400,20 +412,17 @@ fn validate_relic(response: &GeminiBuildResponse, db: &GameDb, result: &mut Vali
     result.relic = find_item_by_name(&response.relic, &relics, "Relic", result);
 }
 
-fn validate_gear_prefix(
-    response: &GeminiBuildResponse,
-    db: &GameDb,
-    result: &mut ValidatedBuild,
-) {
+fn validate_gear_prefix(response: &GeminiBuildResponse, db: &GameDb, result: &mut ValidatedBuild) {
     if response.stat_prefix.is_empty() {
         return;
     }
 
     // Case-insensitive search in itemstats
     let needle = response.stat_prefix.to_lowercase();
-    let found = db.itemstats.values().find(|is| {
-        is.name.to_lowercase() == needle || is.name.to_lowercase().contains(&needle)
-    });
+    let found = db
+        .itemstats
+        .values()
+        .find(|is| is.name.to_lowercase() == needle || is.name.to_lowercase().contains(&needle));
 
     if let Some(is) = found {
         let exact = is.name.to_lowercase() == needle;
@@ -537,10 +546,9 @@ fn find_skill_by_name(
 
         Some((skill.id, skill.name.clone()))
     } else {
-        result.warnings.push(format!(
-            "Skill '{}' not found for this profession",
-            name
-        ));
+        result
+            .warnings
+            .push(format!("Skill '{}' not found for this profession", name));
         None
     }
 }
@@ -655,7 +663,10 @@ fn find_weapon<'a>(
 /// Handles both old format ("Set 1: Axe / Axe") and the raw fields.
 fn parse_weapon_sets_from_response(
     response: &GeminiBuildResponse,
-) -> ((Option<String>, Option<String>), (Option<String>, Option<String>)) {
+) -> (
+    (Option<String>, Option<String>),
+    (Option<String>, Option<String>),
+) {
     let mut set1 = (None, None);
     let mut set2 = (None, None);
 
@@ -667,7 +678,10 @@ fn parse_weapon_sets_from_response(
         };
 
         let parts: Vec<&str> = rest.split('/').map(|s| s.trim()).collect();
-        let main = parts.first().filter(|s| !s.is_empty()).map(|s| s.to_string());
+        let main = parts
+            .first()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
         let off = parts
             .get(1)
             .filter(|s| !s.is_empty() && *s != &"null" && *s != &"None")
@@ -764,10 +778,7 @@ mod tests {
     #[test]
     fn test_parse_weapon_sets_from_response() {
         let mut response = GeminiBuildResponse::default();
-        response.weapons = vec![
-            "Set 1: Axe / Axe".into(),
-            "Set 2: Greatsword".into(),
-        ];
+        response.weapons = vec!["Set 1: Axe / Axe".into(), "Set 2: Greatsword".into()];
         let (set1, set2) = parse_weapon_sets_from_response(&response);
         assert_eq!(set1.0.as_deref(), Some("Axe"));
         assert_eq!(set1.1.as_deref(), Some("Axe"));
@@ -793,11 +804,9 @@ mod tests {
     #[test]
     fn test_parse_changes_structured() {
         let mut response = GeminiBuildResponse::default();
-        response.changes_structured = Some(vec![
-            serde_json::json!({
-                "slot": "Adept", "from": "Trait A", "to": "Trait B", "reason": "Better synergy"
-            }),
-        ]);
+        response.changes_structured = Some(vec![serde_json::json!({
+            "slot": "Adept", "from": "Trait A", "to": "Trait B", "reason": "Better synergy"
+        })]);
         let changes = parse_changes(&response);
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].slot, "Adept");
@@ -846,7 +855,10 @@ mod tests {
         let t = make_trait(1, "Swift Retribution");
         let traits = vec![&t];
         let result = find_trait_by_name("swif", &traits);
-        assert!(result.is_none(), "4-char needle must not match via contains fallback");
+        assert!(
+            result.is_none(),
+            "4-char needle must not match via contains fallback"
+        );
     }
 
     #[test]
@@ -857,7 +869,10 @@ mod tests {
         let t = make_trait(2, "Valorous Recovery");
         let traits = vec![&t];
         let result = find_trait_by_name("valor", &traits);
-        assert!(result.is_some(), "5-char needle must match via contains fallback");
+        assert!(
+            result.is_some(),
+            "5-char needle must match via contains fallback"
+        );
         assert_eq!(result.unwrap().id, 2);
     }
 }

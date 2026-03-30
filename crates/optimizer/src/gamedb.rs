@@ -82,7 +82,9 @@ impl GameDb {
             return Err("No professions found in cache — game data may not be downloaded".into());
         }
         if specs_vec.is_empty() {
-            return Err("No specializations found in cache — game data may not be downloaded".into());
+            return Err(
+                "No specializations found in cache — game data may not be downloaded".into(),
+            );
         }
         if itemstats_vec.is_empty() {
             return Err("No item stats found in cache — game data may not be downloaded".into());
@@ -96,8 +98,10 @@ impl GameDb {
         let traits: HashMap<u32, GW2Trait> = traits_vec.into_iter().map(|t| (t.id, t)).collect();
         let specializations: HashMap<u32, Specialization> =
             specs_vec.into_iter().map(|s| (s.id, s)).collect();
-        let professions: HashMap<String, Profession> =
-            professions_vec.into_iter().map(|p| (p.id.clone(), p)).collect();
+        let professions: HashMap<String, Profession> = professions_vec
+            .into_iter()
+            .map(|p| (p.id.clone(), p))
+            .collect();
         let legends: HashMap<String, Legend> =
             legends_vec.into_iter().map(|l| (l.id.clone(), l)).collect();
         let pvp_amulets: HashMap<u32, PvpAmulet> =
@@ -166,7 +170,10 @@ impl GameDb {
         let mut traits_by_buff: HashMap<String, Vec<u32>> = HashMap::new();
         for t in traits.values() {
             for fact in &t.facts {
-                if let gw2_api::models::facts::Fact::Buff { status: Some(s), .. } = fact {
+                if let gw2_api::models::facts::Fact::Buff {
+                    status: Some(s), ..
+                } = fact
+                {
                     if is_condition(s) {
                         traits_by_condition.entry(s.clone()).or_default().push(t.id);
                     } else if is_boon(s) {
@@ -180,9 +187,15 @@ impl GameDb {
         let mut skills_by_buff: HashMap<String, Vec<u32>> = HashMap::new();
         for skill in skills.values() {
             for fact in &skill.facts {
-                if let gw2_api::models::facts::Fact::Buff { status: Some(s), .. } = fact {
+                if let gw2_api::models::facts::Fact::Buff {
+                    status: Some(s), ..
+                } = fact
+                {
                     if is_condition(s) {
-                        skills_by_condition.entry(s.clone()).or_default().push(skill.id);
+                        skills_by_condition
+                            .entry(s.clone())
+                            .or_default()
+                            .push(skill.id);
                     } else if is_boon(s) {
                         skills_by_buff.entry(s.clone()).or_default().push(skill.id);
                     }
@@ -191,10 +204,22 @@ impl GameDb {
         }
 
         // Deduplicate (a trait/skill may have multiple Buff facts for same condition)
-        for ids in traits_by_condition.values_mut() { ids.sort_unstable(); ids.dedup(); }
-        for ids in traits_by_buff.values_mut() { ids.sort_unstable(); ids.dedup(); }
-        for ids in skills_by_condition.values_mut() { ids.sort_unstable(); ids.dedup(); }
-        for ids in skills_by_buff.values_mut() { ids.sort_unstable(); ids.dedup(); }
+        for ids in traits_by_condition.values_mut() {
+            ids.sort_unstable();
+            ids.dedup();
+        }
+        for ids in traits_by_buff.values_mut() {
+            ids.sort_unstable();
+            ids.dedup();
+        }
+        for ids in skills_by_condition.values_mut() {
+            ids.sort_unstable();
+            ids.dedup();
+        }
+        for ids in skills_by_buff.values_mut() {
+            ids.sort_unstable();
+            ids.dedup();
+        }
 
         Ok(GameDb {
             items,
@@ -229,11 +254,7 @@ impl GameDb {
     pub fn profession_skills(&self, profession: &str) -> Vec<&Skill> {
         self.skills_by_profession
             .get(profession)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|id| self.skills.get(id))
-                    .collect()
-            })
+            .map(|ids| ids.iter().filter_map(|id| self.skills.get(id)).collect())
             .unwrap_or_default()
     }
 
@@ -241,11 +262,7 @@ impl GameDb {
     pub fn spec_traits(&self, spec_id: u32) -> Vec<&GW2Trait> {
         self.traits_by_spec
             .get(&spec_id)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|id| self.traits.get(id))
-                    .collect()
-            })
+            .map(|ids| ids.iter().filter_map(|id| self.traits.get(id)).collect())
             .unwrap_or_default()
     }
 
@@ -331,11 +348,24 @@ impl GameDb {
 fn is_condition(status: &str) -> bool {
     matches!(
         status,
-        "Bleeding" | "Burning" | "Poison" | "Torment" | "Confusion"
-            | "Vulnerability" | "Weakness" | "Blind" | "Blinded"
-            | "Chill" | "Chilled" | "Cripple" | "Crippled"
-            | "Fear" | "Immobilize" | "Immobilized"
-            | "Slow" | "Taunt"
+        "Bleeding"
+            | "Burning"
+            | "Poison"
+            | "Torment"
+            | "Confusion"
+            | "Vulnerability"
+            | "Weakness"
+            | "Blind"
+            | "Blinded"
+            | "Chill"
+            | "Chilled"
+            | "Cripple"
+            | "Crippled"
+            | "Fear"
+            | "Immobilize"
+            | "Immobilized"
+            | "Slow"
+            | "Taunt"
     )
 }
 
@@ -343,9 +373,17 @@ fn is_condition(status: &str) -> bool {
 fn is_boon(status: &str) -> bool {
     matches!(
         status,
-        "Might" | "Fury" | "Quickness" | "Alacrity"
-            | "Protection" | "Resolution" | "Regeneration"
-            | "Vigor" | "Stability" | "Swiftness"
-            | "Resistance" | "Aegis"
+        "Might"
+            | "Fury"
+            | "Quickness"
+            | "Alacrity"
+            | "Protection"
+            | "Resolution"
+            | "Regeneration"
+            | "Vigor"
+            | "Stability"
+            | "Swiftness"
+            | "Resistance"
+            | "Aegis"
     )
 }

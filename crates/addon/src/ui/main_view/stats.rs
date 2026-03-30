@@ -304,7 +304,13 @@ pub(super) fn compute_3tier_combat(
     let cw = gw2_optimizer::combat::condition_weights_for_profession(profession, balance_ctx);
     let compute = |profile: &gw2_optimizer::combat::BuffProfile| -> gw2_core::types::CombatMetrics {
         let perf = gw2_optimizer::combat::calculate_combat_performance(
-            stats, derived, modifiers, profile, &cw, profession, balance_ctx,
+            stats,
+            derived,
+            modifiers,
+            profile,
+            &cw,
+            profession,
+            balance_ctx,
         );
         perf_to_combat_metrics(&perf)
     };

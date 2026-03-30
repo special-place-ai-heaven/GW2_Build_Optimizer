@@ -15,8 +15,8 @@ use crate::combat::{self, CombatPerformance, DamageModifiers};
 use crate::context::{self, ContextConfig};
 use crate::data;
 use crate::gamedb::GameDb;
-use crate::llm::LlmClient;
 use crate::gemini_tools::{self, ToolContext};
+use crate::llm::LlmClient;
 use crate::prompts;
 use crate::rotation;
 use crate::scoring::{self, score_with_weights, OptimizationWeights, StatWeights};
@@ -71,17 +71,34 @@ fn describe_lock_constraints(locks: &gw2_core::types::BuildLocks, db: &GameDb) -
     let mut parts = Vec::new();
     for (slot, spec_id) in locks.specs.iter().enumerate() {
         if let Some(id) = spec_id {
-            let name = db.specializations.get(id).map(|s| s.name.as_str()).unwrap_or("Unknown");
+            let name = db
+                .specializations
+                .get(id)
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
             let elite = db.specializations.get(id).is_some_and(|s| s.elite);
             let elite_tag = if elite { " (Elite)" } else { "" };
-            parts.push(format!("Slot {} LOCKED to \"{}\"{}", slot + 1, name, elite_tag));
+            parts.push(format!(
+                "Slot {} LOCKED to \"{}\"{}",
+                slot + 1,
+                name,
+                elite_tag
+            ));
 
             // Trait locks for this spec
             if let Some(trait_cols) = locks.trait_locks.get(id) {
                 for (col, trait_id) in trait_cols.iter().enumerate() {
                     if let Some(tid) = trait_id {
-                        let tier = match col { 0 => "Adept", 1 => "Master", _ => "Grandmaster" };
-                        let tname = db.traits.get(tid).map(|t| t.name.as_str()).unwrap_or("Unknown");
+                        let tier = match col {
+                            0 => "Adept",
+                            1 => "Master",
+                            _ => "Grandmaster",
+                        };
+                        let tname = db
+                            .traits
+                            .get(tid)
+                            .map(|t| t.name.as_str())
+                            .unwrap_or("Unknown");
                         parts.push(format!("  {} trait LOCKED to \"{}\"", tier, tname));
                     }
                 }
@@ -110,12 +127,28 @@ pub fn optimize(
     pvp_amulets: &HashMap<u32, PvpAmulet>,
 ) -> Result<Vec<BuildCandidate>, String> {
     if ctx.game_mode == GameMode::PvP {
-        return optimize_pvp(profession, weights, specs_cache, traits_cache, &mut on_progress, top_n, locks, ctx, pvp_amulets)
-            .and_then(|v| if v.is_empty() {
-                Err(format!("No PvP candidates found for {} / {}", profession.name, weights.summary_label()))
+        return optimize_pvp(
+            profession,
+            weights,
+            specs_cache,
+            traits_cache,
+            &mut on_progress,
+            top_n,
+            locks,
+            ctx,
+            pvp_amulets,
+        )
+        .and_then(|v| {
+            if v.is_empty() {
+                Err(format!(
+                    "No PvP candidates found for {} / {}",
+                    profession.name,
+                    weights.summary_label()
+                ))
             } else {
                 Ok(v)
-            });
+            }
+        });
     }
 
     on_progress(OptimizeProgress {
@@ -128,7 +161,8 @@ pub fn optimize(
     if gear_candidates.is_empty() {
         return Err(format!(
             "No gear stat prefixes found for {}. GameDb has {} itemstats loaded.",
-            weights.summary_label(), itemstats_cache.len()
+            weights.summary_label(),
+            itemstats_cache.len()
         ));
     }
 
@@ -142,7 +176,10 @@ pub fn optimize(
         full_stats += &mock_stats;
         let derived = stats::compute_derived(&full_stats, &profession.name);
         let perf = combat::calculate_combat_performance(
-            &full_stats, &derived, &empty_mods, solo_profile,
+            &full_stats,
+            &derived,
+            &empty_mods,
+            solo_profile,
             &cw,
             &profession.name,
             ctx,
@@ -151,7 +188,11 @@ pub fn optimize(
     }
 
     // Sort by score descending
-    gear_candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    gear_candidates.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     gear_candidates.truncate(top_n * 3); // keep extra — traits can shift rankings significantly
 
     on_progress(OptimizeProgress {
@@ -162,17 +203,27 @@ pub fn optimize(
     // 2. Find valid spec combinations
     let spec_combos = search_spec_combos(&profession.specializations, specs_cache, locks);
     if spec_combos.is_empty() {
-        let core_count = profession.specializations.iter()
+        let core_count = profession
+            .specializations
+            .iter()
             .filter(|id| specs_cache.get(id).is_some_and(|s| !s.elite))
             .count();
-        let elite_count = profession.specializations.iter()
+        let elite_count = profession
+            .specializations
+            .iter()
             .filter(|id| specs_cache.get(id).is_some_and(|s| s.elite))
             .count();
         return Err(format!(
             "No valid spec combinations for {}. Has {} core specs (need ≥3) and {} elite specs. \
              {} of {} spec IDs found in GameDb.",
-            profession.name, core_count, elite_count,
-            profession.specializations.iter().filter(|id| specs_cache.contains_key(id)).count(),
+            profession.name,
+            core_count,
+            elite_count,
+            profession
+                .specializations
+                .iter()
+                .filter(|id| specs_cache.contains_key(id))
+                .count(),
             profession.specializations.len()
         ));
     }
@@ -184,11 +235,7 @@ pub fn optimize(
 
     for gear in &gear_candidates {
         for (elite, cores) in &spec_combos {
-            let spec_ids: Vec<u32> = cores
-                .iter()
-                .copied()
-                .chain(elite.iter().copied())
-                .collect();
+            let spec_ids: Vec<u32> = cores.iter().copied().chain(elite.iter().copied()).collect();
 
             // Collect minor traits (always active) + best major trait per column
             let mut trait_ids = Vec::new();
@@ -197,7 +244,11 @@ pub fn optimize(
                     trait_ids.extend(&spec.minor_traits);
                     // Pick 1 best major trait per column (Adept/Master/Grandmaster)
                     let best = select_best_major_traits(
-                        &spec.major_traits, &stat_weights, traits_cache, locks, spec_id,
+                        &spec.major_traits,
+                        &stat_weights,
+                        traits_cache,
+                        locks,
+                        spec_id,
                     );
                     trait_ids.extend(best);
                 }
@@ -216,12 +267,21 @@ pub fn optimize(
 
             // Extract damage modifiers from traits (no rune/sigil/relic in search phase)
             let modifiers = combat::extract_damage_modifiers(
-                &trait_ids, None, &[], None, traits_cache, _items_cache, ctx,
+                &trait_ids,
+                None,
+                &[],
+                None,
+                traits_cache,
+                _items_cache,
+                ctx,
             );
 
             // Calculate combat performance with Solo profile
             let combat_perf = combat::calculate_combat_performance(
-                &full_stats, &derived, &modifiers, solo_profile,
+                &full_stats,
+                &derived,
+                &modifiers,
+                solo_profile,
                 &cw,
                 &profession.name,
                 ctx,
@@ -266,7 +326,10 @@ pub fn optimize(
     if all_candidates.is_empty() {
         return Err(format!(
             "Optimization produced 0 candidates from {} gear × {} spec combos for {} / {}",
-            gear_candidates.len(), spec_combos.len(), profession.name, weights.summary_label()
+            gear_candidates.len(),
+            spec_combos.len(),
+            profession.name,
+            weights.summary_label()
         ));
     }
 
@@ -313,18 +376,18 @@ fn optimize_pvp(
 
     for amulet in pvp_amulets.values() {
         for (elite, cores) in &spec_combos {
-            let spec_ids: Vec<u32> = cores
-                .iter()
-                .copied()
-                .chain(elite.iter().copied())
-                .collect();
+            let spec_ids: Vec<u32> = cores.iter().copied().chain(elite.iter().copied()).collect();
 
             let mut trait_ids = Vec::new();
             for &spec_id in &spec_ids {
                 if let Some(spec) = specs_cache.get(&spec_id) {
                     trait_ids.extend(&spec.minor_traits);
                     let best = select_best_major_traits(
-                        &spec.major_traits, &stat_weights, traits_cache, locks, spec_id,
+                        &spec.major_traits,
+                        &stat_weights,
+                        traits_cache,
+                        locks,
+                        spec_id,
                     );
                     trait_ids.extend(best);
                 }
@@ -347,10 +410,19 @@ fn optimize_pvp(
 
             // Extract modifiers from traits only (PvP has no gear modifiers)
             let modifiers = combat::extract_damage_modifiers(
-                &trait_ids, None, &[], None, traits_cache, &HashMap::new(), ctx,
+                &trait_ids,
+                None,
+                &[],
+                None,
+                traits_cache,
+                &HashMap::new(),
+                ctx,
             );
             let combat_perf = combat::calculate_combat_performance(
-                &full_stats, &derived, &modifiers, solo_profile,
+                &full_stats,
+                &derived,
+                &modifiers,
+                solo_profile,
                 &cw,
                 &profession.name,
                 ctx,
@@ -384,7 +456,9 @@ fn optimize_pvp(
     });
 
     all_candidates.sort_by(|a, b| {
-        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
     all_candidates.truncate(top_n);
 
@@ -523,7 +597,8 @@ pub fn score_trait_for_archetype(
     // If the requiring trait is from the same spec, it's likely co-selected (80% credit).
     // If from a different spec, it's uncertain (30% credit).
     for tf in &t.traited_facts {
-        let same_spec = traits_cache.get(&tf.requires_trait)
+        let same_spec = traits_cache
+            .get(&tf.requires_trait)
             .map(|rt| rt.specialization == t.specialization)
             .unwrap_or(false);
         let credit = if same_spec { 0.8 } else { 0.3 };
@@ -680,7 +755,11 @@ pub fn optimize_with_gemini(
         done: false,
     });
     let lock_constraints = describe_lock_constraints(locks, db);
-    let lock_constraint_ref = if lock_constraints.is_empty() { None } else { Some(lock_constraints.as_str()) };
+    let lock_constraint_ref = if lock_constraints.is_empty() {
+        None
+    } else {
+        Some(lock_constraints.as_str())
+    };
     let prompt = prompts::synergy_build_prompt(
         profession_name,
         weights,
@@ -693,7 +772,10 @@ pub fn optimize_with_gemini(
 
     // 4. Call LLM with tools available for optional verification
     on_progress(OptimizeProgress {
-        stage: format!("{} reasoning about synergies...", llm_client.provider_name()),
+        stage: format!(
+            "{} reasoning about synergies...",
+            llm_client.provider_name()
+        ),
         done: false,
     });
     let tools = crate::llm::tools::tool_definitions();
@@ -711,7 +793,9 @@ pub fn optimize_with_gemini(
         .generate_with_tools_progress(
             &prompt,
             &tools,
-            &mut |name: &str, args: &serde_json::Value| gemini_tools::execute_tool(name, args, &tool_ctx),
+            &mut |name: &str, args: &serde_json::Value| {
+                gemini_tools::execute_tool(name, args, &tool_ctx)
+            },
             5, // max 5 tool-calling turns for verification
             &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
                 let tool_list = if tool_names.is_empty() {
@@ -774,8 +858,7 @@ pub fn optimize_with_gemini(
         stage: "Calculating stats...".into(),
         done: false,
     });
-    let (full_stats, modifiers) =
-        calculate_validated_stats(&validated, db, profession_name, ctx);
+    let (full_stats, modifiers) = calculate_validated_stats(&validated, db, profession_name, ctx);
 
     let derived = stats::compute_derived(&full_stats, profession_name);
 
@@ -787,13 +870,31 @@ pub fn optimize_with_gemini(
     let buff_profiles = combat::buff_profiles_for_profession(profession_name, ctx);
     let cw = combat::condition_weights_for_profession(profession_name, ctx);
     let combat_solo = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[0], &cw, profession_name, ctx,
+        &full_stats,
+        &derived,
+        &modifiers,
+        &buff_profiles[0],
+        &cw,
+        profession_name,
+        ctx,
     );
     let combat_party = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[1], &cw, profession_name, ctx,
+        &full_stats,
+        &derived,
+        &modifiers,
+        &buff_profiles[1],
+        &cw,
+        profession_name,
+        ctx,
     );
     let combat_squad = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[2], &cw, profession_name, ctx,
+        &full_stats,
+        &derived,
+        &modifiers,
+        &buff_profiles[2],
+        &cw,
+        profession_name,
+        ctx,
     );
 
     // 9. Simulate rotation from validated skills
@@ -837,9 +938,7 @@ pub fn calculate_validated_stats(
             let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
             for &(slot_type, _) in data::EQUIPMENT_SLOTS {
                 if let Some(budget) = budgets.get(slot_type, shape) {
-                    add_budget_stats_for_itemstat(
-                        &mut full_stats, itemstat, budget,
-                    );
+                    add_budget_stats_for_itemstat(&mut full_stats, itemstat, budget);
                 }
             }
         }
@@ -898,7 +997,8 @@ pub fn simulate_validated_rotation(
     // Resolve weapon skills from validated weapon types
     let profession_name = if let Some(spec) = validated.specializations.first() {
         // Use the profession from the spec
-        db.specializations.get(&spec.spec_id)
+        db.specializations
+            .get(&spec.spec_id)
             .map(|s| s.profession.as_str())
             .unwrap_or("")
     } else {
@@ -986,7 +1086,13 @@ pub fn optimize_deterministic(
 
     // 2. Run the full synergy pipeline
     let mut result = crate::synergy_pipeline::optimize_synergy(
-        db, profession_name, weights, ctx, determined_prefix, locks, on_progress,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        determined_prefix,
+        locks,
+        on_progress,
     )?;
 
     // 3. Optional: LLM explanation pass
@@ -997,7 +1103,10 @@ pub fn optimize_deterministic(
         });
 
         // Build a compact summary for the LLM
-        let specs_summary: Vec<String> = result.validated.specializations.iter()
+        let specs_summary: Vec<String> = result
+            .validated
+            .specializations
+            .iter()
             .map(|s| {
                 let traits_str = s.trait_names.join(", ");
                 if s.elite {
@@ -1008,38 +1117,81 @@ pub fn optimize_deterministic(
             })
             .collect();
 
-        let rune_name = result.validated.rune.as_ref()
+        let rune_name = result
+            .validated
+            .rune
+            .as_ref()
             .map(|r| r.name.as_str())
             .unwrap_or("None");
-        let sigil_names: Vec<&str> = result.validated.sigils.iter()
+        let sigil_names: Vec<&str> = result
+            .validated
+            .sigils
+            .iter()
             .map(|s| s.name.as_str())
             .collect();
-        let relic_name = result.validated.relic.as_ref()
+        let relic_name = result
+            .validated
+            .relic
+            .as_ref()
             .map(|r| r.name.as_str())
             .unwrap_or("None");
 
         let set1 = format!(
             "{}{}",
-            result.validated.weapons.set1.main_hand.as_deref().unwrap_or("?"),
-            result.validated.weapons.set1.off_hand.as_deref()
+            result
+                .validated
+                .weapons
+                .set1
+                .main_hand
+                .as_deref()
+                .unwrap_or("?"),
+            result
+                .validated
+                .weapons
+                .set1
+                .off_hand
+                .as_deref()
                 .map(|o| format!(" / {}", o))
                 .unwrap_or_default()
         );
         let set2 = format!(
             "{}{}",
-            result.validated.weapons.set2.main_hand.as_deref().unwrap_or("?"),
-            result.validated.weapons.set2.off_hand.as_deref()
+            result
+                .validated
+                .weapons
+                .set2
+                .main_hand
+                .as_deref()
+                .unwrap_or("?"),
+            result
+                .validated
+                .weapons
+                .set2
+                .off_hand
+                .as_deref()
                 .map(|o| format!(" / {}", o))
                 .unwrap_or_default()
         );
 
-        let heal = result.validated.skills.heal.as_ref()
+        let heal = result
+            .validated
+            .skills
+            .heal
+            .as_ref()
             .map(|(_, n)| n.as_str())
             .unwrap_or("?");
-        let utils: Vec<&str> = result.validated.skills.utilities.iter()
+        let utils: Vec<&str> = result
+            .validated
+            .skills
+            .utilities
+            .iter()
             .filter_map(|u| u.as_ref().map(|(_, n)| n.as_str()))
             .collect();
-        let elite = result.validated.skills.elite.as_ref()
+        let elite = result
+            .validated
+            .skills
+            .elite
+            .as_ref()
             .map(|(_, n)| n.as_str())
             .unwrap_or("?");
 
@@ -1048,11 +1200,17 @@ pub fn optimize_deterministic(
              Skills: Heal: {} | Utilities: {} | Elite: {}\n\
              Rune: {}\nSigils: {}\nRelic: {}\n\
              Combat (Solo): Strike DPS {:.0}, Condi DPS {:.0}, Total DPS {:.0}",
-            profession_name, determined_prefix,
+            profession_name,
+            determined_prefix,
             specs_summary.join("\n"),
-            set1, set2,
-            heal, utils.join(", "), elite,
-            rune_name, sigil_names.join(", "), relic_name,
+            set1,
+            set2,
+            heal,
+            utils.join(", "),
+            elite,
+            rune_name,
+            sigil_names.join(", "),
+            relic_name,
             result.combat_solo.strike_dps_index,
             result.combat_solo.condition_dps_index,
             result.combat_solo.total_dps_index,
@@ -1093,29 +1251,35 @@ mod tests {
         // Source: data/slot_budgets/level80_ascended.json (verified from GW2 API items)
         let budgets = data::slot_budgets::slot_budgets();
         assert_eq!(
-            budgets.major_for_api_slot("Coat"), 141,
+            budgets.major_for_api_slot("Coat"),
+            141,
             "Coat ThreeStat major should be 141"
         );
         assert_eq!(
-            budgets.major_for_api_slot("Helm"), 63,
+            budgets.major_for_api_slot("Helm"),
+            63,
             "Helm ThreeStat major should be 63"
         );
         assert_eq!(
-            budgets.major_for_api_slot("Amulet"), 157,
+            budgets.major_for_api_slot("Amulet"),
+            157,
             "Amulet ThreeStat major should be 157"
         );
         assert_eq!(
-            budgets.major_for_api_slot("Leggings"), 94,
+            budgets.major_for_api_slot("Leggings"),
+            94,
             "Leggings ThreeStat major should be 94"
         );
         // WeaponA1 maps to WeaponTwoHand
         assert_eq!(
-            budgets.major_for_api_slot("WeaponA1"), 251,
+            budgets.major_for_api_slot("WeaponA1"),
+            251,
             "WeaponA1 (TwoHand) ThreeStat major should be 251"
         );
         // WeaponA2 maps to WeaponOneHand
         assert_eq!(
-            budgets.major_for_api_slot("WeaponA2"), 125,
+            budgets.major_for_api_slot("WeaponA2"),
+            125,
             "WeaponA2 (OneHand) ThreeStat major should be 125"
         );
     }
@@ -1132,7 +1296,8 @@ mod tests {
         let traits_cache = HashMap::new();
         let power_weights = OptimizationWeights::preset_power_dps().to_stat_weights();
         let no_locks = gw2_core::types::BuildLocks::default();
-        let selected = select_best_major_traits(&major_traits, &power_weights, &traits_cache, &no_locks, 0);
+        let selected =
+            select_best_major_traits(&major_traits, &power_weights, &traits_cache, &no_locks, 0);
         assert_eq!(selected.len(), 3);
         // Each should come from a different column
         assert!(major_traits[0..3].contains(&selected[0]));
@@ -1148,55 +1313,105 @@ mod tests {
         let mut traits_cache = HashMap::new();
 
         // Trait 100: gives +150 Power (good for PowerDPS)
-        traits_cache.insert(100, GW2Trait {
-            id: 100, name: "Power Trait".into(), tier: 1, order: 0,
-            description: None, slot: "Major".into(), icon: None,
-            specialization: 1, skills: vec![],
-            facts: vec![Fact::AttributeAdjust {
-                text: Some("Power".into()), icon: None,
-                value: Some(150), target: Some("Power".into()),
-            }],
-            traited_facts: vec![],
-        });
+        traits_cache.insert(
+            100,
+            GW2Trait {
+                id: 100,
+                name: "Power Trait".into(),
+                tier: 1,
+                order: 0,
+                description: None,
+                slot: "Major".into(),
+                icon: None,
+                specialization: 1,
+                skills: vec![],
+                facts: vec![Fact::AttributeAdjust {
+                    text: Some("Power".into()),
+                    icon: None,
+                    value: Some(150),
+                    target: Some("Power".into()),
+                }],
+                traited_facts: vec![],
+            },
+        );
         // Trait 101: gives +150 Vitality (bad for PowerDPS)
-        traits_cache.insert(101, GW2Trait {
-            id: 101, name: "Vitality Trait".into(), tier: 1, order: 1,
-            description: None, slot: "Major".into(), icon: None,
-            specialization: 1, skills: vec![],
-            facts: vec![Fact::AttributeAdjust {
-                text: Some("Vitality".into()), icon: None,
-                value: Some(150), target: Some("Vitality".into()),
-            }],
-            traited_facts: vec![],
-        });
+        traits_cache.insert(
+            101,
+            GW2Trait {
+                id: 101,
+                name: "Vitality Trait".into(),
+                tier: 1,
+                order: 1,
+                description: None,
+                slot: "Major".into(),
+                icon: None,
+                specialization: 1,
+                skills: vec![],
+                facts: vec![Fact::AttributeAdjust {
+                    text: Some("Vitality".into()),
+                    icon: None,
+                    value: Some(150),
+                    target: Some("Vitality".into()),
+                }],
+                traited_facts: vec![],
+            },
+        );
         // Trait 102: nothing
-        traits_cache.insert(102, GW2Trait {
-            id: 102, name: "Empty Trait".into(), tier: 1, order: 2,
-            description: None, slot: "Major".into(), icon: None,
-            specialization: 1, skills: vec![],
-            facts: vec![],
-            traited_facts: vec![],
-        });
+        traits_cache.insert(
+            102,
+            GW2Trait {
+                id: 102,
+                name: "Empty Trait".into(),
+                tier: 1,
+                order: 2,
+                description: None,
+                slot: "Major".into(),
+                icon: None,
+                specialization: 1,
+                skills: vec![],
+                facts: vec![],
+                traited_facts: vec![],
+            },
+        );
 
         let power_weights = OptimizationWeights::preset_power_dps().to_stat_weights();
         let no_locks = gw2_core::types::BuildLocks::default();
-        let selected = select_best_major_traits(&major_traits, &power_weights, &traits_cache, &no_locks, 1);
+        let selected =
+            select_best_major_traits(&major_traits, &power_weights, &traits_cache, &no_locks, 1);
         // First column should select trait 100 (Power bonus)
-        assert_eq!(selected[0], 100, "PowerDPS should prefer Power trait over Vitality");
+        assert_eq!(
+            selected[0], 100,
+            "PowerDPS should prefer Power trait over Vitality"
+        );
     }
 
     #[test]
     fn test_optimize_returns_candidates() {
         let mut itemstats = HashMap::new();
-        itemstats.insert(584, ItemStat {
-            id: 584,
-            name: "Berserker's".into(),
-            attributes: vec![
-                gw2_api::models::StatAttribute { attribute: "Power".into(), multiplier: 0.35, value: 32 },
-                gw2_api::models::StatAttribute { attribute: "Precision".into(), multiplier: 0.25, value: 18 },
-                gw2_api::models::StatAttribute { attribute: "CritDamage".into(), multiplier: 0.25, value: 18 },
-            ],
-        });
+        itemstats.insert(
+            584,
+            ItemStat {
+                id: 584,
+                name: "Berserker's".into(),
+                attributes: vec![
+                    gw2_api::models::StatAttribute {
+                        attribute: "Power".into(),
+                        multiplier: 0.35,
+                        value: 32,
+                    },
+                    gw2_api::models::StatAttribute {
+                        attribute: "Precision".into(),
+                        multiplier: 0.25,
+                        value: 18,
+                    },
+                    gw2_api::models::StatAttribute {
+                        attribute: "CritDamage".into(),
+                        multiplier: 0.25,
+                        value: 18,
+                    },
+                ],
+            },
+        );
 
         let profession = Profession {
             id: "Warrior".into(),
@@ -1212,19 +1427,22 @@ mod tests {
 
         let mut specs = HashMap::new();
         for id in 1..=5u32 {
-            specs.insert(id, Specialization {
+            specs.insert(
                 id,
-                name: format!("Spec{}", id),
-                profession: "Warrior".into(),
-                elite: false,
-                minor_traits: Vec::new(),
-                major_traits: Vec::new(),
-                weapon_trait: None,
-                icon: None,
-                background: None,
-                profession_icon: None,
-                profession_icon_big: None,
-            });
+                Specialization {
+                    id,
+                    name: format!("Spec{}", id),
+                    profession: "Warrior".into(),
+                    elite: false,
+                    minor_traits: Vec::new(),
+                    major_traits: Vec::new(),
+                    weapon_trait: None,
+                    icon: None,
+                    background: None,
+                    profession_icon: None,
+                    profession_icon_big: None,
+                },
+            );
         }
 
         let no_locks = gw2_core::types::BuildLocks::default();
@@ -1267,19 +1485,22 @@ mod tests {
         };
         let mut specs = HashMap::new();
         for id in 1..=5u32 {
-            specs.insert(id, Specialization {
+            specs.insert(
                 id,
-                name: format!("Spec{}", id),
-                profession: "Warrior".into(),
-                elite: false,
-                minor_traits: Vec::new(),
-                major_traits: Vec::new(),
-                weapon_trait: None,
-                icon: None,
-                background: None,
-                profession_icon: None,
-                profession_icon_big: None,
-            });
+                Specialization {
+                    id,
+                    name: format!("Spec{}", id),
+                    profession: "Warrior".into(),
+                    elite: false,
+                    minor_traits: Vec::new(),
+                    major_traits: Vec::new(),
+                    weapon_trait: None,
+                    icon: None,
+                    background: None,
+                    profession_icon: None,
+                    profession_icon_big: None,
+                },
+            );
         }
         (profession, specs)
     }
@@ -1288,18 +1509,21 @@ mod tests {
     fn test_pvp_mode_dispatches_to_pvp_path() {
         let (profession, specs) = test_warrior_profession_and_specs();
         let mut pvp_amulets = HashMap::new();
-        pvp_amulets.insert(4, PvpAmulet {
-            id: 4,
-            name: "Assassin Amulet".into(),
-            icon: None,
-            attributes: {
-                let mut m = HashMap::new();
-                m.insert("Power".into(), 900);
-                m.insert("Precision".into(), 1200);
-                m.insert("CritDamage".into(), 900);
-                m
+        pvp_amulets.insert(
+            4,
+            PvpAmulet {
+                id: 4,
+                name: "Assassin Amulet".into(),
+                icon: None,
+                attributes: {
+                    let mut m = HashMap::new();
+                    m.insert("Power".into(), 900);
+                    m.insert("Precision".into(), 1200);
+                    m.insert("CritDamage".into(), 900);
+                    m
+                },
             },
-        });
+        );
 
         let no_locks = gw2_core::types::BuildLocks::default();
         let ctx = crate::balance::BalanceContext::pvp();
@@ -1322,7 +1546,10 @@ mod tests {
         assert!(!candidates.is_empty());
         // All PvP candidates should have a pvp_amulet set
         for c in &candidates {
-            assert!(c.pvp_amulet.is_some(), "PvP candidate should have pvp_amulet set");
+            assert!(
+                c.pvp_amulet.is_some(),
+                "PvP candidate should have pvp_amulet set"
+            );
         }
     }
 
@@ -1330,18 +1557,21 @@ mod tests {
     fn test_pvp_amulet_stats_applied_to_base() {
         let (profession, specs) = test_warrior_profession_and_specs();
         let mut pvp_amulets = HashMap::new();
-        pvp_amulets.insert(4, PvpAmulet {
-            id: 4,
-            name: "Assassin Amulet".into(),
-            icon: None,
-            attributes: {
-                let mut m = HashMap::new();
-                m.insert("Power".into(), 900);
-                m.insert("Precision".into(), 1200);
-                m.insert("CritDamage".into(), 900);
-                m
+        pvp_amulets.insert(
+            4,
+            PvpAmulet {
+                id: 4,
+                name: "Assassin Amulet".into(),
+                icon: None,
+                attributes: {
+                    let mut m = HashMap::new();
+                    m.insert("Power".into(), 900);
+                    m.insert("Precision".into(), 1200);
+                    m.insert("CritDamage".into(), 900);
+                    m
+                },
             },
-        });
+        );
 
         let no_locks = gw2_core::types::BuildLocks::default();
         let ctx = crate::balance::BalanceContext::pvp();
@@ -1401,7 +1631,10 @@ mod tests {
             &HashMap::new(), // empty pvp_amulets
         );
 
-        assert!(result.is_err(), "PvP optimization should error with no amulet data");
+        assert!(
+            result.is_err(),
+            "PvP optimization should error with no amulet data"
+        );
         let err = result.unwrap_err();
         assert!(
             err.contains("No PvP amulet data"),
@@ -1415,16 +1648,19 @@ mod tests {
         // PvP path should work even with no itemstats (slot budgets not used)
         let (profession, specs) = test_warrior_profession_and_specs();
         let mut pvp_amulets = HashMap::new();
-        pvp_amulets.insert(1, PvpAmulet {
-            id: 1,
-            name: "Test Amulet".into(),
-            icon: None,
-            attributes: {
-                let mut m = HashMap::new();
-                m.insert("Power".into(), 500);
-                m
+        pvp_amulets.insert(
+            1,
+            PvpAmulet {
+                id: 1,
+                name: "Test Amulet".into(),
+                icon: None,
+                attributes: {
+                    let mut m = HashMap::new();
+                    m.insert("Power".into(), 500);
+                    m
+                },
             },
-        });
+        );
 
         let no_locks = gw2_core::types::BuildLocks::default();
         let ctx = crate::balance::BalanceContext::pvp();
@@ -1444,21 +1680,40 @@ mod tests {
             &pvp_amulets,
         );
 
-        assert!(result.is_ok(), "PvP path should succeed without itemstats: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "PvP path should succeed without itemstats: {:?}",
+            result.err()
+        );
     }
 
     #[test]
     fn test_pve_candidates_have_no_pvp_amulet() {
         let mut itemstats = HashMap::new();
-        itemstats.insert(584, ItemStat {
-            id: 584,
-            name: "Berserker's".into(),
-            attributes: vec![
-                gw2_api::models::StatAttribute { attribute: "Power".into(), multiplier: 0.35, value: 32 },
-                gw2_api::models::StatAttribute { attribute: "Precision".into(), multiplier: 0.25, value: 18 },
-                gw2_api::models::StatAttribute { attribute: "CritDamage".into(), multiplier: 0.25, value: 18 },
-            ],
-        });
+        itemstats.insert(
+            584,
+            ItemStat {
+                id: 584,
+                name: "Berserker's".into(),
+                attributes: vec![
+                    gw2_api::models::StatAttribute {
+                        attribute: "Power".into(),
+                        multiplier: 0.35,
+                        value: 32,
+                    },
+                    gw2_api::models::StatAttribute {
+                        attribute: "Precision".into(),
+                        multiplier: 0.25,
+                        value: 18,
+                    },
+                    gw2_api::models::StatAttribute {
+                        attribute: "CritDamage".into(),
+                        multiplier: 0.25,
+                        value: 18,
+                    },
+                ],
+            },
+        );
         let (profession, specs) = test_warrior_profession_and_specs();
         let no_locks = gw2_core::types::BuildLocks::default();
         let ctx = crate::balance::BalanceContext::pve();
@@ -1479,7 +1734,10 @@ mod tests {
         .expect("PvE optimize should succeed");
 
         for c in &candidates {
-            assert!(c.pvp_amulet.is_none(), "PvE candidates should have pvp_amulet = None");
+            assert!(
+                c.pvp_amulet.is_none(),
+                "PvE candidates should have pvp_amulet = None"
+            );
         }
     }
 }

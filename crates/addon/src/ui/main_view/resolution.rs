@@ -71,7 +71,10 @@ pub(super) fn resolve_selected_build_inner(state: &mut AddonState) {
                 }
             }
         }
-        Err(e) => state.main.error = Some(e),
+        Err(e) => {
+            state.main.clear_resolved_view();
+            state.main.error = Some(e);
+        }
     }
 }
 
@@ -143,8 +146,13 @@ fn calculate_current_stats_from_db(
                     let derived = gw2_optimizer::stats::compute_derived(&opt_stats, &profession);
                     let stats = opt_stats_to_stat_block(&opt_stats, &derived);
                     let modifiers = gw2_optimizer::combat::DamageModifiers::default();
-                    let (solo, party, squad) =
-                        compute_3tier_combat(&opt_stats, &derived, &modifiers, &profession, &balance_ctx);
+                    let (solo, party, squad) = compute_3tier_combat(
+                        &opt_stats,
+                        &derived,
+                        &modifiers,
+                        &profession,
+                        &balance_ctx,
+                    );
                     return Ok((stats, solo, party, squad));
                 }
             }

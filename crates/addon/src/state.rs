@@ -2,12 +2,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::ui::chat_bar::ChatBarState;
+use crate::ui::comparison::ComparisonState;
 use gw2_core::config::AppConfig;
 use gw2_core::types::{BuildLocks, GameMode, ResolvedBuild, SavedBuild, StatBlock};
 use gw2_optimizer::gamedb::GameDb;
 use gw2_optimizer::scoring::OptimizationWeights;
-use crate::ui::chat_bar::ChatBarState;
-use crate::ui::comparison::ComparisonState;
 
 static STATE: Mutex<Option<AddonState>> = Mutex::new(None);
 
@@ -49,6 +49,26 @@ pub struct AddonState {
     /// Cancellation token — cloned into every background thread.
     /// Cancelled on addon unload so threads exit early.
     pub cancel_token: CancellationToken,
+}
+
+impl AddonState {
+    /// Reset persisted settings and transient UI state back to first-run setup.
+    pub fn reset_to_first_run(&mut self) -> Result<(), std::io::Error> {
+        let config = AppConfig::default();
+        config.save(&self.config_path)?;
+
+        self.cancel_token.cancel();
+        self.cancel_token = CancellationToken::new();
+        self.config = config;
+        self.setup = SetupState::default();
+
+        let mut main = MainState::default();
+        main.weights = OptimizationWeights::default_for_mode(main.game_mode.label());
+        self.main = main;
+        self.screen = Screen::Setup(SetupStep::Gw2ApiKey);
+
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -130,6 +150,17 @@ pub struct MainState {
     pub build_locks: BuildLocks,
     /// Whether the locks panel is expanded in the left menu.
     pub locks_panel_expanded: bool,
+}
+
+impl MainState {
+    /// Clear the currently resolved build view so the UI never shows stale data.
+    pub fn clear_resolved_view(&mut self) {
+        self.current_build = None;
+        self.current_stats = None;
+        self.comparison.current_combat_solo = None;
+        self.comparison.current_combat_party = None;
+        self.comparison.current_combat_squad = None;
+    }
 }
 
 /// GW2 API health status, checked periodically via `/v2/build`.
@@ -318,11 +349,47 @@ mod tests {
     /// Write `config` as config.json inside a per-test temp dir and return the dir.
     /// AppConfig::save() creates parent dirs automatically.
     fn config_in_tempdir(config: &AppConfig, label: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("gw2_state_test_{}_{}", std::process::id(), label));
+        let dir =
+            std::env::temp_dir().join(format!("gw2_state_test_{}_{}", std::process::id(), label));
         let cfg_path = AppConfig::config_path(&dir);
         config.save(&cfg_path).unwrap();
         dir
+    }
+
+    fn dummy_resolved_build() -> ResolvedBuild {
+        ResolvedBuild {
+            character_name: "Test Character".into(),
+            profession: "Warrior".into(),
+            game_mode: GameMode::PvE,
+            specializations: Vec::new(),
+            skills: Default::default(),
+            weapons: Vec::new(),
+            armor: Vec::new(),
+            trinkets: Vec::new(),
+            relic: None,
+            rune: None,
+            pvp_amulet: None,
+        }
+    }
+
+    fn dummy_combat_metrics(total_dps_index: i32) -> gw2_core::types::CombatMetrics {
+        gw2_core::types::CombatMetrics {
+            effective_power: 0,
+            strike_dps_index: total_dps_index,
+            condition_dps_index: 0,
+            total_dps_index,
+            healing_index: 0,
+            crit_chance: 0.0,
+            boon_duration_pct: 0.0,
+            condi_duration_pct: 0.0,
+            effective_health: 0,
+            damage_reduction_pct: 0.0,
+            bleeding_tick: 0,
+            burning_tick: 0,
+            poison_tick: 0,
+            torment_tick: 0,
+            confusion_tick: 0,
+        }
     }
 
     // ── CancellationToken ─────────────────────────────────────────────────────
@@ -362,10 +429,19 @@ mod tests {
     fn test_main_state_default_fields() {
         let main = MainState::default();
         assert!(main.characters.is_empty(), "characters must start empty");
-        assert!(!main.optimizing,          "optimizing must start false");
-        assert!(!main.characters_loading,  "characters_loading must start false (stuck-loading-flag risk)");
-        assert!(!main.game_db_loading,     "game_db_loading must start false (stuck-loading-flag risk)");
-        assert!(!main.build_loading,       "build_loading must start false (stuck-loading-flag risk)");
+        assert!(!main.optimizing, "optimizing must start false");
+        assert!(
+            !main.characters_loading,
+            "characters_loading must start false (stuck-loading-flag risk)"
+        );
+        assert!(
+            !main.game_db_loading,
+            "game_db_loading must start false (stuck-loading-flag risk)"
+        );
+        assert!(
+            !main.build_loading,
+            "build_loading must start false (stuck-loading-flag risk)"
+        );
         assert_eq!(
             main.weights,
             OptimizationWeights::default(),
@@ -381,6 +457,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_main_state_clear_resolved_view_clears_current_build_and_combat() {
+        let mut main = MainState::default();
+        main.current_build = Some(dummy_resolved_build());
+        main.current_stats = Some(StatBlock {
+            power: 1,
+            precision: 2,
+            toughness: 3,
+            vitality: 4,
+            condition_damage: 5,
+            expertise: 6,
+            concentration: 7,
+            ferocity: 8,
+            healing_power: 9,
+            crit_chance: 10.0,
+            crit_damage: 11.0,
+            health: 12,
+            armor: 13,
+        });
+        main.comparison.current_combat_solo = Some(dummy_combat_metrics(100));
+        main.comparison.current_combat_party = Some(dummy_combat_metrics(200));
+        main.comparison.current_combat_squad = Some(dummy_combat_metrics(300));
+
+        main.clear_resolved_view();
+
+        assert!(main.current_build.is_none());
+        assert!(main.current_stats.is_none());
+        assert!(main.comparison.current_combat_solo.is_none());
+        assert!(main.comparison.current_combat_party.is_none());
+        assert!(main.comparison.current_combat_squad.is_none());
+    }
+
     // ── init() screen routing ─────────────────────────────────────────────────
 
     #[test]
@@ -388,8 +496,8 @@ mod tests {
         let _serial = state_test_guard();
         reset_state();
         // No config.json in the dir → AppConfig::load returns default (no keys).
-        let dir = std::env::temp_dir()
-            .join(format!("gw2_state_test_{}_no_keys", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gw2_state_test_{}_no_keys", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         init(dir);
         let screen = with_state(|s| s.screen.clone()).unwrap();
@@ -456,15 +564,26 @@ mod tests {
     fn test_init_loading_flags_start_false() {
         let _serial = state_test_guard();
         reset_state();
-        let dir = std::env::temp_dir()
-            .join(format!("gw2_state_test_{}_loading_flags", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_state_test_{}_loading_flags",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         init(dir);
         with_state(|s| {
-            assert!(!s.main.optimizing,         "optimizing must be false after init");
-            assert!(!s.main.characters_loading, "characters_loading must be false after init");
-            assert!(!s.main.game_db_loading,    "game_db_loading must be false after init");
-            assert!(!s.main.build_loading,      "build_loading must be false after init");
+            assert!(!s.main.optimizing, "optimizing must be false after init");
+            assert!(
+                !s.main.characters_loading,
+                "characters_loading must be false after init"
+            );
+            assert!(
+                !s.main.game_db_loading,
+                "game_db_loading must be false after init"
+            );
+            assert!(
+                !s.main.build_loading,
+                "build_loading must be false after init"
+            );
         });
         reset_state();
     }
@@ -483,8 +602,10 @@ mod tests {
     fn test_with_state_invokes_closure_when_initialized() {
         let _serial = state_test_guard();
         reset_state();
-        let dir = std::env::temp_dir()
-            .join(format!("gw2_state_test_{}_with_state_init", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_state_test_{}_with_state_init",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         init(dir);
         let result = with_state(|s| s.window_visible);
@@ -498,27 +619,116 @@ mod tests {
     fn test_clear_cancels_token() {
         let _serial = state_test_guard();
         reset_state();
-        let dir = std::env::temp_dir()
-            .join(format!("gw2_state_test_{}_clear_cancel", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_state_test_{}_clear_cancel",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         init(dir);
         let token = with_state(|s| s.cancel_token.clone()).unwrap();
-        assert!(!token.is_cancelled(), "token must not be cancelled before clear");
+        assert!(
+            !token.is_cancelled(),
+            "token must not be cancelled before clear"
+        );
         clear();
-        assert!(token.is_cancelled(), "token clone must see cancellation after clear");
+        assert!(
+            token.is_cancelled(),
+            "token clone must see cancellation after clear"
+        );
     }
 
     #[test]
     fn test_clear_drops_state() {
         let _serial = state_test_guard();
         reset_state();
-        let dir = std::env::temp_dir()
-            .join(format!("gw2_state_test_{}_clear_drops", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gw2_state_test_{}_clear_drops", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         init(dir);
-        assert!(with_state(|_s| ()).is_some(), "state must be Some after init");
+        assert!(
+            with_state(|_s| ()).is_some(),
+            "state must be Some after init"
+        );
         clear();
-        assert!(with_state(|_s| ()).is_none(), "state must be None after clear");
+        assert!(
+            with_state(|_s| ()).is_none(),
+            "state must be None after clear"
+        );
+    }
+
+    #[test]
+    fn test_reset_to_first_run_clears_config_and_transient_state() {
+        let _serial = state_test_guard();
+        reset_state();
+        let config = AppConfig {
+            gw2_api_key: Some("test-gw2-key".into()),
+            gemini_api_key: Some("test-gemini-key".into()),
+            cache_build_number: Some(12345),
+            default_game_mode: Some("WvW".into()),
+            ..Default::default()
+        };
+        let dir = config_in_tempdir(&config, "reset_to_first_run");
+        init(dir.clone());
+
+        let (
+            old_cancelled,
+            new_cancelled,
+            screen,
+            has_gw2_key,
+            has_llm_key,
+            cache_build,
+            locks_cleared,
+        ) = with_state(|s| {
+            s.main.current_build = Some(dummy_resolved_build());
+            s.main.current_stats = Some(StatBlock {
+                power: 1,
+                precision: 2,
+                toughness: 3,
+                vitality: 4,
+                condition_damage: 5,
+                expertise: 6,
+                concentration: 7,
+                ferocity: 8,
+                healing_power: 9,
+                crit_chance: 10.0,
+                crit_damage: 11.0,
+                health: 12,
+                armor: 13,
+            });
+            s.main.comparison.current_combat_solo = Some(dummy_combat_metrics(500));
+            s.main.build_locks.specs[2] = Some(42);
+            s.setup.gw2_key_input = "gw2-input".into();
+            s.setup.llm_key_input = "llm-input".into();
+
+            let old_token = s.cancel_token.clone();
+            s.reset_to_first_run().unwrap();
+
+            (
+                old_token.is_cancelled(),
+                s.cancel_token.is_cancelled(),
+                s.screen.clone(),
+                s.config.has_gw2_key(),
+                s.config.has_active_llm_key(),
+                s.config.cache_build_number,
+                s.main.build_locks.specs.iter().all(|slot| slot.is_none())
+                    && s.main.build_locks.trait_locks.is_empty(),
+            )
+        })
+        .unwrap();
+
+        assert!(old_cancelled, "old token should be cancelled during reset");
+        assert!(!new_cancelled, "replacement token must start uncancelled");
+        assert_eq!(screen, Screen::Setup(SetupStep::Gw2ApiKey));
+        assert!(!has_gw2_key);
+        assert!(!has_llm_key);
+        assert_eq!(cache_build, None);
+        assert!(locks_cleared);
+
+        let (saved_config, err) = AppConfig::load(&AppConfig::config_path(&dir));
+        assert!(err.is_none());
+        assert!(!saved_config.has_gw2_key());
+        assert!(!saved_config.has_active_llm_key());
+        assert_eq!(saved_config.cache_build_number, None);
     }
 
     // ── catch_unwind panic-recovery tests ─────────────────────────────────────
@@ -531,8 +741,8 @@ mod tests {
     fn test_catch_unwind_clears_chat_waiting_on_panic() {
         let _serial = state_test_guard();
         reset_state();
-        let dir = std::env::temp_dir()
-            .join(format!("gw2_state_test_{}_panic_chat", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gw2_state_test_{}_panic_chat", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         init(dir.clone());
         with_state(|s| s.main.chat.waiting = true);
@@ -546,7 +756,11 @@ mod tests {
         }
 
         let waiting = with_state(|s| s.main.chat.waiting);
-        assert_eq!(waiting, Some(false), "chat.waiting must be cleared after panic");
+        assert_eq!(
+            waiting,
+            Some(false),
+            "chat.waiting must be cleared after panic"
+        );
         reset_state();
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -555,8 +769,10 @@ mod tests {
     fn test_catch_unwind_clears_models_loading_on_panic() {
         let _serial = state_test_guard();
         reset_state();
-        let dir = std::env::temp_dir()
-            .join(format!("gw2_state_test_{}_panic_models", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_state_test_{}_panic_models",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         init(dir.clone());
         with_state(|s| s.main.models_loading = true);
@@ -570,7 +786,11 @@ mod tests {
         }
 
         let loading = with_state(|s| s.main.models_loading);
-        assert_eq!(loading, Some(false), "models_loading must be cleared after panic");
+        assert_eq!(
+            loading,
+            Some(false),
+            "models_loading must be cleared after panic"
+        );
         reset_state();
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -579,8 +799,8 @@ mod tests {
     fn test_catch_unwind_clears_characters_loading_on_panic() {
         let _serial = state_test_guard();
         reset_state();
-        let dir = std::env::temp_dir()
-            .join(format!("gw2_state_test_{}_panic_chars", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gw2_state_test_{}_panic_chars", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         init(dir.clone());
         with_state(|s| s.main.characters_loading = true);
@@ -594,7 +814,11 @@ mod tests {
         }
 
         let loading = with_state(|s| s.main.characters_loading);
-        assert_eq!(loading, Some(false), "characters_loading must be cleared after panic");
+        assert_eq!(
+            loading,
+            Some(false),
+            "characters_loading must be cleared after panic"
+        );
         reset_state();
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -603,8 +827,8 @@ mod tests {
     fn test_catch_unwind_resets_gw2_key_status_on_panic() {
         let _serial = state_test_guard();
         reset_state();
-        let dir = std::env::temp_dir()
-            .join(format!("gw2_state_test_{}_panic_setup", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("gw2_state_test_{}_panic_setup", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         init(dir.clone());
         with_state(|s| s.setup.gw2_key_status = KeyStatus::Validating);
@@ -622,7 +846,8 @@ mod tests {
         let status = with_state(|s| s.setup.gw2_key_status.clone());
         assert!(
             matches!(status, Some(KeyStatus::Invalid(ref msg)) if msg == "thread panicked"),
-            "gw2_key_status must be reset to Invalid after panic, got {:?}", status
+            "gw2_key_status must be reset to Invalid after panic, got {:?}",
+            status
         );
         reset_state();
         let _ = std::fs::remove_dir_all(&dir);
@@ -635,8 +860,10 @@ mod tests {
         // the mutex, and subsequent with_state() calls must still succeed via
         // lock_state()'s unwrap_or_else(|e| e.into_inner()) recovery.
         reset_state();
-        let dir = std::env::temp_dir()
-            .join(format!("gw2_state_test_{}_panic_poison", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_state_test_{}_panic_poison",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         init(dir.clone());
         with_state(|s| s.main.characters_loading = true);

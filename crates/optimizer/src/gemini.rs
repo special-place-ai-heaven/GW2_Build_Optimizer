@@ -176,7 +176,11 @@ struct Part {
 
 impl Part {
     fn text(s: impl Into<String>) -> Self {
-        Part { text: Some(s.into()), function_call: None, function_response: None }
+        Part {
+            text: Some(s.into()),
+            function_call: None,
+            function_response: None,
+        }
     }
 
     fn function_response(name: impl Into<String>, response: serde_json::Value) -> Self {
@@ -247,7 +251,11 @@ impl GeminiClient {
 
     /// Create a client with persistent rate tracking.
     /// Loads existing usage from `usage_path` and saves after each request.
-    pub fn with_persistence(api_key: &str, model: &str, usage_path: PathBuf) -> Result<Self, GeminiError> {
+    pub fn with_persistence(
+        api_key: &str,
+        model: &str,
+        usage_path: PathBuf,
+    ) -> Result<Self, GeminiError> {
         let http = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(180))
             .build()?;
@@ -288,7 +296,10 @@ impl GeminiClient {
             429 => Err(GeminiError::RateLimited),
             status => {
                 let body = resp.text().unwrap_or_default();
-                Err(GeminiError::Api { status, message: body })
+                Err(GeminiError::Api {
+                    status,
+                    message: body,
+                })
             }
         }
     }
@@ -308,7 +319,10 @@ impl GeminiClient {
             429 => return Err(GeminiError::RateLimited),
             status => {
                 let body = resp.text().unwrap_or_default();
-                return Err(GeminiError::Api { status, message: body });
+                return Err(GeminiError::Api {
+                    status,
+                    message: body,
+                });
             }
         }
 
@@ -324,9 +338,7 @@ impl GeminiClient {
             supported_generation_methods: Option<Vec<String>>,
         }
 
-        let body: ModelsResponse = resp
-            .json()
-            .map_err(|e| GeminiError::Parse(e.to_string()))?;
+        let body: ModelsResponse = resp.json().map_err(|e| GeminiError::Parse(e.to_string()))?;
 
         let models = body.models.unwrap_or_default();
         let mut result: Vec<(String, String)> = models
@@ -380,10 +392,13 @@ impl GeminiClient {
         // Store in cache
         {
             let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-            cache.insert(key, CachedResponse {
-                text: text.clone(),
-                cached_at: Instant::now(),
-            });
+            cache.insert(
+                key,
+                CachedResponse {
+                    text: text.clone(),
+                    cached_at: Instant::now(),
+                },
+            );
         }
 
         Ok(text)
@@ -400,7 +415,9 @@ impl GeminiClient {
         };
 
         let content = self.send_request(&request)?;
-        content.parts.into_iter()
+        content
+            .parts
+            .into_iter()
             .find_map(|p| p.text)
             .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()))
     }
@@ -415,7 +432,13 @@ impl GeminiClient {
         mut execute_tool: impl FnMut(&str, &serde_json::Value) -> serde_json::Value,
         max_turns: usize,
     ) -> Result<String, GeminiError> {
-        self.generate_with_tools_progress(prompt, tools, &mut execute_tool, max_turns, &mut |_, _, _| {})
+        self.generate_with_tools_progress(
+            prompt,
+            tools,
+            &mut execute_tool,
+            max_turns,
+            &mut |_, _, _| {},
+        )
     }
 
     /// Like `generate_with_tools` but calls `on_progress(turn, max_turns, tool_names)` after
@@ -449,7 +472,9 @@ impl GeminiClient {
             }
 
             // Check if model wants to call a function
-            let function_calls: Vec<&FunctionCall> = response_content.parts.iter()
+            let function_calls: Vec<&FunctionCall> = response_content
+                .parts
+                .iter()
                 .filter_map(|p| p.function_call.as_ref())
                 .collect();
 
@@ -482,7 +507,10 @@ impl GeminiClient {
 
         // If we exceeded max_turns but had text, return it rather than error
         last_text.ok_or_else(|| {
-            GeminiError::Parse(format!("Tool loop exceeded {} turns with no text response", max_turns))
+            GeminiError::Parse(format!(
+                "Tool loop exceeded {} turns with no text response",
+                max_turns
+            ))
         })
     }
 
@@ -517,7 +545,10 @@ impl GeminiClient {
                 Ok(r) => r,
                 Err(e) => {
                     if attempt == MAX_RETRIES - 1 {
-                        self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                        self.rate
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .undo_reserve();
                         return Err(GeminiError::Http(e));
                     }
                     last_error = Some(GeminiError::Http(e));
@@ -531,7 +562,10 @@ impl GeminiClient {
                     let body: GenerateResponse = match resp.json() {
                         Ok(b) => b,
                         Err(e) => {
-                            self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                            self.rate
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .undo_reserve();
                             return Err(GeminiError::Http(e));
                         }
                     };
@@ -539,7 +573,9 @@ impl GeminiClient {
                         .candidates
                         .and_then(|c| c.into_iter().next())
                         .and_then(|c| c.content)
-                        .ok_or_else(|| GeminiError::Parse("No response content from Gemini".into()))?;
+                        .ok_or_else(|| {
+                            GeminiError::Parse("No response content from Gemini".into())
+                        })?;
 
                     // Persist usage
                     {
@@ -550,28 +586,43 @@ impl GeminiClient {
                     return Ok(content);
                 }
                 401 | 403 => {
-                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                    self.rate
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .undo_reserve();
                     return Err(GeminiError::InvalidKey);
                 }
                 429 => {
-                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                    self.rate
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .undo_reserve();
                     return Err(GeminiError::RateLimited);
                 }
                 500 | 503 => {
                     // Transient server error (ErrTimeout, overloaded) — retry
                     let body = resp.text().unwrap_or_default();
-                    last_error = Some(GeminiError::Api { status, message: body });
+                    last_error = Some(GeminiError::Api {
+                        status,
+                        message: body,
+                    });
                     continue;
                 }
                 _ => {
                     let body = resp.text().unwrap_or_default();
-                    return Err(GeminiError::Api { status, message: body });
+                    return Err(GeminiError::Api {
+                        status,
+                        message: body,
+                    });
                 }
             }
         }
 
         // All retries exhausted
-        self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+        self.rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .undo_reserve();
         Err(last_error.unwrap_or_else(|| GeminiError::Api {
             status: 500,
             message: "Gemini server error after retries".into(),

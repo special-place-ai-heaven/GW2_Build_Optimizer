@@ -14,7 +14,7 @@ pub mod traits;
 
 // Re-export top-level types for convenience.
 pub use characters::*;
-pub use facts::{Fact, TraitedFact, deserialize_facts, deserialize_traited_facts};
+pub use facts::{deserialize_facts, deserialize_traited_facts, Fact, TraitedFact};
 pub use items::*;
 pub use itemstats::*;
 pub use legends::*;

@@ -17,8 +17,14 @@ nexus::export! {
 }
 
 fn on_load() {
-    let addon_dir = get_addon_dir("gw2_build_optimizer")
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let Some(addon_dir) = get_addon_dir("gw2_build_optimizer") else {
+        log(
+            LogLevel::Warning,
+            "GW2 Build Optimizer",
+            "Failed to locate the Nexus addon directory. Aborting addon initialization.",
+        );
+        return;
+    };
 
     state::init(addon_dir);
 
@@ -32,10 +38,7 @@ fn on_load() {
         "CTRL+SHIFT+O",
     );
 
-    let _render = register_render(
-        RenderType::Render,
-        nexus::gui::render!(ui::render),
-    );
+    let _render = register_render(RenderType::Render, nexus::gui::render!(ui::render));
 
     log(
         LogLevel::Info,

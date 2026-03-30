@@ -105,10 +105,10 @@ struct SimState {
     buffs: Vec<BuffInstance>,
     total_strike_damage: f64,
     total_condition_damage: f64,
-    skill_casts: HashMap<u32, u32>,       // skill_id → cast count
-    skill_damage: HashMap<u32, f64>,      // skill_id → total damage
+    skill_casts: HashMap<u32, u32>,        // skill_id → cast count
+    skill_damage: HashMap<u32, f64>,       // skill_id → total damage
     condition_ticks: HashMap<String, u32>, // condition → total ticks
-    buff_active_ms: HashMap<String, u32>, // buff → total ms active
+    buff_active_ms: HashMap<String, u32>,  // buff → total ms active
 }
 
 impl SimState {
@@ -157,7 +157,9 @@ impl SimState {
             // Try to use a skill if the character is free
             if self.current_time_ms >= self.next_action_ms {
                 // Check if weapon swap would be beneficial
-                if self.has_weapon_sets && self.should_weapon_swap(power, condition_damage, weapon_strength) {
+                if self.has_weapon_sets
+                    && self.should_weapon_swap(power, condition_damage, weapon_strength)
+                {
                     self.weapon_swap();
                 }
 
@@ -281,8 +283,9 @@ impl SimState {
                     hit_count,
                     dmg_multiplier,
                 } => {
-                    let damage =
-                        weapon_strength * power / reference_armor() * dmg_multiplier * (*hit_count as f64);
+                    let damage = weapon_strength * power / reference_armor()
+                        * dmg_multiplier
+                        * (*hit_count as f64);
                     self.total_strike_damage += damage;
                     *self.skill_damage.entry(skill_id).or_insert(0.0) += damage;
                 }
@@ -293,8 +296,13 @@ impl SimState {
                 } => {
                     // GW2 caps most conditions at 25 stacks; enforce cap to avoid overestimating DPS.
                     const CONDITION_STACK_CAP: usize = 25;
-                    let current = self.conditions.iter().filter(|s| s.condition == *condition).count();
-                    let can_apply = (*stacks as usize).min(CONDITION_STACK_CAP.saturating_sub(current));
+                    let current = self
+                        .conditions
+                        .iter()
+                        .filter(|s| s.condition == *condition)
+                        .count();
+                    let can_apply =
+                        (*stacks as usize).min(CONDITION_STACK_CAP.saturating_sub(current));
                     for _ in 0..can_apply {
                         self.conditions.push(ConditionStack {
                             condition: condition.clone(),
@@ -328,10 +336,15 @@ impl SimState {
         // Quickness does NOT reduce cooldowns.
         // Round-half-up via (n*2 + 1)/3 to avoid systematic floor bias from integer division.
         let quickness_active = self.buffs.iter().any(|b| b.buff == "Quickness");
-        let effective_cast = if quickness_active { (cast_time * 2 + 1) / 3 } else { cast_time };
+        let effective_cast = if quickness_active {
+            (cast_time * 2 + 1) / 3
+        } else {
+            cast_time
+        };
 
         // Next action = now + effective_cast + human delay
-        self.next_action_ms = self.current_time_ms + effective_cast + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS;
+        self.next_action_ms =
+            self.current_time_ms + effective_cast + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS;
     }
 
     /// Tick all active conditions — apply damage for each stack, remove expired.
@@ -349,7 +362,9 @@ impl SimState {
                     .condition_ticks
                     .entry(stack.condition.clone())
                     .or_insert(0) += 1;
-                stack.remaining_ms = stack.remaining_ms.saturating_sub(CONDITION_TICK_INTERVAL_MS);
+                stack.remaining_ms = stack
+                    .remaining_ms
+                    .saturating_sub(CONDITION_TICK_INTERVAL_MS);
             }
         }
 
@@ -361,10 +376,7 @@ impl SimState {
     fn tick_buffs(&mut self) {
         for buff in &mut self.buffs {
             if buff.remaining_ms > 0 {
-                *self
-                    .buff_active_ms
-                    .entry(buff.buff.clone())
-                    .or_insert(0) += TICK_MS;
+                *self.buff_active_ms.entry(buff.buff.clone()).or_insert(0) += TICK_MS;
                 buff.remaining_ms = buff.remaining_ms.saturating_sub(TICK_MS);
             }
         }
@@ -416,12 +428,11 @@ impl SimState {
 
         // Control/survivability metrics
         let stunbreak_count = self.skills.iter().filter(|s| s.is_stunbreak).count() as u32;
-        let has_stability = self
-            .skills
-            .iter()
-            .any(|s| {
-                s.effects.iter().any(|e| matches!(e, SkillEffect::ApplyBuff { buff, .. } if buff == "Stability"))
-            });
+        let has_stability = self.skills.iter().any(|s| {
+            s.effects
+                .iter()
+                .any(|e| matches!(e, SkillEffect::ApplyBuff { buff, .. } if buff == "Stability"))
+        });
         let stability_uptime = buff_uptime.get("Stability").copied().unwrap_or(0.0);
 
         SimulationResult {
@@ -467,8 +478,9 @@ fn skill_dps_efficiency(
                 hit_count,
                 dmg_multiplier,
             } => {
-                total_damage_value +=
-                    weapon_strength * power / reference_armor() * dmg_multiplier * (*hit_count as f64);
+                total_damage_value += weapon_strength * power / reference_armor()
+                    * dmg_multiplier
+                    * (*hit_count as f64);
             }
             SkillEffect::ApplyCondition {
                 condition,
@@ -547,9 +559,7 @@ fn condition_tick_damage(condition: &str, condition_damage: f64) -> f64 {
     let conds = crate::data::conditions();
     match condition {
         "Torment" => conds.torment_tick(condition_damage, GameMode::PvE, false),
-        "Confusion" => {
-            conds.confusion_tick(condition_damage, GameMode::PvE, true)
-        }
+        "Confusion" => conds.confusion_tick(condition_damage, GameMode::PvE, true),
         _ => conds.tick_damage(condition, condition_damage, GameMode::PvE),
     }
 }
@@ -636,7 +646,10 @@ mod tests {
         let result = simulate(&skills, 10000, 2000.0, 1500.0, 1100.0);
 
         assert!(result.strike_dps > 0.0);
-        assert!(result.condition_dps > 0.0, "Should have condition DPS from Bleeding");
+        assert!(
+            result.condition_dps > 0.0,
+            "Should have condition DPS from Bleeding"
+        );
         assert!(
             result.condition_uptime.contains_key("Bleeding"),
             "Bleeding uptime should be tracked"
@@ -715,7 +728,8 @@ mod tests {
         assert!(
             high_dpct > low_dpct,
             "High-damage skill ({:.1}) should have higher DPCT than slow weak skill ({:.1})",
-            high_dpct, low_dpct
+            high_dpct,
+            low_dpct
         );
     }
 
@@ -745,7 +759,11 @@ mod tests {
         // 2 stacks * 5 seconds = 3635.0 total damage
         // cast_time = (500 + 80 + 100) / 1000 = 0.68s
         // DPCT ≈ 3635 / 0.68 ≈ 5345
-        assert!(dpct > 5000.0, "Burning DPCT should be substantial: {:.1}", dpct);
+        assert!(
+            dpct > 5000.0,
+            "Burning DPCT should be substantial: {:.1}",
+            dpct
+        );
     }
 
     #[test]
@@ -834,7 +852,11 @@ mod tests {
         let result = simulate(&skills, 30000, 2000.0, 0.0, 1100.0);
 
         // Both weapon sets should be used
-        let used_names: Vec<&str> = result.skill_usage.iter().map(|su| su.name.as_str()).collect();
+        let used_names: Vec<&str> = result
+            .skill_usage
+            .iter()
+            .map(|su| su.name.as_str())
+            .collect();
         assert!(
             used_names.contains(&"Axe Throw") || used_names.contains(&"Greatsword Swing"),
             "Should use skills from at least one weapon set: {:?}",
@@ -845,7 +867,9 @@ mod tests {
         // With 30s duration and 10s swap CD, should swap at least once
         // Both autos should appear (meaning both sets were active at some point)
         let has_set1 = used_names.iter().any(|n| *n == "Axe Throw" || *n == "Chop");
-        let has_set2 = used_names.iter().any(|n| *n == "Greatsword Swing" || *n == "GS Auto");
+        let has_set2 = used_names
+            .iter()
+            .any(|n| *n == "Greatsword Swing" || *n == "GS Auto");
         assert!(
             has_set1 && has_set2,
             "Should use both weapon sets in 30s: {:?}",
@@ -864,7 +888,10 @@ mod tests {
         assert!(result.condition_dps > 0.0);
 
         // Should have used all skills
-        assert!(result.skill_usage.len() >= 2, "Should use at least AA + weapon skill");
+        assert!(
+            result.skill_usage.len() >= 2,
+            "Should use at least AA + weapon skill"
+        );
     }
 
     #[test]

@@ -9,9 +9,7 @@
 use std::collections::HashMap;
 use std::ops::AddAssign;
 
-use gw2_api::models::{
-    EquipmentPiece, EquipmentTab, Fact, InfixUpgrade, Item, ItemStat, Trait,
-};
+use gw2_api::models::{EquipmentPiece, EquipmentTab, Fact, InfixUpgrade, Item, ItemStat, Trait};
 
 /// All nine primary stats.
 #[derive(Debug, Clone, Default)]
@@ -103,8 +101,8 @@ impl AddAssign<&StatBlock> for StatBlock {
 /// Derived combat stats computed from primary stats.
 #[derive(Debug, Clone, Default)]
 pub struct DerivedStats {
-    pub crit_chance: f64,  // percentage (0-100)
-    pub crit_damage: f64,  // percentage (e.g., 202.6)
+    pub crit_chance: f64, // percentage (0-100)
+    pub crit_damage: f64, // percentage (e.g., 202.6)
     pub effective_power: f64,
     pub health: f64,
     pub armor: f64,
@@ -166,7 +164,10 @@ pub fn calculate_gear_stats(
     for piece in equipment {
         let slot = piece.slot.as_str();
         // Skip non-stat slots
-        if matches!(slot, "Relic" | "HelmAquatic" | "WeaponAquaticA" | "WeaponAquaticB") {
+        if matches!(
+            slot,
+            "Relic" | "HelmAquatic" | "WeaponAquaticA" | "WeaponAquaticB"
+        ) {
             continue;
         }
 
@@ -182,16 +183,12 @@ pub fn calculate_gear_stats(
             .unwrap_or(0.0);
 
         // Get the stat prefix either from equipped stats or from the item's infix_upgrade
-        let stat_id = piece
-            .stats
-            .as_ref()
-            .map(|s| s.id)
-            .or_else(|| {
-                item.details
-                    .as_ref()
-                    .and_then(|d| d.infix_upgrade.as_ref())
-                    .and_then(|iu| iu.id)
-            });
+        let stat_id = piece.stats.as_ref().map(|s| s.id).or_else(|| {
+            item.details
+                .as_ref()
+                .and_then(|d| d.infix_upgrade.as_ref())
+                .and_then(|iu| iu.id)
+        });
 
         if let Some(sid) = stat_id {
             if let Some(itemstat) = itemstats_cache.get(&sid) {
@@ -202,11 +199,7 @@ pub fn calculate_gear_stats(
             }
         } else {
             // Fallback: use infix_upgrade attributes directly (for items with fixed stats)
-            if let Some(infix) = item
-                .details
-                .as_ref()
-                .and_then(|d| d.infix_upgrade.as_ref())
-            {
+            if let Some(infix) = item.details.as_ref().and_then(|d| d.infix_upgrade.as_ref()) {
                 apply_infix_upgrade(&mut stats, infix);
             }
         }
@@ -225,10 +218,7 @@ fn apply_infix_upgrade(stats: &mut StatBlock, infix: &InfixUpgrade) {
 /// Calculate rune set bonus stats.
 /// Rune stat bonuses are in the `bonuses` array as strings like "+25 Power".
 /// We sum all 6 tiers (assuming full 6-piece set).
-pub fn calculate_rune_stats(
-    rune_id: Option<u32>,
-    items_cache: &HashMap<u32, Item>,
-) -> StatBlock {
+pub fn calculate_rune_stats(rune_id: Option<u32>, items_cache: &HashMap<u32, Item>) -> StatBlock {
     let mut stats = StatBlock::default();
 
     let Some(id) = rune_id else {
@@ -290,10 +280,7 @@ fn parse_bonus_string(s: &str) -> Option<(f64, String)> {
 
 /// Calculate permanent sigil stat bonuses.
 /// Only sigils with permanent bonuses contribute to the stat sheet.
-pub fn calculate_sigil_stats(
-    sigil_ids: &[u32],
-    items_cache: &HashMap<u32, Item>,
-) -> StatBlock {
+pub fn calculate_sigil_stats(sigil_ids: &[u32], items_cache: &HashMap<u32, Item>) -> StatBlock {
     let mut stats = StatBlock::default();
 
     for &id in sigil_ids {
@@ -350,7 +337,9 @@ pub fn calculate_trait_stats(
         };
 
         // Collect indices of base facts overridden by active traited_facts
-        let overridden: Vec<u32> = t.traited_facts.iter()
+        let overridden: Vec<u32> = t
+            .traited_facts
+            .iter()
             .filter(|tf| equipped_trait_ids.contains(&tf.requires_trait))
             .filter_map(|tf| tf.overrides)
             .collect();
@@ -404,7 +393,9 @@ pub fn apply_trait_conversions(
         };
 
         // Collect indices of base facts overridden by active traited_facts
-        let overridden: Vec<u32> = t.traited_facts.iter()
+        let overridden: Vec<u32> = t
+            .traited_facts
+            .iter()
             .filter(|tf| equipped_trait_ids.contains(&tf.requires_trait))
             .filter_map(|tf| tf.overrides)
             .collect();
@@ -461,8 +452,7 @@ pub fn compute_derived(stats: &StatBlock, profession: &str) -> DerivedStats {
     let f = crate::data::universal_formulas::formulas();
     let crit_chance = f.crit_chance(stats.precision).clamp(0.0, 100.0);
     let crit_damage = f.crit_damage(stats.ferocity);
-    let effective_power =
-        stats.power * (1.0 + (crit_chance / 100.0) * (crit_damage / 100.0 - 1.0));
+    let effective_power = stats.power * (1.0 + (crit_chance / 100.0) * (crit_damage / 100.0 - 1.0));
     let health = base_health(profession) + stats.vitality * f.vitality_to_health;
     let armor = stats.toughness + base_defense(profession);
 

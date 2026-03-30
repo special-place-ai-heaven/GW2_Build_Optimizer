@@ -13,7 +13,6 @@
 
 use std::collections::HashMap;
 
-use gw2_api::models::{Profession, Skill, Specialization, Trait as GW2Trait};
 use crate::balance::BalanceContext;
 use crate::combat;
 use crate::data;
@@ -23,14 +22,15 @@ use crate::scoring::{score_with_weights, OptimizationWeights};
 use crate::search::search_spec_combos;
 use crate::stats;
 use crate::synergy::{
-    self, ComponentId, NormalizedEffect, SynergyLink, extract_relic_effects,
-    extract_rune_effects, extract_sigil_effects, extract_skill_effects,
-    extract_trait_effects, score_normalized_effect, compute_marginal_synergy,
+    self, compute_marginal_synergy, extract_relic_effects, extract_rune_effects,
+    extract_sigil_effects, extract_skill_effects, extract_trait_effects, score_normalized_effect,
+    ComponentId, NormalizedEffect, SynergyLink,
 };
 use crate::validation::{
     ValidatedBuild, ValidatedGearPrefix, ValidatedItem, ValidatedSkills, ValidatedSpec,
     ValidatedWeaponSet, ValidatedWeapons,
 };
+use gw2_api::models::{Profession, Skill, Specialization, Trait as GW2Trait};
 
 /// Internal candidate from the synergy pipeline.
 #[derive(Debug, Clone)]
@@ -54,7 +54,12 @@ struct SynergyCandidate {
     /// Relic selection.
     relic: Option<(u32, String)>,
     /// Weapon sets: (set1_main, set1_off, set2_main, set2_off).
-    weapons: (Option<String>, Option<String>, Option<String>, Option<String>),
+    weapons: (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ),
     /// Skill selections: (heal, utilities[3], elite).
     heal: Option<(u32, String)>,
     utilities: Vec<(u32, String)>,
@@ -76,7 +81,8 @@ pub fn optimize_synergy(
     locks: &gw2_core::types::BuildLocks,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
-    let profession = db.profession(profession_name)
+    let profession = db
+        .profession(profession_name)
         .ok_or_else(|| format!("Profession '{}' not found", profession_name))?;
 
     // Stage 2: Specs + Traits
@@ -84,12 +90,14 @@ pub fn optimize_synergy(
         stage: "Evaluating specializations and traits...".into(),
         done: false,
     });
-    let mut candidates = select_specs_and_traits(
-        profession, weights, &db.specializations, &db.traits, locks,
-    );
+    let mut candidates =
+        select_specs_and_traits(profession, weights, &db.specializations, &db.traits, locks);
 
     if candidates.is_empty() {
-        return Err(format!("No valid spec/trait combinations found for {}", profession_name));
+        return Err(format!(
+            "No valid spec/trait combinations found for {}",
+            profession_name
+        ));
     }
 
     // Stage 3: Rune
@@ -134,7 +142,12 @@ pub fn optimize_synergy(
     });
 
     let best = rank_and_select(
-        &candidates, db, profession_name, gear_prefix_name, weights, ctx,
+        &candidates,
+        db,
+        profession_name,
+        gear_prefix_name,
+        weights,
+        ctx,
     )?;
 
     // Convert to SynergyResult
@@ -143,7 +156,15 @@ pub fn optimize_synergy(
         done: false,
     });
 
-    build_synergy_result(best, db, profession_name, gear_prefix_name, weights, ctx, on_progress)
+    build_synergy_result(
+        best,
+        db,
+        profession_name,
+        gear_prefix_name,
+        weights,
+        ctx,
+        on_progress,
+    )
 }
 
 // ─── Stage 2: Specs + Traits ───
@@ -160,11 +181,7 @@ fn select_specs_and_traits(
     let mut candidates = Vec::new();
 
     for (elite, cores) in &spec_combos {
-        let spec_ids: Vec<u32> = cores
-            .iter()
-            .copied()
-            .chain(elite.iter().copied())
-            .collect();
+        let spec_ids: Vec<u32> = cores.iter().copied().chain(elite.iter().copied()).collect();
 
         // For each spec combo, find the best trait configuration
         // using a two-pass approach: independent per-spec, then cross-spec synergy
@@ -192,23 +209,42 @@ fn select_specs_and_traits(
             // to all 3 options rather than producing an empty range (which collapses the
             // cross-product to zero candidates with no error message).
             let adept_range: Vec<usize> = if let Some(locked_id) = trait_lock.and_then(|t| t[0]) {
-                let r: Vec<usize> = (0..3).filter(|&i| spec.major_traits[i] == locked_id).collect();
-                if r.is_empty() { vec![0, 1, 2] } else { r }
+                let r: Vec<usize> = (0..3)
+                    .filter(|&i| spec.major_traits[i] == locked_id)
+                    .collect();
+                if r.is_empty() {
+                    vec![0, 1, 2]
+                } else {
+                    r
+                }
             } else {
                 vec![0, 1, 2]
             };
             let master_range: Vec<usize> = if let Some(locked_id) = trait_lock.and_then(|t| t[1]) {
-                let r: Vec<usize> = (0..3).filter(|&i| spec.major_traits[3 + i] == locked_id).collect();
-                if r.is_empty() { vec![0, 1, 2] } else { r }
+                let r: Vec<usize> = (0..3)
+                    .filter(|&i| spec.major_traits[3 + i] == locked_id)
+                    .collect();
+                if r.is_empty() {
+                    vec![0, 1, 2]
+                } else {
+                    r
+                }
             } else {
                 vec![0, 1, 2]
             };
-            let grandmaster_range: Vec<usize> = if let Some(locked_id) = trait_lock.and_then(|t| t[2]) {
-                let r: Vec<usize> = (0..3).filter(|&i| spec.major_traits[6 + i] == locked_id).collect();
-                if r.is_empty() { vec![0, 1, 2] } else { r }
-            } else {
-                vec![0, 1, 2]
-            };
+            let grandmaster_range: Vec<usize> =
+                if let Some(locked_id) = trait_lock.and_then(|t| t[2]) {
+                    let r: Vec<usize> = (0..3)
+                        .filter(|&i| spec.major_traits[6 + i] == locked_id)
+                        .collect();
+                    if r.is_empty() {
+                        vec![0, 1, 2]
+                    } else {
+                        r
+                    }
+                } else {
+                    vec![0, 1, 2]
+                };
 
             // Enumerate trait combos (respecting locks — locked columns have 1 option)
             let mut configs: Vec<(Vec<u32>, f64)> = Vec::new();
@@ -216,13 +252,15 @@ fn select_specs_and_traits(
                 for &m in &master_range {
                     for &g in &grandmaster_range {
                         let traits = vec![
-                            spec.major_traits[a],       // Adept
-                            spec.major_traits[3 + m],   // Master
-                            spec.major_traits[6 + g],   // Grandmaster
+                            spec.major_traits[a],     // Adept
+                            spec.major_traits[3 + m], // Master
+                            spec.major_traits[6 + g], // Grandmaster
                         ];
 
                         // Score this config
-                        let all_ids: Vec<u32> = spec.minor_traits.iter()
+                        let all_ids: Vec<u32> = spec
+                            .minor_traits
+                            .iter()
                             .copied()
                             .chain(traits.iter().copied())
                             .collect();
@@ -241,11 +279,8 @@ fn select_specs_and_traits(
 
                         // Intra-spec synergy
                         for i in 0..effects.len() {
-                            let (syn, _) = compute_marginal_synergy(
-                                &effects[i].1,
-                                &effects[..i],
-                                weights,
-                            );
+                            let (syn, _) =
+                                compute_marginal_synergy(&effects[i].1, &effects[..i], weights);
                             score += syn;
                         }
 
@@ -299,7 +334,11 @@ fn select_specs_and_traits(
             }
 
             // Keep top 10 most impactful synergy links to avoid explanation clutter
-            all_links.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            all_links.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             all_links.truncate(10);
 
             candidates.push(SynergyCandidate {
@@ -322,16 +361,18 @@ fn select_specs_and_traits(
     }
 
     // Sort by score and keep top 5
-    candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     candidates.truncate(5);
 
     candidates
 }
 
 /// Generate cross-product of per-spec trait configurations.
-fn cross_product_trait_configs(
-    per_spec: &[Vec<(Vec<u32>, f64)>],
-) -> Vec<Vec<Vec<u32>>> {
+fn cross_product_trait_configs(per_spec: &[Vec<(Vec<u32>, f64)>]) -> Vec<Vec<Vec<u32>>> {
     if per_spec.is_empty() {
         return vec![Vec::new()];
     }
@@ -352,14 +393,11 @@ fn cross_product_trait_configs(
 
 // ─── Stage 3: Rune ───
 
-fn select_rune(
-    candidates: &mut [SynergyCandidate],
-    db: &GameDb,
-    weights: &OptimizationWeights,
-) {
+fn select_rune(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &OptimizationWeights) {
     let runes = db.all_runes();
     // Filter to Superior runes only
-    let superior_runes: Vec<_> = runes.iter()
+    let superior_runes: Vec<_> = runes
+        .iter()
         .filter(|r| r.name.contains("Superior"))
         .collect();
 
@@ -373,7 +411,8 @@ fn select_rune(
             let effects = extract_rune_effects(rune);
 
             // Base score
-            let base: f64 = effects.iter()
+            let base: f64 = effects
+                .iter()
                 .map(|e| score_normalized_effect(e, weights))
                 .sum();
 
@@ -391,7 +430,9 @@ fn select_rune(
 
         if let Some(rune) = best_rune {
             candidate.synergy_links.extend(best_links);
-            candidate.accumulated.push((ComponentId::Rune(rune.0), best_effects));
+            candidate
+                .accumulated
+                .push((ComponentId::Rune(rune.0), best_effects));
             candidate.rune = Some(rune);
             candidate.score += best_score;
         }
@@ -400,13 +441,10 @@ fn select_rune(
 
 // ─── Stage 4: Sigils ───
 
-fn select_sigils(
-    candidates: &mut [SynergyCandidate],
-    db: &GameDb,
-    weights: &OptimizationWeights,
-) {
+fn select_sigils(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &OptimizationWeights) {
     let sigils = db.all_sigils();
-    let superior_sigils: Vec<_> = sigils.iter()
+    let superior_sigils: Vec<_> = sigils
+        .iter()
         .filter(|s| s.name.contains("Superior"))
         .collect();
 
@@ -430,10 +468,12 @@ fn select_sigils(
                     }
 
                     let effects = extract_sigil_effects(sigil);
-                    let base: f64 = effects.iter()
+                    let base: f64 = effects
+                        .iter()
                         .map(|e| score_normalized_effect(e, weights))
                         .sum();
-                    let (syn, links) = compute_marginal_synergy(&effects, &candidate.accumulated, weights);
+                    let (syn, links) =
+                        compute_marginal_synergy(&effects, &candidate.accumulated, weights);
 
                     let total = base + syn;
                     if total > best_score {
@@ -447,7 +487,9 @@ fn select_sigils(
                 if let Some(sigil) = best_sigil {
                     set_ids.push(sigil.0);
                     candidate.synergy_links.extend(best_links);
-                    candidate.accumulated.push((ComponentId::Sigil(sigil.0), best_effects));
+                    candidate
+                        .accumulated
+                        .push((ComponentId::Sigil(sigil.0), best_effects));
                     candidate.sigils.push(sigil);
                     candidate.score += best_score;
                 }
@@ -458,11 +500,7 @@ fn select_sigils(
 
 // ─── Stage 5: Relic ───
 
-fn select_relic(
-    candidates: &mut [SynergyCandidate],
-    db: &GameDb,
-    weights: &OptimizationWeights,
-) {
+fn select_relic(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &OptimizationWeights) {
     let relics = db.all_relics();
 
     for candidate in candidates.iter_mut() {
@@ -474,7 +512,8 @@ fn select_relic(
         for &relic in &relics {
             let effects = extract_relic_effects(relic);
 
-            let base: f64 = effects.iter()
+            let base: f64 = effects
+                .iter()
                 .map(|e| score_normalized_effect(e, weights))
                 .sum();
             let (syn, links) = compute_marginal_synergy(&effects, &candidate.accumulated, weights);
@@ -490,7 +529,9 @@ fn select_relic(
 
         if let Some(relic) = best_relic {
             candidate.synergy_links.extend(best_links);
-            candidate.accumulated.push((ComponentId::Relic(relic.0), best_effects));
+            candidate
+                .accumulated
+                .push((ComponentId::Relic(relic.0), best_effects));
             candidate.relic = Some(relic);
             candidate.score += best_score;
         }
@@ -507,13 +548,22 @@ fn select_weapons(
 ) {
     // Build list of valid weapon combos for this profession
     for candidate in candidates.iter_mut() {
-        let elite_spec_ids: Vec<u32> = candidate.spec_ids.iter()
-            .filter(|&&id| db.specializations.get(&id).map(|s| s.elite).unwrap_or(false))
+        let elite_spec_ids: Vec<u32> = candidate
+            .spec_ids
+            .iter()
+            .filter(|&&id| {
+                db.specializations
+                    .get(&id)
+                    .map(|s| s.elite)
+                    .unwrap_or(false)
+            })
             .copied()
             .collect();
 
         // Filter weapons by elite spec gate
-        let available: Vec<(&str, bool)> = profession.weapons.iter()
+        let available: Vec<(&str, bool)> = profession
+            .weapons
+            .iter()
             .filter(|(_, info)| {
                 if let Some(req_spec) = info.specialization {
                     elite_spec_ids.contains(&req_spec)
@@ -536,7 +586,8 @@ fn select_weapons(
             let is_main = info.flags.iter().any(|f| f == "Mainhand" || f == "TwoHand");
             if is_2h {
                 // Two-handed weapon as set 1
-                let score = score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
+                let score =
+                    score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
                 if score > best_set1_score {
                     best_set1_score = score;
                     best_set1 = (Some(weapon.to_string()), None);
@@ -544,13 +595,28 @@ fn select_weapons(
             } else if is_main {
                 // Main-hand + each valid off-hand
                 for &(off_weapon, off_2h) in &available {
-                    if off_2h { continue; }
+                    if off_2h {
+                        continue;
+                    }
                     let off_info = &profession.weapons[off_weapon];
                     let off_is_off = off_info.flags.iter().any(|f| f == "Offhand");
-                    if !off_is_off { continue; }
+                    if !off_is_off {
+                        continue;
+                    }
 
-                    let score = score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated)
-                        + score_weapon_skills(off_weapon, profession, db, weights, &candidate.accumulated);
+                    let score = score_weapon_skills(
+                        weapon,
+                        profession,
+                        db,
+                        weights,
+                        &candidate.accumulated,
+                    ) + score_weapon_skills(
+                        off_weapon,
+                        profession,
+                        db,
+                        weights,
+                        &candidate.accumulated,
+                    );
                     if score > best_set1_score {
                         best_set1_score = score;
                         best_set1 = (Some(weapon.to_string()), Some(off_weapon.to_string()));
@@ -558,7 +624,8 @@ fn select_weapons(
                 }
 
                 // Main-hand only (no off-hand)
-                let score = score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
+                let score =
+                    score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
                 if score > best_set1_score {
                     best_set1_score = score;
                     best_set1 = (Some(weapon.to_string()), None);
@@ -580,19 +647,35 @@ fn select_weapons(
             let is_main = info.flags.iter().any(|f| f == "Mainhand" || f == "TwoHand");
 
             if is_2h {
-                let score = score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
+                let score =
+                    score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
                 if score > best_set2_score {
                     best_set2_score = score;
                     best_set2 = (Some(weapon.to_string()), None);
                 }
             } else if is_main {
                 for &(off_weapon, off_2h) in &available {
-                    if off_2h { continue; }
+                    if off_2h {
+                        continue;
+                    }
                     let off_info = &profession.weapons[off_weapon];
-                    if !off_info.flags.iter().any(|f| f == "Offhand") { continue; }
+                    if !off_info.flags.iter().any(|f| f == "Offhand") {
+                        continue;
+                    }
 
-                    let score = score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated)
-                        + score_weapon_skills(off_weapon, profession, db, weights, &candidate.accumulated);
+                    let score = score_weapon_skills(
+                        weapon,
+                        profession,
+                        db,
+                        weights,
+                        &candidate.accumulated,
+                    ) + score_weapon_skills(
+                        off_weapon,
+                        profession,
+                        db,
+                        weights,
+                        &candidate.accumulated,
+                    );
                     if score > best_set2_score {
                         best_set2_score = score;
                         best_set2 = (Some(weapon.to_string()), Some(off_weapon.to_string()));
@@ -602,7 +685,8 @@ fn select_weapons(
                 // Main-hand only (no off-hand) — mirrors Set 1 lines 555-560.
                 // Without this, Set 2 can never be main-hand-only even when that
                 // scores higher than any main+offhand combination.
-                let score = score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
+                let score =
+                    score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
                 if score > best_set2_score {
                     best_set2_score = score;
                     best_set2 = (Some(weapon.to_string()), None);
@@ -658,7 +742,8 @@ fn select_skills(
     for candidate in candidates.iter_mut() {
         // Filter skills by elite spec gate: only allow skills whose specialization
         // is None (core skill) or matches one of the candidate's equipped specs.
-        let gated_skills: Vec<&&Skill> = prof_skills.iter()
+        let gated_skills: Vec<&&Skill> = prof_skills
+            .iter()
             .filter(|s| match s.specialization {
                 Some(spec_id) => candidate.spec_ids.contains(&spec_id),
                 None => true,
@@ -666,7 +751,8 @@ fn select_skills(
             .collect();
 
         // Heal skill
-        let heals: Vec<&&Skill> = gated_skills.iter()
+        let heals: Vec<&&Skill> = gated_skills
+            .iter()
             .filter(|s| s.slot.as_deref() == Some("Heal"))
             .copied()
             .collect();
@@ -674,14 +760,17 @@ fn select_skills(
             // Add heal effects to accumulated for subsequent skill synergy scoring
             if let Some(skill) = db.skills.get(&id) {
                 let effects = extract_skill_effects(skill);
-                candidate.accumulated.push((ComponentId::Skill(id), effects));
+                candidate
+                    .accumulated
+                    .push((ComponentId::Skill(id), effects));
             }
             candidate.synergy_links.extend(links);
             candidate.heal = Some((id, name));
         }
 
         // Elite skill
-        let elites: Vec<&&Skill> = gated_skills.iter()
+        let elites: Vec<&&Skill> = gated_skills
+            .iter()
             .filter(|s| s.slot.as_deref() == Some("Elite"))
             .copied()
             .collect();
@@ -689,31 +778,39 @@ fn select_skills(
             // Add elite effects to accumulated for subsequent skill synergy scoring
             if let Some(skill) = db.skills.get(&id) {
                 let effects = extract_skill_effects(skill);
-                candidate.accumulated.push((ComponentId::Skill(id), effects));
+                candidate
+                    .accumulated
+                    .push((ComponentId::Skill(id), effects));
             }
             candidate.synergy_links.extend(links);
             candidate.elite_skill = Some((id, name));
         }
 
         // Utility skills (3, greedy sequential)
-        let utilities: Vec<&&Skill> = gated_skills.iter()
+        let utilities: Vec<&&Skill> = gated_skills
+            .iter()
             .filter(|s| s.slot.as_deref() == Some("Utility"))
             .copied()
             .collect();
 
         let mut used_ids: Vec<u32> = Vec::new();
         for _ in 0..3 {
-            let available: Vec<&&Skill> = utilities.iter()
+            let available: Vec<&&Skill> = utilities
+                .iter()
                 .filter(|s| !used_ids.contains(&s.id))
                 .copied()
                 .collect();
 
-            if let Some((id, name, links)) = pick_best_skill(&available, weights, &candidate.accumulated) {
+            if let Some((id, name, links)) =
+                pick_best_skill(&available, weights, &candidate.accumulated)
+            {
                 used_ids.push(id);
                 // Add effects to accumulated for next utility selection
                 if let Some(skill) = db.skills.get(&id) {
                     let effects = extract_skill_effects(skill);
-                    candidate.accumulated.push((ComponentId::Skill(id), effects));
+                    candidate
+                        .accumulated
+                        .push((ComponentId::Skill(id), effects));
                 }
                 candidate.synergy_links.extend(links);
                 candidate.utilities.push((id, name));
@@ -732,7 +829,8 @@ fn pick_best_skill(
 
     for &&skill in skills {
         let effects = extract_skill_effects(skill);
-        let base: f64 = effects.iter()
+        let base: f64 = effects
+            .iter()
             .map(|e| score_normalized_effect(e, weights))
             .sum();
         let (syn, links) = compute_marginal_synergy(&effects, accumulated, weights);
@@ -768,19 +866,23 @@ fn rank_and_select(
     // Re-score candidates with full combat performance
     let mut scored: Vec<(usize, f64)> = Vec::new();
 
-    let gear_prefix_id = db.itemstats.values()
+    let gear_prefix_id = db
+        .itemstats
+        .values()
         .find(|is| is.name.contains(gear_prefix_name))
         .map(|is| is.id);
 
     let solo_profile = &combat::buff_profiles_for_profession(profession_name, ctx)[0];
 
     // Compute max synergy once (loop-invariant) — candidates don't change during ranking
-    let max_synergy = candidates.iter().map(|c| c.score).fold(0.0_f64, f64::max).max(1.0);
+    let max_synergy = candidates
+        .iter()
+        .map(|c| c.score)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
 
     for (idx, candidate) in candidates.iter().enumerate() {
-        let stats = compute_candidate_stats(
-            candidate, db, gear_prefix_id,
-        );
+        let stats = compute_candidate_stats(candidate, db, gear_prefix_id);
         let derived = stats::compute_derived(&stats, profession_name);
 
         // Use default (identity) modifiers for ranking to avoid trait fact inflation.
@@ -790,7 +892,10 @@ fn rank_and_select(
         let modifiers = combat::DamageModifiers::default();
 
         let combat_perf = combat::calculate_combat_performance(
-            &stats, &derived, &modifiers, solo_profile,
+            &stats,
+            &derived,
+            &modifiers,
+            solo_profile,
             &combat::condition_weights_for_profession(profession_name, ctx),
             profession_name,
             ctx,
@@ -823,9 +928,7 @@ fn compute_candidate_stats(
             let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
             for &(slot_type, _) in data::EQUIPMENT_SLOTS {
                 if let Some(budget) = budgets.get(slot_type, shape) {
-                    engine::add_budget_stats_for_itemstat(
-                        &mut full_stats, itemstat, budget,
-                    );
+                    engine::add_budget_stats_for_itemstat(&mut full_stats, itemstat, budget);
                 }
             }
         }
@@ -868,7 +971,11 @@ fn build_synergy_result(
     let mut validated = ValidatedBuild::default();
 
     // Gear prefix
-    if let Some(is) = db.itemstats.values().find(|is| is.name.contains(gear_prefix_name)) {
+    if let Some(is) = db
+        .itemstats
+        .values()
+        .find(|is| is.name.contains(gear_prefix_name))
+    {
         validated.gear_prefix = Some(ValidatedGearPrefix {
             itemstat_id: is.id,
             name: is.name.clone(),
@@ -918,31 +1025,41 @@ fn build_synergy_result(
     // Skills
     validated.skills = ValidatedSkills {
         heal: candidate.heal.clone(),
-        utilities: candidate.utilities.iter().map(|u| Some(u.clone())).collect(),
+        utilities: candidate
+            .utilities
+            .iter()
+            .map(|u| Some(u.clone()))
+            .collect(),
         elite: candidate.elite_skill.clone(),
     };
 
     // Rune
     if let Some((id, name)) = &candidate.rune {
-        validated.rune = Some(ValidatedItem { id: *id, name: name.clone() });
+        validated.rune = Some(ValidatedItem {
+            id: *id,
+            name: name.clone(),
+        });
     }
 
     // Sigils
     for (id, name) in &candidate.sigils {
-        validated.sigils.push(ValidatedItem { id: *id, name: name.clone() });
+        validated.sigils.push(ValidatedItem {
+            id: *id,
+            name: name.clone(),
+        });
     }
 
     // Relic
     if let Some((id, name)) = &candidate.relic {
-        validated.relic = Some(ValidatedItem { id: *id, name: name.clone() });
+        validated.relic = Some(ValidatedItem {
+            id: *id,
+            name: name.clone(),
+        });
     }
 
     // Synergy explanation
-    validated.synergy_explanation = synergy::template_explanation(
-        &candidate.synergy_links,
-        gear_prefix_name,
-        profession_name,
-    );
+    validated.synergy_explanation =
+        synergy::template_explanation(&candidate.synergy_links, gear_prefix_name, profession_name);
 
     // Calculate stats
     on_progress(OptimizeProgress {
@@ -959,7 +1076,11 @@ fn build_synergy_result(
     let mut modifiers = combat::extract_damage_modifiers(
         &candidate.all_trait_ids,
         candidate.rune.as_ref().map(|(id, _)| *id),
-        &candidate.sigils.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        &candidate
+            .sigils
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
         candidate.relic.as_ref().map(|(id, _)| *id),
         &db.traits,
         &db.items,
@@ -979,13 +1100,31 @@ fn build_synergy_result(
     let buff_profiles = combat::buff_profiles_for_profession(profession_name, ctx);
     let cw = combat::condition_weights_for_profession(profession_name, ctx);
     let combat_solo = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[0], &cw, profession_name, ctx,
+        &full_stats,
+        &derived,
+        &modifiers,
+        &buff_profiles[0],
+        &cw,
+        profession_name,
+        ctx,
     );
     let combat_party = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[1], &cw, profession_name, ctx,
+        &full_stats,
+        &derived,
+        &modifiers,
+        &buff_profiles[1],
+        &cw,
+        profession_name,
+        ctx,
     );
     let combat_squad = combat::calculate_combat_performance(
-        &full_stats, &derived, &modifiers, &buff_profiles[2], &cw, profession_name, ctx,
+        &full_stats,
+        &derived,
+        &modifiers,
+        &buff_profiles[2],
+        &cw,
+        profession_name,
+        ctx,
     );
 
     // Rotation
@@ -1075,7 +1214,13 @@ mod runtime_diagnostics_tests {
         }
     }
 
-    fn make_spec(spec_id: u32, elite: bool, profession: &str, minor: u32, major: [u32; 9]) -> Specialization {
+    fn make_spec(
+        spec_id: u32,
+        elite: bool,
+        profession: &str,
+        minor: u32,
+        major: [u32; 9],
+    ) -> Specialization {
         Specialization {
             id: spec_id,
             name: format!("DiagSpec{}", spec_id),
@@ -1232,19 +1377,43 @@ mod runtime_diagnostics_tests {
         let mut specializations = HashMap::new();
         specializations.insert(
             10,
-            make_spec(10, false, "Warrior", 1001, [1010, 1011, 1012, 1020, 1021, 1022, 1030, 1031, 1032]),
+            make_spec(
+                10,
+                false,
+                "Warrior",
+                1001,
+                [1010, 1011, 1012, 1020, 1021, 1022, 1030, 1031, 1032],
+            ),
         );
         specializations.insert(
             11,
-            make_spec(11, false, "Warrior", 1101, [1110, 1111, 1112, 1120, 1121, 1122, 1130, 1131, 1132]),
+            make_spec(
+                11,
+                false,
+                "Warrior",
+                1101,
+                [1110, 1111, 1112, 1120, 1121, 1122, 1130, 1131, 1132],
+            ),
         );
         specializations.insert(
             12,
-            make_spec(12, false, "Warrior", 1201, [1210, 1211, 1212, 1220, 1221, 1222, 1230, 1231, 1232]),
+            make_spec(
+                12,
+                false,
+                "Warrior",
+                1201,
+                [1210, 1211, 1212, 1220, 1221, 1222, 1230, 1231, 1232],
+            ),
         );
         specializations.insert(
             30,
-            make_spec(30, true, "Warrior", 1301, [1310, 1311, 1312, 1320, 1321, 1322, 1330, 1331, 1332]),
+            make_spec(
+                30,
+                true,
+                "Warrior",
+                1301,
+                [1310, 1311, 1312, 1320, 1321, 1322, 1330, 1331, 1332],
+            ),
         );
 
         let profession = Profession {
@@ -1267,7 +1436,10 @@ mod runtime_diagnostics_tests {
 
         let mut traits_by_spec: HashMap<u32, Vec<u32>> = HashMap::new();
         for t in traits.values() {
-            traits_by_spec.entry(t.specialization).or_default().push(t.id);
+            traits_by_spec
+                .entry(t.specialization)
+                .or_default()
+                .push(t.id);
         }
 
         GameDb {
@@ -1461,10 +1633,7 @@ mod runtime_diagnostics_tests {
                 .enumerate()
                 .map(|(i, c)| (i, c.score, c.spec_ids.clone()))
                 .collect();
-            synergy_only.sort_by(|a, b| {
-                b.1.partial_cmp(&a.1)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            synergy_only.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             for (rank, (idx, score, specs)) in synergy_only.iter().take(5).enumerate() {
                 println!(
                     "pre-rank synergy #{:<2} idx={} score={:.4} specs={:?}",
@@ -1481,7 +1650,10 @@ mod runtime_diagnostics_tests {
                 .values()
                 .find(|is| is.name.contains(gear_prefix))
                 .map(|is| is.id);
-            println!("ranking contains() chosen gear_prefix_id: {:?}", gear_prefix_id);
+            println!(
+                "ranking contains() chosen gear_prefix_id: {:?}",
+                gear_prefix_id
+            );
             let max_synergy = candidates
                 .iter()
                 .map(|c| c.score)
@@ -1502,18 +1674,10 @@ mod runtime_diagnostics_tests {
                 );
                 let combat_score = score_with_weights(&combat_perf, &weights);
                 let final_score = combat_score * 0.4 + (c.score / max_synergy) * 0.6;
-                ranked_preview.push((
-                    idx,
-                    c.score,
-                    combat_score,
-                    final_score,
-                    c.spec_ids.clone(),
-                ));
+                ranked_preview.push((idx, c.score, combat_score, final_score, c.spec_ids.clone()));
             }
-            ranked_preview.sort_by(|a, b| {
-                b.3.partial_cmp(&a.3)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            ranked_preview
+                .sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
             for (rank, (idx, syn, combat_score, final_score, specs)) in
                 ranked_preview.iter().take(5).enumerate()
             {
@@ -1528,8 +1692,9 @@ mod runtime_diagnostics_tests {
                 );
             }
 
-            let selected = rank_and_select(&candidates, &db, "Warrior", gear_prefix, &weights, &ctx)
-                .expect("rank_and_select should produce best candidate");
+            let selected =
+                rank_and_select(&candidates, &db, "Warrior", gear_prefix, &weights, &ctx)
+                    .expect("rank_and_select should produce best candidate");
 
             // ---- Final suggestion trace (with capped modifiers, as used by deterministic output) ----
             let mut progress = |_p: crate::engine::OptimizeProgress| {};
@@ -1565,7 +1730,11 @@ mod runtime_diagnostics_tests {
             let uncapped_mods = crate::combat::extract_damage_modifiers(
                 &selected.all_trait_ids,
                 selected.rune.as_ref().map(|(id, _)| *id),
-                &selected.sigils.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+                &selected
+                    .sigils
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .collect::<Vec<_>>(),
                 selected.relic.as_ref().map(|(id, _)| *id),
                 &db.traits,
                 &db.items,

@@ -84,9 +84,7 @@ struct BuildInfo {
 
 impl Gw2Client {
     pub fn new(api_key: Option<String>) -> Result<Self, ApiError> {
-        let http = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()?;
+        let http = Client::builder().timeout(Duration::from_secs(30)).build()?;
         Ok(Self {
             http,
             api_key,
@@ -128,7 +126,8 @@ impl Gw2Client {
         let url = if params.is_empty() {
             base_url
         } else {
-            let query = params.iter()
+            let query = params
+                .iter()
                 .map(|(k, v)| {
                     let encoded = urlencoding::encode(v).into_owned().replace("%2C", ",");
                     format!("{}={}", k, encoded)
@@ -144,7 +143,7 @@ impl Gw2Client {
             // Backoff before retries (not before first attempt)
             if attempt > 0 {
                 let wait = Duration::from_millis(
-                    (2000u64.saturating_mul(2u64.saturating_pow(attempt - 1))).min(30_000)
+                    (2000u64.saturating_mul(2u64.saturating_pow(attempt - 1))).min(30_000),
                 );
                 std::thread::sleep(wait);
             }
@@ -167,10 +166,12 @@ impl Gw2Client {
             if let Some(ref key) = self.api_key {
                 let header_val = match HeaderValue::from_str(&format!("Bearer {}", key)) {
                     Ok(v) => v,
-                    Err(_) => return Err(ApiError::Api {
-                        status: 0,
-                        message: "API key contains invalid characters".into(),
-                    }),
+                    Err(_) => {
+                        return Err(ApiError::Api {
+                            status: 0,
+                            message: "API key contains invalid characters".into(),
+                        })
+                    }
                 };
                 headers.insert(AUTHORIZATION, header_val);
             }
@@ -196,7 +197,10 @@ impl Gw2Client {
                 } else {
                     body
                 };
-                last_error = Some(ApiError::Api { status, message: clean_msg });
+                last_error = Some(ApiError::Api {
+                    status,
+                    message: clean_msg,
+                });
                 continue; // retry
             }
 
@@ -207,7 +211,10 @@ impl Gw2Client {
                 } else {
                     body
                 };
-                return Err(ApiError::Api { status, message: clean_msg });
+                return Err(ApiError::Api {
+                    status,
+                    message: clean_msg,
+                });
             }
 
             // Read body — connection can fail here too
@@ -231,7 +238,10 @@ impl Gw2Client {
     }
 
     /// Fetch all IDs from an endpoint root, then bulk-fetch in batches of 200.
-    pub fn fetch_all<T: DeserializeOwned + Send>(&self, endpoint: &str) -> Result<Vec<T>, ApiError> {
+    pub fn fetch_all<T: DeserializeOwned + Send>(
+        &self,
+        endpoint: &str,
+    ) -> Result<Vec<T>, ApiError> {
         // First get all IDs
         let ids: Vec<serde_json::Value> = self.get(endpoint)?;
         self.fetch_by_ids(endpoint, &ids)
@@ -248,25 +258,33 @@ impl Gw2Client {
 
         // Process in groups of 5 concurrent fetches
         for group in batches.chunks(5) {
-            let group_results: Vec<Result<Vec<T>, ApiError>> =
-                std::thread::scope(|s| {
-                    let handles: Vec<_> = group.iter().map(|chunk| {
+            let group_results: Vec<Result<Vec<T>, ApiError>> = std::thread::scope(|s| {
+                let handles: Vec<_> = group
+                    .iter()
+                    .map(|chunk| {
                         s.spawn(|| {
-                            let ids_str: Vec<String> = chunk.iter()
+                            let ids_str: Vec<String> = chunk
+                                .iter()
                                 .map(|id| id.to_string().replace('"', ""))
                                 .collect();
                             let joined = ids_str.join(",");
                             self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
                         })
-                    }).collect();
+                    })
+                    .collect();
 
-                    handles.into_iter().map(|h| {
-                        h.join().unwrap_or_else(|_| Err(ApiError::Api {
-                            status: 0,
-                            message: "Batch fetch thread panicked".into(),
-                        }))
-                    }).collect()
-                });
+                handles
+                    .into_iter()
+                    .map(|h| {
+                        h.join().unwrap_or_else(|_| {
+                            Err(ApiError::Api {
+                                status: 0,
+                                message: "Batch fetch thread panicked".into(),
+                            })
+                        })
+                    })
+                    .collect()
+            });
 
             for batch_result in group_results {
                 results.extend(batch_result?);
@@ -288,25 +306,33 @@ impl Gw2Client {
         let mut results = Vec::with_capacity(total);
 
         for group in batches.chunks(5) {
-            let group_results: Vec<Result<Vec<T>, ApiError>> =
-                std::thread::scope(|s| {
-                    let handles: Vec<_> = group.iter().map(|chunk| {
+            let group_results: Vec<Result<Vec<T>, ApiError>> = std::thread::scope(|s| {
+                let handles: Vec<_> = group
+                    .iter()
+                    .map(|chunk| {
                         s.spawn(|| {
-                            let ids_str: Vec<String> = chunk.iter()
+                            let ids_str: Vec<String> = chunk
+                                .iter()
                                 .map(|id| id.to_string().replace('"', ""))
                                 .collect();
                             let joined = ids_str.join(",");
                             self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
                         })
-                    }).collect();
+                    })
+                    .collect();
 
-                    handles.into_iter().map(|h| {
-                        h.join().unwrap_or_else(|_| Err(ApiError::Api {
-                            status: 0,
-                            message: "Batch fetch thread panicked".into(),
-                        }))
-                    }).collect()
-                });
+                handles
+                    .into_iter()
+                    .map(|h| {
+                        h.join().unwrap_or_else(|_| {
+                            Err(ApiError::Api {
+                                status: 0,
+                                message: "Batch fetch thread panicked".into(),
+                            })
+                        })
+                    })
+                    .collect()
+            });
 
             for batch_result in group_results {
                 results.extend(batch_result?);
@@ -353,10 +379,7 @@ impl Gw2Client {
         &self,
         character: &str,
     ) -> Result<Vec<super::models::BuildTab>, ApiError> {
-        let endpoint = format!(
-            "characters/{}/buildtabs",
-            urlencoding::encode(character)
-        );
+        let endpoint = format!("characters/{}/buildtabs", urlencoding::encode(character));
         self.get_with_params(&endpoint, &[("tabs", "all")])
     }
 
@@ -397,8 +420,9 @@ mod tests {
     #[ignore] // Requires network
     fn test_live_fetch_berserkers_itemstat() {
         let client = Gw2Client::without_key().unwrap();
-        let stats: Vec<super::super::models::ItemStat> =
-            client.get_with_params("itemstats", &[("ids", "584")]).unwrap();
+        let stats: Vec<super::super::models::ItemStat> = client
+            .get_with_params("itemstats", &[("ids", "584")])
+            .unwrap();
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].name, "Berserker's");
     }

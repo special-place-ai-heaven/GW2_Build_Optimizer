@@ -47,7 +47,8 @@ pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
             guidance.push("MANDATORY: Use Harrier's or Diviner's gear (highest Concentration). Focus on boon generation and uptime.");
             mandatory_prefix = Some("Harrier's");
         } else {
-            guidance.push("Prioritize: Concentration gear. Pick traits that generate and share boons.");
+            guidance
+                .push("Prioritize: Concentration gear. Pick traits that generate and share boons.");
         }
     }
     if w.sustain > 0.3 {
@@ -65,7 +66,9 @@ pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
             guidance.push("MANDATORY: Use Magi's or Harrier's gear (highest Healing Power). Do NOT use offensive gear.");
             mandatory_prefix = Some("Magi's");
         } else {
-            guidance.push("Prioritize: Healing Power, Concentration gear. Pick traits that boost healing.");
+            guidance.push(
+                "Prioritize: Healing Power, Concentration gear. Pick traits that boost healing.",
+            );
         }
     }
     if w.control > 0.3 {
@@ -74,13 +77,15 @@ pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
             guidance.push("MANDATORY: Use Diviner's or Ritualist's gear (highest boon/condi duration). Focus on CC skills and boon denial.");
             mandatory_prefix = Some("Diviner's");
         } else {
-            guidance.push("Prioritize: Expertise gear. Pick CC skills and boon corruption/stripping.");
+            guidance
+                .push("Prioritize: Expertise gear. Pick CC skills and boon corruption/stripping.");
         }
     }
 
     if priorities.is_empty() {
         priorities.push("Balanced across all axes".to_string());
-        guidance.push("Build a well-rounded character with decent damage, some sustain, and utility.");
+        guidance
+            .push("Build a well-rounded character with decent damage, some sustain, and utility.");
     }
 
     // Add dominant-axis enforcement when one axis is clearly dominant
@@ -110,7 +115,7 @@ pub fn new_build_prompt(
     weights: &OptimizationWeights,
     game_mode: &str,
     available_specs: &[(String, bool)], // (name, is_elite)
-    context: &str,                       // summarized game data
+    context: &str,                      // summarized game data
 ) -> String {
     let weights_guidance = weights_context(weights);
     let summary = weights.summary_label();
@@ -157,7 +162,11 @@ Respond with a JSON code block containing ONLY the build object:
         specs = available_specs
             .iter()
             .map(|(name, elite)| {
-                if *elite { format!("{} [Elite]", name) } else { name.clone() }
+                if *elite {
+                    format!("{} [Elite]", name)
+                } else {
+                    name.clone()
+                }
             })
             .collect::<Vec<_>>()
             .join(", "),
@@ -433,11 +442,12 @@ Every field is REQUIRED. Do not leave any field empty or null."#,
 }
 
 /// Build a tool-aware prompt for chat refinement.
-pub fn chat_refinement_prompt_with_tools(
-    profession: &str,
-    user_request: &str,
-) -> String {
-    let sanitized: String = user_request.chars().take(300).filter(|c| *c != '`' && *c != '<' && *c != '>').collect();
+pub fn chat_refinement_prompt_with_tools(profession: &str, user_request: &str) -> String {
+    let sanitized: String = user_request
+        .chars()
+        .take(300)
+        .filter(|c| *c != '`' && *c != '<' && *c != '>')
+        .collect();
     format!(
         r#"You are a Guild Wars 2 build advisor for {profession} with access to the game's full database.
 
@@ -603,20 +613,34 @@ pub fn summarize_build(
         .core_specs
         .iter()
         .chain(candidate.elite_spec.iter())
-        .filter_map(|id| spec_names.iter().find(|(sid, _)| sid == id).map(|(_, n)| n.clone()))
+        .filter_map(|id| {
+            spec_names
+                .iter()
+                .find(|(sid, _)| sid == id)
+                .map(|(_, n)| n.clone())
+        })
         .collect();
 
     let traits: Vec<String> = candidate
         .equipped_traits
         .iter()
-        .filter_map(|id| trait_names.iter().find(|(tid, _)| tid == id).map(|(_, n)| n.clone()))
+        .filter_map(|id| {
+            trait_names
+                .iter()
+                .find(|(tid, _)| tid == id)
+                .map(|(_, n)| n.clone())
+        })
         .collect();
 
     let s = &candidate.stats;
     let c = &candidate.combat;
 
     let mut lines = Vec::new();
-    lines.push(format!("Specs: {} | Gear: {}", specs.join(", "), candidate.gear.stat_prefix_name));
+    lines.push(format!(
+        "Specs: {} | Gear: {}",
+        specs.join(", "),
+        candidate.gear.stat_prefix_name
+    ));
 
     if !traits.is_empty() {
         lines.push(format!("  Traits: {}", traits.join(", ")));
@@ -659,7 +683,8 @@ pub fn build_game_context(
     );
 
     let mode_context = match game_mode {
-        "WvW" => r#"
+        "WvW" => {
+            r#"
 WvW-Specific Rules (competitive mode — many stats/bonuses/effects are split and reduced vs PvE):
 - Uses the SAME gear, runes, sigils, and relics as PvE
 - 6 armor pieces with 1 rune each (same rune x6 for set bonus)
@@ -680,8 +705,10 @@ CC DOMINANCE — the single most important factor in WvW:
 - Downstate cleave and rally mechanics affect build choices
 - Movement speed and swiftness uptime matter for repositioning
 - Use search_skills_by_effect("Stability") and search_traits_by_effect("survivability") when optimizing for WvW
-- Consider: stability uptime, condi cleanse access, CC chain potential, CC immunity sources, escape tools, group synergy"#,
-        "PvP" => r#"
+- Consider: stability uptime, condi cleanse access, CC chain potential, CC immunity sources, escape tools, group synergy"#
+        }
+        "PvP" => {
+            r#"
 PvP-Specific Rules (competitive mode — many stats/bonuses/effects are split and reduced vs PvE):
 - Stats come from an amulet (replaces all gear stats), NOT from individual gear pieces
 - Rune and sigil systems still apply but are standardized PvP versions
@@ -690,15 +717,18 @@ PvP-Specific Rules (competitive mode — many stats/bonuses/effects are split an
 - Burst windows, sustain between fights, and disengage/reset ability are crucial
 - Stunbreaks, condition cleanse, and stability access are essential
 - Relic still applies; choose for the game mode's fast-paced fights
-- Consider: stomping/rezzing, decapping, mobility between nodes"#,
-        _ => r#"
+- Consider: stomping/rezzing, decapping, mobility between nodes"#
+        }
+        _ => {
+            r#"
 PvE-Specific Rules:
 - 6 armor pieces with 1 rune each (same rune x6 for set bonus)
 - Sigils: 1 per 1H weapon, 2 per 2H (max 2 per set)
 - 1 relic slot (build-defining effect)
 - Consider: boon strip → vulnerability → damage rotation → buff uptime
 - DPS uptime and benchmark rotations matter
-- Group composition provides boons (Might, Fury, Quickness, Alacrity)"#,
+- Group composition provides boons (Might, Fury, Quickness, Alacrity)"#
+        }
     };
 
     format!("{}{}", base_rules, mode_context)
@@ -787,7 +817,9 @@ pub fn parse_gemini_build(response: &str) -> Result<GeminiBuildResponse, String>
                 let off = set.get("off").and_then(|v| v.as_str());
                 let label = if *set_key == "set1" { "Set 1" } else { "Set 2" };
                 if let Some(off) = off.filter(|o| *o != "null" && !o.is_empty()) {
-                    result.weapons.push(format!("{}: {} / {}", label, main, off));
+                    result
+                        .weapons
+                        .push(format!("{}: {} / {}", label, main, off));
                 } else if !main.is_empty() {
                     result.weapons.push(format!("{}: {}", label, main));
                 }
@@ -893,7 +925,8 @@ mod tests {
         assert!(ctx.contains("Power"));
         assert!(ctx.contains("PvE"));
 
-        let wvw_ctx = build_game_context("Warrior", &OptimizationWeights::preset_power_dps(), "WvW");
+        let wvw_ctx =
+            build_game_context("Warrior", &OptimizationWeights::preset_power_dps(), "WvW");
         assert!(wvw_ctx.contains("WvW"));
         assert!(wvw_ctx.contains("competitive split"));
     }
@@ -941,8 +974,14 @@ mod tests {
     fn test_weights_context_power() {
         let ctx = weights_context(&OptimizationWeights::preset_power_dps());
         assert!(ctx.contains("Power damage"));
-        assert!(ctx.contains("MANDATORY"), "Power at 1.0 should trigger mandatory constraint");
-        assert!(ctx.contains("Berserker"), "Power at 1.0 should mandate Berserker's gear");
+        assert!(
+            ctx.contains("MANDATORY"),
+            "Power at 1.0 should trigger mandatory constraint"
+        );
+        assert!(
+            ctx.contains("Berserker"),
+            "Power at 1.0 should mandate Berserker's gear"
+        );
     }
 
     #[test]

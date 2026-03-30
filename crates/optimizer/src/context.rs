@@ -190,7 +190,10 @@ fn format_trait_entry(
     for ts in &t.skills {
         let ts_name = ts.name.as_deref().unwrap_or("(unnamed)");
         let ts_desc = ts.description.as_deref().unwrap_or("");
-        out.push_str(&format!("{}  Triggers skill: {} — {}\n", prefix, ts_name, ts_desc));
+        out.push_str(&format!(
+            "{}  Triggers skill: {} — {}\n",
+            prefix, ts_name, ts_desc
+        ));
         for fact in &ts.facts {
             if let Some(text) = format_fact_text(fact) {
                 out.push_str(&format!("{}    {}\n", prefix, text));
@@ -247,8 +250,12 @@ fn section_profession_skills(config: &ContextConfig) -> String {
     weapon_skills.sort_by(|a, b| {
         let wa = a.weapon_type.as_deref().unwrap_or("");
         let wb = b.weapon_type.as_deref().unwrap_or("");
-        wa.cmp(wb)
-            .then_with(|| a.slot.as_deref().unwrap_or("").cmp(b.slot.as_deref().unwrap_or("")))
+        wa.cmp(wb).then_with(|| {
+            a.slot
+                .as_deref()
+                .unwrap_or("")
+                .cmp(b.slot.as_deref().unwrap_or(""))
+        })
     });
 
     let mut current_weapon = String::new();
@@ -334,7 +341,13 @@ fn format_skill_entry(out: &mut String, skill: &Skill) {
 
     // Stun break flag
     let has_stunbreak = skill.facts.iter().any(|f| {
-        matches!(f, Fact::StunBreak { value: Some(true), .. })
+        matches!(
+            f,
+            Fact::StunBreak {
+                value: Some(true),
+                ..
+            }
+        )
     });
     if has_stunbreak {
         out.push_str("    ★ STUN BREAK\n");
@@ -344,7 +357,9 @@ fn format_skill_entry(out: &mut String, skill: &Skill) {
 /// ALL Superior Runes with their 6-tier bonuses.
 fn section_runes(db: &GameDb) -> String {
     let mut out = String::from("=== ALL SUPERIOR RUNES ===\n");
-    out.push_str("(Always use 6 of the same rune for the set bonus. The 6th bonus is build-defining.)\n\n");
+    out.push_str(
+        "(Always use 6 of the same rune for the set bonus. The 6th bonus is build-defining.)\n\n",
+    );
 
     let mut runes: Vec<&Item> = db
         .all_runes()
@@ -443,7 +458,11 @@ fn section_gear_prefixes(config: &ContextConfig) -> String {
 
     out.push_str("Available options for reference:\n");
     for prefix_name in &config.gear_prefixes {
-        let marker = if config.determined_prefix == Some(prefix_name) { " <<<SELECTED" } else { "" };
+        let marker = if config.determined_prefix == Some(prefix_name) {
+            " <<<SELECTED"
+        } else {
+            ""
+        };
         if let Some(itemstat) = config
             .db
             .itemstats
@@ -460,9 +479,17 @@ fn section_gear_prefixes(config: &ContextConfig) -> String {
                     )
                 })
                 .collect();
-            out.push_str(&format!("{}: {}{}\n", itemstat.name, stats.join(", "), marker));
+            out.push_str(&format!(
+                "{}: {}{}\n",
+                itemstat.name,
+                stats.join(", "),
+                marker
+            ));
         } else {
-            out.push_str(&format!("{}: (not found in game data){}\n", prefix_name, marker));
+            out.push_str(&format!(
+                "{}: (not found in game data){}\n",
+                prefix_name, marker
+            ));
         }
     }
 
@@ -478,10 +505,7 @@ fn section_current_build(summary: &str) -> String {
         .filter(|c| *c != '`' && *c != '<' && *c != '>')
         .collect();
 
-    format!(
-        "=== CURRENT BUILD (Your Equipped Build) ===\n{}",
-        sanitized
-    )
+    format!("=== CURRENT BUILD (Your Equipped Build) ===\n{}", sanitized)
 }
 
 // ---------------------------------------------------------------------------
@@ -505,9 +529,7 @@ fn format_fact_text(fact: &Fact) -> Option<String> {
             apply_count,
             ..
         } => {
-            let dur = duration
-                .map(|d| format!(" {}s", d))
-                .unwrap_or_default();
+            let dur = duration.map(|d| format!(" {}s", d)).unwrap_or_default();
             let stacks = apply_count
                 .filter(|&c| c > 1)
                 .map(|c| format!(" x{}", c))
@@ -522,9 +544,7 @@ fn format_fact_text(fact: &Fact) -> Option<String> {
             prefix,
             ..
         } => {
-            let dur = duration
-                .map(|d| format!(" {}s", d))
-                .unwrap_or_default();
+            let dur = duration.map(|d| format!(" {}s", d)).unwrap_or_default();
             let stacks = apply_count
                 .filter(|&c| c > 1)
                 .map(|c| format!(" x{}", c))
@@ -585,9 +605,7 @@ fn format_fact_text(fact: &Fact) -> Option<String> {
             percent,
             ..
         } => {
-            let pct = percent
-                .map(|p| format!(" ({}%)", p))
-                .unwrap_or_default();
+            let pct = percent.map(|p| format!(" ({}%)", p)).unwrap_or_default();
             Some(format!("- Combo Finisher: {}{}", ft, pct))
         }
 
@@ -698,10 +716,7 @@ mod tests {
             icon: None,
             field_type: Some("Fire".into()),
         };
-        assert_eq!(
-            format_fact_text(&fact),
-            Some("- Combo Field: Fire".into())
-        );
+        assert_eq!(format_fact_text(&fact), Some("- Combo Field: Fire".into()));
     }
 
     #[test]

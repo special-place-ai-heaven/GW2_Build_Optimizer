@@ -95,7 +95,10 @@ pub trait LlmClient: Send + Sync {
             },
             Err(LlmError::InvalidKey) => KeyValidationResult {
                 valid: false,
-                message: format!("Invalid {} API key. Check that you copied the full key.", self.provider_name()),
+                message: format!(
+                    "Invalid {} API key. Check that you copied the full key.",
+                    self.provider_name()
+                ),
                 warning: None,
             },
             Err(LlmError::RateLimited) => KeyValidationResult {
@@ -105,12 +108,22 @@ pub trait LlmClient: Send + Sync {
             },
             Err(LlmError::Http(ref msg)) => KeyValidationResult {
                 valid: false,
-                message: format!("Cannot connect to {} API. Check your internet connection.", self.provider_name()),
+                message: format!(
+                    "Cannot connect to {} API. Check your internet connection.",
+                    self.provider_name()
+                ),
                 warning: Some(msg.clone()),
             },
-            Err(LlmError::Api { status, ref message }) => KeyValidationResult {
+            Err(LlmError::Api {
+                status,
+                ref message,
+            }) => KeyValidationResult {
                 valid: false,
-                message: format!("{} API returned error (HTTP {}).", self.provider_name(), status),
+                message: format!(
+                    "{} API returned error (HTTP {}).",
+                    self.provider_name(),
+                    status
+                ),
                 warning: Some(message.clone()),
             },
             Err(e) => KeyValidationResult {
@@ -175,7 +188,9 @@ pub fn create_client(
 
     match config.active_provider {
         LlmProvider::Gemini => {
-            let key = config.gemini_api_key.as_deref()
+            let key = config
+                .gemini_api_key
+                .as_deref()
                 .ok_or_else(|| LlmError::Unavailable("No Gemini API key configured".into()))?;
             let model = config.gemini_model_id();
             let usage_path = addon_dir.join("gemini_usage.json");
@@ -183,7 +198,9 @@ pub fn create_client(
             Ok(Box::new(client))
         }
         LlmProvider::OpenAI => {
-            let key = config.openai_api_key.as_deref()
+            let key = config
+                .openai_api_key
+                .as_deref()
                 .ok_or_else(|| LlmError::Unavailable("No OpenAI API key configured".into()))?;
             let model = config.openai_model_id();
             let usage_path = addon_dir.join("openai_usage.json");
@@ -191,7 +208,9 @@ pub fn create_client(
             Ok(Box::new(client))
         }
         LlmProvider::Anthropic => {
-            let key = config.anthropic_api_key.as_deref()
+            let key = config
+                .anthropic_api_key
+                .as_deref()
                 .ok_or_else(|| LlmError::Unavailable("No Anthropic API key configured".into()))?;
             let model = config.anthropic_model_id();
             let usage_path = addon_dir.join("anthropic_usage.json");

@@ -190,9 +190,7 @@ impl Add<FactualValue<f64>> for FactualValue<f64> {
 
     fn add(self, rhs: FactualValue<f64>) -> Self::Output {
         match (self, rhs) {
-            (FactualValue::Resolved(a), FactualValue::Resolved(b)) => {
-                FactualValue::Resolved(a + b)
-            }
+            (FactualValue::Resolved(a), FactualValue::Resolved(b)) => FactualValue::Resolved(a + b),
             _ => FactualValue::Unknown,
         }
     }
@@ -203,9 +201,7 @@ impl Sub<FactualValue<f64>> for FactualValue<f64> {
 
     fn sub(self, rhs: FactualValue<f64>) -> Self::Output {
         match (self, rhs) {
-            (FactualValue::Resolved(a), FactualValue::Resolved(b)) => {
-                FactualValue::Resolved(a - b)
-            }
+            (FactualValue::Resolved(a), FactualValue::Resolved(b)) => FactualValue::Resolved(a - b),
             _ => FactualValue::Unknown,
         }
     }
@@ -216,9 +212,7 @@ impl Mul<FactualValue<f64>> for FactualValue<f64> {
 
     fn mul(self, rhs: FactualValue<f64>) -> Self::Output {
         match (self, rhs) {
-            (FactualValue::Resolved(a), FactualValue::Resolved(b)) => {
-                FactualValue::Resolved(a * b)
-            }
+            (FactualValue::Resolved(a), FactualValue::Resolved(b)) => FactualValue::Resolved(a * b),
             _ => FactualValue::Unknown,
         }
     }
@@ -229,9 +223,7 @@ impl Div<FactualValue<f64>> for FactualValue<f64> {
 
     fn div(self, rhs: FactualValue<f64>) -> Self::Output {
         match (self, rhs) {
-            (FactualValue::Resolved(a), FactualValue::Resolved(b)) => {
-                FactualValue::Resolved(a / b)
-            }
+            (FactualValue::Resolved(a), FactualValue::Resolved(b)) => FactualValue::Resolved(a / b),
             _ => FactualValue::Unknown,
         }
     }
@@ -333,17 +325,14 @@ mod tests {
 
     #[test]
     fn test_factual_value_map_or_unknown() {
-        let v = FactualValue::Resolved(5.0)
-            .map_or_unknown(|x| FactualValue::Resolved(x + 1.0));
+        let v = FactualValue::Resolved(5.0).map_or_unknown(|x| FactualValue::Resolved(x + 1.0));
         assert_eq!(v, FactualValue::Resolved(6.0));
 
-        let u = FactualValue::<f64>::Unknown
-            .map_or_unknown(|x| FactualValue::Resolved(x + 1.0));
+        let u = FactualValue::<f64>::Unknown.map_or_unknown(|x| FactualValue::Resolved(x + 1.0));
         assert_eq!(u, FactualValue::Unknown);
 
         // Inner function returns Unknown
-        let w = FactualValue::Resolved(5.0)
-            .map_or_unknown(|_| FactualValue::<f64>::Unknown);
+        let w = FactualValue::Resolved(5.0).map_or_unknown(|_| FactualValue::<f64>::Unknown);
         assert_eq!(w, FactualValue::Unknown);
     }
 
@@ -357,7 +346,10 @@ mod tests {
 
     #[test]
     fn test_resolved_mul_scalar() {
-        assert_eq!(FactualValue::Resolved(10.0) * 5.0, FactualValue::Resolved(50.0));
+        assert_eq!(
+            FactualValue::Resolved(10.0) * 5.0,
+            FactualValue::Resolved(50.0)
+        );
     }
 
     #[test]
@@ -367,7 +359,10 @@ mod tests {
 
     #[test]
     fn test_resolved_add_scalar() {
-        assert_eq!(FactualValue::Resolved(10.0) + 3.0, FactualValue::Resolved(13.0));
+        assert_eq!(
+            FactualValue::Resolved(10.0) + 3.0,
+            FactualValue::Resolved(13.0)
+        );
     }
 
     #[test]
@@ -377,7 +372,10 @@ mod tests {
 
     #[test]
     fn test_resolved_sub_scalar() {
-        assert_eq!(FactualValue::Resolved(10.0) - 3.0, FactualValue::Resolved(7.0));
+        assert_eq!(
+            FactualValue::Resolved(10.0) - 3.0,
+            FactualValue::Resolved(7.0)
+        );
     }
 
     #[test]
@@ -387,7 +385,10 @@ mod tests {
 
     #[test]
     fn test_resolved_div_scalar() {
-        assert_eq!(FactualValue::Resolved(10.0) / 2.0, FactualValue::Resolved(5.0));
+        assert_eq!(
+            FactualValue::Resolved(10.0) / 2.0,
+            FactualValue::Resolved(5.0)
+        );
     }
 
     #[test]

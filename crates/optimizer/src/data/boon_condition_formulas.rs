@@ -18,12 +18,10 @@ use thiserror::Error;
 use super::DataLoadError;
 
 /// Canonical JSON embedded at compile time from data/formulas/boons.json.
-const BOON_FORMULAS_JSON: &str =
-    include_str!("../../../../data/formulas/boons.json");
+const BOON_FORMULAS_JSON: &str = include_str!("../../../../data/formulas/boons.json");
 
 /// Canonical JSON embedded at compile time from data/formulas/conditions.json.
-const CONDITION_FORMULAS_JSON: &str =
-    include_str!("../../../../data/formulas/conditions.json");
+const CONDITION_FORMULAS_JSON: &str = include_str!("../../../../data/formulas/conditions.json");
 
 static BOONS: OnceLock<BoonFormulas> = OnceLock::new();
 static CONDITIONS: OnceLock<ConditionFormulas> = OnceLock::new();
@@ -34,8 +32,7 @@ static CONDITIONS: OnceLock<ConditionFormulas> = OnceLock::new();
 /// Panics if the embedded JSON is malformed (compile-time data, should never happen).
 pub fn boons() -> &'static BoonFormulas {
     BOONS.get_or_init(|| {
-        load_boon_formulas(BOON_FORMULAS_JSON)
-            .expect("embedded boons.json is invalid")
+        load_boon_formulas(BOON_FORMULAS_JSON).expect("embedded boons.json is invalid")
     })
 }
 
@@ -188,10 +185,7 @@ impl BoonFormulas {
     pub fn might_power_per_stack(&self) -> f64 {
         self.map
             .get("Might")
-            .and_then(|b| {
-                b.effects.get("PvE")
-                    .or_else(|| b.effects.get("all_modes"))
-            })
+            .and_then(|b| b.effects.get("PvE").or_else(|| b.effects.get("all_modes")))
             .and_then(|e| e.get("power_per_stack"))
             .unwrap_or(30.0)
     }
@@ -200,10 +194,7 @@ impl BoonFormulas {
     pub fn might_condi_per_stack(&self) -> f64 {
         self.map
             .get("Might")
-            .and_then(|b| {
-                b.effects.get("PvE")
-                    .or_else(|| b.effects.get("all_modes"))
-            })
+            .and_then(|b| b.effects.get("PvE").or_else(|| b.effects.get("all_modes")))
             .and_then(|e| e.get("condition_damage_per_stack"))
             .unwrap_or(30.0)
     }
@@ -212,10 +203,7 @@ impl BoonFormulas {
     pub fn protection_multiplier(&self) -> f64 {
         self.map
             .get("Protection")
-            .and_then(|b| {
-                b.effects.get("PvE")
-                    .or_else(|| b.effects.get("all_modes"))
-            })
+            .and_then(|b| b.effects.get("PvE").or_else(|| b.effects.get("all_modes")))
             .and_then(|e| e.get("incoming_strike_multiplier"))
             .unwrap_or(0.67)
     }
@@ -224,10 +212,7 @@ impl BoonFormulas {
     pub fn resolution_multiplier(&self) -> f64 {
         self.map
             .get("Resolution")
-            .and_then(|b| {
-                b.effects.get("PvE")
-                    .or_else(|| b.effects.get("all_modes"))
-            })
+            .and_then(|b| b.effects.get("PvE").or_else(|| b.effects.get("all_modes")))
             .and_then(|e| e.get("incoming_condition_multiplier"))
             .unwrap_or(0.67)
     }
@@ -236,10 +221,7 @@ impl BoonFormulas {
     pub fn vulnerability_pct_per_stack(&self) -> f64 {
         self.map
             .get("Vulnerability")
-            .and_then(|b| {
-                b.effects.get("PvE")
-                    .or_else(|| b.effects.get("all_modes"))
-            })
+            .and_then(|b| b.effects.get("PvE").or_else(|| b.effects.get("all_modes")))
             .and_then(|e| e.get("incoming_damage_pct_per_stack"))
             .unwrap_or(0.01)
     }
@@ -355,20 +337,16 @@ pub struct ConditionFormulas {
 impl ConditionFormulas {
     /// Calculate tick damage for a simple condition (Bleeding, Burning, Poison).
     /// For multi-state conditions, use `torment_tick()` or `confusion_tick()`.
-    pub fn tick_damage(
-        &self,
-        condition: &str,
-        condition_damage: f64,
-        mode: GameMode,
-    ) -> f64 {
+    pub fn tick_damage(&self, condition: &str, condition_damage: f64, mode: GameMode) -> f64 {
         let mode_key = mode_to_key(&mode);
         // Also try "Poisoned" for "Poison"
-        let cond = self.map.get(condition)
-            .or_else(|| if condition == "Poison" {
+        let cond = self.map.get(condition).or_else(|| {
+            if condition == "Poison" {
                 self.map.get("Poisoned")
             } else {
                 None
-            });
+            }
+        });
         let cond = match cond {
             Some(c) => c,
             None => return 0.0,
@@ -389,12 +367,7 @@ impl ConditionFormulas {
 
     /// Torment tick damage with explicit mode and movement state.
     /// `moving`: true = target is moving, false = stationary.
-    pub fn torment_tick(
-        &self,
-        condition_damage: f64,
-        mode: GameMode,
-        moving: bool,
-    ) -> f64 {
+    pub fn torment_tick(&self, condition_damage: f64, mode: GameMode, moving: bool) -> f64 {
         let mode_key = mode_to_key(&mode);
         let cond = match self.map.get("Torment") {
             Some(c) => c,
@@ -417,12 +390,7 @@ impl ConditionFormulas {
 
     /// Confusion tick damage with explicit mode and trigger state.
     /// `on_skill_use`: true = activation damage, false = passive over-time.
-    pub fn confusion_tick(
-        &self,
-        condition_damage: f64,
-        mode: GameMode,
-        on_skill_use: bool,
-    ) -> f64 {
+    pub fn confusion_tick(&self, condition_damage: f64, mode: GameMode, on_skill_use: bool) -> f64 {
         let mode_key = mode_to_key(&mode);
         let cond = match self.map.get("Confusion") {
             Some(c) => c,
@@ -480,17 +448,16 @@ pub fn load_boon_formulas(json: &str) -> Result<BoonFormulas, FormulaLoadError> 
         }
 
         let raw_def: RawBoonDefinition = serde_json::from_value(value.clone())
-            .map_err(|e| FormulaLoadError::ValidationError(
-                format!("boon '{}': {}", name, e)
-            ))?;
+            .map_err(|e| FormulaLoadError::ValidationError(format!("boon '{}': {}", name, e)))?;
 
         // Resolve all_modes -> per-mode
         let resolved_effects = resolve_boon_effects(&raw_def.effects);
 
         if map.contains_key(name.as_str()) {
-            return Err(FormulaLoadError::ValidationError(
-                format!("duplicate boon: {}", name),
-            ));
+            return Err(FormulaLoadError::ValidationError(format!(
+                "duplicate boon: {}",
+                name
+            )));
         }
 
         map.insert(
@@ -536,9 +503,7 @@ fn resolve_boon_effects(
 }
 
 /// Parse and validate condition formulas from JSON text.
-pub fn load_condition_formulas(
-    json: &str,
-) -> Result<ConditionFormulas, FormulaLoadError> {
+pub fn load_condition_formulas(json: &str) -> Result<ConditionFormulas, FormulaLoadError> {
     let raw: HashMap<String, serde_json::Value> = serde_json::from_str(json)?;
     let mut map = HashMap::new();
 
@@ -550,9 +515,7 @@ pub fn load_condition_formulas(
 
         let raw_def: RawConditionDefinition =
             serde_json::from_value(value.clone()).map_err(|e| {
-                FormulaLoadError::ValidationError(
-                    format!("condition '{}': {}", name, e),
-                )
+                FormulaLoadError::ValidationError(format!("condition '{}': {}", name, e))
             })?;
 
         // Validate damage conditions declare all 3 modes
@@ -560,20 +523,19 @@ pub fn load_condition_formulas(
             let modes = ["PvE", "PvP", "WvW"];
             for mode in &modes {
                 if !raw_def.formulas.contains_key(*mode) {
-                    return Err(FormulaLoadError::ValidationError(
-                        format!(
-                            "condition '{}': missing mode '{}'",
-                            name, mode,
-                        ),
-                    ));
+                    return Err(FormulaLoadError::ValidationError(format!(
+                        "condition '{}': missing mode '{}'",
+                        name, mode,
+                    )));
                 }
             }
         }
 
         if map.contains_key(name.as_str()) {
-            return Err(FormulaLoadError::ValidationError(
-                format!("duplicate condition: {}", name),
-            ));
+            return Err(FormulaLoadError::ValidationError(format!(
+                "duplicate condition: {}",
+                name
+            )));
         }
 
         map.insert(
@@ -892,10 +854,7 @@ mod tests {
             pvp,
         );
         // PvE and PvP must differ
-        assert!(
-            (pve - pvp).abs() > 1.0,
-            "Torment PvE and PvP should differ"
-        );
+        assert!((pve - pvp).abs() > 1.0, "Torment PvE and PvP should differ");
     }
 
     // Source: https://wiki.guildwars2.com/wiki/Confusion
@@ -977,10 +936,7 @@ mod tests {
             b.get("Might").unwrap().stacking_mode,
             StackingMode::Intensity,
         );
-        assert_eq!(
-            b.get("Fury").unwrap().stacking_mode,
-            StackingMode::Duration,
-        );
+        assert_eq!(b.get("Fury").unwrap().stacking_mode, StackingMode::Duration,);
         assert_eq!(
             b.get("Stability").unwrap().stacking_mode,
             StackingMode::Intensity,
@@ -1019,17 +975,11 @@ mod tests {
     #[test]
     fn test_condition_effect_classes() {
         let c = conditions();
-        assert_eq!(
-            c.get("Bleeding").unwrap().effect_class,
-            EffectClass::Damage,
-        );
+        assert_eq!(c.get("Bleeding").unwrap().effect_class, EffectClass::Damage,);
         assert_eq!(
             c.get("Weakness").unwrap().effect_class,
             EffectClass::Suppression,
         );
-        assert_eq!(
-            c.get("Fear").unwrap().effect_class,
-            EffectClass::Control,
-        );
+        assert_eq!(c.get("Fear").unwrap().effect_class, EffectClass::Control,);
     }
 }
