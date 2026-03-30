@@ -37,6 +37,13 @@ pub struct BuildSuggestion {
     /// Viability gate report from the referee (None for legacy/LLM paths that skip the referee).
     /// Populated for S07 Trust UI rendering.
     pub viability: Option<ViabilityReport>,
+    /// Benchmark delta vs closest community reference build.
+    /// None when no benchmark data has been scraped yet.
+    pub benchmark_delta: Option<gw2_optimizer::benchmark::BenchmarkDelta>,
+    /// Data quality assessment from the optimizer pipeline.
+    pub data_quality: gw2_optimizer::data::DataQuality,
+    /// Human-readable reasons for quality degradation (empty when Verified).
+    pub quality_reasons: Vec<String>,
 }
 
 /// State for the comparison view.
@@ -105,6 +112,9 @@ pub fn render_comparison(
 
     let suggestion = &comparison.suggestions[comparison.selected_suggestion.min(tab_count - 1)];
 
+    // ═══ Data Quality Badge ═══
+    render_data_quality_badge(ui, suggestion);
+
     // ═══ Equipment Comparison ═══
     render_gear_comparison(ui, current_build, suggestion);
 
@@ -131,7 +141,18 @@ pub fn render_comparison(
         }
     }
 
-    // ═══ LLM Explanation ═══
+    // ═══ Trust UI: Viability Gates ═══
+    if let Some(ref viability) = suggestion.viability {
+        render_viability_report(ui, viability);
+    }
+
+    // ═══ Trust UI: Tradeoff Analysis ═══
+    render_tradeoff_analysis(ui, comparison, suggestion);
+
+    // ═══ Trust UI: Benchmark Delta ═══
+    render_benchmark_delta(ui, suggestion);
+
+    // ═══ LLM Explanation (advisory text only) ═══
     // Prefer synergy_explanation (from new pipeline), fall back to explanation (from old pipeline)
     let explanation_text = if !suggestion.synergy_explanation.is_empty() {
         &suggestion.synergy_explanation
@@ -139,7 +160,9 @@ pub fn render_comparison(
         &suggestion.explanation
     };
     if !explanation_text.is_empty() {
-        if ui.collapsing_header("Why This Build?", TreeNodeFlags::DEFAULT_OPEN) {
+        if ui.collapsing_header("AI Advisory (optional)", TreeNodeFlags::empty()) {
+            ui.text_colored([0.6, 0.6, 0.8, 1.0], "Advisory text from AI — referee scores are authoritative.");
+            ui.spacing();
             ui.text_wrapped(explanation_text);
         }
     }
@@ -654,6 +677,221 @@ fn render_rotation_breakdown(ui: &Ui, rotation: &RotationBreakdown) {
             if *casts > 0 {
                 ui.text(format!("  {} x{} ({} DPS)", name, casts, dps));
             }
+        }
+    }
+}
+
+// ─── Trust UI helpers ────────────────────────────────────────────────────────
+
+/// Render data quality badge in comparison header.
+fn render_data_quality_badge(ui: &Ui, suggestion: &BuildSuggestion) {
+    use gw2_optimizer::data::DataQuality;
+    let (label, col, tooltip_header): (&str, [f32; 4], &str) = match suggestion.data_quality {
+        DataQuality::Verified => (
+            "\u{25cf} Verified",
+            [0.3, 0.9, 0.3, 1.0],
+            "All input data is source-backed and verified.",
+        ),
+        DataQuality::Provisional => (
+            "\u{25cf} Provisional",
+            [0.95, 0.75, 0.15, 1.0],
+            "Some data is estimated or provisional. Results are usable but less certain.",
+        ),
+        DataQuality::Blocked => (
+            "\u{25cf} Blocked",
+            [1.0, 0.3, 0.2, 1.0],
+            "Critical data is missing. Results may not be reliable.",
+        ),
+    };
+
+    ui.text_colored(col, label);
+    if ui.is_item_hovered() {
+        ui.tooltip(|| {
+            ui.text(tooltip_header);
+            if !suggestion.quality_reasons.is_empty() {
+                ui.spacing();
+                ui.text("Reasons:");
+                for reason in &suggestion.quality_reasons {
+                    ui.bullet_text(reason);
+                }
+            }
+        });
+    }
+    ui.spacing();
+}
+
+/// Render benchmark delta vs community reference.
+fn render_benchmark_delta(ui: &Ui, suggestion: &BuildSuggestion) {
+    use gw2_optimizer::benchmark::BenchmarkDelta;
+
+    match &suggestion.benchmark_delta {
+        None => {
+            // No data — show subtle hint in collapsed section
+            if ui.collapsing_header("vs Community Meta", TreeNodeFlags::empty()) {
+                ui.text_colored(
+                    [0.5, 0.5, 0.5, 1.0],
+                    "  No benchmark data available.",
+                );
+                ui.text_colored(
+                    [0.5, 0.5, 0.5, 1.0],
+                    "  Go to Settings \u{2192} Sync Benchmarks to download reference builds.",
+                );
+            }
+        }
+        Some(delta) => {
+            let pct = delta.pct_of_ref;
+            let (col, status): ([f32; 4], &str) = if pct >= 95.0 {
+                ([0.3, 0.9, 0.3, 1.0], "on-par")
+            } else if pct >= 80.0 {
+                ([0.9, 0.8, 0.2, 1.0], "close")
+            } else if pct >= 65.0 {
+                ([0.9, 0.55, 0.1, 1.0], "below")
+            } else {
+                ([1.0, 0.3, 0.2, 1.0], "far below")
+            };
+
+            let header = format!(
+                "vs {} meta: {:.0}% [{}]",
+                title_case(&delta.source),
+                pct,
+                status
+            );
+
+            if ui.collapsing_header(&header, TreeNodeFlags::DEFAULT_OPEN) {
+                ui.text_colored(col, &format!("  {:.0}% of reference score", pct));
+                ui.spacing();
+
+                // Score bar
+                let bar_width = ui.content_region_avail()[0] - 16.0;
+                let filled = (bar_width * (pct / 100.0).min(1.0) as f32).max(0.0);
+                let pos = ui.cursor_screen_pos();
+                let draw = ui.get_window_draw_list();
+                // Background
+                draw.add_rect(
+                    [pos[0] + 8.0, pos[1] + 2.0],
+                    [pos[0] + bar_width + 8.0, pos[1] + 14.0],
+                    [0.2, 0.2, 0.2, 0.8],
+                ).filled(true).build();
+                // Fill
+                if filled > 0.0 {
+                    draw.add_rect(
+                        [pos[0] + 8.0, pos[1] + 2.0],
+                        [pos[0] + 8.0 + filled, pos[1] + 14.0],
+                        col,
+                    ).filled(true).build();
+                }
+                ui.dummy([0.0, 18.0]);
+
+                ui.spacing();
+                ui.text(&format!(
+                    "  Reference: {} {} ({}) \u{2014} {}",
+                    delta.profession, delta.role, delta.ref_gear_prefix, delta.source
+                ));
+                if !delta.ref_url.is_empty() {
+                    ui.text_colored([0.4, 0.6, 0.9, 1.0], &format!("  {}", delta.ref_url));
+                }
+            }
+        }
+    }
+}
+
+fn title_case(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().to_string() + c.as_str(),
+    }
+}
+
+/// Render the viability gate breakdown: pass/fail per gate with notes.
+fn render_viability_report(ui: &Ui, report: &ViabilityReport) {
+    let header_col = if report.is_viable {
+        [0.3, 0.9, 0.3, 1.0]
+    } else {
+        [1.0, 0.35, 0.2, 1.0]
+    };
+    let status = if report.is_viable { "VIABLE" } else { "NON-VIABLE" };
+
+    if ui.collapsing_header(
+        &format!("Viability Report [{}]", status),
+        if report.is_viable {
+            TreeNodeFlags::empty()
+        } else {
+            TreeNodeFlags::DEFAULT_OPEN
+        },
+    ) {
+        ui.text_colored(header_col, &format!("  Status: {}", status));
+        ui.spacing();
+        for gate in &report.gates {
+            let (icon, col): (&str, [f32; 4]) = if gate.passed {
+                ("\u{2705}", [0.4, 0.9, 0.4, 1.0])
+            } else {
+                ("\u{274C}", [1.0, 0.3, 0.2, 1.0])
+            };
+            let gate_name = format!("{:?}", gate.gate);
+            ui.text_colored(col, &format!("  {} {} — {}", icon, gate_name, gate.note));
+        }
+        if !report.is_viable {
+            ui.spacing();
+            ui.text_colored(
+                [1.0, 0.7, 0.2, 1.0],
+                "  Build scored -1.0 (non-viable). It won't rank against viable builds.",
+            );
+        }
+    }
+}
+
+/// Render tradeoff analysis: what this build gains/loses vs current stats.
+fn render_tradeoff_analysis(
+    ui: &Ui,
+    comparison: &ComparisonState,
+    suggestion: &BuildSuggestion,
+) {
+    let Some(ref new_metrics) = suggestion.combat_solo else {
+        return;
+    };
+    let Some(ref cur_metrics) = comparison.current_combat_solo else {
+        // No current build data — show absolute metrics only
+        if ui.collapsing_header("Performance Estimate", TreeNodeFlags::empty()) {
+            ui.text_colored([0.8, 0.8, 0.8, 1.0], "  (No current build for comparison)");
+            ui.text(&format!("  Strike DPS index: {:.0}", new_metrics.strike_dps_index));
+            ui.text(&format!("  Condi DPS index:  {:.0}", new_metrics.condition_dps_index));
+            ui.text(&format!("  Effective HP:     {:.0}", new_metrics.effective_health));
+        }
+        return;
+    };
+
+    if ui.collapsing_header("Tradeoff Analysis", TreeNodeFlags::DEFAULT_OPEN) {
+        ui.text_colored([0.8, 0.8, 0.5, 1.0], "  vs your current build:");
+        ui.spacing();
+
+        let tradeoffs = [
+            ("Strike DPS", cur_metrics.strike_dps_index as f64, new_metrics.strike_dps_index as f64),
+            ("Condi DPS", cur_metrics.condition_dps_index as f64, new_metrics.condition_dps_index as f64),
+            ("Effective HP", cur_metrics.effective_health as f64, new_metrics.effective_health as f64),
+            ("Healing Index", cur_metrics.healing_index as f64, new_metrics.healing_index as f64),
+        ];
+
+        for (label, old_val, new_val) in &tradeoffs {
+            if *old_val < 0.01 && *new_val < 0.01 {
+                continue; // Skip zero/negligible axes
+            }
+            let delta = new_val - old_val;
+            let pct = if *old_val > 0.01 { delta / old_val * 100.0 } else { 0.0 };
+            let (arrow, col): (&str, [f32; 4]) = if delta > old_val * 0.02 {
+                ("\u{2191}", [0.3, 0.9, 0.3, 1.0]) // ↑ green
+            } else if delta < -old_val * 0.02 {
+                ("\u{2193}", [1.0, 0.4, 0.3, 1.0]) // ↓ red
+            } else {
+                ("\u{2194}", [0.7, 0.7, 0.7, 1.0]) // ↔ neutral
+            };
+            ui.text_colored(
+                col,
+                &format!(
+                    "  {} {:14} {:+.0}  ({:+.1}%)",
+                    arrow, label, delta, pct
+                ),
+            );
         }
     }
 }
