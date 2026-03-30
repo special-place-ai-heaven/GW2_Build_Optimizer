@@ -20,11 +20,34 @@ const MIN_STUNBREAKS: u32 = 1;
 /// Minimum cleanse count (distinct skills with cleanse) for PvP/WvW viability. // HEURISTIC
 const MIN_CLEANSE_COUNT: u32 = 1;
 
-/// Minimum effective health for PvE viability (arbitrary baseline). // HEURISTIC
-const EHP_FLOOR_PVE: f64 = 5_000.0;
+/// Minimum effective health for PvE viability.
+/// Evidence: a glass Berserker Guardian (vit~1000, no toughness investment) computes
+/// ~18,030 blended EHP (65% strike / 35% condition). A minimal test build with empty
+/// gear (~1099) is far below any real build. This floor screens out obviously
+/// under-geared or broken builds while passing all real ascended/exotic builds.
+const EHP_FLOOR_PVE: f64 = 11_000.0;
 
-/// Minimum effective health for WvW/PvP viability (higher floor for open-world combat). // HEURISTIC
-const EHP_FLOOR_WVW: f64 = 10_000.0;
+/// EHP floor for WvW Roaming / Solo play.
+/// Evidence: a Berserker Guardian (marauder variant) with Vitality gear reaches ~20,473
+/// blended EHP; a Trailblazer Scourge reaches ~32,542. Glass Berserker Guardian solo
+/// is ~18,030. Floor set to 15,000 — below any viable roaming gear set but high enough
+/// to reject near-naked builds. Without a healer, you need this floor to survive burst.
+pub const EHP_FLOOR_WVW_ROAM: f64 = 15_000.0;
+
+/// EHP floor for WvW Havoc / small group play (5-15 players).
+/// Evidence: small groups have a healer or support but you're still frequently 1-targeted.
+/// Celestial Ele at ~18,680; glass Warrior at ~24,587. Floor set to 13,000 — accepts any
+/// reasonable stat investment while rejecting pure paper builds.
+pub const EHP_FLOOR_WVW_HAVOC: f64 = 13_000.0;
+
+/// EHP floor for WvW Zerg / Squad play.
+/// Evidence: zerg play has dedicated healers (Minstrel Firebrand ~24,866 EHP pre-healing).
+/// Even a glass Berserker Warrior gets ~24,587 and is viable in a zerg. Floor set to 10,000
+/// — loose enough that any remotely geared build passes; screens out completely naked builds.
+pub const EHP_FLOOR_WVW_ZERG: f64 = 10_000.0;
+
+/// Legacy alias kept for test backward-compatibility. Equals the havoc (party) floor. // HEURISTIC
+pub const EHP_FLOOR_WVW: f64 = EHP_FLOOR_WVW_HAVOC;
 
 // ─── Viability Gate Types ────────────────────────────────────────────────────
 
@@ -152,8 +175,13 @@ pub fn evaluate_viability_gates(
     }
 
     // ── Effective health gate (always runs) ─────────────────────────────────
+    // WvW floor varies by combat tier: Roamers need more personal sustain than Zerg players.
     let ehp_floor = if requires_pvp_gates {
-        EHP_FLOOR_WVW
+        match scenario.combat_tier {
+            crate::scenario::CombatTier::Solo => EHP_FLOOR_WVW_ROAM,
+            crate::scenario::CombatTier::Party => EHP_FLOOR_WVW_HAVOC,
+            crate::scenario::CombatTier::Squad => EHP_FLOOR_WVW_ZERG,
+        }
     } else {
         EHP_FLOOR_PVE
     };
@@ -300,7 +328,7 @@ pub fn evaluate_validated_build(
 mod tests {
     use super::{
         evaluate_validated_build, evaluate_viability_gates, GateResult, ViabilityGate,
-        EHP_FLOOR_PVE, EHP_FLOOR_WVW,
+        EHP_FLOOR_PVE, EHP_FLOOR_WVW, EHP_FLOOR_WVW_HAVOC, EHP_FLOOR_WVW_ROAM, EHP_FLOOR_WVW_ZERG,
     };
     use crate::balance::BalanceContext;
     use crate::combat::CombatPerformance;
@@ -337,9 +365,11 @@ mod tests {
     }
 
     /// A `CombatPerformance` with sufficient effective health for WvW.
+    /// A `CombatPerformance` with sufficient effective health for all WvW tiers including Roaming.
     fn make_viable_combat() -> CombatPerformance {
         CombatPerformance {
-            effective_health: EHP_FLOOR_WVW + 1_000.0,
+            // Use ROAM floor + buffer so this helper works across all WvW combat tiers.
+            effective_health: EHP_FLOOR_WVW_ROAM + 1_000.0,
             ..CombatPerformance::default()
         }
     }
@@ -489,12 +519,15 @@ mod tests {
         assert_eq!(report.gates[0].gate, ViabilityGate::EffectiveHealth);
     }
 
-    /// EHP gate uses the WvW floor for WvW scenarios.
+    /// EHP gate uses the WvW floor for WvW scenarios; tier-aware (Squad uses ZERG floor).
     #[test]
     fn gate_wvw_ehp_below_wvw_floor_fails() {
+        use crate::scenario::{OptimizationTarget, TargetProfile};
         let rot = make_viable_rotation();
         let mut combat = make_viable_combat();
-        combat.effective_health = EHP_FLOOR_WVW - 1.0; // just below WvW floor
+        // Use a value below the Zerg (Squad) floor to ensure failure at Squad tier
+        combat.effective_health = EHP_FLOOR_WVW_ZERG - 1.0;
+        // make_wvw_scenario() uses CombatTier::Squad
         let scenario = make_wvw_scenario();
         let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
 
@@ -693,5 +726,105 @@ mod tests {
         );
         // Confirm rotation gates are absent in PvE.
         assert!(gate_by_kind(&report.gates, &ViabilityGate::StunbreakCount).is_none());
+    }
+
+    // ─── CombatTier-differentiated EHP gate tests ──────────────────────────
+
+    /// EHP between Zerg floor and Roam floor: passes Zerg (Squad), fails Roaming (Solo).
+    #[test]
+    fn gate_wvw_ehp_passes_zerg_but_fails_roam() {
+        use crate::scenario::{OptimizationTarget, TargetProfile};
+        let rot = make_viable_rotation();
+        // EHP is above ZERG floor but below ROAM floor
+        let mid_ehp = EHP_FLOOR_WVW_ZERG + 500.0;
+        assert!(
+            mid_ehp < EHP_FLOOR_WVW_ROAM,
+            "test setup: mid_ehp={} must be below ROAM floor={}",
+            mid_ehp,
+            EHP_FLOOR_WVW_ROAM
+        );
+
+        let mut combat = make_viable_combat();
+        combat.effective_health = mid_ehp;
+
+        // ── Squad scenario → should pass EHP gate ──
+        let squad_scenario = ScenarioSpec {
+            game_mode: GameMode::WvW,
+            combat_tier: crate::scenario::CombatTier::Squad,
+            target_profile: TargetProfile::Single,
+            optimization_target: OptimizationTarget { label: "WvW".into() },
+            patch_id: None,
+        };
+        let report_squad = evaluate_viability_gates(Some(&rot), &combat, &squad_scenario);
+        let ehp_squad = gate_by_kind(&report_squad.gates, &ViabilityGate::EffectiveHealth).unwrap();
+        assert!(
+            ehp_squad.passed,
+            "EHP={} should pass Squad floor={}; note='{}'",
+            mid_ehp, EHP_FLOOR_WVW_ZERG, ehp_squad.note
+        );
+
+        // ── Solo scenario (Roaming) → should fail EHP gate ──
+        let solo_scenario = ScenarioSpec {
+            game_mode: GameMode::WvW,
+            combat_tier: crate::scenario::CombatTier::Solo,
+            target_profile: TargetProfile::Single,
+            optimization_target: OptimizationTarget { label: "WvW".into() },
+            patch_id: None,
+        };
+        let report_solo = evaluate_viability_gates(Some(&rot), &combat, &solo_scenario);
+        let ehp_solo = gate_by_kind(&report_solo.gates, &ViabilityGate::EffectiveHealth).unwrap();
+        assert!(
+            !ehp_solo.passed,
+            "EHP={} should fail Solo/Roam floor={}; note='{}'",
+            mid_ehp, EHP_FLOOR_WVW_ROAM, ehp_solo.note
+        );
+    }
+
+    /// A fully equipped roaming build (EHP above ROAM floor) passes all WvW gates at Solo tier.
+    #[test]
+    fn gate_wvw_solo_viable_when_ehp_above_roam_floor() {
+        use crate::scenario::{OptimizationTarget, TargetProfile};
+        let rot = make_viable_rotation();
+        let mut combat = make_viable_combat();
+        combat.effective_health = EHP_FLOOR_WVW_ROAM + 1_000.0;
+
+        let solo_scenario = ScenarioSpec {
+            game_mode: GameMode::WvW,
+            combat_tier: crate::scenario::CombatTier::Solo,
+            target_profile: TargetProfile::Single,
+            optimization_target: OptimizationTarget { label: "WvW".into() },
+            patch_id: None,
+        };
+        let report = evaluate_viability_gates(Some(&rot), &combat, &solo_scenario);
+        assert!(
+            report.is_viable,
+            "Build with EHP above ROAM floor and all rotation gates met should be viable; gates: {:?}",
+            report.gates
+        );
+    }
+
+    /// EHP threshold ordering: WvW tiers are correctly graduated; PvE floor is between HAVOC and ZERG.
+    /// Rationale: PvE expects real ascended gear with no healer but no CC pressure either;
+    /// WvW Zerg accepts lower personal EHP because squad healers cover survival.
+    #[test]
+    fn ehp_floor_ordering_is_correct() {
+        assert!(
+            EHP_FLOOR_WVW_ROAM > EHP_FLOOR_WVW_HAVOC,
+            "Roam floor should be stricter than Havoc floor"
+        );
+        assert!(
+            EHP_FLOOR_WVW_HAVOC > EHP_FLOOR_WVW_ZERG,
+            "Havoc floor should be stricter than Zerg floor"
+        );
+        // PvE floor sits between Havoc and Zerg — WvW Zerg has squad healers so lower personal EHP
+        // is acceptable; PvE lacks those but also lacks the CC pressure that makes EHP critical.
+        assert!(
+            EHP_FLOOR_WVW_HAVOC > EHP_FLOOR_PVE,
+            "Havoc floor should be stricter than PvE floor"
+        );
+        assert!(
+            EHP_FLOOR_PVE > EHP_FLOOR_WVW_ZERG,
+            "PvE floor should be stricter than Zerg floor (squad healers compensate)"
+        );
     }
 }

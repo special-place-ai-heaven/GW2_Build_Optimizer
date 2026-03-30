@@ -77,6 +77,11 @@ pub struct MainState {
     pub characters_loading: bool,
     pub selected_character: Option<usize>,
     pub game_mode: GameMode,
+    /// WvW combat sub-tier: Solo (Roaming), Party (Havoc/small group), Squad (Zerg).
+    /// Only meaningful when game_mode == WvW. Defaults to Squad.
+    pub wvw_combat_tier: gw2_optimizer::scenario::CombatTier,
+    /// Selected role objective for 'Create New Build' flow. None = no role chosen yet.
+    pub selected_role: Option<gw2_optimizer::scenario::RoleObjective>,
     pub current_build: Option<ResolvedBuild>,
     pub current_stats: Option<StatBlock>,
     pub build_loading: bool,
@@ -111,6 +116,12 @@ pub struct MainState {
     pub saved_builds_loaded: bool,
     pub save_name_input: String,
     pub save_status: Option<String>,
+    // Benchmark scraping
+    pub benchmark_running: bool,
+    pub benchmark_last_synced: Option<String>,
+    /// Per-source build counts: "snowcrows" -> n, "hardstuck" -> n, "guildjen" -> n.
+    pub benchmark_counts: std::collections::HashMap<String, usize>,
+    pub benchmark_error: Option<String>,
     // Settings
     pub confirm_reset: bool,
     /// Input buffer for new API key entry in Settings (current provider).

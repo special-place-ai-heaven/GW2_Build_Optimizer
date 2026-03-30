@@ -458,6 +458,44 @@ fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
     ui.dummy([0.0, spacing * 0.5]); // gap below
 }
 
+/// WvW combat sub-role selector: Roaming / Havoc / Zerg.
+/// Appears only when WvW mode is active. Changing sub-role updates wvw_combat_tier
+/// and reloads weights from the matching objective profile.
+fn render_wvw_sub_role(ui: &Ui, state: &mut AddonState) {
+    use gw2_optimizer::scenario::CombatTier;
+
+    render_left_section_header(ui, "WVW SUB-ROLE", state.config.section_spacing);
+    ui.spacing();
+
+    let tiers = [
+        (CombatTier::Solo, "Roaming", "Solo / small-scale dueling"),
+        (CombatTier::Party, "Havoc", "5-15 player small group"),
+        (CombatTier::Squad, "Zerg", "Large squad / blob"),
+    ];
+    for (tier, label, tooltip) in &tiers {
+        let selected = state.main.wvw_combat_tier == *tier;
+        if ui.radio_button_bool(label, selected) && !selected {
+            state.main.wvw_combat_tier = *tier;
+            // Load the matching WvW profile weights for this tier
+            let new_weights = match tier {
+                CombatTier::Solo => gw2_optimizer::scenario::RoleObjective::WvWRoamer
+                    .to_weights(&gw2_core::types::GameMode::WvW),
+                CombatTier::Party => gw2_optimizer::scoring::OptimizationWeights::default_for_mode("WvW"),
+                CombatTier::Squad => gw2_optimizer::scenario::RoleObjective::WvWZergDps
+                    .to_weights(&gw2_core::types::GameMode::WvW),
+            };
+            state.main.weights = new_weights;
+            state.main.comparison.suggestions.clear();
+            state.main.comparison.error = None;
+        }
+        if ui.is_item_hovered() {
+            ui.tooltip_text(tooltip);
+        }
+        ui.same_line();
+    }
+    ui.new_line();
+}
+
 /// Character picker + build/equip template dropdowns.
 fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
     render_left_section_header(ui, "CHARACTER", state.config.section_spacing);
@@ -669,6 +707,11 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     }
     ui.new_line();
 
+    // WvW sub-role selector (only shown when WvW mode is active)
+    if state.main.game_mode == gw2_core::types::GameMode::WvW {
+        render_wvw_sub_role(ui, state);
+    }
+
     // Radar chart + presets
     render_left_section_header(ui, "OPTIMIZATION WEIGHTS", state.config.section_spacing);
 
@@ -722,14 +765,23 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     // Summary
     ui.spacing();
     let summary = state.main.weights.summary_label();
-    ui.text_colored([0.6, 0.8, 1.0, 1.0], &format!("  Focus: {}", summary));
+    let focus_label = if state.main.game_mode == gw2_core::types::GameMode::WvW {
+        format!("  Focus: {} — {}", state.main.wvw_combat_tier.label(), summary)
+    } else {
+        format!("  Focus: {}", summary)
+    };
+    ui.text_colored([0.6, 0.8, 1.0, 1.0], &focus_label);
 
     // Action buttons
     render_left_section_header(ui, "ACTIONS", state.config.section_spacing);
 
     let is_improve = state.main.active_tab == MainTab::Improve;
-    let btn_label = if is_improve {
+    let btn_label_owned;
+    let btn_label: &str = if is_improve {
         "Improve Build"
+    } else if let Some(role) = state.main.selected_role {
+        btn_label_owned = format!("Optimize: {}", role.label());
+        &btn_label_owned
     } else {
         "Optimize Build"
     };
@@ -794,6 +846,106 @@ fn render_main_content(ui: &Ui, state: &mut AddonState) {
     }
 }
 
+/// Role picker grid for the 'New Build' tab.
+/// Shows 8 generic archetypes + WvW/PvP-specific roles when appropriate.
+/// Selecting a role updates weights, wvw_combat_tier, and selected_role in state.
+fn render_role_picker(ui: &Ui, state: &mut AddonState) {
+    use gw2_optimizer::scenario::RoleObjective;
+
+    render_left_section_header(ui, "SELECT ROLE", state.config.section_spacing);
+    ui.spacing();
+    ui.text_colored([0.6, 0.6, 0.6, 1.0], "Choose what this build should do:");
+    ui.spacing();
+
+    // Generic roles (all modes)
+    let generic_roles: &[(RoleObjective, &str)] = &[
+        (RoleObjective::PowerDps, "Direct damage, burst & sustained strike DPS"),
+        (RoleObjective::CondiDps, "Condition damage, DoTs and pressure"),
+        (RoleObjective::Sustain, "Bruiser — balanced offense and self-healing"),
+        (RoleObjective::Tank, "Maximum toughness and vitality for frontline"),
+        (RoleObjective::Healer, "Party/squad healing and sustain"),
+        (RoleObjective::Disabler, "CC, interrupts, and movement denial"),
+        (RoleObjective::Buffer, "Boon generation and support for allies"),
+    ];
+
+    // WvW-specific roles (only shown in WvW mode)
+    let wvw_roles: &[(RoleObjective, &str)] = &[
+        (RoleObjective::WvWRoamer, "Solo / small-scale — mobility and self-sustain"),
+        (RoleObjective::WvWZergDps, "Large squad — group damage and AoE pressure"),
+        (RoleObjective::WvWZergSupport, "Squad healer/support — stability and boon generation"),
+        (RoleObjective::WvWDisruptor, "Boon corruption, CC, and movement denial"),
+    ];
+
+    // PvP-specific roles (only shown in PvP mode)
+    let pvp_roles: &[(RoleObjective, &str)] = &[
+        (RoleObjective::PvPBurst, "Spike damage with CC setup"),
+        (RoleObjective::PvPSustain, "Point-holder — bunker and boon generation"),
+        (RoleObjective::PvPDisruptor, "CC and boon denial pressure"),
+    ];
+
+    let game_mode = state.main.game_mode.clone();
+    let current = state.main.selected_role;
+
+    let roles_to_show: Vec<(RoleObjective, &str)> = {
+        let mut v: Vec<(RoleObjective, &str)> = generic_roles.to_vec();
+        match game_mode {
+            gw2_core::types::GameMode::WvW => v.extend_from_slice(wvw_roles),
+            gw2_core::types::GameMode::PvP => v.extend_from_slice(pvp_roles),
+            _ => {}
+        }
+        v
+    };
+
+    // Render as a two-column grid of selectable items
+    let avail_w = ui.content_region_avail()[0];
+    let btn_w = (avail_w - 8.0) / 2.0;
+
+    for (i, (role, desc)) in roles_to_show.iter().enumerate() {
+        let is_selected = current.map(|r| r == *role).unwrap_or(false);
+        let col = i % 2;
+
+        if col == 1 {
+            ui.same_line_with_spacing(0.0, 8.0);
+        }
+
+        // Selected: brighter border + gold text
+        let label = format!("{}##role_{}", role.label(), i);
+        let (text_col, bg_col): ([f32; 4], [f32; 4]) = if is_selected {
+            ([1.0, 0.88, 0.35, 1.0], [0.3, 0.25, 0.05, 0.9])
+        } else {
+            ([0.85, 0.80, 0.70, 1.0], [0.15, 0.14, 0.10, 0.8])
+        };
+
+        let _bg = ui.push_style_color(nexus::imgui::StyleColor::Button, bg_col);
+        let _bg_h = ui.push_style_color(nexus::imgui::StyleColor::ButtonHovered, [bg_col[0] + 0.1, bg_col[1] + 0.1, bg_col[2] + 0.05, 1.0]);
+        let _bg_a = ui.push_style_color(nexus::imgui::StyleColor::ButtonActive, [0.4, 0.33, 0.08, 1.0]);
+        let _tc = ui.push_style_color(nexus::imgui::StyleColor::Text, text_col);
+
+        if ui.button_with_size(&label, [btn_w, 28.0]) {
+            // Apply selection
+            state.main.selected_role = Some(*role);
+            state.main.wvw_combat_tier = role.combat_tier();
+            state.main.weights = role.to_weights(&game_mode);
+            state.main.comparison.suggestions.clear();
+            state.main.comparison.error = None;
+        }
+        if ui.is_item_hovered() {
+            ui.tooltip_text(desc);
+        }
+
+        drop(_tc); drop(_bg_a); drop(_bg_h); drop(_bg);
+    }
+
+    ui.spacing();
+    // Show selected role hint
+    if let Some(role) = current {
+        ui.text_colored([0.6, 0.9, 0.6, 1.0], &format!("  Selected: {} — click 'Optimize Build' in the left panel", role.label()));
+    } else {
+        ui.text_colored([0.5, 0.5, 0.5, 1.0], "  Select a role above, then click 'Optimize Build'");
+    }
+    ui.spacing();
+}
+
 fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
     if state.main.selected_character.is_none() {
         ui.text_colored(
@@ -816,6 +968,11 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
     // Optimization progress banner
     if state.main.optimizing {
         render_optimization_progress(ui, &state.main.optimize_stage, ui.frame_count());
+    }
+
+    // ── Role picker (shown until a result exists) ──────────────────────────
+    if state.main.comparison.suggestions.is_empty() && !state.main.optimizing {
+        render_role_picker(ui, state);
     }
 
     // Show comparison if suggestions exist
@@ -841,15 +998,6 @@ fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
             state.main.comparison.suggestions.clear();
             state.main.comparison.error = None;
         }
-    } else if let Some(ref build) = state.main.current_build {
-        // Show current build when no suggestions yet
-        let stats = state.main.current_stats.clone();
-        build_display::render_build_card(ui, build, stats.as_ref());
-    } else {
-        ui.text_colored(
-            [0.5, 0.5, 0.5, 1.0],
-            "Use the Optimize Build button in the left panel.",
-        );
     }
 
     // Chat bar at bottom
@@ -878,6 +1026,36 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
     // ── Optimization progress banner ──
     if state.main.optimizing {
         render_optimization_progress(ui, &state.main.optimize_stage, ui.frame_count());
+    }
+
+    // ── Locked spec badge ─────────────────────────────────────────────────
+    // Show which elite spec is locked so the user knows the optimizer won't change it.
+    {
+        let locked_spec_name = state
+            .main
+            .build_locks
+            .specs
+            .get(2)
+            .and_then(|s| *s)
+            .and_then(|id| {
+                state
+                    .main
+                    .game_db
+                    .as_ref()
+                    .and_then(|db| db.spec(id))
+                    .map(|s| s.name.clone())
+            });
+        if let Some(spec_name) = locked_spec_name {
+            ui.text_colored(
+                [0.7, 0.9, 0.7, 1.0],
+                &format!("  \u{1F512} Locked to: {}", spec_name),
+            );
+            ui.same_line();
+            if ui.small_button("Unlock") {
+                state.main.build_locks.specs[2] = None;
+            }
+            ui.spacing();
+        }
     }
 
     // ── Two-panel layout: Current Build | Optimized Build ──
@@ -1108,9 +1286,458 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
 }
 
 fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
-    // ═══ Section 1: AI Provider Configuration ═══
+    let avail_w = ui.content_region_avail()[0];
+    let col_w = (avail_w - 12.0) / 2.0;
+
+    // ═══ Two-column layout ═══
+    ui.columns(2, "##settings_cols", false);
+    ui.set_column_width(0, col_w);
+
+    // ── LEFT COLUMN ────────────────────────────────────────────────────
+
+    // ── Card: AI Provider ──
     build_display::render_card_header(ui, "AI PROVIDER", [1.0, 0.88, 0.35, 1.0]);
     {
+        let mut provider_changed = false;
+        for provider in &gw2_core::config::LlmProvider::ALL {
+            let is_selected = state.config.active_provider == *provider;
+            if ui.radio_button_bool(provider.label(), is_selected) && !is_selected {
+                state.config.active_provider = provider.clone();
+                provider_changed = true;
+            }
+        }
+        if provider_changed {
+            state.main.settings_key_input.clear();
+            state.main.settings_key_status = None;
+            state.main.settings_key_valid = false;
+            state.main.settings_key_warning = None;
+            state.main.available_models.clear();
+            state.main.models_error = None;
+            if let Err(e) = state.config.save(&state.config_path) {
+                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt",
+                    &format!("Config save failed: {}", e));
+            }
+        }
+        ui.spacing();
+
+        let provider_label = state.config.active_provider.label().to_string();
+        let has_key = state.config.has_active_llm_key();
+        if has_key {
+            ui.text_colored([0.0, 1.0, 0.0, 1.0], &format!("{} Key: configured", provider_label));
+        } else {
+            ui.text_colored([1.0, 0.5, 0.0, 1.0], &format!("{} Key: not set", provider_label));
+        }
+
+        if has_key {
+            ui.same_line();
+            let validating = state.main.settings_key_validating;
+            if validating {
+                let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+                ui.button_with_size("Testing...", [100.0, 0.0]);
+                style.pop();
+            } else if ui.button_with_size("Test", [60.0, 0.0]) {
+                state.main.settings_key_validating = true;
+                state.main.settings_key_status = Some("Testing...".into());
+                state.main.settings_key_valid = false;
+                state.main.settings_key_warning = None;
+                let addon_dir = state.addon_dir.clone();
+                let config_snapshot = state.config.clone();
+                let token = state.cancel_token.clone();
+                std::thread::spawn(move || {
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        if token.is_cancelled() { return; }
+                        let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
+                            .map(|c| c.validate_key_detailed());
+                        if token.is_cancelled() { return; }
+                        crate::state::with_state(|s| {
+                            s.main.settings_key_validating = false;
+                            match result {
+                                Ok(v) => { s.main.settings_key_valid = v.valid; s.main.settings_key_status = Some(v.message); s.main.settings_key_warning = v.warning; }
+                                Err(e) => { s.main.settings_key_valid = false; s.main.settings_key_status = Some(format!("Failed: {}", e)); s.main.settings_key_warning = None; }
+                            }
+                        });
+                    }));
+                });
+            }
+        }
+
+        // Key input
+        ui.set_next_item_width(col_w - 80.0);
+        ui.input_text(&format!("##{}_key", provider_label), &mut state.main.settings_key_input)
+            .hint("Enter new API key...").build();
+        ui.same_line();
+        let validating = state.main.settings_key_validating;
+        if validating {
+            let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+            ui.button_with_size("...", [50.0, 0.0]);
+            style.pop();
+        } else if ui.button_with_size("Save", [50.0, 0.0]) {
+            let key = state.main.settings_key_input.trim().to_string();
+            if !key.is_empty() {
+                match state.config.active_provider {
+                    gw2_core::config::LlmProvider::Gemini => state.config.gemini_api_key = Some(key.clone()),
+                    gw2_core::config::LlmProvider::OpenAI => state.config.openai_api_key = Some(key.clone()),
+                    gw2_core::config::LlmProvider::Anthropic => state.config.anthropic_api_key = Some(key.clone()),
+                }
+                let _ = state.config.save(&state.config_path);
+                state.main.settings_key_input.clear();
+                state.main.settings_key_status = Some("Saved. Validating...".into());
+                state.main.settings_key_valid = false;
+                state.main.settings_key_validating = true;
+                let addon_dir = state.addon_dir.clone();
+                let config_snapshot = state.config.clone();
+                let token = state.cancel_token.clone();
+                std::thread::spawn(move || {
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        if token.is_cancelled() { return; }
+                        let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
+                            .map(|c| c.validate_key_detailed());
+                        if token.is_cancelled() { return; }
+                        crate::state::with_state(|s| {
+                            s.main.settings_key_validating = false;
+                            match result {
+                                Ok(v) => { s.main.settings_key_valid = v.valid; s.main.settings_key_status = Some(v.message); s.main.settings_key_warning = v.warning; }
+                                Err(e) => { s.main.settings_key_valid = false; s.main.settings_key_status = Some(format!("Saved but validation failed: {}", e)); s.main.settings_key_warning = None; }
+                            }
+                        });
+                    }));
+                });
+            }
+        }
+
+        if let Some(ref status) = state.main.settings_key_status {
+            let col = if state.main.settings_key_valid { [0.0, 1.0, 0.0, 1.0] }
+                      else if status.contains("saved") || status.contains("Testing") || status.contains("Validating") { [0.7, 0.7, 0.7, 1.0] }
+                      else { [1.0, 0.3, 0.3, 1.0] };
+            ui.text_colored(col, status);
+        }
+        if let Some(ref w) = state.main.settings_key_warning {
+            ui.text_colored([1.0, 0.7, 0.0, 1.0], &format!("  Warning: {}", w));
+        }
+
+        ui.spacing();
+
+        // Model selector
+        let current_model = match state.config.active_provider {
+            gw2_core::config::LlmProvider::Gemini => state.config.gemini_model_id().to_string(),
+            gw2_core::config::LlmProvider::OpenAI => state.config.openai_model_id().to_string(),
+            gw2_core::config::LlmProvider::Anthropic => state.config.anthropic_model_id().to_string(),
+        };
+        let config_field = match state.config.active_provider {
+            gw2_core::config::LlmProvider::Gemini => "gemini",
+            gw2_core::config::LlmProvider::OpenAI => "openai",
+            gw2_core::config::LlmProvider::Anthropic => "anthropic",
+        };
+        let has_key2 = has_key;
+        if state.main.available_models.is_empty() && !state.main.models_loading && has_key2 {
+            stats::start_fetch_models(state);
+        }
+        let display_models: Vec<(String, String)> = if !state.main.available_models.is_empty() {
+            state.main.available_models.clone()
+        } else {
+            let hardcoded: &[(&str, &str)] = match state.config.active_provider {
+                gw2_core::config::LlmProvider::Gemini => gw2_core::config::GEMINI_MODELS,
+                gw2_core::config::LlmProvider::OpenAI => gw2_core::config::OPENAI_MODELS,
+                gw2_core::config::LlmProvider::Anthropic => gw2_core::config::ANTHROPIC_MODELS,
+            };
+            hardcoded.iter().map(|(id, label)| (id.to_string(), label.to_string())).collect()
+        };
+        let preview = display_models.iter().find(|(id, _)| *id == current_model)
+            .map(|(_, l)| l.as_str()).unwrap_or(&current_model);
+        ui.text("Model:");
+        ui.same_line();
+        ui.set_next_item_width(col_w - 140.0);
+        if let Some(_c) = ComboBox::new(&format!("##{}_model", config_field)).preview_value(preview).begin(ui) {
+            for (id, label) in &display_models {
+                let sel = *id == current_model;
+                if Selectable::new(label).selected(sel).build(ui) {
+                    match state.config.active_provider {
+                        gw2_core::config::LlmProvider::Gemini => state.config.gemini_model = Some(id.clone()),
+                        gw2_core::config::LlmProvider::OpenAI => state.config.openai_model = Some(id.clone()),
+                        gw2_core::config::LlmProvider::Anthropic => state.config.anthropic_model = Some(id.clone()),
+                    }
+                    let _ = state.config.save(&state.config_path);
+                }
+            }
+        }
+        ui.same_line();
+        if state.main.models_loading {
+            ui.text_colored([0.7, 0.7, 0.7, 1.0], "...");
+        } else if ui.small_button("Refresh##models") {
+            state.main.available_models.clear();
+            state.main.models_error = None;
+            stats::start_fetch_models(state);
+        }
+        if let Some(ref err) = state.main.models_error {
+            ui.text_colored([1.0, 0.5, 0.0, 1.0], &format!("  {}", err));
+        }
+
+        ui.spacing();
+        let usage_filename = match state.config.active_provider {
+            gw2_core::config::LlmProvider::Gemini => "gemini_usage.json",
+            gw2_core::config::LlmProvider::OpenAI => "openai_usage.json",
+            gw2_core::config::LlmProvider::Anthropic => "anthropic_usage.json",
+        };
+        let usage_path = state.addon_dir.join(usage_filename);
+        let today_reqs = std::fs::read_to_string(&usage_path)
+            .ok()
+            .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok())
+            .and_then(|v| v.get("requests_today").and_then(|x| x.as_u64()))
+            .unwrap_or(0);
+        ui.text_colored([0.5, 0.5, 0.5, 1.0], &format!("Usage today: {} requests", today_reqs));
+    }
+
+    ui.dummy([0.0, 8.0]);
+
+    // ── Card: Optimization Defaults ──
+    build_display::render_card_header(ui, "OPTIMIZATION DEFAULTS", [1.0, 0.88, 0.35, 1.0]);
+    {
+        ui.text("Default Game Mode:");
+        let current_default = state.config.default_game_mode.clone().unwrap_or_else(|| "PvE".into());
+        for mode in &["PvE", "PvP", "WvW"] {
+            let is_sel = current_default == *mode;
+            if ui.radio_button_bool(mode, is_sel) && !is_sel {
+                state.config.default_game_mode = Some(mode.to_string());
+                let _ = state.config.save(&state.config_path);
+            }
+        }
+    }
+
+    ui.dummy([0.0, 8.0]);
+
+    // ── Card: Data Quality Legend ──
+    build_display::render_card_header(ui, "DATA QUALITY LEGEND", [0.7, 0.7, 0.7, 1.0]);
+    ui.spacing();
+    ui.text_colored([0.3, 0.9, 0.3, 1.0], "\u{25cf} Verified");
+    ui.same_line();
+    ui.text_colored([0.6, 0.6, 0.6, 1.0], "— All input data is source-backed.");
+    ui.text_colored([0.95, 0.75, 0.15, 1.0], "\u{25cf} Provisional");
+    ui.same_line();
+    ui.text_colored([0.6, 0.6, 0.6, 1.0], "— Some data estimated. Less certain.");
+    ui.text_colored([1.0, 0.3, 0.2, 1.0], "\u{25cf} Blocked");
+    ui.same_line();
+    ui.text_colored([0.6, 0.6, 0.6, 1.0], "— Critical data missing.");
+
+    // ── RIGHT COLUMN ───────────────────────────────────────────────────
+    ui.next_column();
+
+    // ── Card: UI Preferences ──
+    build_display::render_card_header(ui, "UI PREFERENCES", [1.0, 0.88, 0.35, 1.0]);
+    {
+        let right_item_w = col_w - 12.0;
+
+        ui.text("Window Opacity:");
+        ui.set_next_item_width(right_item_w * 0.6);
+        let mut opacity = state.config.window_opacity;
+        if nexus::imgui::Slider::new("##opacity", 0.3, 1.0).display_format("%.2f").build(ui, &mut opacity) {
+            state.config.window_opacity = opacity;
+            let _ = state.config.save(&state.config_path);
+        }
+
+        ui.text("Global Scale:");
+        ui.set_next_item_width(right_item_w * 0.6);
+        let mut scale = state.config.font_scale;
+        if nexus::imgui::Slider::new("##font_scale", 0.5, 2.0).display_format("%.2f").build(ui, &mut scale) {
+            state.config.font_scale = scale;
+            let _ = state.config.save(&state.config_path);
+        }
+
+        ui.spacing();
+        ui.text_colored([0.7, 0.7, 0.75, 1.0], "Layout Tuning:");
+
+        let fields: &mut [(&str, &str, f32, f32, f32)] = &mut [
+            ("Left Panel Width:", "##left_panel_w", 180.0, 400.0, 5.0),
+            ("Panel Padding:",    "##panel_pad",    0.0,   20.0,  1.0),
+            ("Section Spacing:",  "##section_sp",   0.0,   16.0,  1.0),
+            ("Content Indent:",   "##content_ind",  0.0,   20.0,  1.0),
+        ];
+        let vals: &mut [f32] = &mut [
+            state.config.left_panel_width,
+            state.config.panel_padding,
+            state.config.section_spacing,
+            state.config.content_indent,
+        ];
+        let mut dirty = false;
+
+        for (i, (label, id, min, max, step)) in fields.iter().enumerate() {
+            ui.text(label);
+            ui.same_line_with_pos(right_item_w * 0.45);
+            ui.set_next_item_width(right_item_w * 0.35);
+            if nexus::imgui::InputFloat::new(ui, id, &mut vals[i]).step(*step).step_fast(*step * 5.0).build() {
+                vals[i] = vals[i].clamp(*min, *max);
+                dirty = true;
+            }
+        }
+        if dirty {
+            state.config.left_panel_width = vals[0];
+            state.config.panel_padding = vals[1];
+            state.config.section_spacing = vals[2];
+            state.config.content_indent = vals[3];
+            let _ = state.config.save(&state.config_path);
+        }
+
+        ui.spacing();
+        if ui.small_button("Reset Layout Defaults") {
+            state.config.left_panel_width = 255.0;
+            state.config.panel_padding = 6.0;
+            state.config.section_spacing = 4.0;
+            state.config.content_indent = 4.0;
+            let _ = state.config.save(&state.config_path);
+        }
+    }
+
+    ui.dummy([0.0, 8.0]);
+
+    // ── Card: Cache & Data ──
+    build_display::render_card_header(ui, "CACHE & DATA", [1.0, 0.88, 0.35, 1.0]);
+    {
+        if let Some(ref key) = state.config.gw2_api_key {
+            let display = if key.chars().count() > 12 {
+                let pre: String = key.chars().take(8).collect();
+                let suf: String = key.chars().rev().take(4).collect::<String>().chars().rev().collect();
+                format!("{}...{}", pre, suf)
+            } else { "****".into() };
+            ui.text(&format!("GW2 API Key: {}", display));
+        }
+        if let Some(build) = state.config.cache_build_number {
+            ui.text(&format!("Game build: {}", build));
+        }
+
+        let cache_dir = state.addon_dir.join("cache");
+        let cache_size = calculate_dir_size(&cache_dir);
+        ui.text(&format!("Cache: {}", format_bytes(cache_size)));
+        ui.same_line();
+        let refreshing = state.main.game_db_loading;
+        if refreshing {
+            let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+            ui.button_with_size("Clear Cache", [100.0, 0.0]);
+            style.pop();
+        } else if ui.button_with_size("Clear Cache", [100.0, 0.0]) {
+            if let Err(e) = remove_dir_if_present(&cache_dir) {
+                state.main.error = Some(format!("Failed to clear cache: {}", e));
+            } else {
+                state.config.cache_build_number = None;
+                let _ = state.config.save(&state.config_path);
+                state.main.game_db = None;
+                state.setup.download_progress = None;
+                stats::start_game_data_refresh(state);
+            }
+        }
+
+        ui.spacing();
+        let mut auto_refresh = state.config.auto_refresh_cache;
+        if ui.checkbox("Auto-refresh on startup", &mut auto_refresh) {
+            state.config.auto_refresh_cache = auto_refresh;
+            let _ = state.config.save(&state.config_path);
+        }
+
+        ui.spacing();
+        if refreshing {
+            let stage = state.main.game_refresh_stage.clone();
+            ui.text_colored([1.0, 1.0, 0.0, 1.0], if stage.is_empty() { "Downloading game data..." } else { &stage });
+            let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+            ui.button_with_size("Refreshing...", [160.0, 0.0]);
+            style.pop();
+        } else if ui.button_with_size("Refresh Game Data", [160.0, 0.0]) {
+            let dir = state.addon_dir.join("cache");
+            if let Err(e) = remove_dir_if_present(&dir) {
+                state.main.error = Some(format!("Failed to refresh: {}", e));
+            } else {
+                state.config.cache_build_number = None;
+                let _ = state.config.save(&state.config_path);
+                state.main.game_db = None;
+                state.setup.download_progress = None;
+                stats::start_game_data_refresh(state);
+            }
+        }
+
+        ui.spacing();
+        if !state.main.confirm_reset {
+            if ui.button_with_size("Reset Setup", [160.0, 0.0]) {
+                state.main.confirm_reset = true;
+            }
+        } else {
+            ui.text_colored([1.0, 0.3, 0.0, 1.0], "Reset all settings?");
+            if ui.button_with_size("Yes, Reset", [100.0, 0.0]) {
+                state.main.confirm_reset = false;
+                if let Err(e) = state.reset_to_first_run() {
+                    state.main.error = Some(format!("Reset failed: {}", e));
+                }
+            }
+            ui.same_line();
+            if ui.button_with_size("Cancel", [80.0, 0.0]) {
+                state.main.confirm_reset = false;
+            }
+        }
+    }
+
+    ui.dummy([0.0, 8.0]);
+
+    // ── Card: Benchmark Data (right column) ──
+    build_display::render_card_header(ui, "BENCHMARK DATA", [0.6, 0.8, 1.0, 1.0]);
+    ui.spacing();
+    ui.text_colored([0.7, 0.7, 0.7, 1.0], "Snowcrows (PvE) · Hardstuck · GuildJen (WvW/PvP)");
+    ui.spacing();
+    if let Some(ref last) = state.main.benchmark_last_synced {
+        let sc = state.main.benchmark_counts.get("snowcrows").copied().unwrap_or(0);
+        let hs = state.main.benchmark_counts.get("hardstuck").copied().unwrap_or(0);
+        let gj = state.main.benchmark_counts.get("guildjen").copied().unwrap_or(0);
+        ui.text_colored([0.5, 0.9, 0.5, 1.0], &format!("Synced: {}  SC:{} HS:{} GJ:{}", last, sc, hs, gj));
+    } else {
+        ui.text_colored([0.5, 0.5, 0.5, 1.0], "Never synced.");
+    }
+    if let Some(ref err) = state.main.benchmark_error.clone() {
+        // Truncate long errors that would overflow the column
+        let short = if err.chars().count() > 80 { format!("{}…", err.chars().take(80).collect::<String>()) } else { err.clone() };
+        ui.text_colored([1.0, 0.4, 0.2, 1.0], &format!("[!] {}", short));
+        if ui.is_item_hovered() { ui.tooltip_text(err); }
+    }
+    ui.spacing();
+    let sync_disabled = state.main.benchmark_running || state.main.game_db.is_none();
+    if sync_disabled {
+        let _dim = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+        ui.button_with_size(if state.main.benchmark_running { "Syncing..." } else { "Sync Benchmarks" }, [160.0, 0.0]);
+    } else if ui.button_with_size("Sync Benchmarks", [160.0, 0.0]) {
+        let addon_dir = state.addon_dir.clone();
+        state.main.benchmark_running = true;
+        state.main.benchmark_error = None;
+        std::thread::spawn(move || {
+            let results = gw2_optimizer::scraper::scrape_all(&addon_dir);
+            crate::state::with_state(|s| {
+                s.main.benchmark_running = false;
+                let mut counts = std::collections::HashMap::new();
+                let mut errors = Vec::new();
+                for r in &results {
+                    counts.insert(r.source.clone(), r.builds.len());
+                    if let Some(ref e) = r.error { errors.push(format!("{}: {}", r.source, e)); }
+                }
+                s.main.benchmark_counts = counts;
+                s.main.benchmark_error = if errors.is_empty() { None } else { Some(errors.join(" | ")) };
+                let total: usize = results.iter().map(|r| r.builds.len()).sum();
+                if total > 0 {
+                    s.main.benchmark_last_synced = Some(
+                        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| { let secs = d.as_secs(); let days = secs/86400;
+                                format!("{:04}-{:02}-{:02}", 1970+days/365, days%365/30+1, days%365%30+1) })
+                            .unwrap_or_else(|_| "unknown".to_string()));
+                }
+            });
+        });
+    }
+
+    // ── End columns ───────────────────────────────────────────────────
+    ui.columns(1, "##settings_end", false);
+
+    // ── Footer (full width) ──
+    ui.dummy([0.0, 4.0]);
+    ui.separator();
+    ui.dummy([0.0, 2.0]);
+    ui.text_colored([0.4, 0.4, 0.4, 1.0], &format!(
+        "GW2 Build Optimizer v1.0.0  —  AI: {}",
+        state.config.active_provider.label()
+    ));
+}
+    /* LEGACY_SETTINGS_LAYOUT_START
         // Provider radio buttons
         let mut provider_changed = false;
         for provider in &gw2_core::config::LlmProvider::ALL {
@@ -1729,9 +2356,100 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         }
     }
 
+    // ═══ Benchmark Data section ═══
+    ui.spacing();
+    build_display::render_card_header(ui, "BENCHMARK DATA", [0.6, 0.8, 1.0, 1.0]);
+    ui.spacing();
+    ui.text_colored([0.7, 0.7, 0.7, 1.0], "On-demand scrape of community meta builds.");
+    ui.text_colored([0.7, 0.7, 0.7, 1.0], "Sources: Snowcrows (PvE), Hardstuck, GuildJen (WvW/PvP)");
+    ui.spacing();
+
+    // Status line
+    if let Some(ref last) = state.main.benchmark_last_synced {
+        let sc = state.main.benchmark_counts.get("snowcrows").copied().unwrap_or(0);
+        let hs = state.main.benchmark_counts.get("hardstuck").copied().unwrap_or(0);
+        let gj = state.main.benchmark_counts.get("guildjen").copied().unwrap_or(0);
+        ui.text_colored(
+            [0.5, 0.9, 0.5, 1.0],
+            &format!("Last synced: {} — SC:{} HS:{} GJ:{}", last, sc, hs, gj),
+        );
+    } else {
+        ui.text_colored([0.5, 0.5, 0.5, 1.0], "Never synced.");
+    }
+    if let Some(ref err) = state.main.benchmark_error.clone() {
+        ui.text_colored([1.0, 0.4, 0.2, 1.0], &format!("[!] {}", err));
+    }
+
+    ui.spacing();
+    let sync_disabled = state.main.benchmark_running || state.main.game_db.is_none();
+    if sync_disabled {
+        let _dim = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+        ui.button_with_size(
+            if state.main.benchmark_running { "Syncing..." } else { "Sync Benchmarks" },
+            [180.0, 0.0],
+        );
+    } else if ui.button_with_size("Sync Benchmarks", [180.0, 0.0]) {
+        let addon_dir = state.addon_dir.clone();
+        state.main.benchmark_running = true;
+        state.main.benchmark_error = None;
+        std::thread::spawn(move || {
+            let results = gw2_optimizer::scraper::scrape_all(&addon_dir);
+            crate::state::with_state(|s| {
+                s.main.benchmark_running = false;
+                let mut counts = std::collections::HashMap::new();
+                let mut errors = Vec::new();
+                for r in &results {
+                    counts.insert(r.source.clone(), r.builds.len());
+                    if let Some(ref e) = r.error {
+                        errors.push(format!("{}: {}", r.source, e));
+                    }
+                }
+                s.main.benchmark_counts = counts;
+                s.main.benchmark_error = if errors.is_empty() {
+                    None
+                } else {
+                    Some(errors.join("; "))
+                };
+                // Use today's date as last synced
+                let total: usize = results.iter().map(|r| r.builds.len()).sum();
+                if total > 0 {
+                    s.main.benchmark_last_synced = Some(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| {
+                                let secs = d.as_secs();
+                                let days = secs / 86400;
+                                let y = 1970 + days / 365;
+                                let doy = days % 365;
+                                let m = doy / 30 + 1;
+                                let day = doy % 30 + 1;
+                                format!("{:04}-{:02}-{:02}", y, m, day)
+                            })
+                            .unwrap_or_else(|_| "unknown".to_string()),
+                    );
+                }
+            });
+        });
+    }
+
     ui.spacing();
 
     // About
+    // ═══ Data Quality Legend ═══
+    ui.spacing();
+    build_display::render_card_header(ui, "DATA QUALITY LEGEND", [0.7, 0.7, 0.7, 1.0]);
+    ui.spacing();
+    ui.text_colored([0.3, 0.9, 0.3, 1.0], "\u{25cf} Verified");
+    ui.same_line();
+    ui.text_colored([0.6, 0.6, 0.6, 1.0], "— All input data is source-backed.");
+    ui.text_colored([0.95, 0.75, 0.15, 1.0], "\u{25cf} Provisional");
+    ui.same_line();
+    ui.text_colored([0.6, 0.6, 0.6, 1.0], "— Some data is estimated. Results usable, less certain.");
+    ui.text_colored([1.0, 0.3, 0.2, 1.0], "\u{25cf} Blocked");
+    ui.same_line();
+    ui.text_colored([0.6, 0.6, 0.6, 1.0], "— Critical data missing. Results may be unreliable.");
+    ui.spacing();
+
     ui.text_colored([0.5, 0.5, 0.5, 1.0], "GW2 Build Optimizer v1.0.0");
     let provider_label = state.config.active_provider.label();
     ui.text_colored(
@@ -1739,6 +2457,7 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         &format!("Powered by {} AI", provider_label),
     );
 }
+    LEGACY_SETTINGS_LAYOUT_END */
 
 fn calculate_dir_size(path: &std::path::Path) -> u64 {
     let Ok(entries) = std::fs::read_dir(path) else {
@@ -2075,10 +2794,11 @@ fn saved_to_suggestion(
         combat_squad,
         rotation: None,
         viability: None,
+        benchmark_delta: None,
+        data_quality: gw2_optimizer::data::DataQuality::Verified,
+        quality_reasons: vec![],
     }
-}
-
-/// Reconstruct DamageModifiers from a saved build by resolving spec/trait/rune/sigil/relic
+}/// Reconstruct DamageModifiers from a saved build by resolving spec/trait/rune/sigil/relic
 /// names against GameDb. Unresolvable entities are skipped with a warning.
 fn reconstruct_damage_modifiers(
     saved: &gw2_core::types::SavedBuild,

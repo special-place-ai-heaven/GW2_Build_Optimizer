@@ -410,9 +410,17 @@ impl ObjectiveScorer {
         }
     }
 
-    /// Score a build using this scorer's weights and normalization constants.
+    /// Score a build using this scorer's weights and profile-loaded normalization constants.
+    /// Distinct from `score_with_weights` which uses module-level defaults.
     pub fn score(&self, perf: &CombatPerformance) -> f64 {
-        score_with_weights(perf, &self.weights)
+        score_with_norms(
+            perf,
+            &self.weights,
+            self.strike_dps_norm,
+            self.condi_dps_norm,
+            self.effective_health_norm,
+            self.healing_power_norm,
+        )
     }
 
     /// Get boon priority, defaulting to 0.5 if not specified.
@@ -449,17 +457,38 @@ impl ObjectiveScorer {
 /// through tier selection via a secondary axis but is fundamentally wrong
 /// for the user's primary intent.
 pub fn score_with_weights(perf: &CombatPerformance, weights: &OptimizationWeights) -> f64 {
+    score_with_norms(
+        perf,
+        weights,
+        STRIKE_DPS_NORM,
+        CONDI_DPS_NORM,
+        EFFECTIVE_HEALTH_NORM,
+        HEALING_NORM,
+    )
+}
+
+/// Inner scoring function with explicit normalization divisors.
+/// Called by both `score_with_weights` (module-level defaults) and
+/// `ObjectiveScorer::score()` (profile-loaded norms).
+fn score_with_norms(
+    perf: &CombatPerformance,
+    weights: &OptimizationWeights,
+    strike_dps_norm: f64,
+    condi_dps_norm: f64,
+    effective_health_norm: f64,
+    healing_norm: f64,
+) -> f64 {
     let w = weights.clamped();
     let total_w = w.total().max(0.01);
 
-    let power_score = (perf.strike_dps_index / STRIKE_DPS_NORM).min(1.0);
-    let condition_score = (perf.condition_dps_index / CONDI_DPS_NORM
+    let power_score = (perf.strike_dps_index / strike_dps_norm).min(1.0);
+    let condition_score = (perf.condition_dps_index / condi_dps_norm
         + (perf.condi_duration_pct / 100.0).min(1.0) * 0.15)
         .min(1.0);
-    let sustain_score = (perf.effective_health / EFFECTIVE_HEALTH_NORM
+    let sustain_score = (perf.effective_health / effective_health_norm
         + perf.damage_reduction_pct / 100.0)
         .min(1.0);
-    let healing_score = (perf.healing_power_index / HEALING_NORM).min(1.0);
+    let healing_score = (perf.healing_power_index / healing_norm).min(1.0);
     // Boon Support: proxy via boon duration (boon uptime contribution)
     let boon_support_score = (perf.boon_duration_pct / 100.0).min(1.0);
     // Control: proxy via condi duration (CC condition duration) + some boon duration (stability etc.)
@@ -1508,4 +1537,80 @@ mod tests {
         assert_ne!(pve, pvp, "PvE and PvP defaults should differ");
         assert_ne!(pve, wvw, "PvE and WvW defaults should differ");
     }
+
+    /// ObjectiveScorer::score() uses profile-loaded norms, not module-level defaults.
+    /// Two scorers with different profiles produce different scores for the same build.
+    #[test]
+    fn test_objective_scorer_uses_profile_norms() {
+        use crate::balance::BalanceContext;
+        use crate::combat::{self, buff_profiles_for_profession, condition_weights_for_profession, DamageModifiers};
+        use crate::stats;
+
+        let ctx = BalanceContext::pve();
+        let stats = stats::StatBlock {
+            power: 2000.0,
+            precision: 1500.0,
+            ferocity: 800.0,
+            toughness: 1200.0,
+            vitality: 1400.0,
+            ..Default::default()
+        };
+        let derived = stats::compute_derived(&stats, "Guardian");
+        let mods = DamageModifiers::default();
+        let cw = condition_weights_for_profession("Guardian", &ctx);
+        let profile = &buff_profiles_for_profession("Guardian", &ctx)[0];
+        let perf = combat::calculate_combat_performance(&stats, &derived, &mods, profile, &cw, "Guardian", &ctx);
+
+        // PvE Power DPS scorer
+        let pve_scorer = ObjectiveScorer::from_mode(OptimizationWeights::preset_power_dps(), "PvE");
+        // WvW Roamer scorer (has different normalization constants + weights)
+        let wvw_scorer = ObjectiveScorer::from_mode(OptimizationWeights::default_for_mode("WvW"), "WvW");
+
+        let score_pve = pve_scorer.score(&perf);
+        let score_wvw = wvw_scorer.score(&perf);
+
+        // Scores should differ because profiles have different weights
+        assert_ne!(
+            score_pve, score_wvw,
+            "PvE Power DPS scorer and WvW scorer should produce different scores for the same build"
+        );
+    }
+
+    /// ObjectiveScorer::score() and score_with_weights() agree when using same weights and
+    /// the default normalization constants (fallback scorer == module-level constants).
+    #[test]
+    fn test_objective_scorer_fallback_matches_score_with_weights() {
+        use crate::balance::BalanceContext;
+        use crate::combat::{self, buff_profiles_for_profession, condition_weights_for_profession, DamageModifiers};
+        use crate::stats;
+
+        let ctx = BalanceContext::pve();
+        let stats = stats::StatBlock {
+            power: 2000.0,
+            precision: 1500.0,
+            ferocity: 800.0,
+            toughness: 1000.0,
+            vitality: 1000.0,
+            ..Default::default()
+        };
+        let derived = stats::compute_derived(&stats, "Warrior");
+        let mods = DamageModifiers::default();
+        let cw = condition_weights_for_profession("Warrior", &ctx);
+        let profile = &buff_profiles_for_profession("Warrior", &ctx)[0];
+        let perf = combat::calculate_combat_performance(&stats, &derived, &mods, profile, &cw, "Warrior", &ctx);
+
+        let weights = OptimizationWeights::preset_power_dps();
+        let fallback_scorer = ObjectiveScorer::fallback(weights.clone());
+
+        let score_scorer = fallback_scorer.score(&perf);
+        let score_fn = score_with_weights(&perf, &weights);
+
+        assert!(
+            (score_scorer - score_fn).abs() < 0.0001,
+            "Fallback scorer (score={}) should match score_with_weights (score={})",
+            score_scorer,
+            score_fn
+        );
+    }
 }
+

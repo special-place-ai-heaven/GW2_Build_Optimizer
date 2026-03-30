@@ -4,9 +4,10 @@ use std::ops::{Add, Div, Mul, Sub};
 
 /// Overall data quality assessment for an optimizer output.
 /// Degrades from Verified when any input data is Unknown or Provisional.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum DataQuality {
     /// All data inputs are factual and verified.
+    #[default]
     Verified,
     /// Some data inputs are estimated or provisional; results are usable but less certain.
     Provisional,

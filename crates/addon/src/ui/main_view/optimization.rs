@@ -48,7 +48,23 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
     let weights = state.main.weights.clone();
+    let selected_role = state.main.selected_role;
     let build_locks = state.main.build_locks.clone();
+    // Capture WvW combat tier for ScenarioSpec construction inside the thread.
+    let wvw_combat_tier = state.main.wvw_combat_tier;
+    // Capture locked elite spec name for the Improve Build label.
+    let locked_spec_name: Option<String> = build_locks
+        .specs
+        .get(2)
+        .and_then(|s| *s)
+        .and_then(|id| {
+            state
+                .main
+                .game_db
+                .as_ref()
+                .and_then(|db| db.spec(id))
+                .map(|s| s.name.clone())
+        });
     // Capture selection snapshot so results can be discarded if the user switches
     // character or build tab while optimization is running (TOCTOU guard).
     let optimizing_for_char = state.main.selected_character;
@@ -60,12 +76,19 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
 
     // Log the weights and deterministic gear prefix for debugging
     let gear_match = gw2_optimizer::scoring::select_gear_prefix(&weights);
+    let tier_label = if game_mode == gw2_core::types::GameMode::WvW {
+        wvw_combat_tier.label().to_string()
+    } else {
+        String::new()
+    };
     nexus::log::log(
         nexus::log::LogLevel::Info,
         "GW2BuildOpt",
         &format!(
-            "Optimizing {}/{}: weights P={:.2} C={:.2} B={:.2} H={:.2} S={:.2} Ctrl={:.2} ({}) -> gear: {} (sim={:.3})",
-            profession_name, game_mode_label,
+            "Optimizing {}/{}{}: weights P={:.2} C={:.2} B={:.2} H={:.2} S={:.2} Ctrl={:.2} ({}) -> gear: {} (sim={:.3})",
+            profession_name,
+            game_mode_label,
+            if tier_label.is_empty() { String::new() } else { format!(" [{}]", tier_label) },
             weights.power, weights.condition, weights.boon_support, weights.healing, weights.sustain, weights.control,
             weights.summary_label(),
             gear_match.primary, gear_match.similarity,
@@ -85,7 +108,79 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
 
                 let db = db.ok_or("GameDb not loaded")?;
 
-                // ═══ Primary: Deterministic synergy engine (no LLM for build selection) ═══
+                // Build a mode + tier-aware scenario for the referee and optimize_v2.
+                let scenario = {
+                    use gw2_optimizer::scenario::{
+                        CombatTier, OptimizationTarget, ScenarioSpec,
+                        TargetProfile,
+                    };
+                    // Map the captured wvw_combat_tier (gw2_optimizer::scenario::CombatTier)
+                    // directly — it's the same type.
+                    ScenarioSpec {
+                        game_mode: balance_ctx.game_mode.clone(),
+                        combat_tier: wvw_combat_tier,
+                        target_profile: TargetProfile::Single,
+                        optimization_target: OptimizationTarget {
+                            label: balance_ctx.game_mode.label().to_string(),
+                        },
+                        patch_id: Some(balance_ctx.patch_id.clone()),
+                    }
+                };
+
+                // ═══ Primary: optimize_v2 — beam search over complete build states ═══
+                {
+                    let token_v2 = token.clone();
+                    // Create LLM client for the advisor pass (optional — errors silently skip).
+                    let llm_for_advisor: Option<Box<dyn gw2_optimizer::llm::LlmClient>> =
+                        gw2_optimizer::llm::create_client(&config, &addon_dir).ok();
+                    let llm_ref = llm_for_advisor.as_ref().map(|c| c.as_ref());
+                    match gw2_optimizer::engine::optimize_v2(
+                        &db,
+                        &profession_name,
+                        &weights,
+                        &balance_ctx,
+                        &scenario,
+                        &build_locks,
+                        llm_ref,
+                        &mut |progress: gw2_optimizer::engine::OptimizeProgress| {
+                            if token_v2.is_cancelled() {
+                                return;
+                            }
+                            crate::state::with_state(|s| {
+                                s.main.optimize_stage = progress.stage.clone();
+                            });
+                        },
+                    ) {
+                        Ok(synergy_result) => {
+                            if token.is_cancelled() {
+                                return Err("Cancelled".into());
+                            }
+                            let suggestion = synergy_result_to_suggestion(
+                                &synergy_result,
+                                &profession_name,
+                                &scenario,
+                                selected_role,
+                                locked_spec_name.as_ref().map(|n| format!("Improved: {}", n)),
+                                &addon_dir,
+                                &weights,
+                            );
+                            return Ok(vec![suggestion]);
+                        }
+                        Err(e) => {
+                            nexus::log::log(
+                                nexus::log::LogLevel::Warning,
+                                "GW2 Build Optimizer",
+                                &format!(
+                                    "optimize_v2 failed, falling back to synergy engine: {}",
+                                    e
+                                ),
+                            );
+                            // Fall through to legacy synergy engine
+                        }
+                    }
+                }
+
+                // ═══ Fallback 1: Deterministic synergy engine (no LLM for build selection) ═══
                 {
                     let llm_client_opt: Option<Box<dyn gw2_optimizer::llm::LlmClient>> =
                         gw2_optimizer::llm::create_client(&config, &addon_dir).ok();
@@ -114,8 +209,15 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             if token.is_cancelled() {
                                 return Err("Cancelled".into());
                             }
-                            let suggestion =
-                                synergy_result_to_suggestion(&synergy_result, &profession_name);
+                            let suggestion = synergy_result_to_suggestion(
+                                &synergy_result,
+                                &profession_name,
+                                &scenario,
+                                selected_role,
+                                locked_spec_name.as_ref().map(|n| format!("Improved: {}", n)),
+                                &addon_dir,
+                                &weights,
+                            );
                             return Ok(vec![suggestion]);
                         }
                         Err(e) => {
@@ -132,7 +234,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     }
                 }
 
-                // ═══ Fallback 1: LLM synergy pipeline (LLM-driven build selection) ═══
+                // ═══ Fallback 2: LLM synergy pipeline (LLM-driven build selection) ═══
                 if config.has_active_llm_key() {
                     let llm_client = gw2_optimizer::llm::create_client(&config, &addon_dir)
                         .map_err(|e| e.to_string())?;
@@ -159,8 +261,15 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             if token.is_cancelled() {
                                 return Err("Cancelled".into());
                             }
-                            let suggestion =
-                                synergy_result_to_suggestion(&synergy_result, &profession_name);
+                            let suggestion = synergy_result_to_suggestion(
+                                &synergy_result,
+                                &profession_name,
+                                &scenario,
+                                selected_role,
+                                locked_spec_name.as_ref().map(|n| format!("Improved: {}", n)),
+                                &addon_dir,
+                                &weights,
+                            );
                             return Ok(vec![suggestion]);
                         }
                         Err(e) => {
@@ -174,7 +283,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     }
                 }
 
-                // ═══ Legacy pipeline (fallback or no Gemini key) ═══
+                // ═══ Fallback 3: Legacy pipeline (no Gemini key) ═══
                 let profession = db.profession(&profession_name).ok_or_else(|| {
                     format!("Profession '{}' not found in GameDb", profession_name)
                 })?;
@@ -297,6 +406,11 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
 fn synergy_result_to_suggestion(
     result: &gw2_optimizer::engine::SynergyResult,
     profession_name: &str,
+    scenario: &gw2_optimizer::scenario::ScenarioSpec,
+    role: Option<gw2_optimizer::scenario::RoleObjective>,
+    label_override: Option<String>,
+    addon_dir: &std::path::Path,
+    weights: &gw2_optimizer::scoring::OptimizationWeights,
 ) -> crate::ui::comparison::BuildSuggestion {
     use crate::ui::comparison::BuildSuggestion;
 
@@ -432,8 +546,50 @@ fn synergy_result_to_suggestion(
         explanation.push_str(&v.warnings.join("; "));
     }
 
+    // Compute viability gates from the referee using the scenario
+    let primary_combat = match scenario.combat_tier {
+        gw2_optimizer::scenario::CombatTier::Solo => &result.combat_solo,
+        gw2_optimizer::scenario::CombatTier::Party => &result.combat_party,
+        gw2_optimizer::scenario::CombatTier::Squad => &result.combat_squad,
+    };
+    let viability = Some(gw2_optimizer::referee::evaluate_viability_gates(
+        result.rotation.as_ref(),
+        primary_combat,
+        scenario,
+    ));
+
+    // Suggestion label: label_override > role name > generic
+    let label = label_override
+        .or_else(|| role.map(|r| r.label().to_string()))
+        .unwrap_or_else(|| "Optimized Build".to_string());
+
+    // Compute benchmark delta vs best matching community reference
+    let role_hint = role.map(|r| r.label().to_string()).unwrap_or_default();
+    let our_score = {
+        // Use normalised strike + condi DPS index as proxy score when referee score unavailable
+        let s = &result.combat_solo;
+        let strike_norm = s.strike_dps_index as f64 / 3000.0;
+        let condi_norm = s.condition_dps_index as f64 / 3500.0;
+        strike_norm.max(condi_norm).min(1.0)
+    };
+    let benchmark_delta = {
+        let builds = gw2_optimizer::scraper::load_benchmarks(addon_dir);
+        if builds.is_empty() {
+            None
+        } else {
+            gw2_optimizer::benchmark::compute_benchmark_delta(
+                &builds,
+                profession_name,
+                scenario.game_mode.label(),
+                &role_hint,
+                weights,
+                our_score,
+            )
+        }
+    };
+
     BuildSuggestion {
-        label: "Synergy Build".into(),
+        label,
         build_summary: format!(
             "Gear: {}",
             v.gear_prefix
@@ -460,11 +616,12 @@ fn synergy_result_to_suggestion(
         combat_party,
         combat_squad,
         rotation,
-        viability: None,
+        viability,
+        benchmark_delta,
+        data_quality: result.data_quality.clone(),
+        quality_reasons: result.quality_reasons.iter().map(|r| r.to_string()).collect(),
     }
 }
-
-/// Convert BuildCandidate to BuildSuggestion for display (S11-T04)
 fn candidate_to_suggestion(
     candidate: &gw2_optimizer::engine::BuildCandidate,
     db: &gw2_optimizer::gamedb::GameDb,
@@ -542,6 +699,18 @@ fn candidate_to_suggestion(
         balance_ctx,
     );
 
+    // Legacy path: no rotation available, rotation-dependent gates produce degraded state.
+    // Use a simple EHP proxy from vitality for the viability check.
+    let legacy_viability = {
+        let scenario =
+            gw2_optimizer::scenario::ScenarioSpec::from_balance_context(balance_ctx);
+        let proxy_perf = gw2_optimizer::combat::CombatPerformance {
+            effective_health: candidate.stats.vitality * 10.0,
+            ..Default::default()
+        };
+        gw2_optimizer::referee::evaluate_viability_gates(None, &proxy_perf, &scenario)
+    };
+
     BuildSuggestion {
         label: format!("Score: {:.2}", candidate.score),
         build_summary: format!("Gear: {}", candidate.gear.stat_prefix_name),
@@ -560,7 +729,10 @@ fn candidate_to_suggestion(
         combat_party,
         combat_squad,
         rotation: None,
-        viability: None,
+        viability: Some(legacy_viability),
+        benchmark_delta: None,
+        data_quality: gw2_optimizer::data::DataQuality::Verified,
+        quality_reasons: vec![],
     }
 }
 

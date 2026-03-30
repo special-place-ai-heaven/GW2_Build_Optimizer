@@ -1299,8 +1299,9 @@ pub fn optimize_deterministic(
 ///
 /// Seeds from the synergy pipeline, then performs a bounded beam search over
 /// complete build states using the gated referee as the fitness function.
-/// No LLM calls are made.  Completes within `SearchConfig::time_limit_secs`
-/// (default 28 s, well under the 30 s SLA).
+/// If `llm_client` is Some, runs the LLM advisor post-beam to propose
+/// additional candidate mutations — the referee is still the final authority.
+/// Completes within `SearchConfig::time_limit_secs` (default 28 s).
 pub fn optimize_v2(
     db: &GameDb,
     profession_name: &str,
@@ -1308,6 +1309,7 @@ pub fn optimize_v2(
     ctx: &BalanceContext,
     scenario: &crate::scenario::ScenarioSpec,
     locks: &gw2_core::types::BuildLocks,
+    llm_client: Option<&dyn LlmClient>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     use crate::search_v2::SearchConfig;
@@ -1317,7 +1319,7 @@ pub fn optimize_v2(
         done: false,
     });
     let config = SearchConfig::default();
-    let best = crate::search_v2::optimize_v2_search(
+    let mut best = crate::search_v2::optimize_v2_search(
         db,
         profession_name,
         weights,
@@ -1327,11 +1329,152 @@ pub fn optimize_v2(
         &config,
         on_progress,
     )?;
+
+    // Optional: LLM advisor pass — propose mutations, referee ranks them.
+    if let Some(client) = llm_client {
+        on_progress(OptimizeProgress {
+            stage: "LLM advisor: evaluating mutations...".into(),
+            done: false,
+        });
+        best = llm_advisor(best, db, profession_name, weights, ctx, scenario, client);
+    }
+
     on_progress(OptimizeProgress {
         stage: "Done".into(),
         done: true,
     });
     Ok(synergy_result_from_validated(best, db, profession_name, ctx))
+}
+
+/// Post-beam LLM advisor: ask the LLM for candidate mutations, evaluate each
+/// through the referee, return the best improvement found (or original if none better).
+///
+/// The LLM is a *search policy* — it proposes swaps. The referee decides winners.
+/// LLM errors are silently logged and the original build is returned unchanged.
+pub fn llm_advisor(
+    current: crate::validation::ValidatedBuild,
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &crate::scenario::ScenarioSpec,
+    llm_client: &dyn LlmClient,
+) -> crate::validation::ValidatedBuild {
+    // Build a compact prompt asking for 3 specific swaps to try.
+    let current_gear = current
+        .gear_prefix
+        .as_ref()
+        .map(|p| p.name.as_str())
+        .unwrap_or("Unknown");
+    let current_rune = current
+        .rune
+        .as_ref()
+        .map(|r| r.name.as_str())
+        .unwrap_or("None");
+    let current_sigils: Vec<&str> = current.sigils.iter().map(|s| s.name.as_str()).collect();
+
+    let prompt = format!(
+        "You are a Guild Wars 2 build advisor. The current optimized build for {} uses:\n\
+         - Gear prefix: {}\n\
+         - Rune: {}\n\
+         - Sigils: {}\n\n\
+         Game mode: {}. Scoring priorities: Power={:.1}, Condition={:.1}, Sustain={:.1}, Control={:.1}\n\n\
+         Suggest exactly 3 alternative gear prefix or rune swaps to try that might score better \
+         given these priorities. Format each suggestion as:\n\
+         SWAP: gear_prefix=[name] OR rune=[name]\n\
+         Only suggest changes to gear_prefix or rune. Do not suggest spec changes.",
+        profession_name,
+        current_gear,
+        current_rune,
+        current_sigils.join(", "),
+        ctx.game_mode.label(),
+        weights.power, weights.condition, weights.sustain, weights.control,
+    );
+
+    // Get current score for comparison baseline.
+    let current_report = crate::referee::evaluate_validated_build(
+        &current,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+    );
+    let baseline_score = current_report.user_intent_score;
+
+    // Call LLM.
+    let response = match llm_client.generate(&prompt) {
+        Ok(r) => r,
+        Err(_) => {
+            // LLM advisor failure is non-fatal — return original build silently.
+            return current;
+        }
+    };
+
+    // Parse SWAP: lines from response.
+    let mut best_validated = current.clone();
+    let mut best_score = baseline_score;
+
+    for line in response.lines() {
+        let line = line.trim();
+        if !line.starts_with("SWAP:") {
+            continue;
+        }
+        let swap_part = &line["SWAP:".len()..].trim().to_lowercase();
+
+        let mut candidate = current.clone();
+
+        if let Some(rest) = swap_part.strip_prefix("gear_prefix=") {
+            let prefix_name = rest.trim().trim_matches('"').trim_matches('\'');
+            // Look up in DB by name match.
+            if let Some(item_stat) = db
+                .itemstats
+                .values()
+                .find(|s| s.name.to_lowercase() == prefix_name.to_lowercase())
+            {
+                candidate.gear_prefix = Some(crate::validation::ValidatedGearPrefix {
+                    itemstat_id: item_stat.id,
+                    name: item_stat.name.clone(),
+                });
+            } else {
+                continue; // Skip if prefix not found in DB
+            }
+        } else if let Some(rest) = swap_part.strip_prefix("rune=") {
+            let rune_name = rest.trim().trim_matches('"').trim_matches('\'');
+            // db.runes is Vec<u32> of item IDs — look up by name in db.items
+            let found_rune = db.runes.iter().find_map(|&id| {
+                db.items
+                    .get(&id)
+                    .filter(|item| item.name.to_lowercase().contains(&rune_name.to_lowercase()))
+                    .map(|item| crate::validation::ValidatedItem {
+                        id: item.id,
+                        name: item.name.clone(),
+                    })
+            });
+            match found_rune {
+                Some(r) => candidate.rune = Some(r),
+                None => continue,
+            }
+        } else {
+            continue;
+        }
+
+        // Evaluate the mutation through the referee.
+        let report = crate::referee::evaluate_validated_build(
+            &candidate,
+            db,
+            profession_name,
+            weights,
+            ctx,
+            scenario,
+        );
+        if report.user_intent_score > best_score {
+            best_score = report.user_intent_score;
+            best_validated = candidate;
+        }
+    }
+
+    best_validated
 }
 
 #[cfg(test)]
