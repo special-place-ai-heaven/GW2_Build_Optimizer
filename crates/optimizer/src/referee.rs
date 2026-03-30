@@ -175,6 +175,10 @@ pub fn evaluate_viability_gates(
 ///
 /// The referee is the authority. Search strategies and AI advisors may generate
 /// candidates, but they do not decide winners; this report does.
+///
+/// `viability` captures per-gate pass/fail results. When `viability.is_viable` is
+/// `false`, `user_intent_score` is set to the sentinel value `-1.0` and the build
+/// should be excluded from rankings.
 #[derive(Debug, Clone)]
 pub struct RefereeReport {
     pub genome: BuildGenome,
@@ -186,6 +190,9 @@ pub struct RefereeReport {
     pub combat_squad: CombatPerformance,
     pub primary_combat: CombatPerformance,
     pub rotation: Option<rotation::SimulationResult>,
+    /// Structured viability report: per-gate pass/fail with values and notes.
+    pub viability: ViabilityReport,
+    /// Final score for ranking. Set to `-1.0` (sentinel) when `viability.is_viable` is false.
     pub user_intent_score: f64,
     pub quality: DataQuality,
     pub quality_reasons: Vec<DataQualityReason>,
@@ -240,6 +247,15 @@ pub fn evaluate_validated_build(
     };
     let rotation = engine::simulate_validated_rotation(validated, db, &stats);
 
+    // ── Viability gating ──────────────────────────────────────────────────────
+    // Run before score computation. Non-viable builds receive sentinel score -1.0.
+    let viability = evaluate_viability_gates(rotation.as_ref(), &primary_combat, scenario);
+    let user_intent_score = if viability.is_viable {
+        score_with_weights(&primary_combat, weights)
+    } else {
+        -1.0
+    };
+
     let mut quality = DataQuality::Verified;
     let mut quality_reasons = Vec::new();
 
@@ -273,7 +289,8 @@ pub fn evaluate_validated_build(
         combat_squad,
         primary_combat: primary_combat.clone(),
         rotation,
-        user_intent_score: score_with_weights(&primary_combat, weights),
+        viability,
+        user_intent_score,
         quality,
         quality_reasons,
     }
@@ -602,6 +619,12 @@ mod tests {
             report_a.primary_combat.total_dps_index,
             report_b.primary_combat.total_dps_index
         );
+        // Viability must be deterministic: same is_viable flag across both calls.
+        assert_eq!(
+            report_a.viability.is_viable,
+            report_b.viability.is_viable,
+            "viability gate outcome must be deterministic"
+        );
     }
 
     #[test]
@@ -617,5 +640,58 @@ mod tests {
 
         assert_eq!(report.quality, DataQuality::Blocked);
         assert_eq!(report.quality_reasons.len(), 1);
+    }
+
+    /// WvW build with a minimal (no-gear) Guardian → rotation=None from empty DB, EHP far below
+    /// WvW floor → all rotation gates fail + EHP gate fails → non-viable → sentinel score -1.0.
+    /// This tests that RefereeReport.viability is populated and the sentinel is applied end-to-end.
+    #[test]
+    fn referee_wvw_minimal_build_is_non_viable_sentinel_score() {
+        let db = make_test_db();
+        let validated = make_minimal_validated();
+        let ctx = BalanceContext::new(GameMode::WvW);
+        let scenario = ScenarioSpec::from_balance_context(&ctx);
+        let weights = OptimizationWeights::default_for_mode(GameMode::WvW.label());
+
+        let report = evaluate_validated_build(&validated, &db, "Guardian", &weights, &ctx, &scenario);
+
+        // Minimal Guardian has EHP well below WvW floor and no rotation skills → non-viable.
+        assert!(
+            !report.viability.is_viable,
+            "minimal WvW build should be non-viable; gates: {:?}",
+            report.viability.gates
+        );
+        assert_eq!(
+            report.user_intent_score, -1.0,
+            "non-viable build must receive sentinel score -1.0"
+        );
+        // ViabilityReport must be populated (not empty).
+        assert!(
+            !report.viability.gates.is_empty(),
+            "viability.gates must be populated even for non-viable builds"
+        );
+    }
+
+    /// PvE build with stunbreak_count=0 in the rotation → only EHP gate runs in PvE,
+    /// so stunbreak absence does NOT cause non-viability. Tests the gate directly since
+    /// evaluate_validated_build cannot inject a custom rotation.
+    #[test]
+    fn gate_pve_zero_stunbreaks_still_viable_when_ehp_passes() {
+        let mut rot = make_viable_rotation();
+        rot.stunbreak_count = 0; // zero stunbreaks
+        let mut combat = make_viable_combat();
+        combat.effective_health = EHP_FLOOR_PVE + 1_000.0; // PvE EHP floor satisfied
+        let scenario = make_pve_scenario();
+
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+
+        // PvE only runs EHP gate — 0 stunbreaks must not cause failure.
+        assert!(
+            report.is_viable,
+            "PvE build with 0 stunbreaks should be viable when EHP passes; gates: {:?}",
+            report.gates
+        );
+        // Confirm rotation gates are absent in PvE.
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::StunbreakCount).is_none());
     }
 }
