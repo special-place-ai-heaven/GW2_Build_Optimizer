@@ -325,6 +325,10 @@ impl SimState {
                 SkillEffect::ComboField { .. } => {
                     // Combo fields tracked but not simulated for damage
                 }
+                SkillEffect::RemovesCondition { .. } => {
+                    // Cleanse effects are tracked at the roster level (cleanse_count / cleanse_rate_per_20s),
+                    // not during per-tick simulation — no runtime state update needed here.
+                }
             }
         }
 
@@ -435,6 +439,44 @@ impl SimState {
         });
         let stability_uptime = buff_uptime.get("Stability").copied().unwrap_or(0.0);
 
+        // Cleanse metrics: count skills with ≥1 RemovesCondition effect; estimate rate per 20s.
+        // Rate per 20s: for each cleanse skill, sum conditions_removed × (20s / cooldown_s).
+        // Skills with cooldown=0 (auto-attacks) are excluded (would be infinite — ignore them).
+        let cleanse_count = self
+            .skills
+            .iter()
+            .filter(|s| {
+                s.effects
+                    .iter()
+                    .any(|e| matches!(e, SkillEffect::RemovesCondition { .. }))
+            })
+            .count() as u32;
+
+        let cleanse_rate_per_20s: f64 = self
+            .skills
+            .iter()
+            .filter_map(|s| {
+                let conditions_removed: u32 = s
+                    .effects
+                    .iter()
+                    .filter_map(|e| {
+                        if let SkillEffect::RemovesCondition { conditions_removed } = e {
+                            Some(*conditions_removed)
+                        } else {
+                            None
+                        }
+                    })
+                    .sum();
+                if conditions_removed == 0 || s.cooldown_ms == 0 {
+                    return None;
+                }
+                let cooldown_s = s.cooldown_ms as f64 / 1000.0;
+                // uptime_factor = 20s / cooldown_s (capped at 1 use per cooldown)
+                let casts_in_20s = 20.0 / cooldown_s;
+                Some(conditions_removed as f64 * casts_in_20s)
+            })
+            .sum();
+
         SimulationResult {
             duration_ms: self.duration_ms,
             strike_dps,
@@ -446,6 +488,8 @@ impl SimState {
             stunbreak_count,
             has_stability,
             stability_uptime,
+            cleanse_count,
+            cleanse_rate_per_20s,
         }
     }
 }
@@ -901,5 +945,109 @@ mod tests {
         let result = simulate(&skills, 10000, 2000.0, 1500.0, 1100.0);
         assert!(result.total_dps > 0.0);
         assert!(result.skill_usage.len() >= 2);
+    }
+
+    // ─── Cleanse detection tests ───
+
+    fn cleanse_skill(cooldown_ms: u32, conditions: u32) -> RotationSkill {
+        RotationSkill {
+            skill_id: 9999,
+            name: "Mending".into(),
+            slot: SkillSlot::Heal,
+            cast_time_ms: 750,
+            cooldown_ms,
+            effects: vec![SkillEffect::RemovesCondition {
+                conditions_removed: conditions,
+            }],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+        }
+    }
+
+    #[test]
+    fn test_cleanse_count_zero_without_cleanse_skill() {
+        // No cleanse skill → cleanse_count == 0, cleanse_rate_per_20s == 0.0
+        let skills = vec![auto_attack()];
+        let result = simulate(&skills, 5000, 2000.0, 0.0, 1100.0);
+        assert_eq!(result.cleanse_count, 0);
+        assert_eq!(result.cleanse_rate_per_20s, 0.0);
+    }
+
+    #[test]
+    fn test_cleanse_count_detects_cleanse_skill() {
+        // One cleanse skill with 20s CD removing 3 conditions.
+        let skills = vec![auto_attack(), cleanse_skill(20000, 3)];
+        let result = simulate(&skills, 5000, 2000.0, 0.0, 1100.0);
+        assert_eq!(result.cleanse_count, 1, "one skill has cleanse effect");
+        // 3 conditions × (20s / 20s) = 3.0 per 20s
+        assert!(
+            (result.cleanse_rate_per_20s - 3.0).abs() < 0.01,
+            "cleanse_rate_per_20s should be ~3.0, got {}",
+            result.cleanse_rate_per_20s
+        );
+    }
+
+    #[test]
+    fn test_cleanse_rate_scales_with_cooldown() {
+        // 10s CD, 2 conditions → 2 × (20/10) = 4.0 per 20s
+        let skills = vec![auto_attack(), cleanse_skill(10000, 2)];
+        let result = simulate(&skills, 5000, 2000.0, 0.0, 1100.0);
+        assert_eq!(result.cleanse_count, 1);
+        assert!(
+            (result.cleanse_rate_per_20s - 4.0).abs() < 0.01,
+            "cleanse_rate_per_20s should be ~4.0, got {}",
+            result.cleanse_rate_per_20s
+        );
+    }
+
+    #[test]
+    fn test_cleanse_count_multiple_cleanse_skills() {
+        // Two cleanse skills → cleanse_count = 2
+        let mut second_cleanse = cleanse_skill(30000, 1);
+        second_cleanse.skill_id = 9998;
+        let skills = vec![auto_attack(), cleanse_skill(20000, 2), second_cleanse];
+        let result = simulate(&skills, 5000, 2000.0, 0.0, 1100.0);
+        assert_eq!(result.cleanse_count, 2, "both cleanse skills counted");
+        // 2×(20/20) + 1×(20/30) ≈ 2.0 + 0.667 = 2.667
+        let expected = 2.0 + 20.0_f64 / 30.0;
+        assert!(
+            (result.cleanse_rate_per_20s - expected).abs() < 0.01,
+            "cleanse_rate_per_20s should be ~{:.3}, got {}",
+            expected,
+            result.cleanse_rate_per_20s
+        );
+    }
+
+    #[test]
+    fn test_cleanse_auto_attack_excluded_from_rate() {
+        // A cleanse on an auto-attack (cooldown=0) should not blow up the rate.
+        // The rate calculation skips skills with cooldown=0.
+        let auto_with_cleanse = RotationSkill {
+            skill_id: 1,
+            name: "Cleansing Auto".into(),
+            slot: SkillSlot::Weapon1,
+            cast_time_ms: 500,
+            cooldown_ms: 0,
+            effects: vec![
+                SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: 1.0,
+                },
+                SkillEffect::RemovesCondition {
+                    conditions_removed: 1,
+                },
+            ],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+        };
+        let result = simulate(&[auto_with_cleanse], 5000, 2000.0, 0.0, 1100.0);
+        // cleanse_count = 1 (skill has cleanse effect), but rate = 0 (cooldown=0 excluded)
+        assert_eq!(result.cleanse_count, 1, "cleanse_count counts the auto-attack");
+        assert_eq!(
+            result.cleanse_rate_per_20s, 0.0,
+            "rate excludes auto-attacks to avoid division by zero"
+        );
     }
 }

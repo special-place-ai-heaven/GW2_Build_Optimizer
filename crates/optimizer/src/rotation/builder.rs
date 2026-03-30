@@ -4,6 +4,7 @@
 use gw2_api::models::facts::Fact;
 use gw2_api::models::Skill;
 
+use crate::data::normalized_effects::{EffectCategory, NormalizedEffect};
 use crate::gamedb::GameDb;
 
 use super::skill_timings::default_timing;
@@ -18,6 +19,80 @@ pub fn build_rotation_skills(skill_ids: &[u32], db: &GameDb) -> Vec<RotationSkil
             Some(skill_to_rotation(skill))
         })
         .collect()
+}
+
+/// Enrich rotation skills with `RemovesCondition` effects, using NormalizedEffects data
+/// as the primary source and description text as a fallback heuristic.
+///
+/// Primary path: scan `ne_effects` for entries with `category == RemovesCondition`
+/// whose `source_id` matches a skill's `skill_id`. When found, add a
+/// `RemovesCondition` effect carrying the `conditions_removed` count from
+/// `status_operation.amount_value` (floored to u32, minimum 1).
+///
+/// Fallback path: if no NormalizedEffects entry is found for a skill, check
+/// the skill's API description (from `db.skills`) for condition-cleanse language:
+/// ("remov" AND "condit") OR ("cure" AND "condit"). If matched, add
+/// `RemovesCondition { conditions_removed: 1 }` as a heuristic estimate.
+///
+/// Idempotent per-call: skips any skill that already carries a `RemovesCondition` effect.
+pub fn enrich_with_cleanse(
+    skills: &mut [RotationSkill],
+    ne_effects: &[NormalizedEffect],
+    db: &GameDb,
+) {
+    use crate::data::quality::FactualValue;
+    use std::collections::HashMap;
+
+    // Build a fast lookup: source_id → max conditions_removed from NormalizedEffects.
+    // A skill may appear as multiple RemovesCondition entries; take the largest amount.
+    let mut ne_cleanse: HashMap<u32, u32> = HashMap::new();
+    for effect in ne_effects {
+        if effect.category == EffectCategory::RemovesCondition {
+            let count = match &effect.status_operation {
+                Some(op) => match op.amount_value {
+                    FactualValue::Resolved(v) => (v.floor() as u32).max(1),
+                    FactualValue::Unknown => 1,
+                },
+                None => 1,
+            };
+            let entry = ne_cleanse.entry(effect.source_id).or_insert(0);
+            *entry = (*entry).max(count);
+        }
+    }
+
+    for skill in skills.iter_mut() {
+        // Skip if already carries a RemovesCondition effect (idempotency guard).
+        if skill
+            .effects
+            .iter()
+            .any(|e| matches!(e, SkillEffect::RemovesCondition { .. }))
+        {
+            continue;
+        }
+
+        if let Some(&count) = ne_cleanse.get(&skill.skill_id) {
+            // Primary: NormalizedEffects data matched by source_id.
+            skill.effects.push(SkillEffect::RemovesCondition {
+                conditions_removed: count,
+            });
+        } else {
+            // Fallback: description text heuristic.
+            let description = db
+                .skills
+                .get(&skill.skill_id)
+                .and_then(|s| s.description.as_deref())
+                .unwrap_or("")
+                .to_lowercase();
+
+            if (description.contains("remov") && description.contains("condit"))
+                || (description.contains("cure") && description.contains("condit"))
+            {
+                skill.effects.push(SkillEffect::RemovesCondition {
+                    conditions_removed: 1, // HEURISTIC: assume 1 condition removed
+                });
+            }
+        }
+    }
 }
 
 /// Convert a GW2 API Skill into a RotationSkill with extracted timing and effects.
@@ -367,5 +442,191 @@ mod tests {
         );
         let rs = skill_to_rotation(&skill);
         assert!(rs.is_stunbreak);
+    }
+
+    // ─── Tests for enrich_with_cleanse ───
+
+    use crate::data::normalized_effects::{
+        AmountMode, EffectCategory, NormalizedEffect, OperationType,
+        SourceType, StackingRule, StatusOperation, TargetScope, TargetSide, TriggerRule,
+        UptimeModel, UptimeModelKind,
+    };
+    use crate::data::quality::FactualValue;
+    use crate::data::EvidenceLevel;
+    use crate::gamedb::GameDb;
+    use std::collections::HashMap;
+
+    /// Build a minimal empty GameDb for test purposes.
+    fn empty_db() -> GameDb {
+        GameDb {
+            items: HashMap::new(),
+            itemstats: HashMap::new(),
+            skills: HashMap::new(),
+            traits: HashMap::new(),
+            specializations: HashMap::new(),
+            professions: HashMap::new(),
+            legends: HashMap::new(),
+            pvp_amulets: HashMap::new(),
+            skills_by_profession: HashMap::new(),
+            traits_by_spec: HashMap::new(),
+            items_by_type: HashMap::new(),
+            runes: vec![],
+            sigils: vec![],
+            relics: vec![],
+            skill_to_palette: HashMap::new(),
+            palette_to_skill: HashMap::new(),
+            traits_by_condition: HashMap::new(),
+            skills_by_condition: HashMap::new(),
+            traits_by_buff: HashMap::new(),
+            skills_by_buff: HashMap::new(),
+        }
+    }
+
+    /// Build a minimal `NormalizedEffect` with `RemovesCondition` for a given skill ID and count.
+    fn cleanse_ne(source_id: u32, count: f64) -> NormalizedEffect {
+        NormalizedEffect {
+            effect_id: format!("skill:{}:cleanse", source_id),
+            source_type: SourceType::Skill,
+            source_id,
+            source_name: format!("Skill {}", source_id),
+            category: EffectCategory::RemovesCondition,
+            value: FactualValue::Resolved(count),
+            stacking_rule: StackingRule::NonStacking,
+            trigger_rule: TriggerRule::OnSkillUse,
+            uptime_model: UptimeModel {
+                kind: UptimeModelKind::Unknown,
+                uptime: None,
+            },
+            evidence_level: EvidenceLevel::Factual,
+            source: None,
+            effect_duration: None,
+            internal_cooldown: None,
+            max_stacks: None,
+            status_operation: Some(StatusOperation {
+                operation_type: OperationType::RemovesCondition,
+                target_side: TargetSide::Self_,
+                status_kind: "Any".to_string(),
+                amount_mode: AmountMode::Count,
+                amount_value: FactualValue::Resolved(count),
+                base_duration_ms: None,
+                target_scope: TargetScope::Self_,
+                target_count: None,
+                internal_cooldown_ms: None,
+                source_duration_multiplier: None,
+            }),
+            inner_category: None,
+        }
+    }
+
+    /// Build a minimal rotation skill for cleanse tests.
+    fn cleanse_test_skill(id: u32) -> RotationSkill {
+        RotationSkill {
+            skill_id: id,
+            name: format!("Skill {}", id),
+            slot: SkillSlot::Utility,
+            cast_time_ms: 500,
+            cooldown_ms: 20000,
+            effects: vec![],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+        }
+    }
+
+    #[test]
+    fn test_enrich_with_cleanse_ne_primary() {
+        // NormalizedEffects has a RemovesCondition entry → should add effect.
+        let mut skills = vec![cleanse_test_skill(9158)];
+        let ne = vec![cleanse_ne(9158, 3.0)];
+        let db = empty_db();
+
+        enrich_with_cleanse(&mut skills, &ne, &db);
+
+        let cleanse_effects: Vec<_> = skills[0]
+            .effects
+            .iter()
+            .filter_map(|e| {
+                if let SkillEffect::RemovesCondition { conditions_removed } = e {
+                    Some(*conditions_removed)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(cleanse_effects, vec![3], "should detect 3 conditions removed from NE data");
+    }
+
+    #[test]
+    fn test_enrich_with_cleanse_description_fallback() {
+        // No NE entry, but skill description contains "removes condition" phrasing.
+        let mut skill_entry = make_test_skill(500, "Mending", "Heal", vec![]);
+        skill_entry.description = Some("Cure conditions affecting you.".to_string());
+
+        let mut db = empty_db();
+        db.skills.insert(500, skill_entry);
+
+        let mut skills = vec![cleanse_test_skill(500)];
+        enrich_with_cleanse(&mut skills, &[], &db);
+
+        let has_cleanse = skills[0]
+            .effects
+            .iter()
+            .any(|e| matches!(e, SkillEffect::RemovesCondition { conditions_removed: 1 }));
+        assert!(has_cleanse, "description heuristic should detect cleanse from 'cure...condition'");
+    }
+
+    #[test]
+    fn test_enrich_with_cleanse_no_match() {
+        // No NE entry, no matching description → no cleanse effect added.
+        let mut db = empty_db();
+        let mut skill_entry = make_test_skill(999, "Fireball", "Utility", vec![]);
+        skill_entry.description = Some("Deal fire damage.".to_string());
+        db.skills.insert(999, skill_entry);
+
+        let mut skills = vec![cleanse_test_skill(999)];
+        enrich_with_cleanse(&mut skills, &[], &db);
+
+        let has_cleanse = skills[0]
+            .effects
+            .iter()
+            .any(|e| matches!(e, SkillEffect::RemovesCondition { .. }));
+        assert!(!has_cleanse, "no cleanse effect for non-cleanse skill");
+    }
+
+    #[test]
+    fn test_enrich_with_cleanse_idempotent() {
+        // Calling enrich twice should not add duplicate cleanse effects.
+        let mut skills = vec![cleanse_test_skill(9158)];
+        let ne = vec![cleanse_ne(9158, 3.0)];
+        let db = empty_db();
+
+        enrich_with_cleanse(&mut skills, &ne, &db);
+        enrich_with_cleanse(&mut skills, &ne, &db);
+
+        let cleanse_count = skills[0]
+            .effects
+            .iter()
+            .filter(|e| matches!(e, SkillEffect::RemovesCondition { .. }))
+            .count();
+        assert_eq!(cleanse_count, 1, "idempotency: only one RemovesCondition effect");
+    }
+
+    #[test]
+    fn test_enrich_with_cleanse_max_across_multiple_ne_entries() {
+        // Multiple NE entries for same source_id → take maximum conditions_removed.
+        let mut skills = vec![cleanse_test_skill(100)];
+        let ne = vec![cleanse_ne(100, 1.0), cleanse_ne(100, 5.0), cleanse_ne(100, 2.0)];
+        let db = empty_db();
+
+        enrich_with_cleanse(&mut skills, &ne, &db);
+
+        let max_count = skills[0].effects.iter().find_map(|e| {
+            if let SkillEffect::RemovesCondition { conditions_removed } = e {
+                Some(*conditions_removed)
+            } else {
+                None
+            }
+        });
+        assert_eq!(max_count, Some(5), "should take maximum conditions_removed across entries");
     }
 }

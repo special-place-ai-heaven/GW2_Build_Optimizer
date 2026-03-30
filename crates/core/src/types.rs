@@ -275,6 +275,10 @@ pub struct RotationBreakdown {
     pub has_stability: bool,
     /// Stability uptime percentage (0.0-1.0).
     pub stability_uptime: f64,
+    /// Number of equipped skills that have at least one cleanse effect.
+    pub cleanse_count: u32,
+    /// Estimated conditions removed per 20 seconds.
+    pub cleanse_rate_per_20s: f64,
 }
 
 /// A saved optimizer build for persistence (Save/Load tab).

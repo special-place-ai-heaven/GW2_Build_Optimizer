@@ -88,6 +88,9 @@ pub enum SkillEffect {
     },
     /// Combo field placement.
     ComboField { field_type: String },
+    /// Removes one or more conditions from self (cleanse).
+    /// `conditions_removed` is the number of conditions removed per use.
+    RemovesCondition { conditions_removed: u32 },
 }
 
 /// Full simulation result from running a rotation.
@@ -118,6 +121,10 @@ pub struct SimulationResult {
     pub has_stability: bool,
     /// Estimated self-Stability uptime (fraction 0.0 to 1.0).
     pub stability_uptime: f64,
+    /// Number of equipped skills that have at least one cleanse effect.
+    pub cleanse_count: u32,
+    /// Estimated conditions removed per 20 seconds (sum of conditions_removed × uptime_factor).
+    pub cleanse_rate_per_20s: f64,
 }
 
 /// Per-skill breakdown in a simulation result.
