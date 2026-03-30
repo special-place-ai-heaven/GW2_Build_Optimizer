@@ -405,6 +405,8 @@ fn synergy_result_to_suggestion(
             stunbreak_count: sim.stunbreak_count,
             has_stability: sim.has_stability,
             stability_uptime: sim.stability_uptime,
+            cleanse_count: sim.cleanse_count,
+            cleanse_rate_per_20s: sim.cleanse_rate_per_20s,
         });
 
     // Build changes_made from validated structured changes
@@ -665,6 +667,8 @@ pub(super) fn simulate_suggestion_rotation(
         stunbreak_count: result.stunbreak_count,
         has_stability: result.has_stability,
         stability_uptime: result.stability_uptime,
+        cleanse_count: result.cleanse_count,
+        cleanse_rate_per_20s: result.cleanse_rate_per_20s,
     });
 }
 
