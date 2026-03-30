@@ -5,6 +5,7 @@
 use nexus::imgui::{Selectable, TreeNodeFlags, Ui};
 
 use gw2_core::types::{CombatMetrics, ResolvedBuild, RotationBreakdown, StatBlock};
+use gw2_optimizer::ViabilityReport;
 
 use super::gear_diff::{compute_build_diff, ChangeStatus, SlotDiff};
 
@@ -33,6 +34,9 @@ pub struct BuildSuggestion {
     pub combat_squad: Option<CombatMetrics>,
     /// Rotation simulation breakdown (if simulation was run).
     pub rotation: Option<RotationBreakdown>,
+    /// Viability gate report from the referee (None for legacy/LLM paths that skip the referee).
+    /// Populated for S07 Trust UI rendering.
+    pub viability: Option<ViabilityReport>,
 }
 
 /// State for the comparison view.

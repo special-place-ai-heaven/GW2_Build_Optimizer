@@ -18,3 +18,6 @@ pub mod stats;
 pub mod synergy;
 pub mod synergy_pipeline;
 pub mod validation;
+
+// Re-export viability types for downstream consumers (S07 Trust UI).
+pub use referee::{GateResult, ViabilityGate, ViabilityReport};
