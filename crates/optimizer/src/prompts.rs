@@ -704,7 +704,19 @@ CC DOMINANCE — the single most important factor in WvW:
 - Boon corruption, boon strip (removing enemy Stability), and condition cleanse are high-value utilities
 - Downstate cleave and rally mechanics affect build choices
 - Movement speed and swiftness uptime matter for repositioning
-- Use search_skills_by_effect("Stability") and search_traits_by_effect("survivability") when optimizing for WvW
+
+VIABILITY GATES (treated as hard failures by the deterministic referee):
+- If a build has 0 stunbreaks, it is NON-VIABLE regardless of Power or DPS.
+- If a build has no access to Stability (from skills or traits), it is NON-VIABLE.
+- If a build has essentially no condition cleanse, it is NON-VIABLE.
+- If a build's effective health is below the floor for its sub-role (Roaming / Havoc / Zerg), it is NON-VIABLE.
+- When suggesting WvW builds, you MUST fix these first before chasing higher DPS.
+
+PRACTICAL INTERPRETATION:
+- A 4000 Power, 100% crit build with no stab / stunbreak / cleanse is strictly worse than a 2000 Power build that can CC and avoid being CC'd. In real WvW fights its true damage uptime is effectively 0.
+- Prefer slightly lower DPS with strong CC/sustain over higher DPS that cannot deliver damage.
+- Use simulate_rotation and simulate_combat (via tools) to inspect stunbreak_count, has_stability, stability_uptime, cleanse_count, cleanse_rate_per_20s, and buff_uptime for Swiftness / Quickness / Resistance / Stability.
+- Use search_skills_by_effect("Stability") and search_traits_by_effect("survivability") when optimizing for WvW.
 - Consider: stability uptime, condi cleanse access, CC chain potential, CC immunity sources, escape tools, group synergy"#
         }
         "PvP" => {
