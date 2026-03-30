@@ -247,24 +247,39 @@ fn swap_sigil_slots(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuil
         .filter(|s| s.name.contains("Superior"))
         .collect();
 
-    let slot_count = candidate.validated.sigils.len().max(2).min(2);
+    // Treat sigils as 4 fixed slots: [set1_main, set1_off, set2_main, set2_off].
+    // Enforce "no duplicate sigil family within a weapon set", but allow the
+    // same family in both sets independently.
+    let slot_count = 4usize;
     let mut neighbors: Vec<ValidatedBuild> = Vec::new();
 
     for slot_idx in 0..slot_count {
-        // IDs currently in the *other* slots (to avoid duplicates)
-        let other_ids: Vec<u32> = candidate
-            .validated
-            .sigils
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != slot_idx)
-            .filter_map(|(_, s)| Some(s.id))
-            .collect();
+        // Determine the 2-slot weapon set this slot belongs to.
+        let set_start = (slot_idx / 2) * 2;
+        let set_end = set_start + 2;
+
+        // IDs and families currently in the *other* slot(s) of this set.
+        let mut other_ids: Vec<u32> = Vec::new();
+        let mut other_families: Vec<String> = Vec::new();
+        for i in set_start..set_end {
+            if i == slot_idx {
+                continue;
+            }
+            if let Some(s) = candidate.validated.sigils.get(i) {
+                other_ids.push(s.id);
+                other_families.push(normalize_sigil_family(&s.name));
+            }
+        }
 
         for sigil in &superior_sigils {
+            let family = normalize_sigil_family(&sigil.name);
             if other_ids.contains(&sigil.id) {
-                continue; // would duplicate a sigil in another slot
+                continue; // duplicate by item id in this set
             }
+            if other_families.iter().any(|f| f == &family) {
+                continue; // duplicate by family name in this set
+            }
+
             let mut b = candidate.validated.clone();
             // Ensure the sigils vec has at least `slot_idx + 1` entries.
             while b.sigils.len() <= slot_idx {
@@ -280,6 +295,12 @@ fn swap_sigil_slots(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuil
     }
 
     neighbors
+}
+
+fn normalize_sigil_family(name: &str) -> String {
+    let mut base = name.replace(" (PvP)", "");
+    base.make_ascii_lowercase();
+    base.trim().to_string()
 }
 
 /// Operator 4 — swap relic.
