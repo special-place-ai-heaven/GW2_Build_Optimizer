@@ -5,8 +5,7 @@ use thiserror::Error;
 use super::{DataLoadError, EvidenceLevel};
 
 /// Canonical JSON embedded at compile time from data/formulas/universal.json.
-const UNIVERSAL_FORMULAS_JSON: &str =
-    include_str!("../../../../data/formulas/universal.json");
+const UNIVERSAL_FORMULAS_JSON: &str = include_str!("../../../../data/formulas/universal.json");
 
 static FORMULAS: OnceLock<UniversalFormulas> = OnceLock::new();
 
@@ -114,21 +113,15 @@ impl UniversalFormulas {
     /// Formula: skill_damage * (power / base_primary_attribute)
     ///          * (tooltip_reference_armor / target_armor)
     /// Source: https://wiki.guildwars2.com/wiki/Damage
-    pub fn strike_damage(
-        &self,
-        skill_damage: f64,
-        power: f64,
-        target_armor: f64,
-    ) -> f64 {
-        skill_damage * (power / self.base_primary_attribute)
+    pub fn strike_damage(&self, skill_damage: f64, power: f64, target_armor: f64) -> f64 {
+        skill_damage
+            * (power / self.base_primary_attribute)
             * (self.tooltip_reference_armor / target_armor)
     }
 }
 
 /// Parse and validate universal formulas from JSON text.
-pub fn load_universal_formulas(
-    json: &str,
-) -> Result<UniversalFormulas, UniversalFormulaError> {
+pub fn load_universal_formulas(json: &str) -> Result<UniversalFormulas, UniversalFormulaError> {
     let formulas: UniversalFormulas = serde_json::from_str(json)?;
     validate_formulas(&formulas)?;
     Ok(formulas)
@@ -299,11 +292,7 @@ mod tests {
     fn test_strike_damage_formula() {
         let f = formulas();
         let dmg = f.strike_damage(500.0, 2000.0, 2597.0);
-        assert!(
-            (dmg - 1000.0).abs() < 0.01,
-            "Expected 1000.0, got {}",
-            dmg
-        );
+        assert!((dmg - 1000.0).abs() < 0.01, "Expected 1000.0, got {}", dmg);
     }
 
     // Power 2000, skill_damage 500, target_armor 2000:
@@ -312,11 +301,7 @@ mod tests {
     fn test_strike_damage_with_different_armor() {
         let f = formulas();
         let dmg = f.strike_damage(500.0, 2000.0, 2000.0);
-        assert!(
-            (dmg - 1298.5).abs() < 0.01,
-            "Expected 1298.5, got {}",
-            dmg
-        );
+        assert!((dmg - 1298.5).abs() < 0.01, "Expected 1298.5, got {}", dmg);
     }
 
     // Source: https://wiki.guildwars2.com/wiki/Damage
@@ -350,7 +335,8 @@ mod tests {
         }"#;
         let err = load_universal_formulas(json).unwrap_err();
         assert!(
-            err.to_string().contains("precision_offset must be positive"),
+            err.to_string()
+                .contains("precision_offset must be positive"),
             "unexpected error: {}",
             err
         );
@@ -400,7 +386,8 @@ mod tests {
         }"#;
         let err = load_universal_formulas(json).unwrap_err();
         assert!(
-            err.to_string().contains("condition_duration_cap must be 1.0"),
+            err.to_string()
+                .contains("condition_duration_cap must be 1.0"),
             "unexpected error: {}",
             err
         );

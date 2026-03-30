@@ -104,15 +104,26 @@ fn run_provider_tests(client: &dyn LlmClient) {
     print!("  [{}] generate_cached (first call)... ", provider);
     let start = Instant::now();
     let cache_prompt = "What is 2+2? Reply with just the number.";
-    let first = client.generate_cached(cache_prompt).expect("generate_cached first call");
+    let first = client
+        .generate_cached(cache_prompt)
+        .expect("generate_cached first call");
     let first_time = start.elapsed();
     println!("OK ({:.1}s) — '{}'", first_time.as_secs_f64(), first.trim());
 
-    print!("  [{}] generate_cached (second call, should be cached)... ", provider);
+    print!(
+        "  [{}] generate_cached (second call, should be cached)... ",
+        provider
+    );
     let start = Instant::now();
-    let second = client.generate_cached(cache_prompt).expect("generate_cached second call");
+    let second = client
+        .generate_cached(cache_prompt)
+        .expect("generate_cached second call");
     let second_time = start.elapsed();
-    println!("OK ({:.3}s) — '{}'", second_time.as_secs_f64(), second.trim());
+    println!(
+        "OK ({:.3}s) — '{}'",
+        second_time.as_secs_f64(),
+        second.trim()
+    );
     assert_eq!(first, second, "Cached response should be identical");
     assert!(
         second_time < first_time || second_time.as_millis() < 100,
@@ -125,7 +136,8 @@ fn run_provider_tests(client: &dyn LlmClient) {
     print!("  [{}] generate_with_tools (square 7)... ", provider);
     let start = Instant::now();
     let tools = test_tools();
-    let tool_prompt = "What is 7 squared? Use the square_number tool to compute it, then tell me the result.";
+    let tool_prompt =
+        "What is 7 squared? Use the square_number tool to compute it, then tell me the result.";
     let mut turns_seen = 0usize;
     let result = client.generate_with_tools_progress(
         tool_prompt,
@@ -137,7 +149,10 @@ fn run_provider_tests(client: &dyn LlmClient) {
         5,
         &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
             turns_seen = turn;
-            println!("    [progress] turn {}/{} tools={:?}", turn, max_turns, tool_names);
+            println!(
+                "    [progress] turn {}/{} tools={:?}",
+                turn, max_turns, tool_names
+            );
         },
     );
     match result {
@@ -184,12 +199,16 @@ fn test_gemini_validate_and_generate() {
 #[test]
 #[ignore]
 fn test_gemini_invalid_key() {
-    let client = gw2_optimizer::llm::gemini::GeminiLlmClient::new("invalid-key-12345", "gemini-2.5-flash")
-        .expect("Client construction should not fail");
+    let client =
+        gw2_optimizer::llm::gemini::GeminiLlmClient::new("invalid-key-12345", "gemini-2.5-flash")
+            .expect("Client construction should not fail");
     let result = client.validate_key();
     println!("Gemini invalid key result: {:?}", result);
     assert!(
-        matches!(result, Err(LlmError::InvalidKey) | Err(LlmError::Api { .. })),
+        matches!(
+            result,
+            Err(LlmError::InvalidKey) | Err(LlmError::Api { .. })
+        ),
         "Expected InvalidKey or Api error for bad key, got: {:?}",
         result
     );
@@ -210,12 +229,16 @@ fn test_openai_validate_and_generate() {
 #[test]
 #[ignore]
 fn test_openai_invalid_key() {
-    let client = gw2_optimizer::llm::openai::OpenAiClient::new("sk-invalid-key-12345", "gpt-4o-mini")
-        .expect("Client construction should not fail");
+    let client =
+        gw2_optimizer::llm::openai::OpenAiClient::new("sk-invalid-key-12345", "gpt-4o-mini")
+            .expect("Client construction should not fail");
     let result = client.validate_key();
     println!("OpenAI invalid key result: {:?}", result);
     assert!(
-        matches!(result, Err(LlmError::InvalidKey) | Err(LlmError::Api { .. })),
+        matches!(
+            result,
+            Err(LlmError::InvalidKey) | Err(LlmError::Api { .. })
+        ),
         "Expected InvalidKey or Api error for bad key, got: {:?}",
         result
     );
@@ -227,8 +250,9 @@ fn test_openai_invalid_key() {
 #[ignore]
 fn test_anthropic_validate_and_generate() {
     let key = anthropic_key();
-    let client = gw2_optimizer::llm::anthropic::AnthropicClient::new(&key, "claude-haiku-4-5-20251001")
-        .expect("Failed to create Anthropic client");
+    let client =
+        gw2_optimizer::llm::anthropic::AnthropicClient::new(&key, "claude-haiku-4-5-20251001")
+            .expect("Failed to create Anthropic client");
     println!("\n=== Anthropic Live Tests ===");
     run_provider_tests(&client);
 }
@@ -236,12 +260,18 @@ fn test_anthropic_validate_and_generate() {
 #[test]
 #[ignore]
 fn test_anthropic_invalid_key() {
-    let client = gw2_optimizer::llm::anthropic::AnthropicClient::new("sk-ant-invalid-12345", "claude-haiku-4-5-20251001")
-        .expect("Client construction should not fail");
+    let client = gw2_optimizer::llm::anthropic::AnthropicClient::new(
+        "sk-ant-invalid-12345",
+        "claude-haiku-4-5-20251001",
+    )
+    .expect("Client construction should not fail");
     let result = client.validate_key();
     println!("Anthropic invalid key result: {:?}", result);
     assert!(
-        matches!(result, Err(LlmError::InvalidKey) | Err(LlmError::Api { .. })),
+        matches!(
+            result,
+            Err(LlmError::InvalidKey) | Err(LlmError::Api { .. })
+        ),
         "Expected InvalidKey or Api error for bad key, got: {:?}",
         result
     );
@@ -264,7 +294,9 @@ fn test_create_client_factory_gemini() {
     let client = gw2_optimizer::llm::create_client(&config, &tmp)
         .expect("create_client should succeed with valid Gemini config");
     assert_eq!(client.provider_name(), "Gemini");
-    client.validate_key().expect("Key should be valid via factory");
+    client
+        .validate_key()
+        .expect("Key should be valid via factory");
     println!("[OK] create_client factory → Gemini validate_key passed");
 
     std::fs::remove_dir_all(&tmp).ok();
@@ -285,7 +317,9 @@ fn test_create_client_factory_openai() {
     let client = gw2_optimizer::llm::create_client(&config, &tmp)
         .expect("create_client should succeed with valid OpenAI config");
     assert_eq!(client.provider_name(), "OpenAI");
-    client.validate_key().expect("Key should be valid via factory");
+    client
+        .validate_key()
+        .expect("Key should be valid via factory");
     println!("[OK] create_client factory → OpenAI validate_key passed");
 
     std::fs::remove_dir_all(&tmp).ok();
@@ -306,7 +340,9 @@ fn test_create_client_factory_anthropic() {
     let client = gw2_optimizer::llm::create_client(&config, &tmp)
         .expect("create_client should succeed with valid Anthropic config");
     assert_eq!(client.provider_name(), "Anthropic");
-    client.validate_key().expect("Key should be valid via factory");
+    client
+        .validate_key()
+        .expect("Key should be valid via factory");
     println!("[OK] create_client factory → Anthropic validate_key passed");
 
     std::fs::remove_dir_all(&tmp).ok();

@@ -29,12 +29,7 @@ impl DataCache {
     }
 
     /// Save data to cache with current build number.
-    pub fn save<T: Serialize>(
-        &self,
-        key: &str,
-        data: &T,
-        build: u32,
-    ) -> Result<(), CacheError> {
+    pub fn save<T: Serialize>(&self, key: &str, data: &T, build: u32) -> Result<(), CacheError> {
         let entry = CacheEntry {
             build,
             fetched_at: Utc::now(),
@@ -102,7 +97,11 @@ impl DataCache {
     pub fn clear_all(&self) {
         if let Ok(entries) = std::fs::read_dir(&self.base_path) {
             for entry in entries.flatten() {
-                if entry.path().extension().is_some_and(|ext| ext == "json" || ext == "tmp") {
+                if entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext == "json" || ext == "tmp")
+                {
                     std::fs::remove_file(entry.path()).ok();
                 }
             }
@@ -233,8 +232,8 @@ mod tests {
         cache.save("stale_test", &"hello", 100).unwrap();
 
         assert!(!cache.is_stale("stale_test", 100)); // same build
-        assert!(cache.is_stale("stale_test", 101));  // different build
-        assert!(cache.is_stale("nonexistent", 100));  // missing file
+        assert!(cache.is_stale("stale_test", 101)); // different build
+        assert!(cache.is_stale("nonexistent", 100)); // missing file
 
         cache.clear_all();
     }
@@ -250,9 +249,12 @@ mod tests {
     fn test_character_cache_roundtrip() {
         let cache = temp_cache();
         let tabs = vec!["tab1".to_string(), "tab2".to_string()];
-        cache.save_character("Fun Detected", "buildtabs", &tabs).unwrap();
+        cache
+            .save_character("Fun Detected", "buildtabs", &tabs)
+            .unwrap();
 
-        let loaded: Option<Vec<String>> = cache.load_character("Fun Detected", "buildtabs").unwrap();
+        let loaded: Option<Vec<String>> =
+            cache.load_character("Fun Detected", "buildtabs").unwrap();
         assert_eq!(loaded, Some(tabs));
 
         // Different character returns None

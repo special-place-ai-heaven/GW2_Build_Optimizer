@@ -48,7 +48,12 @@ impl BuildStorage {
         }
         std::fs::rename(&tmp_path, &path).map_err(|e| {
             let _ = std::fs::remove_file(&tmp_path); // best-effort cleanup
-            format!("Failed to rename {} → {}: {}", tmp_path.display(), path.display(), e)
+            format!(
+                "Failed to rename {} → {}: {}",
+                tmp_path.display(),
+                path.display(),
+                e
+            )
         })
     }
 
@@ -62,7 +67,10 @@ impl BuildStorage {
 
         let path = self.saves_dir.join(format!("{}.json", filename));
         if !path.exists() {
-            return Err(format!("Build '{}' not found on disk — cannot overwrite", build.name));
+            return Err(format!(
+                "Build '{}' not found on disk — cannot overwrite",
+                build.name
+            ));
         }
 
         let json = serde_json::to_string_pretty(build)
@@ -76,7 +84,12 @@ impl BuildStorage {
         }
         std::fs::rename(&tmp_path, &path).map_err(|e| {
             let _ = std::fs::remove_file(&tmp_path); // best-effort cleanup
-            format!("Failed to rename {} → {}: {}", tmp_path.display(), path.display(), e)
+            format!(
+                "Failed to rename {} → {}: {}",
+                tmp_path.display(),
+                path.display(),
+                e
+            )
         })
     }
 
@@ -99,11 +112,7 @@ impl BuildStorage {
 
         let mut builds: Vec<SavedBuild> = entries
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .is_some_and(|ext| ext == "json")
-            })
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
             .filter_map(|e| {
                 let path = e.path();
                 let json = std::fs::read_to_string(&path).ok()?;
@@ -129,8 +138,7 @@ impl BuildStorage {
         if !path.exists() {
             return Err(format!("Build '{}' not found on disk", name));
         }
-        std::fs::remove_file(&path)
-            .map_err(|e| format!("Failed to delete: {}", e))?;
+        std::fs::remove_file(&path).map_err(|e| format!("Failed to delete: {}", e))?;
         Ok(())
     }
 }
@@ -182,8 +190,7 @@ mod tests {
 
     /// Create a unique temp dir for a test.
     fn temp_dir(label: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("gw2_test_storage_{}_{}",
-            std::process::id(), label))
+        std::env::temp_dir().join(format!("gw2_test_storage_{}_{}", std::process::id(), label))
     }
 
     #[test]

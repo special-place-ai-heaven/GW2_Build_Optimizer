@@ -208,7 +208,10 @@ mod tests {
         let fact: Fact = serde_json::from_str(json).unwrap();
         match fact {
             Fact::Buff {
-                duration, status, apply_count, ..
+                duration,
+                status,
+                apply_count,
+                ..
             } => {
                 assert_eq!(duration, Some(4));
                 assert_eq!(status.as_deref(), Some("Fury"));

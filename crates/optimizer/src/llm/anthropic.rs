@@ -281,7 +281,10 @@ impl AnthropicClient {
                 Ok(r) => r,
                 Err(e) => {
                     if attempt == MAX_RETRIES - 1 {
-                        self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                        self.rate
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .undo_reserve();
                         return Err(LlmError::Http(e.to_string()));
                     }
                     last_error = Some(LlmError::Http(e.to_string()));
@@ -295,7 +298,10 @@ impl AnthropicClient {
                     let body: MessagesResponse = match resp.json() {
                         Ok(b) => b,
                         Err(e) => {
-                            self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                            self.rate
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .undo_reserve();
                             return Err(LlmError::Http(e.to_string()));
                         }
                     };
@@ -309,28 +315,46 @@ impl AnthropicClient {
                     return Ok(body);
                 }
                 401 => {
-                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                    self.rate
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .undo_reserve();
                     return Err(LlmError::InvalidKey);
                 }
                 429 => {
-                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                    self.rate
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .undo_reserve();
                     return Err(LlmError::RateLimited);
                 }
                 500 | 502 | 503 | 529 => {
                     // 529 = Anthropic overloaded
                     let body = resp.text().unwrap_or_default();
-                    last_error = Some(LlmError::Api { status, message: body });
+                    last_error = Some(LlmError::Api {
+                        status,
+                        message: body,
+                    });
                     continue;
                 }
                 _ => {
                     let body = resp.text().unwrap_or_default();
-                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
-                    return Err(LlmError::Api { status, message: body });
+                    self.rate
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .undo_reserve();
+                    return Err(LlmError::Api {
+                        status,
+                        message: body,
+                    });
                 }
             }
         }
 
-        self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+        self.rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .undo_reserve();
         Err(last_error.unwrap_or_else(|| LlmError::Api {
             status: 500,
             message: "Anthropic server error after retries".into(),
@@ -416,18 +440,26 @@ impl LlmClient for AnthropicClient {
             // Accept these as valid keys — billing is a separate concern.
             400 | 403 => {
                 let body = resp.text().unwrap_or_default();
-                if body.contains("credit balance") || body.contains("billing")
-                    || body.contains("disabled") || body.contains("permission")
+                if body.contains("credit balance")
+                    || body.contains("billing")
+                    || body.contains("disabled")
+                    || body.contains("permission")
                 {
                     Ok(())
                 } else {
-                    Err(LlmError::Api { status: 400, message: body })
+                    Err(LlmError::Api {
+                        status: 400,
+                        message: body,
+                    })
                 }
             }
             429 => Ok(()), // Rate limited means key is valid
             status => {
                 let body = resp.text().unwrap_or_default();
-                Err(LlmError::Api { status, message: body })
+                Err(LlmError::Api {
+                    status,
+                    message: body,
+                })
             }
         }
     }
@@ -460,7 +492,8 @@ impl LlmClient for AnthropicClient {
             Err(e) => {
                 return KeyValidationResult {
                     valid: false,
-                    message: "Cannot connect to Anthropic API. Check your internet connection.".into(),
+                    message: "Cannot connect to Anthropic API. Check your internet connection."
+                        .into(),
                     warning: Some(e.to_string()),
                 };
             }
@@ -513,8 +546,7 @@ impl LlmClient for AnthropicClient {
         let blocks = response
             .content
             .ok_or_else(|| LlmError::Parse("No content from Anthropic".into()))?;
-        extract_text(&blocks)
-            .ok_or_else(|| LlmError::Parse("No text in Anthropic response".into()))
+        extract_text(&blocks).ok_or_else(|| LlmError::Parse("No text in Anthropic response".into()))
     }
 
     fn generate_cached(&self, prompt: &str) -> Result<String, LlmError> {
@@ -563,9 +595,7 @@ impl LlmClient for AnthropicClient {
         for turn in 0..max_turns {
             let response = self.send_messages(&messages, None, Some(tools), 4096)?;
 
-            let blocks = response
-                .content
-                .unwrap_or_default();
+            let blocks = response.content.unwrap_or_default();
 
             // Capture text
             if let Some(text) = extract_text(&blocks) {
@@ -581,7 +611,8 @@ impl LlmClient for AnthropicClient {
             }
 
             // Report progress
-            let tool_names: Vec<String> = tool_uses.iter().map(|(_, name, _)| name.clone()).collect();
+            let tool_names: Vec<String> =
+                tool_uses.iter().map(|(_, name, _)| name.clone()).collect();
             on_progress(turn + 1, max_turns, &tool_names);
 
             // Add assistant message with all content blocks
@@ -633,7 +664,10 @@ impl LlmClient for AnthropicClient {
             429 => return Err(LlmError::RateLimited),
             status => {
                 let body = resp.text().unwrap_or_default();
-                return Err(LlmError::Api { status, message: body });
+                return Err(LlmError::Api {
+                    status,
+                    message: body,
+                });
             }
         }
 
@@ -647,9 +681,7 @@ impl LlmClient for AnthropicClient {
             display_name: Option<String>,
         }
 
-        let body: ModelsResponse = resp
-            .json()
-            .map_err(|e| LlmError::Parse(e.to_string()))?;
+        let body: ModelsResponse = resp.json().map_err(|e| LlmError::Parse(e.to_string()))?;
 
         let entries = body.data.unwrap_or_default();
 
@@ -731,7 +763,9 @@ mod tests {
 
     #[test]
     fn test_content_block_serialization() {
-        let text_block = ContentBlock::Text { text: "Hello".into() };
+        let text_block = ContentBlock::Text {
+            text: "Hello".into(),
+        };
         let json = serde_json::to_value(&text_block).unwrap();
         assert_eq!(json["type"], "text");
         assert_eq!(json["text"], "Hello");
@@ -758,13 +792,17 @@ mod tests {
     #[test]
     fn test_extract_text_from_blocks() {
         let blocks = vec![
-            ContentBlock::Text { text: "Hello ".into() },
+            ContentBlock::Text {
+                text: "Hello ".into(),
+            },
             ContentBlock::ToolUse {
                 id: "t1".into(),
                 name: "test".into(),
                 input: Value::Null,
             },
-            ContentBlock::Text { text: "world".into() },
+            ContentBlock::Text {
+                text: "world".into(),
+            },
         ];
         assert_eq!(extract_text(&blocks), Some("Hello world".into()));
     }
@@ -782,7 +820,9 @@ mod tests {
     #[test]
     fn test_extract_tool_uses() {
         let blocks = vec![
-            ContentBlock::Text { text: "Let me check".into() },
+            ContentBlock::Text {
+                text: "Let me check".into(),
+            },
             ContentBlock::ToolUse {
                 id: "toolu_1".into(),
                 name: "get_profession_info".into(),

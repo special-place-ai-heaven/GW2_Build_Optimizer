@@ -94,7 +94,10 @@ pub enum NormalizedEffect {
     /// Flat stat bonus (e.g. +150 Power from a trait).
     StatBonus { stat: StatType, value: f64 },
     /// Percentage damage modifier (e.g. +5% strike damage).
-    DamageModifier { category: DamageCategory, percent: f64 },
+    DamageModifier {
+        category: DamageCategory,
+        percent: f64,
+    },
     /// Applies a condition or boon.
     AppliesStatus {
         status: String,
@@ -108,7 +111,11 @@ pub enum NormalizedEffect {
         effect: Box<NormalizedEffect>,
     },
     /// Converts one stat to another (e.g. 7% of Toughness to Power).
-    StatConversion { source: StatType, target: StatType, percent: f64 },
+    StatConversion {
+        source: StatType,
+        target: StatType,
+        percent: f64,
+    },
     /// Duration bonus for conditions/boons (e.g. +10% Burning Duration).
     DurationBonus { kind: DurationKind, percent: f64 },
     /// Conditional effect requiring a specific trait to be equipped (TraitedFact).
@@ -159,10 +166,7 @@ pub enum SynergyLinkType {
 // ─── Effect Extractors ───
 
 /// Extract normalized effects from a trait, considering equipped traits for TraitedFact resolution.
-pub fn extract_trait_effects(
-    t: &GW2Trait,
-    equipped_traits: &[u32],
-) -> Vec<NormalizedEffect> {
+pub fn extract_trait_effects(t: &GW2Trait, equipped_traits: &[u32]) -> Vec<NormalizedEffect> {
     let mut effects = Vec::new();
 
     // Collect overridden indices from active traited_facts
@@ -717,12 +721,16 @@ pub fn score_normalized_effect(effect: &NormalizedEffect, weights: &Optimization
             // +5% damage modifier with weight 1.0 → 0.05
             percent / 100.0 * w
         }
-        NormalizedEffect::AppliesStatus { status, is_condition, stacks, .. } => {
+        NormalizedEffect::AppliesStatus {
+            status,
+            is_condition,
+            stacks,
+            ..
+        } => {
             if *is_condition {
                 let w = weights.condition;
                 // Conditions are valuable for condition builds
-                (*stacks as f64).min(5.0) * 0.02 * w
-                    + condition_importance(status) * 0.03 * w
+                (*stacks as f64).min(5.0) * 0.02 * w + condition_importance(status) * 0.03 * w
             } else {
                 // Boons: value depends on boon type
                 boon_weight(status, weights) * 0.05
@@ -732,7 +740,11 @@ pub fn score_normalized_effect(effect: &NormalizedEffect, weights: &Optimization
             // Base value of the inner effect, discounted
             score_normalized_effect(effect, weights) * 0.3
         }
-        NormalizedEffect::StatConversion { source, target, percent } => {
+        NormalizedEffect::StatConversion {
+            source,
+            target,
+            percent,
+        } => {
             let src_w = weight_for_stat(source, weights);
             let tgt_w = weight_for_stat(target, weights);
             // Conversion is good when source stat is high (from gear) and target is useful
@@ -741,7 +753,9 @@ pub fn score_normalized_effect(effect: &NormalizedEffect, weights: &Optimization
         NormalizedEffect::DurationBonus { kind, percent } => {
             let w = match kind {
                 DurationKind::AllCondition => weights.condition * 0.8 + weights.control * 0.3,
-                DurationKind::AllBoon => weights.boon_support * 0.4 + weights.control * 0.2 + weights.healing * 0.3,
+                DurationKind::AllBoon => {
+                    weights.boon_support * 0.4 + weights.control * 0.2 + weights.healing * 0.3
+                }
                 DurationKind::SpecificCondition(_) => weights.condition * 0.5,
             };
             percent / 100.0 * w
@@ -750,9 +764,11 @@ pub fn score_normalized_effect(effect: &NormalizedEffect, weights: &Optimization
             // Conditional effects get partial credit (may or may not be activated)
             score_normalized_effect(effect, weights) * 0.4
         }
-        NormalizedEffect::ProcEffect { effect, estimated_uptime, .. } => {
-            score_normalized_effect(effect, weights) * estimated_uptime
-        }
+        NormalizedEffect::ProcEffect {
+            effect,
+            estimated_uptime,
+            ..
+        } => score_normalized_effect(effect, weights) * estimated_uptime,
     }
 }
 
@@ -775,7 +791,12 @@ pub fn compute_marginal_synergy(
     for new_eff in new_effects {
         for &(existing_id, existing_eff) in &all_existing {
             // 1. TraitedFact activation: Conditional requires a trait that is in the build
-            if let NormalizedEffect::Conditional { requires_trait_id, effect, .. } = new_eff {
+            if let NormalizedEffect::Conditional {
+                requires_trait_id,
+                effect,
+                ..
+            } = new_eff
+            {
                 if let ComponentId::Trait(tid) = existing_id {
                     if *tid == *requires_trait_id {
                         let bonus = score_normalized_effect(effect, weights) * 0.6;
@@ -787,15 +808,23 @@ pub fn compute_marginal_synergy(
                             target_name: "Conditional effect".into(),
                             link_type: SynergyLinkType::TraitedFact,
                             score: bonus,
-                            description: "Equipped trait activates a conditional effect upgrade.".into(),
+                            description: "Equipped trait activates a conditional effect upgrade."
+                                .into(),
                         });
                     }
                 }
             }
 
             // 2. Enabler→Payoff: AppliesStatus meets BenefitsFromStatus
-            if let NormalizedEffect::AppliesStatus { status: applied, .. } = new_eff {
-                if let NormalizedEffect::BenefitsFromStatus { status: needed, effect } = existing_eff {
+            if let NormalizedEffect::AppliesStatus {
+                status: applied, ..
+            } = new_eff
+            {
+                if let NormalizedEffect::BenefitsFromStatus {
+                    status: needed,
+                    effect,
+                } = existing_eff
+                {
                     if applied == needed {
                         let bonus = score_normalized_effect(effect, weights) * 0.5;
                         synergy += bonus;
@@ -811,8 +840,15 @@ pub fn compute_marginal_synergy(
                     }
                 }
             }
-            if let NormalizedEffect::BenefitsFromStatus { status: needed, effect } = new_eff {
-                if let NormalizedEffect::AppliesStatus { status: applied, .. } = existing_eff {
+            if let NormalizedEffect::BenefitsFromStatus {
+                status: needed,
+                effect,
+            } = new_eff
+            {
+                if let NormalizedEffect::AppliesStatus {
+                    status: applied, ..
+                } = existing_eff
+                {
                     if applied == needed {
                         let bonus = score_normalized_effect(effect, weights) * 0.5;
                         synergy += bonus;
@@ -823,15 +859,28 @@ pub fn compute_marginal_synergy(
                             target_name: format!("Benefits from {}", needed),
                             link_type: SynergyLinkType::EnablerPayoff,
                             score: bonus,
-                            description: format!("Existing {} application feeds into a bonus effect.", applied),
+                            description: format!(
+                                "Existing {} application feeds into a bonus effect.",
+                                applied
+                            ),
                         });
                     }
                 }
             }
 
             // 3. Condition stacking: multiple sources of same condition
-            if let NormalizedEffect::AppliesStatus { status: s1, is_condition: true, .. } = new_eff {
-                if let NormalizedEffect::AppliesStatus { status: s2, is_condition: true, .. } = existing_eff {
+            if let NormalizedEffect::AppliesStatus {
+                status: s1,
+                is_condition: true,
+                ..
+            } = new_eff
+            {
+                if let NormalizedEffect::AppliesStatus {
+                    status: s2,
+                    is_condition: true,
+                    ..
+                } = existing_eff
+                {
                     if s1 == s2 {
                         let bonus = condition_importance(s1) * 0.03 * weights.condition;
                         synergy += bonus;
@@ -842,15 +891,26 @@ pub fn compute_marginal_synergy(
                             target_name: format!("{} source", s1),
                             link_type: SynergyLinkType::ConditionStacking,
                             score: bonus,
-                            description: format!("Multiple sources of {} stack for higher sustained damage.", s1),
+                            description: format!(
+                                "Multiple sources of {} stack for higher sustained damage.",
+                                s1
+                            ),
                         });
                     }
                 }
             }
 
             // 4. Modifier stacking: multiple modifiers in same category interact
-            if let NormalizedEffect::DamageModifier { category: c1, percent: p1 } = new_eff {
-                if let NormalizedEffect::DamageModifier { category: c2, percent: p2 } = existing_eff {
+            if let NormalizedEffect::DamageModifier {
+                category: c1,
+                percent: p1,
+            } = new_eff
+            {
+                if let NormalizedEffect::DamageModifier {
+                    category: c2,
+                    percent: p2,
+                } = existing_eff
+                {
                     if c1 == c2 {
                         let interaction = (p1 / 100.0) * (p2 / 100.0);
                         let w = weight_for_damage_category(c1, weights);
@@ -864,7 +924,10 @@ pub fn compute_marginal_synergy(
                                 target_name: format!("{:?} +{}%", c1, p1),
                                 link_type: SynergyLinkType::ModifierStacking,
                                 score: bonus,
-                                description: format!("Stacking {:?} damage modifiers multiply for greater effect.", c1),
+                                description: format!(
+                                    "Stacking {:?} damage modifiers multiply for greater effect.",
+                                    c1
+                                ),
                             });
                         }
                     }
@@ -872,7 +935,12 @@ pub fn compute_marginal_synergy(
             }
 
             // 5. Duration alignment: condition applied + matching duration bonus
-            if let NormalizedEffect::AppliesStatus { status, is_condition: true, .. } = new_eff {
+            if let NormalizedEffect::AppliesStatus {
+                status,
+                is_condition: true,
+                ..
+            } = new_eff
+            {
                 if let NormalizedEffect::DurationBonus { kind, .. } = existing_eff {
                     if duration_matches_condition(kind, status) {
                         let bonus = 0.03 * weights.condition;
@@ -884,13 +952,21 @@ pub fn compute_marginal_synergy(
                             target_name: format!("{} application", status),
                             link_type: SynergyLinkType::DurationAlignment,
                             score: bonus,
-                            description: format!("{} duration bonus extends {} ticks for more damage.", status, status),
+                            description: format!(
+                                "{} duration bonus extends {} ticks for more damage.",
+                                status, status
+                            ),
                         });
                     }
                 }
             }
             if let NormalizedEffect::DurationBonus { kind, .. } = new_eff {
-                if let NormalizedEffect::AppliesStatus { status, is_condition: true, .. } = existing_eff {
+                if let NormalizedEffect::AppliesStatus {
+                    status,
+                    is_condition: true,
+                    ..
+                } = existing_eff
+                {
                     if duration_matches_condition(kind, status) {
                         let bonus = 0.03 * weights.condition;
                         synergy += bonus;
@@ -901,7 +977,10 @@ pub fn compute_marginal_synergy(
                             target_name: format!("{:?} duration", kind),
                             link_type: SynergyLinkType::DurationAlignment,
                             score: bonus,
-                            description: format!("Existing {} application benefits from added duration bonus.", status),
+                            description: format!(
+                                "Existing {} application benefits from added duration bonus.",
+                                status
+                            ),
                         });
                     }
                 }
@@ -930,7 +1009,8 @@ pub fn template_explanation(
 
     let mut parts = Vec::new();
     parts.push(format!(
-        "This {} build uses {} gear.", profession, gear_prefix,
+        "This {} build uses {} gear.",
+        profession, gear_prefix,
     ));
 
     for link in synergy_links.iter().take(5) {
@@ -949,7 +1029,9 @@ fn weight_for_stat(stat: &StatType, weights: &OptimizationWeights) -> f64 {
         StatType::Ferocity => weights.power * 0.5,
         StatType::ConditionDamage => weights.condition * 0.8 + weights.control * 0.2,
         StatType::Expertise => weights.condition * 0.6 + weights.control * 0.4,
-        StatType::Concentration => weights.boon_support * 0.5 + weights.control * 0.2 + weights.healing * 0.3,
+        StatType::Concentration => {
+            weights.boon_support * 0.5 + weights.control * 0.2 + weights.healing * 0.3
+        }
         StatType::HealingPower => weights.healing * 0.9,
         StatType::Toughness => weights.sustain * 0.8,
         StatType::Vitality => weights.sustain * 0.7,
@@ -1007,11 +1089,24 @@ fn duration_matches_condition(kind: &DurationKind, condition: &str) -> bool {
 fn is_condition(status: &str) -> bool {
     matches!(
         status,
-        "Bleeding" | "Burning" | "Poison" | "Torment" | "Confusion"
-            | "Vulnerability" | "Weakness" | "Blind" | "Blinded"
-            | "Chill" | "Chilled" | "Cripple" | "Crippled"
-            | "Fear" | "Immobilize" | "Immobilized"
-            | "Slow" | "Taunt"
+        "Bleeding"
+            | "Burning"
+            | "Poison"
+            | "Torment"
+            | "Confusion"
+            | "Vulnerability"
+            | "Weakness"
+            | "Blind"
+            | "Blinded"
+            | "Chill"
+            | "Chilled"
+            | "Cripple"
+            | "Crippled"
+            | "Fear"
+            | "Immobilize"
+            | "Immobilized"
+            | "Slow"
+            | "Taunt"
     )
 }
 
@@ -1064,7 +1159,10 @@ mod tests {
     #[test]
     fn test_stat_type_from_api() {
         assert_eq!(StatType::from_api("Power"), Some(StatType::Power));
-        assert_eq!(StatType::from_api("ConditionDuration"), Some(StatType::Expertise));
+        assert_eq!(
+            StatType::from_api("ConditionDuration"),
+            Some(StatType::Expertise)
+        );
         assert_eq!(StatType::from_api("CritDamage"), Some(StatType::Ferocity));
         assert_eq!(StatType::from_api("AgonyResistance"), None);
     }
@@ -1115,7 +1213,12 @@ mod tests {
         let effects = extract_effects_from_fact(&fact);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
-            NormalizedEffect::AppliesStatus { status, is_condition, stacks, duration_s } => {
+            NormalizedEffect::AppliesStatus {
+                status,
+                is_condition,
+                stacks,
+                duration_s,
+            } => {
                 assert_eq!(status, "Bleeding");
                 assert!(*is_condition);
                 assert_eq!(*stacks, 2);
@@ -1137,7 +1240,11 @@ mod tests {
         let effects = extract_effects_from_fact(&fact);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
-            NormalizedEffect::StatConversion { source, target, percent } => {
+            NormalizedEffect::StatConversion {
+                source,
+                target,
+                percent,
+            } => {
                 assert_eq!(*source, StatType::Toughness);
                 assert_eq!(*target, StatType::Power);
                 assert!((percent - 7.0).abs() < 0.01);
@@ -1184,13 +1291,25 @@ mod tests {
     #[test]
     fn test_score_stat_bonus_power_dps() {
         let w = OptimizationWeights::preset_power_dps();
-        let eff = NormalizedEffect::StatBonus { stat: StatType::Power, value: 150.0 };
+        let eff = NormalizedEffect::StatBonus {
+            stat: StatType::Power,
+            value: 150.0,
+        };
         let score = score_normalized_effect(&eff, &w);
-        assert!(score > 0.0, "Power stat should have positive score with PowerDPS weights");
+        assert!(
+            score > 0.0,
+            "Power stat should have positive score with PowerDPS weights"
+        );
 
-        let eff_hp = NormalizedEffect::StatBonus { stat: StatType::HealingPower, value: 150.0 };
+        let eff_hp = NormalizedEffect::StatBonus {
+            stat: StatType::HealingPower,
+            value: 150.0,
+        };
         let score_hp = score_normalized_effect(&eff_hp, &w);
-        assert!(score > score_hp, "Power should score higher than Healing with PowerDPS weights");
+        assert!(
+            score > score_hp,
+            "Power should score higher than Healing with PowerDPS weights"
+        );
     }
 
     #[test]
@@ -1205,7 +1324,10 @@ mod tests {
 
         let w_power = OptimizationWeights::preset_power_dps();
         let score_power = score_normalized_effect(&eff, &w_power);
-        assert!(score > score_power, "Condi modifier should score higher with condition weights");
+        assert!(
+            score > score_power,
+            "Condi modifier should score higher with condition weights"
+        );
     }
 
     #[test]
@@ -1227,7 +1349,10 @@ mod tests {
             }],
         )];
         let (score, _links) = compute_marginal_synergy(&new_effects, &existing, &w);
-        assert!(score > 0.0, "Should get synergy bonus for stacking conditions");
+        assert!(
+            score > 0.0,
+            "Should get synergy bonus for stacking conditions"
+        );
     }
 
     #[test]
@@ -1247,17 +1372,29 @@ mod tests {
             }],
         )];
         let (score, _links) = compute_marginal_synergy(&new_effects, &existing, &w);
-        assert!(score > 0.0, "Duration bonus should synergize with matching condition");
+        assert!(
+            score > 0.0,
+            "Duration bonus should synergize with matching condition"
+        );
     }
 
     #[test]
     fn test_extract_sigil_force() {
         let sigil = Item {
-            id: 1, name: "Superior Sigil of Force".into(),
-            item_type: "UpgradeComponent".into(), rarity: "Exotic".into(),
-            level: 60, description: None, icon: None, vendor_value: None,
-            chat_link: None, default_skin: None, flags: vec![], game_types: vec![],
-            restrictions: vec![], details: None,
+            id: 1,
+            name: "Superior Sigil of Force".into(),
+            item_type: "UpgradeComponent".into(),
+            rarity: "Exotic".into(),
+            level: 60,
+            description: None,
+            icon: None,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec![],
+            restrictions: vec![],
+            details: None,
         };
         let effects = extract_sigil_effects(&sigil);
         assert!(!effects.is_empty());
@@ -1269,11 +1406,20 @@ mod tests {
     #[test]
     fn test_extract_relic_nightmare() {
         let relic = Item {
-            id: 1, name: "Relic of the Nightmare".into(),
-            item_type: "Relic".into(), rarity: "Legendary".into(),
-            level: 80, description: None, icon: None, vendor_value: None,
-            chat_link: None, default_skin: None, flags: vec![], game_types: vec![],
-            restrictions: vec![], details: None,
+            id: 1,
+            name: "Relic of the Nightmare".into(),
+            item_type: "Relic".into(),
+            rarity: "Legendary".into(),
+            level: 80,
+            description: None,
+            icon: None,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec![],
+            restrictions: vec![],
+            details: None,
         };
         let effects = extract_relic_effects(&relic);
         assert_eq!(effects.len(), 1);

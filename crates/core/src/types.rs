@@ -1,8 +1,8 @@
 //! Core domain types for resolved builds.
 //! A "resolved" build has all IDs expanded to full data from the cache.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A fully resolved character build with all data expanded.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -60,12 +60,17 @@ impl BuildLocks {
     /// Check if any locks are set at all.
     pub fn has_any_locks(&self) -> bool {
         self.specs.iter().any(|s| s.is_some())
-            || self.trait_locks.values().any(|cols| cols.iter().any(|c| c.is_some()))
+            || self
+                .trait_locks
+                .values()
+                .any(|cols| cols.iter().any(|c| c.is_some()))
     }
 
     /// Get locked trait for a specific spec and column (0=Adept, 1=Master, 2=Grandmaster).
     pub fn locked_trait(&self, spec_id: u32, column: usize) -> Option<u32> {
-        self.trait_locks.get(&spec_id).and_then(|cols| cols.get(column).copied().flatten())
+        self.trait_locks
+            .get(&spec_id)
+            .and_then(|cols| cols.get(column).copied().flatten())
     }
 
     /// Build a text description of all active locks for prompt generation.
@@ -85,7 +90,10 @@ impl BuildLocks {
                         2 => "Grandmaster",
                         _ => "Unknown",
                     };
-                    parts.push(format!("Spec {} {} trait locked to ID {}", spec_id, tier, tid));
+                    parts.push(format!(
+                        "Spec {} {} trait locked to ID {}",
+                        spec_id, tier, tid
+                    ));
                 }
             }
         }

@@ -1633,18 +1633,23 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
             ui.button_with_size("Clear Cache", [100.0, 0.0]);
             style.pop();
         } else if ui.button_with_size("Clear Cache", [100.0, 0.0]) {
-            let _ = std::fs::remove_dir_all(&cache_dir);
-            state.config.cache_build_number = None;
-            if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(
-                    nexus::log::LogLevel::Warning,
-                    "GW2BuildOpt",
-                    &format!("Config save failed: {}", e),
-                );
+            if let Err(e) = remove_dir_if_present(&cache_dir) {
+                let msg = format!("Failed to clear cache: {}", e);
+                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &msg);
+                state.main.error = Some(msg);
+            } else {
+                state.config.cache_build_number = None;
+                if let Err(e) = state.config.save(&state.config_path) {
+                    nexus::log::log(
+                        nexus::log::LogLevel::Warning,
+                        "GW2BuildOpt",
+                        &format!("Config save failed: {}", e),
+                    );
+                }
+                state.main.game_db = None;
+                state.setup.download_progress = None;
+                stats::start_game_data_refresh(state);
             }
-            state.main.game_db = None;
-            state.setup.download_progress = None;
-            stats::start_game_data_refresh(state);
         }
 
         ui.spacing();
@@ -1678,18 +1683,23 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
             style.pop();
         } else if ui.button_with_size("Refresh Game Data", [200.0, 0.0]) {
             let cache_dir_refresh = state.addon_dir.join("cache");
-            let _ = std::fs::remove_dir_all(&cache_dir_refresh);
-            state.config.cache_build_number = None;
-            if let Err(e) = state.config.save(&state.config_path) {
-                nexus::log::log(
-                    nexus::log::LogLevel::Warning,
-                    "GW2BuildOpt",
-                    &format!("Config save failed: {}", e),
-                );
+            if let Err(e) = remove_dir_if_present(&cache_dir_refresh) {
+                let msg = format!("Failed to refresh game data: {}", e);
+                nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &msg);
+                state.main.error = Some(msg);
+            } else {
+                state.config.cache_build_number = None;
+                if let Err(e) = state.config.save(&state.config_path) {
+                    nexus::log::log(
+                        nexus::log::LogLevel::Warning,
+                        "GW2BuildOpt",
+                        &format!("Config save failed: {}", e),
+                    );
+                }
+                state.main.game_db = None;
+                state.setup.download_progress = None;
+                stats::start_game_data_refresh(state);
             }
-            state.main.game_db = None;
-            state.setup.download_progress = None;
-            stats::start_game_data_refresh(state);
         }
 
         ui.spacing();
@@ -1706,7 +1716,11 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
             );
             if ui.button_with_size("Yes, Reset", [100.0, 0.0]) {
                 state.main.confirm_reset = false;
-                state.screen = crate::state::Screen::Setup(crate::state::SetupStep::Gw2ApiKey);
+                if let Err(e) = state.reset_to_first_run() {
+                    let msg = format!("Failed to reset settings: {}", e);
+                    nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &msg);
+                    state.main.error = Some(msg);
+                }
             }
             ui.same_line();
             if ui.button_with_size("Cancel", [100.0, 0.0]) {
@@ -1743,6 +1757,14 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {
         format!("{} B", bytes)
+    }
+}
+
+fn remove_dir_if_present(path: &std::path::Path) -> Result<(), std::io::Error> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
     }
 }
 
@@ -2066,10 +2088,7 @@ fn reconstruct_damage_modifiers(
 
     // Resolve specialization + trait names to IDs
     for (spec_name, trait_names) in &saved.specializations {
-        let spec = db
-            .specializations
-            .values()
-            .find(|s| s.name == *spec_name);
+        let spec = db.specializations.values().find(|s| s.name == *spec_name);
         let Some(spec) = spec else {
             nexus::log::log(
                 nexus::log::LogLevel::Warning,
@@ -2083,15 +2102,12 @@ fn reconstruct_damage_modifiers(
         };
 
         for trait_name in trait_names {
-            let trait_id = db
-                .traits_by_spec
-                .get(&spec.id)
-                .and_then(|ids| {
-                    ids.iter()
-                        .filter_map(|id| db.traits.get(id))
-                        .find(|t| t.name == *trait_name)
-                        .map(|t| t.id)
-                });
+            let trait_id = db.traits_by_spec.get(&spec.id).and_then(|ids| {
+                ids.iter()
+                    .filter_map(|id| db.traits.get(id))
+                    .find(|t| t.name == *trait_name)
+                    .map(|t| t.id)
+            });
             match trait_id {
                 Some(id) => equipped_trait_ids.push(id),
                 None => {
@@ -2239,7 +2255,6 @@ fn format_timestamp(timestamp: u64) -> String {
     )
 }
 
-
 #[cfg(test)]
 mod tests {
     fn build_saved_for_modifier_reconstruction() -> gw2_core::types::SavedBuild {
@@ -2253,10 +2268,7 @@ mod tests {
             balance_manifest_version: None,
             label: "Test Build".into(),
             stat_prefix: "Viper's".into(),
-            specializations: vec![(
-                "Test Spec".into(),
-                vec!["Test Condition Trait".into()],
-            )],
+            specializations: vec![("Test Spec".into(), vec!["Test Condition Trait".into()])],
             weapons: vec![],
             skills: vec![],
             rune: "Superior Rune of Test".into(),
@@ -2487,4 +2499,3 @@ mod tests {
         );
     }
 }
-

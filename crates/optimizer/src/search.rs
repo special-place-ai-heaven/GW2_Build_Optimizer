@@ -20,13 +20,33 @@ pub struct GearCandidate {
 
 /// PvE/WvW equipment slots that carry stats.
 pub const STAT_SLOTS: &[&str] = &[
-    "Helm", "Shoulders", "Coat", "Gloves", "Leggings", "Boots",
-    "WeaponA1", "WeaponA2", "WeaponB1", "WeaponB2",
-    "Backpack", "Accessory1", "Accessory2", "Amulet", "Ring1", "Ring2",
+    "Helm",
+    "Shoulders",
+    "Coat",
+    "Gloves",
+    "Leggings",
+    "Boots",
+    "WeaponA1",
+    "WeaponA2",
+    "WeaponB1",
+    "WeaponB2",
+    "Backpack",
+    "Accessory1",
+    "Accessory2",
+    "Amulet",
+    "Ring1",
+    "Ring2",
 ];
 
 /// Slot group definitions for mix strategies.
-const TRINKET_SLOTS: &[&str] = &["Backpack", "Accessory1", "Accessory2", "Amulet", "Ring1", "Ring2"];
+const TRINKET_SLOTS: &[&str] = &[
+    "Backpack",
+    "Accessory1",
+    "Accessory2",
+    "Amulet",
+    "Ring1",
+    "Ring2",
+];
 const WEAPON_SLOTS: &[&str] = &["WeaponA1", "WeaponA2", "WeaponB1", "WeaponB2"];
 const ARMOR_SLOTS: &[&str] = &["Helm", "Shoulders", "Coat", "Gloves", "Leggings", "Boots"];
 
@@ -81,19 +101,25 @@ pub fn search_gear_prefixes(
 
                 // Strategy 2: Secondary on trinkets (classic armor+weapon / trinket split)
                 candidates.push(build_mixed_candidate(
-                    primary.id, secondary.id, TRINKET_SLOTS,
+                    primary.id,
+                    secondary.id,
+                    TRINKET_SLOTS,
                     &format!("{} / {}", primary.name, secondary.name),
                 ));
 
                 // Strategy 3: Secondary on weapons
                 candidates.push(build_mixed_candidate(
-                    primary.id, secondary.id, WEAPON_SLOTS,
+                    primary.id,
+                    secondary.id,
+                    WEAPON_SLOTS,
                     &format!("{} (wep: {})", primary.name, secondary.name),
                 ));
 
                 // Strategy 4: Secondary on armor
                 candidates.push(build_mixed_candidate(
-                    primary.id, secondary.id, ARMOR_SLOTS,
+                    primary.id,
+                    secondary.id,
+                    ARMOR_SLOTS,
                     &format!("{} (armor: {})", primary.name, secondary.name),
                 ));
             }
@@ -165,20 +191,30 @@ pub fn search_spec_combos(
         // Generate core spec pairs for slots 0 and 1
         let slot0_candidates: Vec<u32> = if let Some(locked0) = locked_slot0 {
             // Slot 0 is locked — only this spec
-            if core_specs.contains(&locked0) { vec![locked0] } else { continue; }
+            if core_specs.contains(&locked0) {
+                vec![locked0]
+            } else {
+                continue;
+            }
         } else {
             core_specs.clone()
         };
         let slot1_candidates: Vec<u32> = if let Some(locked1) = locked_slot1 {
-            if core_specs.contains(&locked1) { vec![locked1] } else { continue; }
+            if core_specs.contains(&locked1) {
+                vec![locked1]
+            } else {
+                continue;
+            }
         } else {
             core_specs.clone()
         };
 
         for &s0 in &slot0_candidates {
             for &s1 in &slot1_candidates {
-                if s0 == s1 { continue; } // Can't pick same spec twice
-                // Normalize order for dedup (smaller first) unless locked
+                if s0 == s1 {
+                    continue;
+                } // Can't pick same spec twice
+                  // Normalize order for dedup (smaller first) unless locked
                 let pair = if locked_slot0.is_some() || locked_slot1.is_some() {
                     (s0, s1)
                 } else if s0 < s1 {
@@ -194,30 +230,48 @@ pub fn search_spec_combos(
     // Without elite spec: 3 core specs (only when no elite is locked)
     if locked_elite.is_none() {
         let slot0_candidates: Vec<u32> = if let Some(locked0) = locked_slot0 {
-            if core_specs.contains(&locked0) { vec![locked0] } else { vec![] }
+            if core_specs.contains(&locked0) {
+                vec![locked0]
+            } else {
+                vec![]
+            }
         } else {
             core_specs.clone()
         };
         let slot1_candidates: Vec<u32> = if let Some(locked1) = locked_slot1 {
-            if core_specs.contains(&locked1) { vec![locked1] } else { vec![] }
+            if core_specs.contains(&locked1) {
+                vec![locked1]
+            } else {
+                vec![]
+            }
         } else {
             core_specs.clone()
         };
         // Slot 2 (normally elite) can be a core spec if no elite is locked
         let slot2_candidates: Vec<u32> = if let Some(locked2) = locks.specs[2] {
-            if core_specs.contains(&locked2) { vec![locked2] } else { vec![] }
+            if core_specs.contains(&locked2) {
+                vec![locked2]
+            } else {
+                vec![]
+            }
         } else {
             core_specs.clone()
         };
 
         for &s0 in &slot0_candidates {
             for &s1 in &slot1_candidates {
-                if s1 == s0 { continue; }
+                if s1 == s0 {
+                    continue;
+                }
                 for &s2 in &slot2_candidates {
-                    if s2 == s0 || s2 == s1 { continue; }
+                    if s2 == s0 || s2 == s1 {
+                        continue;
+                    }
                     // Deduplicate: only keep combos where ids are in ascending order
                     // unless specific slots are locked
-                    let any_locked = locked_slot0.is_some() || locked_slot1.is_some() || locks.specs[2].is_some();
+                    let any_locked = locked_slot0.is_some()
+                        || locked_slot1.is_some()
+                        || locks.specs[2].is_some();
                     if !any_locked && !(s0 < s1 && s1 < s2) {
                         continue;
                     }
@@ -243,21 +297,31 @@ mod tests {
     #[test]
     fn test_search_gear_prefixes_generates_candidates() {
         let mut itemstats = HashMap::new();
-        itemstats.insert(584, ItemStat {
-            id: 584,
-            name: "Berserker's".into(),
-            attributes: vec![],
-        });
-        itemstats.insert(656, ItemStat {
-            id: 656,
-            name: "Assassin's".into(),
-            attributes: vec![],
-        });
+        itemstats.insert(
+            584,
+            ItemStat {
+                id: 584,
+                name: "Berserker's".into(),
+                attributes: vec![],
+            },
+        );
+        itemstats.insert(
+            656,
+            ItemStat {
+                id: 656,
+                name: "Assassin's".into(),
+                attributes: vec![],
+            },
+        );
 
         let weights = OptimizationWeights::preset_power_dps();
         let candidates = search_gear_prefixes(&weights, &itemstats);
         // 2 single-prefix + 2*1*3 mixed strategies = 8 total
-        assert!(candidates.len() >= 8, "Expected >=8 candidates, got {}", candidates.len());
+        assert!(
+            candidates.len() >= 8,
+            "Expected >=8 candidates, got {}",
+            candidates.len()
+        );
         // All should have 16 slots
         for c in &candidates {
             assert_eq!(c.slot_stats.len(), STAT_SLOTS.len());
@@ -279,12 +343,37 @@ mod tests {
     #[test]
     fn test_celestial_weights_has_mixing_options() {
         let mut itemstats = HashMap::new();
-        itemstats.insert(1, ItemStat { id: 1, name: "Celestial".into(), attributes: vec![] });
-        itemstats.insert(2, ItemStat { id: 2, name: "Diviner's".into(), attributes: vec![] });
-        itemstats.insert(3, ItemStat { id: 3, name: "Trailblazer's".into(), attributes: vec![] });
+        itemstats.insert(
+            1,
+            ItemStat {
+                id: 1,
+                name: "Celestial".into(),
+                attributes: vec![],
+            },
+        );
+        itemstats.insert(
+            2,
+            ItemStat {
+                id: 2,
+                name: "Diviner's".into(),
+                attributes: vec![],
+            },
+        );
+        itemstats.insert(
+            3,
+            ItemStat {
+                id: 3,
+                name: "Trailblazer's".into(),
+                attributes: vec![],
+            },
+        );
 
         let weights = OptimizationWeights::preset_celestial();
         let candidates = search_gear_prefixes(&weights, &itemstats);
-        assert!(candidates.len() > 3, "Celestial weights should generate mixed gear candidates, got {}", candidates.len());
+        assert!(
+            candidates.len() > 3,
+            "Celestial weights should generate mixed gear candidates, got {}",
+            candidates.len()
+        );
     }
 }

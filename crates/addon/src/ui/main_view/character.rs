@@ -3,6 +3,11 @@ use base64::Engine as _;
 use super::resolution::resolve_selected_build_inner;
 use crate::state::AddonState;
 
+fn report_cache_write_error(state: &mut AddonState, message: String) {
+    nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", &message);
+    state.main.error = Some(message);
+}
+
 /// Phase 1: Load characters from cache (instant) then refresh from API in background.
 pub(super) fn load_characters(state: &mut AddonState) {
     let Some(ref key) = state.config.gw2_api_key else {
@@ -48,7 +53,12 @@ pub(super) fn load_characters(state: &mut AddonState) {
                         // Save to cache for next time
                         let cache_dir = s.addon_dir.join("cache");
                         let cache = gw2_api::cache::DataCache::new(&cache_dir);
-                        let _ = cache.save_characters(&fresh_chars);
+                        if let Err(e) = cache.save_characters(&fresh_chars) {
+                            report_cache_write_error(
+                                s,
+                                format!("Loaded characters, but failed to update cache: {}", e),
+                            );
+                        }
 
                         // Only update UI if data changed
                         if s.main.characters != fresh_chars {
@@ -172,8 +182,28 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
                             // Save to cache
                             let cache_dir = s.addon_dir.join("cache");
                             let cache = gw2_api::cache::DataCache::new(&cache_dir);
-                            let _ = cache.save_character(&expected_char, "buildtabs", &fresh_bt);
-                            let _ = cache.save_character(&expected_char, "equiptabs", &fresh_et);
+                            if let Err(e) =
+                                cache.save_character(&expected_char, "buildtabs", &fresh_bt)
+                            {
+                                report_cache_write_error(
+                                    s,
+                                    format!(
+                                        "Loaded build tabs, but failed to update cache for {}: {}",
+                                        expected_char, e
+                                    ),
+                                );
+                            }
+                            if let Err(e) =
+                                cache.save_character(&expected_char, "equiptabs", &fresh_et)
+                            {
+                                report_cache_write_error(
+                                    s,
+                                    format!(
+                                        "Loaded equipment tabs, but failed to update cache for {}: {}",
+                                        expected_char, e
+                                    ),
+                                );
+                            }
 
                             // Compare: only update UI if data actually changed
                             let bt_changed = serde_json::to_string(&s.main.build_tabs).ok()

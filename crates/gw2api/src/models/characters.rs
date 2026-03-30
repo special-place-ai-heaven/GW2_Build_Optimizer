@@ -98,8 +98,8 @@ pub struct EquipmentStats {
 /// PvP-specific equipment (amulet system).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EquipmentPvp {
-    pub amulet: Option<u32>,  // Resolves to /v2/pvp/amulets
-    pub rune: Option<u32>,    // Resolves to /v2/items
+    pub amulet: Option<u32>, // Resolves to /v2/pvp/amulets
+    pub rune: Option<u32>,   // Resolves to /v2/items
     #[serde(default)]
     pub sigils: Vec<Option<u32>>, // 4 sigils (2 per weapon set)
 }

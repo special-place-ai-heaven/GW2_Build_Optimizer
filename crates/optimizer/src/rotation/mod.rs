@@ -73,10 +73,7 @@ impl SkillSlot {
 #[derive(Debug, Clone)]
 pub enum SkillEffect {
     /// Direct strike damage.
-    StrikeDamage {
-        hit_count: u32,
-        dmg_multiplier: f64,
-    },
+    StrikeDamage { hit_count: u32, dmg_multiplier: f64 },
     /// Applies a damaging condition to the target.
     ApplyCondition {
         condition: String,
@@ -90,9 +87,7 @@ pub enum SkillEffect {
         duration_ms: u32,
     },
     /// Combo field placement.
-    ComboField {
-        field_type: String,
-    },
+    ComboField { field_type: String },
 }
 
 /// Full simulation result from running a rotation.
@@ -141,7 +136,10 @@ mod tests {
     fn test_skill_slot_from_api() {
         assert_eq!(SkillSlot::from_api("Weapon_1"), Some(SkillSlot::Weapon1));
         assert_eq!(SkillSlot::from_api("Heal"), Some(SkillSlot::Heal));
-        assert_eq!(SkillSlot::from_api("Profession_1"), Some(SkillSlot::Profession));
+        assert_eq!(
+            SkillSlot::from_api("Profession_1"),
+            Some(SkillSlot::Profession)
+        );
         assert_eq!(SkillSlot::from_api("Unknown"), None);
     }
 

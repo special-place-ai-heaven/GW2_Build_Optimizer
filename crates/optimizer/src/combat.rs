@@ -40,7 +40,9 @@ impl DamageModifiers {
 
     /// Total multiplicative condition damage modifier (global).
     pub fn total_condi_mult(&self) -> f64 {
-        self.condition_pct.iter().fold(1.0, |acc, &m| acc * (1.0 + m))
+        self.condition_pct
+            .iter()
+            .fold(1.0, |acc, &m| acc * (1.0 + m))
     }
 
     /// Total multiplicative condition damage modifier for a specific condition.
@@ -177,7 +179,10 @@ pub type ConditionWeights = crate::data::ConditionWeightsFromProfile;
 /// `"Firebrand"`, `"Harbinger"`) for forward-compatibility.
 ///
 /// Falls back to generic profile if no profession-specific profile exists.
-pub fn condition_weights_for_profession(profession: &str, ctx: &BalanceContext) -> ConditionWeights {
+pub fn condition_weights_for_profession(
+    profession: &str,
+    ctx: &BalanceContext,
+) -> ConditionWeights {
     let data = crate::data::rotation_profiles::rotation_profiles();
     let profile = data.lookup(profession, None, &ctx.game_mode);
     match profile {
@@ -351,8 +356,7 @@ pub fn calculate_combat_performance(
     let effective_power = total_power * crit_factor * modifiers.total_strike_mult();
 
     // Vulnerability multiplier on target — loaded from data
-    let vuln_mult = 1.0
-        + buffs.vulnerability_stacks as f64 * b.vulnerability_pct_per_stack();
+    let vuln_mult = 1.0 + buffs.vulnerability_stacks as f64 * b.vulnerability_pct_per_stack();
 
     // Strike DPS index (normalized)
     let strike_dps_index =
@@ -366,7 +370,11 @@ pub fn calculate_combat_performance(
     let global_condi_ratio: f64 = modifiers.condi_duration_pct.iter().sum();
     // Overall condition duration bonus (no per-condition specifics) for UI display
     let total_condi_bonus = condition_duration_bonus(
-        stats.expertise, global_condi_ratio, 0.0, CONDITION_DURATION_CAP, ctx,
+        stats.expertise,
+        global_condi_ratio,
+        0.0,
+        CONDITION_DURATION_CAP,
+        ctx,
     );
     // CombatPerformance.condi_duration_pct is percentage points (0-100)
     let total_condi_duration = total_condi_bonus * 100.0;
@@ -381,8 +389,11 @@ pub fn calculate_combat_performance(
             .map(|v| v.iter().sum())
             .unwrap_or(0.0);
         1.0 + condition_duration_bonus(
-            stats.expertise, global_condi_ratio, specific,
-            CONDITION_DURATION_CAP, ctx,
+            stats.expertise,
+            global_condi_ratio,
+            specific,
+            CONDITION_DURATION_CAP,
+            ctx,
         )
     };
     let bleed_dur = condi_dur_for("Bleeding");
@@ -406,7 +417,10 @@ pub fn calculate_combat_performance(
     // Boon duration from Concentration + modifiers
     let global_boon_ratio: f64 = modifiers.boon_duration_pct.iter().sum();
     let boon_duration_pct = boon_duration_bonus(
-        stats.concentration, global_boon_ratio, BOON_DURATION_CAP, ctx,
+        stats.concentration,
+        global_boon_ratio,
+        BOON_DURATION_CAP,
+        ctx,
     ) * 100.0;
 
     // Survivability
@@ -607,9 +621,7 @@ fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
 
             // Specific condition duration patterns
             for condi in &["Bleeding", "Burning", "Poison", "Torment", "Confusion"] {
-                if text_lower.contains(&condi.to_lowercase())
-                    && text_lower.contains("duration")
-                {
+                if text_lower.contains(&condi.to_lowercase()) && text_lower.contains("duration") {
                     mods.specific_condi_duration
                         .entry(condi.to_string())
                         .or_default()
@@ -1000,14 +1012,22 @@ mod tests {
             label: "Test".to_string(),
         };
         let perf = calculate_combat_performance(
-            &stats, &derived, &mods, &buffs,
-            &ConditionWeights::default_pve(), "Warrior", &ctx,
+            &stats,
+            &derived,
+            &mods,
+            &buffs,
+            &ConditionWeights::default_pve(),
+            "Warrior",
+            &ctx,
         );
         // Fury PvE = 25% crit chance bonus (from data)
         // Might 10 stacks * 30 Power = +300 Power (from data)
         // Vulnerability 10 stacks * 0.01 = +10% (from data)
         // Protection DR = 1.0 - 0.67 = 0.33 (from data)
-        assert!(perf.effective_power > 2000.0, "Fury+Might should boost power");
+        assert!(
+            perf.effective_power > 2000.0,
+            "Fury+Might should boost power"
+        );
         assert!(perf.damage_reduction_pct > 0.0, "Protection should give DR");
     }
 
@@ -1016,7 +1036,7 @@ mod tests {
         let mut mods = DamageModifiers::default();
         mods.strike_pct.push(0.05); // +5%
         mods.strike_pct.push(0.10); // +10%
-        // Multiplicative: 1.05 * 1.10 = 1.155
+                                    // Multiplicative: 1.05 * 1.10 = 1.155
         assert!((mods.total_strike_mult() - 1.155).abs() < 0.001);
     }
 
@@ -1034,9 +1054,20 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Warrior");
         let mods = DamageModifiers::default();
-        let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
+        let solo = default_buff_profiles(&ctx)
+            .into_iter()
+            .find(|b| b.label == "Solo")
+            .unwrap();
 
-        let perf = calculate_combat_performance(&stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Warrior", &ctx);
+        let perf = calculate_combat_performance(
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &ConditionWeights::default_pve(),
+            "Warrior",
+            &ctx,
+        );
 
         // Effective power should be > raw power due to crits
         assert!(perf.effective_power > 2800.0);
@@ -1045,7 +1076,9 @@ mod tests {
         // Condition DPS should be low (no condition damage)
         assert!(perf.condition_dps_index < perf.strike_dps_index);
         // Total = strike + condition
-        assert!((perf.total_dps_index - perf.strike_dps_index - perf.condition_dps_index).abs() < 1.0);
+        assert!(
+            (perf.total_dps_index - perf.strike_dps_index - perf.condition_dps_index).abs() < 1.0
+        );
     }
 
     #[test]
@@ -1065,8 +1098,24 @@ mod tests {
         let solo = profiles.iter().find(|b| b.label == "Solo").unwrap();
         let squad = profiles.iter().find(|b| b.label == "Full Squad").unwrap();
 
-        let perf_solo = calculate_combat_performance(&stats, &derived, &mods, solo, &ConditionWeights::default_pve(), "Warrior", &ctx);
-        let perf_squad = calculate_combat_performance(&stats, &derived, &mods, squad, &ConditionWeights::default_pve(), "Warrior", &ctx);
+        let perf_solo = calculate_combat_performance(
+            &stats,
+            &derived,
+            &mods,
+            solo,
+            &ConditionWeights::default_pve(),
+            "Warrior",
+            &ctx,
+        );
+        let perf_squad = calculate_combat_performance(
+            &stats,
+            &derived,
+            &mods,
+            squad,
+            &ConditionWeights::default_pve(),
+            "Warrior",
+            &ctx,
+        );
 
         // Squad should have higher DPS (Might + Fury + Vulnerability)
         assert!(perf_squad.strike_dps_index > perf_solo.strike_dps_index);
@@ -1088,9 +1137,20 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Necromancer");
         let mods = DamageModifiers::default();
-        let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
+        let solo = default_buff_profiles(&ctx)
+            .into_iter()
+            .find(|b| b.label == "Solo")
+            .unwrap();
 
-        let perf = calculate_combat_performance(&stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Necromancer", &ctx);
+        let perf = calculate_combat_performance(
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &ConditionWeights::default_pve(),
+            "Necromancer",
+            &ctx,
+        );
 
         // Condition DPS index should be significant
         assert!(perf.condition_dps_index > 500.0);
@@ -1102,7 +1162,10 @@ mod tests {
     fn test_parse_rune_modifier_burning_duration() {
         let mut mods = DamageModifiers::default();
         parse_rune_modifier(&mut mods, "+7% Burning Duration");
-        assert_eq!(mods.specific_condi_duration.get("Burning").unwrap().len(), 1);
+        assert_eq!(
+            mods.specific_condi_duration.get("Burning").unwrap().len(),
+            1
+        );
         assert!((mods.specific_condi_duration["Burning"][0] - 0.07).abs() < 0.001);
     }
 
@@ -1124,34 +1187,61 @@ mod tests {
 
     #[test]
     fn test_extract_percent_before_basic() {
-        assert_eq!(extract_percent_before("10% burning duration", "burning duration"), Some(10.0));
-        assert_eq!(extract_percent_before("+10% condition duration", "condition duration"), Some(10.0));
-        assert_eq!(extract_percent_before("grants 5% damage bonus", "damage"), Some(5.0));
+        assert_eq!(
+            extract_percent_before("10% burning duration", "burning duration"),
+            Some(10.0)
+        );
+        assert_eq!(
+            extract_percent_before("+10% condition duration", "condition duration"),
+            Some(10.0)
+        );
+        assert_eq!(
+            extract_percent_before("grants 5% damage bonus", "damage"),
+            Some(5.0)
+        );
         // No match
         assert_eq!(extract_percent_before("no number here", "damage"), None);
         // Keyword not found
-        assert_eq!(extract_percent_before("10% burning duration", "poison duration"), None);
+        assert_eq!(
+            extract_percent_before("10% burning duration", "poison duration"),
+            None
+        );
     }
 
     #[test]
     fn test_extract_percent_before_unicode_safe() {
         // Should not panic on non-ASCII characters
         assert_eq!(extract_percent_before("—5% damage", "damage"), Some(5.0));
-        assert_eq!(extract_percent_before("résumé 10% condition duration", "condition duration"), Some(10.0));
+        assert_eq!(
+            extract_percent_before("résumé 10% condition duration", "condition duration"),
+            Some(10.0)
+        );
     }
 
     #[test]
     fn test_parse_sigil_description_fallback() {
         let mut mods = DamageModifiers::default();
         let sigil = Item {
-            id: 99999, name: "Unknown Sigil of Testing".into(),
-            item_type: "UpgradeComponent".into(), rarity: "Exotic".into(),
-            level: 60, description: Some("Grants +10% bleeding duration.".into()),
-            icon: None, vendor_value: None, chat_link: None, default_skin: None,
-            flags: vec![], game_types: vec![], restrictions: vec![], details: None,
+            id: 99999,
+            name: "Unknown Sigil of Testing".into(),
+            item_type: "UpgradeComponent".into(),
+            rarity: "Exotic".into(),
+            level: 60,
+            description: Some("Grants +10% bleeding duration.".into()),
+            icon: None,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec![],
+            restrictions: vec![],
+            details: None,
         };
         parse_sigil_modifier(&mut mods, &sigil);
-        assert_eq!(mods.specific_condi_duration.get("Bleeding").unwrap().len(), 1);
+        assert_eq!(
+            mods.specific_condi_duration.get("Bleeding").unwrap().len(),
+            1
+        );
         assert!((mods.specific_condi_duration["Bleeding"][0] - 0.10).abs() < 0.001);
     }
 
@@ -1159,11 +1249,20 @@ mod tests {
     fn test_parse_relic_description_fallback() {
         let mut mods = DamageModifiers::default();
         let relic = Item {
-            id: 99999, name: "Unknown Relic".into(),
-            item_type: "Relic".into(), rarity: "Legendary".into(),
-            level: 80, description: Some("Increases outgoing healing by 15%.".into()),
-            icon: None, vendor_value: None, chat_link: None, default_skin: None,
-            flags: vec![], game_types: vec![], restrictions: vec![], details: None,
+            id: 99999,
+            name: "Unknown Relic".into(),
+            item_type: "Relic".into(),
+            rarity: "Legendary".into(),
+            level: 80,
+            description: Some("Increases outgoing healing by 15%.".into()),
+            icon: None,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec![],
+            restrictions: vec![],
+            details: None,
         };
         parse_relic_modifier(&mut mods, &relic);
         assert_eq!(mods.healing_pct.len(), 1);
@@ -1174,14 +1273,26 @@ mod tests {
     fn test_parse_sigil_smoldering() {
         let mut mods = DamageModifiers::default();
         let sigil = Item {
-            id: 1, name: "Superior Sigil of Smoldering".into(),
-            item_type: "UpgradeComponent".into(), rarity: "Exotic".into(),
-            level: 60, description: None, icon: None, vendor_value: None,
-            chat_link: None, default_skin: None, flags: vec![], game_types: vec![],
-            restrictions: vec![], details: None,
+            id: 1,
+            name: "Superior Sigil of Smoldering".into(),
+            item_type: "UpgradeComponent".into(),
+            rarity: "Exotic".into(),
+            level: 60,
+            description: None,
+            icon: None,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec![],
+            restrictions: vec![],
+            details: None,
         };
         parse_sigil_modifier(&mut mods, &sigil);
-        assert_eq!(mods.specific_condi_duration.get("Burning").unwrap().len(), 1);
+        assert_eq!(
+            mods.specific_condi_duration.get("Burning").unwrap().len(),
+            1
+        );
         assert!((mods.specific_condi_duration["Burning"][0] - 0.10).abs() < 0.001);
     }
 
@@ -1189,11 +1300,20 @@ mod tests {
     fn test_parse_sigil_transference() {
         let mut mods = DamageModifiers::default();
         let sigil = Item {
-            id: 1, name: "Superior Sigil of Transference".into(),
-            item_type: "UpgradeComponent".into(), rarity: "Exotic".into(),
-            level: 60, description: None, icon: None, vendor_value: None,
-            chat_link: None, default_skin: None, flags: vec![], game_types: vec![],
-            restrictions: vec![], details: None,
+            id: 1,
+            name: "Superior Sigil of Transference".into(),
+            item_type: "UpgradeComponent".into(),
+            rarity: "Exotic".into(),
+            level: 60,
+            description: None,
+            icon: None,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec![],
+            restrictions: vec![],
+            details: None,
         };
         parse_sigil_modifier(&mut mods, &sigil);
         assert_eq!(mods.healing_pct.len(), 1);
@@ -1204,11 +1324,20 @@ mod tests {
     fn test_parse_relic_isgarren() {
         let mut mods = DamageModifiers::default();
         let relic = Item {
-            id: 1, name: "Relic of Isgarren".into(),
-            item_type: "Relic".into(), rarity: "Legendary".into(),
-            level: 80, description: None, icon: None, vendor_value: None,
-            chat_link: None, default_skin: None, flags: vec![], game_types: vec![],
-            restrictions: vec![], details: None,
+            id: 1,
+            name: "Relic of Isgarren".into(),
+            item_type: "Relic".into(),
+            rarity: "Legendary".into(),
+            level: 80,
+            description: None,
+            icon: None,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec![],
+            restrictions: vec![],
+            details: None,
         };
         parse_relic_modifier(&mut mods, &relic);
         assert_eq!(mods.crit_damage_pct.len(), 1);
@@ -1219,11 +1348,20 @@ mod tests {
     fn test_parse_relic_nightmare() {
         let mut mods = DamageModifiers::default();
         let relic = Item {
-            id: 1, name: "Relic of the Nightmare".into(),
-            item_type: "Relic".into(), rarity: "Legendary".into(),
-            level: 80, description: None, icon: None, vendor_value: None,
-            chat_link: None, default_skin: None, flags: vec![], game_types: vec![],
-            restrictions: vec![], details: None,
+            id: 1,
+            name: "Relic of the Nightmare".into(),
+            item_type: "Relic".into(),
+            rarity: "Legendary".into(),
+            level: 80,
+            description: None,
+            icon: None,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec![],
+            restrictions: vec![],
+            details: None,
         };
         parse_relic_modifier(&mut mods, &relic);
         assert_eq!(mods.condi_duration_pct.len(), 1);
@@ -1275,8 +1413,24 @@ mod tests {
             label: "With Prot".into(),
         };
 
-        let perf_without = calculate_combat_performance(&stats, &derived, &mods, &without, &ConditionWeights::default_pve(), "Guardian", &ctx);
-        let perf_with = calculate_combat_performance(&stats, &derived, &mods, &with, &ConditionWeights::default_pve(), "Guardian", &ctx);
+        let perf_without = calculate_combat_performance(
+            &stats,
+            &derived,
+            &mods,
+            &without,
+            &ConditionWeights::default_pve(),
+            "Guardian",
+            &ctx,
+        );
+        let perf_with = calculate_combat_performance(
+            &stats,
+            &derived,
+            &mods,
+            &with,
+            &ConditionWeights::default_pve(),
+            "Guardian",
+            &ctx,
+        );
 
         assert!(perf_with.damage_reduction_pct > perf_without.damage_reduction_pct);
         assert!(perf_with.effective_health > perf_without.effective_health);
@@ -1300,13 +1454,28 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Guardian");
         let mods = DamageModifiers::default();
-        let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
+        let solo = default_buff_profiles(&ctx)
+            .into_iter()
+            .find(|b| b.label == "Solo")
+            .unwrap();
 
         let perf_default = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Guardian", &ctx,
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &ConditionWeights::default_pve(),
+            "Guardian",
+            &ctx,
         );
         let perf_firebrand = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &ConditionWeights::firebrand_group(), "Guardian", &ctx,
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &ConditionWeights::firebrand_group(),
+            "Guardian",
+            &ctx,
         );
 
         // Firebrand has burning=8.0 vs default burning=2.0; burning tick (0.155*2000+131.75=441.75)
@@ -1339,13 +1508,28 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Necromancer");
         let mods = DamageModifiers::default();
-        let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
+        let solo = default_buff_profiles(&ctx)
+            .into_iter()
+            .find(|b| b.label == "Solo")
+            .unwrap();
 
         let perf_default = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &ConditionWeights::default_pve(), "Necromancer", &ctx,
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &ConditionWeights::default_pve(),
+            "Necromancer",
+            &ctx,
         );
         let perf_necro = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &ConditionWeights::necro_group(), "Necromancer", &ctx,
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &ConditionWeights::necro_group(),
+            "Necromancer",
+            &ctx,
         );
 
         // Necro: bleeding=8.0 (vs 3.0), torment=6.0 (vs 1.5); these two combined dominate.
@@ -1368,30 +1552,74 @@ mod tests {
         let ctx = BalanceContext::pve();
         // Necromancer: heavy Bleeding + Torment from rotation profile
         let w = condition_weights_for_profession("Necromancer", &ctx);
-        assert!(w.bleeding > 2.0, "Necro should have high Bleeding: {}", w.bleeding);
-        assert!(w.torment > 1.0, "Necro should have high Torment: {}", w.torment);
+        assert!(
+            w.bleeding > 2.0,
+            "Necro should have high Bleeding: {}",
+            w.bleeding
+        );
+        assert!(
+            w.torment > 1.0,
+            "Necro should have high Torment: {}",
+            w.torment
+        );
 
         // Guardian: heavy Burning from rotation profile
         let g = condition_weights_for_profession("Guardian", &ctx);
-        assert!(g.burning > 2.0, "Guardian should have high Burning: {}", g.burning);
-        assert!(g.burning > g.bleeding, "Guardian Burning should exceed Bleeding");
+        assert!(
+            g.burning > 2.0,
+            "Guardian should have high Burning: {}",
+            g.burning
+        );
+        assert!(
+            g.burning > g.bleeding,
+            "Guardian Burning should exceed Bleeding"
+        );
 
         // Warrior: moderate condition application from rotation profile
         let dw = condition_weights_for_profession("Warrior", &ctx);
-        assert!(dw.bleeding > 0.0, "Warrior should have some Bleeding: {}", dw.bleeding);
-        assert!(dw.burning > 0.0, "Warrior should have some Burning: {}", dw.burning);
+        assert!(
+            dw.bleeding > 0.0,
+            "Warrior should have some Bleeding: {}",
+            dw.bleeding
+        );
+        assert!(
+            dw.burning > 0.0,
+            "Warrior should have some Burning: {}",
+            dw.burning
+        );
 
         // Unknown profession → generic fallback
         let unk = condition_weights_for_profession("ElementalistVariant", &ctx);
-        assert!(unk.bleeding > 0.0, "Generic should have some Bleeding: {}", unk.bleeding);
-        assert!(unk.burning > 0.0, "Generic should have some Burning: {}", unk.burning);
+        assert!(
+            unk.bleeding > 0.0,
+            "Generic should have some Bleeding: {}",
+            unk.bleeding
+        );
+        assert!(
+            unk.burning > 0.0,
+            "Generic should have some Burning: {}",
+            unk.burning
+        );
 
         // All professions return non-empty weights
-        for prof in &["Warrior", "Guardian", "Revenant", "Engineer", "Ranger",
-                      "Thief", "Elementalist", "Mesmer", "Necromancer"] {
+        for prof in &[
+            "Warrior",
+            "Guardian",
+            "Revenant",
+            "Engineer",
+            "Ranger",
+            "Thief",
+            "Elementalist",
+            "Mesmer",
+            "Necromancer",
+        ] {
             let w = condition_weights_for_profession(prof, &ctx);
             let total = w.bleeding + w.burning + w.poison + w.torment + w.confusion;
-            assert!(total > 0.0, "{} should have non-zero total condition weights", prof);
+            assert!(
+                total > 0.0,
+                "{} should have non-zero total condition weights",
+                prof
+            );
         }
     }
 
@@ -1411,16 +1639,31 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Necromancer");
         let mods = DamageModifiers::default();
-        let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
+        let solo = default_buff_profiles(&ctx)
+            .into_iter()
+            .find(|b| b.label == "Solo")
+            .unwrap();
 
         let necro_weights = condition_weights_for_profession("Necromancer", &ctx);
         let guardian_weights = condition_weights_for_profession("Guardian", &ctx);
 
         let necro_result = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &necro_weights, "Necromancer", &ctx,
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &necro_weights,
+            "Necromancer",
+            &ctx,
         );
         let guardian_result = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &guardian_weights, "Guardian", &ctx,
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &guardian_weights,
+            "Guardian",
+            &ctx,
         );
 
         // Necromancer and Guardian have different condition profiles (Bleeding/Torment vs Burning),
@@ -1456,17 +1699,32 @@ mod tests {
         };
         let derived = stats::compute_derived(&stats, "Necromancer");
         let mods = DamageModifiers::default();
-        let solo = default_buff_profiles(&ctx).into_iter().find(|b| b.label == "Solo").unwrap();
+        let solo = default_buff_profiles(&ctx)
+            .into_iter()
+            .find(|b| b.label == "Solo")
+            .unwrap();
 
         // Dispatch: Necromancer -> necro_group (bleeding=8.0, torment=6.0)
         let necro_weights = condition_weights_for_profession("Necromancer", &ctx);
         let necro_result = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &necro_weights, "Necromancer", &ctx,
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &necro_weights,
+            "Necromancer",
+            &ctx,
         );
         // Dispatch: Warrior -> default_pve (bleeding=3.0, torment=1.5)
         let warrior_weights = condition_weights_for_profession("Warrior", &ctx);
         let default_result = calculate_combat_performance(
-            &stats, &derived, &mods, &solo, &warrior_weights, "Warrior", &ctx,
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &warrior_weights,
+            "Warrior",
+            &ctx,
         );
 
         // necro_group scores ~116 weighted units vs default_pve ~39 — gap is definitive.
@@ -1516,12 +1774,22 @@ mod tests {
         };
 
         let perf_pve = calculate_combat_performance(
-            &stats, &derived, &mods, &fury_profile,
-            &ConditionWeights::default_pve(), "Warrior", &ctx_pve,
+            &stats,
+            &derived,
+            &mods,
+            &fury_profile,
+            &ConditionWeights::default_pve(),
+            "Warrior",
+            &ctx_pve,
         );
         let perf_pvp = calculate_combat_performance(
-            &stats, &derived, &mods, &fury_profile,
-            &ConditionWeights::default_pve(), "Warrior", &ctx_pvp,
+            &stats,
+            &derived,
+            &mods,
+            &fury_profile,
+            &ConditionWeights::default_pve(),
+            "Warrior",
+            &ctx_pvp,
         );
 
         // PvE should have higher effective power (25% Fury crit vs 20% PvP Fury crit)
@@ -1552,12 +1820,22 @@ mod tests {
         };
 
         let perf_pve_no = calculate_combat_performance(
-            &stats, &derived, &mods, &no_fury,
-            &ConditionWeights::default_pve(), "Warrior", &ctx_pve,
+            &stats,
+            &derived,
+            &mods,
+            &no_fury,
+            &ConditionWeights::default_pve(),
+            "Warrior",
+            &ctx_pve,
         );
         let perf_pvp_no = calculate_combat_performance(
-            &stats, &derived, &mods, &no_fury,
-            &ConditionWeights::default_pve(), "Warrior", &ctx_pvp,
+            &stats,
+            &derived,
+            &mods,
+            &no_fury,
+            &ConditionWeights::default_pve(),
+            "Warrior",
+            &ctx_pvp,
         );
 
         assert!(
@@ -1577,13 +1855,9 @@ mod tests {
         // result = 3.0 * (1 + 0.50) = 3.0 * 1.50 = 4.5s
         // Source: https://wiki.guildwars2.com/wiki/Expertise
         let ctx = BalanceContext::pve();
-        let result = condition_duration_multiplied(
-            3.0, 450.0, 0.0, 0.20, CONDITION_DURATION_CAP, &ctx,
-        );
-        assert!(
-            (result - 4.5).abs() < 0.001,
-            "Expected 4.5, got {result}",
-        );
+        let result =
+            condition_duration_multiplied(3.0, 450.0, 0.0, 0.20, CONDITION_DURATION_CAP, &ctx);
+        assert!((result - 4.5).abs() < 0.001, "Expected 4.5, got {result}",);
     }
 
     #[test]
@@ -1592,13 +1866,8 @@ mod tests {
         // result = 5.0 * (1 + 0.40) = 5.0 * 1.40 = 7.0s
         // Source: https://wiki.guildwars2.com/wiki/Boon_Duration
         let ctx = BalanceContext::pve();
-        let result = boon_duration_multiplied(
-            5.0, 600.0, 0.0, BOON_DURATION_CAP, &ctx,
-        );
-        assert!(
-            (result - 7.0).abs() < 0.001,
-            "Expected 7.0, got {result}",
-        );
+        let result = boon_duration_multiplied(5.0, 600.0, 0.0, BOON_DURATION_CAP, &ctx);
+        assert!((result - 7.0).abs() < 0.001, "Expected 7.0, got {result}",);
     }
 
     #[test]
@@ -1607,9 +1876,8 @@ mod tests {
         // result = 3.0 * (1 + 1.0) = 6.0s
         // Source: https://wiki.guildwars2.com/wiki/Condition_Duration ("maximum 100%")
         let ctx = BalanceContext::pve();
-        let result = condition_duration_multiplied(
-            3.0, 1800.0, 0.0, 0.30, CONDITION_DURATION_CAP, &ctx,
-        );
+        let result =
+            condition_duration_multiplied(3.0, 1800.0, 0.0, 0.30, CONDITION_DURATION_CAP, &ctx);
         assert!(
             (result - 6.0).abs() < 0.001,
             "Expected 6.0 (capped), got {result}",
@@ -1622,9 +1890,7 @@ mod tests {
         // result = 5.0 * (1 + 1.0) = 10.0s
         // Source: https://wiki.guildwars2.com/wiki/Boon_Duration ("maximum 100%")
         let ctx = BalanceContext::pve();
-        let result = boon_duration_multiplied(
-            5.0, 2000.0, 0.0, BOON_DURATION_CAP, &ctx,
-        );
+        let result = boon_duration_multiplied(5.0, 2000.0, 0.0, BOON_DURATION_CAP, &ctx);
         assert!(
             (result - 10.0).abs() < 0.001,
             "Expected 10.0 (capped), got {result}",
@@ -1638,13 +1904,9 @@ mod tests {
         // result = 4.0 * (1 + 0.50) = 4.0 * 1.50 = 6.0s
         // Source: https://wiki.guildwars2.com/wiki/Expertise
         let ctx = BalanceContext::pve();
-        let result = condition_duration_multiplied(
-            4.0, 300.0, 0.10, 0.20, CONDITION_DURATION_CAP, &ctx,
-        );
-        assert!(
-            (result - 6.0).abs() < 0.001,
-            "Expected 6.0, got {result}",
-        );
+        let result =
+            condition_duration_multiplied(4.0, 300.0, 0.10, 0.20, CONDITION_DURATION_CAP, &ctx);
+        assert!((result - 6.0).abs() < 0.001, "Expected 6.0, got {result}",);
     }
 
     #[test]
@@ -1653,17 +1915,11 @@ mod tests {
         // result = base * 1.0 = base
         // Source: https://wiki.guildwars2.com/wiki/Expertise
         let ctx = BalanceContext::pve();
-        let result = condition_duration_multiplied(
-            5.0, 0.0, 0.0, 0.0, CONDITION_DURATION_CAP, &ctx,
-        );
-        assert!(
-            (result - 5.0).abs() < 0.001,
-            "Expected 5.0, got {result}",
-        );
+        let result =
+            condition_duration_multiplied(5.0, 0.0, 0.0, 0.0, CONDITION_DURATION_CAP, &ctx);
+        assert!((result - 5.0).abs() < 0.001, "Expected 5.0, got {result}",);
 
-        let boon_result = boon_duration_multiplied(
-            5.0, 0.0, 0.0, BOON_DURATION_CAP, &ctx,
-        );
+        let boon_result = boon_duration_multiplied(5.0, 0.0, 0.0, BOON_DURATION_CAP, &ctx);
         assert!(
             (boon_result - 5.0).abs() < 0.001,
             "Expected 5.0, got {boon_result}",
@@ -1677,28 +1933,16 @@ mod tests {
         let ctx = BalanceContext::pve();
 
         // 750 Expertise, 5% global, 10% specific: 750/1500 + 0.05 + 0.10 = 0.65
-        let condi = condition_duration_bonus(
-            750.0, 0.05, 0.10, CONDITION_DURATION_CAP, &ctx,
-        );
-        assert!(
-            (condi - 0.65).abs() < 0.001,
-            "Expected 0.65, got {condi}",
-        );
+        let condi = condition_duration_bonus(750.0, 0.05, 0.10, CONDITION_DURATION_CAP, &ctx);
+        assert!((condi - 0.65).abs() < 0.001, "Expected 0.65, got {condi}",);
 
         // 900 Concentration, 10% global: 900/1500 + 0.10 = 0.60 + 0.10 = 0.70
-        let boon = boon_duration_bonus(
-            900.0, 0.10, BOON_DURATION_CAP, &ctx,
-        );
-        assert!(
-            (boon - 0.70).abs() < 0.001,
-            "Expected 0.70, got {boon}",
-        );
+        let boon = boon_duration_bonus(900.0, 0.10, BOON_DURATION_CAP, &ctx);
+        assert!((boon - 0.70).abs() < 0.001, "Expected 0.70, got {boon}",);
 
         // Capped: 1500 Expertise, 20% global, 10% specific:
         // 1500/1500 + 0.20 + 0.10 = 1.30 -> capped at 1.0
-        let capped = condition_duration_bonus(
-            1500.0, 0.20, 0.10, CONDITION_DURATION_CAP, &ctx,
-        );
+        let capped = condition_duration_bonus(1500.0, 0.20, 0.10, CONDITION_DURATION_CAP, &ctx);
         assert!(
             (capped - 1.0).abs() < 0.001,
             "Expected 1.0 (capped), got {capped}",
@@ -1728,8 +1972,13 @@ mod tests {
             .unwrap();
 
         let perf = calculate_combat_performance(
-            &stats, &derived, &mods, &solo,
-            &ConditionWeights::default_pve(), "Necromancer", &ctx,
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &ConditionWeights::default_pve(),
+            "Necromancer",
+            &ctx,
         );
 
         assert!(
@@ -1748,15 +1997,9 @@ mod tests {
         let pvp = BalanceContext::pvp();
         let wvw = BalanceContext::wvw();
 
-        let condi_pve = condition_duration_bonus(
-            600.0, 0.10, 0.05, CONDITION_DURATION_CAP, &pve,
-        );
-        let condi_pvp = condition_duration_bonus(
-            600.0, 0.10, 0.05, CONDITION_DURATION_CAP, &pvp,
-        );
-        let condi_wvw = condition_duration_bonus(
-            600.0, 0.10, 0.05, CONDITION_DURATION_CAP, &wvw,
-        );
+        let condi_pve = condition_duration_bonus(600.0, 0.10, 0.05, CONDITION_DURATION_CAP, &pve);
+        let condi_pvp = condition_duration_bonus(600.0, 0.10, 0.05, CONDITION_DURATION_CAP, &pvp);
+        let condi_wvw = condition_duration_bonus(600.0, 0.10, 0.05, CONDITION_DURATION_CAP, &wvw);
         assert!(
             (condi_pve - condi_pvp).abs() < 0.001,
             "PvE and PvP should match (currently mode-invariant)",
@@ -1766,15 +2009,9 @@ mod tests {
             "PvE and WvW should match (currently mode-invariant)",
         );
 
-        let boon_pve = boon_duration_bonus(
-            600.0, 0.10, BOON_DURATION_CAP, &pve,
-        );
-        let boon_pvp = boon_duration_bonus(
-            600.0, 0.10, BOON_DURATION_CAP, &pvp,
-        );
-        let boon_wvw = boon_duration_bonus(
-            600.0, 0.10, BOON_DURATION_CAP, &wvw,
-        );
+        let boon_pve = boon_duration_bonus(600.0, 0.10, BOON_DURATION_CAP, &pve);
+        let boon_pvp = boon_duration_bonus(600.0, 0.10, BOON_DURATION_CAP, &pvp);
+        let boon_wvw = boon_duration_bonus(600.0, 0.10, BOON_DURATION_CAP, &wvw);
         assert!(
             (boon_pve - boon_pvp).abs() < 0.001,
             "PvE and PvP boon should match (currently mode-invariant)",

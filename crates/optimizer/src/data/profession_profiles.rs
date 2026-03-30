@@ -6,8 +6,7 @@ use thiserror::Error;
 use super::{DataLoadError, EvidenceLevel};
 
 /// Canonical JSON embedded at compile time from data/profession_profiles.json.
-const PROFESSION_PROFILES_JSON: &str =
-    include_str!("../../../../data/profession_profiles.json");
+const PROFESSION_PROFILES_JSON: &str = include_str!("../../../../data/profession_profiles.json");
 
 static PROFILES: OnceLock<ProfessionProfiles> = OnceLock::new();
 
@@ -115,9 +114,7 @@ impl ProfessionProfiles {
 }
 
 /// Parse and validate profession profiles from JSON text.
-pub fn load_profession_profiles(
-    json: &str,
-) -> Result<ProfessionProfiles, ProfessionProfileError> {
+pub fn load_profession_profiles(json: &str) -> Result<ProfessionProfiles, ProfessionProfileError> {
     let entries: Vec<ProfessionProfile> = serde_json::from_str(json)?;
     validate_profiles(&entries)?;
     let map: HashMap<String, ProfessionProfile> = entries
@@ -157,10 +154,7 @@ fn validate_profiles(entries: &[ProfessionProfile]) -> Result<(), ProfessionProf
         if entry.base_defense_level_80 != expected_defense {
             return Err(ProfessionProfileError::ValidationError(format!(
                 "{}: base_defense {} does not match {:?} armor (expected {})",
-                entry.profession,
-                entry.base_defense_level_80,
-                entry.armor_weight,
-                expected_defense
+                entry.profession, entry.base_defense_level_80, entry.armor_weight, expected_defense
             )));
         }
     }
@@ -175,10 +169,7 @@ fn validate_profiles(entries: &[ProfessionProfile]) -> Result<(), ProfessionProf
         if entry.base_health_level_80 != expected_health {
             return Err(ProfessionProfileError::ValidationError(format!(
                 "{}: base_health {} does not match {:?} health class (expected {})",
-                entry.profession,
-                entry.base_health_level_80,
-                entry.health_class,
-                expected_health
+                entry.profession, entry.base_health_level_80, entry.health_class, expected_health
             )));
         }
     }
@@ -264,8 +255,15 @@ mod tests {
     fn test_all_9_professions_present() {
         let p = profiles();
         let expected = [
-            "Warrior", "Guardian", "Revenant", "Engineer", "Ranger",
-            "Thief", "Elementalist", "Mesmer", "Necromancer",
+            "Warrior",
+            "Guardian",
+            "Revenant",
+            "Engineer",
+            "Ranger",
+            "Thief",
+            "Elementalist",
+            "Mesmer",
+            "Necromancer",
         ];
         for name in &expected {
             assert!(p.get(name).is_some(), "missing profession: {}", name);

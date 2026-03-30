@@ -38,8 +38,8 @@ impl GeminiLlmClient {
         model: &str,
         usage_path: std::path::PathBuf,
     ) -> Result<Self, LlmError> {
-        let inner =
-            RawGeminiClient::with_persistence(api_key, model, usage_path).map_err(LlmError::from)?;
+        let inner = RawGeminiClient::with_persistence(api_key, model, usage_path)
+            .map_err(LlmError::from)?;
         Ok(Self { inner })
     }
 
@@ -136,7 +136,13 @@ impl LlmClient for GeminiLlmClient {
     ) -> Result<String, LlmError> {
         let gemini_tools = to_gemini_tools(tools);
         self.inner
-            .generate_with_tools_progress(prompt, gemini_tools, execute_tool, max_turns, on_progress)
+            .generate_with_tools_progress(
+                prompt,
+                gemini_tools,
+                execute_tool,
+                max_turns,
+                on_progress,
+            )
             .map_err(LlmError::from)
     }
 
@@ -174,7 +180,10 @@ mod tests {
         let le: LlmError = ge.into();
         assert!(matches!(le, LlmError::RateLimited));
 
-        let ge = GeminiError::Api { status: 500, message: "test".into() };
+        let ge = GeminiError::Api {
+            status: 500,
+            message: "test".into(),
+        };
         let le: LlmError = ge.into();
         assert!(matches!(le, LlmError::Api { status: 500, .. }));
 
@@ -204,7 +213,10 @@ mod tests {
         assert_eq!(gemini_tools.len(), 1);
         assert_eq!(gemini_tools[0].function_declarations.len(), 1);
         assert_eq!(gemini_tools[0].function_declarations[0].name, "test_tool");
-        assert_eq!(gemini_tools[0].function_declarations[0].description, "A test tool");
+        assert_eq!(
+            gemini_tools[0].function_declarations[0].description,
+            "A test tool"
+        );
     }
 
     #[test]

@@ -21,9 +21,8 @@ static OVERRIDES: OnceLock<BalanceOverrides> = OnceLock::new();
 /// # Panics
 /// Panics if the embedded JSON is malformed (compile-time data, should never happen).
 pub fn overrides() -> &'static BalanceOverrides {
-    OVERRIDES.get_or_init(|| {
-        load_all_overrides().expect("embedded balance_overrides JSON is invalid")
-    })
+    OVERRIDES
+        .get_or_init(|| load_all_overrides().expect("embedded balance_overrides JSON is invalid"))
 }
 
 /// Try to load all balance overrides from the embedded JSON, returning typed errors
@@ -104,9 +103,7 @@ pub enum OverrideResult {
         evidence_level: EvidenceLevel,
     },
     /// The value is explicitly unknown — degrades DataQuality.
-    Unknown {
-        evidence_level: EvidenceLevel,
-    },
+    Unknown { evidence_level: EvidenceLevel },
 }
 
 // ─── BalanceOverrides container ───
@@ -383,14 +380,22 @@ mod tests {
     #[test]
     fn test_embedded_overrides_load_successfully() {
         let o = overrides();
-        assert_eq!(o.file_count(), 3, "expected 3 override files (PvE, PvP, WvW)");
+        assert_eq!(
+            o.file_count(),
+            3,
+            "expected 3 override files (PvE, PvP, WvW)"
+        );
         assert_eq!(o.entity_count(), 0, "baseline has no entities");
     }
 
     #[test]
     fn test_try_load_returns_ok() {
         let result = try_load_balance_overrides();
-        assert!(result.is_ok(), "try_load should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "try_load should succeed: {:?}",
+            result.err()
+        );
     }
 
     // ─── Lookup on empty baseline returns None ───
@@ -504,10 +509,7 @@ mod tests {
         }"#;
         let file = load_override_file(json).unwrap();
         let mut files = HashMap::new();
-        files.insert(
-            (file.patch_id.clone(), file.mode.clone()),
-            file,
-        );
+        files.insert((file.patch_id.clone(), file.mode.clone()), file);
         let overrides = BalanceOverrides { files };
 
         // Existing override returns Value
@@ -554,10 +556,7 @@ mod tests {
         }"#;
         let file = load_override_file(json).unwrap();
         let mut files = HashMap::new();
-        files.insert(
-            (file.patch_id.clone(), file.mode.clone()),
-            file,
-        );
+        files.insert((file.patch_id.clone(), file.mode.clone()), file);
         let overrides = BalanceOverrides { files };
 
         // Unknown override returns OverrideResult::Unknown (degrades quality)
@@ -593,7 +592,10 @@ mod tests {
         }"#;
         let result = load_override_file(json);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("patch_id must not be empty"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("patch_id must not be empty"));
     }
 
     #[test]
@@ -681,10 +683,7 @@ mod tests {
         }"#;
         let file = load_override_file(json).unwrap();
         let mut files = HashMap::new();
-        files.insert(
-            (file.patch_id.clone(), file.mode.clone()),
-            file,
-        );
+        files.insert((file.patch_id.clone(), file.mode.clone()), file);
         let o = BalanceOverrides { files };
 
         // Known override → Value
@@ -873,8 +872,7 @@ mod tests {
         // WvW must NOT fall back to PvE — should return None
         let wvw_result = overrides.lookup("2026-01-13", "WvW", "Skill", 2001, "coefficient");
         assert_eq!(
-            wvw_result,
-            None,
+            wvw_result, None,
             "WvW lookup must return None, NOT the PvE value — no cross-mode fallback",
         );
     }
@@ -937,15 +935,24 @@ mod tests {
         // Each mode returns its own value, never another mode's
         assert_eq!(
             overrides.lookup("2026-01-13", "PvE", "Trait", 100, "damage_mult"),
-            Some(OverrideResult::Value { value: 1.5, evidence_level: EvidenceLevel::Factual }),
+            Some(OverrideResult::Value {
+                value: 1.5,
+                evidence_level: EvidenceLevel::Factual
+            }),
         );
         assert_eq!(
             overrides.lookup("2026-01-13", "PvP", "Trait", 100, "damage_mult"),
-            Some(OverrideResult::Value { value: 0.75, evidence_level: EvidenceLevel::Factual }),
+            Some(OverrideResult::Value {
+                value: 0.75,
+                evidence_level: EvidenceLevel::Factual
+            }),
         );
         assert_eq!(
             overrides.lookup("2026-01-13", "WvW", "Trait", 100, "damage_mult"),
-            Some(OverrideResult::Value { value: 0.80, evidence_level: EvidenceLevel::Factual }),
+            Some(OverrideResult::Value {
+                value: 0.80,
+                evidence_level: EvidenceLevel::Factual
+            }),
         );
     }
 
@@ -962,8 +969,7 @@ mod tests {
             assert!(
                 split.handled_in_phase_a,
                 "Baseline split {}.{} should be handled_in_phase_a",
-                split.entity_name,
-                split.field,
+                split.entity_name, split.field,
             );
         }
     }

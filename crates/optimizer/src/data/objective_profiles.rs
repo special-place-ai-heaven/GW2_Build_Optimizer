@@ -35,21 +35,19 @@ pub fn objective_profiles() -> &'static ObjectiveProfileData {
 /// Try to load all objective profiles from the embedded JSON, returning typed errors
 /// on failure. Does NOT store in OnceLock — used for health-check validation.
 pub fn try_load_objective_profiles() -> Result<(), Vec<DataLoadError>> {
-    load_all_objective_profiles()
-        .map(|_| ())
-        .map_err(|e| {
-            vec![match e {
-                ObjectiveProfileError::ParseError(pe) => DataLoadError::ParseError {
-                    source: "objective_profiles".into(),
-                    detail: pe.to_string(),
-                },
-                ObjectiveProfileError::ValidationError(msg) => DataLoadError::ValidationError {
-                    source: "objective_profiles".into(),
-                    field: String::new(),
-                    reason: msg,
-                },
-            }]
-        })
+    load_all_objective_profiles().map(|_| ()).map_err(|e| {
+        vec![match e {
+            ObjectiveProfileError::ParseError(pe) => DataLoadError::ParseError {
+                source: "objective_profiles".into(),
+                detail: pe.to_string(),
+            },
+            ObjectiveProfileError::ValidationError(msg) => DataLoadError::ValidationError {
+                source: "objective_profiles".into(),
+                field: String::new(),
+                reason: msg,
+            },
+        }]
+    })
 }
 
 // ─── Error type ───
@@ -125,7 +123,8 @@ pub struct ObjectiveProfileData {
 impl ObjectiveProfileData {
     /// Get the default profile for a game mode.
     pub fn default_for_mode(&self, mode: &str) -> Option<&ObjectiveProfile> {
-        self.files.get(mode)
+        self.files
+            .get(mode)
             .and_then(|f| f.profiles.iter().find(|p| p.is_mode_default))
     }
 
@@ -141,14 +140,16 @@ impl ObjectiveProfileData {
 
     /// Get all profiles for a game mode.
     pub fn profiles_for_mode(&self, mode: &str) -> Vec<&ObjectiveProfile> {
-        self.files.get(mode)
+        self.files
+            .get(mode)
             .map(|f| f.profiles.iter().collect())
             .unwrap_or_default()
     }
 
     /// Get all profiles across all modes.
     pub fn all_profiles(&self) -> Vec<&ObjectiveProfile> {
-        self.files.values()
+        self.files
+            .values()
             .flat_map(|f| f.profiles.iter())
             .collect()
     }
@@ -219,10 +220,7 @@ pub fn load_objective_profile_file(
     Ok(file)
 }
 
-fn validate_profile(
-    profile: &ObjectiveProfile,
-    mode: &str,
-) -> Result<(), ObjectiveProfileError> {
+fn validate_profile(profile: &ObjectiveProfile, mode: &str) -> Result<(), ObjectiveProfileError> {
     let id = &profile.objective_profile_id;
 
     // Validate axis weights are in range
@@ -303,8 +301,12 @@ fn validate_profile(
 
     // Validate interaction_priorities (if present) have valid keys and values
     let valid_interaction_keys = [
-        "removes_boon", "steals_boon", "corrupts_boon",
-        "removes_condition", "converts_condition_to_boon", "transfers_condition",
+        "removes_boon",
+        "steals_boon",
+        "corrupts_boon",
+        "removes_condition",
+        "converts_condition_to_boon",
+        "transfers_condition",
     ];
     for (key, val) in &profile.interaction_priorities {
         if !valid_interaction_keys.contains(&key.as_str()) {
@@ -345,19 +347,31 @@ mod tests {
     #[test]
     fn test_pve_has_5_profiles() {
         let data = load_all_objective_profiles().unwrap();
-        assert_eq!(data.files["PvE"].profiles.len(), 5, "PvE should have 5 profiles");
+        assert_eq!(
+            data.files["PvE"].profiles.len(),
+            5,
+            "PvE should have 5 profiles"
+        );
     }
 
     #[test]
     fn test_pvp_has_4_profiles() {
         let data = load_all_objective_profiles().unwrap();
-        assert_eq!(data.files["PvP"].profiles.len(), 4, "PvP should have 4 profiles");
+        assert_eq!(
+            data.files["PvP"].profiles.len(),
+            4,
+            "PvP should have 4 profiles"
+        );
     }
 
     #[test]
     fn test_wvw_has_4_profiles() {
         let data = load_all_objective_profiles().unwrap();
-        assert_eq!(data.files["WvW"].profiles.len(), 4, "WvW should have 4 profiles");
+        assert_eq!(
+            data.files["WvW"].profiles.len(),
+            4,
+            "WvW should have 4 profiles"
+        );
     }
 
     #[test]
@@ -366,9 +380,11 @@ mod tests {
         for (mode, file) in &data.files {
             let defaults: Vec<_> = file.profiles.iter().filter(|p| p.is_mode_default).collect();
             assert_eq!(
-                defaults.len(), 1,
+                defaults.len(),
+                1,
                 "{} should have exactly 1 default profile, got {}",
-                mode, defaults.len()
+                mode,
+                defaults.len()
             );
         }
     }
@@ -376,21 +392,29 @@ mod tests {
     #[test]
     fn test_default_for_mode_returns_correct_profile() {
         let data = load_all_objective_profiles().unwrap();
-        let pve_default = data.default_for_mode("PvE").expect("PvE should have default");
+        let pve_default = data
+            .default_for_mode("PvE")
+            .expect("PvE should have default");
         assert!(pve_default.is_mode_default);
         assert_eq!(pve_default.objective_profile_id, "PvE_Power_DPS");
 
-        let pvp_default = data.default_for_mode("PvP").expect("PvP should have default");
+        let pvp_default = data
+            .default_for_mode("PvP")
+            .expect("PvP should have default");
         assert!(pvp_default.is_mode_default);
 
-        let wvw_default = data.default_for_mode("WvW").expect("WvW should have default");
+        let wvw_default = data
+            .default_for_mode("WvW")
+            .expect("WvW should have default");
         assert!(wvw_default.is_mode_default);
     }
 
     #[test]
     fn test_profile_by_id() {
         let data = load_all_objective_profiles().unwrap();
-        let profile = data.profile_by_id("PvE_Condi_DPS").expect("should find Condi DPS");
+        let profile = data
+            .profile_by_id("PvE_Condi_DPS")
+            .expect("should find Condi DPS");
         assert_eq!(profile.objective_profile_id, "PvE_Condi_DPS");
         assert!(!profile.is_mode_default);
     }
@@ -427,7 +451,8 @@ mod tests {
             assert!(
                 (profile.weight_budget - 2.0).abs() < 0.001,
                 "Profile {} weight_budget should be 2.0 for backward compat, got {}",
-                profile.objective_profile_id, profile.weight_budget
+                profile.objective_profile_id,
+                profile.weight_budget
             );
         }
     }
@@ -473,7 +498,11 @@ mod tests {
         let result = load_objective_profile_file(PVE_PROFILES_JSON, "PvP");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("does not match"), "expected mode mismatch, got: {}", err);
+        assert!(
+            err.to_string().contains("does not match"),
+            "expected mode mismatch, got: {}",
+            err
+        );
     }
 
     #[test]
@@ -490,12 +519,14 @@ mod tests {
         let data = load_all_objective_profiles().unwrap();
         for profile in data.all_profiles() {
             let aw = &profile.axis_weights;
-            let total = aw.power + aw.condition + aw.boon_support
-                + aw.healing + aw.sustain + aw.control;
+            let total =
+                aw.power + aw.condition + aw.boon_support + aw.healing + aw.sustain + aw.control;
             assert!(
                 total <= profile.weight_budget + 0.001,
                 "Profile {} axis_weights total {} exceeds weight_budget {}",
-                profile.objective_profile_id, total, profile.weight_budget
+                profile.objective_profile_id,
+                total,
+                profile.weight_budget
             );
         }
     }

@@ -68,29 +68,25 @@ static EFFECTS: OnceLock<NormalizedEffectsData> = OnceLock::new();
 /// # Panics
 /// Panics if the embedded JSON is malformed (compile-time data, should never happen).
 pub fn effects() -> &'static NormalizedEffectsData {
-    EFFECTS.get_or_init(|| {
-        load_all_effects().expect("embedded normalized_effects JSON is invalid")
-    })
+    EFFECTS.get_or_init(|| load_all_effects().expect("embedded normalized_effects JSON is invalid"))
 }
 
 /// Try to load all normalized effects from the embedded JSON, returning typed errors
 /// on failure. Does NOT store in OnceLock — used for health-check validation.
 pub fn try_load_normalized_effects() -> Result<(), Vec<DataLoadError>> {
-    load_all_effects()
-        .map(|_| ())
-        .map_err(|e| {
-            vec![match e {
-                NormalizedEffectError::ParseError(pe) => DataLoadError::ParseError {
-                    source: "normalized_effects".into(),
-                    detail: pe.to_string(),
-                },
-                NormalizedEffectError::ValidationError(msg) => DataLoadError::ValidationError {
-                    source: "normalized_effects".into(),
-                    field: String::new(),
-                    reason: msg,
-                },
-            }]
-        })
+    load_all_effects().map(|_| ()).map_err(|e| {
+        vec![match e {
+            NormalizedEffectError::ParseError(pe) => DataLoadError::ParseError {
+                source: "normalized_effects".into(),
+                detail: pe.to_string(),
+            },
+            NormalizedEffectError::ValidationError(msg) => DataLoadError::ValidationError {
+                source: "normalized_effects".into(),
+                field: String::new(),
+                reason: msg,
+            },
+        }]
+    })
 }
 
 // ─── Error type ───
@@ -216,7 +212,11 @@ pub enum UptimeModelKind {
 pub struct UptimeModel {
     pub kind: UptimeModelKind,
     /// Fractional uptime (0.0 to 1.0). Only meaningful for `Estimated` or `Derived` kinds.
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_factual"
+    )]
     pub uptime: Option<FactualValue<f64>>,
 }
 
@@ -282,18 +282,34 @@ pub struct StatusOperation {
     /// Numeric amount (stacks, duration, charges, or count depending on mode).
     pub amount_value: FactualValue<f64>,
     /// Base duration of the applied status in milliseconds, if applicable.
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_factual"
+    )]
     pub base_duration_ms: Option<FactualValue<u32>>,
     /// How many/what kind of targets are affected.
     pub target_scope: TargetScope,
     /// Maximum number of targets affected. `None` means unlimited or N/A.
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_factual"
+    )]
     pub target_count: Option<FactualValue<u32>>,
     /// Internal cooldown of this specific operation in milliseconds.
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_factual"
+    )]
     pub internal_cooldown_ms: Option<FactualValue<u32>>,
     /// Multiplier applied to the source's boon/condition duration stat.
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_factual"
+    )]
     pub source_duration_multiplier: Option<FactualValue<f64>>,
 }
 
@@ -328,26 +344,35 @@ pub struct NormalizedEffect {
     pub source: Option<String>,
 
     // Timer/cap metadata
-
     /// Duration of the effect in seconds, if applicable.
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_factual"
+    )]
     pub effect_duration: Option<FactualValue<f64>>,
     /// Internal cooldown in seconds, if applicable.
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_factual"
+    )]
     pub internal_cooldown: Option<FactualValue<f64>>,
     /// Maximum number of stacks this effect can have.
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "optional_factual")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "optional_factual"
+    )]
     pub max_stacks: Option<FactualValue<u32>>,
 
     // Interaction payload (for status operation categories)
-
     /// Detailed boon/condition operation payload. Required for categories
     /// AppliesBoon through TransfersCondition.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_operation: Option<StatusOperation>,
 
     // TriggeredEffect inner category
-
     /// For `TriggeredEffect` category: the inner effect category that is triggered.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inner_category: Option<EffectCategory>,
@@ -522,9 +547,7 @@ pub fn score_effect(effect: &NormalizedEffect, weights: &OptimizationWeights) ->
             // +5% strike damage → 0.05 * weight
             base_value / 100.0 * weights.power
         }
-        EffectCategory::ConditionDamagePct => {
-            base_value / 100.0 * weights.condition
-        }
+        EffectCategory::ConditionDamagePct => base_value / 100.0 * weights.condition,
         EffectCategory::SpecificConditionDamagePct => {
             // Specific condition damage is less universally useful
             base_value / 100.0 * weights.condition * 0.8
@@ -535,7 +558,8 @@ pub fn score_effect(effect: &NormalizedEffect, weights: &OptimizationWeights) ->
         }
         EffectCategory::BoonDurationPct => {
             // Boon duration benefits boon support and healing
-            base_value / 100.0 * (weights.boon_support * 0.4 + weights.control * 0.2 + weights.healing * 0.3)
+            base_value / 100.0
+                * (weights.boon_support * 0.4 + weights.control * 0.2 + weights.healing * 0.3)
         }
         EffectCategory::ConditionDurationPct => {
             // Condition duration benefits condition DPS and control
@@ -544,9 +568,7 @@ pub fn score_effect(effect: &NormalizedEffect, weights: &OptimizationWeights) ->
         EffectCategory::SpecificConditionDurationPct => {
             base_value / 100.0 * weights.condition * 0.5
         }
-        EffectCategory::OutgoingHealingPct => {
-            base_value / 100.0 * weights.healing
-        }
+        EffectCategory::OutgoingHealingPct => base_value / 100.0 * weights.healing,
         EffectCategory::IncomingStrikeMultiplier => {
             // Damage reduction: lower is better. Value < 1.0 = damage reduction.
             // Score the reduction amount (1.0 - multiplier) as sustain benefit.
@@ -567,7 +589,8 @@ pub fn score_effect(effect: &NormalizedEffect, weights: &OptimizationWeights) ->
         EffectCategory::AppliesCondition => {
             // Condition application: value is stacks
             let cond_w = status_weight_for_scoring(effect, weights, true);
-            base_value.min(5.0) * 0.02 * cond_w + cond_importance_from_op(effect) * 0.03 * weights.condition
+            base_value.min(5.0) * 0.02 * cond_w
+                + cond_importance_from_op(effect) * 0.03 * weights.condition
         }
         EffectCategory::RemovesBoon => {
             // Boon removal is useful in PvP/WvW, modest in PvE
@@ -629,17 +652,15 @@ pub fn score_effect(effect: &NormalizedEffect, weights: &OptimizationWeights) ->
 fn effect_uptime(effect: &NormalizedEffect) -> f64 {
     match &effect.uptime_model.kind {
         UptimeModelKind::AlwaysOn => 1.0,
-        UptimeModelKind::Estimated => {
-            effect
-                .uptime_model
-                .uptime
-                .as_ref()
-                .and_then(|fv| match fv {
-                    FactualValue::Resolved(v) => Some(*v),
-                    _ => None,
-                })
-                .unwrap_or(0.5)
-        }
+        UptimeModelKind::Estimated => effect
+            .uptime_model
+            .uptime
+            .as_ref()
+            .and_then(|fv| match fv {
+                FactualValue::Resolved(v) => Some(*v),
+                _ => None,
+            })
+            .unwrap_or(0.5),
         UptimeModelKind::Derived => {
             // Use provided uptime if available, else 0.5 placeholder
             effect
@@ -832,7 +853,13 @@ pub fn map_legacy_effect(
         }
         synergy::NormalizedEffect::BenefitsFromStatus { status, effect } => {
             // Map inner effect, then wrap as TriggeredEffect with Conditional trigger
-            let inner = map_legacy_effect(effect, source_type.clone(), source_id, source_name, effect_index + 100);
+            let inner = map_legacy_effect(
+                effect,
+                source_type.clone(),
+                source_id,
+                source_name,
+                effect_index + 100,
+            );
             let inner_cat = inner.category.clone();
             NormalizedEffect {
                 effect_id,
@@ -917,13 +944,8 @@ pub fn map_legacy_effect(
             effect,
         } => {
             // Map inner effect but mark as Conditional trigger
-            let mut mapped = map_legacy_effect(
-                effect,
-                source_type,
-                source_id,
-                source_name,
-                effect_index,
-            );
+            let mut mapped =
+                map_legacy_effect(effect, source_type, source_id, source_name, effect_index);
             mapped.effect_id = effect_id;
             mapped.trigger_rule = TriggerRule::Conditional;
             mapped.evidence_level = EvidenceLevel::Derived;
@@ -1118,7 +1140,11 @@ mod tests {
             EffectCategory::ProcEffect,
             EffectCategory::TriggeredEffect,
         ];
-        assert_eq!(variants.len(), 23, "must test all 23 EffectCategory variants");
+        assert_eq!(
+            variants.len(),
+            23,
+            "must test all 23 EffectCategory variants"
+        );
         for v in variants {
             let json = serde_json::to_string(&v).unwrap();
             let parsed: EffectCategory = serde_json::from_str(&json).unwrap();
@@ -1270,7 +1296,10 @@ mod tests {
 
         // Verify optional fields are absent from JSON
         let json_value: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(json_value.get("source").is_none(), "source should be skipped");
+        assert!(
+            json_value.get("source").is_none(),
+            "source should be skipped"
+        );
         assert!(
             json_value.get("effect_duration").is_none(),
             "effect_duration should be skipped"
@@ -1279,7 +1308,10 @@ mod tests {
             json_value.get("internal_cooldown").is_none(),
             "internal_cooldown should be skipped"
         );
-        assert!(json_value.get("max_stacks").is_none(), "max_stacks should be skipped");
+        assert!(
+            json_value.get("max_stacks").is_none(),
+            "max_stacks should be skipped"
+        );
         assert!(
             json_value.get("status_operation").is_none(),
             "status_operation should be skipped"
@@ -1345,7 +1377,8 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            err.to_string().contains("Estimated uptime requires Heuristic"),
+            err.to_string()
+                .contains("Estimated uptime requires Heuristic"),
             "expected uptime/evidence error, got: {}",
             err
         );
@@ -1390,7 +1423,8 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            err.to_string().contains("TriggeredEffect category requires inner_category"),
+            err.to_string()
+                .contains("TriggeredEffect category requires inner_category"),
             "expected inner_category error, got: {}",
             err
         );
@@ -1412,7 +1446,8 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            err.to_string().contains("requires status_operation payload"),
+            err.to_string()
+                .contains("requires status_operation payload"),
             "expected status_operation error, got: {}",
             err
         );
@@ -1453,7 +1488,11 @@ mod tests {
     #[test]
     fn test_embedded_effects_load_successfully() {
         let data = effects();
-        assert_eq!(data.file_count(), 3, "expected 3 effects files (PvE, PvP, WvW)");
+        assert_eq!(
+            data.file_count(),
+            3,
+            "expected 3 effects files (PvE, PvP, WvW)"
+        );
         // P3-10b populates baseline with representative effects
         assert!(
             data.effect_count() >= 20,
@@ -1465,7 +1504,11 @@ mod tests {
     #[test]
     fn test_try_load_returns_ok() {
         let result = try_load_normalized_effects();
-        assert!(result.is_ok(), "try_load should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "try_load should succeed: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -1567,7 +1610,10 @@ mod tests {
         assert_eq!(effect.evidence_level, EvidenceLevel::Heuristic);
         assert_eq!(effect.max_stacks, Some(FactualValue::Resolved(25)));
 
-        let op = effect.status_operation.as_ref().expect("should have status_operation");
+        let op = effect
+            .status_operation
+            .as_ref()
+            .expect("should have status_operation");
         assert_eq!(op.operation_type, OperationType::AppliesBoon);
         assert_eq!(op.target_side, TargetSide::Self_);
         assert_eq!(op.status_kind, "Might");
@@ -1607,7 +1653,11 @@ mod tests {
             effects: vec![effect],
         };
         let result = validate_effects_file(&file);
-        assert!(result.is_ok(), "valid effect should pass: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "valid effect should pass: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -1618,7 +1668,7 @@ mod tests {
             uptime: Some(FactualValue::Resolved(0.75)),
         };
         effect.evidence_level = EvidenceLevel::Heuristic; // Correct!
-        // Non-passive to avoid ICD conflict
+                                                          // Non-passive to avoid ICD conflict
         effect.trigger_rule = TriggerRule::OnCrit;
         let file = NormalizedEffectsFile {
             patch_id: "2026-01-13".to_string(),
@@ -1626,7 +1676,11 @@ mod tests {
             effects: vec![effect],
         };
         let result = validate_effects_file(&file);
-        assert!(result.is_ok(), "Estimated + Heuristic should pass: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Estimated + Heuristic should pass: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -1640,7 +1694,11 @@ mod tests {
             effects: vec![effect],
         };
         let result = validate_effects_file(&file);
-        assert!(result.is_ok(), "TriggeredEffect with inner should pass: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "TriggeredEffect with inner should pass: {:?}",
+            result.err()
+        );
     }
 
     // ─── is_status_operation helper ───
@@ -1676,7 +1734,10 @@ mod tests {
         }"#;
         let result = load_effects_file(json);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("patch_id must not be empty"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("patch_id must not be empty"));
     }
 
     #[test]
@@ -1795,7 +1856,11 @@ mod tests {
             effects: vec![effect],
         };
         let result = validate_effects_file(&file);
-        assert!(result.is_ok(), "OnCrit + ICD should be valid: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "OnCrit + ICD should be valid: {:?}",
+            result.err()
+        );
     }
 
     // ─── FactualValue deserialization: null → Unknown ───
@@ -1927,7 +1992,11 @@ mod tests {
         effect.value = FactualValue::Resolved(150.0);
         let score = score_effect(&effect, &weights);
         // 150 / 3000 * (1.0 + 0.0) * 0.5 = 0.025
-        assert!(score > 0.01, "FlatStat should produce positive score, got {}", score);
+        assert!(
+            score > 0.01,
+            "FlatStat should produce positive score, got {}",
+            score
+        );
         assert!(score < 0.1, "FlatStat +150 should be modest, got {}", score);
     }
 
@@ -2014,7 +2083,10 @@ mod tests {
         let new = map_legacy_effect(&old, SourceType::Sigil, 24560, "Sigil of Earth", 0);
         assert_eq!(new.category, EffectCategory::AppliesCondition);
         assert_eq!(new.value, FactualValue::Resolved(3.0));
-        let op = new.status_operation.as_ref().expect("should have status_operation");
+        let op = new
+            .status_operation
+            .as_ref()
+            .expect("should have status_operation");
         assert_eq!(op.operation_type, OperationType::AppliesCondition);
         assert_eq!(op.status_kind, "Bleeding");
         assert_eq!(op.amount_mode, AmountMode::Stacks);
@@ -2034,7 +2106,10 @@ mod tests {
         };
         let new = map_legacy_effect(&old, SourceType::Trait, 214, "Phalanx Strength", 0);
         assert_eq!(new.category, EffectCategory::AppliesBoon);
-        let op = new.status_operation.as_ref().expect("should have status_operation");
+        let op = new
+            .status_operation
+            .as_ref()
+            .expect("should have status_operation");
         assert_eq!(op.operation_type, OperationType::AppliesBoon);
         assert_eq!(op.status_kind, "Might");
         assert_eq!(op.target_side, TargetSide::Self_);
@@ -2219,10 +2294,7 @@ mod tests {
         let pve = data.effects_for("2026-01-13", "PvE").unwrap();
 
         // Collect all categories present in PvE baseline
-        let categories: HashSet<String> = pve
-            .iter()
-            .map(|e| format!("{:?}", e.category))
-            .collect();
+        let categories: HashSet<String> = pve.iter().map(|e| format!("{:?}", e.category)).collect();
 
         // Must cover at least these core categories
         let required = [
@@ -2251,10 +2323,8 @@ mod tests {
         let data = effects();
         let pve = data.effects_for("2026-01-13", "PvE").unwrap();
 
-        let source_types: HashSet<String> = pve
-            .iter()
-            .map(|e| format!("{:?}", e.source_type))
-            .collect();
+        let source_types: HashSet<String> =
+            pve.iter().map(|e| format!("{:?}", e.source_type)).collect();
 
         // Should have Trait, Rune, Sigil at minimum
         for st in &["Trait", "Rune", "Sigil"] {

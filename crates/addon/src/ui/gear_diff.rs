@@ -109,7 +109,11 @@ pub fn compute_build_diff(current: &ResolvedBuild, suggestion: &BuildSuggestion)
         v
     };
     let current_prefix_str = if unique_prefixes.len() <= 1 {
-        unique_prefixes.first().copied().unwrap_or("(none)").to_string()
+        unique_prefixes
+            .first()
+            .copied()
+            .unwrap_or("(none)")
+            .to_string()
     } else {
         format!("Mixed ({})", unique_prefixes.join(", "))
     };
@@ -117,7 +121,10 @@ pub fn compute_build_diff(current: &ResolvedBuild, suggestion: &BuildSuggestion)
 
     // --- Specializations ---
     let mut specializations = Vec::new();
-    let max_specs = current.specializations.len().max(suggestion.specializations.len());
+    let max_specs = current
+        .specializations
+        .len()
+        .max(suggestion.specializations.len());
     for i in 0..max_specs {
         let (cur_name, cur_traits_str) = if let Some(spec) = current.specializations.get(i) {
             let elite_tag = if spec.elite { " [E]" } else { "" };
@@ -132,13 +139,12 @@ pub fn compute_build_diff(current: &ResolvedBuild, suggestion: &BuildSuggestion)
             ("(empty)".to_string(), String::new())
         };
 
-        let (sug_name, sug_traits_str) = if let Some((name, traits)) =
-            suggestion.specializations.get(i)
-        {
-            (name.clone(), traits.join(" | "))
-        } else {
-            ("(empty)".to_string(), String::new())
-        };
+        let (sug_name, sug_traits_str) =
+            if let Some((name, traits)) = suggestion.specializations.get(i) {
+                (name.clone(), traits.join(" | "))
+            } else {
+                ("(empty)".to_string(), String::new())
+            };
 
         let slot_label = format!("Spec {}", i + 1);
         let spec_diff = diff_slot(&slot_label, &cur_name, &sug_name);

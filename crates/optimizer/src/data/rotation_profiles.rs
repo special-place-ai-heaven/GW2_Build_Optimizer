@@ -35,21 +35,19 @@ pub fn rotation_profiles() -> &'static RotationProfileData {
 /// Try to load all rotation profiles from the embedded JSON, returning typed errors
 /// on failure. Does NOT store in OnceLock — used for health-check validation.
 pub fn try_load_rotation_profiles() -> Result<(), Vec<DataLoadError>> {
-    load_all_rotation_profiles()
-        .map(|_| ())
-        .map_err(|e| {
-            vec![match e {
-                RotationProfileError::ParseError(pe) => DataLoadError::ParseError {
-                    source: "rotation_profiles".into(),
-                    detail: pe.to_string(),
-                },
-                RotationProfileError::ValidationError(msg) => DataLoadError::ValidationError {
-                    source: "rotation_profiles".into(),
-                    field: String::new(),
-                    reason: msg,
-                },
-            }]
-        })
+    load_all_rotation_profiles().map(|_| ()).map_err(|e| {
+        vec![match e {
+            RotationProfileError::ParseError(pe) => DataLoadError::ParseError {
+                source: "rotation_profiles".into(),
+                detail: pe.to_string(),
+            },
+            RotationProfileError::ValidationError(msg) => DataLoadError::ValidationError {
+                source: "rotation_profiles".into(),
+                field: String::new(),
+                reason: msg,
+            },
+        }]
+    })
 }
 
 // ─── Error type ───
@@ -148,18 +146,20 @@ impl RotationProfile {
     /// Extracts from the ApplicationMetrics variant appropriate to the condition.
     pub fn condition_weight(&self, condition: &str) -> f64 {
         match self.condition_application.get(condition) {
-            Some(ApplicationMetrics::IntensityRate { avg_stacks_per_second }) => {
-                *avg_stacks_per_second
-            }
+            Some(ApplicationMetrics::IntensityRate {
+                avg_stacks_per_second,
+            }) => *avg_stacks_per_second,
             Some(ApplicationMetrics::SteadyState { avg_stacks }) => *avg_stacks,
-            Some(ApplicationMetrics::DurationRate { avg_duration_ms_per_second }) => {
+            Some(ApplicationMetrics::DurationRate {
+                avg_duration_ms_per_second,
+            }) => {
                 // Convert duration rate to an approximate stack equivalent
                 // 1000ms per second = 1.0 "stack equivalent"
                 avg_duration_ms_per_second / 1000.0
             }
-            Some(ApplicationMetrics::ProcRate { expected_procs_per_second }) => {
-                *expected_procs_per_second
-            }
+            Some(ApplicationMetrics::ProcRate {
+                expected_procs_per_second,
+            }) => *expected_procs_per_second,
             None => 0.0,
         }
     }
@@ -177,7 +177,11 @@ impl RotationProfile {
                 return val.clamp(0.0, 1.0);
             }
         }
-        self.boon_uptime.get(boon).copied().unwrap_or(0.0).clamp(0.0, 1.0)
+        self.boon_uptime
+            .get(boon)
+            .copied()
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0)
     }
 }
 
@@ -212,18 +216,19 @@ impl RotationProfileData {
 
         // 1. Exact match (profession + elite_spec)
         if let Some(spec) = elite_spec {
-            if let Some(p) = profiles.iter().find(|p| {
-                p.profession == profession
-                    && p.elite_spec.as_deref() == Some(spec)
-            }) {
+            if let Some(p) = profiles
+                .iter()
+                .find(|p| p.profession == profession && p.elite_spec.as_deref() == Some(spec))
+            {
                 return Some(p);
             }
         }
 
         // 2. Profession-only match
-        if let Some(p) = profiles.iter().find(|p| {
-            p.profession == profession && p.elite_spec.is_none()
-        }) {
+        if let Some(p) = profiles
+            .iter()
+            .find(|p| p.profession == profession && p.elite_spec.is_none())
+        {
             return Some(p);
         }
 
@@ -232,10 +237,7 @@ impl RotationProfileData {
     }
 
     /// Get all profiles for a given mode.
-    pub fn profiles_for_mode(
-        &self,
-        mode: &gw2_core::types::GameMode,
-    ) -> &[RotationProfile] {
+    pub fn profiles_for_mode(&self, mode: &gw2_core::types::GameMode) -> &[RotationProfile] {
         match mode {
             gw2_core::types::GameMode::PvE => &self.pve,
             gw2_core::types::GameMode::PvP => &self.pvp,
@@ -285,8 +287,15 @@ fn validate_profiles(
 
     // Must have all 9 core professions
     let required = [
-        "Warrior", "Guardian", "Revenant", "Engineer", "Ranger",
-        "Thief", "Elementalist", "Mesmer", "Necromancer",
+        "Warrior",
+        "Guardian",
+        "Revenant",
+        "Engineer",
+        "Ranger",
+        "Thief",
+        "Elementalist",
+        "Mesmer",
+        "Necromancer",
     ];
     for prof in &required {
         if !profiles.iter().any(|p| p.profession == *prof) {
@@ -323,7 +332,9 @@ fn validate_profiles(
         if p.scenarios.len() < 3 {
             return Err(RotationProfileError::ValidationError(format!(
                 "{}: profile '{}' has {} scenarios, minimum 3 required",
-                mode_label, p.profile_id, p.scenarios.len()
+                mode_label,
+                p.profile_id,
+                p.scenarios.len()
             )));
         }
     }
@@ -436,7 +447,11 @@ impl ConditionWeightsFromProfile {
         let data = rotation_profiles();
         // Try Harbinger elite spec first, fall back to Necromancer core
         let profile = data
-            .lookup("Necromancer", Some("Harbinger"), &gw2_core::types::GameMode::PvE)
+            .lookup(
+                "Necromancer",
+                Some("Harbinger"),
+                &gw2_core::types::GameMode::PvE,
+            )
             .or_else(|| data.lookup("Necromancer", None, &gw2_core::types::GameMode::PvE))
             .expect("Necromancer PvE rotation profile missing");
         Self::from_profile(profile)
@@ -490,7 +505,7 @@ pub fn populate_heuristic_uptimes(
     effects: &mut [super::normalized_effects::NormalizedEffect],
     _profile: &RotationProfile,
 ) -> usize {
-    use super::normalized_effects::{UptimeModelKind, TriggerRule};
+    use super::normalized_effects::{TriggerRule, UptimeModelKind};
     use super::quality::FactualValue;
 
     let mut updated = 0;
@@ -576,7 +591,11 @@ mod tests {
     #[test]
     fn test_embedded_profiles_load_successfully() {
         let data = rotation_profiles();
-        assert!(data.total_count() >= 30, "expected >= 30 profiles, got {}", data.total_count());
+        assert!(
+            data.total_count() >= 30,
+            "expected >= 30 profiles, got {}",
+            data.total_count()
+        );
     }
 
     #[test]
@@ -588,10 +607,18 @@ mod tests {
             gw2_core::types::GameMode::WvW,
         ] {
             let profiles = data.profiles_for_mode(mode);
-            assert!(profiles.len() >= 10, "mode {:?} has {} profiles (need >= 10)", mode, profiles.len());
+            assert!(
+                profiles.len() >= 10,
+                "mode {:?} has {} profiles (need >= 10)",
+                mode,
+                profiles.len()
+            );
             // Generic fallback exists
-            assert!(profiles.iter().any(|p| p.profession == "Generic"),
-                "mode {:?} missing Generic fallback", mode);
+            assert!(
+                profiles.iter().any(|p| p.profession == "Generic"),
+                "mode {:?} missing Generic fallback",
+                mode
+            );
         }
     }
 
@@ -616,9 +643,14 @@ mod tests {
     #[test]
     fn test_condition_weight_extraction() {
         let data = rotation_profiles();
-        let necro = data.lookup("Necromancer", None, &gw2_core::types::GameMode::PvE).unwrap();
+        let necro = data
+            .lookup("Necromancer", None, &gw2_core::types::GameMode::PvE)
+            .unwrap();
         let bleeding = necro.condition_weight("Bleeding");
-        assert!(bleeding > 0.0, "Necromancer should have Bleeding weight > 0");
+        assert!(
+            bleeding > 0.0,
+            "Necromancer should have Bleeding weight > 0"
+        );
         let torment = necro.condition_weight("Torment");
         assert!(torment > 0.0, "Necromancer should have Torment weight > 0");
     }
@@ -632,8 +664,12 @@ mod tests {
             gw2_core::types::GameMode::WvW,
         ] {
             for p in data.profiles_for_mode(mode) {
-                assert!(p.scenarios.len() >= 3,
-                    "profile '{}' has {} scenarios, need >= 3", p.profile_id, p.scenarios.len());
+                assert!(
+                    p.scenarios.len() >= 3,
+                    "profile '{}' has {} scenarios, need >= 3",
+                    p.profile_id,
+                    p.scenarios.len()
+                );
             }
         }
     }
@@ -647,8 +683,12 @@ mod tests {
             gw2_core::types::GameMode::WvW,
         ] {
             for p in data.profiles_for_mode(mode) {
-                assert_eq!(p.evidence_level, EvidenceLevel::Heuristic,
-                    "profile '{}' is not Heuristic", p.profile_id);
+                assert_eq!(
+                    p.evidence_level,
+                    EvidenceLevel::Heuristic,
+                    "profile '{}' is not Heuristic",
+                    p.profile_id
+                );
             }
         }
     }
@@ -656,7 +696,9 @@ mod tests {
     #[test]
     fn test_buff_profile_from_scenario() {
         let data = rotation_profiles();
-        let warrior = data.lookup("Warrior", None, &gw2_core::types::GameMode::PvE).unwrap();
+        let warrior = data
+            .lookup("Warrior", None, &gw2_core::types::GameMode::PvE)
+            .unwrap();
 
         let solo = warrior.scenario("solo").unwrap();
         let bp_solo = BuffProfileFromScenario::from_scenario(warrior, solo);
@@ -665,14 +707,18 @@ mod tests {
         let squad = warrior.scenario("full_squad").unwrap();
         let bp_squad = BuffProfileFromScenario::from_scenario(warrior, squad);
         assert_eq!(bp_squad.label, "Full Squad");
-        assert!(bp_squad.might_stacks > bp_solo.might_stacks,
-            "Squad should have more Might than Solo");
+        assert!(
+            bp_squad.might_stacks > bp_solo.might_stacks,
+            "Squad should have more Might than Solo"
+        );
     }
 
     #[test]
     fn test_condition_weights_from_profile() {
         let data = rotation_profiles();
-        let necro = data.lookup("Necromancer", None, &gw2_core::types::GameMode::PvE).unwrap();
+        let necro = data
+            .lookup("Necromancer", None, &gw2_core::types::GameMode::PvE)
+            .unwrap();
         let cw = ConditionWeightsFromProfile::from_profile(necro);
         assert!(cw.bleeding > 0.0);
         assert!(cw.torment > 0.0);
@@ -681,11 +727,17 @@ mod tests {
     #[test]
     fn test_effective_boon_uptime_with_override() {
         let data = rotation_profiles();
-        let warrior = data.lookup("Warrior", None, &gw2_core::types::GameMode::PvE).unwrap();
+        let warrior = data
+            .lookup("Warrior", None, &gw2_core::types::GameMode::PvE)
+            .unwrap();
         let squad = warrior.scenario("full_squad").unwrap();
         // Full squad should have Fury override to 1.0
         let fury = warrior.effective_boon_uptime("Fury", squad);
-        assert!((fury - 1.0).abs() < 0.001, "Expected Fury 1.0 in full_squad, got {}", fury);
+        assert!(
+            (fury - 1.0).abs() < 0.001,
+            "Expected Fury 1.0 in full_squad, got {}",
+            fury
+        );
     }
 
     #[test]
@@ -719,7 +771,10 @@ mod tests {
         ]"#;
         let result = load_rotation_profiles(json);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("missing Generic fallback"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("missing Generic fallback"));
     }
 
     #[test]
@@ -727,7 +782,8 @@ mod tests {
         // A profile with evidence_level Factual (should be Heuristic) must be rejected.
         // We provide all required professions + generic so that the evidence check is reached.
         let make_profile = |id: &str, prof: &str, evidence: &str| -> String {
-            format!(r#"{{
+            format!(
+                r#"{{
                 "profile_id": "{}",
                 "profession": "{}",
                 "elite_spec": null,
@@ -744,11 +800,24 @@ mod tests {
                 ],
                 "evidence_level": "{}",
                 "notes": "test"
-            }}"#, id, prof, evidence)
+            }}"#,
+                id, prof, evidence
+            )
         };
-        let profs = ["Warrior", "Guardian", "Revenant", "Engineer", "Ranger",
-                     "Thief", "Elementalist", "Mesmer", "Necromancer"];
-        let mut entries: Vec<String> = profs.iter().enumerate()
+        let profs = [
+            "Warrior",
+            "Guardian",
+            "Revenant",
+            "Engineer",
+            "Ranger",
+            "Thief",
+            "Elementalist",
+            "Mesmer",
+            "Necromancer",
+        ];
+        let mut entries: Vec<String> = profs
+            .iter()
+            .enumerate()
             .map(|(i, p)| make_profile(&format!("test_{}", i), p, "Heuristic"))
             .collect();
         // Generic with Factual (should be rejected)
@@ -758,39 +827,64 @@ mod tests {
         let result = load_rotation_profiles(&json);
         assert!(result.is_err(), "Factual evidence_level should be rejected");
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Heuristic") || err_msg.contains("evidence_level"),
-            "Error should mention Heuristic or evidence_level: {}", err_msg);
+        assert!(
+            err_msg.contains("Heuristic") || err_msg.contains("evidence_level"),
+            "Error should mention Heuristic or evidence_level: {}",
+            err_msg
+        );
     }
 
     #[test]
     fn test_integration_rotation_profile_changes_combat_output() {
         // Verify that different rotation profiles produce different condition weights
         let data = rotation_profiles();
-        let warrior = data.lookup("Warrior", None, &gw2_core::types::GameMode::PvE).unwrap();
-        let necro = data.lookup("Necromancer", None, &gw2_core::types::GameMode::PvE).unwrap();
+        let warrior = data
+            .lookup("Warrior", None, &gw2_core::types::GameMode::PvE)
+            .unwrap();
+        let necro = data
+            .lookup("Necromancer", None, &gw2_core::types::GameMode::PvE)
+            .unwrap();
 
         let cw_war = ConditionWeightsFromProfile::from_profile(warrior);
         let cw_nec = ConditionWeightsFromProfile::from_profile(necro);
 
         // Necromancer should have higher Bleeding and Torment than Warrior
-        assert!(cw_nec.bleeding > cw_war.bleeding,
-            "Necro bleeding {} should exceed Warrior {}", cw_nec.bleeding, cw_war.bleeding);
-        assert!(cw_nec.torment > cw_war.torment,
-            "Necro torment {} should exceed Warrior {}", cw_nec.torment, cw_war.torment);
+        assert!(
+            cw_nec.bleeding > cw_war.bleeding,
+            "Necro bleeding {} should exceed Warrior {}",
+            cw_nec.bleeding,
+            cw_war.bleeding
+        );
+        assert!(
+            cw_nec.torment > cw_war.torment,
+            "Necro torment {} should exceed Warrior {}",
+            cw_nec.torment,
+            cw_war.torment
+        );
     }
 
     #[test]
     fn test_integration_solo_lt_party_lt_squad_might() {
         let data = rotation_profiles();
-        let warrior = data.lookup("Warrior", None, &gw2_core::types::GameMode::PvE).unwrap();
+        let warrior = data
+            .lookup("Warrior", None, &gw2_core::types::GameMode::PvE)
+            .unwrap();
 
         let solo = warrior.scenario("solo").unwrap();
         let party = warrior.scenario("party").unwrap();
         let squad = warrior.scenario("full_squad").unwrap();
 
-        assert!(solo.might_stacks < party.might_stacks,
-            "Solo Might {} should be < Party {}", solo.might_stacks, party.might_stacks);
-        assert!(party.might_stacks < squad.might_stacks,
-            "Party Might {} should be < Squad {}", party.might_stacks, squad.might_stacks);
+        assert!(
+            solo.might_stacks < party.might_stacks,
+            "Solo Might {} should be < Party {}",
+            solo.might_stacks,
+            party.might_stacks
+        );
+        assert!(
+            party.might_stacks < squad.might_stacks,
+            "Party Might {} should be < Squad {}",
+            party.might_stacks,
+            squad.might_stacks
+        );
     }
 }

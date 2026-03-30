@@ -32,7 +32,13 @@ fn skill_to_rotation(skill: &Skill) -> RotationSkill {
     let cooldown_ms = extract_cooldown(&skill.facts);
     let effects = extract_effects(&skill.facts);
     let is_stunbreak = skill.facts.iter().any(|f| {
-        matches!(f, Fact::StunBreak { value: Some(true), .. })
+        matches!(
+            f,
+            Fact::StunBreak {
+                value: Some(true),
+                ..
+            }
+        )
     });
 
     RotationSkill {
@@ -306,7 +312,11 @@ mod tests {
         let effects = extract_effects(&facts);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
-            SkillEffect::ApplyCondition { condition, stacks, duration_ms } => {
+            SkillEffect::ApplyCondition {
+                condition,
+                stacks,
+                duration_ms,
+            } => {
                 assert_eq!(condition, "Bleeding");
                 assert_eq!(*stacks, 3);
                 assert_eq!(*duration_ms, 5000);

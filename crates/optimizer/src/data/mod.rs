@@ -15,26 +15,24 @@ pub mod slot_budgets;
 pub mod universal_formulas;
 
 pub use balance_overrides::{
-    BalanceOverrides, KnownModeSplit, OverrideResult, check_wvw_quality, known_mode_splits,
+    check_wvw_quality, known_mode_splits, BalanceOverrides, KnownModeSplit, OverrideResult,
 };
-pub use boon_condition_formulas::{BoonFormulas, ConditionFormulas, boons, conditions};
-pub use manifests::{PatchManifest, check_staleness};
+pub use boon_condition_formulas::{boons, conditions, BoonFormulas, ConditionFormulas};
+pub use manifests::{check_staleness, PatchManifest};
 pub use normalized_effects::{
-    EffectCategory, NormalizedEffect, SourceType, StackingRule, StatusOperation, TriggerRule,
-    UptimeModel, map_legacy_effect, score_effect,
+    map_legacy_effect, score_effect, EffectCategory, NormalizedEffect, SourceType, StackingRule,
+    StatusOperation, TriggerRule, UptimeModel,
 };
+pub use objective_profiles::{ObjectiveProfile, ObjectiveProfileData, ObjectiveProfileFile};
 pub use patch_ledger::PatchLedger;
 pub use profession_profiles::ProfessionProfiles;
-pub use objective_profiles::{
-    ObjectiveProfile, ObjectiveProfileData, ObjectiveProfileFile,
-};
+pub use quality::{DataQuality, DataQualityReason, FactualValue};
 pub use rotation_profiles::{
     ApplicationMetrics, BuffProfileFromScenario, ConditionWeightsFromProfile, GenerationMetrics,
     RotationProfile, RotationProfileData, ScenarioProfile, TargetBehavior,
 };
-pub use quality::{DataQuality, DataQualityReason, FactualValue};
 pub use slot_budgets::{
-    SlotBudgets, SlotType, StatShape, EQUIPMENT_SLOTS, stat_shape_from_attr_count,
+    stat_shape_from_attr_count, SlotBudgets, SlotType, StatShape, EQUIPMENT_SLOTS,
 };
 pub use universal_formulas::UniversalFormulas;
 
@@ -60,7 +58,11 @@ pub enum DataLoadError {
     /// JSON or format parse failure.
     ParseError { source: String, detail: String },
     /// A field value fails validation constraints.
-    ValidationError { source: String, field: String, reason: String },
+    ValidationError {
+        source: String,
+        field: String,
+        reason: String,
+    },
     /// A required data source is missing or empty.
     MissingRequired { source: String },
 }
@@ -71,8 +73,16 @@ impl std::fmt::Display for DataLoadError {
             Self::ParseError { source, detail } => {
                 write!(f, "Parse error in {}: {}", source, detail)
             }
-            Self::ValidationError { source, field, reason } => {
-                write!(f, "Validation error in {} field '{}': {}", source, field, reason)
+            Self::ValidationError {
+                source,
+                field,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "Validation error in {} field '{}': {}",
+                    source, field, reason
+                )
             }
             Self::MissingRequired { source } => {
                 write!(f, "Missing required data: {}", source)
@@ -252,26 +262,62 @@ mod tests {
 
     #[test]
     fn test_stat_shape_from_attr_count() {
-        assert!(matches!(stat_shape_from_attr_count(3), StatShape::ThreeStat));
+        assert!(matches!(
+            stat_shape_from_attr_count(3),
+            StatShape::ThreeStat
+        ));
         assert!(matches!(stat_shape_from_attr_count(4), StatShape::FourStat));
-        assert!(matches!(stat_shape_from_attr_count(7), StatShape::CelestialLike));
-        assert!(matches!(stat_shape_from_attr_count(9), StatShape::CelestialLike));
+        assert!(matches!(
+            stat_shape_from_attr_count(7),
+            StatShape::CelestialLike
+        ));
+        assert!(matches!(
+            stat_shape_from_attr_count(9),
+            StatShape::CelestialLike
+        ));
         // Edge cases fall back to ThreeStat
-        assert!(matches!(stat_shape_from_attr_count(1), StatShape::ThreeStat));
-        assert!(matches!(stat_shape_from_attr_count(5), StatShape::ThreeStat));
+        assert!(matches!(
+            stat_shape_from_attr_count(1),
+            StatShape::ThreeStat
+        ));
+        assert!(matches!(
+            stat_shape_from_attr_count(5),
+            StatShape::ThreeStat
+        ));
     }
 
     #[test]
     fn test_slot_type_from_api_slot() {
         assert_eq!(SlotType::from_api_slot("Helm"), Some(SlotType::Helm));
         assert_eq!(SlotType::from_api_slot("Coat"), Some(SlotType::Coat));
-        assert_eq!(SlotType::from_api_slot("WeaponA1"), Some(SlotType::WeaponTwoHand));
-        assert_eq!(SlotType::from_api_slot("WeaponA2"), Some(SlotType::WeaponOneHand));
-        assert_eq!(SlotType::from_api_slot("WeaponB1"), Some(SlotType::WeaponTwoHand));
-        assert_eq!(SlotType::from_api_slot("WeaponB2"), Some(SlotType::WeaponOneHand));
-        assert_eq!(SlotType::from_api_slot("Backpack"), Some(SlotType::BackItem));
-        assert_eq!(SlotType::from_api_slot("Accessory1"), Some(SlotType::Accessory));
-        assert_eq!(SlotType::from_api_slot("Accessory2"), Some(SlotType::Accessory));
+        assert_eq!(
+            SlotType::from_api_slot("WeaponA1"),
+            Some(SlotType::WeaponTwoHand)
+        );
+        assert_eq!(
+            SlotType::from_api_slot("WeaponA2"),
+            Some(SlotType::WeaponOneHand)
+        );
+        assert_eq!(
+            SlotType::from_api_slot("WeaponB1"),
+            Some(SlotType::WeaponTwoHand)
+        );
+        assert_eq!(
+            SlotType::from_api_slot("WeaponB2"),
+            Some(SlotType::WeaponOneHand)
+        );
+        assert_eq!(
+            SlotType::from_api_slot("Backpack"),
+            Some(SlotType::BackItem)
+        );
+        assert_eq!(
+            SlotType::from_api_slot("Accessory1"),
+            Some(SlotType::Accessory)
+        );
+        assert_eq!(
+            SlotType::from_api_slot("Accessory2"),
+            Some(SlotType::Accessory)
+        );
         assert_eq!(SlotType::from_api_slot("Amulet"), Some(SlotType::Amulet));
         assert_eq!(SlotType::from_api_slot("Ring1"), Some(SlotType::Ring));
         assert_eq!(SlotType::from_api_slot("Ring2"), Some(SlotType::Ring));

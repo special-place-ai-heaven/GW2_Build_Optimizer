@@ -15,7 +15,11 @@ pub enum LlmProvider {
 }
 
 impl LlmProvider {
-    pub const ALL: [LlmProvider; 3] = [LlmProvider::Gemini, LlmProvider::OpenAI, LlmProvider::Anthropic];
+    pub const ALL: [LlmProvider; 3] = [
+        LlmProvider::Gemini,
+        LlmProvider::OpenAI,
+        LlmProvider::Anthropic,
+    ];
 
     pub fn label(&self) -> &str {
         match self {
@@ -136,7 +140,10 @@ fn default_content_indent() -> f32 {
 /// The Settings tab populates this list dynamically from the API at runtime.
 pub const GEMINI_MODELS: &[(&str, &str)] = &[
     ("gemini-2.5-flash", "Gemini 2.5 Flash (fast, free tier)"),
-    ("gemini-3-pro-preview", "Gemini 3 Pro Preview (advanced reasoning)"),
+    (
+        "gemini-3-pro-preview",
+        "Gemini 3 Pro Preview (advanced reasoning)",
+    ),
     ("gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview (latest)"),
 ];
 
@@ -154,7 +161,10 @@ pub const DEFAULT_OPENAI_MODEL: &str = "gpt-4o";
 /// Known Anthropic models available for selection.
 pub const ANTHROPIC_MODELS: &[(&str, &str)] = &[
     ("claude-sonnet-4-6", "Claude Sonnet 4.6 (balanced)"),
-    ("claude-haiku-4-5-20251001", "Claude Haiku 4.5 (fast, cheap)"),
+    (
+        "claude-haiku-4-5-20251001",
+        "Claude Haiku 4.5 (fast, cheap)",
+    ),
 ];
 
 pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-6";
@@ -169,7 +179,9 @@ impl AppConfig {
     }
 
     pub fn anthropic_model_id(&self) -> &str {
-        self.anthropic_model.as_deref().unwrap_or(DEFAULT_ANTHROPIC_MODEL)
+        self.anthropic_model
+            .as_deref()
+            .unwrap_or(DEFAULT_ANTHROPIC_MODEL)
     }
 
     /// Get the model ID for the currently active provider.
@@ -233,7 +245,9 @@ impl AppConfig {
     }
 
     pub fn has_anthropic_key(&self) -> bool {
-        self.anthropic_api_key.as_ref().is_some_and(|k| !k.is_empty())
+        self.anthropic_api_key
+            .as_ref()
+            .is_some_and(|k| !k.is_empty())
     }
 
     /// Whether the active provider has a valid API key.

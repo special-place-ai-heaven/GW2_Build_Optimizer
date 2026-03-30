@@ -18,7 +18,12 @@ pub struct DownloadProgress {
 
 const TOTAL_STEPS: usize = 8;
 
-fn report(on_progress: &mut impl FnMut(DownloadProgress), step: &mut usize, name: &str, detail: Option<String>) {
+fn report(
+    on_progress: &mut impl FnMut(DownloadProgress),
+    step: &mut usize,
+    name: &str,
+    detail: Option<String>,
+) {
     *step += 1;
     on_progress(DownloadProgress {
         current_step: *step,
@@ -43,40 +48,48 @@ pub fn download_all(
     // 1. Item stats
     if cache.is_stale("itemstats", build) {
         let data: Vec<models::ItemStat> = client.fetch_all("itemstats")?;
-        cache.save("itemstats", &data, build).map_err(|e| ApiError::Api {
-            status: 0,
-            message: e.to_string(),
-        })?;
+        cache
+            .save("itemstats", &data, build)
+            .map_err(|e| ApiError::Api {
+                status: 0,
+                message: e.to_string(),
+            })?;
     }
     report(&mut on_progress, &mut step, "Item stats", None);
 
     // 2. Specializations
     if cache.is_stale("specializations", build) {
         let data: Vec<models::Specialization> = client.fetch_all("specializations")?;
-        cache.save("specializations", &data, build).map_err(|e| ApiError::Api {
-            status: 0,
-            message: e.to_string(),
-        })?;
+        cache
+            .save("specializations", &data, build)
+            .map_err(|e| ApiError::Api {
+                status: 0,
+                message: e.to_string(),
+            })?;
     }
     report(&mut on_progress, &mut step, "Specializations", None);
 
     // 3. Traits
     if cache.is_stale("traits", build) {
         let data: Vec<models::Trait> = client.fetch_all("traits")?;
-        cache.save("traits", &data, build).map_err(|e| ApiError::Api {
-            status: 0,
-            message: e.to_string(),
-        })?;
+        cache
+            .save("traits", &data, build)
+            .map_err(|e| ApiError::Api {
+                status: 0,
+                message: e.to_string(),
+            })?;
     }
     report(&mut on_progress, &mut step, "Traits", None);
 
     // 4. Skills
     if cache.is_stale("skills", build) {
         let data: Vec<models::Skill> = client.fetch_all("skills")?;
-        cache.save("skills", &data, build).map_err(|e| ApiError::Api {
-            status: 0,
-            message: e.to_string(),
-        })?;
+        cache
+            .save("skills", &data, build)
+            .map_err(|e| ApiError::Api {
+                status: 0,
+                message: e.to_string(),
+            })?;
     }
     report(&mut on_progress, &mut step, "Skills", None);
 
@@ -86,37 +99,50 @@ pub fn download_all(
             "professions",
             &[("ids", "all"), ("v", "2019-12-19T00:00:00.000Z")],
         )?;
-        cache.save("professions", &data, build).map_err(|e| ApiError::Api {
-            status: 0,
-            message: e.to_string(),
-        })?;
+        cache
+            .save("professions", &data, build)
+            .map_err(|e| ApiError::Api {
+                status: 0,
+                message: e.to_string(),
+            })?;
     }
     report(&mut on_progress, &mut step, "Professions", None);
 
     // 6. Legends
     if cache.is_stale("legends", build) {
         let data: Vec<models::Legend> = client.fetch_all("legends")?;
-        cache.save("legends", &data, build).map_err(|e| ApiError::Api {
-            status: 0,
-            message: e.to_string(),
-        })?;
+        cache
+            .save("legends", &data, build)
+            .map_err(|e| ApiError::Api {
+                status: 0,
+                message: e.to_string(),
+            })?;
     }
     report(&mut on_progress, &mut step, "Legends", None);
 
     // 7. PvP Amulets
     if cache.is_stale("pvp_amulets", build) {
         let data: Vec<models::PvpAmulet> = client.fetch_all("pvp/amulets")?;
-        cache.save("pvp_amulets", &data, build).map_err(|e| ApiError::Api {
-            status: 0,
-            message: e.to_string(),
-        })?;
+        cache
+            .save("pvp_amulets", &data, build)
+            .map_err(|e| ApiError::Api {
+                status: 0,
+                message: e.to_string(),
+            })?;
     }
     report(&mut on_progress, &mut step, "PvP Amulets", None);
 
     // 8. Items (filtered to equipment-relevant types) — largest step, ~100k items
     // Uses fetch_by_ids (200-ID batches, 5 concurrent) with lenient per-item deserialization.
     if cache.is_stale("items", build) {
-        let relevant_types = ["Armor", "Weapon", "Trinket", "Back", "UpgradeComponent", "Relic"];
+        let relevant_types = [
+            "Armor",
+            "Weapon",
+            "Trinket",
+            "Back",
+            "UpgradeComponent",
+            "Relic",
+        ];
         let relevant_rarities = ["Exotic", "Ascended", "Legendary"];
 
         // Get all item IDs first
@@ -130,10 +156,8 @@ pub fn download_all(
         let ids: Vec<serde_json::Value> = client.get("items")?;
 
         // Fetch all items as raw JSON values with live progress updates
-        let raw_items: Vec<serde_json::Value> = client.fetch_by_ids_with_progress(
-            "items",
-            &ids,
-            |fetched, total| {
+        let raw_items: Vec<serde_json::Value> =
+            client.fetch_by_ids_with_progress("items", &ids, |fetched, total| {
                 on_progress(DownloadProgress {
                     current_step: step,
                     total_steps: TOTAL_STEPS,
@@ -141,8 +165,7 @@ pub fn download_all(
                     done: false,
                     detail: Some(format!("{} / {} items fetched", fetched, total)),
                 });
-            },
-        )?;
+            })?;
 
         // Filter to equipment-relevant items with lenient deserialization
         let mut equipment_items: Vec<models::Item> = Vec::new();
@@ -156,10 +179,12 @@ pub fn download_all(
             }
         }
 
-        cache.save("items", &equipment_items, build).map_err(|e| ApiError::Api {
-            status: 0,
-            message: e.to_string(),
-        })?;
+        cache
+            .save("items", &equipment_items, build)
+            .map_err(|e| ApiError::Api {
+                status: 0,
+                message: e.to_string(),
+            })?;
     }
     report(&mut on_progress, &mut step, "Items (equipment)", None);
 

@@ -4,8 +4,7 @@ use std::sync::OnceLock;
 use thiserror::Error;
 
 /// Canonical JSON embedded at compile time from data/manifests/2026-01-13.json.
-const MANIFEST_2026_01_13_JSON: &str =
-    include_str!("../../../../data/manifests/2026-01-13.json");
+const MANIFEST_2026_01_13_JSON: &str = include_str!("../../../../data/manifests/2026-01-13.json");
 
 static MANIFESTS: OnceLock<Vec<PatchManifest>> = OnceLock::new();
 
@@ -15,12 +14,9 @@ static MANIFESTS: OnceLock<Vec<PatchManifest>> = OnceLock::new();
 /// Panics if the embedded JSON is malformed (compile-time data, should never happen).
 pub fn manifests() -> &'static [PatchManifest] {
     MANIFESTS.get_or_init(|| {
-        let all = vec![
-            load_manifest(MANIFEST_2026_01_13_JSON)
-                .expect("embedded 2026-01-13 manifest is invalid"),
-        ];
-        validate_manifest_set(&all)
-            .expect("embedded manifest set validation failed");
+        let all = vec![load_manifest(MANIFEST_2026_01_13_JSON)
+            .expect("embedded 2026-01-13 manifest is invalid")];
+        validate_manifest_set(&all).expect("embedded manifest set validation failed");
         all
     })
 }
@@ -140,10 +136,8 @@ pub fn validate_manifest_set(manifests: &[PatchManifest]) -> Result<(), Manifest
     }
 
     // Build id→manifest lookup for inheritance checks
-    let id_map: HashMap<&str, &PatchManifest> = manifests
-        .iter()
-        .map(|m| (m.patch_id.as_str(), m))
-        .collect();
+    let id_map: HashMap<&str, &PatchManifest> =
+        manifests.iter().map(|m| (m.patch_id.as_str(), m)).collect();
 
     // Every inherits_from must reference an existing patch_id
     for m in manifests {
@@ -168,9 +162,7 @@ pub fn validate_manifest_set(manifests: &[PatchManifest]) -> Result<(), Manifest
                     id
                 )));
             }
-            current = id_map
-                .get(id)
-                .and_then(|m| m.inherits_from.as_deref());
+            current = id_map.get(id).and_then(|m| m.inherits_from.as_deref());
         }
     }
 
@@ -187,9 +179,7 @@ pub fn validate_manifest_set(manifests: &[PatchManifest]) -> Result<(), Manifest
         let mut current = Some(active_id);
         while let Some(id) = current {
             lineage.insert(id);
-            current = id_map
-                .get(id)
-                .and_then(|m| m.inherits_from.as_deref());
+            current = id_map.get(id).and_then(|m| m.inherits_from.as_deref());
         }
 
         // Check if any other active manifest is in this lineage
@@ -257,10 +247,7 @@ mod tests {
             "baseline manifest should have authoring_notes"
         );
         assert!(
-            m.authoring_notes
-                .as_ref()
-                .unwrap()
-                .contains("baseline"),
+            m.authoring_notes.as_ref().unwrap().contains("baseline"),
             "authoring_notes should mention baseline"
         );
     }
@@ -381,7 +368,8 @@ mod tests {
 
     #[test]
     fn test_set_validation_rejects_duplicate_patch_id() {
-        let m1 = load_manifest(r#"{
+        let m1 = load_manifest(
+            r#"{
             "patch_id": "2026-01-13",
             "game_build_id": 175218,
             "release_date": "2026-01-13",
@@ -389,9 +377,11 @@ mod tests {
             "sources": [{"kind": "baseline", "url": "https://example.com"}],
             "supported_modes": ["PvE"],
             "status": "active"
-        }"#)
+        }"#,
+        )
         .unwrap();
-        let m2 = load_manifest(r#"{
+        let m2 = load_manifest(
+            r#"{
             "patch_id": "2026-01-13",
             "game_build_id": 175219,
             "release_date": "2026-01-13",
@@ -399,7 +389,8 @@ mod tests {
             "sources": [{"kind": "baseline", "url": "https://example.com"}],
             "supported_modes": ["PvE"],
             "status": "draft"
-        }"#)
+        }"#,
+        )
         .unwrap();
         let err = validate_manifest_set(&[m1, m2]).unwrap_err();
         assert!(
@@ -411,7 +402,8 @@ mod tests {
 
     #[test]
     fn test_set_validation_rejects_dangling_inherits_from() {
-        let m = load_manifest(r#"{
+        let m = load_manifest(
+            r#"{
             "patch_id": "2026-02-01",
             "game_build_id": 175300,
             "release_date": "2026-02-01",
@@ -419,7 +411,8 @@ mod tests {
             "sources": [{"kind": "wiki_patch_notes", "url": "https://example.com"}],
             "supported_modes": ["PvE"],
             "status": "active"
-        }"#)
+        }"#,
+        )
         .unwrap();
         let err = validate_manifest_set(&[m]).unwrap_err();
         assert!(
@@ -432,7 +425,8 @@ mod tests {
     #[test]
     fn test_set_validation_rejects_circular_inheritance() {
         // Two manifests that point to each other
-        let mut m1 = load_manifest(r#"{
+        let mut m1 = load_manifest(
+            r#"{
             "patch_id": "2026-01-13",
             "game_build_id": 175218,
             "release_date": "2026-01-13",
@@ -440,9 +434,11 @@ mod tests {
             "sources": [{"kind": "baseline", "url": "https://example.com"}],
             "supported_modes": ["PvE"],
             "status": "superseded"
-        }"#)
+        }"#,
+        )
         .unwrap();
-        let m2 = load_manifest(r#"{
+        let m2 = load_manifest(
+            r#"{
             "patch_id": "2026-02-01",
             "game_build_id": 175300,
             "release_date": "2026-02-01",
@@ -450,7 +446,8 @@ mod tests {
             "sources": [{"kind": "wiki_patch_notes", "url": "https://example.com"}],
             "supported_modes": ["PvE"],
             "status": "active"
-        }"#)
+        }"#,
+        )
         .unwrap();
         // Create the cycle: m1 -> m2 -> m1
         m1.inherits_from = Some("2026-02-01".to_string());
@@ -464,7 +461,8 @@ mod tests {
 
     #[test]
     fn test_set_validation_rejects_two_active_in_same_lineage() {
-        let m1 = load_manifest(r#"{
+        let m1 = load_manifest(
+            r#"{
             "patch_id": "2026-01-13",
             "game_build_id": 175218,
             "release_date": "2026-01-13",
@@ -472,9 +470,11 @@ mod tests {
             "sources": [{"kind": "baseline", "url": "https://example.com"}],
             "supported_modes": ["PvE"],
             "status": "active"
-        }"#)
+        }"#,
+        )
         .unwrap();
-        let m2 = load_manifest(r#"{
+        let m2 = load_manifest(
+            r#"{
             "patch_id": "2026-02-01",
             "game_build_id": 175300,
             "release_date": "2026-02-01",
@@ -482,7 +482,8 @@ mod tests {
             "sources": [{"kind": "wiki_patch_notes", "url": "https://example.com"}],
             "supported_modes": ["PvE"],
             "status": "active"
-        }"#)
+        }"#,
+        )
         .unwrap();
         let err = validate_manifest_set(&[m1, m2]).unwrap_err();
         assert!(
@@ -494,7 +495,8 @@ mod tests {
 
     #[test]
     fn test_set_validation_allows_valid_inheritance_chain() {
-        let m1 = load_manifest(r#"{
+        let m1 = load_manifest(
+            r#"{
             "patch_id": "2026-01-13",
             "game_build_id": 175218,
             "release_date": "2026-01-13",
@@ -502,9 +504,11 @@ mod tests {
             "sources": [{"kind": "baseline", "url": "https://example.com"}],
             "supported_modes": ["PvE"],
             "status": "superseded"
-        }"#)
+        }"#,
+        )
         .unwrap();
-        let m2 = load_manifest(r#"{
+        let m2 = load_manifest(
+            r#"{
             "patch_id": "2026-02-01",
             "game_build_id": 175300,
             "release_date": "2026-02-01",
@@ -512,7 +516,8 @@ mod tests {
             "sources": [{"kind": "wiki_patch_notes", "url": "https://example.com"}],
             "supported_modes": ["PvE"],
             "status": "active"
-        }"#)
+        }"#,
+        )
         .unwrap();
         assert!(validate_manifest_set(&[m1, m2]).is_ok());
     }

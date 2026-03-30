@@ -249,15 +249,15 @@ fn render_primary_stats(ui: &Ui, current: Option<&StatBlock>, suggested: Option<
     let sug = suggested.cloned().unwrap_or_default();
 
     let stats = [
-        ("Power",          cur.power,            sug.power),
-        ("Precision",      cur.precision,         sug.precision),
-        ("Ferocity",       cur.ferocity,          sug.ferocity),
-        ("Condition Dmg",  cur.condition_damage,  sug.condition_damage),
-        ("Expertise",      cur.expertise,         sug.expertise),
-        ("Concentration",  cur.concentration,     sug.concentration),
-        ("Toughness",      cur.toughness,         sug.toughness),
-        ("Vitality",       cur.vitality,          sug.vitality),
-        ("Healing Power",  cur.healing_power,     sug.healing_power),
+        ("Power", cur.power, sug.power),
+        ("Precision", cur.precision, sug.precision),
+        ("Ferocity", cur.ferocity, sug.ferocity),
+        ("Condition Dmg", cur.condition_damage, sug.condition_damage),
+        ("Expertise", cur.expertise, sug.expertise),
+        ("Concentration", cur.concentration, sug.concentration),
+        ("Toughness", cur.toughness, sug.toughness),
+        ("Vitality", cur.vitality, sug.vitality),
+        ("Healing Power", cur.healing_power, sug.healing_power),
     ];
 
     render_stat_table(ui, "##primary_stats", &stats);
@@ -265,10 +265,30 @@ fn render_primary_stats(ui: &Ui, current: Option<&StatBlock>, suggested: Option<
 
 /// Render combat performance metrics with three tiers: Solo, Party, Full Squad.
 fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: &BuildSuggestion) {
-    let tiers: Vec<(&str, [f32; 4], Option<&CombatMetrics>, Option<&CombatMetrics>)> = vec![
-        ("Solo (Gear + Traits)", [0.7, 0.85, 1.0, 1.0], comparison.current_combat_solo.as_ref(), suggestion.combat_solo.as_ref()),
-        ("Party (Might x15, Fury)", [1.0, 0.85, 0.4, 1.0], comparison.current_combat_party.as_ref(), suggestion.combat_party.as_ref()),
-        ("Full Squad (Might x25, Fury, Vuln x25)", [0.3, 1.0, 0.3, 1.0], comparison.current_combat_squad.as_ref(), suggestion.combat_squad.as_ref()),
+    let tiers: Vec<(
+        &str,
+        [f32; 4],
+        Option<&CombatMetrics>,
+        Option<&CombatMetrics>,
+    )> = vec![
+        (
+            "Solo (Gear + Traits)",
+            [0.7, 0.85, 1.0, 1.0],
+            comparison.current_combat_solo.as_ref(),
+            suggestion.combat_solo.as_ref(),
+        ),
+        (
+            "Party (Might x15, Fury)",
+            [1.0, 0.85, 0.4, 1.0],
+            comparison.current_combat_party.as_ref(),
+            suggestion.combat_party.as_ref(),
+        ),
+        (
+            "Full Squad (Might x25, Fury, Vuln x25)",
+            [0.3, 1.0, 0.3, 1.0],
+            comparison.current_combat_squad.as_ref(),
+            suggestion.combat_squad.as_ref(),
+        ),
     ];
 
     for (label, color, cur_combat, sug_combat) in &tiers {
@@ -279,18 +299,68 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
             bonus_header(ui);
 
             let cur = *cur_combat;
-            render_int_row_opt(ui, "Effective Power", cur.map(|c| c.effective_power), sug.effective_power);
-            render_pct_row_opt(ui, "Crit Chance", cur.map(|c| c.crit_chance), sug.crit_chance);
-            render_int_row_opt(ui, "Strike DPS Index", cur.map(|c| c.strike_dps_index), sug.strike_dps_index);
-            render_int_row_opt(ui, "Condi DPS Index", cur.map(|c| c.condition_dps_index), sug.condition_dps_index);
-            render_int_row_opt(ui, "Total DPS Index", cur.map(|c| c.total_dps_index), sug.total_dps_index);
-            render_pct_row_opt(ui, "Boon Duration", cur.map(|c| c.boon_duration_pct), sug.boon_duration_pct);
-            render_pct_row_opt(ui, "Condi Duration", cur.map(|c| c.condi_duration_pct), sug.condi_duration_pct);
+            render_int_row_opt(
+                ui,
+                "Effective Power",
+                cur.map(|c| c.effective_power),
+                sug.effective_power,
+            );
+            render_pct_row_opt(
+                ui,
+                "Crit Chance",
+                cur.map(|c| c.crit_chance),
+                sug.crit_chance,
+            );
+            render_int_row_opt(
+                ui,
+                "Strike DPS Index",
+                cur.map(|c| c.strike_dps_index),
+                sug.strike_dps_index,
+            );
+            render_int_row_opt(
+                ui,
+                "Condi DPS Index",
+                cur.map(|c| c.condition_dps_index),
+                sug.condition_dps_index,
+            );
+            render_int_row_opt(
+                ui,
+                "Total DPS Index",
+                cur.map(|c| c.total_dps_index),
+                sug.total_dps_index,
+            );
+            render_pct_row_opt(
+                ui,
+                "Boon Duration",
+                cur.map(|c| c.boon_duration_pct),
+                sug.boon_duration_pct,
+            );
+            render_pct_row_opt(
+                ui,
+                "Condi Duration",
+                cur.map(|c| c.condi_duration_pct),
+                sug.condi_duration_pct,
+            );
             if sug.healing_index > 0 || cur.map_or(false, |c| c.healing_index > 0) {
-                render_int_row_opt(ui, "Healing Index", cur.map(|c| c.healing_index), sug.healing_index);
+                render_int_row_opt(
+                    ui,
+                    "Healing Index",
+                    cur.map(|c| c.healing_index),
+                    sug.healing_index,
+                );
             }
-            render_int_row_opt(ui, "Effective HP", cur.map(|c| c.effective_health), sug.effective_health);
-            render_pct_row_opt(ui, "Dmg Reduction", cur.map(|c| c.damage_reduction_pct), sug.damage_reduction_pct);
+            render_int_row_opt(
+                ui,
+                "Effective HP",
+                cur.map(|c| c.effective_health),
+                sug.effective_health,
+            );
+            render_pct_row_opt(
+                ui,
+                "Dmg Reduction",
+                cur.map(|c| c.damage_reduction_pct),
+                sug.damage_reduction_pct,
+            );
 
             ui.columns(1, &format!("##{}_end", label), false);
         } else {
@@ -304,13 +374,39 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
     if let Some(sug) = suggestion.combat_solo.as_ref() {
         let cur = comparison.current_combat_solo.as_ref();
         let ticks = [
-            ("Bleeding", cur.map_or(0, |c| c.bleeding_tick), sug.bleeding_tick, "per stack/sec"),
-            ("Burning", cur.map_or(0, |c| c.burning_tick), sug.burning_tick, "per stack/sec"),
-            ("Poison", cur.map_or(0, |c| c.poison_tick), sug.poison_tick, "per stack/sec"),
-            ("Torment", cur.map_or(0, |c| c.torment_tick), sug.torment_tick, "stationary"),
-            ("Confusion", cur.map_or(0, |c| c.confusion_tick), sug.confusion_tick, "on skill use"),
+            (
+                "Bleeding",
+                cur.map_or(0, |c| c.bleeding_tick),
+                sug.bleeding_tick,
+                "per stack/sec",
+            ),
+            (
+                "Burning",
+                cur.map_or(0, |c| c.burning_tick),
+                sug.burning_tick,
+                "per stack/sec",
+            ),
+            (
+                "Poison",
+                cur.map_or(0, |c| c.poison_tick),
+                sug.poison_tick,
+                "per stack/sec",
+            ),
+            (
+                "Torment",
+                cur.map_or(0, |c| c.torment_tick),
+                sug.torment_tick,
+                "stationary",
+            ),
+            (
+                "Confusion",
+                cur.map_or(0, |c| c.confusion_tick),
+                sug.confusion_tick,
+                "on skill use",
+            ),
         ];
-        let ticks_to_show: Vec<_> = ticks.iter()
+        let ticks_to_show: Vec<_> = ticks
+            .iter()
             .filter(|(_, cur_v, sug_v, _)| *cur_v > 0 || *sug_v > 0)
             .collect();
 
@@ -341,8 +437,15 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
                 ui.text(&format!("{}", sug_val));
                 if *cur_val > 0 && diff != 0 {
                     ui.same_line();
-                    let color = if diff > 0 { [0.0, 1.0, 0.0, 1.0] } else { [1.0, 0.0, 0.0, 1.0] };
-                    ui.text_colored(color, &format!("({}{})", if diff > 0 { "+" } else { "" }, diff));
+                    let color = if diff > 0 {
+                        [0.0, 1.0, 0.0, 1.0]
+                    } else {
+                        [1.0, 0.0, 0.0, 1.0]
+                    };
+                    ui.text_colored(
+                        color,
+                        &format!("({}{})", if diff > 0 { "+" } else { "" }, diff),
+                    );
                 }
                 ui.next_column();
                 ui.text_colored([0.5, 0.5, 0.5, 1.0], *info);
@@ -368,7 +471,12 @@ fn bonus_header(ui: &Ui) {
 
 /// Render defenses: Health and Armor (static stats that don't change with buff profile).
 /// Effective HP and Damage Reduction are shown per-tier in Combat Performance.
-fn render_defenses(ui: &Ui, _comparison: &ComparisonState, current_stats: Option<&StatBlock>, suggestion: &BuildSuggestion) {
+fn render_defenses(
+    ui: &Ui,
+    _comparison: &ComparisonState,
+    current_stats: Option<&StatBlock>,
+    suggestion: &BuildSuggestion,
+) {
     let sug_stats = suggestion.estimated_stats.clone().unwrap_or_default();
     let cur = current_stats.cloned().unwrap_or_default();
 
@@ -409,7 +517,6 @@ fn render_int_row(ui: &Ui, name: &str, cur: i32, sug: i32) {
     ui.text_colored(color, &format!("{}{}", sign, diff));
     ui.next_column();
 }
-
 
 /// Render an integer row where the current value may be absent (shows "—" for current and diff).
 fn render_int_row_opt(ui: &Ui, name: &str, cur: Option<i32>, sug: i32) {
@@ -489,7 +596,6 @@ fn diff_color(diff: f64) -> [f32; 4] {
     }
 }
 
-
 /// Render rotation simulation breakdown: simulated DPS, condition uptimes, skill usage.
 fn render_rotation_breakdown(ui: &Ui, rotation: &RotationBreakdown) {
     // DPS summary row
@@ -506,7 +612,10 @@ fn render_rotation_breakdown(ui: &Ui, rotation: &RotationBreakdown) {
             parts.push(format!("Stunbreaks: {}", rotation.stunbreak_count));
         }
         if rotation.has_stability {
-            parts.push(format!("Stability: {:.0}%", rotation.stability_uptime * 100.0));
+            parts.push(format!(
+                "Stability: {:.0}%",
+                rotation.stability_uptime * 100.0
+            ));
         }
         ui.text_colored([0.4, 0.9, 0.4, 1.0], parts.join("  |  "));
         ui.spacing();

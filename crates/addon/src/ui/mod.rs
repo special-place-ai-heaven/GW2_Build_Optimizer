@@ -17,14 +17,12 @@ pub fn render(ui: &Ui) {
     Window::new("GW2 Build Optimizer")
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(ui, || {
-            state::with_state(|s| {
-                match &s.screen {
-                    Screen::Setup(step) => {
-                        setup::render_setup(ui, s, step.clone());
-                    }
-                    Screen::Main => {
-                        main_view::render_main(ui, s);
-                    }
+            state::with_state(|s| match &s.screen {
+                Screen::Setup(step) => {
+                    setup::render_setup(ui, s, step.clone());
+                }
+                Screen::Main => {
+                    main_view::render_main(ui, s);
                 }
             });
         });

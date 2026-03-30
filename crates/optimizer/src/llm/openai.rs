@@ -281,7 +281,10 @@ impl OpenAiClient {
                 Ok(r) => r,
                 Err(e) => {
                     if attempt == MAX_RETRIES - 1 {
-                        self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                        self.rate
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .undo_reserve();
                         return Err(LlmError::Http(e.to_string()));
                     }
                     last_error = Some(LlmError::Http(e.to_string()));
@@ -295,7 +298,10 @@ impl OpenAiClient {
                     let body: ChatResponse = match resp.json() {
                         Ok(b) => b,
                         Err(e) => {
-                            self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                            self.rate
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .undo_reserve();
                             return Err(LlmError::Http(e.to_string()));
                         }
                     };
@@ -315,27 +321,45 @@ impl OpenAiClient {
                     return Ok(message);
                 }
                 401 => {
-                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                    self.rate
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .undo_reserve();
                     return Err(LlmError::InvalidKey);
                 }
                 429 => {
-                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+                    self.rate
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .undo_reserve();
                     return Err(LlmError::RateLimited);
                 }
                 500 | 502 | 503 => {
                     let body = resp.text().unwrap_or_default();
-                    last_error = Some(LlmError::Api { status, message: body });
+                    last_error = Some(LlmError::Api {
+                        status,
+                        message: body,
+                    });
                     continue;
                 }
                 _ => {
                     let body = resp.text().unwrap_or_default();
-                    self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
-                    return Err(LlmError::Api { status, message: body });
+                    self.rate
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .undo_reserve();
+                    return Err(LlmError::Api {
+                        status,
+                        message: body,
+                    });
                 }
             }
         }
 
-        self.rate.lock().unwrap_or_else(|e| e.into_inner()).undo_reserve();
+        self.rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .undo_reserve();
         Err(last_error.unwrap_or_else(|| LlmError::Api {
             status: 500,
             message: "OpenAI server error after retries".into(),
@@ -373,12 +397,17 @@ impl LlmClient for OpenAiClient {
             status => {
                 let body = resp.text().unwrap_or_default();
                 // Billing/quota errors mean the key is valid but account has issues
-                if body.contains("billing") || body.contains("quota")
-                    || body.contains("exceeded") || body.contains("insufficient")
+                if body.contains("billing")
+                    || body.contains("quota")
+                    || body.contains("exceeded")
+                    || body.contains("insufficient")
                 {
                     Ok(())
                 } else {
-                    Err(LlmError::Api { status, message: body })
+                    Err(LlmError::Api {
+                        status,
+                        message: body,
+                    })
                 }
             }
         }
@@ -529,7 +558,10 @@ impl LlmClient for OpenAiClient {
             };
 
             // Report progress
-            let tool_names: Vec<String> = tool_calls.iter().map(|tc| tc.function.name.clone()).collect();
+            let tool_names: Vec<String> = tool_calls
+                .iter()
+                .map(|tc| tc.function.name.clone())
+                .collect();
             on_progress(turn + 1, max_turns, &tool_names);
 
             // Add assistant message (with tool_calls) to conversation
@@ -577,7 +609,10 @@ impl LlmClient for OpenAiClient {
             429 => return Err(LlmError::RateLimited),
             status => {
                 let body = resp.text().unwrap_or_default();
-                return Err(LlmError::Api { status, message: body });
+                return Err(LlmError::Api {
+                    status,
+                    message: body,
+                });
             }
         }
 
@@ -592,14 +627,20 @@ impl LlmClient for OpenAiClient {
             created: Option<u64>,
         }
 
-        let body: ModelsResponse = resp
-            .json()
-            .map_err(|e| LlmError::Parse(e.to_string()))?;
+        let body: ModelsResponse = resp.json().map_err(|e| LlmError::Parse(e.to_string()))?;
 
         let entries = body.data.unwrap_or_default();
 
         // Filter to chat-capable models; exclude embeddings, image, audio, etc.
-        let exclude_patterns = ["embedding", "dall-e", "whisper", "tts", "babbage", "davinci", "moderation"];
+        let exclude_patterns = [
+            "embedding",
+            "dall-e",
+            "whisper",
+            "tts",
+            "babbage",
+            "davinci",
+            "moderation",
+        ];
         let include_prefixes = ["gpt-", "o1", "o3", "o4", "chatgpt-"];
 
         let mut models: Vec<super::ModelInfo> = entries

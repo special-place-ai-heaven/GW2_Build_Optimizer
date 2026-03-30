@@ -7,8 +7,7 @@ use thiserror::Error;
 use super::{DataLoadError, EvidenceLevel};
 
 /// Canonical JSON embedded at compile time from data/slot_budgets/level80_ascended.json.
-const SLOT_BUDGETS_JSON: &str =
-    include_str!("../../../../data/slot_budgets/level80_ascended.json");
+const SLOT_BUDGETS_JSON: &str = include_str!("../../../../data/slot_budgets/level80_ascended.json");
 
 static BUDGETS: OnceLock<SlotBudgets> = OnceLock::new();
 
@@ -18,8 +17,7 @@ static BUDGETS: OnceLock<SlotBudgets> = OnceLock::new();
 /// Panics if the embedded JSON is malformed (compile-time data, should never happen).
 pub fn slot_budgets() -> &'static SlotBudgets {
     BUDGETS.get_or_init(|| {
-        load_slot_budgets(SLOT_BUDGETS_JSON)
-            .expect("embedded level80_ascended.json is invalid")
+        load_slot_budgets(SLOT_BUDGETS_JSON).expect("embedded level80_ascended.json is invalid")
     })
 }
 
@@ -160,10 +158,10 @@ pub const EQUIPMENT_SLOTS: &[(SlotType, &str)] = &[
     (SlotType::Gloves, "Gloves"),
     (SlotType::Leggings, "Leggings"),
     (SlotType::Boots, "Boots"),
-    (SlotType::WeaponTwoHand, "WeaponA1"),   // main-hand = two-hand budget
-    (SlotType::WeaponOneHand, "WeaponA2"),   // off-hand = one-hand budget
-    (SlotType::WeaponTwoHand, "WeaponB1"),   // main-hand = two-hand budget
-    (SlotType::WeaponOneHand, "WeaponB2"),   // off-hand = one-hand budget
+    (SlotType::WeaponTwoHand, "WeaponA1"), // main-hand = two-hand budget
+    (SlotType::WeaponOneHand, "WeaponA2"), // off-hand = one-hand budget
+    (SlotType::WeaponTwoHand, "WeaponB1"), // main-hand = two-hand budget
+    (SlotType::WeaponOneHand, "WeaponB2"), // off-hand = one-hand budget
     (SlotType::BackItem, "Backpack"),
     (SlotType::Accessory, "Accessory1"),
     (SlotType::Accessory, "Accessory2"),
@@ -174,11 +172,7 @@ pub const EQUIPMENT_SLOTS: &[(SlotType, &str)] = &[
 
 impl SlotBudgets {
     /// Look up the budget entry for a specific slot and stat shape.
-    pub fn get(
-        &self,
-        slot: SlotType,
-        shape: StatShape,
-    ) -> Option<&SlotBudgetEntry> {
+    pub fn get(&self, slot: SlotType, shape: StatShape) -> Option<&SlotBudgetEntry> {
         self.map.get(&(slot, shape))
     }
 
@@ -226,9 +220,7 @@ pub fn stat_shape_from_attr_count(attr_count: usize) -> StatShape {
 }
 
 /// Parse and validate slot budgets from JSON text.
-pub fn load_slot_budgets(
-    json: &str,
-) -> Result<SlotBudgets, SlotBudgetError> {
+pub fn load_slot_budgets(json: &str) -> Result<SlotBudgets, SlotBudgetError> {
     let file: SlotBudgetFile = serde_json::from_str(json)?;
     validate_entries(&file.entries)?;
     let map: HashMap<(SlotType, StatShape), SlotBudgetEntry> = file
@@ -239,9 +231,7 @@ pub fn load_slot_budgets(
     Ok(SlotBudgets { map })
 }
 
-fn validate_entries(
-    entries: &[SlotBudgetEntry],
-) -> Result<(), SlotBudgetError> {
+fn validate_entries(entries: &[SlotBudgetEntry]) -> Result<(), SlotBudgetError> {
     // No zero values (check first — catches bad data before completeness)
     for entry in entries {
         if entry.major == 0 {
@@ -273,12 +263,10 @@ fn validate_entries(
     for shape in &StatShape::ALL {
         for slot in &SlotType::ALL {
             if !seen.contains(&(*slot, *shape)) {
-                return Err(SlotBudgetError::ValidationError(
-                    format!(
-                        "missing entry: {:?} {:?}",
-                        slot, shape
-                    ),
-                ));
+                return Err(SlotBudgetError::ValidationError(format!(
+                    "missing entry: {:?} {:?}",
+                    slot, shape
+                )));
             }
         }
     }
@@ -436,19 +424,9 @@ mod tests {
         for (slot, expected_major, expected_minor) in &armor_slots {
             let entry = b
                 .get(*slot, StatShape::ThreeStat)
-                .unwrap_or_else(|| {
-                    panic!("{:?} ThreeStat missing", slot)
-                });
-            assert_eq!(
-                entry.major, *expected_major,
-                "{:?} major mismatch",
-                slot
-            );
-            assert_eq!(
-                entry.minor, *expected_minor,
-                "{:?} minor mismatch",
-                slot
-            );
+                .unwrap_or_else(|| panic!("{:?} ThreeStat missing", slot));
+            assert_eq!(entry.major, *expected_major, "{:?} major mismatch", slot);
+            assert_eq!(entry.minor, *expected_minor, "{:?} minor mismatch", slot);
         }
     }
 
@@ -583,8 +561,7 @@ mod tests {
         }"#;
         let err = load_slot_budgets(json).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("duplicate entry: Helm ThreeStat"),
+            err.to_string().contains("duplicate entry: Helm ThreeStat"),
             "unexpected error: {}",
             err
         );

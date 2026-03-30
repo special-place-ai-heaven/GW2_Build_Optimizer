@@ -5,8 +5,7 @@ use thiserror::Error;
 use super::EvidenceLevel;
 
 /// Canonical YAML embedded at compile time from data/patch_ledgers/2026-01-13.yaml.
-const LEDGER_2026_01_13_YAML: &str =
-    include_str!("../../../../data/patch_ledgers/2026-01-13.yaml");
+const LEDGER_2026_01_13_YAML: &str = include_str!("../../../../data/patch_ledgers/2026-01-13.yaml");
 
 static LEDGERS: OnceLock<Vec<PatchLedger>> = OnceLock::new();
 
@@ -16,10 +15,7 @@ static LEDGERS: OnceLock<Vec<PatchLedger>> = OnceLock::new();
 /// Panics if the embedded YAML is malformed (compile-time data, should never happen).
 pub fn ledgers() -> &'static [PatchLedger] {
     LEDGERS.get_or_init(|| {
-        vec![
-            load_ledger(LEDGER_2026_01_13_YAML)
-                .expect("embedded 2026-01-13 ledger is invalid"),
-        ]
+        vec![load_ledger(LEDGER_2026_01_13_YAML).expect("embedded 2026-01-13 ledger is invalid")]
     })
 }
 
@@ -89,7 +85,10 @@ mod tests {
         let ls = ledgers();
         assert_eq!(ls.len(), 1);
         assert_eq!(ls[0].patch_id, "2026-01-13");
-        assert!(ls[0].changes.is_empty(), "baseline ledger should have no changes");
+        assert!(
+            ls[0].changes.is_empty(),
+            "baseline ledger should have no changes"
+        );
     }
 
     #[test]
