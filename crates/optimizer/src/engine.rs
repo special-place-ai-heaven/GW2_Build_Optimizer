@@ -1063,6 +1063,60 @@ fn add_weapon_skill_ids(
     }
 }
 
+/// Convert a `ValidatedBuild` into a `SynergyResult` by computing stats, combat
+/// metrics, and rotation simulation.  This is used by `optimize_v2()` to package
+/// the beam-search winner as the standard output type.
+pub fn synergy_result_from_validated(
+    validated: ValidatedBuild,
+    db: &GameDb,
+    profession_name: &str,
+    ctx: &BalanceContext,
+) -> SynergyResult {
+    let (full_stats, modifiers) = calculate_validated_stats(&validated, db, profession_name, ctx);
+    let derived = stats::compute_derived(&full_stats, profession_name);
+    let buff_profiles = combat::buff_profiles_for_profession(profession_name, ctx);
+    let cw = combat::condition_weights_for_profession(profession_name, ctx);
+    let combat_solo = combat::calculate_combat_performance(
+        &full_stats,
+        &derived,
+        &modifiers,
+        &buff_profiles[0],
+        &cw,
+        profession_name,
+        ctx,
+    );
+    let combat_party = combat::calculate_combat_performance(
+        &full_stats,
+        &derived,
+        &modifiers,
+        &buff_profiles[1],
+        &cw,
+        profession_name,
+        ctx,
+    );
+    let combat_squad = combat::calculate_combat_performance(
+        &full_stats,
+        &derived,
+        &modifiers,
+        &buff_profiles[2],
+        &cw,
+        profession_name,
+        ctx,
+    );
+    let rotation = simulate_validated_rotation(&validated, db, &full_stats);
+    SynergyResult {
+        validated,
+        stats: full_stats,
+        combat_solo,
+        combat_party,
+        combat_squad,
+        modifiers,
+        rotation,
+        data_quality: data::DataQuality::Verified,
+        quality_reasons: vec![],
+    }
+}
+
 /// Run the fully deterministic synergy optimization pipeline.
 /// No LLM calls — all selections are algorithmic via synergy scoring.
 /// Optional Gemini client is used only for explanation generation (not build selection).
