@@ -460,6 +460,7 @@ fn synergy_result_to_suggestion(
         combat_party,
         combat_squad,
         rotation,
+        viability: None,
     }
 }
 
@@ -559,6 +560,7 @@ fn candidate_to_suggestion(
         combat_party,
         combat_squad,
         rotation: None,
+        viability: None,
     }
 }
 
