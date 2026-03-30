@@ -93,9 +93,12 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     let pad = state.config.panel_padding;
     let content_indent = state.config.content_indent;
     let avail = ui.content_region_avail();
+    // Leave a small footer margin so the bottom row (Save/Clear buttons, etc.)
+    // is not tight against the game window edge or clipped on some resolutions.
+    let child_height = (avail[1] - 6.0).max(0.0);
 
     ChildWindow::new("##left_panel_global")
-        .size([left_panel_width, avail[1]])
+        .size([left_panel_width, child_height])
         .build(ui, || {
             ui.dummy([0.0, 2.0]);
             ui.indent_by(pad);
@@ -106,7 +109,7 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     ui.same_line();
 
     ChildWindow::new("##center_content")
-        .size([0.0, avail[1]])
+        .size([0.0, child_height])
         .build(ui, || {
             ui.indent_by(content_indent);
             render_main_content(ui, state);
