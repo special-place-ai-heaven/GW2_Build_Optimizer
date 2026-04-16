@@ -554,4 +554,57 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn test_list_skips_corrupt_json_files() {
+        // list() must silently skip unparseable .json files (logging a
+        // warning) and return only the valid ones. A single corrupt file
+        // dropped in by a crashed editor or partial sync must not take the
+        // whole saved-build list down with it.
+        let dir = temp_dir("list_corrupt");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let storage = BuildStorage::new(&dir);
+        let good = test_build("GoodBuild");
+        storage.save_new(&good).unwrap();
+
+        // Drop a malformed .json alongside and a non-json file that must
+        // also be ignored by the extension filter.
+        let saves_dir = dir.join("saves");
+        std::fs::write(saves_dir.join("corrupt.json"), "{ not json }").unwrap();
+        std::fs::write(saves_dir.join("readme.txt"), "hello").unwrap();
+
+        let builds = storage.list();
+        assert_eq!(
+            builds.len(),
+            1,
+            "exactly one good build should survive the corrupt file",
+        );
+        assert_eq!(builds[0].name, "GoodBuild");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_delete_missing_returns_err() {
+        // delete() of a name that was never saved must error with the
+        // user-visible "not found on disk" message. Covers the early-return
+        // branch in storage.rs so callers can surface the failure to the UI.
+        let dir = temp_dir("delete_missing");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let storage = BuildStorage::new(&dir);
+        std::fs::create_dir_all(dir.join("saves")).unwrap();
+
+        let result = storage.delete("NeverSaved");
+        assert!(result.is_err());
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("not found on disk"),
+            "expected 'not found on disk' in error, got: {}",
+            msg,
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -373,4 +373,70 @@ mod tests {
         };
         assert!(!config.is_setup_complete());
     }
+
+    #[test]
+    fn test_load_parse_error_resets_to_defaults() {
+        // A config file that exists but contains invalid JSON must surface
+        // the parse error and fall back to defaults — this is the
+        // user-visible "settings reset" path and callers rely on the
+        // Some(msg) signal to tell the user their settings were dropped.
+        let dir = env::temp_dir()
+            .join(format!("gw2_config_parse_err_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        std::fs::write(&path, "{ not valid json").unwrap();
+
+        let (loaded, err) = AppConfig::load(&path);
+        assert!(err.is_some(), "expected Some(parse-error message)");
+        assert!(
+            err.as_deref().unwrap().contains("could not be parsed"),
+            "error should mention parse failure, got: {:?}",
+            err,
+        );
+        // Must be the exact default — no partial/lenient recovery.
+        let defaults = AppConfig::default();
+        assert_eq!(loaded.active_provider, defaults.active_provider);
+        assert!(loaded.gw2_api_key.is_none());
+        assert!(loaded.gemini_api_key.is_none());
+        assert_eq!(loaded.window_opacity, defaults.window_opacity);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_active_routing_matches_provider() {
+        // active_api_key / active_model_id must route to the field matching
+        // active_provider, not to whichever key happens to be set. Populate
+        // all three provider slots with distinct values and flip the active
+        // provider across the enum.
+        let mut config = AppConfig {
+            gemini_api_key: Some("gemini-key".into()),
+            openai_api_key: Some("openai-key".into()),
+            anthropic_api_key: Some("anthropic-key".into()),
+            gemini_model: Some("gemini-custom".into()),
+            openai_model: Some("openai-custom".into()),
+            anthropic_model: Some("anthropic-custom".into()),
+            ..Default::default()
+        };
+
+        config.active_provider = LlmProvider::Gemini;
+        assert_eq!(config.active_api_key(), Some("gemini-key"));
+        assert_eq!(config.active_model_id(), "gemini-custom");
+
+        config.active_provider = LlmProvider::OpenAI;
+        assert_eq!(config.active_api_key(), Some("openai-key"));
+        assert_eq!(config.active_model_id(), "openai-custom");
+
+        config.active_provider = LlmProvider::Anthropic;
+        assert_eq!(config.active_api_key(), Some("anthropic-key"));
+        assert_eq!(config.active_model_id(), "anthropic-custom");
+
+        // Empty slot → None key, default model id for the provider.
+        let empty = AppConfig {
+            active_provider: LlmProvider::Anthropic,
+            ..Default::default()
+        };
+        assert_eq!(empty.active_api_key(), None);
+        assert_eq!(empty.active_model_id(), DEFAULT_ANTHROPIC_MODEL);
+    }
 }
