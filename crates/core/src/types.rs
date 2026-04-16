@@ -240,7 +240,9 @@ impl StatBlock {
     /// `data/formulas/universal.json`. The active runtime paths in
     /// `crates/optimizer/src/{stats,combat}.rs` use loaded values from that file.
     /// This method retains hardcoded values because `core` cannot depend on `optimizer`.
-    /// If callers are added, inject constants as parameters or move this to `optimizer`.
+    /// Existing optimizer callers accept this divergence; the pinning test
+    /// `statblock_compute_derived_pins_formula` locks the math in so drift from
+    /// `universal.json` fails loudly rather than producing quietly-wrong stats.
     pub fn compute_derived(&mut self, base_health: i32, base_defense: i32) {
         self.crit_chance = ((self.precision - 895) as f64 / 21.0).clamp(0.0, 100.0);
         self.crit_damage = 150.0 + self.ferocity as f64 / 15.0;
@@ -448,5 +450,44 @@ mod tests {
         // default game mode matching the first element of ALL.
         assert_eq!(GameMode::default(), GameMode::PvE);
         assert_eq!(GameMode::default(), GameMode::ALL[0]);
+    }
+
+    #[test]
+    fn statblock_compute_derived_pins_formula() {
+        // Locks the hardcoded constants (895, 21, 150, 15, 10) against silent
+        // drift from `data/formulas/universal.json`. If any of these asserts
+        // flip, cross-check `optimizer/src/stats.rs::compute_derived` and the
+        // loaded values in `universal.json` — a mismatch means optimizer and
+        // core disagree on derived stats.
+        let mut s = StatBlock::default();
+        s.precision = 895;
+        s.ferocity = 0;
+        s.vitality = 100;
+        s.toughness = 50;
+        s.compute_derived(1000, 1920);
+        assert_eq!(s.crit_chance, 0.0, "precision == threshold → 0% crit");
+        assert_eq!(s.crit_damage, 150.0, "ferocity == 0 → 150% base crit dmg");
+        assert_eq!(s.health, 100 * 10 + 1000);
+        assert_eq!(s.armor, 50 + 1920);
+
+        // Non-zero ferocity / above-threshold precision.
+        let mut s = StatBlock::default();
+        s.precision = 895 + 21 * 50; // +50% crit chance
+        s.ferocity = 150;            // +10% crit damage
+        s.compute_derived(0, 0);
+        assert_eq!(s.crit_chance, 50.0);
+        assert_eq!(s.crit_damage, 160.0);
+
+        // Clamp: below threshold precision must floor at 0%, not go negative.
+        let mut s = StatBlock::default();
+        s.precision = 0;
+        s.compute_derived(0, 0);
+        assert_eq!(s.crit_chance, 0.0);
+
+        // Clamp: above 100% crit chance must saturate.
+        let mut s = StatBlock::default();
+        s.precision = 895 + 21 * 500;
+        s.compute_derived(0, 0);
+        assert_eq!(s.crit_chance, 100.0);
     }
 }
