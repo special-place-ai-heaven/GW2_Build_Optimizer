@@ -11,3 +11,6 @@ reqwest.workspace = true
 thiserror.workspace = true
 urlencoding.workspace = true
 chrono.workspace = true
+
+[dev-dependencies]
+mockito = "1"
