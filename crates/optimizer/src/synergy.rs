@@ -1049,14 +1049,17 @@ fn weight_for_damage_category(cat: &DamageCategory, weights: &OptimizationWeight
 }
 
 fn condition_importance(status: &str) -> f64 {
-    match status {
+    // Verb-form input (Poison) is normalized to canonical (Poisoned) so the
+    // arms only list canonical names.
+    let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
+    match canonical {
         "Burning" => 1.0,       // Highest tick damage: 0.155*CD + 131.75
         "Bleeding" => 0.7,      // Stacks to 25: 0.06*CD + 22
         "Torment" => 0.6,       // Stationary: 0.0375*CD + 31.875; moving: 2×
-        "Poison" => 0.5,        // 0.06*CD + 33.5, also -33% healing
+        "Poisoned" => 0.5,      // 0.06*CD + 33.5, also -33% healing
         "Confusion" => 0.1,     // On-use only: 0.0175*CD + 11 (~10% of Burning DPS)
         "Vulnerability" => 0.8, // Force multiplier (+1% all damage per stack)
-        _ => 0.2,               // CC conditions (Immobilize, Chill, etc.)
+        _ => 0.2,               // CC conditions (Immobile, Chilled, etc.)
     }
 }
 
@@ -1087,27 +1090,43 @@ fn duration_matches_condition(kind: &DurationKind, condition: &str) -> bool {
 }
 
 fn is_condition(status: &str) -> bool {
+    // Verb-form aliases (Blind, Poison, Chill, Cripple, Immobilize) are
+    // normalized via `canonical_condition_name` so the arms only list
+    // canonical (status-effect) form. `Immobilized` stays as an explicit
+    // arm — the resolver only knows `Immobilize→Immobile`, not the
+    // past-tense `Immobilized`.
+    let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
     matches!(
-        status,
+        canonical,
         "Bleeding"
             | "Burning"
-            | "Poison"
+            | "Poisoned"
             | "Torment"
             | "Confusion"
             | "Vulnerability"
             | "Weakness"
-            | "Blind"
             | "Blinded"
-            | "Chill"
             | "Chilled"
-            | "Cripple"
             | "Crippled"
             | "Fear"
-            | "Immobilize"
+            | "Immobile"
             | "Immobilized"
             | "Slow"
             | "Taunt"
     )
+}
+
+/// Test-only thin wrappers so the alias-routing regression suite can fuzz
+/// the private `is_condition` and `condition_importance` helpers without
+/// changing their visibility.
+#[cfg(test)]
+pub(crate) mod tests_alias_helpers {
+    pub(crate) fn is_condition(status: &str) -> bool {
+        super::is_condition(status)
+    }
+    pub(crate) fn condition_importance(status: &str) -> f64 {
+        super::condition_importance(status)
+    }
 }
 
 fn stat_type_from_display_name(name: &str) -> Option<StatType> {

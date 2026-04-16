@@ -93,11 +93,13 @@ pub fn try_load_condition_formulas() -> Result<ConditionFormulas, Vec<DataLoadEr
 // the one used in `data/formulas/conditions.json` (noun/adjective form), since
 // that is the lookup table all damage and metadata queries hit.
 //
-// 3 entries today; if the list grows materially, promote to a data file.
+// 5 entries today; if the list grows materially, promote to a data file.
 const CONDITION_ALIAS_TABLE: &[(&str, &str)] = &[
     ("Blind", "Blinded"),
     ("Poison", "Poisoned"),
     ("Immobilize", "Immobile"),
+    ("Chill", "Chilled"),
+    ("Cripple", "Crippled"),
 ];
 
 /// Returns the canonical condition name for `name`, mapping verb-form aliases
@@ -1006,5 +1008,185 @@ mod tests {
             EffectClass::Suppression,
         );
         assert_eq!(c.get("Fear").unwrap().effect_class, EffectClass::Control,);
+    }
+
+    // ─── Alias-routing regression suite ───
+    //
+    // Fuzzes verb-form and canonical-form input through every site that was
+    // updated to route through `canonical_condition_name`. Every paired
+    // verb/canonical input must produce identical results (alias is a no-op
+    // for behavior). `Burning` is included as an identity-passthrough check.
+
+    /// All (verb-form, canonical-form) condition pairs that the resolver knows.
+    /// Plus pure-canonical entries to confirm passthrough is identity.
+    const ALIAS_PAIRS: &[(&str, &str)] = &[
+        ("Blind", "Blinded"),
+        ("Poison", "Poisoned"),
+        ("Immobilize", "Immobile"),
+        ("Chill", "Chilled"),
+        ("Cripple", "Crippled"),
+        ("Burning", "Burning"),
+        ("Bleeding", "Bleeding"),
+        ("Torment", "Torment"),
+        ("Confusion", "Confusion"),
+    ];
+
+    #[test]
+    fn test_canonical_condition_name_resolves_all_known_aliases() {
+        for (verb, canonical) in ALIAS_PAIRS {
+            assert_eq!(
+                canonical_condition_name(verb),
+                *canonical,
+                "verb-form `{}` should canonicalize to `{}`",
+                verb,
+                canonical,
+            );
+            assert_eq!(
+                canonical_condition_name(canonical),
+                *canonical,
+                "canonical-form `{}` should pass through unchanged",
+                canonical,
+            );
+        }
+    }
+
+    #[test]
+    fn test_canonical_condition_name_passthrough_for_unknown_input() {
+        // Unknown input is returned verbatim (identity) — preserves behavior
+        // for non-condition strings and any 4th-spelling alias not yet in
+        // the table.
+        assert_eq!(canonical_condition_name("Vulnerability"), "Vulnerability");
+        assert_eq!(canonical_condition_name("Slow"), "Slow");
+        assert_eq!(canonical_condition_name("Immobilized"), "Immobilized");
+        assert_eq!(canonical_condition_name("NotACondition"), "NotACondition");
+        assert_eq!(canonical_condition_name(""), "");
+    }
+
+    /// `is_condition` in gamedb.rs must accept either form for the 5 aliased
+    /// conditions and produce the same answer.
+    #[test]
+    fn test_gamedb_is_condition_alias_equivalence() {
+        use crate::gamedb::tests_alias_helpers::is_condition;
+        for (verb, canonical) in ALIAS_PAIRS {
+            assert_eq!(
+                is_condition(verb),
+                is_condition(canonical),
+                "gamedb::is_condition disagrees on alias pair ({}, {})",
+                verb,
+                canonical,
+            );
+            assert!(
+                is_condition(verb),
+                "gamedb::is_condition({}) should be true",
+                verb,
+            );
+        }
+        // Non-condition input still returns false.
+        assert!(!is_condition("Might"));
+        assert!(!is_condition("NotACondition"));
+    }
+
+    /// `is_condition` in synergy.rs must accept either form for the 5 aliased
+    /// conditions and produce the same answer.
+    #[test]
+    fn test_synergy_is_condition_alias_equivalence() {
+        use crate::synergy::tests_alias_helpers::is_condition;
+        for (verb, canonical) in ALIAS_PAIRS {
+            assert_eq!(
+                is_condition(verb),
+                is_condition(canonical),
+                "synergy::is_condition disagrees on alias pair ({}, {})",
+                verb,
+                canonical,
+            );
+            assert!(is_condition(verb));
+        }
+        assert!(!is_condition("Might"));
+    }
+
+    /// `is_damaging_condition` in rotation/builder.rs must accept either
+    /// form for the 5 aliased conditions and produce the same answer.
+    #[test]
+    fn test_rotation_builder_is_damaging_condition_alias_equivalence() {
+        use crate::rotation::builder::tests_alias_helpers::is_damaging_condition;
+        // Damaging set: Bleeding, Burning, Poisoned, Torment, Confusion.
+        for cond in &["Bleeding", "Burning", "Torment", "Confusion"] {
+            assert!(
+                is_damaging_condition(cond),
+                "{} should be damaging",
+                cond,
+            );
+        }
+        // Verb/canonical pair for Poison must agree and both be true.
+        assert!(is_damaging_condition("Poison"));
+        assert!(is_damaging_condition("Poisoned"));
+        assert_eq!(
+            is_damaging_condition("Poison"),
+            is_damaging_condition("Poisoned"),
+        );
+        // Non-damaging conditions (control/suppression) must be false in both
+        // forms.
+        for cond in &["Blind", "Blinded", "Chill", "Chilled", "Immobilize", "Immobile"] {
+            assert!(
+                !is_damaging_condition(cond),
+                "{} should NOT be damaging",
+                cond,
+            );
+        }
+    }
+
+    /// `condition_importance` in synergy.rs must produce the same score for
+    /// verb-form and canonical-form Poison.
+    #[test]
+    fn test_synergy_condition_importance_alias_equivalence() {
+        use crate::synergy::tests_alias_helpers::condition_importance;
+        assert_eq!(
+            condition_importance("Poison"),
+            condition_importance("Poisoned"),
+        );
+        // Identity-passthrough conditions still produce their canonical score.
+        assert!((condition_importance("Burning") - 1.0).abs() < 1e-9);
+        assert!((condition_importance("Bleeding") - 0.7).abs() < 1e-9);
+        assert!((condition_importance("Confusion") - 0.1).abs() < 1e-9);
+    }
+
+    /// `cond_importance_from_op` in normalized_effects.rs must produce the
+    /// same score for verb-form and canonical-form Poison.
+    #[test]
+    fn test_normalized_effects_cond_importance_alias_equivalence() {
+        use crate::data::normalized_effects::tests_alias_helpers::cond_importance_for_status_kind;
+        assert_eq!(
+            cond_importance_for_status_kind("Poison"),
+            cond_importance_for_status_kind("Poisoned"),
+        );
+        assert!((cond_importance_for_status_kind("Burning") - 1.0).abs() < 1e-9);
+        assert!((cond_importance_for_status_kind("Bleeding") - 0.7).abs() < 1e-9);
+    }
+
+    /// `tick_damage` in ConditionFormulas already routes verb-form aliases
+    /// through `canonical_condition_name` (P3 round-3 work). Smoke-test the
+    /// full alias matrix to confirm.
+    #[test]
+    fn test_tick_damage_alias_equivalence() {
+        let c = conditions();
+        let cd = 1000.0;
+        for mode in GameMode::ALL {
+            let poison_verb = c.tick_damage("Poison", cd, mode.clone());
+            let poison_canon = c.tick_damage("Poisoned", cd, mode.clone());
+            assert!(
+                (poison_verb - poison_canon).abs() < 1e-9,
+                "tick_damage Poison/Poisoned mismatch in {:?}: {} vs {}",
+                mode,
+                poison_verb,
+                poison_canon,
+            );
+            // Pure-canonical identity: Burning passes through unchanged.
+            let burn = c.tick_damage("Burning", cd, mode.clone());
+            assert!(
+                burn > 0.0,
+                "Burning tick should be positive in {:?}",
+                mode,
+            );
+        }
     }
 }
