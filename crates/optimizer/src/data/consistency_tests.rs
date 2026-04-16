@@ -761,6 +761,105 @@ mod tests {
         );
     }
 
+    // ─── Cross-dataset: Interaction operations ↔ normalized_effects usage ───
+
+    /// Every operation name in the canonical interaction operations list (the same
+    /// list mirrored by `consistency_test_interaction_priorities_are_valid_operations`
+    /// above and enforced by `objective_profiles::validate_profile`) must be
+    /// referenced by at least one effect's `status_operation.operation_type` field
+    /// somewhere in `data/normalized_effects/<patch>/{pve,pvp,wvw}.json`.
+    ///
+    /// This catches **dead operations**: ops that are defined in the canonical list
+    /// and prioritized by objective_profiles but never produced by any effect, which
+    /// means scoring weight assigned to them is wasted.
+    ///
+    /// Coverage is **any-mode-counts**: an operation present in even one of the
+    /// three mode files satisfies the contract. A finer-grained per-mode check
+    /// would be useful but is out of scope here — the current intent is to surface
+    /// operations that are completely absent from the effect catalog.
+    ///
+    /// `OperationType` JSON serialization is PascalCase (`RemovesBoon`,
+    /// `StealsBoon`, …); the canonical list uses snake_case (`removes_boon`,
+    /// `steals_boon`, …). The match arm below is the single source of truth for
+    /// that translation in this test — it intentionally maps `AppliesBoon` and
+    /// `AppliesCondition` to `None` because they are baseline "give" operations
+    /// and are not part of the canonical *interaction* operations list.
+    ///
+    /// On failure this test lists every dead op so the data owner can either add
+    /// effects that produce it or remove the operation from the canonical list
+    /// (do NOT relax this assertion to make it pass).
+    ///
+    /// **Reverse check (every status_operation in normalized_effects must appear
+    /// in the canonical list) is intentionally NOT performed here** because
+    /// `AppliesBoon` and `AppliesCondition` are produced by effects but are not
+    /// in the canonical interaction list by design — a reverse check would
+    /// false-positive on every applies-style effect. The forward direction
+    /// (this test) already catches silent renames in one direction; the loader's
+    /// own `valid_interaction_keys` check catches the other.
+    #[test]
+    fn consistency_test_interaction_operations_used_by_normalized_effects() {
+        use crate::data::normalized_effects::OperationType;
+
+        // Mirror of the private list in objective_profiles::validate_profile.
+        // Must stay in sync with `consistency_test_interaction_priorities_are_valid_operations`.
+        let canonical_operations: &[&str] = &[
+            "removes_boon",
+            "steals_boon",
+            "corrupts_boon",
+            "removes_condition",
+            "converts_condition_to_boon",
+            "transfers_condition",
+        ];
+
+        // Translate enum variant → canonical snake_case name. `AppliesBoon` and
+        // `AppliesCondition` are intentionally `None` (not interaction operations).
+        fn canonical_name(op: &OperationType) -> Option<&'static str> {
+            match op {
+                OperationType::AppliesBoon => None,
+                OperationType::AppliesCondition => None,
+                OperationType::RemovesBoon => Some("removes_boon"),
+                OperationType::StealsBoon => Some("steals_boon"),
+                OperationType::CorruptsBoon => Some("corrupts_boon"),
+                OperationType::RemovesCondition => Some("removes_condition"),
+                OperationType::ConvertsConditionToBoon => Some("converts_condition_to_boon"),
+                OperationType::TransfersCondition => Some("transfers_condition"),
+            }
+        }
+
+        // Collect every operation name actually produced by any effect across all 3 modes.
+        let effects = normalized_effects::effects();
+        let mut produced: std::collections::HashSet<&'static str> =
+            std::collections::HashSet::new();
+        for mode in &["PvE", "PvP", "WvW"] {
+            if let Some(effs) = effects.effects_for("2026-01-13", mode) {
+                for effect in effs {
+                    if let Some(ref status_op) = effect.status_operation {
+                        if let Some(name) = canonical_name(&status_op.operation_type) {
+                            produced.insert(name);
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut dead_ops: Vec<&str> = Vec::new();
+        for op in canonical_operations {
+            if !produced.contains(op) {
+                dead_ops.push(op);
+            }
+        }
+
+        assert!(
+            dead_ops.is_empty(),
+            "canonical interaction operations have no producing effect in \
+             normalized_effects (dead ops — wasted scoring weight): {:?}\n\
+             Either add an effect with this operation_type or remove it from the \
+             canonical list in objective_profiles::validate_profile (and the \
+             mirrored list in consistency_tests.rs).",
+            dead_ops,
+        );
+    }
+
     // ─── Data completeness: All data loaders produce Ready state ───
 
     /// The full initialize() pipeline should return Ready, meaning all loaders
