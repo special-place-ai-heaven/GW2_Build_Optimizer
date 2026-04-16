@@ -20,9 +20,22 @@
   iterate. Compare against GW2 in-game UI aesthetic.
 
 - **Lock-panel polish** — GW2-style hexagon + 3×3 trait grid in
-  `lock_panel.rs` is the signature visual. Add keyboard focus states,
-  subtle hover animations within ImGui's capabilities, and a
-  "drag-to-reorder" affordance for spec slots if feasible.
+  `lock_panel.rs` is the signature visual.
+  - ✅ Subtle hover animations (2026-04-16): single `LockElementId` + `t`
+    on `MainState.locks_hover`, lerp driven by `tick_hover` (unit-tested).
+    Modulates hex/circle radius, outline thickness, colour brightness, and
+    a fade-in glow ring. Verified by `cargo check` + 7 pure-logic tests.
+    Not verified in-game — no headless ImGui test harness yet (see next
+    todo). A DLL smoke-test before shipping is still required.
+  - ⏭ Keyboard focus states: deferred. Requires input routing (Tab
+    cycling, arrow nav inside a slot, focus ring rendering, guard against
+    chat-bar text-input collisions) that is larger than "polish" and
+    warrants its own session.
+  - ❌ Drag-to-reorder spec slots: skipped by design. `BuildLocks.specs[2]`
+    is the elite-privileged slot — both `locked_elite_id()` and the
+    "Locked to: <elite>" badge in `render_improve_tab` read it directly.
+    Reordering would silently break that invariant. Decision recorded on
+    the doc comment of `BuildLocks.specs` in `crates/core/src/types.rs`.
 
 - **Reduce `render_settings_tab` size** — currently ~450 lines
   (`mod.rs:1291-1742`). Break into `render_api_keys_section`,
@@ -30,12 +43,43 @@
   `render_cache_section`, `render_hardstuck_section`. Each
   independently testable.
 
-- **Cancellation coverage for every bg thread** — audit every
-  `std::thread::spawn` site; confirm the spawned closure holds a
-  `CancellationToken` clone and exits at the next loop boundary.
-  Add a test per spawn site (the `test_cancel_token_*` tests exist —
-  extend to each real consumer). Pair with the engine-side loop audit
-  in `optimizer-engine`.
+- ~~**Cancellation coverage for every bg thread**~~ — audited 2026-04-16.
+  Live `std::thread::spawn` sites in `crates/addon/src/ui/`:
+  `stats.rs` (`start_fetch_models`, `start_game_data_refresh`,
+  `check_api_health`, `load_game_db`), `character.rs`
+  (`load_characters`, `load_character_tabs`), `optimization.rs`
+  (`start_optimization_with_profession`, `send_chat_message`),
+  `setup.rs` (all three setup-step render fns), and `mod.rs`
+  (benchmark sync in `render_settings_tab`; API-key Test/Save pair
+  duplicated in `render_settings_tab` and `render_api_keys_section`
+  during in-progress P1-03 extraction). Every live site clones
+  `CancellationToken` and checks `is_cancelled()` at entry, after each
+  long op, and before the final `with_state` write. The shared pattern
+  is pinned by `test_cancel_token_worker_loop_exits_on_pulse`
+  (`crates/addon/src/state.rs`). Per-consumer tests were deferred —
+  they would require network-layer stubs for `gw2_api`, `llm`, and
+  `scraper` that don't exist, and would mostly duplicate the pattern
+  assertion. Pair still pending with the engine-side loop audit in
+  `optimizer-engine`.
+
+- **Panic recovery gaps in the settings-tab API-key spawns** —
+  surfaced by the cancellation audit. The Test and Save buttons in
+  `render_api_keys_section` (and their duplicate originals still in
+  `render_settings_tab` until P1-03 finishes) use
+  `let _ = std::panic::catch_unwind(...)` — on panic the closure's
+  error is discarded and `settings_key_validating` stays `true`
+  forever. The benchmark-sync spawn in `render_settings_tab` has no
+  `catch_unwind` at all — a scraper panic strands `benchmark_running
+  = true` and can poison the mutex if it fires inside a `with_state`
+  callback. Align these with the `panic_result.is_err() → clear flag
+  + log` pattern used in every `stats.rs` / `character.rs` /
+  `optimization.rs` / `setup.rs` spawn.
+
+- **Delete the legacy-settings block comment in `mod.rs`** — 720 lines
+  wrapped in `/* LEGACY_SETTINGS_LAYOUT_START ... LEGACY_SETTINGS_LAYOUT_END */`
+  carry three dead `std::thread::spawn` sites that show up in every
+  text search and already cost one audit re-inspection. Delete the
+  block outright; git history preserves it if ever needed.
 
 - **Setup-flow UX: recoverable errors** — if key validation fails
   mid-setup, users currently restart. Add "retry this step" behavior

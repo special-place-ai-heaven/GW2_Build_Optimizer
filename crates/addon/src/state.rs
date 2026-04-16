@@ -161,6 +161,10 @@ pub struct MainState {
     pub build_locks: BuildLocks,
     /// Whether the locks panel is expanded in the left menu.
     pub locks_panel_expanded: bool,
+    /// Currently animating hover element in the lock panel (+ its 0..=1 progress).
+    /// Lives on `MainState` so the subtle glow lerps smoothly across frames instead
+    /// of snapping when `render_lock_panel` returns.
+    pub locks_hover: Option<(crate::ui::main_view::lock_panel::LockElementId, f32)>,
 }
 
 impl MainState {
@@ -434,8 +438,9 @@ mod tests {
         // site in `crates/addon/src/ui/`: a background thread clones a
         // CancellationToken and checks `is_cancelled()` between iterations of
         // its work loop. Pulsing the token mid-loop must let the worker exit
-        // within a bounded time. This covers all 14 audited spawn sites — they
-        // share this exact loop shape, so the pattern is tested once.
+        // within a bounded time. This covers all 10 audited live spawn sites
+        // in crates/addon/src/ui/ — they share this exact loop shape, so the
+        // pattern is tested once.
         let token = CancellationToken::new();
         let worker_token = token.clone();
         let handle = std::thread::spawn(move || {
