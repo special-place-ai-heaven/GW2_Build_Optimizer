@@ -77,6 +77,35 @@ pub struct NormalizationConstants {
     pub control_norm: f64,
 }
 
+/// Viability floor thresholds for a build archetype.
+///
+/// Each field is optional: `Some` activates its gate, `None` skips it.
+/// Consumed by `referee::evaluate_viability_gates` when the caller supplies
+/// an `ObjectiveProfile`. Missing/empty `viability_gates` blocks fall back
+/// to the hardcoded per-mode defaults in `referee.rs`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ViabilityGateConfig {
+    /// Minimum effective health required for this role.
+    #[serde(default)]
+    pub ehp_floor: Option<f64>,
+    /// Minimum number of stunbreak skills equipped.
+    #[serde(default)]
+    pub min_stunbreaks: Option<u32>,
+    /// Whether self-Stability access is required.
+    #[serde(default)]
+    pub requires_stability: Option<bool>,
+    /// Minimum number of equipped skills with a cleanse effect.
+    #[serde(default)]
+    pub min_cleanse_count: Option<u32>,
+    /// Minimum conditions-cleansed-per-20s rate (supports role).
+    #[serde(default)]
+    pub min_cleanse_rate_per_20s: Option<f64>,
+    /// Per-boon uptime floors (fraction 0.0–1.0).
+    /// e.g. `{"Quickness": 0.9}` for a boon support role.
+    #[serde(default)]
+    pub boon_uptime_floors: HashMap<String, f64>,
+}
+
 /// A single objective profile defining scoring behavior for a build archetype.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObjectiveProfile {
@@ -93,6 +122,11 @@ pub struct ObjectiveProfile {
     ///        converts_condition_to_boon, transfers_condition.
     #[serde(default)]
     pub interaction_priorities: HashMap<String, f64>,
+    /// Role-specific viability floors consumed by `referee::evaluate_viability_gates`.
+    /// When present, these thresholds override the mode-based hardcoded fallbacks:
+    /// each set field activates its gate, each unset field means "skip that gate".
+    #[serde(default)]
+    pub viability_gates: ViabilityGateConfig,
     /// Exactly one profile per mode must be true.
     pub is_mode_default: bool,
     /// Human-readable documentation of scoring intent and assumptions.
