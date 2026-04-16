@@ -890,7 +890,6 @@ mod tests {
                 OperationType::AppliesBoon => None,
                 OperationType::AppliesCondition => None,
                 OperationType::RemovesBoon => Some("removes_boon"),
-                OperationType::StealsBoon => Some("steals_boon"),
                 OperationType::CorruptsBoon => Some("corrupts_boon"),
                 OperationType::RemovesCondition => Some("removes_condition"),
                 OperationType::ConvertsConditionToBoon => Some("converts_condition_to_boon"),
