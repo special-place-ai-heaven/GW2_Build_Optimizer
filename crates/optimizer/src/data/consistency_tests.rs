@@ -725,7 +725,6 @@ mod tests {
         // If this list ever drifts, both call sites must be updated together.
         let valid_operations: &[&str] = &[
             "removes_boon",
-            "steals_boon",
             "corrupts_boon",
             "removes_condition",
             "converts_condition_to_boon",
@@ -804,7 +803,6 @@ mod tests {
         // Must stay in sync with `consistency_test_interaction_priorities_are_valid_operations`.
         let canonical_operations: &[&str] = &[
             "removes_boon",
-            "steals_boon",
             "corrupts_boon",
             "removes_condition",
             "converts_condition_to_boon",
@@ -818,7 +816,6 @@ mod tests {
                 OperationType::AppliesBoon => None,
                 OperationType::AppliesCondition => None,
                 OperationType::RemovesBoon => Some("removes_boon"),
-                OperationType::StealsBoon => Some("steals_boon"),
                 OperationType::CorruptsBoon => Some("corrupts_boon"),
                 OperationType::RemovesCondition => Some("removes_condition"),
                 OperationType::ConvertsConditionToBoon => Some("converts_condition_to_boon"),
