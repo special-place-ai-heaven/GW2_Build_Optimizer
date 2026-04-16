@@ -20,11 +20,32 @@ const USER_AGENT: &str =
 
 // ─── Public entry point ───────────────────────────────────────────────────────
 
+/// Sentinel error string set on `ScrapeResult.error` when a scrape was skipped
+/// because cancellation was requested before it started.
+pub const CANCELLED_ERROR: &str = "cancelled";
+
 /// Scrape all three community sites and save results to `{addon_dir}/benchmarks/`.
 ///
-/// Returns one `ScrapeResult` per site regardless of whether it succeeded.
-/// Never panics — errors are captured in `ScrapeResult.error`.
-pub fn scrape_all(addon_dir: &Path) -> Vec<ScrapeResult> {
+/// `should_cancel` is consulted before each of the three sequential HTTP scrapes.
+/// When it returns `true`, the remaining sources are skipped and replaced with a
+/// `ScrapeResult` carrying `error = Some(CANCELLED_ERROR)` and empty builds.
+/// Pass `&|| false` from contexts where cancellation is not meaningful.
+///
+/// Returns one `ScrapeResult` per site regardless of whether it succeeded or was
+/// skipped. Never panics — errors are captured in `ScrapeResult.error`.
+pub fn scrape_all(
+    addon_dir: &Path,
+    should_cancel: &dyn Fn() -> bool,
+) -> Vec<ScrapeResult> {
+    // Cancel before any work
+    if should_cancel() {
+        return vec![
+            cancelled_result("snowcrows"),
+            cancelled_result("hardstuck"),
+            cancelled_result("guildjen"),
+        ];
+    }
+
     let client = match build_client() {
         Ok(c) => c,
         Err(e) => {
@@ -49,6 +70,15 @@ pub fn scrape_all(addon_dir: &Path) -> Vec<ScrapeResult> {
 
     let today = today_string();
 
+    // Scrape #1: Snowcrows. Cancellation re-checked here so a pulse during
+    // setup above still aborts before any network I/O.
+    if should_cancel() {
+        return vec![
+            cancelled_result("snowcrows"),
+            cancelled_result("hardstuck"),
+            cancelled_result("guildjen"),
+        ];
+    }
     let sc_result = match scrape_snowcrows(&client, &today) {
         Ok(builds) => {
             save_builds(&builds, &benchmarks_dir);
@@ -57,6 +87,10 @@ pub fn scrape_all(addon_dir: &Path) -> Vec<ScrapeResult> {
         Err(e) => ScrapeResult { source: "snowcrows".into(), builds: vec![], error: Some(e) },
     };
 
+    // Scrape #2: Hardstuck.
+    if should_cancel() {
+        return vec![sc_result, cancelled_result("hardstuck"), cancelled_result("guildjen")];
+    }
     let hs_result = match scrape_hardstuck(&client, &today) {
         Ok(builds) => {
             save_builds(&builds, &benchmarks_dir);
@@ -65,6 +99,10 @@ pub fn scrape_all(addon_dir: &Path) -> Vec<ScrapeResult> {
         Err(e) => ScrapeResult { source: "hardstuck".into(), builds: vec![], error: Some(e) },
     };
 
+    // Scrape #3: GuildJen.
+    if should_cancel() {
+        return vec![sc_result, hs_result, cancelled_result("guildjen")];
+    }
     let gj_result = match scrape_guildjen(&client, &today) {
         Ok(builds) => {
             save_builds(&builds, &benchmarks_dir);
@@ -74,6 +112,15 @@ pub fn scrape_all(addon_dir: &Path) -> Vec<ScrapeResult> {
     };
 
     vec![sc_result, hs_result, gj_result]
+}
+
+/// Construct a placeholder `ScrapeResult` that records cancellation for a source.
+fn cancelled_result(source: &str) -> ScrapeResult {
+    ScrapeResult {
+        source: source.into(),
+        builds: vec![],
+        error: Some(CANCELLED_ERROR.into()),
+    }
 }
 
 /// Load all previously saved benchmark builds from `{addon_dir}/benchmarks/`.
@@ -808,5 +855,121 @@ mod tests {
         assert_eq!(s.len(), 10);
         assert_eq!(&s[4..5], "-");
         assert_eq!(&s[7..8], "-");
+    }
+
+    /// Cancellation requested before any work must short-circuit `scrape_all`
+    /// without performing any HTTP I/O. The function returns one
+    /// `ScrapeResult` per source, each tagged with `CANCELLED_ERROR`. The
+    /// bounded time budget asserts no network call was attempted (each scrape
+    /// has a 15s reqwest timeout, so three sequential failures would take many
+    /// seconds; cancellation must return in milliseconds).
+    #[test]
+    fn scrape_all_returns_immediately_when_cancelled_at_entry() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::Instant;
+
+        let cancelled = Arc::new(AtomicBool::new(true));
+        let cancelled_clone = cancelled.clone();
+        let predicate = move || cancelled_clone.load(Ordering::Relaxed);
+
+        let tmp = std::env::temp_dir().join("gw2_scraper_cancel_test_entry");
+        let start = Instant::now();
+        let results = scrape_all(&tmp, &predicate);
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 500,
+            "scrape_all should return within 500ms when cancelled at entry, took {:?}",
+            elapsed
+        );
+        assert_eq!(results.len(), 3, "must still emit one result per source");
+        for r in &results {
+            assert_eq!(r.error.as_deref(), Some(CANCELLED_ERROR), "{} not flagged cancelled", r.source);
+            assert!(r.builds.is_empty(), "{} should have no builds when cancelled", r.source);
+        }
+        // Sources stay in canonical order so the UI can rely on positional access.
+        assert_eq!(results[0].source, "snowcrows");
+        assert_eq!(results[1].source, "hardstuck");
+        assert_eq!(results[2].source, "guildjen");
+
+        // Defensive: keep `cancelled` alive across the call so the closure's
+        // Arc clone observes a live AtomicBool (clippy::redundant_clone hint
+        // would otherwise tempt removal).
+        assert!(cancelled.load(Ordering::Relaxed));
+    }
+
+    /// A predicate that flips from false to true after the first invocation
+    /// simulates the user clicking cancel after `scrape_all` has begun but
+    /// before the first network call. Because the entry-point check fires
+    /// first (sees false), we then proceed past `build_client` / mkdir, hit
+    /// the pre-snowcrows check (still false on second call? no — it flips on
+    /// every call, so call 2 returns true), and bail out before scraping.
+    /// The test asserts bounded latency and that all three results are
+    /// flagged cancelled.
+    #[test]
+    fn scrape_all_aborts_between_phases_when_predicate_flips() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Instant;
+
+        // Predicate returns false on the first call (entry check), true on
+        // every subsequent call (pre-snowcrows and beyond).
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        let predicate = move || {
+            let n = calls_clone.fetch_add(1, Ordering::Relaxed);
+            n > 0
+        };
+
+        let tmp = std::env::temp_dir().join("gw2_scraper_cancel_test_phases");
+        let start = Instant::now();
+        let results = scrape_all(&tmp, &predicate);
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 1000,
+            "scrape_all should bail out within 1s when cancel pulses after entry, took {:?}",
+            elapsed
+        );
+        assert_eq!(results.len(), 3);
+        for r in &results {
+            assert_eq!(
+                r.error.as_deref(),
+                Some(CANCELLED_ERROR),
+                "{} expected cancelled, got {:?}",
+                r.source,
+                r.error
+            );
+        }
+        // Predicate fired at least twice (entry + pre-snowcrows).
+        assert!(calls.load(Ordering::Relaxed) >= 2);
+    }
+
+    /// Sanity: passing a never-cancel predicate must not change the
+    /// public observable result shape — three entries in canonical order.
+    /// This test does not perform network I/O reliably across CI, so we
+    /// only check the no-cancel branch returns the right vector length
+    /// and source ordering when scraping is allowed to attempt and fail
+    /// (errors are captured, not panicked). The test is bounded by the
+    /// reqwest 15s × 3 timeout cap; in practice DNS for snowcrows.com
+    /// resolves and the test completes quickly even offline.
+    #[test]
+    #[ignore = "performs real network I/O; run with `cargo test -- --ignored`"]
+    fn scrape_all_no_cancel_returns_three_results() {
+        let tmp = std::env::temp_dir().join("gw2_scraper_no_cancel_test");
+        let results = scrape_all(&tmp, &|| false);
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].source, "snowcrows");
+        assert_eq!(results[1].source, "hardstuck");
+        assert_eq!(results[2].source, "guildjen");
+        for r in &results {
+            assert_ne!(
+                r.error.as_deref(),
+                Some(CANCELLED_ERROR),
+                "{} unexpectedly flagged cancelled with never-cancel predicate",
+                r.source
+            );
+        }
     }
 }
