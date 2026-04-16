@@ -114,8 +114,8 @@ pub enum SourceType {
 /// Category of effect — determines how the optimizer interprets and applies the value.
 ///
 /// Categories 0-11: numeric modifiers (stat bonuses, damage multipliers, duration bonuses).
-/// Categories 12-19: status operations (boon/condition application, removal, conversion).
-/// Categories 20-22: special (defiance damage, proc effects, triggered effects).
+/// Categories 12-18: status operations (boon/condition application, removal, conversion).
+/// Categories 19-21: special (defiance damage, proc effects, triggered effects).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EffectCategory {
     FlatStat,
@@ -133,7 +133,6 @@ pub enum EffectCategory {
     AppliesBoon,
     AppliesCondition,
     RemovesBoon,
-    StealsBoon,
     CorruptsBoon,
     RemovesCondition,
     ConvertsConditionToBoon,
@@ -153,7 +152,6 @@ impl EffectCategory {
             EffectCategory::AppliesBoon
                 | EffectCategory::AppliesCondition
                 | EffectCategory::RemovesBoon
-                | EffectCategory::StealsBoon
                 | EffectCategory::CorruptsBoon
                 | EffectCategory::RemovesCondition
                 | EffectCategory::ConvertsConditionToBoon
@@ -594,10 +592,6 @@ pub fn score_effect(effect: &NormalizedEffect, weights: &OptimizationWeights) ->
         EffectCategory::RemovesBoon => {
             // Boon removal is useful in PvP/WvW, modest in PvE
             base_value.min(5.0) * 0.02 * weights.control * 0.5
-        }
-        EffectCategory::StealsBoon => {
-            // Boon theft = removal + self-application
-            base_value.min(5.0) * 0.03 * weights.control
         }
         EffectCategory::CorruptsBoon => {
             // Boon corruption: strong in competitive modes
@@ -1135,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_roundtrip_all_23_effect_categories() {
+    fn test_serde_roundtrip_all_22_effect_categories() {
         let variants = vec![
             EffectCategory::FlatStat,
             EffectCategory::StatConversion,
@@ -1152,7 +1146,6 @@ mod tests {
             EffectCategory::AppliesBoon,
             EffectCategory::AppliesCondition,
             EffectCategory::RemovesBoon,
-            EffectCategory::StealsBoon,
             EffectCategory::CorruptsBoon,
             EffectCategory::RemovesCondition,
             EffectCategory::ConvertsConditionToBoon,
@@ -1163,8 +1156,8 @@ mod tests {
         ];
         assert_eq!(
             variants.len(),
-            23,
-            "must test all 23 EffectCategory variants"
+            22,
+            "must test all 22 EffectCategory variants"
         );
         for v in variants {
             let json = serde_json::to_string(&v).unwrap();
@@ -1479,7 +1472,6 @@ mod tests {
             EffectCategory::AppliesBoon,
             EffectCategory::AppliesCondition,
             EffectCategory::RemovesBoon,
-            EffectCategory::StealsBoon,
             EffectCategory::CorruptsBoon,
             EffectCategory::RemovesCondition,
             EffectCategory::ConvertsConditionToBoon,
@@ -1725,11 +1717,10 @@ mod tests {
 
     #[test]
     fn test_is_status_operation() {
-        // These 8 categories are status operations
+        // These 7 categories are status operations
         assert!(EffectCategory::AppliesBoon.is_status_operation());
         assert!(EffectCategory::AppliesCondition.is_status_operation());
         assert!(EffectCategory::RemovesBoon.is_status_operation());
-        assert!(EffectCategory::StealsBoon.is_status_operation());
         assert!(EffectCategory::CorruptsBoon.is_status_operation());
         assert!(EffectCategory::RemovesCondition.is_status_operation());
         assert!(EffectCategory::ConvertsConditionToBoon.is_status_operation());
