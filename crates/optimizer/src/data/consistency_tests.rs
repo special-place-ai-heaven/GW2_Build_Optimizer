@@ -857,6 +857,104 @@ mod tests {
         );
     }
 
+    // ─── Cross-dataset: Per-mode interaction operations ↔ normalized_effects usage ───
+
+    /// Stricter per-mode counterpart to
+    /// `consistency_test_interaction_operations_used_by_normalized_effects` (which
+    /// is any-mode-counts).
+    ///
+    /// For each mode `m ∈ {pve, pvp, wvw}`: every operation that the mode's
+    /// `data/objective_profiles/<m>.json` references in `interaction_priorities`
+    /// must be produced by at least one effect in **that same mode's**
+    /// `data/normalized_effects/<patch>/<m>.json`.
+    ///
+    /// An op that is not present in a mode's `interaction_priorities` at all is
+    /// not a gap for that mode and is skipped — this test only flags ops the
+    /// mode actually claims to care about.
+    ///
+    /// Operations are translated from `OperationType` (PascalCase) to canonical
+    /// snake_case names the same way the any-mode test does;
+    /// `AppliesBoon`/`AppliesCondition` are intentionally `None` because they
+    /// are not interaction operations.
+    ///
+    /// On failure this test lists every (op, mode) gap so the data owner can
+    /// either add a producing effect to that mode's normalized_effects file or
+    /// drop the priority from that mode's objective profile (do NOT relax this
+    /// assertion to make it pass).
+    #[test]
+    fn consistency_test_interaction_operations_used_per_mode() {
+        use crate::data::normalized_effects::OperationType;
+
+        fn canonical_name(op: &OperationType) -> Option<&'static str> {
+            match op {
+                OperationType::AppliesBoon => None,
+                OperationType::AppliesCondition => None,
+                OperationType::RemovesBoon => Some("removes_boon"),
+                OperationType::StealsBoon => Some("steals_boon"),
+                OperationType::CorruptsBoon => Some("corrupts_boon"),
+                OperationType::RemovesCondition => Some("removes_condition"),
+                OperationType::ConvertsConditionToBoon => Some("converts_condition_to_boon"),
+                OperationType::TransfersCondition => Some("transfers_condition"),
+            }
+        }
+
+        let objectives = objective_profiles::objective_profiles();
+        let effects = normalized_effects::effects();
+
+        let mode_files = [
+            ("PvE", "data/objective_profiles/pve.json"),
+            ("PvP", "data/objective_profiles/pvp.json"),
+            ("WvW", "data/objective_profiles/wvw.json"),
+        ];
+
+        let mut gaps: Vec<String> = Vec::new();
+        for (mode, file) in &mode_files {
+            // Collect ops produced by effects in THIS mode only.
+            let mut produced: std::collections::HashSet<&'static str> =
+                std::collections::HashSet::new();
+            if let Some(effs) = effects.effects_for("2026-01-13", mode) {
+                for effect in effs {
+                    if let Some(ref status_op) = effect.status_operation {
+                        if let Some(name) = canonical_name(&status_op.operation_type) {
+                            produced.insert(name);
+                        }
+                    }
+                }
+            }
+
+            // Collect ops this mode's objective profiles reference.
+            let mut referenced: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for profile in objectives.profiles_for_mode(mode) {
+                for op_name in profile.interaction_priorities.keys() {
+                    referenced.insert(op_name.clone());
+                }
+            }
+
+            for op in &referenced {
+                if !produced.contains(op.as_str()) {
+                    gaps.push(format!(
+                        "operation '{}' is in objective_profiles/{}.json::interaction_priorities \
+                         but no effect in normalized_effects/<patch>/{}.json produces it \
+                         (per-mode gap)",
+                        op,
+                        mode.to_lowercase(),
+                        mode.to_lowercase(),
+                    ));
+                }
+            }
+
+            // Silence unused-variable warning when this mode has zero gaps.
+            let _ = file;
+        }
+
+        assert!(
+            gaps.is_empty(),
+            "per-mode interaction-op coverage gaps:\n  {}",
+            gaps.join("\n  "),
+        );
+    }
+
     // ─── Data completeness: All data loaders produce Ready state ───
 
     /// The full initialize() pipeline should return Ready, meaning all loaders
