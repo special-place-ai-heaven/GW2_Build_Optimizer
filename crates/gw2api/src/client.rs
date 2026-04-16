@@ -662,4 +662,64 @@ mod tests {
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].name, "Berserker's");
     }
+
+    #[test]
+    #[ignore] // Requires network
+    fn test_live_fetch_pvp_amulets_all() {
+        // Shape smoke-test for the PvP amulet endpoint. Fetches every amulet
+        // in one bulk request and asserts the list deserializes and at least
+        // one amulet exposes stat attributes — catches drift in a low-traffic
+        // endpoint that ItemStat tests do not cover.
+        let client = Gw2Client::without_key().unwrap();
+        let amulets: Vec<super::super::models::PvpAmulet> = client
+            .get_with_params("pvp/amulets", &[("ids", "all")])
+            .unwrap();
+        assert!(!amulets.is_empty(), "expected non-empty amulet list");
+        assert!(
+            amulets.iter().any(|a| !a.attributes.is_empty()),
+            "expected at least one amulet with attributes populated"
+        );
+    }
+
+    #[test]
+    #[ignore] // Requires network
+    fn test_live_fetch_legendary_dual_stat_weapon() {
+        // Sunrise (id=30704) — canonical legendary greatsword from launch.
+        // Legendary weapons expose `stat_choices` in place of a fixed
+        // `infix_upgrade`; this guards the shape optimizer gear resolution
+        // relies on.
+        let client = Gw2Client::without_key().unwrap();
+        let items: Vec<super::super::models::Item> = client
+            .get_with_params("items", &[("ids", "30704")])
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        let sunrise = &items[0];
+        assert_eq!(sunrise.rarity, "Legendary");
+        assert_eq!(sunrise.item_type, "Weapon");
+        let details = sunrise
+            .details
+            .as_ref()
+            .expect("legendary weapon must carry details");
+        assert!(
+            !details.stat_choices.is_empty(),
+            "legendary weapon must expose stat_choices"
+        );
+    }
+
+    #[test]
+    #[ignore] // Requires network
+    fn test_live_fetch_relic() {
+        // SotO-era relics replaced the 7th rune bonus. 100947 is Relic of the
+        // Thief. If Anet ever retires this exact ID, replace it — the test
+        // still earns its keep by guarding the `Relic` item_type variant,
+        // which only showed up in the API post-2023.
+        let client = Gw2Client::without_key().unwrap();
+        let items: Vec<super::super::models::Item> = client
+            .get_with_params("items", &[("ids", "100947")])
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        let relic = &items[0];
+        assert_eq!(relic.item_type, "Relic");
+        assert!(!relic.name.is_empty());
+    }
 }

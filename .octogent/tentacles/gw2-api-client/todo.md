@@ -16,10 +16,12 @@
   shape differs. Pick one (`status`, `body_snippet`, `url_path`), update
   tests, document in `code-review` skill.
 
-- **Expand live-test coverage to exotic itemstats** —
-  `test_live_fetch_berserkers_itemstat` covers one prefix. Add ignored
-  tests for relics, legendary dual-stat weapons, PvP amulets — categories
-  most likely to shape-shift in API responses.
+- ~~**Expand live-test coverage to exotic itemstats**~~ — done. Added three
+  `#[ignore]` live tests alongside `test_live_fetch_berserkers_itemstat`:
+  `test_live_fetch_pvp_amulets_all` (all amulets via `ids=all`),
+  `test_live_fetch_legendary_dual_stat_weapon` (Sunrise id=30704, asserts
+  `stat_choices` non-empty), `test_live_fetch_relic` (Relic of the Thief
+  id=100947, asserts `item_type == "Relic"`). All pass against live API.
 
 - **`DataCache::clear_all` atomicity contract** — iterates and deletes. Add
   a test that defines and verifies behavior on partial failure. Either
