@@ -52,7 +52,6 @@
       },
       "interaction_priorities": {
         "removes_boon": 0.1,
-        "steals_boon": 0.15,
         "corrupts_boon": 0.2,
         "removes_condition": 0.3,
         "converts_condition_to_boon": 0.35,
@@ -113,7 +112,6 @@
       },
       "interaction_priorities": {
         "removes_boon": 0.1,
-        "steals_boon": 0.15,
         "corrupts_boon": 0.25,
         "removes_condition": 0.2,
         "converts_condition_to_boon": 0.25,
@@ -174,7 +172,6 @@
       },
       "interaction_priorities": {
         "removes_boon": 0.1,
-        "steals_boon": 0.15,
         "corrupts_boon": 0.1,
         "removes_condition": 0.6,
         "converts_condition_to_boon": 0.7,
@@ -235,7 +232,6 @@
       },
       "interaction_priorities": {
         "removes_boon": 0.05,
-        "steals_boon": 0.1,
         "corrupts_boon": 0.05,
         "removes_condition": 0.9,
         "converts_condition_to_boon": 0.95,
@@ -296,7 +292,6 @@
       },
       "interaction_priorities": {
         "removes_boon": 0.1,
-        "steals_boon": 0.15,
         "corrupts_boon": 0.1,
         "removes_condition": 0.7,
         "converts_condition_to_boon": 0.75,
