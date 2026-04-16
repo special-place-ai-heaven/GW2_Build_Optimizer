@@ -703,41 +703,29 @@ pub struct SynergyResult {
     pub quality_reasons: Vec<data::DataQualityReason>,
 }
 
-/// Run the synergy-driven optimization pipeline.
-/// Sends ALL profession data to Gemini in a single prompt for holistic synergy reasoning.
-/// Returns a fully validated build with combat metrics at 3 buff tiers.
-pub fn optimize_with_gemini(
-    db: &GameDb,
-    profession_name: &str,
+/// Stage 1 of the Gemini pipeline: deterministic gear-prefix selection.
+/// Returns the authoritative primary prefix (which overrides any Gemini choice)
+/// and the tier-based pool of candidates shown to Gemini as context.
+fn select_gemini_gear_prefixes(
     weights: &OptimizationWeights,
-    ctx: &BalanceContext,
-    llm_client: &dyn LlmClient,
-    current_build_summary: Option<&str>,
-    locks: &gw2_core::types::BuildLocks,
-    on_progress: &mut dyn FnMut(OptimizeProgress),
-) -> Result<SynergyResult, String> {
-    // 1. DETERMINISTIC gear prefix selection — this is authoritative, LLM cannot override
-    on_progress(OptimizeProgress {
-        stage: "Selecting gear prefix...".into(),
-        done: false,
-    });
+) -> (&'static str, Vec<&'static str>) {
     let gear_match = scoring::select_gear_prefix(weights);
-    let determined_prefix = gear_match.primary;
-
-    // Also get the tier-based pool for context (Gemini sees what's available)
     let tier_prefixes = scoring::select_prefixes_by_tiers(weights);
     let gear_prefixes: Vec<&str> = tier_prefixes.iter().map(|s| *s).collect();
+    (gear_match.primary, gear_prefixes)
+}
 
-    // 2. Build comprehensive pre-computed context
-    on_progress(OptimizeProgress {
-        stage: "Building profession context...".into(),
-        done: false,
-    });
-    let mode_str = match ctx.game_mode {
-        GameMode::PvE => "PvE",
-        GameMode::PvP => "PvP",
-        GameMode::WvW => "WvW",
-    };
+/// Stage 2 of the Gemini pipeline: build the pre-computed profession context
+/// string fed into the prompt.
+fn build_pre_computed_gemini_context<'a>(
+    db: &'a GameDb,
+    profession_name: &'a str,
+    weights: &'a OptimizationWeights,
+    mode_str: &'a str,
+    gear_prefixes: Vec<&'a str>,
+    determined_prefix: &'a str,
+    current_build_summary: Option<&'a str>,
+) -> String {
     let context_config = ContextConfig {
         db,
         profession_name,
@@ -747,39 +735,52 @@ pub fn optimize_with_gemini(
         current_build_summary,
         determined_prefix: Some(determined_prefix),
     };
-    let pre_computed_context = context::build_gemini_context(&context_config);
+    context::build_gemini_context(&context_config)
+}
 
-    // 3. Build the synergy-focused prompt (includes determined prefix constraint)
-    on_progress(OptimizeProgress {
-        stage: "Preparing Gemini prompt...".into(),
-        done: false,
-    });
+/// Stage 3 of the Gemini pipeline: assemble the final synergy prompt
+/// (applies user-imposed spec/trait lock constraints).
+fn build_gemini_synergy_prompt(
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    mode_str: &str,
+    pre_computed_context: &str,
+    current_build_summary: Option<&str>,
+    determined_prefix: &str,
+    locks: &gw2_core::types::BuildLocks,
+) -> String {
     let lock_constraints = describe_lock_constraints(locks, db);
     let lock_constraint_ref = if lock_constraints.is_empty() {
         None
     } else {
         Some(lock_constraints.as_str())
     };
-    let prompt = prompts::synergy_build_prompt(
+    prompts::synergy_build_prompt(
         profession_name,
         weights,
         mode_str,
-        &pre_computed_context,
+        pre_computed_context,
         current_build_summary,
         Some(determined_prefix),
         lock_constraint_ref,
-    );
+    )
+}
 
-    // 4. Call LLM with tools available for optional verification
-    on_progress(OptimizeProgress {
-        stage: format!(
-            "{} reasoning about synergies...",
-            llm_client.provider_name()
-        ),
-        done: false,
-    });
+/// Stage 4 of the Gemini pipeline: call the LLM with tool definitions and
+/// multi-turn progress reporting. Tool candidates are empty — the LLM is
+/// choosing the build, not ranking candidates.
+fn call_gemini_with_progress(
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    llm_client: &dyn LlmClient,
+    prompt: &str,
+    current_build_summary: Option<&str>,
+    on_progress: &mut dyn FnMut(OptimizeProgress),
+) -> Result<String, String> {
     let tools = crate::llm::tools::tool_definitions();
-    // Build a minimal ToolContext — candidates are empty since the LLM is choosing the build
     let tool_ctx = ToolContext {
         db,
         profession_name,
@@ -789,14 +790,14 @@ pub fn optimize_with_gemini(
         balance_ctx: ctx,
     };
     let provider_name = llm_client.provider_name().to_string();
-    let llm_response = llm_client
+    llm_client
         .generate_with_tools_progress(
-            &prompt,
+            prompt,
             &tools,
             &mut |name: &str, args: &serde_json::Value| {
                 gemini_tools::execute_tool(name, args, &tool_ctx)
             },
-            5, // max 5 tool-calling turns for verification
+            5,
             &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
                 let tool_list = if tool_names.is_empty() {
                     String::new()
@@ -815,31 +816,30 @@ pub fn optimize_with_gemini(
                 });
             },
         )
-        .map_err(|e| format!("LLM call failed: {}", e))?;
+        .map_err(|e| format!("LLM call failed: {}", e))
+}
 
-    // 5. Parse the Gemini response and OVERRIDE the gear prefix
-    on_progress(OptimizeProgress {
-        stage: "Parsing Gemini build...".into(),
-        done: false,
-    });
-    let mut parsed = prompts::parse_gemini_build(&llm_response)
+/// Stage 5 of the Gemini pipeline: parse the LLM response and apply the
+/// deterministic gear-prefix override. Gemini is unreliable at following gear
+/// constraints, so the cosine-similarity selection from Stage 1 is authoritative.
+fn parse_and_override_gear_prefix(
+    llm_response: &str,
+    determined_prefix: &str,
+) -> Result<prompts::GeminiBuildResponse, String> {
+    let mut parsed = prompts::parse_gemini_build(llm_response)
         .map_err(|e| format!("Failed to parse Gemini response: {}", e))?;
-
-    // CRITICAL: Override Gemini's stat_prefix with our deterministic choice.
-    // Gemini is unreliable at following gear constraints — it frequently picks
-    // healing gear regardless of weight settings. The deterministic selector
-    // (cosine similarity against purpose profiles) is authoritative.
     parsed.stat_prefix = determined_prefix.to_string();
+    Ok(parsed)
+}
 
-    // 6. Validate against GameDb
-    on_progress(OptimizeProgress {
-        stage: "Validating build...".into(),
-        done: false,
-    });
-    let validated = validation::validate_gemini_build(&parsed, db, profession_name);
-
-    // Check for blocking errors: no specializations, OR any hard validation error
-    // (e.g., elite-spec-gated weapon without the required spec equipped).
+/// Stage 6 of the Gemini pipeline: validate the parsed response against the
+/// GameDb and reject builds with no specializations or any hard error.
+fn validate_gemini_response(
+    parsed: &prompts::GeminiBuildResponse,
+    db: &GameDb,
+    profession_name: &str,
+) -> Result<ValidatedBuild, String> {
+    let validated = validation::validate_gemini_build(parsed, db, profession_name);
     if validated.specializations.is_empty() {
         return Err(format!(
             "Validation failed — no specializations resolved. Errors: {}",
@@ -852,52 +852,155 @@ pub fn optimize_with_gemini(
             validated.errors.join("; ")
         ));
     }
+    Ok(validated)
+}
 
-    // 7. Calculate stats from validated gear prefix + trait modifiers
-    on_progress(OptimizeProgress {
-        stage: "Calculating stats...".into(),
-        done: false,
-    });
-    let (full_stats, modifiers) = calculate_validated_stats(&validated, db, profession_name, ctx);
-
-    let derived = stats::compute_derived(&full_stats, profession_name);
-
-    // 8. Compute 3-tier combat performance
-    on_progress(OptimizeProgress {
-        stage: "Computing combat performance...".into(),
-        done: false,
-    });
+/// Stage 8 of the Gemini pipeline: compute combat performance at all three
+/// buff tiers (solo / party / squad) for the validated build.
+fn compute_three_tier_combat(
+    full_stats: &stats::StatBlock,
+    derived: &stats::DerivedStats,
+    modifiers: &DamageModifiers,
+    profession_name: &str,
+    ctx: &BalanceContext,
+) -> (CombatPerformance, CombatPerformance, CombatPerformance) {
     let buff_profiles = combat::buff_profiles_for_profession(profession_name, ctx);
     let cw = combat::condition_weights_for_profession(profession_name, ctx);
-    let combat_solo = combat::calculate_combat_performance(
-        &full_stats,
-        &derived,
-        &modifiers,
+    let solo = combat::calculate_combat_performance(
+        full_stats,
+        derived,
+        modifiers,
         &buff_profiles[0],
         &cw,
         profession_name,
         ctx,
     );
-    let combat_party = combat::calculate_combat_performance(
-        &full_stats,
-        &derived,
-        &modifiers,
+    let party = combat::calculate_combat_performance(
+        full_stats,
+        derived,
+        modifiers,
         &buff_profiles[1],
         &cw,
         profession_name,
         ctx,
     );
-    let combat_squad = combat::calculate_combat_performance(
-        &full_stats,
-        &derived,
-        &modifiers,
+    let squad = combat::calculate_combat_performance(
+        full_stats,
+        derived,
+        modifiers,
         &buff_profiles[2],
         &cw,
         profession_name,
         ctx,
     );
+    (solo, party, squad)
+}
+/// Run the synergy-driven optimization pipeline.
+/// Sends ALL profession data to Gemini in a single prompt for holistic synergy reasoning.
+/// Returns a fully validated build with combat metrics at 3 buff tiers.
+pub fn optimize_with_gemini(
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    llm_client: &dyn LlmClient,
+    current_build_summary: Option<&str>,
+    locks: &gw2_core::types::BuildLocks,
+    on_progress: &mut dyn FnMut(OptimizeProgress),
+) -> Result<SynergyResult, String> {
+    // 1. Authoritative gear-prefix selection (Gemini cannot override this).
+    on_progress(OptimizeProgress {
+        stage: "Selecting gear prefix...".into(),
+        done: false,
+    });
+    let (determined_prefix, gear_prefixes) = select_gemini_gear_prefixes(weights);
 
-    // 9. Simulate rotation from validated skills
+    // 2. Pre-computed profession context.
+    on_progress(OptimizeProgress {
+        stage: "Building profession context...".into(),
+        done: false,
+    });
+    let mode_str = match ctx.game_mode {
+        GameMode::PvE => "PvE",
+        GameMode::PvP => "PvP",
+        GameMode::WvW => "WvW",
+    };
+    let pre_computed_context = build_pre_computed_gemini_context(
+        db,
+        profession_name,
+        weights,
+        mode_str,
+        gear_prefixes,
+        determined_prefix,
+        current_build_summary,
+    );
+
+    // 3. Synergy prompt with lock constraints.
+    on_progress(OptimizeProgress {
+        stage: "Preparing Gemini prompt...".into(),
+        done: false,
+    });
+    let prompt = build_gemini_synergy_prompt(
+        db,
+        profession_name,
+        weights,
+        mode_str,
+        &pre_computed_context,
+        current_build_summary,
+        determined_prefix,
+        locks,
+    );
+
+    // 4. LLM call (multi-turn tool-use progress emitted inside the helper).
+    on_progress(OptimizeProgress {
+        stage: format!(
+            "{} reasoning about synergies...",
+            llm_client.provider_name()
+        ),
+        done: false,
+    });
+    let llm_response = call_gemini_with_progress(
+        db,
+        profession_name,
+        weights,
+        ctx,
+        llm_client,
+        &prompt,
+        current_build_summary,
+        on_progress,
+    )?;
+
+    // 5. Parse + deterministic gear-prefix override.
+    on_progress(OptimizeProgress {
+        stage: "Parsing Gemini build...".into(),
+        done: false,
+    });
+    let parsed = parse_and_override_gear_prefix(&llm_response, determined_prefix)?;
+
+    // 6. Validate against GameDb.
+    on_progress(OptimizeProgress {
+        stage: "Validating build...".into(),
+        done: false,
+    });
+    let validated = validate_gemini_response(&parsed, db, profession_name)?;
+
+    // 7. Stats from validated gear prefix + trait modifiers.
+    on_progress(OptimizeProgress {
+        stage: "Calculating stats...".into(),
+        done: false,
+    });
+    let (full_stats, modifiers) = calculate_validated_stats(&validated, db, profession_name, ctx);
+    let derived = stats::compute_derived(&full_stats, profession_name);
+
+    // 8. 3-tier combat performance.
+    on_progress(OptimizeProgress {
+        stage: "Computing combat performance...".into(),
+        done: false,
+    });
+    let (combat_solo, combat_party, combat_squad) =
+        compute_three_tier_combat(&full_stats, &derived, &modifiers, profession_name, ctx);
+
+    // 9. Rotation simulation from validated skills.
     on_progress(OptimizeProgress {
         stage: "Simulating rotation...".into(),
         done: false,
