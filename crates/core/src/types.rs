@@ -81,7 +81,13 @@ impl BuildLocks {
                 parts.push(format!("Slot {} spec locked to ID {}", slot + 1, id));
             }
         }
-        for (spec_id, cols) in &self.trait_locks {
+        // Sort by spec_id so the output is deterministic regardless of
+        // HashMap iteration order. The string is embedded verbatim in LLM
+        // prompts; nondeterministic ordering breaks prompt cache hits and
+        // makes responses drift between identical user requests.
+        let mut trait_entries: Vec<(&u32, &[Option<u32>; 3])> = self.trait_locks.iter().collect();
+        trait_entries.sort_by_key(|(spec_id, _)| **spec_id);
+        for (spec_id, cols) in trait_entries {
             for (col, trait_id) in cols.iter().enumerate() {
                 if let Some(tid) = trait_id {
                     let tier = match col {
@@ -366,6 +372,51 @@ mod tests {
         assert_eq!(
             locks.describe_constraints(),
             "Slot 3 spec locked to ID 34; Spec 34 Adept trait locked to ID 1111; Spec 34 Grandmaster trait locked to ID 3333",
+        );
+    }
+
+    /// `trait_locks` is a `HashMap<u32, _>`, so its iteration order is
+    /// nondeterministic. `describe_constraints` must sort by `spec_id` so the
+    /// emitted string is stable across runs (these snapshots assert that).
+    #[test]
+    fn describe_constraints_two_specs_with_traits_sorted_by_spec_id() {
+        // Insert in the reverse of the expected order to expose any reliance
+        // on insertion order.
+        let mut locks = BuildLocks::default();
+        locks.trait_locks.insert(48, [Some(2001), None, None]);
+        locks.trait_locks.insert(34, [Some(1111), Some(2222), None]);
+        assert_eq!(
+            locks.describe_constraints(),
+            "Spec 34 Adept trait locked to ID 1111; Spec 34 Master trait locked to ID 2222; Spec 48 Adept trait locked to ID 2001",
+        );
+    }
+
+    #[test]
+    fn describe_constraints_three_specs_with_traits_sorted_by_spec_id() {
+        // Insert out of order; expected output is sorted ascending by spec_id.
+        let mut locks = BuildLocks::default();
+        locks.trait_locks.insert(72, [None, None, Some(7000)]);
+        locks.trait_locks.insert(5, [Some(500), None, Some(502)]);
+        locks.trait_locks.insert(34, [None, Some(3400), None]);
+        assert_eq!(
+            locks.describe_constraints(),
+            "Spec 5 Adept trait locked to ID 500; Spec 5 Grandmaster trait locked to ID 502; Spec 34 Master trait locked to ID 3400; Spec 72 Grandmaster trait locked to ID 7000",
+        );
+    }
+
+    #[test]
+    fn describe_constraints_mixed_spec_and_multi_spec_traits() {
+        // Spec locks come first (in slot order), followed by trait locks
+        // grouped by spec_id ascending. One of the trait-locked specs has no
+        // matching spec lock, exercising the independence of the two maps.
+        let mut locks = BuildLocks::default();
+        locks.specs[0] = Some(5);
+        locks.specs[2] = Some(34);
+        locks.trait_locks.insert(34, [Some(3401), None, None]);
+        locks.trait_locks.insert(5, [None, Some(502), Some(503)]);
+        assert_eq!(
+            locks.describe_constraints(),
+            "Slot 1 spec locked to ID 5; Slot 3 spec locked to ID 34; Spec 5 Master trait locked to ID 502; Spec 5 Grandmaster trait locked to ID 503; Spec 34 Adept trait locked to ID 3401",
         );
     }
 }
