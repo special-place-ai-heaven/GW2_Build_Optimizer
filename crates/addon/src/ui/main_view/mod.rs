@@ -1702,10 +1702,24 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         ui.button_with_size(if state.main.benchmark_running { "Syncing..." } else { "Sync Benchmarks" }, [160.0, 0.0]);
     } else if ui.button_with_size("Sync Benchmarks", [160.0, 0.0]) {
         let addon_dir = state.addon_dir.clone();
+        let token = state.cancel_token.clone();
         state.main.benchmark_running = true;
         state.main.benchmark_error = None;
         std::thread::spawn(move || {
+            // Cancel-aware at the boundaries we control. `scrape_all` runs three
+            // sequential blocking HTTP scrapes with no progress callback, so it
+            // cannot be interrupted mid-call without a signature change (out of
+            // scope for this audit). At minimum: skip starting if cancelled, and
+            // skip the state update if cancellation arrived during scraping so the
+            // benchmark_running flag isn't reset on a stale token (with_state is a
+            // no-op after clear() but we keep the guard explicit).
+            if token.is_cancelled() {
+                return;
+            }
             let results = gw2_optimizer::scraper::scrape_all(&addon_dir);
+            if token.is_cancelled() {
+                return;
+            }
             crate::state::with_state(|s| {
                 s.main.benchmark_running = false;
                 let mut counts = std::collections::HashMap::new();
