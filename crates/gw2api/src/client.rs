@@ -25,6 +25,18 @@ fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
     Some(Duration::from_secs(secs))
 }
 
+/// UTF-8-safe truncation of response bodies to a short, loggable snippet.
+/// Used by `ApiError::Api` to bound the message size; GW2 error payloads
+/// are already short, but HTML from intermediaries can be arbitrarily large
+/// (and is noise — we drop it entirely).
+fn body_snippet(body: &str) -> String {
+    const MAX: usize = 200;
+    if body.contains('<') {
+        return String::new();
+    }
+    body.chars().take(MAX).collect()
+}
+
 /// Build the comma-separated `ids` query value used by GW2 API bulk endpoints.
 ///
 /// Produces output bit-for-bit identical to the previous inline construction
@@ -100,18 +112,37 @@ impl TokenBucket {
     }
 }
 
+/// Errors returned by the GW2 API client.
+///
+/// Variant conventions (see `code-review` skill for the binding rule):
+/// - `Api` — GW2 API returned a non-2xx response. Always populates
+///   `url_path` (the relative endpoint, e.g. `"items"`) and `body_snippet`
+///   (≤200 chars, UTF-8 safe). Do NOT use for non-HTTP failures.
+/// - `RateLimited` — 429 retries exhausted or `Retry-After` exceeded the
+///   cap. Carries the endpoint that tripped the limit.
+/// - `Cache` — on-disk cache read/write failure.
+/// - `Internal` — panics, invalid config, unrecoverable client state.
+///   Never a sentinel for HTTP errors.
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("JSON parse error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("API error {status}: {message}")]
-    Api { status: u16, message: String },
-    #[error("Rate limited after {0} retries")]
-    RateLimited(u32),
+    #[error("API error {status} on {url_path}: {body_snippet}")]
+    Api {
+        status: u16,
+        url_path: String,
+        body_snippet: String,
+    },
+    #[error("Rate limited after {retries} retries on {url_path}")]
+    RateLimited { retries: u32, url_path: String },
     #[error("Missing required API scopes: {0:?}")]
     MissingScopes(Vec<String>),
+    #[error("Cache error: {0}")]
+    Cache(String),
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 /// Token info returned by /v2/tokeninfo.
@@ -164,6 +195,7 @@ impl Gw2Client {
         } else {
             format!("{}/{}", BASE_URL, endpoint.trim_start_matches('/'))
         };
+        let url_path = endpoint.to_string();
 
         // Build query string manually — reqwest's .query() encodes commas as %2C,
         // which triples separator length and can exceed URL limits for bulk ID requests.
@@ -218,10 +250,9 @@ impl Gw2Client {
                 let header_val = match HeaderValue::from_str(&format!("Bearer {}", key)) {
                     Ok(v) => v,
                     Err(_) => {
-                        return Err(ApiError::Api {
-                            status: 0,
-                            message: "API key contains invalid characters".into(),
-                        })
+                        return Err(ApiError::Internal(
+                            "API key contains invalid characters".into(),
+                        ))
                     }
                 };
                 headers.insert(AUTHORIZATION, header_val);
@@ -245,38 +276,34 @@ impl Gw2Client {
                     let retry_after = parse_retry_after(resp.headers());
                     if let Some(wait) = retry_after {
                         if wait > RETRY_AFTER_CAP {
-                            return Err(ApiError::RateLimited(attempt + 1));
+                            return Err(ApiError::RateLimited {
+                                retries: attempt + 1,
+                                url_path,
+                            });
                         }
                         suggested_wait = Some(wait);
                     }
-                    last_error = Some(ApiError::RateLimited(attempt + 1));
+                    last_error = Some(ApiError::RateLimited {
+                        retries: attempt + 1,
+                        url_path: url_path.clone(),
+                    });
                     continue;
                 }
                 let body = resp.text().unwrap_or_default();
-                let clean_msg = if body.contains('<') {
-                    format!("Server error (HTTP {})", status)
-                } else if body.is_empty() {
-                    format!("HTTP {}", status)
-                } else {
-                    body
-                };
                 last_error = Some(ApiError::Api {
                     status,
-                    message: clean_msg,
+                    url_path: url_path.clone(),
+                    body_snippet: body_snippet(&body),
                 });
                 continue; // retry
             }
 
             if !resp.status().is_success() {
                 let body = resp.text().unwrap_or_default();
-                let clean_msg = if body.contains('<') {
-                    format!("Server error (HTTP {})", status)
-                } else {
-                    body
-                };
                 return Err(ApiError::Api {
                     status,
-                    message: clean_msg,
+                    url_path,
+                    body_snippet: body_snippet(&body),
                 });
             }
 
@@ -294,9 +321,11 @@ impl Gw2Client {
         }
 
         // All retries exhausted
-        Err(last_error.unwrap_or_else(|| ApiError::Api {
-            status: 0,
-            message: "GW2 API unavailable after retries. Try again later.".into(),
+        Err(last_error.unwrap_or_else(|| {
+            ApiError::Internal(format!(
+                "GW2 API unavailable after {} retries on {}",
+                MAX_RETRIES, url_path
+            ))
         }))
     }
 
@@ -338,10 +367,10 @@ impl Gw2Client {
                     .into_iter()
                     .map(|h| {
                         h.join().unwrap_or_else(|_| {
-                            Err(ApiError::Api {
-                                status: 0,
-                                message: "Batch fetch thread panicked".into(),
-                            })
+                            Err(ApiError::Internal(format!(
+                                "Batch fetch thread panicked on {}",
+                                endpoint
+                            )))
                         })
                     })
                     .collect()
@@ -384,10 +413,10 @@ impl Gw2Client {
                     .into_iter()
                     .map(|h| {
                         h.join().unwrap_or_else(|_| {
-                            Err(ApiError::Api {
-                                status: 0,
-                                message: "Batch fetch thread panicked".into(),
-                            })
+                            Err(ApiError::Internal(format!(
+                                "Batch fetch thread panicked on {}",
+                                endpoint
+                            )))
                         })
                     })
                     .collect()
@@ -594,6 +623,28 @@ mod tests {
     }
 
     #[test]
+    fn body_snippet_truncates_long_text_utf8_safely() {
+        // 300 four-byte chars × "💀" — naive byte slice at 200 would panic; chars().take must cap.
+        let input: String = std::iter::repeat('💀').take(300).collect();
+        let out = body_snippet(&input);
+        assert_eq!(out.chars().count(), 200);
+        assert!(out.is_char_boundary(out.len()));
+    }
+
+    #[test]
+    fn body_snippet_strips_html_payloads() {
+        // Intermediary HTML error pages are noise — keep them out of ApiError.
+        let html = "<html><body>Gateway timeout</body></html>";
+        assert_eq!(body_snippet(html), "");
+    }
+
+    #[test]
+    fn body_snippet_preserves_short_plain_text() {
+        assert_eq!(body_snippet("not found"), "not found");
+        assert_eq!(body_snippet(""), "");
+    }
+
+    #[test]
     fn get_with_params_429_then_200_succeeds_with_retry_after() {
         // Mock server: first GET /v2/mock returns 429 + Retry-After: 1, second returns 200.
         // We assert the retry path completes successfully, not precise timing — the
@@ -639,7 +690,10 @@ mod tests {
             .get_with_params::<serde_json::Value>(&url, &[])
             .unwrap_err();
         match err {
-            ApiError::RateLimited(n) => assert_eq!(n, 1),
+            ApiError::RateLimited { retries, url_path } => {
+                assert_eq!(retries, 1);
+                assert_eq!(url_path, url);
+            }
             other => panic!("expected RateLimited, got {:?}", other),
         }
     }

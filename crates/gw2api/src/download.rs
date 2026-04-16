@@ -50,10 +50,7 @@ pub fn download_all(
         let data: Vec<models::ItemStat> = client.fetch_all("itemstats")?;
         cache
             .save("itemstats", &data, build)
-            .map_err(|e| ApiError::Api {
-                status: 0,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "Item stats", None);
 
@@ -62,10 +59,7 @@ pub fn download_all(
         let data: Vec<models::Specialization> = client.fetch_all("specializations")?;
         cache
             .save("specializations", &data, build)
-            .map_err(|e| ApiError::Api {
-                status: 0,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "Specializations", None);
 
@@ -74,10 +68,7 @@ pub fn download_all(
         let data: Vec<models::Trait> = client.fetch_all("traits")?;
         cache
             .save("traits", &data, build)
-            .map_err(|e| ApiError::Api {
-                status: 0,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "Traits", None);
 
@@ -86,10 +77,7 @@ pub fn download_all(
         let data: Vec<models::Skill> = client.fetch_all("skills")?;
         cache
             .save("skills", &data, build)
-            .map_err(|e| ApiError::Api {
-                status: 0,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "Skills", None);
 
@@ -101,10 +89,7 @@ pub fn download_all(
         )?;
         cache
             .save("professions", &data, build)
-            .map_err(|e| ApiError::Api {
-                status: 0,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "Professions", None);
 
@@ -113,10 +98,7 @@ pub fn download_all(
         let data: Vec<models::Legend> = client.fetch_all("legends")?;
         cache
             .save("legends", &data, build)
-            .map_err(|e| ApiError::Api {
-                status: 0,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "Legends", None);
 
@@ -125,10 +107,7 @@ pub fn download_all(
         let data: Vec<models::PvpAmulet> = client.fetch_all("pvp/amulets")?;
         cache
             .save("pvp_amulets", &data, build)
-            .map_err(|e| ApiError::Api {
-                status: 0,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "PvP Amulets", None);
 
@@ -181,10 +160,7 @@ pub fn download_all(
 
         cache
             .save("items", &equipment_items, build)
-            .map_err(|e| ApiError::Api {
-                status: 0,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "Items (equipment)", None);
 
