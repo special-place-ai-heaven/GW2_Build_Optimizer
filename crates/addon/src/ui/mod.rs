@@ -1,7 +1,7 @@
 pub mod chat_bar;
 pub mod comparison;
 mod gear_diff;
-mod main_view;
+pub mod main_view;
 pub mod radar_chart;
 mod setup;
 

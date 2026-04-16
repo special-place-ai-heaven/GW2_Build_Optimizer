@@ -50,6 +50,11 @@ impl GameMode {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BuildLocks {
     /// Spec locks by slot (0, 1, 2). None = optimizer decides, Some(id) = must use this spec.
+    ///
+    /// Slot 2 is semantically the elite-eligible slot: `locked_elite_id()` and the
+    /// "Locked to: <elite>" badge in `render_improve_tab` both read `specs[2]` directly.
+    /// Reordering slots is therefore not supported by the UI — it would silently break
+    /// that invariant for every consumer that assumes `specs[2]` is the elite slot.
     pub specs: [Option<u32>; 3],
     /// Trait locks: spec_id → [Adept, Master, Grandmaster]. None = free, Some(id) = locked trait.
     #[serde(default)]
