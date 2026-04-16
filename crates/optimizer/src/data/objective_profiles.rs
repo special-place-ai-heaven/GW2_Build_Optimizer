@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 use thiserror::Error;
 
 use super::boon_condition_formulas::canonical_condition_name;
-use super::{DataLoadError, EvidenceLevel};
+use super::{try_load, DataLoadError, EvidenceLevel};
 
 // ─── Embedded JSON (compile-time) ───
 
@@ -36,19 +36,11 @@ pub fn objective_profiles() -> &'static ObjectiveProfileData {
 /// Try to load all objective profiles from the embedded JSON, returning typed errors
 /// on failure. Does NOT store in OnceLock — used for health-check validation.
 pub fn try_load_objective_profiles() -> Result<(), Vec<DataLoadError>> {
-    load_all_objective_profiles().map(|_| ()).map_err(|e| {
-        vec![match e {
-            ObjectiveProfileError::ParseError(pe) => DataLoadError::ParseError {
-                source: "objective_profiles".into(),
-                detail: pe.to_string(),
-            },
-            ObjectiveProfileError::ValidationError(msg) => DataLoadError::ValidationError {
-                source: "objective_profiles".into(),
-                field: String::new(),
-                reason: msg,
-            },
-        }]
-    })
+    try_load!(
+        "objective_profiles",
+        load_all_objective_profiles().map(|_| ()),
+        ObjectiveProfileError
+    )
 }
 
 // ─── Error type ───
