@@ -96,18 +96,38 @@ impl DataCache {
         std::fs::remove_file(&path).ok();
     }
 
-    /// Clear all cached data.
-    pub fn clear_all(&self) {
-        if let Ok(entries) = std::fs::read_dir(&self.base_path) {
-            for entry in entries.flatten() {
-                if entry
-                    .path()
-                    .extension()
-                    .is_some_and(|ext| ext == "json" || ext == "tmp")
-                {
-                    std::fs::remove_file(entry.path()).ok();
-                }
+    /// Clear all cached data (every `*.json` / `*.tmp` entry under `base_path`).
+    ///
+    /// Contract: **best-effort**. If any individual entry cannot be removed,
+    /// the remaining entries are still attempted; the per-entry failures are
+    /// returned as `CacheError::PartialClear`. A missing cache directory is
+    /// treated as success (nothing to clear). Non-matching extensions are
+    /// left untouched.
+    pub fn clear_all(&self) -> Result<(), CacheError> {
+        let entries = match std::fs::read_dir(&self.base_path) {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(CacheError::Io(e)),
+        };
+
+        let mut failures: Vec<String> = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_clearable = path
+                .extension()
+                .is_some_and(|ext| ext == "json" || ext == "tmp");
+            if !is_clearable {
+                continue;
             }
+            if let Err(e) = std::fs::remove_file(&path) {
+                failures.push(format!("{}: {}", path.display(), e));
+            }
+        }
+
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(CacheError::PartialClear { failures })
         }
     }
 
@@ -205,6 +225,10 @@ pub enum CacheError {
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+    /// `clear_all` attempted every matching entry; this is the list of entries
+    /// it could not remove. Best-effort contract — cleared files stay cleared.
+    #[error("Cache clear partially failed: {failures:?}")]
+    PartialClear { failures: Vec<String> },
 }
 
 #[cfg(test)]
@@ -226,7 +250,7 @@ mod tests {
         let loaded: Option<Vec<u32>> = cache.load("test_data").unwrap();
         assert_eq!(loaded, Some(vec![1, 2, 3, 4, 5]));
 
-        cache.clear_all();
+        let _ = cache.clear_all();
     }
 
     #[test]
@@ -238,7 +262,7 @@ mod tests {
         assert!(cache.is_stale("stale_test", 101)); // different build
         assert!(cache.is_stale("nonexistent", 100)); // missing file
 
-        cache.clear_all();
+        let _ = cache.clear_all();
     }
 
     #[test]
@@ -251,7 +275,7 @@ mod tests {
         assert!(cache.is_stale("rollback_test", 150));
         assert!(cache.is_stale("rollback_test", 0));
 
-        cache.clear_all();
+        let _ = cache.clear_all();
     }
 
     #[test]
@@ -277,7 +301,7 @@ mod tests {
         let other: Option<Vec<String>> = cache.load_character("Other Char", "buildtabs").unwrap();
         assert!(other.is_none());
 
-        cache.clear_all();
+        let _ = cache.clear_all();
     }
 
     #[test]
@@ -289,7 +313,7 @@ mod tests {
         let loaded = cache.load_characters().unwrap();
         assert_eq!(loaded, Some(chars));
 
-        cache.clear_all();
+        let _ = cache.clear_all();
     }
 
     #[test]
@@ -297,5 +321,77 @@ mod tests {
         assert_eq!(super::sanitize_name("Fun Detected"), "fun_detected");
         assert_eq!(super::sanitize_name("Ælfred's Toon"), "ælfred_s_toon");
         assert_eq!(super::sanitize_name("simple"), "simple");
+    }
+
+    /// Per-test isolated cache to avoid racing with the shared `temp_cache()`
+    /// tests — these clear_all assertions would otherwise see files written by
+    /// parallel tests and vice versa.
+    fn isolated_cache(tag: &str) -> (DataCache, PathBuf) {
+        let path = env::temp_dir().join(format!(
+            "gw2_cache_test_{}_{}",
+            std::process::id(),
+            tag
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        let cache = DataCache::new(&path);
+        (cache, path)
+    }
+
+    #[test]
+    fn clear_all_on_missing_directory_returns_ok() {
+        // If the cache dir never existed (first run, user wiped it), clearing
+        // should be a no-op, not an error.
+        let (cache, path) = isolated_cache("clear_missing");
+        // DataCache::new called create_dir_all — remove it again to simulate missing
+        let _ = std::fs::remove_dir_all(&path);
+        cache.clear_all().expect("clearing a missing dir is OK");
+    }
+
+    #[test]
+    fn clear_all_leaves_non_cache_files_alone() {
+        let (cache, path) = isolated_cache("clear_non_cache");
+        cache.save("keep_json", &"x", 1).unwrap();
+        let unrelated = path.join("notes.txt");
+        std::fs::write(&unrelated, b"user data").unwrap();
+
+        cache.clear_all().expect("clear should succeed");
+
+        assert!(unrelated.exists(), ".txt file must not be touched");
+        assert!(!cache.exists("keep_json"), ".json cache file should be cleared");
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    #[test]
+    fn clear_all_surfaces_partial_failure_for_undeletable_entry() {
+        // Seed the cache dir with a *directory* whose name ends in `.json`.
+        // `remove_file` refuses to delete directories on both Windows (ACCESS_DENIED)
+        // and Unix (EISDIR), which gives us a portable simulation of a per-entry
+        // removal failure — exercising the `PartialClear` path.
+        let (cache, path) = isolated_cache("clear_partial");
+        cache.save("deletable", &"x", 1).unwrap();
+        let blocker = path.join("stuck.json");
+        std::fs::create_dir(&blocker).unwrap();
+
+        let err = cache
+            .clear_all()
+            .expect_err("expected PartialClear for undeletable entry");
+
+        match err {
+            CacheError::PartialClear { failures } => {
+                assert_eq!(failures.len(), 1, "only the directory should fail");
+                assert!(
+                    failures[0].contains("stuck.json"),
+                    "failure list must name the offending entry: {:?}",
+                    failures
+                );
+            }
+            other => panic!("expected PartialClear, got {:?}", other),
+        }
+
+        // Best-effort contract: the other .json entry must still be cleared.
+        assert!(!cache.exists("deletable"), "removable entry must still be cleared");
+
+        let _ = std::fs::remove_dir(&blocker);
+        let _ = std::fs::remove_dir_all(&path);
     }
 }
