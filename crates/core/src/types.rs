@@ -313,3 +313,59 @@ pub struct SavedBuild {
     pub changes_made: Vec<String>,
     pub estimated_stats: Option<StatBlock>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// These tests snapshot the exact string format produced by
+    /// `BuildLocks::describe_constraints`. The output is consumed verbatim by the
+    /// LLM prompts in `crates/optimizer/src/prompts.rs` (e.g.
+    /// `new_build_prompt_with_tools`, `synergy_build_prompt`). If you change the
+    /// format intentionally, update both the prompt callers and these snapshots
+    /// in the same change.
+    #[test]
+    fn describe_constraints_no_locks() {
+        let locks = BuildLocks::default();
+        assert_eq!(locks.describe_constraints(), "");
+    }
+
+    #[test]
+    fn describe_constraints_only_spec_locked() {
+        let mut locks = BuildLocks::default();
+        locks.specs[0] = Some(5);
+        locks.specs[2] = Some(34);
+        assert_eq!(
+            locks.describe_constraints(),
+            "Slot 1 spec locked to ID 5; Slot 3 spec locked to ID 34",
+        );
+    }
+
+    #[test]
+    fn describe_constraints_only_traits_locked() {
+        // Use a single spec_id so HashMap iteration order can't make the
+        // snapshot flaky.
+        let mut locks = BuildLocks::default();
+        locks
+            .trait_locks
+            .insert(34, [Some(1111), Some(2222), Some(3333)]);
+        assert_eq!(
+            locks.describe_constraints(),
+            "Spec 34 Adept trait locked to ID 1111; Spec 34 Master trait locked to ID 2222; Spec 34 Grandmaster trait locked to ID 3333",
+        );
+    }
+
+    #[test]
+    fn describe_constraints_both_spec_and_traits_locked() {
+        // Single spec_id again to avoid HashMap iteration nondeterminism.
+        let mut locks = BuildLocks::default();
+        locks.specs[2] = Some(34);
+        locks
+            .trait_locks
+            .insert(34, [Some(1111), None, Some(3333)]);
+        assert_eq!(
+            locks.describe_constraints(),
+            "Slot 3 spec locked to ID 34; Spec 34 Adept trait locked to ID 1111; Spec 34 Grandmaster trait locked to ID 3333",
+        );
+    }
+}
