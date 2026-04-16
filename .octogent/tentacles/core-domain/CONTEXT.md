@@ -35,7 +35,9 @@ Change a field here and the blast radius is the whole workspace.
 - **`StatBlock::add` / `StatBlock::get` normalize old-vs-new GW2 attribute names.**
   The API still emits `ConditionDuration` (old) alongside `Expertise` (new).
   Never read/write stats via raw map access — always go through the
-  `StatBlock` API. (See `crates/core/src/types.rs:196-234`.)
+  `StatBlock` API. Note: the alias-normalizing `StatBlock` lives in
+  `crates/optimizer/src/stats.rs:29-70` (not in this crate — `core::StatBlock`
+  in `types.rs` is a plain data struct with no alias logic).
 - **`AppConfig` carries per-provider keys + models**, with `active_llm_key()`
   / `active_model_id()` routing through the `LlmProvider` enum.
   `is_setup_complete()` = `has_gw2_key()` ∧ `has_active_llm_key()` ∧

@@ -29,6 +29,11 @@ pub enum GameMode {
 }
 
 impl GameMode {
+    /// Canonical iteration order for `GameMode`. The slice `[PvE, PvP, WvW]`
+    /// is part of the contract — downstream consumers iterate this constant
+    /// to build tab order and default-lookup sequences. Reordering silently
+    /// shifts UI/lookup behavior across the workspace. The
+    /// `game_mode_all_order_is_pinned` test below guards the order.
     pub const ALL: [GameMode; 3] = [GameMode::PvE, GameMode::PvP, GameMode::WvW];
 
     pub fn label(&self) -> &str {
@@ -418,5 +423,25 @@ mod tests {
             locks.describe_constraints(),
             "Slot 1 spec locked to ID 5; Slot 3 spec locked to ID 34; Spec 5 Master trait locked to ID 502; Spec 5 Grandmaster trait locked to ID 503; Spec 34 Adept trait locked to ID 3401",
         );
+    }
+
+
+    #[test]
+    fn game_mode_all_order_is_pinned() {
+        // `GameMode::ALL` is iterated by tab rendering and default-lookup code
+        // across the workspace. The order [PvE, PvP, WvW] is load-bearing — if
+        // it silently flips, UI tabs and default profiles reorder with it.
+        assert_eq!(
+            GameMode::ALL,
+            [GameMode::PvE, GameMode::PvP, GameMode::WvW],
+        );
+    }
+
+    #[test]
+    fn game_mode_default_is_pve() {
+        // Pinned alongside ALL's order because several consumers rely on the
+        // default game mode matching the first element of ALL.
+        assert_eq!(GameMode::default(), GameMode::PvE);
+        assert_eq!(GameMode::default(), GameMode::ALL[0]);
     }
 }

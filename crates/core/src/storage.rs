@@ -252,6 +252,48 @@ mod tests {
         assert_eq!(saved.name, "Old Build");
     }
 
+
+    #[test]
+    fn test_forward_compat_ignores_unknown_fields() {
+        // If a future DLL adds a new field to `SavedBuild` and the user then
+        // downgrades, the older binary must still load the saved file. Serde's
+        // default behavior is to ignore unknown fields — this test locks that
+        // in (i.e. guards against a future `#[serde(deny_unknown_fields)]`
+        // being accidentally added).
+        let json = r#"{
+            "name": "Future Build",
+            "timestamp": 9000,
+            "character_name": "FutureChar",
+            "game_mode": "PvE",
+            "profession": "Necromancer",
+            "engine_version": "9.9.9",
+            "balance_manifest_version": "2099-01-01",
+            "label": "Future",
+            "stat_prefix": "Berserker's",
+            "specializations": [],
+            "weapons": [],
+            "skills": [],
+            "rune": "",
+            "sigils": [],
+            "relic": "",
+            "explanation": "",
+            "synergy_explanation": "",
+            "changes_made": [],
+            "estimated_stats": null,
+            "unknown_scalar_from_the_future": 42,
+            "unknown_string_from_the_future": "hello",
+            "unknown_nested_from_the_future": {"foo": ["a", "b"], "bar": true}
+        }"#;
+        let saved: SavedBuild = serde_json::from_str(json)
+            .expect("SavedBuild must tolerate unknown fields for DLL-downgrade safety");
+        assert_eq!(saved.name, "Future Build");
+        assert_eq!(saved.profession, "Necromancer");
+        assert_eq!(
+            saved.balance_manifest_version.as_deref(),
+            Some("2099-01-01"),
+        );
+    }
+
     #[test]
     fn test_round_trip_with_new_fields() {
         let build = SavedBuild {
@@ -308,6 +350,122 @@ mod tests {
         let result = storage.save_new(&build);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("already exists"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+
+    #[test]
+    #[ignore = "save_new is TOCTOU-racy: two threads can both pass exists() and \
+                both succeed. This test asserts the intended contract (exactly \
+                one wins) and currently fails. Un-ignore once save_new uses \
+                atomic exclusive creation (e.g. OpenOptions::create_new) on the \
+                final path instead of an exists()-check. Run with \
+                `cargo test -p gw2-core -- --ignored` to reproduce."]
+    fn test_save_new_concurrent_race() {
+        // Two threads call save_new on the same filename at the same time.
+        // The contract promises that save_new rejects collisions (see
+        // `test_save_new_collision`); under contention exactly one thread
+        // must win and the other must error with "already exists". No .tmp
+        // leftover should remain.
+        //
+        // Each thread is repeated many times to push the window between the
+        // exists() check and rename(). This is a best-effort stress test —
+        // threads rerun the race fresh each iteration.
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::thread;
+
+        let dir = temp_dir("save_new_race");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let storage = Arc::new(BuildStorage::new(&dir));
+        let saves_dir = dir.join("saves");
+
+        const ITERATIONS: usize = 50;
+        let successes = Arc::new(AtomicUsize::new(0));
+        let collisions = Arc::new(AtomicUsize::new(0));
+        let other_errors = Arc::new(AtomicUsize::new(0));
+
+        for i in 0..ITERATIONS {
+            let name = format!("Race_{}", i);
+
+            let s1 = Arc::clone(&storage);
+            let s2 = Arc::clone(&storage);
+            let n1 = name.clone();
+            let n2 = name.clone();
+            let suc1 = Arc::clone(&successes);
+            let suc2 = Arc::clone(&successes);
+            let col1 = Arc::clone(&collisions);
+            let col2 = Arc::clone(&collisions);
+            let err1 = Arc::clone(&other_errors);
+            let err2 = Arc::clone(&other_errors);
+
+            let classify = move |result: Result<(), String>,
+                                 suc: &AtomicUsize,
+                                 col: &AtomicUsize,
+                                 err: &AtomicUsize| {
+                match result {
+                    Ok(()) => {
+                        suc.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Err(msg) if msg.contains("already exists") => {
+                        col.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Err(_) => {
+                        err.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            };
+
+            let c1 = classify.clone();
+            let c2 = classify.clone();
+
+            let t1 = thread::spawn(move || {
+                let build = test_build(&n1);
+                c1(s1.save_new(&build), &suc1, &col1, &err1);
+            });
+            let t2 = thread::spawn(move || {
+                let build = test_build(&n2);
+                c2(s2.save_new(&build), &suc2, &col2, &err2);
+            });
+            t1.join().unwrap();
+            t2.join().unwrap();
+
+            let json_path = saves_dir.join(format!("{}.json", name));
+            let tmp_path = saves_dir.join(format!("{}.tmp", name));
+            assert!(
+                json_path.exists(),
+                "final .json must exist after race for {}",
+                name
+            );
+            assert!(
+                !tmp_path.exists(),
+                ".tmp must not leak after race for {}",
+                name
+            );
+        }
+
+        let suc = successes.load(Ordering::SeqCst);
+        let col = collisions.load(Ordering::SeqCst);
+        let err = other_errors.load(Ordering::SeqCst);
+
+        assert_eq!(
+            err, 0,
+            "unexpected non-collision errors during race ({} total)",
+            err,
+        );
+        // Contract: exactly one winner per race, exactly one collision rejection.
+        assert_eq!(
+            suc, ITERATIONS,
+            "expected one success per race ({} iterations), got {} successes + {} collisions",
+            ITERATIONS, suc, col,
+        );
+        assert_eq!(
+            col, ITERATIONS,
+            "expected one collision rejection per race ({} iterations), got {} collisions + {} successes",
+            ITERATIONS, col, suc,
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
