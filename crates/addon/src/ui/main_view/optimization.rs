@@ -1124,7 +1124,12 @@ fn enrich_with_llm(
             "GW2BuildOpt",
             &format!(
                 "Legacy enrichment validation errors: {}",
-                validated.errors.join("; ")
+                validated
+                    .errors
+                    .iter()
+                    .map(|e| e.detail.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; ")
             ),
         );
     }
@@ -1262,7 +1267,12 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             "GW2BuildOpt",
                             &format!(
                                 "Chat refinement validation errors: {}",
-                                validated.errors.join("; ")
+                                validated
+                                    .errors
+                                    .iter()
+                                    .map(|e| e.detail.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join("; ")
                             ),
                         );
                     }

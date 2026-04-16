@@ -303,7 +303,7 @@ pub fn evaluate_validated_build(
             field: "validated_build.error".into(),
             entity: profession_name.into(),
             modes: vec![ctx.game_mode.label().to_string()],
-            explanation: error.clone(),
+            explanation: error.detail.clone(),
         }));
     }
 
@@ -338,8 +338,8 @@ mod tests {
     use crate::scenario::{CombatTier, ScenarioSpec, TargetProfile, OptimizationTarget};
     use crate::scoring::OptimizationWeights;
     use crate::validation::{
-        ValidatedBuild, ValidatedGearPrefix, ValidatedSkills, ValidatedSpec, ValidatedWeaponSet,
-        ValidatedWeapons,
+        RejectCode, ValidatedBuild, ValidatedGearPrefix, ValidatedSkills, ValidatedSpec,
+        ValidatedWeaponSet, ValidatedWeapons, ValidationReject,
     };
     use gw2_core::types::GameMode;
     use std::collections::HashMap;
@@ -664,7 +664,14 @@ mod tests {
     fn referee_marks_build_blocked_when_validation_has_errors() {
         let db = make_test_db();
         let mut validated = make_minimal_validated();
-        validated.errors.push("illegal weapon".into());
+        validated.errors.push(ValidationReject {
+            code: RejectCode::WeaponNotAvailable {
+                slot: "Set 1".into(),
+                weapon: "illegal".into(),
+                profession: "Guardian".into(),
+            },
+            detail: "illegal weapon".into(),
+        });
         let ctx = BalanceContext::new(GameMode::PvE);
         let scenario = ScenarioSpec::from_balance_context(&ctx);
         let weights = OptimizationWeights::default_for_mode(GameMode::PvE.label());
