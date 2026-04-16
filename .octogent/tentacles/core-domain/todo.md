@@ -21,7 +21,6 @@
 - **Document `GameMode::ALL` ordering contract** — at least one lookup
   assumes `[Pve, Pvp, WvW]`. Add a doc comment and a pinned-slice test.
 
-- **Extract `#[serde(default)]` default-fn boilerplate** — `config.rs:120-137`
-  has six near-identical `default_*` helpers. Consider a single generic
-  helper with `const` defaults, or a macro. Keep behavior identical; add a
-  test that an empty-JSON config round-trips to current defaults.
+- ~~**Extract `#[serde(default)]` default-fn boilerplate**~~ — done 2026-04-16.
+  Six `default_*` fns replaced with a `default_f32!` macro in `config.rs`;
+  added `test_empty_json_round_trips_to_defaults` regression test.

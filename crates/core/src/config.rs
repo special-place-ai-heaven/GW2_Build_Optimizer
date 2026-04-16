@@ -117,24 +117,20 @@ impl Default for AppConfig {
     }
 }
 
-fn default_opacity() -> f32 {
-    1.0
+macro_rules! default_f32 {
+    ($name:ident = $value:expr) => {
+        fn $name() -> f32 {
+            $value
+        }
+    };
 }
-fn default_font_scale() -> f32 {
-    1.0
-}
-fn default_left_panel_width() -> f32 {
-    255.0
-}
-fn default_panel_padding() -> f32 {
-    6.0
-}
-fn default_section_spacing() -> f32 {
-    4.0
-}
-fn default_content_indent() -> f32 {
-    4.0
-}
+
+default_f32!(default_opacity = 1.0);
+default_f32!(default_font_scale = 1.0);
+default_f32!(default_left_panel_width = 255.0);
+default_f32!(default_panel_padding = 6.0);
+default_f32!(default_section_spacing = 4.0);
+default_f32!(default_content_indent = 4.0);
 
 /// Known Gemini models — fallback shown when list_models() API call fails.
 /// The Settings tab populates this list dynamically from the API at runtime.
@@ -323,6 +319,20 @@ mod tests {
         assert_eq!(config.font_scale, 1.0);
         assert!(!config.auto_refresh_cache);
         assert!(config.is_setup_complete());
+    }
+
+    #[test]
+    fn test_empty_json_round_trips_to_defaults() {
+        // Regression guard for the `default_f32!` macro: every serde default
+        // must still yield the AppConfig::default() value when loading `{}`.
+        let config: AppConfig = serde_json::from_str("{}").unwrap();
+        let defaults = AppConfig::default();
+        assert_eq!(config.window_opacity, defaults.window_opacity);
+        assert_eq!(config.font_scale, defaults.font_scale);
+        assert_eq!(config.left_panel_width, defaults.left_panel_width);
+        assert_eq!(config.panel_padding, defaults.panel_padding);
+        assert_eq!(config.section_spacing, defaults.section_spacing);
+        assert_eq!(config.content_indent, defaults.content_indent);
     }
 
     #[test]
