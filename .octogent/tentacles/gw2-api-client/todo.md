@@ -1,13 +1,10 @@
 # Todo
 
-- **Extract a tested bulk-IDs query helper** — `get_with_params`
-  (`client.rs:111-238`) manually escapes bulk IDs to avoid `%2C`. Extract
-  `build_bulk_ids_query(ids: &[u32]) -> String`, add fuzz tests (empty,
-  single, over 200, `u32::MAX`), and reuse in every bulk fetcher.
-
-- **Add `Retry-After`-aware rate handling** — current `TokenBucket::take`
-  spin-waits with `MAX_RETRIES = 3`. Detect HTTP 429 and honor
-  `Retry-After` instead of burning retries. Add a mock-server test.
+- ~~**Add `Retry-After`-aware rate handling**~~ — done. `parse_retry_after`
+  (integer seconds, HTTP-date intentionally unsupported) + `RETRY_AFTER_CAP
+  = 30s` short-circuit to `ApiError::RateLimited`. 5xx stays on exponential
+  backoff. Mock-server tests via `mockito` dev-dep cover 429→200 retry and
+  over-cap short-circuit.
 
 - **Cache invalidation on build-number rollover** — confirm `is_stale`
   behaves correctly when the server returns a *lower* build number (rare,

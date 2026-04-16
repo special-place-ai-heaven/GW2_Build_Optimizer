@@ -13,6 +13,17 @@ const MAX_BULK_IDS: usize = 200;
 const BUCKET_CAPACITY: u32 = 300;
 const REFILL_RATE: f64 = 5.0; // tokens per second
 const MAX_RETRIES: u32 = 5;
+/// Upper bound on honoring a server-sent `Retry-After`. Beyond this we
+/// short-circuit to `ApiError::RateLimited` so background threads don't block
+/// for minutes on an uninterruptible `thread::sleep`.
+const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
+
+/// Parse `Retry-After` as integer seconds (RFC 7231 delta-seconds form).
+/// HTTP-date is intentionally unsupported — GW2 API returns integer seconds.
+fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
+    let secs: u64 = headers.get("retry-after")?.to_str().ok()?.trim().parse().ok()?;
+    Some(Duration::from_secs(secs))
+}
 
 /// Build the comma-separated `ids` query value used by GW2 API bulk endpoints.
 ///
@@ -173,13 +184,18 @@ impl Gw2Client {
         };
 
         let mut last_error: Option<ApiError> = None;
+        // When Some, the next retry waits this duration instead of exponential
+        // backoff — set by a 429 response with a `Retry-After` header.
+        let mut suggested_wait: Option<Duration> = None;
 
         for attempt in 0..MAX_RETRIES {
             // Backoff before retries (not before first attempt)
             if attempt > 0 {
-                let wait = Duration::from_millis(
-                    (2000u64.saturating_mul(2u64.saturating_pow(attempt - 1))).min(30_000),
-                );
+                let wait = suggested_wait.take().unwrap_or_else(|| {
+                    Duration::from_millis(
+                        (2000u64.saturating_mul(2u64.saturating_pow(attempt - 1))).min(30_000),
+                    )
+                });
                 std::thread::sleep(wait);
             }
 
@@ -222,8 +238,20 @@ impl Gw2Client {
 
             let status = resp.status().as_u16();
 
-            // Retry on rate limit and server errors (502/503/504)
+            // Retry on rate limit and server errors (502/503/504).
+            // For 429, honor `Retry-After` when present; 5xx stays on exponential backoff.
             if status == 429 || status == 502 || status == 503 || status == 504 {
+                if status == 429 {
+                    let retry_after = parse_retry_after(resp.headers());
+                    if let Some(wait) = retry_after {
+                        if wait > RETRY_AFTER_CAP {
+                            return Err(ApiError::RateLimited(attempt + 1));
+                        }
+                        suggested_wait = Some(wait);
+                    }
+                    last_error = Some(ApiError::RateLimited(attempt + 1));
+                    continue;
+                }
                 let body = resp.text().unwrap_or_default();
                 let clean_msg = if body.contains('<') {
                     format!("Server error (HTTP {})", status)
@@ -509,6 +537,111 @@ mod tests {
         // Should not need to sleep when bucket is full
         let wait = bucket.take();
         assert!(wait.is_none(), "Full bucket should not require sleeping");
+    }
+
+    fn headers_with_retry_after(value: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert("retry-after", HeaderValue::from_str(value).unwrap());
+        h
+    }
+
+    #[test]
+    fn parse_retry_after_missing_header_is_none() {
+        assert_eq!(parse_retry_after(&HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn parse_retry_after_integer_seconds() {
+        assert_eq!(
+            parse_retry_after(&headers_with_retry_after("10")),
+            Some(Duration::from_secs(10))
+        );
+    }
+
+    #[test]
+    fn parse_retry_after_zero_is_zero_duration() {
+        assert_eq!(
+            parse_retry_after(&headers_with_retry_after("0")),
+            Some(Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn parse_retry_after_tolerates_whitespace() {
+        assert_eq!(
+            parse_retry_after(&headers_with_retry_after("  7  ")),
+            Some(Duration::from_secs(7))
+        );
+    }
+
+    #[test]
+    fn parse_retry_after_rejects_http_date() {
+        // HTTP-date form is valid per RFC 7231 but unsupported here.
+        assert_eq!(
+            parse_retry_after(&headers_with_retry_after("Wed, 21 Oct 2025 07:28:00 GMT")),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_retry_after_rejects_negative() {
+        assert_eq!(parse_retry_after(&headers_with_retry_after("-1")), None);
+    }
+
+    #[test]
+    fn parse_retry_after_rejects_garbage() {
+        assert_eq!(parse_retry_after(&headers_with_retry_after("abc")), None);
+    }
+
+    #[test]
+    fn get_with_params_429_then_200_succeeds_with_retry_after() {
+        // Mock server: first GET /v2/mock returns 429 + Retry-After: 1, second returns 200.
+        // We assert the retry path completes successfully, not precise timing — the
+        // proactive token bucket and OS sleep granularity make timing assertions flaky.
+        let mut server = mockito::Server::new();
+        let m1 = server
+            .mock("GET", "/mock")
+            .with_status(429)
+            .with_header("retry-after", "1")
+            .with_body("rate limited")
+            .expect(1)
+            .create();
+        let m2 = server
+            .mock("GET", "/mock")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("{\"ok\":true}")
+            .expect(1)
+            .create();
+
+        let client = Gw2Client::without_key().unwrap();
+        let url = format!("{}/mock", server.url());
+        let resp: serde_json::Value = client.get_with_params(&url, &[]).unwrap();
+        assert_eq!(resp["ok"], true);
+        m1.assert();
+        m2.assert();
+    }
+
+    #[test]
+    fn get_with_params_429_over_cap_short_circuits_to_rate_limited() {
+        let mut server = mockito::Server::new();
+        let _m = server
+            .mock("GET", "/mock")
+            .with_status(429)
+            .with_header("retry-after", "3600") // 1h, well over RETRY_AFTER_CAP
+            .with_body("rate limited")
+            .expect(1) // must NOT retry
+            .create();
+
+        let client = Gw2Client::without_key().unwrap();
+        let url = format!("{}/mock", server.url());
+        let err = client
+            .get_with_params::<serde_json::Value>(&url, &[])
+            .unwrap_err();
+        match err {
+            ApiError::RateLimited(n) => assert_eq!(n, 1),
+            other => panic!("expected RateLimited, got {:?}", other),
+        }
     }
 
     #[test]
