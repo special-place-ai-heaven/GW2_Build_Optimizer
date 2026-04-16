@@ -31,4 +31,10 @@ coverage/
 .cache/
 tmp/
 
-.octogent
+/.octogent/*
+!/.octogent/tentacles/
+/.octogent/tentacles/*
+!/.octogent/tentacles/*/
+/.octogent/tentacles/*/*
+!/.octogent/tentacles/*/CONTEXT.md
+!/.octogent/tentacles/*/todo.md
