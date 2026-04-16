@@ -6,9 +6,11 @@
   backoff. Mock-server tests via `mockito` dev-dep cover 429→200 retry and
   over-cap short-circuit.
 
-- **Cache invalidation on build-number rollover** — confirm `is_stale`
-  behaves correctly when the server returns a *lower* build number (rare,
-  but possible during rollback). Today's check may treat it as fresh.
+- ~~**Cache invalidation on build-number rollover**~~ — confirmed correct.
+  `is_stale` uses `meta.build != current_build`, so rollback (cached >
+  current) already invalidates. Tightened doc-comment to state the
+  rollback contract explicitly and added `test_staleness_rollback_is_stale`
+  regression test.
 
 - **Normalize `ApiError` formatting across call sites** — variants exist but
   shape differs. Pick one (`status`, `body_snippet`, `url_path`), update

@@ -56,7 +56,10 @@ impl DataCache {
         Ok(Some(entry.data))
     }
 
-    /// Check if cache is stale (build number doesn't match current).
+    /// Check if the cached entry's build number differs from `current_build`.
+    ///
+    /// Any mismatch — including rollback (cached > current) — is treated as
+    /// stale. Callers are expected to refetch on `true`.
     pub fn is_stale(&self, key: &str, current_build: u32) -> bool {
         let path = self.path_for(key);
         if !path.exists() {
@@ -234,6 +237,19 @@ mod tests {
         assert!(!cache.is_stale("stale_test", 100)); // same build
         assert!(cache.is_stale("stale_test", 101)); // different build
         assert!(cache.is_stale("nonexistent", 100)); // missing file
+
+        cache.clear_all();
+    }
+
+    #[test]
+    fn test_staleness_rollback_is_stale() {
+        // Server build number going DOWN (rollback / rollout revert) must
+        // invalidate the cache, not be silently trusted as "still fresh".
+        let cache = temp_cache();
+        cache.save("rollback_test", &"hello", 200).unwrap();
+
+        assert!(cache.is_stale("rollback_test", 150));
+        assert!(cache.is_stale("rollback_test", 0));
 
         cache.clear_all();
     }
