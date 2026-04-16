@@ -231,11 +231,26 @@ fn extract_effects(facts: &[Fact]) -> Vec<SkillEffect> {
 }
 
 /// GW2 damaging conditions (same list as gamedb.rs is_condition).
+///
+/// Accepts either verb-form (Poison) or canonical (Poisoned) — input is
+/// normalized via `canonical_condition_name` so the arms only list
+/// canonical form.
 fn is_damaging_condition(status: &str) -> bool {
+    let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
     matches!(
-        status,
-        "Bleeding" | "Burning" | "Poison" | "Torment" | "Confusion"
+        canonical,
+        "Bleeding" | "Burning" | "Poisoned" | "Torment" | "Confusion"
     )
+}
+
+/// Test-only thin wrapper so the alias-routing regression suite can fuzz
+/// the private `is_damaging_condition` helper without changing its
+/// visibility.
+#[cfg(test)]
+pub(crate) mod tests_alias_helpers {
+    pub(crate) fn is_damaging_condition(status: &str) -> bool {
+        super::is_damaging_condition(status)
+    }
 }
 
 #[cfg(test)]

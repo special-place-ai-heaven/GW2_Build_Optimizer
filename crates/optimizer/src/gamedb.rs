@@ -344,29 +344,42 @@ impl GameDb {
     }
 }
 
-/// GW2 damaging conditions.
+/// GW2 conditions (damaging + non-damaging status effects).
+///
+/// Accepts either verb-form (Blind, Poison, Chill, …) or canonical
+/// status-effect form (Blinded, Poisoned, Chilled, …) — the input is
+/// normalized via `canonical_condition_name` before matching, so the
+/// arms only need to list canonical forms.
 fn is_condition(status: &str) -> bool {
+    let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
     matches!(
-        status,
+        canonical,
         "Bleeding"
             | "Burning"
-            | "Poison"
+            | "Poisoned"
             | "Torment"
             | "Confusion"
             | "Vulnerability"
             | "Weakness"
-            | "Blind"
             | "Blinded"
-            | "Chill"
             | "Chilled"
-            | "Cripple"
             | "Crippled"
             | "Fear"
-            | "Immobilize"
+            | "Immobile"
             | "Immobilized"
             | "Slow"
             | "Taunt"
     )
+}
+
+/// Test-only thin wrapper so the alias-routing regression suite in
+/// `data::boon_condition_formulas::tests` can fuzz the private
+/// `is_condition` helper without changing its visibility.
+#[cfg(test)]
+pub(crate) mod tests_alias_helpers {
+    pub(crate) fn is_condition(status: &str) -> bool {
+        super::is_condition(status)
+    }
 }
 
 /// GW2 boons.

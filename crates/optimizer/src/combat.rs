@@ -154,8 +154,8 @@ pub fn calculate_condition_ticks(
             * modifiers.total_condi_mult_for("Bleeding"),
         burning: conds.tick_damage("Burning", condition_damage, mode.clone())
             * modifiers.total_condi_mult_for("Burning"),
-        poison: conds.tick_damage("Poison", condition_damage, mode.clone())
-            * modifiers.total_condi_mult_for("Poison"),
+        poison: conds.tick_damage("Poisoned", condition_damage, mode.clone())
+            * modifiers.total_condi_mult_for("Poisoned"),
         // Torment: stationary baseline (conservative). Movement weighting is P3-14 scope.
         torment: conds.torment_tick(condition_damage, mode.clone(), false)
             * modifiers.total_condi_mult_for("Torment"),
@@ -398,7 +398,7 @@ pub fn calculate_combat_performance(
     };
     let bleed_dur = condi_dur_for("Bleeding");
     let burn_dur = condi_dur_for("Burning");
-    let poison_dur = condi_dur_for("Poison");
+    let poison_dur = condi_dur_for("Poisoned");
     let torment_dur = condi_dur_for("Torment");
     let confuse_dur = condi_dur_for("Confusion");
 
@@ -619,11 +619,17 @@ fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
                 mods.healing_pct.push(decimal);
             }
 
-            // Specific condition duration patterns
+            // Specific condition duration patterns.
+            // Search terms stay verb-form (GW2 tooltip text uses "Poison Duration",
+            // not "Poisoned Duration"); the map key is canonicalized so reads via
+            // `total_condi_duration_for("Poisoned")` and `condi_dur_for("Poisoned")`
+            // hit the entry inserted here.
             for condi in &["Bleeding", "Burning", "Poison", "Torment", "Confusion"] {
                 if text_lower.contains(&condi.to_lowercase()) && text_lower.contains("duration") {
+                    let canonical =
+                        crate::data::boon_condition_formulas::canonical_condition_name(condi);
                     mods.specific_condi_duration
-                        .entry(condi.to_string())
+                        .entry(canonical.to_string())
                         .or_default()
                         .push(decimal);
                 }
@@ -734,9 +740,10 @@ fn parse_sigil_modifier(mods: &mut DamageModifiers, sigil: &Item) {
             .or_default()
             .push(0.10);
     } else if name_lower.contains("sigil of venom") {
-        // Superior Sigil of Venom: +10% Poison duration
+        // Superior Sigil of Venom: +10% Poison duration.
+        // Map key uses canonical form to match the read paths.
         mods.specific_condi_duration
-            .entry("Poison".into())
+            .entry("Poisoned".into())
             .or_default()
             .push(0.10);
     } else if name_lower.contains("sigil of doom") {

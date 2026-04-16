@@ -952,7 +952,9 @@ fn exec_search_traits_by_effect(args: &Value, ctx: &ToolContext) -> Value {
                 Fact::Percent { text: Some(text), .. } if text.to_lowercase().contains("damage")
             )),
             "condition_damage" => t.facts.iter().any(|f| matches!(f,
-                Fact::Buff { status: Some(s), .. } if ["Bleeding", "Burning", "Poison", "Torment", "Confusion"].contains(&s.as_str())
+                Fact::Buff { status: Some(s), .. } if ["Bleeding", "Burning", "Poisoned", "Torment", "Confusion"].contains(
+                    &crate::data::boon_condition_formulas::canonical_condition_name(s)
+                )
             )),
             "healing" => t.facts.iter().any(|f| matches!(f,
                 Fact::AttributeAdjust { target: Some(t), .. } if t.contains("Healing")
@@ -1253,10 +1255,12 @@ fn exec_get_build_synergy_report(args: &Value, ctx: &ToolContext) -> Value {
                     status: Some(s), ..
                 } = f
                 {
-                    let conditions = ["Bleeding", "Burning", "Poison", "Torment", "Confusion"];
-                    if conditions.contains(&s.as_str()) {
+                    let conditions = ["Bleeding", "Burning", "Poisoned", "Torment", "Confusion"];
+                    let canonical =
+                        crate::data::boon_condition_formulas::canonical_condition_name(s);
+                    if conditions.contains(&canonical) {
                         all_conditions
-                            .entry(s.clone())
+                            .entry(canonical.to_string())
                             .or_default()
                             .push(t.name.clone());
                     }
@@ -1475,23 +1479,27 @@ fn summarize_trait_facts(t: &GW2Trait) -> Vec<String> {
 }
 
 /// Extract conditions applied by a set of facts.
+///
+/// API `Fact::Buff.status` may emit either verb-form (Poison) or canonical
+/// (Poisoned) names. Inputs are normalized via `canonical_condition_name`
+/// before filtering, and the canonical form is shipped in JSON so the LLM
+/// sees one consistent name per condition. `Immobilized` stays in the
+/// list — the resolver only knows `Immobilize→Immobile`.
 fn extract_conditions(facts: &[Fact]) -> Vec<Value> {
+    use crate::data::boon_condition_formulas::canonical_condition_name;
     let conditions = [
         "Bleeding",
         "Burning",
-        "Poison",
+        "Poisoned",
         "Torment",
         "Confusion",
         "Vulnerability",
         "Weakness",
-        "Blind",
         "Blinded",
-        "Chill",
         "Chilled",
-        "Cripple",
         "Crippled",
         "Fear",
-        "Immobilize",
+        "Immobile",
         "Immobilized",
         "Slow",
         "Taunt",
@@ -1510,11 +1518,18 @@ fn extract_conditions(facts: &[Fact]) -> Vec<Value> {
                 duration,
                 apply_count,
                 ..
-            } if conditions.contains(&s.as_str()) => Some(json!({
-                "condition": s,
-                "stacks": apply_count.unwrap_or(1),
-                "duration_s": duration.unwrap_or(0)
-            })),
+            } => {
+                let canonical = canonical_condition_name(s);
+                if conditions.contains(&canonical) {
+                    Some(json!({
+                        "condition": canonical,
+                        "stacks": apply_count.unwrap_or(1),
+                        "duration_s": duration.unwrap_or(0)
+                    }))
+                } else {
+                    None
+                }
+            }
             _ => None,
         })
         .collect()
@@ -1664,12 +1679,17 @@ fn parse_rune_bonus_structured(bonus: &str) -> Value {
     }
 
     // Condition duration: "+10% Burning Duration"
+    // Search terms stay in verb form (GW2 tooltip text uses "Poison Duration",
+    // not "Poisoned Duration"); the emitted `condition` key is canonicalized
+    // so LLM / downstream consumers see a single spelling per condition.
     for condi in &["Bleeding", "Burning", "Poison", "Torment", "Confusion"] {
         if lower.contains(&condi.to_lowercase()) && lower.contains("duration") {
             if let Some(pct) = extract_number(bonus) {
+                let canonical =
+                    crate::data::boon_condition_formulas::canonical_condition_name(condi);
                 return json!({
                     "type": "condition_duration",
-                    "condition": condi,
+                    "condition": canonical,
                     "value_pct": pct,
                     "raw": bonus
                 });
