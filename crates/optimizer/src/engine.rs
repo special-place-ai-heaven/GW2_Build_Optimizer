@@ -840,16 +840,24 @@ fn validate_gemini_response(
     profession_name: &str,
 ) -> Result<ValidatedBuild, String> {
     let validated = validation::validate_gemini_build(parsed, db, profession_name);
+    let joined_errors = || {
+        validated
+            .errors
+            .iter()
+            .map(|e| e.detail.as_str())
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
     if validated.specializations.is_empty() {
         return Err(format!(
             "Validation failed — no specializations resolved. Errors: {}",
-            validated.errors.join("; ")
+            joined_errors()
         ));
     }
     if !validated.errors.is_empty() {
         return Err(format!(
             "Validation failed — build has hard errors: {}",
-            validated.errors.join("; ")
+            joined_errors()
         ));
     }
     Ok(validated)

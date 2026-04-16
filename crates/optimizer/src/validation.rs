@@ -29,7 +29,7 @@ pub struct ValidatedBuild {
     pub synergy_explanation: String,
     pub changes: Vec<ChangeEntry>,
     pub warnings: Vec<String>,
-    pub errors: Vec<String>,
+    pub errors: Vec<ValidationReject>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +84,57 @@ pub struct ChangeEntry {
     pub reason: String,
 }
 
+/// Machine-readable rejection code. Pair with `ValidationReject.detail`
+/// (which is human-readable) so a retry loop can key off the typed code
+/// and feed the LLM a precise correction instruction rather than parse
+/// prose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RejectCode {
+    /// Build spec requires exactly 3 specializations; got a different count.
+    WrongSpecCount { expected: usize, actual: usize },
+    /// Specialization name not found for the given profession.
+    SpecNotFound { spec: String, profession: String },
+    /// Specialization exists but belongs to another profession.
+    SpecWrongProfession {
+        spec: String,
+        owner: String,
+        expected: String,
+    },
+    /// More than one elite spec in the 3-slot list.
+    MultipleEliteSpecs { spec: String },
+    /// Weapon not available for the profession.
+    WeaponNotAvailable {
+        slot: String,
+        weapon: String,
+        profession: String,
+    },
+    /// Weapon requires an elite spec that is not equipped.
+    WeaponGatedBySpec {
+        slot: String,
+        weapon: String,
+        required_spec: String,
+    },
+    /// Rune/sigil/relic name not in game data (all fuzzy passes failed).
+    ItemNotFound { item_type: String, name: String },
+    /// Gear prefix (stat name) not in itemstats.
+    GearPrefixNotFound { name: String },
+}
+
+/// Structured validator rejection. `detail` mirrors the prior flat string
+/// format and is safe to show in UI (`impl Display`); `code` is the
+/// stable discriminator for retry logic.
+#[derive(Debug, Clone)]
+pub struct ValidationReject {
+    pub code: RejectCode,
+    pub detail: String,
+}
+
+impl std::fmt::Display for ValidationReject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.detail)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -110,10 +161,14 @@ pub fn validate_gemini_build(
     // Validate each component
     validate_specializations(response, db, profession_name, &mut result);
     if result.specializations.len() != 3 {
-        result.errors.push(format!(
-            "Expected 3 specializations, got {}",
-            result.specializations.len()
-        ));
+        let actual = result.specializations.len();
+        result.errors.push(ValidationReject {
+            code: RejectCode::WrongSpecCount {
+                expected: 3,
+                actual,
+            },
+            detail: format!("Expected 3 specializations, got {}", actual),
+        });
     }
     validate_weapons(response, db, profession_name, &mut result);
     validate_skills(response, db, profession_name, &mut result);
@@ -146,28 +201,44 @@ fn validate_specializations(
         let spec = find_spec_by_name(db, spec_name_clean, &prof_spec_ids);
 
         let Some(spec) = spec else {
-            result.errors.push(format!(
-                "Specialization '{}' not found for {}",
-                spec_name, profession_name
-            ));
+            result.errors.push(ValidationReject {
+                code: RejectCode::SpecNotFound {
+                    spec: spec_name.clone(),
+                    profession: profession_name.to_string(),
+                },
+                detail: format!(
+                    "Specialization '{}' not found for {}",
+                    spec_name, profession_name
+                ),
+            });
             continue;
         };
 
         // Check profession ownership
         if spec.profession != profession_name {
-            result.errors.push(format!(
-                "Specialization '{}' belongs to {}, not {}",
-                spec.name, spec.profession, profession_name
-            ));
+            result.errors.push(ValidationReject {
+                code: RejectCode::SpecWrongProfession {
+                    spec: spec.name.clone(),
+                    owner: spec.profession.clone(),
+                    expected: profession_name.to_string(),
+                },
+                detail: format!(
+                    "Specialization '{}' belongs to {}, not {}",
+                    spec.name, spec.profession, profession_name
+                ),
+            });
             continue;
         }
 
         if spec.elite {
             elite_count += 1;
             if elite_count > 1 {
-                result
-                    .errors
-                    .push(format!("Multiple elite specs selected ({})", spec.name));
+                result.errors.push(ValidationReject {
+                    code: RejectCode::MultipleEliteSpecs {
+                        spec: spec.name.clone(),
+                    },
+                    detail: format!("Multiple elite specs selected ({})", spec.name),
+                });
             }
         }
 
@@ -258,10 +329,17 @@ fn validate_weapon_set(
         if let Some(_info) = find_weapon(mh, prof) {
             set.main_hand = Some(mh.clone());
         } else {
-            result.errors.push(format!(
-                "{}: weapon '{}' not available for {}",
-                label, mh, prof.name
-            ));
+            result.errors.push(ValidationReject {
+                code: RejectCode::WeaponNotAvailable {
+                    slot: label.to_string(),
+                    weapon: mh.clone(),
+                    profession: prof.name.clone(),
+                },
+                detail: format!(
+                    "{}: weapon '{}' not available for {}",
+                    label, mh, prof.name
+                ),
+            });
         }
     }
 
@@ -270,10 +348,17 @@ fn validate_weapon_set(
         if let Some(_info) = find_weapon(oh, prof) {
             set.off_hand = Some(oh.clone());
         } else {
-            result.errors.push(format!(
-                "{}: weapon '{}' not available for {}",
-                label, oh, prof.name
-            ));
+            result.errors.push(ValidationReject {
+                code: RejectCode::WeaponNotAvailable {
+                    slot: label.to_string(),
+                    weapon: oh.clone(),
+                    profession: prof.name.clone(),
+                },
+                detail: format!(
+                    "{}: weapon '{}' not available for {}",
+                    label, oh, prof.name
+                ),
+            });
         }
     }
 
@@ -296,10 +381,17 @@ fn validate_weapon_set(
                         .spec(required_spec)
                         .map(|s| s.name.as_str())
                         .unwrap_or("unknown");
-                    result.errors.push(format!(
-                        "{}: '{}' requires {} (not equipped) — weapon cannot be used",
-                        label, weapon_name, spec_name
-                    ));
+                    result.errors.push(ValidationReject {
+                        code: RejectCode::WeaponGatedBySpec {
+                            slot: label.to_string(),
+                            weapon: weapon_name.clone(),
+                            required_spec: spec_name.to_string(),
+                        },
+                        detail: format!(
+                            "{}: '{}' requires {} (not equipped) — weapon cannot be used",
+                            label, weapon_name, spec_name
+                        ),
+                    });
                     gated_weapons.push(weapon_name.clone());
                 }
             }
@@ -437,9 +529,12 @@ fn validate_gear_prefix(response: &GeminiBuildResponse, db: &GameDb, result: &mu
             name: is.name.clone(),
         });
     } else {
-        result
-            .errors
-            .push(format!("Gear prefix '{}' not found", response.stat_prefix));
+        result.errors.push(ValidationReject {
+            code: RejectCode::GearPrefixNotFound {
+                name: response.stat_prefix.clone(),
+            },
+            detail: format!("Gear prefix '{}' not found", response.stat_prefix),
+        });
     }
 }
 
@@ -637,9 +732,13 @@ fn find_item_by_name(
         }
     }
 
-    result
-        .errors
-        .push(format!("{} '{}' not found in game data", item_type, name));
+    result.errors.push(ValidationReject {
+        code: RejectCode::ItemNotFound {
+            item_type: item_type.to_string(),
+            name: name.to_string(),
+        },
+        detail: format!("{} '{}' not found in game data", item_type, name),
+    });
     None
 }
 
