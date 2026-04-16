@@ -10,10 +10,13 @@
 #[cfg(test)]
 mod tests {
     use crate::data::balance_overrides;
+    use crate::data::boon_condition_formulas;
     use crate::data::manifests;
     use crate::data::normalized_effects;
+    use crate::data::objective_profiles;
     use crate::data::patch_ledger;
     use crate::data::profession_profiles;
+    use crate::data::rotation_profiles;
     use crate::data::slot_budgets;
     use crate::data::universal_formulas;
     use crate::data::EvidenceLevel;
@@ -564,6 +567,98 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ─── Cross-dataset: Rotation profile professions ↔ profession_profiles.json ───
+
+    /// Every profession that appears in `data/rotation_profiles/{pve,pvp,wvw}.json`
+    /// must also be present in `data/profession_profiles.json`.
+    ///
+    /// "Generic" is intentionally skipped: it is the documented fallback bucket used
+    /// by `RotationProfileData::lookup` when no profession-specific profile exists,
+    /// and is validated separately by `test_all_modes_have_9_professions_plus_fallback`
+    /// in `rotation_profiles.rs`. It is not a real GW2 profession.
+    ///
+    /// On failure this test lists every gap so the data owner can fix the source data
+    /// rather than the test (do NOT relax this assertion to make it pass).
+    #[test]
+    fn test_rotation_profile_professions_exist_in_profession_profiles() {
+        let rotations = rotation_profiles::rotation_profiles();
+        let profs = profession_profiles::profiles();
+
+        let modes = [
+            (gw2_core::types::GameMode::PvE, "data/rotation_profiles/pve.json"),
+            (gw2_core::types::GameMode::PvP, "data/rotation_profiles/pvp.json"),
+            (gw2_core::types::GameMode::WvW, "data/rotation_profiles/wvw.json"),
+        ];
+
+        let mut gaps: Vec<String> = Vec::new();
+        for (mode, file) in &modes {
+            for profile in rotations.profiles_for_mode(mode) {
+                // Documented fallback bucket — not a real profession.
+                if profile.profession == "Generic" {
+                    continue;
+                }
+                if profs.get(&profile.profession).is_none() {
+                    gaps.push(format!(
+                        "{} (in {}) not present in profession_profiles.json",
+                        profile.profession, file,
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            gaps.is_empty(),
+            "rotation profiles reference professions missing from \
+             profession_profiles.json:\n  {}",
+            gaps.join("\n  "),
+        );
+    }
+
+    // ─── Cross-dataset: Objective profile boon_priorities ↔ formulas/boons.json ───
+
+    /// Every boon name referenced in any `boon_priorities` map of
+    /// `data/objective_profiles/{pve,pvp,wvw}.json` must exist as a key in
+    /// `data/formulas/boons.json`.
+    ///
+    /// Only `boon_priorities` is checked — `condition_priorities` map to
+    /// `formulas/conditions.json` (a separate dataset) and `interaction_priorities`
+    /// keys are operation names (`removes_boon`, `steals_boon`, …), not boon names.
+    ///
+    /// On failure this test lists every gap so the data owner can fix the source data
+    /// rather than the test (do NOT relax this assertion to make it pass).
+    #[test]
+    fn test_objective_profile_boon_priorities_exist_in_boon_formulas() {
+        let objectives = objective_profiles::objective_profiles();
+        let boons = boon_condition_formulas::boons();
+
+        let mode_files = [
+            ("PvE", "data/objective_profiles/pve.json"),
+            ("PvP", "data/objective_profiles/pvp.json"),
+            ("WvW", "data/objective_profiles/wvw.json"),
+        ];
+
+        let mut gaps: Vec<String> = Vec::new();
+        for (mode, file) in &mode_files {
+            for profile in objectives.profiles_for_mode(mode) {
+                for boon_name in profile.boon_priorities.keys() {
+                    if boons.get(boon_name).is_none() {
+                        gaps.push(format!(
+                            "{} (in {} / {}) not present in formulas/boons.json",
+                            boon_name, profile.objective_profile_id, file,
+                        ));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            gaps.is_empty(),
+            "objective profile boon_priorities reference boons missing from \
+             formulas/boons.json:\n  {}",
+            gaps.join("\n  "),
+        );
     }
 
     // ─── Data completeness: All data loaders produce Ready state ───
