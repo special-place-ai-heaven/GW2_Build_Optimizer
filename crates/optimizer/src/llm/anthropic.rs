@@ -400,6 +400,55 @@ fn extract_tool_uses(blocks: &[ContentBlock]) -> Vec<(String, String, Value)> {
         .collect()
 }
 
+/// Drop oldest tool-call turn(s) when the conversation exceeds the token
+/// budget. An Anthropic turn is one assistant message (with tool_use blocks)
+/// followed by one user message (with tool_result blocks); pairs must be
+/// dropped atomically. The initial user prompt and the most recent turn are
+/// always preserved.
+fn trim_messages(messages: &mut Vec<AnthropicMessage>, budget_tokens: usize) {
+    use super::trim::estimate_tokens;
+
+    fn message_tokens(m: &AnthropicMessage) -> usize {
+        match &m.content {
+            AnthropicContent::Text(s) => estimate_tokens(s),
+            AnthropicContent::Blocks(blocks) => blocks
+                .iter()
+                .map(|b| match b {
+                    ContentBlock::Text { text } => estimate_tokens(text),
+                    ContentBlock::ToolUse { input, .. } => estimate_tokens(&input.to_string()),
+                    ContentBlock::ToolResult { content, .. } => estimate_tokens(content),
+                })
+                .sum(),
+        }
+    }
+
+    let mut total: usize = messages.iter().map(message_tokens).sum();
+    if total <= budget_tokens {
+        return;
+    }
+
+    loop {
+        let turn_starts: Vec<usize> = messages
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(_, m)| m.role == "assistant")
+            .map(|(i, _)| i)
+            .collect();
+
+        if turn_starts.len() < 2 {
+            return;
+        }
+
+        messages.drain(turn_starts[0]..turn_starts[1]);
+        total = messages.iter().map(message_tokens).sum();
+        if total <= budget_tokens {
+            return;
+        }
+    }
+}
+
+
 impl LlmClient for AnthropicClient {
     fn provider_name(&self) -> &str {
         "Anthropic"
@@ -513,7 +562,7 @@ impl LlmClient for AnthropicClient {
                 message: "Invalid Anthropic API key. Check that you copied the full key from console.anthropic.com/settings/keys.".into(),
                 warning: None,
             },
-            400 if body.contains("credit balance") || body.contains("billing") => KeyValidationResult {
+            400 if super::has_billing_keyword(&body) => KeyValidationResult {
                 valid: true,
                 message: "Anthropic key is valid!".into(),
                 warning: Some("Your account has no credits. Add credits at console.anthropic.com to use this provider.".into()),
@@ -593,6 +642,7 @@ impl LlmClient for AnthropicClient {
         let mut last_text: Option<String> = None;
 
         for turn in 0..max_turns {
+            trim_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
             let response = self.send_messages(&messages, None, Some(tools), 4096)?;
 
             let blocks = response.content.unwrap_or_default();
@@ -844,6 +894,106 @@ mod tests {
     }
 
     #[test]
+        fn test_trim_messages_drops_oldest_turn() {
+            fn user_text(s: &str) -> AnthropicMessage {
+                AnthropicMessage {
+                    role: "user".into(),
+                    content: AnthropicContent::Text(s.into()),
+                }
+            }
+            fn assistant_turn(id: &str, name: &str, payload: &str) -> AnthropicMessage {
+                AnthropicMessage {
+                    role: "assistant".into(),
+                    content: AnthropicContent::Blocks(vec![ContentBlock::ToolUse {
+                        id: id.into(),
+                        name: name.into(),
+                        input: serde_json::json!({ "q": payload }),
+                    }]),
+                }
+            }
+            fn user_tool_result(id: &str, payload: &str) -> AnthropicMessage {
+                AnthropicMessage {
+                    role: "user".into(),
+                    content: AnthropicContent::Blocks(vec![ContentBlock::ToolResult {
+                        tool_use_id: id.into(),
+                        content: payload.into(),
+                    }]),
+                }
+            }
+
+            let filler = "x".repeat(400);
+            let mut messages = vec![
+                user_text("initial prompt"),
+                assistant_turn("tu_1", "get_trait_details", &filler),
+                user_tool_result("tu_1", &filler),
+                assistant_turn("tu_2", "get_trait_details", &filler),
+                user_tool_result("tu_2", &filler),
+                assistant_turn("tu_3", "get_trait_details", &filler),
+                user_tool_result("tu_3", &filler),
+            ];
+            let original_len = messages.len();
+
+            trim_messages(&mut messages, 200);
+
+            assert!(
+                messages.len() < original_len,
+                "expected trimming, got {}",
+                messages.len()
+            );
+            // Initial prompt preserved.
+            assert_eq!(messages[0].role, "user");
+            match &messages[0].content {
+                AnthropicContent::Text(s) => assert_eq!(s, "initial prompt"),
+                _ => panic!("first message lost text content"),
+            }
+            // Last turn's tool_use_id still matches its tool_result.
+            let last_assistant_idx = messages
+                .iter()
+                .rposition(|m| m.role == "assistant")
+                .expect("must retain at least one assistant");
+            let last_use_id = match &messages[last_assistant_idx].content {
+                AnthropicContent::Blocks(blocks) => blocks
+                    .iter()
+                    .find_map(|b| match b {
+                        ContentBlock::ToolUse { id, .. } => Some(id.clone()),
+                        _ => None,
+                    })
+                    .expect("last assistant has a tool_use block"),
+                _ => panic!("last assistant not block-shaped"),
+            };
+            assert_eq!(last_use_id, "tu_3");
+            // Every tool_result still has a matching tool_use earlier.
+            for (i, m) in messages.iter().enumerate() {
+                if let AnthropicContent::Blocks(blocks) = &m.content {
+                    for b in blocks {
+                        if let ContentBlock::ToolResult { tool_use_id, .. } = b {
+                            let paired = messages[..i].iter().any(|prev| {
+                                if let AnthropicContent::Blocks(pbs) = &prev.content {
+                                    pbs.iter().any(|pb| {
+                                        matches!(pb, ContentBlock::ToolUse { id, .. } if id == tool_use_id)
+                                    })
+                                } else {
+                                    false
+                                }
+                            });
+                            assert!(paired, "orphaned tool_use_id {}", tool_use_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn test_trim_messages_noop_under_budget() {
+            let mut messages = vec![AnthropicMessage {
+                role: "user".into(),
+                content: AnthropicContent::Text("short".into()),
+            }];
+            trim_messages(&mut messages, 10_000);
+            assert_eq!(messages.len(), 1);
+        }
+
+    #[test]
     fn test_rate_tracker_rpm_limit() {
         let mut tracker = RateTracker::new();
         for _ in 0..50 {
@@ -851,6 +1001,53 @@ mod tests {
         }
         assert!(tracker.check_and_reserve().is_err());
     }
+
+    #[test]
+        fn test_rate_tracker_persistence_roundtrip_same_day() {
+            let mut tracker = RateTracker::new();
+            for _ in 0..5 {
+                tracker.check_and_reserve().unwrap();
+            }
+            assert_eq!(tracker.requests_today, 5);
+            assert_eq!(tracker.requests_this_minute, 5);
+
+            let persisted = tracker.to_persisted();
+            let reloaded = RateTracker::from_persisted(persisted);
+
+            assert_eq!(reloaded.requests_today, 5);
+            assert_eq!(reloaded.requests_this_minute, 0);
+        }
+
+        #[test]
+        fn test_rate_tracker_persistence_day_rollover_resets_daily() {
+            let yesterday = current_epoch_day().saturating_sub(1);
+            let persisted = PersistedUsage {
+                day: yesterday,
+                requests_today: 42,
+            };
+            let reloaded = RateTracker::from_persisted(persisted);
+
+            assert_eq!(reloaded.requests_today, 0);
+            assert_eq!(reloaded.requests_this_minute, 0);
+            assert_eq!(reloaded.current_day, current_epoch_day());
+        }
+
+        #[test]
+        fn test_rate_tracker_minute_rollover_preserves_daily() {
+            let mut tracker = RateTracker::new();
+            for _ in 0..3 {
+                tracker.check_and_reserve().unwrap();
+            }
+            assert_eq!(tracker.requests_this_minute, 3);
+            assert_eq!(tracker.requests_today, 3);
+
+            tracker.minute_start = Instant::now() - std::time::Duration::from_secs(61);
+
+            tracker.check_and_reserve().unwrap();
+
+            assert_eq!(tracker.requests_this_minute, 1);
+            assert_eq!(tracker.requests_today, 4);
+        }
 
     #[test]
     fn test_anthropic_content_text_serialization() {
@@ -876,5 +1073,35 @@ mod tests {
         assert_eq!(json["role"], "user");
         assert!(json["content"].is_array());
         assert_eq!(json["content"][0]["type"], "tool_result");
+    }
+
+    #[test]
+    fn test_tool_use_id_round_trip() {
+        // Simulate Anthropic's response: an assistant message with one tool_use
+        // block. Parse like `send_messages` does, extract the id via the same
+        // `extract_tool_uses` helper `generate_with_tools_progress` uses, then
+        // build the follow-up tool_result block and assert the id survives.
+        let server_response_json = r#"{
+            "content": [
+                {"type": "text", "text": "Let me check."},
+                {"type": "tool_use", "id": "toolu_01A8bL9Qrx", "name": "square_number", "input": {"number": 7}}
+            ]
+        }"#;
+
+        let body: MessagesResponse =
+            serde_json::from_str(server_response_json).expect("parse MessagesResponse");
+        let blocks = body.content.expect("content blocks");
+        let uses = extract_tool_uses(&blocks);
+        assert_eq!(uses.len(), 1);
+        assert_eq!(uses[0].0, "toolu_01A8bL9Qrx");
+        assert_eq!(uses[0].1, "square_number");
+
+        let result_block = ContentBlock::ToolResult {
+            tool_use_id: uses[0].0.clone(),
+            content: r#"{"result":49}"#.into(),
+        };
+        let wire = serde_json::to_value(&result_block).unwrap();
+        assert_eq!(wire["type"], "tool_result");
+        assert_eq!(wire["tool_use_id"], "toolu_01A8bL9Qrx");
     }
 }

@@ -16,10 +16,25 @@
 //! # All at once (needs all three keys)
 //! GEMINI_API_KEY=... OPENAI_API_KEY=... ANTHROPIC_API_KEY=... \
 //!   cargo test -p gw2-optimizer --test live_llm -- --ignored --nocapture
+//!
+//! # Canonical-build smoke suite — one command, all three providers,
+//! # asserts the response validates against a real GameDb.
+//! # Also set GW2_OPTIMIZER_CACHE_DIR to a populated cache directory
+//! # (e.g. the addon's cache/ folder). Per-provider sections skip
+//! # independently when their API key env var is missing.
+//! GW2_OPTIMIZER_CACHE_DIR=~/AppData/Roaming/Guild\ Wars\ 2/addons/gw2_build_optimizer/cache \
+//!   GEMINI_API_KEY=... OPENAI_API_KEY=... ANTHROPIC_API_KEY=... \
+//!   cargo test -p gw2-optimizer --test live_llm -- --ignored --nocapture canonical_build_smoke
 //! ```
 
+use gw2_api::cache::DataCache;
+use gw2_optimizer::gamedb::GameDb;
 use gw2_optimizer::llm::{LlmClient, LlmError, ToolDefinition};
+use gw2_optimizer::prompts::{new_build_prompt_with_tools, parse_gemini_build};
+use gw2_optimizer::scoring::OptimizationWeights;
+use gw2_optimizer::validation::validate_gemini_build;
 use serde_json::{json, Value};
+use std::path::PathBuf;
 use std::time::Instant;
 
 // ─── Helpers ───
@@ -346,4 +361,131 @@ fn test_create_client_factory_anthropic() {
     println!("[OK] create_client factory → Anthropic validate_key passed");
 
     std::fs::remove_dir_all(&tmp).ok();
+}
+
+// ─── Canonical Build Smoke Suite ─────────────────────────────────────────
+//
+// One command, all three providers: send the canonical new-build prompt
+// and assert the response parses and validates against a real GameDb.
+// Gated on GW2_OPTIMIZER_CACHE_DIR *and* each provider's API key env var.
+// Per-provider sections skip independently if a key is missing; the whole
+// test skips if the cache dir is absent.
+
+fn load_game_db_for_smoke() -> Option<GameDb> {
+    let dir = std::env::var("GW2_OPTIMIZER_CACHE_DIR").ok()?;
+    let cache = DataCache::new(PathBuf::from(dir));
+    match GameDb::load(&cache) {
+        Ok(db) => Some(db),
+        Err(e) => {
+            eprintln!("[skip] GameDb::load failed: {}", e);
+            None
+        }
+    }
+}
+
+fn run_canonical_build_smoke(client: &dyn LlmClient, db: &GameDb) {
+    let provider = client.provider_name();
+    let weights = OptimizationWeights::preset_power_dps();
+    let prompt = new_build_prompt_with_tools("Warrior", &weights, "PvE");
+
+    println!("  [{}] canonical build smoke...", provider);
+    let start = Instant::now();
+    // Pass an empty tool set to short-circuit the tool-calling loop: the
+    // LLM sees no tools, so it must answer with the final JSON directly.
+    let mut no_tools: Vec<ToolDefinition> = Vec::new();
+    let response = client
+        .generate_with_tools_progress(
+            &prompt,
+            &no_tools,
+            &mut |_name, _args| json!({}),
+            1,
+            &mut |_, _, _| {},
+        )
+        .or_else(|_| {
+            no_tools.clear();
+            client.generate(&prompt)
+        })
+        .unwrap_or_else(|e| panic!("{}: generate failed: {}", provider, e));
+    println!(
+        "    ({:.1}s, {} chars)",
+        start.elapsed().as_secs_f64(),
+        response.len()
+    );
+
+    let parsed = parse_gemini_build(&response)
+        .unwrap_or_else(|e| panic!("{}: parse_gemini_build failed: {}", provider, e));
+    let validated = validate_gemini_build(&parsed, db, "Warrior");
+
+    assert!(
+        !validated.specializations.is_empty(),
+        "{}: validated build has no specializations. errors: {:?}",
+        provider,
+        validated.errors
+    );
+    assert!(
+        validated.errors.is_empty(),
+        "{}: validation hard errors: {:?}",
+        provider,
+        validated.errors
+    );
+    println!(
+        "  [{}] OK — {} specs, stat_prefix={:?}, warnings={}",
+        provider,
+        validated.specializations.len(),
+        validated.gear_prefix.as_ref().map(|g| g.name.as_str()),
+        validated.warnings.len()
+    );
+}
+
+#[test]
+#[ignore]
+fn test_all_providers_canonical_build_smoke() {
+    let Some(db) = load_game_db_for_smoke() else {
+        eprintln!(
+            "[skip] set GW2_OPTIMIZER_CACHE_DIR to a populated cache dir \
+             (addon's cache/ folder works)"
+        );
+        return;
+    };
+
+    let mut ran = 0;
+
+    match std::env::var("GEMINI_API_KEY") {
+        Ok(key) => {
+            let client =
+                gw2_optimizer::llm::gemini::GeminiLlmClient::new(&key, "gemini-2.5-flash")
+                    .expect("create Gemini client");
+            run_canonical_build_smoke(&client, &db);
+            ran += 1;
+        }
+        Err(_) => println!("[skip] GEMINI_API_KEY not set"),
+    }
+
+    match std::env::var("OPENAI_API_KEY") {
+        Ok(key) => {
+            let client = gw2_optimizer::llm::openai::OpenAiClient::new(&key, "gpt-4o-mini")
+                .expect("create OpenAI client");
+            run_canonical_build_smoke(&client, &db);
+            ran += 1;
+        }
+        Err(_) => println!("[skip] OPENAI_API_KEY not set"),
+    }
+
+    match std::env::var("ANTHROPIC_API_KEY") {
+        Ok(key) => {
+            let client = gw2_optimizer::llm::anthropic::AnthropicClient::new(
+                &key,
+                "claude-haiku-4-5-20251001",
+            )
+            .expect("create Anthropic client");
+            run_canonical_build_smoke(&client, &db);
+            ran += 1;
+        }
+        Err(_) => println!("[skip] ANTHROPIC_API_KEY not set"),
+    }
+
+    assert!(
+        ran > 0,
+        "no provider API keys set — at least one required for canonical-build smoke"
+    );
 }

@@ -5,7 +5,9 @@
 pub mod anthropic;
 pub mod gemini;
 pub mod openai;
+pub(crate) mod retry;
 pub mod tools;
+pub(crate) mod trim;
 
 use serde_json::Value;
 
@@ -177,6 +179,59 @@ pub fn generate_with_tools(
 ) -> Result<String, LlmError> {
     client.generate_with_tools_progress(prompt, tools, execute_tool, max_turns, &mut |_, _, _| {})
 }
+
+/// Case-insensitive check whether an API error body mentions a billing,
+/// quota, or credit-balance issue. Used by `validate_key_detailed` overrides
+/// to distinguish "key is valid but account has no credits" from "key is
+/// invalid". Includes language-neutral Google API status codes so Gemini's
+/// non-English responses still match.
+pub(crate) fn has_billing_keyword(message: &str) -> bool {
+    const KEYWORDS: &[&str] = &[
+        "billing",
+        "quota",
+        "exceeded",
+        "payment",
+        "credit",
+        "insufficient",
+        // Google API canonical status codes (stable across locales).
+        "resource_exhausted",
+        "failed_precondition",
+    ];
+    let lower = message.to_lowercase();
+    KEYWORDS.iter().any(|kw| lower.contains(kw))
+}
+
+#[cfg(test)]
+mod billing_tests {
+    use super::has_billing_keyword;
+
+    #[test]
+    fn matches_english_keywords_case_insensitively() {
+        assert!(has_billing_keyword("Your billing account is suspended"));
+        assert!(has_billing_keyword("QUOTA exceeded for this project"));
+        assert!(has_billing_keyword("Credit balance is too low"));
+        assert!(has_billing_keyword("payment method required"));
+        assert!(has_billing_keyword("insufficient funds"));
+    }
+
+    #[test]
+    fn matches_google_status_codes() {
+        assert!(has_billing_keyword(
+            r#"{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}"#
+        ));
+        assert!(has_billing_keyword(
+            r#"{"error":{"status":"FAILED_PRECONDITION","message":"..."}}"#
+        ));
+    }
+
+    #[test]
+    fn does_not_match_generic_errors() {
+        assert!(!has_billing_keyword("Bad request: missing required field"));
+        assert!(!has_billing_keyword("Internal server error"));
+        assert!(!has_billing_keyword(""));
+    }
+}
+
 
 /// Create an LLM client based on the current config.
 /// Dispatches to the correct provider and configures persistence.

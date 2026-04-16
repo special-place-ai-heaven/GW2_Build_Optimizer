@@ -446,7 +446,7 @@ impl LlmClient for OpenAiClient {
                 warning: None,
             },
             429 => {
-                let warning = if body.contains("quota") || body.contains("exceeded") || body.contains("billing") {
+                let warning = if super::has_billing_keyword(&body) {
                     "Your account has exceeded its usage limit. Check billing at platform.openai.com/account/billing."
                 } else {
                     "Currently rate-limited. Try again shortly."
@@ -458,9 +458,7 @@ impl LlmClient for OpenAiClient {
                 }
             }
             _ => {
-                if body.contains("billing") || body.contains("quota")
-                    || body.contains("exceeded") || body.contains("insufficient")
-                {
+                if super::has_billing_keyword(&body) {
                     KeyValidationResult {
                         valid: true,
                         message: "OpenAI key is valid!".into(),
@@ -537,6 +535,7 @@ impl LlmClient for OpenAiClient {
         let mut last_text: Option<String> = None;
 
         for turn in 0..max_turns {
+            trim_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
             let response = self.send_chat(&messages, Some(tools))?;
 
             // Capture text content
@@ -682,6 +681,56 @@ impl LlmClient for OpenAiClient {
     }
 }
 
+/// Drop oldest tool-call turn(s) when the conversation exceeds the token
+/// budget. A "turn" is one assistant message with `tool_calls` plus the
+/// tool-role messages that reference its ids; these must be dropped as an
+/// atomic unit so the remaining assistant/tool pairing stays valid. The
+/// initial user prompt (messages[0]) and the most recent turn are always
+/// preserved.
+fn trim_messages(messages: &mut Vec<Message>, budget_tokens: usize) {
+    use super::trim::estimate_tokens;
+
+    fn message_tokens(m: &Message) -> usize {
+        let content = m.content.as_deref().map(estimate_tokens).unwrap_or(0);
+        let tool_calls = m
+            .tool_calls
+            .as_ref()
+            .map(|tcs| {
+                tcs.iter()
+                    .map(|tc| estimate_tokens(&tc.function.arguments))
+                    .sum::<usize>()
+            })
+            .unwrap_or(0);
+        content + tool_calls
+    }
+
+    let mut total: usize = messages.iter().map(message_tokens).sum();
+    if total <= budget_tokens {
+        return;
+    }
+
+    loop {
+        let turn_starts: Vec<usize> = messages
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(_, m)| m.role == "assistant" && m.tool_calls.is_some())
+            .map(|(i, _)| i)
+            .collect();
+
+        // Keep at least the initial prompt + the most recent turn.
+        if turn_starts.len() < 2 {
+            return;
+        }
+
+        messages.drain(turn_starts[0]..turn_starts[1]);
+        total = messages.iter().map(message_tokens).sum();
+        if total <= budget_tokens {
+            return;
+        }
+    }
+}
+
 /// Derive a human-readable display name from an OpenAI model ID.
 fn openai_display_name(id: &str) -> String {
     match id {
@@ -786,6 +835,162 @@ mod tests {
     }
 
     #[test]
+        fn test_rate_tracker_persistence_roundtrip_same_day() {
+            let mut tracker = RateTracker::new();
+            for _ in 0..5 {
+                tracker.check_and_reserve().unwrap();
+            }
+            assert_eq!(tracker.requests_today, 5);
+            assert_eq!(tracker.requests_this_minute, 5);
+
+            let persisted = tracker.to_persisted();
+            let reloaded = RateTracker::from_persisted(persisted);
+
+            // Daily counter survives, minute counter is always reset on reload.
+            assert_eq!(reloaded.requests_today, 5);
+            assert_eq!(reloaded.requests_this_minute, 0);
+        }
+
+        #[test]
+        fn test_rate_tracker_persistence_day_rollover_resets_daily() {
+            let yesterday = current_epoch_day().saturating_sub(1);
+            let persisted = PersistedUsage {
+                day: yesterday,
+                requests_today: 42,
+            };
+            let reloaded = RateTracker::from_persisted(persisted);
+
+            assert_eq!(reloaded.requests_today, 0);
+            assert_eq!(reloaded.requests_this_minute, 0);
+            assert_eq!(reloaded.current_day, current_epoch_day());
+        }
+
+        #[test]
+        fn test_rate_tracker_minute_rollover_preserves_daily() {
+            let mut tracker = RateTracker::new();
+            for _ in 0..3 {
+                tracker.check_and_reserve().unwrap();
+            }
+            assert_eq!(tracker.requests_this_minute, 3);
+            assert_eq!(tracker.requests_today, 3);
+
+            // Simulate 61 seconds having elapsed since the minute started.
+            tracker.minute_start = Instant::now() - std::time::Duration::from_secs(61);
+
+            tracker.check_and_reserve().unwrap();
+
+            // Minute counter reset to 1 (this new reserve), daily keeps climbing.
+            assert_eq!(tracker.requests_this_minute, 1);
+            assert_eq!(tracker.requests_today, 4);
+        }
+
+        #[test]
+            fn test_trim_messages_drops_oldest_turn() {
+                fn user_msg(text: &str) -> Message {
+                    Message {
+                        role: "user".into(),
+                        content: Some(text.into()),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    }
+                }
+                fn assistant_with_call(id: &str, args: &str) -> Message {
+                    Message {
+                        role: "assistant".into(),
+                        content: None,
+                        tool_calls: Some(vec![ToolCallResponse {
+                            id: id.into(),
+                            call_type: "function".into(),
+                            function: FunctionCallData {
+                                name: "get_trait_details".into(),
+                                arguments: args.into(),
+                            },
+                        }]),
+                        tool_call_id: None,
+                    }
+                }
+                fn tool_result(id: &str, body: &str) -> Message {
+                    Message {
+                        role: "tool".into(),
+                        content: Some(body.into()),
+                        tool_calls: None,
+                        tool_call_id: Some(id.into()),
+                    }
+                }
+
+                // Big filler (~100 chars = ~25 tokens each)
+                let filler = "x".repeat(400);
+
+                let mut messages = vec![
+                    user_msg("initial prompt"),
+                    assistant_with_call("call_1", &format!(r#"{{"q":"{}"}}"#, filler)),
+                    tool_result("call_1", &filler),
+                    assistant_with_call("call_2", &format!(r#"{{"q":"{}"}}"#, filler)),
+                    tool_result("call_2", &filler),
+                    assistant_with_call("call_3", &format!(r#"{{"q":"{}"}}"#, filler)),
+                    tool_result("call_3", &filler),
+                ];
+                let original_len = messages.len();
+
+                // Budget of 200 tokens = 800 chars. Each turn is >= 200 chars of tool args + 400 chars of result.
+                trim_messages(&mut messages, 200);
+
+                assert!(
+                    messages.len() < original_len,
+                    "expected trimming, got {} messages",
+                    messages.len()
+                );
+                // Initial user prompt preserved.
+                assert_eq!(messages[0].role, "user");
+                assert_eq!(messages[0].content.as_deref(), Some("initial prompt"));
+                // Most recent turn preserved (the call_3 pair).
+                let last_assistant_idx = messages
+                    .iter()
+                    .rposition(|m| m.role == "assistant")
+                    .expect("must retain an assistant message");
+                let last_tc = messages[last_assistant_idx]
+                    .tool_calls
+                    .as_ref()
+                    .expect("assistant has tool_calls")
+                    .first()
+                    .unwrap();
+                assert_eq!(last_tc.id, "call_3");
+                // Every tool message still refers to a tool_call_id present on a preceding assistant.
+                for (i, m) in messages.iter().enumerate() {
+                    if m.role == "tool" {
+                        let id = m.tool_call_id.as_deref().unwrap();
+                        let found = messages[..i].iter().any(|prev| {
+                            prev.tool_calls
+                                .as_ref()
+                                .is_some_and(|tcs| tcs.iter().any(|tc| tc.id == id))
+                        });
+                        assert!(found, "orphaned tool_call_id {}", id);
+                    }
+                }
+            }
+
+            #[test]
+            fn test_trim_messages_noop_under_budget() {
+                let mut messages = vec![
+                    Message {
+                        role: "user".into(),
+                        content: Some("short prompt".into()),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    },
+                    Message {
+                        role: "assistant".into(),
+                        content: Some("short reply".into()),
+                        tool_calls: None,
+                        tool_call_id: None,
+                    },
+                ];
+                let original_len = messages.len();
+                trim_messages(&mut messages, 10_000);
+                assert_eq!(messages.len(), original_len);
+            }
+
+    #[test]
     fn test_message_serialization() {
         // User message
         let msg = Message {
@@ -810,5 +1015,48 @@ mod tests {
         let json = serde_json::to_value(&tool_msg).unwrap();
         assert_eq!(json["role"], "tool");
         assert_eq!(json["tool_call_id"], "call_abc123");
+    }
+
+    #[test]
+    fn test_tool_call_id_round_trip() {
+        // Simulate a server response containing an assistant message with one
+        // tool call. Parse it the same way `send_chat` does, then echo the id
+        // back on a tool-role follow-up message — the same echo path
+        // `generate_with_tools_progress` uses.
+        let server_response_json = r#"{
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_fRzHUzNm7",
+                        "type": "function",
+                        "function": {"name": "square_number", "arguments": "{\"number\":7}"}
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }"#;
+
+        let body: ChatResponse =
+            serde_json::from_str(server_response_json).expect("parse ChatResponse");
+        let assistant_msg = body
+            .choices
+            .and_then(|c| c.into_iter().next())
+            .and_then(|c| c.message)
+            .expect("assistant message");
+        let tool_calls = assistant_msg.tool_calls.clone().expect("tool_calls");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].id, "call_fRzHUzNm7");
+
+        let follow_up = Message {
+            role: "tool".into(),
+            content: Some(r#"{"result":49}"#.into()),
+            tool_calls: None,
+            tool_call_id: Some(tool_calls[0].id.clone()),
+        };
+        let wire = serde_json::to_value(&follow_up).unwrap();
+        assert_eq!(wire["role"], "tool");
+        assert_eq!(wire["tool_call_id"], "call_fRzHUzNm7");
     }
 }
