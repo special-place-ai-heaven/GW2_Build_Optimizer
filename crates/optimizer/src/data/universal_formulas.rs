@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::sync::OnceLock;
 use thiserror::Error;
 
-use super::{DataLoadError, EvidenceLevel};
+use super::{try_load, DataLoadError, EvidenceLevel};
 
 /// Canonical JSON embedded at compile time from data/formulas/universal.json.
 const UNIVERSAL_FORMULAS_JSON: &str = include_str!("../../../../data/formulas/universal.json");
@@ -23,19 +23,11 @@ pub fn formulas() -> &'static UniversalFormulas {
 /// Try to load universal formulas from the embedded JSON, returning typed errors
 /// on failure. Does NOT store in OnceLock — used for health-check validation.
 pub fn try_load_universal_formulas() -> Result<UniversalFormulas, Vec<DataLoadError>> {
-    load_universal_formulas(UNIVERSAL_FORMULAS_JSON).map_err(|e| {
-        vec![match e {
-            UniversalFormulaError::ParseError(pe) => DataLoadError::ParseError {
-                source: "universal_formulas".into(),
-                detail: pe.to_string(),
-            },
-            UniversalFormulaError::ValidationError(msg) => DataLoadError::ValidationError {
-                source: "universal_formulas".into(),
-                field: String::new(),
-                reason: msg,
-            },
-        }]
-    })
+    try_load!(
+        "universal_formulas",
+        load_universal_formulas(UNIVERSAL_FORMULAS_JSON),
+        UniversalFormulaError
+    )
 }
 
 #[derive(Debug, Error)]
