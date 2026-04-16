@@ -273,15 +273,20 @@ impl OptimizationWeights {
     }
 
     pub fn preset_healer() -> Self {
+        // Boon support is weighted high (0.6) because meta GW2 PvE healers are
+        // defined by quickness/alacrity uptime, not raw sustain -- this is what
+        // makes Harrier's (Pow/Heal/Concentration) the canonical healer prefix
+        // over pure-sustain Magi's (Heal/Tou/Vit). Sustain stays nonzero so the
+        // tier selector still includes Minstrel's for heal-tank fallback builds.
         Self {
             power: 0.0,
             condition: 0.0,
-            boon_support: 0.2,
+            boon_support: 0.6,
             healing: 1.0,
-            sustain: 0.4,
+            sustain: 0.2,
             control: 0.0,
         }
-        // total = 1.6
+        // total = 1.8
     }
 
     pub fn preset_balanced() -> Self {
