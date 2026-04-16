@@ -661,6 +661,106 @@ mod tests {
         );
     }
 
+    // ─── Cross-dataset: Objective profile condition_priorities ↔ formulas/conditions.json ───
+
+    /// Every condition name referenced in any `condition_priorities` map of
+    /// `data/objective_profiles/{pve,pvp,wvw}.json` must exist as a key in
+    /// `data/formulas/conditions.json`.
+    ///
+    /// On failure this test lists every gap so the data owner can fix the source data
+    /// rather than the test (do NOT relax this assertion to make it pass).
+    #[test]
+    fn consistency_test_condition_priorities_exist_in_formulas() {
+        let objectives = objective_profiles::objective_profiles();
+        let conditions = boon_condition_formulas::conditions();
+
+        let mode_files = [
+            ("PvE", "data/objective_profiles/pve.json"),
+            ("PvP", "data/objective_profiles/pvp.json"),
+            ("WvW", "data/objective_profiles/wvw.json"),
+        ];
+
+        let mut gaps: Vec<String> = Vec::new();
+        for (mode, file) in &mode_files {
+            for profile in objectives.profiles_for_mode(mode) {
+                for cond_name in profile.condition_priorities.keys() {
+                    if conditions.get(cond_name).is_none() {
+                        gaps.push(format!(
+                            "{} (in {} / {}) not present in formulas/conditions.json",
+                            cond_name, profile.objective_profile_id, file,
+                        ));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            gaps.is_empty(),
+            "objective profile condition_priorities reference conditions missing from \
+             formulas/conditions.json:\n  {}",
+            gaps.join("\n  "),
+        );
+    }
+
+    // ─── Cross-dataset: Objective profile interaction_priorities ↔ valid operations ───
+
+    /// Every operation name referenced in any `interaction_priorities` map of
+    /// `data/objective_profiles/{pve,pvp,wvw}.json` must be a recognized
+    /// interaction operation.
+    ///
+    /// The authoritative list of valid operations lives in
+    /// `objective_profiles::validate_profile` (private `valid_interaction_keys`
+    /// array). It is duplicated here intentionally so this consistency test
+    /// catches additions to the data files that the loader's own validator
+    /// already guards — the duplication makes the cross-dataset contract
+    /// explicit and surfaces the canonical list in test output.
+    ///
+    /// On failure this test lists every gap so the data owner can fix the source data
+    /// rather than the test (do NOT relax this assertion to make it pass).
+    #[test]
+    fn consistency_test_interaction_priorities_are_valid_operations() {
+        let objectives = objective_profiles::objective_profiles();
+
+        // Mirror of the private list in objective_profiles::validate_profile.
+        // If this list ever drifts, both call sites must be updated together.
+        let valid_operations: &[&str] = &[
+            "removes_boon",
+            "steals_boon",
+            "corrupts_boon",
+            "removes_condition",
+            "converts_condition_to_boon",
+            "transfers_condition",
+        ];
+
+        let mode_files = [
+            ("PvE", "data/objective_profiles/pve.json"),
+            ("PvP", "data/objective_profiles/pvp.json"),
+            ("WvW", "data/objective_profiles/wvw.json"),
+        ];
+
+        let mut gaps: Vec<String> = Vec::new();
+        for (mode, file) in &mode_files {
+            for profile in objectives.profiles_for_mode(mode) {
+                for op_name in profile.interaction_priorities.keys() {
+                    if !valid_operations.contains(&op_name.as_str()) {
+                        gaps.push(format!(
+                            "{} (in {} / {}) not present in valid interaction operations",
+                            op_name, profile.objective_profile_id, file,
+                        ));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            gaps.is_empty(),
+            "objective profile interaction_priorities reference operations not in the \
+             canonical list ({:?}):\n  {}",
+            valid_operations,
+            gaps.join("\n  "),
+        );
+    }
+
     // ─── Data completeness: All data loaders produce Ready state ───
 
     /// The full initialize() pipeline should return Ready, meaning all loaders
