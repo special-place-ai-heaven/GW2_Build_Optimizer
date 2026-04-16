@@ -709,20 +709,42 @@ fn status_weight_for_scoring(
 }
 
 /// Get condition importance from StatusOperation payload.
+///
+/// Authored data may use verb-form (Poison) or canonical (Poisoned) — the
+/// `status_kind` is normalized via `canonical_condition_name` so the arms
+/// only list canonical form.
 fn cond_importance_from_op(effect: &NormalizedEffect) -> f64 {
-    let status_kind = effect
+    let raw_kind = effect
         .status_operation
         .as_ref()
         .map(|op| op.status_kind.as_str())
         .unwrap_or("");
+    cond_importance_from_status_kind(raw_kind)
+}
+
+/// Inner helper — splits the alias-normalization-and-scoring logic out of
+/// `cond_importance_from_op` so the alias-routing regression suite can
+/// exercise the score table directly without constructing a
+/// `NormalizedEffect`.
+fn cond_importance_from_status_kind(raw_kind: &str) -> f64 {
+    let status_kind = super::boon_condition_formulas::canonical_condition_name(raw_kind);
     match status_kind {
         "Burning" => 1.0,
         "Vulnerability" => 0.8,
         "Bleeding" => 0.7,
         "Torment" => 0.6,
-        "Poison" => 0.5,
+        "Poisoned" => 0.5,
         "Confusion" => 0.1,
         _ => 0.2,
+    }
+}
+
+/// Test-only re-export so the alias-routing regression suite can fuzz the
+/// private `cond_importance_from_status_kind` helper.
+#[cfg(test)]
+pub(crate) mod tests_alias_helpers {
+    pub(crate) fn cond_importance_for_status_kind(raw_kind: &str) -> f64 {
+        super::cond_importance_from_status_kind(raw_kind)
     }
 }
 
