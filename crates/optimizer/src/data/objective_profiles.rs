@@ -317,7 +317,6 @@ fn validate_profile(profile: &ObjectiveProfile, mode: &str) -> Result<(), Object
     // Validate interaction_priorities (if present) have valid keys and values
     let valid_interaction_keys = [
         "removes_boon",
-        "steals_boon",
         "corrupts_boon",
         "removes_condition",
         "converts_condition_to_boon",
