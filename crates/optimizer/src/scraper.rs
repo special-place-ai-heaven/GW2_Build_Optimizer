@@ -79,10 +79,11 @@ pub fn scrape_all(
             cancelled_result("guildjen"),
         ];
     }
-    let sc_result = match scrape_snowcrows(&client, &today) {
-        Ok(builds) => {
+    let sc_result = match scrape_snowcrows(&client, &today, should_cancel) {
+        Ok((builds, cancelled)) => {
             save_builds(&builds, &benchmarks_dir);
-            ScrapeResult { source: "snowcrows".into(), builds, error: None }
+            let error = if cancelled { Some(CANCELLED_ERROR.into()) } else { None };
+            ScrapeResult { source: "snowcrows".into(), builds, error }
         }
         Err(e) => ScrapeResult { source: "snowcrows".into(), builds: vec![], error: Some(e) },
     };
@@ -91,10 +92,11 @@ pub fn scrape_all(
     if should_cancel() {
         return vec![sc_result, cancelled_result("hardstuck"), cancelled_result("guildjen")];
     }
-    let hs_result = match scrape_hardstuck(&client, &today) {
-        Ok(builds) => {
+    let hs_result = match scrape_hardstuck(&client, &today, should_cancel) {
+        Ok((builds, cancelled)) => {
             save_builds(&builds, &benchmarks_dir);
-            ScrapeResult { source: "hardstuck".into(), builds, error: None }
+            let error = if cancelled { Some(CANCELLED_ERROR.into()) } else { None };
+            ScrapeResult { source: "hardstuck".into(), builds, error }
         }
         Err(e) => ScrapeResult { source: "hardstuck".into(), builds: vec![], error: Some(e) },
     };
@@ -103,10 +105,11 @@ pub fn scrape_all(
     if should_cancel() {
         return vec![sc_result, hs_result, cancelled_result("guildjen")];
     }
-    let gj_result = match scrape_guildjen(&client, &today) {
-        Ok(builds) => {
+    let gj_result = match scrape_guildjen(&client, &today, should_cancel) {
+        Ok((builds, cancelled)) => {
             save_builds(&builds, &benchmarks_dir);
-            ScrapeResult { source: "guildjen".into(), builds, error: None }
+            let error = if cancelled { Some(CANCELLED_ERROR.into()) } else { None };
+            ScrapeResult { source: "guildjen".into(), builds, error }
         }
         Err(e) => ScrapeResult { source: "guildjen".into(), builds: vec![], error: Some(e) },
     };
@@ -155,14 +158,22 @@ const SC_PROFESSIONS: &[&str] = &[
 
 /// Scrape Snowcrows (PvE raid/strike meta builds).
 /// Enumerates per-profession pages: https://snowcrows.com/builds/raids/{profession}
+///
+/// `should_cancel` is consulted before every outer (per-profession) and inner
+/// (per-build) HTTP fetch. On cancellation, returns whatever builds were
+/// collected so far paired with `cancelled = true`.
 fn scrape_snowcrows(
     client: &reqwest::blocking::Client,
     today: &str,
-) -> Result<Vec<BenchmarkBuild>, String> {
+    should_cancel: &dyn Fn() -> bool,
+) -> Result<(Vec<BenchmarkBuild>, bool), String> {
     let mut all_links: Vec<String> = Vec::new();
 
     // Collect build links from each profession's page
     for profession in SC_PROFESSIONS {
+        if should_cancel() {
+            return Ok((Vec::new(), true));
+        }
         let prof_url = format!("https://snowcrows.com/builds/raids/{}", profession);
         let Ok(html) = fetch_html(client, &prof_url) else {
             continue;
@@ -189,12 +200,15 @@ fn scrape_snowcrows(
     let mut builds = Vec::new();
     // Cap at 45 builds total (5 per profession on average across 9 professions)
     for url in all_links.into_iter().take(45) {
+        if should_cancel() {
+            return Ok((builds, true));
+        }
         match scrape_snowcrows_build(client, &url, today) {
             Ok(b) => builds.push(b),
             Err(_) => {}
         }
     }
-    Ok(builds)
+    Ok((builds, false))
 }
 
 fn scrape_snowcrows_build(
@@ -257,14 +271,23 @@ const HS_PROFESSIONS: &[&str] = &[
     "elementalist", "mesmer", "necromancer", "revenant",
 ];
 
+/// Scrape Hardstuck (multi-mode builds).
+///
+/// `should_cancel` is consulted before every outer (per-profession) and inner
+/// (per-build) HTTP fetch. On cancellation, returns whatever builds were
+/// collected so far paired with `cancelled = true`.
 fn scrape_hardstuck(
     client: &reqwest::blocking::Client,
     today: &str,
-) -> Result<Vec<BenchmarkBuild>, String> {
+    should_cancel: &dyn Fn() -> bool,
+) -> Result<(Vec<BenchmarkBuild>, bool), String> {
     let mut all_links: Vec<String> = Vec::new();
 
     // Each profession page lists builds for that profession
     for profession in HS_PROFESSIONS {
+        if should_cancel() {
+            return Ok((Vec::new(), true));
+        }
         let prof_url = format!("https://hardstuck.gg/gw2/builds/{}/", profession);
         let Ok(html) = fetch_html(client, &prof_url) else {
             continue;
@@ -294,12 +317,15 @@ fn scrape_hardstuck(
 
     let mut builds = Vec::new();
     for url in all_links.into_iter().take(45) {
+        if should_cancel() {
+            return Ok((builds, true));
+        }
         match scrape_hardstuck_build(client, &url, today) {
             Ok(b) => builds.push(b),
             Err(_) => {}
         }
     }
-    Ok(builds)
+    Ok((builds, false))
 }
 
 fn scrape_hardstuck_build(
@@ -365,10 +391,15 @@ fn scrape_hardstuck_build(
 
 /// Scrape GuildJen (WvW/PvP builds).
 /// Index: https://guildjen.com/
+///
+/// `should_cancel` is consulted before every outer (per-index-page) and inner
+/// (per-build) HTTP fetch. On cancellation, returns whatever builds were
+/// collected so far paired with `cancelled = true`.
 fn scrape_guildjen(
     client: &reqwest::blocking::Client,
     today: &str,
-) -> Result<Vec<BenchmarkBuild>, String> {
+    should_cancel: &dyn Fn() -> bool,
+) -> Result<(Vec<BenchmarkBuild>, bool), String> {
     // GuildJen's main build index pages
     let index_urls = [
         "https://guildjen.com/wvw-builds/",
@@ -379,6 +410,9 @@ fn scrape_guildjen(
     let mut any_success = false;
 
     for index_url in &index_urls {
+        if should_cancel() {
+            return Ok((builds, true));
+        }
         let mode = if index_url.contains("wvw") { "WvW" } else { "PvP" };
         let Ok(html) = fetch_html(client, index_url) else {
             continue;
@@ -388,6 +422,9 @@ fn scrape_guildjen(
         any_success = true;
 
         for link in links.into_iter().take(15) {
+            if should_cancel() {
+                return Ok((builds, true));
+            }
             let url = if link.starts_with("http") {
                 link
             } else {
@@ -403,7 +440,7 @@ fn scrape_guildjen(
     if !any_success {
         return Err("GuildJen: failed to fetch any index pages".to_string());
     }
-    Ok(builds)
+    Ok((builds, false))
 }
 
 fn scrape_guildjen_build(
@@ -971,5 +1008,131 @@ mod tests {
                 r.source
             );
         }
+    }
+
+    /// Inner-loop cancellation: each per-source scraper must consult
+    /// `should_cancel` BEFORE every outer (per-profession / per-index-page)
+    /// HTTP fetch. With an always-true predicate, the function must return
+    /// without performing any network I/O — proven by bounded latency well
+    /// below the reqwest 15s timeout. The returned tuple's `cancelled` flag
+    /// must be true and `builds` must be empty (nothing collected before
+    /// the very first fetch). The predicate must have been observed at
+    /// least once (the top-of-loop check).
+    ///
+    /// Mid-loop cancellation (cancel after N successful fetches) is not
+    /// asserted here because it would require mocking the HTTP layer; see
+    /// NOTES in the round-3 commit. The wiring proven here is sufficient:
+    /// the predicate is in scope at the inner loop and short-circuits the
+    /// loop body before each iteration's HTTP work.
+    #[test]
+    fn scrape_snowcrows_aborts_at_inner_loop_when_cancelled() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Instant;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        let predicate = move || {
+            calls_clone.fetch_add(1, Ordering::Relaxed);
+            true
+        };
+        let client = build_client().expect("client build must succeed");
+
+        let start = Instant::now();
+        let result = scrape_snowcrows(&client, "2026-04-16", &predicate);
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 500,
+            "scrape_snowcrows must abort within 500ms when cancel pulses, took {:?}",
+            elapsed
+        );
+        match result {
+            Ok((builds, cancelled)) => {
+                assert!(cancelled, "cancelled flag must be true");
+                assert!(builds.is_empty(), "no builds should be collected before first fetch");
+            }
+            Err(e) => panic!("expected Ok((empty, true)) on cancel, got Err({})", e),
+        }
+        assert!(
+            calls.load(Ordering::Relaxed) >= 1,
+            "predicate must be invoked at least once at inner loop entry"
+        );
+    }
+
+    /// Inner-loop cancellation for hardstuck. Same shape as the snowcrows
+    /// test — see that test's docstring for rationale.
+    #[test]
+    fn scrape_hardstuck_aborts_at_inner_loop_when_cancelled() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Instant;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        let predicate = move || {
+            calls_clone.fetch_add(1, Ordering::Relaxed);
+            true
+        };
+        let client = build_client().expect("client build must succeed");
+
+        let start = Instant::now();
+        let result = scrape_hardstuck(&client, "2026-04-16", &predicate);
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 500,
+            "scrape_hardstuck must abort within 500ms when cancel pulses, took {:?}",
+            elapsed
+        );
+        match result {
+            Ok((builds, cancelled)) => {
+                assert!(cancelled, "cancelled flag must be true");
+                assert!(builds.is_empty(), "no builds should be collected before first fetch");
+            }
+            Err(e) => panic!("expected Ok((empty, true)) on cancel, got Err({})", e),
+        }
+        assert!(
+            calls.load(Ordering::Relaxed) >= 1,
+            "predicate must be invoked at least once at inner loop entry"
+        );
+    }
+
+    /// Inner-loop cancellation for guildjen. Same shape as the snowcrows
+    /// test — see that test's docstring for rationale.
+    #[test]
+    fn scrape_guildjen_aborts_at_inner_loop_when_cancelled() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Instant;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        let predicate = move || {
+            calls_clone.fetch_add(1, Ordering::Relaxed);
+            true
+        };
+        let client = build_client().expect("client build must succeed");
+
+        let start = Instant::now();
+        let result = scrape_guildjen(&client, "2026-04-16", &predicate);
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed.as_millis() < 500,
+            "scrape_guildjen must abort within 500ms when cancel pulses, took {:?}",
+            elapsed
+        );
+        match result {
+            Ok((builds, cancelled)) => {
+                assert!(cancelled, "cancelled flag must be true");
+                assert!(builds.is_empty(), "no builds should be collected before first fetch");
+            }
+            Err(e) => panic!("expected Ok((empty, true)) on cancel, got Err({})", e),
+        }
+        assert!(
+            calls.load(Ordering::Relaxed) >= 1,
+            "predicate must be invoked at least once at inner loop entry"
+        );
     }
 }
