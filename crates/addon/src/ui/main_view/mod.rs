@@ -5,7 +5,7 @@ use gw2_optimizer::scoring::OptimizationWeights;
 
 mod build_display;
 mod character;
-mod lock_panel;
+pub mod lock_panel;
 mod optimization;
 mod resolution;
 mod stats;
@@ -1146,6 +1146,7 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                             db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
                             &profession_name,
                             &current_specs,
+                            &mut state.main.locks_hover,
                         );
                     }
                     ui.next_column();
@@ -1256,6 +1257,7 @@ fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
                             db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
                             &profession_name,
                             &current_specs,
+                            &mut state.main.locks_hover,
                         );
                     }
                     build_display::render_build_card_no_specs(ui, &build, stats.as_ref(), None);

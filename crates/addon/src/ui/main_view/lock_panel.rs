@@ -34,6 +34,7 @@ fn draw_hexagon(
     radius: f32,
     color: u32,
     filled: bool,
+    thickness: f32,
 ) {
     let mut points = Vec::with_capacity(6);
     for i in 0..6 {
@@ -58,7 +59,7 @@ fn draw_hexagon(
         let next = (i + 1) % 6;
         draw_list
             .add_line(points[i], points[next], color)
-            .thickness(2.0)
+            .thickness(thickness)
             .build();
     }
 }
@@ -76,10 +77,79 @@ fn is_in_hexagon(mouse: [f32; 2], center: [f32; 2], radius: f32) -> bool {
     is_in_circle(mouse, center, radius)
 }
 
+// ─── Hover animation ───
+
+/// Identifies a single interactive element inside the lock panel for hover tracking.
+///
+/// One shared state slot (`Option<(LockElementId, f32)>`) drives animation for both
+/// the hex (slot) and the 3×3 trait grids. Only the currently-hovered element lerps in;
+/// everything else renders flat. When hover moves, the new element starts at `t=0`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum LockElementId {
+    /// Spec hexagon at `slot` (0, 1, 2).
+    Hex(u8),
+    /// Trait circle at `slot` (0..3), `col` (0..3 = Adept/Master/Grandmaster), `row` (0..3).
+    Trait { slot: u8, col: u8, row: u8 },
+}
+
+/// Step size applied to hover `t` per frame when the element stays hovered.
+/// Picked to reach ~1.0 in ~8 frames (≈130ms at 60fps) — "subtle" per the polish brief.
+const HOVER_LERP_IN: f32 = 0.12;
+
+/// Step size applied to hover `t` per frame when nothing is hovered.
+/// Slightly faster out than in so the glow doesn't linger when the mouse leaves.
+const HOVER_LERP_OUT: f32 = 0.15;
+
+/// Advance the single-element hover animation. Pure — unit-tested below.
+///
+/// * If `hovered` matches the stored id, lerp `t` up toward 1.0.
+/// * If `hovered` is a different element, snap state to `(new, 0.0)` so the new
+///   element animates in from scratch (out-animation is intentionally dropped).
+/// * If nothing is hovered, decay `t` toward 0.0 and drop the state when it reaches 0.
+fn tick_hover(state: &mut Option<(LockElementId, f32)>, hovered: Option<LockElementId>) {
+    match (hovered, state.as_mut()) {
+        (Some(id), Some((stored_id, t))) if *stored_id == id => {
+            *t = (*t + HOVER_LERP_IN).min(1.0);
+        }
+        (Some(id), _) => {
+            *state = Some((id, 0.0));
+        }
+        (None, Some((_, t))) => {
+            *t = (*t - HOVER_LERP_OUT).max(0.0);
+            if *t <= 0.0 {
+                *state = None;
+            }
+        }
+        (None, None) => {}
+    }
+}
+
+/// Return the hover progress (0.0..=1.0) for `id` if it's the currently animating element.
+fn hover_t_for(state: &Option<(LockElementId, f32)>, id: LockElementId) -> f32 {
+    match state {
+        Some((stored_id, t)) if *stored_id == id => *t,
+        _ => 0.0,
+    }
+}
+
+/// Blend `color` toward white by `t*amount`, preserving alpha.
+fn brighten(color: [f32; 4], t: f32, amount: f32) -> [f32; 4] {
+    let k = (t * amount).clamp(0.0, 1.0);
+    [
+        color[0] + (1.0 - color[0]) * k,
+        color[1] + (1.0 - color[1]) * k,
+        color[2] + (1.0 - color[2]) * k,
+        color[3],
+    ]
+}
+
 // ─── Main render function ───
 
 /// Render the spec & trait lock panel in the left menu.
 /// Returns true if any lock state was modified.
+///
+/// `hover_state` holds the single currently-animating element (if any). It persists
+/// across frames on `MainState` so hover glow smoothly lerps in instead of snapping.
 pub fn render_lock_panel(
     ui: &Ui,
     locks: &mut BuildLocks,
@@ -87,8 +157,12 @@ pub fn render_lock_panel(
     db: Option<&GameDb>,
     profession_name: &str,
     current_specs: &[(u32, Vec<u32>)], // (spec_id, selected_trait_ids) from current build
+    hover_state: &mut Option<(LockElementId, f32)>,
 ) -> bool {
     let mut modified = false;
+    // Set when the mouse lies over an interactive element this frame. Used to
+    // advance the single-element hover animation at the end of the function.
+    let mut hovered_now: Option<LockElementId> = None;
     let spacing = 4.0_f32;
 
     // Collapsible header
@@ -203,32 +277,51 @@ pub fn render_lock_panel(
             .and_then(|id| db.specializations.get(&id))
             .is_some_and(|s| s.elite);
 
+        let hex_id = LockElementId::Hex(slot as u8);
+        let hex_t = hover_t_for(hover_state, hex_id);
         {
             let draw_list = ui.get_window_draw_list();
 
-            // Draw hexagon
-            let hex_color = if spec_locked { LOCKED_COLOR } else { DIM_COLOR };
+            // Draw hexagon — radius, outline thickness, and brightness lerp in on hover.
+            let hex_color_base = if spec_locked { LOCKED_COLOR } else { DIM_COLOR };
+            let hex_color = brighten(hex_color_base, hex_t, 0.3);
+            let hex_radius_anim = hex_radius + 2.0 * hex_t;
             if spec_locked {
                 draw_hexagon(
                     &draw_list,
                     hex_center,
-                    hex_radius,
+                    hex_radius_anim,
                     color_u32([0.3, 0.25, 0.05, 0.6]),
                     true,
+                    2.0,
                 );
             }
             draw_hexagon(
                 &draw_list,
                 hex_center,
-                hex_radius,
+                hex_radius_anim,
                 color_u32(hex_color),
                 false,
+                2.0 + 1.5 * hex_t,
             );
+
+            // Subtle glow ring on hover — faint outer hex that fades in with t.
+            if hex_t > 0.0 {
+                let glow = [hex_color_base[0], hex_color_base[1], hex_color_base[2], 0.35 * hex_t];
+                draw_hexagon(
+                    &draw_list,
+                    hex_center,
+                    hex_radius_anim + 4.0,
+                    color_u32(glow),
+                    false,
+                    1.5,
+                );
+            }
 
             // Lock ring around hexagon when locked
             if spec_locked {
                 draw_list
-                    .add_circle(hex_center, hex_radius + 3.0, color_u32(LOCK_ICON_COLOR))
+                    .add_circle(hex_center, hex_radius_anim + 3.0, color_u32(LOCK_ICON_COLOR))
                     .thickness(2.0)
                     .build();
             }
@@ -257,8 +350,10 @@ pub fn render_lock_panel(
             );
         } // DrawListMut dropped
 
-        // Hexagon click detection — toggle lock
-        if is_in_hexagon(mouse_pos, hex_center, hex_radius + 4.0) {
+        // Hexagon click detection — toggle lock. Hit box follows the animated
+        // radius so the cursor never falls out while the glow is still visible.
+        if is_in_hexagon(mouse_pos, hex_center, hex_radius + 4.0 + 2.0 * hex_t) {
+            hovered_now = Some(hex_id);
             // Tooltip
             ui.tooltip(|| {
                 if spec_locked {
@@ -316,6 +411,14 @@ pub fn render_lock_panel(
                                 .locked_trait(sid, col)
                                 .is_some_and(|id| id == trait_id);
 
+                            let trait_element = LockElementId::Trait {
+                                slot: slot as u8,
+                                col: col as u8,
+                                row: row as u8,
+                            };
+                            let trait_t = hover_t_for(hover_state, trait_element);
+                            let circle_radius_anim = circle_radius + 1.5 * trait_t;
+
                             {
                                 let draw_list = ui.get_window_draw_list();
 
@@ -330,20 +433,47 @@ pub fn render_lock_panel(
 
                                 if is_selected || is_locked {
                                     draw_list
-                                        .add_circle([cx, cy], circle_radius, color_u32(fill_color))
+                                        .add_circle(
+                                            [cx, cy],
+                                            circle_radius_anim,
+                                            color_u32(brighten(fill_color, trait_t, 0.3)),
+                                        )
                                         .filled(true)
                                         .build();
                                 }
                                 draw_list
-                                    .add_circle([cx, cy], circle_radius, color_u32(outline_color))
+                                    .add_circle(
+                                        [cx, cy],
+                                        circle_radius_anim,
+                                        color_u32(brighten(outline_color, trait_t, 0.3)),
+                                    )
+                                    .thickness(1.0 + 1.0 * trait_t)
                                     .build();
+
+                                // Subtle glow ring on hover.
+                                if trait_t > 0.0 {
+                                    let glow = [
+                                        outline_color[0],
+                                        outline_color[1],
+                                        outline_color[2],
+                                        0.35 * trait_t,
+                                    ];
+                                    draw_list
+                                        .add_circle(
+                                            [cx, cy],
+                                            circle_radius_anim + 3.0,
+                                            color_u32(glow),
+                                        )
+                                        .thickness(1.0)
+                                        .build();
+                                }
 
                                 // Lock ring
                                 if is_locked {
                                     draw_list
                                         .add_circle(
                                             [cx, cy],
-                                            circle_radius + 3.0,
+                                            circle_radius_anim + 3.0,
                                             color_u32(LOCK_ICON_COLOR),
                                         )
                                         .thickness(1.5)
@@ -351,7 +481,7 @@ pub fn render_lock_panel(
                                 }
 
                                 // Trait name to the right of circle
-                                let text_color = if is_locked {
+                                let text_color_base = if is_locked {
                                     LOCKED_COLOR
                                 } else if is_selected {
                                     SELECTED_COLOR
@@ -360,13 +490,18 @@ pub fn render_lock_panel(
                                 };
                                 draw_list.add_text(
                                     [cx + circle_radius + 6.0, cy - 6.0],
-                                    color_u32(text_color),
+                                    color_u32(brighten(text_color_base, trait_t, 0.25)),
                                     trait_name,
                                 );
                             } // DrawListMut dropped
 
-                            // Click/hover detection
-                            if is_in_circle(mouse_pos, [cx, cy], circle_radius + 4.0) {
+                            // Click/hover detection — hit box follows animated radius.
+                            if is_in_circle(
+                                mouse_pos,
+                                [cx, cy],
+                                circle_radius + 4.0 + 1.5 * trait_t,
+                            ) {
+                                hovered_now = Some(trait_element);
                                 // Tooltip with full trait info
                                 ui.tooltip(|| {
                                     ui.text(trait_name);
@@ -477,6 +612,9 @@ pub fn render_lock_panel(
         ui.text_colored(LOCKED_COLOR, &format!("  {} locks active", lock_count));
     }
 
+    // Advance the hover animation for next frame.
+    tick_hover(hover_state, hovered_now);
+
     modified
 }
 
@@ -567,6 +705,7 @@ pub fn render_optimized_specs_panel(
                 hex_radius,
                 color_u32([0.05, 0.2, 0.1, 0.6]),
                 true,
+                2.0,
             );
             draw_hexagon(
                 &draw_list,
@@ -574,6 +713,7 @@ pub fn render_optimized_specs_panel(
                 hex_radius,
                 color_u32(optimized_color),
                 false,
+                2.0,
             );
 
             // Elite marker
@@ -697,5 +837,74 @@ pub fn render_optimized_specs_panel(
                 )
                 .build();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tick_hover_starts_state_at_zero_when_first_hovered() {
+        let mut state: Option<(LockElementId, f32)> = None;
+        tick_hover(&mut state, Some(LockElementId::Hex(0)));
+        assert_eq!(state, Some((LockElementId::Hex(0), 0.0)));
+    }
+
+    #[test]
+    fn tick_hover_lerps_up_while_same_element_hovered() {
+        let mut state: Option<(LockElementId, f32)> = Some((LockElementId::Hex(1), 0.0));
+        tick_hover(&mut state, Some(LockElementId::Hex(1)));
+        let (_, t) = state.expect("state remains set while hovered");
+        assert!((t - HOVER_LERP_IN).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn tick_hover_clamps_at_one_after_enough_frames() {
+        let mut state: Option<(LockElementId, f32)> = Some((LockElementId::Hex(0), 0.95));
+        tick_hover(&mut state, Some(LockElementId::Hex(0)));
+        let (_, t) = state.expect("hovered state is preserved");
+        assert!((t - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn tick_hover_snaps_to_new_element_at_zero() {
+        let mut state: Option<(LockElementId, f32)> = Some((LockElementId::Hex(0), 0.9));
+        let new_id = LockElementId::Trait { slot: 1, col: 0, row: 2 };
+        tick_hover(&mut state, Some(new_id));
+        assert_eq!(state, Some((new_id, 0.0)));
+    }
+
+    #[test]
+    fn tick_hover_decays_when_nothing_hovered_and_clears_at_zero() {
+        let mut state: Option<(LockElementId, f32)> = Some((LockElementId::Hex(2), 0.2));
+        tick_hover(&mut state, None);
+        let (_, t) = state.expect("state persists while t > 0");
+        assert!((t - (0.2 - HOVER_LERP_OUT)).abs() < f32::EPSILON);
+
+        // One more frame drops us to zero and clears the state.
+        tick_hover(&mut state, None);
+        assert!(state.is_none(), "state should clear once t reaches zero");
+    }
+
+    #[test]
+    fn hover_t_for_returns_zero_unless_id_matches() {
+        let state: Option<(LockElementId, f32)> = Some((LockElementId::Hex(0), 0.7));
+        assert!((hover_t_for(&state, LockElementId::Hex(0)) - 0.7).abs() < f32::EPSILON);
+        assert_eq!(hover_t_for(&state, LockElementId::Hex(1)), 0.0);
+        assert_eq!(
+            hover_t_for(&None, LockElementId::Trait { slot: 0, col: 0, row: 0 }),
+            0.0
+        );
+    }
+
+    #[test]
+    fn brighten_preserves_alpha_and_moves_toward_white() {
+        let c = brighten([0.0, 0.0, 0.0, 0.5], 1.0, 0.5);
+        assert!((c[0] - 0.5).abs() < f32::EPSILON);
+        assert!((c[3] - 0.5).abs() < f32::EPSILON); // alpha untouched
+
+        let c2 = brighten([1.0, 1.0, 1.0, 1.0], 1.0, 1.0);
+        assert_eq!(c2, [1.0, 1.0, 1.0, 1.0]); // white stays white
     }
 }
