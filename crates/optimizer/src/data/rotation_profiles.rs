@@ -144,6 +144,12 @@ pub struct RotationProfile {
 impl RotationProfile {
     /// Get the condition weight (average stacks) for a given condition.
     /// Extracts from the ApplicationMetrics variant appropriate to the condition.
+    ///
+    /// NOTE: `data/rotation_profiles/*.json` currently uses verb-form keys
+    /// ("Poison", "Cripple"); callers must use the same form. Centralized
+    /// alias normalization here is intentionally NOT applied — switching
+    /// to `canonical_condition_name` would require migrating the JSON keys
+    /// to canonical form first (out of scope for the alias-resolver task).
     pub fn condition_weight(&self, condition: &str) -> f64 {
         match self.condition_application.get(condition) {
             Some(ApplicationMetrics::IntensityRate {
