@@ -1706,17 +1706,21 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         state.main.benchmark_running = true;
         state.main.benchmark_error = None;
         std::thread::spawn(move || {
-            // Cancel-aware at the boundaries we control. `scrape_all` runs three
-            // sequential blocking HTTP scrapes with no progress callback, so it
-            // cannot be interrupted mid-call without a signature change (out of
-            // scope for this audit). At minimum: skip starting if cancelled, and
-            // skip the state update if cancellation arrived during scraping so the
-            // benchmark_running flag isn't reset on a stale token (with_state is a
-            // no-op after clear() but we keep the guard explicit).
+            // Cancel-aware end-to-end: an entry-point check skips everything if
+            // cancellation arrived before the thread started, the predicate
+            // passed to `scrape_all` aborts between each of its three sequential
+            // HTTP scrapes (so a mid-scrape cancel returns after the in-flight
+            // request rather than after all three), and a final check skips the
+            // state update so `benchmark_running` is not reset on a stale token
+            // (with_state is a no-op after clear() but the guard stays explicit).
             if token.is_cancelled() {
                 return;
             }
-            let results = gw2_optimizer::scraper::scrape_all(&addon_dir);
+            let cancel_check = token.clone();
+            let results = gw2_optimizer::scraper::scrape_all(
+                &addon_dir,
+                &|| cancel_check.is_cancelled(),
+            );
             if token.is_cancelled() {
                 return;
             }
@@ -2410,7 +2414,7 @@ fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
         state.main.benchmark_running = true;
         state.main.benchmark_error = None;
         std::thread::spawn(move || {
-            let results = gw2_optimizer::scraper::scrape_all(&addon_dir);
+            let results = gw2_optimizer::scraper::scrape_all(&addon_dir, &|| false);
             crate::state::with_state(|s| {
                 s.main.benchmark_running = false;
                 let mut counts = std::collections::HashMap::new();
