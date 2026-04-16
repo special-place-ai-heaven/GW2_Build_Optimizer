@@ -14,6 +14,41 @@ const BUCKET_CAPACITY: u32 = 300;
 const REFILL_RATE: f64 = 5.0; // tokens per second
 const MAX_RETRIES: u32 = 5;
 
+/// Build the comma-separated `ids` query value used by GW2 API bulk endpoints.
+///
+/// Produces output bit-for-bit identical to the previous inline construction
+/// (`ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(",")`).
+/// Does NOT enforce the 200-ID API cap — callers are responsible for chunking
+/// (see `MAX_BULK_IDS` and `slice::chunks`).
+pub(crate) fn build_bulk_ids_query(ids: &[u32]) -> String {
+    let mut out = String::new();
+    let mut first = true;
+    for id in ids {
+        if !first {
+            out.push(',');
+        }
+        first = false;
+        out.push_str(&id.to_string());
+    }
+    out
+}
+
+/// Convert a `serde_json::Value` ID into a `u32`, accepting either JSON numbers
+/// or numeric JSON strings. Mirrors the previous `id.to_string().replace('"', "")`
+/// behavior for the GW2 endpoints used by `fetch_by_ids` (all of which return
+/// integer IDs in practice). Returns `None` for non-numeric values, which lets
+/// callers `filter_map` and skip silently — matching prior behavior where a
+/// non-numeric ID would have been sent verbatim and rejected by the API.
+fn value_to_u32(v: &serde_json::Value) -> Option<u32> {
+    if let Some(n) = v.as_u64() {
+        u32::try_from(n).ok()
+    } else if let Some(s) = v.as_str() {
+        s.parse::<u32>().ok()
+    } else {
+        None
+    }
+}
+
 /// Rate-limited GW2 API client.
 pub struct Gw2Client {
     http: Client,
@@ -263,11 +298,9 @@ impl Gw2Client {
                     .iter()
                     .map(|chunk| {
                         s.spawn(|| {
-                            let ids_str: Vec<String> = chunk
-                                .iter()
-                                .map(|id| id.to_string().replace('"', ""))
-                                .collect();
-                            let joined = ids_str.join(",");
+                            let numeric_ids: Vec<u32> =
+                                chunk.iter().filter_map(value_to_u32).collect();
+                            let joined = build_bulk_ids_query(&numeric_ids);
                             self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
                         })
                     })
@@ -311,11 +344,9 @@ impl Gw2Client {
                     .iter()
                     .map(|chunk| {
                         s.spawn(|| {
-                            let ids_str: Vec<String> = chunk
-                                .iter()
-                                .map(|id| id.to_string().replace('"', ""))
-                                .collect();
-                            let joined = ids_str.join(",");
+                            let numeric_ids: Vec<u32> =
+                                chunk.iter().filter_map(value_to_u32).collect();
+                            let joined = build_bulk_ids_query(&numeric_ids);
                             self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
                         })
                     })
@@ -399,6 +430,78 @@ impl Gw2Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_bulk_ids_query_empty_slice() {
+        // Preserves prior behavior: empty Vec joined with "," → empty string.
+        assert_eq!(build_bulk_ids_query(&[]), "");
+    }
+
+    #[test]
+    fn build_bulk_ids_query_single_id() {
+        assert_eq!(build_bulk_ids_query(&[42]), "42");
+    }
+
+    #[test]
+    fn build_bulk_ids_query_exactly_200_ids() {
+        // GW2 API max per bulk request. The helper itself does NOT enforce this
+        // cap (chunking is upstream via `ids.chunks(MAX_BULK_IDS)`); it must
+        // faithfully serialize whatever it's given.
+        let ids: Vec<u32> = (1..=200).collect();
+        let out = build_bulk_ids_query(&ids);
+        let parts: Vec<&str> = out.split(',').collect();
+        assert_eq!(parts.len(), 200);
+        assert_eq!(parts[0], "1");
+        assert_eq!(parts[199], "200");
+        // Exactly 199 separators, no trailing comma.
+        assert_eq!(out.matches(',').count(), 199);
+        assert!(!out.starts_with(','));
+        assert!(!out.ends_with(','));
+    }
+
+    #[test]
+    fn build_bulk_ids_query_201_ids_passes_through() {
+        // One over the GW2 API cap. The helper deliberately does NOT split or
+        // error — chunking is the caller's responsibility (current call sites
+        // chunk via `ids.chunks(MAX_BULK_IDS)` BEFORE invoking the helper).
+        let ids: Vec<u32> = (1..=201).collect();
+        let out = build_bulk_ids_query(&ids);
+        assert_eq!(out.split(',').count(), 201);
+        assert!(out.ends_with(",201"));
+    }
+
+    #[test]
+    fn build_bulk_ids_query_u32_max() {
+        assert_eq!(build_bulk_ids_query(&[u32::MAX]), "4294967295");
+    }
+
+    #[test]
+    fn build_bulk_ids_query_matches_legacy_format_for_numeric_values() {
+        // Bit-for-bit equivalence check against the previous inline construction
+        // for the JSON-number IDs that real GW2 endpoints return.
+        let values: Vec<serde_json::Value> =
+            vec![1u32.into(), 42u32.into(), 100u32.into(), u32::MAX.into()];
+        let legacy: String = values
+            .iter()
+            .map(|id| id.to_string().replace('"', ""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let numeric: Vec<u32> = values.iter().filter_map(value_to_u32).collect();
+        assert_eq!(build_bulk_ids_query(&numeric), legacy);
+    }
+
+    #[test]
+    fn value_to_u32_accepts_numbers_and_numeric_strings() {
+        assert_eq!(value_to_u32(&serde_json::json!(42)), Some(42));
+        assert_eq!(value_to_u32(&serde_json::json!("42")), Some(42));
+        assert_eq!(value_to_u32(&serde_json::json!(u32::MAX)), Some(u32::MAX));
+        assert_eq!(
+            value_to_u32(&serde_json::json!((u32::MAX as u64) + 1)),
+            None
+        );
+        assert_eq!(value_to_u32(&serde_json::json!(null)), None);
+        assert_eq!(value_to_u32(&serde_json::json!("not-a-number")), None);
+    }
 
     #[test]
     fn test_token_bucket_starts_full() {
