@@ -338,11 +338,13 @@ fn regression_gear_prefix_selection() {
         harb.primary, "Viper's",
         "condi_dps preset must select Viper's gear"
     );
-    // Healer preset (boon_support=0.2, healing=1.0, sustain=0.4) cosine-matches
-    // Magi's most strongly (Pow/Heal/Vit) under the current GEAR_PROFILES.
+    // Healer preset (boon_support=0.6, healing=1.0, sustain=0.2) cosine-matches
+    // Harrier's most strongly (Pow/Heal/Concentration) under the current
+    // GEAR_PROFILES -- the canonical meta-healer prefix in PvE, since healer
+    // identity is defined by quickness/alacrity uptime, not raw sustain.
     assert_eq!(
-        druid.primary, "Magi's",
-        "healer preset must cosine-match Magi's gear"
+        druid.primary, "Harrier's",
+        "healer preset must cosine-match Harrier's gear"
     );
     // Tank preset (power=0.1, healing=0.3, sustain=1.0, control=0.2) cosine-matches
     // Nomad's most strongly (Tou/Vit/Heal pure-defensive).
