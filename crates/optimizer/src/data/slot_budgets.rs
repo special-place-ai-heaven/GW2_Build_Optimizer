@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 use thiserror::Error;
 
-use super::{DataLoadError, EvidenceLevel};
+use super::{try_load, DataLoadError, EvidenceLevel};
 
 /// Canonical JSON embedded at compile time from data/slot_budgets/level80_ascended.json.
 const SLOT_BUDGETS_JSON: &str = include_str!("../../../../data/slot_budgets/level80_ascended.json");
@@ -24,19 +24,11 @@ pub fn slot_budgets() -> &'static SlotBudgets {
 /// Try to load slot budgets from the embedded JSON, returning typed errors
 /// on failure. Does NOT store in OnceLock — used for health-check validation.
 pub fn try_load_slot_budgets() -> Result<SlotBudgets, Vec<DataLoadError>> {
-    load_slot_budgets(SLOT_BUDGETS_JSON).map_err(|e| {
-        vec![match e {
-            SlotBudgetError::ParseError(pe) => DataLoadError::ParseError {
-                source: "slot_budgets".into(),
-                detail: pe.to_string(),
-            },
-            SlotBudgetError::ValidationError(msg) => DataLoadError::ValidationError {
-                source: "slot_budgets".into(),
-                field: String::new(),
-                reason: msg,
-            },
-        }]
-    })
+    try_load!(
+        "slot_budgets",
+        load_slot_budgets(SLOT_BUDGETS_JSON),
+        SlotBudgetError
+    )
 }
 
 #[derive(Debug, Error)]

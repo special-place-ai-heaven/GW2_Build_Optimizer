@@ -91,6 +91,30 @@ impl std::fmt::Display for DataLoadError {
     }
 }
 
+/// Maps a per-dataset load error to a `Vec<DataLoadError>` with `source` tagged.
+///
+/// Every data loader's error enum has the same shape: `ParseError(impl ToString)`
+/// and `ValidationError(String)`. This macro folds that shape into a single line
+/// at each `try_load_*` call site.
+macro_rules! try_load {
+    ($source:literal, $inner:expr, $err_ty:ident) => {
+        $inner.map_err(|e| {
+            vec![match e {
+                $err_ty::ParseError(pe) => $crate::data::DataLoadError::ParseError {
+                    source: $source.into(),
+                    detail: pe.to_string(),
+                },
+                $err_ty::ValidationError(msg) => $crate::data::DataLoadError::ValidationError {
+                    source: $source.into(),
+                    field: String::new(),
+                    reason: msg,
+                },
+            }]
+        })
+    };
+}
+pub(crate) use try_load;
+
 /// Overall health of loaded data, returned by `initialize()`.
 #[derive(Debug, Clone)]
 pub enum DataState {

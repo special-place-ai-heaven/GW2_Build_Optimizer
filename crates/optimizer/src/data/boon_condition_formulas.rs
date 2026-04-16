@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use thiserror::Error;
 
-use super::DataLoadError;
+use super::{try_load, DataLoadError};
 
 /// Canonical JSON embedded at compile time from data/formulas/boons.json.
 const BOON_FORMULAS_JSON: &str = include_str!("../../../../data/formulas/boons.json");
@@ -50,37 +50,21 @@ pub fn conditions() -> &'static ConditionFormulas {
 /// Try to load boon formulas from the embedded JSON, returning typed errors
 /// on failure. Does NOT store in OnceLock — used for health-check validation.
 pub fn try_load_boon_formulas() -> Result<BoonFormulas, Vec<DataLoadError>> {
-    load_boon_formulas(BOON_FORMULAS_JSON).map_err(|e| {
-        vec![match e {
-            FormulaLoadError::ParseError(pe) => DataLoadError::ParseError {
-                source: "boon_formulas".into(),
-                detail: pe.to_string(),
-            },
-            FormulaLoadError::ValidationError(msg) => DataLoadError::ValidationError {
-                source: "boon_formulas".into(),
-                field: String::new(),
-                reason: msg,
-            },
-        }]
-    })
+    try_load!(
+        "boon_formulas",
+        load_boon_formulas(BOON_FORMULAS_JSON),
+        FormulaLoadError
+    )
 }
 
 /// Try to load condition formulas from the embedded JSON, returning typed errors
 /// on failure. Does NOT store in OnceLock — used for health-check validation.
 pub fn try_load_condition_formulas() -> Result<ConditionFormulas, Vec<DataLoadError>> {
-    load_condition_formulas(CONDITION_FORMULAS_JSON).map_err(|e| {
-        vec![match e {
-            FormulaLoadError::ParseError(pe) => DataLoadError::ParseError {
-                source: "condition_formulas".into(),
-                detail: pe.to_string(),
-            },
-            FormulaLoadError::ValidationError(msg) => DataLoadError::ValidationError {
-                source: "condition_formulas".into(),
-                field: String::new(),
-                reason: msg,
-            },
-        }]
-    })
+    try_load!(
+        "condition_formulas",
+        load_condition_formulas(CONDITION_FORMULAS_JSON),
+        FormulaLoadError
+    )
 }
 
 // ─── Condition name canonicalization ───

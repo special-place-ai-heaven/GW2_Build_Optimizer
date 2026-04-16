@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 use thiserror::Error;
 
 use super::quality::FactualValue;
-use super::{DataLoadError, EvidenceLevel};
+use super::{try_load, DataLoadError, EvidenceLevel};
 use crate::scoring::OptimizationWeights;
 use crate::synergy;
 
@@ -74,19 +74,11 @@ pub fn effects() -> &'static NormalizedEffectsData {
 /// Try to load all normalized effects from the embedded JSON, returning typed errors
 /// on failure. Does NOT store in OnceLock — used for health-check validation.
 pub fn try_load_normalized_effects() -> Result<(), Vec<DataLoadError>> {
-    load_all_effects().map(|_| ()).map_err(|e| {
-        vec![match e {
-            NormalizedEffectError::ParseError(pe) => DataLoadError::ParseError {
-                source: "normalized_effects".into(),
-                detail: pe.to_string(),
-            },
-            NormalizedEffectError::ValidationError(msg) => DataLoadError::ValidationError {
-                source: "normalized_effects".into(),
-                field: String::new(),
-                reason: msg,
-            },
-        }]
-    })
+    try_load!(
+        "normalized_effects",
+        load_all_effects().map(|_| ()),
+        NormalizedEffectError
+    )
 }
 
 // ─── Error type ───

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use thiserror::Error;
 
-use super::{DataLoadError, DataQuality, DataQualityReason, EvidenceLevel};
+use super::{try_load, DataLoadError, DataQuality, DataQualityReason, EvidenceLevel};
 
 // ─── Embedded baseline JSON (compile-time) ───
 
@@ -28,19 +28,11 @@ pub fn overrides() -> &'static BalanceOverrides {
 /// Try to load all balance overrides from the embedded JSON, returning typed errors
 /// on failure. Does NOT store in OnceLock — used for health-check validation.
 pub fn try_load_balance_overrides() -> Result<BalanceOverrides, Vec<DataLoadError>> {
-    load_all_overrides().map_err(|e| {
-        vec![match e {
-            BalanceOverrideError::ParseError(pe) => DataLoadError::ParseError {
-                source: "balance_overrides".into(),
-                detail: pe.to_string(),
-            },
-            BalanceOverrideError::ValidationError(msg) => DataLoadError::ValidationError {
-                source: "balance_overrides".into(),
-                field: String::new(),
-                reason: msg,
-            },
-        }]
-    })
+    try_load!(
+        "balance_overrides",
+        load_all_overrides(),
+        BalanceOverrideError
+    )
 }
 
 // ─── Error type ───

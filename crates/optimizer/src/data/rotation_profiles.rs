@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use thiserror::Error;
 
-use super::{DataLoadError, EvidenceLevel};
+use super::{try_load, DataLoadError, EvidenceLevel};
 
 // ─── Embedded JSON (compile-time) ───
 
@@ -35,19 +35,11 @@ pub fn rotation_profiles() -> &'static RotationProfileData {
 /// Try to load all rotation profiles from the embedded JSON, returning typed errors
 /// on failure. Does NOT store in OnceLock — used for health-check validation.
 pub fn try_load_rotation_profiles() -> Result<(), Vec<DataLoadError>> {
-    load_all_rotation_profiles().map(|_| ()).map_err(|e| {
-        vec![match e {
-            RotationProfileError::ParseError(pe) => DataLoadError::ParseError {
-                source: "rotation_profiles".into(),
-                detail: pe.to_string(),
-            },
-            RotationProfileError::ValidationError(msg) => DataLoadError::ValidationError {
-                source: "rotation_profiles".into(),
-                field: String::new(),
-                reason: msg,
-            },
-        }]
-    })
+    try_load!(
+        "rotation_profiles",
+        load_all_rotation_profiles().map(|_| ()),
+        RotationProfileError
+    )
 }
 
 // ─── Error type ───
