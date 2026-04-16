@@ -227,7 +227,6 @@ pub struct UptimeModel {
 pub enum OperationType {
     AppliesBoon,
     RemovesBoon,
-    StealsBoon,
     CorruptsBoon,
     AppliesCondition,
     RemovesCondition,
@@ -1226,7 +1225,6 @@ mod tests {
         let variants = vec![
             OperationType::AppliesBoon,
             OperationType::RemovesBoon,
-            OperationType::StealsBoon,
             OperationType::CorruptsBoon,
             OperationType::AppliesCondition,
             OperationType::RemovesCondition,
