@@ -19,21 +19,29 @@
   *why* precisely enough that the LLM can correct itself on retry. Extend
   `ChangeEntry` to carry a machine-readable reason.
 
-- **Unified retry/backoff shim** — OpenAI and Anthropic each have
-  near-identical `MAX_RETRIES = 3` loops with bespoke status matching.
-  Extract `with_retries<F>(f: F)` shared helper. Keep billing-vs-auth
-  distinction per provider.
+- ~~**Unified retry/backoff shim**~~ — Done. `llm/retry.rs` provides
+  generic `with_retries<F, T, E>`, `RetryOutcome<T, E>`, `MAX_RETRIES`,
+  and `backoff_delay`. OpenAI `send_chat`, Anthropic `send_messages`,
+  and Gemini `send_request` all share the loop; per-provider status
+  classification stays inline (OpenAI 500/502/503, Anthropic adds 529,
+  Gemini 500/503).
 
-- **Rate-tracker persistence fuzz** — `PersistedUsage` is loaded and
-  flushed per reserve. Simulate DLL-reload mid-minute and confirm
-  `used_this_minute` resets on minute rollover but `used_today` persists.
+- ~~**Rate-tracker persistence fuzz**~~ — Done. Per-provider tests cover
+  to_persisted → from_persisted same-day roundtrip (daily preserved,
+  minute zeroed), day rollover on reload (daily reset), and minute
+  rollover mid-operation (minute resets, daily preserved). Gemini adds
+  a daily-limit-after-reload test.
 
-- **Chat-refinement memory bound** —
-  `chat_refinement_prompt_with_tools` rebuilds the whole conversation into
-  one prompt. Add a token-budget guard that trims oldest non-critical
-  turns when approaching per-provider context limits.
+- ~~**Chat-refinement memory bound**~~ — Done (revised interpretation).
+  Growth lives in `generate_with_tools_progress`, not the prompt builder.
+  `llm/trim.rs` supplies `estimate_tokens` + `SAFE_PROMPT_BUDGET_TOKENS =
+  100_000`. Each provider has a local `trim_messages`/`trim_contents`
+  that drops oldest turn atomically (keeping the initial prompt and the
+  latest turn, preserving tool_call/tool_result pair balance).
 
-- **Extend billing-keyword detection** — `validate_key_detailed` provider
-  overrides each carry a substring set. Centralize the list (`"billing"`,
-  `"quota"`, `"exceeded"`, `"payment"`, `"credit"`) and cover localized
-  error messages (Gemini occasionally returns non-English text).
+- ~~**Extend billing-keyword detection**~~ — Done. `llm::has_billing_keyword`
+  centralizes the substring list (`billing`, `quota`, `exceeded`,
+  `payment`, `credit`, `insufficient`) plus language-neutral Google
+  status codes (`resource_exhausted`, `failed_precondition`) for
+  Gemini's non-English responses. All three providers' `validate_key_detailed`
+  overrides call through it.

@@ -96,7 +96,7 @@ impl LlmClient for GeminiLlmClient {
                 warning: Some(e.to_string()),
             },
             Err(GeminiError::Api { status, ref message }) => {
-                if message.contains("billing") || message.contains("quota") {
+                if super::has_billing_keyword(message) {
                     KeyValidationResult {
                         valid: true,
                         message: "Gemini key is valid!".into(),

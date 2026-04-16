@@ -234,6 +234,59 @@ struct Candidate {
     content: Option<Content>,
 }
 
+/// Drop oldest tool-call turn(s) when the conversation exceeds the token
+/// budget. A Gemini turn is one model Content (with function_call parts)
+/// followed by one user Content (with function_response parts); pairs must
+/// be dropped atomically. The initial user prompt and the most recent turn
+/// are always preserved.
+fn trim_contents(contents: &mut Vec<Content>, budget_tokens: usize) {
+    use crate::llm::trim::estimate_tokens;
+
+    fn part_tokens(p: &Part) -> usize {
+        let text = p.text.as_deref().map(estimate_tokens).unwrap_or(0);
+        let fc = p
+            .function_call
+            .as_ref()
+            .map(|fc| estimate_tokens(&fc.args.to_string()))
+            .unwrap_or(0);
+        let fr = p
+            .function_response
+            .as_ref()
+            .map(|fr| estimate_tokens(&fr.response.to_string()))
+            .unwrap_or(0);
+        text + fc + fr
+    }
+    fn content_tokens(c: &Content) -> usize {
+        c.parts.iter().map(part_tokens).sum()
+    }
+
+    let mut total: usize = contents.iter().map(content_tokens).sum();
+    if total <= budget_tokens {
+        return;
+    }
+
+    loop {
+        let turn_starts: Vec<usize> = contents
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(_, c)| c.parts.iter().any(|p| p.function_call.is_some()))
+            .map(|(i, _)| i)
+            .collect();
+
+        if turn_starts.len() < 2 {
+            return;
+        }
+
+        contents.drain(turn_starts[0]..turn_starts[1]);
+        total = contents.iter().map(content_tokens).sum();
+        if total <= budget_tokens {
+            return;
+        }
+    }
+}
+
+
 impl GeminiClient {
     pub fn new(api_key: &str, model: &str) -> Result<Self, GeminiError> {
         let http = reqwest::blocking::Client::builder()
@@ -459,6 +512,7 @@ impl GeminiClient {
         let mut last_text: Option<String> = None;
 
         for turn in 0..max_turns {
+            trim_contents(&mut contents, crate::llm::trim::SAFE_PROMPT_BUDGET_TOKENS);
             let request = GenerateRequest {
                 contents: contents.clone(),
                 tools: Some(tools.clone()),
@@ -677,8 +731,181 @@ mod tests {
     }
 
     #[test]
+        fn test_rate_tracker_persistence_roundtrip_same_day() {
+            let mut tracker = RateTracker::new();
+            for _ in 0..5 {
+                tracker.check_and_reserve().unwrap();
+            }
+            assert_eq!(tracker.requests_today, 5);
+            assert_eq!(tracker.requests_this_minute, 5);
+
+            let persisted = tracker.to_persisted();
+            let reloaded = RateTracker::from_persisted(persisted);
+
+            assert_eq!(reloaded.requests_today, 5);
+            assert_eq!(reloaded.requests_this_minute, 0);
+        }
+
+        #[test]
+        fn test_rate_tracker_persistence_day_rollover_resets_daily() {
+            let yesterday = current_epoch_day().saturating_sub(1);
+            let persisted = PersistedUsage {
+                day: yesterday,
+                requests_today: 200,
+            };
+            let reloaded = RateTracker::from_persisted(persisted);
+
+            assert_eq!(reloaded.requests_today, 0);
+            assert_eq!(reloaded.requests_this_minute, 0);
+            assert_eq!(reloaded.current_day, current_epoch_day());
+        }
+
+        #[test]
+        fn test_rate_tracker_minute_rollover_preserves_daily() {
+            let mut tracker = RateTracker::new();
+            for _ in 0..3 {
+                tracker.check_and_reserve().unwrap();
+            }
+            assert_eq!(tracker.requests_this_minute, 3);
+            assert_eq!(tracker.requests_today, 3);
+
+            tracker.minute_start = Instant::now() - std::time::Duration::from_secs(61);
+
+            tracker.check_and_reserve().unwrap();
+
+            assert_eq!(tracker.requests_this_minute, 1);
+            assert_eq!(tracker.requests_today, 4);
+        }
+
+        #[test]
+        fn test_rate_tracker_daily_limit_enforced_after_reload() {
+            // Simulate a DLL reload mid-day with the daily budget nearly exhausted.
+            let persisted = PersistedUsage {
+                day: current_epoch_day(),
+                requests_today: 240,
+            };
+            let mut reloaded = RateTracker::from_persisted(persisted);
+            assert_eq!(reloaded.requests_today, 240);
+            assert!(reloaded.check_and_reserve().is_err());
+        }
+
+    #[test]
     fn test_remaining_quota() {
         let client = GeminiClient::new("fake-key", "gemini-2.5-flash").unwrap();
         assert_eq!(client.remaining_quota(), 250);
     }
+
+    #[test]
+    fn test_function_call_name_round_trip() {
+        // Gemini's protocol pairs functionCall/functionResponse by `name`
+        // (no id field). The round-trip invariant: when we echo the call,
+        // the name must survive serde → HTTP → serde untouched.
+        let server_content_json = r#"{
+            "role": "model",
+            "parts": [
+                {"functionCall": {"name": "square_number", "args": {"number": 7}}}
+            ]
+        }"#;
+
+        let content: Content = serde_json::from_str(server_content_json).expect("parse Content");
+        let call = content
+            .parts
+            .iter()
+            .find_map(|p| p.function_call.as_ref())
+            .expect("functionCall present");
+        assert_eq!(call.name, "square_number");
+
+        let result_part = Part::function_response(&call.name, serde_json::json!({"result": 49}));
+        let wire = serde_json::to_value(&result_part).unwrap();
+        assert_eq!(wire["functionResponse"]["name"], "square_number");
+        assert!(wire["functionResponse"]["response"].is_object());
+    }
+
+    #[test]
+        fn test_trim_contents_drops_oldest_turn() {
+            fn user_text(s: &str) -> Content {
+                Content {
+                    role: Some("user".into()),
+                    parts: vec![Part::text(s)],
+                }
+            }
+            fn model_call(name: &str, payload: &str) -> Content {
+                Content {
+                    role: Some("model".into()),
+                    parts: vec![Part {
+                        text: None,
+                        function_call: Some(FunctionCall {
+                            name: name.into(),
+                            args: serde_json::json!({ "q": payload }),
+                        }),
+                        function_response: None,
+                    }],
+                }
+            }
+            fn user_fresponse(name: &str, payload: &str) -> Content {
+                Content {
+                    role: Some("user".into()),
+                    parts: vec![Part::function_response(
+                        name,
+                        serde_json::Value::String(payload.into()),
+                    )],
+                }
+            }
+
+            let filler = "x".repeat(400);
+            let mut contents = vec![
+                user_text("initial prompt"),
+                model_call("get_trait_details", &filler),
+                user_fresponse("get_trait_details", &filler),
+                model_call("get_trait_details", &filler),
+                user_fresponse("get_trait_details", &filler),
+                model_call("get_skill_info", &filler),
+                user_fresponse("get_skill_info", &filler),
+            ];
+            let original_len = contents.len();
+
+            trim_contents(&mut contents, 200);
+
+            assert!(
+                contents.len() < original_len,
+                "expected trim, got {}",
+                contents.len()
+            );
+            // Initial prompt preserved.
+            assert_eq!(contents[0].role.as_deref(), Some("user"));
+            assert_eq!(contents[0].parts[0].text.as_deref(), Some("initial prompt"));
+            // Last model call is still the most recent one (get_skill_info).
+            let last_model = contents
+                .iter()
+                .rposition(|c| c.parts.iter().any(|p| p.function_call.is_some()))
+                .expect("must retain a model call");
+            let last_call_name = contents[last_model].parts[0]
+                .function_call
+                .as_ref()
+                .map(|fc| fc.name.clone())
+                .unwrap();
+            assert_eq!(last_call_name, "get_skill_info");
+            // Every function_response still has a preceding function_call (pair invariant).
+            for (i, c) in contents.iter().enumerate() {
+                if c.parts.iter().any(|p| p.function_response.is_some()) {
+                    assert!(
+                        contents[..i]
+                            .iter()
+                            .any(|prev| prev.parts.iter().any(|p| p.function_call.is_some())),
+                        "orphan function_response at index {}",
+                        i
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn test_trim_contents_noop_under_budget() {
+            let mut contents = vec![Content {
+                role: Some("user".into()),
+                parts: vec![Part::text("short")],
+            }];
+            trim_contents(&mut contents, 10_000);
+            assert_eq!(contents.len(), 1);
+        }
 }
