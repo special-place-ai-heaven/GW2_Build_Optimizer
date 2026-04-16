@@ -768,6 +768,48 @@ mod tests {
         assert_eq!(stats.concentration, 50.0);
     }
 
+
+    #[test]
+    fn test_stat_add_all_alias_pairs() {
+        // CLAUDE.md calls out the ConditionDuration/Expertise rename as the
+        // primary API compatibility concern. The GW2 API still emits the old
+        // spellings alongside the new ones depending on the endpoint, so every
+        // alias pair must normalize symmetrically through `add` and round-trip
+        // through `get`. Missing any pair silently drops stats on either path.
+        let pairs = [
+            ("ConditionDuration", "Expertise"),
+            ("BoonDuration", "Concentration"),
+            ("CritDamage", "Ferocity"),
+            ("Healing", "HealingPower"),
+        ];
+        for (old, new) in pairs {
+            let mut stats = StatBlock::default();
+            stats.add(old, 10.0);
+            stats.add(new, 5.0);
+
+            let via_old = stats.get(old);
+            let via_new = stats.get(new);
+            assert_eq!(
+                via_old, via_new,
+                "alias pair ({old}, {new}) must read the same value — got {via_old} vs {via_new}",
+            );
+            assert_eq!(
+                via_new, 15.0,
+                "alias pair ({old}, {new}) must accumulate additions — got {via_new}",
+            );
+        }
+    }
+
+    #[test]
+    fn test_stat_get_unknown_attr_returns_zero() {
+        // `get` returns 0.0 for unrecognized attributes (e.g. AgonyResistance)
+        // rather than panicking. This mirrors `add`'s silent-skip behavior
+        // and lets callers iterate API responses without per-attr filtering.
+        let stats = StatBlock::default();
+        assert_eq!(stats.get("AgonyResistance"), 0.0);
+        assert_eq!(stats.get("TotallyFakeAttribute"), 0.0);
+    }
+
     // Helper constructors for test data
     fn default_item() -> Item {
         Item {
