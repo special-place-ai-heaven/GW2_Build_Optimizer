@@ -18,8 +18,16 @@ impl BuildStorage {
     }
 
     /// Save a new build to disk. Fails if a file with this name already exists.
-    /// Uses crash-safe temp-write + atomic rename pattern.
+    ///
+    /// Two-phase write: (1) atomically claim the destination path with
+    /// `create_new(true)` on a zero-byte placeholder, then (2) write the
+    /// content to `<path>.tmp` and rename over our own placeholder. This is
+    /// both race-safe (two concurrent `save_new` calls with the same name
+    /// can never both succeed — one sees `AlreadyExists` on the claim) and
+    /// crash-safe (partial writes land in `.tmp`, never published).
     pub fn save_new(&self, build: &SavedBuild) -> Result<(), String> {
+        use std::fs::OpenOptions;
+
         std::fs::create_dir_all(&self.saves_dir)
             .map_err(|e| format!("Failed to create saves dir: {}", e))?;
 
@@ -29,25 +37,47 @@ impl BuildStorage {
         }
 
         let path = self.saves_dir.join(format!("{}.json", filename));
-        if path.exists() {
-            return Err(format!(
-                "A build with filename '{}' already exists \
-                 (names that differ only in special characters collide)",
-                filename
-            ));
+
+        // Phase 1: claim the destination atomically. `create_new(true)` returns
+        // AlreadyExists if any other thread/process has already reserved it,
+        // which is the collision signal callers rely on.
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(_handle) => { /* claim acquired; handle dropped immediately */ }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(format!(
+                    "A build with filename '{}' already exists \
+                     (names that differ only in special characters collide)",
+                    filename
+                ));
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Failed to create {}: {}",
+                    path.display(),
+                    e
+                ));
+            }
         }
 
-        let json = serde_json::to_string_pretty(build)
-            .map_err(|e| format!("Failed to serialize: {}", e))?;
+        let json = match serde_json::to_string_pretty(build) {
+            Ok(s) => s,
+            Err(e) => {
+                // Remove the placeholder so the slot doesn't leak for the user.
+                let _ = std::fs::remove_file(&path);
+                return Err(format!("Failed to serialize: {}", e));
+            }
+        };
 
-        // Crash-safe: write to .tmp then atomic rename to .json
+        // Phase 2: crash-safe content write.
         let tmp_path = path.with_extension("tmp");
         if let Err(e) = std::fs::write(&tmp_path, &json) {
-            let _ = std::fs::remove_file(&tmp_path); // best-effort cleanup
+            let _ = std::fs::remove_file(&tmp_path);
+            let _ = std::fs::remove_file(&path);
             return Err(format!("Failed to write {}: {}", tmp_path.display(), e));
         }
         std::fs::rename(&tmp_path, &path).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp_path); // best-effort cleanup
+            let _ = std::fs::remove_file(&tmp_path);
+            let _ = std::fs::remove_file(&path);
             format!(
                 "Failed to rename {} → {}: {}",
                 tmp_path.display(),
@@ -356,22 +386,13 @@ mod tests {
 
 
     #[test]
-    #[ignore = "save_new is TOCTOU-racy: two threads can both pass exists() and \
-                both succeed. This test asserts the intended contract (exactly \
-                one wins) and currently fails. Un-ignore once save_new uses \
-                atomic exclusive creation (e.g. OpenOptions::create_new) on the \
-                final path instead of an exists()-check. Run with \
-                `cargo test -p gw2-core -- --ignored` to reproduce."]
     fn test_save_new_concurrent_race() {
         // Two threads call save_new on the same filename at the same time.
         // The contract promises that save_new rejects collisions (see
         // `test_save_new_collision`); under contention exactly one thread
         // must win and the other must error with "already exists". No .tmp
-        // leftover should remain.
-        //
-        // Each thread is repeated many times to push the window between the
-        // exists() check and rename(). This is a best-effort stress test —
-        // threads rerun the race fresh each iteration.
+        // leftover should remain. Repeated across many iterations to widen
+        // the scheduler race window.
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::thread;
