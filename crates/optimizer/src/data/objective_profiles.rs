@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use thiserror::Error;
 
+use super::boon_condition_formulas::canonical_condition_name;
 use super::{DataLoadError, EvidenceLevel};
 
 // ─── Embedded JSON (compile-time) ───
@@ -174,7 +175,21 @@ pub fn load_objective_profile_file(
     json: &str,
     expected_mode: &str,
 ) -> Result<ObjectiveProfileFile, ObjectiveProfileError> {
-    let file: ObjectiveProfileFile = serde_json::from_str(json)?;
+    let mut file: ObjectiveProfileFile = serde_json::from_str(json)?;
+
+    // Normalize condition_priorities keys to their canonical form so authored
+    // verb-form names (Blind, Poison, Immobilize) match the status-effect-form
+    // keys in `data/formulas/conditions.json` (Blinded, Poisoned, Immobile).
+    // If both forms are present, the canonical form wins.
+    for profile in file.profiles.iter_mut() {
+        let original = std::mem::take(&mut profile.condition_priorities);
+        let mut normalized: HashMap<String, f64> = HashMap::with_capacity(original.len());
+        for (name, weight) in original {
+            let canonical = canonical_condition_name(&name).to_string();
+            normalized.insert(canonical, weight);
+        }
+        profile.condition_priorities = normalized;
+    }
 
     // Validate mode matches filename stem
     if file.mode != expected_mode {
