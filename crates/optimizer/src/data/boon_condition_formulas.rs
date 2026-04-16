@@ -83,6 +83,36 @@ pub fn try_load_condition_formulas() -> Result<ConditionFormulas, Vec<DataLoadEr
     })
 }
 
+// ─── Condition name canonicalization ───
+//
+// GW2 wiki uses verb-form names for some conditions (Blind, Poison, Immobilize)
+// while the in-game status-effect tooltips and `data/formulas/conditions.json`
+// use the noun/adjective form (Blinded, Poisoned, Immobile). Authored data
+// (objective_profiles, etc.) and ad-hoc string literals scattered through the
+// codebase use both forms inconsistently. Canonical form for this codebase is
+// the one used in `data/formulas/conditions.json` (noun/adjective form), since
+// that is the lookup table all damage and metadata queries hit.
+//
+// 3 entries today; if the list grows materially, promote to a data file.
+const CONDITION_ALIAS_TABLE: &[(&str, &str)] = &[
+    ("Blind", "Blinded"),
+    ("Poison", "Poisoned"),
+    ("Immobilize", "Immobile"),
+];
+
+/// Returns the canonical condition name for `name`, mapping verb-form aliases
+/// (Blind, Poison, Immobilize) to the status-effect form used as keys in
+/// `data/formulas/conditions.json` (Blinded, Poisoned, Immobile). Returns the
+/// input unchanged if it is already canonical or not a recognized alias.
+pub fn canonical_condition_name(name: &str) -> &str {
+    for (alias, canonical) in CONDITION_ALIAS_TABLE {
+        if name == *alias {
+            return canonical;
+        }
+    }
+    name
+}
+
 // ─── Error Types ───
 
 #[derive(Debug, Error)]
@@ -339,15 +369,10 @@ impl ConditionFormulas {
     /// For multi-state conditions, use `torment_tick()` or `confusion_tick()`.
     pub fn tick_damage(&self, condition: &str, condition_damage: f64, mode: GameMode) -> f64 {
         let mode_key = mode_to_key(&mode);
-        // Also try "Poisoned" for "Poison"
-        let cond = self.map.get(condition).or_else(|| {
-            if condition == "Poison" {
-                self.map.get("Poisoned")
-            } else {
-                None
-            }
-        });
-        let cond = match cond {
+        // Route through the canonical resolver so verb-form aliases
+        // (Poison, Blind, Immobilize) hit their status-effect-form entries.
+        let canonical = canonical_condition_name(condition);
+        let cond = match self.map.get(canonical) {
             Some(c) => c,
             None => return 0.0,
         };
