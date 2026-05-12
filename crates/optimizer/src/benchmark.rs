@@ -5,8 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::balance::BalanceContext;
-use crate::scoring::{select_gear_prefix, score_with_weights, OptimizationWeights};
+use crate::scoring::{select_gear_prefix, OptimizationWeights};
 
 /// A single normalized reference build from a community build site.
 #[derive(Debug, Clone, Serialize, Deserialize)]

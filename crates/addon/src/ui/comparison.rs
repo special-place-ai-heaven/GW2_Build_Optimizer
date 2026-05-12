@@ -722,8 +722,6 @@ fn render_data_quality_badge(ui: &Ui, suggestion: &BuildSuggestion) {
 
 /// Render benchmark delta vs community reference.
 fn render_benchmark_delta(ui: &Ui, suggestion: &BuildSuggestion) {
-    use gw2_optimizer::benchmark::BenchmarkDelta;
-
     match &suggestion.benchmark_delta {
         None => {
             // No data — show subtle hint in collapsed section

@@ -111,8 +111,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                 // Build a mode + tier-aware scenario for the referee and optimize_v2.
                 let scenario = {
                     use gw2_optimizer::scenario::{
-                        CombatTier, OptimizationTarget, ScenarioSpec,
-                        TargetProfile,
+                        OptimizationTarget, ScenarioSpec, TargetProfile,
                     };
                     // Map the captured wvw_combat_tier (gw2_optimizer::scenario::CombatTier)
                     // directly — it's the same type.
