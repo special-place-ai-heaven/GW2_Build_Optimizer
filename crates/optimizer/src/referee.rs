@@ -341,7 +341,7 @@ pub fn evaluate_validated_build(
 mod tests {
     use super::{
         evaluate_validated_build, evaluate_viability_gates, GateResult, ViabilityGate,
-        EHP_FLOOR_PVE, EHP_FLOOR_PVP, EHP_FLOOR_WVW, EHP_FLOOR_WVW_HAVOC, EHP_FLOOR_WVW_ROAM,
+        EHP_FLOOR_PVE, EHP_FLOOR_PVP, EHP_FLOOR_WVW_HAVOC, EHP_FLOOR_WVW_ROAM,
         EHP_FLOOR_WVW_ZERG,
     };
     use crate::balance::BalanceContext;
@@ -536,7 +536,6 @@ mod tests {
     /// EHP gate uses the WvW floor for WvW scenarios; tier-aware (Squad uses ZERG floor).
     #[test]
     fn gate_wvw_ehp_below_wvw_floor_fails() {
-        use crate::scenario::{OptimizationTarget, TargetProfile};
         let rot = make_viable_rotation();
         let mut combat = make_viable_combat();
         // Use a value below the Zerg (Squad) floor to ensure failure at Squad tier
