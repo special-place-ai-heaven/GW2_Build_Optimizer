@@ -17,13 +17,7 @@ const ELITE_COLOR: [f32; 4] = [1.0, 0.6, 0.2, 1.0]; // Orange for elite marker
 const HEADER_COLOR: [f32; 4] = [0.85, 0.72, 0.3, 1.0]; // Gold header
 const LOCK_ICON_COLOR: [f32; 4] = [1.0, 0.85, 0.2, 0.8]; // Lock indicator ring
 
-fn color_u32(c: [f32; 4]) -> u32 {
-    let r = (c[0] * 255.0).clamp(0.0, 255.0) as u32;
-    let g = (c[1] * 255.0).clamp(0.0, 255.0) as u32;
-    let b = (c[2] * 255.0).clamp(0.0, 255.0) as u32;
-    let a = (c[3] * 255.0).clamp(0.0, 255.0) as u32;
-    (a << 24) | (b << 16) | (g << 8) | r
-}
+use crate::ui::color_u32;
 
 // ─── Geometry helpers ───
 
@@ -213,25 +207,16 @@ pub fn render_lock_panel(
         return modified;
     }
 
-    let Some(profession) = db.professions.get(profession_name) else {
+    // Bail if the profession isn't in the DB — we can't render the panel
+    // without spec metadata, and the rest of the function would silently
+    // produce an empty view.
+    if db.professions.get(profession_name).is_none() {
         return modified;
-    };
+    }
 
-    // Gather available specs for this profession (reserved for future spec picker)
-    let _core_specs: Vec<(u32, &str)> = profession
-        .specializations
-        .iter()
-        .filter_map(|&id| db.specializations.get(&id))
-        .filter(|s| !s.elite)
-        .map(|s| (s.id, s.name.as_str()))
-        .collect();
-    let _elite_specs: Vec<(u32, &str)> = profession
-        .specializations
-        .iter()
-        .filter_map(|&id| db.specializations.get(&id))
-        .filter(|s| s.elite)
-        .map(|s| (s.id, s.name.as_str()))
-        .collect();
+    // (Spec-picker scaffolding was here. Removed because the two Vecs were
+    // computed every render frame and never read. Re-introduce alongside the
+    // picker when it's actually wired up.)
 
     let mouse_pos = ui.io().mouse_pos;
     let mouse_clicked = ui.is_mouse_clicked(nexus::imgui::MouseButton::Left);

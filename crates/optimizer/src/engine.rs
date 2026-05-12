@@ -233,16 +233,26 @@ pub fn optimize(
     // 3. Combine gear + specs into full candidates
     let mut all_candidates: Vec<BuildCandidate> = Vec::new();
 
-    for gear in &gear_candidates {
-        for (elite, cores) in &spec_combos {
-            let spec_ids: Vec<u32> = cores.iter().copied().chain(elite.iter().copied()).collect();
+    // Pre-compute spec-combo invariants (trait_ids, trait stats, trait modifiers).
+    // These are gear-independent — recomputing them inside the gear loop was
+    // ~5x wasted work for a typical 5-gear search.
+    struct PrecomputedSpec {
+        elite: Option<u32>,
+        cores: Vec<u32>,
+        trait_ids: Vec<u32>,
+        trait_stats: stats::StatBlock,
+        modifiers: combat::DamageModifiers,
+    }
+    let precomputed_specs: Vec<PrecomputedSpec> = spec_combos
+        .iter()
+        .map(|(elite, cores)| {
+            let spec_ids: Vec<u32> =
+                cores.iter().copied().chain(elite.iter().copied()).collect();
 
-            // Collect minor traits (always active) + best major trait per column
             let mut trait_ids = Vec::new();
             for &spec_id in &spec_ids {
                 if let Some(spec) = specs_cache.get(&spec_id) {
                     trait_ids.extend(&spec.minor_traits);
-                    // Pick 1 best major trait per column (Adept/Master/Grandmaster)
                     let best = select_best_major_traits(
                         &spec.major_traits,
                         &stat_weights,
@@ -254,18 +264,7 @@ pub fn optimize(
                 }
             }
 
-            // Calculate stats with gear + traits
-            let gear_stats = calculate_candidate_stats(gear, itemstats_cache);
             let trait_stats = stats::calculate_trait_stats(&trait_ids, traits_cache);
-
-            let mut full_stats = stats::base_stats();
-            full_stats += &gear_stats;
-            full_stats += &trait_stats;
-            stats::apply_trait_conversions(&mut full_stats, &trait_ids, traits_cache);
-
-            let derived = stats::compute_derived(&full_stats, &profession.name);
-
-            // Extract damage modifiers from traits (no rune/sigil/relic in search phase)
             let modifiers = combat::extract_damage_modifiers(
                 &trait_ids,
                 None,
@@ -275,12 +274,33 @@ pub fn optimize(
                 _items_cache,
                 ctx,
             );
+            PrecomputedSpec {
+                elite: *elite,
+                cores: cores.clone(),
+                trait_ids,
+                trait_stats,
+                modifiers,
+            }
+        })
+        .collect();
+
+    for gear in &gear_candidates {
+        // gear_stats is spec-invariant — compute once per gear.
+        let gear_stats = calculate_candidate_stats(gear, itemstats_cache);
+
+        for spec in &precomputed_specs {
+            let mut full_stats = stats::base_stats();
+            full_stats += &gear_stats;
+            full_stats += &spec.trait_stats;
+            stats::apply_trait_conversions(&mut full_stats, &spec.trait_ids, traits_cache);
+
+            let derived = stats::compute_derived(&full_stats, &profession.name);
 
             // Calculate combat performance with Solo profile
             let combat_perf = combat::calculate_combat_performance(
                 &full_stats,
                 &derived,
-                &modifiers,
+                &spec.modifiers,
                 solo_profile,
                 &cw,
                 &profession.name,
@@ -290,14 +310,14 @@ pub fn optimize(
 
             all_candidates.push(BuildCandidate {
                 gear: gear.clone(),
-                elite_spec: *elite,
-                core_specs: cores.clone(),
-                equipped_traits: trait_ids,
+                elite_spec: spec.elite,
+                core_specs: spec.cores.clone(),
+                equipped_traits: spec.trait_ids.clone(),
                 stats: full_stats,
                 derived,
                 score,
                 combat: combat_perf,
-                modifiers,
+                modifiers: spec.modifiers.clone(),
                 pvp_amulet: None,
                 data_quality: data::DataQuality::Verified,
                 quality_reasons: vec![],
@@ -374,10 +394,29 @@ fn optimize_pvp(
     let stat_weights = weights.to_stat_weights();
     let cw = combat::condition_weights_for_profession(&profession.name, ctx);
 
-    for amulet in pvp_amulets.values() {
-        for (elite, cores) in &spec_combos {
-            let spec_ids: Vec<u32> = cores.iter().copied().chain(elite.iter().copied()).collect();
+    // Iterate amulets by id so candidates with identical scores break ties
+    // deterministically. `pvp_amulets.values()` iteration order is unspecified;
+    // the downstream `sort_by(...)` is stable but a stable sort preserves whatever
+    // input order it got, so the "best" amulet could vary across runs on ties.
+    let mut amulets_sorted: Vec<&PvpAmulet> = pvp_amulets.values().collect();
+    amulets_sorted.sort_by_key(|a| a.id);
 
+    // Pre-compute spec-combo invariants. trait_ids, trait_stats, and modifiers
+    // do not depend on the chosen amulet — recomputing them per amulet was
+    // ~N_amulets wasted work (often >10 amulets per profession in GW2).
+    let empty_items_cache: HashMap<u32, gw2_api::models::Item> = HashMap::new();
+    struct PvpPrecomputedSpec {
+        elite: Option<u32>,
+        cores: Vec<u32>,
+        trait_ids: Vec<u32>,
+        trait_stats: stats::StatBlock,
+        modifiers: combat::DamageModifiers,
+    }
+    let precomputed_specs: Vec<PvpPrecomputedSpec> = spec_combos
+        .iter()
+        .map(|(elite, cores)| {
+            let spec_ids: Vec<u32> =
+                cores.iter().copied().chain(elite.iter().copied()).collect();
             let mut trait_ids = Vec::new();
             for &spec_id in &spec_ids {
                 if let Some(spec) = specs_cache.get(&spec_id) {
@@ -392,7 +431,28 @@ fn optimize_pvp(
                     trait_ids.extend(best);
                 }
             }
+            let trait_stats = stats::calculate_trait_stats(&trait_ids, traits_cache);
+            let modifiers = combat::extract_damage_modifiers(
+                &trait_ids,
+                None,
+                &[],
+                None,
+                traits_cache,
+                &empty_items_cache,
+                ctx,
+            );
+            PvpPrecomputedSpec {
+                elite: *elite,
+                cores: cores.clone(),
+                trait_ids,
+                trait_stats,
+                modifiers,
+            }
+        })
+        .collect();
 
+    for amulet in amulets_sorted {
+        for spec in &precomputed_specs {
             // PvP stat block: base_stats + amulet stats + trait stats (no gear)
             let mut full_stats = stats::base_stats();
 
@@ -401,27 +461,16 @@ fn optimize_pvp(
                 full_stats.add(attr, value as f64);
             }
 
-            // Apply trait stats
-            let trait_stats = stats::calculate_trait_stats(&trait_ids, traits_cache);
-            full_stats += &trait_stats;
-            stats::apply_trait_conversions(&mut full_stats, &trait_ids, traits_cache);
+            // Apply trait stats (precomputed)
+            full_stats += &spec.trait_stats;
+            stats::apply_trait_conversions(&mut full_stats, &spec.trait_ids, traits_cache);
 
             let derived = stats::compute_derived(&full_stats, &profession.name);
 
-            // Extract modifiers from traits only (PvP has no gear modifiers)
-            let modifiers = combat::extract_damage_modifiers(
-                &trait_ids,
-                None,
-                &[],
-                None,
-                traits_cache,
-                &HashMap::new(),
-                ctx,
-            );
             let combat_perf = combat::calculate_combat_performance(
                 &full_stats,
                 &derived,
-                &modifiers,
+                &spec.modifiers,
                 solo_profile,
                 &cw,
                 &profession.name,
@@ -431,14 +480,14 @@ fn optimize_pvp(
 
             all_candidates.push(BuildCandidate {
                 gear: empty_gear.clone(),
-                elite_spec: *elite,
-                core_specs: cores.clone(),
-                equipped_traits: trait_ids,
+                elite_spec: spec.elite,
+                core_specs: spec.cores.clone(),
+                equipped_traits: spec.trait_ids.clone(),
                 stats: full_stats,
                 derived,
                 score,
                 combat: combat_perf,
-                modifiers,
+                modifiers: spec.modifiers.clone(),
                 pvp_amulet: Some(PvpAmuletCandidate {
                     id: amulet.id,
                     name: amulet.name.clone(),
@@ -1096,19 +1145,24 @@ pub fn simulate_validated_rotation(
     db: &GameDb,
     stats: &stats::StatBlock,
 ) -> Option<rotation::SimulationResult> {
-    // Collect all skill IDs from validated skills
-    let mut skill_ids: Vec<u32> = Vec::new();
+    // Heal/utility/elite stay at weapon_set 0 (always available); weapon skills
+    // get tagged with their actual set 1 or 2 so the simulator's weapon-swap
+    // logic in `is_skill_available` and `should_weapon_swap` can decide when to
+    // swap. Previously all skills defaulted to set 0, making the simulator
+    // treat both weapon sets as simultaneously available — no swap, set 2
+    // skills usable while set 1 active.
+    let mut non_weapon_ids: Vec<u32> = Vec::new();
 
     if let Some((id, _)) = &validated.skills.heal {
-        skill_ids.push(*id);
+        non_weapon_ids.push(*id);
     }
     for util in &validated.skills.utilities {
         if let Some((id, _)) = util {
-            skill_ids.push(*id);
+            non_weapon_ids.push(*id);
         }
     }
     if let Some((id, _)) = &validated.skills.elite {
-        skill_ids.push(*id);
+        non_weapon_ids.push(*id);
     }
 
     // Resolve weapon skills from validated weapon types
@@ -1122,29 +1176,38 @@ pub fn simulate_validated_rotation(
         ""
     };
 
-    // Find weapon skills for each weapon set
-    if let Some(profession) = db.professions.values().find(|p| p.name == profession_name) {
-        // Set 1
+    let mut set1_ids: Vec<u32> = Vec::new();
+    let mut set2_ids: Vec<u32> = Vec::new();
+
+    // Find weapon skills for each weapon set. `db.profession(name)` is an O(1)
+    // HashMap lookup keyed on id (which equals the name for GW2 professions).
+    if let Some(profession) = db.profession(profession_name) {
         if let Some(ref main) = validated.weapons.set1.main_hand {
-            add_weapon_skill_ids(&mut skill_ids, profession, main, db, 1);
+            add_weapon_skill_ids(&mut set1_ids, profession, main, db, 1);
         }
         if let Some(ref off) = validated.weapons.set1.off_hand {
-            add_weapon_skill_ids(&mut skill_ids, profession, off, db, 1);
+            add_weapon_skill_ids(&mut set1_ids, profession, off, db, 1);
         }
-        // Set 2
         if let Some(ref main) = validated.weapons.set2.main_hand {
-            add_weapon_skill_ids(&mut skill_ids, profession, main, db, 2);
+            add_weapon_skill_ids(&mut set2_ids, profession, main, db, 2);
         }
         if let Some(ref off) = validated.weapons.set2.off_hand {
-            add_weapon_skill_ids(&mut skill_ids, profession, off, db, 2);
+            add_weapon_skill_ids(&mut set2_ids, profession, off, db, 2);
         }
     }
 
-    if skill_ids.is_empty() {
+    if non_weapon_ids.is_empty() && set1_ids.is_empty() && set2_ids.is_empty() {
         return None;
     }
 
-    let rotation_skills = rotation::builder::build_rotation_skills(&skill_ids, db);
+    let mut rotation_skills = rotation::builder::build_rotation_skills(&non_weapon_ids, db);
+    let mut set1_skills = rotation::builder::build_rotation_skills(&set1_ids, db);
+    rotation::builder::tag_weapon_set(&mut set1_skills, 1);
+    let mut set2_skills = rotation::builder::build_rotation_skills(&set2_ids, db);
+    rotation::builder::tag_weapon_set(&mut set2_skills, 2);
+    rotation_skills.extend(set1_skills);
+    rotation_skills.extend(set2_skills);
+
     if rotation_skills.is_empty() {
         return None;
     }
@@ -1543,12 +1606,10 @@ pub fn llm_advisor(
 
         if let Some(rest) = swap_part.strip_prefix("gear_prefix=") {
             let prefix_name = rest.trim().trim_matches('"').trim_matches('\'');
-            // Look up in DB by name match.
-            if let Some(item_stat) = db
-                .itemstats
-                .values()
-                .find(|s| s.name.to_lowercase() == prefix_name.to_lowercase())
-            {
+            // Use the centralized deterministic helper (exact match wins, else
+            // shortest-fuzzy with id tiebreak). Previously this called
+            // `to_lowercase()` on every itemstat in the loop.
+            if let Some(item_stat) = db.itemstat_by_name(prefix_name) {
                 candidate.gear_prefix = Some(crate::validation::ValidatedGearPrefix {
                     itemstat_id: item_stat.id,
                     name: item_stat.name.clone(),
@@ -1558,11 +1619,13 @@ pub fn llm_advisor(
             }
         } else if let Some(rest) = swap_part.strip_prefix("rune=") {
             let rune_name = rest.trim().trim_matches('"').trim_matches('\'');
-            // db.runes is Vec<u32> of item IDs — look up by name in db.items
+            // Hoist the needle lowercase once so we don't re-allocate it on
+            // every item probed.
+            let rune_needle = rune_name.to_lowercase();
             let found_rune = db.runes.iter().find_map(|&id| {
                 db.items
                     .get(&id)
-                    .filter(|item| item.name.to_lowercase().contains(&rune_name.to_lowercase()))
+                    .filter(|item| item.name.to_lowercase().contains(&rune_needle))
                     .map(|item| crate::validation::ValidatedItem {
                         id: item.id,
                         name: item.name.clone(),

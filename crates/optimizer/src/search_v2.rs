@@ -55,19 +55,36 @@ impl Default for SearchConfig {
 /// slot, and appends the mutated build to the output.  Operators that find no
 /// alternatives (e.g. because the DB is empty) simply contribute nothing to
 /// the output — the function never panics on an empty `GameDb`.
+///
+/// Output is interleaved round-robin across operators rather than concatenated.
+/// `optimize_v2_search` caps evaluation per beam member at ~30 neighbors;
+/// concatenated order would burn the entire budget on `swap_gear_prefix`
+/// (which produces ~50 neighbors and appears first), and the search would
+/// never explore rune/sigil/relic/utility mutations at all.
 pub fn generate_neighbors(
     candidate: &BeamCandidate,
     db: &GameDb,
     profession_name: &str,
 ) -> Vec<ValidatedBuild> {
-    let mut neighbors: Vec<ValidatedBuild> = Vec::new();
+    let groups: [Vec<ValidatedBuild>; 5] = [
+        swap_gear_prefix(candidate, db),
+        swap_rune(candidate, db),
+        swap_sigil_slots(candidate, db),
+        swap_relic(candidate, db),
+        swap_utility_skills(candidate, db, profession_name),
+    ];
 
-    neighbors.extend(swap_gear_prefix(candidate, db));
-    neighbors.extend(swap_rune(candidate, db));
-    neighbors.extend(swap_sigil_slots(candidate, db));
-    neighbors.extend(swap_relic(candidate, db));
-    neighbors.extend(swap_utility_skills(candidate, db, profession_name));
-
+    let total: usize = groups.iter().map(|g| g.len()).sum();
+    let max_len = groups.iter().map(|g| g.len()).max().unwrap_or(0);
+    let mut neighbors: Vec<ValidatedBuild> = Vec::with_capacity(total);
+    let mut iters: Vec<_> = groups.into_iter().map(|g| g.into_iter()).collect();
+    for _ in 0..max_len {
+        for it in iters.iter_mut() {
+            if let Some(n) = it.next() {
+                neighbors.push(n);
+            }
+        }
+    }
     neighbors
 }
 
@@ -202,9 +219,15 @@ pub fn optimize_v2_search(
 /// For every `ItemStat` in the DB, produce a clone of the current build with
 /// `gear_prefix` set to that stat.  This covers all available gear prefixes
 /// (Berserker's, Viper's, …).
+///
+/// Iterates by id so beam-search neighbor ordering — and therefore the
+/// tie-break behavior in the downstream `sort_by + dedup_by + truncate`
+/// pipeline — is stable across runs.
 fn swap_gear_prefix(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuild> {
-    db.itemstats
-        .values()
+    let mut itemstats: Vec<&gw2_api::models::ItemStat> = db.itemstats.values().collect();
+    itemstats.sort_by_key(|is| is.id);
+    itemstats
+        .into_iter()
         .map(|is| {
             let mut b = candidate.validated.clone();
             b.gear_prefix = Some(ValidatedGearPrefix {
@@ -250,7 +273,14 @@ fn swap_sigil_slots(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuil
     // Treat sigils as 4 fixed slots: [set1_main, set1_off, set2_main, set2_off].
     // Enforce "no duplicate sigil family within a weapon set", but allow the
     // same family in both sets independently.
-    let slot_count = 4usize;
+    //
+    // Only mutate slots the seed already filled. Previously this function
+    // padded missing slots with `ValidatedItem { id: 0, name: "" }`, which is
+    // not a valid item — those placeholders rendered as empty slots in the UI
+    // and were skipped by stat calculation, producing builds that scored worse
+    // than the seed for an unrelated reason. The synergy pipeline always seeds
+    // with 4 sigils, so this is normally a no-op guard.
+    let slot_count = candidate.validated.sigils.len().min(4);
     let mut neighbors: Vec<ValidatedBuild> = Vec::new();
 
     for slot_idx in 0..slot_count {
@@ -281,11 +311,6 @@ fn swap_sigil_slots(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuil
             }
 
             let mut b = candidate.validated.clone();
-            // Ensure the sigils vec has at least `slot_idx + 1` entries.
-            while b.sigils.len() <= slot_idx {
-                // Pad with a placeholder that will be overwritten.
-                b.sigils.push(ValidatedItem { id: 0, name: String::new() });
-            }
             b.sigils[slot_idx] = ValidatedItem {
                 id: sigil.id,
                 name: sigil.name.clone(),
@@ -568,6 +593,74 @@ mod tests {
         assert!(
             rune_ids.contains(&102),
             "expected rune ID 102 in neighbors"
+        );
+    }
+
+    /// Regression: generate_neighbors interleaves operator outputs so
+    /// `take(neighbor_cap)` exposes diversity. If we set many gear prefixes
+    /// AND a rune, the cap'd subset must include the rune mutation rather
+    /// than only gear-prefix swaps.
+    #[test]
+    fn test_generate_neighbors_interleaves_operators() {
+        let mut db = empty_db();
+        // Add 5 itemstats so swap_gear_prefix produces 5 neighbors first.
+        for i in 1..=5u32 {
+            db.itemstats.insert(
+                i,
+                gw2_api::models::ItemStat {
+                    id: i,
+                    name: format!("Prefix{}", i),
+                    attributes: Vec::new(),
+                },
+            );
+        }
+        // Add 1 rune.
+        let rune = Item {
+            id: 200,
+            name: "Superior Rune of the Test".to_string(),
+            description: None,
+            icon: None,
+            item_type: "UpgradeComponent".to_string(),
+            rarity: "Exotic".to_string(),
+            level: 60,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: Vec::new(),
+            game_types: Vec::new(),
+            restrictions: Vec::new(),
+            details: Some(ItemDetails {
+                detail_type: Some("Rune".to_string()),
+                weight_class: None,
+                defense: None,
+                damage_type: None,
+                min_power: None,
+                max_power: None,
+                suffix: None,
+                bonuses: Vec::new(),
+                infusion_upgrade_flags: Vec::new(),
+                infusion_slots: Vec::new(),
+                attribute_adjustment: None,
+                infix_upgrade: None,
+                suffix_item_id: None,
+                secondary_suffix_item_id: None,
+                stat_choices: Vec::new(),
+            }),
+        };
+        db.items.insert(200, rune);
+        db.runes.push(200);
+
+        let candidate = make_candidate(ValidatedBuild::default());
+        let neighbors = generate_neighbors(&candidate, &db, "Warrior");
+        // First two emitted positions: gear-prefix (group 0 round 0), then rune
+        // (group 1 round 0). Confirms rune is reachable inside a small cap.
+        assert!(
+            neighbors[0].gear_prefix.is_some(),
+            "first neighbor should be a gear-prefix mutation"
+        );
+        assert!(
+            neighbors[1].rune.is_some(),
+            "second neighbor should be a rune mutation (round-robin interleave)"
         );
     }
 

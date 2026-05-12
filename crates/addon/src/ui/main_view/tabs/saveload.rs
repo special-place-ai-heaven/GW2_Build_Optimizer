@@ -52,11 +52,16 @@ pub(in crate::ui::main_view) fn render_save_build_ui(ui: &Ui, state: &mut AddonS
             .map(|b| b.profession.clone())
             .unwrap_or_default();
         let game_mode = state.main.game_mode.clone();
+        // Capture the active balance patch so saved builds remember which
+        // patch they were optimized against. Lets the load-side warn the user
+        // when a build is loaded under a different patch.
+        let balance_ctx = gw2_optimizer::balance::BalanceContext::new(game_mode.clone());
         let saved = suggestion_to_saved(
             &state.main.save_name_input,
             &character_name,
             &profession,
             &game_mode,
+            Some(&balance_ctx.patch_id),
             suggestion,
         );
 
@@ -209,6 +214,7 @@ fn suggestion_to_saved(
     character_name: &str,
     profession: &str,
     game_mode: &gw2_core::types::GameMode,
+    balance_manifest_version: Option<&str>,
     suggestion: &crate::ui::comparison::BuildSuggestion,
 ) -> gw2_core::types::SavedBuild {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -225,7 +231,7 @@ fn suggestion_to_saved(
         game_mode: game_mode.clone(),
         profession: profession.to_string(),
         engine_version: env!("CARGO_PKG_VERSION").to_string(),
-        balance_manifest_version: None, // TODO: populate from BalanceContext (P3-08)
+        balance_manifest_version: balance_manifest_version.map(|s| s.to_string()),
         label: suggestion.label.clone(),
         stat_prefix: suggestion.stat_prefix.clone(),
         specializations: suggestion.specializations.clone(),
@@ -326,9 +332,15 @@ fn reconstruct_damage_modifiers(
 ) -> gw2_optimizer::combat::DamageModifiers {
     let mut equipped_trait_ids: Vec<u32> = Vec::new();
 
-    // Resolve specialization + trait names to IDs
+    // Resolve specialization + trait names to IDs.
+    // Match case-insensitively so old/edited save files with drifted casing
+    // still resolve. find() returns one hit at most for exact-name lookup, so
+    // HashMap iteration order doesn't matter here.
     for (spec_name, trait_names) in &saved.specializations {
-        let spec = db.specializations.values().find(|s| s.name == *spec_name);
+        let spec = db
+            .specializations
+            .values()
+            .find(|s| s.name.eq_ignore_ascii_case(spec_name));
         let Some(spec) = spec else {
             nexus::log::log(
                 nexus::log::LogLevel::Warning,
@@ -345,7 +357,7 @@ fn reconstruct_damage_modifiers(
             let trait_id = db.traits_by_spec.get(&spec.id).and_then(|ids| {
                 ids.iter()
                     .filter_map(|id| db.traits.get(id))
-                    .find(|t| t.name == *trait_name)
+                    .find(|t| t.name.eq_ignore_ascii_case(trait_name))
                     .map(|t| t.id)
             });
             match trait_id {
@@ -364,13 +376,13 @@ fn reconstruct_damage_modifiers(
         }
     }
 
-    // Resolve rune name to ID
+    // Resolve rune name to ID (case-insensitive)
     let rune_id = if !saved.rune.is_empty() {
         let found = db
             .runes
             .iter()
             .filter_map(|id| db.items.get(id))
-            .find(|item| item.name == saved.rune)
+            .find(|item| item.name.eq_ignore_ascii_case(&saved.rune))
             .map(|item| item.id);
         if found.is_none() {
             nexus::log::log(
@@ -396,7 +408,7 @@ fn reconstruct_damage_modifiers(
                 .sigils
                 .iter()
                 .filter_map(|id| db.items.get(id))
-                .find(|item| item.name == *name)
+                .find(|item| item.name.eq_ignore_ascii_case(name))
                 .map(|item| item.id);
             if found.is_none() {
                 nexus::log::log(
@@ -409,13 +421,13 @@ fn reconstruct_damage_modifiers(
         })
         .collect();
 
-    // Resolve relic name to ID
+    // Resolve relic name to ID (case-insensitive)
     let relic_id = if !saved.relic.is_empty() {
         let found = db
             .relics
             .iter()
             .filter_map(|id| db.items.get(id))
-            .find(|item| item.name == saved.relic)
+            .find(|item| item.name.eq_ignore_ascii_case(&saved.relic))
             .map(|item| item.id);
         if found.is_none() {
             nexus::log::log(

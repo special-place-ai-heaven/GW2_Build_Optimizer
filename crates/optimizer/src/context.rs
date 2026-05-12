@@ -463,12 +463,7 @@ fn section_gear_prefixes(config: &ContextConfig) -> String {
         } else {
             ""
         };
-        if let Some(itemstat) = config
-            .db
-            .itemstats
-            .values()
-            .find(|is| is.name.contains(prefix_name))
-        {
+        if let Some(itemstat) = config.db.itemstat_by_name(prefix_name) {
             let stats: Vec<String> = itemstat
                 .attributes
                 .iter()

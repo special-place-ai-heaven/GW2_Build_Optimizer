@@ -135,6 +135,10 @@ impl BuildStorage {
     }
 
     /// List all saved builds, sorted by timestamp descending (newest first).
+    ///
+    /// Streams each save file via `BufReader` rather than `read_to_string` so
+    /// large saved-build collections don't pay double allocation (raw text +
+    /// parsed values) for every file.
     pub fn list(&self) -> Vec<SavedBuild> {
         let Ok(entries) = std::fs::read_dir(&self.saves_dir) else {
             return Vec::new();
@@ -145,8 +149,9 @@ impl BuildStorage {
             .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
             .filter_map(|e| {
                 let path = e.path();
-                let json = std::fs::read_to_string(&path).ok()?;
-                match serde_json::from_str(&json) {
+                let file = std::fs::File::open(&path).ok()?;
+                let reader = std::io::BufReader::new(file);
+                match serde_json::from_reader(reader) {
                     Ok(build) => Some(build),
                     Err(_) => {
                         // Corrupt save file — skip but don't crash

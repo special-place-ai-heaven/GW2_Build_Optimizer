@@ -866,8 +866,16 @@ pub fn parse_gemini_build(response: &str) -> Result<GeminiBuildResponse, String>
                 map.insert(k.clone(), s.to_string());
             }
         }
-        // Also flatten into sigils vec for backward compat
-        result.sigils = map.values().cloned().collect();
+        // Also flatten into sigils vec for backward compat. Walk the keys in
+        // canonical positional order so downstream code that indexes the flat
+        // list as [set1_main, set1_off, set2_main, set2_off] stays correct;
+        // previously this was `map.values().cloned().collect()` which has
+        // unspecified HashMap order.
+        for key in &["set1_main", "set1_off", "set2_main", "set2_off"] {
+            if let Some(name) = map.get(*key) {
+                result.sigils.push(name.clone());
+            }
+        }
         result.sigils_map = Some(map);
     } else if let Some(arr) = json.get("sigils").and_then(|v| v.as_array()) {
         // Old format: ["Sigil1", "Sigil2", ...]

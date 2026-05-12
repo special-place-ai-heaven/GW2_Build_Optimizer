@@ -345,43 +345,7 @@ impl Gw2Client {
         endpoint: &str,
         ids: &[serde_json::Value],
     ) -> Result<Vec<T>, ApiError> {
-        let batches: Vec<&[serde_json::Value]> = ids.chunks(MAX_BULK_IDS).collect();
-        let mut results = Vec::with_capacity(ids.len());
-
-        // Process in groups of 5 concurrent fetches
-        for group in batches.chunks(5) {
-            let group_results: Vec<Result<Vec<T>, ApiError>> = std::thread::scope(|s| {
-                let handles: Vec<_> = group
-                    .iter()
-                    .map(|chunk| {
-                        s.spawn(|| {
-                            let numeric_ids: Vec<u32> =
-                                chunk.iter().filter_map(value_to_u32).collect();
-                            let joined = build_bulk_ids_query(&numeric_ids);
-                            self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
-                        })
-                    })
-                    .collect();
-
-                handles
-                    .into_iter()
-                    .map(|h| {
-                        h.join().unwrap_or_else(|_| {
-                            Err(ApiError::Internal(format!(
-                                "Batch fetch thread panicked on {}",
-                                endpoint
-                            )))
-                        })
-                    })
-                    .collect()
-            });
-
-            for batch_result in group_results {
-                results.extend(batch_result?);
-            }
-        }
-
-        Ok(results)
+        self.fetch_by_ids_with_progress(endpoint, ids, |_, _| {})
     }
 
     /// Like `fetch_by_ids` but calls `on_progress(fetched_so_far, total)` after each batch group.

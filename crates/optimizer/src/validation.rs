@@ -326,8 +326,10 @@ fn validate_weapon_set(
 
     // Validate main hand
     if let Some(ref mh) = weapons.0 {
-        if let Some(_info) = find_weapon(mh, prof) {
-            set.main_hand = Some(mh.clone());
+        if let Some((canonical, _info)) = find_weapon(mh, prof) {
+            // Store canonical name so later `prof.weapons.get(...)` (case-sensitive)
+            // hits — preserving the LLM's casing would bypass the elite spec gate.
+            set.main_hand = Some(canonical.clone());
         } else {
             result.errors.push(ValidationReject {
                 code: RejectCode::WeaponNotAvailable {
@@ -345,8 +347,8 @@ fn validate_weapon_set(
 
     // Validate off hand
     if let Some(ref oh) = weapons.1 {
-        if let Some(_info) = find_weapon(oh, prof) {
-            set.off_hand = Some(oh.clone());
+        if let Some((canonical, _info)) = find_weapon(oh, prof) {
+            set.off_hand = Some(canonical.clone());
         } else {
             result.errors.push(ValidationReject {
                 code: RejectCode::WeaponNotAvailable {
@@ -443,9 +445,25 @@ fn validate_skills(
         result.skills.heal = find_skill_by_name(name, &prof_skills, Some("Heal"), result);
     }
 
-    // Validate utilities
+    // Validate utilities. GW2 has exactly 3 utility slots — cap so an LLM that
+    // hallucinates 4+ utilities cannot inflate the build, and dedupe by skill id
+    // so a single utility is never equipped in two slots simultaneously.
+    let mut seen_utility_ids: std::collections::HashSet<u32> =
+        std::collections::HashSet::new();
     for name in &utility_names {
+        if result.skills.utilities.len() >= 3 {
+            break;
+        }
         let resolved = find_skill_by_name(name, &prof_skills, Some("Utility"), result);
+        if let Some((id, ref skill_name)) = resolved {
+            if !seen_utility_ids.insert(id) {
+                result.warnings.push(format!(
+                    "Skill '{}' already equipped — duplicate utility ignored",
+                    skill_name
+                ));
+                continue;
+            }
+        }
         result.skills.utilities.push(resolved);
     }
 
@@ -470,25 +488,56 @@ fn validate_rune(response: &GeminiBuildResponse, db: &GameDb, result: &mut Valid
 fn validate_sigils(response: &GeminiBuildResponse, db: &GameDb, result: &mut ValidatedBuild) {
     let sigils_list = db.all_sigils();
 
-    // Handle both old format (flat array) and new format (per-slot map)
-    let sigil_names = if let Some(ref map) = response.sigils_map {
-        vec![
-            map.get("set1_main").cloned().unwrap_or_default(),
-            map.get("set1_off").cloned().unwrap_or_default(),
-            map.get("set2_main").cloned().unwrap_or_default(),
-            map.get("set2_off").cloned().unwrap_or_default(),
-        ]
+    // Handle both old format (flat array) and new format (per-slot map).
+    // When `sigils_map` is provided, positions are [set1_main, set1_off, set2_main, set2_off].
+    let (sigil_names, positional) = if let Some(ref map) = response.sigils_map {
+        (
+            vec![
+                map.get("set1_main").cloned().unwrap_or_default(),
+                map.get("set1_off").cloned().unwrap_or_default(),
+                map.get("set2_main").cloned().unwrap_or_default(),
+                map.get("set2_off").cloned().unwrap_or_default(),
+            ],
+            true,
+        )
     } else {
-        response.sigils.clone()
+        (response.sigils.clone(), false)
     };
 
+    // GW2 forbids duplicate sigils within a single weapon set, but the same
+    // sigil is allowed across sets. When positions are known (sigils_map path)
+    // we can enforce this per-set. Falling back to "no dedup" for the legacy
+    // flat list — that path lacks slot identity so we can't reliably split.
+    let mut resolved: Vec<Option<ValidatedItem>> = Vec::with_capacity(sigil_names.len());
     for name in &sigil_names {
         if name.is_empty() {
+            resolved.push(None);
             continue;
         }
-        if let Some(item) = find_item_by_name(name, &sigils_list, "Sigil", result) {
-            result.sigils.push(item);
+        resolved.push(find_item_by_name(name, &sigils_list, "Sigil", result));
+    }
+
+    if positional && resolved.len() == 4 {
+        // Set 1 = indices 0,1 | Set 2 = indices 2,3
+        for (set_label, a, b) in [
+            ("Set 1", 0usize, 1usize),
+            ("Set 2", 2usize, 3usize),
+        ] {
+            if let (Some(left), Some(right)) = (&resolved[a], &resolved[b]) {
+                if left.id == right.id {
+                    result.warnings.push(format!(
+                        "{}: duplicate sigil '{}' — GW2 forbids two of the same sigil in one weapon set; \
+                         dropping the off-hand slot",
+                        set_label, left.name
+                    ));
+                    resolved[b] = None;
+                }
+            }
         }
+    }
+
+    for item in resolved.into_iter().flatten() {
+        result.sigils.push(item);
     }
 }
 
@@ -509,32 +558,58 @@ fn validate_gear_prefix(response: &GeminiBuildResponse, db: &GameDb, result: &mu
         return;
     }
 
-    // Case-insensitive search in itemstats
+    // Case-insensitive search in itemstats. HashMap::values() iteration order is
+    // unspecified, so we collect all candidates and pick deterministically:
+    //   1. Exact case-insensitive name match (id tiebreak if multiple).
+    //   2. Substring match — prefer the *shortest* name, then lowest id. This
+    //      makes "Berserker" pick "Berserker's" over "Marauder's Berserker..."
+    //      and survives HashMap reorders across runs.
     let needle = response.stat_prefix.to_lowercase();
-    let found = db
-        .itemstats
-        .values()
-        .find(|is| is.name.to_lowercase() == needle || is.name.to_lowercase().contains(&needle));
 
-    if let Some(is) = found {
-        let exact = is.name.to_lowercase() == needle;
-        if !exact {
-            result.warnings.push(format!(
-                "Gear prefix '{}' fuzzy-matched to '{}'",
-                response.stat_prefix, is.name
-            ));
+    let mut exact: Vec<(u32, &str)> = Vec::new();
+    let mut fuzzy: Vec<(usize, u32, &str)> = Vec::new();
+    for is in db.itemstats.values() {
+        let lower = is.name.to_lowercase();
+        if lower == needle {
+            exact.push((is.id, is.name.as_str()));
+        } else if lower.contains(&needle) {
+            fuzzy.push((is.name.len(), is.id, is.name.as_str()));
         }
-        result.gear_prefix = Some(ValidatedGearPrefix {
-            itemstat_id: is.id,
-            name: is.name.clone(),
-        });
+    }
+
+    let picked = if !exact.is_empty() {
+        exact.sort_by_key(|(id, _)| *id);
+        let (id, name) = exact[0];
+        Some((id, name.to_string(), true))
+    } else if !fuzzy.is_empty() {
+        fuzzy.sort_by_key(|(len, id, _)| (*len, *id));
+        let (_, id, name) = fuzzy[0];
+        Some((id, name.to_string(), false))
     } else {
-        result.errors.push(ValidationReject {
-            code: RejectCode::GearPrefixNotFound {
-                name: response.stat_prefix.clone(),
-            },
-            detail: format!("Gear prefix '{}' not found", response.stat_prefix),
-        });
+        None
+    };
+
+    match picked {
+        Some((id, name, is_exact)) => {
+            if !is_exact {
+                result.warnings.push(format!(
+                    "Gear prefix '{}' fuzzy-matched to '{}'",
+                    response.stat_prefix, name
+                ));
+            }
+            result.gear_prefix = Some(ValidatedGearPrefix {
+                itemstat_id: id,
+                name,
+            });
+        }
+        None => {
+            result.errors.push(ValidationReject {
+                code: RejectCode::GearPrefixNotFound {
+                    name: response.stat_prefix.clone(),
+                },
+                detail: format!("Gear prefix '{}' not found", response.stat_prefix),
+            });
+        }
     }
 }
 
@@ -608,15 +683,23 @@ fn find_skill_by_name(
 ) -> Option<(u32, String)> {
     let needle = name.to_lowercase();
 
-    // Exact match
-    let found = prof_skills
+    // Exact match first. Fall back to substring contains, but only when the
+    // needle is at least 5 chars long — otherwise short LLM hallucinations like
+    // "heal" or "fire" would over-match skills they never named (e.g. "heal"
+    // matching the first heal-tagged skill alphabetically). Matches the same
+    // guard used by `find_trait_by_name`.
+    let exact_match = prof_skills
         .iter()
-        .find(|s| s.name.to_lowercase() == needle)
-        .or_else(|| {
-            prof_skills
-                .iter()
-                .find(|s| s.name.to_lowercase().contains(&needle))
-        });
+        .find(|s| s.name.to_lowercase() == needle);
+    let found = if exact_match.is_some() {
+        exact_match
+    } else if needle.len() >= 5 {
+        prof_skills
+            .iter()
+            .find(|s| s.name.to_lowercase().contains(&needle))
+    } else {
+        None
+    };
 
     if let Some(skill) = found {
         // Validate slot type
@@ -743,15 +826,18 @@ fn find_item_by_name(
 }
 
 /// Find a weapon type in the profession's weapon list (case-insensitive).
+/// Returns the canonical key + WeaponInfo so callers can store the canonical
+/// name instead of the LLM-supplied casing. Otherwise a downstream
+/// `prof.weapons.get(canonical_key)` (case-sensitive) misses and skips the
+/// elite-spec weapon gate.
 fn find_weapon<'a>(
     name: &str,
     prof: &'a gw2_api::models::Profession,
-) -> Option<&'a gw2_api::models::WeaponInfo> {
+) -> Option<(&'a String, &'a gw2_api::models::WeaponInfo)> {
     let needle = name.to_lowercase();
     prof.weapons
         .iter()
         .find(|(k, _)| k.to_lowercase() == needle)
-        .map(|(_, v)| v)
 }
 
 // ---------------------------------------------------------------------------
@@ -798,19 +884,32 @@ fn parse_weapon_sets_from_response(
 
 /// Parse skill names from GeminiBuildResponse.
 /// Handles both old format ("Heal: Mending", "Utils: Foo, Bar, Baz") and direct fields.
+///
+/// Label prefix matching is case-insensitive — the LLM occasionally lowercases
+/// labels ("heal:") and a case-sensitive strip silently dropped those skills.
 fn parse_skill_names_from_response(
     response: &GeminiBuildResponse,
 ) -> (Option<String>, Vec<String>, Option<String>) {
+    fn strip_label_ci<'a>(s: &'a str, label: &str) -> Option<&'a str> {
+        // UTF-8 safe via `str::get` — returns None on non-char-boundary indices.
+        let head = s.get(..label.len())?;
+        if head.eq_ignore_ascii_case(label) {
+            Some(&s[label.len()..])
+        } else {
+            None
+        }
+    }
+
     let mut heal = None;
     let mut utilities = Vec::new();
     let mut elite = None;
 
     for skill_line in &response.skills {
-        if let Some(rest) = skill_line.strip_prefix("Heal: ") {
+        if let Some(rest) = strip_label_ci(skill_line, "Heal: ") {
             heal = Some(rest.trim().to_string());
-        } else if let Some(rest) = skill_line.strip_prefix("Utils: ") {
+        } else if let Some(rest) = strip_label_ci(skill_line, "Utils: ") {
             utilities.extend(rest.split(',').map(|s| s.trim().to_string()));
-        } else if let Some(rest) = skill_line.strip_prefix("Elite: ") {
+        } else if let Some(rest) = strip_label_ci(skill_line, "Elite: ") {
             elite = Some(rest.trim().to_string());
         }
     }
@@ -901,6 +1000,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_skill_names_case_insensitive() {
+        // Regression: case-sensitive strip_prefix dropped lowercase labels.
+        let mut response = GeminiBuildResponse::default();
+        response.skills = vec![
+            "heal: Mending".into(),
+            "UTILS: Signet of Fury, Banner of Strength".into(),
+            "Elite: Signet of Rage".into(),
+        ];
+        let (heal, utils, elite) = parse_skill_names_from_response(&response);
+        assert_eq!(heal.as_deref(), Some("Mending"));
+        assert_eq!(utils.len(), 2);
+        assert_eq!(elite.as_deref(), Some("Signet of Rage"));
+    }
+
+    #[test]
     fn test_parse_changes_structured() {
         let mut response = GeminiBuildResponse::default();
         response.changes_structured = Some(vec![serde_json::json!({
@@ -973,5 +1087,235 @@ mod tests {
             "5-char needle must match via contains fallback"
         );
         assert_eq!(result.unwrap().id, 2);
+    }
+
+    // ── validate_gear_prefix() determinism + tie-break ───────────────────────
+
+    fn empty_db_with_itemstats(stats: Vec<(u32, &str)>) -> GameDb {
+        let mut itemstats = std::collections::HashMap::new();
+        for (id, name) in stats {
+            itemstats.insert(
+                id,
+                gw2_api::models::itemstats::ItemStat {
+                    id,
+                    name: name.into(),
+                    attributes: vec![],
+                },
+            );
+        }
+        GameDb {
+            items: std::collections::HashMap::new(),
+            itemstats,
+            skills: std::collections::HashMap::new(),
+            traits: std::collections::HashMap::new(),
+            specializations: std::collections::HashMap::new(),
+            professions: std::collections::HashMap::new(),
+            legends: std::collections::HashMap::new(),
+            pvp_amulets: std::collections::HashMap::new(),
+            skills_by_profession: std::collections::HashMap::new(),
+            traits_by_spec: std::collections::HashMap::new(),
+            items_by_type: std::collections::HashMap::new(),
+            runes: vec![],
+            sigils: vec![],
+            relics: vec![],
+            skill_to_palette: std::collections::HashMap::new(),
+            palette_to_skill: std::collections::HashMap::new(),
+            traits_by_condition: std::collections::HashMap::new(),
+            skills_by_condition: std::collections::HashMap::new(),
+            traits_by_buff: std::collections::HashMap::new(),
+            skills_by_buff: std::collections::HashMap::new(),
+        }
+    }
+
+    fn run_validate_gear_prefix(prefix: &str, db: &GameDb) -> ValidatedBuild {
+        let mut response = GeminiBuildResponse::default();
+        response.stat_prefix = prefix.into();
+        let mut result = ValidatedBuild::default();
+        validate_gear_prefix(&response, db, &mut result);
+        result
+    }
+
+    #[test]
+    fn test_validate_gear_prefix_exact_match_beats_substring() {
+        // Two candidates contain "berserker"; exact match must win regardless of insertion order.
+        let db = empty_db_with_itemstats(vec![
+            (100, "Marauder's Berserker Combo"),
+            (101, "Berserker's"),
+        ]);
+        let result = run_validate_gear_prefix("Berserker's", &db);
+        let p = result.gear_prefix.expect("should match");
+        assert_eq!(p.itemstat_id, 101);
+        assert_eq!(p.name, "Berserker's");
+        assert!(
+            result.warnings.is_empty(),
+            "exact match must not emit fuzzy warning"
+        );
+    }
+
+    #[test]
+    fn test_validate_gear_prefix_fuzzy_prefers_shortest_name() {
+        // "Viper" substring matches multiple. Tie-break: shortest name wins.
+        // This is the determinism fix: HashMap iteration order would otherwise
+        // make this test flaky depending on hasher seed.
+        let db = empty_db_with_itemstats(vec![
+            (200, "Carrion-Viper Hybrid Marauder Combo"),
+            (201, "Viper's"),
+            (202, "Trailblazer's Viper Combo"),
+        ]);
+        for _ in 0..10 {
+            let result = run_validate_gear_prefix("Viper", &db);
+            let p = result.gear_prefix.expect("should fuzzy match");
+            assert_eq!(p.itemstat_id, 201, "shortest name must always win");
+            assert_eq!(p.name, "Viper's");
+        }
+        let result = run_validate_gear_prefix("Viper", &db);
+        assert_eq!(result.warnings.len(), 1, "fuzzy match must warn once");
+    }
+
+    #[test]
+    fn test_validate_gear_prefix_fuzzy_id_tiebreak_when_lengths_equal() {
+        // Two equal-length names both contain needle. Lower id wins deterministically.
+        let db = empty_db_with_itemstats(vec![
+            (350, "Zerk Sample A"),
+            (300, "Zerk Sample B"),
+        ]);
+        let result = run_validate_gear_prefix("Sample", &db);
+        let p = result.gear_prefix.expect("should match");
+        assert_eq!(p.itemstat_id, 300, "lower id must win equal-length tie");
+    }
+
+    #[test]
+    fn test_validate_gear_prefix_not_found_emits_error() {
+        let db = empty_db_with_itemstats(vec![(400, "Berserker's")]);
+        let result = run_validate_gear_prefix("Nonexistent", &db);
+        assert!(result.gear_prefix.is_none());
+        assert_eq!(result.errors.len(), 1);
+        assert!(matches!(
+            result.errors[0].code,
+            RejectCode::GearPrefixNotFound { .. }
+        ));
+    }
+
+    // ── find_skill_by_name() needle-length guard ─────────────────────────────
+
+    fn make_skill(id: u32, name: &str) -> gw2_api::models::Skill {
+        gw2_api::models::Skill {
+            id,
+            name: name.into(),
+            description: None,
+            icon: None,
+            chat_link: None,
+            skill_type: None,
+            weapon_type: None,
+            professions: vec![],
+            slot: Some("Utility".into()),
+            facts: vec![],
+            traited_facts: vec![],
+            categories: vec![],
+            attunement: None,
+            cost: None,
+            dual_wield: None,
+            flip_skill: None,
+            initiative: None,
+            next_chain: None,
+            prev_chain: None,
+            transform_skills: vec![],
+            bundle_skills: vec![],
+            toolbelt_skill: None,
+            flags: vec![],
+            specialization: None,
+        }
+    }
+
+    #[test]
+    fn test_find_skill_short_needle_no_contains_match() {
+        // needle "heal" (4 chars) is a substring of "Healing Spring".
+        // Length guard (< 5) must block the contains fallback → None.
+        let s = make_skill(1, "Healing Spring");
+        let skills = vec![&s];
+        let mut result = ValidatedBuild::default();
+        let found = find_skill_by_name("heal", &skills, None, &mut result);
+        assert!(
+            found.is_none(),
+            "4-char needle must not match via contains fallback"
+        );
+    }
+
+    #[test]
+    fn test_find_skill_ge5_needle_contains_match() {
+        // needle "heali" (5 chars) is a substring of "Healing Spring".
+        let s = make_skill(2, "Healing Spring");
+        let skills = vec![&s];
+        let mut result = ValidatedBuild::default();
+        let found = find_skill_by_name("heali", &skills, None, &mut result);
+        assert_eq!(found.map(|(id, _)| id), Some(2));
+    }
+
+    fn make_prof_with_elite_axe() -> gw2_api::models::Profession {
+        let mut weapons = std::collections::HashMap::new();
+        weapons.insert(
+            "Axe".to_string(),
+            gw2_api::models::WeaponInfo {
+                specialization: Some(99), // requires elite spec 99
+                flags: vec!["Mainhand".into()],
+                skills: vec![],
+            },
+        );
+        gw2_api::models::Profession {
+            id: "Guardian".into(),
+            name: "Guardian".into(),
+            code: None,
+            specializations: vec![],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        }
+    }
+
+    #[test]
+    fn test_validate_weapon_set_lowercase_input_still_triggers_elite_gate() {
+        // Regression: find_weapon used to be case-insensitive but stored the
+        // LLM's input casing. Then prof.weapons.get(weapon_name) was case-
+        // sensitive and missed, silently bypassing the elite-spec weapon gate.
+        let prof = make_prof_with_elite_axe();
+        let weapons = (Some("axe".to_string()), None);
+        let db = empty_db_with_itemstats(vec![]);
+        let mut result = ValidatedBuild::default();
+        let set = validate_weapon_set(&weapons, Some(&prof), &db, &mut result, "Set 1");
+        // Weapon must be removed because no elite spec is equipped
+        assert!(
+            set.main_hand.is_none(),
+            "gated axe should be removed; got {:?}",
+            set.main_hand
+        );
+        assert!(
+            result.errors.iter().any(|e| matches!(
+                &e.code,
+                RejectCode::WeaponGatedBySpec { weapon, .. } if weapon.eq_ignore_ascii_case("Axe")
+            )),
+            "expected WeaponGatedBySpec error; got {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn test_find_skill_exact_match_bypasses_guard() {
+        // Exact match for a 4-char skill name must still succeed.
+        let s = make_skill(3, "Bolt");
+        let skills = vec![&s];
+        let mut result = ValidatedBuild::default();
+        let found = find_skill_by_name("Bolt", &skills, None, &mut result);
+        assert_eq!(found.map(|(id, _)| id), Some(3));
+    }
+
+    #[test]
+    fn test_validate_gear_prefix_empty_input_is_noop() {
+        let db = empty_db_with_itemstats(vec![(500, "Berserker's")]);
+        let result = run_validate_gear_prefix("", &db);
+        assert!(result.gear_prefix.is_none());
+        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
     }
 }

@@ -623,13 +623,25 @@ impl GeminiClient {
                             return Err(GeminiError::Http(e));
                         }
                     };
-                    let content = body
+                    let content = match body
                         .candidates
                         .and_then(|c| c.into_iter().next())
                         .and_then(|c| c.content)
-                        .ok_or_else(|| {
-                            GeminiError::Parse("No response content from Gemini".into())
-                        })?;
+                    {
+                        Some(c) => c,
+                        None => {
+                            // 200 with empty candidates: response is "successful" at the HTTP
+                            // layer but yielded no usable content. Release the rate slot so
+                            // this dead trip doesn't count against the quota.
+                            self.rate
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .undo_reserve();
+                            return Err(GeminiError::Parse(
+                                "No response content from Gemini".into(),
+                            ));
+                        }
+                    };
 
                     // Persist usage
                     {
@@ -663,7 +675,13 @@ impl GeminiClient {
                     continue;
                 }
                 _ => {
+                    // Release the reserved rate slot — this Err path bailed
+                    // without consuming a real successful response.
                     let body = resp.text().unwrap_or_default();
+                    self.rate
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .undo_reserve();
                     return Err(GeminiError::Api {
                         status,
                         message: body,

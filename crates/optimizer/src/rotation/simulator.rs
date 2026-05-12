@@ -362,10 +362,14 @@ impl SimState {
             if stack.remaining_ms > 0 {
                 let tick_dmg = condition_tick_damage(&stack.condition, condition_damage);
                 self.total_condition_damage += tick_dmg;
-                *self
-                    .condition_ticks
-                    .entry(stack.condition.clone())
-                    .or_insert(0) += 1;
+                // Skip the per-tick `stack.condition.clone()` once the key is
+                // already present in the map. Hash + lookup is cheaper than
+                // String allocation across thousands of ticks per sim.
+                if let Some(count) = self.condition_ticks.get_mut(&stack.condition) {
+                    *count += 1;
+                } else {
+                    self.condition_ticks.insert(stack.condition.clone(), 1);
+                }
                 stack.remaining_ms = stack
                     .remaining_ms
                     .saturating_sub(CONDITION_TICK_INTERVAL_MS);
@@ -380,7 +384,14 @@ impl SimState {
     fn tick_buffs(&mut self) {
         for buff in &mut self.buffs {
             if buff.remaining_ms > 0 {
-                *self.buff_active_ms.entry(buff.buff.clone()).or_insert(0) += TICK_MS;
+                // Avoid `buff.buff.clone()` once the buff name is interned in
+                // the uptime map. Sim runs ~thousands of ticks; clone savings
+                // compound across long simulations.
+                if let Some(ms) = self.buff_active_ms.get_mut(&buff.buff) {
+                    *ms += TICK_MS;
+                } else {
+                    self.buff_active_ms.insert(buff.buff.clone(), TICK_MS);
+                }
                 buff.remaining_ms = buff.remaining_ms.saturating_sub(TICK_MS);
             }
         }

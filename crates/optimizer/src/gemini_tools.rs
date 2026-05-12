@@ -17,6 +17,86 @@ use crate::gemini::{FunctionDeclaration, Tool};
 use crate::scoring::{self, OptimizationWeights};
 use crate::stats;
 
+/// Named record indexable by the deterministic lookup helper below.
+/// Implemented for any indexed game entity (ItemStat, Specialization, GW2Trait) with
+/// `id` + `name` fields.
+trait NamedRecord {
+    fn rec_id(&self) -> u32;
+    fn rec_name(&self) -> &str;
+}
+
+impl NamedRecord for ItemStat {
+    fn rec_id(&self) -> u32 {
+        self.id
+    }
+    fn rec_name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl NamedRecord for gw2_api::models::Specialization {
+    fn rec_id(&self) -> u32 {
+        self.id
+    }
+    fn rec_name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl NamedRecord for GW2Trait {
+    fn rec_id(&self) -> u32 {
+        self.id
+    }
+    fn rec_name(&self) -> &str {
+        &self.name
+    }
+}
+
+/// Deterministic record lookup by name across any `HashMap<u32, T>` of `NamedRecord`.
+///
+/// `HashMap::values()` iteration order is unspecified, so a naive `.find(contains)`
+/// can pick a different record across runs given identical input. Gemini tool execs
+/// are LLM-driven and must be reproducible: the same name string must always
+/// resolve to the same record.
+///
+/// Policy (matches `validation::validate_gear_prefix`):
+///   1. Exact case-insensitive name match wins (lower id tiebreak).
+///   2. Otherwise: shortest substring match wins (lower id tiebreak).
+fn find_named<'a, T, I>(records: I, needle: &str) -> Option<&'a T>
+where
+    T: NamedRecord + 'a,
+    I: IntoIterator<Item = &'a T>,
+{
+    if needle.is_empty() {
+        return None;
+    }
+    let needle_lower = needle.to_lowercase();
+    let mut exact: Option<&T> = None;
+    let mut fuzzy: Option<(usize, u32, &T)> = None;
+    for r in records {
+        let lower = r.rec_name().to_lowercase();
+        if lower == needle_lower {
+            match exact {
+                Some(prev) if prev.rec_id() <= r.rec_id() => {}
+                _ => exact = Some(r),
+            }
+        } else if lower.contains(&needle_lower) {
+            let key = (r.rec_name().len(), r.rec_id());
+            match fuzzy {
+                Some((plen, pid, _)) if (plen, pid) <= key => {}
+                _ => fuzzy = Some((key.0, key.1, r)),
+            }
+        }
+    }
+    exact.or(fuzzy.map(|(_, _, r)| r))
+}
+
+fn find_itemstat_by_name<'a>(db: &'a GameDb, needle: &str) -> Option<&'a ItemStat> {
+    // Delegate to GameDb's centralized deterministic helper. Kept as a thin
+    // wrapper so existing call sites and tests continue to compile unchanged.
+    db.itemstat_by_name(needle)
+}
+
 /// Runtime context for tool execution — holds references to all game data
 /// and optimizer state needed by the tools.
 pub struct ToolContext<'a> {
@@ -455,12 +535,7 @@ fn exec_get_profession_info(args: &Value, ctx: &ToolContext) -> Value {
 fn exec_get_spec_traits(args: &Value, ctx: &ToolContext) -> Value {
     let spec_name = args["spec_name"].as_str().unwrap_or("");
 
-    // Find spec by name (case-insensitive substring match)
-    let spec = ctx
-        .db
-        .specializations
-        .values()
-        .find(|s| s.name.to_lowercase().contains(&spec_name.to_lowercase()));
+    let spec = find_named(ctx.db.specializations.values(), spec_name);
 
     let Some(spec) = spec else {
         return json!({ "error": format!("Specialization '{}' not found", spec_name) });
@@ -517,11 +592,7 @@ fn exec_get_spec_traits(args: &Value, ctx: &ToolContext) -> Value {
 fn exec_get_trait_details(args: &Value, ctx: &ToolContext) -> Value {
     let trait_name = args["trait_name"].as_str().unwrap_or("");
 
-    let t = ctx
-        .db
-        .traits
-        .values()
-        .find(|t| t.name.to_lowercase().contains(&trait_name.to_lowercase()));
+    let t = find_named(ctx.db.traits.values(), trait_name);
 
     let Some(t) = t else {
         return json!({ "error": format!("Trait '{}' not found", trait_name) });
@@ -704,11 +775,7 @@ fn exec_list_relics(ctx: &ToolContext) -> Value {
 fn exec_calculate_stats(args: &Value, ctx: &ToolContext) -> Value {
     let gear_prefix = args["gear_prefix"].as_str().unwrap_or("");
 
-    let itemstat = ctx
-        .db
-        .itemstats
-        .values()
-        .find(|is| is.name.to_lowercase().contains(&gear_prefix.to_lowercase()));
+    let itemstat = find_itemstat_by_name(ctx.db, gear_prefix);
 
     let Some(itemstat) = itemstat else {
         return json!({ "error": format!("Stat prefix '{}' not found", gear_prefix) });
@@ -745,11 +812,7 @@ fn exec_calculate_stats(args: &Value, ctx: &ToolContext) -> Value {
 fn exec_simulate_combat(args: &Value, ctx: &ToolContext) -> Value {
     let gear_prefix = args["gear_prefix"].as_str().unwrap_or("");
 
-    let itemstat = ctx
-        .db
-        .itemstats
-        .values()
-        .find(|is| is.name.to_lowercase().contains(&gear_prefix.to_lowercase()));
+    let itemstat = find_itemstat_by_name(ctx.db, gear_prefix);
 
     let Some(itemstat) = itemstat else {
         return json!({ "error": format!("Stat prefix '{}' not found", gear_prefix) });
@@ -813,11 +876,7 @@ fn exec_simulate_combat(args: &Value, ctx: &ToolContext) -> Value {
 fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
     let gear_prefix = args["gear_prefix"].as_str().unwrap_or("");
 
-    let itemstat = ctx
-        .db
-        .itemstats
-        .values()
-        .find(|is| is.name.to_lowercase().contains(&gear_prefix.to_lowercase()));
+    let itemstat = find_itemstat_by_name(ctx.db, gear_prefix);
 
     let Some(itemstat) = itemstat else {
         return json!({ "error": format!("Stat prefix '{}' not found", gear_prefix) });
@@ -934,9 +993,17 @@ fn exec_search_traits_by_effect(args: &Value, ctx: &ToolContext) -> Value {
     let effect_type = args["effect_type"].as_str().unwrap_or("");
     let profession_filter = args.get("profession").and_then(|v| v.as_str());
 
+    // Iterate by id so the "first 20" surfaced to the LLM are stable across
+    // runs. `db.traits.values()` HashMap iteration order is unspecified.
+    let mut trait_ids: Vec<u32> = ctx.db.traits.keys().copied().collect();
+    trait_ids.sort_unstable();
+
     let mut results: Vec<Value> = Vec::new();
 
-    for t in ctx.db.traits.values() {
+    for &tid in &trait_ids {
+        let Some(t) = ctx.db.traits.get(&tid) else {
+            continue;
+        };
         // Filter by profession if specified
         if let Some(prof) = profession_filter {
             let spec = ctx.db.spec(t.specialization);
@@ -1104,49 +1171,58 @@ fn exec_search_skills_by_effect(args: &Value, ctx: &ToolContext) -> Value {
         .unwrap_or(ctx.profession_name);
     let weapon_filter = args.get("weapon_type").and_then(|v| v.as_str());
 
+    // Hoist the needle lowercase once outside the per-skill/per-fact loop.
+    // Also walk the pre-built `skills_by_profession` index so iteration order
+    // is stable across runs — the previous `db.skills.values()` scan picked
+    // nondeterministic first-20 to surface to the LLM.
+    let needle = effect.to_lowercase();
+    let prof_skill_ids = ctx.db.skills_by_profession.get(profession_filter);
+
     let mut results: Vec<Value> = Vec::new();
 
-    for skill in ctx.db.skills.values() {
-        if !skill.professions.contains(&profession_filter.to_string()) {
-            continue;
-        }
-        if let Some(wt) = weapon_filter {
-            if skill.weapon_type.as_deref() != Some(wt) {
+    if let Some(ids) = prof_skill_ids {
+        for &id in ids {
+            let Some(skill) = ctx.db.skills.get(&id) else {
                 continue;
+            };
+            if let Some(wt) = weapon_filter {
+                if skill.weapon_type.as_deref() != Some(wt) {
+                    continue;
+                }
             }
-        }
 
-        let matches = skill.facts.iter().any(|f| match f {
-            Fact::Buff {
-                status: Some(s), ..
-            }
-            | Fact::PrefixedBuff {
-                status: Some(s), ..
-            } => s.to_lowercase().contains(&effect.to_lowercase()),
-            Fact::ComboField {
-                field_type: Some(ft),
-                ..
-            } => ft.to_lowercase().contains(&effect.to_lowercase()),
-            Fact::ComboFinisher {
-                finisher_type: Some(ft),
-                ..
-            } => ft.to_lowercase().contains(&effect.to_lowercase()),
-            _ => false,
-        });
+            let matches = skill.facts.iter().any(|f| match f {
+                Fact::Buff {
+                    status: Some(s), ..
+                }
+                | Fact::PrefixedBuff {
+                    status: Some(s), ..
+                } => s.to_lowercase().contains(&needle),
+                Fact::ComboField {
+                    field_type: Some(ft),
+                    ..
+                } => ft.to_lowercase().contains(&needle),
+                Fact::ComboFinisher {
+                    finisher_type: Some(ft),
+                    ..
+                } => ft.to_lowercase().contains(&needle),
+                _ => false,
+            });
 
-        if matches {
-            let conditions = extract_conditions(&skill.facts);
-            let buffs = extract_buffs(&skill.facts);
-            results.push(json!({
-                "id": skill.id,
-                "name": &skill.name,
-                "slot": skill.slot.as_deref().unwrap_or(""),
-                "weapon_type": skill.weapon_type.as_deref().unwrap_or(""),
-                "conditions_applied": conditions,
-                "buffs_applied": buffs
-            }));
-            if results.len() >= 20 {
-                break;
+            if matches {
+                let conditions = extract_conditions(&skill.facts);
+                let buffs = extract_buffs(&skill.facts);
+                results.push(json!({
+                    "id": skill.id,
+                    "name": &skill.name,
+                    "slot": skill.slot.as_deref().unwrap_or(""),
+                    "weapon_type": skill.weapon_type.as_deref().unwrap_or(""),
+                    "conditions_applied": conditions,
+                    "buffs_applied": buffs
+                }));
+                if results.len() >= 20 {
+                    break;
+                }
             }
         }
     }
@@ -1333,8 +1409,11 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
         .get("gear_prefix")
         .and_then(|v| v.as_str())
         .unwrap_or("Berserker's");
+    // Use the deterministic, case-insensitive lookup so LLM-supplied prefixes
+    // like "berserker's" don't silently fall through to hardcoded defaults
+    // and run the simulation against the wrong stats.
     let (power, condition_damage, weapon_strength) =
-        if let Some(istat) = ctx.db.itemstats.values().find(|is| is.name == gear_prefix) {
+        if let Some(istat) = find_itemstat_by_name(ctx.db, gear_prefix) {
             let gear_stats = calculate_full_set_stats(istat);
             let base = stats::base_stats();
             let power = base.power + gear_stats.power;
@@ -1990,5 +2069,157 @@ mod tests {
         assert_eq!(result["profile"], "Solo");
         assert_eq!(result["effective_power"], 12346);
         assert_eq!(result["total_dps_index"], 8000);
+    }
+
+    // ── find_itemstat_by_name() determinism ──────────────────────────────────
+
+    fn db_with_itemstats(stats: Vec<(u32, &str)>) -> GameDb {
+        let mut itemstats = HashMap::new();
+        for (id, name) in stats {
+            itemstats.insert(
+                id,
+                ItemStat {
+                    id,
+                    name: name.into(),
+                    attributes: vec![],
+                },
+            );
+        }
+        GameDb {
+            items: HashMap::new(),
+            itemstats,
+            skills: HashMap::new(),
+            traits: HashMap::new(),
+            specializations: HashMap::new(),
+            professions: HashMap::new(),
+            legends: HashMap::new(),
+            pvp_amulets: HashMap::new(),
+            skills_by_profession: HashMap::new(),
+            traits_by_spec: HashMap::new(),
+            items_by_type: HashMap::new(),
+            runes: vec![],
+            sigils: vec![],
+            relics: vec![],
+            skill_to_palette: HashMap::new(),
+            palette_to_skill: HashMap::new(),
+            traits_by_condition: HashMap::new(),
+            skills_by_condition: HashMap::new(),
+            traits_by_buff: HashMap::new(),
+            skills_by_buff: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_find_itemstat_exact_match_wins_over_substring() {
+        let db = db_with_itemstats(vec![
+            (10, "Marauder's Berserker Combo"),
+            (11, "Berserker's"),
+        ]);
+        let is = find_itemstat_by_name(&db, "Berserker's").expect("match");
+        assert_eq!(is.id, 11);
+    }
+
+    #[test]
+    fn test_find_itemstat_fuzzy_prefers_shortest_name() {
+        // Three substring matches. Run repeatedly — HashMap iteration would
+        // otherwise leak through. Shortest name (Viper's = 7) must always win.
+        let db = db_with_itemstats(vec![
+            (20, "Trailblazer's Viper Combo"),
+            (21, "Viper's"),
+            (22, "Carrion-Viper Hybrid"),
+        ]);
+        for _ in 0..20 {
+            let is = find_itemstat_by_name(&db, "Viper").expect("match");
+            assert_eq!(is.id, 21, "Viper's must win every run");
+        }
+    }
+
+    #[test]
+    fn test_find_itemstat_empty_needle_returns_none() {
+        let db = db_with_itemstats(vec![(30, "Berserker's")]);
+        assert!(find_itemstat_by_name(&db, "").is_none());
+    }
+
+    #[test]
+    fn test_find_itemstat_id_tiebreak_when_lengths_equal() {
+        let db = db_with_itemstats(vec![(50, "Foo Alpha Bar"), (40, "Foo Beta Baz")]);
+        // Both length 13, both contain "Foo". Lower id (40) must win.
+        let is = find_itemstat_by_name(&db, "Foo").expect("match");
+        assert_eq!(is.id, 40);
+    }
+
+    // ── find_named() generic lookup: Specialization + Trait ──────────────────
+
+    fn make_spec(id: u32, name: &str) -> gw2_api::models::Specialization {
+        gw2_api::models::Specialization {
+            id,
+            name: name.into(),
+            profession: "Test".into(),
+            elite: false,
+            minor_traits: vec![],
+            major_traits: vec![],
+            weapon_trait: None,
+            icon: None,
+            background: None,
+            profession_icon: None,
+            profession_icon_big: None,
+        }
+    }
+
+    fn make_trait(id: u32, name: &str) -> GW2Trait {
+        GW2Trait {
+            id,
+            name: name.into(),
+            icon: None,
+            description: None,
+            specialization: 0,
+            tier: 1,
+            order: 0,
+            slot: "Major".into(),
+            facts: vec![],
+            traited_facts: vec![],
+            skills: vec![],
+        }
+    }
+
+    #[test]
+    fn test_find_named_spec_exact_beats_substring() {
+        let specs = vec![
+            make_spec(1, "Berserker"),
+            make_spec(2, "Berserker Variant Spec"),
+        ];
+        let s = find_named(&specs, "Berserker").expect("match");
+        assert_eq!(s.id, 1);
+    }
+
+    #[test]
+    fn test_find_named_spec_fuzzy_shortest_wins_deterministically() {
+        // Two substring matches across many repeats — must be stable.
+        let specs = vec![
+            make_spec(10, "Soulbeast Special Edition"),
+            make_spec(11, "Soulbeast"),
+            make_spec(12, "Soulbeast Long Name Variant"),
+        ];
+        for _ in 0..20 {
+            let s = find_named(&specs, "Soulbeast").expect("match");
+            assert_eq!(s.id, 11, "shortest name must win every iteration");
+        }
+    }
+
+    #[test]
+    fn test_find_named_trait_fuzzy_id_tiebreak() {
+        // Equal-length names containing needle → lower id wins.
+        let traits = vec![
+            make_trait(200, "Big Trait Alpha"),
+            make_trait(100, "Big Trait Bravo"),
+        ];
+        let t = find_named(&traits, "Big").expect("match");
+        assert_eq!(t.id, 100);
+    }
+
+    #[test]
+    fn test_find_named_empty_needle_returns_none() {
+        let traits = vec![make_trait(300, "Anything")];
+        assert!(find_named(&traits, "").is_none());
     }
 }

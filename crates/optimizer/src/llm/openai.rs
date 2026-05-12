@@ -306,11 +306,24 @@ impl OpenAiClient {
                         }
                     };
 
-                    let message = body
+                    let message = match body
                         .choices
                         .and_then(|c| c.into_iter().next())
                         .and_then(|c| c.message)
-                        .ok_or_else(|| LlmError::Parse("No response from OpenAI".into()))?;
+                    {
+                        Some(m) => m,
+                        None => {
+                            // 200 with empty choices — release the rate slot so this
+                            // dead trip doesn't count against the daily counter.
+                            self.rate
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .undo_reserve();
+                            return Err(LlmError::Parse(
+                                "No response from OpenAI".into(),
+                            ));
+                        }
+                    };
 
                     // Persist usage
                     {
