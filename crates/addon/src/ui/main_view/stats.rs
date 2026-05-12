@@ -10,26 +10,33 @@ pub(super) fn start_fetch_models(state: &mut AddonState) {
     let token = state.cancel_token.clone();
     std::thread::spawn(move || {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if token.is_cancelled() {
-                return;
-            }
-            let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
-                .map_err(|e| e.to_string())
-                .and_then(|c| c.list_models().map_err(|e| e.to_string()));
-            if token.is_cancelled() {
-                return;
-            }
+            // Always reset models_loading on every exit path. Without this, an early
+            // cancellation (e.g. user closed the Settings tab) leaves the spinner
+            // stuck "Loading models…" forever.
+            let result = if token.is_cancelled() {
+                None
+            } else {
+                let r = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
+                    .map_err(|e| e.to_string())
+                    .and_then(|c| c.list_models().map_err(|e| e.to_string()));
+                if token.is_cancelled() {
+                    None
+                } else {
+                    Some(r)
+                }
+            };
             crate::state::with_state(|s| {
                 s.main.models_loading = false;
                 match result {
-                    Ok(models) => {
+                    Some(Ok(models)) => {
                         s.main.available_models =
                             models.into_iter().map(|m| (m.id, m.display_name)).collect();
                         s.main.models_error = None;
                     }
-                    Err(e) => {
+                    Some(Err(e)) => {
                         s.main.models_error = Some(e);
                     }
+                    None => { /* cancelled — only the flag reset matters */ }
                 }
             });
         }));
@@ -55,97 +62,103 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
 
     std::thread::spawn(move || {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if token.is_cancelled() {
-                return;
+            // Drive the refresh in a single labelled block so every exit path falls
+            // through to the unified state reset below. Previously the 4 early-return
+            // cancel checks left game_db_loading=true and game_refresh_stage non-empty,
+            // freezing the main screen on a partial "Refreshing: …" banner.
+            enum Outcome {
+                Cancelled,
+                ClientError(String),
+                DownloadError(String),
+                DbLoad(Result<gw2_optimizer::gamedb::GameDb, String>),
             }
 
-            let client = match gw2_api::client::Gw2Client::without_key() {
-                Ok(c) => c,
-                Err(e) => {
-                    crate::state::with_state(|s| {
-                        s.main.game_db_loading = false;
-                        s.main.error = Some(format!("Refresh failed: {}", e));
-                    });
-                    return;
-                }
-            };
-            let cache = gw2_api::cache::DataCache::new(&cache_dir);
-
-            let result = gw2_api::download::download_all(&client, &cache, |progress| {
+            let outcome: Outcome = 'refresh: {
                 if token.is_cancelled() {
-                    return;
+                    break 'refresh Outcome::Cancelled;
                 }
+                let client = match gw2_api::client::Gw2Client::without_key() {
+                    Ok(c) => c,
+                    Err(e) => break 'refresh Outcome::ClientError(e.to_string()),
+                };
+                let cache = gw2_api::cache::DataCache::new(&cache_dir);
+
+                let download_result =
+                    gw2_api::download::download_all(&client, &cache, |progress| {
+                        if token.is_cancelled() {
+                            return;
+                        }
+                        crate::state::with_state(|s| {
+                            let detail = if let Some(ref d) = progress.detail {
+                                format!("Refreshing: {} ({})", progress.step_name, d)
+                            } else {
+                                format!("Refreshing: {}", progress.step_name)
+                            };
+                            s.main.game_refresh_stage = detail;
+                        });
+                    });
+
+                if token.is_cancelled() {
+                    break 'refresh Outcome::Cancelled;
+                }
+
+                let build_number = match download_result {
+                    Ok(n) => n,
+                    Err(e) => break 'refresh Outcome::DownloadError(e.to_string()),
+                };
+
+                // Save new build number
                 crate::state::with_state(|s| {
-                    let detail = if let Some(ref d) = progress.detail {
-                        format!("Refreshing: {} ({})", progress.step_name, d)
-                    } else {
-                        format!("Refreshing: {}", progress.step_name)
-                    };
-                    s.main.game_refresh_stage = detail;
+                    s.config.cache_build_number = Some(build_number);
+                    if let Err(e) = s.config.save(&config_path) {
+                        nexus::log::log(
+                            nexus::log::LogLevel::Warning,
+                            "GW2BuildOpt",
+                            &format!("Config save failed: {}", e),
+                        );
+                    }
                 });
-            });
 
-            if token.is_cancelled() {
-                return;
-            }
-
-            match result {
-                Ok(build_number) => {
-                    // Save new build number
-                    crate::state::with_state(|s| {
-                        s.config.cache_build_number = Some(build_number);
-                        if let Err(e) = s.config.save(&config_path) {
-                            nexus::log::log(
-                                nexus::log::LogLevel::Warning,
-                                "GW2BuildOpt",
-                                &format!("Config save failed: {}", e),
-                            );
-                        }
-                    });
-
-                    // Reload GameDb from fresh cache
-                    if token.is_cancelled() {
-                        return;
-                    }
-                    let cache2 = gw2_api::cache::DataCache::new(&cache_dir);
-                    let db_result = gw2_optimizer::gamedb::GameDb::load(&cache2);
-
-                    if token.is_cancelled() {
-                        return;
-                    }
-
-                    crate::state::with_state(|s| {
-                        s.main.game_db_loading = false;
-                        s.main.game_refresh_stage = String::new();
-                        match db_result {
-                            Ok(db) => {
-                                nexus::log::log(
-                                    nexus::log::LogLevel::Info,
-                                    "GW2 Build Optimizer",
-                                    "Game data refreshed successfully",
-                                );
-                                s.main.game_db = Some(db);
-                                // Re-resolve build with fresh data
-                                if s.main.selected_build_tab.is_some()
-                                    && s.main.selected_equipment_tab.is_some()
-                                {
-                                    resolve_selected_build_inner(s);
-                                }
-                            }
-                            Err(e) => {
-                                s.main.error = Some(format!("Failed to reload game data: {}", e));
-                            }
-                        }
-                    });
+                if token.is_cancelled() {
+                    break 'refresh Outcome::Cancelled;
                 }
-                Err(e) => {
-                    crate::state::with_state(|s| {
-                        s.main.game_db_loading = false;
-                        s.main.game_refresh_stage = String::new();
+                let cache2 = gw2_api::cache::DataCache::new(&cache_dir);
+                let db_result =
+                    gw2_optimizer::gamedb::GameDb::load(&cache2).map_err(|e| e.to_string());
+
+                if token.is_cancelled() {
+                    break 'refresh Outcome::Cancelled;
+                }
+
+                Outcome::DbLoad(db_result)
+            };
+
+            crate::state::with_state(|s| {
+                s.main.game_db_loading = false;
+                s.main.game_refresh_stage = String::new();
+                match outcome {
+                    Outcome::Cancelled => {}
+                    Outcome::ClientError(e) | Outcome::DownloadError(e) => {
                         s.main.error = Some(format!("Refresh failed: {}", e));
-                    });
+                    }
+                    Outcome::DbLoad(Ok(db)) => {
+                        nexus::log::log(
+                            nexus::log::LogLevel::Info,
+                            "GW2 Build Optimizer",
+                            "Game data refreshed successfully",
+                        );
+                        s.main.game_db = Some(db);
+                        if s.main.selected_build_tab.is_some()
+                            && s.main.selected_equipment_tab.is_some()
+                        {
+                            resolve_selected_build_inner(s);
+                        }
+                    }
+                    Outcome::DbLoad(Err(e)) => {
+                        s.main.error = Some(format!("Failed to reload game data: {}", e));
+                    }
                 }
-            }
+            });
         }));
         if panic_result.is_err() {
             nexus::log::log(
@@ -168,32 +181,33 @@ pub(super) fn check_api_health(state: &mut AddonState) {
 
     std::thread::spawn(move || {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if token.is_cancelled() {
-                return;
-            }
-
-            let start = std::time::Instant::now();
-            let result =
-                gw2_api::client::Gw2Client::without_key().and_then(|c| c.get_build_number());
-
-            if token.is_cancelled() {
-                return;
-            }
-
-            let status = match result {
-                Ok(_) => {
-                    if start.elapsed().as_secs() >= 5 {
-                        crate::state::ApiStatus::Degraded
-                    } else {
-                        crate::state::ApiStatus::Online
-                    }
+            // Always clear api_health_checking on every exit path.
+            let status: Option<crate::state::ApiStatus> = if token.is_cancelled() {
+                None
+            } else {
+                let start = std::time::Instant::now();
+                let result = gw2_api::client::Gw2Client::without_key()
+                    .and_then(|c| c.get_build_number());
+                if token.is_cancelled() {
+                    None
+                } else {
+                    Some(match result {
+                        Ok(_) => {
+                            if start.elapsed().as_secs() >= 5 {
+                                crate::state::ApiStatus::Degraded
+                            } else {
+                                crate::state::ApiStatus::Online
+                            }
+                        }
+                        Err(_) => crate::state::ApiStatus::Offline,
+                    })
                 }
-                Err(_) => crate::state::ApiStatus::Offline,
             };
-
             crate::state::with_state(|s| {
-                s.main.api_status = status;
                 s.main.api_health_checking = false;
+                if let Some(st) = status {
+                    s.main.api_status = st;
+                }
             });
         }));
         if panic_result.is_err() {
@@ -218,21 +232,25 @@ pub(super) fn load_game_db(state: &mut AddonState) {
 
     std::thread::spawn(move || {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if token.is_cancelled() {
-                return;
-            }
-
-            let cache = gw2_api::cache::DataCache::new(&cache_dir);
-            let result = gw2_optimizer::gamedb::GameDb::load(&cache);
-
-            if token.is_cancelled() {
-                return;
-            }
+            // Always reset game_db_loading on every exit path. Early-return cancel
+            // checks previously skipped the state write, leaving the main screen
+            // spinner stuck "Loading game data…".
+            let result = if token.is_cancelled() {
+                None
+            } else {
+                let cache = gw2_api::cache::DataCache::new(&cache_dir);
+                let r = gw2_optimizer::gamedb::GameDb::load(&cache);
+                if token.is_cancelled() {
+                    None
+                } else {
+                    Some(r)
+                }
+            };
 
             crate::state::with_state(|s| {
                 s.main.game_db_loading = false;
                 match result {
-                    Ok(db) => {
+                    Some(Ok(db)) => {
                         nexus::log::log(
                             nexus::log::LogLevel::Info,
                             "GW2 Build Optimizer",
@@ -246,9 +264,10 @@ pub(super) fn load_game_db(state: &mut AddonState) {
                             resolve_selected_build_inner(s);
                         }
                     }
-                    Err(e) => {
+                    Some(Err(e)) => {
                         s.main.error = Some(format!("Failed to load game data: {}", e));
                     }
+                    None => { /* cancelled — flag reset above */ }
                 }
             });
         }));

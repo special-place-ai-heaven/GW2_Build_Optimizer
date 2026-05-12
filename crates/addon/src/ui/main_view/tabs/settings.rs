@@ -124,15 +124,20 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             let token = state.cancel_token.clone();
             std::thread::spawn(move || {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    if token.is_cancelled() { return; }
-                    let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
-                        .map(|c| c.validate_key_detailed());
-                    if token.is_cancelled() { return; }
+                    // Always clear settings_key_validating on every exit path.
+                    let result = if token.is_cancelled() {
+                        None
+                    } else {
+                        let r = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
+                            .map(|c| c.validate_key_detailed());
+                        if token.is_cancelled() { None } else { Some(r) }
+                    };
                     crate::state::with_state(|s| {
                         s.main.settings_key_validating = false;
                         match result {
-                            Ok(v) => { s.main.settings_key_valid = v.valid; s.main.settings_key_status = Some(v.message); s.main.settings_key_warning = v.warning; }
-                            Err(e) => { s.main.settings_key_valid = false; s.main.settings_key_status = Some(format!("Failed: {}", e)); s.main.settings_key_warning = None; }
+                            Some(Ok(v)) => { s.main.settings_key_valid = v.valid; s.main.settings_key_status = Some(v.message); s.main.settings_key_warning = v.warning; }
+                            Some(Err(e)) => { s.main.settings_key_valid = false; s.main.settings_key_status = Some(format!("Failed: {}", e)); s.main.settings_key_warning = None; }
+                            None => { /* cancelled — flag cleared */ }
                         }
                     });
                 }));
@@ -167,15 +172,20 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             let token = state.cancel_token.clone();
             std::thread::spawn(move || {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    if token.is_cancelled() { return; }
-                    let result = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
-                        .map(|c| c.validate_key_detailed());
-                    if token.is_cancelled() { return; }
+                    // Always clear settings_key_validating on every exit path.
+                    let result = if token.is_cancelled() {
+                        None
+                    } else {
+                        let r = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
+                            .map(|c| c.validate_key_detailed());
+                        if token.is_cancelled() { None } else { Some(r) }
+                    };
                     crate::state::with_state(|s| {
                         s.main.settings_key_validating = false;
                         match result {
-                            Ok(v) => { s.main.settings_key_valid = v.valid; s.main.settings_key_status = Some(v.message); s.main.settings_key_warning = v.warning; }
-                            Err(e) => { s.main.settings_key_valid = false; s.main.settings_key_status = Some(format!("Saved but validation failed: {}", e)); s.main.settings_key_warning = None; }
+                            Some(Ok(v)) => { s.main.settings_key_valid = v.valid; s.main.settings_key_status = Some(v.message); s.main.settings_key_warning = v.warning; }
+                            Some(Err(e)) => { s.main.settings_key_valid = false; s.main.settings_key_status = Some(format!("Saved but validation failed: {}", e)); s.main.settings_key_warning = None; }
+                            None => { /* cancelled — flag cleared */ }
                         }
                     });
                 }));
@@ -256,12 +266,23 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         gw2_core::config::LlmProvider::Anthropic => "anthropic_usage.json",
     };
     let usage_path = state.addon_dir.join(usage_filename);
-    let today_reqs = std::fs::read_to_string(&usage_path)
-        .ok()
-        .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok())
-        .and_then(|v| v.get("requests_today").and_then(|x| x.as_u64()))
-        .unwrap_or(0);
-    ui.text_colored([0.5, 0.5, 0.5, 1.0], &format!("Usage today: {} requests", today_reqs));
+    // Refresh the usage display at most ~once per second (~60 frames at 60fps).
+    // Previously this read from disk on every render frame just to display a
+    // counter that changes at most a few times per minute.
+    if state.main.settings_usage_frames == 0 {
+        state.main.settings_usage_today = std::fs::read_to_string(&usage_path)
+            .ok()
+            .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok())
+            .and_then(|v| v.get("requests_today").and_then(|x| x.as_u64()))
+            .unwrap_or(0);
+        state.main.settings_usage_frames = 60;
+    } else {
+        state.main.settings_usage_frames -= 1;
+    }
+    ui.text_colored(
+        [0.5, 0.5, 0.5, 1.0],
+        &format!("Usage today: {} requests", state.main.settings_usage_today),
+    );
 }
 
 fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
@@ -341,8 +362,19 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     }
 
     let cache_dir = state.addon_dir.join("cache");
-    let cache_size = calculate_dir_size(&cache_dir);
-    ui.text(&format!("Cache: {}", format_bytes(cache_size)));
+    // Throttle the directory scan to ~once per second. The cache holds ~10–20
+    // files including a ~50 MB items.json; scanning + metadata-statting every
+    // render frame just to display "Cache: X MB" hits disk at ~60 Hz.
+    if state.main.settings_cache_size_frames == 0 {
+        state.main.settings_cache_size = calculate_dir_size(&cache_dir);
+        state.main.settings_cache_size_frames = 60;
+    } else {
+        state.main.settings_cache_size_frames -= 1;
+    }
+    ui.text(&format!(
+        "Cache: {}",
+        format_bytes(state.main.settings_cache_size)
+    ));
     ui.same_line();
     let refreshing = state.main.game_db_loading;
     if refreshing {
@@ -357,6 +389,9 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
             let _ = state.config.save(&state.config_path);
             state.main.game_db = None;
             state.setup.download_progress = None;
+            // Force the cached "Cache: …" label to recompute on the next frame
+            // instead of waiting for the throttle to roll over.
+            state.main.settings_cache_size_frames = 0;
             stats::start_game_data_refresh(state);
         }
     }
@@ -384,6 +419,8 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
             let _ = state.config.save(&state.config_path);
             state.main.game_db = None;
             state.setup.download_progress = None;
+            // Force the cached "Cache: …" label to recompute on the next frame.
+            state.main.settings_cache_size_frames = 0;
             stats::start_game_data_refresh(state);
         }
     }
@@ -436,26 +473,24 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         state.main.benchmark_running = true;
         state.main.benchmark_error = None;
         std::thread::spawn(move || {
-            // Cancel-aware end-to-end: an entry-point check skips everything if
-            // cancellation arrived before the thread started, the predicate
-            // passed to `scrape_all` aborts between each of its three sequential
-            // HTTP scrapes (so a mid-scrape cancel returns after the in-flight
-            // request rather than after all three), and a final check skips the
-            // state update so `benchmark_running` is not reset on a stale token
-            // (with_state is a no-op after clear() but the guard stays explicit).
-            if token.is_cancelled() {
-                return;
-            }
+            // Cancel-aware end-to-end. Previously, an entry-point or post-scrape cancel
+            // returned early, leaving `benchmark_running = true` and the button locked
+            // on "Syncing…". Now every exit path resets the flag.
             let cancel_check = token.clone();
-            let results = gw2_optimizer::scraper::scrape_all(
-                &addon_dir,
-                &|| cancel_check.is_cancelled(),
-            );
-            if token.is_cancelled() {
-                return;
-            }
+            let results = if token.is_cancelled() {
+                None
+            } else {
+                let r = gw2_optimizer::scraper::scrape_all(
+                    &addon_dir,
+                    &|| cancel_check.is_cancelled(),
+                );
+                if token.is_cancelled() { None } else { Some(r) }
+            };
             crate::state::with_state(|s| {
                 s.main.benchmark_running = false;
+                let Some(results) = results else {
+                    return;
+                };
                 let mut counts = std::collections::HashMap::new();
                 let mut errors = Vec::new();
                 for r in &results {
@@ -466,11 +501,11 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
                 s.main.benchmark_error = if errors.is_empty() { None } else { Some(errors.join(" | ")) };
                 let total: usize = results.iter().map(|r| r.builds.len()).sum();
                 if total > 0 {
-                    s.main.benchmark_last_synced = Some(
-                        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| { let secs = d.as_secs(); let days = secs/86400;
-                                format!("{:04}-{:02}-{:02}", 1970+days/365, days%365/30+1, days%365%30+1) })
-                            .unwrap_or_else(|_| "unknown".to_string()));
+                    // Use chrono for the YYYY-MM-DD label. The previous manual calendar
+                    // arithmetic (1970 + days/365, days%365/30 + 1, …) ignored leap years
+                    // and assumed 30-day months, drifting ~14 days off the real date.
+                    s.main.benchmark_last_synced =
+                        Some(chrono::Utc::now().format("%Y-%m-%d").to_string());
                 }
             });
         });

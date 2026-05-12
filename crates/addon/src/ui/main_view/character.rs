@@ -35,21 +35,24 @@ pub(super) fn load_characters(state: &mut AddonState) {
 
     std::thread::spawn(move || {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if token.is_cancelled() {
-                return;
-            }
-
-            let result =
-                gw2_api::client::Gw2Client::with_key(&key).and_then(|c| c.fetch_characters());
-
-            if token.is_cancelled() {
-                return;
-            }
+            // Always reset characters_loading on every exit path. Early-return cancels
+            // previously left the spinner stuck if the user navigated away mid-fetch.
+            let result = if token.is_cancelled() {
+                None
+            } else {
+                let r = gw2_api::client::Gw2Client::with_key(&key)
+                    .and_then(|c| c.fetch_characters());
+                if token.is_cancelled() {
+                    None
+                } else {
+                    Some(r)
+                }
+            };
 
             crate::state::with_state(|s| {
                 s.main.characters_loading = false;
                 match result {
-                    Ok(fresh_chars) => {
+                    Some(Ok(fresh_chars)) => {
                         // Save to cache for next time
                         let cache_dir = s.addon_dir.join("cache");
                         let cache = gw2_api::cache::DataCache::new(&cache_dir);
@@ -65,7 +68,7 @@ pub(super) fn load_characters(state: &mut AddonState) {
                             s.main.characters = fresh_chars;
                         }
                     }
-                    Err(e) => {
+                    Some(Err(e)) => {
                         // If we had cached data, don't overwrite it with an error
                         if !had_cache {
                             s.main.error = Some(e.to_string());
@@ -73,6 +76,7 @@ pub(super) fn load_characters(state: &mut AddonState) {
                         // Update API health status on failure
                         s.main.api_status = crate::state::ApiStatus::Offline;
                     }
+                    None => { /* cancelled — flag reset above */ }
                 }
             });
         }));
@@ -151,25 +155,37 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
 
     std::thread::spawn(move || {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if token.is_cancelled() {
-                return;
-            }
-
-            let result = (|| -> Result<(Vec<gw2_api::models::BuildTab>, Vec<gw2_api::models::EquipmentTab>), String> {
-            let client = gw2_api::client::Gw2Client::with_key(&key)
-                .map_err(|e| e.to_string())?;
-            let build_tabs = client.fetch_build_tabs(&character_name)
-                .map_err(|e| e.to_string())?;
-            let equip_tabs = client.fetch_equipment_tabs(&character_name)
-                .map_err(|e| e.to_string())?;
-            Ok((build_tabs, equip_tabs))
-        })();
-
-            if token.is_cancelled() {
-                return;
-            }
+            // Always reset build_loading on every exit path. Early-return cancels
+            // previously left the spinner stuck if the user switched character mid-fetch.
+            let result = if token.is_cancelled() {
+                None
+            } else {
+                let r: Result<(Vec<gw2_api::models::BuildTab>, Vec<gw2_api::models::EquipmentTab>), String> = (|| {
+                    let client = gw2_api::client::Gw2Client::with_key(&key)
+                        .map_err(|e| e.to_string())?;
+                    let build_tabs = client
+                        .fetch_build_tabs(&character_name)
+                        .map_err(|e| e.to_string())?;
+                    let equip_tabs = client
+                        .fetch_equipment_tabs(&character_name)
+                        .map_err(|e| e.to_string())?;
+                    Ok((build_tabs, equip_tabs))
+                })();
+                if token.is_cancelled() {
+                    None
+                } else {
+                    Some(r)
+                }
+            };
 
             crate::state::with_state(|s| {
+                // Always clear the loading flag — covers cancellation and the case where
+                // the user switched character (skipping the apply branch below) which
+                // previously left the spinner stuck.
+                s.main.build_loading = false;
+                let Some(result) = result else {
+                    return;
+                };
                 // Only apply if user hasn't switched to a different character
                 if s.main
                     .selected_character
@@ -214,10 +230,8 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
                             if bt_changed || et_changed {
                                 apply_character_tabs(s, fresh_bt, fresh_et);
                             }
-                            s.main.build_loading = false;
                         }
                         Err(e) => {
-                            s.main.build_loading = false;
                             // If we had cached data, don't overwrite with error
                             if !had_cache {
                                 s.main.error = Some(e);
