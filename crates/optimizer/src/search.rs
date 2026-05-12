@@ -68,11 +68,15 @@ pub fn search_gear_prefixes(
     let relevant = crate::scoring::select_prefixes_by_tiers(weights);
     let mut candidates = Vec::new();
 
-    // Find itemstat IDs matching the relevant prefix names
-    let relevant_stats: Vec<&ItemStat> = itemstats
+    // Find itemstat IDs matching the relevant prefix names.
+    // Sort by id so candidate-generation order — and therefore the tie-break
+    // when downstream scoring produces equal scores — is stable across runs.
+    // `HashMap::values()` order is unspecified.
+    let mut relevant_stats: Vec<&ItemStat> = itemstats
         .values()
         .filter(|is| relevant.iter().any(|r| is.name.contains(r)))
         .collect();
+    relevant_stats.sort_by_key(|is| is.id);
 
     if relevant_stats.is_empty() {
         return candidates;

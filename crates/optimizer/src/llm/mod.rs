@@ -5,6 +5,7 @@
 pub mod anthropic;
 pub mod gemini;
 pub mod openai;
+pub mod openrouter;
 pub(crate) mod retry;
 pub mod tools;
 pub(crate) mod trim;
@@ -270,6 +271,16 @@ pub fn create_client(
             let model = config.anthropic_model_id();
             let usage_path = addon_dir.join("anthropic_usage.json");
             let client = anthropic::AnthropicClient::with_persistence(key, model, usage_path)?;
+            Ok(Box::new(client))
+        }
+        LlmProvider::OpenRouter => {
+            let key = config
+                .openrouter_api_key
+                .as_deref()
+                .ok_or_else(|| LlmError::Unavailable("No OpenRouter API key configured".into()))?;
+            let model = config.openrouter_model_id();
+            let usage_path = addon_dir.join("openrouter_usage.json");
+            let client = openrouter::OpenRouterClient::with_persistence(key, model, usage_path)?;
             Ok(Box::new(client))
         }
     }

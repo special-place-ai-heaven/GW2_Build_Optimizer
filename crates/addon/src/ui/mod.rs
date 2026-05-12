@@ -25,16 +25,31 @@ pub fn render(ui: &Ui) {
         return;
     }
 
-    Window::new("GW2 Build Optimizer")
-        .size([800.0, 600.0], Condition::FirstUseEver)
-        .build(ui, || {
-            state::with_state(|s| match &s.screen {
-                Screen::Setup(step) => {
-                    setup::render_setup(ui, s, step.clone());
-                }
-                Screen::Main => {
-                    main_view::render_main(ui, s);
-                }
+    // Catch panics inside the ImGui frame so a bug in any render path
+    // doesn't unwind through Nexus' C-unwind FFI boundary. A panic mid-frame
+    // also leaves the ImGui stack unbalanced (open `begin` without `end`),
+    // which the next frame would inherit and corrupt — `catch_unwind` here
+    // protects only this addon's draw calls, but that's enough to keep the
+    // rest of the game's ImGui state intact.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Window::new("GW2 Build Optimizer")
+            .size([800.0, 600.0], Condition::FirstUseEver)
+            .build(ui, || {
+                state::with_state(|s| match &s.screen {
+                    Screen::Setup(step) => {
+                        setup::render_setup(ui, s, step.clone());
+                    }
+                    Screen::Main => {
+                        main_view::render_main(ui, s);
+                    }
+                });
             });
-        });
+    }));
+    if outcome.is_err() {
+        nexus::log::log(
+            nexus::log::LogLevel::Warning,
+            "GW2BuildOpt",
+            "Render panicked — skipping this frame. See debugger or logs for details.",
+        );
+    }
 }

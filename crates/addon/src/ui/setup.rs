@@ -271,6 +271,11 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
             "https://console.anthropic.com/settings/keys",
             "Click 'Create Key', name it, and copy the key.",
         ),
+        LlmProvider::OpenRouter => (
+            "Get an OpenRouter API key (one key, hundreds of models):",
+            "https://openrouter.ai/keys",
+            "Click 'Create Key', name it, and copy the key. You can pre-load credits at openrouter.ai/credits.",
+        ),
     };
 
     ui.text_wrapped(help_text);
@@ -335,6 +340,13 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
                                 )?;
                                 c.validate_key()
                             }
+                            LlmProvider::OpenRouter => {
+                                let c = gw2_optimizer::llm::openrouter::OpenRouterClient::new(
+                                    &key,
+                                    gw2_core::config::DEFAULT_OPENROUTER_MODEL,
+                                )?;
+                                c.validate_key()
+                            }
                         }
                     })();
                     if token.is_cancelled() {
@@ -357,6 +369,9 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
                             }
                             LlmProvider::Anthropic => {
                                 s.config.anthropic_api_key = Some(key);
+                            }
+                            LlmProvider::OpenRouter => {
+                                s.config.openrouter_api_key = Some(key);
                             }
                         }
                         if let Err(e) = s.config.save(&s.config_path) {

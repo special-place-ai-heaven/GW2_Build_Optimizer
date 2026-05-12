@@ -30,13 +30,15 @@ fn draw_hexagon(
     filled: bool,
     thickness: f32,
 ) {
-    let mut points = Vec::with_capacity(6);
-    for i in 0..6 {
+    // Stack-allocated fixed-size array — hexagons always have exactly 6
+    // vertices, so a heap Vec per render frame was pure overhead.
+    let mut points = [[0.0f32; 2]; 6];
+    for (i, pt) in points.iter_mut().enumerate() {
         let angle = std::f32::consts::PI / 3.0 * i as f32 - std::f32::consts::FRAC_PI_6;
-        points.push([
+        *pt = [
             center[0] + radius * angle.cos(),
             center[1] + radius * angle.sin(),
-        ]);
+        ];
     }
     if filled {
         // Draw as triangles from center

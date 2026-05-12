@@ -131,16 +131,29 @@ impl GameDb {
         let mut sigils = Vec::new();
         let mut relics = Vec::new();
 
-        // Build skill ↔ palette ID maps from professions
+        // Build skill ↔ palette ID maps from professions.
+        //
+        // Iterate professions in a deterministic order (sorted by name) so
+        // that when a skill_id or palette_id is shared across professions
+        // (e.g. racial elites, downed-state skills), the last-writer-wins
+        // resolution is stable across runs and machines. `HashMap::values()`
+        // ordering is unspecified — without this sort the same input cache
+        // could yield two different `skill_to_palette` / `palette_to_skill`
+        // mappings, then break weapon-skill-by-palette lookups depending on
+        // which profession won the insert.
+        let mut prof_names: Vec<&String> = professions.keys().collect();
+        prof_names.sort_unstable();
         let mut skill_to_palette: HashMap<u32, u32> = HashMap::new();
         let mut palette_to_skill: HashMap<u32, u32> = HashMap::new();
-        for prof in professions.values() {
-            for pair in &prof.skills_by_palette {
-                if pair.len() == 2 {
-                    let palette_id = pair[0];
-                    let skill_id = pair[1];
-                    skill_to_palette.insert(skill_id, palette_id);
-                    palette_to_skill.insert(palette_id, skill_id);
+        for prof_name in prof_names {
+            if let Some(prof) = professions.get(prof_name) {
+                for pair in &prof.skills_by_palette {
+                    if pair.len() == 2 {
+                        let palette_id = pair[0];
+                        let skill_id = pair[1];
+                        skill_to_palette.insert(skill_id, palette_id);
+                        palette_to_skill.insert(palette_id, skill_id);
+                    }
                 }
             }
         }

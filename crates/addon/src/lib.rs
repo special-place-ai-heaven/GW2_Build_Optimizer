@@ -28,7 +28,7 @@ fn on_load() {
 
     state::init(addon_dir);
 
-    let _keybind = register_keybind_with_string(
+    register_keybind_with_string(
         "GW2_BUILD_OPT_TOGGLE",
         keybind_handler!(|_id, is_release| {
             if !is_release {
@@ -36,9 +36,10 @@ fn on_load() {
             }
         }),
         "CTRL+SHIFT+O",
-    );
+    )
+    .revert_on_unload();
 
-    let _render = register_render(RenderType::Render, nexus::gui::render!(ui::render));
+    register_render(RenderType::Render, nexus::gui::render!(ui::render)).revert_on_unload();
 
     log(
         LogLevel::Info,

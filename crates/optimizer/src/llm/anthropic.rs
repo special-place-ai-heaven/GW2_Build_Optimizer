@@ -365,7 +365,12 @@ impl AnthropicClient {
         if let Some(ref path) = self.usage_path {
             let persisted = rate.to_persisted();
             if let Ok(json) = serde_json::to_string(&persisted) {
-                let _ = std::fs::write(path, json);
+                let tmp = path.with_extension("tmp");
+                if std::fs::write(&tmp, &json).is_ok() {
+                    let _ = std::fs::rename(&tmp, path);
+                } else {
+                    let _ = std::fs::remove_file(&tmp);
+                }
             }
         }
     }

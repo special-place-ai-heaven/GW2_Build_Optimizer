@@ -94,7 +94,9 @@ impl TokenBucket {
 
     /// Take a token, returning the duration to sleep if the bucket was empty.
     /// The caller must sleep AFTER releasing the mutex lock to avoid blocking
-    /// other threads that want to check/take tokens concurrently.
+    /// other threads that want to check/take tokens concurrently. After sleeping,
+    /// the caller loops back to `take()` again to atomically consume the
+    /// now-refilled token.
     fn take(&mut self) -> Option<Duration> {
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_refill).as_secs_f64();
@@ -102,8 +104,13 @@ impl TokenBucket {
         self.last_refill = now;
 
         if self.tokens < 1.0 {
+            // Compute the wait until one full token has accumulated. We do NOT
+            // reset `self.tokens` here — the next `take()` call (after the
+            // caller sleeps and re-locks) will roll the fractional remainder
+            // into the new total via the `elapsed * REFILL_RATE` accumulation
+            // above. Zeroing `self.tokens` would discard the fractional progress
+            // and force the caller to wait an extra (1.0 - tokens)/rate seconds.
             let wait = Duration::from_secs_f64((1.0 - self.tokens) / REFILL_RATE);
-            self.tokens = 0.0;
             Some(wait)
         } else {
             self.tokens -= 1.0;
@@ -530,6 +537,40 @@ mod tests {
         // Should not need to sleep when bucket is full
         let wait = bucket.take();
         assert!(wait.is_none(), "Full bucket should not require sleeping");
+    }
+
+    #[test]
+    fn test_token_bucket_preserves_fractional_on_empty() {
+        // Regression: previously `take()` set `tokens = 0.0` on the empty
+        // branch, which discarded any fractional progress and forced the
+        // caller to wait an extra (1.0 - tokens) / rate seconds before any
+        // token was available. Verify that calling `take()` twice without
+        // sleeping does NOT erase the bucket — the second call should see
+        // the small elapsed time accumulate on top of the prior fractional
+        // total, not on top of zero.
+        let mut bucket = TokenBucket::new();
+        // Drain the bucket
+        while bucket.take().is_none() {}
+        // Force the bucket into a deliberate fractional state by walking
+        // back its `last_refill` clock so the next take() sees ~0.1s of
+        // elapsed time, which at REFILL_RATE produces a fractional token.
+        bucket.last_refill -= Duration::from_millis(100);
+        let _first = bucket.take(); // accumulates fractional tokens
+        let tokens_after_first = bucket.tokens;
+        assert!(
+            tokens_after_first > 0.0,
+            "after a sub-token wait, take() should LEAVE the fractional progress in the bucket (was {})",
+            tokens_after_first,
+        );
+        // Calling take() again with negligible elapsed time should keep the
+        // fractional balance approximately the same (modulo a tiny refill).
+        let _second = bucket.take();
+        assert!(
+            bucket.tokens >= tokens_after_first - 0.01,
+            "consecutive take() calls must not zero out fractional tokens (before={}, after={})",
+            tokens_after_first,
+            bucket.tokens,
+        );
     }
 
     fn headers_with_retry_after(value: &str) -> HeaderMap {
