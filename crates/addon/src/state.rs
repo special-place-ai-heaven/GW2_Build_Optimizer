@@ -156,6 +156,17 @@ pub struct MainState {
     pub api_status_frames: u32,
     /// Whether a health check is currently in flight.
     pub api_health_checking: bool,
+    /// Cached "Usage today" count for the active provider's persisted usage
+    /// file, displayed in the Settings tab. Refreshed every ~60 frames (~1s)
+    /// instead of reading the file every render frame.
+    pub settings_usage_today: u64,
+    /// Frame counter that throttles `settings_usage_today` refresh.
+    pub settings_usage_frames: u32,
+    /// Cached cache-directory size in bytes for the Settings tab "Cache: …"
+    /// label. Throttled refresh on `settings_cache_size_frames`.
+    pub settings_cache_size: u64,
+    /// Frame counter that throttles `settings_cache_size` refresh.
+    pub settings_cache_size_frames: u32,
     // Spec & Trait Locks
     /// Granular lock constraints for optimizer (which specs/traits to preserve).
     pub build_locks: BuildLocks,

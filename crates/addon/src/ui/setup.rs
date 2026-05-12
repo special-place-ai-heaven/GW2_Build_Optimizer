@@ -89,74 +89,87 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
         let token = state.cancel_token.clone();
         std::thread::spawn(move || {
             let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                if token.is_cancelled() {
-                    return;
+                // Reset the Validating spinner on every exit path (including cancel).
+                // Without this, navigating away mid-validation pins the status text on
+                // "Validating…" until the user clicks Validate again.
+                enum SetupOutcome {
+                    Cancelled,
+                    Invalid(String),
+                    Valid {
+                        scopes: Vec<(String, bool)>,
+                        missing: Vec<String>,
+                    },
                 }
 
-                let client = match gw2_api::client::Gw2Client::with_key(&tx_key) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        crate::state::with_state(|s| {
-                            s.setup.gw2_key_status = KeyStatus::Invalid(e.to_string());
-                        });
-                        return;
+                let outcome: SetupOutcome = 'validate: {
+                    if token.is_cancelled() {
+                        break 'validate SetupOutcome::Cancelled;
                     }
+                    let client = match gw2_api::client::Gw2Client::with_key(&tx_key) {
+                        Ok(c) => c,
+                        Err(e) => break 'validate SetupOutcome::Invalid(e.to_string()),
+                    };
+
+                    if token.is_cancelled() {
+                        break 'validate SetupOutcome::Cancelled;
+                    }
+                    let info: gw2_api::client::TokenInfo = match client.get("tokeninfo") {
+                        Ok(i) => i,
+                        Err(e) => break 'validate SetupOutcome::Invalid(e.to_string()),
+                    };
+
+                    if token.is_cancelled() {
+                        break 'validate SetupOutcome::Cancelled;
+                    }
+
+                    let required = ["account", "characters", "builds"];
+                    let recommended = ["inventories", "unlocks"];
+                    let scopes: Vec<(String, bool)> = required
+                        .iter()
+                        .chain(recommended.iter())
+                        .map(|scope| {
+                            (
+                                scope.to_string(),
+                                info.permissions.contains(&scope.to_string()),
+                            )
+                        })
+                        .collect();
+                    let missing: Vec<String> = required
+                        .iter()
+                        .filter(|s| !info.permissions.contains(&s.to_string()))
+                        .map(|s| s.to_string())
+                        .collect();
+                    SetupOutcome::Valid { scopes, missing }
                 };
 
-                if token.is_cancelled() {
-                    return;
-                }
-
-                // Fetch token info (always, to populate scope table)
-                let info: gw2_api::client::TokenInfo = match client.get("tokeninfo") {
-                    Ok(i) => i,
-                    Err(e) => {
-                        crate::state::with_state(|s| {
-                            s.setup.gw2_key_status = KeyStatus::Invalid(e.to_string());
-                        });
-                        return;
-                    }
-                };
-
-                if token.is_cancelled() {
-                    return;
-                }
-
-                let required = ["account", "characters", "builds"];
-                let recommended = ["inventories", "unlocks"];
-                let all_scopes: Vec<_> = required
-                    .iter()
-                    .chain(recommended.iter())
-                    .map(|scope| {
-                        let present = info.permissions.contains(&scope.to_string());
-                        (scope.to_string(), present)
-                    })
-                    .collect();
-
-                let missing_required: Vec<_> = required
-                    .iter()
-                    .filter(|s| !info.permissions.contains(&s.to_string()))
-                    .collect();
-
-                crate::state::with_state(|s| {
-                    s.setup.gw2_key_scopes = all_scopes;
-                    if missing_required.is_empty() {
-                        s.setup.gw2_key_status = KeyStatus::Valid;
-                        s.config.gw2_api_key = Some(tx_key);
-                        if let Err(e) = s.config.save(&s.config_path) {
-                            nexus::log::log(
-                                nexus::log::LogLevel::Warning,
-                                "GW2BuildOpt",
-                                &format!("Config save failed: {}", e),
-                            );
+                crate::state::with_state(|s| match outcome {
+                    SetupOutcome::Cancelled => {
+                        // Clear the Validating state but leave the scope table alone.
+                        if matches!(s.setup.gw2_key_status, KeyStatus::Validating) {
+                            s.setup.gw2_key_status = KeyStatus::NotValidated;
                         }
-                    } else {
-                        let names: Vec<_> =
-                            missing_required.iter().map(|s| s.to_string()).collect();
-                        s.setup.gw2_key_status = KeyStatus::Invalid(format!(
-                            "Missing required scopes: {}",
-                            names.join(", ")
-                        ));
+                    }
+                    SetupOutcome::Invalid(e) => {
+                        s.setup.gw2_key_status = KeyStatus::Invalid(e);
+                    }
+                    SetupOutcome::Valid { scopes, missing } => {
+                        s.setup.gw2_key_scopes = scopes;
+                        if missing.is_empty() {
+                            s.setup.gw2_key_status = KeyStatus::Valid;
+                            s.config.gw2_api_key = Some(tx_key);
+                            if let Err(e) = s.config.save(&s.config_path) {
+                                nexus::log::log(
+                                    nexus::log::LogLevel::Warning,
+                                    "GW2BuildOpt",
+                                    &format!("Config save failed: {}", e),
+                                );
+                            }
+                        } else {
+                            s.setup.gw2_key_status = KeyStatus::Invalid(format!(
+                                "Missing required scopes: {}",
+                                missing.join(", ")
+                            ));
+                        }
                     }
                 });
             }));
@@ -293,43 +306,46 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
         let token = state.cancel_token.clone();
         std::thread::spawn(move || {
             let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                if token.is_cancelled() {
-                    return;
-                }
-
-                let result = (|| -> Result<(), gw2_optimizer::llm::LlmError> {
-                    use gw2_optimizer::llm::LlmClient;
-                    match provider {
-                        LlmProvider::Gemini => {
-                            let c = gw2_optimizer::llm::gemini::GeminiLlmClient::new(
-                                &key,
-                                gw2_core::config::DEFAULT_GEMINI_MODEL,
-                            )?;
-                            c.validate_key()
+                // Reset the Validating spinner on every exit path. Without this,
+                // a cancellation mid-validation pins the status on "Validating…".
+                let result = if token.is_cancelled() {
+                    None
+                } else {
+                    let r = (|| -> Result<(), gw2_optimizer::llm::LlmError> {
+                        use gw2_optimizer::llm::LlmClient;
+                        match provider {
+                            LlmProvider::Gemini => {
+                                let c = gw2_optimizer::llm::gemini::GeminiLlmClient::new(
+                                    &key,
+                                    gw2_core::config::DEFAULT_GEMINI_MODEL,
+                                )?;
+                                c.validate_key()
+                            }
+                            LlmProvider::OpenAI => {
+                                let c = gw2_optimizer::llm::openai::OpenAiClient::new(
+                                    &key,
+                                    gw2_core::config::DEFAULT_OPENAI_MODEL,
+                                )?;
+                                c.validate_key()
+                            }
+                            LlmProvider::Anthropic => {
+                                let c = gw2_optimizer::llm::anthropic::AnthropicClient::new(
+                                    &key,
+                                    gw2_core::config::DEFAULT_ANTHROPIC_MODEL,
+                                )?;
+                                c.validate_key()
+                            }
                         }
-                        LlmProvider::OpenAI => {
-                            let c = gw2_optimizer::llm::openai::OpenAiClient::new(
-                                &key,
-                                gw2_core::config::DEFAULT_OPENAI_MODEL,
-                            )?;
-                            c.validate_key()
-                        }
-                        LlmProvider::Anthropic => {
-                            let c = gw2_optimizer::llm::anthropic::AnthropicClient::new(
-                                &key,
-                                gw2_core::config::DEFAULT_ANTHROPIC_MODEL,
-                            )?;
-                            c.validate_key()
-                        }
+                    })();
+                    if token.is_cancelled() {
+                        None
+                    } else {
+                        Some(r)
                     }
-                })();
-
-                if token.is_cancelled() {
-                    return;
-                }
+                };
 
                 crate::state::with_state(|s| match result {
-                    Ok(()) => {
+                    Some(Ok(())) => {
                         s.setup.llm_key_status = KeyStatus::Valid;
                         // Store key in the correct provider slot
                         match s.config.active_provider {
@@ -351,8 +367,15 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
                             );
                         }
                     }
-                    Err(e) => {
+                    Some(Err(e)) => {
                         s.setup.llm_key_status = KeyStatus::Invalid(e.to_string());
+                    }
+                    None => {
+                        // Cancelled. Clear the Validating spinner without overwriting
+                        // a status the user has since set (e.g. by switching providers).
+                        if matches!(s.setup.llm_key_status, KeyStatus::Validating) {
+                            s.setup.llm_key_status = KeyStatus::NotValidated;
+                        }
                     }
                 });
             }));
@@ -424,51 +447,65 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                 std::thread::spawn(move || {
                     let panic_result =
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            if token.is_cancelled() {
-                                return;
+                            // Drive the download in a single labelled block so every exit
+                            // path lands at the unified state write below. Previously,
+                            // cancel mid-download froze the progress bar with no Retry/Next
+                            // affordance.
+                            enum DlOutcome {
+                                Cancelled,
+                                ClientError(String),
+                                DownloadError(String),
+                                Ok(u32),
                             }
 
-                            let client = match gw2_api::client::Gw2Client::without_key() {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    crate::state::with_state(|s| {
-                                        if let Some(ref mut dl) = s.setup.download_progress {
-                                            dl.error = Some(e.to_string());
+                            let outcome: DlOutcome = 'download: {
+                                if token.is_cancelled() {
+                                    break 'download DlOutcome::Cancelled;
+                                }
+                                let client = match gw2_api::client::Gw2Client::without_key() {
+                                    Ok(c) => c,
+                                    Err(e) => {
+                                        break 'download DlOutcome::ClientError(e.to_string())
+                                    }
+                                };
+                                let cache = gw2_api::cache::DataCache::new(&cache_dir);
+
+                                let token_inner = token.clone();
+                                let result = gw2_api::download::download_all(
+                                    &client,
+                                    &cache,
+                                    |progress| {
+                                        if token_inner.is_cancelled() {
+                                            return;
                                         }
-                                    });
-                                    return;
+                                        crate::state::with_state(|s| {
+                                            let name = if let Some(ref detail) = progress.detail {
+                                                format!("{} ({})", progress.step_name, detail)
+                                            } else {
+                                                progress.step_name.clone()
+                                            };
+                                            s.setup.download_progress = Some(DownloadState {
+                                                current_step: progress.current_step,
+                                                total_steps: progress.total_steps,
+                                                step_name: name,
+                                                done: progress.done,
+                                                error: None,
+                                            });
+                                        });
+                                    },
+                                );
+
+                                if token.is_cancelled() {
+                                    break 'download DlOutcome::Cancelled;
+                                }
+                                match result {
+                                    Ok(b) => DlOutcome::Ok(b),
+                                    Err(e) => DlOutcome::DownloadError(e.to_string()),
                                 }
                             };
-                            let cache = gw2_api::cache::DataCache::new(&cache_dir);
 
-                            let token_inner = token.clone();
-                            let result =
-                                gw2_api::download::download_all(&client, &cache, |progress| {
-                                    if token_inner.is_cancelled() {
-                                        return;
-                                    }
-                                    crate::state::with_state(|s| {
-                                        let name = if let Some(ref detail) = progress.detail {
-                                            format!("{} ({})", progress.step_name, detail)
-                                        } else {
-                                            progress.step_name.clone()
-                                        };
-                                        s.setup.download_progress = Some(DownloadState {
-                                            current_step: progress.current_step,
-                                            total_steps: progress.total_steps,
-                                            step_name: name,
-                                            done: progress.done,
-                                            error: None,
-                                        });
-                                    });
-                                });
-
-                            if token.is_cancelled() {
-                                return;
-                            }
-
-                            crate::state::with_state(|s| match result {
-                                Ok(build) => {
+                            crate::state::with_state(|s| match outcome {
+                                DlOutcome::Ok(build) => {
                                     s.config.cache_build_number = Some(build);
                                     if let Err(e) = s.config.save(&s.config_path) {
                                         nexus::log::log(
@@ -481,9 +518,17 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                         dl.done = true;
                                     }
                                 }
-                                Err(e) => {
+                                DlOutcome::ClientError(e) | DlOutcome::DownloadError(e) => {
                                     if let Some(ref mut dl) = s.setup.download_progress {
-                                        dl.error = Some(e.to_string());
+                                        dl.error = Some(e);
+                                    }
+                                }
+                                DlOutcome::Cancelled => {
+                                    // Surface cancellation as an error so the user gets the
+                                    // Retry button. Otherwise the progress bar freezes with
+                                    // no way forward.
+                                    if let Some(ref mut dl) = s.setup.download_progress {
+                                        dl.error = Some("Cancelled".into());
                                     }
                                 }
                             });

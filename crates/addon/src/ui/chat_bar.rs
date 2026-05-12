@@ -17,6 +17,18 @@ pub struct ChatMessage {
     pub text: String,
 }
 
+/// Maximum chat history entries retained. Beyond this, the oldest entries are
+/// dropped on append so a long-running session can't grow the Vec without
+/// bound. Render only shows the last ~6 entries anyway.
+const CHAT_HISTORY_CAP: usize = 100;
+
+fn trim_history(history: &mut Vec<ChatMessage>) {
+    if history.len() > CHAT_HISTORY_CAP {
+        let drop = history.len() - CHAT_HISTORY_CAP;
+        history.drain(..drop);
+    }
+}
+
 /// Render the chat bar at the bottom of the build view.
 /// Returns Some(message) if the user submitted a request.
 pub fn render_chat_bar(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
@@ -70,6 +82,7 @@ pub fn render_chat_bar(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
                     from_user: true,
                     text: msg.clone(),
                 });
+                trim_history(&mut state.history);
                 state.input.clear();
                 submitted = Some(msg);
             }
@@ -102,4 +115,5 @@ pub fn add_ai_response(state: &mut ChatBarState, text: String) {
         from_user: false,
         text: display,
     });
+    trim_history(&mut state.history);
 }

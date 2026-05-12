@@ -379,6 +379,13 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                         }
                     }
                 });
+            } else {
+                // Cancelled mid-flight. Without resetting these flags the UI stays stuck
+                // on the "Optimizing…" spinner until another optimization completes.
+                crate::state::with_state(|s| {
+                    s.main.optimizing = false;
+                    s.main.comparison.loading = false;
+                });
             }
         }));
 
@@ -671,24 +678,22 @@ fn candidate_to_suggestion(
         armor: candidate.derived.armor.round() as i32,
     });
 
-    // Compute combat metrics for all 3 buff profiles
-    let profession_name = db
-        .professions
-        .values()
-        .next()
-        .map(|p| p.name.as_str())
-        .unwrap_or("Warrior");
-    // Try to determine profession from elite spec
+    // Compute combat metrics for all 3 buff profiles.
+    // Determine profession from the candidate's specs. The "Warrior" fallback
+    // is only reached if the candidate has no specs at all, which a valid
+    // BuildCandidate never has — kept here so combat math always has a
+    // profession name. Previously this fell back to
+    // `db.professions.values().next()`, whose order is unspecified.
     let prof_name = if let Some(elite_id) = candidate.elite_spec {
         db.spec(elite_id)
             .map(|s| s.profession.as_str())
-            .unwrap_or(profession_name)
+            .unwrap_or("Warrior")
     } else if let Some(&core_id) = candidate.core_specs.first() {
         db.spec(core_id)
             .map(|s| s.profession.as_str())
-            .unwrap_or(profession_name)
+            .unwrap_or("Warrior")
     } else {
-        profession_name
+        "Warrior"
     };
 
     let (combat_solo, combat_party, combat_squad) = compute_3tier_combat(
@@ -751,27 +756,39 @@ pub(super) fn simulate_suggestion_rotation(
 
     let mut all_rotation_skills: Vec<gw2_optimizer::rotation::RotationSkill> = Vec::new();
 
-    // 1. Resolve weapon skills from suggestion.weapons (format: "Set 1: Axe / Axe")
+    // 1. Resolve weapon skills from suggestion.weapons (format: "Set 1: Axe / Axe").
+    //
+    // Use the pre-built `skills_by_profession` index instead of scanning all
+    // ~500 skills per (profession × weapon set × weapon type) — that scan was
+    // also nondeterministic across runs because `db.skills.values()` iteration
+    // order is unspecified.
     if !suggestion.weapons.is_empty() {
         let profession = infer_profession_from_specs(&suggestion.specializations, db);
         let weapon_sets = parse_weapon_sets(&suggestion.weapons);
+        let prof_skill_ids = db.skills_by_profession.get(profession.as_str());
 
         for (set_num, weapon_types) in &weapon_sets {
             let mut set_skill_ids: Vec<u32> = Vec::new();
-            for wtype in weapon_types {
-                for skill in db.skills.values() {
-                    if skill.weapon_type.as_deref() == Some(wtype.as_str())
-                        && skill
-                            .professions
-                            .iter()
-                            .any(|p| p.eq_ignore_ascii_case(&profession))
-                        && skill
-                            .slot
-                            .as_deref()
-                            .map(|s| s.starts_with("Weapon_"))
-                            .unwrap_or(false)
-                        && !set_skill_ids.contains(&skill.id)
-                    {
+            if let Some(ids) = prof_skill_ids {
+                for &id in ids {
+                    let Some(skill) = db.skills.get(&id) else {
+                        continue;
+                    };
+                    let matches_weapon = weapon_types
+                        .iter()
+                        .any(|wt| skill.weapon_type.as_deref() == Some(wt.as_str()));
+                    if !matches_weapon {
+                        continue;
+                    }
+                    let is_weapon_slot = skill
+                        .slot
+                        .as_deref()
+                        .map(|s| s.starts_with("Weapon_"))
+                        .unwrap_or(false);
+                    if !is_weapon_slot {
+                        continue;
+                    }
+                    if !set_skill_ids.contains(&skill.id) {
                         set_skill_ids.push(skill.id);
                     }
                 }
@@ -785,20 +802,36 @@ pub(super) fn simulate_suggestion_rotation(
         }
     }
 
-    // 2. Resolve heal/utility/elite from suggestion.skills
-    //    Format: "Heal: Name", "Utils: Name1, Name2, Name3", "Elite: Name"
+    // 2. Resolve heal/utility/elite from suggestion.skills.
+    //    Format: "Heal: Name", "Utils: Name1, Name2, Name3", "Elite: Name".
+    //
+    // Walk skills_by_profession (sorted, scoped) instead of all db.skills —
+    // deterministic order plus faster than the ~500-entry scan. We still need
+    // exact-name match so the smaller candidate set is iterated linearly.
     let skill_names = parse_skill_names(&suggestion.skills);
-    for name in &skill_names {
-        if let Some(skill) = db
-            .skills
-            .values()
-            .find(|s| s.name.eq_ignore_ascii_case(name))
-        {
-            if !all_rotation_skills.iter().any(|rs| rs.skill_id == skill.id) {
-                let mut rs_vec =
-                    gw2_optimizer::rotation::builder::build_rotation_skills(&[skill.id], db);
-                // Non-weapon skills stay at weapon_set=0 (always available)
-                all_rotation_skills.append(&mut rs_vec);
+    if !skill_names.is_empty() {
+        let profession = infer_profession_from_specs(&suggestion.specializations, db);
+        let prof_skill_ids = db.skills_by_profession.get(profession.as_str());
+        for name in &skill_names {
+            let found_skill = prof_skill_ids.and_then(|ids| {
+                ids.iter()
+                    .filter_map(|id| db.skills.get(id))
+                    .find(|s| s.name.eq_ignore_ascii_case(name))
+            });
+            // Fallback: scan all skills if the profession index missed (e.g.
+            // shared utility-like skills not registered under profession).
+            let skill = found_skill.or_else(|| {
+                db.skills
+                    .values()
+                    .find(|s| s.name.eq_ignore_ascii_case(name))
+            });
+            if let Some(skill) = skill {
+                if !all_rotation_skills.iter().any(|rs| rs.skill_id == skill.id) {
+                    let mut rs_vec =
+                        gw2_optimizer::rotation::builder::build_rotation_skills(&[skill.id], db);
+                    // Non-weapon skills stay at weapon_set=0 (always available)
+                    all_rotation_skills.append(&mut rs_vec);
+                }
             }
         }
     }
@@ -921,12 +954,13 @@ fn infer_profession_from_specs(
             }
         }
     }
-    // Fallback to first profession in db
-    db.professions
-        .values()
-        .next()
-        .map(|p| p.name.clone())
-        .unwrap_or_default()
+    // Fallback: return empty string. The previous
+    // `db.professions.values().next()` picked a random profession from
+    // HashMap iteration order — non-deterministic and almost certainly the
+    // wrong profession anyway. Callers downstream that key on the profession
+    // (e.g. `skills_by_profession.get(name)`) will simply find nothing, which
+    // is the correct outcome when we cannot infer.
+    String::new()
 }
 
 // infer_weights_from_stats is now in radar_chart.rs
@@ -1310,6 +1344,13 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             format!("Error: {}", e),
                         );
                     }
+                });
+            } else {
+                // Cancelled mid-flight. `add_ai_response` would normally clear the
+                // waiting flag; without this branch the UI stays stuck on "AI thinking…"
+                // until another chat completes successfully.
+                crate::state::with_state(|s| {
+                    s.main.chat.waiting = false;
                 });
             }
         }));
