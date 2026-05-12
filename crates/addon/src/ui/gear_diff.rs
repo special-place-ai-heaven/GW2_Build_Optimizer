@@ -33,15 +33,23 @@ pub struct BuildDiff {
 }
 
 /// Normalize a name for comparison: lowercase, strip common prefixes.
+///
+/// Lowercase BEFORE stripping — the previous order stripped case-sensitive
+/// prefixes first, so "Superior Rune of the Scholar" → "scholar" but
+/// "superior rune of the scholar" → "superior rune of the scholar". Two
+/// equivalent inputs from different sources (current build vs LLM suggestion)
+/// could compare unequal and show "Changed" when the gear was unchanged.
 fn normalize(s: &str) -> String {
-    let s = s.trim();
-    let s = s.strip_prefix("Superior Rune of the ").unwrap_or(s);
-    let s = s.strip_prefix("Superior Rune of ").unwrap_or(s);
-    let s = s.strip_prefix("Superior Sigil of the ").unwrap_or(s);
-    let s = s.strip_prefix("Superior Sigil of ").unwrap_or(s);
-    let s = s.strip_prefix("Relic of the ").unwrap_or(s);
-    let s = s.strip_prefix("Relic of ").unwrap_or(s);
-    s.to_lowercase()
+    let lower = s.trim().to_lowercase();
+    let stripped = lower
+        .strip_prefix("superior rune of the ")
+        .or_else(|| lower.strip_prefix("superior rune of "))
+        .or_else(|| lower.strip_prefix("superior sigil of the "))
+        .or_else(|| lower.strip_prefix("superior sigil of "))
+        .or_else(|| lower.strip_prefix("relic of the "))
+        .or_else(|| lower.strip_prefix("relic of "))
+        .unwrap_or(&lower);
+    stripped.to_string()
 }
 
 fn diff_slot(label: &str, current: &str, proposed: &str) -> SlotDiff {
@@ -58,17 +66,32 @@ fn diff_slot(label: &str, current: &str, proposed: &str) -> SlotDiff {
     }
 }
 
-/// Parse suggestion skill strings: "Heal: X", "Utility: X", "Elite: X"
+/// Parse suggestion skill strings: "Heal: X", "Utility: X", "Elite: X".
+///
+/// Prefix matching is case-insensitive — the LLM occasionally lowercases
+/// labels, and a case-sensitive `strip_prefix` would silently misroute
+/// "heal: X" into the utility bucket.
 fn parse_suggestion_skills(skills: &[String]) -> (String, Vec<String>, String) {
+    fn strip_label_ci<'a>(s: &'a str, label: &str) -> Option<&'a str> {
+        // `get` returns None on a non-char-boundary index, so this stays
+        // UTF-8 safe even if the LLM-provided string starts with multibyte
+        // characters within the first `label.len()` bytes.
+        let head = s.get(..label.len())?;
+        if head.eq_ignore_ascii_case(label) {
+            Some(&s[label.len()..])
+        } else {
+            None
+        }
+    }
     let mut heal = String::new();
     let mut utils = Vec::new();
     let mut elite = String::new();
     for s in skills {
-        if let Some(name) = s.strip_prefix("Heal: ") {
+        if let Some(name) = strip_label_ci(s, "Heal: ") {
             heal = name.trim().to_string();
-        } else if let Some(name) = s.strip_prefix("Utility: ") {
+        } else if let Some(name) = strip_label_ci(s, "Utility: ") {
             utils.push(name.trim().to_string());
-        } else if let Some(name) = s.strip_prefix("Elite: ") {
+        } else if let Some(name) = strip_label_ci(s, "Elite: ") {
             elite = name.trim().to_string();
         } else {
             // Unknown format — treat as utility
@@ -78,14 +101,27 @@ fn parse_suggestion_skills(skills: &[String]) -> (String, Vec<String>, String) {
     (heal, utils, elite)
 }
 
-/// Parse suggestion weapon strings: "Set 1: Sword / Shield", "Set 2: Rifle"
-/// Returns Vec of (weapon_summary_string, label).
+/// Parse suggestion weapon strings: "Set 1: Sword / Shield", "Set 2: Rifle".
+///
+/// Prefix matching is case-insensitive so "set 1:" or "SET 1:" route the
+/// same as the canonical "Set 1:".
 fn parse_suggestion_weapons(weapons: &[String]) -> Vec<(String, String)> {
+    fn strip_label_ci<'a>(s: &'a str, label: &str) -> Option<&'a str> {
+        // `get` returns None on a non-char-boundary index, so this stays
+        // UTF-8 safe even if the LLM-provided string starts with multibyte
+        // characters within the first `label.len()` bytes.
+        let head = s.get(..label.len())?;
+        if head.eq_ignore_ascii_case(label) {
+            Some(&s[label.len()..])
+        } else {
+            None
+        }
+    }
     let mut result = Vec::new();
     for w in weapons {
-        if let Some(rest) = w.strip_prefix("Set 1: ") {
+        if let Some(rest) = strip_label_ci(w, "Set 1: ") {
             result.push(("Set 1".to_string(), rest.trim().to_string()));
-        } else if let Some(rest) = w.strip_prefix("Set 2: ") {
+        } else if let Some(rest) = strip_label_ci(w, "Set 2: ") {
             result.push(("Set 2".to_string(), rest.trim().to_string()));
         } else {
             result.push(("Weapons".to_string(), w.trim().to_string()));
@@ -279,6 +315,20 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_case_insensitive_prefix_strip() {
+        // Regression: lowercase prefix wasn't stripped because strip_prefix was
+        // case-sensitive — so a lowercase input compared unequal to the same
+        // canonical name and the diff showed "Changed" for unchanged gear.
+        assert_eq!(
+            normalize("superior rune of the scholar"),
+            normalize("Superior Rune of the Scholar"),
+            "lowercase + canonical-case inputs must normalize identically"
+        );
+        assert_eq!(normalize("SUPERIOR SIGIL OF FORCE"), "force");
+        assert_eq!(normalize("relic of the thief"), "thief");
+    }
+
+    #[test]
     fn test_diff_unchanged() {
         let d = diff_slot("Test", "Scholar", "Superior Rune of the Scholar");
         assert_eq!(d.status, ChangeStatus::Unchanged);
@@ -303,6 +353,37 @@ mod tests {
         assert_eq!(heal, "Mending");
         assert_eq!(utils.len(), 3);
         assert_eq!(elite, "Feel My Wrath");
+    }
+
+    #[test]
+    fn test_parse_skills_case_insensitive_labels() {
+        // Regression: lowercase / mixed-case labels from the LLM used to fall
+        // through to the unknown-format branch (treated as utilities).
+        let skills = vec![
+            "heal: Mending".to_string(),
+            "UTILITY: Signet of Resolve".to_string(),
+            "Elite: Feel My Wrath".to_string(),
+        ];
+        let (heal, utils, elite) = parse_suggestion_skills(&skills);
+        assert_eq!(heal, "Mending");
+        assert_eq!(utils, vec!["Signet of Resolve".to_string()]);
+        assert_eq!(elite, "Feel My Wrath");
+    }
+
+    #[test]
+    fn test_parse_weapons_case_insensitive_labels() {
+        let weapons = vec![
+            "set 1: Axe / Axe".to_string(),
+            "SET 2: Greatsword".to_string(),
+        ];
+        let parsed = parse_suggestion_weapons(&weapons);
+        assert_eq!(
+            parsed,
+            vec![
+                ("Set 1".to_string(), "Axe / Axe".to_string()),
+                ("Set 2".to_string(), "Greatsword".to_string()),
+            ]
+        );
     }
 
     #[test]
