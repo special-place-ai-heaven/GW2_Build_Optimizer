@@ -12,13 +12,18 @@ pub enum LlmProvider {
     Gemini,
     OpenAI,
     Anthropic,
+    /// OpenRouter — OpenAI-compatible API at https://openrouter.ai, gateway
+    /// to hundreds of hosted models (Anthropic, OpenAI, Google, Mistral, etc.)
+    /// with a single API key. Uses Chat Completions + tools format.
+    OpenRouter,
 }
 
 impl LlmProvider {
-    pub const ALL: [LlmProvider; 3] = [
+    pub const ALL: [LlmProvider; 4] = [
         LlmProvider::Gemini,
         LlmProvider::OpenAI,
         LlmProvider::Anthropic,
+        LlmProvider::OpenRouter,
     ];
 
     pub fn label(&self) -> &str {
@@ -26,6 +31,7 @@ impl LlmProvider {
             LlmProvider::Gemini => "Google Gemini",
             LlmProvider::OpenAI => "OpenAI",
             LlmProvider::Anthropic => "Anthropic (Claude)",
+            LlmProvider::OpenRouter => "OpenRouter",
         }
     }
 }
@@ -59,6 +65,13 @@ pub struct AppConfig {
     /// Anthropic model ID (e.g. "claude-sonnet-4-6").
     #[serde(default)]
     pub anthropic_model: Option<String>,
+
+    /// OpenRouter API key (https://openrouter.ai).
+    #[serde(default)]
+    pub openrouter_api_key: Option<String>,
+    /// OpenRouter model ID (e.g. "anthropic/claude-sonnet-4-5").
+    #[serde(default)]
+    pub openrouter_model: Option<String>,
 
     // ─── UI Preferences ───
     /// Window opacity (0.0–1.0). Default 1.0.
@@ -105,6 +118,8 @@ impl Default for AppConfig {
             openai_model: None,
             anthropic_api_key: None,
             anthropic_model: None,
+            openrouter_api_key: None,
+            openrouter_model: None,
             window_opacity: 1.0,
             font_scale: 1.0,
             left_panel_width: 255.0,
@@ -163,6 +178,20 @@ pub const ANTHROPIC_MODELS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Known OpenRouter models — fallback shown when list_models() API call
+/// fails. The Settings tab populates this list dynamically from the
+/// OpenRouter `/models` endpoint at runtime.
+pub const OPENROUTER_MODELS: &[(&str, &str)] = &[
+    (
+        "anthropic/claude-sonnet-4-5",
+        "Claude Sonnet 4.5 (Anthropic via OR)",
+    ),
+    ("openai/gpt-4o-mini", "GPT-4o Mini (OpenAI via OR)"),
+    ("google/gemini-2.5-flash", "Gemini 2.5 Flash (Google via OR)"),
+];
+
+pub const DEFAULT_OPENROUTER_MODEL: &str = "anthropic/claude-sonnet-4-5";
+
 pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-6";
 
 impl AppConfig {
@@ -180,12 +209,19 @@ impl AppConfig {
             .unwrap_or(DEFAULT_ANTHROPIC_MODEL)
     }
 
+    pub fn openrouter_model_id(&self) -> &str {
+        self.openrouter_model
+            .as_deref()
+            .unwrap_or(DEFAULT_OPENROUTER_MODEL)
+    }
+
     /// Get the model ID for the currently active provider.
     pub fn active_model_id(&self) -> &str {
         match self.active_provider {
             LlmProvider::Gemini => self.gemini_model_id(),
             LlmProvider::OpenAI => self.openai_model_id(),
             LlmProvider::Anthropic => self.anthropic_model_id(),
+            LlmProvider::OpenRouter => self.openrouter_model_id(),
         }
     }
 
@@ -195,6 +231,7 @@ impl AppConfig {
             LlmProvider::Gemini => self.gemini_api_key.as_deref(),
             LlmProvider::OpenAI => self.openai_api_key.as_deref(),
             LlmProvider::Anthropic => self.anthropic_api_key.as_deref(),
+            LlmProvider::OpenRouter => self.openrouter_api_key.as_deref(),
         }
     }
 
@@ -224,8 +261,18 @@ impl AppConfig {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         let tmp_path = path.with_extension("tmp");
-        std::fs::write(&tmp_path, &json)?;
-        std::fs::rename(&tmp_path, path)
+        // Crash-safe: write to .tmp then atomic rename. Clean up the orphan
+        // .tmp on either failure so it doesn't accumulate after repeated
+        // failed saves (e.g. disk full, antivirus interruption).
+        if let Err(e) = std::fs::write(&tmp_path, &json) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(e);
+        }
+        if let Err(e) = std::fs::rename(&tmp_path, path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(e);
+        }
+        Ok(())
     }
 
     pub fn has_gw2_key(&self) -> bool {
@@ -246,12 +293,19 @@ impl AppConfig {
             .is_some_and(|k| !k.is_empty())
     }
 
+    pub fn has_openrouter_key(&self) -> bool {
+        self.openrouter_api_key
+            .as_ref()
+            .is_some_and(|k| !k.is_empty())
+    }
+
     /// Whether the active provider has a valid API key.
     pub fn has_active_llm_key(&self) -> bool {
         match self.active_provider {
             LlmProvider::Gemini => self.has_gemini_key(),
             LlmProvider::OpenAI => self.has_openai_key(),
             LlmProvider::Anthropic => self.has_anthropic_key(),
+            LlmProvider::OpenRouter => self.has_openrouter_key(),
         }
     }
 

@@ -655,11 +655,18 @@ fn exec_get_skill_info(args: &Value, ctx: &ToolContext) -> Value {
         .filter(|s| s.name.to_lowercase().contains(&skill_name.to_lowercase()))
         .collect();
 
-    // Sort: profession-specific first, then by name length (shorter = more exact)
+    // Sort: profession-specific first, then by name length (shorter = more exact),
+    // then by id so ties are broken deterministically across runs.
+    // `HashMap::values()` order is unspecified — without an id tiebreak the
+    // same skill_name argument could resolve to different skills on different
+    // machines or runs, making LLM tool results non-reproducible.
     matches.sort_by(|a, b| {
         let a_prof = a.professions.contains(&ctx.profession_name.to_string());
         let b_prof = b.professions.contains(&ctx.profession_name.to_string());
-        b_prof.cmp(&a_prof).then(a.name.len().cmp(&b.name.len()))
+        b_prof
+            .cmp(&a_prof)
+            .then(a.name.len().cmp(&b.name.len()))
+            .then(a.id.cmp(&b.id))
     });
 
     let Some(skill) = matches.first() else {

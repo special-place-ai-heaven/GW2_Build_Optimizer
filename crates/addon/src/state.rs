@@ -167,6 +167,12 @@ pub struct MainState {
     pub settings_cache_size: u64,
     /// Frame counter that throttles `settings_cache_size` refresh.
     pub settings_cache_size_frames: u32,
+    /// Search filter text for the Settings tab model-picker dropdown.
+    /// Case-insensitive substring filter against model id + display label.
+    /// Persists across frames so the user can refine. Cleared when the
+    /// active provider changes (different model catalogs) and when the
+    /// user explicitly clicks Clear.
+    pub settings_model_search: String,
     // Spec & Trait Locks
     /// Granular lock constraints for optimizer (which specs/traits to preserve).
     pub build_locks: BuildLocks,

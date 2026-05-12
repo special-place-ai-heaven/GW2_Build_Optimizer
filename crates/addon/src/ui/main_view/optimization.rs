@@ -811,6 +811,10 @@ pub(super) fn simulate_suggestion_rotation(
     if !skill_names.is_empty() {
         let profession = infer_profession_from_specs(&suggestion.specializations, db);
         let prof_skill_ids = db.skills_by_profession.get(profession.as_str());
+        // Hoist the sorted skill-id list once so the global fallback below
+        // doesn't re-collect-and-sort `db.skills.keys()` (~500 ids) per skill
+        // name. Only allocated when at least one name will be searched.
+        let mut all_skill_ids_sorted: Option<Vec<u32>> = None;
         for name in &skill_names {
             let found_skill = prof_skill_ids.and_then(|ids| {
                 ids.iter()
@@ -819,9 +823,17 @@ pub(super) fn simulate_suggestion_rotation(
             });
             // Fallback: scan all skills if the profession index missed (e.g.
             // shared utility-like skills not registered under profession).
+            // Iterate by id so a name with multiple matches (e.g. "Bandage")
+            // resolves to the same skill across runs — `HashMap::values()`
+            // order is unspecified.
             let skill = found_skill.or_else(|| {
-                db.skills
-                    .values()
+                let ids = all_skill_ids_sorted.get_or_insert_with(|| {
+                    let mut v: Vec<u32> = db.skills.keys().copied().collect();
+                    v.sort_unstable();
+                    v
+                });
+                ids.iter()
+                    .filter_map(|id| db.skills.get(id))
                     .find(|s| s.name.eq_ignore_ascii_case(name))
             });
             if let Some(skill) = skill {
@@ -945,11 +957,20 @@ fn infer_profession_from_specs(
     specs: &[(String, Vec<String>)],
     db: &gw2_optimizer::gamedb::GameDb,
 ) -> String {
+    // Walk specializations in id order so name collisions across
+    // professions (defensive — GW2 currently has unique spec names but
+    // data drift could introduce duplicates) resolve to the same
+    // profession across runs and machines. `HashMap::values()` order is
+    // unspecified.
+    let mut spec_ids: Vec<u32> = db.specializations.keys().copied().collect();
+    spec_ids.sort_unstable();
     for (spec_name, _) in specs {
         let clean = spec_name.replace(" [E]", "");
-        for spec in db.specializations.values() {
-            if spec.name.eq_ignore_ascii_case(&clean) {
-                return spec.profession.clone();
+        for sid in &spec_ids {
+            if let Some(spec) = db.specializations.get(sid) {
+                if spec.name.eq_ignore_ascii_case(&clean) {
+                    return spec.profession.clone();
+                }
             }
         }
     }

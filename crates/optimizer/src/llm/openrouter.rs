@@ -1,6 +1,16 @@
-//! OpenAI provider — implements `LlmClient` for GPT-4o and compatible models.
-//! Uses the OpenAI Chat Completions API with function calling.
-//! API key is sent via `Authorization: Bearer <key>` header.
+//! OpenRouter provider — implements `LlmClient` for any model hosted on
+//! https://openrouter.ai. OpenRouter exposes an OpenAI-compatible Chat
+//! Completions API (with tools/function calling) and a `/models` endpoint
+//! that lists every supported model across providers (Anthropic, OpenAI,
+//! Google, Mistral, Meta, etc.). One API key, many models.
+//!
+//! Differences from the OpenAI provider:
+//!  - Base URL: `https://openrouter.ai/api/v1`
+//!  - Optional `HTTP-Referer` + `X-Title` headers identify this app to
+//!    OpenRouter's analytics/leaderboards.
+//!  - Model IDs are slash-prefixed (`anthropic/claude-sonnet-4-5`).
+//!
+//! API key is sent via `Authorization: Bearer <key>` header, same as OpenAI.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -12,9 +22,13 @@ use serde_json::Value;
 
 use super::{KeyValidationResult, LlmClient, LlmError, ToolDefinition};
 
-const OPENAI_API_BASE: &str = "https://api.openai.com/v1";
+const OPENROUTER_API_BASE: &str = "https://openrouter.ai/api/v1";
+/// Identify this app in OpenRouter's request logs / leaderboards. Optional
+/// but recommended by OpenRouter docs.
+const OPENROUTER_HTTP_REFERER: &str = "https://github.com/special-place-administrator/GW2_Build_Optimizer";
+const OPENROUTER_X_TITLE: &str = "GW2 Build Optimizer";
 
-pub struct OpenAiClient {
+pub struct OpenRouterClient {
     api_key: String,
     model: String,
     http: reqwest::blocking::Client,
@@ -181,7 +195,7 @@ struct Choice {
     finish_reason: Option<String>,
 }
 
-impl OpenAiClient {
+impl OpenRouterClient {
     pub fn new(api_key: &str, model: &str) -> Result<Self, LlmError> {
         let http = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(180))
@@ -261,7 +275,7 @@ impl OpenAiClient {
             max_tokens: Some(8192),
         };
 
-        let url = format!("{}/chat/completions", OPENAI_API_BASE);
+        let url = format!("{}/chat/completions", OPENROUTER_API_BASE);
         let mut last_error: Option<LlmError> = None;
 
         for attempt in 0..MAX_RETRIES {
@@ -275,6 +289,10 @@ impl OpenAiClient {
                 .post(&url)
                 .header("Authorization", format!("Bearer {}", self.api_key))
                 .header("Content-Type", "application/json")
+                // OpenRouter-recommended identity headers — show up in their
+                // model leaderboards / request logs for this app.
+                .header("HTTP-Referer", OPENROUTER_HTTP_REFERER)
+                .header("X-Title", OPENROUTER_X_TITLE)
                 .json(&request)
                 .send()
             {
@@ -320,7 +338,7 @@ impl OpenAiClient {
                                 .unwrap_or_else(|e| e.into_inner())
                                 .undo_reserve();
                             return Err(LlmError::Parse(
-                                "No response from OpenAI".into(),
+                                "No response from OpenRouter".into(),
                             ));
                         }
                     };
@@ -375,7 +393,7 @@ impl OpenAiClient {
             .undo_reserve();
         Err(last_error.unwrap_or_else(|| LlmError::Api {
             status: 500,
-            message: "OpenAI server error after retries".into(),
+            message: "OpenRouter server error after retries".into(),
         }))
     }
 
@@ -394,13 +412,13 @@ impl OpenAiClient {
     }
 }
 
-impl LlmClient for OpenAiClient {
+impl LlmClient for OpenRouterClient {
     fn provider_name(&self) -> &str {
-        "OpenAI"
+        "OpenRouter"
     }
 
     fn validate_key(&self) -> Result<(), LlmError> {
-        let url = format!("{}/models", OPENAI_API_BASE);
+        let url = format!("{}/models", OPENROUTER_API_BASE);
         let resp = self
             .http
             .get(&url)
@@ -432,7 +450,7 @@ impl LlmClient for OpenAiClient {
     }
 
     fn validate_key_detailed(&self) -> KeyValidationResult {
-        let url = format!("{}/models", OPENAI_API_BASE);
+        let url = format!("{}/models", OPENROUTER_API_BASE);
         let resp = match self
             .http
             .get(&url)
@@ -443,7 +461,7 @@ impl LlmClient for OpenAiClient {
             Err(e) => {
                 return KeyValidationResult {
                     valid: false,
-                    message: "Cannot connect to OpenAI API. Check your internet connection.".into(),
+                    message: "Cannot connect to OpenRouter API. Check your internet connection.".into(),
                     warning: Some(e.to_string()),
                 };
             }
@@ -455,23 +473,23 @@ impl LlmClient for OpenAiClient {
         match status {
             200 => KeyValidationResult {
                 valid: true,
-                message: "OpenAI key validated successfully!".into(),
+                message: "OpenRouter key validated successfully!".into(),
                 warning: None,
             },
             401 => KeyValidationResult {
                 valid: false,
-                message: "Invalid OpenAI API key. Check that you copied the full key from platform.openai.com/api-keys.".into(),
+                message: "Invalid OpenRouter API key. Check that you copied the full key from openrouter.ai/keys.".into(),
                 warning: None,
             },
             429 => {
                 let warning = if super::has_billing_keyword(&body) {
-                    "Your account has exceeded its usage limit. Check billing at platform.openai.com/account/billing."
+                    "Your account has exceeded its usage limit. Check credits at openrouter.ai/credits."
                 } else {
                     "Currently rate-limited. Try again shortly."
                 };
                 KeyValidationResult {
                     valid: true,
-                    message: "OpenAI key is valid!".into(),
+                    message: "OpenRouter key is valid!".into(),
                     warning: Some(warning.into()),
                 }
             }
@@ -479,13 +497,13 @@ impl LlmClient for OpenAiClient {
                 if super::has_billing_keyword(&body) {
                     KeyValidationResult {
                         valid: true,
-                        message: "OpenAI key is valid!".into(),
-                        warning: Some("Your account may have billing issues. Check platform.openai.com/account/billing.".into()),
+                        message: "OpenRouter key is valid!".into(),
+                        warning: Some("Your account may be out of credits. Top up at openrouter.ai/credits.".into()),
                     }
                 } else {
                     KeyValidationResult {
                         valid: false,
-                        message: format!("OpenAI API error (HTTP {}).", status),
+                        message: format!("OpenRouter API error (HTTP {}).", status),
                         warning: if body.is_empty() { None } else { Some(body) },
                     }
                 }
@@ -504,7 +522,7 @@ impl LlmClient for OpenAiClient {
         let response = self.send_chat(&messages, None)?;
         response
             .content
-            .ok_or_else(|| LlmError::Parse("No response text from OpenAI".into()))
+            .ok_or_else(|| LlmError::Parse("No response text from OpenRouter".into()))
     }
 
     fn generate_cached(&self, prompt: &str) -> Result<String, LlmError> {
@@ -570,7 +588,7 @@ impl LlmClient for OpenAiClient {
                     // No tool calls — return text
                     return last_text
                         .or(response.content)
-                        .ok_or_else(|| LlmError::Parse("No response text from OpenAI".into()));
+                        .ok_or_else(|| LlmError::Parse("No response text from OpenRouter".into()));
                 }
             };
 
@@ -612,11 +630,19 @@ impl LlmClient for OpenAiClient {
     }
 
     fn list_models(&self) -> Result<Vec<super::ModelInfo>, LlmError> {
-        let url = format!("{}/models", OPENAI_API_BASE);
+        // OpenRouter `/models` endpoint returns ALL hosted models across every
+        // upstream provider (Anthropic, OpenAI, Google, Mistral, Meta, etc.).
+        // Unlike OpenAI's `/models` (which mixes in audio/image/embedding
+        // endpoints under one account), OpenRouter's catalog is already
+        // pre-filtered to chat-capable LLMs — no OpenAI-style include/exclude
+        // prefix list needed. We just deserialize, sort, and surface them.
+        let url = format!("{}/models", OPENROUTER_API_BASE);
         let resp = self
             .http
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("HTTP-Referer", OPENROUTER_HTTP_REFERER)
+            .header("X-Title", OPENROUTER_X_TITLE)
             .send()
             .map_err(|e| LlmError::Http(e.to_string()))?;
 
@@ -640,46 +666,25 @@ impl LlmClient for OpenAiClient {
         #[derive(Deserialize)]
         struct ModelEntry {
             id: String,
-            #[allow(dead_code)]
-            created: Option<u64>,
+            /// Human-readable name when OpenRouter provides one (e.g.
+            /// "Claude Sonnet 4.5"). Falls back to the slug when missing.
+            #[serde(default)]
+            name: Option<String>,
         }
 
         let body: ModelsResponse = resp.json().map_err(|e| LlmError::Parse(e.to_string()))?;
-
         let entries = body.data.unwrap_or_default();
-
-        // Filter to chat-capable models; exclude embeddings, image, audio, etc.
-        let exclude_patterns = [
-            "embedding",
-            "dall-e",
-            "whisper",
-            "tts",
-            "babbage",
-            "davinci",
-            "moderation",
-        ];
-        let include_prefixes = ["gpt-", "o1", "o3", "o4", "chatgpt-"];
 
         let mut models: Vec<super::ModelInfo> = entries
             .into_iter()
-            .filter(|m| {
-                let id = m.id.to_lowercase();
-                // Must match at least one include prefix
-                let included = include_prefixes.iter().any(|p| id.starts_with(p));
-                // Must not match any exclude pattern
-                let excluded = exclude_patterns.iter().any(|p| id.contains(p));
-                included && !excluded
-            })
-            .map(|m| {
-                let display = openai_display_name(&m.id);
-                super::ModelInfo {
-                    id: m.id,
-                    display_name: display,
-                }
+            .map(|m| super::ModelInfo {
+                display_name: m.name.unwrap_or_else(|| m.id.clone()),
+                id: m.id,
             })
             .collect();
 
-        // Sort: newer/better models first (gpt-4o before gpt-4o-mini, o3 before o1)
+        // Sort alphabetically by id — gives a stable, easily-scannable list
+        // grouped by upstream provider (anthropic/*, google/*, openai/*…).
         models.sort_by(|a, b| a.id.cmp(&b.id));
 
         Ok(models)
@@ -749,35 +754,19 @@ fn trim_messages(messages: &mut Vec<Message>, budget_tokens: usize) {
     }
 }
 
-/// Derive a human-readable display name from an OpenAI model ID.
-fn openai_display_name(id: &str) -> String {
-    match id {
-        "gpt-4o" => "GPT-4o".into(),
-        "gpt-4o-mini" => "GPT-4o Mini".into(),
-        "gpt-4-turbo" => "GPT-4 Turbo".into(),
-        "gpt-4" => "GPT-4".into(),
-        "gpt-3.5-turbo" => "GPT-3.5 Turbo".into(),
-        "o1" => "o1 (reasoning)".into(),
-        "o1-mini" => "o1-mini (reasoning)".into(),
-        "o3-mini" => "o3-mini (reasoning)".into(),
-        "chatgpt-4o-latest" => "ChatGPT-4o Latest".into(),
-        _ => id.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_provider_name() {
-        let client = OpenAiClient::new("fake-key", "gpt-4o").unwrap();
-        assert_eq!(client.provider_name(), "OpenAI");
+        let client = OpenRouterClient::new("fake-key", "anthropic/claude-sonnet-4-5").unwrap();
+        assert_eq!(client.provider_name(), "OpenRouter");
     }
 
     #[test]
     fn test_remaining_quota_default() {
-        let client = OpenAiClient::new("fake-key", "gpt-4o").unwrap();
+        let client = OpenRouterClient::new("fake-key", "gpt-4o").unwrap();
         assert_eq!(client.remaining_quota(), 10000);
     }
 

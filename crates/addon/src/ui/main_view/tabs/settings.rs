@@ -92,6 +92,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         state.main.settings_key_warning = None;
         state.main.available_models.clear();
         state.main.models_error = None;
+        state.main.settings_model_search.clear();
         if let Err(e) = state.config.save(&state.config_path) {
             nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt",
                 &format!("Config save failed: {}", e));
@@ -161,6 +162,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
                 gw2_core::config::LlmProvider::Gemini => state.config.gemini_api_key = Some(key.clone()),
                 gw2_core::config::LlmProvider::OpenAI => state.config.openai_api_key = Some(key.clone()),
                 gw2_core::config::LlmProvider::Anthropic => state.config.anthropic_api_key = Some(key.clone()),
+                gw2_core::config::LlmProvider::OpenRouter => state.config.openrouter_api_key = Some(key.clone()),
             }
             let _ = state.config.save(&state.config_path);
             state.main.settings_key_input.clear();
@@ -209,11 +211,13 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         gw2_core::config::LlmProvider::Gemini => state.config.gemini_model_id().to_string(),
         gw2_core::config::LlmProvider::OpenAI => state.config.openai_model_id().to_string(),
         gw2_core::config::LlmProvider::Anthropic => state.config.anthropic_model_id().to_string(),
+        gw2_core::config::LlmProvider::OpenRouter => state.config.openrouter_model_id().to_string(),
     };
     let config_field = match state.config.active_provider {
         gw2_core::config::LlmProvider::Gemini => "gemini",
         gw2_core::config::LlmProvider::OpenAI => "openai",
         gw2_core::config::LlmProvider::Anthropic => "anthropic",
+        gw2_core::config::LlmProvider::OpenRouter => "openrouter",
     };
     let has_key = state.config.has_active_llm_key();
     if state.main.available_models.is_empty() && !state.main.models_loading && has_key {
@@ -226,6 +230,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             gw2_core::config::LlmProvider::Gemini => gw2_core::config::GEMINI_MODELS,
             gw2_core::config::LlmProvider::OpenAI => gw2_core::config::OPENAI_MODELS,
             gw2_core::config::LlmProvider::Anthropic => gw2_core::config::ANTHROPIC_MODELS,
+            gw2_core::config::LlmProvider::OpenRouter => gw2_core::config::OPENROUTER_MODELS,
         };
         hardcoded.iter().map(|(id, label)| (id.to_string(), label.to_string())).collect()
     };
@@ -235,16 +240,43 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     ui.same_line();
     ui.set_next_item_width(col_w - 140.0);
     if let Some(_c) = ComboBox::new(&format!("##{}_model", config_field)).preview_value(preview).begin(ui) {
+        // Search box pinned at the top of the dropdown — filters the model
+        // list by case-insensitive substring match against both id and
+        // display label. OpenRouter's catalog can have hundreds of entries,
+        // so without a filter the user has to scroll/eyeball through them.
+        ui.set_next_item_width(-1.0);
+        ui.input_text(
+            &format!("##{}_model_search", config_field),
+            &mut state.main.settings_model_search,
+        )
+        .hint("Search models...")
+        .build();
+        let needle = state.main.settings_model_search.trim().to_lowercase();
+        let mut visible = 0usize;
         for (id, label) in &display_models {
+            if !needle.is_empty()
+                && !id.to_lowercase().contains(&needle)
+                && !label.to_lowercase().contains(&needle)
+            {
+                continue;
+            }
+            visible += 1;
             let sel = *id == current_model;
             if Selectable::new(label).selected(sel).build(ui) {
                 match state.config.active_provider {
                     gw2_core::config::LlmProvider::Gemini => state.config.gemini_model = Some(id.clone()),
                     gw2_core::config::LlmProvider::OpenAI => state.config.openai_model = Some(id.clone()),
                     gw2_core::config::LlmProvider::Anthropic => state.config.anthropic_model = Some(id.clone()),
+                    gw2_core::config::LlmProvider::OpenRouter => state.config.openrouter_model = Some(id.clone()),
                 }
                 let _ = state.config.save(&state.config_path);
             }
+        }
+        if visible == 0 && !needle.is_empty() {
+            ui.text_colored(
+                [0.7, 0.7, 0.7, 1.0],
+                &format!("No models match \"{}\"", state.main.settings_model_search.trim()),
+            );
         }
     }
     ui.same_line();
@@ -264,6 +296,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         gw2_core::config::LlmProvider::Gemini => "gemini_usage.json",
         gw2_core::config::LlmProvider::OpenAI => "openai_usage.json",
         gw2_core::config::LlmProvider::Anthropic => "anthropic_usage.json",
+        gw2_core::config::LlmProvider::OpenRouter => "openrouter_usage.json",
     };
     let usage_path = state.addon_dir.join(usage_filename);
     // Refresh the usage display at most ~once per second (~60 frames at 60fps).

@@ -29,6 +29,10 @@ impl DataCache {
     }
 
     /// Save data to cache with current build number.
+    ///
+    /// Uses crash-safe temp-write + atomic rename. If serialization or write
+    /// fails partway, the orphan `.tmp` file is best-effort removed so it does
+    /// not accumulate after repeated failed downloads.
     pub fn save<T: Serialize>(&self, key: &str, data: &T, build: u32) -> Result<(), CacheError> {
         let entry = CacheEntry {
             build,
@@ -37,12 +41,18 @@ impl DataCache {
         };
         let path = self.path_for(key);
         let tmp_path = self.base_path.join(format!("{}.tmp", key));
-        let file = std::fs::File::create(&tmp_path)?;
-        let mut writer = BufWriter::new(file);
-        serde_json::to_writer(&mut writer, &entry)?;
-        writer.flush()?;
-        std::fs::rename(&tmp_path, &path)?;
-        Ok(())
+        let result = (|| -> Result<(), CacheError> {
+            let file = std::fs::File::create(&tmp_path)?;
+            let mut writer = BufWriter::new(file);
+            serde_json::to_writer(&mut writer, &entry)?;
+            writer.flush()?;
+            std::fs::rename(&tmp_path, &path)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp_path);
+        }
+        result
     }
 
     /// Load data from cache. Returns None if file doesn't exist.
@@ -154,6 +164,8 @@ impl DataCache {
 
     /// Save character-specific data (build tabs, equipment tabs).
     /// Key format: `char_{sanitized_name}_{data_type}.json`
+    ///
+    /// Crash-safe temp+rename with orphan `.tmp` cleanup on failure.
     pub fn save_character<T: Serialize>(
         &self,
         character: &str,
@@ -163,12 +175,18 @@ impl DataCache {
         let key = format!("char_{}_{}", sanitize_name(character), data_type);
         let path = self.path_for(&key);
         let tmp_path = self.base_path.join(format!("{}.tmp", key));
-        let file = std::fs::File::create(&tmp_path)?;
-        let mut writer = BufWriter::new(file);
-        serde_json::to_writer(&mut writer, data)?;
-        writer.flush()?;
-        std::fs::rename(&tmp_path, &path)?;
-        Ok(())
+        let result = (|| -> Result<(), CacheError> {
+            let file = std::fs::File::create(&tmp_path)?;
+            let mut writer = BufWriter::new(file);
+            serde_json::to_writer(&mut writer, data)?;
+            writer.flush()?;
+            std::fs::rename(&tmp_path, &path)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp_path);
+        }
+        result
     }
 
     /// Load character-specific cached data. Returns None if not cached.
@@ -188,16 +206,23 @@ impl DataCache {
         Ok(Some(data))
     }
 
-    /// Save the character name list.
+    /// Save the character name list. Crash-safe temp+rename with orphan
+    /// `.tmp` cleanup on failure.
     pub fn save_characters(&self, characters: &[String]) -> Result<(), CacheError> {
         let path = self.path_for("characters");
         let tmp_path = self.base_path.join("characters.tmp");
-        let file = std::fs::File::create(&tmp_path)?;
-        let mut writer = BufWriter::new(file);
-        serde_json::to_writer(&mut writer, characters)?;
-        writer.flush()?;
-        std::fs::rename(&tmp_path, &path)?;
-        Ok(())
+        let result = (|| -> Result<(), CacheError> {
+            let file = std::fs::File::create(&tmp_path)?;
+            let mut writer = BufWriter::new(file);
+            serde_json::to_writer(&mut writer, characters)?;
+            writer.flush()?;
+            std::fs::rename(&tmp_path, &path)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp_path);
+        }
+        result
     }
 
     /// Load the cached character name list. Returns None if not cached.
