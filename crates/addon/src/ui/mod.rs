@@ -7,6 +7,17 @@ mod setup;
 
 use nexus::imgui::{Condition, Ui, Window};
 
+/// Convert RGBA `[f32;4]` (each channel 0.0–1.0) to ImGui's packed `u32` color
+/// (ABGR byte order). Shared by `radar_chart` and `lock_panel` to avoid
+/// duplicate definitions drifting out of sync.
+pub(crate) fn color_u32(c: [f32; 4]) -> u32 {
+    let r = (c[0] * 255.0).clamp(0.0, 255.0) as u32;
+    let g = (c[1] * 255.0).clamp(0.0, 255.0) as u32;
+    let b = (c[2] * 255.0).clamp(0.0, 255.0) as u32;
+    let a = (c[3] * 255.0).clamp(0.0, 255.0) as u32;
+    (a << 24) | (b << 16) | (g << 8) | r
+}
+
 use crate::state::{self, Screen};
 
 pub fn render(ui: &Ui) {

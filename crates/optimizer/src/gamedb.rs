@@ -203,7 +203,11 @@ impl GameDb {
             }
         }
 
-        // Deduplicate (a trait/skill may have multiple Buff facts for same condition)
+        // Deduplicate (a trait/skill may have multiple Buff facts for same condition).
+        // Also sort the profession/spec/type indexes so downstream consumers
+        // (`profession_skills()`, `section_profession_skills()`, LLM tool execs)
+        // get a stable order across runs — these Vecs were previously populated
+        // from `HashMap::values()` iteration which has non-deterministic order.
         for ids in traits_by_condition.values_mut() {
             ids.sort_unstable();
             ids.dedup();
@@ -220,6 +224,24 @@ impl GameDb {
             ids.sort_unstable();
             ids.dedup();
         }
+        for ids in skills_by_profession.values_mut() {
+            ids.sort_unstable();
+        }
+        for ids in traits_by_spec.values_mut() {
+            ids.sort_unstable();
+        }
+        for ids in items_by_type.values_mut() {
+            ids.sort_unstable();
+        }
+
+        // Sort the upgrade-item id vecs so `all_runes()`/`all_sigils()`/
+        // `all_relics()` iterate in stable order. Populated from
+        // `items.values()` HashMap iteration, which is unspecified — beam
+        // search neighbor order (swap_rune, swap_relic, swap_sigil_slots)
+        // inherited the nondeterminism without these sorts.
+        runes.sort_unstable();
+        sigils.sort_unstable();
+        relics.sort_unstable();
 
         Ok(GameDb {
             items,
@@ -248,6 +270,40 @@ impl GameDb {
     /// Get a profession by name.
     pub fn profession(&self, name: &str) -> Option<&Profession> {
         self.professions.get(name)
+    }
+
+    /// Deterministic itemstat lookup by name (case-insensitive). Returns the
+    /// exact-name match if any (lower id wins ties), otherwise the shortest
+    /// substring match (lower id wins ties).
+    ///
+    /// Centralizes the policy used by validation, Gemini tool execs, and
+    /// LLM-context builders — a raw `itemstats.values().find(contains)` is
+    /// non-deterministic because `HashMap::values()` iteration order is
+    /// unspecified, so the same input could resolve to different itemstats
+    /// across runs and machines.
+    pub fn itemstat_by_name(&self, needle: &str) -> Option<&ItemStat> {
+        if needle.is_empty() {
+            return None;
+        }
+        let needle_lower = needle.to_lowercase();
+        let mut exact: Option<&ItemStat> = None;
+        let mut fuzzy: Option<(usize, u32, &ItemStat)> = None;
+        for is in self.itemstats.values() {
+            let lower = is.name.to_lowercase();
+            if lower == needle_lower {
+                match exact {
+                    Some(prev) if prev.id <= is.id => {}
+                    _ => exact = Some(is),
+                }
+            } else if lower.contains(&needle_lower) {
+                let key = (is.name.len(), is.id);
+                match fuzzy {
+                    Some((plen, pid, _)) if (plen, pid) <= key => {}
+                    _ => fuzzy = Some((key.0, key.1, is)),
+                }
+            }
+        }
+        exact.or(fuzzy.map(|(_, _, is)| is))
     }
 
     /// Get all skills for a profession.

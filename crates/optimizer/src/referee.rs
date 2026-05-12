@@ -49,6 +49,17 @@ pub const EHP_FLOOR_WVW_ZERG: f64 = 10_000.0;
 /// Legacy alias kept for test backward-compatibility. Equals the havoc (party) floor. // HEURISTIC
 pub const EHP_FLOOR_WVW: f64 = EHP_FLOOR_WVW_HAVOC;
 
+/// EHP floor for sPvP / structured PvP. PvP uses amulet-based stat allocation
+/// with a smaller total stat budget than ascended WvW gear, so EHP at level 80
+/// is materially lower. Setting the floor to WvW levels would systematically
+/// fail viable PvP builds and score them with the non-viable -1.0 sentinel.
+///
+/// Evidence: a Marauder amulet on a medium-armor profession with no toughness
+/// investment lands ~12-14k blended EHP; tankier amulets (Cleric / Paladin)
+/// hover at 18-22k. Floor at 8,000 rejects clearly broken builds while leaving
+/// every real amulet/rune combo viable. // HEURISTIC
+pub const EHP_FLOOR_PVP: f64 = 8_000.0;
+
 // ─── Viability Gate Types ────────────────────────────────────────────────────
 
 /// Which gate a `GateResult` describes.
@@ -176,14 +187,16 @@ pub fn evaluate_viability_gates(
 
     // ── Effective health gate (always runs) ─────────────────────────────────
     // WvW floor varies by combat tier: Roamers need more personal sustain than Zerg players.
-    let ehp_floor = if requires_pvp_gates {
-        match scenario.combat_tier {
+    // PvP uses its own (lower) floor — amulet-based gear has a smaller stat budget than
+    // ascended WvW, so reusing WvW floors here would non-viably score most real PvP builds.
+    let ehp_floor = match scenario.game_mode {
+        GameMode::WvW => match scenario.combat_tier {
             crate::scenario::CombatTier::Solo => EHP_FLOOR_WVW_ROAM,
             crate::scenario::CombatTier::Party => EHP_FLOOR_WVW_HAVOC,
             crate::scenario::CombatTier::Squad => EHP_FLOOR_WVW_ZERG,
-        }
-    } else {
-        EHP_FLOOR_PVE
+        },
+        GameMode::PvP => EHP_FLOOR_PVP,
+        GameMode::PvE => EHP_FLOOR_PVE,
     };
     let passed = combat_perf.effective_health >= ehp_floor;
     gates.push(GateResult {
@@ -328,7 +341,8 @@ pub fn evaluate_validated_build(
 mod tests {
     use super::{
         evaluate_validated_build, evaluate_viability_gates, GateResult, ViabilityGate,
-        EHP_FLOOR_PVE, EHP_FLOOR_WVW, EHP_FLOOR_WVW_HAVOC, EHP_FLOOR_WVW_ROAM, EHP_FLOOR_WVW_ZERG,
+        EHP_FLOOR_PVE, EHP_FLOOR_PVP, EHP_FLOOR_WVW, EHP_FLOOR_WVW_HAVOC, EHP_FLOOR_WVW_ROAM,
+        EHP_FLOOR_WVW_ZERG,
     };
     use crate::balance::BalanceContext;
     use crate::combat::CombatPerformance;
@@ -832,6 +846,64 @@ mod tests {
         assert!(
             EHP_FLOOR_PVE > EHP_FLOOR_WVW_ZERG,
             "PvE floor should be stricter than Zerg floor (squad healers compensate)"
+        );
+        assert!(
+            EHP_FLOOR_PVP < EHP_FLOOR_WVW_ZERG,
+            "PvP floor should be the loosest — amulet stat budget is smaller than ascended"
+        );
+    }
+
+    #[test]
+    fn gate_pvp_uses_pvp_floor_not_wvw_floor() {
+        // PvP build with 9_000 EHP: below WvW Roam (15k) but above EHP_FLOOR_PVP (8k).
+        // Must pass on PvP. Before the fix, requires_pvp_gates routed PvP through
+        // WvW EHP tiers and the build would non-viably score at -1.0.
+        let rot = make_viable_rotation();
+        let combat = CombatPerformance {
+            effective_health: 9_000.0,
+            ..make_viable_combat()
+        };
+        let pvp_scenario = ScenarioSpec {
+            game_mode: GameMode::PvP,
+            combat_tier: CombatTier::Solo,
+            target_profile: TargetProfile::Single,
+            optimization_target: OptimizationTarget {
+                label: "PvP".to_string(),
+            },
+            patch_id: None,
+        };
+        let report = evaluate_viability_gates(Some(&rot), &combat, &pvp_scenario);
+        let ehp = gate_by_kind(&report.gates, &ViabilityGate::EffectiveHealth).expect("gate");
+        assert!(
+            ehp.passed,
+            "PvP 9k EHP should pass PvP floor (8k), not be measured against WvW Roam (15k); note: {}",
+            ehp.note
+        );
+    }
+
+    #[test]
+    fn gate_pvp_low_ehp_still_fails_pvp_floor() {
+        // Sanity check: an unreasonably low PvP EHP (e.g. 5k) still fails the PvP floor.
+        let rot = make_viable_rotation();
+        let combat = CombatPerformance {
+            effective_health: 5_000.0,
+            ..make_viable_combat()
+        };
+        let pvp_scenario = ScenarioSpec {
+            game_mode: GameMode::PvP,
+            combat_tier: CombatTier::Solo,
+            target_profile: TargetProfile::Single,
+            optimization_target: OptimizationTarget {
+                label: "PvP".to_string(),
+            },
+            patch_id: None,
+        };
+        let report = evaluate_viability_gates(Some(&rot), &combat, &pvp_scenario);
+        let ehp = gate_by_kind(&report.gates, &ViabilityGate::EffectiveHealth).expect("gate");
+        assert!(
+            !ehp.passed,
+            "PvP 5k EHP should fail the PvP floor (8k); note: {}",
+            ehp.note
         );
     }
 }

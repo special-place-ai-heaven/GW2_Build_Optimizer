@@ -279,8 +279,12 @@ fn select_specs_and_traits(
 
                         // Intra-spec synergy
                         for i in 0..effects.len() {
-                            let (syn, _) =
-                                compute_marginal_synergy(&effects[i].1, &effects[..i], weights);
+                            let (syn, _) = compute_marginal_synergy(
+                                &effects[i].1,
+                                &effects[..i],
+                                weights,
+                                Some(&effects[i].0),
+                            );
                             score += syn;
                         }
 
@@ -326,10 +330,12 @@ fn select_specs_and_traits(
                     for eff in &effs {
                         total_score += score_normalized_effect(eff, weights);
                     }
-                    let (syn, links) = compute_marginal_synergy(&effs, &accumulated, weights);
+                    let new_id = ComponentId::Trait(tid);
+                    let (syn, links) =
+                        compute_marginal_synergy(&effs, &accumulated, weights, Some(&new_id));
                     total_score += syn;
                     all_links.extend(links);
-                    accumulated.push((ComponentId::Trait(tid), effs));
+                    accumulated.push((new_id, effs));
                 }
             }
 
@@ -417,7 +423,13 @@ fn select_rune(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Optim
                 .sum();
 
             // Synergy with existing traits/specs
-            let (syn, links) = compute_marginal_synergy(&effects, &candidate.accumulated, weights);
+            let new_id = ComponentId::Rune(rune.id);
+            let (syn, links) = compute_marginal_synergy(
+                &effects,
+                &candidate.accumulated,
+                weights,
+                Some(&new_id),
+            );
 
             let total = base + syn;
             if total > best_score {
@@ -480,8 +492,13 @@ fn select_sigils(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Opt
                         .iter()
                         .map(|e| score_normalized_effect(e, weights))
                         .sum();
-                    let (syn, links) =
-                        compute_marginal_synergy(&effects, &candidate.accumulated, weights);
+                    let new_id = ComponentId::Sigil(sigil.id);
+                    let (syn, links) = compute_marginal_synergy(
+                        &effects,
+                        &candidate.accumulated,
+                        weights,
+                        Some(&new_id),
+                    );
 
                     let total = base + syn;
                     if total > best_score {
@@ -531,7 +548,13 @@ fn select_relic(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Opti
                 .iter()
                 .map(|e| score_normalized_effect(e, weights))
                 .sum();
-            let (syn, links) = compute_marginal_synergy(&effects, &candidate.accumulated, weights);
+            let new_id = ComponentId::Relic(relic.id);
+            let (syn, links) = compute_marginal_synergy(
+                &effects,
+                &candidate.accumulated,
+                weights,
+                Some(&new_id),
+            );
 
             let total = base + syn;
             if total > best_score {
@@ -592,6 +615,25 @@ fn select_weapons(
             })
             .collect();
 
+        // Cache per-weapon synergy scores once. Each weapon was previously scored
+        // ~12 times per candidate (once per mh+oh combination per set, once main-only
+        // per set, two sets). Caching collapses that to O(weapons) calls.
+        let weapon_scores: std::collections::HashMap<&str, f64> = available
+            .iter()
+            .map(|(name, _)| {
+                (
+                    *name,
+                    score_weapon_skills(
+                        name,
+                        profession,
+                        db,
+                        weights,
+                        &candidate.accumulated,
+                    ),
+                )
+            })
+            .collect();
+
         // Generate weapon combos (simplified: pick best set 1, then best set 2)
         let mut best_set1 = (None, None);
         let mut best_set1_score = f64::NEG_INFINITY;
@@ -601,8 +643,7 @@ fn select_weapons(
             let is_main = info.flags.iter().any(|f| f == "Mainhand" || f == "TwoHand");
             if is_2h {
                 // Two-handed weapon as set 1
-                let score =
-                    score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
+                let score = weapon_scores[weapon];
                 if score > best_set1_score {
                     best_set1_score = score;
                     best_set1 = (Some(weapon.to_string()), None);
@@ -619,19 +660,7 @@ fn select_weapons(
                         continue;
                     }
 
-                    let score = score_weapon_skills(
-                        weapon,
-                        profession,
-                        db,
-                        weights,
-                        &candidate.accumulated,
-                    ) + score_weapon_skills(
-                        off_weapon,
-                        profession,
-                        db,
-                        weights,
-                        &candidate.accumulated,
-                    );
+                    let score = weapon_scores[weapon] + weapon_scores[off_weapon];
                     if score > best_set1_score {
                         best_set1_score = score;
                         best_set1 = (Some(weapon.to_string()), Some(off_weapon.to_string()));
@@ -639,8 +668,7 @@ fn select_weapons(
                 }
 
                 // Main-hand only (no off-hand)
-                let score =
-                    score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
+                let score = weapon_scores[weapon];
                 if score > best_set1_score {
                     best_set1_score = score;
                     best_set1 = (Some(weapon.to_string()), None);
@@ -662,8 +690,7 @@ fn select_weapons(
             let is_main = info.flags.iter().any(|f| f == "Mainhand" || f == "TwoHand");
 
             if is_2h {
-                let score =
-                    score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
+                let score = weapon_scores[weapon];
                 if score > best_set2_score {
                     best_set2_score = score;
                     best_set2 = (Some(weapon.to_string()), None);
@@ -678,30 +705,17 @@ fn select_weapons(
                         continue;
                     }
 
-                    let score = score_weapon_skills(
-                        weapon,
-                        profession,
-                        db,
-                        weights,
-                        &candidate.accumulated,
-                    ) + score_weapon_skills(
-                        off_weapon,
-                        profession,
-                        db,
-                        weights,
-                        &candidate.accumulated,
-                    );
+                    let score = weapon_scores[weapon] + weapon_scores[off_weapon];
                     if score > best_set2_score {
                         best_set2_score = score;
                         best_set2 = (Some(weapon.to_string()), Some(off_weapon.to_string()));
                     }
                 }
 
-                // Main-hand only (no off-hand) — mirrors Set 1 lines 555-560.
+                // Main-hand only (no off-hand) — mirrors Set 1.
                 // Without this, Set 2 can never be main-hand-only even when that
                 // scores higher than any main+offhand combination.
-                let score =
-                    score_weapon_skills(weapon, profession, db, weights, &candidate.accumulated);
+                let score = weapon_scores[weapon];
                 if score > best_set2_score {
                     best_set2_score = score;
                     best_set2 = (Some(weapon.to_string()), None);
@@ -737,7 +751,9 @@ fn score_weapon_skills(
             for eff in &effects {
                 score += score_normalized_effect(eff, weights);
             }
-            let (syn, _) = compute_marginal_synergy(&effects, accumulated, weights);
+            let new_id = ComponentId::Skill(skill.id);
+            let (syn, _) =
+                compute_marginal_synergy(&effects, accumulated, weights, Some(&new_id));
             score += syn;
         }
     }
@@ -848,7 +864,9 @@ fn pick_best_skill(
             .iter()
             .map(|e| score_normalized_effect(e, weights))
             .sum();
-        let (syn, links) = compute_marginal_synergy(&effects, accumulated, weights);
+        let new_id = ComponentId::Skill(skill.id);
+        let (syn, links) =
+            compute_marginal_synergy(&effects, accumulated, weights, Some(&new_id));
 
         let total = base + syn;
         if total > best_score {
@@ -881,13 +899,14 @@ fn rank_and_select(
     // Re-score candidates with full combat performance
     let mut scored: Vec<(usize, f64)> = Vec::new();
 
-    let gear_prefix_id = db
-        .itemstats
-        .values()
-        .find(|is| is.name.contains(gear_prefix_name))
-        .map(|is| is.id);
+    // Resolve the gear prefix once with the shared deterministic policy.
+    let gear_prefix_id = db.itemstat_by_name(gear_prefix_name).map(|is| is.id);
 
     let solo_profile = &combat::buff_profiles_for_profession(profession_name, ctx)[0];
+    // Hoist condition weights outside the candidate loop — they only depend on
+    // (profession, mode) and don't change per candidate. Previously this rebuilt
+    // a ConditionWeights via rotation-profile HashMap lookup on every iteration.
+    let cond_weights = combat::condition_weights_for_profession(profession_name, ctx);
 
     // Compute max synergy once (loop-invariant) — candidates don't change during ranking
     let max_synergy = candidates
@@ -911,7 +930,7 @@ fn rank_and_select(
             &derived,
             &modifiers,
             solo_profile,
-            &combat::condition_weights_for_profession(profession_name, ctx),
+            &cond_weights,
             profession_name,
             ctx,
         );
@@ -985,12 +1004,10 @@ fn build_synergy_result(
     // Build ValidatedBuild
     let mut validated = ValidatedBuild::default();
 
-    // Gear prefix
-    if let Some(is) = db
-        .itemstats
-        .values()
-        .find(|is| is.name.contains(gear_prefix_name))
-    {
+    // Gear prefix. `gear_prefix_name` is the cosine-selected canonical name
+    // (e.g. "Berserker's"). Use the shared deterministic lookup so the same
+    // input always resolves to the same itemstat across runs.
+    if let Some(is) = db.itemstat_by_name(gear_prefix_name) {
         validated.gear_prefix = Some(ValidatedGearPrefix {
             itemstat_id: is.id,
             name: is.name.clone(),

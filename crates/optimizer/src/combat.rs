@@ -530,6 +530,11 @@ pub fn extract_damage_modifiers(
     _ctx: &BalanceContext,
 ) -> DamageModifiers {
     let mut mods = DamageModifiers::default();
+    // Hoist into a HashSet once — `equipped_trait_ids` is scanned twice per
+    // traited_fact (overridden filter + activation gate) across every trait;
+    // O(n) linear scans add up across the ~36-trait hot path.
+    let equipped_set: std::collections::HashSet<u32> =
+        equipped_trait_ids.iter().copied().collect();
 
     // 1. Traits — look for Percent facts with damage-related text
     for &trait_id in equipped_trait_ids {
@@ -538,10 +543,10 @@ pub fn extract_damage_modifiers(
         };
 
         // Collect overridden indices from active traited_facts
-        let overridden: Vec<u32> = t
+        let overridden: std::collections::HashSet<u32> = t
             .traited_facts
             .iter()
-            .filter(|tf| equipped_trait_ids.contains(&tf.requires_trait))
+            .filter(|tf| equipped_set.contains(&tf.requires_trait))
             .filter_map(|tf| tf.overrides)
             .collect();
 
@@ -555,7 +560,7 @@ pub fn extract_damage_modifiers(
 
         // Process active traited_facts
         for tf in &t.traited_facts {
-            if equipped_trait_ids.contains(&tf.requires_trait) {
+            if equipped_set.contains(&tf.requires_trait) {
                 extract_modifier_from_fact(&mut mods, &tf.fact);
             }
         }
@@ -672,12 +677,19 @@ fn parse_rune_modifier(mods: &mut DamageModifiers, bonus: &str) {
     };
     let decimal = value / 100.0;
 
-    // Specific condition duration: "+7% Burning Duration"
+    // Specific condition duration: "+7% Burning Duration".
+    // Canonicalize the key (e.g. "poison" → "Poisoned") so downstream lookups
+    // via `total_condi_duration_for("Poisoned")` / `condi_dur_for("Poisoned")`
+    // actually hit this entry. Storing the verb-form key dropped rune-sourced
+    // specific duration bonuses on read.
     for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
         if rest.contains(condi) && rest.contains("duration") {
             let condi_cap = capitalize(condi);
+            let canonical = crate::data::boon_condition_formulas::canonical_condition_name(
+                &condi_cap,
+            );
             mods.specific_condi_duration
-                .entry(condi_cap)
+                .entry(canonical.to_string())
                 .or_default()
                 .push(decimal);
             return;
@@ -771,11 +783,16 @@ fn parse_sigil_from_description(mods: &mut DamageModifiers, sigil: &Item) {
         None => return,
     };
 
-    // Look for "+N% <condition> duration" patterns (collect all, don't early return)
+    // Look for "+N% <condition> duration" patterns. Canonicalize the key so
+    // downstream lookups via "Poisoned" hit "poison"-sourced entries.
     for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
         if let Some(pct) = extract_percent_before(&desc, &format!("{} duration", condi)) {
+            let condi_cap = capitalize(condi);
+            let canonical = crate::data::boon_condition_formulas::canonical_condition_name(
+                &condi_cap,
+            );
             mods.specific_condi_duration
-                .entry(capitalize(condi))
+                .entry(canonical.to_string())
                 .or_default()
                 .push(pct / 100.0);
         }

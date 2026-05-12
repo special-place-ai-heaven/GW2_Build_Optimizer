@@ -166,14 +166,20 @@ pub enum SynergyLinkType {
 // ─── Effect Extractors ───
 
 /// Extract normalized effects from a trait, considering equipped traits for TraitedFact resolution.
+///
+/// `equipped_traits` is scanned twice per traited_fact under typical inputs (~36 trait
+/// ids), so we hoist it into a `HashSet` once. Reduces O(facts × traits) linear scans
+/// to O(facts) hash lookups — meaningful since `select_specs_and_traits` calls this
+/// for every trait in every cross-product combo (hundreds of invocations per build).
 pub fn extract_trait_effects(t: &GW2Trait, equipped_traits: &[u32]) -> Vec<NormalizedEffect> {
+    let equipped_set: std::collections::HashSet<u32> = equipped_traits.iter().copied().collect();
     let mut effects = Vec::new();
 
     // Collect overridden indices from active traited_facts
-    let overridden: Vec<u32> = t
+    let overridden: std::collections::HashSet<u32> = t
         .traited_facts
         .iter()
-        .filter(|tf| equipped_traits.contains(&tf.requires_trait))
+        .filter(|tf| equipped_set.contains(&tf.requires_trait))
         .filter_map(|tf| tf.overrides)
         .collect();
 
@@ -188,7 +194,7 @@ pub fn extract_trait_effects(t: &GW2Trait, equipped_traits: &[u32]) -> Vec<Norma
     // Process traited_facts — active ones as direct effects, inactive as Conditional
     for tf in &t.traited_facts {
         let inner_effects = extract_effects_from_fact(&tf.fact);
-        if equipped_traits.contains(&tf.requires_trait) {
+        if equipped_set.contains(&tf.requires_trait) {
             effects.extend(inner_effects);
         } else {
             for eff in inner_effects {
@@ -291,8 +297,15 @@ pub fn extract_sigil_effects(sigil: &Item) -> Vec<NormalizedEffect> {
             percent: 10.0,
         });
     } else if name_lower.contains("sigil of venom") {
+        // Canonicalize the condition name so the synergy matcher
+        // (`duration_matches_condition`) hits the same key the trait/skill
+        // extractors use. The wiki/tooltip text says "Poison Duration" but
+        // canonical form everywhere else is "Poisoned".
         effects.push(NormalizedEffect::DurationBonus {
-            kind: DurationKind::SpecificCondition("Poison".into()),
+            kind: DurationKind::SpecificCondition(
+                crate::data::boon_condition_formulas::canonical_condition_name("Poison")
+                    .to_string(),
+            ),
             percent: 10.0,
         });
     } else if name_lower.contains("sigil of transference") {
@@ -321,10 +334,14 @@ pub fn extract_sigil_effects(sigil: &Item) -> Vec<NormalizedEffect> {
             estimated_uptime: 0.6,
         });
     } else if name_lower.contains("sigil of doom") {
+        // Use canonical "Poisoned" so the AppliesStatus matcher in
+        // compute_marginal_synergy can chain this with traits that
+        // benefit from Poisoned application.
         effects.push(NormalizedEffect::ProcEffect {
             trigger: ProcTrigger::OnWeaponSwap,
             effect: Box::new(NormalizedEffect::AppliesStatus {
-                status: "Poison".into(),
+                status: crate::data::boon_condition_formulas::canonical_condition_name("Poison")
+                    .to_string(),
                 is_condition: true,
                 duration_s: 5,
                 stacks: 1,
@@ -536,8 +553,15 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             ..
         } => {
             let is_cond = is_condition(status);
+            // Store the canonical name (e.g. "Poisoned" not "Poison") so the
+            // synergy matchers in `compute_marginal_synergy` compare apples to
+            // apples — two emitters (one trait, one sigil) referring to the
+            // same condition under different aliases would otherwise miss.
+            let canonical = crate::data::boon_condition_formulas::canonical_condition_name(
+                status,
+            );
             effects.push(NormalizedEffect::AppliesStatus {
-                status: status.clone(),
+                status: canonical.to_string(),
                 is_condition: is_cond,
                 duration_s: *dur,
                 stacks: apply_count.unwrap_or(1),
@@ -554,8 +578,11 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             ..
         } => {
             let is_cond = is_condition(status);
+            let canonical = crate::data::boon_condition_formulas::canonical_condition_name(
+                status,
+            );
             effects.push(NormalizedEffect::AppliesStatus {
-                status: status.clone(),
+                status: canonical.to_string(),
                 is_condition: is_cond,
                 duration_s: *dur,
                 stacks: apply_count.unwrap_or(1),
@@ -602,11 +629,18 @@ fn parse_rune_bonus_to_effects(bonus: &str) -> Vec<NormalizedEffect> {
             let rest = without_plus[pct_idx + 1..].trim();
 
             if let Ok(value) = num_str.trim().parse::<f64>() {
-                // Specific condition duration
+                // Specific condition duration. Canonicalize so "Poison" verb
+                // form becomes "Poisoned" — matches trait/skill emitters and
+                // `duration_matches_condition`'s key comparison.
                 for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
                     if rest.contains(condi) && rest.contains("duration") {
+                        let condi_cap = capitalize(condi);
+                        let canonical =
+                            crate::data::boon_condition_formulas::canonical_condition_name(
+                                &condi_cap,
+                            );
                         effects.push(NormalizedEffect::DurationBonus {
-                            kind: DurationKind::SpecificCondition(capitalize(condi)),
+                            kind: DurationKind::SpecificCondition(canonical.to_string()),
                             percent: value,
                         });
                         return effects;
@@ -663,11 +697,16 @@ fn parse_description_to_effects(desc: &str) -> Vec<NormalizedEffect> {
     let mut effects = Vec::new();
     let desc_lower = desc.to_lowercase();
 
-    // "+N% <condition> duration"
+    // "+N% <condition> duration". Canonicalize so descriptions that say
+    // "Poison duration" produce the same key the rest of the system uses.
     for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
         if let Some(pct) = extract_percent_before(&desc_lower, &format!("{} duration", condi)) {
+            let condi_cap = capitalize(condi);
+            let canonical = crate::data::boon_condition_formulas::canonical_condition_name(
+                &condi_cap,
+            );
             effects.push(NormalizedEffect::DurationBonus {
-                kind: DurationKind::SpecificCondition(capitalize(condi)),
+                kind: DurationKind::SpecificCondition(canonical.to_string()),
                 percent: pct,
             });
         }
@@ -774,13 +813,21 @@ pub fn score_normalized_effect(effect: &NormalizedEffect, weights: &Optimization
 
 /// Compute the marginal synergy score of adding new_effects to the existing build effects.
 /// Detects interaction chains and rewards builds with complementary components.
+///
+/// `new_id` identifies the component whose effects are being added (rune, sigil,
+/// relic, trait, weapon-skill, utility-skill). It populates the `target` field of
+/// each emitted `SynergyLink` so UI can render which component completes a chain.
+/// Callers without a meaningful new id (legacy/test cases) may pass `None`; the
+/// target then falls back to the existing component, preserving prior behavior.
 pub fn compute_marginal_synergy(
     new_effects: &[NormalizedEffect],
     existing_effects: &[(ComponentId, Vec<NormalizedEffect>)],
     weights: &OptimizationWeights,
+    new_id: Option<&ComponentId>,
 ) -> (f64, Vec<SynergyLink>) {
     let mut synergy = 0.0;
     let mut links = Vec::new();
+    let new_target = |existing: &ComponentId| new_id.cloned().unwrap_or_else(|| existing.clone());
 
     // Flatten existing effects for quick scanning
     let all_existing: Vec<(&ComponentId, &NormalizedEffect)> = existing_effects
@@ -804,7 +851,7 @@ pub fn compute_marginal_synergy(
                         links.push(SynergyLink {
                             source: existing_id.clone(),
                             source_name: format!("Trait {}", tid),
-                            target: existing_id.clone(),
+                            target: new_target(existing_id),
                             target_name: "Conditional effect".into(),
                             link_type: SynergyLinkType::TraitedFact,
                             score: bonus,
@@ -831,7 +878,7 @@ pub fn compute_marginal_synergy(
                         links.push(SynergyLink {
                             source: existing_id.clone(),
                             source_name: format!("Benefits from {}", needed),
-                            target: existing_id.clone(),
+                            target: new_target(existing_id),
                             target_name: format!("Applies {}", applied),
                             link_type: SynergyLinkType::EnablerPayoff,
                             score: bonus,
@@ -855,7 +902,7 @@ pub fn compute_marginal_synergy(
                         links.push(SynergyLink {
                             source: existing_id.clone(),
                             source_name: format!("Applies {}", applied),
-                            target: existing_id.clone(),
+                            target: new_target(existing_id),
                             target_name: format!("Benefits from {}", needed),
                             link_type: SynergyLinkType::EnablerPayoff,
                             score: bonus,
@@ -887,7 +934,7 @@ pub fn compute_marginal_synergy(
                         links.push(SynergyLink {
                             source: existing_id.clone(),
                             source_name: format!("{} source", s2),
-                            target: existing_id.clone(),
+                            target: new_target(existing_id),
                             target_name: format!("{} source", s1),
                             link_type: SynergyLinkType::ConditionStacking,
                             score: bonus,
@@ -920,7 +967,7 @@ pub fn compute_marginal_synergy(
                             links.push(SynergyLink {
                                 source: existing_id.clone(),
                                 source_name: format!("{:?} +{}%", c2, p2),
-                                target: existing_id.clone(),
+                                target: new_target(existing_id),
                                 target_name: format!("{:?} +{}%", c1, p1),
                                 link_type: SynergyLinkType::ModifierStacking,
                                 score: bonus,
@@ -948,7 +995,7 @@ pub fn compute_marginal_synergy(
                         links.push(SynergyLink {
                             source: existing_id.clone(),
                             source_name: format!("{:?} duration", kind),
-                            target: existing_id.clone(),
+                            target: new_target(existing_id),
                             target_name: format!("{} application", status),
                             link_type: SynergyLinkType::DurationAlignment,
                             score: bonus,
@@ -973,7 +1020,7 @@ pub fn compute_marginal_synergy(
                         links.push(SynergyLink {
                             source: existing_id.clone(),
                             source_name: format!("{} application", status),
-                            target: existing_id.clone(),
+                            target: new_target(existing_id),
                             target_name: format!("{:?} duration", kind),
                             link_type: SynergyLinkType::DurationAlignment,
                             score: bonus,
@@ -1367,10 +1414,16 @@ mod tests {
                 stacks: 2,
             }],
         )];
-        let (score, _links) = compute_marginal_synergy(&new_effects, &existing, &w);
+        let new_id = ComponentId::Rune(42);
+        let (score, links) =
+            compute_marginal_synergy(&new_effects, &existing, &w, Some(&new_id));
         assert!(
             score > 0.0,
             "Should get synergy bonus for stacking conditions"
+        );
+        assert!(
+            links.iter().any(|l| l.target == new_id && l.source == ComponentId::Trait(100)),
+            "Link should attribute new effect to its component (Rune 42) targeting trait source"
         );
     }
 
@@ -1390,10 +1443,48 @@ mod tests {
                 stacks: 2,
             }],
         )];
-        let (score, _links) = compute_marginal_synergy(&new_effects, &existing, &w);
+        let new_id = ComponentId::Sigil(7);
+        let (score, links) =
+            compute_marginal_synergy(&new_effects, &existing, &w, Some(&new_id));
         assert!(
             score > 0.0,
             "Duration bonus should synergize with matching condition"
+        );
+        assert!(
+            links.iter().any(|l| l.target == new_id),
+            "Link target should point to new component (Sigil 7), not existing"
+        );
+    }
+
+    #[test]
+    fn test_marginal_synergy_canonicalized_poisoned() {
+        // Regression: rune/sigil extractors used to emit "Poison" while trait
+        // extractors emitted canonical "Poisoned". `duration_matches_condition`
+        // uses eq_ignore_ascii_case which does NOT equate them — the synergy
+        // chain was silently dropped. Both sides now canonicalize on emit.
+        let w = OptimizationWeights::preset_condi_dps();
+        // Caller hand-builds "Poison" form to simulate the pre-fix bug shape;
+        // the canonicalized matchers in compute_marginal_synergy still match
+        // because trait extractors now produce "Poisoned" consistently.
+        let new_effects = vec![NormalizedEffect::DurationBonus {
+            kind: DurationKind::SpecificCondition("Poisoned".into()),
+            percent: 10.0,
+        }];
+        let existing = vec![(
+            ComponentId::Trait(200),
+            vec![NormalizedEffect::AppliesStatus {
+                status: "Poisoned".into(),
+                is_condition: true,
+                duration_s: 5,
+                stacks: 1,
+            }],
+        )];
+        let new_id = ComponentId::Sigil(99);
+        let (score, _links) =
+            compute_marginal_synergy(&new_effects, &existing, &w, Some(&new_id));
+        assert!(
+            score > 0.0,
+            "Poisoned-applying trait should synergize with Poison-duration sigil"
         );
     }
 

@@ -330,6 +330,8 @@ pub fn calculate_trait_stats(
     traits_cache: &HashMap<u32, Trait>,
 ) -> StatBlock {
     let mut stats = StatBlock::default();
+    let equipped_set: std::collections::HashSet<u32> =
+        equipped_trait_ids.iter().copied().collect();
 
     for &trait_id in equipped_trait_ids {
         let Some(t) = traits_cache.get(&trait_id) else {
@@ -337,10 +339,10 @@ pub fn calculate_trait_stats(
         };
 
         // Collect indices of base facts overridden by active traited_facts
-        let overridden: Vec<u32> = t
+        let overridden: std::collections::HashSet<u32> = t
             .traited_facts
             .iter()
-            .filter(|tf| equipped_trait_ids.contains(&tf.requires_trait))
+            .filter(|tf| equipped_set.contains(&tf.requires_trait))
             .filter_map(|tf| tf.overrides)
             .collect();
 
@@ -354,7 +356,7 @@ pub fn calculate_trait_stats(
 
         // Process active traited_facts
         for tf in &t.traited_facts {
-            if equipped_trait_ids.contains(&tf.requires_trait) {
+            if equipped_set.contains(&tf.requires_trait) {
                 apply_attribute_adjust(&mut stats, &tf.fact);
             }
         }
@@ -386,6 +388,8 @@ pub fn apply_trait_conversions(
     traits_cache: &HashMap<u32, Trait>,
 ) {
     let snapshot = stats.clone();
+    let equipped_set: std::collections::HashSet<u32> =
+        equipped_trait_ids.iter().copied().collect();
 
     for &trait_id in equipped_trait_ids {
         let Some(t) = traits_cache.get(&trait_id) else {
@@ -393,10 +397,10 @@ pub fn apply_trait_conversions(
         };
 
         // Collect indices of base facts overridden by active traited_facts
-        let overridden: Vec<u32> = t
+        let overridden: std::collections::HashSet<u32> = t
             .traited_facts
             .iter()
-            .filter(|tf| equipped_trait_ids.contains(&tf.requires_trait))
+            .filter(|tf| equipped_set.contains(&tf.requires_trait))
             .filter_map(|tf| tf.overrides)
             .collect();
 
@@ -410,7 +414,7 @@ pub fn apply_trait_conversions(
 
         // Process active traited_facts
         for tf in &t.traited_facts {
-            if equipped_trait_ids.contains(&tf.requires_trait) {
+            if equipped_set.contains(&tf.requires_trait) {
                 apply_buff_conversion(&mut *stats, &snapshot, &tf.fact);
             }
         }

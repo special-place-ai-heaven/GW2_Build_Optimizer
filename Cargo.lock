@@ -361,6 +361,7 @@ name = "gw2-build-optimizer"
 version = "1.0.0"
 dependencies = [
  "base64",
+ "chrono",
  "gw2-api",
  "gw2-core",
  "gw2-optimizer",
@@ -380,6 +381,7 @@ dependencies = [
 name = "gw2-optimizer"
 version = "1.0.0"
 dependencies = [
+ "chrono",
  "gw2-api",
  "gw2-core",
  "reqwest",

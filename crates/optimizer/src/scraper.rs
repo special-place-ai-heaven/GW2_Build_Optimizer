@@ -127,19 +127,28 @@ fn cancelled_result(source: &str) -> ScrapeResult {
 }
 
 /// Load all previously saved benchmark builds from `{addon_dir}/benchmarks/`.
+///
+/// Entries are sorted by path before processing so two calls with the same
+/// disk contents return Vecs in identical order. `fs::read_dir` order is
+/// OS-defined (Windows is alphabetical, Linux is roughly inode order), and
+/// downstream `find_best_benchmark` ties broke on raw iteration order —
+/// meaning the "best" benchmark could differ between machines.
 pub fn load_benchmarks(addon_dir: &Path) -> Vec<BenchmarkBuild> {
     let dir = addon_dir.join("benchmarks");
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return vec![];
     };
+    let mut paths: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+        .collect();
+    paths.sort();
     let mut builds = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(v) = serde_json::from_str::<Vec<BenchmarkBuild>>(&content) {
+    for path in paths {
+        if let Ok(file) = std::fs::File::open(&path) {
+            let reader = std::io::BufReader::new(file);
+            if let Ok(v) = serde_json::from_reader::<_, Vec<BenchmarkBuild>>(reader) {
                 builds.extend(v);
             }
         }
@@ -626,6 +635,9 @@ fn extract_build_code(html: &str) -> Option<String> {
 }
 
 /// Extract gear stat prefix from HTML text.
+///
+/// Case-insensitive — scraped sites vary in casing (e.g. "viper's", "VIPER'S"),
+/// and a case-sensitive `contains` previously silently dropped those.
 fn extract_gear_prefix(html: &str) -> String {
     // Common gear prefixes — match in order of specificity
     let prefixes = [
@@ -635,8 +647,9 @@ fn extract_gear_prefix(html: &str) -> String {
         "Trailblazer", "Assassin's", "Knight's", "Nomad's", "Soldier's",
         "Cavalier's", "Dire", "Magi's", "Cleric's",
     ];
+    let html_lower = html.to_lowercase();
     for p in &prefixes {
-        if html.contains(p) {
+        if html_lower.contains(&p.to_lowercase()) {
             return p.to_string();
         }
     }
@@ -804,21 +817,11 @@ fn build_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
 }
 
 fn today_string() -> String {
-    // Use a simple approach — format current time as YYYY-MM-DD
-    // We don't have chrono; use a manual UTC approximation.
-    // The exact date doesn't matter much for our use case.
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // Simple day calculation: days since 1970-01-01
-    let days = secs / 86400;
-    let year = 1970 + days / 365;
-    let day_of_year = days % 365;
-    let month = (day_of_year / 30) + 1;
-    let day = (day_of_year % 30) + 1;
-    format!("{:04}-{:02}-{:02}", year, month, day)
+    // Use chrono so the date is correct. The previous manual approximation
+    // (1970 + days/365, day_of_year/30 + 1) ignored leap years and assumed
+    // 30-day months — the rendered date drifted up to ~14 days off the real
+    // calendar date, which propagated into the scraped benchmark filenames.
+    chrono::Utc::now().format("%Y-%m-%d").to_string()
 }
 
 #[cfg(test)]

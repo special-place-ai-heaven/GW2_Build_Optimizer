@@ -13,3 +13,4 @@ gw2-optimizer = { path = "../optimizer" }
 nexus = { git = "https://github.com/zerthox/nexus-rs", features = ["serde"] }
 serde_json.workspace = true
 base64.workspace = true
+chrono.workspace = true

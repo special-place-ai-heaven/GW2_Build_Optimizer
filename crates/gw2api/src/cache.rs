@@ -2,7 +2,7 @@
 //! Each cache file stores metadata (build number, timestamp) alongside the data.
 //! Cache is invalidated when the GW2 game build number changes.
 
-use std::io::{BufWriter, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
@@ -46,13 +46,19 @@ impl DataCache {
     }
 
     /// Load data from cache. Returns None if file doesn't exist.
+    ///
+    /// Streams via `BufReader` + `serde_json::from_reader` rather than reading
+    /// the whole file into a `String`. The items cache is ~50 MB of JSON; the
+    /// old `read_to_string` approach paid for both the raw text and the parsed
+    /// values simultaneously.
     pub fn load<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, CacheError> {
         let path = self.path_for(key);
         if !path.exists() {
             return Ok(None);
         }
-        let json = std::fs::read_to_string(&path)?;
-        let entry: CacheEntry<T> = serde_json::from_str(&json)?;
+        let file = std::fs::File::open(&path)?;
+        let reader = BufReader::new(file);
+        let entry: CacheEntry<T> = serde_json::from_reader(reader)?;
         Ok(Some(entry.data))
     }
 
@@ -60,20 +66,25 @@ impl DataCache {
     ///
     /// Any mismatch — including rollback (cached > current) — is treated as
     /// stale. Callers are expected to refetch on `true`.
+    ///
+    /// Streams via `BufReader` + `serde(deny_unknown_fields = false)` so the
+    /// 50 MB items cache is not pulled fully into a `String` just to extract
+    /// the 4-byte `build` field.
     pub fn is_stale(&self, key: &str, current_build: u32) -> bool {
         let path = self.path_for(key);
         if !path.exists() {
             return true;
         }
-        let Ok(json) = std::fs::read_to_string(&path) else {
+        let Ok(file) = std::fs::File::open(&path) else {
             return true;
         };
+        let reader = BufReader::new(file);
         // Parse just the metadata, not the full data
         #[derive(Deserialize)]
         struct Meta {
             build: u32,
         }
-        let Ok(meta) = serde_json::from_str::<Meta>(&json) else {
+        let Ok(meta) = serde_json::from_reader::<_, Meta>(reader) else {
             return true;
         };
         meta.build != current_build
@@ -82,12 +93,13 @@ impl DataCache {
     /// Get the cached build number for a key, if it exists.
     pub fn cached_build(&self, key: &str) -> Option<u32> {
         let path = self.path_for(key);
-        let json = std::fs::read_to_string(&path).ok()?;
+        let file = std::fs::File::open(&path).ok()?;
+        let reader = BufReader::new(file);
         #[derive(Deserialize)]
         struct Meta {
             build: u32,
         }
-        serde_json::from_str::<Meta>(&json).ok().map(|m| m.build)
+        serde_json::from_reader::<_, Meta>(reader).ok().map(|m| m.build)
     }
 
     /// Delete a cache entry.
@@ -170,8 +182,9 @@ impl DataCache {
         if !path.exists() {
             return Ok(None);
         }
-        let json = std::fs::read_to_string(&path)?;
-        let data: T = serde_json::from_str(&json)?;
+        let file = std::fs::File::open(&path)?;
+        let reader = BufReader::new(file);
+        let data: T = serde_json::from_reader(reader)?;
         Ok(Some(data))
     }
 
@@ -193,8 +206,9 @@ impl DataCache {
         if !path.exists() {
             return Ok(None);
         }
-        let json = std::fs::read_to_string(&path)?;
-        let data: Vec<String> = serde_json::from_str(&json)?;
+        let file = std::fs::File::open(&path)?;
+        let reader = BufReader::new(file);
+        let data: Vec<String> = serde_json::from_reader(reader)?;
         Ok(Some(data))
     }
 
