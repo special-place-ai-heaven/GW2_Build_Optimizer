@@ -10,11 +10,13 @@ result.
 
 ## Download
 
-Download the prebuilt DLL from this repository:
+Download the prebuilt DLL from GitHub Releases:
 
-- [release/gw2_build_optimizer.dll](release/gw2_build_optimizer.dll)
+- [Latest release](https://github.com/special-place-administrator/GW2_Build_Optimizer/releases/latest)
+- [Direct DLL download](https://github.com/special-place-administrator/GW2_Build_Optimizer/releases/latest/download/gw2_build_optimizer.dll)
+- [Checksum file](https://github.com/special-place-administrator/GW2_Build_Optimizer/releases/latest/download/SHA256SUMS.txt)
 
-Current bundled DLL SHA256:
+Current release DLL SHA256:
 
 ```text
 8DA076F161D9D84EB25C7723616AE16F13CC03030D1E007917AC856B12E82433
@@ -74,6 +76,12 @@ Create a new key and enable these scopes:
 
 - Required: `account`, `characters`, `builds`
 - Recommended: `inventories`, `unlocks`
+
+> [!IMPORTANT]
+> When ArenaNet asks which permissions to include, select these checkboxes:
+> `account`, `characters`, `builds`, `inventories`, and `unlocks`.
+> The first three are required. `inventories` and `unlocks` let the optimizer
+> see more of what your account owns so its suggestions are more useful.
 
 Paste the key into the addon when asked.
 
