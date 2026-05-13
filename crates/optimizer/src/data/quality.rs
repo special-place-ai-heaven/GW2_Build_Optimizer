@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn test_factual_value_display() {
-        assert_eq!(FactualValue::Resolved(3.14).to_string(), "3.14");
+        assert_eq!(FactualValue::Resolved(12.34).to_string(), "12.34");
         assert_eq!(FactualValue::<f64>::Unknown.to_string(), "Unknown");
     }
 

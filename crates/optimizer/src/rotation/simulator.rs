@@ -1055,7 +1055,10 @@ mod tests {
         };
         let result = simulate(&[auto_with_cleanse], 5000, 2000.0, 0.0, 1100.0);
         // cleanse_count = 1 (skill has cleanse effect), but rate = 0 (cooldown=0 excluded)
-        assert_eq!(result.cleanse_count, 1, "cleanse_count counts the auto-attack");
+        assert_eq!(
+            result.cleanse_count, 1,
+            "cleanse_count counts the auto-attack"
+        );
         assert_eq!(
             result.cleanse_rate_per_20s, 0.0,
             "rate excludes auto-attacks to avoid division by zero"

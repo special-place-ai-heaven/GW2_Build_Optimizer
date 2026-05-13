@@ -1548,7 +1548,9 @@ mod tests {
     #[test]
     fn test_objective_scorer_uses_profile_norms() {
         use crate::balance::BalanceContext;
-        use crate::combat::{self, buff_profiles_for_profession, condition_weights_for_profession, DamageModifiers};
+        use crate::combat::{
+            self, buff_profiles_for_profession, condition_weights_for_profession, DamageModifiers,
+        };
         use crate::stats;
 
         let ctx = BalanceContext::pve();
@@ -1564,12 +1566,15 @@ mod tests {
         let mods = DamageModifiers::default();
         let cw = condition_weights_for_profession("Guardian", &ctx);
         let profile = &buff_profiles_for_profession("Guardian", &ctx)[0];
-        let perf = combat::calculate_combat_performance(&stats, &derived, &mods, profile, &cw, "Guardian", &ctx);
+        let perf = combat::calculate_combat_performance(
+            &stats, &derived, &mods, profile, &cw, "Guardian", &ctx,
+        );
 
         // PvE Power DPS scorer
         let pve_scorer = ObjectiveScorer::from_mode(OptimizationWeights::preset_power_dps(), "PvE");
         // WvW Roamer scorer (has different normalization constants + weights)
-        let wvw_scorer = ObjectiveScorer::from_mode(OptimizationWeights::default_for_mode("WvW"), "WvW");
+        let wvw_scorer =
+            ObjectiveScorer::from_mode(OptimizationWeights::default_for_mode("WvW"), "WvW");
 
         let score_pve = pve_scorer.score(&perf);
         let score_wvw = wvw_scorer.score(&perf);
@@ -1586,7 +1591,9 @@ mod tests {
     #[test]
     fn test_objective_scorer_fallback_matches_score_with_weights() {
         use crate::balance::BalanceContext;
-        use crate::combat::{self, buff_profiles_for_profession, condition_weights_for_profession, DamageModifiers};
+        use crate::combat::{
+            self, buff_profiles_for_profession, condition_weights_for_profession, DamageModifiers,
+        };
         use crate::stats;
 
         let ctx = BalanceContext::pve();
@@ -1602,7 +1609,9 @@ mod tests {
         let mods = DamageModifiers::default();
         let cw = condition_weights_for_profession("Warrior", &ctx);
         let profile = &buff_profiles_for_profession("Warrior", &ctx)[0];
-        let perf = combat::calculate_combat_performance(&stats, &derived, &mods, profile, &cw, "Warrior", &ctx);
+        let perf = combat::calculate_combat_performance(
+            &stats, &derived, &mods, profile, &cw, "Warrior", &ctx,
+        );
 
         let weights = OptimizationWeights::preset_power_dps();
         let fallback_scorer = ObjectiveScorer::fallback(weights.clone());
@@ -1618,4 +1627,3 @@ mod tests {
         );
     }
 }
-

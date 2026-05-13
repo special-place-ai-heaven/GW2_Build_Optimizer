@@ -587,9 +587,18 @@ mod tests {
         let profs = profession_profiles::profiles();
 
         let modes = [
-            (gw2_core::types::GameMode::PvE, "data/rotation_profiles/pve.json"),
-            (gw2_core::types::GameMode::PvP, "data/rotation_profiles/pvp.json"),
-            (gw2_core::types::GameMode::WvW, "data/rotation_profiles/wvw.json"),
+            (
+                gw2_core::types::GameMode::PvE,
+                "data/rotation_profiles/pve.json",
+            ),
+            (
+                gw2_core::types::GameMode::PvP,
+                "data/rotation_profiles/pvp.json",
+            ),
+            (
+                gw2_core::types::GameMode::WvW,
+                "data/rotation_profiles/wvw.json",
+            ),
         ];
 
         let mut gaps: Vec<String> = Vec::new();

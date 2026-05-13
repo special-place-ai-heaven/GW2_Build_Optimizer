@@ -453,7 +453,6 @@ fn trim_messages(messages: &mut Vec<AnthropicMessage>, budget_tokens: usize) {
     }
 }
 
-
 impl LlmClient for AnthropicClient {
     fn provider_name(&self) -> &str {
         "Anthropic"
@@ -899,80 +898,80 @@ mod tests {
     }
 
     #[test]
-        fn test_trim_messages_drops_oldest_turn() {
-            fn user_text(s: &str) -> AnthropicMessage {
-                AnthropicMessage {
-                    role: "user".into(),
-                    content: AnthropicContent::Text(s.into()),
-                }
+    fn test_trim_messages_drops_oldest_turn() {
+        fn user_text(s: &str) -> AnthropicMessage {
+            AnthropicMessage {
+                role: "user".into(),
+                content: AnthropicContent::Text(s.into()),
             }
-            fn assistant_turn(id: &str, name: &str, payload: &str) -> AnthropicMessage {
-                AnthropicMessage {
-                    role: "assistant".into(),
-                    content: AnthropicContent::Blocks(vec![ContentBlock::ToolUse {
-                        id: id.into(),
-                        name: name.into(),
-                        input: serde_json::json!({ "q": payload }),
-                    }]),
-                }
+        }
+        fn assistant_turn(id: &str, name: &str, payload: &str) -> AnthropicMessage {
+            AnthropicMessage {
+                role: "assistant".into(),
+                content: AnthropicContent::Blocks(vec![ContentBlock::ToolUse {
+                    id: id.into(),
+                    name: name.into(),
+                    input: serde_json::json!({ "q": payload }),
+                }]),
             }
-            fn user_tool_result(id: &str, payload: &str) -> AnthropicMessage {
-                AnthropicMessage {
-                    role: "user".into(),
-                    content: AnthropicContent::Blocks(vec![ContentBlock::ToolResult {
-                        tool_use_id: id.into(),
-                        content: payload.into(),
-                    }]),
-                }
+        }
+        fn user_tool_result(id: &str, payload: &str) -> AnthropicMessage {
+            AnthropicMessage {
+                role: "user".into(),
+                content: AnthropicContent::Blocks(vec![ContentBlock::ToolResult {
+                    tool_use_id: id.into(),
+                    content: payload.into(),
+                }]),
             }
+        }
 
-            let filler = "x".repeat(400);
-            let mut messages = vec![
-                user_text("initial prompt"),
-                assistant_turn("tu_1", "get_trait_details", &filler),
-                user_tool_result("tu_1", &filler),
-                assistant_turn("tu_2", "get_trait_details", &filler),
-                user_tool_result("tu_2", &filler),
-                assistant_turn("tu_3", "get_trait_details", &filler),
-                user_tool_result("tu_3", &filler),
-            ];
-            let original_len = messages.len();
+        let filler = "x".repeat(400);
+        let mut messages = vec![
+            user_text("initial prompt"),
+            assistant_turn("tu_1", "get_trait_details", &filler),
+            user_tool_result("tu_1", &filler),
+            assistant_turn("tu_2", "get_trait_details", &filler),
+            user_tool_result("tu_2", &filler),
+            assistant_turn("tu_3", "get_trait_details", &filler),
+            user_tool_result("tu_3", &filler),
+        ];
+        let original_len = messages.len();
 
-            trim_messages(&mut messages, 200);
+        trim_messages(&mut messages, 200);
 
-            assert!(
-                messages.len() < original_len,
-                "expected trimming, got {}",
-                messages.len()
-            );
-            // Initial prompt preserved.
-            assert_eq!(messages[0].role, "user");
-            match &messages[0].content {
-                AnthropicContent::Text(s) => assert_eq!(s, "initial prompt"),
-                _ => panic!("first message lost text content"),
-            }
-            // Last turn's tool_use_id still matches its tool_result.
-            let last_assistant_idx = messages
+        assert!(
+            messages.len() < original_len,
+            "expected trimming, got {}",
+            messages.len()
+        );
+        // Initial prompt preserved.
+        assert_eq!(messages[0].role, "user");
+        match &messages[0].content {
+            AnthropicContent::Text(s) => assert_eq!(s, "initial prompt"),
+            _ => panic!("first message lost text content"),
+        }
+        // Last turn's tool_use_id still matches its tool_result.
+        let last_assistant_idx = messages
+            .iter()
+            .rposition(|m| m.role == "assistant")
+            .expect("must retain at least one assistant");
+        let last_use_id = match &messages[last_assistant_idx].content {
+            AnthropicContent::Blocks(blocks) => blocks
                 .iter()
-                .rposition(|m| m.role == "assistant")
-                .expect("must retain at least one assistant");
-            let last_use_id = match &messages[last_assistant_idx].content {
-                AnthropicContent::Blocks(blocks) => blocks
-                    .iter()
-                    .find_map(|b| match b {
-                        ContentBlock::ToolUse { id, .. } => Some(id.clone()),
-                        _ => None,
-                    })
-                    .expect("last assistant has a tool_use block"),
-                _ => panic!("last assistant not block-shaped"),
-            };
-            assert_eq!(last_use_id, "tu_3");
-            // Every tool_result still has a matching tool_use earlier.
-            for (i, m) in messages.iter().enumerate() {
-                if let AnthropicContent::Blocks(blocks) = &m.content {
-                    for b in blocks {
-                        if let ContentBlock::ToolResult { tool_use_id, .. } = b {
-                            let paired = messages[..i].iter().any(|prev| {
+                .find_map(|b| match b {
+                    ContentBlock::ToolUse { id, .. } => Some(id.clone()),
+                    _ => None,
+                })
+                .expect("last assistant has a tool_use block"),
+            _ => panic!("last assistant not block-shaped"),
+        };
+        assert_eq!(last_use_id, "tu_3");
+        // Every tool_result still has a matching tool_use earlier.
+        for (i, m) in messages.iter().enumerate() {
+            if let AnthropicContent::Blocks(blocks) = &m.content {
+                for b in blocks {
+                    if let ContentBlock::ToolResult { tool_use_id, .. } = b {
+                        let paired = messages[..i].iter().any(|prev| {
                                 if let AnthropicContent::Blocks(pbs) = &prev.content {
                                     pbs.iter().any(|pb| {
                                         matches!(pb, ContentBlock::ToolUse { id, .. } if id == tool_use_id)
@@ -981,22 +980,22 @@ mod tests {
                                     false
                                 }
                             });
-                            assert!(paired, "orphaned tool_use_id {}", tool_use_id);
-                        }
+                        assert!(paired, "orphaned tool_use_id {}", tool_use_id);
                     }
                 }
             }
         }
+    }
 
-        #[test]
-        fn test_trim_messages_noop_under_budget() {
-            let mut messages = vec![AnthropicMessage {
-                role: "user".into(),
-                content: AnthropicContent::Text("short".into()),
-            }];
-            trim_messages(&mut messages, 10_000);
-            assert_eq!(messages.len(), 1);
-        }
+    #[test]
+    fn test_trim_messages_noop_under_budget() {
+        let mut messages = vec![AnthropicMessage {
+            role: "user".into(),
+            content: AnthropicContent::Text("short".into()),
+        }];
+        trim_messages(&mut messages, 10_000);
+        assert_eq!(messages.len(), 1);
+    }
 
     #[test]
     fn test_rate_tracker_rpm_limit() {
@@ -1008,51 +1007,51 @@ mod tests {
     }
 
     #[test]
-        fn test_rate_tracker_persistence_roundtrip_same_day() {
-            let mut tracker = RateTracker::new();
-            for _ in 0..5 {
-                tracker.check_and_reserve().unwrap();
-            }
-            assert_eq!(tracker.requests_today, 5);
-            assert_eq!(tracker.requests_this_minute, 5);
-
-            let persisted = tracker.to_persisted();
-            let reloaded = RateTracker::from_persisted(persisted);
-
-            assert_eq!(reloaded.requests_today, 5);
-            assert_eq!(reloaded.requests_this_minute, 0);
-        }
-
-        #[test]
-        fn test_rate_tracker_persistence_day_rollover_resets_daily() {
-            let yesterday = current_epoch_day().saturating_sub(1);
-            let persisted = PersistedUsage {
-                day: yesterday,
-                requests_today: 42,
-            };
-            let reloaded = RateTracker::from_persisted(persisted);
-
-            assert_eq!(reloaded.requests_today, 0);
-            assert_eq!(reloaded.requests_this_minute, 0);
-            assert_eq!(reloaded.current_day, current_epoch_day());
-        }
-
-        #[test]
-        fn test_rate_tracker_minute_rollover_preserves_daily() {
-            let mut tracker = RateTracker::new();
-            for _ in 0..3 {
-                tracker.check_and_reserve().unwrap();
-            }
-            assert_eq!(tracker.requests_this_minute, 3);
-            assert_eq!(tracker.requests_today, 3);
-
-            tracker.minute_start = Instant::now() - std::time::Duration::from_secs(61);
-
+    fn test_rate_tracker_persistence_roundtrip_same_day() {
+        let mut tracker = RateTracker::new();
+        for _ in 0..5 {
             tracker.check_and_reserve().unwrap();
-
-            assert_eq!(tracker.requests_this_minute, 1);
-            assert_eq!(tracker.requests_today, 4);
         }
+        assert_eq!(tracker.requests_today, 5);
+        assert_eq!(tracker.requests_this_minute, 5);
+
+        let persisted = tracker.to_persisted();
+        let reloaded = RateTracker::from_persisted(persisted);
+
+        assert_eq!(reloaded.requests_today, 5);
+        assert_eq!(reloaded.requests_this_minute, 0);
+    }
+
+    #[test]
+    fn test_rate_tracker_persistence_day_rollover_resets_daily() {
+        let yesterday = current_epoch_day().saturating_sub(1);
+        let persisted = PersistedUsage {
+            day: yesterday,
+            requests_today: 42,
+        };
+        let reloaded = RateTracker::from_persisted(persisted);
+
+        assert_eq!(reloaded.requests_today, 0);
+        assert_eq!(reloaded.requests_this_minute, 0);
+        assert_eq!(reloaded.current_day, current_epoch_day());
+    }
+
+    #[test]
+    fn test_rate_tracker_minute_rollover_preserves_daily() {
+        let mut tracker = RateTracker::new();
+        for _ in 0..3 {
+            tracker.check_and_reserve().unwrap();
+        }
+        assert_eq!(tracker.requests_this_minute, 3);
+        assert_eq!(tracker.requests_today, 3);
+
+        tracker.minute_start = Instant::now() - std::time::Duration::from_secs(61);
+
+        tracker.check_and_reserve().unwrap();
+
+        assert_eq!(tracker.requests_this_minute, 1);
+        assert_eq!(tracker.requests_today, 4);
+    }
 
     #[test]
     fn test_anthropic_content_text_serialization() {

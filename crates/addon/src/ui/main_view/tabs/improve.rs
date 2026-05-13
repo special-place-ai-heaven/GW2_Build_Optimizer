@@ -149,6 +149,11 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                     ui.indent_by(6.0);
                     // RIGHT: Optimized Build header + read-only specs
                     build_display::render_card_header(ui, "OPTIMIZED BUILD", [0.3, 1.0, 0.5, 1.0]);
+                    crate::ui::comparison::render_chat_code_copy(
+                        ui,
+                        suggestion.chat_code.as_deref(),
+                        "improve",
+                    );
                     {
                         let db_ref = state.main.game_db.as_ref();
                         lock_panel::render_optimized_specs_panel(

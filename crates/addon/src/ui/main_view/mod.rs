@@ -484,7 +484,9 @@ fn render_wvw_sub_role(ui: &Ui, state: &mut AddonState) {
             let new_weights = match tier {
                 CombatTier::Solo => gw2_optimizer::scenario::RoleObjective::WvWRoamer
                     .to_weights(&gw2_core::types::GameMode::WvW),
-                CombatTier::Party => gw2_optimizer::scoring::OptimizationWeights::default_for_mode("WvW"),
+                CombatTier::Party => {
+                    gw2_optimizer::scoring::OptimizationWeights::default_for_mode("WvW")
+                }
                 CombatTier::Squad => gw2_optimizer::scenario::RoleObjective::WvWZergDps
                     .to_weights(&gw2_core::types::GameMode::WvW),
             };
@@ -770,7 +772,11 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
     let summary = state.main.weights.summary_label();
     let focus_label = if state.main.game_mode == gw2_core::types::GameMode::WvW {
-        format!("  Focus: {} — {}", state.main.wvw_combat_tier.label(), summary)
+        format!(
+            "  Focus: {} — {}",
+            state.main.wvw_combat_tier.label(),
+            summary
+        )
     } else {
         format!("  Focus: {}", summary)
     };
@@ -849,4 +855,3 @@ fn render_main_content(ui: &Ui, state: &mut AddonState) {
         }
     }
 }
-

@@ -147,17 +147,14 @@ pub fn optimize_v2_search(
     let mut eval_count = 0usize;
 
     // Step 5: beam loop.
-    while eval_count < config.eval_budget
-        && start.elapsed().as_secs() < config.time_limit_secs
-    {
+    while eval_count < config.eval_budget && start.elapsed().as_secs() < config.time_limit_secs {
         let mut next: Vec<BeamCandidate> = Vec::new();
 
         // Elitism: keep current beam members in the candidate pool.
         next.extend(beam.iter().cloned());
 
         // Budget per candidate to avoid spending all evals on a single member.
-        let budget_per =
-            config.eval_budget.saturating_sub(eval_count) / beam.len().max(1);
+        let budget_per = config.eval_budget.saturating_sub(eval_count) / beam.len().max(1);
         let neighbor_cap = budget_per.min(30).max(1);
 
         for candidate in &beam {
@@ -391,7 +388,7 @@ fn swap_utility_skills(
                 // Check slot eligibility.
                 let slot_ok = match skill.slot.as_deref() {
                     Some("Utility") => true,
-                    None => true,  // slot absent but in profession list → eligible
+                    None => true, // slot absent but in profession list → eligible
                     _ => false,
                 };
                 if !slot_ok {
@@ -480,7 +477,9 @@ mod tests {
                 game_mode: GameMode::PvE,
                 combat_tier: CombatTier::Solo,
                 target_profile: crate::scenario::TargetProfile::Single,
-                optimization_target: crate::scenario::OptimizationTarget { label: String::new() },
+                optimization_target: crate::scenario::OptimizationTarget {
+                    label: String::new(),
+                },
                 patch_id: None,
             },
             stats: StatBlock::default(),
@@ -586,14 +585,8 @@ mod tests {
             "expected 2 rune-swap neighbors, got {}",
             rune_ids.len()
         );
-        assert!(
-            rune_ids.contains(&101),
-            "expected rune ID 101 in neighbors"
-        );
-        assert!(
-            rune_ids.contains(&102),
-            "expected rune ID 102 in neighbors"
-        );
+        assert!(rune_ids.contains(&101), "expected rune ID 101 in neighbors");
+        assert!(rune_ids.contains(&102), "expected rune ID 102 in neighbors");
     }
 
     /// Regression: generate_neighbors interleaves operator outputs so
@@ -708,9 +701,6 @@ mod tests {
     fn test_search_config_default() {
         let config = SearchConfig::default();
         assert_eq!(config.beam_width, 10, "default beam_width should be 10");
-        assert_eq!(
-            config.eval_budget, 200,
-            "default eval_budget should be 200"
-        );
+        assert_eq!(config.eval_budget, 200, "default eval_budget should be 200");
     }
 }

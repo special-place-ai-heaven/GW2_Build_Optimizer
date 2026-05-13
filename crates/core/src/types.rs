@@ -378,9 +378,7 @@ mod tests {
         // Single spec_id again to avoid HashMap iteration nondeterminism.
         let mut locks = BuildLocks::default();
         locks.specs[2] = Some(34);
-        locks
-            .trait_locks
-            .insert(34, [Some(1111), None, Some(3333)]);
+        locks.trait_locks.insert(34, [Some(1111), None, Some(3333)]);
         assert_eq!(
             locks.describe_constraints(),
             "Slot 3 spec locked to ID 34; Spec 34 Adept trait locked to ID 1111; Spec 34 Grandmaster trait locked to ID 3333",
@@ -432,16 +430,12 @@ mod tests {
         );
     }
 
-
     #[test]
     fn game_mode_all_order_is_pinned() {
         // `GameMode::ALL` is iterated by tab rendering and default-lookup code
         // across the workspace. The order [PvE, PvP, WvW] is load-bearing — if
         // it silently flips, UI tabs and default profiles reorder with it.
-        assert_eq!(
-            GameMode::ALL,
-            [GameMode::PvE, GameMode::PvP, GameMode::WvW],
-        );
+        assert_eq!(GameMode::ALL, [GameMode::PvE, GameMode::PvP, GameMode::WvW],);
     }
 
     #[test]
@@ -473,7 +467,7 @@ mod tests {
         // Non-zero ferocity / above-threshold precision.
         let mut s = StatBlock::default();
         s.precision = 895 + 21 * 50; // +50% crit chance
-        s.ferocity = 150;            // +10% crit damage
+        s.ferocity = 150; // +10% crit damage
         s.compute_derived(0, 0);
         assert_eq!(s.crit_chance, 50.0);
         assert_eq!(s.crit_damage, 160.0);

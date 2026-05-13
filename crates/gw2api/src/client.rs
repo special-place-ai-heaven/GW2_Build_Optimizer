@@ -21,7 +21,13 @@ const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
 /// Parse `Retry-After` as integer seconds (RFC 7231 delta-seconds form).
 /// HTTP-date is intentionally unsupported — GW2 API returns integer seconds.
 fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
-    let secs: u64 = headers.get("retry-after")?.to_str().ok()?.trim().parse().ok()?;
+    let secs: u64 = headers
+        .get("retry-after")?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
     Some(Duration::from_secs(secs))
 }
 
@@ -39,11 +45,9 @@ fn body_snippet(body: &str) -> String {
 
 /// Build the comma-separated `ids` query value used by GW2 API bulk endpoints.
 ///
-/// Produces output bit-for-bit identical to the previous inline construction
-/// (`ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(",")`).
-/// Does NOT enforce the 200-ID API cap — callers are responsible for chunking
-/// (see `MAX_BULK_IDS` and `slice::chunks`).
-pub(crate) fn build_bulk_ids_query(ids: &[u32]) -> String {
+/// Accepts numeric IDs and string IDs. The caller is responsible for chunking
+/// to the GW2 API's 200-ID cap before invoking this helper.
+pub(crate) fn build_bulk_ids_query<T: std::fmt::Display>(ids: &[T]) -> String {
     let mut out = String::new();
     let mut first = true;
     for id in ids {
@@ -56,12 +60,7 @@ pub(crate) fn build_bulk_ids_query(ids: &[u32]) -> String {
     out
 }
 
-/// Convert a `serde_json::Value` ID into a `u32`, accepting either JSON numbers
-/// or numeric JSON strings. Mirrors the previous `id.to_string().replace('"', "")`
-/// behavior for the GW2 endpoints used by `fetch_by_ids` (all of which return
-/// integer IDs in practice). Returns `None` for non-numeric values, which lets
-/// callers `filter_map` and skip silently — matching prior behavior where a
-/// non-numeric ID would have been sent verbatim and rejected by the API.
+/// Convert a JSON numeric ID into `u32`, accepting JSON numbers and numeric strings.
 fn value_to_u32(v: &serde_json::Value) -> Option<u32> {
     if let Some(n) = v.as_u64() {
         u32::try_from(n).ok()
@@ -70,6 +69,14 @@ fn value_to_u32(v: &serde_json::Value) -> Option<u32> {
     } else {
         None
     }
+}
+
+/// Convert a GW2 endpoint ID into the string form accepted by `ids=` bulk queries.
+/// Most endpoints return numeric IDs; `/v2/legends` returns IDs like `Legend1`.
+fn value_to_bulk_id(v: &serde_json::Value) -> Option<String> {
+    value_to_u32(v)
+        .map(|n| n.to_string())
+        .or_else(|| v.as_str().filter(|s| !s.is_empty()).map(str::to_owned))
 }
 
 /// Rate-limited GW2 API client.
@@ -372,9 +379,15 @@ impl Gw2Client {
                     .iter()
                     .map(|chunk| {
                         s.spawn(|| {
-                            let numeric_ids: Vec<u32> =
-                                chunk.iter().filter_map(value_to_u32).collect();
-                            let joined = build_bulk_ids_query(&numeric_ids);
+                            let ids: Vec<String> =
+                                chunk.iter().filter_map(value_to_bulk_id).collect();
+                            if ids.is_empty() {
+                                return Err(ApiError::Internal(format!(
+                                    "Endpoint {} returned no usable bulk IDs",
+                                    endpoint
+                                )));
+                            }
+                            let joined = build_bulk_ids_query(&ids);
                             self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
                         })
                     })
@@ -462,7 +475,7 @@ mod tests {
     #[test]
     fn build_bulk_ids_query_empty_slice() {
         // Preserves prior behavior: empty Vec joined with "," → empty string.
-        assert_eq!(build_bulk_ids_query(&[]), "");
+        assert_eq!(build_bulk_ids_query(&[] as &[u32]), "");
     }
 
     #[test]
@@ -701,6 +714,44 @@ mod tests {
             }
             other => panic!("expected RateLimited, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn fetch_by_ids_preserves_string_ids_for_legend_endpoints() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("GET", "/legends")
+            .match_query(mockito::Matcher::Exact("ids=Legend1,Legend2".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"[
+                    {"id":"Legend1","swap":28085,"heal":27220,"elite":27760,"utilities":[28379,27014,26644]},
+                    {"id":"Legend2","swap":28134,"heal":26937,"elite":28406,"utilities":[29209,28231,27107]}
+                ]"#,
+            )
+            .expect(1)
+            .create();
+
+        let client = Gw2Client::without_key().unwrap();
+        let ids = vec![serde_json::json!("Legend1"), serde_json::json!("Legend2")];
+        let endpoint = format!("{}/legends", server.url());
+        let legends: Vec<super::super::models::Legend> =
+            client.fetch_by_ids(&endpoint, &ids).unwrap();
+
+        assert_eq!(legends.len(), 2);
+        assert_eq!(legends[0].id, "Legend1");
+        assert_eq!(legends[1].id, "Legend2");
+        m.assert();
+    }
+
+    #[test]
+    #[ignore] // Requires network
+    fn test_live_fetch_legends_all() {
+        let client = Gw2Client::without_key().unwrap();
+        let legends: Vec<super::super::models::Legend> = client.fetch_all("legends").unwrap();
+        assert!(legends.len() >= 7, "expected current revenant legends");
+        assert!(legends.iter().all(|l| l.id.starts_with("Legend")));
     }
 
     #[test]
