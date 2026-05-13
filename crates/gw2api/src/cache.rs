@@ -109,7 +109,9 @@ impl DataCache {
         struct Meta {
             build: u32,
         }
-        serde_json::from_reader::<_, Meta>(reader).ok().map(|m| m.build)
+        serde_json::from_reader::<_, Meta>(reader)
+            .ok()
+            .map(|m| m.build)
     }
 
     /// Delete a cache entry.
@@ -274,9 +276,14 @@ pub enum CacheError {
 mod tests {
     use super::*;
     use std::env;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT_CACHE_ID: AtomicUsize = AtomicUsize::new(0);
 
     fn temp_cache() -> DataCache {
-        let dir = env::temp_dir().join(format!("gw2_cache_test_{}", std::process::id()));
+        let id = NEXT_CACHE_ID.fetch_add(1, Ordering::Relaxed);
+        let dir = env::temp_dir().join(format!("gw2_cache_test_{}_{}", std::process::id(), id));
+        let _ = std::fs::remove_dir_all(&dir);
         DataCache::new(dir)
     }
 
@@ -366,11 +373,7 @@ mod tests {
     /// tests — these clear_all assertions would otherwise see files written by
     /// parallel tests and vice versa.
     fn isolated_cache(tag: &str) -> (DataCache, PathBuf) {
-        let path = env::temp_dir().join(format!(
-            "gw2_cache_test_{}_{}",
-            std::process::id(),
-            tag
-        ));
+        let path = env::temp_dir().join(format!("gw2_cache_test_{}_{}", std::process::id(), tag));
         let _ = std::fs::remove_dir_all(&path);
         let cache = DataCache::new(&path);
         (cache, path)
@@ -396,7 +399,10 @@ mod tests {
         cache.clear_all().expect("clear should succeed");
 
         assert!(unrelated.exists(), ".txt file must not be touched");
-        assert!(!cache.exists("keep_json"), ".json cache file should be cleared");
+        assert!(
+            !cache.exists("keep_json"),
+            ".json cache file should be cleared"
+        );
         let _ = std::fs::remove_dir_all(&path);
     }
 
@@ -428,7 +434,10 @@ mod tests {
         }
 
         // Best-effort contract: the other .json entry must still be cleared.
-        assert!(!cache.exists("deletable"), "removable entry must still be cleared");
+        assert!(
+            !cache.exists("deletable"),
+            "removable entry must still be cleared"
+        );
 
         let _ = std::fs::remove_dir(&blocker);
         let _ = std::fs::remove_dir_all(&path);

@@ -452,9 +452,8 @@ fn test_all_providers_canonical_build_smoke() {
 
     match std::env::var("GEMINI_API_KEY") {
         Ok(key) => {
-            let client =
-                gw2_optimizer::llm::gemini::GeminiLlmClient::new(&key, "gemini-2.5-flash")
-                    .expect("create Gemini client");
+            let client = gw2_optimizer::llm::gemini::GeminiLlmClient::new(&key, "gemini-2.5-flash")
+                .expect("create Gemini client");
             run_canonical_build_smoke(&client, &db);
             ran += 1;
         }

@@ -84,9 +84,7 @@ pub fn enrich_with_cleanse(
                 .unwrap_or("")
                 .to_lowercase();
 
-            if (description.contains("remov") && description.contains("condit"))
-                || (description.contains("cure") && description.contains("condit"))
-            {
+            if text_describes_condition_cleanse(&description) {
                 skill.effects.push(SkillEffect::RemovesCondition {
                     conditions_removed: 1, // HEURISTIC: assume 1 condition removed
                 });
@@ -223,11 +221,34 @@ fn extract_effects(facts: &[Fact]) -> Vec<SkillEffect> {
                     field_type: ft.clone(),
                 });
             }
+            Fact::Number {
+                text: Some(text),
+                value,
+                ..
+            } => {
+                if let Some(conditions_removed) = condition_cleanse_count_from_text(text, *value) {
+                    effects.push(SkillEffect::RemovesCondition { conditions_removed });
+                }
+            }
             _ => {}
         }
     }
 
     effects
+}
+
+fn condition_cleanse_count_from_text(text: &str, value: Option<i32>) -> Option<u32> {
+    if text_describes_condition_cleanse(text) {
+        Some(value.unwrap_or(1).max(1) as u32)
+    } else {
+        None
+    }
+}
+
+fn text_describes_condition_cleanse(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("condit")
+        && (lower.contains("remov") || lower.contains("cleanse") || lower.contains("cure"))
 }
 
 /// GW2 damaging conditions (same list as gamedb.rs is_condition).
@@ -462,9 +483,8 @@ mod tests {
     // ─── Tests for enrich_with_cleanse ───
 
     use crate::data::normalized_effects::{
-        AmountMode, EffectCategory, NormalizedEffect, OperationType,
-        SourceType, StackingRule, StatusOperation, TargetScope, TargetSide, TriggerRule,
-        UptimeModel, UptimeModelKind,
+        AmountMode, EffectCategory, NormalizedEffect, OperationType, SourceType, StackingRule,
+        StatusOperation, TargetScope, TargetSide, TriggerRule, UptimeModel, UptimeModelKind,
     };
     use crate::data::quality::FactualValue;
     use crate::data::EvidenceLevel;
@@ -568,7 +588,11 @@ mod tests {
                 }
             })
             .collect();
-        assert_eq!(cleanse_effects, vec![3], "should detect 3 conditions removed from NE data");
+        assert_eq!(
+            cleanse_effects,
+            vec![3],
+            "should detect 3 conditions removed from NE data"
+        );
     }
 
     #[test]
@@ -583,11 +607,18 @@ mod tests {
         let mut skills = vec![cleanse_test_skill(500)];
         enrich_with_cleanse(&mut skills, &[], &db);
 
-        let has_cleanse = skills[0]
-            .effects
-            .iter()
-            .any(|e| matches!(e, SkillEffect::RemovesCondition { conditions_removed: 1 }));
-        assert!(has_cleanse, "description heuristic should detect cleanse from 'cure...condition'");
+        let has_cleanse = skills[0].effects.iter().any(|e| {
+            matches!(
+                e,
+                SkillEffect::RemovesCondition {
+                    conditions_removed: 1
+                }
+            )
+        });
+        assert!(
+            has_cleanse,
+            "description heuristic should detect cleanse from 'cure...condition'"
+        );
     }
 
     #[test]
@@ -623,14 +654,21 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, SkillEffect::RemovesCondition { .. }))
             .count();
-        assert_eq!(cleanse_count, 1, "idempotency: only one RemovesCondition effect");
+        assert_eq!(
+            cleanse_count, 1,
+            "idempotency: only one RemovesCondition effect"
+        );
     }
 
     #[test]
     fn test_enrich_with_cleanse_max_across_multiple_ne_entries() {
         // Multiple NE entries for same source_id → take maximum conditions_removed.
         let mut skills = vec![cleanse_test_skill(100)];
-        let ne = vec![cleanse_ne(100, 1.0), cleanse_ne(100, 5.0), cleanse_ne(100, 2.0)];
+        let ne = vec![
+            cleanse_ne(100, 1.0),
+            cleanse_ne(100, 5.0),
+            cleanse_ne(100, 2.0),
+        ];
         let db = empty_db();
 
         enrich_with_cleanse(&mut skills, &ne, &db);
@@ -642,6 +680,10 @@ mod tests {
                 None
             }
         });
-        assert_eq!(max_count, Some(5), "should take maximum conditions_removed across entries");
+        assert_eq!(
+            max_count,
+            Some(5),
+            "should take maximum conditions_removed across entries"
+        );
     }
 }

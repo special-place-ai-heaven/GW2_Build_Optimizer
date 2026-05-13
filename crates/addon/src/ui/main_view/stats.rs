@@ -186,8 +186,8 @@ pub(super) fn check_api_health(state: &mut AddonState) {
                 None
             } else {
                 let start = std::time::Instant::now();
-                let result = gw2_api::client::Gw2Client::without_key()
-                    .and_then(|c| c.get_build_number());
+                let result =
+                    gw2_api::client::Gw2Client::without_key().and_then(|c| c.get_build_number());
                 if token.is_cancelled() {
                     None
                 } else {

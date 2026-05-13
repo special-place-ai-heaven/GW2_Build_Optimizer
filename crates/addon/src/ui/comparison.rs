@@ -21,6 +21,8 @@ pub struct BuildSuggestion {
     pub rune: String,
     pub sigils: Vec<String>,
     pub relic: String,
+    /// Generated GW2 build-template chat code for this suggestion, when all required IDs are known.
+    pub chat_code: Option<String>,
     pub explanation: String,
     /// Synergy-focused explanation from the new pipeline (preferred over `explanation`).
     pub synergy_explanation: String,
@@ -115,6 +117,16 @@ pub fn render_comparison(
     // ═══ Data Quality Badge ═══
     render_data_quality_badge(ui, suggestion);
 
+    // ═══ Copyable Build Template ═══
+    render_chat_code_copy(
+        ui,
+        suggestion.chat_code.as_deref(),
+        &format!(
+            "comparison_{}",
+            comparison.selected_suggestion.min(tab_count - 1)
+        ),
+    );
+
     // ═══ Equipment Comparison ═══
     render_gear_comparison(ui, current_build, suggestion);
 
@@ -161,7 +173,10 @@ pub fn render_comparison(
     };
     if !explanation_text.is_empty() {
         if ui.collapsing_header("AI Advisory (optional)", TreeNodeFlags::empty()) {
-            ui.text_colored([0.6, 0.6, 0.8, 1.0], "Advisory text from AI — referee scores are authoritative.");
+            ui.text_colored(
+                [0.6, 0.6, 0.8, 1.0],
+                "Advisory text from AI — referee scores are authoritative.",
+            );
             ui.spacing();
             ui.text_wrapped(explanation_text);
         }
@@ -177,6 +192,28 @@ pub fn render_comparison(
     }
 
     new_selection
+}
+
+/// Render a compact copy affordance for a GW2 build-template chat code.
+pub fn render_chat_code_copy(ui: &Ui, chat_code: Option<&str>, id_suffix: &str) {
+    let Some(code) = chat_code else {
+        return;
+    };
+
+    ui.spacing();
+    ui.text_colored([0.6, 0.6, 0.7, 1.0], "Chat Code:");
+    ui.same_line();
+    if ui.small_button(&format!("Copy##suggestion_chat_code_{}", id_suffix)) {
+        ui.set_clipboard_text(code);
+    }
+    ui.set_next_item_width(-1.0);
+    let mut code_buf = code.to_string();
+    ui.input_text(
+        &format!("##suggestion_chat_code_display_{}", id_suffix),
+        &mut code_buf,
+    )
+    .read_only(true)
+    .build();
 }
 
 /// Render gear comparison table: per-slot diff between current and optimized build.
@@ -726,10 +763,7 @@ fn render_benchmark_delta(ui: &Ui, suggestion: &BuildSuggestion) {
         None => {
             // No data — show subtle hint in collapsed section
             if ui.collapsing_header("vs Community Meta", TreeNodeFlags::empty()) {
-                ui.text_colored(
-                    [0.5, 0.5, 0.5, 1.0],
-                    "  No benchmark data available.",
-                );
+                ui.text_colored([0.5, 0.5, 0.5, 1.0], "  No benchmark data available.");
                 ui.text_colored(
                     [0.5, 0.5, 0.5, 1.0],
                     "  Go to Settings \u{2192} Sync Benchmarks to download reference builds.",
@@ -769,14 +803,18 @@ fn render_benchmark_delta(ui: &Ui, suggestion: &BuildSuggestion) {
                     [pos[0] + 8.0, pos[1] + 2.0],
                     [pos[0] + bar_width + 8.0, pos[1] + 14.0],
                     [0.2, 0.2, 0.2, 0.8],
-                ).filled(true).build();
+                )
+                .filled(true)
+                .build();
                 // Fill
                 if filled > 0.0 {
                     draw.add_rect(
                         [pos[0] + 8.0, pos[1] + 2.0],
                         [pos[0] + 8.0 + filled, pos[1] + 14.0],
                         col,
-                    ).filled(true).build();
+                    )
+                    .filled(true)
+                    .build();
                 }
                 ui.dummy([0.0, 18.0]);
 
@@ -808,7 +846,11 @@ fn render_viability_report(ui: &Ui, report: &ViabilityReport) {
     } else {
         [1.0, 0.35, 0.2, 1.0]
     };
-    let status = if report.is_viable { "VIABLE" } else { "NON-VIABLE" };
+    let status = if report.is_viable {
+        "VIABLE"
+    } else {
+        "NON-VIABLE"
+    };
 
     if ui.collapsing_header(
         &format!("Viability Report [{}]", status),
@@ -840,11 +882,7 @@ fn render_viability_report(ui: &Ui, report: &ViabilityReport) {
 }
 
 /// Render tradeoff analysis: what this build gains/loses vs current stats.
-fn render_tradeoff_analysis(
-    ui: &Ui,
-    comparison: &ComparisonState,
-    suggestion: &BuildSuggestion,
-) {
+fn render_tradeoff_analysis(ui: &Ui, comparison: &ComparisonState, suggestion: &BuildSuggestion) {
     let Some(ref new_metrics) = suggestion.combat_solo else {
         return;
     };
@@ -852,9 +890,18 @@ fn render_tradeoff_analysis(
         // No current build data — show absolute metrics only
         if ui.collapsing_header("Performance Estimate", TreeNodeFlags::empty()) {
             ui.text_colored([0.8, 0.8, 0.8, 1.0], "  (No current build for comparison)");
-            ui.text(&format!("  Strike DPS index: {:.0}", new_metrics.strike_dps_index));
-            ui.text(&format!("  Condi DPS index:  {:.0}", new_metrics.condition_dps_index));
-            ui.text(&format!("  Effective HP:     {:.0}", new_metrics.effective_health));
+            ui.text(&format!(
+                "  Strike DPS index: {:.0}",
+                new_metrics.strike_dps_index
+            ));
+            ui.text(&format!(
+                "  Condi DPS index:  {:.0}",
+                new_metrics.condition_dps_index
+            ));
+            ui.text(&format!(
+                "  Effective HP:     {:.0}",
+                new_metrics.effective_health
+            ));
         }
         return;
     };
@@ -864,10 +911,26 @@ fn render_tradeoff_analysis(
         ui.spacing();
 
         let tradeoffs = [
-            ("Strike DPS", cur_metrics.strike_dps_index as f64, new_metrics.strike_dps_index as f64),
-            ("Condi DPS", cur_metrics.condition_dps_index as f64, new_metrics.condition_dps_index as f64),
-            ("Effective HP", cur_metrics.effective_health as f64, new_metrics.effective_health as f64),
-            ("Healing Index", cur_metrics.healing_index as f64, new_metrics.healing_index as f64),
+            (
+                "Strike DPS",
+                cur_metrics.strike_dps_index as f64,
+                new_metrics.strike_dps_index as f64,
+            ),
+            (
+                "Condi DPS",
+                cur_metrics.condition_dps_index as f64,
+                new_metrics.condition_dps_index as f64,
+            ),
+            (
+                "Effective HP",
+                cur_metrics.effective_health as f64,
+                new_metrics.effective_health as f64,
+            ),
+            (
+                "Healing Index",
+                cur_metrics.healing_index as f64,
+                new_metrics.healing_index as f64,
+            ),
         ];
 
         for (label, old_val, new_val) in &tradeoffs {
@@ -875,7 +938,11 @@ fn render_tradeoff_analysis(
                 continue; // Skip zero/negligible axes
             }
             let delta = new_val - old_val;
-            let pct = if *old_val > 0.01 { delta / old_val * 100.0 } else { 0.0 };
+            let pct = if *old_val > 0.01 {
+                delta / old_val * 100.0
+            } else {
+                0.0
+            };
             let (arrow, col): (&str, [f32; 4]) = if delta > old_val * 0.02 {
                 ("\u{2191}", [0.3, 0.9, 0.3, 1.0]) // ↑ green
             } else if delta < -old_val * 0.02 {
@@ -885,10 +952,7 @@ fn render_tradeoff_analysis(
             };
             ui.text_colored(
                 col,
-                &format!(
-                    "  {} {:14} {:+.0}  ({:+.1}%)",
-                    arrow, label, delta, pct
-                ),
+                &format!("  {} {:14} {:+.0}  ({:+.1}%)", arrow, label, delta, pct),
             );
         }
     }
@@ -904,6 +968,16 @@ mod tests {
         assert!(s.label.is_empty());
         assert!(s.specializations.is_empty());
         assert!(s.weapons.is_empty());
+    }
+
+    #[test]
+    fn build_suggestion_can_carry_copyable_chat_code() {
+        let s = BuildSuggestion {
+            chat_code: Some("[&DQIEAAA=]".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(s.chat_code.as_deref(), Some("[&DQIEAAA=]"));
     }
 
     #[test]

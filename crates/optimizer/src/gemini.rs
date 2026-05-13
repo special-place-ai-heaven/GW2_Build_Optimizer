@@ -286,7 +286,6 @@ fn trim_contents(contents: &mut Vec<Content>, budget_tokens: usize) {
     }
 }
 
-
 impl GeminiClient {
     pub fn new(api_key: &str, model: &str) -> Result<Self, GeminiError> {
         let http = reqwest::blocking::Client::builder()
@@ -759,63 +758,63 @@ mod tests {
     }
 
     #[test]
-        fn test_rate_tracker_persistence_roundtrip_same_day() {
-            let mut tracker = RateTracker::new();
-            for _ in 0..5 {
-                tracker.check_and_reserve().unwrap();
-            }
-            assert_eq!(tracker.requests_today, 5);
-            assert_eq!(tracker.requests_this_minute, 5);
-
-            let persisted = tracker.to_persisted();
-            let reloaded = RateTracker::from_persisted(persisted);
-
-            assert_eq!(reloaded.requests_today, 5);
-            assert_eq!(reloaded.requests_this_minute, 0);
-        }
-
-        #[test]
-        fn test_rate_tracker_persistence_day_rollover_resets_daily() {
-            let yesterday = current_epoch_day().saturating_sub(1);
-            let persisted = PersistedUsage {
-                day: yesterday,
-                requests_today: 200,
-            };
-            let reloaded = RateTracker::from_persisted(persisted);
-
-            assert_eq!(reloaded.requests_today, 0);
-            assert_eq!(reloaded.requests_this_minute, 0);
-            assert_eq!(reloaded.current_day, current_epoch_day());
-        }
-
-        #[test]
-        fn test_rate_tracker_minute_rollover_preserves_daily() {
-            let mut tracker = RateTracker::new();
-            for _ in 0..3 {
-                tracker.check_and_reserve().unwrap();
-            }
-            assert_eq!(tracker.requests_this_minute, 3);
-            assert_eq!(tracker.requests_today, 3);
-
-            tracker.minute_start = Instant::now() - std::time::Duration::from_secs(61);
-
+    fn test_rate_tracker_persistence_roundtrip_same_day() {
+        let mut tracker = RateTracker::new();
+        for _ in 0..5 {
             tracker.check_and_reserve().unwrap();
-
-            assert_eq!(tracker.requests_this_minute, 1);
-            assert_eq!(tracker.requests_today, 4);
         }
+        assert_eq!(tracker.requests_today, 5);
+        assert_eq!(tracker.requests_this_minute, 5);
 
-        #[test]
-        fn test_rate_tracker_daily_limit_enforced_after_reload() {
-            // Simulate a DLL reload mid-day with the daily budget nearly exhausted.
-            let persisted = PersistedUsage {
-                day: current_epoch_day(),
-                requests_today: 240,
-            };
-            let mut reloaded = RateTracker::from_persisted(persisted);
-            assert_eq!(reloaded.requests_today, 240);
-            assert!(reloaded.check_and_reserve().is_err());
+        let persisted = tracker.to_persisted();
+        let reloaded = RateTracker::from_persisted(persisted);
+
+        assert_eq!(reloaded.requests_today, 5);
+        assert_eq!(reloaded.requests_this_minute, 0);
+    }
+
+    #[test]
+    fn test_rate_tracker_persistence_day_rollover_resets_daily() {
+        let yesterday = current_epoch_day().saturating_sub(1);
+        let persisted = PersistedUsage {
+            day: yesterday,
+            requests_today: 200,
+        };
+        let reloaded = RateTracker::from_persisted(persisted);
+
+        assert_eq!(reloaded.requests_today, 0);
+        assert_eq!(reloaded.requests_this_minute, 0);
+        assert_eq!(reloaded.current_day, current_epoch_day());
+    }
+
+    #[test]
+    fn test_rate_tracker_minute_rollover_preserves_daily() {
+        let mut tracker = RateTracker::new();
+        for _ in 0..3 {
+            tracker.check_and_reserve().unwrap();
         }
+        assert_eq!(tracker.requests_this_minute, 3);
+        assert_eq!(tracker.requests_today, 3);
+
+        tracker.minute_start = Instant::now() - std::time::Duration::from_secs(61);
+
+        tracker.check_and_reserve().unwrap();
+
+        assert_eq!(tracker.requests_this_minute, 1);
+        assert_eq!(tracker.requests_today, 4);
+    }
+
+    #[test]
+    fn test_rate_tracker_daily_limit_enforced_after_reload() {
+        // Simulate a DLL reload mid-day with the daily budget nearly exhausted.
+        let persisted = PersistedUsage {
+            day: current_epoch_day(),
+            requests_today: 240,
+        };
+        let mut reloaded = RateTracker::from_persisted(persisted);
+        assert_eq!(reloaded.requests_today, 240);
+        assert!(reloaded.check_and_reserve().is_err());
+    }
 
     #[test]
     fn test_remaining_quota() {
@@ -850,90 +849,90 @@ mod tests {
     }
 
     #[test]
-        fn test_trim_contents_drops_oldest_turn() {
-            fn user_text(s: &str) -> Content {
-                Content {
-                    role: Some("user".into()),
-                    parts: vec![Part::text(s)],
-                }
-            }
-            fn model_call(name: &str, payload: &str) -> Content {
-                Content {
-                    role: Some("model".into()),
-                    parts: vec![Part {
-                        text: None,
-                        function_call: Some(FunctionCall {
-                            name: name.into(),
-                            args: serde_json::json!({ "q": payload }),
-                        }),
-                        function_response: None,
-                    }],
-                }
-            }
-            fn user_fresponse(name: &str, payload: &str) -> Content {
-                Content {
-                    role: Some("user".into()),
-                    parts: vec![Part::function_response(
-                        name,
-                        serde_json::Value::String(payload.into()),
-                    )],
-                }
-            }
-
-            let filler = "x".repeat(400);
-            let mut contents = vec![
-                user_text("initial prompt"),
-                model_call("get_trait_details", &filler),
-                user_fresponse("get_trait_details", &filler),
-                model_call("get_trait_details", &filler),
-                user_fresponse("get_trait_details", &filler),
-                model_call("get_skill_info", &filler),
-                user_fresponse("get_skill_info", &filler),
-            ];
-            let original_len = contents.len();
-
-            trim_contents(&mut contents, 200);
-
-            assert!(
-                contents.len() < original_len,
-                "expected trim, got {}",
-                contents.len()
-            );
-            // Initial prompt preserved.
-            assert_eq!(contents[0].role.as_deref(), Some("user"));
-            assert_eq!(contents[0].parts[0].text.as_deref(), Some("initial prompt"));
-            // Last model call is still the most recent one (get_skill_info).
-            let last_model = contents
-                .iter()
-                .rposition(|c| c.parts.iter().any(|p| p.function_call.is_some()))
-                .expect("must retain a model call");
-            let last_call_name = contents[last_model].parts[0]
-                .function_call
-                .as_ref()
-                .map(|fc| fc.name.clone())
-                .unwrap();
-            assert_eq!(last_call_name, "get_skill_info");
-            // Every function_response still has a preceding function_call (pair invariant).
-            for (i, c) in contents.iter().enumerate() {
-                if c.parts.iter().any(|p| p.function_response.is_some()) {
-                    assert!(
-                        contents[..i]
-                            .iter()
-                            .any(|prev| prev.parts.iter().any(|p| p.function_call.is_some())),
-                        "orphan function_response at index {}",
-                        i
-                    );
-                }
-            }
-        }
-
-        #[test]
-        fn test_trim_contents_noop_under_budget() {
-            let mut contents = vec![Content {
+    fn test_trim_contents_drops_oldest_turn() {
+        fn user_text(s: &str) -> Content {
+            Content {
                 role: Some("user".into()),
-                parts: vec![Part::text("short")],
-            }];
-            trim_contents(&mut contents, 10_000);
-            assert_eq!(contents.len(), 1);
+                parts: vec![Part::text(s)],
+            }
         }
+        fn model_call(name: &str, payload: &str) -> Content {
+            Content {
+                role: Some("model".into()),
+                parts: vec![Part {
+                    text: None,
+                    function_call: Some(FunctionCall {
+                        name: name.into(),
+                        args: serde_json::json!({ "q": payload }),
+                    }),
+                    function_response: None,
+                }],
+            }
+        }
+        fn user_fresponse(name: &str, payload: &str) -> Content {
+            Content {
+                role: Some("user".into()),
+                parts: vec![Part::function_response(
+                    name,
+                    serde_json::Value::String(payload.into()),
+                )],
+            }
+        }
+
+        let filler = "x".repeat(400);
+        let mut contents = vec![
+            user_text("initial prompt"),
+            model_call("get_trait_details", &filler),
+            user_fresponse("get_trait_details", &filler),
+            model_call("get_trait_details", &filler),
+            user_fresponse("get_trait_details", &filler),
+            model_call("get_skill_info", &filler),
+            user_fresponse("get_skill_info", &filler),
+        ];
+        let original_len = contents.len();
+
+        trim_contents(&mut contents, 200);
+
+        assert!(
+            contents.len() < original_len,
+            "expected trim, got {}",
+            contents.len()
+        );
+        // Initial prompt preserved.
+        assert_eq!(contents[0].role.as_deref(), Some("user"));
+        assert_eq!(contents[0].parts[0].text.as_deref(), Some("initial prompt"));
+        // Last model call is still the most recent one (get_skill_info).
+        let last_model = contents
+            .iter()
+            .rposition(|c| c.parts.iter().any(|p| p.function_call.is_some()))
+            .expect("must retain a model call");
+        let last_call_name = contents[last_model].parts[0]
+            .function_call
+            .as_ref()
+            .map(|fc| fc.name.clone())
+            .unwrap();
+        assert_eq!(last_call_name, "get_skill_info");
+        // Every function_response still has a preceding function_call (pair invariant).
+        for (i, c) in contents.iter().enumerate() {
+            if c.parts.iter().any(|p| p.function_response.is_some()) {
+                assert!(
+                    contents[..i]
+                        .iter()
+                        .any(|prev| prev.parts.iter().any(|p| p.function_call.is_some())),
+                    "orphan function_response at index {}",
+                    i
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_trim_contents_noop_under_budget() {
+        let mut contents = vec![Content {
+            role: Some("user".into()),
+            parts: vec![Part::text("short")],
+        }];
+        trim_contents(&mut contents, 10_000);
+        assert_eq!(contents.len(), 1);
+    }
 }

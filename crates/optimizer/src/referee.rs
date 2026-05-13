@@ -2,8 +2,8 @@ use crate::balance::BalanceContext;
 use crate::combat::{self, CombatPerformance, DamageModifiers};
 use crate::data::{DataQuality, DataQualityReason};
 use crate::engine;
-use crate::genome::BuildGenome;
 use crate::gamedb::GameDb;
+use crate::genome::BuildGenome;
 use crate::rotation;
 use crate::rotation::SimulationResult;
 use crate::scenario::{CombatTier, ScenarioSpec};
@@ -341,15 +341,14 @@ pub fn evaluate_validated_build(
 mod tests {
     use super::{
         evaluate_validated_build, evaluate_viability_gates, GateResult, ViabilityGate,
-        EHP_FLOOR_PVE, EHP_FLOOR_PVP, EHP_FLOOR_WVW_HAVOC, EHP_FLOOR_WVW_ROAM,
-        EHP_FLOOR_WVW_ZERG,
+        EHP_FLOOR_PVE, EHP_FLOOR_PVP, EHP_FLOOR_WVW_HAVOC, EHP_FLOOR_WVW_ROAM, EHP_FLOOR_WVW_ZERG,
     };
     use crate::balance::BalanceContext;
     use crate::combat::CombatPerformance;
     use crate::data::DataQuality;
     use crate::gamedb::GameDb;
     use crate::rotation::SimulationResult;
-    use crate::scenario::{CombatTier, ScenarioSpec, TargetProfile, OptimizationTarget};
+    use crate::scenario::{CombatTier, OptimizationTarget, ScenarioSpec, TargetProfile};
     use crate::scoring::OptimizationWeights;
     use crate::validation::{
         RejectCode, ValidatedBuild, ValidatedGearPrefix, ValidatedSkills, ValidatedSpec,
@@ -393,7 +392,9 @@ mod tests {
             game_mode: GameMode::WvW,
             combat_tier: CombatTier::Squad,
             target_profile: TargetProfile::Single,
-            optimization_target: OptimizationTarget { label: "WvW".into() },
+            optimization_target: OptimizationTarget {
+                label: "WvW".into(),
+            },
             patch_id: None,
         }
     }
@@ -403,7 +404,9 @@ mod tests {
             game_mode: GameMode::PvE,
             combat_tier: CombatTier::Party,
             target_profile: TargetProfile::Single,
-            optimization_target: OptimizationTarget { label: "PvE".into() },
+            optimization_target: OptimizationTarget {
+                label: "PvE".into(),
+            },
             patch_id: None,
         }
     }
@@ -422,10 +425,18 @@ mod tests {
         let scenario = make_wvw_scenario();
         let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
 
-        assert!(report.is_viable, "expected viable; gates: {:?}", report.gates);
+        assert!(
+            report.is_viable,
+            "expected viable; gates: {:?}",
+            report.gates
+        );
         assert_eq!(report.gates.len(), 4); // stunbreak + stability + cleanse + ehp
         for g in &report.gates {
-            assert!(g.passed, "gate {:?} should pass but failed: {}", g.gate, g.note);
+            assert!(
+                g.passed,
+                "gate {:?} should pass but failed: {}",
+                g.gate, g.note
+            );
         }
     }
 
@@ -667,8 +678,7 @@ mod tests {
         );
         // Viability must be deterministic: same is_viable flag across both calls.
         assert_eq!(
-            report_a.viability.is_viable,
-            report_b.viability.is_viable,
+            report_a.viability.is_viable, report_b.viability.is_viable,
             "viability gate outcome must be deterministic"
         );
     }
@@ -689,7 +699,8 @@ mod tests {
         let scenario = ScenarioSpec::from_balance_context(&ctx);
         let weights = OptimizationWeights::default_for_mode(GameMode::PvE.label());
 
-        let report = evaluate_validated_build(&validated, &db, "Guardian", &weights, &ctx, &scenario);
+        let report =
+            evaluate_validated_build(&validated, &db, "Guardian", &weights, &ctx, &scenario);
 
         assert_eq!(report.quality, DataQuality::Blocked);
         assert_eq!(report.quality_reasons.len(), 1);
@@ -706,7 +717,8 @@ mod tests {
         let scenario = ScenarioSpec::from_balance_context(&ctx);
         let weights = OptimizationWeights::default_for_mode(GameMode::WvW.label());
 
-        let report = evaluate_validated_build(&validated, &db, "Guardian", &weights, &ctx, &scenario);
+        let report =
+            evaluate_validated_build(&validated, &db, "Guardian", &weights, &ctx, &scenario);
 
         // Minimal Guardian has EHP well below WvW floor and no rotation skills → non-viable.
         assert!(
@@ -772,7 +784,9 @@ mod tests {
             game_mode: GameMode::WvW,
             combat_tier: crate::scenario::CombatTier::Squad,
             target_profile: TargetProfile::Single,
-            optimization_target: OptimizationTarget { label: "WvW".into() },
+            optimization_target: OptimizationTarget {
+                label: "WvW".into(),
+            },
             patch_id: None,
         };
         let report_squad = evaluate_viability_gates(Some(&rot), &combat, &squad_scenario);
@@ -788,7 +802,9 @@ mod tests {
             game_mode: GameMode::WvW,
             combat_tier: crate::scenario::CombatTier::Solo,
             target_profile: TargetProfile::Single,
-            optimization_target: OptimizationTarget { label: "WvW".into() },
+            optimization_target: OptimizationTarget {
+                label: "WvW".into(),
+            },
             patch_id: None,
         };
         let report_solo = evaluate_viability_gates(Some(&rot), &combat, &solo_scenario);
@@ -812,7 +828,9 @@ mod tests {
             game_mode: GameMode::WvW,
             combat_tier: crate::scenario::CombatTier::Solo,
             target_profile: TargetProfile::Single,
-            optimization_target: OptimizationTarget { label: "WvW".into() },
+            optimization_target: OptimizationTarget {
+                label: "WvW".into(),
+            },
             patch_id: None,
         };
         let report = evaluate_viability_gates(Some(&rot), &combat, &solo_scenario);

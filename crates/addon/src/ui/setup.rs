@@ -486,10 +486,8 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                 let cache = gw2_api::cache::DataCache::new(&cache_dir);
 
                                 let token_inner = token.clone();
-                                let result = gw2_api::download::download_all(
-                                    &client,
-                                    &cache,
-                                    |progress| {
+                                let result =
+                                    gw2_api::download::download_all(&client, &cache, |progress| {
                                         if token_inner.is_cancelled() {
                                             return;
                                         }
@@ -507,8 +505,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                                 error: None,
                                             });
                                         });
-                                    },
-                                );
+                                    });
 
                                 if token.is_cancelled() {
                                     break 'download DlOutcome::Cancelled;

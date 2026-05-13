@@ -3,12 +3,12 @@
   "mode": "PvE",
   "effects": [
     {
-      "effect_id": "trait:1444:0",
+      "effect_id": "trait:1338:0",
       "source_type": "Trait",
-      "source_id": 1444,
+      "source_id": 1338,
       "source_name": "Forceful Greatsword",
       "category": "FlatStat",
-      "value": 150.0,
+      "value": 120.0,
       "stacking_rule": "Additive",
       "trigger_rule": "Passive",
       "uptime_model": { "kind": "AlwaysOn" },
@@ -56,9 +56,9 @@
       "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Force"
     },
     {
-      "effect_id": "trait:1437:0",
+      "effect_id": "trait:1485:0",
       "source_type": "Trait",
-      "source_id": 1437,
+      "source_id": 1485,
       "source_name": "Empowered",
       "category": "StrikeDamagePct",
       "value": 1.0,
@@ -82,9 +82,9 @@
       "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Bursting"
     },
     {
-      "effect_id": "trait:2049:0",
+      "effect_id": "trait:1711:0",
       "source_type": "Trait",
-      "source_id": 2049,
+      "source_id": 1711,
       "source_name": "Phalanx Strength",
       "category": "AppliesBoon",
       "value": 1.0,
@@ -113,9 +113,9 @@
       }
     },
     {
-      "effect_id": "trait:1016:0",
+      "effect_id": "trait:1069:0",
       "source_type": "Trait",
-      "source_id": 1016,
+      "source_id": 1069,
       "source_name": "Sharpened Edges",
       "category": "AppliesCondition",
       "value": 1.0,
@@ -127,7 +127,7 @@
       },
       "evidence_level": "Heuristic",
       "source": "https://wiki.guildwars2.com/wiki/Sharpened_Edges",
-      "effect_duration": 4.0,
+      "effect_duration": 3.0,
       "internal_cooldown": 2.0,
       "max_stacks": 25,
       "status_operation": {
@@ -136,7 +136,7 @@
         "status_kind": "Bleeding",
         "amount_mode": "Stacks",
         "amount_value": 1.0,
-        "base_duration_ms": 4000,
+        "base_duration_ms": 3000,
         "target_scope": "SingleTarget",
         "internal_cooldown_ms": 2000
       }
@@ -160,9 +160,9 @@
       "inner_category": "StrikeDamagePct"
     },
     {
-      "effect_id": "trait:1482:0",
+      "effect_id": "trait:1437:0",
       "source_type": "Trait",
-      "source_id": 1482,
+      "source_id": 1437,
       "source_name": "Berserker's Power",
       "category": "StrikeDamagePct",
       "value": 7.0,
@@ -173,9 +173,9 @@
       "source": "https://wiki.guildwars2.com/wiki/Berserker%27s_Power"
     },
     {
-      "effect_id": "trait:1707:0",
+      "effect_id": "trait:1268:0",
       "source_type": "Trait",
-      "source_id": 1707,
+      "source_id": 1268,
       "source_name": "Twin Fangs",
       "category": "CritDamagePct",
       "value": 7.0,
@@ -186,9 +186,9 @@
       "source": "https://wiki.guildwars2.com/wiki/Twin_Fangs"
     },
     {
-      "effect_id": "sigil:24583:0",
+      "effect_id": "sigil:44950:0",
       "source_type": "Sigil",
-      "source_id": 24583,
+      "source_id": 44950,
       "source_name": "Superior Sigil of Malice",
       "category": "ConditionDurationPct",
       "value": 10.0,
@@ -199,9 +199,9 @@
       "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Malice"
     },
     {
-      "effect_id": "sigil:72339:0",
+      "effect_id": "sigil:24624:0",
       "source_type": "Sigil",
-      "source_id": 72339,
+      "source_id": 24624,
       "source_name": "Superior Sigil of Smoldering",
       "category": "SpecificConditionDurationPct",
       "value": 10.0,
@@ -241,9 +241,9 @@
       "source": "https://wiki.guildwars2.com/wiki/Relic_of_the_Thief"
     },
     {
-      "effect_id": "relic:100153:0",
+      "effect_id": "relic:99997:0",
       "source_type": "Relic",
-      "source_id": 100153,
+      "source_id": 99997,
       "source_name": "Relic of Isgarren",
       "category": "CritDamagePct",
       "value": 10.0,
@@ -257,9 +257,9 @@
       "source": "https://wiki.guildwars2.com/wiki/Relic_of_Isgarren"
     },
     {
-      "effect_id": "relic:100849:0",
+      "effect_id": "relic:100579:0",
       "source_type": "Relic",
-      "source_id": 100849,
+      "source_id": 100579,
       "source_name": "Relic of the Nightmare",
       "category": "ConditionDurationPct",
       "value": 10.0,
@@ -270,35 +270,35 @@
       "source": "https://wiki.guildwars2.com/wiki/Relic_of_the_Nightmare"
     },
     {
-      "effect_id": "trait:1686:0",
+      "effect_id": "trait:214:0",
       "source_type": "Trait",
-      "source_id": 1686,
-      "source_name": "Spotter",
+      "source_id": 214,
+      "source_name": "Raging Storm",
       "category": "FlatStat",
-      "value": 100.0,
+      "value": 180.0,
       "stacking_rule": "Additive",
       "trigger_rule": "Passive",
       "uptime_model": { "kind": "AlwaysOn" },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Spotter"
+      "source": "https://wiki.guildwars2.com/wiki/Raging_Storm"
     },
     {
-      "effect_id": "trait:2020:0",
+      "effect_id": "trait:801:0",
       "source_type": "Trait",
-      "source_id": 2020,
+      "source_id": 801,
       "source_name": "Lingering Curse",
-      "category": "SpecificConditionDamagePct",
-      "value": 25.0,
-      "stacking_rule": "Multiplicative",
+      "category": "ConditionDurationPct",
+      "value": 50.0,
+      "stacking_rule": "Additive",
       "trigger_rule": "Passive",
       "uptime_model": { "kind": "AlwaysOn" },
       "evidence_level": "Factual",
       "source": "https://wiki.guildwars2.com/wiki/Lingering_Curse"
     },
     {
-      "effect_id": "sigil:24639:0",
+      "effect_id": "sigil:72339:0",
       "source_type": "Sigil",
-      "source_id": 24639,
+      "source_id": 72339,
       "source_name": "Superior Sigil of Concentration",
       "category": "BoonDurationPct",
       "value": 10.0,
@@ -313,25 +313,25 @@
       "internal_cooldown": 9.0
     },
     {
-      "effect_id": "trait:801:0",
+      "effect_id": "trait:2074:0",
       "source_type": "Trait",
-      "source_id": 801,
-      "source_name": "Corrupter's Fervor",
+      "source_id": 2074,
+      "source_name": "Fell Beacon",
       "category": "StatConversion",
       "value": 7.0,
       "stacking_rule": "Additive",
       "trigger_rule": "Passive",
       "uptime_model": { "kind": "AlwaysOn" },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Corrupter%27s_Fervor"
+      "source": "https://wiki.guildwars2.com/wiki/Fell_Beacon"
     },
     {
-      "effect_id": "skill:9158:0",
+      "effect_id": "skill:9120:0",
       "source_type": "Skill",
-      "source_id": 9158,
+      "source_id": 9120,
       "source_name": "Virtue of Resolve",
       "category": "RemovesCondition",
-      "value": 3.0,
+      "value": 2.0,
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnSkillUse",
       "uptime_model": { "kind": "Unknown" },
@@ -342,14 +342,14 @@
         "target_side": "self",
         "status_kind": "Any",
         "amount_mode": "Count",
-        "amount_value": 3.0,
+        "amount_value": 2.0,
         "target_scope": "self"
       }
     },
     {
-      "effect_id": "trait:2074:0",
+      "effect_id": "trait:2013:0",
       "source_type": "Trait",
-      "source_id": 2074,
+      "source_id": 2013,
       "source_name": "Plague Sending",
       "category": "TransfersCondition",
       "value": 2.0,
@@ -368,17 +368,17 @@
       }
     },
     {
-      "effect_id": "trait:1878:0",
+      "effect_id": "trait:681:0",
       "source_type": "Trait",
-      "source_id": 1878,
-      "source_name": "Banshee's Wail",
+      "source_id": 681,
+      "source_name": "Vicious Expression",
       "category": "RemovesBoon",
       "value": 2.0,
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnSkillUse",
       "uptime_model": { "kind": "Unknown" },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Banshee%27s_Wail",
+      "source": "https://wiki.guildwars2.com/wiki/Vicious_Expression",
       "status_operation": {
         "operation_type": "RemovesBoon",
         "target_side": "Enemy",
@@ -390,12 +390,12 @@
       }
     },
     {
-      "effect_id": "trait:2013:0",
+      "effect_id": "trait:1693:0",
       "source_type": "Trait",
-      "source_id": 2013,
-      "source_name": "Dread",
+      "source_id": 1693,
+      "source_name": "Path of Corruption",
       "category": "CorruptsBoon",
-      "value": 1.0,
+      "value": 2.0,
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnHit",
       "uptime_model": {
@@ -403,22 +403,22 @@
         "uptime": 0.3
       },
       "evidence_level": "Heuristic",
-      "source": "https://wiki.guildwars2.com/wiki/Dread",
+      "source": "https://wiki.guildwars2.com/wiki/Path_of_Corruption",
       "internal_cooldown": 10.0,
       "status_operation": {
         "operation_type": "CorruptsBoon",
         "target_side": "Enemy",
         "status_kind": "Any",
         "amount_mode": "Count",
-        "amount_value": 1.0,
+        "amount_value": 2.0,
         "target_scope": "SingleTarget",
         "internal_cooldown_ms": 10000
       }
     },
     {
-      "effect_id": "relic:100947:0",
+      "effect_id": "relic:100031:0",
       "source_type": "Relic",
-      "source_id": 100947,
+      "source_id": 100031,
       "source_name": "Relic of the Monk",
       "category": "OutgoingHealingPct",
       "value": 10.0,
@@ -442,30 +442,30 @@
       "source": "https://wiki.guildwars2.com/wiki/Signet_of_Undeath"
     },
     {
-      "effect_id": "trait:1693:0",
+      "effect_id": "trait:553:0",
       "source_type": "Trait",
-      "source_id": 1693,
-      "source_name": "Abyssal Chill",
+      "source_id": 553,
+      "source_name": "Pure of Voice",
       "category": "ConvertsConditionToBoon",
       "value": 1.0,
       "stacking_rule": "NonStacking",
-      "trigger_rule": "OnHit",
+      "trigger_rule": "OnSkillUse",
       "uptime_model": { "kind": "Unknown" },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Abyssal_Chill",
+      "source": "https://wiki.guildwars2.com/wiki/Pure_of_Voice",
       "status_operation": {
         "operation_type": "ConvertsConditionToBoon",
-        "target_side": "self",
-        "status_kind": "Chill",
+        "target_side": "Ally",
+        "status_kind": "Any",
         "amount_mode": "Count",
         "amount_value": 1.0,
-        "target_scope": "self"
+        "target_scope": "NearbyAllies"
       }
     },
     {
-      "effect_id": "trait:1962:0",
+      "effect_id": "trait:782:0",
       "source_type": "Trait",
-      "source_id": 1962,
+      "source_id": 782,
       "source_name": "Blood Bank",
       "category": "IncomingStrikeMultiplier",
       "value": 0.9,
@@ -476,9 +476,9 @@
       "source": "https://wiki.guildwars2.com/wiki/Blood_Bank"
     },
     {
-      "effect_id": "rune:67339:0",
+      "effect_id": "rune:24848:0",
       "source_type": "Rune",
-      "source_id": 67339,
+      "source_id": 24848,
       "source_name": "Superior Rune of the Nightmare",
       "category": "FlatStat",
       "value": 175.0,

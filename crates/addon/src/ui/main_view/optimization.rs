@@ -53,11 +53,8 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
     // Capture WvW combat tier for ScenarioSpec construction inside the thread.
     let wvw_combat_tier = state.main.wvw_combat_tier;
     // Capture locked elite spec name for the Improve Build label.
-    let locked_spec_name: Option<String> = build_locks
-        .specs
-        .get(2)
-        .and_then(|s| *s)
-        .and_then(|id| {
+    let locked_spec_name: Option<String> =
+        build_locks.specs.get(2).and_then(|s| *s).and_then(|id| {
             state
                 .main
                 .game_db
@@ -156,10 +153,13 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             }
                             let suggestion = synergy_result_to_suggestion(
                                 &synergy_result,
+                                &db,
                                 &profession_name,
                                 &scenario,
                                 selected_role,
-                                locked_spec_name.as_ref().map(|n| format!("Improved: {}", n)),
+                                locked_spec_name
+                                    .as_ref()
+                                    .map(|n| format!("Improved: {}", n)),
                                 &addon_dir,
                                 &weights,
                             );
@@ -210,10 +210,13 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             }
                             let suggestion = synergy_result_to_suggestion(
                                 &synergy_result,
+                                &db,
                                 &profession_name,
                                 &scenario,
                                 selected_role,
-                                locked_spec_name.as_ref().map(|n| format!("Improved: {}", n)),
+                                locked_spec_name
+                                    .as_ref()
+                                    .map(|n| format!("Improved: {}", n)),
                                 &addon_dir,
                                 &weights,
                             );
@@ -262,10 +265,13 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             }
                             let suggestion = synergy_result_to_suggestion(
                                 &synergy_result,
+                                &db,
                                 &profession_name,
                                 &scenario,
                                 selected_role,
-                                locked_spec_name.as_ref().map(|n| format!("Improved: {}", n)),
+                                locked_spec_name
+                                    .as_ref()
+                                    .map(|n| format!("Improved: {}", n)),
                                 &addon_dir,
                                 &weights,
                             );
@@ -411,6 +417,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
 /// Convert a SynergyResult from the new pipeline into a BuildSuggestion for display.
 fn synergy_result_to_suggestion(
     result: &gw2_optimizer::engine::SynergyResult,
+    db: &gw2_optimizer::gamedb::GameDb,
     profession_name: &str,
     scenario: &gw2_optimizer::scenario::ScenarioSpec,
     role: Option<gw2_optimizer::scenario::RoleObjective>,
@@ -421,6 +428,7 @@ fn synergy_result_to_suggestion(
     use crate::ui::comparison::BuildSuggestion;
 
     let v = &result.validated;
+    let chat_code = validated_build_to_chat_code(v, profession_name, db);
 
     // Specializations: (name, [trait_name1, trait_name2, trait_name3])
     let specializations: Vec<(String, Vec<String>)> = v
@@ -614,6 +622,7 @@ fn synergy_result_to_suggestion(
         rune: v.rune.as_ref().map(|r| r.name.clone()).unwrap_or_default(),
         sigils,
         relic: v.relic.as_ref().map(|r| r.name.clone()).unwrap_or_default(),
+        chat_code,
         explanation,
         synergy_explanation: v.synergy_explanation.clone(),
         changes_made,
@@ -625,9 +634,50 @@ fn synergy_result_to_suggestion(
         viability,
         benchmark_delta,
         data_quality: result.data_quality.clone(),
-        quality_reasons: result.quality_reasons.iter().map(|r| r.to_string()).collect(),
+        quality_reasons: result
+            .quality_reasons
+            .iter()
+            .map(|r| r.to_string())
+            .collect(),
     }
 }
+
+fn validated_build_to_chat_code(
+    build: &gw2_optimizer::validation::ValidatedBuild,
+    profession_name: &str,
+    db: &gw2_optimizer::gamedb::GameDb,
+) -> Option<String> {
+    let api_build = gw2_api::models::Build {
+        name: None,
+        profession: Some(profession_name.to_string()),
+        specializations: build
+            .specializations
+            .iter()
+            .map(|spec| gw2_api::models::SpecSelection {
+                id: Some(spec.spec_id),
+                traits: spec.trait_ids.iter().take(3).map(|id| Some(*id)).collect(),
+            })
+            .collect(),
+        skills: Some(gw2_api::models::SkillSelection {
+            heal: build.skills.heal.as_ref().map(|(id, _)| *id),
+            utilities: build
+                .skills
+                .utilities
+                .iter()
+                .take(3)
+                .map(|skill| skill.as_ref().map(|(id, _)| *id))
+                .collect(),
+            elite: build.skills.elite.as_ref().map(|(id, _)| *id),
+        }),
+        aquatic_skills: None,
+        legends: Vec::new(),
+        aquatic_legends: Vec::new(),
+        pets: None,
+    };
+
+    super::character::generate_build_chat_code(&api_build, db)
+}
+
 fn candidate_to_suggestion(
     candidate: &gw2_optimizer::engine::BuildCandidate,
     db: &gw2_optimizer::gamedb::GameDb,
@@ -706,8 +756,7 @@ fn candidate_to_suggestion(
     // Legacy path: no rotation available, rotation-dependent gates produce degraded state.
     // Use a simple EHP proxy from vitality for the viability check.
     let legacy_viability = {
-        let scenario =
-            gw2_optimizer::scenario::ScenarioSpec::from_balance_context(balance_ctx);
+        let scenario = gw2_optimizer::scenario::ScenarioSpec::from_balance_context(balance_ctx);
         let proxy_perf = gw2_optimizer::combat::CombatPerformance {
             effective_health: candidate.stats.vitality * 10.0,
             ..Default::default()
@@ -725,6 +774,7 @@ fn candidate_to_suggestion(
         rune: String::new(),
         sigils: Vec::new(),
         relic: String::new(),
+        chat_code: None,
         explanation: String::new(),
         synergy_explanation: String::new(),
         changes_made: Vec::new(),

@@ -30,7 +30,9 @@ use crate::validation::{
     ValidatedBuild, ValidatedGearPrefix, ValidatedItem, ValidatedSkills, ValidatedSpec,
     ValidatedWeaponSet, ValidatedWeapons,
 };
+use gw2_api::models::facts::Fact;
 use gw2_api::models::{Profession, Skill, Specialization, Trait as GW2Trait};
+use gw2_core::types::GameMode;
 
 /// Internal candidate from the synergy pipeline.
 #[derive(Debug, Clone)]
@@ -133,7 +135,7 @@ pub fn optimize_synergy(
         stage: "Selecting optimal skills...".into(),
         done: false,
     });
-    select_skills(&mut candidates, db, profession_name, weights);
+    select_skills(&mut candidates, db, profession_name, weights, ctx);
 
     // Stage 8: Final ranking with full combat performance
     on_progress(OptimizeProgress {
@@ -424,12 +426,8 @@ fn select_rune(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Optim
 
             // Synergy with existing traits/specs
             let new_id = ComponentId::Rune(rune.id);
-            let (syn, links) = compute_marginal_synergy(
-                &effects,
-                &candidate.accumulated,
-                weights,
-                Some(&new_id),
-            );
+            let (syn, links) =
+                compute_marginal_synergy(&effects, &candidate.accumulated, weights, Some(&new_id));
 
             let total = base + syn;
             if total > best_score {
@@ -549,12 +547,8 @@ fn select_relic(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Opti
                 .map(|e| score_normalized_effect(e, weights))
                 .sum();
             let new_id = ComponentId::Relic(relic.id);
-            let (syn, links) = compute_marginal_synergy(
-                &effects,
-                &candidate.accumulated,
-                weights,
-                Some(&new_id),
-            );
+            let (syn, links) =
+                compute_marginal_synergy(&effects, &candidate.accumulated, weights, Some(&new_id));
 
             let total = base + syn;
             if total > best_score {
@@ -623,13 +617,7 @@ fn select_weapons(
             .map(|(name, _)| {
                 (
                     *name,
-                    score_weapon_skills(
-                        name,
-                        profession,
-                        db,
-                        weights,
-                        &candidate.accumulated,
-                    ),
+                    score_weapon_skills(name, profession, db, weights, &candidate.accumulated),
                 )
             })
             .collect();
@@ -752,8 +740,7 @@ fn score_weapon_skills(
                 score += score_normalized_effect(eff, weights);
             }
             let new_id = ComponentId::Skill(skill.id);
-            let (syn, _) =
-                compute_marginal_synergy(&effects, accumulated, weights, Some(&new_id));
+            let (syn, _) = compute_marginal_synergy(&effects, accumulated, weights, Some(&new_id));
             score += syn;
         }
     }
@@ -767,6 +754,7 @@ fn select_skills(
     db: &GameDb,
     profession_name: &str,
     weights: &OptimizationWeights,
+    ctx: &BalanceContext,
 ) {
     let prof_skills = db.profession_skills(profession_name);
 
@@ -788,14 +776,7 @@ fn select_skills(
             .copied()
             .collect();
         if let Some((id, name, links)) = pick_best_skill(&heals, weights, &candidate.accumulated) {
-            // Add heal effects to accumulated for subsequent skill synergy scoring
-            if let Some(skill) = db.skills.get(&id) {
-                let effects = extract_skill_effects(skill);
-                candidate
-                    .accumulated
-                    .push((ComponentId::Skill(id), effects));
-            }
-            candidate.synergy_links.extend(links);
+            add_selected_skill_effects(candidate, db, id, links);
             candidate.heal = Some((id, name));
         }
 
@@ -806,14 +787,7 @@ fn select_skills(
             .copied()
             .collect();
         if let Some((id, name, links)) = pick_best_skill(&elites, weights, &candidate.accumulated) {
-            // Add elite effects to accumulated for subsequent skill synergy scoring
-            if let Some(skill) = db.skills.get(&id) {
-                let effects = extract_skill_effects(skill);
-                candidate
-                    .accumulated
-                    .push((ComponentId::Skill(id), effects));
-            }
-            candidate.synergy_links.extend(links);
+            add_selected_skill_effects(candidate, db, id, links);
             candidate.elite_skill = Some((id, name));
         }
 
@@ -825,7 +799,21 @@ fn select_skills(
             .collect();
 
         let mut used_ids: Vec<u32> = Vec::new();
+        if matches!(ctx.game_mode, GameMode::PvP | GameMode::WvW) {
+            select_required_competitive_utilities(
+                &utilities,
+                candidate,
+                db,
+                weights,
+                &mut used_ids,
+            );
+        }
+
         for _ in 0..3 {
+            if used_ids.len() >= 3 {
+                break;
+            }
+
             let available: Vec<&&Skill> = utilities
                 .iter()
                 .filter(|s| !used_ids.contains(&s.id))
@@ -836,18 +824,177 @@ fn select_skills(
                 pick_best_skill(&available, weights, &candidate.accumulated)
             {
                 used_ids.push(id);
-                // Add effects to accumulated for next utility selection
-                if let Some(skill) = db.skills.get(&id) {
-                    let effects = extract_skill_effects(skill);
-                    candidate
-                        .accumulated
-                        .push((ComponentId::Skill(id), effects));
-                }
-                candidate.synergy_links.extend(links);
+                add_selected_skill_effects(candidate, db, id, links);
                 candidate.utilities.push((id, name));
             }
         }
     }
+}
+
+fn add_selected_skill_effects(
+    candidate: &mut SynergyCandidate,
+    db: &GameDb,
+    id: u32,
+    links: Vec<SynergyLink>,
+) {
+    if let Some(skill) = db.skills.get(&id) {
+        let effects = extract_skill_effects(skill);
+        candidate
+            .accumulated
+            .push((ComponentId::Skill(id), effects));
+    }
+    candidate.synergy_links.extend(links);
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CompetitiveUtilityGate {
+    Stunbreak,
+    Stability,
+    Cleanse,
+}
+
+#[derive(Default)]
+struct CompetitiveUtilityCoverage {
+    stunbreak: bool,
+    stability: bool,
+    cleanse: bool,
+}
+
+impl CompetitiveUtilityCoverage {
+    fn add_skill(&mut self, skill: &Skill) {
+        self.stunbreak |= skill_is_stunbreak(skill);
+        self.stability |= skill_has_stability(skill);
+        self.cleanse |= skill_cleanse_count(skill) > 0;
+    }
+
+    fn satisfies(&self, gate: CompetitiveUtilityGate) -> bool {
+        match gate {
+            CompetitiveUtilityGate::Stunbreak => self.stunbreak,
+            CompetitiveUtilityGate::Stability => self.stability,
+            CompetitiveUtilityGate::Cleanse => self.cleanse,
+        }
+    }
+}
+
+impl CompetitiveUtilityGate {
+    fn matches(self, skill: &Skill) -> bool {
+        match self {
+            CompetitiveUtilityGate::Stunbreak => skill_is_stunbreak(skill),
+            CompetitiveUtilityGate::Stability => skill_has_stability(skill),
+            CompetitiveUtilityGate::Cleanse => skill_cleanse_count(skill) > 0,
+        }
+    }
+}
+
+fn select_required_competitive_utilities(
+    utilities: &[&&Skill],
+    candidate: &mut SynergyCandidate,
+    db: &GameDb,
+    weights: &OptimizationWeights,
+    used_ids: &mut Vec<u32>,
+) {
+    let mut coverage = CompetitiveUtilityCoverage::default();
+    for selected in [&candidate.heal, &candidate.elite_skill]
+        .into_iter()
+        .flatten()
+    {
+        if let Some(skill) = db.skills.get(&selected.0) {
+            coverage.add_skill(skill);
+        }
+    }
+
+    for gate in [
+        CompetitiveUtilityGate::Stunbreak,
+        CompetitiveUtilityGate::Stability,
+        CompetitiveUtilityGate::Cleanse,
+    ] {
+        if used_ids.len() >= 3 || coverage.satisfies(gate) {
+            continue;
+        }
+
+        let mut available: Vec<&&Skill> = Vec::new();
+        for skill_ref in utilities {
+            let skill = **skill_ref;
+            if !used_ids.contains(&skill.id) && gate.matches(skill) {
+                available.push(*skill_ref);
+            }
+        }
+
+        if let Some((id, name, links)) =
+            pick_best_skill(&available, weights, &candidate.accumulated)
+        {
+            used_ids.push(id);
+            add_selected_skill_effects(candidate, db, id, links);
+            candidate.utilities.push((id, name));
+            if let Some(skill) = db.skills.get(&id) {
+                coverage.add_skill(skill);
+            }
+        }
+    }
+}
+
+fn skill_is_stunbreak(skill: &Skill) -> bool {
+    skill.facts.iter().any(|fact| {
+        matches!(
+            fact,
+            Fact::StunBreak {
+                value: Some(true),
+                ..
+            }
+        )
+    })
+}
+
+fn skill_has_stability(skill: &Skill) -> bool {
+    skill.facts.iter().any(|fact| match fact {
+        Fact::Buff {
+            status: Some(status),
+            ..
+        }
+        | Fact::PrefixedBuff {
+            status: Some(status),
+            ..
+        } => status.eq_ignore_ascii_case("Stability"),
+        _ => false,
+    })
+}
+
+fn skill_cleanse_count(skill: &Skill) -> u32 {
+    let fact_count: u32 = skill
+        .facts
+        .iter()
+        .filter_map(condition_cleanse_count_from_fact)
+        .sum();
+    if fact_count > 0 {
+        return fact_count;
+    }
+
+    if skill
+        .description
+        .as_deref()
+        .is_some_and(text_describes_condition_cleanse)
+    {
+        1
+    } else {
+        0
+    }
+}
+
+fn condition_cleanse_count_from_fact(fact: &Fact) -> Option<u32> {
+    match fact {
+        Fact::Number {
+            text: Some(text),
+            value,
+            ..
+        } if text_describes_condition_cleanse(text) => Some((*value).unwrap_or(1).max(1) as u32),
+        _ => None,
+    }
+}
+
+fn text_describes_condition_cleanse(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("condit")
+        && (lower.contains("remov") || lower.contains("cleanse") || lower.contains("cure"))
 }
 
 fn pick_best_skill(
@@ -865,8 +1012,7 @@ fn pick_best_skill(
             .map(|e| score_normalized_effect(e, weights))
             .sum();
         let new_id = ComponentId::Skill(skill.id);
-        let (syn, links) =
-            compute_marginal_synergy(&effects, accumulated, weights, Some(&new_id));
+        let (syn, links) = compute_marginal_synergy(&effects, accumulated, weights, Some(&new_id));
 
         let total = base + syn;
         if total > best_score {
@@ -1199,10 +1345,11 @@ mod runtime_diagnostics_tests {
 
     use gw2_api::models::{
         EquipmentPiece, EquipmentStats, EquipmentTab, Fact, Item, ItemDetails, ItemStat,
-        Profession, Specialization, StatAttribute, Trait as GW2Trait,
+        Profession, Skill, Specialization, StatAttribute, Trait as GW2Trait,
     };
 
     use crate::balance::BalanceContext;
+    use crate::scenario::{CombatTier, ScenarioSpec};
     use crate::scoring::{score_with_weights, OptimizationWeights};
 
     fn make_damage_trait(id: u32, specialization: u32, pct: f64) -> GW2Trait {
@@ -1300,6 +1447,40 @@ mod runtime_diagnostics_tests {
                 secondary_suffix_item_id: None,
                 stat_choices: vec![584],
             }),
+        }
+    }
+
+    fn make_utility_skill(
+        id: u32,
+        name: &str,
+        facts: Vec<Fact>,
+        description: Option<&str>,
+    ) -> Skill {
+        Skill {
+            id,
+            name: name.into(),
+            description: description.map(str::to_string),
+            icon: None,
+            chat_link: None,
+            skill_type: None,
+            weapon_type: None,
+            professions: vec!["Warrior".into()],
+            slot: Some("Utility".into()),
+            facts,
+            traited_facts: vec![],
+            categories: vec![],
+            attunement: None,
+            cost: None,
+            dual_wield: None,
+            flip_skill: None,
+            initiative: None,
+            next_chain: None,
+            prev_chain: None,
+            transform_skills: vec![],
+            bundle_skills: vec![],
+            toolbelt_skill: None,
+            flags: vec![],
+            specialization: None,
         }
     }
 
@@ -1543,6 +1724,122 @@ mod runtime_diagnostics_tests {
     }
 
     #[test]
+    fn optimize_synergy_wvw_selects_required_viability_utilities() {
+        let mut db = make_diag_db();
+        let skills = vec![
+            make_utility_skill(
+                9_001,
+                "Damage Utility A",
+                vec![Fact::Percent {
+                    text: Some("Damage Increase".into()),
+                    icon: None,
+                    percent: Some(25.0),
+                }],
+                None,
+            ),
+            make_utility_skill(
+                9_002,
+                "Damage Utility B",
+                vec![Fact::Percent {
+                    text: Some("Damage Increase".into()),
+                    icon: None,
+                    percent: Some(20.0),
+                }],
+                None,
+            ),
+            make_utility_skill(
+                9_003,
+                "Damage Utility C",
+                vec![Fact::Percent {
+                    text: Some("Damage Increase".into()),
+                    icon: None,
+                    percent: Some(15.0),
+                }],
+                None,
+            ),
+            make_utility_skill(
+                9_101,
+                "Stunbreak Utility",
+                vec![Fact::StunBreak {
+                    text: Some("Breaks Stun".into()),
+                    icon: None,
+                    value: Some(true),
+                }],
+                None,
+            ),
+            make_utility_skill(
+                9_102,
+                "Stability Utility",
+                vec![Fact::Buff {
+                    text: Some("Apply Buff/Condition".into()),
+                    icon: None,
+                    duration: Some(5),
+                    status: Some("Stability".into()),
+                    description: None,
+                    apply_count: Some(1),
+                }],
+                None,
+            ),
+            make_utility_skill(
+                9_103,
+                "Cleanse Utility",
+                vec![Fact::Number {
+                    text: Some("Conditions Removed".into()),
+                    icon: None,
+                    value: Some(2),
+                }],
+                Some("Remove conditions from yourself."),
+            ),
+        ];
+        db.skills_by_profession
+            .insert("Warrior".into(), skills.iter().map(|s| s.id).collect());
+        for skill in skills {
+            db.skills.insert(skill.id, skill);
+        }
+
+        let weights = OptimizationWeights::preset_power_dps();
+        let ctx = BalanceContext::new(gw2_core::types::GameMode::WvW);
+        let mut progress = |_p: crate::engine::OptimizeProgress| {};
+        let result = optimize_synergy(
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            "Berserker's",
+            &gw2_core::types::BuildLocks::default(),
+            &mut progress,
+        )
+        .expect("synthetic Warrior should optimize");
+
+        let selected_utilities: Vec<u32> = result
+            .validated
+            .skills
+            .utilities
+            .iter()
+            .filter_map(|slot| slot.as_ref().map(|(id, _)| *id))
+            .collect();
+
+        assert!(selected_utilities.contains(&9_101), "missing stunbreak");
+        assert!(selected_utilities.contains(&9_102), "missing stability");
+        assert!(selected_utilities.contains(&9_103), "missing cleanse");
+
+        let scenario = ScenarioSpec::from_balance_context(&ctx).with_combat_tier(CombatTier::Squad);
+        let report = crate::referee::evaluate_validated_build(
+            &result.validated,
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+        );
+        assert!(
+            report.viability.is_viable,
+            "selected utilities should satisfy competitive gates: {:?}",
+            report.viability.gates
+        );
+    }
+
+    #[test]
     fn test_runtime_non_improvement_diagnostics_two_contexts() {
         // TEMP DIAGNOSTIC: runtime trace to reproduce "optimizer suggestion never beats loaded build".
         let db = make_diag_db();
@@ -1657,7 +1954,7 @@ mod runtime_diagnostics_tests {
             select_sigils(&mut candidates, &db, &weights);
             select_relic(&mut candidates, &db, &weights);
             select_weapons(&mut candidates, profession, &db, &weights);
-            select_skills(&mut candidates, &db, "Warrior", &weights);
+            select_skills(&mut candidates, &db, "Warrior", &weights, &ctx);
 
             println!("candidate_count_after_pipeline: {}", candidates.len());
             let mut synergy_only: Vec<(usize, f64, Vec<u32>)> = candidates

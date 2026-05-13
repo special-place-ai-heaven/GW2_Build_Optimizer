@@ -40,8 +40,8 @@ pub(super) fn load_characters(state: &mut AddonState) {
             let result = if token.is_cancelled() {
                 None
             } else {
-                let r = gw2_api::client::Gw2Client::with_key(&key)
-                    .and_then(|c| c.fetch_characters());
+                let r =
+                    gw2_api::client::Gw2Client::with_key(&key).and_then(|c| c.fetch_characters());
                 if token.is_cancelled() {
                     None
                 } else {
@@ -160,9 +160,15 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
             let result = if token.is_cancelled() {
                 None
             } else {
-                let r: Result<(Vec<gw2_api::models::BuildTab>, Vec<gw2_api::models::EquipmentTab>), String> = (|| {
-                    let client = gw2_api::client::Gw2Client::with_key(&key)
-                        .map_err(|e| e.to_string())?;
+                let r: Result<
+                    (
+                        Vec<gw2_api::models::BuildTab>,
+                        Vec<gw2_api::models::EquipmentTab>,
+                    ),
+                    String,
+                > = (|| {
+                    let client =
+                        gw2_api::client::Gw2Client::with_key(&key).map_err(|e| e.to_string())?;
                     let build_tabs = client
                         .fetch_build_tabs(&character_name)
                         .map_err(|e| e.to_string())?;
@@ -277,7 +283,7 @@ fn update_build_chat_code_inner(state: &mut AddonState) {
 /// Generate GW2 build template chat code from a Build.
 /// Format: 0x0D + profession_code(1) + 3x(spec_id(1) + trait_bits(1)) + 10x skill_palette(2 LE)
 /// + 16 bytes profession-specific + base64 → [&...]
-fn generate_build_chat_code(
+pub(in crate::ui::main_view) fn generate_build_chat_code(
     build: &gw2_api::models::Build,
     db: &gw2_optimizer::gamedb::GameDb,
 ) -> Option<String> {

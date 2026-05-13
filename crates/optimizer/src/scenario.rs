@@ -203,13 +203,19 @@ mod tests {
 
     #[test]
     fn role_wvw_roamer_maps_to_correct_profile_and_tier() {
-        assert_eq!(RoleObjective::WvWRoamer.profile_id(&GameMode::WvW), "WvW_Roamer");
+        assert_eq!(
+            RoleObjective::WvWRoamer.profile_id(&GameMode::WvW),
+            "WvW_Roamer"
+        );
         assert_eq!(RoleObjective::WvWRoamer.combat_tier(), CombatTier::Solo);
     }
 
     #[test]
     fn role_wvw_zerg_dps_maps_to_squad_tier() {
-        assert_eq!(RoleObjective::WvWZergDps.profile_id(&GameMode::WvW), "WvW_Zerg_DPS");
+        assert_eq!(
+            RoleObjective::WvWZergDps.profile_id(&GameMode::WvW),
+            "WvW_Zerg_DPS"
+        );
         assert_eq!(RoleObjective::WvWZergDps.combat_tier(), CombatTier::Squad);
     }
 
@@ -219,7 +225,10 @@ mod tests {
             RoleObjective::WvWZergSupport.profile_id(&GameMode::WvW),
             "WvW_Zerg_Support"
         );
-        assert_eq!(RoleObjective::WvWZergSupport.combat_tier(), CombatTier::Squad);
+        assert_eq!(
+            RoleObjective::WvWZergSupport.combat_tier(),
+            CombatTier::Squad
+        );
     }
 
     #[test]
@@ -263,7 +272,11 @@ mod tests {
         // WvW Roamer profile has specific weights in wvw.json — verify they loaded correctly
         let w = RoleObjective::WvWRoamer.to_weights(&GameMode::WvW);
         // From wvw.json WvW_Roamer: power=0.5, sustain=0.5, control=0.5
-        assert!((w.power - 0.5).abs() < 0.01, "WvW_Roamer power should be 0.5, got {}", w.power);
+        assert!(
+            (w.power - 0.5).abs() < 0.01,
+            "WvW_Roamer power should be 0.5, got {}",
+            w.power
+        );
         assert!(
             (w.sustain - 0.5).abs() < 0.01,
             "WvW_Roamer sustain should be 0.5, got {}",
