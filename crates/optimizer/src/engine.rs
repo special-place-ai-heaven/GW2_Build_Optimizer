@@ -246,8 +246,7 @@ pub fn optimize(
     let precomputed_specs: Vec<PrecomputedSpec> = spec_combos
         .iter()
         .map(|(elite, cores)| {
-            let spec_ids: Vec<u32> =
-                cores.iter().copied().chain(elite.iter().copied()).collect();
+            let spec_ids: Vec<u32> = cores.iter().copied().chain(elite.iter().copied()).collect();
 
             let mut trait_ids = Vec::new();
             for &spec_id in &spec_ids {
@@ -415,8 +414,7 @@ fn optimize_pvp(
     let precomputed_specs: Vec<PvpPrecomputedSpec> = spec_combos
         .iter()
         .map(|(elite, cores)| {
-            let spec_ids: Vec<u32> =
-                cores.iter().copied().chain(elite.iter().copied()).collect();
+            let spec_ids: Vec<u32> = cores.iter().copied().chain(elite.iter().copied()).collect();
             let mut trait_ids = Vec::new();
             for &spec_id in &spec_ids {
                 if let Some(spec) = specs_cache.get(&spec_id) {
@@ -755,9 +753,7 @@ pub struct SynergyResult {
 /// Stage 1 of the Gemini pipeline: deterministic gear-prefix selection.
 /// Returns the authoritative primary prefix (which overrides any Gemini choice)
 /// and the tier-based pool of candidates shown to Gemini as context.
-fn select_gemini_gear_prefixes(
-    weights: &OptimizationWeights,
-) -> (&'static str, Vec<&'static str>) {
+fn select_gemini_gear_prefixes(weights: &OptimizationWeights) -> (&'static str, Vec<&'static str>) {
     let gear_match = scoring::select_gear_prefix(weights);
     let tier_prefixes = scoring::select_prefixes_by_tiers(weights);
     let gear_prefixes: Vec<&str> = tier_prefixes.iter().map(|s| *s).collect();
@@ -1207,6 +1203,7 @@ pub fn simulate_validated_rotation(
     rotation::builder::tag_weapon_set(&mut set2_skills, 2);
     rotation_skills.extend(set1_skills);
     rotation_skills.extend(set2_skills);
+    rotation::builder::enrich_with_cleanse(&mut rotation_skills, &[], db);
 
     if rotation_skills.is_empty() {
         return None;
@@ -1523,7 +1520,12 @@ pub fn optimize_v2(
         stage: "Done".into(),
         done: true,
     });
-    Ok(synergy_result_from_validated(best, db, profession_name, ctx))
+    Ok(synergy_result_from_validated(
+        best,
+        db,
+        profession_name,
+        ctx,
+    ))
 }
 
 /// Post-beam LLM advisor: ask the LLM for candidate mutations, evaluate each
@@ -2155,5 +2157,83 @@ mod tests {
                 "PvE candidates should have pvp_amulet = None"
             );
         }
+    }
+
+    #[test]
+    fn simulate_validated_rotation_counts_cleanse_from_skill_facts() {
+        let cleanse_skill = gw2_api::models::Skill {
+            id: 90_001,
+            name: "Cleanse Utility".into(),
+            description: None,
+            icon: None,
+            chat_link: None,
+            skill_type: None,
+            weapon_type: None,
+            professions: vec!["Warrior".into()],
+            slot: Some("Utility".into()),
+            facts: vec![
+                Fact::Recharge {
+                    text: Some("Recharge".into()),
+                    icon: None,
+                    value: Some(20.0),
+                },
+                Fact::Number {
+                    text: Some("Conditions Removed".into()),
+                    icon: None,
+                    value: Some(2),
+                },
+            ],
+            traited_facts: vec![],
+            categories: vec![],
+            attunement: None,
+            cost: None,
+            dual_wield: None,
+            flip_skill: None,
+            initiative: None,
+            next_chain: None,
+            prev_chain: None,
+            transform_skills: vec![],
+            bundle_skills: vec![],
+            toolbelt_skill: None,
+            flags: vec![],
+            specialization: None,
+        };
+
+        let mut db = GameDb {
+            items: HashMap::new(),
+            itemstats: HashMap::new(),
+            skills: HashMap::new(),
+            traits: HashMap::new(),
+            specializations: HashMap::new(),
+            professions: HashMap::new(),
+            legends: HashMap::new(),
+            pvp_amulets: HashMap::new(),
+            skills_by_profession: HashMap::new(),
+            traits_by_spec: HashMap::new(),
+            items_by_type: HashMap::new(),
+            runes: vec![],
+            sigils: vec![],
+            relics: vec![],
+            skill_to_palette: HashMap::new(),
+            palette_to_skill: HashMap::new(),
+            traits_by_condition: HashMap::new(),
+            skills_by_condition: HashMap::new(),
+            traits_by_buff: HashMap::new(),
+            skills_by_buff: HashMap::new(),
+        };
+        db.skills.insert(cleanse_skill.id, cleanse_skill);
+
+        let mut validated = ValidatedBuild::default();
+        validated.skills.utilities = vec![Some((90_001, "Cleanse Utility".into()))];
+
+        let stats = stats::base_stats();
+        let rotation = simulate_validated_rotation(&validated, &db, &stats)
+            .expect("utility skill should produce a rotation");
+
+        assert_eq!(rotation.cleanse_count, 1);
+        assert!(
+            rotation.cleanse_rate_per_20s > 0.0,
+            "cleanse fact should contribute to cleanse rate"
+        );
     }
 }

@@ -38,7 +38,11 @@ pub struct SkillLoadoutGenome {
 impl BuildGenome {
     pub fn from_validated(profession_name: impl Into<String>, validated: &ValidatedBuild) -> Self {
         let profession_name = profession_name.into();
-        let spec_ids: Vec<u32> = validated.specializations.iter().map(|spec| spec.spec_id).collect();
+        let spec_ids: Vec<u32> = validated
+            .specializations
+            .iter()
+            .map(|spec| spec.spec_id)
+            .collect();
         let elite_spec_id = validated
             .specializations
             .iter()
@@ -61,8 +65,14 @@ impl BuildGenome {
             elite_spec_id,
             major_trait_ids,
             all_trait_ids,
-            gear_prefix_id: validated.gear_prefix.as_ref().map(|prefix| prefix.itemstat_id),
-            gear_prefix_name: validated.gear_prefix.as_ref().map(|prefix| prefix.name.clone()),
+            gear_prefix_id: validated
+                .gear_prefix
+                .as_ref()
+                .map(|prefix| prefix.itemstat_id),
+            gear_prefix_name: validated
+                .gear_prefix
+                .as_ref()
+                .map(|prefix| prefix.name.clone()),
             rune_id: validated.rune.as_ref().map(|rune| rune.id),
             sigil_ids: validated.sigils.iter().map(|sigil| sigil.id).collect(),
             relic_id: validated.relic.as_ref().map(|relic| relic.id),
@@ -129,7 +139,11 @@ mod tests {
             },
             skills: ValidatedSkills {
                 heal: Some((1001, "Heal".into())),
-                utilities: vec![Some((2001, "Utility A".into())), None, Some((2003, "Utility C".into()))],
+                utilities: vec![
+                    Some((2001, "Utility A".into())),
+                    None,
+                    Some((2003, "Utility C".into())),
+                ],
                 elite: Some((3001, "Elite".into())),
             },
             rune: Some(ValidatedItem {

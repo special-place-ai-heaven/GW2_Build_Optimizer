@@ -207,15 +207,13 @@ fn regression_daredevil_wvw_roam() {
 fn regression_per_axis_resolution_dragonhunter() {
     let perf = dragonhunter_power_pve();
 
-    let single = |power, condition, boon_support, healing, sustain, control| {
-        OptimizationWeights {
-            power,
-            condition,
-            boon_support,
-            healing,
-            sustain,
-            control,
-        }
+    let single = |power, condition, boon_support, healing, sustain, control| OptimizationWeights {
+        power,
+        condition,
+        boon_support,
+        healing,
+        sustain,
+        control,
     };
 
     let s_power = score_with_weights(&perf, &single(1.0, 0.0, 0.0, 0.0, 0.0, 0.0));
@@ -369,9 +367,7 @@ fn regression_tier_prefix_counts() {
     let n_heal = select_prefixes_by_tiers(&OptimizationWeights::preset_healer()).len();
     let n_tank = select_prefixes_by_tiers(&OptimizationWeights::preset_tank()).len();
 
-    println!(
-        "MEASURED tier counts: power={n_power} condi={n_condi} heal={n_heal} tank={n_tank}"
-    );
+    println!("MEASURED tier counts: power={n_power} condi={n_condi} heal={n_heal} tank={n_tank}");
 
     // Wider band on counts (+/-1) than on scores -- we want to catch table
     // restructure, not penalize a single prefix being added/removed within

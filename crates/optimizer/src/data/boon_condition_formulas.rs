@@ -1095,11 +1095,7 @@ mod tests {
         use crate::rotation::builder::tests_alias_helpers::is_damaging_condition;
         // Damaging set: Bleeding, Burning, Poisoned, Torment, Confusion.
         for cond in &["Bleeding", "Burning", "Torment", "Confusion"] {
-            assert!(
-                is_damaging_condition(cond),
-                "{} should be damaging",
-                cond,
-            );
+            assert!(is_damaging_condition(cond), "{} should be damaging", cond,);
         }
         // Verb/canonical pair for Poison must agree and both be true.
         assert!(is_damaging_condition("Poison"));
@@ -1110,7 +1106,14 @@ mod tests {
         );
         // Non-damaging conditions (control/suppression) must be false in both
         // forms.
-        for cond in &["Blind", "Blinded", "Chill", "Chilled", "Immobilize", "Immobile"] {
+        for cond in &[
+            "Blind",
+            "Blinded",
+            "Chill",
+            "Chilled",
+            "Immobilize",
+            "Immobile",
+        ] {
             assert!(
                 !is_damaging_condition(cond),
                 "{} should NOT be damaging",
@@ -1166,11 +1169,7 @@ mod tests {
             );
             // Pure-canonical identity: Burning passes through unchanged.
             let burn = c.tick_damage("Burning", cd, mode.clone());
-            assert!(
-                burn > 0.0,
-                "Burning tick should be positive in {:?}",
-                mode,
-            );
+            assert!(burn > 0.0, "Burning tick should be positive in {:?}", mode,);
         }
     }
 }

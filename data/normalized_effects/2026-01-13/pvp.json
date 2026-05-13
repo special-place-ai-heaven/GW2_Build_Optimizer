@@ -3,9 +3,9 @@
   "mode": "PvP",
   "effects": [
     {
-      "effect_id": "trait:1444:0",
+      "effect_id": "trait:1338:0",
       "source_type": "Trait",
-      "source_id": 1444,
+      "source_id": 1338,
       "source_name": "Forceful Greatsword",
       "category": "FlatStat",
       "value": 120.0,
@@ -69,9 +69,9 @@
       "source": "https://wiki.guildwars2.com/wiki/Superior_Sigil_of_Bursting"
     },
     {
-      "effect_id": "trait:2049:0",
+      "effect_id": "trait:1711:0",
       "source_type": "Trait",
-      "source_id": 2049,
+      "source_id": 1711,
       "source_name": "Phalanx Strength",
       "category": "AppliesBoon",
       "value": 1.0,
@@ -100,9 +100,9 @@
       }
     },
     {
-      "effect_id": "trait:1016:0",
+      "effect_id": "trait:1069:0",
       "source_type": "Trait",
-      "source_id": 1016,
+      "source_id": 1069,
       "source_name": "Sharpened Edges",
       "category": "AppliesCondition",
       "value": 1.0,
@@ -147,32 +147,32 @@
       "inner_category": "StrikeDamagePct"
     },
     {
-      "effect_id": "trait:1878:0",
+      "effect_id": "trait:681:0",
       "source_type": "Trait",
-      "source_id": 1878,
-      "source_name": "Banshee's Wail",
+      "source_id": 681,
+      "source_name": "Vicious Expression",
       "category": "RemovesBoon",
-      "value": 3.0,
+      "value": 2.0,
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnSkillUse",
       "uptime_model": { "kind": "Unknown" },
       "evidence_level": "Factual",
-      "source": "https://wiki.guildwars2.com/wiki/Banshee%27s_Wail",
+      "source": "https://wiki.guildwars2.com/wiki/Vicious_Expression",
       "status_operation": {
         "operation_type": "RemovesBoon",
         "target_side": "Enemy",
         "status_kind": "Any",
         "amount_mode": "Count",
-        "amount_value": 3.0,
+        "amount_value": 2.0,
         "target_scope": "Area",
         "target_count": 5
       }
     },
     {
-      "effect_id": "trait:2013:0",
+      "effect_id": "trait:1693:0",
       "source_type": "Trait",
-      "source_id": 2013,
-      "source_name": "Dread",
+      "source_id": 1693,
+      "source_name": "Path of Corruption",
       "category": "CorruptsBoon",
       "value": 2.0,
       "stacking_rule": "NonStacking",
@@ -182,7 +182,7 @@
         "uptime": 0.25
       },
       "evidence_level": "Heuristic",
-      "source": "https://wiki.guildwars2.com/wiki/Dread",
+      "source": "https://wiki.guildwars2.com/wiki/Path_of_Corruption",
       "internal_cooldown": 10.0,
       "status_operation": {
         "operation_type": "CorruptsBoon",
@@ -195,12 +195,12 @@
       }
     },
     {
-      "effect_id": "skill:9158:0",
+      "effect_id": "skill:9120:0",
       "source_type": "Skill",
-      "source_id": 9158,
+      "source_id": 9120,
       "source_name": "Virtue of Resolve",
       "category": "RemovesCondition",
-      "value": 3.0,
+      "value": 2.0,
       "stacking_rule": "NonStacking",
       "trigger_rule": "OnSkillUse",
       "uptime_model": { "kind": "Unknown" },
@@ -211,8 +211,50 @@
         "target_side": "self",
         "status_kind": "Any",
         "amount_mode": "Count",
-        "amount_value": 3.0,
+        "amount_value": 2.0,
         "target_scope": "self"
+      }
+    },
+    {
+      "effect_id": "trait:2013:0",
+      "source_type": "Trait",
+      "source_id": 2013,
+      "source_name": "Plague Sending",
+      "category": "TransfersCondition",
+      "value": 2.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": { "kind": "Unknown" },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Plague_Sending",
+      "status_operation": {
+        "operation_type": "TransfersCondition",
+        "target_side": "Enemy",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 2.0,
+        "target_scope": "SingleTarget"
+      }
+    },
+    {
+      "effect_id": "trait:553:0",
+      "source_type": "Trait",
+      "source_id": 553,
+      "source_name": "Pure of Voice",
+      "category": "ConvertsConditionToBoon",
+      "value": 1.0,
+      "stacking_rule": "NonStacking",
+      "trigger_rule": "OnSkillUse",
+      "uptime_model": { "kind": "Unknown" },
+      "evidence_level": "Factual",
+      "source": "https://wiki.guildwars2.com/wiki/Pure_of_Voice",
+      "status_operation": {
+        "operation_type": "ConvertsConditionToBoon",
+        "target_side": "Ally",
+        "status_kind": "Any",
+        "amount_mode": "Count",
+        "amount_value": 1.0,
+        "target_scope": "NearbyAllies"
       }
     },
     {

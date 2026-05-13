@@ -110,8 +110,7 @@ pub fn find_best_benchmark<'a>(
     let candidates: Vec<&BenchmarkBuild> = builds
         .iter()
         .filter(|b| {
-            b.profession.to_lowercase().contains(&prof_lower)
-                && b.mode.to_lowercase() == mode_lower
+            b.profession.to_lowercase().contains(&prof_lower) && b.mode.to_lowercase() == mode_lower
         })
         .collect();
 

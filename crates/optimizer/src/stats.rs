@@ -330,8 +330,7 @@ pub fn calculate_trait_stats(
     traits_cache: &HashMap<u32, Trait>,
 ) -> StatBlock {
     let mut stats = StatBlock::default();
-    let equipped_set: std::collections::HashSet<u32> =
-        equipped_trait_ids.iter().copied().collect();
+    let equipped_set: std::collections::HashSet<u32> = equipped_trait_ids.iter().copied().collect();
 
     for &trait_id in equipped_trait_ids {
         let Some(t) = traits_cache.get(&trait_id) else {
@@ -388,8 +387,7 @@ pub fn apply_trait_conversions(
     traits_cache: &HashMap<u32, Trait>,
 ) {
     let snapshot = stats.clone();
-    let equipped_set: std::collections::HashSet<u32> =
-        equipped_trait_ids.iter().copied().collect();
+    let equipped_set: std::collections::HashSet<u32> = equipped_trait_ids.iter().copied().collect();
 
     for &trait_id in equipped_trait_ids {
         let Some(t) = traits_cache.get(&trait_id) else {
@@ -771,7 +769,6 @@ mod tests {
         stats.add("Concentration", 20.0);
         assert_eq!(stats.concentration, 50.0);
     }
-
 
     #[test]
     fn test_stat_add_all_alias_pairs() {
