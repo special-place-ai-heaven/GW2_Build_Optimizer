@@ -233,7 +233,6 @@ mod billing_tests {
     }
 }
 
-
 /// Create an LLM client based on the current config.
 /// Dispatches to the correct provider and configures persistence.
 pub fn create_client(

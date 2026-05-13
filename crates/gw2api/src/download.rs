@@ -150,8 +150,7 @@ pub fn download_all(
         // Consume `raw_items` by-value via into_iter so each rejected Value drops
         // before the next iteration — only the ~5k surviving Items are retained
         // for `cache.save`.
-        let mut equipment_items: Vec<models::Item> =
-            Vec::with_capacity(ids.len() / 20); // ~5% of items expected
+        let mut equipment_items: Vec<models::Item> = Vec::with_capacity(ids.len() / 20); // ~5% of items expected
         for val in raw_items {
             if let Ok(item) = serde_json::from_value::<models::Item>(val) {
                 if relevant_types.contains(&item.item_type.as_str())

@@ -19,27 +19,60 @@ fn render_role_picker(ui: &Ui, state: &mut AddonState) {
 
     // Generic roles (all modes)
     let generic_roles: &[(RoleObjective, &str)] = &[
-        (RoleObjective::PowerDps, "Direct damage, burst & sustained strike DPS"),
-        (RoleObjective::CondiDps, "Condition damage, DoTs and pressure"),
-        (RoleObjective::Sustain, "Bruiser — balanced offense and self-healing"),
-        (RoleObjective::Tank, "Maximum toughness and vitality for frontline"),
+        (
+            RoleObjective::PowerDps,
+            "Direct damage, burst & sustained strike DPS",
+        ),
+        (
+            RoleObjective::CondiDps,
+            "Condition damage, DoTs and pressure",
+        ),
+        (
+            RoleObjective::Sustain,
+            "Bruiser — balanced offense and self-healing",
+        ),
+        (
+            RoleObjective::Tank,
+            "Maximum toughness and vitality for frontline",
+        ),
         (RoleObjective::Healer, "Party/squad healing and sustain"),
-        (RoleObjective::Disabler, "CC, interrupts, and movement denial"),
-        (RoleObjective::Buffer, "Boon generation and support for allies"),
+        (
+            RoleObjective::Disabler,
+            "CC, interrupts, and movement denial",
+        ),
+        (
+            RoleObjective::Buffer,
+            "Boon generation and support for allies",
+        ),
     ];
 
     // WvW-specific roles (only shown in WvW mode)
     let wvw_roles: &[(RoleObjective, &str)] = &[
-        (RoleObjective::WvWRoamer, "Solo / small-scale — mobility and self-sustain"),
-        (RoleObjective::WvWZergDps, "Large squad — group damage and AoE pressure"),
-        (RoleObjective::WvWZergSupport, "Squad healer/support — stability and boon generation"),
-        (RoleObjective::WvWDisruptor, "Boon corruption, CC, and movement denial"),
+        (
+            RoleObjective::WvWRoamer,
+            "Solo / small-scale — mobility and self-sustain",
+        ),
+        (
+            RoleObjective::WvWZergDps,
+            "Large squad — group damage and AoE pressure",
+        ),
+        (
+            RoleObjective::WvWZergSupport,
+            "Squad healer/support — stability and boon generation",
+        ),
+        (
+            RoleObjective::WvWDisruptor,
+            "Boon corruption, CC, and movement denial",
+        ),
     ];
 
     // PvP-specific roles (only shown in PvP mode)
     let pvp_roles: &[(RoleObjective, &str)] = &[
         (RoleObjective::PvPBurst, "Spike damage with CC setup"),
-        (RoleObjective::PvPSustain, "Point-holder — bunker and boon generation"),
+        (
+            RoleObjective::PvPSustain,
+            "Point-holder — bunker and boon generation",
+        ),
         (RoleObjective::PvPDisruptor, "CC and boon denial pressure"),
     ];
 
@@ -77,8 +110,14 @@ fn render_role_picker(ui: &Ui, state: &mut AddonState) {
         };
 
         let _bg = ui.push_style_color(nexus::imgui::StyleColor::Button, bg_col);
-        let _bg_h = ui.push_style_color(nexus::imgui::StyleColor::ButtonHovered, [bg_col[0] + 0.1, bg_col[1] + 0.1, bg_col[2] + 0.05, 1.0]);
-        let _bg_a = ui.push_style_color(nexus::imgui::StyleColor::ButtonActive, [0.4, 0.33, 0.08, 1.0]);
+        let _bg_h = ui.push_style_color(
+            nexus::imgui::StyleColor::ButtonHovered,
+            [bg_col[0] + 0.1, bg_col[1] + 0.1, bg_col[2] + 0.05, 1.0],
+        );
+        let _bg_a = ui.push_style_color(
+            nexus::imgui::StyleColor::ButtonActive,
+            [0.4, 0.33, 0.08, 1.0],
+        );
         let _tc = ui.push_style_color(nexus::imgui::StyleColor::Text, text_col);
 
         if ui.button_with_size(&label, [btn_w, 28.0]) {
@@ -93,15 +132,27 @@ fn render_role_picker(ui: &Ui, state: &mut AddonState) {
             ui.tooltip_text(desc);
         }
 
-        drop(_tc); drop(_bg_a); drop(_bg_h); drop(_bg);
+        drop(_tc);
+        drop(_bg_a);
+        drop(_bg_h);
+        drop(_bg);
     }
 
     ui.spacing();
     // Show selected role hint
     if let Some(role) = current {
-        ui.text_colored([0.6, 0.9, 0.6, 1.0], &format!("  Selected: {} — click 'Optimize Build' in the left panel", role.label()));
+        ui.text_colored(
+            [0.6, 0.9, 0.6, 1.0],
+            &format!(
+                "  Selected: {} — click 'Optimize Build' in the left panel",
+                role.label()
+            ),
+        );
     } else {
-        ui.text_colored([0.5, 0.5, 0.5, 1.0], "  Select a role above, then click 'Optimize Build'");
+        ui.text_colored(
+            [0.5, 0.5, 0.5, 1.0],
+            "  Select a role above, then click 'Optimize Build'",
+        );
     }
     ui.spacing();
 }

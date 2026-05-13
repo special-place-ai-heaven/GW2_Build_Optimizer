@@ -557,9 +557,7 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             // synergy matchers in `compute_marginal_synergy` compare apples to
             // apples — two emitters (one trait, one sigil) referring to the
             // same condition under different aliases would otherwise miss.
-            let canonical = crate::data::boon_condition_formulas::canonical_condition_name(
-                status,
-            );
+            let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
             effects.push(NormalizedEffect::AppliesStatus {
                 status: canonical.to_string(),
                 is_condition: is_cond,
@@ -578,9 +576,7 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             ..
         } => {
             let is_cond = is_condition(status);
-            let canonical = crate::data::boon_condition_formulas::canonical_condition_name(
-                status,
-            );
+            let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
             effects.push(NormalizedEffect::AppliesStatus {
                 status: canonical.to_string(),
                 is_condition: is_cond,
@@ -702,9 +698,8 @@ fn parse_description_to_effects(desc: &str) -> Vec<NormalizedEffect> {
     for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
         if let Some(pct) = extract_percent_before(&desc_lower, &format!("{} duration", condi)) {
             let condi_cap = capitalize(condi);
-            let canonical = crate::data::boon_condition_formulas::canonical_condition_name(
-                &condi_cap,
-            );
+            let canonical =
+                crate::data::boon_condition_formulas::canonical_condition_name(&condi_cap);
             effects.push(NormalizedEffect::DurationBonus {
                 kind: DurationKind::SpecificCondition(canonical.to_string()),
                 percent: pct,
@@ -1415,14 +1410,15 @@ mod tests {
             }],
         )];
         let new_id = ComponentId::Rune(42);
-        let (score, links) =
-            compute_marginal_synergy(&new_effects, &existing, &w, Some(&new_id));
+        let (score, links) = compute_marginal_synergy(&new_effects, &existing, &w, Some(&new_id));
         assert!(
             score > 0.0,
             "Should get synergy bonus for stacking conditions"
         );
         assert!(
-            links.iter().any(|l| l.target == new_id && l.source == ComponentId::Trait(100)),
+            links
+                .iter()
+                .any(|l| l.target == new_id && l.source == ComponentId::Trait(100)),
             "Link should attribute new effect to its component (Rune 42) targeting trait source"
         );
     }
@@ -1444,8 +1440,7 @@ mod tests {
             }],
         )];
         let new_id = ComponentId::Sigil(7);
-        let (score, links) =
-            compute_marginal_synergy(&new_effects, &existing, &w, Some(&new_id));
+        let (score, links) = compute_marginal_synergy(&new_effects, &existing, &w, Some(&new_id));
         assert!(
             score > 0.0,
             "Duration bonus should synergize with matching condition"
@@ -1480,8 +1475,7 @@ mod tests {
             }],
         )];
         let new_id = ComponentId::Sigil(99);
-        let (score, _links) =
-            compute_marginal_synergy(&new_effects, &existing, &w, Some(&new_id));
+        let (score, _links) = compute_marginal_synergy(&new_effects, &existing, &w, Some(&new_id));
         assert!(
             score > 0.0,
             "Poisoned-applying trait should synergize with Poison-duration sigil"

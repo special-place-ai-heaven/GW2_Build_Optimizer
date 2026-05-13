@@ -533,8 +533,7 @@ pub fn extract_damage_modifiers(
     // Hoist into a HashSet once — `equipped_trait_ids` is scanned twice per
     // traited_fact (overridden filter + activation gate) across every trait;
     // O(n) linear scans add up across the ~36-trait hot path.
-    let equipped_set: std::collections::HashSet<u32> =
-        equipped_trait_ids.iter().copied().collect();
+    let equipped_set: std::collections::HashSet<u32> = equipped_trait_ids.iter().copied().collect();
 
     // 1. Traits — look for Percent facts with damage-related text
     for &trait_id in equipped_trait_ids {
@@ -685,9 +684,8 @@ fn parse_rune_modifier(mods: &mut DamageModifiers, bonus: &str) {
     for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
         if rest.contains(condi) && rest.contains("duration") {
             let condi_cap = capitalize(condi);
-            let canonical = crate::data::boon_condition_formulas::canonical_condition_name(
-                &condi_cap,
-            );
+            let canonical =
+                crate::data::boon_condition_formulas::canonical_condition_name(&condi_cap);
             mods.specific_condi_duration
                 .entry(canonical.to_string())
                 .or_default()
@@ -788,9 +786,8 @@ fn parse_sigil_from_description(mods: &mut DamageModifiers, sigil: &Item) {
     for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
         if let Some(pct) = extract_percent_before(&desc, &format!("{} duration", condi)) {
             let condi_cap = capitalize(condi);
-            let canonical = crate::data::boon_condition_formulas::canonical_condition_name(
-                &condi_cap,
-            );
+            let canonical =
+                crate::data::boon_condition_formulas::canonical_condition_name(&condi_cap);
             mods.specific_condi_duration
                 .entry(canonical.to_string())
                 .or_default()
@@ -2077,7 +2074,10 @@ mod tests {
 
     #[test]
     fn extract_percent_before_simple() {
-        assert_eq!(extract_percent_before("10% burning duration", "burning duration"), Some(10.0));
+        assert_eq!(
+            extract_percent_before("10% burning duration", "burning duration"),
+            Some(10.0)
+        );
         assert_eq!(extract_percent_before("+7% damage", "damage"), Some(7.0));
     }
 
@@ -2087,7 +2087,10 @@ mod tests {
         // this case would return 10.0 for `"boon duration"` instead of 5.0.
         let text = "+10% condition duration. +5% boon duration.";
         assert_eq!(extract_percent_before(text, "boon duration"), Some(5.0));
-        assert_eq!(extract_percent_before(text, "condition duration"), Some(10.0));
+        assert_eq!(
+            extract_percent_before(text, "condition duration"),
+            Some(10.0)
+        );
     }
 
     #[test]
@@ -2108,6 +2111,9 @@ mod tests {
 
     #[test]
     fn extract_percent_before_handles_decimals() {
-        assert_eq!(extract_percent_before("+0.5% burning damage", "burning damage"), Some(0.5));
+        assert_eq!(
+            extract_percent_before("+0.5% burning damage", "burning damage"),
+            Some(0.5)
+        );
     }
 }

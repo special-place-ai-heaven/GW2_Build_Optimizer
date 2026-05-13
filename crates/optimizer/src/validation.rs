@@ -337,10 +337,7 @@ fn validate_weapon_set(
                     weapon: mh.clone(),
                     profession: prof.name.clone(),
                 },
-                detail: format!(
-                    "{}: weapon '{}' not available for {}",
-                    label, mh, prof.name
-                ),
+                detail: format!("{}: weapon '{}' not available for {}", label, mh, prof.name),
             });
         }
     }
@@ -356,10 +353,7 @@ fn validate_weapon_set(
                     weapon: oh.clone(),
                     profession: prof.name.clone(),
                 },
-                detail: format!(
-                    "{}: weapon '{}' not available for {}",
-                    label, oh, prof.name
-                ),
+                detail: format!("{}: weapon '{}' not available for {}", label, oh, prof.name),
             });
         }
     }
@@ -448,8 +442,7 @@ fn validate_skills(
     // Validate utilities. GW2 has exactly 3 utility slots — cap so an LLM that
     // hallucinates 4+ utilities cannot inflate the build, and dedupe by skill id
     // so a single utility is never equipped in two slots simultaneously.
-    let mut seen_utility_ids: std::collections::HashSet<u32> =
-        std::collections::HashSet::new();
+    let mut seen_utility_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
     for name in &utility_names {
         if result.skills.utilities.len() >= 3 {
             break;
@@ -519,10 +512,7 @@ fn validate_sigils(response: &GeminiBuildResponse, db: &GameDb, result: &mut Val
 
     if positional && resolved.len() == 4 {
         // Set 1 = indices 0,1 | Set 2 = indices 2,3
-        for (set_label, a, b) in [
-            ("Set 1", 0usize, 1usize),
-            ("Set 2", 2usize, 3usize),
-        ] {
+        for (set_label, a, b) in [("Set 1", 0usize, 1usize), ("Set 2", 2usize, 3usize)] {
             if let (Some(left), Some(right)) = (&resolved[a], &resolved[b]) {
                 if left.id == right.id {
                     result.warnings.push(format!(
@@ -688,9 +678,7 @@ fn find_skill_by_name(
     // "heal" or "fire" would over-match skills they never named (e.g. "heal"
     // matching the first heal-tagged skill alphabetically). Matches the same
     // guard used by `find_trait_by_name`.
-    let exact_match = prof_skills
-        .iter()
-        .find(|s| s.name.to_lowercase() == needle);
+    let exact_match = prof_skills.iter().find(|s| s.name.to_lowercase() == needle);
     let found = if exact_match.is_some() {
         exact_match
     } else if needle.len() >= 5 {
@@ -1175,10 +1163,7 @@ mod tests {
     #[test]
     fn test_validate_gear_prefix_fuzzy_id_tiebreak_when_lengths_equal() {
         // Two equal-length names both contain needle. Lower id wins deterministically.
-        let db = empty_db_with_itemstats(vec![
-            (350, "Zerk Sample A"),
-            (300, "Zerk Sample B"),
-        ]);
+        let db = empty_db_with_itemstats(vec![(350, "Zerk Sample A"), (300, "Zerk Sample B")]);
         let result = run_validate_gear_prefix("Sample", &db);
         let p = result.gear_prefix.expect("should match");
         assert_eq!(p.itemstat_id, 300, "lower id must win equal-length tie");

@@ -308,6 +308,7 @@ fn saved_to_suggestion(
         rune: saved.rune.clone(),
         sigils: saved.sigils.clone(),
         relic: saved.relic.clone(),
+        chat_code: None,
         explanation: saved.explanation.clone(),
         synergy_explanation: saved.synergy_explanation.clone(),
         changes_made: saved.changes_made.clone(),

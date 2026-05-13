@@ -1025,11 +1025,8 @@ mod tests {
 
     #[test]
     fn snapshot_new_build_prompt_with_tools() {
-        let prompt = new_build_prompt_with_tools(
-            "Warrior",
-            &OptimizationWeights::preset_power_dps(),
-            "PvE",
-        );
+        let prompt =
+            new_build_prompt_with_tools("Warrior", &OptimizationWeights::preset_power_dps(), "PvE");
         let expected = r#"You are an expert Guild Wars 2 build optimizer with access to the game's full database.
 
 Create an optimal Power build for Warrior in PvE.

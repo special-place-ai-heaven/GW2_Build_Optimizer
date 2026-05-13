@@ -294,7 +294,12 @@ pub fn render_lock_panel(
 
             // Subtle glow ring on hover — faint outer hex that fades in with t.
             if hex_t > 0.0 {
-                let glow = [hex_color_base[0], hex_color_base[1], hex_color_base[2], 0.35 * hex_t];
+                let glow = [
+                    hex_color_base[0],
+                    hex_color_base[1],
+                    hex_color_base[2],
+                    0.35 * hex_t,
+                ];
                 draw_hexagon(
                     &draw_list,
                     hex_center,
@@ -308,7 +313,11 @@ pub fn render_lock_panel(
             // Lock ring around hexagon when locked
             if spec_locked {
                 draw_list
-                    .add_circle(hex_center, hex_radius_anim + 3.0, color_u32(LOCK_ICON_COLOR))
+                    .add_circle(
+                        hex_center,
+                        hex_radius_anim + 3.0,
+                        color_u32(LOCK_ICON_COLOR),
+                    )
                     .thickness(2.0)
                     .build();
             }
@@ -857,7 +866,11 @@ mod tests {
     #[test]
     fn tick_hover_snaps_to_new_element_at_zero() {
         let mut state: Option<(LockElementId, f32)> = Some((LockElementId::Hex(0), 0.9));
-        let new_id = LockElementId::Trait { slot: 1, col: 0, row: 2 };
+        let new_id = LockElementId::Trait {
+            slot: 1,
+            col: 0,
+            row: 2,
+        };
         tick_hover(&mut state, Some(new_id));
         assert_eq!(state, Some((new_id, 0.0)));
     }
@@ -880,7 +893,14 @@ mod tests {
         assert!((hover_t_for(&state, LockElementId::Hex(0)) - 0.7).abs() < f32::EPSILON);
         assert_eq!(hover_t_for(&state, LockElementId::Hex(1)), 0.0);
         assert_eq!(
-            hover_t_for(&None, LockElementId::Trait { slot: 0, col: 0, row: 0 }),
+            hover_t_for(
+                &None,
+                LockElementId::Trait {
+                    slot: 0,
+                    col: 0,
+                    row: 0
+                }
+            ),
             0.0
         );
     }

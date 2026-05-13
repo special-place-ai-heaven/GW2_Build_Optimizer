@@ -25,7 +25,8 @@ use super::{KeyValidationResult, LlmClient, LlmError, ToolDefinition};
 const OPENROUTER_API_BASE: &str = "https://openrouter.ai/api/v1";
 /// Identify this app in OpenRouter's request logs / leaderboards. Optional
 /// but recommended by OpenRouter docs.
-const OPENROUTER_HTTP_REFERER: &str = "https://github.com/special-place-administrator/GW2_Build_Optimizer";
+const OPENROUTER_HTTP_REFERER: &str =
+    "https://github.com/special-place-administrator/GW2_Build_Optimizer";
 const OPENROUTER_X_TITLE: &str = "GW2 Build Optimizer";
 
 pub struct OpenRouterClient {
@@ -337,9 +338,7 @@ impl OpenRouterClient {
                                 .lock()
                                 .unwrap_or_else(|e| e.into_inner())
                                 .undo_reserve();
-                            return Err(LlmError::Parse(
-                                "No response from OpenRouter".into(),
-                            ));
+                            return Err(LlmError::Parse("No response from OpenRouter".into()));
                         }
                     };
 
@@ -461,7 +460,8 @@ impl LlmClient for OpenRouterClient {
             Err(e) => {
                 return KeyValidationResult {
                     valid: false,
-                    message: "Cannot connect to OpenRouter API. Check your internet connection.".into(),
+                    message: "Cannot connect to OpenRouter API. Check your internet connection."
+                        .into(),
                     warning: Some(e.to_string()),
                 };
             }
@@ -842,160 +842,160 @@ mod tests {
     }
 
     #[test]
-        fn test_rate_tracker_persistence_roundtrip_same_day() {
-            let mut tracker = RateTracker::new();
-            for _ in 0..5 {
-                tracker.check_and_reserve().unwrap();
-            }
-            assert_eq!(tracker.requests_today, 5);
-            assert_eq!(tracker.requests_this_minute, 5);
-
-            let persisted = tracker.to_persisted();
-            let reloaded = RateTracker::from_persisted(persisted);
-
-            // Daily counter survives, minute counter is always reset on reload.
-            assert_eq!(reloaded.requests_today, 5);
-            assert_eq!(reloaded.requests_this_minute, 0);
-        }
-
-        #[test]
-        fn test_rate_tracker_persistence_day_rollover_resets_daily() {
-            let yesterday = current_epoch_day().saturating_sub(1);
-            let persisted = PersistedUsage {
-                day: yesterday,
-                requests_today: 42,
-            };
-            let reloaded = RateTracker::from_persisted(persisted);
-
-            assert_eq!(reloaded.requests_today, 0);
-            assert_eq!(reloaded.requests_this_minute, 0);
-            assert_eq!(reloaded.current_day, current_epoch_day());
-        }
-
-        #[test]
-        fn test_rate_tracker_minute_rollover_preserves_daily() {
-            let mut tracker = RateTracker::new();
-            for _ in 0..3 {
-                tracker.check_and_reserve().unwrap();
-            }
-            assert_eq!(tracker.requests_this_minute, 3);
-            assert_eq!(tracker.requests_today, 3);
-
-            // Simulate 61 seconds having elapsed since the minute started.
-            tracker.minute_start = Instant::now() - std::time::Duration::from_secs(61);
-
+    fn test_rate_tracker_persistence_roundtrip_same_day() {
+        let mut tracker = RateTracker::new();
+        for _ in 0..5 {
             tracker.check_and_reserve().unwrap();
+        }
+        assert_eq!(tracker.requests_today, 5);
+        assert_eq!(tracker.requests_this_minute, 5);
 
-            // Minute counter reset to 1 (this new reserve), daily keeps climbing.
-            assert_eq!(tracker.requests_this_minute, 1);
-            assert_eq!(tracker.requests_today, 4);
+        let persisted = tracker.to_persisted();
+        let reloaded = RateTracker::from_persisted(persisted);
+
+        // Daily counter survives, minute counter is always reset on reload.
+        assert_eq!(reloaded.requests_today, 5);
+        assert_eq!(reloaded.requests_this_minute, 0);
+    }
+
+    #[test]
+    fn test_rate_tracker_persistence_day_rollover_resets_daily() {
+        let yesterday = current_epoch_day().saturating_sub(1);
+        let persisted = PersistedUsage {
+            day: yesterday,
+            requests_today: 42,
+        };
+        let reloaded = RateTracker::from_persisted(persisted);
+
+        assert_eq!(reloaded.requests_today, 0);
+        assert_eq!(reloaded.requests_this_minute, 0);
+        assert_eq!(reloaded.current_day, current_epoch_day());
+    }
+
+    #[test]
+    fn test_rate_tracker_minute_rollover_preserves_daily() {
+        let mut tracker = RateTracker::new();
+        for _ in 0..3 {
+            tracker.check_and_reserve().unwrap();
+        }
+        assert_eq!(tracker.requests_this_minute, 3);
+        assert_eq!(tracker.requests_today, 3);
+
+        // Simulate 61 seconds having elapsed since the minute started.
+        tracker.minute_start = Instant::now() - std::time::Duration::from_secs(61);
+
+        tracker.check_and_reserve().unwrap();
+
+        // Minute counter reset to 1 (this new reserve), daily keeps climbing.
+        assert_eq!(tracker.requests_this_minute, 1);
+        assert_eq!(tracker.requests_today, 4);
+    }
+
+    #[test]
+    fn test_trim_messages_drops_oldest_turn() {
+        fn user_msg(text: &str) -> Message {
+            Message {
+                role: "user".into(),
+                content: Some(text.into()),
+                tool_calls: None,
+                tool_call_id: None,
+            }
+        }
+        fn assistant_with_call(id: &str, args: &str) -> Message {
+            Message {
+                role: "assistant".into(),
+                content: None,
+                tool_calls: Some(vec![ToolCallResponse {
+                    id: id.into(),
+                    call_type: "function".into(),
+                    function: FunctionCallData {
+                        name: "get_trait_details".into(),
+                        arguments: args.into(),
+                    },
+                }]),
+                tool_call_id: None,
+            }
+        }
+        fn tool_result(id: &str, body: &str) -> Message {
+            Message {
+                role: "tool".into(),
+                content: Some(body.into()),
+                tool_calls: None,
+                tool_call_id: Some(id.into()),
+            }
         }
 
-        #[test]
-            fn test_trim_messages_drops_oldest_turn() {
-                fn user_msg(text: &str) -> Message {
-                    Message {
-                        role: "user".into(),
-                        content: Some(text.into()),
-                        tool_calls: None,
-                        tool_call_id: None,
-                    }
-                }
-                fn assistant_with_call(id: &str, args: &str) -> Message {
-                    Message {
-                        role: "assistant".into(),
-                        content: None,
-                        tool_calls: Some(vec![ToolCallResponse {
-                            id: id.into(),
-                            call_type: "function".into(),
-                            function: FunctionCallData {
-                                name: "get_trait_details".into(),
-                                arguments: args.into(),
-                            },
-                        }]),
-                        tool_call_id: None,
-                    }
-                }
-                fn tool_result(id: &str, body: &str) -> Message {
-                    Message {
-                        role: "tool".into(),
-                        content: Some(body.into()),
-                        tool_calls: None,
-                        tool_call_id: Some(id.into()),
-                    }
-                }
+        // Big filler (~100 chars = ~25 tokens each)
+        let filler = "x".repeat(400);
 
-                // Big filler (~100 chars = ~25 tokens each)
-                let filler = "x".repeat(400);
+        let mut messages = vec![
+            user_msg("initial prompt"),
+            assistant_with_call("call_1", &format!(r#"{{"q":"{}"}}"#, filler)),
+            tool_result("call_1", &filler),
+            assistant_with_call("call_2", &format!(r#"{{"q":"{}"}}"#, filler)),
+            tool_result("call_2", &filler),
+            assistant_with_call("call_3", &format!(r#"{{"q":"{}"}}"#, filler)),
+            tool_result("call_3", &filler),
+        ];
+        let original_len = messages.len();
 
-                let mut messages = vec![
-                    user_msg("initial prompt"),
-                    assistant_with_call("call_1", &format!(r#"{{"q":"{}"}}"#, filler)),
-                    tool_result("call_1", &filler),
-                    assistant_with_call("call_2", &format!(r#"{{"q":"{}"}}"#, filler)),
-                    tool_result("call_2", &filler),
-                    assistant_with_call("call_3", &format!(r#"{{"q":"{}"}}"#, filler)),
-                    tool_result("call_3", &filler),
-                ];
-                let original_len = messages.len();
+        // Budget of 200 tokens = 800 chars. Each turn is >= 200 chars of tool args + 400 chars of result.
+        trim_messages(&mut messages, 200);
 
-                // Budget of 200 tokens = 800 chars. Each turn is >= 200 chars of tool args + 400 chars of result.
-                trim_messages(&mut messages, 200);
-
-                assert!(
-                    messages.len() < original_len,
-                    "expected trimming, got {} messages",
-                    messages.len()
-                );
-                // Initial user prompt preserved.
-                assert_eq!(messages[0].role, "user");
-                assert_eq!(messages[0].content.as_deref(), Some("initial prompt"));
-                // Most recent turn preserved (the call_3 pair).
-                let last_assistant_idx = messages
-                    .iter()
-                    .rposition(|m| m.role == "assistant")
-                    .expect("must retain an assistant message");
-                let last_tc = messages[last_assistant_idx]
-                    .tool_calls
-                    .as_ref()
-                    .expect("assistant has tool_calls")
-                    .first()
-                    .unwrap();
-                assert_eq!(last_tc.id, "call_3");
-                // Every tool message still refers to a tool_call_id present on a preceding assistant.
-                for (i, m) in messages.iter().enumerate() {
-                    if m.role == "tool" {
-                        let id = m.tool_call_id.as_deref().unwrap();
-                        let found = messages[..i].iter().any(|prev| {
-                            prev.tool_calls
-                                .as_ref()
-                                .is_some_and(|tcs| tcs.iter().any(|tc| tc.id == id))
-                        });
-                        assert!(found, "orphaned tool_call_id {}", id);
-                    }
-                }
+        assert!(
+            messages.len() < original_len,
+            "expected trimming, got {} messages",
+            messages.len()
+        );
+        // Initial user prompt preserved.
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content.as_deref(), Some("initial prompt"));
+        // Most recent turn preserved (the call_3 pair).
+        let last_assistant_idx = messages
+            .iter()
+            .rposition(|m| m.role == "assistant")
+            .expect("must retain an assistant message");
+        let last_tc = messages[last_assistant_idx]
+            .tool_calls
+            .as_ref()
+            .expect("assistant has tool_calls")
+            .first()
+            .unwrap();
+        assert_eq!(last_tc.id, "call_3");
+        // Every tool message still refers to a tool_call_id present on a preceding assistant.
+        for (i, m) in messages.iter().enumerate() {
+            if m.role == "tool" {
+                let id = m.tool_call_id.as_deref().unwrap();
+                let found = messages[..i].iter().any(|prev| {
+                    prev.tool_calls
+                        .as_ref()
+                        .is_some_and(|tcs| tcs.iter().any(|tc| tc.id == id))
+                });
+                assert!(found, "orphaned tool_call_id {}", id);
             }
+        }
+    }
 
-            #[test]
-            fn test_trim_messages_noop_under_budget() {
-                let mut messages = vec![
-                    Message {
-                        role: "user".into(),
-                        content: Some("short prompt".into()),
-                        tool_calls: None,
-                        tool_call_id: None,
-                    },
-                    Message {
-                        role: "assistant".into(),
-                        content: Some("short reply".into()),
-                        tool_calls: None,
-                        tool_call_id: None,
-                    },
-                ];
-                let original_len = messages.len();
-                trim_messages(&mut messages, 10_000);
-                assert_eq!(messages.len(), original_len);
-            }
+    #[test]
+    fn test_trim_messages_noop_under_budget() {
+        let mut messages = vec![
+            Message {
+                role: "user".into(),
+                content: Some("short prompt".into()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            Message {
+                role: "assistant".into(),
+                content: Some("short reply".into()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        ];
+        let original_len = messages.len();
+        trim_messages(&mut messages, 10_000);
+        assert_eq!(messages.len(), original_len);
+    }
 
     #[test]
     fn test_message_serialization() {

@@ -187,7 +187,10 @@ pub const OPENROUTER_MODELS: &[(&str, &str)] = &[
         "Claude Sonnet 4.5 (Anthropic via OR)",
     ),
     ("openai/gpt-4o-mini", "GPT-4o Mini (OpenAI via OR)"),
-    ("google/gemini-2.5-flash", "Gemini 2.5 Flash (Google via OR)"),
+    (
+        "google/gemini-2.5-flash",
+        "Gemini 2.5 Flash (Google via OR)",
+    ),
 ];
 
 pub const DEFAULT_OPENROUTER_MODEL: &str = "anthropic/claude-sonnet-4-5";
@@ -434,8 +437,7 @@ mod tests {
         // the parse error and fall back to defaults — this is the
         // user-visible "settings reset" path and callers rely on the
         // Some(msg) signal to tell the user their settings were dropped.
-        let dir = env::temp_dir()
-            .join(format!("gw2_config_parse_err_{}", std::process::id()));
+        let dir = env::temp_dir().join(format!("gw2_config_parse_err_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.json");
         std::fs::write(&path, "{ not valid json").unwrap();

@@ -33,10 +33,7 @@ pub const CANCELLED_ERROR: &str = "cancelled";
 ///
 /// Returns one `ScrapeResult` per site regardless of whether it succeeded or was
 /// skipped. Never panics — errors are captured in `ScrapeResult.error`.
-pub fn scrape_all(
-    addon_dir: &Path,
-    should_cancel: &dyn Fn() -> bool,
-) -> Vec<ScrapeResult> {
+pub fn scrape_all(addon_dir: &Path, should_cancel: &dyn Fn() -> bool) -> Vec<ScrapeResult> {
     // Cancel before any work
     if should_cancel() {
         return vec![
@@ -51,9 +48,21 @@ pub fn scrape_all(
         Err(e) => {
             let msg = format!("Failed to build HTTP client: {}", e);
             return vec![
-                ScrapeResult { source: "snowcrows".into(), builds: vec![], error: Some(msg.clone()) },
-                ScrapeResult { source: "hardstuck".into(), builds: vec![], error: Some(msg.clone()) },
-                ScrapeResult { source: "guildjen".into(), builds: vec![], error: Some(msg) },
+                ScrapeResult {
+                    source: "snowcrows".into(),
+                    builds: vec![],
+                    error: Some(msg.clone()),
+                },
+                ScrapeResult {
+                    source: "hardstuck".into(),
+                    builds: vec![],
+                    error: Some(msg.clone()),
+                },
+                ScrapeResult {
+                    source: "guildjen".into(),
+                    builds: vec![],
+                    error: Some(msg),
+                },
             ];
         }
     };
@@ -62,9 +71,21 @@ pub fn scrape_all(
     if let Err(e) = std::fs::create_dir_all(&benchmarks_dir) {
         let msg = format!("Cannot create benchmarks dir: {}", e);
         return vec![
-            ScrapeResult { source: "snowcrows".into(), builds: vec![], error: Some(msg.clone()) },
-            ScrapeResult { source: "hardstuck".into(), builds: vec![], error: Some(msg.clone()) },
-            ScrapeResult { source: "guildjen".into(), builds: vec![], error: Some(msg) },
+            ScrapeResult {
+                source: "snowcrows".into(),
+                builds: vec![],
+                error: Some(msg.clone()),
+            },
+            ScrapeResult {
+                source: "hardstuck".into(),
+                builds: vec![],
+                error: Some(msg.clone()),
+            },
+            ScrapeResult {
+                source: "guildjen".into(),
+                builds: vec![],
+                error: Some(msg),
+            },
         ];
     }
 
@@ -82,23 +103,51 @@ pub fn scrape_all(
     let sc_result = match scrape_snowcrows(&client, &today, should_cancel) {
         Ok((builds, cancelled)) => {
             save_builds(&builds, &benchmarks_dir);
-            let error = if cancelled { Some(CANCELLED_ERROR.into()) } else { None };
-            ScrapeResult { source: "snowcrows".into(), builds, error }
+            let error = if cancelled {
+                Some(CANCELLED_ERROR.into())
+            } else {
+                None
+            };
+            ScrapeResult {
+                source: "snowcrows".into(),
+                builds,
+                error,
+            }
         }
-        Err(e) => ScrapeResult { source: "snowcrows".into(), builds: vec![], error: Some(e) },
+        Err(e) => ScrapeResult {
+            source: "snowcrows".into(),
+            builds: vec![],
+            error: Some(e),
+        },
     };
 
     // Scrape #2: Hardstuck.
     if should_cancel() {
-        return vec![sc_result, cancelled_result("hardstuck"), cancelled_result("guildjen")];
+        return vec![
+            sc_result,
+            cancelled_result("hardstuck"),
+            cancelled_result("guildjen"),
+        ];
     }
     let hs_result = match scrape_hardstuck(&client, &today, should_cancel) {
         Ok((builds, cancelled)) => {
             save_builds(&builds, &benchmarks_dir);
-            let error = if cancelled { Some(CANCELLED_ERROR.into()) } else { None };
-            ScrapeResult { source: "hardstuck".into(), builds, error }
+            let error = if cancelled {
+                Some(CANCELLED_ERROR.into())
+            } else {
+                None
+            };
+            ScrapeResult {
+                source: "hardstuck".into(),
+                builds,
+                error,
+            }
         }
-        Err(e) => ScrapeResult { source: "hardstuck".into(), builds: vec![], error: Some(e) },
+        Err(e) => ScrapeResult {
+            source: "hardstuck".into(),
+            builds: vec![],
+            error: Some(e),
+        },
     };
 
     // Scrape #3: GuildJen.
@@ -108,10 +157,22 @@ pub fn scrape_all(
     let gj_result = match scrape_guildjen(&client, &today, should_cancel) {
         Ok((builds, cancelled)) => {
             save_builds(&builds, &benchmarks_dir);
-            let error = if cancelled { Some(CANCELLED_ERROR.into()) } else { None };
-            ScrapeResult { source: "guildjen".into(), builds, error }
+            let error = if cancelled {
+                Some(CANCELLED_ERROR.into())
+            } else {
+                None
+            };
+            ScrapeResult {
+                source: "guildjen".into(),
+                builds,
+                error,
+            }
         }
-        Err(e) => ScrapeResult { source: "guildjen".into(), builds: vec![], error: Some(e) },
+        Err(e) => ScrapeResult {
+            source: "guildjen".into(),
+            builds: vec![],
+            error: Some(e),
+        },
     };
 
     vec![sc_result, hs_result, gj_result]
@@ -161,8 +222,15 @@ pub fn load_benchmarks(addon_dir: &Path) -> Vec<BenchmarkBuild> {
 /// Professions enumerated directly — Snowcrows uses server-side rendering per-profession page.
 /// The top-level `/builds` page is a SPA shell with no static links.
 const SC_PROFESSIONS: &[&str] = &[
-    "guardian", "warrior", "engineer", "ranger", "thief",
-    "elementalist", "mesmer", "necromancer", "revenant",
+    "guardian",
+    "warrior",
+    "engineer",
+    "ranger",
+    "thief",
+    "elementalist",
+    "mesmer",
+    "necromancer",
+    "revenant",
 ];
 
 /// Scrape Snowcrows (PvE raid/strike meta builds).
@@ -276,8 +344,15 @@ fn scrape_snowcrows_build(
 /// The index page is Next.js — links appear as hrefs in the static HTML.
 /// We enumerate per-profession pages to bypass the JS-rendered filter UI.
 const HS_PROFESSIONS: &[&str] = &[
-    "guardian", "warrior", "engineer", "ranger", "thief",
-    "elementalist", "mesmer", "necromancer", "revenant",
+    "guardian",
+    "warrior",
+    "engineer",
+    "ranger",
+    "thief",
+    "elementalist",
+    "mesmer",
+    "necromancer",
+    "revenant",
 ];
 
 /// Scrape Hardstuck (multi-mode builds).
@@ -347,7 +422,10 @@ fn scrape_hardstuck_build(
     // URL: /gw2/builds/{profession}/{slug}/
     // slug like "blood-harbinger" or "24929"
     let url_parts: Vec<&str> = url.trim_end_matches('/').split('/').collect();
-    let profession_raw = url_parts.get(url_parts.len().saturating_sub(2)).copied().unwrap_or("");
+    let profession_raw = url_parts
+        .get(url_parts.len().saturating_sub(2))
+        .copied()
+        .unwrap_or("");
     let slug = url_parts.last().copied().unwrap_or("");
     let profession = title_case(&profession_raw.replace('-', " "));
 
@@ -367,7 +445,10 @@ fn scrape_hardstuck_build(
     // Role from page content
     let role = if html_lower.contains("condi") || html_lower.contains("condition damage") {
         "Condi DPS"
-    } else if html_lower.contains("support") || html_lower.contains("healer") || html_lower.contains("heal") {
+    } else if html_lower.contains("support")
+        || html_lower.contains("healer")
+        || html_lower.contains("heal")
+    {
         "Heal Support"
     } else if html_lower.contains("bruiser") || html_lower.contains("sustain") {
         "Sustain / Bruiser"
@@ -422,7 +503,11 @@ fn scrape_guildjen(
         if should_cancel() {
             return Ok((builds, true));
         }
-        let mode = if index_url.contains("wvw") { "WvW" } else { "PvP" };
+        let mode = if index_url.contains("wvw") {
+            "WvW"
+        } else {
+            "PvP"
+        };
         let Ok(html) = fetch_html(client, index_url) else {
             continue;
         };
@@ -460,7 +545,13 @@ fn scrape_guildjen_build(
     let html = fetch_html(client, url)?;
 
     let (profession, spec_name) = parse_profession_spec_from_url(url);
-    let mode = if url.contains("wvw") { "WvW" } else if url.contains("pvp") { "PvP" } else { "WvW" };
+    let mode = if url.contains("wvw") {
+        "WvW"
+    } else if url.contains("pvp") {
+        "PvP"
+    } else {
+        "WvW"
+    };
 
     let role = if html.to_lowercase().contains("roam") {
         "WvW Roaming"
@@ -533,7 +624,11 @@ fn extract_text_after(html: &str, marker: &str, end_marker: &str) -> Option<Stri
     let content = &after_marker[content_start + 1..];
     let content_end = content.find(end_marker)?;
     let text = content[..content_end].trim().to_string();
-    if text.is_empty() { None } else { Some(text) }
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 /// Parse profession and spec name from a URL path.
@@ -550,8 +645,15 @@ fn parse_profession_spec_from_url(url: &str) -> (String, String) {
 
     // Known profession names for matching
     let professions = [
-        "guardian", "warrior", "engineer", "ranger", "thief",
-        "elementalist", "mesmer", "necromancer", "revenant",
+        "guardian",
+        "warrior",
+        "engineer",
+        "ranger",
+        "thief",
+        "elementalist",
+        "mesmer",
+        "necromancer",
+        "revenant",
     ];
 
     let mut profession = String::new();
@@ -582,11 +684,34 @@ fn parse_profession_spec_from_url(url: &str) -> (String, String) {
 
 /// Known GW2 elite spec names for slug extraction.
 const KNOWN_SPECS: &[&str] = &[
-    "firebrand", "willbender", "dragonhunter", "berserker", "spellbreaker", "bladesworn",
-    "scrapper", "mechanist", "holosmith", "soulbeast", "untamed", "druid",
-    "daredevil", "specter", "deadeye", "weaver", "tempest", "catalyst",
-    "chronomancer", "virtuoso", "mirage", "scourge", "harbinger", "reaper",
-    "renegade", "vindicator", "herald", "luminary",
+    "firebrand",
+    "willbender",
+    "dragonhunter",
+    "berserker",
+    "spellbreaker",
+    "bladesworn",
+    "scrapper",
+    "mechanist",
+    "holosmith",
+    "soulbeast",
+    "untamed",
+    "druid",
+    "daredevil",
+    "specter",
+    "deadeye",
+    "weaver",
+    "tempest",
+    "catalyst",
+    "chronomancer",
+    "virtuoso",
+    "mirage",
+    "scourge",
+    "harbinger",
+    "reaper",
+    "renegade",
+    "vindicator",
+    "herald",
+    "luminary",
 ];
 
 /// Extract elite spec name from a Snowcrows URL slug.
@@ -641,11 +766,30 @@ fn extract_build_code(html: &str) -> Option<String> {
 fn extract_gear_prefix(html: &str) -> String {
     // Common gear prefixes — match in order of specificity
     let prefixes = [
-        "Trailblazer's", "Plaguedoctor's", "Ritualist's", "Apothecary's",
-        "Diviner's", "Celestial", "Minstrel's", "Harrier's", "Berserker's",
-        "Viper's", "Sinister", "Grieving", "Marauder", "Dragon's", "Valkyrie",
-        "Trailblazer", "Assassin's", "Knight's", "Nomad's", "Soldier's",
-        "Cavalier's", "Dire", "Magi's", "Cleric's",
+        "Trailblazer's",
+        "Plaguedoctor's",
+        "Ritualist's",
+        "Apothecary's",
+        "Diviner's",
+        "Celestial",
+        "Minstrel's",
+        "Harrier's",
+        "Berserker's",
+        "Viper's",
+        "Sinister",
+        "Grieving",
+        "Marauder",
+        "Dragon's",
+        "Valkyrie",
+        "Trailblazer",
+        "Assassin's",
+        "Knight's",
+        "Nomad's",
+        "Soldier's",
+        "Cavalier's",
+        "Dire",
+        "Magi's",
+        "Cleric's",
     ];
     let html_lower = html.to_lowercase();
     for p in &prefixes {
@@ -664,7 +808,9 @@ fn extract_rune(html: &str) -> String {
             let after = &html[pos..];
             // Take up to 40 chars and trim at next HTML tag or quote
             let raw = &after[..after.len().min(60)];
-            let end = raw.find(|c: char| c == '<' || c == '"' || c == '\n').unwrap_or(raw.len());
+            let end = raw
+                .find(|c: char| c == '<' || c == '"' || c == '\n')
+                .unwrap_or(raw.len());
             let name = raw[..end].trim().to_string();
             if name.len() > 5 {
                 return name;
@@ -682,7 +828,9 @@ fn extract_sigils(html: &str) -> Vec<String> {
         while let Some(idx) = html[pos..].find(marker) {
             let abs = pos + idx;
             let after = &html[abs..abs.min(html.len() - 1) + 60.min(html.len() - abs)];
-            let end = after.find(|c: char| c == '<' || c == '"' || c == '\n').unwrap_or(after.len());
+            let end = after
+                .find(|c: char| c == '<' || c == '"' || c == '\n')
+                .unwrap_or(after.len());
             let name = after[..end].trim().to_string();
             if name.len() > 5 && !sigils.contains(&name) {
                 sigils.push(name);
@@ -702,7 +850,9 @@ fn extract_relic(html: &str) -> String {
         if let Some(pos) = html.find(marker) {
             let after = &html[pos..];
             let raw = &after[..after.len().min(60)];
-            let end = raw.find(|c: char| c == '<' || c == '"' || c == '\n').unwrap_or(raw.len());
+            let end = raw
+                .find(|c: char| c == '<' || c == '"' || c == '\n')
+                .unwrap_or(raw.len());
             let name = raw[..end].trim().to_string();
             if name.len() > 5 {
                 return name;
@@ -715,18 +865,43 @@ fn extract_relic(html: &str) -> String {
 /// Extract trait names from HTML (look for known specialization names as section headers).
 fn extract_traits(html: &str) -> Vec<String> {
     let known_specs = [
-        "Firebrand", "Willbender", "Dragonhunter",
-        "Berserker", "Spellbreaker", "Bladesworn",
-        "Scrapper", "Mechanist", "Holosmith",
-        "Soulbeast", "Untamed", "Druid",
-        "Daredevil", "Specter", "Deadeye",
-        "Weaver", "Tempest", "Catalyst",
-        "Chronomancer", "Virtuoso", "Mirage",
-        "Scourge", "Harbinger", "Reaper",
-        "Renegade", "Vindicator", "Herald",
+        "Firebrand",
+        "Willbender",
+        "Dragonhunter",
+        "Berserker",
+        "Spellbreaker",
+        "Bladesworn",
+        "Scrapper",
+        "Mechanist",
+        "Holosmith",
+        "Soulbeast",
+        "Untamed",
+        "Druid",
+        "Daredevil",
+        "Specter",
+        "Deadeye",
+        "Weaver",
+        "Tempest",
+        "Catalyst",
+        "Chronomancer",
+        "Virtuoso",
+        "Mirage",
+        "Scourge",
+        "Harbinger",
+        "Reaper",
+        "Renegade",
+        "Vindicator",
+        "Herald",
         // Core specs
-        "Guardian", "Warrior", "Engineer", "Ranger", "Thief",
-        "Elementalist", "Mesmer", "Necromancer", "Revenant",
+        "Guardian",
+        "Warrior",
+        "Engineer",
+        "Ranger",
+        "Thief",
+        "Elementalist",
+        "Mesmer",
+        "Necromancer",
+        "Revenant",
     ];
     let mut traits = Vec::new();
     for spec in &known_specs {
@@ -743,7 +918,14 @@ fn extract_traits(html: &str) -> Vec<String> {
 /// Extract skill names from HTML.
 fn extract_skills(html: &str) -> Vec<String> {
     // Common skill markers on build sites
-    let markers = ["Heal:", "Utility:", "Elite:", "utility-skill", "heal-skill", "elite-skill"];
+    let markers = [
+        "Heal:",
+        "Utility:",
+        "Elite:",
+        "utility-skill",
+        "heal-skill",
+        "elite-skill",
+    ];
     let mut skills = Vec::new();
     for marker in &markers {
         if let Some(pos) = html.find(marker) {
@@ -830,7 +1012,8 @@ mod tests {
 
     #[test]
     fn test_extract_build_links_finds_hrefs() {
-        let html = r#"<a href="/builds/guardian/firebrand">Firebrand</a><a href="/other">Other</a>"#;
+        let html =
+            r#"<a href="/builds/guardian/firebrand">Firebrand</a><a href="/other">Other</a>"#;
         let links = extract_build_links(html, "/builds/", 10);
         assert_eq!(links.len(), 1);
         assert_eq!(links[0], "/builds/guardian/firebrand");
@@ -838,14 +1021,18 @@ mod tests {
 
     #[test]
     fn test_parse_profession_spec_guardian_firebrand() {
-        let (prof, spec) = parse_profession_spec_from_url("https://snowcrows.com/builds/guardian/firebrand/power-dps");
+        let (prof, spec) = parse_profession_spec_from_url(
+            "https://snowcrows.com/builds/guardian/firebrand/power-dps",
+        );
         assert_eq!(prof, "Guardian");
         assert_eq!(spec, "Firebrand");
     }
 
     #[test]
     fn test_parse_profession_spec_necromancer_scourge() {
-        let (prof, spec) = parse_profession_spec_from_url("https://snowcrows.com/builds/necromancer/scourge/condi");
+        let (prof, spec) = parse_profession_spec_from_url(
+            "https://snowcrows.com/builds/necromancer/scourge/condi",
+        );
         assert_eq!(prof, "Necromancer");
         assert_eq!(spec, "Scourge");
     }
@@ -864,7 +1051,8 @@ mod tests {
 
     #[test]
     fn test_extract_build_code() {
-        let html = r#"Build code: [&DQYAAAAqASsATgA2ADYARgBGAEYARgAAAAAAAAAAAAAAAAAAAAAAAAA=] use it"#;
+        let html =
+            r#"Build code: [&DQYAAAAqASsATgA2ADYARgBGAEYARgAAAAAAAAAAAAAAAAAAAAAAAAA=] use it"#;
         let code = extract_build_code(html);
         assert!(code.is_some());
         assert!(code.unwrap().starts_with("[&"));
@@ -874,7 +1062,11 @@ mod tests {
     fn test_extract_rune() {
         let html = "equip Superior Rune of the Scholar for best results";
         let rune = extract_rune(html);
-        assert!(rune.contains("Scholar"), "rune='{}' should contain Scholar", rune);
+        assert!(
+            rune.contains("Scholar"),
+            "rune='{}' should contain Scholar",
+            rune
+        );
     }
 
     #[test]
@@ -925,8 +1117,17 @@ mod tests {
         );
         assert_eq!(results.len(), 3, "must still emit one result per source");
         for r in &results {
-            assert_eq!(r.error.as_deref(), Some(CANCELLED_ERROR), "{} not flagged cancelled", r.source);
-            assert!(r.builds.is_empty(), "{} should have no builds when cancelled", r.source);
+            assert_eq!(
+                r.error.as_deref(),
+                Some(CANCELLED_ERROR),
+                "{} not flagged cancelled",
+                r.source
+            );
+            assert!(
+                r.builds.is_empty(),
+                "{} should have no builds when cancelled",
+                r.source
+            );
         }
         // Sources stay in canonical order so the UI can rely on positional access.
         assert_eq!(results[0].source, "snowcrows");
@@ -1053,7 +1254,10 @@ mod tests {
         match result {
             Ok((builds, cancelled)) => {
                 assert!(cancelled, "cancelled flag must be true");
-                assert!(builds.is_empty(), "no builds should be collected before first fetch");
+                assert!(
+                    builds.is_empty(),
+                    "no builds should be collected before first fetch"
+                );
             }
             Err(e) => panic!("expected Ok((empty, true)) on cancel, got Err({})", e),
         }
@@ -1091,7 +1295,10 @@ mod tests {
         match result {
             Ok((builds, cancelled)) => {
                 assert!(cancelled, "cancelled flag must be true");
-                assert!(builds.is_empty(), "no builds should be collected before first fetch");
+                assert!(
+                    builds.is_empty(),
+                    "no builds should be collected before first fetch"
+                );
             }
             Err(e) => panic!("expected Ok((empty, true)) on cancel, got Err({})", e),
         }
@@ -1129,7 +1336,10 @@ mod tests {
         match result {
             Ok((builds, cancelled)) => {
                 assert!(cancelled, "cancelled flag must be true");
-                assert!(builds.is_empty(), "no builds should be collected before first fetch");
+                assert!(
+                    builds.is_empty(),
+                    "no builds should be collected before first fetch"
+                );
             }
             Err(e) => panic!("expected Ok((empty, true)) on cancel, got Err({})", e),
         }

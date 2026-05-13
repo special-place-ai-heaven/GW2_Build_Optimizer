@@ -51,11 +51,7 @@ impl BuildStorage {
                 ));
             }
             Err(e) => {
-                return Err(format!(
-                    "Failed to create {}: {}",
-                    path.display(),
-                    e
-                ));
+                return Err(format!("Failed to create {}: {}", path.display(), e));
             }
         }
 
@@ -287,7 +283,6 @@ mod tests {
         assert_eq!(saved.name, "Old Build");
     }
 
-
     #[test]
     fn test_forward_compat_ignores_unknown_fields() {
         // If a future DLL adds a new field to `SavedBuild` and the user then
@@ -389,7 +384,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-
     #[test]
     fn test_save_new_concurrent_race() {
         // Two threads call save_new on the same filename at the same time.
@@ -398,8 +392,8 @@ mod tests {
         // must win and the other must error with "already exists". No .tmp
         // leftover should remain. Repeated across many iterations to widen
         // the scheduler race window.
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
         use std::thread;
 
         let dir = temp_dir("save_new_race");
