@@ -244,6 +244,7 @@ fn scrape_snowcrows(
     today: &str,
     should_cancel: &dyn Fn() -> bool,
 ) -> Result<(Vec<BenchmarkBuild>, bool), String> {
+    let mut last_html: Option<String> = None;
     let mut all_links: Vec<String> = Vec::new();
 
     // Collect build links from each profession's page
@@ -255,6 +256,7 @@ fn scrape_snowcrows(
         let Ok(html) = fetch_html(client, &prof_url) else {
             continue;
         };
+        last_html = Some(html.clone());
         // Build links look like: href="/builds/raids/guardian/power-dragonhunter-..."
         let links = extract_build_links(&html, "/builds/raids/", 50);
         for link in links {
@@ -271,6 +273,22 @@ fn scrape_snowcrows(
     }
 
     if all_links.is_empty() {
+        // Distinguish "we were served a block page / wrong content" from
+        // "the site genuinely listed no builds" — the former is almost always a
+        // network filter (e.g. a UniFi/UDMPro content block on snowcrows.com) and
+        // needs an allowlist change, not a code fix.
+        if last_html
+            .as_deref()
+            .map(looks_like_blocked_page)
+            .unwrap_or(false)
+        {
+            return Err(
+                "Snowcrows: request was intercepted by a network block/filter page \
+                 (the domain appears restricted by your gateway/firewall — allowlist \
+                 snowcrows.com, e.g. on your UniFi/UDMPro content filter)"
+                    .into(),
+            );
+        }
         return Err("Snowcrows: no build links found on any profession page".into());
     }
 
@@ -392,6 +410,7 @@ fn scrape_hardstuck(
     today: &str,
     should_cancel: &dyn Fn() -> bool,
 ) -> Result<(Vec<BenchmarkBuild>, bool), String> {
+    let mut last_html: Option<String> = None;
     let mut all_links: Vec<String> = Vec::new();
 
     // Each profession page lists builds for that profession
@@ -403,6 +422,7 @@ fn scrape_hardstuck(
         let Ok(html) = fetch_html(client, &prof_url) else {
             continue;
         };
+        last_html = Some(html.clone());
         // Build links: href="/gw2/builds/{profession}/{slug}/" with a non-empty slug
         // slug can be numeric (24929) or text (blood-harbinger)
         let links = extract_build_links(&html, &format!("/gw2/builds/{}/", profession), 40);
@@ -423,6 +443,22 @@ fn scrape_hardstuck(
     }
 
     if all_links.is_empty() {
+        // Distinguish "we were served a block page / wrong content" from
+        // "the site genuinely listed no builds" — the former is almost always a
+        // network filter (e.g. a UniFi/UDMPro content block on hardstuck.gg) and
+        // needs an allowlist change, not a code fix.
+        if last_html
+            .as_deref()
+            .map(looks_like_blocked_page)
+            .unwrap_or(false)
+        {
+            return Err(
+                "Hardstuck: request was intercepted by a network block/filter page \
+                 (the domain appears restricted by your gateway/firewall — allowlist \
+                 hardstuck.gg, e.g. on your UniFi/UDMPro content filter)"
+                    .into(),
+            );
+        }
         return Err("Hardstuck: no build links found on any profession page".into());
     }
 
@@ -590,12 +626,42 @@ fn scrape_guildjen_build(
 // ─── HTML extraction helpers ──────────────────────────────────────────────────
 
 fn fetch_html(client: &reqwest::blocking::Client, url: &str) -> Result<String, String> {
-    client
+    let resp = client
         .get(url)
         .send()
-        .map_err(|e| format!("HTTP error fetching {}: {}", url, e))?
-        .text()
+        .map_err(|e| format!("HTTP error fetching {}: {}", url, e))?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(format!(
+            "HTTP {} fetching {} (expected 2xx)",
+            status.as_u16(),
+            url
+        ));
+    }
+
+    resp.text()
         .map_err(|e| format!("UTF-8 error reading {}: {}", url, e))
+}
+
+/// Heuristic: does this look like a network/security interstitial (block page,
+/// captive portal, WAF challenge) rather than the real site content?
+///
+/// These pages return HTTP 200 with a body that mentions being blocked, so a
+/// status check alone won't catch them. We only flag high-confidence markers to
+/// avoid false positives on legitimate build pages.
+fn looks_like_blocked_page(html: &str) -> bool {
+    let lower = html.to_lowercase();
+    // "blocked" + a gateway/filter vendor or "restricted"/"administrator" cue.
+    let mentions_blocked = lower.contains("blocked because")
+        || lower.contains("access denied")
+        || lower.contains("this site is blocked")
+        || lower.contains("domain is restricted");
+    let mentions_gateway = lower.contains("ubiquiti")
+        || lower.contains("unifi")
+        || lower.contains("contact your administrator")
+        || lower.contains("content filter");
+    (mentions_blocked && mentions_gateway) || lower.contains("domain is restricted")
 }
 
 /// Extract hrefs containing `needle` from anchor tags in HTML.
@@ -1000,6 +1066,34 @@ mod tests {
         let links = extract_build_links(html, "/builds/", 10);
         assert_eq!(links.len(), 1);
         assert_eq!(links[0], "/builds/guardian/firebrand");
+    }
+
+    #[test]
+    fn test_looks_like_blocked_page_detects_unifi_block() {
+        // Markers taken from the observed UniFi/Ubiquiti block page.
+        let html = r#"<html><head><title>Blocked</title></head><body>
+            <div id="info-box"><svg id="ubiquiti-logo"></svg>
+            <p>This domain is restricted. Contact your administrator for more information.</p>
+            <p>blocked because the domain is restricted</p></body></html>"#;
+        assert!(looks_like_blocked_page(html));
+    }
+
+    #[test]
+    fn test_looks_like_blocked_page_ignores_real_build_page() {
+        // A normal build page that happens to use the word "blocks" must NOT trip it.
+        let html = r#"<html><body>
+            <a href="/gw2/builds/guardian/firebrand">Firebrand</a>
+            <p>Shield of Courage blocks the next attack. Great sustain build.</p>
+            </body></html>"#;
+        assert!(!looks_like_blocked_page(html));
+    }
+
+    #[test]
+    fn test_looks_like_blocked_page_ignores_empty() {
+        assert!(!looks_like_blocked_page(""));
+        assert!(!looks_like_blocked_page(
+            "<html><body>No builds here yet.</body></html>"
+        ));
     }
 
     #[test]
