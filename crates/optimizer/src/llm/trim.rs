@@ -21,6 +21,8 @@ pub(crate) const SAFE_PROMPT_BUDGET_TOKENS: usize = 100_000;
 
 #[cfg(test)]
 mod tests {
+    // Intentional invariant tripwires.
+    #![allow(clippy::assertions_on_constants)]
     use super::*;
 
     #[test]

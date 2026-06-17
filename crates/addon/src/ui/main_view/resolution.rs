@@ -334,17 +334,20 @@ fn resolve_skills_db(
     }
 }
 
-/// Resolve equipment using GameDb O(1) lookups.
-fn resolve_equipment_db(
-    equipment: &gw2_api::models::EquipmentTab,
-    db: &gw2_optimizer::gamedb::GameDb,
-) -> (
+/// Resolved equipment bundle: (weapon sets, armor, trinkets, rune, relic).
+type ResolvedEquipment = (
     Vec<gw2_core::types::ResolvedWeaponSet>,
     Vec<gw2_core::types::ResolvedGearPiece>,
     Vec<gw2_core::types::ResolvedGearPiece>,
     Option<gw2_core::types::ResolvedUpgrade>,
     Option<gw2_core::types::ResolvedRelic>,
-) {
+);
+
+/// Resolve equipment using GameDb O(1) lookups.
+fn resolve_equipment_db(
+    equipment: &gw2_api::models::EquipmentTab,
+    db: &gw2_optimizer::gamedb::GameDb,
+) -> ResolvedEquipment {
     use gw2_core::types::*;
 
     let mut armor = Vec::new();

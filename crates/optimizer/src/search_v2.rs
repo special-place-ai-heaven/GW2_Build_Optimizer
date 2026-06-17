@@ -98,6 +98,9 @@ pub fn generate_neighbors(
 /// time/evaluation budget.
 ///
 /// Returns `Err` if seeding fails (e.g. unknown profession).
+// Beam-search core; db, weights, context, scenario, and config are independent
+// inputs — a params struct adds indirection without clarifying the search.
+#[allow(clippy::too_many_arguments)]
 pub fn optimize_v2_search(
     db: &GameDb,
     profession_name: &str,
@@ -155,7 +158,7 @@ pub fn optimize_v2_search(
 
         // Budget per candidate to avoid spending all evals on a single member.
         let budget_per = config.eval_budget.saturating_sub(eval_count) / beam.len().max(1);
-        let neighbor_cap = budget_per.min(30).max(1);
+        let neighbor_cap = budget_per.clamp(1, 30);
 
         for candidate in &beam {
             let neighbors = generate_neighbors(candidate, db, profession_name);

@@ -219,9 +219,7 @@ pub fn search_spec_combos(
                     continue;
                 } // Can't pick same spec twice
                   // Normalize order for dedup (smaller first) unless locked
-                let pair = if locked_slot0.is_some() || locked_slot1.is_some() {
-                    (s0, s1)
-                } else if s0 < s1 {
+                let pair = if locked_slot0.is_some() || locked_slot1.is_some() || s0 < s1 {
                     (s0, s1)
                 } else {
                     continue; // skip reversed pair to avoid duplicates
@@ -276,7 +274,7 @@ pub fn search_spec_combos(
                     let any_locked = locked_slot0.is_some()
                         || locked_slot1.is_some()
                         || locks.specs[2].is_some();
-                    if !any_locked && !(s0 < s1 && s1 < s2) {
+                    if !(any_locked || s0 < s1 && s1 < s2) {
                         continue;
                     }
                     combos.push((None, vec![s0, s1, s2]));

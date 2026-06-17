@@ -70,7 +70,7 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                 Cancelled,
                 ClientError(String),
                 DownloadError(String),
-                DbLoad(Result<gw2_optimizer::gamedb::GameDb, String>),
+                DbLoad(Box<Result<gw2_optimizer::gamedb::GameDb, String>>),
             }
 
             let outcome: Outcome = 'refresh: {
@@ -130,7 +130,7 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                     break 'refresh Outcome::Cancelled;
                 }
 
-                Outcome::DbLoad(db_result)
+                Outcome::DbLoad(Box::new(db_result))
             };
 
             crate::state::with_state(|s| {
@@ -141,22 +141,24 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                     Outcome::ClientError(e) | Outcome::DownloadError(e) => {
                         s.main.error = Some(format!("Refresh failed: {}", e));
                     }
-                    Outcome::DbLoad(Ok(db)) => {
-                        nexus::log::log(
-                            nexus::log::LogLevel::Info,
-                            "GW2 Build Optimizer",
-                            "Game data refreshed successfully",
-                        );
-                        s.main.game_db = Some(db);
-                        if s.main.selected_build_tab.is_some()
-                            && s.main.selected_equipment_tab.is_some()
-                        {
-                            resolve_selected_build_inner(s);
+                    Outcome::DbLoad(db_result) => match *db_result {
+                        Ok(db) => {
+                            nexus::log::log(
+                                nexus::log::LogLevel::Info,
+                                "GW2 Build Optimizer",
+                                "Game data refreshed successfully",
+                            );
+                            s.main.game_db = Some(db);
+                            if s.main.selected_build_tab.is_some()
+                                && s.main.selected_equipment_tab.is_some()
+                            {
+                                resolve_selected_build_inner(s);
+                            }
                         }
-                    }
-                    Outcome::DbLoad(Err(e)) => {
-                        s.main.error = Some(format!("Failed to reload game data: {}", e));
-                    }
+                        Err(e) => {
+                            s.main.error = Some(format!("Failed to reload game data: {}", e));
+                        }
+                    },
                 }
             });
         }));

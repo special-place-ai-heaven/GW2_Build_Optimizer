@@ -158,7 +158,7 @@ impl BuildStorage {
             })
             .collect();
 
-        builds.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        builds.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
         builds
     }
 
