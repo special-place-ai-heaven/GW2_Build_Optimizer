@@ -26,6 +26,7 @@ use crate::synergy::{
     extract_sigil_effects, extract_skill_effects, extract_trait_effects, score_normalized_effect,
     ComponentId, NormalizedEffect, SynergyLink,
 };
+use crate::text_util::{normalize_sigil_family, text_describes_condition_cleanse};
 use crate::validation::{
     ValidatedBuild, ValidatedGearPrefix, ValidatedItem, ValidatedSkills, ValidatedSpec,
     ValidatedWeaponSet, ValidatedWeapons,
@@ -524,12 +525,6 @@ fn select_sigils(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Opt
 
 // ─── Stage 5: Relic ───
 
-fn normalize_sigil_family(name: &str) -> String {
-    let mut base = name.replace(" (PvP)", "");
-    base.make_ascii_lowercase();
-    base.trim().to_string()
-}
-
 fn select_relic(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &OptimizationWeights) {
     let relics = db.all_relics();
 
@@ -989,12 +984,6 @@ fn condition_cleanse_count_from_fact(fact: &Fact) -> Option<u32> {
         } if text_describes_condition_cleanse(text) => Some((*value).unwrap_or(1).max(1) as u32),
         _ => None,
     }
-}
-
-fn text_describes_condition_cleanse(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    lower.contains("condit")
-        && (lower.contains("remov") || lower.contains("cleanse") || lower.contains("cure"))
 }
 
 fn pick_best_skill(

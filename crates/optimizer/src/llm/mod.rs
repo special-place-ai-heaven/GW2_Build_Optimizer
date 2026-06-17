@@ -6,7 +6,7 @@ pub mod anthropic;
 pub mod gemini;
 pub mod openai;
 pub mod openrouter;
-pub(crate) mod retry;
+pub(crate) mod rate;
 pub mod tools;
 pub(crate) mod trim;
 
@@ -202,37 +202,6 @@ pub(crate) fn has_billing_keyword(message: &str) -> bool {
     KEYWORDS.iter().any(|kw| lower.contains(kw))
 }
 
-#[cfg(test)]
-mod billing_tests {
-    use super::has_billing_keyword;
-
-    #[test]
-    fn matches_english_keywords_case_insensitively() {
-        assert!(has_billing_keyword("Your billing account is suspended"));
-        assert!(has_billing_keyword("QUOTA exceeded for this project"));
-        assert!(has_billing_keyword("Credit balance is too low"));
-        assert!(has_billing_keyword("payment method required"));
-        assert!(has_billing_keyword("insufficient funds"));
-    }
-
-    #[test]
-    fn matches_google_status_codes() {
-        assert!(has_billing_keyword(
-            r#"{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}"#
-        ));
-        assert!(has_billing_keyword(
-            r#"{"error":{"status":"FAILED_PRECONDITION","message":"..."}}"#
-        ));
-    }
-
-    #[test]
-    fn does_not_match_generic_errors() {
-        assert!(!has_billing_keyword("Bad request: missing required field"));
-        assert!(!has_billing_keyword("Internal server error"));
-        assert!(!has_billing_keyword(""));
-    }
-}
-
 /// Create an LLM client based on the current config.
 /// Dispatches to the correct provider and configures persistence.
 pub fn create_client(
@@ -282,5 +251,36 @@ pub fn create_client(
             let client = openrouter::OpenRouterClient::with_persistence(key, model, usage_path)?;
             Ok(Box::new(client))
         }
+    }
+}
+
+#[cfg(test)]
+mod billing_tests {
+    use super::has_billing_keyword;
+
+    #[test]
+    fn matches_english_keywords_case_insensitively() {
+        assert!(has_billing_keyword("Your billing account is suspended"));
+        assert!(has_billing_keyword("QUOTA exceeded for this project"));
+        assert!(has_billing_keyword("Credit balance is too low"));
+        assert!(has_billing_keyword("payment method required"));
+        assert!(has_billing_keyword("insufficient funds"));
+    }
+
+    #[test]
+    fn matches_google_status_codes() {
+        assert!(has_billing_keyword(
+            r#"{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}"#
+        ));
+        assert!(has_billing_keyword(
+            r#"{"error":{"status":"FAILED_PRECONDITION","message":"..."}}"#
+        ));
+    }
+
+    #[test]
+    fn does_not_match_generic_errors() {
+        assert!(!has_billing_keyword("Bad request: missing required field"));
+        assert!(!has_billing_keyword("Internal server error"));
+        assert!(!has_billing_keyword(""));
     }
 }

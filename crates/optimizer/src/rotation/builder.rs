@@ -6,6 +6,7 @@ use gw2_api::models::Skill;
 
 use crate::data::normalized_effects::{EffectCategory, NormalizedEffect};
 use crate::gamedb::GameDb;
+use crate::text_util::text_describes_condition_cleanse;
 
 use super::skill_timings::default_timing;
 use super::{RotationSkill, SkillEffect, SkillSlot};
@@ -245,13 +246,7 @@ fn condition_cleanse_count_from_text(text: &str, value: Option<i32>) -> Option<u
     }
 }
 
-fn text_describes_condition_cleanse(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    lower.contains("condit")
-        && (lower.contains("remov") || lower.contains("cleanse") || lower.contains("cure"))
-}
-
-/// GW2 damaging conditions (same list as gamedb.rs is_condition).
+/// GW2 damaging conditions (the damaging subset of `is_condition`).
 ///
 /// Accepts either verb-form (Poison) or canonical (Poisoned) — input is
 /// normalized via `canonical_condition_name` so the arms only list

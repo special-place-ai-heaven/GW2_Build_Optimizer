@@ -14,7 +14,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
 
     // Error display
     if let Some(err) = state.main.comparison.error.clone() {
-        ui.text_colored([1.0, 0.3, 0.0, 1.0], &format!("[!] {}", err));
+        ui.text_colored([1.0, 0.3, 0.0, 1.0], format!("[!] {}", err));
         ui.same_line();
         if ui.small_button("Dismiss##opt_err_improve") {
             state.main.comparison.error = None;
@@ -47,7 +47,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
         if let Some(spec_name) = locked_spec_name {
             ui.text_colored(
                 [0.7, 0.9, 0.7, 1.0],
-                &format!("  \u{1F512} Locked to: {}", spec_name),
+                format!("  \u{1F512} Locked to: {}", spec_name),
             );
             ui.same_line();
             if ui.small_button("Unlock") {

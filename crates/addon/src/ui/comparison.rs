@@ -77,7 +77,7 @@ pub fn render_comparison(
     }
 
     if let Some(ref err) = comparison.error {
-        ui.text_colored([1.0, 0.3, 0.0, 1.0], &format!("Error: {}", err));
+        ui.text_colored([1.0, 0.3, 0.0, 1.0], format!("Error: {}", err));
         return None;
     }
 
@@ -171,23 +171,23 @@ pub fn render_comparison(
     } else {
         &suggestion.explanation
     };
-    if !explanation_text.is_empty() {
-        if ui.collapsing_header("AI Advisory (optional)", TreeNodeFlags::empty()) {
-            ui.text_colored(
-                [0.6, 0.6, 0.8, 1.0],
-                "Advisory text from AI — referee scores are authoritative.",
-            );
-            ui.spacing();
-            ui.text_wrapped(explanation_text);
-        }
+    if !explanation_text.is_empty()
+        && ui.collapsing_header("AI Advisory (optional)", TreeNodeFlags::empty())
+    {
+        ui.text_colored(
+            [0.6, 0.6, 0.8, 1.0],
+            "Advisory text from AI — referee scores are authoritative.",
+        );
+        ui.spacing();
+        ui.text_wrapped(explanation_text);
     }
 
     // ═══ Changes Made ═══
-    if !suggestion.changes_made.is_empty() {
-        if ui.collapsing_header("Changes Made", TreeNodeFlags::DEFAULT_OPEN) {
-            for change in &suggestion.changes_made {
-                ui.bullet_text(change);
-            }
+    if !suggestion.changes_made.is_empty()
+        && ui.collapsing_header("Changes Made", TreeNodeFlags::DEFAULT_OPEN)
+    {
+        for change in &suggestion.changes_made {
+            ui.bullet_text(change);
         }
     }
 
@@ -203,7 +203,7 @@ pub fn render_chat_code_copy(ui: &Ui, chat_code: Option<&str>, id_suffix: &str) 
     ui.spacing();
     ui.text_colored([0.6, 0.6, 0.7, 1.0], "Chat Code:");
     ui.same_line();
-    if ui.small_button(&format!("Copy##suggestion_chat_code_{}", id_suffix)) {
+    if ui.small_button(format!("Copy##suggestion_chat_code_{}", id_suffix)) {
         ui.set_clipboard_text(code);
     }
     ui.set_next_item_width(-1.0);
@@ -327,14 +327,17 @@ fn render_primary_stats(ui: &Ui, current: Option<&StatBlock>, suggested: Option<
     render_stat_table(ui, "##primary_stats", &stats);
 }
 
+/// One combat-performance row: (label, color, current metrics, suggested metrics).
+type CombatTier<'a> = (
+    &'a str,
+    [f32; 4],
+    Option<&'a CombatMetrics>,
+    Option<&'a CombatMetrics>,
+);
+
 /// Render combat performance metrics with three tiers: Solo, Party, Full Squad.
 fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: &BuildSuggestion) {
-    let tiers: Vec<(
-        &str,
-        [f32; 4],
-        Option<&CombatMetrics>,
-        Option<&CombatMetrics>,
-    )> = vec![
+    let tiers: Vec<CombatTier> = vec![
         (
             "Solo (Gear + Traits)",
             [0.7, 0.85, 1.0, 1.0],
@@ -359,7 +362,7 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
         ui.text_colored(*color, *label);
 
         if let Some(sug) = sug_combat {
-            ui.columns(4, &format!("##{}_cols", label), true);
+            ui.columns(4, format!("##{}_cols", label), true);
             bonus_header(ui);
 
             let cur = *cur_combat;
@@ -405,7 +408,7 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
                 cur.map(|c| c.condi_duration_pct),
                 sug.condi_duration_pct,
             );
-            if sug.healing_index > 0 || cur.map_or(false, |c| c.healing_index > 0) {
+            if sug.healing_index > 0 || cur.is_some_and(|c| c.healing_index > 0) {
                 render_int_row_opt(
                     ui,
                     "Healing Index",
@@ -426,7 +429,7 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
                 sug.damage_reduction_pct,
             );
 
-            ui.columns(1, &format!("##{}_end", label), false);
+            ui.columns(1, format!("##{}_end", label), false);
         } else {
             ui.text_colored([0.5, 0.5, 0.5, 1.0], "  (not computed)");
         }
@@ -492,13 +495,13 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
                 ui.text(*name);
                 ui.next_column();
                 if *cur_val > 0 {
-                    ui.text(&format!("{}", cur_val));
+                    ui.text(format!("{}", cur_val));
                 } else {
                     ui.text_colored([0.5, 0.5, 0.5, 1.0], "-");
                 }
                 ui.next_column();
                 let diff = *sug_val - *cur_val;
-                ui.text(&format!("{}", sug_val));
+                ui.text(format!("{}", sug_val));
                 if *cur_val > 0 && diff != 0 {
                     ui.same_line();
                     let color = if diff > 0 {
@@ -508,7 +511,7 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
                     };
                     ui.text_colored(
                         color,
-                        &format!("({}{})", if diff > 0 { "+" } else { "" }, diff),
+                        format!("({}{})", if diff > 0 { "+" } else { "" }, diff),
                     );
                 }
                 ui.next_column();
@@ -571,14 +574,14 @@ fn render_defenses(
 fn render_int_row(ui: &Ui, name: &str, cur: i32, sug: i32) {
     ui.text(name);
     ui.next_column();
-    ui.text(&format!("{}", cur));
+    ui.text(format!("{}", cur));
     ui.next_column();
-    ui.text(&format!("{}", sug));
+    ui.text(format!("{}", sug));
     ui.next_column();
     let diff = sug - cur;
     let color = diff_color(diff as f64);
     let sign = if diff > 0 { "+" } else { "" };
-    ui.text_colored(color, &format!("{}{}", sign, diff));
+    ui.text_colored(color, format!("{}{}", sign, diff));
     ui.next_column();
 }
 
@@ -587,18 +590,18 @@ fn render_int_row_opt(ui: &Ui, name: &str, cur: Option<i32>, sug: i32) {
     ui.text(name);
     ui.next_column();
     if let Some(c) = cur {
-        ui.text(&format!("{}", c));
+        ui.text(format!("{}", c));
         ui.next_column();
-        ui.text(&format!("{}", sug));
+        ui.text(format!("{}", sug));
         ui.next_column();
         let diff = sug - c;
         let color = diff_color(diff as f64);
         let sign = if diff > 0 { "+" } else { "" };
-        ui.text_colored(color, &format!("{}{}", sign, diff));
+        ui.text_colored(color, format!("{}{}", sign, diff));
     } else {
         ui.text_colored([0.5, 0.5, 0.5, 1.0], "\u{2014}"); // em-dash
         ui.next_column();
-        ui.text(&format!("{}", sug));
+        ui.text(format!("{}", sug));
         ui.next_column();
         ui.text_colored([0.5, 0.5, 0.5, 1.0], "\u{2014}");
     }
@@ -610,18 +613,18 @@ fn render_pct_row_opt(ui: &Ui, name: &str, cur: Option<f64>, sug: f64) {
     ui.text(name);
     ui.next_column();
     if let Some(c) = cur {
-        ui.text(&format!("{:.1}%", c));
+        ui.text(format!("{:.1}%", c));
         ui.next_column();
-        ui.text(&format!("{:.1}%", sug));
+        ui.text(format!("{:.1}%", sug));
         ui.next_column();
         let diff = sug - c;
         let color = diff_color(diff);
         let sign = if diff > 0.0 { "+" } else { "" };
-        ui.text_colored(color, &format!("{}{:.1}%", sign, diff));
+        ui.text_colored(color, format!("{}{:.1}%", sign, diff));
     } else {
         ui.text_colored([0.5, 0.5, 0.5, 1.0], "\u{2014}");
         ui.next_column();
-        ui.text(&format!("{:.1}%", sug));
+        ui.text(format!("{:.1}%", sug));
         ui.next_column();
         ui.text_colored([0.5, 0.5, 0.5, 1.0], "\u{2014}");
     }
@@ -646,7 +649,7 @@ fn render_stat_table(ui: &Ui, id: &str, stats: &[(&str, i32, i32)]) {
         render_int_row(ui, name, *cur, *sug);
     }
 
-    ui.columns(1, &format!("{}_end", id), false);
+    ui.columns(1, format!("{}_end", id), false);
 }
 
 /// Color for a diff value: green=positive, red=negative, gray=zero.
@@ -790,7 +793,7 @@ fn render_benchmark_delta(ui: &Ui, suggestion: &BuildSuggestion) {
             );
 
             if ui.collapsing_header(&header, TreeNodeFlags::DEFAULT_OPEN) {
-                ui.text_colored(col, &format!("  {:.0}% of reference score", pct));
+                ui.text_colored(col, format!("  {:.0}% of reference score", pct));
                 ui.spacing();
 
                 // Score bar
@@ -819,12 +822,12 @@ fn render_benchmark_delta(ui: &Ui, suggestion: &BuildSuggestion) {
                 ui.dummy([0.0, 18.0]);
 
                 ui.spacing();
-                ui.text(&format!(
+                ui.text(format!(
                     "  Reference: {} {} ({}) \u{2014} {}",
                     delta.profession, delta.role, delta.ref_gear_prefix, delta.source
                 ));
                 if !delta.ref_url.is_empty() {
-                    ui.text_colored([0.4, 0.6, 0.9, 1.0], &format!("  {}", delta.ref_url));
+                    ui.text_colored([0.4, 0.6, 0.9, 1.0], format!("  {}", delta.ref_url));
                 }
             }
         }
@@ -853,14 +856,14 @@ fn render_viability_report(ui: &Ui, report: &ViabilityReport) {
     };
 
     if ui.collapsing_header(
-        &format!("Viability Report [{}]", status),
+        format!("Viability Report [{}]", status),
         if report.is_viable {
             TreeNodeFlags::empty()
         } else {
             TreeNodeFlags::DEFAULT_OPEN
         },
     ) {
-        ui.text_colored(header_col, &format!("  Status: {}", status));
+        ui.text_colored(header_col, format!("  Status: {}", status));
         ui.spacing();
         for gate in &report.gates {
             let (icon, col): (&str, [f32; 4]) = if gate.passed {
@@ -869,7 +872,7 @@ fn render_viability_report(ui: &Ui, report: &ViabilityReport) {
                 ("\u{274C}", [1.0, 0.3, 0.2, 1.0])
             };
             let gate_name = format!("{:?}", gate.gate);
-            ui.text_colored(col, &format!("  {} {} — {}", icon, gate_name, gate.note));
+            ui.text_colored(col, format!("  {} {} — {}", icon, gate_name, gate.note));
         }
         if !report.is_viable {
             ui.spacing();
@@ -890,15 +893,15 @@ fn render_tradeoff_analysis(ui: &Ui, comparison: &ComparisonState, suggestion: &
         // No current build data — show absolute metrics only
         if ui.collapsing_header("Performance Estimate", TreeNodeFlags::empty()) {
             ui.text_colored([0.8, 0.8, 0.8, 1.0], "  (No current build for comparison)");
-            ui.text(&format!(
+            ui.text(format!(
                 "  Strike DPS index: {:.0}",
                 new_metrics.strike_dps_index
             ));
-            ui.text(&format!(
+            ui.text(format!(
                 "  Condi DPS index:  {:.0}",
                 new_metrics.condition_dps_index
             ));
-            ui.text(&format!(
+            ui.text(format!(
                 "  Effective HP:     {:.0}",
                 new_metrics.effective_health
             ));
@@ -952,7 +955,7 @@ fn render_tradeoff_analysis(ui: &Ui, comparison: &ComparisonState, suggestion: &
             };
             ui.text_colored(
                 col,
-                &format!("  {} {:14} {:+.0}  ({:+.1}%)", arrow, label, delta, pct),
+                format!("  {} {:14} {:+.0}  ({:+.1}%)", arrow, label, delta, pct),
             );
         }
     }

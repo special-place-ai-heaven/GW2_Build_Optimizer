@@ -76,7 +76,7 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.dummy([0.0, 2.0]);
     ui.text_colored(
         [0.4, 0.4, 0.4, 1.0],
-        &format!(
+        format!(
             "GW2 Build Optimizer v1.0.0  —  AI: {}",
             state.config.active_provider.label()
         ),
@@ -104,7 +104,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             nexus::log::log(
                 nexus::log::LogLevel::Warning,
                 "GW2BuildOpt",
-                &format!("Config save failed: {}", e),
+                format!("Config save failed: {}", e),
             );
         }
     }
@@ -115,12 +115,12 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     if has_key {
         ui.text_colored(
             [0.0, 1.0, 0.0, 1.0],
-            &format!("{} Key: configured", provider_label),
+            format!("{} Key: configured", provider_label),
         );
     } else {
         ui.text_colored(
             [1.0, 0.5, 0.0, 1.0],
-            &format!("{} Key: not set", provider_label),
+            format!("{} Key: not set", provider_label),
         );
     }
 
@@ -262,7 +262,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         ui.text_colored(col, status);
     }
     if let Some(ref w) = state.main.settings_key_warning {
-        ui.text_colored([1.0, 0.7, 0.0, 1.0], &format!("  Warning: {}", w));
+        ui.text_colored([1.0, 0.7, 0.0, 1.0], format!("  Warning: {}", w));
     }
 }
 
@@ -352,7 +352,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         if visible == 0 && !needle.is_empty() {
             ui.text_colored(
                 [0.7, 0.7, 0.7, 1.0],
-                &format!(
+                format!(
                     "No models match \"{}\"",
                     state.main.settings_model_search.trim()
                 ),
@@ -368,7 +368,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         stats::start_fetch_models(state);
     }
     if let Some(ref err) = state.main.models_error {
-        ui.text_colored([1.0, 0.5, 0.0, 1.0], &format!("  {}", err));
+        ui.text_colored([1.0, 0.5, 0.0, 1.0], format!("  {}", err));
     }
 
     ui.spacing();
@@ -394,7 +394,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     }
     ui.text_colored(
         [0.5, 0.5, 0.5, 1.0],
-        &format!("Usage today: {} requests", state.main.settings_usage_today),
+        format!("Usage today: {} requests", state.main.settings_usage_today),
     );
 }
 
@@ -487,10 +487,10 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
         } else {
             "****".into()
         };
-        ui.text(&format!("GW2 API Key: {}", display));
+        ui.text(format!("GW2 API Key: {}", display));
     }
     if let Some(build) = state.config.cache_build_number {
-        ui.text(&format!("Game build: {}", build));
+        ui.text(format!("Game build: {}", build));
     }
 
     let cache_dir = state.addon_dir.join("cache");
@@ -503,7 +503,7 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     } else {
         state.main.settings_cache_size_frames -= 1;
     }
-    ui.text(&format!(
+    ui.text(format!(
         "Cache: {}",
         format_bytes(state.main.settings_cache_size)
     ));
@@ -612,7 +612,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
             .unwrap_or(0);
         ui.text_colored(
             [0.5, 0.9, 0.5, 1.0],
-            &format!("Synced: {}  SC:{} HS:{} GJ:{}", last, sc, hs, gj),
+            format!("Synced: {}  SC:{} HS:{} GJ:{}", last, sc, hs, gj),
         );
     } else {
         ui.text_colored([0.5, 0.5, 0.5, 1.0], "Never synced.");
@@ -623,7 +623,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         } else {
             err.clone()
         };
-        ui.text_colored([1.0, 0.4, 0.2, 1.0], &format!("[!] {}", short));
+        ui.text_colored([1.0, 0.4, 0.2, 1.0], format!("[!] {}", short));
         if ui.is_item_hovered() {
             ui.tooltip_text(err);
         }

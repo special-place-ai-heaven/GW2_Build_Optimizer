@@ -141,6 +141,9 @@ impl std::fmt::Display for ValidationReject {
 
 /// Validate a parsed Gemini build response against the GameDb.
 /// Always returns a ValidatedBuild, even if there are errors.
+// The result is populated incrementally as each validation stage runs; a single
+// struct literal would not match the staged, side-effecting validation flow.
+#[allow(clippy::field_reassign_with_default)]
 pub fn validate_gemini_build(
     response: &GeminiBuildResponse,
     db: &GameDb,
@@ -832,14 +835,12 @@ fn find_weapon<'a>(
 // Parsing helpers
 // ---------------------------------------------------------------------------
 
+/// A single weapon set as (main-hand, off-hand) names.
+type WeaponSlots = (Option<String>, Option<String>);
+
 /// Parse weapon sets from GeminiBuildResponse.
 /// Handles both old format ("Set 1: Axe / Axe") and the raw fields.
-fn parse_weapon_sets_from_response(
-    response: &GeminiBuildResponse,
-) -> (
-    (Option<String>, Option<String>),
-    (Option<String>, Option<String>),
-) {
+fn parse_weapon_sets_from_response(response: &GeminiBuildResponse) -> (WeaponSlots, WeaponSlots) {
     let mut set1 = (None, None);
     let mut set2 = (None, None);
 
@@ -959,6 +960,8 @@ fn tier_label(tier: u32) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    // Test fixtures are built field-by-field for readability.
+    #![allow(clippy::field_reassign_with_default)]
     use super::*;
 
     #[test]

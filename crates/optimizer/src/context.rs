@@ -27,15 +27,15 @@ pub struct ContextConfig<'a> {
 /// Build the complete pre-computed context document for Gemini.
 /// Returns a structured text string containing all profession-relevant game data.
 pub fn build_gemini_context(config: &ContextConfig) -> String {
-    let mut sections = Vec::new();
-
-    sections.push(section_profession_info(config));
-    sections.push(section_specializations_and_traits(config));
-    sections.push(section_profession_skills(config));
-    sections.push(section_runes(config.db));
-    sections.push(section_sigils(config.db));
-    sections.push(section_relics(config.db));
-    sections.push(section_gear_prefixes(config));
+    let mut sections = vec![
+        section_profession_info(config),
+        section_specializations_and_traits(config),
+        section_profession_skills(config),
+        section_runes(config.db),
+        section_sigils(config.db),
+        section_relics(config.db),
+        section_gear_prefixes(config),
+    ];
 
     if let Some(summary) = config.current_build_summary {
         sections.push(section_current_build(summary));
@@ -221,7 +221,7 @@ fn section_profession_skills(config: &ContextConfig) -> String {
             .filter(|s| {
                 s.slot
                     .as_deref()
-                    .is_some_and(|slot| slot_values.iter().any(|sv| slot == *sv))
+                    .is_some_and(|slot| slot_values.contains(&slot))
             })
             .filter(|s| s.prev_chain.is_none()) // skip chain follow-ups
             .copied()

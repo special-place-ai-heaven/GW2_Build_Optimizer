@@ -143,7 +143,7 @@ fn render_role_picker(ui: &Ui, state: &mut AddonState) {
     if let Some(role) = current {
         ui.text_colored(
             [0.6, 0.9, 0.6, 1.0],
-            &format!(
+            format!(
                 "  Selected: {} — click 'Optimize Build' in the left panel",
                 role.label()
             ),
@@ -168,7 +168,7 @@ pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonS
 
     // Show optimization error
     if let Some(err) = state.main.comparison.error.clone() {
-        ui.text_colored([1.0, 0.3, 0.0, 1.0], &format!("[!] {}", err));
+        ui.text_colored([1.0, 0.3, 0.0, 1.0], format!("[!] {}", err));
         ui.same_line();
         if ui.small_button("Dismiss##opt_err") {
             state.main.comparison.error = None;

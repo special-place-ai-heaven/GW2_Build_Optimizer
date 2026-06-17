@@ -103,6 +103,11 @@ impl ProfessionProfiles {
     pub fn len(&self) -> usize {
         self.map.len()
     }
+
+    /// True when no profiles are loaded.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
 }
 
 /// Parse and validate profession profiles from JSON text.

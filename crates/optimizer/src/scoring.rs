@@ -41,6 +41,9 @@ pub const DEFAULT_WEIGHT_BUDGET: f64 = 2.0;
 /// directly can still compile but should migrate to using the profile's weight_budget.
 pub const WEIGHT_BUDGET: f64 = DEFAULT_WEIGHT_BUDGET;
 
+/// A named UI preset: display label paired with a constructor for the weights.
+type WeightPreset = (&'static str, fn() -> OptimizationWeights);
+
 /// 6-axis optimization weights. Each axis 0.0-1.0, total constrained to weight budget.
 /// Drives gear search, trait selection, and build scoring.
 ///
@@ -315,7 +318,7 @@ impl OptimizationWeights {
 
     /// Named presets for UI buttons. These serve as quick-access shortcuts;
     /// the full named profile system is available through objective profile data.
-    pub const PRESETS: [(&'static str, fn() -> Self); 6] = [
+    pub const PRESETS: [WeightPreset; 6] = [
         ("Power DPS", Self::preset_power_dps),
         ("Condi DPS", Self::preset_condi_dps),
         ("Tank", Self::preset_tank),

@@ -3,7 +3,6 @@ use crate::combat::{self, CombatPerformance, DamageModifiers};
 use crate::data::{DataQuality, DataQualityReason};
 use crate::engine;
 use crate::gamedb::GameDb;
-use crate::genome::BuildGenome;
 use crate::rotation;
 use crate::rotation::SimulationResult;
 use crate::scenario::{CombatTier, ScenarioSpec};
@@ -222,7 +221,6 @@ pub fn evaluate_viability_gates(
 /// should be excluded from rankings.
 #[derive(Debug, Clone)]
 pub struct RefereeReport {
-    pub genome: BuildGenome,
     pub scenario: ScenarioSpec,
     pub stats: stats::StatBlock,
     pub modifiers: DamageModifiers,
@@ -247,7 +245,6 @@ pub fn evaluate_validated_build(
     ctx: &BalanceContext,
     scenario: &ScenarioSpec,
 ) -> RefereeReport {
-    let genome = BuildGenome::from_validated(profession_name, validated);
     let (stats, modifiers) = engine::calculate_validated_stats(validated, db, profession_name, ctx);
     let derived = stats::compute_derived(&stats, profession_name);
     let buff_profiles = combat::buff_profiles_for_profession(profession_name, ctx);
@@ -321,7 +318,6 @@ pub fn evaluate_validated_build(
     }
 
     RefereeReport {
-        genome,
         scenario: scenario.clone(),
         stats,
         modifiers,
@@ -339,6 +335,8 @@ pub fn evaluate_validated_build(
 
 #[cfg(test)]
 mod tests {
+    // Intentional invariant tripwires.
+    #![allow(clippy::assertions_on_constants)]
     use super::{
         evaluate_validated_build, evaluate_viability_gates, GateResult, ViabilityGate,
         EHP_FLOOR_PVE, EHP_FLOOR_PVP, EHP_FLOOR_WVW_HAVOC, EHP_FLOOR_WVW_ROAM, EHP_FLOOR_WVW_ZERG,
@@ -669,7 +667,6 @@ mod tests {
         let report_b =
             evaluate_validated_build(&validated, &db, "Guardian", &weights, &ctx, &scenario);
 
-        assert_eq!(report_a.genome, report_b.genome);
         assert_eq!(report_a.quality, DataQuality::Verified);
         assert_eq!(report_a.user_intent_score, report_b.user_intent_score);
         assert_eq!(

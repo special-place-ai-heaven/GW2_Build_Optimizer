@@ -470,6 +470,9 @@ pub fn compute_derived(stats: &StatBlock, profession: &str) -> DerivedStats {
 /// Full stat calculation pipeline for PvE/WvW.
 /// NOTE: rune_id and sigil_ids are passed separately from equipment to avoid
 /// double-counting — calculate_gear_stats does NOT process piece.upgrades.
+// Stat-calculation pipeline; runes and sigils are intentionally separate
+// parameters from equipment (see note above) — a struct would hide that intent.
+#[allow(clippy::too_many_arguments)]
 pub fn calculate_full_stats(
     equipment: &EquipmentTab,
     equipped_trait_ids: &[u32],
@@ -531,6 +534,8 @@ fn add_block(target: &mut StatBlock, source: &StatBlock) {
 
 #[cfg(test)]
 mod tests {
+    // Test fixtures are built field-by-field for readability.
+    #![allow(clippy::field_reassign_with_default)]
     use super::*;
 
     #[test]
