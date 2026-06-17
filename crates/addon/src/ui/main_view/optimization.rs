@@ -44,7 +44,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
         .main
         .current_build
         .as_ref()
-        .map(|b| summarize_resolved_build(b));
+        .map(summarize_resolved_build);
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
     let weights = state.main.weights.clone();
@@ -81,7 +81,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
     nexus::log::log(
         nexus::log::LogLevel::Info,
         "GW2BuildOpt",
-        &format!(
+        format!(
             "Optimizing {}/{}{}: weights P={:.2} C={:.2} B={:.2} H={:.2} S={:.2} Ctrl={:.2} ({}) -> gear: {} (sim={:.3})",
             profession_name,
             game_mode_label,
@@ -169,7 +169,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             nexus::log::log(
                                 nexus::log::LogLevel::Warning,
                                 "GW2 Build Optimizer",
-                                &format!(
+                                format!(
                                     "optimize_v2 failed, falling back to synergy engine: {}",
                                     e
                                 ),
@@ -226,7 +226,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             nexus::log::log(
                                 nexus::log::LogLevel::Warning,
                                 "GW2 Build Optimizer",
-                                &format!(
+                                format!(
                                     "Deterministic engine failed, trying Gemini pipeline: {}",
                                     e
                                 ),
@@ -281,7 +281,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             nexus::log::log(
                                 nexus::log::LogLevel::Warning,
                                 "GW2 Build Optimizer",
-                                &format!("LLM pipeline failed, falling back to legacy: {}", e),
+                                format!("LLM pipeline failed, falling back to legacy: {}", e),
                             );
                             // Fall through to legacy pipeline
                         }
@@ -352,7 +352,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             nexus::log::log(
                                 nexus::log::LogLevel::Warning,
                                 "GW2 Build Optimizer",
-                                &format!("LLM enrichment skipped: {}", e),
+                                format!("LLM enrichment skipped: {}", e),
                             );
                         }
                     }
@@ -466,10 +466,8 @@ fn synergy_result_to_suggestion(
     if let Some((_, name)) = &v.skills.heal {
         skills.push(format!("Heal: {}", name));
     }
-    for util in &v.skills.utilities {
-        if let Some((_, name)) = util {
-            skills.push(format!("Utility: {}", name));
-        }
+    for (_, name) in v.skills.utilities.iter().flatten() {
+        skills.push(format!("Utility: {}", name));
     }
     if let Some((_, name)) = &v.skills.elite {
         skills.push(format!("Elite: {}", name));
@@ -582,8 +580,8 @@ fn synergy_result_to_suggestion(
     let our_score = {
         // Use normalised strike + condi DPS index as proxy score when referee score unavailable
         let s = &result.combat_solo;
-        let strike_norm = s.strike_dps_index as f64 / 3000.0;
-        let condi_norm = s.condition_dps_index as f64 / 3500.0;
+        let strike_norm = s.strike_dps_index / 3000.0;
+        let condi_norm = s.condition_dps_index / 3500.0;
         strike_norm.max(condi_norm).min(1.0)
     };
     let benchmark_delta = {
@@ -1033,8 +1031,6 @@ fn infer_profession_from_specs(
     String::new()
 }
 
-// infer_weights_from_stats is now in radar_chart.rs
-
 /// Summarize a ResolvedBuild as text for LLM prompts.
 fn summarize_resolved_build(build: &gw2_core::types::ResolvedBuild) -> String {
     let mut parts = Vec::new();
@@ -1226,7 +1222,7 @@ fn enrich_with_llm(
         nexus::log::log(
             nexus::log::LogLevel::Warning,
             "GW2BuildOpt",
-            &format!(
+            format!(
                 "Legacy enrichment validation errors: {}",
                 validated
                     .errors
@@ -1280,7 +1276,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         .main
         .current_build
         .as_ref()
-        .map(|b| summarize_resolved_build(b));
+        .map(summarize_resolved_build);
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
     let db_clone = state.main.game_db.clone();
@@ -1369,7 +1365,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         nexus::log::log(
                             nexus::log::LogLevel::Warning,
                             "GW2BuildOpt",
-                            &format!(
+                            format!(
                                 "Chat refinement validation errors: {}",
                                 validated
                                     .errors

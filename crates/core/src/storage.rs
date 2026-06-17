@@ -438,8 +438,8 @@ mod tests {
                 }
             };
 
-            let c1 = classify.clone();
-            let c2 = classify.clone();
+            let c1 = classify;
+            let c2 = classify;
 
             let t1 = thread::spawn(move || {
                 let build = test_build(&n1);

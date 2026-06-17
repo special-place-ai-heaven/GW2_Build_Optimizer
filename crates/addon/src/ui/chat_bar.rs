@@ -44,7 +44,7 @@ pub fn render_chat_bar(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
         } else {
             ("AI: ", [0.3, 1.0, 0.3, 1.0])
         };
-        ui.text_colored(color, &format!("{}{}", prefix, msg.text));
+        ui.text_colored(color, format!("{}{}", prefix, msg.text));
     }
 
     if state.waiting {

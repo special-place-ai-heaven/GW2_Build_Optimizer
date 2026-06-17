@@ -262,7 +262,7 @@ impl AppConfig {
             std::fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         let tmp_path = path.with_extension("tmp");
         // Crash-safe: write to .tmp then atomic rename. Clean up the orphan
         // .tmp on either failure so it doesn't accumulate after repeated

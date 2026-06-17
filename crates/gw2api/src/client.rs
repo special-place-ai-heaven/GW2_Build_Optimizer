@@ -643,7 +643,7 @@ mod tests {
     #[test]
     fn body_snippet_truncates_long_text_utf8_safely() {
         // 300 four-byte chars × "💀" — naive byte slice at 200 would panic; chars().take must cap.
-        let input: String = std::iter::repeat('💀').take(300).collect();
+        let input: String = std::iter::repeat_n('💀', 300).collect();
         let out = body_snippet(&input);
         assert_eq!(out.chars().count(), 200);
         assert!(out.is_char_boundary(out.len()));

@@ -114,7 +114,7 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                         nexus::log::log(
                             nexus::log::LogLevel::Warning,
                             "GW2BuildOpt",
-                            &format!("Config save failed: {}", e),
+                            format!("Config save failed: {}", e),
                         );
                     }
                 });
@@ -254,7 +254,7 @@ pub(super) fn load_game_db(state: &mut AddonState) {
                         nexus::log::log(
                             nexus::log::LogLevel::Info,
                             "GW2 Build Optimizer",
-                            &db.summary(),
+                            db.summary(),
                         );
                         s.main.game_db = Some(db);
                         // If build tabs were loaded before GameDb, trigger resolve now
@@ -334,7 +334,7 @@ pub(super) fn compute_3tier_combat(
         perf_to_combat_metrics(&perf)
     };
     (
-        profiles.get(0).map(&compute),
+        profiles.first().map(&compute),
         profiles.get(1).map(&compute),
         profiles.get(2).map(&compute),
     )

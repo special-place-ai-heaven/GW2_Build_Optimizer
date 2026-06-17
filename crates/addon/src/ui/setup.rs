@@ -161,7 +161,7 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
                                 nexus::log::log(
                                     nexus::log::LogLevel::Warning,
                                     "GW2BuildOpt",
-                                    &format!("Config save failed: {}", e),
+                                    format!("Config save failed: {}", e),
                                 );
                             }
                         } else {
@@ -196,7 +196,7 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
             ui.text_colored([0.0, 1.0, 0.0, 1.0], "Valid!");
         }
         KeyStatus::Invalid(msg) => {
-            ui.text_colored([1.0, 0.0, 0.0, 1.0], &format!("Error: {}", msg));
+            ui.text_colored([1.0, 0.0, 0.0, 1.0], format!("Error: {}", msg));
         }
     }
 
@@ -206,20 +206,19 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
         ui.text("Permissions:");
         for (scope, present) in &state.setup.gw2_key_scopes {
             if *present {
-                ui.text_colored([0.0, 1.0, 0.0, 1.0], &format!("  [v] {}", scope));
+                ui.text_colored([0.0, 1.0, 0.0, 1.0], format!("  [v] {}", scope));
             } else {
-                ui.text_colored([1.0, 0.3, 0.0, 1.0], &format!("  [x] {} (missing)", scope));
+                ui.text_colored([1.0, 0.3, 0.0, 1.0], format!("  [x] {} (missing)", scope));
             }
         }
     }
 
     // Next button
     ui.spacing();
-    if state.setup.gw2_key_status == KeyStatus::Valid {
-        if ui.button_with_size("Next >>", [120.0, 0.0]) {
+    if state.setup.gw2_key_status == KeyStatus::Valid
+        && ui.button_with_size("Next >>", [120.0, 0.0]) {
             state.screen = Screen::Setup(SetupStep::LlmApiKey);
         }
-    }
 }
 
 fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
@@ -238,8 +237,8 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
     ui.text("Provider:");
     for provider in &LlmProvider::ALL {
         let label = provider.label();
-        if ui.radio_button_bool(label, state.config.active_provider == *provider) {
-            if state.config.active_provider != *provider {
+        if ui.radio_button_bool(label, state.config.active_provider == *provider)
+            && state.config.active_provider != *provider {
                 state.config.active_provider = provider.clone();
                 // Reset validation when switching providers
                 state.setup.llm_key_input.clear();
@@ -250,7 +249,6 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
                     state.setup.llm_key_status = KeyStatus::Valid;
                 }
             }
-        }
     }
     ui.spacing();
 
@@ -293,7 +291,7 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
 
     // Key input
     let provider_label = state.config.active_provider.label();
-    ui.text(&format!("Paste your {} API key:", provider_label));
+    ui.text(format!("Paste your {} API key:", provider_label));
     ui.set_next_item_width(-1.0);
     ui.input_text("##llm_key", &mut state.setup.llm_key_input)
         .build();
@@ -378,7 +376,7 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
                             nexus::log::log(
                                 nexus::log::LogLevel::Warning,
                                 "GW2BuildOpt",
-                                &format!("Config save failed: {}", e),
+                                format!("Config save failed: {}", e),
                             );
                         }
                     }
@@ -416,7 +414,7 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
             ui.text_colored([0.0, 1.0, 0.0, 1.0], "Valid!");
         }
         KeyStatus::Invalid(msg) => {
-            ui.text_colored([1.0, 0.0, 0.0, 1.0], &format!("Error: {}", msg));
+            ui.text_colored([1.0, 0.0, 0.0, 1.0], format!("Error: {}", msg));
         }
     }
 
@@ -523,7 +521,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                         nexus::log::log(
                                             nexus::log::LogLevel::Warning,
                                             "GW2BuildOpt",
-                                            &format!("Config save failed: {}", e),
+                                            format!("Config save failed: {}", e),
                                         );
                                     }
                                     if let Some(ref mut dl) = s.setup.download_progress {
@@ -577,7 +575,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
 
             if let Some(ref err) = dl.error {
                 ui.spacing();
-                ui.text_colored([1.0, 0.0, 0.0, 1.0], &format!("Error: {}", err));
+                ui.text_colored([1.0, 0.0, 0.0, 1.0], format!("Error: {}", err));
                 ui.spacing();
                 if ui.button_with_size("Retry", [120.0, 0.0]) {
                     state.setup.download_progress = None;

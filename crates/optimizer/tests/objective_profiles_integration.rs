@@ -555,12 +555,10 @@ fn test_pve_and_pvp_default_profiles_produce_different_scores() {
 
 #[test]
 fn test_full_pipeline_ranking_with_objective_scorer() {
-    let builds = vec![
-        ("Power DPS", power_dps_perf()),
+    let builds = [("Power DPS", power_dps_perf()),
         ("Condi DPS", condi_dps_perf()),
         ("Support", support_perf()),
-        ("Sustain", sustain_perf()),
-    ];
+        ("Sustain", sustain_perf())];
 
     // Power DPS profile should rank Power DPS highest
     let power_scorer =
