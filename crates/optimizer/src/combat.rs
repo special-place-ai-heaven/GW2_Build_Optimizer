@@ -605,11 +605,12 @@ fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
             let text_lower = text.to_lowercase();
             let decimal = *pct / 100.0;
 
-            if text_lower.contains("damage") && !text_lower.contains("condition damage") {
-                // Generic damage increase (applies to strike)
-                if decimal.abs() > 0.001 {
-                    mods.strike_pct.push(decimal);
-                }
+            // Crit damage MUST be checked before the generic "damage" catch-all:
+            // "Critical Damage" contains the substring "damage" but is neither
+            // strike nor condition damage. Ordering it first prevents it from
+            // being misclassified as a strike modifier.
+            if text_lower.contains("critical damage") || text_lower.contains("crit damage") {
+                mods.crit_damage_pct.push(*pct); // already in percentage points
             } else if text_lower.contains("condition damage") {
                 // Mirror the strike branch: trust the structured Percent fact and
                 // its sign. Requiring the literal word "increase" silently dropped
@@ -617,8 +618,11 @@ fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
                 if decimal.abs() > 0.001 {
                     mods.condition_pct.push(decimal);
                 }
-            } else if text_lower.contains("critical damage") || text_lower.contains("crit damage") {
-                mods.crit_damage_pct.push(*pct); // already in percentage points
+            } else if text_lower.contains("damage") {
+                // Generic damage increase (applies to strike)
+                if decimal.abs() > 0.001 {
+                    mods.strike_pct.push(decimal);
+                }
             } else if text_lower.contains("condition duration") {
                 mods.condi_duration_pct.push(decimal);
             } else if text_lower.contains("boon duration") {
@@ -655,6 +659,58 @@ fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
             let _ = (text, status); // Acknowledge but skip
         }
         _ => {}
+    }
+}
+
+/// Test-only shim for the cross-parser consistency suite.
+///
+/// Runs [`extract_modifier_from_fact`] against a fresh [`DamageModifiers`] and
+/// collapses the result into a comparable [`FactClass`] so it can be asserted
+/// equal to `synergy::tests_consistency_shim::classify_fact`. Both parsers must
+/// agree on what a given modifier `Fact` *means*; this shim exposes the private
+/// combat parser to the consistency test module without widening its public API.
+#[cfg(test)]
+pub(crate) mod tests_consistency_shim {
+    use super::{extract_modifier_from_fact, DamageModifiers};
+    use crate::parser_consistency_tests::FactClass;
+    use gw2_api::models::Fact;
+
+    pub(crate) fn classify_fact(fact: &Fact) -> Vec<FactClass> {
+        let mut mods = DamageModifiers::default();
+        extract_modifier_from_fact(&mut mods, fact);
+        classify_mods(&mods)
+    }
+
+    /// Map a populated `DamageModifiers` to the set of classifications it
+    /// implies. Each non-empty field contributes one `FactClass`; ordering is
+    /// normalized by the caller before comparison.
+    fn classify_mods(mods: &DamageModifiers) -> Vec<FactClass> {
+        let mut out = Vec::new();
+        if !mods.strike_pct.is_empty() {
+            out.push(FactClass::Strike);
+        }
+        if !mods.condition_pct.is_empty() {
+            out.push(FactClass::ConditionDamage);
+        }
+        if !mods.crit_damage_pct.is_empty() {
+            out.push(FactClass::Crit);
+        }
+        if !mods.healing_pct.is_empty() {
+            out.push(FactClass::Healing);
+        }
+        if !mods.condi_duration_pct.is_empty() {
+            out.push(FactClass::AllConditionDuration);
+        }
+        if !mods.boon_duration_pct.is_empty() {
+            out.push(FactClass::AllBoonDuration);
+        }
+        for key in mods.specific_condi_duration.keys() {
+            out.push(FactClass::SpecificConditionDuration(key.clone()));
+        }
+        for key in mods.specific_condi.keys() {
+            out.push(FactClass::SpecificConditionDamage(key.clone()));
+        }
+        out
     }
 }
 

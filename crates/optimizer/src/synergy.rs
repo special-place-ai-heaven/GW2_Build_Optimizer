@@ -506,22 +506,26 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             ..
         } => {
             let text_lower = text.to_lowercase();
-            if text_lower.contains("damage") && !text_lower.contains("condition damage") {
+            // Crit damage MUST be checked before the generic "damage" catch-all:
+            // "Critical Damage" contains the substring "damage" but is neither
+            // strike nor condition damage. Ordering it first prevents it from
+            // being misclassified as a strike modifier.
+            if text_lower.contains("critical damage") || text_lower.contains("crit damage") {
                 effects.push(NormalizedEffect::DamageModifier {
-                    category: DamageCategory::Strike,
+                    category: DamageCategory::Crit,
                     percent: *pct,
                 });
             } else if text_lower.contains("condition damage") {
-                // Mirror the strike branch above: trust the structured Percent fact.
+                // Mirror the strike branch below: trust the structured Percent fact.
                 // Requiring the literal word "increase" silently dropped condition
                 // damage facts phrased as "Condition Damage: +X%".
                 effects.push(NormalizedEffect::DamageModifier {
                     category: DamageCategory::Condition,
                     percent: *pct,
                 });
-            } else if text_lower.contains("critical damage") || text_lower.contains("crit damage") {
+            } else if text_lower.contains("damage") {
                 effects.push(NormalizedEffect::DamageModifier {
-                    category: DamageCategory::Crit,
+                    category: DamageCategory::Strike,
                     percent: *pct,
                 });
             } else if text_lower.contains("outgoing healing") {
@@ -1126,6 +1130,51 @@ pub(crate) mod tests_alias_helpers {
     }
     pub(crate) fn condition_importance(status: &str) -> f64 {
         crate::data::boon_condition_formulas::condition_importance(status)
+    }
+}
+
+/// Test-only shim for the cross-parser consistency suite.
+///
+/// Runs the private [`extract_effects_from_fact`] and collapses its
+/// `Vec<NormalizedEffect>` into the same comparable [`FactClass`] set the
+/// combat parser's shim produces, so the consistency test can assert the two
+/// parsers classify each modifier `Fact` identically without exposing either
+/// private parser as a public API.
+#[cfg(test)]
+pub(crate) mod tests_consistency_shim {
+    use super::{extract_effects_from_fact, DamageCategory, DurationKind, NormalizedEffect};
+    use crate::parser_consistency_tests::FactClass;
+    use gw2_api::models::Fact;
+
+    pub(crate) fn classify_fact(fact: &Fact) -> Vec<FactClass> {
+        let effects = extract_effects_from_fact(fact);
+        let mut out = Vec::new();
+        for effect in &effects {
+            match effect {
+                NormalizedEffect::DamageModifier { category, .. } => match category {
+                    DamageCategory::Strike => out.push(FactClass::Strike),
+                    DamageCategory::Condition => out.push(FactClass::ConditionDamage),
+                    DamageCategory::Crit => out.push(FactClass::Crit),
+                    DamageCategory::Healing => out.push(FactClass::Healing),
+                    DamageCategory::SpecificCondition(c) => {
+                        out.push(FactClass::SpecificConditionDamage(c.clone()))
+                    }
+                },
+                NormalizedEffect::DurationBonus { kind, .. } => match kind {
+                    DurationKind::AllCondition => out.push(FactClass::AllConditionDuration),
+                    DurationKind::AllBoon => out.push(FactClass::AllBoonDuration),
+                    DurationKind::SpecificCondition(c) => {
+                        out.push(FactClass::SpecificConditionDuration(c.clone()))
+                    }
+                },
+                // Other effect kinds (StatBonus, AppliesStatus, etc.) are not
+                // damage/duration modifiers and are out of scope for this
+                // consistency table — the combat parser deliberately ignores
+                // them, so emitting nothing here keeps the comparison honest.
+                _ => {}
+            }
+        }
+        out
     }
 }
 
