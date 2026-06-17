@@ -26,6 +26,7 @@ use crate::synergy::{
     extract_sigil_effects, extract_skill_effects, extract_trait_effects, score_normalized_effect,
     ComponentId, NormalizedEffect, SynergyLink,
 };
+use crate::text_util::normalize_sigil_family;
 use crate::validation::{
     ValidatedBuild, ValidatedGearPrefix, ValidatedItem, ValidatedSkills, ValidatedSpec,
     ValidatedWeaponSet, ValidatedWeapons,
@@ -523,12 +524,6 @@ fn select_sigils(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Opt
 }
 
 // ─── Stage 5: Relic ───
-
-fn normalize_sigil_family(name: &str) -> String {
-    let mut base = name.replace(" (PvP)", "");
-    base.make_ascii_lowercase();
-    base.trim().to_string()
-}
 
 fn select_relic(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &OptimizationWeights) {
     let relics = db.all_relics();

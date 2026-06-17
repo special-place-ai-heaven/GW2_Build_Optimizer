@@ -19,6 +19,7 @@ pub mod search_v2;
 pub mod stats;
 pub mod synergy;
 pub mod synergy_pipeline;
+pub mod text_util;
 pub mod validation;
 
 // Re-export viability types for downstream consumers (S07 Trust UI).
