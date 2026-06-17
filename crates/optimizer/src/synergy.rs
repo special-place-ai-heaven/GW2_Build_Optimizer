@@ -540,11 +540,17 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
                 });
             }
 
-            // Specific condition duration patterns
+            // Specific condition duration patterns. Search terms stay verb-form
+            // (tooltip text says "Poison Duration"); the stored key is
+            // canonicalized so it matches the "Poisoned" form every other path
+            // (and `duration_matches`) uses. Without this, a "+X% Poison Duration"
+            // bonus keyed as "Poison" would never match a "Poisoned" lookup.
             for condi in &["Bleeding", "Burning", "Poison", "Torment", "Confusion"] {
                 if text_lower.contains(&condi.to_lowercase()) && text_lower.contains("duration") {
+                    let canonical =
+                        crate::data::boon_condition_formulas::canonical_condition_name(condi);
                     effects.push(NormalizedEffect::DurationBonus {
-                        kind: DurationKind::SpecificCondition(condi.to_string()),
+                        kind: DurationKind::SpecificCondition(canonical.to_string()),
                         percent: *pct,
                     });
                 }
@@ -1231,6 +1237,28 @@ mod tests {
         assert!(matches!(&effects[0], NormalizedEffect::DamageModifier {
             category: DamageCategory::Condition, percent
         } if (*percent - 8.0).abs() < 0.01));
+    }
+
+    #[test]
+    fn test_extract_effects_poison_duration_key_is_canonical() {
+        // Regression: a fact "+10% Poison Duration" must store the SpecificCondition
+        // key in canonical "Poisoned" form so it matches duration_matches_condition's
+        // "Poisoned" lookup. Previously this path stored the raw "Poison" verb form
+        // (unlike its sibling rune/description parsers) and the bonus never applied.
+        let fact = Fact::Percent {
+            text: Some("+10% Poison Duration".into()),
+            icon: None,
+            percent: Some(10.0),
+        };
+        let effects = extract_effects_from_fact(&fact);
+        let key = effects.iter().find_map(|e| match e {
+            NormalizedEffect::DurationBonus {
+                kind: DurationKind::SpecificCondition(c),
+                ..
+            } => Some(c.as_str()),
+            _ => None,
+        });
+        assert_eq!(key, Some("Poisoned"));
     }
 
     #[test]
