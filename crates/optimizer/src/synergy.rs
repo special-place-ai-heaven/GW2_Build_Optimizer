@@ -509,7 +509,10 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
                     category: DamageCategory::Strike,
                     percent: *pct,
                 });
-            } else if text_lower.contains("condition damage") && text_lower.contains("increase") {
+            } else if text_lower.contains("condition damage") {
+                // Mirror the strike branch above: trust the structured Percent fact.
+                // Requiring the literal word "increase" silently dropped condition
+                // damage facts phrased as "Condition Damage: +X%".
                 effects.push(NormalizedEffect::DamageModifier {
                     category: DamageCategory::Condition,
                     percent: *pct,
@@ -616,9 +619,7 @@ fn parse_rune_bonus_to_effects(bonus: &str) -> Vec<NormalizedEffect> {
     let s = bonus.trim().to_lowercase();
 
     // Match "+N <Stat>" patterns (flat stat bonuses)
-    if s.starts_with('+') {
-        let without_plus = &s[1..];
-
+    if let Some(without_plus) = s.strip_prefix('+') {
         // Check for percentage patterns first
         if let Some(pct_idx) = without_plus.find('%') {
             let num_str = &without_plus[..pct_idx];
@@ -727,7 +728,16 @@ fn parse_description_to_effects(desc: &str) -> Vec<NormalizedEffect> {
             });
         }
     }
-    if desc_lower.contains("damage") && !desc_lower.contains("condition damage") {
+    if desc_lower.contains("condition damage") {
+        // Checked before the generic-damage branch, which excludes "condition
+        // damage" and would otherwise drop a "+N% condition damage" description.
+        if let Some(pct) = extract_percent_before(&desc_lower, "condition damage") {
+            effects.push(NormalizedEffect::DamageModifier {
+                category: DamageCategory::Condition,
+                percent: pct,
+            });
+        }
+    } else if desc_lower.contains("damage") {
         if let Some(pct) = extract_percent_before(&desc_lower, "damage") {
             effects.push(NormalizedEffect::DamageModifier {
                 category: DamageCategory::Strike,
@@ -1259,6 +1269,21 @@ mod tests {
         assert!(matches!(&effects[0], NormalizedEffect::DamageModifier {
             category: DamageCategory::Strike, percent
         } if (*percent - 5.0).abs() < 0.01));
+    }
+
+    #[test]
+    fn test_extract_effects_condition_damage_without_increase_keyword() {
+        // "Condition Damage: +X%" (no literal "increase") must map to the
+        // Condition damage category, not be dropped.
+        let fact = Fact::Percent {
+            text: Some("Condition Damage: +8%".into()),
+            icon: None,
+            percent: Some(8.0),
+        };
+        let effects = extract_effects_from_fact(&fact);
+        assert!(matches!(&effects[0], NormalizedEffect::DamageModifier {
+            category: DamageCategory::Condition, percent
+        } if (*percent - 8.0).abs() < 0.01));
     }
 
     #[test]

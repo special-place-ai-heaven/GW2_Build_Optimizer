@@ -609,7 +609,10 @@ fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
                 if decimal.abs() > 0.001 {
                     mods.strike_pct.push(decimal);
                 }
-            } else if text_lower.contains("condition damage") && text_lower.contains("increase") {
+            } else if text_lower.contains("condition damage") {
+                // Mirror the strike branch: trust the structured Percent fact and
+                // its sign. Requiring the literal word "increase" silently dropped
+                // condition-damage facts phrased as "Condition Damage: +X%".
                 if decimal.abs() > 0.001 {
                     mods.condition_pct.push(decimal);
                 }
@@ -703,6 +706,21 @@ fn parse_rune_modifier(mods: &mut DamageModifiers, bonus: &str) {
     // Boon duration
     if rest.contains("boon duration") {
         mods.boon_duration_pct.push(decimal);
+        return;
+    }
+
+    // Flat condition damage increase, e.g. "+5% Condition Damage". Must precede
+    // the generic-damage branch, which deliberately excludes "condition".
+    if rest.contains("condition damage") {
+        mods.condition_pct.push(decimal);
+        return;
+    }
+
+    // Outgoing healing, e.g. Rune of the Monk's "+10% Outgoing Healing". Runes
+    // deliver this as a bonus string (no facts), so it is dropped unless handled
+    // here. Matches the `outgoing healing` branch in the fact parser.
+    if rest.contains("outgoing healing") || rest.contains("healing effectiveness") {
+        mods.healing_pct.push(decimal);
         return;
     }
 
@@ -803,8 +821,14 @@ fn parse_sigil_from_description(mods: &mut DamageModifiers, sigil: &Item) {
     if let Some(pct) = extract_percent_before(&desc, "boon duration") {
         mods.boon_duration_pct.push(pct / 100.0);
     }
-    // "+N% damage" (strike)
-    if desc.contains("damage") && !desc.contains("condition damage") {
+    // "+N% condition damage" — must be checked before the generic-damage branch,
+    // which excludes "condition damage" and would otherwise drop it.
+    if desc.contains("condition damage") {
+        if let Some(pct) = extract_percent_before(&desc, "condition damage") {
+            mods.condition_pct.push(pct / 100.0);
+        }
+    } else if desc.contains("damage") {
+        // "+N% damage" (strike)
         if let Some(pct) = extract_percent_before(&desc, "damage") {
             mods.strike_pct.push(pct / 100.0);
         }
@@ -928,6 +952,12 @@ fn parse_relic_from_description(mods: &mut DamageModifiers, relic: &Item) {
     if desc.contains("boon duration") {
         if let Some(pct) = extract_percent_before(&desc, "boon duration") {
             mods.boon_duration_pct.push(pct / 100.0);
+            return;
+        }
+    }
+    if desc.contains("condition damage") {
+        if let Some(pct) = extract_percent_before(&desc, "condition damage") {
+            mods.condition_pct.push(pct / 100.0);
         }
     }
 }
@@ -1234,6 +1264,68 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_rune_modifier_outgoing_healing() {
+        // Rune of the Monk delivers "+10% Outgoing Healing" as a bonus string.
+        // Runes have no facts, so this is the only path — it must not be dropped.
+        let mut mods = DamageModifiers::default();
+        parse_rune_modifier(&mut mods, "+10% Outgoing Healing");
+        assert_eq!(mods.healing_pct.len(), 1);
+        assert!((mods.healing_pct[0] - 0.10).abs() < 0.001);
+        assert!(mods.strike_pct.is_empty());
+    }
+
+    #[test]
+    fn test_parse_rune_modifier_condition_damage() {
+        // Flat "+X% Condition Damage" must land in condition_pct, not be dropped
+        // by the generic-damage branch (which excludes "condition") and not be
+        // mis-routed to strike_pct.
+        let mut mods = DamageModifiers::default();
+        parse_rune_modifier(&mut mods, "+5% Condition Damage");
+        assert_eq!(mods.condition_pct.len(), 1);
+        assert!((mods.condition_pct[0] - 0.05).abs() < 0.001);
+        assert!(mods.strike_pct.is_empty());
+    }
+
+    #[test]
+    fn test_parse_rune_modifier_condition_duration_not_treated_as_damage() {
+        // Guard the branch ordering: "Condition Duration" contains neither a
+        // damage keyword we want here; it must route to condi_duration_pct only.
+        let mut mods = DamageModifiers::default();
+        parse_rune_modifier(&mut mods, "+15% Condition Duration");
+        assert_eq!(mods.condi_duration_pct.len(), 1);
+        assert!(mods.condition_pct.is_empty());
+        assert!(mods.strike_pct.is_empty());
+    }
+
+    fn percent_fact(text: &str, percent: f64) -> gw2_api::models::Fact {
+        gw2_api::models::Fact::Percent {
+            text: Some(text.to_string()),
+            icon: None,
+            percent: Some(percent),
+        }
+    }
+
+    #[test]
+    fn test_extract_modifier_condition_damage_fact_without_increase_keyword() {
+        // A structured Percent fact phrased as "Condition Damage: +X%" (no literal
+        // word "increase") must still credit condition_pct — previously dropped.
+        let mut mods = DamageModifiers::default();
+        extract_modifier_from_fact(&mut mods, &percent_fact("Condition Damage: +10%", 10.0));
+        assert_eq!(mods.condition_pct.len(), 1);
+        assert!((mods.condition_pct[0] - 0.10).abs() < 0.001);
+        assert!(mods.strike_pct.is_empty());
+    }
+
+    #[test]
+    fn test_extract_modifier_generic_damage_fact_still_routes_to_strike() {
+        // Guard: a generic-damage fact must NOT leak into the condition branch.
+        let mut mods = DamageModifiers::default();
+        extract_modifier_from_fact(&mut mods, &percent_fact("Damage increased by 7%", 7.0));
+        assert_eq!(mods.strike_pct.len(), 1);
+        assert!(mods.condition_pct.is_empty());
+    }
+
+    #[test]
     fn test_extract_percent_before_basic() {
         assert_eq!(
             extract_percent_before("10% burning duration", "burning duration"),
@@ -1315,6 +1407,55 @@ mod tests {
         parse_relic_modifier(&mut mods, &relic);
         assert_eq!(mods.healing_pct.len(), 1);
         assert!((mods.healing_pct[0] - 0.15).abs() < 0.001);
+    }
+
+    fn item_with_desc(name: &str, item_type: &str, desc: &str) -> Item {
+        Item {
+            id: 99999,
+            name: name.into(),
+            item_type: item_type.into(),
+            rarity: "Exotic".into(),
+            level: 80,
+            description: Some(desc.into()),
+            icon: None,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec![],
+            restrictions: vec![],
+            details: None,
+        }
+    }
+
+    #[test]
+    fn test_parse_sigil_description_condition_damage() {
+        // A description-fallback sigil with "+N% condition damage" must credit
+        // condition_pct, not be swallowed by the generic-damage branch.
+        let mut mods = DamageModifiers::default();
+        let sigil = item_with_desc(
+            "Unknown Sigil of Testing",
+            "UpgradeComponent",
+            "Grants +6% condition damage.",
+        );
+        parse_sigil_modifier(&mut mods, &sigil);
+        assert_eq!(mods.condition_pct.len(), 1);
+        assert!((mods.condition_pct[0] - 0.06).abs() < 0.001);
+        assert!(mods.strike_pct.is_empty());
+    }
+
+    #[test]
+    fn test_parse_relic_description_condition_damage() {
+        let mut mods = DamageModifiers::default();
+        let relic = item_with_desc(
+            "Unknown Relic",
+            "Relic",
+            "Increases condition damage by 10%.",
+        );
+        parse_relic_modifier(&mut mods, &relic);
+        assert_eq!(mods.condition_pct.len(), 1);
+        assert!((mods.condition_pct[0] - 0.10).abs() < 0.001);
+        assert!(mods.strike_pct.is_empty());
     }
 
     #[test]
