@@ -353,7 +353,7 @@ pub fn render_lock_panel(
             // Tooltip
             ui.tooltip(|| {
                 if spec_locked {
-                    ui.text(&format!("{} (LOCKED)", spec_name));
+                    ui.text(format!("{} (LOCKED)", spec_name));
                     ui.text_colored(DIM_COLOR, "Click to unlock");
                 } else {
                     ui.text(spec_name);
@@ -605,7 +605,7 @@ pub fn render_lock_panel(
             .filter(|t| t.is_some())
             .count();
     if lock_count > 0 {
-        ui.text_colored(LOCKED_COLOR, &format!("  {} locks active", lock_count));
+        ui.text_colored(LOCKED_COLOR, format!("  {} locks active", lock_count));
     }
 
     // Advance the hover animation for next frame.

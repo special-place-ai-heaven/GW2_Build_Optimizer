@@ -48,14 +48,12 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
 
     // Periodic API health check (~every 60s at 60fps)
     state.main.api_status_frames += 1;
-    if state.main.api_status_frames >= 3600
-        || state.main.api_status == crate::state::ApiStatus::Unknown
-    {
-        if !state.main.api_health_checking {
+    if (state.main.api_status_frames >= 3600
+        || state.main.api_status == crate::state::ApiStatus::Unknown)
+        && !state.main.api_health_checking {
             stats::check_api_health(state);
             state.main.api_status_frames = 0;
         }
-    }
 
     // Auto-dismiss save status after ~180 frames (~3s at 60fps)
     if state.main.save_status.is_some() {
@@ -142,7 +140,7 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
         crate::state::ApiStatus::Degraded => ("[~]", "API Slow", [1.0, 0.8, 0.0, 1.0]),
         crate::state::ApiStatus::Offline => ("[-]", "API Offline", [1.0, 0.2, 0.0, 1.0]),
     };
-    ui.text_colored(color, &format!(" {} {}", dot, label));
+    ui.text_colored(color, format!(" {} {}", dot, label));
     if ui.is_item_hovered() {
         ui.tooltip_text(match state.main.api_status {
             crate::state::ApiStatus::Unknown => "Checking GW2 API availability...",
@@ -159,7 +157,7 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
         ui.same_line();
         let stage = &state.main.game_refresh_stage;
         if !stage.is_empty() {
-            ui.text_colored([1.0, 1.0, 0.0, 1.0], &format!("| {}", stage));
+            ui.text_colored([1.0, 1.0, 0.0, 1.0], format!("| {}", stage));
         } else {
             ui.text_colored([1.0, 1.0, 0.0, 1.0], "| Loading game data...");
         }
@@ -170,13 +168,13 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
         ui.same_line();
         ui.text_colored(
             [1.0, 1.0, 0.0, 1.0],
-            &format!("| {}", state.main.optimize_stage),
+            format!("| {}", state.main.optimize_stage),
         );
     }
 
     // Error bar (dismissible)
     if let Some(ref err) = state.main.error {
-        ui.text_colored([1.0, 0.3, 0.0, 1.0], &format!("  [!] {}", err));
+        ui.text_colored([1.0, 0.3, 0.0, 1.0], format!("  [!] {}", err));
         ui.same_line();
         if ui.small_button("Dismiss##err") {
             state.main.error = None;
@@ -436,7 +434,7 @@ fn render_left_panel(ui: &Ui, state: &mut AddonState) {
             ui.text_colored([0.5, 0.5, 0.5, 1.0], "  v1.0.0");
             ui.spacing();
             let provider_label = state.config.active_provider.label();
-            ui.text_colored([0.5, 0.5, 0.5, 1.0], &format!("  AI: {}", provider_label));
+            ui.text_colored([0.5, 0.5, 0.5, 1.0], format!("  AI: {}", provider_label));
         }
     }
 }
@@ -533,11 +531,10 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
     {
         for (i, name) in chars_snapshot.iter().enumerate() {
             let selected = state.main.selected_character == Some(i);
-            if Selectable::new(name).selected(selected).build(ui) {
-                if state.main.selected_character != Some(i) {
+            if Selectable::new(name).selected(selected).build(ui)
+                && state.main.selected_character != Some(i) {
                     new_selection = Some((i, name.clone()));
                 }
-            }
         }
     }
 
@@ -596,11 +593,10 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
             {
                 for (i, label) in &bt_labels {
                     let selected = state.main.selected_build_tab == Some(*i);
-                    if Selectable::new(label).selected(selected).build(ui) {
-                        if state.main.selected_build_tab != Some(*i) {
+                    if Selectable::new(label).selected(selected).build(ui)
+                        && state.main.selected_build_tab != Some(*i) {
                             bt_changed = Some(*i);
                         }
-                    }
                 }
             }
         }
@@ -648,11 +644,10 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
             {
                 for (i, label) in &et_labels {
                     let selected = state.main.selected_equipment_tab == Some(*i);
-                    if Selectable::new(label).selected(selected).build(ui) {
-                        if state.main.selected_equipment_tab != Some(*i) {
+                    if Selectable::new(label).selected(selected).build(ui)
+                        && state.main.selected_equipment_tab != Some(*i) {
                             et_changed = Some(*i);
                         }
-                    }
                 }
             }
         }

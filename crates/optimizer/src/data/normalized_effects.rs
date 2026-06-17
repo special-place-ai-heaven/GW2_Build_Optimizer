@@ -1826,7 +1826,7 @@ mod tests {
                 }}"#
             );
             let effect: NormalizedEffect =
-                serde_json::from_str(&json).expect(&format!("should parse {}", source_type_str));
+                serde_json::from_str(&json).unwrap_or_else(|_| panic!("should parse {}", source_type_str));
             assert_eq!(effect.source_type, expected);
         }
     }

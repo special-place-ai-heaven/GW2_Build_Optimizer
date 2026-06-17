@@ -441,16 +441,6 @@ fn is_condition(status: &str) -> bool {
     )
 }
 
-/// Test-only thin wrapper so the alias-routing regression suite in
-/// `data::boon_condition_formulas::tests` can fuzz the private
-/// `is_condition` helper without changing its visibility.
-#[cfg(test)]
-pub(crate) mod tests_alias_helpers {
-    pub(crate) fn is_condition(status: &str) -> bool {
-        super::is_condition(status)
-    }
-}
-
 /// GW2 boons.
 fn is_boon(status: &str) -> bool {
     matches!(
@@ -468,4 +458,14 @@ fn is_boon(status: &str) -> bool {
             | "Resistance"
             | "Aegis"
     )
+}
+
+/// Test-only thin wrapper so the alias-routing regression suite in
+/// `data::boon_condition_formulas::tests` can fuzz the private
+/// `is_condition` helper without changing its visibility.
+#[cfg(test)]
+pub(crate) mod tests_alias_helpers {
+    pub(crate) fn is_condition(status: &str) -> bool {
+        super::is_condition(status)
+    }
 }

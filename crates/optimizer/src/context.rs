@@ -221,7 +221,7 @@ fn section_profession_skills(config: &ContextConfig) -> String {
             .filter(|s| {
                 s.slot
                     .as_deref()
-                    .is_some_and(|slot| slot_values.iter().any(|sv| slot == *sv))
+                    .is_some_and(|slot| slot_values.contains(&slot))
             })
             .filter(|s| s.prev_chain.is_none()) // skip chain follow-ups
             .copied()

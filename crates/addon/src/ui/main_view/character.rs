@@ -413,19 +413,19 @@ pub(in crate::ui::main_view) fn generate_build_chat_code(
                     .unwrap_or(0)
             };
             let legends = &build.legends;
-            buf.push(legends.first().map(|l| legend_to_byte(l)).unwrap_or(0));
-            buf.push(legends.get(1).map(|l| legend_to_byte(l)).unwrap_or(0));
+            buf.push(legends.first().map(&legend_to_byte).unwrap_or(0));
+            buf.push(legends.get(1).map(&legend_to_byte).unwrap_or(0));
             let aquatic_legends = &build.aquatic_legends;
             buf.push(
                 aquatic_legends
                     .first()
-                    .map(|l| legend_to_byte(l))
+                    .map(&legend_to_byte)
                     .unwrap_or(0),
             );
             buf.push(
                 aquatic_legends
                     .get(1)
-                    .map(|l| legend_to_byte(l))
+                    .map(legend_to_byte)
                     .unwrap_or(0),
             );
             buf.extend_from_slice(&[0u8; 12]);

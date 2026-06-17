@@ -119,11 +119,11 @@ pub fn find_best_benchmark<'a>(
     }
 
     // Score by role similarity (word overlap)
-    let best = candidates
-        .into_iter()
-        .max_by_key(|b| role_similarity(&b.role.to_lowercase(), &role_lower));
+    
 
-    best
+    candidates
+        .into_iter()
+        .max_by_key(|b| role_similarity(&b.role.to_lowercase(), &role_lower))
 }
 
 /// Compute a simple word-overlap similarity score between two role strings.

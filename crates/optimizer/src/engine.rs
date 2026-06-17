@@ -611,7 +611,7 @@ fn select_best_major_traits(
         let mut best_score = f64::NEG_INFINITY;
 
         for &trait_id in column {
-            let score = score_trait_for_archetype(trait_id, &weights, traits_cache);
+            let score = score_trait_for_archetype(trait_id, weights, traits_cache);
             if score > best_score {
                 best_score = score;
                 best_id = trait_id;
@@ -756,7 +756,7 @@ pub struct SynergyResult {
 fn select_gemini_gear_prefixes(weights: &OptimizationWeights) -> (&'static str, Vec<&'static str>) {
     let gear_match = scoring::select_gear_prefix(weights);
     let tier_prefixes = scoring::select_prefixes_by_tiers(weights);
-    let gear_prefixes: Vec<&str> = tier_prefixes.iter().map(|s| *s).collect();
+    let gear_prefixes: Vec<&str> = tier_prefixes.to_vec();
     (gear_match.primary, gear_prefixes)
 }
 
@@ -1152,10 +1152,8 @@ pub fn simulate_validated_rotation(
     if let Some((id, _)) = &validated.skills.heal {
         non_weapon_ids.push(*id);
     }
-    for util in &validated.skills.utilities {
-        if let Some((id, _)) = util {
-            non_weapon_ids.push(*id);
-        }
+    for (id, _) in validated.skills.utilities.iter().flatten() {
+        non_weapon_ids.push(*id);
     }
     if let Some((id, _)) = &validated.skills.elite {
         non_weapon_ids.push(*id);

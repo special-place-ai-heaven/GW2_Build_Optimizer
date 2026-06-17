@@ -140,7 +140,7 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
         // Name + action buttons on one line
         ui.text_colored([0.6, 0.8, 1.0, 1.0], name);
         ui.same_line();
-        if ui.button_with_size(&format!("Load##load_{}", i), [50.0, 0.0]) {
+        if ui.button_with_size(format!("Load##load_{}", i), [50.0, 0.0]) {
             load_idx = Some(i);
         }
         ui.same_line();
@@ -149,22 +149,22 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
         if state.main.confirm_delete == Some(i) {
             ui.text_colored([1.0, 0.3, 0.0, 1.0], "Delete?");
             ui.same_line();
-            if ui.small_button(&format!("Yes##confirm_del_{}", i)) {
+            if ui.small_button(format!("Yes##confirm_del_{}", i)) {
                 request_delete = Some(i);
                 state.main.confirm_delete = None;
             }
             ui.same_line();
-            if ui.small_button(&format!("No##cancel_del_{}", i)) {
+            if ui.small_button(format!("No##cancel_del_{}", i)) {
                 state.main.confirm_delete = None;
             }
-        } else if ui.button_with_size(&format!("Delete##del_{}", i), [50.0, 0.0]) {
+        } else if ui.button_with_size(format!("Delete##del_{}", i), [50.0, 0.0]) {
             state.main.confirm_delete = Some(i);
         }
 
         // Details on second line
         ui.text_colored(
             [0.55, 0.55, 0.55, 1.0],
-            &format!("  {} | {} | {} | {}", character, mode, prefix, time),
+            format!("  {} | {} | {} | {}", character, mode, prefix, time),
         );
 
         ui.spacing();
@@ -346,7 +346,7 @@ fn reconstruct_damage_modifiers(
             nexus::log::log(
                 nexus::log::LogLevel::Warning,
                 "GW2BuildOpt",
-                &format!(
+                format!(
                     "Could not resolve spec '{}' for modifier reconstruction — skipping",
                     spec_name
                 ),
@@ -367,7 +367,7 @@ fn reconstruct_damage_modifiers(
                     nexus::log::log(
                         nexus::log::LogLevel::Warning,
                         "GW2BuildOpt",
-                        &format!(
+                        format!(
                             "Could not resolve trait '{}' in spec '{}' — skipping",
                             trait_name, spec_name
                         ),
@@ -389,7 +389,7 @@ fn reconstruct_damage_modifiers(
             nexus::log::log(
                 nexus::log::LogLevel::Warning,
                 "GW2BuildOpt",
-                &format!("Could not resolve rune '{}' — skipping", saved.rune),
+                format!("Could not resolve rune '{}' — skipping", saved.rune),
             );
         }
         found
@@ -415,7 +415,7 @@ fn reconstruct_damage_modifiers(
                 nexus::log::log(
                     nexus::log::LogLevel::Warning,
                     "GW2BuildOpt",
-                    &format!("Could not resolve sigil '{}' — skipping", name),
+                    format!("Could not resolve sigil '{}' — skipping", name),
                 );
             }
             found
@@ -434,7 +434,7 @@ fn reconstruct_damage_modifiers(
             nexus::log::log(
                 nexus::log::LogLevel::Warning,
                 "GW2BuildOpt",
-                &format!("Could not resolve relic '{}' — skipping", saved.relic),
+                format!("Could not resolve relic '{}' — skipping", saved.relic),
             );
         }
         found
@@ -464,7 +464,7 @@ fn format_timestamp(timestamp: u64) -> String {
     let mut y = 1970u64;
     let mut remaining_days = days;
     loop {
-        let days_in_year = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+        let days_in_year = if y.is_multiple_of(4) && (!y.is_multiple_of(100) || y.is_multiple_of(400)) {
             366
         } else {
             365
@@ -475,7 +475,7 @@ fn format_timestamp(timestamp: u64) -> String {
         remaining_days -= days_in_year;
         y += 1;
     }
-    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let leap = y.is_multiple_of(4) && (!y.is_multiple_of(100) || y.is_multiple_of(400));
     let days_in_months: [u64; 12] = [
         31,
         if leap { 29 } else { 28 },
