@@ -470,9 +470,7 @@ mod tests {
 
     fn dummy_report() -> RefereeReport {
         use crate::combat::DamageModifiers;
-        use crate::genome::BuildGenome;
         RefereeReport {
-            genome: BuildGenome::from_validated("", &ValidatedBuild::default()),
             scenario: ScenarioSpec {
                 game_mode: GameMode::PvE,
                 combat_tier: CombatTier::Solo,

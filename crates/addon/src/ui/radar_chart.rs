@@ -291,26 +291,6 @@ pub fn render_legend(ui: &Ui, show_current: bool, show_optimized: bool) {
     ui.text_colored(WEIGHTS_OUTLINE, "-- Target Weights");
 }
 
-/// Compute 6-axis performance values from CombatPerformance, normalized 0.0-1.0.
-pub fn compute_performance_axes(
-    perf: &gw2_optimizer::combat::CombatPerformance,
-    _profession: &str,
-) -> [f64; 6] {
-    let power = (perf.strike_dps_index / STRIKE_DPS_NORM).min(1.0);
-    let condition = ((perf.condition_dps_index / CONDI_DPS_NORM)
-        + (perf.condi_duration_pct / 100.0).min(1.0) * 0.15)
-        .min(1.0);
-    let boon_support = (perf.boon_duration_pct / 100.0).min(1.0);
-    let heal = (perf.healing_power_index / HEALING_NORM).min(1.0);
-    let sustain = ((perf.effective_health / EFFECTIVE_HEALTH_NORM)
-        + perf.damage_reduction_pct / 100.0)
-        .min(1.0);
-    let control =
-        (perf.condi_duration_pct / 100.0 * 0.6 + perf.boon_duration_pct / 100.0 * 0.4).min(1.0);
-
-    [power, condition, boon_support, heal, sustain, control]
-}
-
 /// Compute 6-axis performance values from CombatMetrics (i32 UI type).
 pub fn compute_axes_from_metrics(m: &gw2_core::types::CombatMetrics) -> [f64; 6] {
     let power = (m.strike_dps_index as f64 / STRIKE_DPS_NORM).min(1.0);
@@ -327,52 +307,3 @@ pub fn compute_axes_from_metrics(m: &gw2_core::types::CombatMetrics) -> [f64; 6]
     [power, condition, boon_support, heal, sustain, control]
 }
 
-/// Infer optimization weights from current build stats.
-/// Maps stat investment patterns to the 6-axis weight space.
-pub fn infer_weights_from_stats(stats: Option<&gw2_core::types::StatBlock>) -> OptimizationWeights {
-    let Some(stats) = stats else {
-        return OptimizationWeights::preset_balanced();
-    };
-
-    // Investment above base values (Power & Precision base = 1000, rest = 0)
-    let power_inv = (stats.power - 1000).max(0) as f64;
-    let prec_inv = (stats.precision - 1000).max(0) as f64;
-    let fer_inv = stats.ferocity as f64;
-    let cd_inv = stats.condition_damage as f64;
-    let exp_inv = stats.expertise as f64;
-    let conc_inv = stats.concentration as f64;
-    let hp_inv = stats.healing_power as f64;
-    let tough_inv = stats.toughness as f64;
-    let vit_inv = stats.vitality as f64;
-
-    // Max possible investment per slot (Ascended Berserker = ~1200 for primary stat)
-    let max_inv = 1500.0;
-
-    let power = ((power_inv + prec_inv + fer_inv) / (max_inv * 3.0)).clamp(0.0, 1.0);
-    let condition = ((cd_inv * 2.0 + exp_inv) / (max_inv * 3.0)).clamp(0.0, 1.0);
-    let sustain = ((tough_inv + vit_inv) / (max_inv * 2.0)).clamp(0.0, 1.0);
-    let healing = (hp_inv / max_inv).clamp(0.0, 1.0);
-    let boon_support = (conc_inv / max_inv).clamp(0.0, 1.0);
-    let control = ((exp_inv * 0.5) / max_inv).clamp(0.0, 1.0);
-
-    // Normalize to respect weight budget
-    let mut w = OptimizationWeights {
-        power,
-        condition,
-        boon_support,
-        healing,
-        sustain,
-        control,
-    };
-    let total = w.total();
-    if total > gw2_optimizer::scoring::WEIGHT_BUDGET {
-        let scale = gw2_optimizer::scoring::WEIGHT_BUDGET / total;
-        w.power *= scale;
-        w.condition *= scale;
-        w.boon_support *= scale;
-        w.healing *= scale;
-        w.sustain *= scale;
-        w.control *= scale;
-    }
-    w
-}

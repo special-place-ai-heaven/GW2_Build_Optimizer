@@ -133,124 +133,6 @@ fn render_card_section(ui: &Ui, title: &str, content: impl FnOnce(&Ui)) {
     ui.dummy([0.0, CARD_GAP]);
 }
 
-/// Render a compact build card suitable for a narrow panel.
-pub fn render_build_card(ui: &Ui, build: &ResolvedBuild, stats: Option<&StatBlock>) {
-    // ── Specializations Card ──
-    render_card_section(ui, "SPECIALIZATIONS", |ui| {
-        for spec in &build.specializations {
-            let elite = if spec.elite { " [Elite]" } else { "" };
-            ui.text_colored(SPEC_COLOR, &format!("  {}{}", spec.name, elite));
-            let traits: Vec<&str> = spec
-                .traits_selected
-                .iter()
-                .map(|t| t.name.as_str())
-                .collect();
-            if !traits.is_empty() {
-                ui.text_colored(TRAIT_COLOR, &format!("    {}", traits.join(" | ")));
-            }
-        }
-    });
-
-    // ── Skills Card ──
-    render_card_section(ui, "SKILLS", |ui| {
-        if let Some(ref h) = build.skills.heal {
-            render_label_value(ui, "Heal", &h.name);
-        }
-        let utils: Vec<String> = build
-            .skills
-            .utilities
-            .iter()
-            .filter_map(|u| u.as_ref().map(|s| s.name.clone()))
-            .collect();
-        for (i, name) in utils.iter().enumerate() {
-            render_label_value(ui, &format!("Util {}", i + 1), name);
-        }
-        if let Some(ref e) = build.skills.elite {
-            render_label_value(ui, "Elite", &e.name);
-        }
-    });
-
-    // ── Weapons Card ──
-    render_card_section(ui, "WEAPONS", |ui| {
-        for set in &build.weapons {
-            let mut parts = Vec::new();
-            if let Some(ref mh) = set.main_hand {
-                parts.push(mh.weapon_type.as_str());
-            }
-            if let Some(ref oh) = set.off_hand {
-                parts.push(oh.weapon_type.as_str());
-            }
-            if !parts.is_empty() {
-                render_label_value(ui, &set.label, &parts.join(" / "));
-            }
-            if !set.sigils.is_empty() {
-                let names: Vec<&str> = set.sigils.iter().map(|s| s.name.as_str()).collect();
-                ui.text_colored(DIM_COLOR, &format!("    Sigils: {}", names.join(", ")));
-            }
-        }
-    });
-
-    // ── Gear Card ──
-    render_card_section(ui, "GEAR", |ui| {
-        if !build.armor.is_empty() {
-            let mut prefixes: Vec<&str> = build
-                .armor
-                .iter()
-                .map(|a| a.stat_prefix.as_str())
-                .filter(|p| !p.is_empty())
-                .collect();
-            prefixes.sort();
-            prefixes.dedup();
-            let prefix_str = if prefixes.len() <= 1 {
-                prefixes.first().copied().unwrap_or("(none)").to_string()
-            } else {
-                format!("Mixed ({})", prefixes.join(", "))
-            };
-            render_label_value(ui, "Prefix", &prefix_str);
-        }
-        if let Some(ref r) = build.rune {
-            render_label_value_colored(ui, "Rune", &r.name, GEAR_COLOR);
-        }
-        if let Some(ref r) = build.relic {
-            render_label_value_colored(ui, "Relic", &r.name, GEAR_COLOR);
-        }
-        if let Some(ref a) = build.pvp_amulet {
-            render_label_value_colored(ui, "Amulet", &a.name, GEAR_COLOR);
-        }
-    });
-
-    // ── Stats Card ──
-    if let Some(s) = stats {
-        render_card_section(ui, "STATS", |ui| {
-            ui.columns(2, "##card_stats", false);
-            let rows = [
-                ("Power", s.power),
-                ("Precision", s.precision),
-                ("Toughness", s.toughness),
-                ("Vitality", s.vitality),
-                ("Condi Dmg", s.condition_damage),
-                ("Ferocity", s.ferocity),
-                ("Healing", s.healing_power),
-                ("Expertise", s.expertise),
-            ];
-            for (name, val) in &rows {
-                ui.text_colored(LABEL_COLOR, &format!("  {}: ", name));
-                ui.same_line();
-                ui.text_colored(VALUE_COLOR, &format!("{}", val));
-                ui.next_column();
-            }
-            ui.columns(1, "##card_stats_end", false);
-            ui.text_colored(
-                DIM_COLOR,
-                &format!(
-                    "  Crit {:.1}% | HP {} | Armor {}",
-                    s.crit_chance, s.health, s.armor
-                ),
-            );
-        });
-    }
-}
-
 /// Render a build card without the Specializations section (used when lock panel replaces it).
 /// `compare_stats`: if provided, stat values are colored green/red relative to these.
 pub fn render_build_card_no_specs(
@@ -271,9 +153,9 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
     // ── Specializations Card ──
     render_card_section(ui, "SPECIALIZATIONS", |ui| {
         for (name, traits) in &suggestion.specializations {
-            ui.text_colored(SPEC_COLOR, &format!("  {}", name));
+            ui.text_colored(SPEC_COLOR, format!("  {}", name));
             if !traits.is_empty() {
-                ui.text_colored(TRAIT_COLOR, &format!("    {}", traits.join(" | ")));
+                ui.text_colored(TRAIT_COLOR, format!("    {}", traits.join(" | ")));
             }
         }
     });
@@ -281,19 +163,19 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
     // ── Skills Card ──
     render_card_section(ui, "SKILLS", |ui| {
         for skill in &suggestion.skills {
-            ui.text_colored(VALUE_COLOR, &format!("  {}", skill));
+            ui.text_colored(VALUE_COLOR, format!("  {}", skill));
         }
     });
 
     // ── Weapons Card ──
     render_card_section(ui, "WEAPONS", |ui| {
         for weapon in &suggestion.weapons {
-            ui.text_colored(VALUE_COLOR, &format!("  {}", weapon));
+            ui.text_colored(VALUE_COLOR, format!("  {}", weapon));
         }
         if !suggestion.sigils.is_empty() {
             ui.text_colored(
                 DIM_COLOR,
-                &format!("  Sigils: {}", suggestion.sigils.join(", ")),
+                format!("  Sigils: {}", suggestion.sigils.join(", ")),
             );
         }
     });
@@ -326,15 +208,15 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
                 ("Expertise", s.expertise),
             ];
             for (name, val) in &rows {
-                ui.text_colored(LABEL_COLOR, &format!("  {}: ", name));
+                ui.text_colored(LABEL_COLOR, format!("  {}: ", name));
                 ui.same_line();
-                ui.text_colored(VALUE_COLOR, &format!("{}", val));
+                ui.text_colored(VALUE_COLOR, format!("{}", val));
                 ui.next_column();
             }
             ui.columns(1, "##sug_stats_end", false);
             ui.text_colored(
                 DIM_COLOR,
-                &format!(
+                format!(
                     "  Crit {:.1}% | HP {} | Armor {}",
                     s.crit_chance, s.health, s.armor
                 ),
@@ -360,13 +242,13 @@ pub fn render_suggestion_card_no_specs(
 // ─── Helpers ───
 
 fn render_label_value(ui: &Ui, label: &str, value: &str) {
-    ui.text_colored(LABEL_COLOR, &format!("  {}: ", label));
+    ui.text_colored(LABEL_COLOR, format!("  {}: ", label));
     ui.same_line();
     ui.text_colored(VALUE_COLOR, value);
 }
 
 fn render_label_value_colored(ui: &Ui, label: &str, value: &str, color: [f32; 4]) {
-    ui.text_colored(LABEL_COLOR, &format!("  {}: ", label));
+    ui.text_colored(LABEL_COLOR, format!("  {}: ", label));
     ui.same_line();
     ui.text_colored(color, value);
 }
@@ -410,7 +292,7 @@ pub fn render_build_weapons(ui: &Ui, build: &ResolvedBuild) {
             }
             if !set.sigils.is_empty() {
                 let names: Vec<&str> = set.sigils.iter().map(|s| s.name.as_str()).collect();
-                ui.text_colored(DIM_COLOR, &format!("    Sigils: {}", names.join(", ")));
+                ui.text_colored(DIM_COLOR, format!("    Sigils: {}", names.join(", ")));
             }
         }
     });
@@ -464,18 +346,18 @@ pub fn render_build_stats(ui: &Ui, stats: Option<&StatBlock>, compare_stats: Opt
                 ("Expertise", s.expertise, cmp.expertise),
             ];
             for (name, val, cmp_val) in &rows {
-                ui.text_colored(LABEL_COLOR, &format!("  {}: ", name));
+                ui.text_colored(LABEL_COLOR, format!("  {}: ", name));
                 ui.same_line();
                 let color = if compare_stats.is_some() {
                     stat_color(*val, *cmp_val)
                 } else {
                     VALUE_COLOR
                 };
-                ui.text_colored(color, &format!("{}", val));
+                ui.text_colored(color, format!("{}", val));
             }
             ui.text_colored(
                 DIM_COLOR,
-                &format!(
+                format!(
                     "  Crit {:.1}% | HP {} | Armor {}",
                     s.crit_chance, s.health, s.armor
                 ),
@@ -488,7 +370,7 @@ pub fn render_build_stats(ui: &Ui, stats: Option<&StatBlock>, compare_stats: Opt
 pub fn render_suggestion_skills(ui: &Ui, suggestion: &super::super::comparison::BuildSuggestion) {
     render_card_section(ui, "SKILLS", |ui| {
         for skill in &suggestion.skills {
-            ui.text_colored(VALUE_COLOR, &format!("  {}", skill));
+            ui.text_colored(VALUE_COLOR, format!("  {}", skill));
         }
     });
 }
@@ -497,12 +379,12 @@ pub fn render_suggestion_skills(ui: &Ui, suggestion: &super::super::comparison::
 pub fn render_suggestion_weapons(ui: &Ui, suggestion: &super::super::comparison::BuildSuggestion) {
     render_card_section(ui, "WEAPONS", |ui| {
         for weapon in &suggestion.weapons {
-            ui.text_colored(VALUE_COLOR, &format!("  {}", weapon));
+            ui.text_colored(VALUE_COLOR, format!("  {}", weapon));
         }
         if !suggestion.sigils.is_empty() {
             ui.text_colored(
                 DIM_COLOR,
-                &format!("  Sigils: {}", suggestion.sigils.join(", ")),
+                format!("  Sigils: {}", suggestion.sigils.join(", ")),
             );
         }
     });
@@ -544,18 +426,18 @@ pub fn render_suggestion_stats(
                 ("Expertise", s.expertise, cmp.expertise),
             ];
             for (name, val, cmp_val) in &rows {
-                ui.text_colored(LABEL_COLOR, &format!("  {}: ", name));
+                ui.text_colored(LABEL_COLOR, format!("  {}: ", name));
                 ui.same_line();
                 let color = if compare_stats.is_some() {
                     stat_color(*val, *cmp_val)
                 } else {
                     VALUE_COLOR
                 };
-                ui.text_colored(color, &format!("{}", val));
+                ui.text_colored(color, format!("{}", val));
             }
             ui.text_colored(
                 DIM_COLOR,
-                &format!(
+                format!(
                     "  Crit {:.1}% | HP {} | Armor {}",
                     s.crit_chance, s.health, s.armor
                 ),
@@ -567,25 +449,25 @@ pub fn render_suggestion_stats(
 // ─── Combat performance section renderers ───
 
 fn render_combat_int(ui: &Ui, label: &str, val: i32, cmp_val: i32, has_cmp: bool) {
-    ui.text_colored(LABEL_COLOR, &format!("  {}: ", label));
+    ui.text_colored(LABEL_COLOR, format!("  {}: ", label));
     ui.same_line();
     let color = if has_cmp {
         stat_color(val, cmp_val)
     } else {
         VALUE_COLOR
     };
-    ui.text_colored(color, &format!("{}", val));
+    ui.text_colored(color, format!("{}", val));
 }
 
 fn render_combat_pct(ui: &Ui, label: &str, val: f64, cmp_val: f64, has_cmp: bool) {
-    ui.text_colored(LABEL_COLOR, &format!("  {}: ", label));
+    ui.text_colored(LABEL_COLOR, format!("  {}: ", label));
     ui.same_line();
     let color = if has_cmp {
         stat_color_f64(val, cmp_val)
     } else {
         VALUE_COLOR
     };
-    ui.text_colored(color, &format!("{:.1}%", val));
+    ui.text_colored(color, format!("{:.1}%", val));
 }
 
 fn render_combat_metrics_inner(ui: &Ui, c: &CombatMetrics, cmp: &CombatMetrics, has_cmp: bool) {
@@ -693,7 +575,7 @@ pub fn render_rotation_section(ui: &Ui, rotation: &RotationBreakdown) {
     render_card_section(ui, "ROTATION BREAKDOWN", |ui| {
         ui.text_colored(
             VALUE_COLOR,
-            &format!(
+            format!(
                 "  Simulated DPS: {}  (Strike: {} | Condi: {})",
                 rotation.simulated_dps, rotation.strike_dps, rotation.condition_dps
             ),
@@ -709,7 +591,7 @@ pub fn render_rotation_section(ui: &Ui, rotation: &RotationBreakdown) {
                     rotation.stability_uptime * 100.0
                 ));
             }
-            ui.text_colored([0.4, 0.9, 0.4, 1.0], &format!("  {}", parts.join("  |  ")));
+            ui.text_colored([0.4, 0.9, 0.4, 1.0], format!("  {}", parts.join("  |  ")));
         }
         if !rotation.condition_uptime.is_empty() {
             let uptimes: Vec<String> = rotation
@@ -720,14 +602,14 @@ pub fn render_rotation_section(ui: &Ui, rotation: &RotationBreakdown) {
                 .collect();
             if !uptimes.is_empty() {
                 ui.text_colored(LABEL_COLOR, "  Condition Stacks:");
-                ui.text_colored(VALUE_COLOR, &format!("    {}", uptimes.join("  |  ")));
+                ui.text_colored(VALUE_COLOR, format!("    {}", uptimes.join("  |  ")));
             }
         }
         if !rotation.skill_usage.is_empty() {
             ui.text_colored(LABEL_COLOR, "  Key Skills:");
             for (name, casts, dps) in &rotation.skill_usage {
                 if *casts > 0 {
-                    ui.text_colored(DIM_COLOR, &format!("    {} x{} ({} DPS)", name, casts, dps));
+                    ui.text_colored(DIM_COLOR, format!("    {} x{} ({} DPS)", name, casts, dps));
                 }
             }
         }
@@ -770,7 +652,7 @@ pub fn render_why_section(ui: &Ui, explanation: &str, changes: &[String]) {
         ui.spacing();
         ui.text_colored(SECTION_TITLE_COLOR, "  CHANGES");
         for change in changes {
-            ui.text_colored(GEAR_COLOR, &format!("    * {}", change));
+            ui.text_colored(GEAR_COLOR, format!("    * {}", change));
         }
     }
     ui.spacing();

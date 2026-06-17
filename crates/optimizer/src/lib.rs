@@ -7,7 +7,6 @@ pub mod engine;
 pub mod gamedb;
 pub mod gemini;
 pub mod gemini_tools;
-pub mod genome;
 pub mod llm;
 pub mod prompts;
 pub mod referee;
