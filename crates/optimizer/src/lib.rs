@@ -8,6 +8,8 @@ pub mod gamedb;
 pub mod gemini;
 pub mod gemini_tools;
 pub mod llm;
+#[cfg(test)]
+pub mod parser_consistency_tests;
 pub mod prompts;
 pub mod referee;
 pub mod rotation;
