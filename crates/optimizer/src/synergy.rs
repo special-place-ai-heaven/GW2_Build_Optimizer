@@ -556,7 +556,7 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             apply_count,
             ..
         } => {
-            let is_cond = is_condition(status);
+            let is_cond = crate::data::boon_condition_formulas::is_condition(status);
             // Store the canonical name (e.g. "Poisoned" not "Poison") so the
             // synergy matchers in `compute_marginal_synergy` compare apples to
             // apples — two emitters (one trait, one sigil) referring to the
@@ -579,7 +579,7 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             apply_count,
             ..
         } => {
-            let is_cond = is_condition(status);
+            let is_cond = crate::data::boon_condition_formulas::is_condition(status);
             let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
             effects.push(NormalizedEffect::AppliesStatus {
                 status: canonical.to_string(),
@@ -1142,40 +1142,13 @@ fn duration_matches_condition(kind: &DurationKind, condition: &str) -> bool {
     }
 }
 
-fn is_condition(status: &str) -> bool {
-    // Verb-form aliases (Blind, Poison, Chill, Cripple, Immobilize) are
-    // normalized via `canonical_condition_name` so the arms only list
-    // canonical (status-effect) form. `Immobilized` stays as an explicit
-    // arm — the resolver only knows `Immobilize→Immobile`, not the
-    // past-tense `Immobilized`.
-    let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
-    matches!(
-        canonical,
-        "Bleeding"
-            | "Burning"
-            | "Poisoned"
-            | "Torment"
-            | "Confusion"
-            | "Vulnerability"
-            | "Weakness"
-            | "Blinded"
-            | "Chilled"
-            | "Crippled"
-            | "Fear"
-            | "Immobile"
-            | "Immobilized"
-            | "Slow"
-            | "Taunt"
-    )
-}
-
-/// Test-only thin wrappers so the alias-routing regression suite can fuzz
-/// the private `is_condition` and `condition_importance` helpers without
-/// changing their visibility.
+/// Test-only thin wrappers so the alias-routing regression suite can fuzz the
+/// shared `is_condition` helper (through the path this module consumes it by)
+/// and the private `condition_importance` helper without changing visibility.
 #[cfg(test)]
 pub(crate) mod tests_alias_helpers {
     pub(crate) fn is_condition(status: &str) -> bool {
-        super::is_condition(status)
+        crate::data::boon_condition_formulas::is_condition(status)
     }
     pub(crate) fn condition_importance(status: &str) -> f64 {
         super::condition_importance(status)
