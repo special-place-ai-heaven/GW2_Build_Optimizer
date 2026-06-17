@@ -1295,6 +1295,120 @@ mod tests {
         assert!(mods.strike_pct.is_empty());
     }
 
+    #[test]
+    fn test_extract_damage_modifiers_multi_bonus_rune_credits_all() {
+        // Integration-style guard: feed a single REALISTIC multi-bonus rune item
+        // through the top-level entry point `extract_damage_modifiers` (rune path
+        // only — no traits/sigils/relic) and assert that EVERY modifier kind on
+        // it is credited SIMULTANEOUSLY. Single-modifier rune tests pass even if a
+        // *different* bonus on the same item is silently dropped during the loop
+        // over `details.bonuses`; this asserts the whole multi-tier set survives
+        // one pass. Noise (flat stats / non-modifier flavor) must be ignored.
+        //
+        // Modeled on a condi multi-stat rune (Nightmare/Trapper-style): a 6-tier
+        // bonus list mixing flat condition damage, a specific-condition duration,
+        // a global condition duration, an outgoing-healing %, and two non-modifier
+        // strings that the parser must skip without corrupting results.
+        let rune_id: u32 = 24818;
+        let rune = Item {
+            id: rune_id,
+            name: "Superior Rune of the Nightmare".into(),
+            item_type: "UpgradeComponent".into(),
+            rarity: "Exotic".into(),
+            level: 60,
+            description: None,
+            icon: None,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec![],
+            restrictions: vec![],
+            details: Some(gw2_api::models::ItemDetails {
+                detail_type: Some("Rune".into()),
+                weight_class: None,
+                defense: None,
+                damage_type: None,
+                min_power: None,
+                max_power: None,
+                suffix: Some("of the Nightmare".into()),
+                bonuses: vec![
+                    // Tier 1: flat stat — no '%', must be ignored as noise.
+                    "+25 Power".into(),
+                    // Tier 2: flat condition-damage % -> condition_pct (0.05).
+                    "+5% Condition Damage".into(),
+                    // Tier 3: non-modifier flavor text — must be ignored as noise.
+                    "Gain might on heal".into(),
+                    // Tier 4: specific-condition duration ->
+                    // specific_condi_duration["Burning"] (0.10).
+                    "+10% Burning Duration".into(),
+                    // Tier 5: global condition duration -> condi_duration_pct (0.15).
+                    "+15% Condition Duration".into(),
+                    // Tier 6: outgoing healing % -> healing_pct (0.10).
+                    "+10% Outgoing Healing".into(),
+                ],
+                infusion_upgrade_flags: vec![],
+                infusion_slots: vec![],
+                attribute_adjustment: None,
+                infix_upgrade: None,
+                suffix_item_id: None,
+                secondary_suffix_item_id: None,
+                stat_choices: vec![],
+            }),
+        };
+
+        let mut items_cache: HashMap<u32, Item> = HashMap::new();
+        items_cache.insert(rune_id, rune);
+        let empty_traits: HashMap<u32, Trait> = HashMap::new();
+        let ctx = BalanceContext::pve();
+
+        let mods = extract_damage_modifiers(
+            &[],           // no equipped traits
+            Some(rune_id), // rune under test
+            &[],           // no sigils
+            None,          // no relic
+            &empty_traits,
+            &items_cache,
+            &ctx,
+        );
+
+        // All four modifier kinds present at once from the single item.
+        assert_eq!(
+            mods.condition_pct.len(),
+            1,
+            "flat condition-damage % dropped from multi-bonus rune"
+        );
+        assert!((mods.condition_pct[0] - 0.05).abs() < 0.001);
+
+        let burning = mods
+            .specific_condi_duration
+            .get("Burning")
+            .expect("Burning-duration bonus dropped from multi-bonus rune");
+        assert_eq!(burning.len(), 1);
+        assert!((burning[0] - 0.10).abs() < 0.001);
+
+        assert_eq!(
+            mods.condi_duration_pct.len(),
+            1,
+            "global condition-duration % dropped from multi-bonus rune"
+        );
+        assert!((mods.condi_duration_pct[0] - 0.15).abs() < 0.001);
+
+        assert_eq!(
+            mods.healing_pct.len(),
+            1,
+            "outgoing-healing % dropped from multi-bonus rune"
+        );
+        assert!((mods.healing_pct[0] - 0.10).abs() < 0.001);
+
+        // Noise must not leak into any axis: the flat "+25 Power" and the flavor
+        // "Gain might on heal" credit nothing, and nothing spilled into strike.
+        assert!(
+            mods.strike_pct.is_empty(),
+            "noise/flat-stat bonuses leaked into strike_pct"
+        );
+    }
+
     fn percent_fact(text: &str, percent: f64) -> gw2_api::models::Fact {
         gw2_api::models::Fact::Percent {
             text: Some(text.to_string()),
