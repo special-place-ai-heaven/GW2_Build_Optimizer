@@ -77,6 +77,17 @@ pub(crate) fn normalize_sigil_family(name: &str) -> String {
     base.trim().to_string()
 }
 
+/// Heuristic: does `text` describe a skill that removes/cleanses conditions?
+///
+/// Matches GW2 fact/description wording — a "condition" stem plus a
+/// remove/cleanse/cure verb. Used by rotation analysis and the synergy
+/// pipeline to detect cleanse coverage.
+pub(crate) fn text_describes_condition_cleanse(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("condit")
+        && (lower.contains("remov") || lower.contains("cleanse") || lower.contains("cure"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +189,15 @@ mod tests {
             normalize_sigil_family("  Superior Sigil of Force  "),
             "superior sigil of force"
         );
+    }
+
+    #[test]
+    fn condition_cleanse_matches_stem_plus_verb() {
+        assert!(text_describes_condition_cleanse("Remove a condition"));
+        assert!(text_describes_condition_cleanse("Cleanse 2 conditions"));
+        assert!(text_describes_condition_cleanse("Cure conditions from allies"));
+        // Needs both a condition stem AND a cleanse verb.
+        assert!(!text_describes_condition_cleanse("Gain 3 stacks of might"));
+        assert!(!text_describes_condition_cleanse("Conditions you apply last longer"));
     }
 }

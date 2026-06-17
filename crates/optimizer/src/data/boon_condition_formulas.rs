@@ -99,6 +99,36 @@ pub fn canonical_condition_name(name: &str) -> &str {
     name
 }
 
+/// Returns `true` if `status` names a GW2 condition (damaging or non-damaging).
+///
+/// Accepts either verb-form aliases (Blind, Poison, Chill, Cripple,
+/// Immobilize) or canonical status-effect form (Blinded, Poisoned, Chilled,
+/// …) — the input is normalized via `canonical_condition_name` before
+/// matching, so the arms only list canonical forms. `Immobilized` stays as an
+/// explicit arm: the alias resolver only knows `Immobilize→Immobile`, not the
+/// past-tense `Immobilized`.
+pub(crate) fn is_condition(status: &str) -> bool {
+    let canonical = canonical_condition_name(status);
+    matches!(
+        canonical,
+        "Bleeding"
+            | "Burning"
+            | "Poisoned"
+            | "Torment"
+            | "Confusion"
+            | "Vulnerability"
+            | "Weakness"
+            | "Blinded"
+            | "Chilled"
+            | "Crippled"
+            | "Fear"
+            | "Immobile"
+            | "Immobilized"
+            | "Slow"
+            | "Taunt"
+    )
+}
+
 // ─── Error Types ───
 
 #[derive(Debug, Error)]
@@ -1096,6 +1126,24 @@ mod tests {
             assert!(is_condition(verb));
         }
         assert!(!is_condition("Might"));
+    }
+
+    /// The shared `is_condition` recognizes damaging and non-damaging
+    /// conditions, normalizes verb-form aliases, and rejects boons / unknowns.
+    #[test]
+    fn test_shared_is_condition() {
+        // Damaging condition.
+        assert!(is_condition("Bleeding"));
+        // Non-damaging condition.
+        assert!(is_condition("Vulnerability"));
+        // Verb-form alias that canonicalizes (Chill -> Chilled).
+        assert!(is_condition("Chill"));
+        assert_eq!(is_condition("Chill"), is_condition("Chilled"));
+        // Boons are not conditions.
+        assert!(!is_condition("Might"));
+        assert!(!is_condition("Fury"));
+        // Unrecognized input is not a condition.
+        assert!(!is_condition("NotACondition"));
     }
 
     /// `is_damaging_condition` in rotation/builder.rs must accept either

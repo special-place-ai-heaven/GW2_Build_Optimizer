@@ -413,33 +413,7 @@ impl GameDb {
     }
 }
 
-/// GW2 conditions (damaging + non-damaging status effects).
-///
-/// Accepts either verb-form (Blind, Poison, Chill, …) or canonical
-/// status-effect form (Blinded, Poisoned, Chilled, …) — the input is
-/// normalized via `canonical_condition_name` before matching, so the
-/// arms only need to list canonical forms.
-fn is_condition(status: &str) -> bool {
-    let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
-    matches!(
-        canonical,
-        "Bleeding"
-            | "Burning"
-            | "Poisoned"
-            | "Torment"
-            | "Confusion"
-            | "Vulnerability"
-            | "Weakness"
-            | "Blinded"
-            | "Chilled"
-            | "Crippled"
-            | "Fear"
-            | "Immobile"
-            | "Immobilized"
-            | "Slow"
-            | "Taunt"
-    )
-}
+use crate::data::boon_condition_formulas::is_condition;
 
 /// GW2 boons.
 fn is_boon(status: &str) -> bool {
@@ -460,12 +434,12 @@ fn is_boon(status: &str) -> bool {
     )
 }
 
-/// Test-only thin wrapper so the alias-routing regression suite in
-/// `data::boon_condition_formulas::tests` can fuzz the private
-/// `is_condition` helper without changing its visibility.
+/// Test-only thin wrapper preserved so the alias-routing regression suite in
+/// `data::boon_condition_formulas::tests` keeps exercising the shared
+/// `is_condition` helper through the path the gamedb module consumes it by.
 #[cfg(test)]
 pub(crate) mod tests_alias_helpers {
     pub(crate) fn is_condition(status: &str) -> bool {
-        super::is_condition(status)
+        crate::data::boon_condition_formulas::is_condition(status)
     }
 }
