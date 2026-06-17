@@ -7,7 +7,6 @@ pub mod engine;
 pub mod gamedb;
 pub mod gemini;
 pub mod gemini_tools;
-pub mod genome;
 pub mod llm;
 pub mod prompts;
 pub mod referee;
@@ -20,6 +19,7 @@ pub mod search_v2;
 pub mod stats;
 pub mod synergy;
 pub mod synergy_pipeline;
+pub mod text_util;
 pub mod validation;
 
 // Re-export viability types for downstream consumers (S07 Trust UI).

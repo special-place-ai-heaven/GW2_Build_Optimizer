@@ -7,7 +7,9 @@
 
 use gw2_api::models::{Fact, Item, Skill, Trait as GW2Trait};
 
+use crate::data::boon_condition_formulas::{boon_weight, condition_importance};
 use crate::scoring::OptimizationWeights;
+use crate::text_util::{capitalize, extract_percent_before};
 
 // ─── Supporting Enums ───
 
@@ -509,7 +511,10 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
                     category: DamageCategory::Strike,
                     percent: *pct,
                 });
-            } else if text_lower.contains("condition damage") && text_lower.contains("increase") {
+            } else if text_lower.contains("condition damage") {
+                // Mirror the strike branch above: trust the structured Percent fact.
+                // Requiring the literal word "increase" silently dropped condition
+                // damage facts phrased as "Condition Damage: +X%".
                 effects.push(NormalizedEffect::DamageModifier {
                     category: DamageCategory::Condition,
                     percent: *pct,
@@ -536,11 +541,17 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
                 });
             }
 
-            // Specific condition duration patterns
+            // Specific condition duration patterns. Search terms stay verb-form
+            // (tooltip text says "Poison Duration"); the stored key is
+            // canonicalized so it matches the "Poisoned" form every other path
+            // (and `duration_matches`) uses. Without this, a "+X% Poison Duration"
+            // bonus keyed as "Poison" would never match a "Poisoned" lookup.
             for condi in &["Bleeding", "Burning", "Poison", "Torment", "Confusion"] {
                 if text_lower.contains(&condi.to_lowercase()) && text_lower.contains("duration") {
+                    let canonical =
+                        crate::data::boon_condition_formulas::canonical_condition_name(condi);
                     effects.push(NormalizedEffect::DurationBonus {
-                        kind: DurationKind::SpecificCondition(condi.to_string()),
+                        kind: DurationKind::SpecificCondition(canonical.to_string()),
                         percent: *pct,
                     });
                 }
@@ -552,7 +563,7 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             apply_count,
             ..
         } => {
-            let is_cond = is_condition(status);
+            let is_cond = crate::data::boon_condition_formulas::is_condition(status);
             // Store the canonical name (e.g. "Poisoned" not "Poison") so the
             // synergy matchers in `compute_marginal_synergy` compare apples to
             // apples — two emitters (one trait, one sigil) referring to the
@@ -575,7 +586,7 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             apply_count,
             ..
         } => {
-            let is_cond = is_condition(status);
+            let is_cond = crate::data::boon_condition_formulas::is_condition(status);
             let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
             effects.push(NormalizedEffect::AppliesStatus {
                 status: canonical.to_string(),
@@ -616,9 +627,7 @@ fn parse_rune_bonus_to_effects(bonus: &str) -> Vec<NormalizedEffect> {
     let s = bonus.trim().to_lowercase();
 
     // Match "+N <Stat>" patterns (flat stat bonuses)
-    if s.starts_with('+') {
-        let without_plus = &s[1..];
-
+    if let Some(without_plus) = s.strip_prefix('+') {
         // Check for percentage patterns first
         if let Some(pct_idx) = without_plus.find('%') {
             let num_str = &without_plus[..pct_idx];
@@ -727,7 +736,16 @@ fn parse_description_to_effects(desc: &str) -> Vec<NormalizedEffect> {
             });
         }
     }
-    if desc_lower.contains("damage") && !desc_lower.contains("condition damage") {
+    if desc_lower.contains("condition damage") {
+        // Checked before the generic-damage branch, which excludes "condition
+        // damage" and would otherwise drop a "+N% condition damage" description.
+        if let Some(pct) = extract_percent_before(&desc_lower, "condition damage") {
+            effects.push(NormalizedEffect::DamageModifier {
+                category: DamageCategory::Condition,
+                percent: pct,
+            });
+        }
+    } else if desc_lower.contains("damage") {
         if let Some(pct) = extract_percent_before(&desc_lower, "damage") {
             effects.push(NormalizedEffect::DamageModifier {
                 category: DamageCategory::Strike,
@@ -1090,39 +1108,6 @@ fn weight_for_damage_category(cat: &DamageCategory, weights: &OptimizationWeight
     }
 }
 
-fn condition_importance(status: &str) -> f64 {
-    // Verb-form input (Poison) is normalized to canonical (Poisoned) so the
-    // arms only list canonical names.
-    let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
-    match canonical {
-        "Burning" => 1.0,       // Highest tick damage: 0.155*CD + 131.75
-        "Bleeding" => 0.7,      // Stacks to 25: 0.06*CD + 22
-        "Torment" => 0.6,       // Stationary: 0.0375*CD + 31.875; moving: 2×
-        "Poisoned" => 0.5,      // 0.06*CD + 33.5, also -33% healing
-        "Confusion" => 0.1,     // On-use only: 0.0175*CD + 11 (~10% of Burning DPS)
-        "Vulnerability" => 0.8, // Force multiplier (+1% all damage per stack)
-        _ => 0.2,               // CC conditions (Immobile, Chilled, etc.)
-    }
-}
-
-fn boon_weight(status: &str, weights: &OptimizationWeights) -> f64 {
-    match status {
-        "Might" => weights.power * 0.5 + weights.condition * 0.5,
-        "Fury" => weights.power * 0.7,
-        "Quickness" => weights.power * 0.5 + weights.condition * 0.3,
-        "Alacrity" => weights.boon_support * 0.4 + weights.power * 0.2,
-        "Protection" => weights.sustain * 0.6,
-        "Resolution" => weights.sustain * 0.4,
-        "Regeneration" => weights.healing * 0.4,
-        "Vigor" => weights.sustain * 0.3,
-        "Stability" => weights.control * 0.3 + weights.sustain * 0.3 + weights.boon_support * 0.2,
-        "Swiftness" => 0.05,
-        "Resistance" => weights.sustain * 0.4,
-        "Aegis" => weights.sustain * 0.5,
-        _ => 0.05,
-    }
-}
-
 fn duration_matches_condition(kind: &DurationKind, condition: &str) -> bool {
     match kind {
         DurationKind::AllCondition => true,
@@ -1131,43 +1116,16 @@ fn duration_matches_condition(kind: &DurationKind, condition: &str) -> bool {
     }
 }
 
-fn is_condition(status: &str) -> bool {
-    // Verb-form aliases (Blind, Poison, Chill, Cripple, Immobilize) are
-    // normalized via `canonical_condition_name` so the arms only list
-    // canonical (status-effect) form. `Immobilized` stays as an explicit
-    // arm — the resolver only knows `Immobilize→Immobile`, not the
-    // past-tense `Immobilized`.
-    let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
-    matches!(
-        canonical,
-        "Bleeding"
-            | "Burning"
-            | "Poisoned"
-            | "Torment"
-            | "Confusion"
-            | "Vulnerability"
-            | "Weakness"
-            | "Blinded"
-            | "Chilled"
-            | "Crippled"
-            | "Fear"
-            | "Immobile"
-            | "Immobilized"
-            | "Slow"
-            | "Taunt"
-    )
-}
-
-/// Test-only thin wrappers so the alias-routing regression suite can fuzz
-/// the private `is_condition` and `condition_importance` helpers without
-/// changing their visibility.
+/// Test-only thin wrappers so the alias-routing regression suite can fuzz the
+/// shared `is_condition` helper (through the path this module consumes it by)
+/// and the private `condition_importance` helper without changing visibility.
 #[cfg(test)]
 pub(crate) mod tests_alias_helpers {
     pub(crate) fn is_condition(status: &str) -> bool {
-        super::is_condition(status)
+        crate::data::boon_condition_formulas::is_condition(status)
     }
     pub(crate) fn condition_importance(status: &str) -> f64 {
-        super::condition_importance(status)
+        crate::data::boon_condition_formulas::condition_importance(status)
     }
 }
 
@@ -1184,33 +1142,6 @@ fn stat_type_from_display_name(name: &str) -> Option<StatType> {
         "healing power" | "healingpower" | "healing" => Some(StatType::HealingPower),
         _ => None,
     }
-}
-
-fn capitalize(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        None => String::new(),
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-    }
-}
-
-/// Extract a percentage from text (reused from combat.rs pattern).
-fn extract_percent_before(text: &str, keyword: &str) -> Option<f64> {
-    if !text.contains(keyword) {
-        return None;
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let pct_pos = chars.iter().position(|&c| c == '%')?;
-    let start = chars[..pct_pos]
-        .iter()
-        .rposition(|c| !c.is_ascii_digit() && *c != '.')
-        .map(|i| i + 1)
-        .unwrap_or(0);
-    if start >= pct_pos {
-        return None;
-    }
-    let num: String = chars[start..pct_pos].iter().collect();
-    num.parse::<f64>().ok()
 }
 
 #[cfg(test)]
@@ -1259,6 +1190,43 @@ mod tests {
         assert!(matches!(&effects[0], NormalizedEffect::DamageModifier {
             category: DamageCategory::Strike, percent
         } if (*percent - 5.0).abs() < 0.01));
+    }
+
+    #[test]
+    fn test_extract_effects_condition_damage_without_increase_keyword() {
+        // "Condition Damage: +X%" (no literal "increase") must map to the
+        // Condition damage category, not be dropped.
+        let fact = Fact::Percent {
+            text: Some("Condition Damage: +8%".into()),
+            icon: None,
+            percent: Some(8.0),
+        };
+        let effects = extract_effects_from_fact(&fact);
+        assert!(matches!(&effects[0], NormalizedEffect::DamageModifier {
+            category: DamageCategory::Condition, percent
+        } if (*percent - 8.0).abs() < 0.01));
+    }
+
+    #[test]
+    fn test_extract_effects_poison_duration_key_is_canonical() {
+        // Regression: a fact "+10% Poison Duration" must store the SpecificCondition
+        // key in canonical "Poisoned" form so it matches duration_matches_condition's
+        // "Poisoned" lookup. Previously this path stored the raw "Poison" verb form
+        // (unlike its sibling rune/description parsers) and the bonus never applied.
+        let fact = Fact::Percent {
+            text: Some("+10% Poison Duration".into()),
+            icon: None,
+            percent: Some(10.0),
+        };
+        let effects = extract_effects_from_fact(&fact);
+        let key = effects.iter().find_map(|e| match e {
+            NormalizedEffect::DurationBonus {
+                kind: DurationKind::SpecificCondition(c),
+                ..
+            } => Some(c.as_str()),
+            _ => None,
+        });
+        assert_eq!(key, Some("Poisoned"));
     }
 
     #[test]

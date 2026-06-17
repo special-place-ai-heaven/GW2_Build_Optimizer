@@ -555,7 +555,7 @@ fn test_pve_and_pvp_default_profiles_produce_different_scores() {
 
 #[test]
 fn test_full_pipeline_ranking_with_objective_scorer() {
-    let builds = vec![
+    let builds = [
         ("Power DPS", power_dps_perf()),
         ("Condi DPS", condi_dps_perf()),
         ("Support", support_perf()),

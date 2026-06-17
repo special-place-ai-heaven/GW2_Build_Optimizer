@@ -112,6 +112,10 @@ fn describe_lock_constraints(locks: &gw2_core::types::BuildLocks, db: &GameDb) -
 /// Returns top N candidates ranked by score, or an error describing why none were found.
 /// For PvP, skips gear search (stats come from amulet) and only evaluates spec/trait combos.
 /// For PvE/WvW, runs full gear + spec search.
+// Core optimization entry point; the caches, weights, progress callback, and
+// top-N are distinct concerns — bundling them into a params struct adds
+// indirection without clarifying the call site.
+#[allow(clippy::too_many_arguments)]
 pub fn optimize(
     profession: &Profession,
     weights: &OptimizationWeights,
@@ -359,6 +363,9 @@ pub fn optimize(
 /// PvP amulet stats REPLACE gear stats — the stat block is: base_stats + amulet + traits.
 /// Slot-budget data is NOT loaded during PvP optimization.
 /// Returns an error if no PvP amulet data is available (no silent zero-stat fallback).
+// PvP search variant mirroring `optimize`'s caches/weights/callback shape; a
+// params struct would not improve the single internal call site.
+#[allow(clippy::too_many_arguments)]
 fn optimize_pvp(
     profession: &Profession,
     weights: &OptimizationWeights,
@@ -611,7 +618,7 @@ fn select_best_major_traits(
         let mut best_score = f64::NEG_INFINITY;
 
         for &trait_id in column {
-            let score = score_trait_for_archetype(trait_id, &weights, traits_cache);
+            let score = score_trait_for_archetype(trait_id, weights, traits_cache);
             if score > best_score {
                 best_score = score;
                 best_id = trait_id;
@@ -756,7 +763,7 @@ pub struct SynergyResult {
 fn select_gemini_gear_prefixes(weights: &OptimizationWeights) -> (&'static str, Vec<&'static str>) {
     let gear_match = scoring::select_gear_prefix(weights);
     let tier_prefixes = scoring::select_prefixes_by_tiers(weights);
-    let gear_prefixes: Vec<&str> = tier_prefixes.iter().map(|s| *s).collect();
+    let gear_prefixes: Vec<&str> = tier_prefixes.to_vec();
     (gear_match.primary, gear_prefixes)
 }
 
@@ -785,6 +792,9 @@ fn build_pre_computed_gemini_context<'a>(
 
 /// Stage 3 of the Gemini pipeline: assemble the final synergy prompt
 /// (applies user-imposed spec/trait lock constraints).
+// Prompt-assembly stage; each argument is independent prompt input, grouping
+// them into a struct would only rename fields, not reduce coupling.
+#[allow(clippy::too_many_arguments)]
 fn build_gemini_synergy_prompt(
     db: &GameDb,
     profession_name: &str,
@@ -815,6 +825,9 @@ fn build_gemini_synergy_prompt(
 /// Stage 4 of the Gemini pipeline: call the LLM with tool definitions and
 /// multi-turn progress reporting. Tool candidates are empty — the LLM is
 /// choosing the build, not ranking candidates.
+// LLM-call stage; the client, context, db, and progress callback are distinct
+// dependencies passed straight through — a params struct adds no clarity.
+#[allow(clippy::too_many_arguments)]
 fn call_gemini_with_progress(
     db: &GameDb,
     profession_name: &str,
@@ -951,6 +964,9 @@ fn compute_three_tier_combat(
 /// Run the synergy-driven optimization pipeline.
 /// Sends ALL profession data to Gemini in a single prompt for holistic synergy reasoning.
 /// Returns a fully validated build with combat metrics at 3 buff tiers.
+// Gemini pipeline entry point; arguments are the db, weights, balance context,
+// LLM client, and callbacks — grouping them adds indirection without clarity.
+#[allow(clippy::too_many_arguments)]
 pub fn optimize_with_gemini(
     db: &GameDb,
     profession_name: &str,
@@ -1152,10 +1168,8 @@ pub fn simulate_validated_rotation(
     if let Some((id, _)) = &validated.skills.heal {
         non_weapon_ids.push(*id);
     }
-    for util in &validated.skills.utilities {
-        if let Some((id, _)) = util {
-            non_weapon_ids.push(*id);
-        }
+    for (id, _) in validated.skills.utilities.iter().flatten() {
+        non_weapon_ids.push(*id);
     }
     if let Some((id, _)) = &validated.skills.elite {
         non_weapon_ids.push(*id);
@@ -1297,6 +1311,9 @@ pub fn synergy_result_from_validated(
 /// Run the fully deterministic synergy optimization pipeline.
 /// No LLM calls — all selections are algorithmic via synergy scoring.
 /// Optional Gemini client is used only for explanation generation (not build selection).
+// Deterministic pipeline entry point; the db, weights, context, optional LLM
+// client, and callbacks are distinct concerns — a params struct adds no clarity.
+#[allow(clippy::too_many_arguments)]
 pub fn optimize_deterministic(
     db: &GameDb,
     profession_name: &str,
@@ -1479,6 +1496,9 @@ pub fn optimize_deterministic(
 /// If `llm_client` is Some, runs the LLM advisor post-beam to propose
 /// additional candidate mutations — the referee is still the final authority.
 /// Completes within `SearchConfig::time_limit_secs` (default 28 s).
+// Beam-search pipeline entry point; db, weights, context, scenario, and
+// optional LLM client are independent inputs — a params struct adds no clarity.
+#[allow(clippy::too_many_arguments)]
 pub fn optimize_v2(
     db: &GameDb,
     profession_name: &str,

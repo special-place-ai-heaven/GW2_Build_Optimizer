@@ -280,12 +280,46 @@ fn scrape_snowcrows(
         if should_cancel() {
             return Ok((builds, true));
         }
-        match scrape_snowcrows_build(client, &url, today) {
-            Ok(b) => builds.push(b),
-            Err(_) => {}
+        if let Ok(b) = scrape_snowcrows_build(client, &url, today) {
+            builds.push(b)
         }
     }
     Ok((builds, false))
+}
+
+/// Build a `BenchmarkBuild` from page HTML once the per-site fields
+/// (source/profession/spec/mode/role) have been derived. The gear/trait/skill
+/// extraction is identical across every source, so it lives here.
+// Builder over per-site fields already derived by the caller; bundling the HTML
+// and metadata into a struct would just mirror the argument list.
+#[allow(clippy::too_many_arguments)]
+fn benchmark_from_html(
+    html: &str,
+    url: &str,
+    today: &str,
+    source: &str,
+    profession: String,
+    spec_name: String,
+    mode: &str,
+    role: &str,
+) -> BenchmarkBuild {
+    BenchmarkBuild {
+        source: source.into(),
+        profession,
+        spec_name,
+        mode: mode.into(),
+        role: role.to_string(),
+        build_code: extract_build_code(html),
+        gear_prefix: extract_gear_prefix(html),
+        rune: extract_rune(html),
+        sigils: extract_sigils(html),
+        relic: extract_relic(html),
+        traits: extract_traits(html),
+        skills: extract_skills(html),
+        source_url: url.to_string(),
+        scraped_at: today.to_string(),
+        notes: String::new(),
+    }
 }
 
 fn scrape_snowcrows_build(
@@ -319,23 +353,16 @@ fn scrape_snowcrows_build(
         "Power DPS"
     };
 
-    Ok(BenchmarkBuild {
-        source: "snowcrows".into(),
+    Ok(benchmark_from_html(
+        &html,
+        url,
+        today,
+        "snowcrows",
         profession,
         spec_name,
-        mode: "PvE".into(),
-        role: role.to_string(),
-        build_code: extract_build_code(&html),
-        gear_prefix: extract_gear_prefix(&html),
-        rune: extract_rune(&html),
-        sigils: extract_sigils(&html),
-        relic: extract_relic(&html),
-        traits: extract_traits(&html),
-        skills: extract_skills(&html),
-        source_url: url.to_string(),
-        scraped_at: today.to_string(),
-        notes: String::new(),
-    })
+        "PvE",
+        role,
+    ))
 }
 
 // ─── Hardstuck ────────────────────────────────────────────────────────────────
@@ -404,9 +431,8 @@ fn scrape_hardstuck(
         if should_cancel() {
             return Ok((builds, true));
         }
-        match scrape_hardstuck_build(client, &url, today) {
-            Ok(b) => builds.push(b),
-            Err(_) => {}
+        if let Ok(b) = scrape_hardstuck_build(client, &url, today) {
+            builds.push(b)
         }
     }
     Ok((builds, false))
@@ -458,23 +484,16 @@ fn scrape_hardstuck_build(
         "Power DPS"
     };
 
-    Ok(BenchmarkBuild {
-        source: "hardstuck".into(),
+    Ok(benchmark_from_html(
+        &html,
+        url,
+        today,
+        "hardstuck",
         profession,
         spec_name,
-        mode: mode.to_string(),
-        role: role.to_string(),
-        build_code: extract_build_code(&html),
-        gear_prefix: extract_gear_prefix(&html),
-        rune: extract_rune(&html),
-        sigils: extract_sigils(&html),
-        relic: extract_relic(&html),
-        traits: extract_traits(&html),
-        skills: extract_skills(&html),
-        source_url: url.to_string(),
-        scraped_at: today.to_string(),
-        notes: String::new(),
-    })
+        mode,
+        role,
+    ))
 }
 
 // ─── GuildJen ─────────────────────────────────────────────────────────────────
@@ -563,23 +582,9 @@ fn scrape_guildjen_build(
         "WvW Roaming"
     };
 
-    Ok(BenchmarkBuild {
-        source: "guildjen".into(),
-        profession,
-        spec_name,
-        mode: mode.to_string(),
-        role: role.to_string(),
-        build_code: extract_build_code(&html),
-        gear_prefix: extract_gear_prefix(&html),
-        rune: extract_rune(&html),
-        sigils: extract_sigils(&html),
-        relic: extract_relic(&html),
-        traits: extract_traits(&html),
-        skills: extract_skills(&html),
-        source_url: url.to_string(),
-        scraped_at: today.to_string(),
-        notes: String::new(),
-    })
+    Ok(benchmark_from_html(
+        &html, url, today, "guildjen", profession, spec_name, mode, role,
+    ))
 }
 
 // ─── HTML extraction helpers ──────────────────────────────────────────────────
@@ -613,22 +618,6 @@ fn extract_build_links(html: &str, needle: &str, max: usize) -> Vec<String> {
         }
     }
     links
-}
-
-/// Extract text content immediately after `marker` and before `end_marker`.
-fn extract_text_after(html: &str, marker: &str, end_marker: &str) -> Option<String> {
-    let start = html.find(marker)?;
-    let after_marker = &html[start + marker.len()..];
-    // Skip to next `>`
-    let content_start = after_marker.find('>')?;
-    let content = &after_marker[content_start + 1..];
-    let content_end = content.find(end_marker)?;
-    let text = content[..content_end].trim().to_string();
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
-    }
 }
 
 /// Parse profession and spec name from a URL path.
@@ -808,9 +797,7 @@ fn extract_rune(html: &str) -> String {
             let after = &html[pos..];
             // Take up to 40 chars and trim at next HTML tag or quote
             let raw = &after[..after.len().min(60)];
-            let end = raw
-                .find(|c: char| c == '<' || c == '"' || c == '\n')
-                .unwrap_or(raw.len());
+            let end = raw.find(['<', '"', '\n']).unwrap_or(raw.len());
             let name = raw[..end].trim().to_string();
             if name.len() > 5 {
                 return name;
@@ -828,9 +815,7 @@ fn extract_sigils(html: &str) -> Vec<String> {
         while let Some(idx) = html[pos..].find(marker) {
             let abs = pos + idx;
             let after = &html[abs..abs.min(html.len() - 1) + 60.min(html.len() - abs)];
-            let end = after
-                .find(|c: char| c == '<' || c == '"' || c == '\n')
-                .unwrap_or(after.len());
+            let end = after.find(['<', '"', '\n']).unwrap_or(after.len());
             let name = after[..end].trim().to_string();
             if name.len() > 5 && !sigils.contains(&name) {
                 sigils.push(name);
@@ -850,9 +835,7 @@ fn extract_relic(html: &str) -> String {
         if let Some(pos) = html.find(marker) {
             let after = &html[pos..];
             let raw = &after[..after.len().min(60)];
-            let end = raw
-                .find(|c: char| c == '<' || c == '"' || c == '\n')
-                .unwrap_or(raw.len());
+            let end = raw.find(['<', '"', '\n']).unwrap_or(raw.len());
             let name = raw[..end].trim().to_string();
             if name.len() > 5 {
                 return name;

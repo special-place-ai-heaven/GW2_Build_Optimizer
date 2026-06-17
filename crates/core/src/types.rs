@@ -334,6 +334,8 @@ pub struct SavedBuild {
 
 #[cfg(test)]
 mod tests {
+    // Test fixtures are built field-by-field for readability.
+    #![allow(clippy::field_reassign_with_default)]
     use super::*;
 
     /// These tests snapshot the exact string format produced by

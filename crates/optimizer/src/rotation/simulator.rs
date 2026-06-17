@@ -354,7 +354,10 @@ impl SimState {
     /// Tick all active conditions — apply damage for each stack, remove expired.
     fn tick_conditions(&mut self, condition_damage: f64) {
         // Only tick on 1-second boundaries
-        if self.current_time_ms % CONDITION_TICK_INTERVAL_MS != 0 {
+        if !self
+            .current_time_ms
+            .is_multiple_of(CONDITION_TICK_INTERVAL_MS)
+        {
             return;
         }
 
