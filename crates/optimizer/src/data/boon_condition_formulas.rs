@@ -16,6 +16,7 @@ use std::sync::OnceLock;
 use thiserror::Error;
 
 use super::{try_load, DataLoadError};
+use crate::scoring::OptimizationWeights;
 
 /// Canonical JSON embedded at compile time from data/formulas/boons.json.
 const BOON_FORMULAS_JSON: &str = include_str!("../../../../data/formulas/boons.json");
@@ -127,6 +128,52 @@ pub(crate) fn is_condition(status: &str) -> bool {
             | "Slow"
             | "Taunt"
     )
+}
+
+/// Heuristic importance weight for a condition in synergy/effect scoring.
+///
+/// Empirically calibrated; do NOT re-tune individual values without
+/// cross-build validation. Single source of truth shared by `synergy.rs` and
+/// `data/normalized_effects.rs` so the two scoring paths cannot silently
+/// desync.
+///
+/// Verb-form input (Poison) is normalized to canonical (Poisoned) so the arms
+/// only list canonical names.
+pub(crate) fn condition_importance(status: &str) -> f64 {
+    let canonical = canonical_condition_name(status);
+    match canonical {
+        "Burning" => 1.0,       // Highest tick damage: 0.155*CD + 131.75
+        "Bleeding" => 0.7,      // Stacks to 25: 0.06*CD + 22
+        "Torment" => 0.6,       // Stationary: 0.0375*CD + 31.875; moving: 2×
+        "Poisoned" => 0.5,      // 0.06*CD + 33.5, also -33% healing
+        "Confusion" => 0.1,     // On-use only: 0.0175*CD + 11 (~10% of Burning DPS)
+        "Vulnerability" => 0.8, // Force multiplier (+1% all damage per stack)
+        _ => 0.2,               // CC conditions (Immobile, Chilled, etc.)
+    }
+}
+
+/// Heuristic importance weight for a boon in synergy/effect scoring, scaled by
+/// the active `OptimizationWeights`.
+///
+/// Empirically calibrated; do NOT re-tune individual values. Single source of
+/// truth shared by `synergy.rs` and `data/normalized_effects.rs` so the two
+/// scoring paths cannot silently desync.
+pub(crate) fn boon_weight(status: &str, weights: &OptimizationWeights) -> f64 {
+    match status {
+        "Might" => weights.power * 0.5 + weights.condition * 0.5,
+        "Fury" => weights.power * 0.7,
+        "Quickness" => weights.power * 0.5 + weights.condition * 0.3,
+        "Alacrity" => weights.boon_support * 0.4 + weights.power * 0.2,
+        "Protection" => weights.sustain * 0.6,
+        "Resolution" => weights.sustain * 0.4,
+        "Regeneration" => weights.healing * 0.4,
+        "Vigor" => weights.sustain * 0.3,
+        "Stability" => weights.control * 0.3 + weights.sustain * 0.3 + weights.boon_support * 0.2,
+        "Swiftness" => 0.05,
+        "Resistance" => weights.sustain * 0.4,
+        "Aegis" => weights.sustain * 0.5,
+        _ => 0.05,
+    }
 }
 
 // ─── Error Types ───
@@ -1229,5 +1276,50 @@ mod tests {
             let burn = c.tick_damage("Burning", cd, mode.clone());
             assert!(burn > 0.0, "Burning tick should be positive in {:?}", mode,);
         }
+    }
+
+    // ─── Shared scoring-table tests ───
+    //
+    // Guards the single source of truth for the empirically-calibrated
+    // condition_importance / boon_weight tables now shared by synergy.rs and
+    // normalized_effects.rs. Known values are pinned so a future tweak that
+    // changes a tuned constant fails loudly.
+
+    #[test]
+    fn test_condition_importance_known_values() {
+        // Direct canonical-form lookups.
+        assert!((condition_importance("Burning") - 1.0).abs() < 1e-9);
+        assert!((condition_importance("Bleeding") - 0.7).abs() < 1e-9);
+        assert!((condition_importance("Torment") - 0.6).abs() < 1e-9);
+        assert!((condition_importance("Vulnerability") - 0.8).abs() < 1e-9);
+        assert!((condition_importance("Confusion") - 0.1).abs() < 1e-9);
+        // Verb-form "Poison" canonicalizes to "Poisoned" → 0.5.
+        assert!((condition_importance("Poison") - 0.5).abs() < 1e-9);
+        assert_eq!(
+            condition_importance("Poison"),
+            condition_importance("Poisoned"),
+        );
+        // Unknown / CC conditions fall through to 0.2.
+        assert!((condition_importance("Immobile") - 0.2).abs() < 1e-9);
+        assert!((condition_importance("NotACondition") - 0.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_boon_weight_known_values() {
+        use crate::scoring::OptimizationWeights;
+        // Pure-power preset isolates the Fury arm (weights.power * 0.7).
+        let weights = OptimizationWeights {
+            power: 1.0,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.0,
+            control: 0.0,
+        };
+        assert!((boon_weight("Fury", &weights) - 0.7).abs() < 1e-9);
+        // Swiftness is a flat constant regardless of weights.
+        assert!((boon_weight("Swiftness", &weights) - 0.05).abs() < 1e-9);
+        // Unknown boons fall through to the flat 0.05 default.
+        assert!((boon_weight("NotABoon", &weights) - 0.05).abs() < 1e-9);
     }
 }
