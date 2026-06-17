@@ -11,12 +11,16 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::rate::{PersistedUsage, RateTracker};
 use super::{KeyValidationResult, LlmClient, LlmError, ToolDefinition};
+
+/// Anthropic's conservative default requests-per-minute ceiling.
+const RPM_LIMIT: u32 = 50;
 
 const ANTHROPIC_API_BASE: &str = "https://api.anthropic.com/v1";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -35,91 +39,6 @@ struct CachedResponse {
     cached_at: Instant,
 }
 
-struct RateTracker {
-    requests_this_minute: u32,
-    minute_start: Instant,
-    requests_today: u32,
-    current_day: u64,
-}
-
-#[derive(Serialize, Deserialize)]
-struct PersistedUsage {
-    day: u64,
-    requests_today: u32,
-}
-
-fn current_epoch_day() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        / 86400
-}
-
-impl RateTracker {
-    fn new() -> Self {
-        Self {
-            requests_this_minute: 0,
-            minute_start: Instant::now(),
-            requests_today: 0,
-            current_day: current_epoch_day(),
-        }
-    }
-
-    fn from_persisted(persisted: PersistedUsage) -> Self {
-        let today = current_epoch_day();
-        let requests_today = if persisted.day == today {
-            persisted.requests_today
-        } else {
-            0
-        };
-        Self {
-            requests_this_minute: 0,
-            minute_start: Instant::now(),
-            requests_today,
-            current_day: today,
-        }
-    }
-
-    fn check_and_reserve(&mut self) -> Result<(), LlmError> {
-        let today = current_epoch_day();
-        if today != self.current_day {
-            self.requests_today = 0;
-            self.current_day = today;
-        }
-
-        let now = Instant::now();
-        if now.duration_since(self.minute_start).as_secs() >= 60 {
-            self.requests_this_minute = 0;
-            self.minute_start = now;
-        }
-
-        // Anthropic rate limits vary by tier; use conservative defaults
-        if self.requests_this_minute >= 50 {
-            return Err(LlmError::RateLimited);
-        }
-
-        self.requests_this_minute += 1;
-        self.requests_today += 1;
-        Ok(())
-    }
-
-    fn undo_reserve(&mut self) {
-        self.requests_this_minute = self.requests_this_minute.saturating_sub(1);
-        self.requests_today = self.requests_today.saturating_sub(1);
-    }
-
-    fn remaining_today(&self) -> u32 {
-        10000u32.saturating_sub(self.requests_today)
-    }
-
-    fn to_persisted(&self) -> PersistedUsage {
-        PersistedUsage {
-            day: self.current_day,
-            requests_today: self.requests_today,
-        }
-    }
-}
 
 // ─── Anthropic API Types ───
 
@@ -191,7 +110,7 @@ impl AnthropicClient {
             model: model.to_string(),
             http,
             cache: Mutex::new(HashMap::new()),
-            rate: Mutex::new(RateTracker::new()),
+            rate: Mutex::new(RateTracker::new(RPM_LIMIT)),
             usage_path: None,
         })
     }
@@ -211,11 +130,11 @@ impl AnthropicClient {
                 .ok()
                 .and_then(|s| serde_json::from_str::<PersistedUsage>(&s).ok())
             {
-                Some(persisted) => RateTracker::from_persisted(persisted),
-                None => RateTracker::new(),
+                Some(persisted) => RateTracker::from_persisted(persisted, RPM_LIMIT),
+                None => RateTracker::new(RPM_LIMIT),
             }
         } else {
-            RateTracker::new()
+            RateTracker::new(RPM_LIMIT)
         };
 
         Ok(Self {
@@ -785,7 +704,7 @@ mod tests {
 
     #[test]
     fn test_tool_definition_to_anthropic_format() {
-        let defs = vec![ToolDefinition {
+        let defs = [ToolDefinition {
             name: "get_profession_info".into(),
             description: "Get profession details".into(),
             parameters: serde_json::json!({
@@ -995,62 +914,6 @@ mod tests {
         }];
         trim_messages(&mut messages, 10_000);
         assert_eq!(messages.len(), 1);
-    }
-
-    #[test]
-    fn test_rate_tracker_rpm_limit() {
-        let mut tracker = RateTracker::new();
-        for _ in 0..50 {
-            assert!(tracker.check_and_reserve().is_ok());
-        }
-        assert!(tracker.check_and_reserve().is_err());
-    }
-
-    #[test]
-    fn test_rate_tracker_persistence_roundtrip_same_day() {
-        let mut tracker = RateTracker::new();
-        for _ in 0..5 {
-            tracker.check_and_reserve().unwrap();
-        }
-        assert_eq!(tracker.requests_today, 5);
-        assert_eq!(tracker.requests_this_minute, 5);
-
-        let persisted = tracker.to_persisted();
-        let reloaded = RateTracker::from_persisted(persisted);
-
-        assert_eq!(reloaded.requests_today, 5);
-        assert_eq!(reloaded.requests_this_minute, 0);
-    }
-
-    #[test]
-    fn test_rate_tracker_persistence_day_rollover_resets_daily() {
-        let yesterday = current_epoch_day().saturating_sub(1);
-        let persisted = PersistedUsage {
-            day: yesterday,
-            requests_today: 42,
-        };
-        let reloaded = RateTracker::from_persisted(persisted);
-
-        assert_eq!(reloaded.requests_today, 0);
-        assert_eq!(reloaded.requests_this_minute, 0);
-        assert_eq!(reloaded.current_day, current_epoch_day());
-    }
-
-    #[test]
-    fn test_rate_tracker_minute_rollover_preserves_daily() {
-        let mut tracker = RateTracker::new();
-        for _ in 0..3 {
-            tracker.check_and_reserve().unwrap();
-        }
-        assert_eq!(tracker.requests_this_minute, 3);
-        assert_eq!(tracker.requests_today, 3);
-
-        tracker.minute_start = Instant::now() - std::time::Duration::from_secs(61);
-
-        tracker.check_and_reserve().unwrap();
-
-        assert_eq!(tracker.requests_this_minute, 1);
-        assert_eq!(tracker.requests_today, 4);
     }
 
     #[test]
