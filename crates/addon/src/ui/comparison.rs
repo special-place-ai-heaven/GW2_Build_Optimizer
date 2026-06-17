@@ -172,22 +172,24 @@ pub fn render_comparison(
         &suggestion.explanation
     };
     if !explanation_text.is_empty()
-        && ui.collapsing_header("AI Advisory (optional)", TreeNodeFlags::empty()) {
-            ui.text_colored(
-                [0.6, 0.6, 0.8, 1.0],
-                "Advisory text from AI — referee scores are authoritative.",
-            );
-            ui.spacing();
-            ui.text_wrapped(explanation_text);
-        }
+        && ui.collapsing_header("AI Advisory (optional)", TreeNodeFlags::empty())
+    {
+        ui.text_colored(
+            [0.6, 0.6, 0.8, 1.0],
+            "Advisory text from AI — referee scores are authoritative.",
+        );
+        ui.spacing();
+        ui.text_wrapped(explanation_text);
+    }
 
     // ═══ Changes Made ═══
     if !suggestion.changes_made.is_empty()
-        && ui.collapsing_header("Changes Made", TreeNodeFlags::DEFAULT_OPEN) {
-            for change in &suggestion.changes_made {
-                ui.bullet_text(change);
-            }
+        && ui.collapsing_header("Changes Made", TreeNodeFlags::DEFAULT_OPEN)
+    {
+        for change in &suggestion.changes_made {
+            ui.bullet_text(change);
         }
+    }
 
     new_selection
 }
@@ -326,7 +328,12 @@ fn render_primary_stats(ui: &Ui, current: Option<&StatBlock>, suggested: Option<
 }
 
 /// One combat-performance row: (label, color, current metrics, suggested metrics).
-type CombatTier<'a> = (&'a str, [f32; 4], Option<&'a CombatMetrics>, Option<&'a CombatMetrics>);
+type CombatTier<'a> = (
+    &'a str,
+    [f32; 4],
+    Option<&'a CombatMetrics>,
+    Option<&'a CombatMetrics>,
+);
 
 /// Render combat performance metrics with three tiers: Solo, Party, Full Squad.
 fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: &BuildSuggestion) {

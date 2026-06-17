@@ -32,7 +32,6 @@ struct CachedResponse {
     cached_at: Instant,
 }
 
-
 // ─── OpenAI API Types ───
 
 #[derive(Serialize)]

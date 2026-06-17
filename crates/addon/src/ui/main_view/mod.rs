@@ -50,10 +50,11 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     state.main.api_status_frames += 1;
     if (state.main.api_status_frames >= 3600
         || state.main.api_status == crate::state::ApiStatus::Unknown)
-        && !state.main.api_health_checking {
-            stats::check_api_health(state);
-            state.main.api_status_frames = 0;
-        }
+        && !state.main.api_health_checking
+    {
+        stats::check_api_health(state);
+        state.main.api_status_frames = 0;
+    }
 
     // Auto-dismiss save status after ~180 frames (~3s at 60fps)
     if state.main.save_status.is_some() {
@@ -532,9 +533,10 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
         for (i, name) in chars_snapshot.iter().enumerate() {
             let selected = state.main.selected_character == Some(i);
             if Selectable::new(name).selected(selected).build(ui)
-                && state.main.selected_character != Some(i) {
-                    new_selection = Some((i, name.clone()));
-                }
+                && state.main.selected_character != Some(i)
+            {
+                new_selection = Some((i, name.clone()));
+            }
         }
     }
 
@@ -594,9 +596,10 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
                 for (i, label) in &bt_labels {
                     let selected = state.main.selected_build_tab == Some(*i);
                     if Selectable::new(label).selected(selected).build(ui)
-                        && state.main.selected_build_tab != Some(*i) {
-                            bt_changed = Some(*i);
-                        }
+                        && state.main.selected_build_tab != Some(*i)
+                    {
+                        bt_changed = Some(*i);
+                    }
                 }
             }
         }
@@ -645,9 +648,10 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
                 for (i, label) in &et_labels {
                     let selected = state.main.selected_equipment_tab == Some(*i);
                     if Selectable::new(label).selected(selected).build(ui)
-                        && state.main.selected_equipment_tab != Some(*i) {
-                            et_changed = Some(*i);
-                        }
+                        && state.main.selected_equipment_tab != Some(*i)
+                    {
+                        et_changed = Some(*i);
+                    }
                 }
             }
         }
