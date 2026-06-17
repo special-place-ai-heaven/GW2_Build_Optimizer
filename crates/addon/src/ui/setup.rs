@@ -216,9 +216,10 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
     // Next button
     ui.spacing();
     if state.setup.gw2_key_status == KeyStatus::Valid
-        && ui.button_with_size("Next >>", [120.0, 0.0]) {
-            state.screen = Screen::Setup(SetupStep::LlmApiKey);
-        }
+        && ui.button_with_size("Next >>", [120.0, 0.0])
+    {
+        state.screen = Screen::Setup(SetupStep::LlmApiKey);
+    }
 }
 
 fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
@@ -238,17 +239,18 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
     for provider in &LlmProvider::ALL {
         let label = provider.label();
         if ui.radio_button_bool(label, state.config.active_provider == *provider)
-            && state.config.active_provider != *provider {
-                state.config.active_provider = provider.clone();
-                // Reset validation when switching providers
-                state.setup.llm_key_input.clear();
-                state.setup.llm_key_status = KeyStatus::NotValidated;
-                // Pre-fill if we already have a key for this provider
-                if let Some(key) = state.config.active_api_key() {
-                    state.setup.llm_key_input = key.to_string();
-                    state.setup.llm_key_status = KeyStatus::Valid;
-                }
+            && state.config.active_provider != *provider
+        {
+            state.config.active_provider = provider.clone();
+            // Reset validation when switching providers
+            state.setup.llm_key_input.clear();
+            state.setup.llm_key_status = KeyStatus::NotValidated;
+            // Pre-fill if we already have a key for this provider
+            if let Some(key) = state.config.active_api_key() {
+                state.setup.llm_key_input = key.to_string();
+                state.setup.llm_key_status = KeyStatus::Valid;
             }
+        }
     }
     ui.spacing();
 

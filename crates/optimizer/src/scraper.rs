@@ -280,7 +280,9 @@ fn scrape_snowcrows(
         if should_cancel() {
             return Ok((builds, true));
         }
-        if let Ok(b) = scrape_snowcrows_build(client, &url, today) { builds.push(b) }
+        if let Ok(b) = scrape_snowcrows_build(client, &url, today) {
+            builds.push(b)
+        }
     }
     Ok((builds, false))
 }
@@ -429,7 +431,9 @@ fn scrape_hardstuck(
         if should_cancel() {
             return Ok((builds, true));
         }
-        if let Ok(b) = scrape_hardstuck_build(client, &url, today) { builds.push(b) }
+        if let Ok(b) = scrape_hardstuck_build(client, &url, today) {
+            builds.push(b)
+        }
     }
     Ok((builds, false))
 }
@@ -579,14 +583,7 @@ fn scrape_guildjen_build(
     };
 
     Ok(benchmark_from_html(
-        &html,
-        url,
-        today,
-        "guildjen",
-        profession,
-        spec_name,
-        mode,
-        role,
+        &html, url, today, "guildjen", profession, spec_name, mode, role,
     ))
 }
 
@@ -800,9 +797,7 @@ fn extract_rune(html: &str) -> String {
             let after = &html[pos..];
             // Take up to 40 chars and trim at next HTML tag or quote
             let raw = &after[..after.len().min(60)];
-            let end = raw
-                .find(['<', '"', '\n'])
-                .unwrap_or(raw.len());
+            let end = raw.find(['<', '"', '\n']).unwrap_or(raw.len());
             let name = raw[..end].trim().to_string();
             if name.len() > 5 {
                 return name;
@@ -820,9 +815,7 @@ fn extract_sigils(html: &str) -> Vec<String> {
         while let Some(idx) = html[pos..].find(marker) {
             let abs = pos + idx;
             let after = &html[abs..abs.min(html.len() - 1) + 60.min(html.len() - abs)];
-            let end = after
-                .find(['<', '"', '\n'])
-                .unwrap_or(after.len());
+            let end = after.find(['<', '"', '\n']).unwrap_or(after.len());
             let name = after[..end].trim().to_string();
             if name.len() > 5 && !sigils.contains(&name) {
                 sigils.push(name);
@@ -842,9 +835,7 @@ fn extract_relic(html: &str) -> String {
         if let Some(pos) = html.find(marker) {
             let after = &html[pos..];
             let raw = &after[..after.len().min(60)];
-            let end = raw
-                .find(['<', '"', '\n'])
-                .unwrap_or(raw.len());
+            let end = raw.find(['<', '"', '\n']).unwrap_or(raw.len());
             let name = raw[..end].trim().to_string();
             if name.len() > 5 {
                 return name;

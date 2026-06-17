@@ -306,4 +306,3 @@ pub fn compute_axes_from_metrics(m: &gw2_core::types::CombatMetrics) -> [f64; 6]
 
     [power, condition, boon_support, heal, sustain, control]
 }
-

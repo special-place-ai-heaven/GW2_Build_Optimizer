@@ -195,9 +195,13 @@ mod tests {
     fn condition_cleanse_matches_stem_plus_verb() {
         assert!(text_describes_condition_cleanse("Remove a condition"));
         assert!(text_describes_condition_cleanse("Cleanse 2 conditions"));
-        assert!(text_describes_condition_cleanse("Cure conditions from allies"));
+        assert!(text_describes_condition_cleanse(
+            "Cure conditions from allies"
+        ));
         // Needs both a condition stem AND a cleanse verb.
         assert!(!text_describes_condition_cleanse("Gain 3 stacks of might"));
-        assert!(!text_describes_condition_cleanse("Conditions you apply last longer"));
+        assert!(!text_describes_condition_cleanse(
+            "Conditions you apply last longer"
+        ));
     }
 }

@@ -119,7 +119,6 @@ pub fn find_best_benchmark<'a>(
     }
 
     // Score by role similarity (word overlap)
-    
 
     candidates
         .into_iter()

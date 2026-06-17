@@ -840,9 +840,7 @@ type WeaponSlots = (Option<String>, Option<String>);
 
 /// Parse weapon sets from GeminiBuildResponse.
 /// Handles both old format ("Set 1: Axe / Axe") and the raw fields.
-fn parse_weapon_sets_from_response(
-    response: &GeminiBuildResponse,
-) -> (WeaponSlots, WeaponSlots) {
+fn parse_weapon_sets_from_response(response: &GeminiBuildResponse) -> (WeaponSlots, WeaponSlots) {
     let mut set1 = (None, None);
     let mut set2 = (None, None);
 

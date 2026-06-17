@@ -39,7 +39,6 @@ struct CachedResponse {
     cached_at: Instant,
 }
 
-
 // ─── Anthropic API Types ───
 
 #[derive(Serialize)]
