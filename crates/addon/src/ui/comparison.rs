@@ -325,14 +325,12 @@ fn render_primary_stats(ui: &Ui, current: Option<&StatBlock>, suggested: Option<
     render_stat_table(ui, "##primary_stats", &stats);
 }
 
+/// One combat-performance row: (label, color, current metrics, suggested metrics).
+type CombatTier<'a> = (&'a str, [f32; 4], Option<&'a CombatMetrics>, Option<&'a CombatMetrics>);
+
 /// Render combat performance metrics with three tiers: Solo, Party, Full Squad.
 fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: &BuildSuggestion) {
-    let tiers: Vec<(
-        &str,
-        [f32; 4],
-        Option<&CombatMetrics>,
-        Option<&CombatMetrics>,
-    )> = vec![
+    let tiers: Vec<CombatTier> = vec![
         (
             "Solo (Gear + Traits)",
             [0.7, 0.85, 1.0, 1.0],

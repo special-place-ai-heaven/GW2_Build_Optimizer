@@ -415,6 +415,9 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
 }
 
 /// Convert a SynergyResult from the new pipeline into a BuildSuggestion for display.
+// Display adapter; db, profession, scenario, role, and result are distinct
+// inputs threaded straight through — a params struct adds no clarity here.
+#[allow(clippy::too_many_arguments)]
 fn synergy_result_to_suggestion(
     result: &gw2_optimizer::engine::SynergyResult,
     db: &gw2_optimizer::gamedb::GameDb,
@@ -1162,6 +1165,9 @@ fn humanize_tool_names(tool_names: &[String]) -> String {
 
 /// Call the active LLM provider to enrich the top optimizer suggestion with AI reasoning.
 /// Uses function calling (tool use) so the LLM can query game data and simulate builds.
+// LLM enrichment call; config, profession, weights, mode, and candidates are
+// independent inputs — grouping them adds indirection without clarity.
+#[allow(clippy::too_many_arguments)]
 fn enrich_with_llm(
     config: &gw2_core::config::AppConfig,
     profession_name: &str,

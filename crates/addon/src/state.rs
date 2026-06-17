@@ -269,6 +269,9 @@ fn lock_state() -> std::sync::MutexGuard<'static, Option<AddonState>> {
     })
 }
 
+// SetupState/MainState fields are filled conditionally from optional config
+// after default(); a struct literal would force redundant default expressions.
+#[allow(clippy::field_reassign_with_default)]
 pub fn init(addon_dir: PathBuf) {
     let config_path = AppConfig::config_path(&addon_dir);
     let (config, config_err) = AppConfig::load(&config_path);
@@ -351,6 +354,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    // Test fixtures are built field-by-field for readability.
+    #![allow(clippy::field_reassign_with_default)]
     use super::*;
     use gw2_core::config::AppConfig;
     use gw2_optimizer::scoring::OptimizationWeights;

@@ -288,6 +288,9 @@ fn scrape_snowcrows(
 /// Build a `BenchmarkBuild` from page HTML once the per-site fields
 /// (source/profession/spec/mode/role) have been derived. The gear/trait/skill
 /// extraction is identical across every source, so it lives here.
+// Builder over per-site fields already derived by the caller; bundling the HTML
+// and metadata into a struct would just mirror the argument list.
+#[allow(clippy::too_many_arguments)]
 fn benchmark_from_html(
     html: &str,
     url: &str,

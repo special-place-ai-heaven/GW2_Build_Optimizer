@@ -130,8 +130,8 @@ pub fn render_radar_chart(
     if mouse_down {
         if dragging.is_none() {
             // Check if mouse is near a handle (start drag)
-            for i in 0..NUM_AXES {
-                let handle_pos = axis_point(center, radius, i, w[i] as f32);
+            for (i, &wi) in w.iter().enumerate() {
+                let handle_pos = axis_point(center, radius, i, wi as f32);
                 let dx = mouse_pos[0] - handle_pos[0];
                 let dy = mouse_pos[1] - handle_pos[1];
                 if dx * dx + dy * dy < 144.0 {

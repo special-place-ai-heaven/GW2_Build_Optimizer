@@ -212,7 +212,7 @@ pub fn render_lock_panel(
     // Bail if the profession isn't in the DB — we can't render the panel
     // without spec metadata, and the rest of the function would silently
     // produce an empty view.
-    if db.professions.get(profession_name).is_none() {
+    if !db.professions.contains_key(profession_name) {
         return modified;
     }
 
@@ -577,9 +577,9 @@ pub fn render_lock_panel(
                     let mut cols = [None; 3];
                     for &tid in trait_ids {
                         // Find which column this trait belongs to
-                        for col in 0..3 {
+                        for (col, slot) in cols.iter_mut().enumerate() {
                             if spec.major_traits[col * 3..col * 3 + 3].contains(&tid) {
-                                cols[col] = Some(tid);
+                                *slot = Some(tid);
                             }
                         }
                     }

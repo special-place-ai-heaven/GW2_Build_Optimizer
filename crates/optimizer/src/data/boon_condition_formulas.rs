@@ -259,6 +259,11 @@ impl BoonFormulas {
     pub fn len(&self) -> usize {
         self.map.len()
     }
+
+    /// True when no boon definitions are loaded.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
 }
 
 // ─── Condition Types ───
@@ -430,6 +435,11 @@ impl ConditionFormulas {
     /// Number of loaded condition definitions.
     pub fn len(&self) -> usize {
         self.map.len()
+    }
+
+    /// True when no condition definitions are loaded.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
     }
 }
 

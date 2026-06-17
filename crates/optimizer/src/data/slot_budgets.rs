@@ -173,6 +173,11 @@ impl SlotBudgets {
         self.map.len()
     }
 
+    /// True when no slot budget entries are loaded.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
     /// Look up the ThreeStat major value for an API equipment slot name.
     /// Returns the pre-computed final stat value for the major attribute.
     ///

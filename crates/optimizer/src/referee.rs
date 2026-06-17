@@ -335,6 +335,8 @@ pub fn evaluate_validated_build(
 
 #[cfg(test)]
 mod tests {
+    // Intentional invariant tripwires.
+    #![allow(clippy::assertions_on_constants)]
     use super::{
         evaluate_validated_build, evaluate_viability_gates, GateResult, ViabilityGate,
         EHP_FLOOR_PVE, EHP_FLOOR_PVP, EHP_FLOOR_WVW_HAVOC, EHP_FLOOR_WVW_ROAM, EHP_FLOOR_WVW_ZERG,
