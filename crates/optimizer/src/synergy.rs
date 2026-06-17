@@ -7,6 +7,7 @@
 
 use gw2_api::models::{Fact, Item, Skill, Trait as GW2Trait};
 
+use crate::data::boon_condition_formulas::{boon_weight, condition_importance};
 use crate::scoring::OptimizationWeights;
 use crate::text_util::{capitalize, extract_percent_before};
 
@@ -1107,39 +1108,6 @@ fn weight_for_damage_category(cat: &DamageCategory, weights: &OptimizationWeight
     }
 }
 
-fn condition_importance(status: &str) -> f64 {
-    // Verb-form input (Poison) is normalized to canonical (Poisoned) so the
-    // arms only list canonical names.
-    let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
-    match canonical {
-        "Burning" => 1.0,       // Highest tick damage: 0.155*CD + 131.75
-        "Bleeding" => 0.7,      // Stacks to 25: 0.06*CD + 22
-        "Torment" => 0.6,       // Stationary: 0.0375*CD + 31.875; moving: 2×
-        "Poisoned" => 0.5,      // 0.06*CD + 33.5, also -33% healing
-        "Confusion" => 0.1,     // On-use only: 0.0175*CD + 11 (~10% of Burning DPS)
-        "Vulnerability" => 0.8, // Force multiplier (+1% all damage per stack)
-        _ => 0.2,               // CC conditions (Immobile, Chilled, etc.)
-    }
-}
-
-fn boon_weight(status: &str, weights: &OptimizationWeights) -> f64 {
-    match status {
-        "Might" => weights.power * 0.5 + weights.condition * 0.5,
-        "Fury" => weights.power * 0.7,
-        "Quickness" => weights.power * 0.5 + weights.condition * 0.3,
-        "Alacrity" => weights.boon_support * 0.4 + weights.power * 0.2,
-        "Protection" => weights.sustain * 0.6,
-        "Resolution" => weights.sustain * 0.4,
-        "Regeneration" => weights.healing * 0.4,
-        "Vigor" => weights.sustain * 0.3,
-        "Stability" => weights.control * 0.3 + weights.sustain * 0.3 + weights.boon_support * 0.2,
-        "Swiftness" => 0.05,
-        "Resistance" => weights.sustain * 0.4,
-        "Aegis" => weights.sustain * 0.5,
-        _ => 0.05,
-    }
-}
-
 fn duration_matches_condition(kind: &DurationKind, condition: &str) -> bool {
     match kind {
         DurationKind::AllCondition => true,
@@ -1157,7 +1125,7 @@ pub(crate) mod tests_alias_helpers {
         crate::data::boon_condition_formulas::is_condition(status)
     }
     pub(crate) fn condition_importance(status: &str) -> f64 {
-        super::condition_importance(status)
+        crate::data::boon_condition_formulas::condition_importance(status)
     }
 }
 

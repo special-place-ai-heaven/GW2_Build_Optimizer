@@ -671,65 +671,38 @@ fn status_weight_for_scoring(
     if is_condition {
         return weights.condition;
     }
-    // For boons, check the specific boon name if available
+    // For boons, check the specific boon name if available. Delegates to the
+    // shared empirically-calibrated boon weight table.
     let status_kind = effect
         .status_operation
         .as_ref()
         .map(|op| op.status_kind.as_str())
         .unwrap_or("");
-    match status_kind {
-        "Might" => weights.power * 0.5 + weights.condition * 0.5,
-        "Fury" => weights.power * 0.7,
-        "Quickness" => weights.power * 0.5 + weights.condition * 0.3,
-        "Alacrity" => weights.boon_support * 0.4 + weights.power * 0.2,
-        "Protection" => weights.sustain * 0.6,
-        "Resolution" => weights.sustain * 0.4,
-        "Regeneration" => weights.healing * 0.4,
-        "Vigor" => weights.sustain * 0.3,
-        "Stability" => weights.control * 0.3 + weights.sustain * 0.3 + weights.boon_support * 0.2,
-        "Resistance" => weights.sustain * 0.4,
-        "Aegis" => weights.sustain * 0.5,
-        _ => 0.05,
-    }
+    super::boon_condition_formulas::boon_weight(status_kind, weights)
 }
 
 /// Get condition importance from StatusOperation payload.
 ///
 /// Authored data may use verb-form (Poison) or canonical (Poisoned) — the
-/// `status_kind` is normalized via `canonical_condition_name` so the arms
-/// only list canonical form.
+/// shared `condition_importance` normalizes `status_kind` via
+/// `canonical_condition_name` internally, so behavior is identical regardless
+/// of input form.
 fn cond_importance_from_op(effect: &NormalizedEffect) -> f64 {
     let raw_kind = effect
         .status_operation
         .as_ref()
         .map(|op| op.status_kind.as_str())
         .unwrap_or("");
-    cond_importance_from_status_kind(raw_kind)
-}
-
-/// Inner helper — splits the alias-normalization-and-scoring logic out of
-/// `cond_importance_from_op` so the alias-routing regression suite can
-/// exercise the score table directly without constructing a
-/// `NormalizedEffect`.
-fn cond_importance_from_status_kind(raw_kind: &str) -> f64 {
-    let status_kind = super::boon_condition_formulas::canonical_condition_name(raw_kind);
-    match status_kind {
-        "Burning" => 1.0,
-        "Vulnerability" => 0.8,
-        "Bleeding" => 0.7,
-        "Torment" => 0.6,
-        "Poisoned" => 0.5,
-        "Confusion" => 0.1,
-        _ => 0.2,
-    }
+    super::boon_condition_formulas::condition_importance(raw_kind)
 }
 
 /// Test-only re-export so the alias-routing regression suite can fuzz the
-/// private `cond_importance_from_status_kind` helper.
+/// shared condition-importance score table directly without constructing a
+/// `NormalizedEffect`.
 #[cfg(test)]
 pub(crate) mod tests_alias_helpers {
     pub(crate) fn cond_importance_for_status_kind(raw_kind: &str) -> f64 {
-        super::cond_importance_from_status_kind(raw_kind)
+        super::super::boon_condition_formulas::condition_importance(raw_kind)
     }
 }
 
@@ -1825,8 +1798,8 @@ mod tests {
                     "evidence_level": "Factual"
                 }}"#
             );
-            let effect: NormalizedEffect =
-                serde_json::from_str(&json).unwrap_or_else(|_| panic!("should parse {}", source_type_str));
+            let effect: NormalizedEffect = serde_json::from_str(&json)
+                .unwrap_or_else(|_| panic!("should parse {}", source_type_str));
             assert_eq!(effect.source_type, expected);
         }
     }
