@@ -8,6 +8,7 @@
 use gw2_api::models::{Fact, Item, Skill, Trait as GW2Trait};
 
 use crate::scoring::OptimizationWeights;
+use crate::text_util::{capitalize, extract_percent_before};
 
 // ─── Supporting Enums ───
 
@@ -1194,33 +1195,6 @@ fn stat_type_from_display_name(name: &str) -> Option<StatType> {
         "healing power" | "healingpower" | "healing" => Some(StatType::HealingPower),
         _ => None,
     }
-}
-
-fn capitalize(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        None => String::new(),
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-    }
-}
-
-/// Extract a percentage from text (reused from combat.rs pattern).
-fn extract_percent_before(text: &str, keyword: &str) -> Option<f64> {
-    if !text.contains(keyword) {
-        return None;
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let pct_pos = chars.iter().position(|&c| c == '%')?;
-    let start = chars[..pct_pos]
-        .iter()
-        .rposition(|c| !c.is_ascii_digit() && *c != '.')
-        .map(|i| i + 1)
-        .unwrap_or(0);
-    if start >= pct_pos {
-        return None;
-    }
-    let num: String = chars[start..pct_pos].iter().collect();
-    num.parse::<f64>().ok()
 }
 
 #[cfg(test)]

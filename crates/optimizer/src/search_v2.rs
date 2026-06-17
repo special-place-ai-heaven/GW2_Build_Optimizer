@@ -13,6 +13,7 @@ use crate::referee::{self, RefereeReport};
 use crate::scenario::ScenarioSpec;
 use crate::scoring::{self, OptimizationWeights};
 use crate::synergy_pipeline;
+use crate::text_util::normalize_sigil_family;
 use crate::validation::{ValidatedBuild, ValidatedGearPrefix, ValidatedItem};
 
 // ─── Core types ──────────────────────────────────────────────────────────────
@@ -320,12 +321,6 @@ fn swap_sigil_slots(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuil
     }
 
     neighbors
-}
-
-fn normalize_sigil_family(name: &str) -> String {
-    let mut base = name.replace(" (PvP)", "");
-    base.make_ascii_lowercase();
-    base.trim().to_string()
 }
 
 /// Operator 4 — swap relic.
