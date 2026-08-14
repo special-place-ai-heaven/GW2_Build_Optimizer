@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use super::combat_model::{
     kit_has_corrupt, kit_has_mobility_out, kit_has_stability_cover, kit_has_strip, setup_priority,
-    setup_window_ms,
+    setup_window_ms, EnemyDummy,
 };
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::{RotationSkill, SimulationResult, SkillEffect, SkillSlot, SkillUsage};
@@ -79,13 +79,32 @@ pub fn simulate(
     condition_damage: f64,
     weapon_strength: f64,
 ) -> SimulationResult {
+    simulate_against(
+        skills,
+        duration_ms,
+        power,
+        condition_damage,
+        weapon_strength,
+        EnemyDummy::open(),
+    )
+}
+
+/// Like [`simulate`], but the dummy can start with Protection/Stability.
+pub fn simulate_against(
+    skills: &[RotationSkill],
+    duration_ms: u32,
+    power: f64,
+    condition_damage: f64,
+    weapon_strength: f64,
+    enemy: EnemyDummy,
+) -> SimulationResult {
     let duration = if duration_ms == 0 {
         DEFAULT_DURATION_MS
     } else {
         duration_ms
     };
 
-    let mut sim = SimState::new(skills, duration);
+    let mut sim = SimState::new(skills, duration, enemy);
     sim.setup_until_ms = setup_window_ms(duration);
     sim.run(power, condition_damage, weapon_strength);
     sim.into_result()
@@ -106,6 +125,7 @@ struct SimState {
     has_weapon_sets: bool,
     /// Prefer CC/strip/cover over DPCT until this time (0 = never).
     setup_until_ms: u32,
+    enemy: EnemyDummy,
 
     // Tracking
     conditions: Vec<ConditionStack>,
@@ -119,7 +139,7 @@ struct SimState {
 }
 
 impl SimState {
-    fn new(skills: &[RotationSkill], duration_ms: u32) -> Self {
+    fn new(skills: &[RotationSkill], duration_ms: u32, enemy: EnemyDummy) -> Self {
         let skill_states = skills
             .iter()
             .map(|_| SkillState {
@@ -139,6 +159,7 @@ impl SimState {
             weapon_swap_cooldown_ms: 0,
             has_weapon_sets,
             setup_until_ms: 0,
+            enemy,
             conditions: Vec::new(),
             buffs: Vec::new(),
             total_strike_damage: 0.0,
@@ -313,9 +334,13 @@ impl SimState {
                     hit_count,
                     dmg_multiplier,
                 } => {
-                    let damage = weapon_strength * power / reference_armor()
+                    let mut damage = weapon_strength * power / reference_armor()
                         * dmg_multiplier
                         * (*hit_count as f64);
+                    if self.enemy.protection {
+                        damage *=
+                            crate::data::boon_condition_formulas::boons().protection_multiplier();
+                    }
                     self.total_strike_damage += damage;
                     *self.skill_damage.entry(skill_id).or_insert(0.0) += damage;
                 }
@@ -360,12 +385,15 @@ impl SimState {
                     // not as in-sim condition deletion (no enemy condi bar).
                 }
                 SkillEffect::CrowdControl { .. }
-                | SkillEffect::StripBoons { .. }
-                | SkillEffect::CorruptBoons
                 | SkillEffect::ConvertConditions
-                | SkillEffect::StealBoons
                 | SkillEffect::Cover { .. }
                 | SkillEffect::Mobility { .. } => {}
+                SkillEffect::StripBoons { .. }
+                | SkillEffect::CorruptBoons
+                | SkillEffect::StealBoons => {
+                    self.enemy.protection = false;
+                    self.enemy.stability = false;
+                }
             }
         }
 
@@ -1101,6 +1129,55 @@ mod tests {
         assert_eq!(
             result.cleanse_rate_per_20s, 0.0,
             "rate excludes auto-attacks to avoid division by zero"
+        );
+    }
+
+    #[test]
+    fn protection_dummy_cuts_strike_by_a_third() {
+        let skills = vec![auto_attack()];
+        let open = simulate_against(&skills, 2000, 2000.0, 0.0, 1100.0, EnemyDummy::open());
+        let prot = simulate_against(
+            &skills,
+            2000,
+            2000.0,
+            0.0,
+            1100.0,
+            EnemyDummy {
+                protection: true,
+                stability: true,
+            },
+        );
+        let ratio = prot.strike_dps / open.strike_dps;
+        assert!((ratio - 0.67).abs() < 0.02, "expected ~0.67, got {ratio}");
+    }
+
+    #[test]
+    fn strip_clears_protection_so_later_hits_are_full() {
+        let strip = RotationSkill {
+            skill_id: 90,
+            name: "Strip".into(),
+            slot: SkillSlot::Utility,
+            cast_time_ms: 250,
+            cooldown_ms: 10_000,
+            effects: vec![SkillEffect::StripBoons {
+                count_per_pulse: 1,
+                interval_ms: 1000,
+                window_ms: 1000,
+            }],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+        };
+        let dummy = EnemyDummy {
+            protection: true,
+            stability: true,
+        };
+        let with_strip =
+            simulate_against(&[auto_attack(), strip], 2000, 2000.0, 0.0, 1100.0, dummy);
+        let no_strip = simulate_against(&[auto_attack()], 2000, 2000.0, 0.0, 1100.0, dummy);
+        assert!(
+            with_strip.strike_dps > no_strip.strike_dps,
+            "strip should raise delivered DPS vs a Protection dummy"
         );
     }
 }
