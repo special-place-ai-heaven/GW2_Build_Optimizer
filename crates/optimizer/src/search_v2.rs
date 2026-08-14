@@ -14,7 +14,11 @@ use crate::scenario::ScenarioSpec;
 use crate::scoring::{self, OptimizationWeights};
 use crate::synergy_pipeline;
 use crate::text_util::normalize_sigil_family;
-use crate::validation::{ValidatedBuild, ValidatedGearPrefix, ValidatedItem};
+use crate::validation::{
+    ValidatedBuild, ValidatedGearPrefix, ValidatedItem, ValidatedSpec, ValidatedWeaponSet,
+};
+use gw2_api::models::{Profession, Specialization};
+use gw2_core::types::BuildLocks;
 
 // ─── Core types ──────────────────────────────────────────────────────────────
 
@@ -57,6 +61,7 @@ impl Default for SearchConfig {
 /// alternatives (e.g. because the DB is empty) simply contribute nothing to
 /// the output — the function never panics on an empty `GameDb`.
 ///
+/// Five original operators plus elite-spec and weapon jumps.
 /// Output is interleaved round-robin across operators rather than concatenated.
 /// `optimize_v2_search` caps evaluation per beam member at ~30 neighbors;
 /// concatenated order would burn the entire budget on `swap_gear_prefix`
@@ -66,13 +71,16 @@ pub fn generate_neighbors(
     candidate: &BeamCandidate,
     db: &GameDb,
     profession_name: &str,
+    locks: &BuildLocks,
 ) -> Vec<ValidatedBuild> {
-    let groups: [Vec<ValidatedBuild>; 5] = [
+    let groups: [Vec<ValidatedBuild>; 7] = [
         swap_gear_prefix(candidate, db),
         swap_rune(candidate, db),
         swap_sigil_slots(candidate, db),
         swap_relic(candidate, db),
         swap_utility_skills(candidate, db, profession_name),
+        swap_elite_spec(candidate, db, profession_name, locks),
+        swap_weapons(candidate, db, profession_name),
     ];
 
     let total: usize = groups.iter().map(|g| g.len()).sum();
@@ -163,7 +171,7 @@ pub fn optimize_v2_search(
         let neighbor_cap = budget_per.clamp(1, 30);
 
         for candidate in &beam {
-            let neighbors = generate_neighbors(candidate, db, profession_name);
+            let neighbors = generate_neighbors(candidate, db, profession_name, locks);
             for neighbor in neighbors.into_iter().take(neighbor_cap) {
                 if eval_count >= config.eval_budget {
                     break;
@@ -429,6 +437,250 @@ fn swap_utility_skills(
     neighbors
 }
 
+fn swap_elite_spec(
+    candidate: &BeamCandidate,
+    db: &GameDb,
+    profession_name: &str,
+    locks: &BuildLocks,
+) -> Vec<ValidatedBuild> {
+    if locks.specs[2].is_some() {
+        return Vec::new();
+    }
+    let Some(profession) = db.profession(profession_name) else {
+        return Vec::new();
+    };
+    let current_elite_id = candidate
+        .validated
+        .specializations
+        .iter()
+        .find(|s| s.elite)
+        .map(|s| s.spec_id);
+
+    let mut elites: Vec<&Specialization> = profession
+        .specializations
+        .iter()
+        .filter_map(|id| db.specializations.get(id))
+        .filter(|s| s.elite)
+        .collect();
+    elites.sort_by_key(|s| s.id);
+
+    let mut out = Vec::new();
+    for spec in elites {
+        if Some(spec.id) == current_elite_id {
+            continue;
+        }
+        let mut b = candidate.validated.clone();
+        let vs = validated_spec_from(spec, db, locks);
+        if let Some(idx) = b.specializations.iter().position(|s| s.elite) {
+            b.specializations[idx] = vs;
+        } else if b.specializations.len() >= 3 {
+            b.specializations[2] = vs;
+        } else {
+            b.specializations.push(vs);
+        }
+        retarget_after_elite_swap(&mut b, db, profession);
+        out.push(b);
+    }
+    out
+}
+
+fn validated_spec_from(spec: &Specialization, db: &GameDb, locks: &BuildLocks) -> ValidatedSpec {
+    let mut trait_ids = Vec::new();
+    let mut trait_names = Vec::new();
+    for col in 0..3 {
+        let id = locks
+            .locked_trait(spec.id, col)
+            .or_else(|| spec.major_traits.get(col * 3).copied());
+        if let Some(id) = id {
+            trait_ids.push(id);
+            trait_names.push(
+                db.traits
+                    .get(&id)
+                    .map(|t| t.name.clone())
+                    .unwrap_or_default(),
+            );
+        }
+    }
+    let mut all_trait_ids = spec.minor_traits.clone();
+    all_trait_ids.extend(trait_ids.iter().copied());
+    ValidatedSpec {
+        spec_id: spec.id,
+        name: spec.name.clone(),
+        elite: true,
+        trait_ids,
+        trait_names,
+        all_trait_ids,
+    }
+}
+
+fn retarget_after_elite_swap(build: &mut ValidatedBuild, db: &GameDb, profession: &Profession) {
+    let equipped: Vec<u32> = build.specializations.iter().map(|s| s.spec_id).collect();
+    let elite_ids: Vec<u32> = build
+        .specializations
+        .iter()
+        .filter(|s| s.elite)
+        .map(|s| s.spec_id)
+        .collect();
+
+    if let Some((id, _)) = &build.skills.heal {
+        if skill_gated_out(*id, db, &equipped) {
+            build.skills.heal = None;
+        }
+    }
+    for slot in &mut build.skills.utilities {
+        if let Some((id, _)) = slot {
+            if skill_gated_out(*id, db, &equipped) {
+                *slot = None;
+            }
+        }
+    }
+    if let Some((id, _)) = &build.skills.elite {
+        if skill_gated_out(*id, db, &equipped) {
+            build.skills.elite = None;
+        }
+    }
+
+    let combos = land_weapon_combos(profession, &elite_ids);
+    if !weapon_set_ok(&build.weapons.set1, profession, &elite_ids) {
+        build.weapons.set1 = combos
+            .first()
+            .map(|(mh, oh)| ValidatedWeaponSet {
+                main_hand: mh.clone(),
+                off_hand: oh.clone(),
+            })
+            .unwrap_or_default();
+    }
+    if !weapon_set_ok(&build.weapons.set2, profession, &elite_ids) {
+        build.weapons.set2 = combos
+            .get(1)
+            .or(combos.first())
+            .map(|(mh, oh)| ValidatedWeaponSet {
+                main_hand: mh.clone(),
+                off_hand: oh.clone(),
+            })
+            .unwrap_or_default();
+    }
+}
+
+fn skill_gated_out(id: u32, db: &GameDb, equipped: &[u32]) -> bool {
+    match db.skills.get(&id).and_then(|s| s.specialization) {
+        Some(req) => !equipped.contains(&req),
+        None => false,
+    }
+}
+
+fn weapon_set_ok(set: &ValidatedWeaponSet, profession: &Profession, elite_ids: &[u32]) -> bool {
+    [&set.main_hand, &set.off_hand]
+        .into_iter()
+        .flatten()
+        .all(|name| weapon_ok(name, profession, elite_ids))
+}
+
+fn weapon_ok(name: &str, profession: &Profession, elite_ids: &[u32]) -> bool {
+    let Some(info) = profession.weapons.get(name) else {
+        return false;
+    };
+    if info.is_aquatic() {
+        return false;
+    }
+    match info.specialization {
+        Some(req) => elite_ids.contains(&req),
+        None => true,
+    }
+}
+
+fn land_weapon_combos(
+    profession: &Profession,
+    elite_ids: &[u32],
+) -> Vec<(Option<String>, Option<String>)> {
+    let mut two_hand = Vec::new();
+    let mut main = Vec::new();
+    let mut off = Vec::new();
+    for (name, info) in &profession.weapons {
+        if info.is_aquatic() {
+            continue;
+        }
+        if let Some(req) = info.specialization {
+            if !elite_ids.contains(&req) {
+                continue;
+            }
+        }
+        if info.flags.iter().any(|f| f == "TwoHand") {
+            two_hand.push(name.clone());
+        } else if info.flags.iter().any(|f| f == "Mainhand") {
+            main.push(name.clone());
+        }
+        if info.flags.iter().any(|f| f == "Offhand") {
+            off.push(name.clone());
+        }
+    }
+    two_hand.sort();
+    main.sort();
+    off.sort();
+    let mut combos = Vec::new();
+    for w in two_hand {
+        combos.push((Some(w), None));
+    }
+    for m in &main {
+        combos.push((Some(m.clone()), None));
+        for o in &off {
+            if o != m {
+                combos.push((Some(m.clone()), Some(o.clone())));
+            }
+        }
+    }
+    combos
+}
+
+fn swap_weapons(
+    candidate: &BeamCandidate,
+    db: &GameDb,
+    profession_name: &str,
+) -> Vec<ValidatedBuild> {
+    let Some(profession) = db.profession(profession_name) else {
+        return Vec::new();
+    };
+    let elite_ids: Vec<u32> = candidate
+        .validated
+        .specializations
+        .iter()
+        .filter(|s| s.elite)
+        .map(|s| s.spec_id)
+        .collect();
+    let combos = land_weapon_combos(profession, &elite_ids);
+    let set1 = (
+        candidate.validated.weapons.set1.main_hand.clone(),
+        candidate.validated.weapons.set1.off_hand.clone(),
+    );
+    let set2 = (
+        candidate.validated.weapons.set2.main_hand.clone(),
+        candidate.validated.weapons.set2.off_hand.clone(),
+    );
+    let mut out = Vec::new();
+    for combo in combos {
+        if combo != set1 {
+            let mut b = candidate.validated.clone();
+            b.weapons.set1 = ValidatedWeaponSet {
+                main_hand: combo.0.clone(),
+                off_hand: combo.1.clone(),
+            };
+            out.push(b);
+        }
+        if combo != set2 {
+            let mut b = candidate.validated.clone();
+            b.weapons.set2 = ValidatedWeaponSet {
+                main_hand: combo.0,
+                off_hand: combo.1,
+            };
+            out.push(b);
+        }
+        if out.len() >= 16 {
+            break;
+        }
+    }
+    out
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -444,7 +696,7 @@ mod tests {
     use crate::scenario::{CombatTier, ScenarioSpec};
     use crate::stats::StatBlock;
     use crate::validation::ValidatedBuild;
-    use gw2_core::types::GameMode;
+    use gw2_core::types::{BuildLocks, GameMode};
 
     fn empty_db() -> GameDb {
         GameDb {
@@ -514,7 +766,7 @@ mod tests {
     fn test_generate_neighbors_empty_db_no_panic() {
         let db = empty_db();
         let candidate = make_candidate(ValidatedBuild::default());
-        let neighbors = generate_neighbors(&candidate, &db, "Guardian");
+        let neighbors = generate_neighbors(&candidate, &db, "Guardian", &BuildLocks::default());
         // No items or skills → no neighbors.
         assert!(
             neighbors.is_empty(),
@@ -573,7 +825,7 @@ mod tests {
         db.runes.push(102);
 
         let candidate = make_candidate(ValidatedBuild::default());
-        let neighbors = generate_neighbors(&candidate, &db, "Warrior");
+        let neighbors = generate_neighbors(&candidate, &db, "Warrior", &BuildLocks::default());
 
         // Collect the rune IDs that appear in results.
         let rune_ids: Vec<u32> = neighbors
@@ -646,7 +898,7 @@ mod tests {
         db.runes.push(200);
 
         let candidate = make_candidate(ValidatedBuild::default());
-        let neighbors = generate_neighbors(&candidate, &db, "Warrior");
+        let neighbors = generate_neighbors(&candidate, &db, "Warrior", &BuildLocks::default());
         // First two emitted positions: gear-prefix (group 0 round 0), then rune
         // (group 1 round 0). Confirms rune is reachable inside a small cap.
         assert!(
@@ -705,5 +957,133 @@ mod tests {
         let config = SearchConfig::default();
         assert_eq!(config.beam_width, 10, "default beam_width should be 10");
         assert_eq!(config.eval_budget, 200, "default eval_budget should be 200");
+    }
+
+    fn twohand(name: &str, spec: Option<u32>) -> (String, gw2_api::models::WeaponInfo) {
+        (
+            name.into(),
+            gw2_api::models::WeaponInfo {
+                specialization: spec,
+                flags: vec!["TwoHand".into()],
+                skills: Vec::new(),
+            },
+        )
+    }
+
+    fn spec_line(id: u32, name: &str, elite: bool) -> gw2_api::models::Specialization {
+        gw2_api::models::Specialization {
+            id,
+            name: name.into(),
+            profession: "Guardian".into(),
+            elite,
+            minor_traits: Vec::new(),
+            major_traits: vec![1, 2, 3, 4, 5, 6, 7, 8, 9],
+            weapon_trait: None,
+            icon: None,
+            background: None,
+            profession_icon: None,
+            profession_icon_big: None,
+        }
+    }
+
+    #[test]
+    fn swap_elite_respects_lock_and_jumps_when_free() {
+        let mut db = empty_db();
+        let dh = spec_line(27, "Dragonhunter", true);
+        let fb = spec_line(62, "Firebrand", true);
+        db.specializations.insert(27, dh);
+        db.specializations.insert(62, fb);
+        let mut weapons = HashMap::new();
+        let (n, w) = twohand("Greatsword", None);
+        weapons.insert(n, w);
+        db.professions.insert(
+            "Guardian".into(),
+            gw2_api::models::Profession {
+                id: "Guardian".into(),
+                name: "Guardian".into(),
+                code: None,
+                specializations: vec![27, 62],
+                weapons,
+                training: Vec::new(),
+                skills_by_palette: Vec::new(),
+                icon: None,
+                icon_big: None,
+            },
+        );
+
+        let build = ValidatedBuild {
+            specializations: vec![crate::validation::ValidatedSpec {
+                spec_id: 27,
+                name: "Dragonhunter".into(),
+                elite: true,
+                trait_ids: vec![1, 4, 7],
+                trait_names: vec!["a".into(), "b".into(), "c".into()],
+                all_trait_ids: vec![1, 4, 7],
+            }],
+            ..Default::default()
+        };
+        let candidate = make_candidate(build);
+
+        let locked = BuildLocks {
+            specs: [None, None, Some(27)],
+            trait_locks: HashMap::new(),
+        };
+        let none_locked = generate_neighbors(&candidate, &db, "Guardian", &locked);
+        assert!(
+            none_locked
+                .iter()
+                .all(|b| b.specializations.iter().all(|s| s.spec_id == 27)),
+            "locked elite must not jump"
+        );
+
+        let jumped = generate_neighbors(&candidate, &db, "Guardian", &BuildLocks::default());
+        assert!(
+            jumped
+                .iter()
+                .any(|b| b.specializations.iter().any(|s| s.elite && s.spec_id == 62)),
+            "free elite must jump to Firebrand"
+        );
+    }
+
+    #[test]
+    fn swap_weapons_emits_other_land_set() {
+        let mut db = empty_db();
+        let mut weapons = HashMap::new();
+        let (n, w) = twohand("Greatsword", None);
+        weapons.insert(n, w);
+        let (n, w) = twohand("Staff", None);
+        weapons.insert(n, w);
+        db.professions.insert(
+            "Guardian".into(),
+            gw2_api::models::Profession {
+                id: "Guardian".into(),
+                name: "Guardian".into(),
+                code: None,
+                specializations: Vec::new(),
+                weapons,
+                training: Vec::new(),
+                skills_by_palette: Vec::new(),
+                icon: None,
+                icon_big: None,
+            },
+        );
+        let build = ValidatedBuild {
+            weapons: crate::validation::ValidatedWeapons {
+                set1: crate::validation::ValidatedWeaponSet {
+                    main_hand: Some("Greatsword".into()),
+                    off_hand: None,
+                },
+                set2: Default::default(),
+            },
+            ..Default::default()
+        };
+        let candidate = make_candidate(build);
+        let neighbors = generate_neighbors(&candidate, &db, "Guardian", &BuildLocks::default());
+        assert!(
+            neighbors
+                .iter()
+                .any(|b| b.weapons.set1.main_hand.as_deref() == Some("Staff")),
+            "weapon jump should offer Staff"
+        );
     }
 }

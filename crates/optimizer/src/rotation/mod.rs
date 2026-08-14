@@ -228,6 +228,12 @@ pub struct SimulationResult {
     pub has_strip: bool,
     /// Kit converts enemy boons to conditions (disabler identity).
     pub has_corrupt: bool,
+    /// Dummy HP hit 0 during the window (downed, not yet stomped).
+    pub downed: bool,
+    /// Downed and the ~3.5s interruptible stomp finished inside the window.
+    pub finished: bool,
+    /// Kit has any CrowdControl (secures stomp / cuts casts).
+    pub has_interrupt: bool,
 }
 
 /// Per-skill breakdown in a simulation result.

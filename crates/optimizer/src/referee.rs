@@ -76,6 +76,10 @@ pub enum ViabilityGate {
     MobilityOut,
     /// Harasser: strip/steal/corrupt before dump (Stability strip-all + Protection).
     HarasserStrip,
+    /// Roam / harasser: dummy HP reached 0 inside the clock.
+    KillWindow,
+    /// Roam / harasser: kit can interrupt (secures the stomp).
+    SecureFinish,
 }
 
 /// Result of a single viability gate check.
@@ -226,6 +230,41 @@ pub fn evaluate_viability_gates(
                 },
             });
         }
+
+        if needs_kill_clock(scenario) {
+            gates.push(match rotation {
+                Some(rot) => GateResult {
+                    gate: ViabilityGate::KillWindow,
+                    passed: rot.downed,
+                    note: if rot.downed {
+                        "dummy downed in window".into()
+                    } else {
+                        "dummy still up at end of clock".into()
+                    },
+                },
+                None => GateResult {
+                    gate: ViabilityGate::KillWindow,
+                    passed: false,
+                    note: "rotation unavailable".into(),
+                },
+            });
+            gates.push(match rotation {
+                Some(rot) => GateResult {
+                    gate: ViabilityGate::SecureFinish,
+                    passed: rot.has_interrupt,
+                    note: if rot.has_interrupt {
+                        "interrupt present to secure stomp".into()
+                    } else {
+                        "no interrupt — stomp is free to cut".into()
+                    },
+                },
+                None => GateResult {
+                    gate: ViabilityGate::SecureFinish,
+                    passed: false,
+                    note: "rotation unavailable".into(),
+                },
+            });
+        }
     }
 
     // ── Effective health gate (always runs) ─────────────────────────────────
@@ -253,6 +292,18 @@ pub fn evaluate_viability_gates(
 
     let is_viable = gates.iter().all(|g| g.passed);
     ViabilityReport { gates, is_viable }
+}
+
+fn needs_kill_clock(scenario: &ScenarioSpec) -> bool {
+    if matches!(
+        scenario.combat_kind,
+        CombatKind::Support | CombatKind::Commander
+    ) {
+        return false;
+    }
+    scenario.combat_kind == CombatKind::Harasser
+        || (matches!(scenario.game_mode, GameMode::WvW | GameMode::PvP)
+            && scenario.combat_tier == CombatTier::Solo)
 }
 
 /// Deterministic build evaluation output.
@@ -419,6 +470,9 @@ mod tests {
             has_mobility_out: true,
             has_strip: true,
             has_corrupt: false,
+            downed: true,
+            finished: true,
+            has_interrupt: true,
         }
     }
 
@@ -1026,5 +1080,56 @@ mod tests {
         let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
         assert!(gate_by_kind(&report.gates, &ViabilityGate::MobilityOut).is_none());
         assert!(report.is_viable);
+    }
+
+    #[test]
+    fn gate_roam_fails_without_down() {
+        let mut rot = make_viable_rotation();
+        rot.downed = false;
+        let combat = make_viable_combat();
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_tier = CombatTier::Solo;
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let g = gate_by_kind(&report.gates, &ViabilityGate::KillWindow).unwrap();
+        assert!(!g.passed);
+        assert!(!report.is_viable);
+    }
+
+    #[test]
+    fn gate_roam_fails_without_interrupt() {
+        let mut rot = make_viable_rotation();
+        rot.has_interrupt = false;
+        let combat = make_viable_combat();
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_tier = CombatTier::Solo;
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let g = gate_by_kind(&report.gates, &ViabilityGate::SecureFinish).unwrap();
+        assert!(!g.passed);
+        assert!(!report.is_viable);
+    }
+
+    #[test]
+    fn gate_zerg_dps_does_not_require_kill_window() {
+        let mut rot = make_viable_rotation();
+        rot.downed = false;
+        rot.has_interrupt = false;
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::KillWindow).is_none());
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::SecureFinish).is_none());
+        assert!(report.is_viable);
+    }
+
+    #[test]
+    fn gate_support_does_not_require_kill_window() {
+        let mut rot = make_viable_rotation();
+        rot.downed = false;
+        let combat = make_viable_combat();
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_tier = CombatTier::Solo;
+        scenario.combat_kind = crate::scenario::CombatKind::Support;
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::KillWindow).is_none());
     }
 }

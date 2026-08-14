@@ -61,6 +61,14 @@ pub fn kit_has_corrupt(skills: &[RotationSkill]) -> bool {
     })
 }
 
+pub fn kit_has_interrupt(skills: &[RotationSkill]) -> bool {
+    skills.iter().any(|s| {
+        s.effects
+            .iter()
+            .any(|e| matches!(e, SkillEffect::CrowdControl { .. }))
+    })
+}
+
 pub fn kit_has_stability_cover(skills: &[RotationSkill]) -> bool {
     skills.iter().any(|s| {
         s.effects.iter().any(|e| match e {
@@ -127,11 +135,26 @@ pub fn corrupt_into(boon: &str) -> Option<&'static str> {
     })
 }
 
+/// Glass roam pick / havoc bruiser. Support and zerg DPS have no solo-kill dummy.
+pub fn dummy_hp(tier: CombatTier, kind: CombatKind) -> Option<f64> {
+    if matches!(kind, CombatKind::Support | CombatKind::Commander) {
+        return None;
+    }
+    match (tier, kind) {
+        (CombatTier::Solo, _) => Some(13_000.0),
+        (CombatTier::Party, _) => Some(20_000.0),
+        (CombatTier::Squad, CombatKind::Harasser) => Some(13_000.0),
+        (CombatTier::Squad, _) => None,
+    }
+}
+
 /// Enemy cover the dummy starts with. Strip/steal/corrupt clear it for the rest of the window.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct EnemyDummy {
     pub protection: bool,
     pub stability: bool,
+    /// `None` = open dummy (no kill tracking).
+    pub hp: Option<f64>,
 }
 
 impl EnemyDummy {
@@ -141,16 +164,19 @@ impl EnemyDummy {
 
     /// Zerg/havoc blobs and roam harasser targets are assumed booned; naked roam DPS is not.
     pub fn for_scenario(tier: CombatTier, kind: CombatKind) -> Self {
+        let hp = dummy_hp(tier, kind);
         match (tier, kind) {
             (CombatTier::Solo, CombatKind::Harasser | CombatKind::Disabler) => Self {
                 protection: true,
                 stability: true,
+                hp,
             },
             (CombatTier::Party, _) | (CombatTier::Squad, _) => Self {
                 protection: true,
                 stability: true,
+                hp,
             },
-            _ => Self::open(),
+            _ => Self { hp, ..Self::open() },
         }
     }
 }
@@ -352,9 +378,33 @@ mod tests {
     fn zerg_dummy_starts_booned_roam_dps_does_not() {
         let zerg = EnemyDummy::for_scenario(CombatTier::Squad, CombatKind::StrikeSpike);
         assert!(zerg.protection && zerg.stability);
+        assert!(zerg.hp.is_none());
         let roam_dps = EnemyDummy::for_scenario(CombatTier::Solo, CombatKind::StrikeSpike);
         assert!(!roam_dps.protection && !roam_dps.stability);
+        assert_eq!(roam_dps.hp, Some(13_000.0));
         let roam_pick = EnemyDummy::for_scenario(CombatTier::Solo, CombatKind::Harasser);
         assert!(roam_pick.protection && roam_pick.stability);
+        assert_eq!(roam_pick.hp, Some(13_000.0));
+        let havoc = EnemyDummy::for_scenario(CombatTier::Party, CombatKind::StrikeSpike);
+        assert_eq!(havoc.hp, Some(20_000.0));
+        let support = EnemyDummy::for_scenario(CombatTier::Solo, CombatKind::Support);
+        assert!(support.hp.is_none());
+    }
+
+    #[test]
+    fn interrupt_is_any_crowd_control() {
+        assert!(kit_has_interrupt(&[skill_with(vec![
+            SkillEffect::CrowdControl {
+                kind: ControlKind::Daze,
+                duration_ms: 500,
+                stops_dodge: false,
+            }
+        ])]));
+        assert!(!kit_has_interrupt(&[skill_with(vec![
+            SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }
+        ])]));
     }
 }
