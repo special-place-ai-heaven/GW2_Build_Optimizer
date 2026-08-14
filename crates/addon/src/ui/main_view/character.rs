@@ -440,11 +440,7 @@ fn encode_revenant_profession_bytes(
     build: &gw2_api::models::Build,
     db: &gw2_optimizer::gamedb::GameDb,
 ) {
-    let spec_ids: Vec<u32> = build
-        .specializations
-        .iter()
-        .filter_map(|s| s.id)
-        .collect();
+    let spec_ids: Vec<u32> = build.specializations.iter().filter_map(|s| s.id).collect();
     let mut legends: Vec<String> = build
         .legends
         .iter()
@@ -466,9 +462,8 @@ fn encode_revenant_profession_bytes(
         aquatic = legends.clone();
     }
 
-    let legend_byte = |id: Option<&String>| -> u8 {
-        id.map(|s| db.legend_template_code(s)).unwrap_or(0)
-    };
+    let legend_byte =
+        |id: Option<&String>| -> u8 { id.map(|s| db.legend_template_code(s)).unwrap_or(0) };
     buf.push(legend_byte(legends.first()));
     buf.push(legend_byte(legends.get(1)));
     buf.push(legend_byte(aquatic.first()));
@@ -674,7 +669,11 @@ mod tests {
         assert_eq!(u16_at(&buf, 16), 4651);
         assert_eq!(u16_at(&buf, 20), 4564);
         assert_eq!(u16_at(&buf, 24), 4554);
-        assert_eq!(&buf[28..32], &[1, 2, 1, 2], "legend codes active/inactive × land/water");
+        assert_eq!(
+            &buf[28..32],
+            &[1, 2, 1, 2],
+            "legend codes active/inactive × land/water"
+        );
         // Inactive legend utility palettes (also shared).
         assert_eq!(u16_at(&buf, 32), 4614);
         assert_eq!(u16_at(&buf, 34), 4651);
@@ -716,4 +715,3 @@ mod tests {
         assert_eq!(buf.len(), 44);
     }
 }
-

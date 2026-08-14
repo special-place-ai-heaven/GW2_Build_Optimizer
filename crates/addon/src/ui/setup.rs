@@ -448,7 +448,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
             if theme::gold_button_sized(ui, "Start Download", [160.0, 0.0]) {
                 state.setup.download_progress = Some(DownloadState {
                     current_step: 0,
-        total_steps: 9,
+                    total_steps: 9,
                     step_name: "Starting...".into(),
                     done: false,
                     error: None,

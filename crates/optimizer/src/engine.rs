@@ -1074,7 +1074,7 @@ pub fn optimize_with_gemini(
         stage: "Simulating rotation...".into(),
         done: false,
     });
-    let rotation_result = simulate_validated_rotation(&validated, db, &full_stats);
+    let rotation_result = simulate_validated_rotation(&validated, db, &full_stats, None);
 
     on_progress(OptimizeProgress {
         stage: "Done".into(),
@@ -1156,6 +1156,7 @@ pub fn simulate_validated_rotation(
     validated: &ValidatedBuild,
     db: &GameDb,
     stats: &stats::StatBlock,
+    scenario: Option<&crate::scenario::ScenarioSpec>,
 ) -> Option<rotation::SimulationResult> {
     // Heal/utility/elite stay at weapon_set 0 (always available); weapon skills
     // get tagged with their actual set 1 or 2 so the simulator's weapon-swap
@@ -1227,9 +1228,13 @@ pub fn simulate_validated_rotation(
     let condition_damage = stats.get("ConditionDamage");
     let weapon_strength = 1100.0; // GW2 reference weapon strength
 
+    let duration_ms = scenario
+        .map(|s| crate::rotation::combat_model::simulation_window_ms(s.combat_tier, s.combat_kind))
+        .unwrap_or(0); // 0 = 30s DPCT default
+
     Some(rotation::simulator::simulate(
         &rotation_skills,
-        0, // use default duration
+        duration_ms,
         power,
         condition_damage,
         weapon_strength,
@@ -1294,7 +1299,7 @@ pub fn synergy_result_from_validated(
         profession_name,
         ctx,
     );
-    let rotation = simulate_validated_rotation(&validated, db, &full_stats);
+    let rotation = simulate_validated_rotation(&validated, db, &full_stats, None);
     SynergyResult {
         validated,
         stats: full_stats,
@@ -2247,7 +2252,7 @@ mod tests {
         validated.skills.utilities = vec![Some((90_001, "Cleanse Utility".into()))];
 
         let stats = stats::base_stats();
-        let rotation = simulate_validated_rotation(&validated, &db, &stats)
+        let rotation = simulate_validated_rotation(&validated, &db, &stats, None)
             .expect("utility skill should produce a rotation");
 
         assert_eq!(rotation.cleanse_count, 1);

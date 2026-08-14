@@ -58,10 +58,8 @@ pub enum ResultPane {
 }
 
 impl ResultPane {
-    const ALL: [(ResultPane, &'static str); 2] = [
-        (ResultPane::Build, "Build"),
-        (ResultPane::Stats, "Stats"),
-    ];
+    const ALL: [(ResultPane, &'static str); 2] =
+        [(ResultPane::Build, "Build"), (ResultPane::Stats, "Stats")];
 }
 
 /// Compact section tabs as gold pills. Wraps instead of clipping on a narrow overlay.
@@ -315,7 +313,8 @@ fn inspect_one(name: &str, db: &GameDb) -> Option<String> {
 
 pub(crate) fn inspect_text(name: &str, db: &GameDb) -> Option<String> {
     let name = name.trim();
-    if name.is_empty() || name == "\u{2014}" || name == "-" || name == "(none)" || name == "(empty)" {
+    if name.is_empty() || name == "\u{2014}" || name == "-" || name == "(none)" || name == "(empty)"
+    {
         return None;
     }
     if name.contains(" / ") {
@@ -597,7 +596,6 @@ pub(crate) fn render_stats_pane(
     }
 }
 
-
 /// Sticky copy strip for a GW2 build-template chat code.
 pub fn render_chat_code_copy(
     ui: &Ui,
@@ -644,7 +642,10 @@ pub fn render_chat_code_copy(
     }
     if *copied_frames > 0 {
         ui.same_line();
-        ui.text_colored(crate::ui::theme::OPTIMIZED, "Copied \u{2014} paste in GW2 chat");
+        ui.text_colored(
+            crate::ui::theme::OPTIMIZED,
+            "Copied \u{2014} paste in GW2 chat",
+        );
     } else {
         ui.same_line();
         ui.text_colored(crate::ui::theme::MUTED, "Paste in GW2 chat to apply");
@@ -773,7 +774,11 @@ fn render_diff_row(ui: &Ui, diff: &SlotDiff, db: Option<&GameDb>) {
             .filled(true)
             .rounding(th * 0.4)
             .build();
-        dl.add_text([p[0] + 5.0, p[1] + 1.0], crate::ui::color_u32(badge_col), badge);
+        dl.add_text(
+            [p[0] + 5.0, p[1] + 1.0],
+            crate::ui::color_u32(badge_col),
+            badge,
+        );
     }
     ui.dummy([tw, th]);
     ui.next_column();
@@ -931,7 +936,10 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
             .collect();
 
         if !ticks_to_show.is_empty() {
-            ui.text_colored([0.9, 0.6, 0.2, 1.0], "Condition ticks (how condi damage applies, Solo)");
+            ui.text_colored(
+                [0.9, 0.6, 0.2, 1.0],
+                "Condition ticks (how condi damage applies, Solo)",
+            );
             ui.columns(4, "##condi_ticks", true);
 
             ui.text_colored(crate::ui::theme::GOLD, "Condition");
@@ -976,7 +984,6 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
         }
     }
 }
-
 
 fn bonus_header(ui: &Ui) {
     ui.text_colored(crate::ui::theme::GOLD, "Metric");
@@ -1024,7 +1031,10 @@ fn render_defenses(
         render_int_row_opt(
             ui,
             "Effective HP",
-            comparison.current_combat_solo.as_ref().map(|c| c.effective_health),
+            comparison
+                .current_combat_solo
+                .as_ref()
+                .map(|c| c.effective_health),
             sug_hp,
         );
     }
@@ -1126,11 +1136,7 @@ fn diff_color(diff: f64) -> [f32; 4] {
 }
 
 /// Render rotation simulation breakdown: simulated DPS, condition uptimes, skill usage.
-fn render_rotation_breakdown(
-    ui: &Ui,
-    rotation: &RotationBreakdown,
-    db: Option<&GameDb>,
-) {
+fn render_rotation_breakdown(ui: &Ui, rotation: &RotationBreakdown, db: Option<&GameDb>) {
     ui.text_colored(
         [0.55, 0.55, 0.55, 1.0],
         "Simulated — not a live combat log.",
@@ -1151,7 +1157,6 @@ fn render_rotation_breakdown(
         }
     }
 }
-
 
 // ─── Trust UI helpers ────────────────────────────────────────────────────────
 

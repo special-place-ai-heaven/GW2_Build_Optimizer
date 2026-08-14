@@ -17,6 +17,10 @@
 
 use std::collections::HashMap;
 
+use super::combat_model::{
+    kit_has_corrupt, kit_has_mobility_out, kit_has_stability_cover, kit_has_strip, setup_priority,
+    setup_window_ms,
+};
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::{RotationSkill, SimulationResult, SkillEffect, SkillSlot, SkillUsage};
 
@@ -82,6 +86,7 @@ pub fn simulate(
     };
 
     let mut sim = SimState::new(skills, duration);
+    sim.setup_until_ms = setup_window_ms(duration);
     sim.run(power, condition_damage, weapon_strength);
     sim.into_result()
 }
@@ -98,7 +103,9 @@ struct SimState {
     // Weapon swap
     active_weapon_set: u8,
     weapon_swap_cooldown_ms: u32,
-    has_weapon_sets: bool, // true if any skill has weapon_set > 0
+    has_weapon_sets: bool,
+    /// Prefer CC/strip/cover over DPCT until this time (0 = never).
+    setup_until_ms: u32,
 
     // Tracking
     conditions: Vec<ConditionStack>,
@@ -131,6 +138,7 @@ impl SimState {
             active_weapon_set: 1,
             weapon_swap_cooldown_ms: 0,
             has_weapon_sets,
+            setup_until_ms: 0,
             conditions: Vec::new(),
             buffs: Vec::new(),
             total_strike_damage: 0.0,
@@ -213,6 +221,28 @@ impl SimState {
             if dpct > best_dpct {
                 best_dpct = dpct;
                 best_idx = Some(i);
+            }
+        }
+
+        if self.current_time_ms < self.setup_until_ms {
+            let mut best_setup = None;
+            let mut best_p = 0u32;
+            for (i, skill) in self.skills.iter().enumerate() {
+                if self.skill_states[i].cooldown_remaining_ms > 0 || !self.is_skill_available(skill)
+                {
+                    continue;
+                }
+                if skill.slot == SkillSlot::Weapon1 && skill.cooldown_ms == 0 {
+                    continue;
+                }
+                let p = setup_priority(skill);
+                if p > best_p {
+                    best_p = p;
+                    best_setup = Some(i);
+                }
+            }
+            if best_p > 0 {
+                return best_setup.or(filler_idx);
             }
         }
 
@@ -327,8 +357,15 @@ impl SimState {
                 }
                 SkillEffect::RemovesCondition { .. } => {
                     // Cleanse effects are tracked at the roster level (cleanse_count / cleanse_rate_per_20s),
-                    // not during per-tick simulation — no runtime state update needed here.
+                    // not as in-sim condition deletion (no enemy condi bar).
                 }
+                SkillEffect::CrowdControl { .. }
+                | SkillEffect::StripBoons { .. }
+                | SkillEffect::CorruptBoons
+                | SkillEffect::ConvertConditions
+                | SkillEffect::StealBoons
+                | SkillEffect::Cover { .. }
+                | SkillEffect::Mobility { .. } => {}
             }
         }
 
@@ -446,11 +483,7 @@ impl SimState {
 
         // Control/survivability metrics
         let stunbreak_count = self.skills.iter().filter(|s| s.is_stunbreak).count() as u32;
-        let has_stability = self.skills.iter().any(|s| {
-            s.effects
-                .iter()
-                .any(|e| matches!(e, SkillEffect::ApplyBuff { buff, .. } if buff == "Stability"))
-        });
+        let has_stability = kit_has_stability_cover(&self.skills);
         let stability_uptime = buff_uptime.get("Stability").copied().unwrap_or(0.0);
 
         // Cleanse metrics: count skills with ≥1 RemovesCondition effect; estimate rate per 20s.
@@ -504,6 +537,9 @@ impl SimState {
             stability_uptime,
             cleanse_count,
             cleanse_rate_per_20s,
+            has_mobility_out: kit_has_mobility_out(&self.skills),
+            has_strip: kit_has_strip(&self.skills),
+            has_corrupt: kit_has_corrupt(&self.skills),
         }
     }
 }

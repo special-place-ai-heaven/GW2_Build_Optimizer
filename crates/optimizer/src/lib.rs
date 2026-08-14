@@ -27,4 +27,4 @@ pub mod validation;
 // Re-export viability types for downstream consumers (S07 Trust UI).
 pub use referee::{GateResult, ViabilityGate, ViabilityReport};
 // Re-export scenario types for addon UI (S03).
-pub use scenario::{CombatTier, RoleObjective, ScenarioSpec};
+pub use scenario::{CombatKind, CombatTier, RoleObjective, ScenarioSpec};

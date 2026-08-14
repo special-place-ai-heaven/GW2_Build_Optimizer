@@ -9,6 +9,7 @@ use crate::scoring::OptimizationWeights;
 pub struct ScenarioSpec {
     pub game_mode: GameMode,
     pub combat_tier: CombatTier,
+    pub combat_kind: CombatKind,
     pub target_profile: TargetProfile,
     pub optimization_target: OptimizationTarget,
     pub patch_id: Option<String>,
@@ -20,6 +21,31 @@ pub enum CombatTier {
     Party,
     #[default]
     Squad,
+}
+
+/// What job the dummy is scoring. Independent of [`CombatTier`] (scale).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CombatKind {
+    #[default]
+    StrikeSpike,
+    CondiRamp,
+    Harasser,
+    Support,
+    Disabler,
+    Commander,
+}
+
+impl CombatKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            CombatKind::StrikeSpike => "Strike spike",
+            CombatKind::CondiRamp => "Condi ramp",
+            CombatKind::Harasser => "Harasser",
+            CombatKind::Support => "Support",
+            CombatKind::Disabler => "Disabler",
+            CombatKind::Commander => "Commander",
+        }
+    }
 }
 
 impl CombatTier {
@@ -50,6 +76,7 @@ impl ScenarioSpec {
         Self {
             game_mode: ctx.game_mode.clone(),
             combat_tier: CombatTier::Solo,
+            combat_kind: CombatKind::StrikeSpike,
             target_profile: TargetProfile::Single,
             optimization_target: OptimizationTarget {
                 label: ctx.game_mode.label().to_string(),
@@ -61,6 +88,11 @@ impl ScenarioSpec {
     /// Construct scenario with explicit combat tier (used by UI when WvW sub-role is selected).
     pub fn with_combat_tier(mut self, tier: CombatTier) -> Self {
         self.combat_tier = tier;
+        self
+    }
+
+    pub fn with_combat_kind(mut self, kind: CombatKind) -> Self {
+        self.combat_kind = kind;
         self
     }
 }

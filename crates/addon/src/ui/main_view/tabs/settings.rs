@@ -130,9 +130,9 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         let validating = state.main.settings_key_validating;
         if validating {
             let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-            theme::gold_button_sized(ui,"Testing...", [100.0, 0.0]);
+            theme::gold_button_sized(ui, "Testing...", [100.0, 0.0]);
             style.pop();
-        } else if theme::gold_button_sized(ui,"Test", [60.0, 0.0]) {
+        } else if theme::gold_button_sized(ui, "Test", [60.0, 0.0]) {
             state.main.settings_key_validating = true;
             state.main.settings_key_status = Some("Testing...".into());
             state.main.settings_key_valid = false;
@@ -186,9 +186,9 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let validating = state.main.settings_key_validating;
     if validating {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui,"...", [50.0, 0.0]);
+        theme::gold_button_sized(ui, "...", [50.0, 0.0]);
         style.pop();
-    } else if theme::gold_button_sized(ui,"Save", [50.0, 0.0]) {
+    } else if theme::gold_button_sized(ui, "Save", [50.0, 0.0]) {
         let key = state.main.settings_key_input.trim().to_string();
         if !key.is_empty() {
             match state.config.active_provider {
@@ -523,18 +523,15 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     ui.same_line();
     ui.text_colored(
         theme::MUTED,
-        format!(
-            "Icons: {}",
-            format_bytes(state.main.settings_graphics_size)
-        ),
+        format!("Icons: {}", format_bytes(state.main.settings_graphics_size)),
     );
     ui.same_line();
     let refreshing = state.main.game_db_loading;
     if refreshing {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui,"Clear Cache", [100.0, 0.0]);
+        theme::gold_button_sized(ui, "Clear Cache", [100.0, 0.0]);
         style.pop();
-    } else if theme::gold_button_sized(ui,"Clear Cache", [100.0, 0.0]) {
+    } else if theme::gold_button_sized(ui, "Clear Cache", [100.0, 0.0]) {
         let cache = gw2_api::cache::DataCache::new(&cache_dir);
         if let Err(e) = cache.clear_all() {
             state.main.error = Some(format!("Failed to clear cache: {}", e));
@@ -569,9 +566,9 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
             },
         );
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui,"Refreshing...", [160.0, 0.0]);
+        theme::gold_button_sized(ui, "Refreshing...", [160.0, 0.0]);
         style.pop();
-    } else if theme::gold_button_sized(ui,"Refresh Game Data", [160.0, 0.0]) {
+    } else if theme::gold_button_sized(ui, "Refresh Game Data", [160.0, 0.0]) {
         let cache = gw2_api::cache::DataCache::new(&cache_dir);
         if let Err(e) = cache.clear_all() {
             state.main.error = Some(format!("Failed to refresh: {}", e));
@@ -588,19 +585,19 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
 
     ui.spacing();
     if !state.main.confirm_reset {
-        if theme::gold_button_sized(ui,"Reset Setup", [160.0, 0.0]) {
+        if theme::gold_button_sized(ui, "Reset Setup", [160.0, 0.0]) {
             state.main.confirm_reset = true;
         }
     } else {
         ui.text_colored([1.0, 0.3, 0.0, 1.0], "Reset all settings?");
-        if theme::gold_button_sized(ui,"Yes, Reset", [100.0, 0.0]) {
+        if theme::gold_button_sized(ui, "Yes, Reset", [100.0, 0.0]) {
             state.main.confirm_reset = false;
             if let Err(e) = state.reset_to_first_run() {
                 state.main.error = Some(format!("Reset failed: {}", e));
             }
         }
         ui.same_line();
-        if theme::gold_button_sized(ui,"Cancel", [80.0, 0.0]) {
+        if theme::gold_button_sized(ui, "Cancel", [80.0, 0.0]) {
             state.main.confirm_reset = false;
         }
     }
@@ -654,7 +651,8 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
     let sync_disabled = state.main.benchmark_running || state.main.game_db.is_none();
     if sync_disabled {
         let _dim = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui,
+        theme::gold_button_sized(
+            ui,
             if state.main.benchmark_running {
                 "Syncing..."
             } else {
@@ -662,7 +660,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
             },
             [160.0, 0.0],
         );
-    } else if theme::gold_button_sized(ui,"Sync Benchmarks", [160.0, 0.0]) {
+    } else if theme::gold_button_sized(ui, "Sync Benchmarks", [160.0, 0.0]) {
         let addon_dir = state.addon_dir.clone();
         let token = state.cancel_token.clone();
         state.main.benchmark_running = true;

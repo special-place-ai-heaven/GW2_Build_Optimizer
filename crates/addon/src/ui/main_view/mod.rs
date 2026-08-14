@@ -164,9 +164,10 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
         });
     }
 
-    if let (Some(cached), Some(live)) =
-        (state.config.cache_build_number, state.main.live_build_number)
-    {
+    if let (Some(cached), Some(live)) = (
+        state.config.cache_build_number,
+        state.main.live_build_number,
+    ) {
         if cached != live && !state.main.game_db_loading {
             ui.same_line();
             ui.text_colored(
@@ -199,10 +200,7 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
     // Optimization progress
     if state.main.optimizing {
         ui.same_line();
-        ui.text_colored(
-            theme::WARN,
-            format!("| {}", state.main.optimize_stage),
-        );
+        ui.text_colored(theme::WARN, format!("| {}", state.main.optimize_stage));
     }
 
     // Error bar (dismissible)
@@ -374,10 +372,7 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
                 MainTab::Improve => {
                     if let Some(ref build) = state.main.current_build {
                         let build_clone = build.clone();
-                        resolution::auto_populate_locks(
-                            &build_clone,
-                            &mut state.main.build_locks,
-                        );
+                        resolution::auto_populate_locks(&build_clone, &mut state.main.build_locks);
                     }
                 }
                 _ => {}
@@ -447,11 +442,7 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
             .filled(true)
             .rounding(2.0)
             .build();
-        draw_list.add_text(
-            [pos[0] + 8.0, pos[1] + 2.0],
-            crate::ui::theme::GOLD,
-            title,
-        );
+        draw_list.add_text([pos[0] + 8.0, pos[1] + 2.0], crate::ui::theme::GOLD, title);
     }
     ui.dummy([0.0, 20.0]);
     ui.dummy([0.0, spacing * 0.5]); // gap below
