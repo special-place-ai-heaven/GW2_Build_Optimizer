@@ -95,6 +95,9 @@ pub enum CoverKind {
     Stealth,
     Aegis,
     Stability,
+    /// Suppresses nondamaging condition *effects* (Immobile, Fear, Taunt, …).
+    /// Condi damage still ticks. Poison heal-reduction and Terror are exempt.
+    /// Corrupts into Chill (wiki Resistance, fetched 2026-08-14).
     Resistance,
     Protection,
     Blind,

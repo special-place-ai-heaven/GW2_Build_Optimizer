@@ -394,6 +394,15 @@ impl NormalizedEffectsData {
             .map(|f| f.effects.as_slice())
     }
 
+    /// Effects for a game mode, ignoring snapshot patch_id mismatch.
+    pub fn effects_for_mode(&self, mode: &str) -> &[NormalizedEffect] {
+        self.files
+            .values()
+            .find(|f| f.mode.eq_ignore_ascii_case(mode))
+            .map(|f| f.effects.as_slice())
+            .unwrap_or(&[])
+    }
+
     /// Number of loaded effects files.
     pub fn file_count(&self) -> usize {
         self.files.len()
@@ -1518,6 +1527,10 @@ mod tests {
         let data = effects();
         assert!(data.effects_for("9999-99-99", "PvE").is_none());
         assert!(data.effects_for("2026-01-13", "Ranked").is_none());
+        assert!(
+            !data.effects_for_mode("WvW").is_empty(),
+            "mode lookup should ignore patch_id"
+        );
     }
 
     // ─── 11. Loader: malformed JSON → DataLoadError ───

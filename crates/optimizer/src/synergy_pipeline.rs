@@ -18,6 +18,7 @@ use crate::combat;
 use crate::data;
 use crate::engine::{self, OptimizeProgress, SynergyResult};
 use crate::gamedb::GameDb;
+use crate::scenario::ScenarioSpec;
 use crate::scoring::{score_with_weights, OptimizationWeights};
 use crate::search::search_spec_combos;
 use crate::stats;
@@ -78,6 +79,7 @@ struct SynergyCandidate {
 
 /// Run the full deterministic synergy pipeline.
 /// Returns a SynergyResult with a fully determined build.
+#[allow(clippy::too_many_arguments)]
 pub fn optimize_synergy(
     db: &GameDb,
     profession_name: &str,
@@ -85,6 +87,7 @@ pub fn optimize_synergy(
     ctx: &BalanceContext,
     gear_prefix_name: &str,
     locks: &gw2_core::types::BuildLocks,
+    scenario: Option<&ScenarioSpec>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     let profession = db
@@ -154,6 +157,7 @@ pub fn optimize_synergy(
         gear_prefix_name,
         weights,
         ctx,
+        scenario,
     )?;
 
     // Convert to SynergyResult
@@ -169,6 +173,7 @@ pub fn optimize_synergy(
         gear_prefix_name,
         weights,
         ctx,
+        scenario,
         on_progress,
     )
 }
@@ -1136,6 +1141,7 @@ fn rank_and_select(
     gear_prefix_name: &str,
     weights: &OptimizationWeights,
     ctx: &BalanceContext,
+    scenario: Option<&ScenarioSpec>,
 ) -> Result<SynergyCandidate, String> {
     if candidates.is_empty() {
         return Err(format!(
@@ -1151,7 +1157,12 @@ fn rank_and_select(
     // Resolve the gear prefix once with the shared deterministic policy.
     let gear_prefix_id = db.itemstat_by_name(gear_prefix_name).map(|is| is.id);
 
-    let solo_profile = &combat::buff_profiles_for_profession(profession_name, ctx)[0];
+    let profiles = combat::buff_profiles_for_profession(profession_name, ctx);
+    let idx = scenario
+        .map(|s| crate::rotation::combat_model::buff_profile_index(s.combat_tier))
+        .unwrap_or(0)
+        .min(profiles.len().saturating_sub(1));
+    let scale_profile = &profiles[idx];
     // Hoist condition weights outside the candidate loop — they only depend on
     // (profession, mode) and don't change per candidate. Previously this rebuilt
     // a ConditionWeights via rotation-profile HashMap lookup on every iteration.
@@ -1178,7 +1189,7 @@ fn rank_and_select(
             &stats,
             &derived,
             &modifiers,
-            solo_profile,
+            scale_profile,
             &cond_weights,
             profession_name,
             ctx,
@@ -1248,6 +1259,7 @@ fn build_synergy_result(
     gear_prefix_name: &str,
     _weights: &OptimizationWeights,
     ctx: &BalanceContext,
+    scenario: Option<&ScenarioSpec>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     // Build ValidatedBuild
@@ -1415,7 +1427,8 @@ fn build_synergy_result(
         stage: "Simulating rotation...".into(),
         done: false,
     });
-    let rotation_result = engine::simulate_validated_rotation(&validated, db, &full_stats, None);
+    let rotation_result =
+        engine::simulate_validated_rotation(&validated, db, &full_stats, scenario);
 
     on_progress(OptimizeProgress {
         stage: "Done".into(),
@@ -1912,6 +1925,7 @@ mod runtime_diagnostics_tests {
             &ctx,
             "Berserker's",
             &gw2_core::types::BuildLocks::default(),
+            None,
             &mut progress,
         )
         .expect("synthetic Warrior should optimize");
@@ -2126,9 +2140,16 @@ mod runtime_diagnostics_tests {
                 );
             }
 
-            let selected =
-                rank_and_select(&candidates, &db, "Warrior", gear_prefix, &weights, &ctx)
-                    .expect("rank_and_select should produce best candidate");
+            let selected = rank_and_select(
+                &candidates,
+                &db,
+                "Warrior",
+                gear_prefix,
+                &weights,
+                &ctx,
+                None,
+            )
+            .expect("rank_and_select should produce best candidate");
 
             // ---- Final suggestion trace (with capped modifiers, as used by deterministic output) ----
             let mut progress = |_p: crate::engine::OptimizeProgress| {};
@@ -2139,6 +2160,7 @@ mod runtime_diagnostics_tests {
                 gear_prefix,
                 &weights,
                 &ctx,
+                None,
                 &mut progress,
             )
             .expect("build_synergy_result should succeed");
