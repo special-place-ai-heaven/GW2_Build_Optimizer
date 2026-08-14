@@ -234,69 +234,15 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                                 nexus::log::LogLevel::Warning,
                                 "GW2 Build Optimizer",
                                 format!(
-                                    "Deterministic engine failed, trying Gemini pipeline: {}",
+                                    "Deterministic engine failed, falling back to legacy: {}",
                                     e
                                 ),
                             );
-                            // Fall through to Gemini pipeline
                         }
                     }
                 }
 
-                // ═══ Fallback 2: LLM synergy pipeline (LLM-driven build selection) ═══
-                if config.has_active_llm_key() {
-                    let llm_client = gw2_optimizer::llm::create_client(&config, &addon_dir)
-                        .map_err(|e| e.to_string())?;
-
-                    let token_synergy = token.clone();
-                    match gw2_optimizer::engine::optimize_with_gemini(
-                        &db,
-                        &profession_name,
-                        &weights,
-                        &balance_ctx,
-                        llm_client.as_ref(),
-                        current_build_summary.as_deref(),
-                        &build_locks,
-                        Some(&scenario),
-                        &mut |progress| {
-                            if token_synergy.is_cancelled() {
-                                return;
-                            }
-                            crate::state::with_state(|s| {
-                                s.main.optimize_stage = progress.stage.clone();
-                            });
-                        },
-                    ) {
-                        Ok(synergy_result) => {
-                            if token.is_cancelled() {
-                                return Err("Cancelled".into());
-                            }
-                            let suggestion = synergy_result_to_suggestion(
-                                &synergy_result,
-                                &db,
-                                &profession_name,
-                                &scenario,
-                                selected_role,
-                                locked_spec_name
-                                    .as_ref()
-                                    .map(|n| format!("Improved: {}", n)),
-                                &addon_dir,
-                                &weights,
-                            );
-                            return Ok(vec![suggestion]);
-                        }
-                        Err(e) => {
-                            nexus::log::log(
-                                nexus::log::LogLevel::Warning,
-                                "GW2 Build Optimizer",
-                                format!("LLM pipeline failed, falling back to legacy: {}", e),
-                            );
-                            // Fall through to legacy pipeline
-                        }
-                    }
-                }
-
-                // ═══ Fallback 3: Legacy pipeline (no Gemini key) ═══
+                // ═══ Fallback 2: Legacy pipeline (no LLM invent-a-build) ═══
                 let profession = db.profession(&profession_name).ok_or_else(|| {
                     format!("Profession '{}' not found in GameDb", profession_name)
                 })?;

@@ -18,8 +18,8 @@
 use std::collections::HashMap;
 
 use super::combat_model::{
-    kit_has_corrupt, kit_has_mobility_out, kit_has_stability_cover, kit_has_strip, setup_priority,
-    setup_window_ms, EnemyDummy,
+    kit_has_corrupt, kit_has_interrupt, kit_has_mobility_out, kit_has_stability_cover,
+    kit_has_strip, setup_priority, setup_window_ms, EnemyDummy,
 };
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::{RotationSkill, SimulationResult, SkillEffect, SkillSlot, SkillUsage};
@@ -32,6 +32,12 @@ pub const DEFAULT_DURATION_MS: u32 = 30_000;
 
 /// GW2 weapon swap cooldown (10 seconds in-combat).
 const WEAPON_SWAP_COOLDOWN_MS: u32 = 10_000;
+
+/// Brief invulnerability on falling down (wiki Downed / Invulnerability).
+const DOWNED_INVULN_MS: u32 = 1_000;
+
+/// WvW/PvP finisher channel. Interruptible; Quickness/Slow do not apply.
+const STOMP_MS: u32 = 3_500;
 
 /// Conditions tick every 1 second.
 const CONDITION_TICK_INTERVAL_MS: u32 = 1000;
@@ -126,6 +132,10 @@ struct SimState {
     /// Prefer CC/strip/cover over DPCT until this time (0 = never).
     setup_until_ms: u32,
     enemy: EnemyDummy,
+    remaining_hp: Option<f64>,
+    downed: bool,
+    invuln_until_ms: u32,
+    stomp_ends_ms: u32,
 
     // Tracking
     conditions: Vec<ConditionStack>,
@@ -159,6 +169,10 @@ impl SimState {
             weapon_swap_cooldown_ms: 0,
             has_weapon_sets,
             setup_until_ms: 0,
+            remaining_hp: enemy.hp,
+            downed: false,
+            invuln_until_ms: 0,
+            stomp_ends_ms: 0,
             enemy,
             conditions: Vec::new(),
             buffs: Vec::new(),
@@ -343,6 +357,7 @@ impl SimState {
                     }
                     self.total_strike_damage += damage;
                     *self.skill_damage.entry(skill_id).or_insert(0.0) += damage;
+                    self.apply_dummy_damage(damage);
                 }
                 SkillEffect::ApplyCondition {
                     condition,
@@ -426,10 +441,12 @@ impl SimState {
             return;
         }
 
+        let mut tick_total = 0.0;
         for stack in &mut self.conditions {
             if stack.remaining_ms > 0 {
                 let tick_dmg = condition_tick_damage(&stack.condition, condition_damage);
                 self.total_condition_damage += tick_dmg;
+                tick_total += tick_dmg;
                 // Skip the per-tick `stack.condition.clone()` once the key is
                 // already present in the map. Hash + lookup is cheaper than
                 // String allocation across thousands of ticks per sim.
@@ -443,9 +460,26 @@ impl SimState {
                     .saturating_sub(CONDITION_TICK_INTERVAL_MS);
             }
         }
+        self.apply_dummy_damage(tick_total);
 
         // Remove expired
         self.conditions.retain(|s| s.remaining_ms > 0);
+    }
+
+    fn apply_dummy_damage(&mut self, damage: f64) {
+        if self.downed || self.current_time_ms < self.invuln_until_ms {
+            return;
+        }
+        let Some(hp) = self.remaining_hp.as_mut() else {
+            return;
+        };
+        *hp -= damage;
+        if *hp <= 0.0 {
+            *hp = 0.0;
+            self.downed = true;
+            self.invuln_until_ms = self.current_time_ms.saturating_add(DOWNED_INVULN_MS);
+            self.stomp_ends_ms = self.invuln_until_ms.saturating_add(STOMP_MS);
+        }
     }
 
     /// Tick buffs — track uptime, remove expired.
@@ -568,6 +602,9 @@ impl SimState {
             has_mobility_out: kit_has_mobility_out(&self.skills),
             has_strip: kit_has_strip(&self.skills),
             has_corrupt: kit_has_corrupt(&self.skills),
+            downed: self.downed,
+            finished: self.downed && self.duration_ms >= self.stomp_ends_ms,
+            has_interrupt: kit_has_interrupt(&self.skills),
         }
     }
 }
@@ -1145,6 +1182,7 @@ mod tests {
             EnemyDummy {
                 protection: true,
                 stability: true,
+                hp: None,
             },
         );
         let ratio = prot.strike_dps / open.strike_dps;
@@ -1171,6 +1209,7 @@ mod tests {
         let dummy = EnemyDummy {
             protection: true,
             stability: true,
+            hp: None,
         };
         let with_strip =
             simulate_against(&[auto_attack(), strip], 2000, 2000.0, 0.0, 1100.0, dummy);
@@ -1179,5 +1218,73 @@ mod tests {
             with_strip.strike_dps > no_strip.strike_dps,
             "strip should raise delivered DPS vs a Protection dummy"
         );
+    }
+
+    #[test]
+    fn dummy_hp_downs_then_stomps_after_invuln() {
+        let burst = RotationSkill {
+            skill_id: 99,
+            name: "Burst".into(),
+            slot: SkillSlot::Weapon2,
+            cast_time_ms: 250,
+            cooldown_ms: 10_000,
+            effects: vec![SkillEffect::StrikeDamage {
+                hit_count: 20,
+                dmg_multiplier: 10.0,
+            }],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+        };
+        let dummy = EnemyDummy {
+            hp: Some(500.0),
+            ..EnemyDummy::open()
+        };
+        let short = simulate_against(
+            &[auto_attack(), burst.clone()],
+            2_000,
+            2500.0,
+            0.0,
+            1100.0,
+            dummy,
+        );
+        assert!(short.downed, "500 HP dummy should drop in a 2s burst");
+        assert!(
+            !short.finished,
+            "2s window cannot fit 1s invuln + 3.5s stomp"
+        );
+
+        let long = simulate_against(&[auto_attack(), burst], 10_000, 2500.0, 0.0, 1100.0, dummy);
+        assert!(long.downed);
+        assert!(long.finished, "10s window covers stomp after invuln");
+    }
+
+    #[test]
+    fn open_dummy_does_not_track_downstate() {
+        let result = simulate(&[auto_attack()], 5_000, 2000.0, 0.0, 1100.0);
+        assert!(!result.downed);
+        assert!(!result.finished);
+    }
+
+    #[test]
+    fn crowd_control_sets_has_interrupt() {
+        let cc = RotationSkill {
+            skill_id: 7,
+            name: "Daze".into(),
+            slot: SkillSlot::Utility,
+            cast_time_ms: 0,
+            cooldown_ms: 10_000,
+            effects: vec![SkillEffect::CrowdControl {
+                kind: crate::rotation::ControlKind::Daze,
+                duration_ms: 500,
+                stops_dodge: false,
+            }],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+        };
+        let result = simulate(&[auto_attack(), cc], 2_000, 2000.0, 0.0, 1100.0);
+        assert!(result.has_interrupt);
+        assert!(!simulate(&[auto_attack()], 2_000, 2000.0, 0.0, 1100.0).has_interrupt);
     }
 }
