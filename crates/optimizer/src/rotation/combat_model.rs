@@ -127,6 +127,34 @@ pub fn corrupt_into(boon: &str) -> Option<&'static str> {
     })
 }
 
+/// Enemy cover the dummy starts with. Strip/steal/corrupt clear it for the rest of the window.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EnemyDummy {
+    pub protection: bool,
+    pub stability: bool,
+}
+
+impl EnemyDummy {
+    pub fn open() -> Self {
+        Self::default()
+    }
+
+    /// Zerg/havoc blobs and roam harasser targets are assumed booned; naked roam DPS is not.
+    pub fn for_scenario(tier: CombatTier, kind: CombatKind) -> Self {
+        match (tier, kind) {
+            (CombatTier::Solo, CombatKind::Harasser | CombatKind::Disabler) => Self {
+                protection: true,
+                stability: true,
+            },
+            (CombatTier::Party, _) | (CombatTier::Squad, _) => Self {
+                protection: true,
+                stability: true,
+            },
+            _ => Self::open(),
+        }
+    }
+}
+
 pub fn setup_priority(skill: &RotationSkill) -> u32 {
     let mut p = 0u32;
     for e in &skill.effects {
@@ -318,5 +346,15 @@ mod tests {
         assert_eq!(buff_profile_index(CombatTier::Solo), 0);
         assert_eq!(buff_profile_index(CombatTier::Party), 1);
         assert_eq!(buff_profile_index(CombatTier::Squad), 2);
+    }
+
+    #[test]
+    fn zerg_dummy_starts_booned_roam_dps_does_not() {
+        let zerg = EnemyDummy::for_scenario(CombatTier::Squad, CombatKind::StrikeSpike);
+        assert!(zerg.protection && zerg.stability);
+        let roam_dps = EnemyDummy::for_scenario(CombatTier::Solo, CombatKind::StrikeSpike);
+        assert!(!roam_dps.protection && !roam_dps.stability);
+        let roam_pick = EnemyDummy::for_scenario(CombatTier::Solo, CombatKind::Harasser);
+        assert!(roam_pick.protection && roam_pick.stability);
     }
 }

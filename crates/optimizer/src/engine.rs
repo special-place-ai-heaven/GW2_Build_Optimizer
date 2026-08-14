@@ -1235,12 +1235,19 @@ pub fn simulate_validated_rotation(
         .map(|s| crate::rotation::combat_model::simulation_window_ms(s.combat_tier, s.combat_kind))
         .unwrap_or(0); // 0 = 30s DPCT default
 
-    Some(rotation::simulator::simulate(
+    let enemy = scenario
+        .map(|s| {
+            crate::rotation::combat_model::EnemyDummy::for_scenario(s.combat_tier, s.combat_kind)
+        })
+        .unwrap_or_default();
+
+    Some(rotation::simulator::simulate_against(
         &rotation_skills,
         duration_ms,
         power,
         condition_damage,
         weapon_strength,
+        enemy,
     ))
 }
 
