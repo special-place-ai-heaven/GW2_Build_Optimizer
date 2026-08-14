@@ -775,7 +775,7 @@ fn select_skills(
                 Some(spec_id) => candidate.spec_ids.contains(&spec_id),
                 None => true,
             })
-            .filter(|s| db.skill_palette_id(s.id) != 0)
+            .filter(|s| db.skill_to_palette.is_empty() || db.skill_palette_id(s.id) != 0)
             .collect();
 
         // Heal skill
@@ -897,8 +897,12 @@ fn score_legend(
         for eff in &effects {
             score += score_normalized_effect(eff, weights);
         }
-        let (syn, _) =
-            compute_marginal_synergy(&effects, accumulated, weights, Some(&ComponentId::Skill(id)));
+        let (syn, _) = compute_marginal_synergy(
+            &effects,
+            accumulated,
+            weights,
+            Some(&ComponentId::Skill(id)),
+        );
         score += syn;
     }
     score
@@ -1411,7 +1415,7 @@ fn build_synergy_result(
         stage: "Simulating rotation...".into(),
         done: false,
     });
-    let rotation_result = engine::simulate_validated_rotation(&validated, db, &full_stats);
+    let rotation_result = engine::simulate_validated_rotation(&validated, db, &full_stats, None);
 
     on_progress(OptimizeProgress {
         stage: "Done".into(),
@@ -2214,12 +2218,19 @@ mod runtime_diagnostics_tests {
 #[cfg(test)]
 mod revenant_legend_tests {
     use super::*;
-    use gw2_api::models::{Legend, Skill};
     use crate::balance::BalanceContext;
     use crate::scoring::OptimizationWeights;
+    use gw2_api::models::{Legend, Skill};
     use gw2_core::types::GameMode;
 
-    fn legend(id: &str, code: u32, heal: u32, elite: u32, utilities: [u32; 3], swap: u32) -> Legend {
+    fn legend(
+        id: &str,
+        code: u32,
+        heal: u32,
+        elite: u32,
+        utilities: [u32; 3],
+        swap: u32,
+    ) -> Legend {
         Legend {
             id: id.into(),
             code: Some(code),
@@ -2285,7 +2296,8 @@ mod revenant_legend_tests {
         let mut db = GameDb::empty_for_tests();
         db.skills.insert(200, slot_skill(200, "Heal"));
         db.skills.insert(100, slot_skill(100, "Heal"));
-        db.skills_by_profession.insert("Ranger".into(), vec![200, 100]);
+        db.skills_by_profession
+            .insert("Ranger".into(), vec![200, 100]);
         db.skill_to_palette.insert(100, 120);
         let mut candidates = [empty_candidate()];
         select_skills(
@@ -2310,12 +2322,19 @@ mod revenant_legend_tests {
             legend("Legend3", 3, 200, 204, [201, 202, 203], 11),
         );
         let mut candidates = [empty_candidate()];
-        select_revenant_legends(&mut candidates, &db, &OptimizationWeights::preset_power_dps());
+        select_revenant_legends(
+            &mut candidates,
+            &db,
+            &OptimizationWeights::preset_power_dps(),
+        );
         let c = &candidates[0];
         assert_eq!(c.legends.len(), 2, "two stances for the template");
         let active = db.legends.get(&c.legends[0]).expect("active legend");
         assert_eq!(c.heal.as_ref().map(|(id, _)| *id), Some(active.heal));
-        assert_eq!(c.elite_skill.as_ref().map(|(id, _)| *id), Some(active.elite));
+        assert_eq!(
+            c.elite_skill.as_ref().map(|(id, _)| *id),
+            Some(active.elite)
+        );
         let util_ids: Vec<u32> = c.utilities.iter().map(|(id, _)| *id).collect();
         assert_eq!(util_ids, active.utilities);
         assert!(
@@ -2405,4 +2424,3 @@ mod land_weapon_tests {
         );
     }
 }
-

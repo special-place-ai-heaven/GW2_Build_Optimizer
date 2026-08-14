@@ -3,6 +3,7 @@
 //! and buff uptime — validating AI build reasoning with concrete numbers.
 
 pub mod builder;
+pub mod combat_model;
 pub mod simulator;
 pub mod skill_timings;
 
@@ -69,11 +70,54 @@ impl SkillSlot {
     }
 }
 
+/// Hard control vs interrupt-only. `stops_dodge` is the lock/not-lock split:
+/// Daze interrupts casts but does not stop dodges; Immobilize is a condition
+/// that does stop dodges (wiki Control effect / Dodge).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlKind {
+    Stun,
+    Knockdown,
+    Launch,
+    Knockback,
+    Pull,
+    Fear,
+    Taunt,
+    Daze,
+    Float,
+    Sink,
+    Immobilize,
+}
+
+/// Cover that can eat the alpha answer. Boons are strippable; true invuln is not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoverKind {
+    Invulnerability,
+    Stealth,
+    Aegis,
+    Stability,
+    Resistance,
+    Protection,
+    Blind,
+    Block,
+}
+
+/// Roam "out" — at least one of these is the mobility gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MobilityKind {
+    Teleport,
+    Stealth,
+    Superspeed,
+    Leap,
+}
+
 /// An effect that a skill produces when used.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SkillEffect {
     /// Direct strike damage.
-    StrikeDamage { hit_count: u32, dmg_multiplier: f64 },
+    StrikeDamage {
+        hit_count: u32,
+        dmg_multiplier: f64,
+    },
     /// Applies a damaging condition to the target.
     ApplyCondition {
         condition: String,
@@ -87,10 +131,60 @@ pub enum SkillEffect {
         duration_ms: u32,
     },
     /// Combo field placement.
-    ComboField { field_type: String },
+    ComboField {
+        field_type: String,
+    },
     /// Removes one or more conditions from self (cleanse).
     /// `conditions_removed` is the number of conditions removed per use.
-    RemovesCondition { conditions_removed: u32 },
+    RemovesCondition {
+        conditions_removed: u32,
+    },
+    /// Crowd control. `stops_dodge` false = interrupt only (Daze).
+    CrowdControl {
+        kind: ControlKind,
+        duration_ms: u32,
+        stops_dodge: bool,
+    },
+    /// Boon strip. Pair Number "Boons Removed" with Time Interval/Pulse/Duration.
+    /// WoD: count_per_pulse=1, interval_ms=1000, window_ms=5000 → 5 strips, not 1.
+    StripBoons {
+        count_per_pulse: u32,
+        interval_ms: u32,
+        window_ms: u32,
+    },
+    /// Boon → condition. Often missing from API facts; parsed from description.
+    CorruptBoons,
+    /// Condition → boon (convert cleanse).
+    ConvertConditions,
+    /// Boon steal / transfer to self.
+    StealBoons,
+    Cover {
+        kind: CoverKind,
+        duration_ms: u32,
+        strippable: bool,
+    },
+    Mobility {
+        kind: MobilityKind,
+    },
+}
+
+/// Total boons removed over a strip effect's window (not the per-pulse Number).
+pub fn strip_total(effect: &SkillEffect) -> u32 {
+    match effect {
+        SkillEffect::StripBoons {
+            count_per_pulse,
+            interval_ms,
+            window_ms,
+        } => {
+            if *interval_ms == 0 {
+                *count_per_pulse
+            } else {
+                let window = (*window_ms).max(*interval_ms);
+                *count_per_pulse * (window / *interval_ms)
+            }
+        }
+        _ => 0,
+    }
 }
 
 /// Full simulation result from running a rotation.
@@ -125,6 +219,12 @@ pub struct SimulationResult {
     pub cleanse_count: u32,
     /// Estimated conditions removed per 20 seconds (sum of conditions_removed × uptime_factor).
     pub cleanse_rate_per_20s: f64,
+    /// Kit has teleport/stealth/superspeed/leap (roam out gate).
+    pub has_mobility_out: bool,
+    /// Kit has strip, steal, or corrupt (harasser cover-crack gate).
+    pub has_strip: bool,
+    /// Kit converts enemy boons to conditions (disabler identity).
+    pub has_corrupt: bool,
 }
 
 /// Per-skill breakdown in a simulation result.

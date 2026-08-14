@@ -4,6 +4,27 @@
 
 use super::SkillSlot;
 
+/// Human reaction/input delay between consecutive skill activations.
+/// Players can't perfectly chain skills — there's always a small gap.
+/// Range: 50ms (fast) to 150ms (average), we use 80ms as a reasonable default.
+pub const HUMAN_DELAY_MS: u32 = 80;
+
+/// Minimum global cooldown between any two skill activations (GW2 internal).
+/// GW2 has a hidden ~100ms minimum between skill activations.
+pub const MIN_SKILL_GAP_MS: u32 = 100;
+
+/// Wiki activation times for calibration skills. The API has no cast field.
+/// IDs from live api.guildwars2.com / kimi-combat-model.md (2026-08-14).
+pub fn timing_for(skill_id: u32, slot: SkillSlot) -> SkillTiming {
+    match skill_id {
+        13007 => SkillTiming::new(250, 0),  // Backstab ¼ s
+        45333 => SkillTiming::new(1500, 0), // Winds of Disenchantment 1½ s
+        10192 => SkillTiming::new(0, 0),    // Distortion shatter
+        10671 => SkillTiming::new(500, 0),  // Well of Corruption
+        _ => default_timing(slot),
+    }
+}
+
 /// Cast time for a specific skill.
 #[derive(Debug, Clone, Copy)]
 pub struct SkillTiming {
@@ -49,15 +70,6 @@ pub fn default_timing(slot: SkillSlot) -> SkillTiming {
     }
 }
 
-/// Human reaction/input delay between consecutive skill activations.
-/// Players can't perfectly chain skills — there's always a small gap.
-/// Range: 50ms (fast) to 150ms (average), we use 80ms as a reasonable default.
-pub const HUMAN_DELAY_MS: u32 = 80;
-
-/// Minimum global cooldown between any two skill activations (GW2 internal).
-/// GW2 has a hidden ~100ms minimum between skill activations.
-pub const MIN_SKILL_GAP_MS: u32 = 100;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +106,20 @@ mod tests {
     fn test_skill_timing_total() {
         let t = SkillTiming::new(500, 250);
         assert_eq!(t.total_ms(), 750);
+    }
+
+    #[test]
+    fn wod_cast_is_not_elite_slot_average() {
+        let wod = timing_for(45333, SkillSlot::Elite);
+        let slot = default_timing(SkillSlot::Elite);
+        assert_eq!(wod.cast_ms, 1500);
+        assert_ne!(wod.cast_ms, slot.cast_ms);
+    }
+
+    #[test]
+    fn backstab_is_faster_than_weapon1_average() {
+        let backstab = timing_for(13007, SkillSlot::Weapon1);
+        assert_eq!(backstab.cast_ms, 250);
+        assert!(backstab.total_ms() < default_timing(SkillSlot::Weapon1).total_ms());
     }
 }

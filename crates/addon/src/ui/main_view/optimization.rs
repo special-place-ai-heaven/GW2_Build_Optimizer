@@ -115,6 +115,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     ScenarioSpec {
                         game_mode: balance_ctx.game_mode.clone(),
                         combat_tier: wvw_combat_tier,
+                        combat_kind: gw2_optimizer::scenario::CombatKind::StrikeSpike,
                         target_profile: TargetProfile::Single,
                         optimization_target: OptimizationTarget {
                             label: balance_ctx.game_mode.label().to_string(),

@@ -120,7 +120,12 @@ pub fn spec_url(db: &GameDb, id: u32) -> Option<&str> {
 }
 
 pub fn skill_url_by_name<'a>(db: &'a GameDb, name: &str) -> Option<&'a str> {
-    lookup_name(db.skills.values().map(|s| (s.name.as_str(), s.icon.as_deref())), name)
+    lookup_name(
+        db.skills
+            .values()
+            .map(|s| (s.name.as_str(), s.icon.as_deref())),
+        name,
+    )
 }
 
 pub fn spec_url_by_name<'a>(db: &'a GameDb, name: &str) -> Option<&'a str> {
@@ -133,7 +138,12 @@ pub fn spec_url_by_name<'a>(db: &'a GameDb, name: &str) -> Option<&'a str> {
 }
 
 pub fn trait_url_by_name<'a>(db: &'a GameDb, name: &str) -> Option<&'a str> {
-    lookup_name(db.traits.values().map(|t| (t.name.as_str(), t.icon.as_deref())), name)
+    lookup_name(
+        db.traits
+            .values()
+            .map(|t| (t.name.as_str(), t.icon.as_deref())),
+        name,
+    )
 }
 
 pub fn upgrade_url<'a>(db: &'a GameDb, name: &str) -> Option<&'a str> {
@@ -157,8 +167,11 @@ pub fn weapon_type_url<'a>(db: &'a GameDb, profession: &str, weapon_type: &str) 
 
 fn lookup_item_ids<'a>(db: &'a GameDb, ids: &[u32], name: &str) -> Option<&'a str> {
     lookup_name(
-        ids.iter()
-            .filter_map(|id| db.items.get(id).map(|i| (i.name.as_str(), i.icon.as_deref()))),
+        ids.iter().filter_map(|id| {
+            db.items
+                .get(id)
+                .map(|i| (i.name.as_str(), i.icon.as_deref()))
+        }),
         name,
     )
 }

@@ -235,11 +235,7 @@ pub fn compute_build_diff(current: &ResolvedBuild, suggestion: &BuildSuggestion)
         ));
     }
     if !parsed.pets.is_empty() || !current.pets.is_empty() {
-        skills.push(diff_slot(
-            "Pets",
-            &current.pets.join(" / "),
-            &parsed.pets,
-        ));
+        skills.push(diff_slot("Pets", &current.pets.join(" / "), &parsed.pets));
     }
     skills.push(diff_slot("Heal", &cur_heal, &parsed.heal));
     let max_utils = cur_utils.len().max(parsed.utilities.len()).max(3);

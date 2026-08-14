@@ -476,6 +476,7 @@ mod tests {
             scenario: ScenarioSpec {
                 game_mode: GameMode::PvE,
                 combat_tier: CombatTier::Solo,
+                combat_kind: crate::scenario::CombatKind::StrikeSpike,
                 target_profile: crate::scenario::TargetProfile::Single,
                 optimization_target: crate::scenario::OptimizationTarget {
                     label: String::new(),
@@ -670,6 +671,7 @@ mod tests {
         let scenario = ScenarioSpec {
             game_mode: GameMode::PvE,
             combat_tier: CombatTier::Solo,
+            combat_kind: crate::scenario::CombatKind::StrikeSpike,
             target_profile: TargetProfile::Single,
             optimization_target: OptimizationTarget {
                 label: String::new(),

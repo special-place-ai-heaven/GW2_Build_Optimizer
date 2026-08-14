@@ -641,10 +641,7 @@ fn scrape_guildjen(
                 b.mode = mode.to_string();
                 builds.push(b);
             }
-            on_progress(
-                "guildjen",
-                &format!("{} {}/{}", mode, i + 1, cap),
-            );
+            on_progress("guildjen", &format!("{} {}/{}", mode, i + 1, cap));
         }
     }
 
@@ -1129,7 +1126,12 @@ mod tests {
 
     #[test]
     fn format_source_status_shows_down_when_empty_and_errored() {
-        let line = format_source_status("GuildJen (WvW/PvP)", 0, None, Some("HTTP 404 fetching https://guildjen.com/wvw-builds/"));
+        let line = format_source_status(
+            "GuildJen (WvW/PvP)",
+            0,
+            None,
+            Some("HTTP 404 fetching https://guildjen.com/wvw-builds/"),
+        );
         assert!(line.starts_with("GuildJen (WvW/PvP)  down — "));
         assert!(line.contains("HTTP 404"));
     }
@@ -1153,7 +1155,10 @@ mod tests {
         let events = Mutex::new(Vec::<(String, String)>::new());
         let tmp = std::env::temp_dir().join("gw2_scraper_progress_cancel");
         let _ = scrape_all_with_progress(&tmp, &|| true, &|src, msg| {
-            events.lock().unwrap().push((src.to_string(), msg.to_string()));
+            events
+                .lock()
+                .unwrap()
+                .push((src.to_string(), msg.to_string()));
         });
         let ev = events.lock().unwrap();
         assert!(

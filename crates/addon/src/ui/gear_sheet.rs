@@ -7,7 +7,7 @@ use nexus::imgui::Ui;
 use super::comparison::BuildSuggestion;
 use super::gear_diff::parse_suggestion_weapons;
 use super::theme;
-use super::{icons, comparison};
+use super::{comparison, icons};
 
 const ARMOR_SLOTS: [&str; 6] = ["Helm", "Shoulders", "Coat", "Gloves", "Leggings", "Boots"];
 const TRINKET_SLOTS: [&str; 6] = [
@@ -128,13 +128,7 @@ fn render_resolved_sheet(
         let url = db.and_then(|d| piece.and_then(|p| icons::item_url(d, p.id)));
         let changed = suggestion.is_some()
             && (prefix != sug_prefix && !sug_prefix.is_empty() || rune_name != sug_rune);
-        let other = suggestion.map(|s| {
-            format!(
-                "{} {}",
-                s.stat_prefix,
-                slot_label(slot)
-            )
-        });
+        let other = suggestion.map(|s| format!("{} {}", s.stat_prefix, slot_label(slot)));
         row(
             ui,
             db,
@@ -176,7 +170,9 @@ fn render_resolved_sheet(
         let url = db.and_then(|d| {
             icons::item_url(d, relic.id).or_else(|| icons::upgrade_url(d, &relic.name))
         });
-        let other = suggestion.filter(|s| !s.relic.is_empty()).map(|s| s.relic.as_str());
+        let other = suggestion
+            .filter(|s| !s.relic.is_empty())
+            .map(|s| s.relic.as_str());
         row(
             ui,
             db,
@@ -218,9 +214,9 @@ fn render_resolved_sheet(
                 .as_ref()
                 .and_then(|w| icons::item_url(d, w.id))
                 .or_else(|| {
-                    set.main_hand.as_ref().and_then(|w| {
-                        icons::weapon_type_url(d, &build.profession, &w.weapon_type)
-                    })
+                    set.main_hand
+                        .as_ref()
+                        .and_then(|w| icons::weapon_type_url(d, &build.profession, &w.weapon_type))
                 })
         });
         let sigils: Vec<String> = set.sigils.iter().map(|s| s.name.clone()).collect();
@@ -231,7 +227,11 @@ fn render_resolved_sheet(
             &set.label,
             &label,
             &sigils,
-            if sug_line.is_empty() { None } else { Some(sug_line) },
+            if sug_line.is_empty() {
+                None
+            } else {
+                Some(sug_line)
+            },
             slot_tint(
                 suggestion.is_some() && !sug_line.is_empty() && sug_line != label,
                 viewing_optimized,
@@ -307,7 +307,11 @@ fn render_suggestion_sheet(
     }
 
     if !sug.relic.is_empty() {
-        let cur_relic = current.relic.as_ref().map(|r| r.name.as_str()).unwrap_or("");
+        let cur_relic = current
+            .relic
+            .as_ref()
+            .map(|r| r.name.as_str())
+            .unwrap_or("");
         row(
             ui,
             db,
@@ -465,12 +469,7 @@ fn weapon_row(
 
 fn tooltip(ui: &Ui, prefix: &str, slot: &str, name: &str, nested: &str, other: Option<&str>) {
     ui.tooltip(|| {
-        let shown = format!(
-            "{} {} {}",
-            prefix,
-            slot,
-            name
-        );
+        let shown = format!("{} {} {}", prefix, slot, name);
         ui.text_colored(theme::GOLD, shown.trim());
         if !nested.is_empty() {
             ui.text_colored(theme::MUTED, nested);

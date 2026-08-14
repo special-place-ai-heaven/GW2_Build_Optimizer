@@ -551,7 +551,14 @@ mod tests {
     use super::*;
     use gw2_api::models::Legend;
 
-    fn legend(id: &str, code: u32, heal: u32, elite: u32, utilities: [u32; 3], swap: u32) -> Legend {
+    fn legend(
+        id: &str,
+        code: u32,
+        heal: u32,
+        elite: u32,
+        utilities: [u32; 3],
+        swap: u32,
+    ) -> Legend {
         Legend {
             id: id.into(),
             code: Some(code),
@@ -580,7 +587,11 @@ mod tests {
         db.skill_to_palette.insert(76805, 4564);
 
         assert_eq!(db.skill_palette_id(77043), 4572);
-        assert_eq!(db.skill_palette_id(27220), 4572, "Shiro/Dragon heal shares Conduit heal palette");
+        assert_eq!(
+            db.skill_palette_id(27220),
+            4572,
+            "Shiro/Dragon heal shares Conduit heal palette"
+        );
         assert_eq!(db.skill_palette_id(27760), 4554);
         assert_eq!(db.skill_palette_id(28379), 4614);
         assert_eq!(db.skill_palette_id(26644), 4564);
@@ -590,10 +601,8 @@ mod tests {
     #[test]
     fn legend_template_code_prefers_api_code() {
         let mut db = GameDb::empty_for_tests();
-        db.legends.insert(
-            "Legend5".into(),
-            legend("Legend5", 5, 1, 2, [3, 4, 5], 6),
-        );
+        db.legends
+            .insert("Legend5".into(), legend("Legend5", 5, 1, 2, [3, 4, 5], 6));
         assert_eq!(db.legend_template_code("Legend5"), 5);
         assert_eq!(db.legend_template_code("Legend9"), 9);
     }

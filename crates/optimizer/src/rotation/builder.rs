@@ -8,8 +8,8 @@ use crate::data::normalized_effects::{EffectCategory, NormalizedEffect};
 use crate::gamedb::GameDb;
 use crate::text_util::text_describes_condition_cleanse;
 
-use super::skill_timings::default_timing;
-use super::{RotationSkill, SkillEffect, SkillSlot};
+use super::skill_timings::timing_for;
+use super::{ControlKind, CoverKind, MobilityKind, RotationSkill, SkillEffect, SkillSlot};
 
 /// Build a list of RotationSkills from skill IDs, looking up data from GameDb.
 pub fn build_rotation_skills(skill_ids: &[u32], db: &GameDb) -> Vec<RotationSkill> {
@@ -102,9 +102,9 @@ fn skill_to_rotation(skill: &Skill) -> RotationSkill {
         .and_then(SkillSlot::from_api)
         .unwrap_or(SkillSlot::Utility);
 
-    let timing = default_timing(slot);
+    let timing = timing_for(skill.id, slot);
     let cooldown_ms = extract_cooldown(&skill.facts);
-    let effects = extract_effects(&skill.facts);
+    let effects = extract_effects(&skill.facts, skill.description.as_deref());
     let is_stunbreak = skill.facts.iter().any(|f| {
         matches!(
             f,
@@ -148,9 +148,10 @@ fn extract_cooldown(facts: &[Fact]) -> u32 {
     0 // no cooldown = auto-attack or instant
 }
 
-/// Extract all combat-relevant effects from skill facts.
-fn extract_effects(facts: &[Fact]) -> Vec<SkillEffect> {
+/// Extract all combat-relevant effects from skill facts (+ description for corrupt/mobility).
+fn extract_effects(facts: &[Fact], description: Option<&str>) -> Vec<SkillEffect> {
     let mut effects = Vec::new();
+    let (interval_ms, window_ms) = pulse_window_ms(facts);
 
     for fact in facts {
         match fact {
@@ -170,49 +171,25 @@ fn extract_effects(facts: &[Fact]) -> Vec<SkillEffect> {
                 apply_count,
                 ..
             } => {
-                let stacks = apply_count.unwrap_or(1);
-                let duration_ms = duration.unwrap_or(0) * 1000;
-
-                if is_damaging_condition(status) {
-                    effects.push(SkillEffect::ApplyCondition {
-                        condition: status.clone(),
-                        stacks,
-                        duration_ms,
-                    });
-                } else {
-                    effects.push(SkillEffect::ApplyBuff {
-                        buff: status.clone(),
-                        stacks,
-                        duration_ms,
-                    });
-                }
+                push_status_effect(
+                    &mut effects,
+                    status,
+                    apply_count.unwrap_or(1),
+                    duration.unwrap_or(0) * 1000,
+                );
             }
-            // PrefixedBuff has the same combat-relevant fields as Buff (status, duration,
-            // apply_count) but also carries a textual prefix describing the application
-            // context (e.g. "To nearby enemies", "On hit"). The effects are identical
-            // for simulation purposes — handle them the same way.
             Fact::PrefixedBuff {
                 status: Some(status),
                 duration,
                 apply_count,
                 ..
             } => {
-                let stacks = apply_count.unwrap_or(1);
-                let duration_ms = duration.unwrap_or(0) * 1000;
-
-                if is_damaging_condition(status) {
-                    effects.push(SkillEffect::ApplyCondition {
-                        condition: status.clone(),
-                        stacks,
-                        duration_ms,
-                    });
-                } else {
-                    effects.push(SkillEffect::ApplyBuff {
-                        buff: status.clone(),
-                        stacks,
-                        duration_ms,
-                    });
-                }
+                push_status_effect(
+                    &mut effects,
+                    status,
+                    apply_count.unwrap_or(1),
+                    duration.unwrap_or(0) * 1000,
+                );
             }
             Fact::ComboField {
                 field_type: Some(ft),
@@ -227,15 +204,223 @@ fn extract_effects(facts: &[Fact]) -> Vec<SkillEffect> {
                 value,
                 ..
             } => {
-                if let Some(conditions_removed) = condition_cleanse_count_from_text(text, *value) {
-                    effects.push(SkillEffect::RemovesCondition { conditions_removed });
+                let count = value.unwrap_or(1).max(1) as u32;
+                if text_describes_boon_strip(text) {
+                    effects.push(SkillEffect::StripBoons {
+                        count_per_pulse: count,
+                        interval_ms,
+                        window_ms,
+                    });
+                } else if let Some(conditions_removed) =
+                    condition_cleanse_count_from_text(text, *value)
+                {
+                    let pulses = if interval_ms == 0 {
+                        1
+                    } else {
+                        window_ms.max(interval_ms) / interval_ms
+                    };
+                    effects.push(SkillEffect::RemovesCondition {
+                        conditions_removed: conditions_removed * pulses,
+                    });
+                }
+            }
+            Fact::Distance {
+                distance: Some(d), ..
+            } if *d >= 200 => {
+                // Displacement this large is usually a leap/teleport, not a pull tick.
+                if !effects
+                    .iter()
+                    .any(|e| matches!(e, SkillEffect::Mobility { .. }))
+                {
+                    effects.push(SkillEffect::Mobility {
+                        kind: MobilityKind::Leap,
+                    });
                 }
             }
             _ => {}
         }
     }
 
+    if let Some(desc) = description {
+        push_description_effects(&mut effects, desc);
+    }
+
     effects
+}
+
+fn pulse_window_ms(facts: &[Fact]) -> (u32, u32) {
+    let mut interval_ms = 0u32;
+    let mut window_ms = 0u32;
+    for fact in facts {
+        match fact {
+            Fact::Time {
+                text: Some(text),
+                duration: Some(d),
+                ..
+            } => {
+                let ms = d.saturating_mul(1000);
+                let t = text.to_lowercase();
+                if t.contains("interval") || t.contains("pulse") {
+                    interval_ms = ms;
+                } else if t.contains("duration") {
+                    window_ms = ms;
+                }
+            }
+            Fact::Duration {
+                duration: Some(d), ..
+            } => {
+                window_ms = d.saturating_mul(1000);
+            }
+            _ => {}
+        }
+    }
+    (interval_ms, window_ms)
+}
+
+fn push_status_effect(effects: &mut Vec<SkillEffect>, status: &str, stacks: u32, duration_ms: u32) {
+    if let Some((kind, stops_dodge)) = control_kind(status) {
+        effects.push(SkillEffect::CrowdControl {
+            kind,
+            duration_ms,
+            stops_dodge,
+        });
+        return;
+    }
+    if let Some((kind, strippable)) = cover_kind(status) {
+        effects.push(SkillEffect::Cover {
+            kind,
+            duration_ms,
+            strippable,
+        });
+        if kind == CoverKind::Stability {
+            effects.push(SkillEffect::ApplyBuff {
+                buff: "Stability".into(),
+                stacks,
+                duration_ms,
+            });
+        }
+        return;
+    }
+    if status.eq_ignore_ascii_case("Superspeed") {
+        effects.push(SkillEffect::Mobility {
+            kind: MobilityKind::Superspeed,
+        });
+        return;
+    }
+    if status.eq_ignore_ascii_case("Stealth") {
+        effects.push(SkillEffect::Cover {
+            kind: CoverKind::Stealth,
+            duration_ms,
+            strippable: false,
+        });
+        effects.push(SkillEffect::Mobility {
+            kind: MobilityKind::Stealth,
+        });
+        return;
+    }
+    if is_damaging_condition(status) {
+        effects.push(SkillEffect::ApplyCondition {
+            condition: status.to_string(),
+            stacks,
+            duration_ms,
+        });
+    } else {
+        effects.push(SkillEffect::ApplyBuff {
+            buff: status.to_string(),
+            stacks,
+            duration_ms,
+        });
+    }
+}
+
+fn control_kind(status: &str) -> Option<(ControlKind, bool)> {
+    Some(match status {
+        "Stun" => (ControlKind::Stun, true),
+        "Knockdown" => (ControlKind::Knockdown, true),
+        "Launch" => (ControlKind::Launch, true),
+        "Knockback" => (ControlKind::Knockback, true),
+        "Pull" => (ControlKind::Pull, true),
+        "Fear" => (ControlKind::Fear, true),
+        "Taunt" => (ControlKind::Taunt, true),
+        "Daze" => (ControlKind::Daze, false),
+        "Float" => (ControlKind::Float, true),
+        "Sink" => (ControlKind::Sink, true),
+        "Immobile" | "Immobilize" | "Immobilized" => (ControlKind::Immobilize, true),
+        _ => return None,
+    })
+}
+
+fn cover_kind(status: &str) -> Option<(CoverKind, bool)> {
+    Some(match status {
+        "Distortion" | "Invulnerability" | "Determined" => (CoverKind::Invulnerability, false),
+        "Aegis" => (CoverKind::Aegis, true),
+        "Stability" => (CoverKind::Stability, true),
+        "Resistance" => (CoverKind::Resistance, true),
+        "Protection" => (CoverKind::Protection, true),
+        "Blind" | "Blinded" => (CoverKind::Blind, false),
+        _ => return None,
+    })
+}
+
+fn text_describes_boon_strip(text: &str) -> bool {
+    let t = text.to_lowercase();
+    t.contains("boons removed")
+        || (t.contains("boon") && t.contains("remov") && !t.contains("condit"))
+}
+
+fn push_description_effects(effects: &mut Vec<SkillEffect>, description: &str) {
+    let d = description.to_lowercase();
+    let has_corrupt = effects
+        .iter()
+        .any(|e| matches!(e, SkillEffect::CorruptBoons));
+    if !has_corrupt && describes_corrupt(&d) {
+        effects.push(SkillEffect::CorruptBoons);
+    }
+    if !effects.iter().any(|e| matches!(e, SkillEffect::StealBoons)) && describes_steal(&d) {
+        effects.push(SkillEffect::StealBoons);
+    }
+    if !effects
+        .iter()
+        .any(|e| matches!(e, SkillEffect::ConvertConditions))
+        && describes_convert_conditions(&d)
+    {
+        effects.push(SkillEffect::ConvertConditions);
+    }
+    if !effects
+        .iter()
+        .any(|e| matches!(e, SkillEffect::Mobility { .. }))
+    {
+        if let Some(kind) = mobility_from_text(&d) {
+            effects.push(SkillEffect::Mobility { kind });
+        }
+    }
+}
+
+fn describes_corrupt(d: &str) -> bool {
+    (d.contains("converting boons") || d.contains("convert boons") || d.contains("corrupts"))
+        && d.contains("condition")
+}
+
+fn describes_steal(d: &str) -> bool {
+    (d.contains("steal") || d.contains("transfer")) && d.contains("boon")
+}
+
+fn describes_convert_conditions(d: &str) -> bool {
+    d.contains("convert") && d.contains("condition") && d.contains("boon") && !describes_corrupt(d)
+}
+
+fn mobility_from_text(d: &str) -> Option<MobilityKind> {
+    if d.contains("shadowstep") || d.contains("teleport") {
+        Some(MobilityKind::Teleport)
+    } else if d.contains("stealth") {
+        Some(MobilityKind::Stealth)
+    } else if d.contains("superspeed") {
+        Some(MobilityKind::Superspeed)
+    } else if d.contains("leap") || d.contains("dash") || d.contains("retreat") {
+        Some(MobilityKind::Leap)
+    } else {
+        None
+    }
 }
 
 fn condition_cleanse_count_from_text(text: &str, value: Option<i32>) -> Option<u32> {
@@ -272,6 +457,7 @@ pub(crate) mod tests_alias_helpers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rotation::{strip_total, ControlKind, CoverKind, MobilityKind};
 
     fn make_test_skill(id: u32, name: &str, slot: &str, facts: Vec<Fact>) -> Skill {
         Skill {
@@ -331,7 +517,7 @@ mod tests {
             hit_count: Some(3),
             dmg_multiplier: Some(1.5),
         }];
-        let effects = extract_effects(&facts);
+        let effects = extract_effects(&facts, None);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             SkillEffect::StrikeDamage {
@@ -355,7 +541,7 @@ mod tests {
             apply_count: Some(2),
             description: None,
         }];
-        let effects = extract_effects(&facts);
+        let effects = extract_effects(&facts, None);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             SkillEffect::ApplyCondition {
@@ -381,7 +567,7 @@ mod tests {
             apply_count: Some(3),
             description: None,
         }];
-        let effects = extract_effects(&facts);
+        let effects = extract_effects(&facts, None);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             SkillEffect::ApplyBuff {
@@ -394,6 +580,149 @@ mod tests {
                 assert_eq!(*duration_ms, 10000);
             }
             _ => panic!("Expected ApplyBuff"),
+        }
+    }
+
+    #[test]
+    fn stun_is_lock_not_buff() {
+        let facts = vec![Fact::Buff {
+            text: None,
+            icon: None,
+            status: Some("Stun".into()),
+            duration: Some(1),
+            apply_count: Some(1),
+            description: None,
+        }];
+        let effects = extract_effects(&facts, None);
+        match &effects[0] {
+            SkillEffect::CrowdControl {
+                kind: ControlKind::Stun,
+                stops_dodge: true,
+                duration_ms: 1000,
+            } => {}
+            other => panic!("expected lock Stun, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn daze_is_interrupt_not_lock() {
+        let facts = vec![Fact::Buff {
+            text: None,
+            icon: None,
+            status: Some("Daze".into()),
+            duration: Some(1),
+            apply_count: Some(1),
+            description: None,
+        }];
+        let effects = extract_effects(&facts, None);
+        match &effects[0] {
+            SkillEffect::CrowdControl {
+                kind: ControlKind::Daze,
+                stops_dodge: false,
+                ..
+            } => {}
+            other => panic!("expected interrupt Daze, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn immobilize_stops_dodge() {
+        let facts = vec![Fact::Buff {
+            text: None,
+            icon: None,
+            status: Some("Immobile".into()),
+            duration: Some(2),
+            apply_count: Some(1),
+            description: None,
+        }];
+        let effects = extract_effects(&facts, None);
+        match &effects[0] {
+            SkillEffect::CrowdControl {
+                kind: ControlKind::Immobilize,
+                stops_dodge: true,
+                ..
+            } => {}
+            other => panic!("expected immobilize lock, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn wod_strip_is_rate_not_one_boon() {
+        let facts = vec![
+            Fact::Number {
+                text: Some("Boons Removed".into()),
+                icon: None,
+                value: Some(1),
+            },
+            Fact::Time {
+                text: Some("Interval".into()),
+                icon: None,
+                duration: Some(1),
+            },
+            Fact::Time {
+                text: Some("Duration".into()),
+                icon: None,
+                duration: Some(5),
+            },
+        ];
+        let effects = extract_effects(&facts, None);
+        let strip = effects
+            .iter()
+            .find(|e| matches!(e, SkillEffect::StripBoons { .. }))
+            .expect("strip effect");
+        assert_eq!(strip_total(strip), 5, "WoD is 1/s × 5s, not 1");
+    }
+
+    #[test]
+    fn well_of_corruption_corrupt_from_description() {
+        let facts = vec![Fact::Damage {
+            text: None,
+            icon: None,
+            hit_count: Some(1),
+            dmg_multiplier: Some(0.5),
+        }];
+        let desc = Some("Target area pulses, converting boons on foes into conditions.");
+        let effects = extract_effects(&facts, desc);
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, SkillEffect::CorruptBoons)),
+            "WoC must not look like a pulse damage field"
+        );
+    }
+
+    #[test]
+    fn teleport_description_is_roam_out() {
+        let effects = extract_effects(
+            &[],
+            Some("Shadowstep to the target. Teleport to a nearby ally."),
+        );
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            SkillEffect::Mobility {
+                kind: MobilityKind::Teleport
+            }
+        )));
+    }
+
+    #[test]
+    fn distortion_is_unstrippable_cover() {
+        let facts = vec![Fact::Buff {
+            text: None,
+            icon: None,
+            status: Some("Distortion".into()),
+            duration: Some(1),
+            apply_count: Some(1),
+            description: Some("Immune to conditions and damage.".into()),
+        }];
+        let effects = extract_effects(&facts, None);
+        match &effects[0] {
+            SkillEffect::Cover {
+                kind: CoverKind::Invulnerability,
+                strippable: false,
+                ..
+            } => {}
+            other => panic!("expected invuln cover, got {other:?}"),
         }
     }
 
@@ -415,7 +744,7 @@ mod tests {
                 description: None,
             }),
         }];
-        let effects = extract_effects(&facts);
+        let effects = extract_effects(&facts, None);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             SkillEffect::ApplyCondition {

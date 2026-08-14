@@ -5,7 +5,7 @@ use crate::engine;
 use crate::gamedb::GameDb;
 use crate::rotation;
 use crate::rotation::SimulationResult;
-use crate::scenario::{CombatTier, ScenarioSpec};
+use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
 use crate::scoring::{score_with_weights, OptimizationWeights};
 use crate::stats;
 use crate::validation::ValidatedBuild;
@@ -72,6 +72,10 @@ pub enum ViabilityGate {
     CleanseRate,
     /// Build effective health must meet the mode-specific EHP floor.
     EffectiveHealth,
+    /// WvW roam (Solo): kit must have teleport/stealth/superspeed/leap.
+    MobilityOut,
+    /// Harasser: strip/steal/corrupt before dump (Stability strip-all + Protection).
+    HarasserStrip,
 }
 
 /// Result of a single viability gate check.
@@ -182,6 +186,46 @@ pub fn evaluate_viability_gates(
                 note: "rotation unavailable".into(),
             },
         });
+
+        if scenario.game_mode == GameMode::WvW && scenario.combat_tier == CombatTier::Solo {
+            gates.push(match rotation {
+                Some(rot) => GateResult {
+                    gate: ViabilityGate::MobilityOut,
+                    passed: rot.has_mobility_out,
+                    note: if rot.has_mobility_out {
+                        "roam out present".into()
+                    } else {
+                        "no teleport/stealth/superspeed/leap — not roam".into()
+                    },
+                },
+                None => GateResult {
+                    gate: ViabilityGate::MobilityOut,
+                    passed: false,
+                    note: "rotation unavailable".into(),
+                },
+            });
+        }
+
+        if scenario.combat_kind == CombatKind::Harasser
+            || (scenario.game_mode == GameMode::WvW && scenario.combat_tier == CombatTier::Solo)
+        {
+            gates.push(match rotation {
+                Some(rot) => GateResult {
+                    gate: ViabilityGate::HarasserStrip,
+                    passed: rot.has_strip,
+                    note: if rot.has_strip {
+                        "strip/steal/corrupt present".into()
+                    } else {
+                        "harasser/roam without cover-crack (strip/steal/corrupt)".into()
+                    },
+                },
+                None => GateResult {
+                    gate: ViabilityGate::HarasserStrip,
+                    passed: false,
+                    note: "rotation unavailable".into(),
+                },
+            });
+        }
     }
 
     // ── Effective health gate (always runs) ─────────────────────────────────
@@ -283,7 +327,7 @@ pub fn evaluate_validated_build(
         CombatTier::Party => combat_party.clone(),
         CombatTier::Squad => combat_squad.clone(),
     };
-    let rotation = engine::simulate_validated_rotation(validated, db, &stats);
+    let rotation = engine::simulate_validated_rotation(validated, db, &stats, Some(scenario));
 
     // ── Viability gating ──────────────────────────────────────────────────────
     // Run before score computation. Non-viable builds receive sentinel score -1.0.
@@ -372,6 +416,9 @@ mod tests {
             stability_uptime: 0.6,
             cleanse_count: 2,
             cleanse_rate_per_20s: 4.0,
+            has_mobility_out: true,
+            has_strip: true,
+            has_corrupt: false,
         }
     }
 
@@ -389,6 +436,7 @@ mod tests {
         ScenarioSpec {
             game_mode: GameMode::WvW,
             combat_tier: CombatTier::Squad,
+            combat_kind: crate::scenario::CombatKind::StrikeSpike,
             target_profile: TargetProfile::Single,
             optimization_target: OptimizationTarget {
                 label: "WvW".into(),
@@ -401,6 +449,7 @@ mod tests {
         ScenarioSpec {
             game_mode: GameMode::PvE,
             combat_tier: CombatTier::Party,
+            combat_kind: crate::scenario::CombatKind::StrikeSpike,
             target_profile: TargetProfile::Single,
             optimization_target: OptimizationTarget {
                 label: "PvE".into(),
@@ -783,6 +832,7 @@ mod tests {
         let squad_scenario = ScenarioSpec {
             game_mode: GameMode::WvW,
             combat_tier: crate::scenario::CombatTier::Squad,
+            combat_kind: crate::scenario::CombatKind::StrikeSpike,
             target_profile: TargetProfile::Single,
             optimization_target: OptimizationTarget {
                 label: "WvW".into(),
@@ -801,6 +851,7 @@ mod tests {
         let solo_scenario = ScenarioSpec {
             game_mode: GameMode::WvW,
             combat_tier: crate::scenario::CombatTier::Solo,
+            combat_kind: crate::scenario::CombatKind::StrikeSpike,
             target_profile: TargetProfile::Single,
             optimization_target: OptimizationTarget {
                 label: "WvW".into(),
@@ -827,6 +878,7 @@ mod tests {
         let solo_scenario = ScenarioSpec {
             game_mode: GameMode::WvW,
             combat_tier: crate::scenario::CombatTier::Solo,
+            combat_kind: crate::scenario::CombatKind::StrikeSpike,
             target_profile: TargetProfile::Single,
             optimization_target: OptimizationTarget {
                 label: "WvW".into(),
@@ -883,6 +935,7 @@ mod tests {
         let pvp_scenario = ScenarioSpec {
             game_mode: GameMode::PvP,
             combat_tier: CombatTier::Solo,
+            combat_kind: crate::scenario::CombatKind::StrikeSpike,
             target_profile: TargetProfile::Single,
             optimization_target: OptimizationTarget {
                 label: "PvP".to_string(),
@@ -909,6 +962,7 @@ mod tests {
         let pvp_scenario = ScenarioSpec {
             game_mode: GameMode::PvP,
             combat_tier: CombatTier::Solo,
+            combat_kind: crate::scenario::CombatKind::StrikeSpike,
             target_profile: TargetProfile::Single,
             optimization_target: OptimizationTarget {
                 label: "PvP".to_string(),
@@ -922,5 +976,55 @@ mod tests {
             "PvP 5k EHP should fail the PvP floor (8k); note: {}",
             ehp.note
         );
+    }
+
+    #[test]
+    fn gate_wvw_roam_fails_without_mobility_out() {
+        let mut rot = make_viable_rotation();
+        rot.has_mobility_out = false;
+        let combat = make_viable_combat();
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_tier = CombatTier::Solo;
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let g = gate_by_kind(&report.gates, &ViabilityGate::MobilityOut).unwrap();
+        assert!(!g.passed);
+        assert!(!report.is_viable);
+    }
+
+    #[test]
+    fn gate_wvw_roam_fails_without_strip() {
+        let mut rot = make_viable_rotation();
+        rot.has_strip = false;
+        let combat = make_viable_combat();
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_tier = CombatTier::Solo;
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let g = gate_by_kind(&report.gates, &ViabilityGate::HarasserStrip).unwrap();
+        assert!(!g.passed);
+        assert!(!report.is_viable);
+    }
+
+    #[test]
+    fn gate_harasser_fails_without_strip() {
+        let mut rot = make_viable_rotation();
+        rot.has_strip = false;
+        let combat = make_viable_combat();
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_kind = crate::scenario::CombatKind::Harasser;
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let g = gate_by_kind(&report.gates, &ViabilityGate::HarasserStrip).unwrap();
+        assert!(!g.passed);
+        assert!(!report.is_viable);
+    }
+
+    #[test]
+    fn gate_zerg_dps_does_not_require_roam_out() {
+        let mut rot = make_viable_rotation();
+        rot.has_mobility_out = false;
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario(); // Squad strike
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::MobilityOut).is_none());
+        assert!(report.is_viable);
     }
 }
