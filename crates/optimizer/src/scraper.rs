@@ -24,6 +24,29 @@ const USER_AGENT: &str =
 /// because cancellation was requested before it started.
 pub const CANCELLED_ERROR: &str = "cancelled";
 
+/// One-line status for Settings: live heartbeat, down, count, or never-synced dash.
+pub fn format_source_status(
+    display_name: &str,
+    count: usize,
+    live: Option<&str>,
+    error: Option<&str>,
+) -> String {
+    if let Some(live) = live.filter(|s| !s.is_empty()) {
+        return format!("{}  {}", display_name, live);
+    }
+    if let Some(err) = error {
+        let short: String = err.chars().take(60).collect();
+        if count == 0 {
+            return format!("{}  down — {}", display_name, short);
+        }
+        return format!("{}  {} builds (warning: {})", display_name, count, short);
+    }
+    if count == 0 {
+        return format!("{}  —", display_name);
+    }
+    format!("{}  {} builds", display_name, count)
+}
+
 /// Scrape all three community sites and save results to `{addon_dir}/benchmarks/`.
 ///
 /// `should_cancel` is consulted before each of the three sequential HTTP scrapes.
@@ -34,8 +57,20 @@ pub const CANCELLED_ERROR: &str = "cancelled";
 /// Returns one `ScrapeResult` per site regardless of whether it succeeded or was
 /// skipped. Never panics — errors are captured in `ScrapeResult.error`.
 pub fn scrape_all(addon_dir: &Path, should_cancel: &dyn Fn() -> bool) -> Vec<ScrapeResult> {
+    scrape_all_with_progress(addon_dir, should_cancel, &|_, _| {})
+}
+
+/// Same as [`scrape_all`], plus a `(source, message)` heartbeat for the UI.
+pub fn scrape_all_with_progress(
+    addon_dir: &Path,
+    should_cancel: &dyn Fn() -> bool,
+    on_progress: &dyn Fn(&str, &str),
+) -> Vec<ScrapeResult> {
     // Cancel before any work
     if should_cancel() {
+        on_progress("snowcrows", "cancelled");
+        on_progress("hardstuck", "cancelled");
+        on_progress("guildjen", "cancelled");
         return vec![
             cancelled_result("snowcrows"),
             cancelled_result("hardstuck"),
@@ -47,6 +82,9 @@ pub fn scrape_all(addon_dir: &Path, should_cancel: &dyn Fn() -> bool) -> Vec<Scr
         Ok(c) => c,
         Err(e) => {
             let msg = format!("Failed to build HTTP client: {}", e);
+            on_progress("snowcrows", &format!("down: {}", msg));
+            on_progress("hardstuck", &format!("down: {}", msg));
+            on_progress("guildjen", &format!("down: {}", msg));
             return vec![
                 ScrapeResult {
                     source: "snowcrows".into(),
@@ -70,6 +108,9 @@ pub fn scrape_all(addon_dir: &Path, should_cancel: &dyn Fn() -> bool) -> Vec<Scr
     let benchmarks_dir = addon_dir.join("benchmarks");
     if let Err(e) = std::fs::create_dir_all(&benchmarks_dir) {
         let msg = format!("Cannot create benchmarks dir: {}", e);
+        on_progress("snowcrows", &format!("down: {}", msg));
+        on_progress("hardstuck", &format!("down: {}", msg));
+        on_progress("guildjen", &format!("down: {}", msg));
         return vec![
             ScrapeResult {
                 source: "snowcrows".into(),
@@ -94,88 +135,90 @@ pub fn scrape_all(addon_dir: &Path, should_cancel: &dyn Fn() -> bool) -> Vec<Scr
     // Scrape #1: Snowcrows. Cancellation re-checked here so a pulse during
     // setup above still aborts before any network I/O.
     if should_cancel() {
+        on_progress("snowcrows", "cancelled");
+        on_progress("hardstuck", "cancelled");
+        on_progress("guildjen", "cancelled");
         return vec![
             cancelled_result("snowcrows"),
             cancelled_result("hardstuck"),
             cancelled_result("guildjen"),
         ];
     }
-    let sc_result = match scrape_snowcrows(&client, &today, should_cancel) {
-        Ok((builds, cancelled)) => {
-            save_builds(&builds, &benchmarks_dir);
-            let error = if cancelled {
-                Some(CANCELLED_ERROR.into())
-            } else {
-                None
-            };
-            ScrapeResult {
-                source: "snowcrows".into(),
-                builds,
-                error,
-            }
-        }
-        Err(e) => ScrapeResult {
-            source: "snowcrows".into(),
-            builds: vec![],
-            error: Some(e),
-        },
-    };
+    on_progress("snowcrows", "starting");
+    let sc_result = finish_source(
+        "snowcrows",
+        scrape_snowcrows(&client, &today, should_cancel, on_progress),
+        &benchmarks_dir,
+        on_progress,
+    );
 
     // Scrape #2: Hardstuck.
     if should_cancel() {
+        on_progress("hardstuck", "cancelled");
+        on_progress("guildjen", "cancelled");
         return vec![
             sc_result,
             cancelled_result("hardstuck"),
             cancelled_result("guildjen"),
         ];
     }
-    let hs_result = match scrape_hardstuck(&client, &today, should_cancel) {
-        Ok((builds, cancelled)) => {
-            save_builds(&builds, &benchmarks_dir);
-            let error = if cancelled {
-                Some(CANCELLED_ERROR.into())
-            } else {
-                None
-            };
-            ScrapeResult {
-                source: "hardstuck".into(),
-                builds,
-                error,
-            }
-        }
-        Err(e) => ScrapeResult {
-            source: "hardstuck".into(),
-            builds: vec![],
-            error: Some(e),
-        },
-    };
+    on_progress("hardstuck", "starting");
+    let hs_result = finish_source(
+        "hardstuck",
+        scrape_hardstuck(&client, &today, should_cancel, on_progress),
+        &benchmarks_dir,
+        on_progress,
+    );
 
     // Scrape #3: GuildJen.
     if should_cancel() {
+        on_progress("guildjen", "cancelled");
         return vec![sc_result, hs_result, cancelled_result("guildjen")];
     }
-    let gj_result = match scrape_guildjen(&client, &today, should_cancel) {
-        Ok((builds, cancelled)) => {
-            save_builds(&builds, &benchmarks_dir);
-            let error = if cancelled {
-                Some(CANCELLED_ERROR.into())
-            } else {
-                None
-            };
-            ScrapeResult {
-                source: "guildjen".into(),
-                builds,
-                error,
-            }
-        }
-        Err(e) => ScrapeResult {
-            source: "guildjen".into(),
-            builds: vec![],
-            error: Some(e),
-        },
-    };
+    on_progress("guildjen", "starting");
+    let gj_result = finish_source(
+        "guildjen",
+        scrape_guildjen(&client, &today, should_cancel, on_progress),
+        &benchmarks_dir,
+        on_progress,
+    );
 
     vec![sc_result, hs_result, gj_result]
+}
+
+fn finish_source(
+    source: &str,
+    result: Result<(Vec<BenchmarkBuild>, bool), String>,
+    dir: &Path,
+    on_progress: &dyn Fn(&str, &str),
+) -> ScrapeResult {
+    match result {
+        Ok((builds, cancelled)) => {
+            save_builds(&builds, dir);
+            if cancelled {
+                on_progress(source, "cancelled");
+            } else {
+                on_progress(source, &format!("done {}", builds.len()));
+            }
+            ScrapeResult {
+                source: source.into(),
+                builds,
+                error: if cancelled {
+                    Some(CANCELLED_ERROR.into())
+                } else {
+                    None
+                },
+            }
+        }
+        Err(e) => {
+            on_progress(source, &format!("down: {}", e));
+            ScrapeResult {
+                source: source.into(),
+                builds: vec![],
+                error: Some(e),
+            }
+        }
+    }
 }
 
 /// Construct a placeholder `ScrapeResult` that records cancellation for a source.
@@ -243,16 +286,19 @@ fn scrape_snowcrows(
     client: &reqwest::blocking::Client,
     today: &str,
     should_cancel: &dyn Fn() -> bool,
+    on_progress: &dyn Fn(&str, &str),
 ) -> Result<(Vec<BenchmarkBuild>, bool), String> {
     let mut last_html: Option<String> = None;
     let mut all_links: Vec<String> = Vec::new();
 
+    on_progress("snowcrows", "listing builds…");
     // Collect build links from each profession's page
     for profession in SC_PROFESSIONS {
         if should_cancel() {
             return Ok((Vec::new(), true));
         }
         let prof_url = format!("https://snowcrows.com/builds/raids/{}", profession);
+        on_progress("snowcrows", &format!("listing {}…", profession));
         let Ok(html) = fetch_html(client, &prof_url) else {
             continue;
         };
@@ -293,14 +339,17 @@ fn scrape_snowcrows(
     }
 
     let mut builds = Vec::new();
+    let total = all_links.len().min(45);
+    on_progress("snowcrows", &format!("0/{}", total));
     // Cap at 45 builds total (5 per profession on average across 9 professions)
-    for url in all_links.into_iter().take(45) {
+    for (i, url) in all_links.into_iter().take(45).enumerate() {
         if should_cancel() {
             return Ok((builds, true));
         }
         if let Ok(b) = scrape_snowcrows_build(client, &url, today) {
             builds.push(b)
         }
+        on_progress("snowcrows", &format!("{}/{}", i + 1, total));
     }
     Ok((builds, false))
 }
@@ -409,16 +458,19 @@ fn scrape_hardstuck(
     client: &reqwest::blocking::Client,
     today: &str,
     should_cancel: &dyn Fn() -> bool,
+    on_progress: &dyn Fn(&str, &str),
 ) -> Result<(Vec<BenchmarkBuild>, bool), String> {
     let mut last_html: Option<String> = None;
     let mut all_links: Vec<String> = Vec::new();
 
+    on_progress("hardstuck", "listing builds…");
     // Each profession page lists builds for that profession
     for profession in HS_PROFESSIONS {
         if should_cancel() {
             return Ok((Vec::new(), true));
         }
         let prof_url = format!("https://hardstuck.gg/gw2/builds/{}/", profession);
+        on_progress("hardstuck", &format!("listing {}…", profession));
         let Ok(html) = fetch_html(client, &prof_url) else {
             continue;
         };
@@ -463,13 +515,16 @@ fn scrape_hardstuck(
     }
 
     let mut builds = Vec::new();
-    for url in all_links.into_iter().take(45) {
+    let total = all_links.len().min(45);
+    on_progress("hardstuck", &format!("0/{}", total));
+    for (i, url) in all_links.into_iter().take(45).enumerate() {
         if should_cancel() {
             return Ok((builds, true));
         }
         if let Ok(b) = scrape_hardstuck_build(client, &url, today) {
             builds.push(b)
         }
+        on_progress("hardstuck", &format!("{}/{}", i + 1, total));
     }
     Ok((builds, false))
 }
@@ -544,6 +599,7 @@ fn scrape_guildjen(
     client: &reqwest::blocking::Client,
     today: &str,
     should_cancel: &dyn Fn() -> bool,
+    on_progress: &dyn Fn(&str, &str),
 ) -> Result<(Vec<BenchmarkBuild>, bool), String> {
     // GuildJen's main build index pages
     let index_urls = [
@@ -563,14 +619,16 @@ fn scrape_guildjen(
         } else {
             "PvP"
         };
+        on_progress("guildjen", &format!("listing {}…", mode));
         let Ok(html) = fetch_html(client, index_url) else {
             continue;
         };
 
         let links = extract_build_links(&html, "guildjen.com/", 40);
         any_success = true;
+        let cap = links.len().min(15);
 
-        for link in links.into_iter().take(15) {
+        for (i, link) in links.into_iter().take(15).enumerate() {
             if should_cancel() {
                 return Ok((builds, true));
             }
@@ -583,6 +641,10 @@ fn scrape_guildjen(
                 b.mode = mode.to_string();
                 builds.push(b);
             }
+            on_progress(
+                "guildjen",
+                &format!("{} {}/{}", mode, i + 1, cap),
+            );
         }
     }
 
@@ -1060,6 +1122,55 @@ mod tests {
     use super::*;
 
     #[test]
+    fn format_source_status_shows_live_progress() {
+        let line = format_source_status("Snowcrows (PvE)", 0, Some("12/45"), None);
+        assert_eq!(line, "Snowcrows (PvE)  12/45");
+    }
+
+    #[test]
+    fn format_source_status_shows_down_when_empty_and_errored() {
+        let line = format_source_status("GuildJen (WvW/PvP)", 0, None, Some("HTTP 404 fetching https://guildjen.com/wvw-builds/"));
+        assert!(line.starts_with("GuildJen (WvW/PvP)  down — "));
+        assert!(line.contains("HTTP 404"));
+    }
+
+    #[test]
+    fn format_source_status_shows_count_when_done() {
+        let line = format_source_status("Hardstuck", 42, None, None);
+        assert_eq!(line, "Hardstuck  42 builds");
+    }
+
+    #[test]
+    fn format_source_status_dash_when_never_touched() {
+        let line = format_source_status("Snowcrows (PvE)", 0, None, None);
+        assert_eq!(line, "Snowcrows (PvE)  —");
+    }
+
+    #[test]
+    fn scrape_all_reports_cancelled_progress_when_cancelled_at_entry() {
+        use std::sync::Mutex;
+
+        let events = Mutex::new(Vec::<(String, String)>::new());
+        let tmp = std::env::temp_dir().join("gw2_scraper_progress_cancel");
+        let _ = scrape_all_with_progress(&tmp, &|| true, &|src, msg| {
+            events.lock().unwrap().push((src.to_string(), msg.to_string()));
+        });
+        let ev = events.lock().unwrap();
+        assert!(
+            ev.iter()
+                .any(|(s, m)| s == "snowcrows" && m.contains("cancelled")),
+            "expected snowcrows cancelled event, got {:?}",
+            *ev
+        );
+        assert!(
+            ev.iter()
+                .any(|(s, m)| s == "guildjen" && m.contains("cancelled")),
+            "expected guildjen cancelled event, got {:?}",
+            *ev
+        );
+    }
+
+    #[test]
     fn test_extract_build_links_finds_hrefs() {
         let html =
             r#"<a href="/builds/guardian/firebrand">Firebrand</a><a href="/other">Other</a>"#;
@@ -1320,7 +1431,7 @@ mod tests {
         let client = build_client().expect("client build must succeed");
 
         let start = Instant::now();
-        let result = scrape_snowcrows(&client, "2026-04-16", &predicate);
+        let result = scrape_snowcrows(&client, "2026-04-16", &predicate, &|_, _| {});
         let elapsed = start.elapsed();
 
         assert!(
@@ -1361,7 +1472,7 @@ mod tests {
         let client = build_client().expect("client build must succeed");
 
         let start = Instant::now();
-        let result = scrape_hardstuck(&client, "2026-04-16", &predicate);
+        let result = scrape_hardstuck(&client, "2026-04-16", &predicate, &|_, _| {});
         let elapsed = start.elapsed();
 
         assert!(
@@ -1402,7 +1513,7 @@ mod tests {
         let client = build_client().expect("client build must succeed");
 
         let start = Instant::now();
-        let result = scrape_guildjen(&client, "2026-04-16", &predicate);
+        let result = scrape_guildjen(&client, "2026-04-16", &predicate, &|_, _| {});
         let elapsed = start.elapsed();
 
         assert!(

@@ -19,7 +19,7 @@ pub struct ChatMessage {
 
 /// Maximum chat history entries retained. Beyond this, the oldest entries are
 /// dropped on append so a long-running session can't grow the Vec without
-/// bound. Render only shows the last ~6 entries anyway.
+/// bound. Render only shows the last VISIBLE_HISTORY entries.
 const CHAT_HISTORY_CAP: usize = 100;
 
 fn trim_history(history: &mut Vec<ChatMessage>) {
@@ -29,6 +29,19 @@ fn trim_history(history: &mut Vec<ChatMessage>) {
     }
 }
 
+/// How many recent chat lines stay visible. Six lines used to eat the result
+/// panel and clip Save/Copy on an 800×600 overlay.
+const VISIBLE_HISTORY: usize = 2;
+
+/// Vertical space this bar will consume (separator + history + optional
+/// "Thinking..." + input row). Callers reserve this before the scroll child
+/// so the input is not drawn on top of results.
+pub fn reserved_height(state: &ChatBarState) -> f32 {
+    let shown = state.history.len().min(VISIBLE_HISTORY) as f32;
+    let waiting = if state.waiting { 18.0 } else { 0.0 };
+    10.0 + shown * 18.0 + waiting + 28.0
+}
+
 /// Render the chat bar at the bottom of the build view.
 /// Returns Some(message) if the user submitted a request.
 pub fn render_chat_bar(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
@@ -36,26 +49,24 @@ pub fn render_chat_bar(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
 
     ui.separator();
 
-    // Show recent history (last 6 messages for better context)
-    let recent = state.history.len().saturating_sub(6);
+    let recent = state.history.len().saturating_sub(VISIBLE_HISTORY);
     for msg in state.history[recent..].iter() {
         let (prefix, color) = if msg.from_user {
-            ("> ", [0.6, 0.8, 1.0, 1.0])
+            ("You  ", crate::ui::theme::CURRENT)
         } else {
-            ("AI: ", [0.3, 1.0, 0.3, 1.0])
+            ("Hint  ", crate::ui::theme::GOLD)
         };
         ui.text_colored(color, format!("{}{}", prefix, msg.text));
     }
 
     if state.waiting {
-        ui.text_colored([1.0, 1.0, 0.0, 1.0], "Thinking...");
+        ui.text_colored(crate::ui::theme::GOLD, "Thinking\u{2026}");
     }
 
-    // Input bar
+    // Input bar — never let the width go negative on a narrow overlay.
     let avail_width = ui.content_region_avail()[0];
     let button_width = 60.0;
-
-    ui.set_next_item_width(avail_width - button_width - 10.0);
+    ui.set_next_item_width((avail_width - button_width - 10.0).max(40.0));
     if state.waiting {
         // Show disabled input while waiting
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
@@ -73,7 +84,8 @@ pub fn render_chat_bar(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
         ui.same_line();
 
         let can_send = !state.input.is_empty();
-        let send_clicked = ui.button_with_size("Send", [button_width, 0.0]) && can_send;
+        let send_clicked =
+            crate::ui::theme::gold_button_sized(ui, "Send", [button_width, 0.0]) && can_send;
 
         if (enter_pressed || send_clicked) && can_send {
             let msg = state.input.trim().to_string();
@@ -95,7 +107,7 @@ pub fn render_chat_bar(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
 
     // Disabled Send button while waiting
     let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-    ui.button_with_size("Send", [button_width, 0.0]);
+    crate::ui::theme::gold_button_sized(ui, "Send", [button_width, 0.0]);
     style.pop();
 
     submitted
@@ -116,4 +128,41 @@ pub fn add_ai_response(state: &mut ChatBarState, text: String) {
         text: display,
     });
     trim_history(&mut state.history);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reserved_height_caps_at_two_visible_lines() {
+        let mut state = ChatBarState::default();
+        let empty = reserved_height(&state);
+        state.history.push(ChatMessage {
+            from_user: true,
+            text: "a".into(),
+        });
+        let one = reserved_height(&state);
+        state.history.push(ChatMessage {
+            from_user: false,
+            text: "b".into(),
+        });
+        let two = reserved_height(&state);
+        state.history.push(ChatMessage {
+            from_user: true,
+            text: "c".into(),
+        });
+        let three = reserved_height(&state);
+        assert!(one > empty);
+        assert!(two > one);
+        assert_eq!(three, two, "only two history lines are reserved");
+    }
+
+    #[test]
+    fn reserved_height_includes_waiting_line() {
+        let mut state = ChatBarState::default();
+        let idle = reserved_height(&state);
+        state.waiting = true;
+        assert!(reserved_height(&state) > idle);
+    }
 }

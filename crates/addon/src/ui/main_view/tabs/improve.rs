@@ -3,18 +3,20 @@
 use nexus::imgui::{ChildWindow, Selectable, Ui};
 
 use crate::state::AddonState;
+use crate::ui::comparison::ResultPane;
+use crate::ui::theme;
 
 use super::{build_display, lock_panel, optimization, render_optimization_progress};
 
 pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
     if state.main.build_loading {
-        ui.text_colored([1.0, 1.0, 0.0, 1.0], "Resolving build from API data...");
+        ui.text_colored(theme::WARN, "Resolving build from API data...");
         return;
     }
 
     // Error display
     if let Some(err) = state.main.comparison.error.clone() {
-        ui.text_colored([1.0, 0.3, 0.0, 1.0], format!("[!] {}", err));
+        ui.text_colored(theme::ERR, format!("[!] {}", err));
         ui.same_line();
         if ui.small_button("Dismiss##opt_err_improve") {
             state.main.comparison.error = None;
@@ -46,7 +48,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
             });
         if let Some(spec_name) = locked_spec_name {
             ui.text_colored(
-                [0.7, 0.9, 0.7, 1.0],
+                theme::OPTIMIZED,
                 format!("  \u{1F512} Locked to: {}", spec_name),
             );
             ui.same_line();
@@ -59,8 +61,13 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
 
     // ── Two-panel layout: Current Build | Optimized Build ──
     let has_suggestion = !state.main.comparison.suggestions.is_empty();
-    let avail = ui.content_region_avail();
-    let _panel_height = avail[1] - 40.0; // leave room for chat bar
+    let show_chat = state.main.current_build.is_some();
+    let footer = (if has_suggestion { 36.0 } else { 0.0 })
+        + if show_chat {
+            crate::ui::chat_bar::reserved_height(&state.main.chat)
+        } else {
+            0.0
+        };
 
     if state.main.current_build.is_some() {
         // Clone build data upfront to avoid borrow conflicts with mutable lock_panel state
@@ -108,8 +115,24 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 ui.spacing();
             }
 
-            let avail_after = ui.content_region_avail();
-            let scroll_height = avail_after[1] - 60.0; // room for save + chat
+            let idx = state
+                .main
+                .comparison
+                .selected_suggestion
+                .min(state.main.comparison.suggestions.len() - 1);
+            let chat_code = state.main.comparison.suggestions[idx].chat_code.clone();
+            crate::ui::comparison::render_chat_code_copy(
+                ui,
+                chat_code.as_deref(),
+                "improve",
+                &mut state.main.comparison.copy_feedback_frames,
+            );
+            crate::ui::comparison::render_result_pane_tabs(
+                ui,
+                &mut state.main.comparison.result_pane,
+            );
+
+            let scroll_height = (ui.content_region_avail()[1] - footer).max(64.0);
 
             let idx = state
                 .main
@@ -117,138 +140,85 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 .selected_suggestion
                 .min(state.main.comparison.suggestions.len() - 1);
             let suggestion = state.main.comparison.suggestions[idx].clone();
-            let current_combat_solo = state.main.comparison.current_combat_solo.clone();
+            let pane = state.main.comparison.result_pane;
+            let db_ref = state.main.game_db.as_ref();
+            let gain = crate::ui::gear_sheet::combat_gain(
+                state.main.comparison.current_combat_solo.as_ref(),
+                suggestion.combat_solo.as_ref(),
+            );
 
-            // ═══ Section-by-section grid layout ═══
-            // Each section pair uses its own columns(2) block, ensuring
-            // horizontal alignment: columns(1) at section end sets Y to MAX.
             ChildWindow::new("##improve_scroll")
-                .size([avail[0], scroll_height])
+                .size([0.0, scroll_height])
                 .build(ui, || {
-                    let col_avail = ui.content_region_avail()[0];
-                    let col1_offset = (col_avail + 12.0) / 2.0;
-
-                    // ── SPEC & TRAIT SECTION ──
-                    ui.columns(2, "##imp_spec", false);
-                    ui.set_column_offset(1, col1_offset);
-                    // LEFT: Current Build header + interactive lock panel
-                    build_display::render_card_header(ui, "CURRENT BUILD", [0.5, 0.7, 1.0, 1.0]);
-                    {
-                        let db_ref = state.main.game_db.as_ref();
-                        lock_panel::render_lock_panel(
-                            ui,
-                            &mut state.main.build_locks,
-                            &mut state.main.locks_panel_expanded,
-                            db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
-                            &profession_name,
-                            &current_specs,
-                            &mut state.main.locks_hover,
-                        );
+                    match pane {
+                        ResultPane::Build => {
+                            crate::ui::gear_sheet::render_view_toggle(
+                                ui,
+                                &mut state.main.comparison.show_optimized,
+                            );
+                            let viewing = state.main.comparison.show_optimized;
+                            if viewing {
+                                build_display::render_card_header(
+                                    ui,
+                                    "OPTIMIZED BUILD",
+                                    theme::OPTIMIZED,
+                                );
+                                lock_panel::render_optimized_specs_panel(
+                                    ui,
+                                    db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
+                                    &suggestion.specializations,
+                                );
+                            } else {
+                                build_display::render_card_header(
+                                    ui,
+                                    "CURRENT BUILD",
+                                    theme::CURRENT,
+                                );
+                                lock_panel::render_lock_panel(
+                                    ui,
+                                    &mut state.main.build_locks,
+                                    &mut state.main.locks_panel_expanded,
+                                    db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
+                                    &profession_name,
+                                    &current_specs,
+                                    &mut state.main.locks_hover,
+                                );
+                            }
+                            ui.spacing();
+                            crate::ui::gear_sheet::render_current_sheet(
+                                ui,
+                                &build,
+                                Some(&suggestion),
+                                db_ref,
+                                viewing,
+                                gain,
+                            );
+                            ui.spacing();
+                            if viewing {
+                                build_display::render_suggestion_skills(ui, &suggestion, db_ref);
+                            } else {
+                                build_display::render_build_skills(ui, &build, db_ref);
+                            }
+                        }
+                        ResultPane::Stats => {
+                            crate::ui::comparison::render_stats_pane(
+                                ui,
+                                stats.as_ref(),
+                                &state.main.comparison,
+                                &suggestion,
+                                db_ref,
+                            );
+                        }
                     }
-                    ui.next_column();
-                    ui.indent_by(6.0);
-                    // RIGHT: Optimized Build header + read-only specs
-                    build_display::render_card_header(ui, "OPTIMIZED BUILD", [0.3, 1.0, 0.5, 1.0]);
-                    crate::ui::comparison::render_chat_code_copy(
-                        ui,
-                        suggestion.chat_code.as_deref(),
-                        "improve",
-                    );
-                    {
-                        let db_ref = state.main.game_db.as_ref();
-                        lock_panel::render_optimized_specs_panel(
-                            ui,
-                            db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
-                            &suggestion.specializations,
-                        );
-                    }
-                    ui.unindent_by(6.0);
-                    ui.columns(1, "##imp_spec_end", false);
-
-                    // ── SKILLS SECTION ──
-                    ui.columns(2, "##imp_skills", false);
-                    ui.set_column_offset(1, col1_offset);
-                    build_display::render_build_skills(ui, &build);
-                    ui.next_column();
-                    ui.indent_by(6.0);
-                    build_display::render_suggestion_skills(ui, &suggestion);
-                    ui.unindent_by(6.0);
-                    ui.columns(1, "##imp_skills_end", false);
-
-                    // ── WEAPONS SECTION ──
-                    ui.columns(2, "##imp_weapons", false);
-                    ui.set_column_offset(1, col1_offset);
-                    build_display::render_build_weapons(ui, &build);
-                    ui.next_column();
-                    ui.indent_by(6.0);
-                    build_display::render_suggestion_weapons(ui, &suggestion);
-                    ui.unindent_by(6.0);
-                    ui.columns(1, "##imp_weapons_end", false);
-
-                    // ── GEAR SECTION ──
-                    ui.columns(2, "##imp_gear", false);
-                    ui.set_column_offset(1, col1_offset);
-                    build_display::render_build_gear(ui, &build);
-                    ui.next_column();
-                    ui.indent_by(6.0);
-                    build_display::render_suggestion_gear(ui, &suggestion);
-                    ui.unindent_by(6.0);
-                    ui.columns(1, "##imp_gear_end", false);
-
-                    // ── STATS SECTION ──
-                    ui.columns(2, "##imp_stats", false);
-                    ui.set_column_offset(1, col1_offset);
-                    build_display::render_build_stats(
-                        ui,
-                        stats.as_ref(),
-                        suggestion.estimated_stats.as_ref(),
-                    );
-                    ui.next_column();
-                    ui.indent_by(6.0);
-                    build_display::render_suggestion_stats(ui, &suggestion, stats.as_ref());
-                    ui.unindent_by(6.0);
-                    ui.columns(1, "##imp_stats_end", false);
-
-                    // ── COMBAT PERFORMANCE SECTION ──
-                    ui.columns(2, "##imp_combat", false);
-                    ui.set_column_offset(1, col1_offset);
-                    build_display::render_build_combat(
-                        ui,
-                        current_combat_solo.as_ref(),
-                        suggestion.combat_solo.as_ref(),
-                    );
-                    ui.next_column();
-                    ui.indent_by(6.0);
-                    build_display::render_suggestion_combat(
-                        ui,
-                        &suggestion,
-                        current_combat_solo.as_ref(),
-                    );
-                    ui.unindent_by(6.0);
-                    ui.columns(1, "##imp_combat_end", false);
-
-                    // ── ROTATION BREAKDOWN (full-width) ──
-                    if let Some(ref rotation) = suggestion.rotation {
-                        build_display::render_rotation_section(ui, rotation);
-                    }
-
-                    // ── WHY THIS BUILD (full-width, different background) ──
-                    let explanation = if !suggestion.synergy_explanation.is_empty() {
-                        &suggestion.synergy_explanation
-                    } else {
-                        &suggestion.explanation
-                    };
-                    build_display::render_why_section(ui, explanation, &suggestion.changes_made);
                 });
         } else {
             // No suggestion yet — show current build with lock panel (full width)
-            let avail_after = ui.content_region_avail();
-            let scroll_height = avail_after[1] - 40.0;
+            let scroll_height = (ui.content_region_avail()[1] - footer).max(64.0);
 
             ChildWindow::new("##improve_single")
-                .size([avail[0], scroll_height])
+                .size([0.0, scroll_height])
                 .build(ui, || {
-                    build_display::render_card_header(ui, "CURRENT BUILD", [0.5, 0.7, 1.0, 1.0]);
+                    build_display::render_card_header(ui, "CURRENT BUILD", theme::CURRENT);
                     {
                         let db_ref = state.main.game_db.as_ref();
                         lock_panel::render_lock_panel(
@@ -261,14 +231,26 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                             &mut state.main.locks_hover,
                         );
                     }
-                    build_display::render_build_card_no_specs(ui, &build, stats.as_ref(), None);
+                    crate::ui::gear_sheet::render_current_sheet(
+                        ui,
+                        &build,
+                        None,
+                        state.main.game_db.as_ref(),
+                        false,
+                        0,
+                    );
+                    build_display::render_build_skills(
+                        ui,
+                        &build,
+                        state.main.game_db.as_ref(),
+                    );
                 });
         }
     } else if state.main.selected_character.is_some() {
-        ui.text_colored([0.5, 0.5, 0.5, 1.0], "Loading character build...");
+        ui.text_colored(theme::MUTED, "Loading character build...");
     } else {
         ui.text_colored(
-            [0.5, 0.5, 0.5, 1.0],
+            theme::MUTED,
             "Select a character from the left panel.",
         );
     }

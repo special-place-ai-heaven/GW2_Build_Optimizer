@@ -422,6 +422,21 @@ impl Gw2Client {
         Ok(info.id)
     }
 
+    /// Fetch raw bytes from any URL. Skips the GW2 API token bucket — used for
+    /// `render.guildwars2.com` icons, which are a CDN, not the game API.
+    pub fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>, ApiError> {
+        let resp = self.http.get(url).send()?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(ApiError::Api {
+                status: status.as_u16(),
+                url_path: url.chars().take(80).collect(),
+                body_snippet: String::new(),
+            });
+        }
+        Ok(resp.bytes()?.to_vec())
+    }
+
     /// Validate the client's API key and return token info.
     /// Checks that required scopes (account, characters, builds) are present.
     pub fn validate_api_key(&self) -> Result<TokenInfo, ApiError> {

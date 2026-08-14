@@ -1,0 +1,14 @@
+---
+description: Prefer SymForge for code search, inspection, and surgical edits
+alwaysApply: true
+---
+
+# SymForge first
+
+When the SymForge MCP is available, use it for code before Grep/Read/StrReplace.
+
+**Read/search:** `search_symbols`, `search_text`, `get_symbol`, `get_symbol_context`, `find_references`, `get_file_context`, `get_file_content`, `explore`, `what_changed`, `diff_symbols`.
+
+**Edit:** `symforge_edit` / `replace_symbol_body` / `edit_within_symbol` / `batch_edit` / `batch_rename`. After edits, `analyze_file_impact` on each changed file.
+
+Direct Read/Grep/StrReplace only when SymForge cannot answer (docs, raw config, or you already have the exact span). Do not dump whole source files to find a function.

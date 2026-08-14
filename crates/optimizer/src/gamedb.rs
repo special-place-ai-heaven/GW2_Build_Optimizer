@@ -319,6 +319,81 @@ impl GameDb {
         exact.or(fuzzy.map(|(_, _, is)| is))
     }
 
+    /// Palette ID for a build-template skill slot.
+    ///
+    /// Revenant legend skills share one palette per slot; `/v2/professions`
+    /// `skills_by_palette` only lists the latest legend's skill IDs. A miss on
+    /// an older legend skill is mapped through that shared slot palette.
+    pub fn skill_palette_id(&self, skill_id: u32) -> u32 {
+        if let Some(&p) = self.skill_to_palette.get(&skill_id) {
+            return p;
+        }
+        let Some((heal_p, util_p, elite_p)) = self.revenant_shared_palettes() else {
+            return 0;
+        };
+        for legend in self.legends.values() {
+            if skill_id == legend.heal {
+                return heal_p;
+            }
+            if skill_id == legend.elite {
+                return elite_p;
+            }
+            if let Some(i) = legend.utilities.iter().position(|&u| u == skill_id) {
+                if i < 3 {
+                    return util_p[i];
+                }
+            }
+        }
+        0
+    }
+
+    /// Template byte for a revenant legend id (`Legend1`…), from `/v2/legends.code`.
+    pub fn legend_template_code(&self, legend_id: &str) -> u8 {
+        if let Some(c) = self.legends.get(legend_id).and_then(|l| l.code) {
+            return c.min(255) as u8;
+        }
+        legend_id
+            .strip_prefix("Legend")
+            .and_then(|n| n.parse::<u8>().ok())
+            .unwrap_or(0)
+    }
+
+    /// True when this legend's swap skill is ungated, or its elite spec is equipped.
+    pub fn legend_available(&self, legend_id: &str, spec_ids: &[u32]) -> bool {
+        let Some(legend) = self.legends.get(legend_id) else {
+            return false;
+        };
+        match self.skills.get(&legend.swap).and_then(|s| s.specialization) {
+            None => true,
+            Some(spec_id) => spec_ids.contains(&spec_id),
+        }
+    }
+
+    fn revenant_shared_palettes(&self) -> Option<(u32, [u32; 3], u32)> {
+        for legend in self.legends.values() {
+            let Some(&heal_p) = self.skill_to_palette.get(&legend.heal) else {
+                continue;
+            };
+            let Some(&elite_p) = self.skill_to_palette.get(&legend.elite) else {
+                continue;
+            };
+            if legend.utilities.len() < 3 {
+                continue;
+            }
+            let Some(&u0) = self.skill_to_palette.get(&legend.utilities[0]) else {
+                continue;
+            };
+            let Some(&u1) = self.skill_to_palette.get(&legend.utilities[1]) else {
+                continue;
+            };
+            let Some(&u2) = self.skill_to_palette.get(&legend.utilities[2]) else {
+                continue;
+            };
+            return Some((heal_p, [u0, u1, u2], elite_p));
+        }
+        None
+    }
+
     /// Get all skills for a profession.
     pub fn profession_skills(&self, profession: &str) -> Vec<&Skill> {
         self.skills_by_profession
@@ -411,6 +486,33 @@ impl GameDb {
             self.relics.len(),
         )
     }
+
+    /// Empty indexed db for unit tests (optimizer + addon).
+    pub fn empty_for_tests() -> Self {
+        use std::collections::HashMap;
+        Self {
+            items: HashMap::new(),
+            itemstats: HashMap::new(),
+            skills: HashMap::new(),
+            traits: HashMap::new(),
+            specializations: HashMap::new(),
+            professions: HashMap::new(),
+            legends: HashMap::new(),
+            pvp_amulets: HashMap::new(),
+            skills_by_profession: HashMap::new(),
+            traits_by_spec: HashMap::new(),
+            items_by_type: HashMap::new(),
+            runes: vec![],
+            sigils: vec![],
+            relics: vec![],
+            skill_to_palette: HashMap::new(),
+            palette_to_skill: HashMap::new(),
+            traits_by_condition: HashMap::new(),
+            skills_by_condition: HashMap::new(),
+            traits_by_buff: HashMap::new(),
+            skills_by_buff: HashMap::new(),
+        }
+    }
 }
 
 use crate::data::boon_condition_formulas::is_condition;
@@ -441,5 +543,98 @@ fn is_boon(status: &str) -> bool {
 pub(crate) mod tests_alias_helpers {
     pub(crate) fn is_condition(status: &str) -> bool {
         crate::data::boon_condition_formulas::is_condition(status)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gw2_api::models::Legend;
+
+    fn legend(id: &str, code: u32, heal: u32, elite: u32, utilities: [u32; 3], swap: u32) -> Legend {
+        Legend {
+            id: id.into(),
+            code: Some(code),
+            swap,
+            heal,
+            elite,
+            utilities: utilities.to_vec(),
+        }
+    }
+
+    #[test]
+    fn revenant_older_legend_skill_uses_shared_palette() {
+        let mut db = GameDb::empty_for_tests();
+        db.legends.insert(
+            "Legend1".into(),
+            legend("Legend1", 1, 27220, 27760, [28379, 27014, 26644], 28085),
+        );
+        db.legends.insert(
+            "Legend8".into(),
+            legend("Legend8", 8, 77043, 76968, [77243, 77291, 76805], 76610),
+        );
+        db.skill_to_palette.insert(77043, 4572);
+        db.skill_to_palette.insert(76968, 4554);
+        db.skill_to_palette.insert(77243, 4614);
+        db.skill_to_palette.insert(77291, 4651);
+        db.skill_to_palette.insert(76805, 4564);
+
+        assert_eq!(db.skill_palette_id(77043), 4572);
+        assert_eq!(db.skill_palette_id(27220), 4572, "Shiro/Dragon heal shares Conduit heal palette");
+        assert_eq!(db.skill_palette_id(27760), 4554);
+        assert_eq!(db.skill_palette_id(28379), 4614);
+        assert_eq!(db.skill_palette_id(26644), 4564);
+        assert_eq!(db.skill_palette_id(99999), 0);
+    }
+
+    #[test]
+    fn legend_template_code_prefers_api_code() {
+        let mut db = GameDb::empty_for_tests();
+        db.legends.insert(
+            "Legend5".into(),
+            legend("Legend5", 5, 1, 2, [3, 4, 5], 6),
+        );
+        assert_eq!(db.legend_template_code("Legend5"), 5);
+        assert_eq!(db.legend_template_code("Legend9"), 9);
+    }
+
+    #[test]
+    fn legend_available_respects_swap_specialization() {
+        let mut db = GameDb::empty_for_tests();
+        db.legends.insert(
+            "Legend1".into(),
+            legend("Legend1", 1, 1, 2, [3, 4, 5], 28085),
+        );
+        db.skills.insert(
+            28085,
+            Skill {
+                id: 28085,
+                name: "Legendary Dragon Stance".into(),
+                description: None,
+                icon: None,
+                chat_link: None,
+                skill_type: Some("Profession".into()),
+                weapon_type: None,
+                professions: vec!["Revenant".into()],
+                slot: Some("Profession_1".into()),
+                facts: vec![],
+                traited_facts: vec![],
+                categories: vec![],
+                attunement: None,
+                cost: None,
+                dual_wield: None,
+                flip_skill: None,
+                initiative: None,
+                next_chain: None,
+                prev_chain: None,
+                transform_skills: vec![],
+                bundle_skills: vec![],
+                toolbelt_skill: None,
+                flags: vec![],
+                specialization: Some(52),
+            },
+        );
+        assert!(!db.legend_available("Legend1", &[3, 9]));
+        assert!(db.legend_available("Legend1", &[3, 9, 52]));
     }
 }

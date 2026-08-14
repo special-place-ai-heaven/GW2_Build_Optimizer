@@ -16,7 +16,7 @@ pub struct DownloadProgress {
     pub detail: Option<String>,
 }
 
-const TOTAL_STEPS: usize = 8;
+const TOTAL_STEPS: usize = 9;
 
 fn report(
     on_progress: &mut impl FnMut(DownloadProgress),
@@ -93,9 +93,12 @@ pub fn download_all(
     }
     report(&mut on_progress, &mut step, "Professions", None);
 
-    // 6. Legends
+    // 6. Legends (schema that includes template `code`)
     if cache.is_stale("legends", build) {
-        let data: Vec<models::Legend> = client.fetch_all("legends")?;
+        let data: Vec<models::Legend> = client.get_with_params(
+            "legends",
+            &[("ids", "all"), ("v", "2019-12-19T00:00:00.000Z")],
+        )?;
         cache
             .save("legends", &data, build)
             .map_err(|e| ApiError::Cache(e.to_string()))?;
@@ -166,6 +169,24 @@ pub fn download_all(
             .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "Items (equipment)", None);
+
+    // 9. Icons — separate from JSON. Skip files already on disk.
+    let urls = crate::graphics::collect_from_cache(cache);
+    let gfx = cache.graphics_dir();
+    let _ = crate::graphics::download_missing(client, &gfx, &urls, |done, total| {
+        on_progress(DownloadProgress {
+            current_step: step + 1,
+            total_steps: TOTAL_STEPS,
+            step_name: "Icons".into(),
+            done: false,
+            detail: Some(if total == 0 {
+                "up to date".into()
+            } else {
+                format!("{done} / {total}")
+            }),
+        });
+    });
+    report(&mut on_progress, &mut step, "Icons", None);
 
     Ok(build)
 }

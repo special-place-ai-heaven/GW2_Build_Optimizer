@@ -67,6 +67,9 @@ struct SynergyCandidate {
     heal: Option<(u32, String)>,
     utilities: Vec<(u32, String)>,
     elite_skill: Option<(u32, String)>,
+    /// Revenant legends, active first.
+    legends: Vec<String>,
+    aquatic_legends: Vec<String>,
     /// Synergy links discovered during selection.
     synergy_links: Vec<SynergyLink>,
 }
@@ -364,6 +367,8 @@ fn select_specs_and_traits(
                 heal: None,
                 utilities: Vec::new(),
                 elite_skill: None,
+                legends: Vec::new(),
+                aquatic_legends: Vec::new(),
                 synergy_links: all_links,
             });
         }
@@ -592,6 +597,9 @@ fn select_weapons(
             .weapons
             .iter()
             .filter(|(_, info)| {
+                if info.is_aquatic() {
+                    return false;
+                }
                 if let Some(req_spec) = info.specialization {
                     elite_spec_ids.contains(&req_spec)
                 } else {
@@ -751,6 +759,11 @@ fn select_skills(
     weights: &OptimizationWeights,
     ctx: &BalanceContext,
 ) {
+    if profession_name == "Revenant" && !db.legends.is_empty() {
+        select_revenant_legends(candidates, db, weights);
+        return;
+    }
+
     let prof_skills = db.profession_skills(profession_name);
 
     for candidate in candidates.iter_mut() {
@@ -762,6 +775,7 @@ fn select_skills(
                 Some(spec_id) => candidate.spec_ids.contains(&spec_id),
                 None => true,
             })
+            .filter(|s| db.skill_palette_id(s.id) != 0)
             .collect();
 
         // Heal skill
@@ -823,6 +837,102 @@ fn select_skills(
                 candidate.utilities.push((id, name));
             }
         }
+    }
+}
+
+/// Revenant heal/utilities/elite come from legendary stances, not a free mix.
+fn select_revenant_legends(
+    candidates: &mut [SynergyCandidate],
+    db: &GameDb,
+    weights: &OptimizationWeights,
+) {
+    if db.legends.is_empty() {
+        return;
+    }
+    for candidate in candidates.iter_mut() {
+        let mut ranked: Vec<(f64, String)> = db
+            .legends
+            .keys()
+            .filter(|id| db.legend_available(id, &candidate.spec_ids))
+            .map(|id| {
+                (
+                    score_legend(db, id, weights, &candidate.accumulated),
+                    id.clone(),
+                )
+            })
+            .collect();
+        ranked.sort_by(|a, b| {
+            b.0.partial_cmp(&a.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.1.cmp(&b.1))
+        });
+        ranked.truncate(2);
+        let ids: Vec<String> = ranked.into_iter().map(|(_, id)| id).collect();
+        if ids.is_empty() {
+            continue;
+        }
+        apply_legend_skills(candidate, db, &ids[0]);
+        candidate.legends = ids.clone();
+        candidate.aquatic_legends = ids;
+    }
+}
+
+fn score_legend(
+    db: &GameDb,
+    legend_id: &str,
+    weights: &OptimizationWeights,
+    accumulated: &[(ComponentId, Vec<NormalizedEffect>)],
+) -> f64 {
+    let Some(legend) = db.legends.get(legend_id) else {
+        return 0.0;
+    };
+    let mut ids = vec![legend.heal, legend.elite];
+    ids.extend(legend.utilities.iter().copied());
+    let mut score = 0.0;
+    for id in ids {
+        let Some(skill) = db.skills.get(&id) else {
+            continue;
+        };
+        let effects = extract_skill_effects(skill);
+        for eff in &effects {
+            score += score_normalized_effect(eff, weights);
+        }
+        let (syn, _) =
+            compute_marginal_synergy(&effects, accumulated, weights, Some(&ComponentId::Skill(id)));
+        score += syn;
+    }
+    score
+}
+
+fn apply_legend_skills(candidate: &mut SynergyCandidate, db: &GameDb, legend_id: &str) {
+    let Some(legend) = db.legends.get(legend_id) else {
+        return;
+    };
+    let name_of = |id: u32| {
+        db.skills
+            .get(&id)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| format!("Skill {id}"))
+    };
+    candidate.heal = Some((legend.heal, name_of(legend.heal)));
+    if db.skills.contains_key(&legend.heal) {
+        add_selected_skill_effects(candidate, db, legend.heal, Vec::new());
+    }
+    candidate.utilities = legend
+        .utilities
+        .iter()
+        .take(3)
+        .map(|&id| (id, name_of(id)))
+        .collect();
+    let util_ids: Vec<u32> = candidate.utilities.iter().map(|(id, _)| *id).collect();
+    for id in util_ids {
+        if db.skills.contains_key(&id) {
+            add_selected_skill_effects(candidate, db, id, Vec::new());
+        }
+    }
+    candidate.elite_skill = Some((legend.elite, name_of(legend.elite)));
+    if db.skills.contains_key(&legend.elite) {
+        add_selected_skill_effects(candidate, db, legend.elite, Vec::new());
     }
 }
 
@@ -1199,6 +1309,8 @@ fn build_synergy_result(
             .collect(),
         elite: candidate.elite_skill.clone(),
     };
+    validated.legends = candidate.legends.clone();
+    validated.aquatic_legends = candidate.aquatic_legends.clone();
 
     // Rune
     if let Some((id, name)) = &candidate.rune {
@@ -2098,3 +2210,199 @@ mod runtime_diagnostics_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod revenant_legend_tests {
+    use super::*;
+    use gw2_api::models::{Legend, Skill};
+    use crate::balance::BalanceContext;
+    use crate::scoring::OptimizationWeights;
+    use gw2_core::types::GameMode;
+
+    fn legend(id: &str, code: u32, heal: u32, elite: u32, utilities: [u32; 3], swap: u32) -> Legend {
+        Legend {
+            id: id.into(),
+            code: Some(code),
+            swap,
+            heal,
+            elite,
+            utilities: utilities.to_vec(),
+        }
+    }
+
+    fn empty_candidate() -> SynergyCandidate {
+        SynergyCandidate {
+            spec_ids: vec![],
+            elite_spec: None,
+            selected_major_traits: Vec::new(),
+            all_trait_ids: Vec::new(),
+            accumulated: Vec::new(),
+            score: 0.0,
+            rune: None,
+            sigils: Vec::new(),
+            relic: None,
+            weapons: (None, None, None, None),
+            heal: None,
+            utilities: Vec::new(),
+            elite_skill: None,
+            legends: Vec::new(),
+            aquatic_legends: Vec::new(),
+            synergy_links: Vec::new(),
+        }
+    }
+
+    fn slot_skill(id: u32, slot: &str) -> Skill {
+        Skill {
+            id,
+            name: format!("Skill {id}"),
+            description: None,
+            icon: None,
+            chat_link: None,
+            skill_type: None,
+            weapon_type: None,
+            professions: vec!["Ranger".into()],
+            slot: Some(slot.into()),
+            facts: vec![],
+            traited_facts: vec![],
+            categories: vec![],
+            attunement: None,
+            cost: None,
+            dual_wield: None,
+            flip_skill: None,
+            initiative: None,
+            next_chain: None,
+            prev_chain: None,
+            transform_skills: vec![],
+            bundle_skills: vec![],
+            toolbelt_skill: None,
+            flags: vec![],
+            specialization: None,
+        }
+    }
+
+    #[test]
+    fn select_skills_skips_heals_without_template_palette() {
+        let mut db = GameDb::empty_for_tests();
+        db.skills.insert(200, slot_skill(200, "Heal"));
+        db.skills.insert(100, slot_skill(100, "Heal"));
+        db.skills_by_profession.insert("Ranger".into(), vec![200, 100]);
+        db.skill_to_palette.insert(100, 120);
+        let mut candidates = [empty_candidate()];
+        select_skills(
+            &mut candidates,
+            &db,
+            "Ranger",
+            &OptimizationWeights::preset_power_dps(),
+            &BalanceContext::new(GameMode::PvE),
+        );
+        assert_eq!(candidates[0].heal.as_ref().map(|(id, _)| *id), Some(100));
+    }
+
+    #[test]
+    fn revenant_bar_is_one_legend_not_a_mix() {
+        let mut db = GameDb::empty_for_tests();
+        db.legends.insert(
+            "Legend2".into(),
+            legend("Legend2", 2, 100, 104, [101, 102, 103], 10),
+        );
+        db.legends.insert(
+            "Legend3".into(),
+            legend("Legend3", 3, 200, 204, [201, 202, 203], 11),
+        );
+        let mut candidates = [empty_candidate()];
+        select_revenant_legends(&mut candidates, &db, &OptimizationWeights::preset_power_dps());
+        let c = &candidates[0];
+        assert_eq!(c.legends.len(), 2, "two stances for the template");
+        let active = db.legends.get(&c.legends[0]).expect("active legend");
+        assert_eq!(c.heal.as_ref().map(|(id, _)| *id), Some(active.heal));
+        assert_eq!(c.elite_skill.as_ref().map(|(id, _)| *id), Some(active.elite));
+        let util_ids: Vec<u32> = c.utilities.iter().map(|(id, _)| *id).collect();
+        assert_eq!(util_ids, active.utilities);
+        assert!(
+            !active.utilities.iter().any(|u| db
+                .legends
+                .get(&c.legends[1])
+                .unwrap()
+                .utilities
+                .contains(u)),
+            "utilities must not mix the inactive legend"
+        );
+    }
+}
+
+#[cfg(test)]
+mod land_weapon_tests {
+    use super::*;
+    use gw2_api::models::{Profession, WeaponInfo};
+
+    fn weapon(flags: &[&str]) -> WeaponInfo {
+        WeaponInfo {
+            specialization: None,
+            flags: flags.iter().map(|s| (*s).to_string()).collect(),
+            skills: vec![],
+        }
+    }
+
+    fn guardian_with_trident() -> Profession {
+        let mut weapons = std::collections::HashMap::new();
+        weapons.insert("Sword".into(), weapon(&["Mainhand"]));
+        weapons.insert("Focus".into(), weapon(&["Offhand"]));
+        weapons.insert("Staff".into(), weapon(&["TwoHand"]));
+        weapons.insert("Trident".into(), weapon(&["TwoHand", "Aquatic"]));
+        Profession {
+            id: "Guardian".into(),
+            name: "Guardian".into(),
+            code: None,
+            specializations: vec![],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        }
+    }
+
+    fn empty_candidate() -> SynergyCandidate {
+        SynergyCandidate {
+            spec_ids: vec![],
+            elite_spec: None,
+            selected_major_traits: Vec::new(),
+            all_trait_ids: Vec::new(),
+            accumulated: Vec::new(),
+            score: 0.0,
+            rune: None,
+            sigils: Vec::new(),
+            relic: None,
+            weapons: (None, None, None, None),
+            heal: None,
+            utilities: Vec::new(),
+            elite_skill: None,
+            legends: Vec::new(),
+            aquatic_legends: Vec::new(),
+            synergy_links: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn select_weapons_never_puts_trident_on_a_land_set() {
+        let prof = guardian_with_trident();
+        let db = GameDb::empty_for_tests();
+        let mut candidates = [empty_candidate()];
+        select_weapons(&mut candidates, &prof, &db, &OptimizationWeights::default());
+        let (s1m, s1o, s2m, s2o) = &candidates[0].weapons;
+        for w in [s1m, s1o, s2m, s2o].into_iter().flatten() {
+            assert_ne!(
+                w.as_str(),
+                "Trident",
+                "land sets must not include underwater weapons; got {:?}",
+                candidates[0].weapons
+            );
+        }
+        assert!(
+            s1m.is_some(),
+            "should still pick a land set; got {:?}",
+            candidates[0].weapons
+        );
+    }
+}
+

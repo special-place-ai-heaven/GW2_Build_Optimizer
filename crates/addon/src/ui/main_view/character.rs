@@ -267,6 +267,7 @@ pub(super) fn update_build_chat_code(state: &mut AddonState) {
 }
 
 fn update_build_chat_code_inner(state: &mut AddonState) {
+    let weapons = current_weapon_types(state);
     let build_tab = state
         .main
         .selected_build_tab
@@ -274,18 +275,35 @@ fn update_build_chat_code_inner(state: &mut AddonState) {
     let game_db = state.main.game_db.as_ref();
 
     if let (Some(bt), Some(db)) = (build_tab, game_db) {
-        state.main.build_chat_code = generate_build_chat_code(&bt.build, db);
+        state.main.build_chat_code = generate_build_chat_code(&bt.build, db, &weapons);
     } else {
         state.main.build_chat_code = None;
     }
 }
 
+fn current_weapon_types(state: &AddonState) -> Vec<String> {
+    let Some(build) = state.main.current_build.as_ref() else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    for set in &build.weapons {
+        if let Some(w) = &set.main_hand {
+            names.push(w.weapon_type.clone());
+        }
+        if let Some(w) = &set.off_hand {
+            names.push(w.weapon_type.clone());
+        }
+    }
+    names
+}
+
 /// Generate GW2 build template chat code from a Build.
 /// Format: 0x0D + profession_code(1) + 3x(spec_id(1) + trait_bits(1)) + 10x skill_palette(2 LE)
-/// + 16 bytes profession-specific + base64 → [&...]
+/// + 16 bytes profession-specific + SotO weapon list + skill-override count → [&...]
 pub(in crate::ui::main_view) fn generate_build_chat_code(
     build: &gw2_api::models::Build,
     db: &gw2_optimizer::gamedb::GameDb,
+    weapons: &[String],
 ) -> Option<String> {
     let profession_name = build.profession.as_deref()?;
     let profession = db.profession(profession_name)?;
@@ -350,7 +368,7 @@ pub(in crate::ui::main_view) fn generate_build_chat_code(
         .as_ref()
         .map(|sk| {
             let mut ids = vec![sk.heal.unwrap_or(0)];
-            for u in &sk.utilities {
+            for u in sk.utilities.iter().take(3) {
                 ids.push(u.unwrap_or(0));
             }
             while ids.len() < 4 {
@@ -366,7 +384,7 @@ pub(in crate::ui::main_view) fn generate_build_chat_code(
         .as_ref()
         .map(|sk| {
             let mut ids = vec![sk.heal.unwrap_or(0)];
-            for u in &sk.utilities {
+            for u in sk.utilities.iter().take(3) {
                 ids.push(u.unwrap_or(0));
             }
             while ids.len() < 4 {
@@ -380,51 +398,322 @@ pub(in crate::ui::main_view) fn generate_build_chat_code(
     // Interleave: terr_heal, aqua_heal, terr_util1, aqua_util1, ..., terr_elite, aqua_elite
     for i in 0..5 {
         let t_skill = terrestrial_skills.get(i).copied().unwrap_or(0);
-        let t_palette = db.skill_to_palette.get(&t_skill).copied().unwrap_or(0);
+        let t_palette = db.skill_palette_id(t_skill);
         buf.extend_from_slice(&(t_palette as u16).to_le_bytes());
 
         let a_skill = aquatic_skills.get(i).copied().unwrap_or(0);
-        let a_palette = db.skill_to_palette.get(&a_skill).copied().unwrap_or(0);
+        let a_palette = db.skill_palette_id(a_skill);
         buf.extend_from_slice(&(a_palette as u16).to_le_bytes());
     }
 
     // 16 bytes profession-specific data
     match profession_name {
         "Ranger" => {
-            // Ranger pets: 4 bytes (terrestrial1, terrestrial2, aquatic1, aquatic2) + 12 zeros
+            let mut pet_bytes = [0u8; 4];
             if let Some(ref pets) = build.pets {
-                for pet in pets.terrestrial.iter().take(2) {
-                    buf.push(pet.unwrap_or(0) as u8);
+                for (i, pet) in pets.terrestrial.iter().take(2).enumerate() {
+                    pet_bytes[i] = pet.unwrap_or(0) as u8;
                 }
-                for pet in pets.aquatic.iter().take(2) {
-                    buf.push(pet.unwrap_or(0) as u8);
+                for (i, pet) in pets.aquatic.iter().take(2).enumerate() {
+                    pet_bytes[2 + i] = pet.unwrap_or(0) as u8;
                 }
-            } else {
-                buf.extend_from_slice(&[0u8; 4]);
             }
+            buf.extend_from_slice(&pet_bytes);
             buf.extend_from_slice(&[0u8; 12]);
         }
         "Revenant" => {
-            // Revenant legends: 4 bytes (legend number parsed from "LegendN" ID) + 12 zeros
-            let legend_to_byte = |legend: &Option<String>| -> u8 {
-                legend
-                    .as_deref()
-                    .and_then(|l| l.strip_prefix("Legend").and_then(|n| n.parse::<u8>().ok()))
-                    .unwrap_or(0)
-            };
-            let legends = &build.legends;
-            buf.push(legends.first().map(&legend_to_byte).unwrap_or(0));
-            buf.push(legends.get(1).map(&legend_to_byte).unwrap_or(0));
-            let aquatic_legends = &build.aquatic_legends;
-            buf.push(aquatic_legends.first().map(&legend_to_byte).unwrap_or(0));
-            buf.push(aquatic_legends.get(1).map(legend_to_byte).unwrap_or(0));
-            buf.extend_from_slice(&[0u8; 12]);
+            encode_revenant_profession_bytes(&mut buf, build, db);
         }
         _ => {
             buf.extend_from_slice(&[0u8; 16]);
         }
     }
 
+    append_soto_weapons(&mut buf, weapons);
+
     let encoded = base64::engine::general_purpose::STANDARD.encode(&buf);
     Some(format!("[&{}]", encoded))
 }
+
+fn encode_revenant_profession_bytes(
+    buf: &mut Vec<u8>,
+    build: &gw2_api::models::Build,
+    db: &gw2_optimizer::gamedb::GameDb,
+) {
+    let spec_ids: Vec<u32> = build
+        .specializations
+        .iter()
+        .filter_map(|s| s.id)
+        .collect();
+    let mut legends: Vec<String> = build
+        .legends
+        .iter()
+        .flatten()
+        .cloned()
+        .filter(|id| !id.is_empty())
+        .collect();
+    if legends.is_empty() {
+        legends = infer_revenant_legends(build, db, &spec_ids);
+    }
+    let mut aquatic: Vec<String> = build
+        .aquatic_legends
+        .iter()
+        .flatten()
+        .cloned()
+        .filter(|id| !id.is_empty())
+        .collect();
+    if aquatic.is_empty() {
+        aquatic = legends.clone();
+    }
+
+    let legend_byte = |id: Option<&String>| -> u8 {
+        id.map(|s| db.legend_template_code(s)).unwrap_or(0)
+    };
+    buf.push(legend_byte(legends.first()));
+    buf.push(legend_byte(legends.get(1)));
+    buf.push(legend_byte(aquatic.first()));
+    buf.push(legend_byte(aquatic.get(1)));
+
+    // Inactive legend's 3 terrestrial + 3 aquatic utility palettes (u16 LE).
+    let inactive_land = legends.get(1).or(legends.first());
+    let inactive_water = aquatic.get(1).or(aquatic.first());
+    for legend_id in [inactive_land, inactive_water] {
+        let utils: Vec<u32> = legend_id
+            .and_then(|id| db.legends.get(id))
+            .map(|l| l.utilities.clone())
+            .unwrap_or_default();
+        for i in 0..3 {
+            let pal = utils
+                .get(i)
+                .copied()
+                .map(|sid| db.skill_palette_id(sid) as u16)
+                .unwrap_or(0);
+            buf.extend_from_slice(&pal.to_le_bytes());
+        }
+    }
+}
+
+fn infer_revenant_legends(
+    build: &gw2_api::models::Build,
+    db: &gw2_optimizer::gamedb::GameDb,
+    spec_ids: &[u32],
+) -> Vec<String> {
+    let heal = build.skills.as_ref().and_then(|s| s.heal);
+    let mut ids: Vec<String> = Vec::new();
+    if let Some(heal_id) = heal {
+        if let Some((id, _)) = db
+            .legends
+            .iter()
+            .find(|(_, l)| l.heal == heal_id && db.legend_available(&l.id, spec_ids))
+        {
+            ids.push(id.clone());
+        }
+    }
+    let mut rest: Vec<(u8, String)> = db
+        .legends
+        .keys()
+        .filter(|id| !ids.contains(id) && db.legend_available(id, spec_ids))
+        .map(|id| (db.legend_template_code(id), id.clone()))
+        .collect();
+    rest.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    for (_, id) in rest {
+        if ids.len() >= 2 {
+            break;
+        }
+        ids.push(id);
+    }
+    ids
+}
+
+fn append_soto_weapons(buf: &mut Vec<u8>, weapons: &[String]) {
+    if weapons.is_empty() {
+        return;
+    }
+    let mut ids: Vec<u16> = Vec::new();
+    for name in weapons {
+        if let Some(id) = weapon_type_id(name) {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    ids.truncate(8);
+    buf.push(ids.len() as u8);
+    for id in ids {
+        buf.extend_from_slice(&id.to_le_bytes());
+    }
+    buf.push(0); // no weapon-skill overrides
+}
+
+fn weapon_type_id(name: &str) -> Option<u16> {
+    Some(match name {
+        "Axe" => 5,
+        "Longbow" => 35,
+        "Dagger" => 47,
+        "Focus" => 49,
+        "Greatsword" => 50,
+        "Hammer" => 51,
+        "Mace" => 53,
+        "Pistol" => 54,
+        "Rifle" => 85,
+        "Scepter" => 86,
+        "Shield" => 87,
+        "Staff" => 89,
+        "Sword" => 90,
+        "Torch" => 102,
+        "Warhorn" => 103,
+        "Shortbow" => 107,
+        "Spear" | "Trident" | "HarpoonGun" => 265,
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gw2_api::models::{Build, PetSelection, Profession, SkillSelection};
+    use gw2_optimizer::gamedb::GameDb;
+    use std::collections::HashMap;
+
+    fn revenant_db() -> GameDb {
+        let mut db = GameDb::empty_for_tests();
+        db.professions.insert(
+            "Revenant".into(),
+            Profession {
+                id: "Revenant".into(),
+                name: "Revenant".into(),
+                code: Some(9),
+                specializations: vec![],
+                weapons: HashMap::new(),
+                training: vec![],
+                skills_by_palette: vec![],
+                icon: None,
+                icon_big: None,
+            },
+        );
+        db.legends.insert(
+            "Legend1".into(),
+            gw2_api::models::Legend {
+                id: "Legend1".into(),
+                code: Some(1),
+                swap: 28085,
+                heal: 27220,
+                elite: 27760,
+                utilities: vec![28379, 27014, 26644],
+            },
+        );
+        db.legends.insert(
+            "Legend2".into(),
+            gw2_api::models::Legend {
+                id: "Legend2".into(),
+                code: Some(2),
+                swap: 28134,
+                heal: 26937,
+                elite: 28472,
+                utilities: vec![27025, 26679, 27322],
+            },
+        );
+        db.legends.insert(
+            "Legend8".into(),
+            gw2_api::models::Legend {
+                id: "Legend8".into(),
+                code: Some(8),
+                swap: 76610,
+                heal: 77043,
+                elite: 76968,
+                utilities: vec![77243, 77291, 76805],
+            },
+        );
+        // Only the latest legend is in skills_by_palette — older stances share these.
+        db.skill_to_palette.insert(77043, 4572);
+        db.skill_to_palette.insert(76968, 4554);
+        db.skill_to_palette.insert(77243, 4614);
+        db.skill_to_palette.insert(77291, 4651);
+        db.skill_to_palette.insert(76805, 4564);
+        db
+    }
+
+    fn decode_template(code: &str) -> Vec<u8> {
+        let inner = code
+            .strip_prefix("[&")
+            .and_then(|s| s.strip_suffix("]"))
+            .expect("[&...] wrapper");
+        base64::engine::general_purpose::STANDARD
+            .decode(inner)
+            .expect("base64")
+    }
+
+    fn u16_at(buf: &[u8], offset: usize) -> u16 {
+        u16::from_le_bytes([buf[offset], buf[offset + 1]])
+    }
+
+    #[test]
+    fn revenant_older_legend_encodes_shared_palettes_and_stance_bytes() {
+        let db = revenant_db();
+        let build = Build {
+            name: None,
+            profession: Some("Revenant".into()),
+            specializations: vec![],
+            skills: Some(SkillSelection {
+                heal: Some(27220),
+                utilities: vec![Some(28379), Some(27014), Some(26644)],
+                elite: Some(27760),
+            }),
+            aquatic_skills: None,
+            legends: vec![Some("Legend1".into()), Some("Legend2".into())],
+            aquatic_legends: vec![],
+            pets: None,
+        };
+        let code = generate_build_chat_code(&build, &db, &[]).expect("encode");
+        let buf = decode_template(&code);
+        assert_eq!(buf[0], 0x0D);
+        assert_eq!(buf[1], 9);
+        // Land heal / util / elite palettes (even indices in the 10×u16 block).
+        assert_eq!(u16_at(&buf, 8), 4572, "Legend1 heal shares Conduit palette");
+        assert_eq!(u16_at(&buf, 12), 4614);
+        assert_eq!(u16_at(&buf, 16), 4651);
+        assert_eq!(u16_at(&buf, 20), 4564);
+        assert_eq!(u16_at(&buf, 24), 4554);
+        assert_eq!(&buf[28..32], &[1, 2, 1, 2], "legend codes active/inactive × land/water");
+        // Inactive legend utility palettes (also shared).
+        assert_eq!(u16_at(&buf, 32), 4614);
+        assert_eq!(u16_at(&buf, 34), 4651);
+        assert_eq!(u16_at(&buf, 36), 4564);
+    }
+
+    #[test]
+    fn ranger_pets_pad_to_four_bytes() {
+        let mut db = GameDb::empty_for_tests();
+        db.professions.insert(
+            "Ranger".into(),
+            Profession {
+                id: "Ranger".into(),
+                name: "Ranger".into(),
+                code: Some(4),
+                specializations: vec![],
+                weapons: HashMap::new(),
+                training: vec![],
+                skills_by_palette: vec![],
+                icon: None,
+                icon_big: None,
+            },
+        );
+        let build = Build {
+            name: None,
+            profession: Some("Ranger".into()),
+            specializations: vec![],
+            skills: None,
+            aquatic_skills: None,
+            legends: vec![],
+            aquatic_legends: vec![],
+            pets: Some(PetSelection {
+                terrestrial: vec![Some(31)],
+                aquatic: vec![Some(7), Some(8)],
+            }),
+        };
+        let buf = decode_template(&generate_build_chat_code(&build, &db, &[]).unwrap());
+        assert_eq!(&buf[28..32], &[31, 0, 7, 8]);
+        assert_eq!(buf.len(), 44);
+    }
+}
+

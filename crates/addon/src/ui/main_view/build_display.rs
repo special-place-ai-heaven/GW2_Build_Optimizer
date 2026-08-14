@@ -66,6 +66,15 @@ pub fn render_card_header(ui: &Ui, title: &str, color: [f32; 4]) {
             .round_bot_right(false)
             .build();
         draw_list.add_text([start[0] + 8.0, start[1] + 3.0], color, title);
+        draw_list
+            .add_rect(
+                [start[0] - 1.0, start[1]],
+                [start[0] + 3.0, start[1] + 22.0],
+                crate::ui::theme::GOLD,
+            )
+            .filled(true)
+            .rounding(2.0)
+            .build();
     }
     ui.dummy([0.0, 24.0]);
 }
@@ -97,6 +106,15 @@ fn render_card_section(ui: &Ui, title: &str, content: impl FnOnce(&Ui)) {
             SECTION_TITLE_COLOR,
             title,
         );
+        draw_list
+            .add_rect(
+                [start[0] - 1.0, hdr_top],
+                [start[0] + 3.0, hdr_bottom],
+                crate::ui::theme::GOLD,
+            )
+            .filled(true)
+            .rounding(2.0)
+            .build();
     } // DrawListMut dropped here
 
     // Reserve space for the header
@@ -140,10 +158,11 @@ pub fn render_build_card_no_specs(
     build: &ResolvedBuild,
     stats: Option<&StatBlock>,
     compare_stats: Option<&StatBlock>,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
 ) {
-    render_build_skills(ui, build);
-    render_build_weapons(ui, build);
-    render_build_gear(ui, build);
+    render_build_skills(ui, build, db);
+    render_build_weapons(ui, build, db);
+    render_build_gear(ui, build, db);
     render_build_stats(ui, stats, compare_stats);
 }
 
@@ -162,9 +181,16 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
 
     // ── Skills Card ──
     render_card_section(ui, "SKILLS", |ui| {
-        for skill in &suggestion.skills {
-            ui.text_colored(VALUE_COLOR, format!("  {}", skill));
-        }
+        let parsed = crate::ui::gear_diff::parse_suggestion_skills(&suggestion.skills);
+        render_skill_bar(
+            ui,
+            None,
+            &parsed.stances,
+            &parsed.pets,
+            &parsed.heal,
+            &parsed.utilities,
+            &parsed.elite,
+        );
     });
 
     // ── Weapons Card ──
@@ -233,9 +259,9 @@ pub fn render_suggestion_card_no_specs(
     suggestion: &super::super::comparison::BuildSuggestion,
     compare_stats: Option<&StatBlock>,
 ) {
-    render_suggestion_skills(ui, suggestion);
-    render_suggestion_weapons(ui, suggestion);
-    render_suggestion_gear(ui, suggestion);
+    render_suggestion_skills(ui, suggestion, None);
+    render_suggestion_weapons(ui, suggestion, None);
+    render_suggestion_gear(ui, suggestion, None);
     render_suggestion_stats(ui, suggestion, compare_stats);
 }
 
@@ -247,37 +273,238 @@ fn render_label_value(ui: &Ui, label: &str, value: &str) {
     ui.text_colored(VALUE_COLOR, value);
 }
 
+fn render_label_value_inspect(
+    ui: &Ui,
+    label: &str,
+    value: &str,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+) {
+    ui.text_colored(LABEL_COLOR, format!("  {}: ", label));
+    ui.same_line();
+    ui.text_colored(VALUE_COLOR, value);
+    crate::ui::comparison::inspect_if_hovered(ui, value, db);
+}
+
 fn render_label_value_colored(ui: &Ui, label: &str, value: &str, color: [f32; 4]) {
     ui.text_colored(LABEL_COLOR, format!("  {}: ", label));
     ui.same_line();
     ui.text_colored(color, value);
 }
 
+fn truncate_to_width(ui: &Ui, text: &str, max_w: f32) -> String {
+    if ui.calc_text_size(text)[0] <= max_w {
+        return text.to_string();
+    }
+    let mut s = String::new();
+    for c in text.chars() {
+        let mut next = s.clone();
+        next.push(c);
+        next.push('\u{2026}');
+        if ui.calc_text_size(&next)[0] > max_w {
+            break;
+        }
+        s.push(c);
+    }
+    s.push('\u{2026}');
+    s
+}
+
+fn render_slash_list(
+    ui: &Ui,
+    label: &str,
+    joined: &str,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+) {
+    if joined.is_empty() {
+        return;
+    }
+    ui.text_colored(LABEL_COLOR, format!("  {label}"));
+    ui.same_line();
+    for (i, part) in joined.split(" / ").enumerate() {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if i > 0 {
+            ui.same_line_with_spacing(0.0, 6.0);
+        }
+        crate::ui::theme::chip(ui, part, &format!("##{label}_chip_{i}"));
+        crate::ui::comparison::inspect_if_hovered(ui, part, db);
+    }
+}
+
+fn wrap_slot_lines(ui: &Ui, text: &str, max_w: f32) -> Vec<String> {
+    if ui.calc_text_size(text)[0] <= max_w {
+        return vec![text.to_string()];
+    }
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() < 2 {
+        return vec![truncate_to_width(ui, text, max_w)];
+    }
+    let mut line1 = String::new();
+    let mut i = 0;
+    while i < words.len() {
+        let trial = if line1.is_empty() {
+            words[i].to_string()
+        } else {
+            format!("{} {}", line1, words[i])
+        };
+        if ui.calc_text_size(&trial)[0] > max_w && !line1.is_empty() {
+            break;
+        }
+        line1 = trial;
+        i += 1;
+    }
+    let rest = words[i..].join(" ");
+    if rest.is_empty() {
+        vec![line1]
+    } else {
+        vec![line1, truncate_to_width(ui, &rest, max_w)]
+    }
+}
+
+fn render_skill_bar(
+    ui: &Ui,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+    stances: &str,
+    pets: &str,
+    heal: &str,
+    utilities: &[String],
+    elite: &str,
+) {
+    render_slash_list(ui, "Stances", stances, db);
+    render_slash_list(ui, "Pets", pets, db);
+
+    let u1 = utilities.first().map(|s| s.as_str()).unwrap_or("");
+    let u2 = utilities.get(1).map(|s| s.as_str()).unwrap_or("");
+    let u3 = utilities.get(2).map(|s| s.as_str()).unwrap_or("");
+    let slots = [
+        ("Heal", heal, crate::ui::theme::HEAL_RIM),
+        ("Util 1", u1, crate::ui::theme::GOLD_DIM),
+        ("Util 2", u2, crate::ui::theme::GOLD_DIM),
+        ("Util 3", u3, crate::ui::theme::GOLD_DIM),
+        ("Elite", elite, crate::ui::theme::ELITE_RIM),
+    ];
+    let avail = ui.content_region_avail()[0].max(1.0);
+    let gap = 5.0;
+    let slot_w = ((avail - gap * 4.0) / 5.0).max(52.0);
+    let slot_h = 58.0;
+    let start = ui.cursor_screen_pos();
+    let line = ui.text_line_height();
+    for (i, (label, value, rim)) in slots.iter().enumerate() {
+        let x = start[0] + i as f32 * (slot_w + gap);
+        let p = [x, start[1]];
+        let empty = value.is_empty();
+        let fill = if empty {
+            crate::ui::theme::PLATE_EMPTY
+        } else {
+            crate::ui::theme::PLATE
+        };
+        let border = if empty {
+            [0.28, 0.24, 0.14, 0.45]
+        } else {
+            *rim
+        };
+        ui.set_cursor_screen_pos(p);
+        let _ = ui.invisible_button(&format!("##skill_slot_{i}"), [slot_w, slot_h]);
+        if !empty {
+            crate::ui::comparison::inspect_if_hovered(ui, value, db);
+        }
+        {
+            let dl = ui.get_window_draw_list();
+            dl.add_rect(p, [p[0] + slot_w, p[1] + slot_h], fill)
+                .filled(true)
+                .rounding(6.0)
+                .build();
+            dl.add_rect(p, [p[0] + slot_w, p[1] + slot_h], border)
+                .rounding(6.0)
+                .build();
+            if !empty {
+                if let Some(url) = db.and_then(|d| crate::ui::icons::skill_url_by_name(d, value)) {
+                    crate::ui::icons::paint_on(
+                        &dl,
+                        Some(url),
+                        [p[0] + 4.0, p[1] + 20.0],
+                        [p[0] + 26.0, p[1] + 42.0],
+                        [1.0, 1.0, 1.0, 1.0],
+                    );
+                }
+            }
+            dl.add_text(
+                [p[0] + 6.0, p[1] + 4.0],
+                crate::ui::color_u32(crate::ui::theme::GOLD),
+                *label,
+            );
+            let shown = if empty { "\u{2014}" } else { *value };
+            let color = if empty {
+                crate::ui::theme::MUTED
+            } else {
+                crate::ui::theme::CREAM
+            };
+            let inner_w = slot_w - 12.0;
+            let lines = wrap_slot_lines(ui, shown, inner_w);
+            for (li, ln) in lines.iter().take(2).enumerate() {
+                dl.add_text(
+                    [p[0] + 6.0, p[1] + 6.0 + line * (1.0 + li as f32)],
+                    crate::ui::color_u32(color),
+                    ln,
+                );
+            }
+        }
+    }
+    ui.set_cursor_screen_pos([start[0], start[1] + slot_h + 6.0]);
+    ui.dummy([avail, 0.0]);
+}
+
 // ─── Individual section renderers (for column-aligned layouts) ───
 
 /// Render the SKILLS section for the current build.
-pub fn render_build_skills(ui: &Ui, build: &ResolvedBuild) {
+pub fn render_build_skills(
+    ui: &Ui,
+    build: &ResolvedBuild,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+) {
     render_card_section(ui, "SKILLS", |ui| {
-        if let Some(ref h) = build.skills.heal {
-            render_label_value(ui, "Heal", &h.name);
-        }
-        let utils: Vec<String> = build
+        let heal = build
             .skills
-            .utilities
-            .iter()
-            .filter_map(|u| u.as_ref().map(|s| s.name.clone()))
+            .heal
+            .as_ref()
+            .map(|s| s.name.as_str())
+            .unwrap_or("");
+        let elite = build
+            .skills
+            .elite
+            .as_ref()
+            .map(|s| s.name.as_str())
+            .unwrap_or("");
+        let utils: Vec<String> = (0..3)
+            .map(|i| {
+                build
+                    .skills
+                    .utilities
+                    .get(i)
+                    .and_then(|u| u.as_ref().map(|s| s.name.clone()))
+                    .unwrap_or_default()
+            })
             .collect();
-        for (i, name) in utils.iter().enumerate() {
-            render_label_value(ui, &format!("Util {}", i + 1), name);
-        }
-        if let Some(ref e) = build.skills.elite {
-            render_label_value(ui, "Elite", &e.name);
-        }
+        render_skill_bar(
+            ui,
+            db,
+            &build.legends.join(" / "),
+            &build.pets.join(" / "),
+            heal,
+            &utils,
+            elite,
+        );
     });
 }
 
 /// Render the WEAPONS section for the current build.
-pub fn render_build_weapons(ui: &Ui, build: &ResolvedBuild) {
+pub fn render_build_weapons(
+    ui: &Ui,
+    build: &ResolvedBuild,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+) {
     render_card_section(ui, "WEAPONS", |ui| {
         for set in &build.weapons {
             let mut parts = Vec::new();
@@ -290,16 +517,19 @@ pub fn render_build_weapons(ui: &Ui, build: &ResolvedBuild) {
             if !parts.is_empty() {
                 render_label_value(ui, &set.label, &parts.join(" / "));
             }
-            if !set.sigils.is_empty() {
-                let names: Vec<&str> = set.sigils.iter().map(|s| s.name.as_str()).collect();
-                ui.text_colored(DIM_COLOR, format!("    Sigils: {}", names.join(", ")));
+            for sigil in &set.sigils {
+                render_label_value_inspect(ui, "Sigil", &sigil.name, db);
             }
         }
     });
 }
 
 /// Render the GEAR section for the current build.
-pub fn render_build_gear(ui: &Ui, build: &ResolvedBuild) {
+pub fn render_build_gear(
+    ui: &Ui,
+    build: &ResolvedBuild,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+) {
     render_card_section(ui, "GEAR", |ui| {
         if !build.armor.is_empty() {
             let mut prefixes: Vec<&str> = build
@@ -318,10 +548,16 @@ pub fn render_build_gear(ui: &Ui, build: &ResolvedBuild) {
             render_label_value(ui, "Prefix", &prefix_str);
         }
         if let Some(ref r) = build.rune {
-            render_label_value_colored(ui, "Rune", &r.name, GEAR_COLOR);
+            ui.text_colored(LABEL_COLOR, "  Rune: ");
+            ui.same_line();
+            ui.text_colored(GEAR_COLOR, &r.name);
+            crate::ui::comparison::inspect_if_hovered(ui, &r.name, db);
         }
         if let Some(ref r) = build.relic {
-            render_label_value_colored(ui, "Relic", &r.name, GEAR_COLOR);
+            ui.text_colored(LABEL_COLOR, "  Relic: ");
+            ui.same_line();
+            ui.text_colored(GEAR_COLOR, &r.name);
+            crate::ui::comparison::inspect_if_hovered(ui, &r.name, db);
         }
         if let Some(ref a) = build.pvp_amulet {
             render_label_value_colored(ui, "Amulet", &a.name, GEAR_COLOR);
@@ -367,40 +603,62 @@ pub fn render_build_stats(ui: &Ui, stats: Option<&StatBlock>, compare_stats: Opt
 }
 
 /// Render the SKILLS section for the suggestion.
-pub fn render_suggestion_skills(ui: &Ui, suggestion: &super::super::comparison::BuildSuggestion) {
+pub fn render_suggestion_skills(
+    ui: &Ui,
+    suggestion: &super::super::comparison::BuildSuggestion,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+) {
     render_card_section(ui, "SKILLS", |ui| {
-        for skill in &suggestion.skills {
-            ui.text_colored(VALUE_COLOR, format!("  {}", skill));
-        }
+        let parsed = crate::ui::gear_diff::parse_suggestion_skills(&suggestion.skills);
+        render_skill_bar(
+            ui,
+            db,
+            &parsed.stances,
+            &parsed.pets,
+            &parsed.heal,
+            &parsed.utilities,
+            &parsed.elite,
+        );
     });
 }
 
 /// Render the WEAPONS section for the suggestion.
-pub fn render_suggestion_weapons(ui: &Ui, suggestion: &super::super::comparison::BuildSuggestion) {
+pub fn render_suggestion_weapons(
+    ui: &Ui,
+    suggestion: &super::super::comparison::BuildSuggestion,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+) {
     render_card_section(ui, "WEAPONS", |ui| {
         for weapon in &suggestion.weapons {
             ui.text_colored(VALUE_COLOR, format!("  {}", weapon));
         }
-        if !suggestion.sigils.is_empty() {
-            ui.text_colored(
-                DIM_COLOR,
-                format!("  Sigils: {}", suggestion.sigils.join(", ")),
-            );
+        for sigil in &suggestion.sigils {
+            render_label_value_inspect(ui, "Sigil", sigil, db);
         }
     });
 }
 
 /// Render the GEAR section for the suggestion.
-pub fn render_suggestion_gear(ui: &Ui, suggestion: &super::super::comparison::BuildSuggestion) {
+pub fn render_suggestion_gear(
+    ui: &Ui,
+    suggestion: &super::super::comparison::BuildSuggestion,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+) {
     render_card_section(ui, "GEAR", |ui| {
         if !suggestion.stat_prefix.is_empty() {
             render_label_value(ui, "Prefix", &suggestion.stat_prefix);
         }
         if !suggestion.rune.is_empty() {
-            render_label_value_colored(ui, "Rune", &suggestion.rune, GEAR_COLOR);
+            ui.text_colored(LABEL_COLOR, "  Rune: ");
+            ui.same_line();
+            ui.text_colored(GEAR_COLOR, &suggestion.rune);
+            crate::ui::comparison::inspect_if_hovered(ui, &suggestion.rune, db);
         }
         if !suggestion.relic.is_empty() {
-            render_label_value_colored(ui, "Relic", &suggestion.relic, GEAR_COLOR);
+            ui.text_colored(LABEL_COLOR, "  Relic: ");
+            ui.same_line();
+            ui.text_colored(GEAR_COLOR, &suggestion.relic);
+            crate::ui::comparison::inspect_if_hovered(ui, &suggestion.relic, db);
         }
     });
 }
@@ -571,8 +829,16 @@ pub fn render_suggestion_combat(
 }
 
 /// Render rotation breakdown section (full-width).
-pub fn render_rotation_section(ui: &Ui, rotation: &RotationBreakdown) {
-    render_card_section(ui, "ROTATION BREAKDOWN", |ui| {
+pub fn render_rotation_section(
+    ui: &Ui,
+    rotation: &RotationBreakdown,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+) {
+    render_card_section(ui, "ROTATION (simulated)", |ui| {
+        ui.text_colored(
+            DIM_COLOR,
+            "  Not a live combat log \u{2014} model of this template.",
+        );
         ui.text_colored(
             VALUE_COLOR,
             format!(
@@ -610,6 +876,7 @@ pub fn render_rotation_section(ui: &Ui, rotation: &RotationBreakdown) {
             for (name, casts, dps) in &rotation.skill_usage {
                 if *casts > 0 {
                     ui.text_colored(DIM_COLOR, format!("    {} x{} ({} DPS)", name, casts, dps));
+                    crate::ui::comparison::inspect_if_hovered(ui, name, db);
                 }
             }
         }
@@ -639,7 +906,7 @@ pub fn render_why_section(ui: &Ui, explanation: &str, changes: &[String]) {
         draw_list.add_text(
             [pos[0] + 8.0, pos[1] + 3.0],
             SECTION_TITLE_COLOR,
-            "WHY THIS BUILD",
+            "HOW TO PLAY (advisory)",
         );
     }
     ui.dummy([width, 24.0]);

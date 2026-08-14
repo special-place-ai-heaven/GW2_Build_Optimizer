@@ -12,6 +12,15 @@ pub enum ChangeStatus {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct ParsedSkills {
+    pub heal: String,
+    pub utilities: Vec<String>,
+    pub elite: String,
+    pub stances: String,
+    pub pets: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct SlotDiff {
     pub slot_label: String,
     pub current_value: String,
@@ -66,12 +75,13 @@ fn diff_slot(label: &str, current: &str, proposed: &str) -> SlotDiff {
     }
 }
 
-/// Parse suggestion skill strings: "Heal: X", "Utility: X", "Elite: X".
+/// Parse suggestion skill strings: "Heal: X", "Utility: X", "Elite: X",
+/// plus optional "Stances:" / "Pets:" rows.
 ///
 /// Prefix matching is case-insensitive — the LLM occasionally lowercases
 /// labels, and a case-sensitive `strip_prefix` would silently misroute
 /// "heal: X" into the utility bucket.
-fn parse_suggestion_skills(skills: &[String]) -> (String, Vec<String>, String) {
+pub(crate) fn parse_suggestion_skills(skills: &[String]) -> ParsedSkills {
     fn strip_label_ci<'a>(s: &'a str, label: &str) -> Option<&'a str> {
         // `get` returns None on a non-char-boundary index, so this stays
         // UTF-8 safe even if the LLM-provided string starts with multibyte
@@ -83,29 +93,36 @@ fn parse_suggestion_skills(skills: &[String]) -> (String, Vec<String>, String) {
             None
         }
     }
-    let mut heal = String::new();
-    let mut utils = Vec::new();
-    let mut elite = String::new();
+    let mut parsed = ParsedSkills {
+        heal: String::new(),
+        utilities: Vec::new(),
+        elite: String::new(),
+        stances: String::new(),
+        pets: String::new(),
+    };
     for s in skills {
         if let Some(name) = strip_label_ci(s, "Heal: ") {
-            heal = name.trim().to_string();
+            parsed.heal = name.trim().to_string();
         } else if let Some(name) = strip_label_ci(s, "Utility: ") {
-            utils.push(name.trim().to_string());
+            parsed.utilities.push(name.trim().to_string());
         } else if let Some(name) = strip_label_ci(s, "Elite: ") {
-            elite = name.trim().to_string();
+            parsed.elite = name.trim().to_string();
+        } else if let Some(name) = strip_label_ci(s, "Stances: ") {
+            parsed.stances = name.trim().to_string();
+        } else if let Some(name) = strip_label_ci(s, "Pets: ") {
+            parsed.pets = name.trim().to_string();
         } else {
-            // Unknown format — treat as utility
-            utils.push(s.trim().to_string());
+            parsed.utilities.push(s.trim().to_string());
         }
     }
-    (heal, utils, elite)
+    parsed
 }
 
 /// Parse suggestion weapon strings: "Set 1: Sword / Shield", "Set 2: Rifle".
 ///
 /// Prefix matching is case-insensitive so "set 1:" or "SET 1:" route the
 /// same as the canonical "Set 1:".
-fn parse_suggestion_weapons(weapons: &[String]) -> Vec<(String, String)> {
+pub(crate) fn parse_suggestion_weapons(weapons: &[String]) -> Vec<(String, String)> {
     fn strip_label_ci<'a>(s: &'a str, label: &str) -> Option<&'a str> {
         // `get` returns None on a non-char-boundary index, so this stays
         // UTF-8 safe even if the LLM-provided string starts with multibyte
@@ -189,7 +206,7 @@ pub fn compute_build_diff(current: &ResolvedBuild, suggestion: &BuildSuggestion)
     }
 
     // --- Skills ---
-    let (sug_heal, sug_utils, sug_elite) = parse_suggestion_skills(&suggestion.skills);
+    let parsed = parse_suggestion_skills(&suggestion.skills);
     let cur_heal = current
         .skills
         .heal
@@ -210,14 +227,28 @@ pub fn compute_build_diff(current: &ResolvedBuild, suggestion: &BuildSuggestion)
         .collect();
 
     let mut skills = Vec::new();
-    skills.push(diff_slot("Heal", &cur_heal, &sug_heal));
-    let max_utils = cur_utils.len().max(sug_utils.len()).max(3);
+    if !parsed.stances.is_empty() || !current.legends.is_empty() {
+        skills.push(diff_slot(
+            "Stances",
+            &current.legends.join(" / "),
+            &parsed.stances,
+        ));
+    }
+    if !parsed.pets.is_empty() || !current.pets.is_empty() {
+        skills.push(diff_slot(
+            "Pets",
+            &current.pets.join(" / "),
+            &parsed.pets,
+        ));
+    }
+    skills.push(diff_slot("Heal", &cur_heal, &parsed.heal));
+    let max_utils = cur_utils.len().max(parsed.utilities.len()).max(3);
     for i in 0..max_utils {
         let cur_u = cur_utils.get(i).map(|s| s.as_str()).unwrap_or("");
-        let sug_u = sug_utils.get(i).map(|s| s.as_str()).unwrap_or("");
+        let sug_u = parsed.utilities.get(i).map(|s| s.as_str()).unwrap_or("");
         skills.push(diff_slot(&format!("Utility {}", i + 1), cur_u, sug_u));
     }
-    skills.push(diff_slot("Elite", &cur_elite, &sug_elite));
+    skills.push(diff_slot("Elite", &cur_elite, &parsed.elite));
 
     // --- Weapons & Sigils ---
     let sug_weapons = parse_suggestion_weapons(&suggestion.weapons);
@@ -349,10 +380,28 @@ mod tests {
             "Utility: Advance!".to_string(),
             "Elite: Feel My Wrath".to_string(),
         ];
-        let (heal, utils, elite) = parse_suggestion_skills(&skills);
-        assert_eq!(heal, "Mending");
-        assert_eq!(utils.len(), 3);
-        assert_eq!(elite, "Feel My Wrath");
+        let parsed = parse_suggestion_skills(&skills);
+        assert_eq!(parsed.heal, "Mending");
+        assert_eq!(parsed.utilities.len(), 3);
+        assert_eq!(parsed.elite, "Feel My Wrath");
+        assert!(parsed.stances.is_empty());
+        assert!(parsed.pets.is_empty());
+    }
+
+    #[test]
+    fn test_parse_skills_stances_and_pets() {
+        let skills = vec![
+            "Stances: Assassin / Dwarf".to_string(),
+            "Pets: #1 / #2".to_string(),
+            "Heal: Mending".to_string(),
+            "Elite: Feel My Wrath".to_string(),
+        ];
+        let parsed = parse_suggestion_skills(&skills);
+        assert_eq!(parsed.stances, "Assassin / Dwarf");
+        assert_eq!(parsed.pets, "#1 / #2");
+        assert_eq!(parsed.heal, "Mending");
+        assert!(parsed.utilities.is_empty());
+        assert_eq!(parsed.elite, "Feel My Wrath");
     }
 
     #[test]
@@ -364,10 +413,10 @@ mod tests {
             "UTILITY: Signet of Resolve".to_string(),
             "Elite: Feel My Wrath".to_string(),
         ];
-        let (heal, utils, elite) = parse_suggestion_skills(&skills);
-        assert_eq!(heal, "Mending");
-        assert_eq!(utils, vec!["Signet of Resolve".to_string()]);
-        assert_eq!(elite, "Feel My Wrath");
+        let parsed = parse_suggestion_skills(&skills);
+        assert_eq!(parsed.heal, "Mending");
+        assert_eq!(parsed.utilities, vec!["Signet of Resolve".to_string()]);
+        assert_eq!(parsed.elite, "Feel My Wrath");
     }
 
     #[test]

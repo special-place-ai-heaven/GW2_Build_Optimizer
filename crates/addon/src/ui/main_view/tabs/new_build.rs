@@ -3,6 +3,7 @@
 use nexus::imgui::Ui;
 
 use crate::state::AddonState;
+use crate::ui::theme;
 
 use super::{optimization, render_left_section_header, render_optimization_progress};
 
@@ -14,7 +15,7 @@ fn render_role_picker(ui: &Ui, state: &mut AddonState) {
 
     render_left_section_header(ui, "SELECT ROLE", state.config.section_spacing);
     ui.spacing();
-    ui.text_colored([0.6, 0.6, 0.6, 1.0], "Choose what this build should do:");
+    ui.text_colored(theme::MUTED, "Choose what this build should do:");
     ui.spacing();
 
     // Generic roles (all modes)
@@ -142,7 +143,7 @@ fn render_role_picker(ui: &Ui, state: &mut AddonState) {
     // Show selected role hint
     if let Some(role) = current {
         ui.text_colored(
-            [0.6, 0.9, 0.6, 1.0],
+            theme::OPTIMIZED,
             format!(
                 "  Selected: {} — click 'Optimize Build' in the left panel",
                 role.label()
@@ -150,7 +151,7 @@ fn render_role_picker(ui: &Ui, state: &mut AddonState) {
         );
     } else {
         ui.text_colored(
-            [0.5, 0.5, 0.5, 1.0],
+            theme::MUTED,
             "  Select a role above, then click 'Optimize Build'",
         );
     }
@@ -160,7 +161,7 @@ fn render_role_picker(ui: &Ui, state: &mut AddonState) {
 pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
     if state.main.selected_character.is_none() {
         ui.text_colored(
-            [0.6, 0.6, 0.7, 1.0],
+            theme::MUTED,
             "Select a character from the left panel to create a new build.",
         );
         return;
@@ -168,7 +169,7 @@ pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonS
 
     // Show optimization error
     if let Some(err) = state.main.comparison.error.clone() {
-        ui.text_colored([1.0, 0.3, 0.0, 1.0], format!("[!] {}", err));
+        ui.text_colored(theme::ERR, format!("[!] {}", err));
         ui.same_line();
         if ui.small_button("Dismiss##opt_err") {
             state.main.comparison.error = None;
@@ -186,21 +187,26 @@ pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonS
         render_role_picker(ui, state);
     }
 
-    // Show comparison if suggestions exist
+    // Show comparison if suggestions exist — scroll child leaves room for Save + chat.
     if !state.main.comparison.suggestions.is_empty() {
-        if let Some(ref build) = state.main.current_build {
-            let stats = state.main.current_stats.clone();
-            if let Some(new_idx) = crate::ui::comparison::render_comparison(
-                ui,
-                build,
-                stats.as_ref(),
-                &state.main.comparison,
-            ) {
-                state.main.comparison.selected_suggestion = new_idx;
-            }
-        } else {
-            ui.text_colored([1.0, 1.0, 0.0, 1.0], "Waiting for build data to load...");
-        }
+        let footer = 36.0 + crate::ui::chat_bar::reserved_height(&state.main.chat);
+        let scroll_h = (ui.content_region_avail()[1] - footer).max(64.0);
+        nexus::imgui::ChildWindow::new("##new_build_scroll")
+            .size([0.0, scroll_h])
+            .build(ui, || {
+                if let Some(build) = state.main.current_build.clone() {
+                    let stats = state.main.current_stats.clone();
+                    crate::ui::comparison::render_comparison(
+                        ui,
+                        &build,
+                        stats.as_ref(),
+                        &mut state.main.comparison,
+                        state.main.game_db.as_ref(),
+                    );
+                } else {
+                    ui.text_colored(theme::WARN, "Waiting for build data to load...");
+                }
+            });
 
         // Save Build + Clear
         super::saveload::render_save_build_ui(ui, state);

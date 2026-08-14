@@ -1,9 +1,10 @@
 use nexus::imgui::{ChildWindow, ComboBox, Selectable, Ui};
 
 use crate::state::{AddonState, MainTab};
+use crate::ui::theme;
 use gw2_optimizer::scoring::OptimizationWeights;
 
-mod build_display;
+pub(crate) mod build_display;
 mod character;
 pub mod lock_panel;
 mod optimization;
@@ -16,9 +17,6 @@ const HEADER_BG: [f32; 4] = [0.18, 0.16, 0.10, 0.95];
 const ACCENT_COLOR: [f32; 4] = [0.7, 0.55, 0.15, 0.6];
 
 pub fn render_main(ui: &Ui, state: &mut AddonState) {
-    // Force arrow cursor (prevent hand/drag cursor from Nexus overlay)
-    ui.set_mouse_cursor(Some(nexus::imgui::MouseCursor::Arrow));
-
     // Apply global UI scale (text + element sizing)
     let scale = state.config.font_scale;
     ui.set_window_font_scale(scale);
@@ -89,10 +87,14 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
 
     // ── Two-column layout: left dynamic panel + center content ──
-    let left_panel_width = state.config.left_panel_width;
     let pad = state.config.panel_padding;
     let content_indent = state.config.content_indent;
     let avail = ui.content_region_avail();
+    let left_panel_width = {
+        let scaled = state.config.left_panel_width * scale;
+        let max_w = (avail[0] * 0.42).max(160.0);
+        scaled.clamp(160.0, max_w)
+    };
     // Leave a small footer margin so the bottom row (Save/Clear buttons, etc.)
     // is not tight against the game window edge or clipped on some resolutions.
     let child_height = (avail[1] - 6.0).max(0.0);
@@ -135,13 +137,22 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
     }
 
     // API health indicator
-    let (dot, label, color) = match state.main.api_status {
-        crate::state::ApiStatus::Unknown => ("[o]", "Checking...", [0.5, 0.5, 0.5, 1.0]),
-        crate::state::ApiStatus::Online => ("[+]", "API Online", [0.0, 0.8, 0.0, 1.0]),
-        crate::state::ApiStatus::Degraded => ("[~]", "API Slow", [1.0, 0.8, 0.0, 1.0]),
-        crate::state::ApiStatus::Offline => ("[-]", "API Offline", [1.0, 0.2, 0.0, 1.0]),
+    let (label, color) = match state.main.api_status {
+        crate::state::ApiStatus::Unknown => ("Checking API\u{2026}", crate::ui::theme::MUTED),
+        crate::state::ApiStatus::Online => ("API ready", crate::ui::theme::OPTIMIZED),
+        crate::state::ApiStatus::Degraded => ("API slow", crate::ui::theme::GOLD),
+        crate::state::ApiStatus::Offline => ("API offline", crate::ui::theme::ERR),
     };
-    ui.text_colored(color, format!(" {} {}", dot, label));
+    {
+        let p = ui.cursor_screen_pos();
+        ui.get_window_draw_list()
+            .add_circle([p[0] + 8.0, p[1] + 8.0], 4.0, color)
+            .filled(true)
+            .build();
+    }
+    ui.dummy([16.0, 16.0]);
+    ui.same_line();
+    ui.text_colored(color, label);
     if ui.is_item_hovered() {
         ui.tooltip_text(match state.main.api_status {
             crate::state::ApiStatus::Unknown => "Checking GW2 API availability...",
@@ -153,14 +164,35 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
         });
     }
 
+    if let (Some(cached), Some(live)) =
+        (state.config.cache_build_number, state.main.live_build_number)
+    {
+        if cached != live && !state.main.game_db_loading {
+            ui.same_line();
+            ui.text_colored(
+                theme::WARN,
+                format!("| Game data stale ({cached} \u{2192} {live})"),
+            );
+            if ui.is_item_hovered() {
+                ui.tooltip_text(
+                    "ArenaNet shipped a new game build. Refresh game data — icons stay cached.",
+                );
+            }
+            ui.same_line();
+            if theme::gold_button(ui, "Refresh##stale_data") {
+                stats::start_game_data_refresh(state);
+            }
+        }
+    }
+
     // Loading banner (GameDb)
     if state.main.game_db_loading {
         ui.same_line();
         let stage = &state.main.game_refresh_stage;
         if !stage.is_empty() {
-            ui.text_colored([1.0, 1.0, 0.0, 1.0], format!("| {}", stage));
+            ui.text_colored(theme::WARN, format!("| {}", stage));
         } else {
-            ui.text_colored([1.0, 1.0, 0.0, 1.0], "| Loading game data...");
+            ui.text_colored(theme::WARN, "| Loading game data...");
         }
     }
 
@@ -168,14 +200,14 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
     if state.main.optimizing {
         ui.same_line();
         ui.text_colored(
-            [1.0, 1.0, 0.0, 1.0],
+            theme::WARN,
             format!("| {}", state.main.optimize_stage),
         );
     }
 
     // Error bar (dismissible)
     if let Some(ref err) = state.main.error {
-        ui.text_colored([1.0, 0.3, 0.0, 1.0], format!("  [!] {}", err));
+        ui.text_colored(theme::ERR, format!("  [!] {}", err));
         ui.same_line();
         if ui.small_button("Dismiss##err") {
             state.main.error = None;
@@ -214,7 +246,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
             .add_rect(
                 [start[0], start[1]],
                 [start[0] + width, start[1] + 62.0],
-                [0.10, 0.10, 0.16, 0.95],
+                [0.10, 0.08, 0.05, 0.95],
             )
             .filled(true)
             .rounding(6.0)
@@ -228,7 +260,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
             .add_rect(
                 [(glow_x - glow_half).max(start[0]), start[1]],
                 [(glow_x + glow_half).min(start[0] + width), start[1] + 3.0],
-                [0.3, 0.9, 1.0, 0.9],
+                crate::ui::theme::GOLD,
             )
             .filled(true)
             .build();
@@ -237,7 +269,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
             .add_rect(
                 [start[0], start[1]],
                 [start[0] + width, start[1] + 3.0],
-                [0.2, 0.5, 0.7, 0.3],
+                [0.55, 0.42, 0.16, 0.35],
             )
             .filled(true)
             .build();
@@ -249,7 +281,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
             let alpha = 0.3 + 0.7 * (phase * std::f32::consts::PI * 2.0).sin().abs();
             let dot_x = start[0] + 16.0 + i as f32 * 12.0;
             draw_list
-                .add_circle([dot_x, dot_y], 3.5, [0.3_f32, 0.8, 1.0, alpha])
+                .add_circle([dot_x, dot_y], 3.5, [1.0, 0.84, 0.38, alpha])
                 .filled(true)
                 .build();
         }
@@ -257,8 +289,8 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
         // "OPTIMIZING..." title
         draw_list.add_text(
             [start[0] + 56.0, start[1] + 10.0],
-            [0.4, 0.9, 1.0, 1.0],
-            "OPTIMIZING...",
+            crate::ui::theme::GOLD,
+            "Finding a better build\u{2026}",
         );
 
         // Stage detail text
@@ -297,7 +329,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
                     (sweep_x + sweep_width).min(start[0] + width - 8.0),
                     bar_y + 4.0,
                 ],
-                [0.3, 0.8, 1.0, 0.7],
+                crate::ui::theme::GOLD_FILL,
             )
             .filled(true)
             .rounding(2.0)
@@ -308,7 +340,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
             .add_rect(
                 [start[0], start[1]],
                 [start[0] + width, start[1] + 62.0],
-                [0.25, 0.5, 0.7, 0.3],
+                crate::ui::theme::GOLD_DIM,
             )
             .rounding(6.0)
             .build();
@@ -322,88 +354,38 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
 fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
     let tabs = [
         (MainTab::NewBuild, "New Build"),
-        (MainTab::Improve, "Improve Build"),
+        (MainTab::Improve, "Improve"),
         (MainTab::SaveLoad, "Save / Load"),
         (MainTab::Settings, "Settings"),
     ];
 
-    let start_y = ui.cursor_screen_pos()[1];
-
     for (i, (tab, label)) in tabs.iter().enumerate() {
         if i > 0 {
-            ui.same_line();
+            ui.same_line_with_spacing(0.0, 8.0);
         }
 
         let is_active = state.main.active_tab == *tab;
-        let btn_pos = ui.cursor_screen_pos();
-
-        if is_active {
-            // Active tab: brighter text + underline
-            ui.text_colored([1.0, 0.88, 0.35, 1.0], label);
-        } else {
-            // Inactive: dim + clickable
-            ui.text_colored([0.6, 0.55, 0.45, 1.0], label);
-        }
-
-        // Make the text clickable
-        if ui.is_item_hovered() {
-            if !is_active {
-                // Hover underline
-                let text_size = ui.calc_text_size(label);
-                let draw_list = ui.get_window_draw_list();
-                draw_list
-                    .add_line(
-                        [btn_pos[0], btn_pos[1] + text_size[1] + 1.0],
-                        [btn_pos[0] + text_size[0], btn_pos[1] + text_size[1] + 1.0],
-                        [0.6, 0.5, 0.3, 0.5],
-                    )
-                    .thickness(1.0)
-                    .build();
-            }
-            if ui.is_item_clicked() {
-                state.main.active_tab = tab.clone();
-                // Clear locks when switching to New Build, auto-populate when switching to Improve
-                match tab {
-                    MainTab::NewBuild => {
-                        state.main.build_locks = gw2_core::types::BuildLocks::default();
-                    }
-                    MainTab::Improve => {
-                        if let Some(ref build) = state.main.current_build {
-                            let build_clone = build.clone();
-                            resolution::auto_populate_locks(
-                                &build_clone,
-                                &mut state.main.build_locks,
-                            );
-                        }
-                    }
-                    _ => {}
+        if crate::ui::theme::pill(ui, label, is_active, &format!("##main_tab_{}", label)) {
+            state.main.active_tab = tab.clone();
+            match tab {
+                MainTab::NewBuild => {
+                    state.main.build_locks = gw2_core::types::BuildLocks::default();
                 }
+                MainTab::Improve => {
+                    if let Some(ref build) = state.main.current_build {
+                        let build_clone = build.clone();
+                        resolution::auto_populate_locks(
+                            &build_clone,
+                            &mut state.main.build_locks,
+                        );
+                    }
+                }
+                _ => {}
             }
-        }
-
-        // Active tab: gold underline
-        if is_active {
-            let text_size = ui.calc_text_size(label);
-            let draw_list = ui.get_window_draw_list();
-            draw_list
-                .add_line(
-                    [btn_pos[0], btn_pos[1] + text_size[1] + 2.0],
-                    [btn_pos[0] + text_size[0], btn_pos[1] + text_size[1] + 2.0],
-                    [1.0, 0.75, 0.2, 0.9],
-                )
-                .thickness(2.0)
-                .build();
-        }
-
-        // Tab separator
-        if i < tabs.len() - 1 {
-            ui.same_line();
-            ui.text_colored([0.3, 0.3, 0.3, 0.5], "|");
         }
     }
 
-    let _ = start_y; // suppress unused warning
-    ui.dummy([0.0, 4.0]);
+    ui.dummy([0.0, 6.0]);
 }
 
 /// Dynamic left panel: content varies by active tab.
@@ -422,20 +404,20 @@ fn render_left_panel(ui: &Ui, state: &mut AddonState) {
             ui.spacing();
             if state.main.characters_loading {
                 let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-                ui.button_with_size("Refreshing...", [-1.0, 0.0]);
+                theme::gold_button_sized(ui, "Refreshing...", [-1.0, 0.0]);
                 style.pop();
-            } else if ui.button_with_size("Refresh Data", [-1.0, 0.0]) {
+            } else if theme::gold_button_sized(ui, "Refresh Data", [-1.0, 0.0]) {
                 character::load_characters(state);
             }
         }
         MainTab::Settings => {
             // Settings info
             render_left_section_header(ui, "INFO", state.config.section_spacing);
-            ui.text_colored([0.6, 0.6, 0.7, 1.0], "  GW2 Build Optimizer");
-            ui.text_colored([0.5, 0.5, 0.5, 1.0], "  v1.0.0");
+            ui.text_colored(theme::MUTED, "  GW2 Build Optimizer");
+            ui.text_colored(theme::MUTED, "  v1.0.0");
             ui.spacing();
             let provider_label = state.config.active_provider.label();
-            ui.text_colored([0.5, 0.5, 0.5, 1.0], format!("  AI: {}", provider_label));
+            ui.text_colored(theme::MUTED, format!("  AI: {}", provider_label));
         }
     }
 }
@@ -451,11 +433,25 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
             .add_rect(
                 [pos[0], pos[1]],
                 [pos[0] + width, pos[1] + 18.0],
-                [0.22, 0.19, 0.10, 0.9],
+                [0.18, 0.15, 0.08, 0.95],
             )
             .filled(true)
+            .rounding(4.0)
             .build();
-        draw_list.add_text([pos[0] + 6.0, pos[1] + 2.0], [0.85, 0.72, 0.3, 1.0], title);
+        draw_list
+            .add_rect(
+                [pos[0], pos[1]],
+                [pos[0] + 3.0, pos[1] + 18.0],
+                crate::ui::theme::GOLD,
+            )
+            .filled(true)
+            .rounding(2.0)
+            .build();
+        draw_list.add_text(
+            [pos[0] + 8.0, pos[1] + 2.0],
+            crate::ui::theme::GOLD,
+            title,
+        );
     }
     ui.dummy([0.0, 20.0]);
     ui.dummy([0.0, spacing * 0.5]); // gap below
@@ -667,26 +663,16 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
 
     // Build resolution indicator
     if state.main.build_loading {
-        ui.text_colored([1.0, 1.0, 0.0, 1.0], "Resolving build...");
+        ui.text_colored(theme::WARN, "Resolving build...");
     }
 
-    // Build chat code display with Copy button
-    if let Some(ref code) = state.main.build_chat_code.clone() {
-        ui.spacing();
-        ui.text_colored([0.6, 0.6, 0.7, 1.0], "Chat Code:");
-        ui.same_line();
-        if state.main.copy_feedback_frames > 0 {
-            ui.text_colored([0.0, 1.0, 0.0, 1.0], "Copied!");
-            state.main.copy_feedback_frames -= 1;
-        } else if ui.small_button("Copy##chatcode") {
-            ui.set_clipboard_text(code);
-            state.main.copy_feedback_frames = 120;
-        }
-        ui.set_next_item_width(-1.0);
-        let mut code_buf = code.clone();
-        ui.input_text("##chat_code_display", &mut code_buf)
-            .read_only(true)
-            .build();
+    if let Some(code) = state.main.build_chat_code.clone() {
+        crate::ui::comparison::render_chat_code_copy(
+            ui,
+            Some(&code),
+            "current",
+            &mut state.main.copy_feedback_frames,
+        );
     }
 }
 
@@ -779,7 +765,7 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     } else {
         format!("  Focus: {}", summary)
     };
-    ui.text_colored([0.6, 0.8, 1.0, 1.0], &focus_label);
+    ui.text_colored(theme::CURRENT, &focus_label);
 
     // Action buttons
     render_left_section_header(ui, "ACTIONS", state.config.section_spacing);
@@ -800,7 +786,7 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
 
     if disabled {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        ui.button_with_size(btn_label, [-1.0, 28.0]);
+        theme::gold_button_sized(ui, btn_label, [-1.0, 28.0]);
         style.pop();
         if ui.is_item_hovered() {
             ui.tooltip_text(if state.main.optimizing {
@@ -811,7 +797,7 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
                 "Select a character first"
             });
         }
-    } else if ui.button_with_size(btn_label, [-1.0, 28.0]) {
+    } else if theme::gold_button_sized(ui, btn_label, [-1.0, 28.0]) {
         if is_improve {
             let profession_name = state
                 .main
@@ -830,9 +816,9 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     ui.dummy([0.0, 2.0]);
     if state.main.characters_loading {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        ui.button_with_size("Refreshing...", [-1.0, 0.0]);
+        theme::gold_button_sized(ui, "Refreshing...", [-1.0, 0.0]);
         style.pop();
-    } else if ui.button_with_size("Refresh Data", [-1.0, 0.0]) {
+    } else if theme::gold_button_sized(ui, "Refresh Data", [-1.0, 0.0]) {
         character::load_characters(state);
     }
     ui.dummy([0.0, 4.0]);

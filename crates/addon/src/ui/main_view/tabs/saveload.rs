@@ -3,6 +3,7 @@
 use nexus::imgui::Ui;
 
 use crate::state::{AddonState, MainTab};
+use crate::ui::theme;
 
 use super::super::{build_display, optimization, stats};
 
@@ -22,10 +23,10 @@ pub(in crate::ui::main_view) fn render_save_build_ui(ui: &Ui, state: &mut AddonS
 
     let can_save = !state.main.save_name_input.trim().is_empty();
     let save_clicked = if can_save {
-        ui.button_with_size("Save", [60.0, 0.0])
+        theme::gold_button_sized(ui, "Save", [60.0, 0.0])
     } else {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        ui.button_with_size("Save", [60.0, 0.0]);
+        theme::gold_button_sized(ui, "Save", [60.0, 0.0]);
         style.pop();
         if ui.is_item_hovered() {
             ui.tooltip_text("Enter a build name first");
@@ -83,9 +84,9 @@ pub(in crate::ui::main_view) fn render_save_build_ui(ui: &Ui, state: &mut AddonS
     if let Some(ref status) = state.main.save_status {
         ui.same_line();
         if status.starts_with("Save failed") {
-            ui.text_colored([1.0, 0.3, 0.0, 1.0], status);
+            ui.text_colored(theme::ERR, status);
         } else {
-            ui.text_colored([0.0, 1.0, 0.0, 1.0], status);
+            ui.text_colored(theme::OPTIMIZED, status);
         }
     }
 }
@@ -102,14 +103,14 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
     build_display::render_card_header(
         ui,
         &format!("SAVED BUILDS ({})", state.main.saved_builds.len()),
-        [1.0, 0.88, 0.35, 1.0],
+        theme::GOLD,
     );
 
     if state.main.saved_builds.is_empty() {
         ui.spacing();
-        ui.text_colored([0.5, 0.5, 0.5, 1.0], "No saved builds yet.");
+        ui.text_colored(theme::MUTED, "No saved builds yet.");
         ui.text_colored(
-            [0.5, 0.5, 0.5, 1.0],
+            theme::MUTED,
             "Optimize a build, then use Save to store it here.",
         );
         return;
@@ -138,16 +139,16 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
 
     for (i, (name, character, prefix, time, mode)) in builds_snapshot.iter().enumerate() {
         // Name + action buttons on one line
-        ui.text_colored([0.6, 0.8, 1.0, 1.0], name);
+        ui.text_colored(theme::CURRENT, name);
         ui.same_line();
-        if ui.button_with_size(format!("Load##load_{}", i), [50.0, 0.0]) {
+        if theme::gold_button_sized(ui, format!("Load##load_{}", i), [50.0, 0.0]) {
             load_idx = Some(i);
         }
         ui.same_line();
 
         // Delete with confirmation
         if state.main.confirm_delete == Some(i) {
-            ui.text_colored([1.0, 0.3, 0.0, 1.0], "Delete?");
+            ui.text_colored(theme::WARN, "Delete?");
             ui.same_line();
             if ui.small_button(format!("Yes##confirm_del_{}", i)) {
                 request_delete = Some(i);
@@ -157,13 +158,13 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
             if ui.small_button(format!("No##cancel_del_{}", i)) {
                 state.main.confirm_delete = None;
             }
-        } else if ui.button_with_size(format!("Delete##del_{}", i), [50.0, 0.0]) {
+        } else if theme::gold_button_sized(ui, format!("Delete##del_{}", i), [50.0, 0.0]) {
             state.main.confirm_delete = Some(i);
         }
 
         // Details on second line
         ui.text_colored(
-            [0.55, 0.55, 0.55, 1.0],
+            theme::MUTED,
             format!("  {} | {} | {} | {}", character, mode, prefix, time),
         );
 
@@ -181,6 +182,7 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
         }
         state.main.comparison.suggestions = vec![suggestion];
         state.main.comparison.selected_suggestion = 0;
+        state.main.comparison.show_optimized = true;
         state.main.comparison.error = None;
         state.main.active_tab = MainTab::NewBuild;
     }

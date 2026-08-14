@@ -183,7 +183,7 @@ pub(super) fn check_api_health(state: &mut AddonState) {
 
     std::thread::spawn(move || {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // Always clear api_health_checking on every exit path.
+            let mut live_build = None;
             let status: Option<crate::state::ApiStatus> = if token.is_cancelled() {
                 None
             } else {
@@ -194,7 +194,8 @@ pub(super) fn check_api_health(state: &mut AddonState) {
                     None
                 } else {
                     Some(match result {
-                        Ok(_) => {
+                        Ok(build) => {
+                            live_build = Some(build);
                             if start.elapsed().as_secs() >= 5 {
                                 crate::state::ApiStatus::Degraded
                             } else {
@@ -207,6 +208,9 @@ pub(super) fn check_api_health(state: &mut AddonState) {
             };
             crate::state::with_state(|s| {
                 s.main.api_health_checking = false;
+                if let Some(b) = live_build {
+                    s.main.live_build_number = Some(b);
+                }
                 if let Some(st) = status {
                     s.main.api_status = st;
                 }

@@ -32,6 +32,13 @@ pub struct WeaponInfo {
     pub skills: Vec<WeaponSkillRef>,
 }
 
+impl WeaponInfo {
+    /// Underwater-only (Trident, Harpoon Gun, aquatic Spear). Not a land weapon set.
+    pub fn is_aquatic(&self) -> bool {
+        self.flags.iter().any(|f| f.eq_ignore_ascii_case("Aquatic"))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeaponSkillRef {
     pub id: u32,
