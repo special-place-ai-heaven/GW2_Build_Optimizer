@@ -21,6 +21,12 @@ pub struct ValidatedBuild {
     pub specializations: Vec<ValidatedSpec>,
     pub weapons: ValidatedWeapons,
     pub skills: ValidatedSkills,
+    /// Revenant terrestrial legends (`Legend1`…), active first.
+    pub legends: Vec<String>,
+    /// Revenant aquatic legends. Empty → encoder copies terrestrial.
+    pub aquatic_legends: Vec<String>,
+    /// Ranger pet IDs: terrestrial[2] then aquatic[2].
+    pub pets: Option<(Option<u32>, Option<u32>, Option<u32>, Option<u32>)>,
     pub rune: Option<ValidatedItem>,
     pub sigils: Vec<ValidatedItem>,
     pub relic: Option<ValidatedItem>,
@@ -175,6 +181,9 @@ pub fn validate_gemini_build(
     }
     validate_weapons(response, db, profession_name, &mut result);
     validate_skills(response, db, profession_name, &mut result);
+    if profession_name == "Revenant" {
+        fill_revenant_legends(&mut result, db);
+    }
     validate_rune(response, db, &mut result);
     validate_sigils(response, db, &mut result);
     validate_relic(response, db, &mut result);
@@ -329,10 +338,24 @@ fn validate_weapon_set(
 
     // Validate main hand
     if let Some(ref mh) = weapons.0 {
-        if let Some((canonical, _info)) = find_weapon(mh, prof) {
-            // Store canonical name so later `prof.weapons.get(...)` (case-sensitive)
-            // hits — preserving the LLM's casing would bypass the elite spec gate.
-            set.main_hand = Some(canonical.clone());
+        if let Some((canonical, info)) = find_weapon(mh, prof) {
+            if info.is_aquatic() {
+                result.errors.push(ValidationReject {
+                    code: RejectCode::WeaponNotAvailable {
+                        slot: label.to_string(),
+                        weapon: canonical.clone(),
+                        profession: prof.name.clone(),
+                    },
+                    detail: format!(
+                        "{}: '{}' is underwater and cannot be a land weapon set",
+                        label, canonical
+                    ),
+                });
+            } else {
+                // Store canonical name so later `prof.weapons.get(...)` (case-sensitive)
+                // hits — preserving the LLM's casing would bypass the elite spec gate.
+                set.main_hand = Some(canonical.clone());
+            }
         } else {
             result.errors.push(ValidationReject {
                 code: RejectCode::WeaponNotAvailable {
@@ -347,8 +370,22 @@ fn validate_weapon_set(
 
     // Validate off hand
     if let Some(ref oh) = weapons.1 {
-        if let Some((canonical, _info)) = find_weapon(oh, prof) {
-            set.off_hand = Some(canonical.clone());
+        if let Some((canonical, info)) = find_weapon(oh, prof) {
+            if info.is_aquatic() {
+                result.errors.push(ValidationReject {
+                    code: RejectCode::WeaponNotAvailable {
+                        slot: label.to_string(),
+                        weapon: canonical.clone(),
+                        profession: prof.name.clone(),
+                    },
+                    detail: format!(
+                        "{}: '{}' is underwater and cannot be a land weapon set",
+                        label, canonical
+                    ),
+                });
+            } else {
+                set.off_hand = Some(canonical.clone());
+            }
         } else {
             result.errors.push(ValidationReject {
                 code: RejectCode::WeaponNotAvailable {
@@ -432,6 +469,7 @@ fn validate_skills(
             None => true,
             Some(spec_id) => Some(spec_id) == equipped_elite_spec_id,
         })
+        .filter(|s| db.skill_palette_id(s.id) != 0)
         .collect();
 
     // Parse skill names from the response
@@ -467,6 +505,58 @@ fn validate_skills(
     if let Some(name) = &elite_name {
         result.skills.elite = find_skill_by_name(name, &prof_skills, Some("Elite"), result);
     }
+}
+
+/// Revenant heal/utilities/elite are a legend bundle, not a free mix.
+/// `/v2/legends` plus the swap skill's `specialization` gate which stances
+/// are legal; the template byte is `Legend.code`.
+fn fill_revenant_legends(result: &mut ValidatedBuild, db: &GameDb) {
+    if db.legends.is_empty() {
+        return;
+    }
+    let spec_ids: Vec<u32> = result.specializations.iter().map(|s| s.spec_id).collect();
+    let mut ids = Vec::new();
+    if let Some((heal_id, _)) = &result.skills.heal {
+        if let Some(id) = db.legends.iter().find_map(|(id, l)| {
+            (l.heal == *heal_id && db.legend_available(id, &spec_ids)).then(|| id.clone())
+        }) {
+            ids.push(id);
+        }
+    }
+    let mut rest: Vec<(u8, String)> = db
+        .legends
+        .keys()
+        .filter(|id| !ids.contains(id) && db.legend_available(id, &spec_ids))
+        .map(|id| (db.legend_template_code(id), id.clone()))
+        .collect();
+    rest.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    for (_, id) in rest {
+        if ids.len() >= 2 {
+            break;
+        }
+        ids.push(id);
+    }
+    if ids.is_empty() {
+        return;
+    }
+    if let Some(legend) = db.legends.get(&ids[0]) {
+        let name_of = |id: u32| {
+            db.skills
+                .get(&id)
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| format!("Skill {id}"))
+        };
+        result.skills.heal = Some((legend.heal, name_of(legend.heal)));
+        result.skills.utilities = legend
+            .utilities
+            .iter()
+            .take(3)
+            .map(|&id| Some((id, name_of(id))))
+            .collect();
+        result.skills.elite = Some((legend.elite, name_of(legend.elite)));
+    }
+    result.legends = ids.clone();
+    result.aquatic_legends = ids;
 }
 
 fn validate_rune(response: &GeminiBuildResponse, db: &GameDb, result: &mut ValidatedBuild) {
@@ -1286,6 +1376,71 @@ mod tests {
             "expected WeaponGatedBySpec error; got {:?}",
             result.errors
         );
+    }
+
+    #[test]
+    fn test_validate_weapon_set_rejects_aquatic_trident_on_land() {
+        let mut weapons = std::collections::HashMap::new();
+        weapons.insert(
+            "Trident".to_string(),
+            gw2_api::models::WeaponInfo {
+                specialization: None,
+                flags: vec!["TwoHand".into(), "Aquatic".into()],
+                skills: vec![],
+            },
+        );
+        weapons.insert(
+            "Staff".to_string(),
+            gw2_api::models::WeaponInfo {
+                specialization: None,
+                flags: vec!["TwoHand".into()],
+                skills: vec![],
+            },
+        );
+        let prof = gw2_api::models::Profession {
+            id: "Guardian".into(),
+            name: "Guardian".into(),
+            code: None,
+            specializations: vec![],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        let db = empty_db_with_itemstats(vec![]);
+        let mut result = ValidatedBuild::default();
+        let set = validate_weapon_set(
+            &(Some("Trident".into()), None),
+            Some(&prof),
+            &db,
+            &mut result,
+            "Set 2",
+        );
+        assert!(
+            set.main_hand.is_none(),
+            "trident must not survive as a land set; got {:?}",
+            set.main_hand
+        );
+        assert!(
+            result.errors.iter().any(|e| matches!(
+                &e.code,
+                RejectCode::WeaponNotAvailable { weapon, .. } if weapon == "Trident"
+            )),
+            "expected WeaponNotAvailable for Trident; got {:?}",
+            result.errors
+        );
+
+        let mut ok = ValidatedBuild::default();
+        let staff = validate_weapon_set(
+            &(Some("Staff".into()), None),
+            Some(&prof),
+            &db,
+            &mut ok,
+            "Set 2",
+        );
+        assert_eq!(staff.main_hand.as_deref(), Some("Staff"));
+        assert!(ok.errors.is_empty());
     }
 
     #[test]

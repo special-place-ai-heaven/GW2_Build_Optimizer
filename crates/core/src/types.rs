@@ -12,6 +12,12 @@ pub struct ResolvedBuild {
     pub game_mode: GameMode,
     pub specializations: Vec<ResolvedSpec>,
     pub skills: ResolvedSkills,
+    /// Revenant stance labels (compact), active first.
+    #[serde(default)]
+    pub legends: Vec<String>,
+    /// Ranger pet labels (terrestrial), when known.
+    #[serde(default)]
+    pub pets: Vec<String>,
     pub weapons: Vec<ResolvedWeaponSet>,
     pub armor: Vec<ResolvedGearPiece>,
     pub trinkets: Vec<ResolvedGearPiece>,
@@ -171,6 +177,8 @@ pub struct ResolvedWeaponSet {
 pub struct WeaponInfo {
     pub name: String,
     pub weapon_type: String,
+    #[serde(default)]
+    pub id: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -185,6 +193,8 @@ pub struct ResolvedGearPiece {
     pub name: String,
     pub stat_prefix: String,
     pub infusions: Vec<String>,
+    #[serde(default)]
+    pub id: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

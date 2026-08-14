@@ -1,6 +1,7 @@
 /target
 .claude/worktrees/
 .symforge/
+.genesis/
 .kilocode/mcp.json
 
 # ── GSD baseline (auto-generated) ──

@@ -322,8 +322,19 @@ pub fn render_lock_panel(
                     .build();
             }
 
-            // Elite marker
-            if is_elite {
+            let spec_icon = spec_id
+                .or_else(|| current_specs.get(slot).map(|(id, _)| *id))
+                .and_then(|id| crate::ui::icons::spec_url(db, id));
+            if spec_icon.is_some() {
+                let r = hex_radius_anim * 0.72;
+                crate::ui::icons::paint_on(
+                    &draw_list,
+                    spec_icon,
+                    [hex_center[0] - r, hex_center[1] - r],
+                    [hex_center[0] + r, hex_center[1] + r],
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+            } else if is_elite {
                 let e_pos = [hex_center[0] - 3.0, hex_center[1] - 5.0];
                 draw_list.add_text(e_pos, color_u32(ELITE_COLOR), "E");
             } else if !spec_locked {
@@ -446,6 +457,17 @@ pub fn render_lock_panel(
                                     .thickness(1.0 + 1.0 * trait_t)
                                     .build();
 
+                                if let Some(url) = crate::ui::icons::trait_url(db, trait_id) {
+                                    let r = circle_radius_anim * 0.92;
+                                    crate::ui::icons::paint_on(
+                                        &draw_list,
+                                        Some(url),
+                                        [cx - r, cy - r],
+                                        [cx + r, cy + r],
+                                        [1.0, 1.0, 1.0, 1.0],
+                                    );
+                                }
+
                                 // Subtle glow ring on hover.
                                 if trait_t > 0.0 {
                                     let glow = [
@@ -500,11 +522,12 @@ pub fn render_lock_panel(
                                 hovered_now = Some(trait_element);
                                 // Tooltip with full trait info
                                 ui.tooltip(|| {
-                                    ui.text(trait_name);
-                                    if let Some(t) = trait_info {
-                                        if let Some(ref desc) = t.description {
-                                            ui.text_wrapped(desc);
-                                        }
+                                    if let Some(tip) =
+                                        crate::ui::comparison::inspect_text(trait_name, db)
+                                    {
+                                        ui.text_wrapped(tip);
+                                    } else {
+                                        ui.text(trait_name);
                                     }
                                     if is_locked {
                                         ui.text_colored(LOCKED_COLOR, "LOCKED");
@@ -568,7 +591,7 @@ pub fn render_lock_panel(
     // ── Lock All / Unlock All buttons ──
     ui.dummy([0.0, 4.0]);
     let btn_width = (avail_width - 6.0) / 2.0;
-    if ui.button_with_size("Lock All", [btn_width, 0.0]) {
+    if crate::ui::theme::gold_button_sized(ui, "Lock All", [btn_width, 0.0]) {
         // Lock all current build specs and traits
         for (slot, (spec_id, trait_ids)) in current_specs.iter().enumerate() {
             locks.specs[slot] = Some(*spec_id);
@@ -590,7 +613,7 @@ pub fn render_lock_panel(
         modified = true;
     }
     ui.same_line();
-    if ui.button_with_size("Unlock All", [btn_width, 0.0]) {
+    if crate::ui::theme::gold_button_sized(ui, "Unlock All", [btn_width, 0.0]) {
         locks.specs = [None; 3];
         locks.trait_locks.clear();
         modified = true;
@@ -712,8 +735,19 @@ pub fn render_optimized_specs_panel(
                 2.0,
             );
 
-            // Elite marker
-            if is_elite {
+            if let Some(url) = db
+                .and_then(|d| crate::ui::icons::spec_url_by_name(d, lookup_name))
+                .or_else(|| spec_info.and_then(|s| s.icon.as_deref()))
+            {
+                let r = hex_radius * 0.72;
+                crate::ui::icons::paint_on(
+                    &draw_list,
+                    Some(url),
+                    [hex_center[0] - r, hex_center[1] - r],
+                    [hex_center[0] + r, hex_center[1] + r],
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+            } else if is_elite {
                 let e_pos = [hex_center[0] - 3.0, hex_center[1] - 5.0];
                 draw_list.add_text(e_pos, color_u32(ELITE_COLOR), "E");
             } else {
@@ -773,6 +807,17 @@ pub fn render_optimized_specs_panel(
                                 .add_circle([cx, cy], circle_radius, color_u32(outline_color))
                                 .build();
 
+                            if let Some(url) = trait_info.and_then(|t| t.icon.as_deref()) {
+                                let r = circle_radius * 0.92;
+                                crate::ui::icons::paint_on(
+                                    &draw_list,
+                                    Some(url),
+                                    [cx - r, cy - r],
+                                    [cx + r, cy + r],
+                                    [1.0, 1.0, 1.0, 1.0],
+                                );
+                            }
+
                             // Trait name
                             let text_color = if is_selected {
                                 optimized_color
@@ -790,11 +835,12 @@ pub fn render_optimized_specs_panel(
                         let mouse_pos = ui.io().mouse_pos;
                         if is_in_circle(mouse_pos, [cx, cy], circle_radius + 4.0) {
                             ui.tooltip(|| {
-                                ui.text(trait_name);
-                                if let Some(t) = trait_info {
-                                    if let Some(ref desc) = t.description {
-                                        ui.text_wrapped(desc);
-                                    }
+                                if let Some(tip) = db.and_then(|d| {
+                                    crate::ui::comparison::inspect_text(trait_name, d)
+                                }) {
+                                    ui.text_wrapped(tip);
+                                } else {
+                                    ui.text(trait_name);
                                 }
                                 if is_selected {
                                     ui.text_colored(optimized_color, "OPTIMIZER SELECTED");

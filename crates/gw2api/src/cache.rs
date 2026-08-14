@@ -160,6 +160,11 @@ impl DataCache {
         self.path_for(key).exists()
     }
 
+    /// Sticky PNG folder. Not cleared by [`Self::clear_all`] (JSON/tmp only).
+    pub fn graphics_dir(&self) -> PathBuf {
+        self.base_path.join("graphics")
+    }
+
     // --- Character-specific cache methods ---
     // Character data changes independently of game patches, so these use
     // simple JSON files without build-number invalidation.

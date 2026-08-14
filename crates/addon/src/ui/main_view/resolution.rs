@@ -109,6 +109,7 @@ fn resolve_build_from_db(
 
     let resolved_specs = resolve_specs_db(build, db);
     let resolved_skills = resolve_skills_db(build, db);
+    let (legends, pets) = resolve_profession_extras(build, db);
     let (weapons, armor, trinkets_vec, rune, relic_resolved) = resolve_equipment_db(equipment, db);
     let pvp_amulet = resolve_pvp_amulet_db(game_mode, equipment, db);
 
@@ -118,6 +119,8 @@ fn resolve_build_from_db(
         game_mode: game_mode.clone(),
         specializations: resolved_specs,
         skills: resolved_skills,
+        legends,
+        pets,
         weapons,
         armor,
         trinkets: trinkets_vec,
@@ -334,6 +337,32 @@ fn resolve_skills_db(
     }
 }
 
+fn resolve_profession_extras(
+    build: &gw2_api::models::Build,
+    db: &gw2_optimizer::gamedb::GameDb,
+) -> (Vec<String>, Vec<String>) {
+    let legends = build
+        .legends
+        .iter()
+        .flatten()
+        .filter(|id| !id.is_empty())
+        .map(|id| {
+            db.legends
+                .get(id)
+                .and_then(|l| db.skills.get(&l.swap))
+                .map(|s| crate::ui::comparison::compact_stance_name(&s.name))
+                .unwrap_or_else(|| id.clone())
+        })
+        .collect();
+    let mut pets = Vec::new();
+    if let Some(ref p) = build.pets {
+        for id in p.terrestrial.iter().flatten() {
+            pets.push(format!("#{id}"));
+        }
+    }
+    (legends, pets)
+}
+
 /// Resolved equipment bundle: (weapon sets, armor, trinkets, rune, relic).
 type ResolvedEquipment = (
     Vec<gw2_core::types::ResolvedWeaponSet>,
@@ -393,6 +422,7 @@ fn resolve_equipment_db(
                     weapon_type: item
                         .and_then(|i| i.details.as_ref()?.detail_type.clone())
                         .unwrap_or_default(),
+                    id: piece.id,
                 });
                 extract_sigils(piece, &mut ws1);
             }
@@ -402,6 +432,7 @@ fn resolve_equipment_db(
                     weapon_type: item
                         .and_then(|i| i.details.as_ref()?.detail_type.clone())
                         .unwrap_or_default(),
+                    id: piece.id,
                 });
                 extract_sigils(piece, &mut ws1);
             }
@@ -411,6 +442,7 @@ fn resolve_equipment_db(
                     weapon_type: item
                         .and_then(|i| i.details.as_ref()?.detail_type.clone())
                         .unwrap_or_default(),
+                    id: piece.id,
                 });
                 extract_sigils(piece, &mut ws2);
             }
@@ -420,6 +452,7 @@ fn resolve_equipment_db(
                     weapon_type: item
                         .and_then(|i| i.details.as_ref()?.detail_type.clone())
                         .unwrap_or_default(),
+                    id: piece.id,
                 });
                 extract_sigils(piece, &mut ws2);
             }
@@ -439,6 +472,7 @@ fn resolve_equipment_db(
                     name: item_name,
                     stat_prefix,
                     infusions: Vec::new(),
+                    id: piece.id,
                 });
             }
             "Backpack" | "Accessory1" | "Accessory2" | "Amulet" | "Ring1" | "Ring2" => {
@@ -447,6 +481,7 @@ fn resolve_equipment_db(
                     name: item_name,
                     stat_prefix,
                     infusions: Vec::new(),
+                    id: piece.id,
                 });
             }
             "Relic" => {

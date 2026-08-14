@@ -378,6 +378,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                         Ok(suggestions) => {
                             s.main.comparison.suggestions = suggestions;
                             s.main.comparison.selected_suggestion = 0;
+                            s.main.comparison.show_optimized = true;
                         }
                         Err(e) => {
                             s.main.comparison.error = Some(e);
@@ -466,6 +467,30 @@ fn synergy_result_to_suggestion(
 
     // Skills: flatten into display strings
     let mut skills = Vec::new();
+    if !v.legends.is_empty() {
+        let names: Vec<String> = v
+            .legends
+            .iter()
+            .map(|id| {
+                db.legends
+                    .get(id)
+                    .and_then(|l| db.skills.get(&l.swap))
+                    .map(|s| crate::ui::comparison::compact_stance_name(&s.name))
+                    .unwrap_or_else(|| id.clone())
+            })
+            .collect();
+        skills.push(format!("Stances: {}", names.join(" / ")));
+    }
+    if let Some((t1, t2, _, _)) = v.pets {
+        let ids: Vec<String> = [t1, t2]
+            .into_iter()
+            .flatten()
+            .map(|id| format!("#{id}"))
+            .collect();
+        if !ids.is_empty() {
+            skills.push(format!("Pets: {}", ids.join(" / ")));
+        }
+    }
     if let Some((_, name)) = &v.skills.heal {
         skills.push(format!("Heal: {}", name));
     }
@@ -648,6 +673,25 @@ fn validated_build_to_chat_code(
     profession_name: &str,
     db: &gw2_optimizer::gamedb::GameDb,
 ) -> Option<String> {
+    let skills = gw2_api::models::SkillSelection {
+        heal: build.skills.heal.as_ref().map(|(id, _)| *id),
+        utilities: build
+            .skills
+            .utilities
+            .iter()
+            .take(3)
+            .map(|skill| skill.as_ref().map(|(id, _)| *id))
+            .collect(),
+        elite: build.skills.elite.as_ref().map(|(id, _)| *id),
+    };
+    let pets = match build.pets {
+        Some((t1, t2, a1, a2)) => Some(gw2_api::models::PetSelection {
+            terrestrial: vec![t1, t2],
+            aquatic: vec![a1, a2],
+        }),
+        None if profession_name == "Ranger" => snapshot_ranger_pets(),
+        None => None,
+    };
     let api_build = gw2_api::models::Build {
         name: None,
         profession: Some(profession_name.to_string()),
@@ -659,24 +703,40 @@ fn validated_build_to_chat_code(
                 traits: spec.trait_ids.iter().take(3).map(|id| Some(*id)).collect(),
             })
             .collect(),
-        skills: Some(gw2_api::models::SkillSelection {
-            heal: build.skills.heal.as_ref().map(|(id, _)| *id),
-            utilities: build
-                .skills
-                .utilities
-                .iter()
-                .take(3)
-                .map(|skill| skill.as_ref().map(|(id, _)| *id))
-                .collect(),
-            elite: build.skills.elite.as_ref().map(|(id, _)| *id),
-        }),
-        aquatic_skills: None,
-        legends: Vec::new(),
-        aquatic_legends: Vec::new(),
-        pets: None,
+        skills: Some(skills.clone()),
+        aquatic_skills: Some(skills),
+        legends: build.legends.iter().map(|id| Some(id.clone())).collect(),
+        aquatic_legends: {
+            let src = if build.aquatic_legends.is_empty() {
+                &build.legends
+            } else {
+                &build.aquatic_legends
+            };
+            src.iter().map(|id| Some(id.clone())).collect()
+        },
+        pets,
     };
+    let weapons = [
+        build.weapons.set1.main_hand.as_deref(),
+        build.weapons.set1.off_hand.as_deref(),
+        build.weapons.set2.main_hand.as_deref(),
+        build.weapons.set2.off_hand.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::to_string)
+    .collect::<Vec<_>>();
 
-    super::character::generate_build_chat_code(&api_build, db)
+    super::character::generate_build_chat_code(&api_build, db, &weapons)
+}
+
+fn snapshot_ranger_pets() -> Option<gw2_api::models::PetSelection> {
+    crate::state::with_state(|s| {
+        s.main
+            .selected_build_tab
+            .and_then(|i| s.main.build_tabs.get(i).and_then(|t| t.build.pets.clone()))
+    })
+    .flatten()
 }
 
 fn candidate_to_suggestion(
@@ -1409,6 +1469,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         s.main.comparison.suggestions.push(suggestion);
                         s.main.comparison.selected_suggestion =
                             s.main.comparison.suggestions.len() - 1;
+                        s.main.comparison.show_optimized = true;
                     }
                     Err(e) => {
                         crate::ui::chat_bar::add_ai_response(

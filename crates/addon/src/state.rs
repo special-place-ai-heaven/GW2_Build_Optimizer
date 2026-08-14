@@ -49,6 +49,8 @@ pub struct AddonState {
     /// Cancellation token — cloned into every background thread.
     /// Cancelled on addon unload so threads exit early.
     pub cancel_token: CancellationToken,
+    /// Next frame: pin the overlay to [80, 80] (off-screen imgui.ini / Reset button).
+    pub force_window_pos: bool,
 }
 
 impl AddonState {
@@ -121,6 +123,10 @@ pub struct MainState {
     pub benchmark_last_synced: Option<String>,
     /// Per-source build counts: "snowcrows" -> n, "hardstuck" -> n, "guildjen" -> n.
     pub benchmark_counts: std::collections::HashMap<String, usize>,
+    /// Live heartbeat while a sync is running ("12/45", "listing guardian…").
+    pub benchmark_live: std::collections::HashMap<String, String>,
+    /// Per-source error after a sync (shown as "down" on that row).
+    pub benchmark_errors: std::collections::HashMap<String, String>,
     pub benchmark_error: Option<String>,
     // Settings
     pub confirm_reset: bool,
@@ -156,6 +162,8 @@ pub struct MainState {
     pub api_status_frames: u32,
     /// Whether a health check is currently in flight.
     pub api_health_checking: bool,
+    /// Live `/v2/build` id. Compared to `cache_build_number` to prompt a data refresh.
+    pub live_build_number: Option<u32>,
     /// Cached "Usage today" count for the active provider's persisted usage
     /// file, displayed in the Settings tab. Refreshed every ~60 frames (~1s)
     /// instead of reading the file every render frame.
@@ -165,6 +173,8 @@ pub struct MainState {
     /// Cached cache-directory size in bytes for the Settings tab "Cache: …"
     /// label. Throttled refresh on `settings_cache_size_frames`.
     pub settings_cache_size: u64,
+    /// PNG icon cache size (cache/graphics). Separate from JSON data.
+    pub settings_graphics_size: u64,
     /// Frame counter that throttles `settings_cache_size` refresh.
     pub settings_cache_size_frames: u32,
     /// Search filter text for the Settings tab model-picker dropdown.
@@ -308,6 +318,7 @@ pub fn init(addon_dir: PathBuf) {
         _ => gw2_core::types::GameMode::PvE,
     };
     main.weights = OptimizationWeights::default_for_mode(main.game_mode.label());
+    crate::ui::icons::set_graphics_dir(addon_dir.join("cache").join("graphics"));
     *lock_state() = Some(AddonState {
         window_visible: false,
         config,
@@ -317,6 +328,7 @@ pub fn init(addon_dir: PathBuf) {
         setup,
         main,
         cancel_token: CancellationToken::new(),
+        force_window_pos: false,
     });
 }
 
@@ -400,6 +412,8 @@ mod tests {
             game_mode: GameMode::PvE,
             specializations: Vec::new(),
             skills: Default::default(),
+            legends: Vec::new(),
+            pets: Vec::new(),
             weapons: Vec::new(),
             armor: Vec::new(),
             trinkets: Vec::new(),

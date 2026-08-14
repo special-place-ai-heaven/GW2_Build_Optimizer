@@ -359,6 +359,11 @@ fn swap_utility_skills(
     db: &GameDb,
     profession_name: &str,
 ) -> Vec<ValidatedBuild> {
+    // Revenant utilities are bound to the active legend; mixing slots
+    // from two stances produces an illegal template.
+    if profession_name == "Revenant" {
+        return Vec::new();
+    }
     let prof_skill_ids: Vec<u32> = db
         .skills_by_profession
         .get(profession_name)
@@ -384,12 +389,11 @@ fn swap_utility_skills(
         .filter(|&id| {
             if let Some(skill) = db.skills.get(&id) {
                 // Check slot eligibility.
-                let slot_ok = match skill.slot.as_deref() {
-                    Some("Utility") => true,
-                    None => true, // slot absent but in profession list → eligible
-                    _ => false,
-                };
+                let slot_ok = skill.slot.as_deref() == Some("Utility");
                 if !slot_ok {
+                    return false;
+                }
+                if db.skill_palette_id(id) == 0 {
                     return false;
                 }
                 // Check specialization gating.

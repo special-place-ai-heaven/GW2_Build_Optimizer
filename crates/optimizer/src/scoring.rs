@@ -304,6 +304,18 @@ impl OptimizationWeights {
         // total = 1.8
     }
 
+    pub fn preset_disrupt() -> Self {
+        Self {
+            power: 0.2,
+            condition: 0.3,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.2,
+            control: 1.0,
+        }
+        // total = 1.7
+    }
+
     pub fn preset_celestial() -> Self {
         Self {
             power: 0.33,
