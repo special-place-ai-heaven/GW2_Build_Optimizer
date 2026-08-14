@@ -193,6 +193,26 @@ impl RoleObjective {
         }
     }
 
+    /// Task axis — independent of [`combat_tier`] (scale).
+    pub fn combat_kind(&self) -> CombatKind {
+        match self {
+            RoleObjective::CondiDps => CombatKind::CondiRamp,
+            RoleObjective::Healer | RoleObjective::Buffer | RoleObjective::WvWZergSupport => {
+                CombatKind::Support
+            }
+            RoleObjective::Disabler | RoleObjective::WvWDisruptor | RoleObjective::PvPDisruptor => {
+                CombatKind::Disabler
+            }
+            RoleObjective::WvWRoamer => CombatKind::Harasser,
+            RoleObjective::Tank => CombatKind::Commander,
+            RoleObjective::PowerDps
+            | RoleObjective::Sustain
+            | RoleObjective::WvWZergDps
+            | RoleObjective::PvPBurst
+            | RoleObjective::PvPSustain => CombatKind::StrikeSpike,
+        }
+    }
+
     /// Convert this role to `OptimizationWeights` by reading the objective profile data.
     /// Falls back to mode default weights if the profile is not found.
     pub fn to_weights(&self, game_mode: &GameMode) -> OptimizationWeights {
@@ -216,7 +236,7 @@ impl RoleObjective {
 
 #[cfg(test)]
 mod tests {
-    use super::{CombatTier, RoleObjective, ScenarioSpec, TargetProfile};
+    use super::{CombatKind, CombatTier, RoleObjective, ScenarioSpec, TargetProfile};
     use crate::balance::BalanceContext;
     use gw2_core::types::GameMode;
 
@@ -326,5 +346,24 @@ mod tests {
         for tier in [CombatTier::Solo, CombatTier::Party, CombatTier::Squad] {
             assert!(!tier.label().is_empty());
         }
+    }
+
+    #[test]
+    fn role_combat_kind_is_independent_of_scale() {
+        assert_eq!(RoleObjective::WvWRoamer.combat_kind(), CombatKind::Harasser);
+        assert_eq!(
+            RoleObjective::WvWZergSupport.combat_kind(),
+            CombatKind::Support
+        );
+        assert_eq!(
+            RoleObjective::WvWDisruptor.combat_kind(),
+            CombatKind::Disabler
+        );
+        assert_eq!(RoleObjective::Tank.combat_kind(), CombatKind::Commander);
+        assert_eq!(RoleObjective::CondiDps.combat_kind(), CombatKind::CondiRamp);
+        assert_eq!(
+            RoleObjective::WvWZergDps.combat_kind(),
+            CombatKind::StrikeSpike
+        );
     }
 }

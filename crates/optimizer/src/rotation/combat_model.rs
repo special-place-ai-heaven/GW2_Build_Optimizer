@@ -74,6 +74,59 @@ pub fn kit_has_stability_cover(skills: &[RotationSkill]) -> bool {
     })
 }
 
+/// Which of the three BuffProfile slots (Solo / Party / Squad) this scale uses.
+pub fn buff_profile_index(tier: CombatTier) -> usize {
+    match tier {
+        CombatTier::Solo => 0,
+        CombatTier::Party => 1,
+        CombatTier::Squad => 2,
+    }
+}
+
+/// Nondamaging condition effects Resistance suppresses. Poison heal-reduction
+/// and Terror damage are explicitly not negated (wiki Resistance, 2026-08-14).
+pub fn resistance_negates(status: &str) -> bool {
+    matches!(
+        status,
+        "Blind"
+            | "Blinded"
+            | "Chill"
+            | "Chilled"
+            | "Cripple"
+            | "Crippled"
+            | "Fear"
+            | "Immobile"
+            | "Immobilize"
+            | "Immobilized"
+            | "Slow"
+            | "Taunt"
+            | "Vulnerability"
+            | "Weakness"
+    )
+}
+
+/// Boon → leftover condition when corrupted.
+/// Protection/Resolution/Vigor/Aegis rows from wiki Boon table (local fetch 2026-08-14);
+/// Resistance → Chilled from wiki Resistance version history (same fetch);
+/// remaining rows are the stable wiki Boon "Converted into" mapping.
+pub fn corrupt_into(boon: &str) -> Option<&'static str> {
+    Some(match boon {
+        "Aegis" => "Burning",
+        "Alacrity" => "Chilled",
+        "Fury" => "Blinded",
+        "Might" => "Weakness",
+        "Protection" => "Vulnerability",
+        "Quickness" => "Slow",
+        "Regeneration" => "Poisoned",
+        "Resistance" => "Chilled",
+        "Resolution" => "Confusion",
+        "Stability" => "Fear",
+        "Swiftness" => "Crippled",
+        "Vigor" => "Bleeding",
+        _ => return None,
+    })
+}
+
 pub fn setup_priority(skill: &RotationSkill) -> u32 {
     let mut p = 0u32;
     for e in &skill.effects {
@@ -240,5 +293,30 @@ mod tests {
                 assert_eq!(*kind, Harasser);
             }
         }
+    }
+
+    #[test]
+    fn resistance_does_not_negate_poison_heal_or_terror() {
+        assert!(resistance_negates("Immobile"));
+        assert!(resistance_negates("Fear"));
+        assert!(!resistance_negates("Poisoned"));
+        assert!(!resistance_negates("Burning"));
+        assert!(!resistance_negates("Terror"));
+    }
+
+    #[test]
+    fn corrupt_resistance_becomes_chill() {
+        assert_eq!(corrupt_into("Resistance"), Some("Chilled"));
+        assert_eq!(corrupt_into("Protection"), Some("Vulnerability"));
+        assert_eq!(corrupt_into("Aegis"), Some("Burning"));
+        assert_eq!(corrupt_into("Vigor"), Some("Bleeding"));
+        assert!(corrupt_into("Distortion").is_none());
+    }
+
+    #[test]
+    fn buff_profile_follows_scale() {
+        assert_eq!(buff_profile_index(CombatTier::Solo), 0);
+        assert_eq!(buff_profile_index(CombatTier::Party), 1);
+        assert_eq!(buff_profile_index(CombatTier::Squad), 2);
     }
 }

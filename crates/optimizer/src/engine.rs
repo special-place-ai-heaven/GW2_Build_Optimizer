@@ -975,6 +975,7 @@ pub fn optimize_with_gemini(
     llm_client: &dyn LlmClient,
     current_build_summary: Option<&str>,
     locks: &gw2_core::types::BuildLocks,
+    scenario: Option<&crate::scenario::ScenarioSpec>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     // 1. Authoritative gear-prefix selection (Gemini cannot override this).
@@ -1074,7 +1075,7 @@ pub fn optimize_with_gemini(
         stage: "Simulating rotation...".into(),
         done: false,
     });
-    let rotation_result = simulate_validated_rotation(&validated, db, &full_stats, None);
+    let rotation_result = simulate_validated_rotation(&validated, db, &full_stats, scenario);
 
     on_progress(OptimizeProgress {
         stage: "Done".into(),
@@ -1218,7 +1219,9 @@ pub fn simulate_validated_rotation(
     rotation::builder::tag_weapon_set(&mut set2_skills, 2);
     rotation_skills.extend(set1_skills);
     rotation_skills.extend(set2_skills);
-    rotation::builder::enrich_with_cleanse(&mut rotation_skills, &[], db);
+    let mode = scenario.map(|s| s.game_mode.label()).unwrap_or("PvE");
+    let ne = crate::data::normalized_effects::effects().effects_for_mode(mode);
+    rotation::builder::enrich_with_cleanse(&mut rotation_skills, ne, db);
 
     if rotation_skills.is_empty() {
         return None;
@@ -1267,6 +1270,7 @@ pub fn synergy_result_from_validated(
     db: &GameDb,
     profession_name: &str,
     ctx: &BalanceContext,
+    scenario: Option<&crate::scenario::ScenarioSpec>,
 ) -> SynergyResult {
     let (full_stats, modifiers) = calculate_validated_stats(&validated, db, profession_name, ctx);
     let derived = stats::compute_derived(&full_stats, profession_name);
@@ -1299,7 +1303,7 @@ pub fn synergy_result_from_validated(
         profession_name,
         ctx,
     );
-    let rotation = simulate_validated_rotation(&validated, db, &full_stats, None);
+    let rotation = simulate_validated_rotation(&validated, db, &full_stats, scenario);
     SynergyResult {
         validated,
         stats: full_stats,
@@ -1327,6 +1331,7 @@ pub fn optimize_deterministic(
     llm_client: Option<&dyn LlmClient>,
     _current_build_summary: Option<&str>,
     locks: &gw2_core::types::BuildLocks,
+    scenario: Option<&crate::scenario::ScenarioSpec>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     // 1. DETERMINISTIC gear prefix selection (reuse existing)
@@ -1345,6 +1350,7 @@ pub fn optimize_deterministic(
         ctx,
         determined_prefix,
         locks,
+        scenario,
         on_progress,
     )?;
 
@@ -1550,6 +1556,7 @@ pub fn optimize_v2(
         db,
         profession_name,
         ctx,
+        Some(scenario),
     ))
 }
 

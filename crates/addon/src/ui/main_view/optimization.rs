@@ -110,12 +110,17 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     use gw2_optimizer::scenario::{
                         OptimizationTarget, ScenarioSpec, TargetProfile,
                     };
-                    // Map the captured wvw_combat_tier (gw2_optimizer::scenario::CombatTier)
-                    // directly — it's the same type.
+                    let combat_kind = selected_role.map(|r| r.combat_kind()).unwrap_or_else(|| {
+                        if weights.condition > weights.power {
+                            gw2_optimizer::scenario::CombatKind::CondiRamp
+                        } else {
+                            gw2_optimizer::scenario::CombatKind::StrikeSpike
+                        }
+                    });
                     ScenarioSpec {
                         game_mode: balance_ctx.game_mode.clone(),
                         combat_tier: wvw_combat_tier,
-                        combat_kind: gw2_optimizer::scenario::CombatKind::StrikeSpike,
+                        combat_kind,
                         target_profile: TargetProfile::Single,
                         optimization_target: OptimizationTarget {
                             label: balance_ctx.game_mode.label().to_string(),
@@ -196,6 +201,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                         llm_ref,
                         current_build_summary.as_deref(),
                         &build_locks,
+                        Some(&scenario),
                         &mut |progress: gw2_optimizer::engine::OptimizeProgress| {
                             if token_det.is_cancelled() {
                                 return;
@@ -251,6 +257,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                         llm_client.as_ref(),
                         current_build_summary.as_deref(),
                         &build_locks,
+                        Some(&scenario),
                         &mut |progress| {
                             if token_synergy.is_cancelled() {
                                 return;

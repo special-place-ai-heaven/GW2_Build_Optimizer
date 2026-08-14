@@ -128,6 +128,7 @@ pub fn optimize_v2_search(
         ctx,
         prefix_name,
         locks,
+        Some(scenario),
         &mut |_| {},
     )?;
 

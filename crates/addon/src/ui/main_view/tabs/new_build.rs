@@ -9,7 +9,7 @@ use super::{optimization, render_left_section_header, render_optimization_progre
 
 /// Role picker grid for the 'New Build' tab.
 /// Shows 8 generic archetypes + WvW/PvP-specific roles when appropriate.
-/// Selecting a role updates weights, wvw_combat_tier, and selected_role in state.
+/// Selecting a role updates weights and selected_role. Scale (Roam/Havoc/Zerg) is independent.
 fn render_role_picker(ui: &Ui, state: &mut AddonState) {
     use gw2_optimizer::scenario::RoleObjective;
 
@@ -122,9 +122,8 @@ fn render_role_picker(ui: &Ui, state: &mut AddonState) {
         let _tc = ui.push_style_color(nexus::imgui::StyleColor::Text, text_col);
 
         if ui.button_with_size(&label, [btn_w, 28.0]) {
-            // Apply selection
+            // Task sets weights. Scale (Roam/Havoc/Zerg) stays whatever the user picked.
             state.main.selected_role = Some(*role);
-            state.main.wvw_combat_tier = role.combat_tier();
             state.main.weights = role.to_weights(&game_mode);
             state.main.comparison.suggestions.clear();
             state.main.comparison.error = None;

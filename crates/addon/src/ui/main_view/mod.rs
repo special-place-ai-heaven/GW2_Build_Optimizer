@@ -448,17 +448,25 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
     ui.dummy([0.0, spacing * 0.5]); // gap below
 }
 
-/// WvW combat sub-role selector: Roaming / Havoc / Zerg.
-/// Appears only when WvW mode is active. Changing sub-role updates wvw_combat_tier
-/// and reloads weights from the matching objective profile.
+/// WvW fight scale: Roaming / Havoc / Zerg.
+/// Independent of role/task — changing scale does not rewrite healer vs DPS weights.
 fn render_wvw_sub_role(ui: &Ui, state: &mut AddonState) {
     use gw2_optimizer::scenario::CombatTier;
 
-    render_left_section_header(ui, "WVW SUB-ROLE", state.config.section_spacing);
+    render_left_section_header(ui, "WVW SCALE", state.config.section_spacing);
+    ui.spacing();
+    ui.text_colored(
+        theme::MUTED,
+        "Fight size. Role (task) is chosen separately.",
+    );
     ui.spacing();
 
     let tiers = [
-        (CombatTier::Solo, "Roaming", "Solo / small-scale dueling"),
+        (
+            CombatTier::Solo,
+            "Roaming",
+            "Solo / small-scale — pick and leave",
+        ),
         (CombatTier::Party, "Havoc", "5-15 player small group"),
         (CombatTier::Squad, "Zerg", "Large squad / blob"),
     ];
@@ -466,17 +474,6 @@ fn render_wvw_sub_role(ui: &Ui, state: &mut AddonState) {
         let selected = state.main.wvw_combat_tier == *tier;
         if ui.radio_button_bool(label, selected) && !selected {
             state.main.wvw_combat_tier = *tier;
-            // Load the matching WvW profile weights for this tier
-            let new_weights = match tier {
-                CombatTier::Solo => gw2_optimizer::scenario::RoleObjective::WvWRoamer
-                    .to_weights(&gw2_core::types::GameMode::WvW),
-                CombatTier::Party => {
-                    gw2_optimizer::scoring::OptimizationWeights::default_for_mode("WvW")
-                }
-                CombatTier::Squad => gw2_optimizer::scenario::RoleObjective::WvWZergDps
-                    .to_weights(&gw2_core::types::GameMode::WvW),
-            };
-            state.main.weights = new_weights;
             state.main.comparison.suggestions.clear();
             state.main.comparison.error = None;
         }
@@ -748,9 +745,15 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
     let summary = state.main.weights.summary_label();
     let focus_label = if state.main.game_mode == gw2_core::types::GameMode::WvW {
+        let task = state
+            .main
+            .selected_role
+            .map(|r| r.combat_kind().label())
+            .unwrap_or("Strike spike");
         format!(
-            "  Focus: {} — {}",
+            "  Focus: {} / {} — {}",
             state.main.wvw_combat_tier.label(),
+            task,
             summary
         )
     } else {
