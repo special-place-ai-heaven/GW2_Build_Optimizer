@@ -115,21 +115,21 @@ fn test_each_mode_has_a_default_profile() {
 fn test_pve_has_expected_profile_count() {
     let data = objective_profiles::objective_profiles();
     let pve = data.profiles_for_mode("PvE");
-    assert_eq!(pve.len(), 5, "PvE should have 5 profiles");
+    assert_eq!(pve.len(), 7, "PvE should have 7 profiles");
 }
 
 #[test]
 fn test_pvp_has_expected_profile_count() {
     let data = objective_profiles::objective_profiles();
     let pvp = data.profiles_for_mode("PvP");
-    assert_eq!(pvp.len(), 4, "PvP should have 4 profiles");
+    assert_eq!(pvp.len(), 5, "PvP should have 5 profiles");
 }
 
 #[test]
 fn test_wvw_has_expected_profile_count() {
     let data = objective_profiles::objective_profiles();
     let wvw = data.profiles_for_mode("WvW");
-    assert_eq!(wvw.len(), 4, "WvW should have 4 profiles");
+    assert_eq!(wvw.len(), 6, "WvW should have 6 profiles");
 }
 
 #[test]

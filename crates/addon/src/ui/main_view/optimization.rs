@@ -660,8 +660,9 @@ fn validated_build_to_chat_code(
                 traits: spec.trait_ids.iter().take(3).map(|id| Some(*id)).collect(),
             })
             .collect(),
-        skills: Some(skills.clone()),
-        aquatic_skills: Some(skills),
+        skills: Some(skills),
+        // Land palettes in aquatic slots make GW2 reject the template.
+        aquatic_skills: None,
         legends: build.legends.iter().map(|id| Some(id.clone())).collect(),
         aquatic_legends: {
             let src = if build.aquatic_legends.is_empty() {
@@ -1096,8 +1097,9 @@ pub(super) fn suggestion_to_chat_code(
         name: None,
         profession: Some(profession),
         specializations,
-        skills: Some(skills.clone()),
-        aquatic_skills: Some(skills),
+        skills: Some(skills),
+        // Land palettes in aquatic slots make GW2 reject the template.
+        aquatic_skills: None,
         legends: vec![],
         aquatic_legends: vec![],
         pets,
@@ -1625,6 +1627,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
 mod tests {
     use super::suggestion_to_chat_code;
     use crate::ui::comparison::BuildSuggestion;
+    use base64::Engine as _;
     use gw2_api::models::{Profession, Specialization, Trait};
     use std::collections::HashMap;
 
@@ -1694,6 +1697,11 @@ mod tests {
         db.skills.insert(14, skill(14, "Dagger Storm"));
         db.skills_by_profession
             .insert("Thief".into(), vec![10, 11, 12, 13, 14]);
+        db.skill_to_palette.insert(10, 268);
+        db.skill_to_palette.insert(11, 347);
+        db.skill_to_palette.insert(12, 4905);
+        db.skill_to_palette.insert(13, 318);
+        db.skill_to_palette.insert(14, 415);
         db
     }
 
@@ -1722,5 +1730,20 @@ mod tests {
         let code = suggestion_to_chat_code(&suggestion, &db).expect("encode on load");
         assert!(code.starts_with("[&"), "{code}");
         assert!(code.ends_with(']'), "{code}");
+
+        let inner = code
+            .strip_prefix("[&")
+            .and_then(|s| s.strip_suffix(']'))
+            .expect("[&...] wrapper");
+        let buf = base64::engine::general_purpose::STANDARD
+            .decode(inner)
+            .expect("base64");
+        // 10×u16 palettes at byte 8: land, aqua, land, aqua, ...
+        for i in 0..5 {
+            let land = u16::from_le_bytes([buf[8 + i * 4], buf[9 + i * 4]]);
+            let aqua = u16::from_le_bytes([buf[10 + i * 4], buf[11 + i * 4]]);
+            assert_ne!(land, 0, "land palette {i} should resolve");
+            assert_eq!(aqua, 0, "aquatic palette {i} must stay empty");
+        }
     }
 }

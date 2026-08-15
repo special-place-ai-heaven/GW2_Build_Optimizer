@@ -54,13 +54,18 @@ pub fn render_radar_chart(
     optimized_perf: Option<&[f64; 6]>,
 ) -> bool {
     let mut modified = false;
-    let size = 156.0_f32;
-    let radius = size * 0.38;
-    let cursor_pos = ui.cursor_screen_pos();
+    let avail = ui.content_region_avail()[0].max(156.0);
+    let size = avail.min(300.0);
+    let indent = ((avail - size) * 0.5).max(0.0);
+    let origin = ui.cursor_screen_pos();
+    let cursor_pos = [origin[0] + indent, origin[1]];
+    ui.set_cursor_screen_pos(cursor_pos);
+    let radius = (size * 0.5 - 58.0).max(size * 0.30);
     let center = [cursor_pos[0] + size / 2.0, cursor_pos[1] + size / 2.0];
 
-    // Reserve space in layout
+    // Reserve space in layout, then restore full-width cursor under the chart.
     ui.invisible_button("##radar_area", [size, size]);
+    ui.set_cursor_screen_pos([origin[0], origin[1] + size]);
 
     let draw_list = ui.get_window_draw_list();
 
