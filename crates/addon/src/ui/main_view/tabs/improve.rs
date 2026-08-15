@@ -29,35 +29,20 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
         render_optimization_progress(ui, &state.main.optimize_stage, ui.frame_count());
     }
 
-    // ── Locked spec badge ─────────────────────────────────────────────────
-    // Show which elite spec is locked so the user knows the optimizer won't change it.
-    {
-        let locked_spec_name = state
-            .main
-            .build_locks
-            .specs
-            .get(2)
-            .and_then(|s| *s)
-            .and_then(|id| {
-                state
-                    .main
-                    .game_db
-                    .as_ref()
-                    .and_then(|db| db.spec(id))
-                    .map(|s| s.name.clone())
-            });
-        if let Some(spec_name) = locked_spec_name {
-            ui.text_colored(
-                theme::OPTIMIZED,
-                format!("  \u{1F512} Locked to: {}", spec_name),
-            );
-            ui.same_line();
-            if ui.small_button("Unlock") {
-                state.main.build_locks.specs[2] = None;
-            }
-            ui.spacing();
-        }
-    }
+    let locked_spec_name = state
+        .main
+        .build_locks
+        .specs
+        .get(2)
+        .and_then(|s| *s)
+        .and_then(|id| {
+            state
+                .main
+                .game_db
+                .as_ref()
+                .and_then(|db| db.spec(id))
+                .map(|s| s.name.clone())
+        });
 
     // ── Two-panel layout: Current Build | Optimized Build ──
     let has_suggestion = !state.main.comparison.suggestions.is_empty();
@@ -107,6 +92,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                         .build(ui)
                     {
                         state.main.comparison.selected_suggestion = i;
+                        state.main.comparison.show_optimized = true;
                     }
                     if i < tab_count - 1 {
                         ui.same_line();
@@ -115,22 +101,26 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 ui.spacing();
             }
 
-            let idx = state
-                .main
-                .comparison
-                .selected_suggestion
-                .min(state.main.comparison.suggestions.len() - 1);
-            let chat_code = state.main.comparison.suggestions[idx].chat_code.clone();
-            crate::ui::comparison::render_chat_code_copy(
-                ui,
-                chat_code.as_deref(),
-                "improve",
-                &mut state.main.comparison.copy_feedback_frames,
-            );
+            if let Some(spec_name) = locked_spec_name.as_deref() {
+                ui.text_colored(theme::OPTIMIZED, format!("Locked: {}", spec_name));
+                ui.same_line();
+                if ui.small_button("Unlock##improve") {
+                    state.main.build_locks.specs[2] = None;
+                }
+                ui.same_line_with_spacing(0.0, 12.0);
+            }
             crate::ui::comparison::render_result_pane_tabs(
                 ui,
                 &mut state.main.comparison.result_pane,
             );
+            if state.main.comparison.result_pane == ResultPane::Build {
+                ui.same_line_with_spacing(0.0, 16.0);
+                crate::ui::gear_sheet::render_view_toggle(
+                    ui,
+                    &mut state.main.comparison.show_optimized,
+                );
+            }
+            ui.spacing();
 
             let scroll_height = (ui.content_region_avail()[1] - footer).max(64.0);
 
@@ -151,28 +141,26 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 .size([0.0, scroll_height])
                 .build(ui, || match pane {
                     ResultPane::Build => {
-                        crate::ui::gear_sheet::render_view_toggle(
-                            ui,
-                            &mut state.main.comparison.show_optimized,
-                        );
                         let viewing = state.main.comparison.show_optimized;
                         if viewing {
-                            build_display::render_card_header(
-                                ui,
-                                "OPTIMIZED BUILD",
-                                theme::OPTIMIZED,
-                            );
+                            build_display::render_suggestion_skills(ui, &suggestion, db_ref);
+                        } else {
+                            build_display::render_build_skills(ui, &build, db_ref);
+                        }
+                        ui.spacing();
+                        if viewing {
                             lock_panel::render_optimized_specs_panel(
                                 ui,
                                 db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
                                 &suggestion.specializations,
+                                "OPTIMIZED SPECS & TRAITS",
                             );
                         } else {
-                            build_display::render_card_header(ui, "CURRENT BUILD", theme::CURRENT);
+                            let mut specs_open = true;
                             lock_panel::render_lock_panel(
                                 ui,
                                 &mut state.main.build_locks,
-                                &mut state.main.locks_panel_expanded,
+                                &mut specs_open,
                                 db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
                                 &profession_name,
                                 &current_specs,
@@ -188,12 +176,6 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                             viewing,
                             gain,
                         );
-                        ui.spacing();
-                        if viewing {
-                            build_display::render_suggestion_skills(ui, &suggestion, db_ref);
-                        } else {
-                            build_display::render_build_skills(ui, &build, db_ref);
-                        }
                     }
                     ResultPane::Stats => {
                         crate::ui::comparison::render_stats_pane(
@@ -213,12 +195,14 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 .size([0.0, scroll_height])
                 .build(ui, || {
                     build_display::render_card_header(ui, "CURRENT BUILD", theme::CURRENT);
+                    build_display::render_build_skills(ui, &build, state.main.game_db.as_ref());
                     {
                         let db_ref = state.main.game_db.as_ref();
+                        let mut specs_open = true;
                         lock_panel::render_lock_panel(
                             ui,
                             &mut state.main.build_locks,
-                            &mut state.main.locks_panel_expanded,
+                            &mut specs_open,
                             db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
                             &profession_name,
                             &current_specs,
@@ -233,7 +217,6 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                         false,
                         0,
                     );
-                    build_display::render_build_skills(ui, &build, state.main.game_db.as_ref());
                 });
         }
     } else if state.main.selected_character.is_some() {

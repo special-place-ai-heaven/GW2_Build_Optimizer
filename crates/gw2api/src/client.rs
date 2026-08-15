@@ -79,6 +79,33 @@ fn value_to_bulk_id(v: &serde_json::Value) -> Option<String> {
         .or_else(|| v.as_str().filter(|s| !s.is_empty()).map(str::to_owned))
 }
 
+fn is_retryable_status(status: u16) -> bool {
+    matches!(status, 500 | 502 | 503 | 504)
+}
+
+fn is_retryable_api(err: &ApiError) -> bool {
+    matches!(err, ApiError::Api { status, .. } if is_retryable_status(*status))
+}
+
+/// Fetch `ids` in one bulk call. On a 5xx, split the set (or skip a single rotten ID)
+/// so one bad item cannot abort an entire `/v2/items` dump.
+fn merge_bulk_fetch<T>(
+    ids: &[serde_json::Value],
+    fetch: &mut impl FnMut(&[serde_json::Value]) -> Result<Vec<T>, ApiError>,
+) -> Result<Vec<T>, ApiError> {
+    match fetch(ids) {
+        Ok(v) => Ok(v),
+        Err(e) if ids.len() > 1 && is_retryable_api(&e) => {
+            let mid = ids.len() / 2;
+            let mut left = merge_bulk_fetch(&ids[..mid], fetch)?;
+            left.extend(merge_bulk_fetch(&ids[mid..], fetch)?);
+            Ok(left)
+        }
+        Err(e) if ids.len() == 1 && is_retryable_api(&e) => Ok(Vec::new()),
+        Err(e) => Err(e),
+    }
+}
+
 /// Rate-limited GW2 API client.
 pub struct Gw2Client {
     http: Client,
@@ -198,7 +225,7 @@ impl Gw2Client {
 
     /// Make a GET request with query parameters.
     /// Builds query string manually to avoid URL-encoding commas in bulk ID requests.
-    /// Retries on connection errors (timeouts) AND server errors (502/503/504).
+    /// Retries on connection errors (timeouts) AND server errors (500/502/503/504).
     pub fn get_with_params<T: DeserializeOwned>(
         &self,
         endpoint: &str,
@@ -283,33 +310,33 @@ impl Gw2Client {
 
             let status = resp.status().as_u16();
 
-            // Retry on rate limit and server errors (502/503/504).
+            // Retry on rate limit and server errors (500/502/503/504).
             // For 429, honor `Retry-After` when present; 5xx stays on exponential backoff.
-            if status == 429 || status == 502 || status == 503 || status == 504 {
-                if status == 429 {
-                    let retry_after = parse_retry_after(resp.headers());
-                    if let Some(wait) = retry_after {
-                        if wait > RETRY_AFTER_CAP {
-                            return Err(ApiError::RateLimited {
-                                retries: attempt + 1,
-                                url_path,
-                            });
-                        }
-                        suggested_wait = Some(wait);
+            if status == 429 {
+                let retry_after = parse_retry_after(resp.headers());
+                if let Some(wait) = retry_after {
+                    if wait > RETRY_AFTER_CAP {
+                        return Err(ApiError::RateLimited {
+                            retries: attempt + 1,
+                            url_path,
+                        });
                     }
-                    last_error = Some(ApiError::RateLimited {
-                        retries: attempt + 1,
-                        url_path: url_path.clone(),
-                    });
-                    continue;
+                    suggested_wait = Some(wait);
                 }
+                last_error = Some(ApiError::RateLimited {
+                    retries: attempt + 1,
+                    url_path: url_path.clone(),
+                });
+                continue;
+            }
+            if is_retryable_status(status) {
                 let body = resp.text().unwrap_or_default();
                 last_error = Some(ApiError::Api {
                     status,
                     url_path: url_path.clone(),
                     body_snippet: body_snippet(&body),
                 });
-                continue; // retry
+                continue;
             }
 
             if !resp.status().is_success() {
@@ -379,16 +406,15 @@ impl Gw2Client {
                     .iter()
                     .map(|chunk| {
                         s.spawn(|| {
-                            let ids: Vec<String> =
-                                chunk.iter().filter_map(value_to_bulk_id).collect();
-                            if ids.is_empty() {
-                                return Err(ApiError::Internal(format!(
-                                    "Endpoint {} returned no usable bulk IDs",
-                                    endpoint
-                                )));
-                            }
-                            let joined = build_bulk_ids_query(&ids);
-                            self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
+                            merge_bulk_fetch(chunk, &mut |part| {
+                                let ids: Vec<String> =
+                                    part.iter().filter_map(value_to_bulk_id).collect();
+                                if ids.is_empty() {
+                                    return Ok(Vec::new());
+                                }
+                                let joined = build_bulk_ids_query(&ids);
+                                self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
+                            })
                         })
                     })
                     .collect();
@@ -675,6 +701,51 @@ mod tests {
     fn body_snippet_preserves_short_plain_text() {
         assert_eq!(body_snippet("not found"), "not found");
         assert_eq!(body_snippet(""), "");
+    }
+
+    fn api_500() -> ApiError {
+        ApiError::Api {
+            status: 500,
+            url_path: "items".into(),
+            body_snippet: String::new(),
+        }
+    }
+
+    #[test]
+    fn retryable_status_includes_gw2_item_dump_500() {
+        assert!(is_retryable_status(500));
+        assert!(is_retryable_status(502));
+        assert!(!is_retryable_status(404));
+        assert!(!is_retryable_status(429));
+    }
+
+    #[test]
+    fn merge_bulk_fetch_splits_500_and_skips_rotten_id() {
+        let ids = vec![serde_json::json!(1), serde_json::json!(2), serde_json::json!(3)];
+        let mut fetch = |part: &[serde_json::Value]| -> Result<Vec<u32>, ApiError> {
+            if part.len() > 1 {
+                return Err(api_500());
+            }
+            let id = part[0].as_u64().unwrap() as u32;
+            if id == 2 {
+                return Err(api_500());
+            }
+            Ok(vec![id])
+        };
+        let got = merge_bulk_fetch(&ids, &mut fetch).unwrap();
+        assert_eq!(got, vec![1, 3]);
+    }
+
+    #[test]
+    fn merge_bulk_fetch_still_fails_on_client_errors() {
+        let ids = vec![serde_json::json!(1), serde_json::json!(2)];
+        let mut fetch = |_part: &[serde_json::Value]| -> Result<Vec<u32>, ApiError> {
+            Err(ApiError::Internal("nope".into()))
+        };
+        assert!(matches!(
+            merge_bulk_fetch(&ids, &mut fetch),
+            Err(ApiError::Internal(_))
+        ));
     }
 
     #[test]

@@ -81,7 +81,6 @@ pub fn render_view_toggle(ui: &Ui, show_optimized: &mut bool) {
     if theme::pill(ui, "Optimized", *show_optimized, "##view_optimized") {
         *show_optimized = true;
     }
-    ui.spacing();
 }
 
 pub fn render_current_sheet(
@@ -120,125 +119,132 @@ fn render_resolved_sheet(
     let sug_prefix = suggestion.map(|s| s.stat_prefix.as_str()).unwrap_or("");
     let sug_rune = suggestion.map(|s| s.rune.as_str()).unwrap_or("");
 
-    section(ui, "ARMOR");
-    for slot in ARMOR_SLOTS {
-        let piece = build.armor.iter().find(|p| p.slot == slot);
-        let prefix = piece.map(|p| p.stat_prefix.as_str()).unwrap_or("");
-        let name = piece.map(|p| p.name.as_str()).unwrap_or("");
-        let url = db.and_then(|d| piece.and_then(|p| icons::item_url(d, p.id)));
-        let changed = suggestion.is_some()
-            && (prefix != sug_prefix && !sug_prefix.is_empty() || rune_name != sug_rune);
-        let other = suggestion.map(|s| format!("{} {}", s.stat_prefix, slot_label(slot)));
-        row(
-            ui,
-            db,
-            url,
-            prefix,
-            slot_label(slot),
-            name,
-            rune_name,
-            rune_url,
-            other.as_deref(),
-            slot_tint(changed, viewing_optimized, gain),
-        );
-    }
-
-    section(ui, "TRINKETS");
-    for slot in TRINKET_SLOTS {
-        let piece = build.trinkets.iter().find(|p| p.slot == slot);
-        let prefix = piece.map(|p| p.stat_prefix.as_str()).unwrap_or("");
-        let name = piece.map(|p| p.name.as_str()).unwrap_or("");
-        let url = db.and_then(|d| piece.and_then(|p| icons::item_url(d, p.id)));
-        let changed = suggestion.is_some() && prefix != sug_prefix && !sug_prefix.is_empty();
-        let other = suggestion.map(|s| format!("{} {}", s.stat_prefix, slot_label(slot)));
-        row(
-            ui,
-            db,
-            url,
-            prefix,
-            slot_label(slot),
-            name,
-            "",
-            None,
-            other.as_deref(),
-            slot_tint(changed, viewing_optimized, gain),
-        );
-    }
-
-    if let Some(relic) = &build.relic {
-        let sug_relic = suggestion.map(|s| s.relic.as_str()).unwrap_or("");
-        let url = db.and_then(|d| {
-            icons::item_url(d, relic.id).or_else(|| icons::upgrade_url(d, &relic.name))
-        });
-        let other = suggestion
-            .filter(|s| !s.relic.is_empty())
-            .map(|s| s.relic.as_str());
-        row(
-            ui,
-            db,
-            url,
-            "",
-            "Relic",
-            &relic.name,
-            "",
-            None,
-            other,
-            slot_tint(
-                suggestion.is_some() && relic.name != sug_relic,
-                viewing_optimized,
-                gain,
-            ),
-        );
-    }
-
-    section(ui, "WEAPONS");
-    let sug_sets = suggestion
-        .map(|s| parse_suggestion_weapons(&s.weapons))
-        .unwrap_or_default();
-    for (i, set) in build.weapons.iter().enumerate() {
-        let parts: Vec<&str> = [set.main_hand.as_ref(), set.off_hand.as_ref()]
-            .into_iter()
-            .flatten()
-            .map(|w| {
-                if w.weapon_type.is_empty() {
-                    w.name.as_str()
-                } else {
-                    w.weapon_type.as_str()
-                }
-            })
-            .collect();
-        let label = parts.join(" / ");
-        let sug_line = sug_sets.get(i).map(|(_, v)| v.as_str()).unwrap_or("");
-        let url = db.and_then(|d| {
-            set.main_hand
-                .as_ref()
-                .and_then(|w| icons::item_url(d, w.id))
-                .or_else(|| {
+    gear_columns(
+        ui,
+        |ui| {
+            section(ui, "ARMOR");
+            for slot in ARMOR_SLOTS {
+                let piece = build.armor.iter().find(|p| p.slot == slot);
+                let prefix = piece.map(|p| p.stat_prefix.as_str()).unwrap_or("");
+                let name = piece.map(|p| p.name.as_str()).unwrap_or("");
+                let url = db.and_then(|d| piece.and_then(|p| icons::item_url(d, p.id)));
+                let changed = suggestion.is_some()
+                    && (prefix != sug_prefix && !sug_prefix.is_empty() || rune_name != sug_rune);
+                let other = suggestion.map(|s| format!("{} {}", s.stat_prefix, slot_label(slot)));
+                row(
+                    ui,
+                    db,
+                    url,
+                    prefix,
+                    slot_label(slot),
+                    name,
+                    rune_name,
+                    rune_url,
+                    other.as_deref(),
+                    slot_tint(changed, viewing_optimized, gain),
+                );
+            }
+        },
+        |ui| {
+            section(ui, "TRINKETS");
+            for slot in TRINKET_SLOTS {
+                let piece = build.trinkets.iter().find(|p| p.slot == slot);
+                let prefix = piece.map(|p| p.stat_prefix.as_str()).unwrap_or("");
+                let name = piece.map(|p| p.name.as_str()).unwrap_or("");
+                let url = db.and_then(|d| piece.and_then(|p| icons::item_url(d, p.id)));
+                let changed = suggestion.is_some() && prefix != sug_prefix && !sug_prefix.is_empty();
+                let other = suggestion.map(|s| format!("{} {}", s.stat_prefix, slot_label(slot)));
+                row(
+                    ui,
+                    db,
+                    url,
+                    prefix,
+                    slot_label(slot),
+                    name,
+                    "",
+                    None,
+                    other.as_deref(),
+                    slot_tint(changed, viewing_optimized, gain),
+                );
+            }
+            if let Some(relic) = &build.relic {
+                let sug_relic = suggestion.map(|s| s.relic.as_str()).unwrap_or("");
+                let url = db.and_then(|d| {
+                    icons::item_url(d, relic.id).or_else(|| icons::upgrade_url(d, &relic.name))
+                });
+                let other = suggestion
+                    .filter(|s| !s.relic.is_empty())
+                    .map(|s| s.relic.as_str());
+                row(
+                    ui,
+                    db,
+                    url,
+                    "",
+                    "Relic",
+                    &relic.name,
+                    "",
+                    None,
+                    other,
+                    slot_tint(
+                        suggestion.is_some() && relic.name != sug_relic,
+                        viewing_optimized,
+                        gain,
+                    ),
+                );
+            }
+        },
+        |ui| {
+            section(ui, "WEAPONS");
+            let sug_sets = suggestion
+                .map(|s| parse_suggestion_weapons(&s.weapons))
+                .unwrap_or_default();
+            for (i, set) in build.weapons.iter().enumerate() {
+                let parts: Vec<&str> = [set.main_hand.as_ref(), set.off_hand.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .map(|w| {
+                        if w.weapon_type.is_empty() {
+                            w.name.as_str()
+                        } else {
+                            w.weapon_type.as_str()
+                        }
+                    })
+                    .collect();
+                let label = parts.join(" / ");
+                let sug_line = sug_sets.get(i).map(|(_, v)| v.as_str()).unwrap_or("");
+                let url = db.and_then(|d| {
                     set.main_hand
                         .as_ref()
-                        .and_then(|w| icons::weapon_type_url(d, &build.profession, &w.weapon_type))
-                })
-        });
-        let sigils: Vec<String> = set.sigils.iter().map(|s| s.name.clone()).collect();
-        weapon_row(
-            ui,
-            db,
-            url,
-            &set.label,
-            &label,
-            &sigils,
-            if sug_line.is_empty() {
-                None
-            } else {
-                Some(sug_line)
-            },
-            slot_tint(
-                suggestion.is_some() && !sug_line.is_empty() && sug_line != label,
-                viewing_optimized,
-                gain,
-            ),
-        );
-    }
+                        .and_then(|w| icons::item_url(d, w.id))
+                        .or_else(|| {
+                            set.main_hand.as_ref().and_then(|w| {
+                                icons::weapon_type_url(d, &build.profession, &w.weapon_type)
+                            })
+                        })
+                });
+                let sigils: Vec<String> = set.sigils.iter().map(|s| s.name.clone()).collect();
+                weapon_row(
+                    ui,
+                    db,
+                    url,
+                    &set.stat_prefix,
+                    &set.label,
+                    &label,
+                    &sigils,
+                    if sug_line.is_empty() {
+                        None
+                    } else {
+                        Some(sug_line)
+                    },
+                    slot_tint(
+                        suggestion.is_some() && !sug_line.is_empty() && sug_line != label,
+                        viewing_optimized,
+                        gain,
+                    ),
+                );
+            }
+        },
+    );
 }
 
 fn render_suggestion_sheet(
@@ -250,129 +256,146 @@ fn render_suggestion_sheet(
     gain: i32,
 ) {
     let rune_url = db.and_then(|d| icons::upgrade_url(d, &sug.rune));
-    section(ui, "ARMOR");
-    for slot in ARMOR_SLOTS {
-        let cur = current.armor.iter().find(|p| p.slot == slot);
-        let cur_prefix = cur.map(|p| p.stat_prefix.as_str()).unwrap_or("");
-        let other = cur.map(|p| {
-            format!(
-                "{} {}",
-                if p.stat_prefix.is_empty() {
-                    ""
-                } else {
-                    p.stat_prefix.as_str()
-                },
-                slot_label(slot)
-            )
-        });
-        row(
-            ui,
-            db,
-            db.and_then(|d| cur.and_then(|p| icons::item_url(d, p.id))),
-            &sug.stat_prefix,
-            slot_label(slot),
-            "",
-            &sug.rune,
-            rune_url,
-            other.as_deref(),
-            slot_tint(
-                cur_prefix != sug.stat_prefix && !sug.stat_prefix.is_empty(),
-                viewing_optimized,
-                gain,
-            ),
-        );
-    }
-
-    section(ui, "TRINKETS");
-    for slot in TRINKET_SLOTS {
-        let cur = current.trinkets.iter().find(|p| p.slot == slot);
-        let cur_prefix = cur.map(|p| p.stat_prefix.as_str()).unwrap_or("");
-        let other = cur.map(|p| format!("{} {}", p.stat_prefix, slot_label(slot)));
-        row(
-            ui,
-            db,
-            db.and_then(|d| cur.and_then(|p| icons::item_url(d, p.id))),
-            &sug.stat_prefix,
-            slot_label(slot),
-            "",
-            "",
-            None,
-            other.as_deref(),
-            slot_tint(
-                cur_prefix != sug.stat_prefix && !sug.stat_prefix.is_empty(),
-                viewing_optimized,
-                gain,
-            ),
-        );
-    }
-
-    if !sug.relic.is_empty() {
-        let cur_relic = current
-            .relic
-            .as_ref()
-            .map(|r| r.name.as_str())
-            .unwrap_or("");
-        row(
-            ui,
-            db,
-            db.and_then(|d| icons::upgrade_url(d, &sug.relic)),
-            "",
-            "Relic",
-            &sug.relic,
-            "",
-            None,
-            if cur_relic.is_empty() {
-                None
-            } else {
-                Some(cur_relic)
-            },
-            slot_tint(cur_relic != sug.relic, viewing_optimized, gain),
-        );
-    }
-
-    section(ui, "WEAPONS");
-    let sets = parse_suggestion_weapons(&sug.weapons);
-    let sigil_pairs = sug.sigils.chunks(2);
-    for (i, ((label, weapons), sigils)) in sets.iter().zip(sigil_pairs).enumerate() {
-        let url = db.and_then(|d| {
-            let wt = weapons.split(" / ").next().unwrap_or(weapons).trim();
-            icons::weapon_type_url(d, &current.profession, wt)
-        });
-        let cur = current.weapons.get(i).map(|w| {
-            let parts: Vec<&str> = [w.main_hand.as_ref(), w.off_hand.as_ref()]
-                .into_iter()
-                .flatten()
-                .map(|x| {
-                    if x.weapon_type.is_empty() {
-                        x.name.as_str()
+    gear_columns(
+        ui,
+        |ui| {
+            section(ui, "ARMOR");
+            for slot in ARMOR_SLOTS {
+                let cur = current.armor.iter().find(|p| p.slot == slot);
+                let cur_prefix = cur.map(|p| p.stat_prefix.as_str()).unwrap_or("");
+                let other = cur.map(|p| {
+                    format!(
+                        "{} {}",
+                        if p.stat_prefix.is_empty() {
+                            ""
+                        } else {
+                            p.stat_prefix.as_str()
+                        },
+                        slot_label(slot)
+                    )
+                });
+                row(
+                    ui,
+                    db,
+                    db.and_then(|d| cur.and_then(|p| icons::item_url(d, p.id))),
+                    &sug.stat_prefix,
+                    slot_label(slot),
+                    cur.map(|p| p.name.as_str()).unwrap_or(""),
+                    &sug.rune,
+                    rune_url,
+                    other.as_deref(),
+                    slot_tint(
+                        cur_prefix != sug.stat_prefix && !sug.stat_prefix.is_empty(),
+                        viewing_optimized,
+                        gain,
+                    ),
+                );
+            }
+        },
+        |ui| {
+            section(ui, "TRINKETS");
+            for slot in TRINKET_SLOTS {
+                let cur = current.trinkets.iter().find(|p| p.slot == slot);
+                let cur_prefix = cur.map(|p| p.stat_prefix.as_str()).unwrap_or("");
+                let other = cur.map(|p| format!("{} {}", p.stat_prefix, slot_label(slot)));
+                row(
+                    ui,
+                    db,
+                    db.and_then(|d| cur.and_then(|p| icons::item_url(d, p.id))),
+                    &sug.stat_prefix,
+                    slot_label(slot),
+                    cur.map(|p| p.name.as_str()).unwrap_or(""),
+                    "",
+                    None,
+                    other.as_deref(),
+                    slot_tint(
+                        cur_prefix != sug.stat_prefix && !sug.stat_prefix.is_empty(),
+                        viewing_optimized,
+                        gain,
+                    ),
+                );
+            }
+            if !sug.relic.is_empty() {
+                let cur_relic = current
+                    .relic
+                    .as_ref()
+                    .map(|r| r.name.as_str())
+                    .unwrap_or("");
+                row(
+                    ui,
+                    db,
+                    db.and_then(|d| icons::upgrade_url(d, &sug.relic)),
+                    "",
+                    "Relic",
+                    &sug.relic,
+                    "",
+                    None,
+                    if cur_relic.is_empty() {
+                        None
                     } else {
-                        x.weapon_type.as_str()
-                    }
-                })
-                .collect();
-            parts.join(" / ")
-        });
-        let sigil_names: Vec<String> = sigils.to_vec();
-        weapon_row(
-            ui,
-            db,
-            url,
-            label,
-            weapons,
-            &sigil_names,
-            cur.as_deref(),
-            slot_tint(
-                cur.as_deref() != Some(weapons.as_str()),
-                viewing_optimized,
-                gain,
-            ),
-        );
-    }
-    if sets.is_empty() {
-        for w in &sug.weapons {
-            ui.text_colored(theme::CREAM, w);
-        }
-    }
+                        Some(cur_relic)
+                    },
+                    slot_tint(cur_relic != sug.relic, viewing_optimized, gain),
+                );
+            }
+        },
+        |ui| {
+            section(ui, "WEAPONS");
+            let sets = parse_suggestion_weapons(&sug.weapons);
+            let sigil_pairs = sug.sigils.chunks(2);
+            for (i, ((label, weapons), sigils)) in sets.iter().zip(sigil_pairs).enumerate() {
+                let url = db.and_then(|d| {
+                    let wt = weapons.split(" / ").next().unwrap_or(weapons).trim();
+                    icons::weapon_type_url(d, &current.profession, wt)
+                });
+                let cur = current.weapons.get(i).map(|w| {
+                    let parts: Vec<&str> = [w.main_hand.as_ref(), w.off_hand.as_ref()]
+                        .into_iter()
+                        .flatten()
+                        .map(|x| {
+                            if x.weapon_type.is_empty() {
+                                x.name.as_str()
+                            } else {
+                                x.weapon_type.as_str()
+                            }
+                        })
+                        .collect();
+                    parts.join(" / ")
+                });
+                let sigil_names: Vec<String> = sigils.to_vec();
+                weapon_row(
+                    ui,
+                    db,
+                    url,
+                    &sug.stat_prefix,
+                    label,
+                    weapons,
+                    &sigil_names,
+                    cur.as_deref(),
+                    slot_tint(
+                        cur.as_deref() != Some(weapons.as_str()),
+                        viewing_optimized,
+                        gain,
+                    ),
+                );
+            }
+            if sets.is_empty() {
+                for w in &sug.weapons {
+                    ui.text_colored(theme::CREAM, w);
+                }
+            }
+        },
+    );
+}
+
+fn gear_columns(ui: &Ui, a: impl FnOnce(&Ui), b: impl FnOnce(&Ui), c: impl FnOnce(&Ui)) {
+    ui.columns(3, "##gear_cols", false);
+    a(ui);
+    ui.next_column();
+    b(ui);
+    ui.next_column();
+    c(ui);
+    ui.columns(1, "##gear_end", false);
 }
 
 fn section(ui: &Ui, title: &str) {
@@ -392,10 +415,19 @@ fn row(
     other: Option<&str>,
     tint: GainTint,
 ) {
+    const ICON: f32 = 28.0;
+    const GAP: f32 = 14.0;
     let p = ui.cursor_screen_pos();
-    icons::draw(ui, url, 28.0, icon_tint(tint));
+    icons::draw(ui, url, ICON, icon_tint(tint));
+    if ui.is_item_hovered() {
+        let key = if name.is_empty() { slot } else { name };
+        if db.and_then(|d| comparison::inspect_text(key, d)).is_none() {
+            tooltip(ui, prefix, slot, name, nested, other);
+        }
+        comparison::inspect_if_hovered(ui, key, db);
+    }
     ui.same_line();
-    ui.set_cursor_screen_pos([p[0] + 34.0, p[1]]);
+    ui.set_cursor_screen_pos([p[0] + ICON + GAP, p[1]]);
     if !prefix.is_empty() {
         ui.text_colored(theme::GOLD, prefix);
         ui.same_line();
@@ -405,18 +437,8 @@ fn row(
         ui.same_line();
         ui.text_colored(theme::MUTED, name);
     }
-    if ui.is_item_hovered() || ui.is_item_hovered() {
-        tooltip(ui, prefix, slot, name, nested, other);
-    }
-    // Hover the icon too.
-    ui.set_cursor_screen_pos(p);
-    ui.dummy([28.0, 28.0]);
     if ui.is_item_hovered() {
         tooltip(ui, prefix, slot, name, nested, other);
-        if let Some(n) = name.chars().chain(prefix.chars()).next() {
-            let _ = n;
-            comparison::inspect_if_hovered(ui, if name.is_empty() { slot } else { name }, db);
-        }
     }
 
     if !nested.is_empty() {
@@ -424,7 +446,7 @@ fn row(
         let np = ui.cursor_screen_pos();
         icons::draw(ui, nested_url, 18.0, [1.0, 1.0, 1.0, 1.0]);
         ui.same_line();
-        ui.set_cursor_screen_pos([np[0] + 22.0, np[1]]);
+        ui.set_cursor_screen_pos([np[0] + 18.0 + 10.0, np[1]]);
         ui.text_colored(theme::MUTED, nested);
         comparison::inspect_if_hovered(ui, nested, db);
         ui.unindent();
@@ -435,21 +457,28 @@ fn weapon_row(
     ui: &Ui,
     db: Option<&GameDb>,
     url: Option<&str>,
+    prefix: &str,
     set_label: &str,
     weapons: &str,
     sigils: &[String],
     other: Option<&str>,
     tint: GainTint,
 ) {
+    const ICON: f32 = 28.0;
+    const GAP: f32 = 14.0;
     let p = ui.cursor_screen_pos();
-    icons::draw(ui, url, 28.0, icon_tint(tint));
+    icons::draw(ui, url, ICON, icon_tint(tint));
     ui.same_line();
-    ui.set_cursor_screen_pos([p[0] + 34.0, p[1]]);
-    ui.text_colored(theme::GOLD, set_label);
+    ui.set_cursor_screen_pos([p[0] + ICON + GAP, p[1]]);
+    if !prefix.is_empty() {
+        ui.text_colored(theme::GOLD, prefix);
+        ui.same_line();
+    }
+    ui.text_colored(theme::CREAM, set_label);
     ui.same_line();
     ui.text_colored(theme::CREAM, weapons);
     if ui.is_item_hovered() {
-        tooltip(ui, "", set_label, weapons, &sigils.join(" · "), other);
+        tooltip(ui, prefix, set_label, weapons, &sigils.join(" · "), other);
     }
     for sig in sigils {
         if sig.is_empty() {
@@ -460,7 +489,7 @@ fn weapon_row(
         let surl = db.and_then(|d| icons::upgrade_url(d, sig));
         icons::draw(ui, surl, 18.0, [1.0, 1.0, 1.0, 1.0]);
         ui.same_line();
-        ui.set_cursor_screen_pos([sp[0] + 22.0, sp[1]]);
+        ui.set_cursor_screen_pos([sp[0] + 18.0 + 10.0, sp[1]]);
         ui.text_colored(theme::MUTED, sig);
         comparison::inspect_if_hovered(ui, sig, db);
         ui.unindent();
@@ -468,7 +497,7 @@ fn weapon_row(
 }
 
 fn tooltip(ui: &Ui, prefix: &str, slot: &str, name: &str, nested: &str, other: Option<&str>) {
-    ui.tooltip(|| {
+    crate::ui::theme::wide_tooltip(ui, |ui| {
         let shown = format!("{} {} {}", prefix, slot, name);
         ui.text_colored(theme::GOLD, shown.trim());
         if !nested.is_empty() {

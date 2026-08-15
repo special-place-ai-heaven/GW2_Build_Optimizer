@@ -424,6 +424,9 @@ fn resolve_equipment_db(
                         .unwrap_or_default(),
                     id: piece.id,
                 });
+                if ws1.stat_prefix.is_empty() {
+                    ws1.stat_prefix = stat_prefix;
+                }
                 extract_sigils(piece, &mut ws1);
             }
             "WeaponA2" => {
@@ -434,6 +437,9 @@ fn resolve_equipment_db(
                         .unwrap_or_default(),
                     id: piece.id,
                 });
+                if ws1.stat_prefix.is_empty() {
+                    ws1.stat_prefix = stat_prefix;
+                }
                 extract_sigils(piece, &mut ws1);
             }
             "WeaponB1" => {
@@ -444,6 +450,9 @@ fn resolve_equipment_db(
                         .unwrap_or_default(),
                     id: piece.id,
                 });
+                if ws2.stat_prefix.is_empty() {
+                    ws2.stat_prefix = stat_prefix;
+                }
                 extract_sigils(piece, &mut ws2);
             }
             "WeaponB2" => {
@@ -454,6 +463,9 @@ fn resolve_equipment_db(
                         .unwrap_or_default(),
                     id: piece.id,
                 });
+                if ws2.stat_prefix.is_empty() {
+                    ws2.stat_prefix = stat_prefix;
+                }
                 extract_sigils(piece, &mut ws2);
             }
             "Helm" | "Shoulders" | "Coat" | "Gloves" | "Leggings" | "Boots" => {

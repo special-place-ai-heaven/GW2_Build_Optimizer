@@ -265,8 +265,44 @@ pub struct DownloadState {
     pub current_step: usize,
     pub total_steps: usize,
     pub step_name: String,
+    pub inner_done: usize,
+    pub inner_total: usize,
     pub done: bool,
     pub error: Option<String>,
+}
+
+impl DownloadState {
+    /// Overall 0..=1, including the current step's item/icon batches.
+    pub fn fraction(&self) -> f32 {
+        download_fraction(
+            self.current_step,
+            self.total_steps,
+            self.inner_done,
+            self.inner_total,
+            self.done,
+        )
+    }
+}
+
+pub(crate) fn download_fraction(
+    current_step: usize,
+    total_steps: usize,
+    inner_done: usize,
+    inner_total: usize,
+    done: bool,
+) -> f32 {
+    if done {
+        return 1.0;
+    }
+    if total_steps == 0 {
+        return 0.0;
+    }
+    let inner = if inner_total > 0 {
+        (inner_done as f32 / inner_total as f32).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    ((current_step as f32 + inner) / total_steps as f32).clamp(0.0, 1.0)
 }
 
 fn lock_state() -> std::sync::MutexGuard<'static, Option<AddonState>> {
@@ -983,5 +1019,16 @@ mod tests {
         );
         reset_state();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn download_fraction_crawls_during_item_batches() {
+        let start = download_fraction(7, 9, 0, 74056, false);
+        assert!((start - 7.0 / 9.0).abs() < 1e-5);
+        let mid = download_fraction(7, 9, 24000, 74056, false);
+        assert!(mid > start);
+        assert!(mid < 8.0 / 9.0);
+        assert_eq!(download_fraction(9, 9, 0, 0, true), 1.0);
+        assert_eq!(download_fraction(0, 0, 0, 0, false), 0.0);
     }
 }

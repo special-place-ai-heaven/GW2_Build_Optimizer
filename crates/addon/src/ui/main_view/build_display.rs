@@ -190,6 +190,7 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
             &parsed.heal,
             &parsed.utilities,
             &parsed.elite,
+            "sugcard",
         );
     });
 
@@ -333,6 +334,82 @@ fn render_slash_list(
     }
 }
 
+fn slash_parts(joined: &str) -> Vec<&str> {
+    joined
+        .split(" / ")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Heal / utilities / elite for one revenant legend, keyed by compact stance label
+/// ("Dwarf", "Entity", …). Character API skills are the active legend only —
+/// and older legends often share palettes with the newest one — so the bar
+/// must read `/v2/legends`, not `build.skills`.
+fn stance_kit(
+    db: &gw2_optimizer::gamedb::GameDb,
+    compact: &str,
+) -> Option<(String, Vec<String>, String)> {
+    let legend = db.legends.values().find(|l| {
+        db.skills.get(&l.swap).is_some_and(|s| {
+            crate::ui::comparison::compact_stance_name(&s.name).eq_ignore_ascii_case(compact)
+        })
+    })?;
+    let name = |id: u32| {
+        db.skills
+            .get(&id)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| format!("#{id}"))
+    };
+    Some((
+        name(legend.heal),
+        legend.utilities.iter().copied().map(name).collect(),
+        name(legend.elite),
+    ))
+}
+
+// ponytail: one preview index for the visible skill bar (Improve never shows two).
+thread_local! {
+    static STANCE_PREVIEW: std::cell::Cell<usize> = std::cell::Cell::new(0);
+}
+
+/// Clickable stance pills. Returns that legend's kit when the db has it.
+fn render_stance_tabs(
+    ui: &Ui,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+    joined: &str,
+    id_suffix: &str,
+) -> Option<(String, Vec<String>, String)> {
+    let names = slash_parts(joined);
+    if names.is_empty() {
+        return None;
+    }
+    ui.text_colored(LABEL_COLOR, "Stances");
+    let n = names.len();
+    let mut selected = STANCE_PREVIEW.with(|c| {
+        let v = c.get();
+        if v >= n {
+            c.set(0);
+            0
+        } else {
+            v
+        }
+    });
+    let avail = ui.content_region_avail()[0];
+    let mut row_x = 0.0_f32;
+    for (i, name) in names.iter().enumerate() {
+        let [cw, _] = crate::ui::theme::select_chip_size(ui, name, false);
+        crate::ui::theme::wrap_chip(ui, avail, &mut row_x, cw, 4.0);
+        let id = format!("##stance_tab_{id_suffix}_{i}");
+        if crate::ui::theme::select_chip(ui, name, i == selected, &id, None) {
+            selected = i;
+            STANCE_PREVIEW.with(|c| c.set(i));
+        }
+        crate::ui::comparison::inspect_if_hovered(ui, name, db);
+    }
+    db.and_then(|d| stance_kit(d, names[selected]))
+}
+
 fn wrap_slot_lines(ui: &Ui, text: &str, max_w: f32) -> Vec<String> {
     if ui.calc_text_size(text)[0] <= max_w {
         return vec![text.to_string()];
@@ -371,29 +448,48 @@ fn render_skill_bar(
     heal: &str,
     utilities: &[String],
     elite: &str,
+    id_suffix: &str,
 ) {
-    render_slash_list(ui, "Stances", stances, db);
+    let kit = render_stance_tabs(ui, db, stances, id_suffix);
     render_slash_list(ui, "Pets", pets, db);
 
+    let (heal, utilities, elite) = match kit {
+        Some((h, u, e)) => (h, u, e),
+        None => (heal.to_string(), utilities.to_vec(), elite.to_string()),
+    };
     let u1 = utilities.first().map(|s| s.as_str()).unwrap_or("");
     let u2 = utilities.get(1).map(|s| s.as_str()).unwrap_or("");
     let u3 = utilities.get(2).map(|s| s.as_str()).unwrap_or("");
     let slots = [
-        ("Heal", heal, crate::ui::theme::HEAL_RIM),
+        ("Heal", heal.as_str(), crate::ui::theme::HEAL_RIM),
         ("Util 1", u1, crate::ui::theme::GOLD_DIM),
         ("Util 2", u2, crate::ui::theme::GOLD_DIM),
         ("Util 3", u3, crate::ui::theme::GOLD_DIM),
-        ("Elite", elite, crate::ui::theme::ELITE_RIM),
+        ("Elite", elite.as_str(), crate::ui::theme::ELITE_RIM),
     ];
     let avail = ui.content_region_avail()[0].max(1.0);
     let gap = 5.0;
-    let slot_w = ((avail - gap * 4.0) / 5.0).max(52.0);
-    let slot_h = 58.0;
-    let start = ui.cursor_screen_pos();
     let line = ui.text_line_height();
+    let pad = 4.0;
+    let icon = line * 2.0;
+    let icon_text_gap = 8.0;
+    let slot_h = icon + pad * 2.0;
+    let min_slot = pad + icon + icon_text_gap + 72.0 + pad;
+    let cols = if avail >= min_slot * 5.0 + gap * 4.0 {
+        5
+    } else if avail >= min_slot * 3.0 + gap * 2.0 {
+        3
+    } else {
+        1
+    };
+    let slot_w = (avail - gap * (cols as f32 - 1.0)) / cols as f32;
+    let start = ui.cursor_screen_pos();
     for (i, (label, value, rim)) in slots.iter().enumerate() {
-        let x = start[0] + i as f32 * (slot_w + gap);
-        let p = [x, start[1]];
+        let col = i % cols;
+        let row = i / cols;
+        let x = start[0] + col as f32 * (slot_w + gap);
+        let y = start[1] + row as f32 * (slot_h + gap);
+        let p = [x, y];
         let empty = value.is_empty();
         let fill = if empty {
             crate::ui::theme::PLATE_EMPTY
@@ -406,7 +502,7 @@ fn render_skill_bar(
             *rim
         };
         ui.set_cursor_screen_pos(p);
-        let _ = ui.invisible_button(&format!("##skill_slot_{i}"), [slot_w, slot_h]);
+        let _ = ui.invisible_button(&format!("##skill_slot_{id_suffix}_{i}"), [slot_w, slot_h]);
         if !empty {
             crate::ui::comparison::inspect_if_hovered(ui, value, db);
         }
@@ -419,19 +515,23 @@ fn render_skill_bar(
             dl.add_rect(p, [p[0] + slot_w, p[1] + slot_h], border)
                 .rounding(6.0)
                 .build();
-            if !empty {
-                if let Some(url) = db.and_then(|d| crate::ui::icons::skill_url_by_name(d, value)) {
-                    crate::ui::icons::paint_on(
-                        &dl,
-                        Some(url),
-                        [p[0] + 4.0, p[1] + 20.0],
-                        [p[0] + 26.0, p[1] + 42.0],
-                        [1.0, 1.0, 1.0, 1.0],
-                    );
-                }
-            }
+            let icon_p = [p[0] + pad, p[1] + pad];
+            let icon_url = if empty {
+                None
+            } else {
+                db.and_then(|d| crate::ui::icons::skill_url_by_name(d, value))
+            };
+            crate::ui::icons::paint_on(
+                &dl,
+                icon_url,
+                icon_p,
+                [icon_p[0] + icon, icon_p[1] + icon],
+                [1.0, 1.0, 1.0, 1.0],
+            );
+            let text_x = p[0] + pad + icon + icon_text_gap;
+            let text_w = (p[0] + slot_w - pad - text_x).max(16.0);
             dl.add_text(
-                [p[0] + 6.0, p[1] + 4.0],
+                [text_x, p[1] + pad],
                 crate::ui::color_u32(crate::ui::theme::GOLD),
                 *label,
             );
@@ -441,18 +541,14 @@ fn render_skill_bar(
             } else {
                 crate::ui::theme::CREAM
             };
-            let inner_w = slot_w - 12.0;
-            let lines = wrap_slot_lines(ui, shown, inner_w);
-            for (li, ln) in lines.iter().take(2).enumerate() {
-                dl.add_text(
-                    [p[0] + 6.0, p[1] + 6.0 + line * (1.0 + li as f32)],
-                    crate::ui::color_u32(color),
-                    ln,
-                );
+            let lines = wrap_slot_lines(ui, shown, text_w);
+            if let Some(ln) = lines.first() {
+                dl.add_text([text_x, p[1] + pad + line], crate::ui::color_u32(color), ln);
             }
         }
     }
-    ui.set_cursor_screen_pos([start[0], start[1] + slot_h + 6.0]);
+    let rows = slots.len().div_ceil(cols);
+    ui.set_cursor_screen_pos([start[0], start[1] + rows as f32 * (slot_h + gap)]);
     ui.dummy([avail, 0.0]);
 }
 
@@ -495,6 +591,7 @@ pub fn render_build_skills(
             heal,
             &utils,
             elite,
+            "cur",
         );
     });
 }
@@ -618,6 +715,7 @@ pub fn render_suggestion_skills(
             &parsed.heal,
             &parsed.utilities,
             &parsed.elite,
+            "sug",
         );
     });
 }
@@ -923,4 +1021,52 @@ pub fn render_why_section(ui: &Ui, explanation: &str, changes: &[String]) {
         }
     }
     ui.spacing();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stance_kit;
+    use gw2_api::models::Legend;
+
+    fn skill(id: u32, name: &str) -> gw2_api::models::Skill {
+        serde_json::from_value(serde_json::json!({ "id": id, "name": name }))
+            .expect("skill fixture")
+    }
+
+    fn legend(id: &str, swap: u32, heal: u32, elite: u32, utilities: [u32; 3]) -> Legend {
+        Legend {
+            id: id.into(),
+            code: None,
+            swap,
+            heal,
+            elite,
+            utilities: utilities.to_vec(),
+        }
+    }
+
+    #[test]
+    fn stance_kit_uses_that_legend_not_the_api_active_one() {
+        let mut db = gw2_optimizer::gamedb::GameDb::empty_for_tests();
+        db.skills.insert(1, skill(1, "Legendary Dwarf Stance"));
+        db.skills.insert(10, skill(10, "Soothing Stone"));
+        db.skills.insert(11, skill(11, "Inspiring Reinforcement"));
+        db.skills.insert(12, skill(12, "Forced Engagement"));
+        db.skills.insert(13, skill(13, "Vengeful Hammers"));
+        db.skills.insert(14, skill(14, "Rite of the Great Dwarf"));
+        db.skills.insert(2, skill(2, "Legendary Alliance Stance"));
+        db.skills.insert(20, skill(20, "Selfish Spirit"));
+        db.skills.insert(21, skill(21, "Battle Scorned"));
+        db.legends
+            .insert("Legend3".into(), legend("Legend3", 1, 10, 14, [11, 12, 13]));
+        db.legends
+            .insert("Legend8".into(), legend("Legend8", 2, 20, 20, [21, 21, 21]));
+
+        let (heal, utils, elite) = stance_kit(&db, "Dwarf").expect("dwarf kit");
+        assert_eq!(heal, "Soothing Stone");
+        assert_eq!(utils[0], "Inspiring Reinforcement");
+        assert_eq!(elite, "Rite of the Great Dwarf");
+        let (heal, _, _) = stance_kit(&db, "Alliance").expect("alliance kit");
+        assert_eq!(heal, "Selfish Spirit");
+        assert!(stance_kit(&db, "Entity").is_none());
+    }
 }

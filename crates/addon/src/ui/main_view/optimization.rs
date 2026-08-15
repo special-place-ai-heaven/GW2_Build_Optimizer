@@ -50,8 +50,11 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
     let weights = state.main.weights.clone();
     let selected_role = state.main.selected_role;
     let build_locks = state.main.build_locks.clone();
-    // Capture WvW combat tier for ScenarioSpec construction inside the thread.
-    let wvw_combat_tier = state.main.wvw_combat_tier;
+    let combat_tier = match game_mode {
+        gw2_core::types::GameMode::WvW => state.main.wvw_combat_tier,
+        gw2_core::types::GameMode::PvP => gw2_optimizer::scenario::CombatTier::Solo,
+        gw2_core::types::GameMode::PvE => gw2_optimizer::scenario::CombatTier::Party,
+    };
     // Capture locked elite spec name for the Improve Build label.
     let locked_spec_name: Option<String> =
         build_locks.specs.get(2).and_then(|s| *s).and_then(|id| {
@@ -73,11 +76,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
 
     // Log the weights and deterministic gear prefix for debugging
     let gear_match = gw2_optimizer::scoring::select_gear_prefix(&weights);
-    let tier_label = if game_mode == gw2_core::types::GameMode::WvW {
-        wvw_combat_tier.label().to_string()
-    } else {
-        String::new()
-    };
+    let tier_label = combat_tier.label().to_string();
     nexus::log::log(
         nexus::log::LogLevel::Info,
         "GW2BuildOpt",
@@ -119,7 +118,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     });
                     ScenarioSpec {
                         game_mode: balance_ctx.game_mode.clone(),
-                        combat_tier: wvw_combat_tier,
+                        combat_tier,
                         combat_kind,
                         target_profile: TargetProfile::Single,
                         optimization_target: OptimizationTarget {
@@ -582,7 +581,7 @@ fn synergy_result_to_suggestion(
         }
     };
 
-    BuildSuggestion {
+    let mut suggestion = BuildSuggestion {
         label,
         build_summary: format!(
             "Gear: {}",
@@ -619,7 +618,11 @@ fn synergy_result_to_suggestion(
             .iter()
             .map(|r| r.to_string())
             .collect(),
+    };
+    if suggestion.chat_code.is_none() {
+        suggestion.chat_code = suggestion_to_chat_code(&suggestion, db);
     }
+    suggestion
 }
 
 fn validated_build_to_chat_code(
@@ -779,7 +782,7 @@ fn candidate_to_suggestion(
         gw2_optimizer::referee::evaluate_viability_gates(None, &proxy_perf, &scenario)
     };
 
-    BuildSuggestion {
+    let mut suggestion = BuildSuggestion {
         label: format!("Score: {:.2}", candidate.score),
         build_summary: format!("Gear: {}", candidate.gear.stat_prefix_name),
         stat_prefix: candidate.gear.stat_prefix_name.clone(),
@@ -802,7 +805,9 @@ fn candidate_to_suggestion(
         benchmark_delta: None,
         data_quality: gw2_optimizer::data::DataQuality::Verified,
         quality_reasons: vec![],
-    }
+    };
+    suggestion.chat_code = suggestion_to_chat_code(&suggestion, db);
+    suggestion
 }
 
 /// Run rotation simulation for a suggestion's skills and attach the results.
@@ -1046,6 +1051,168 @@ fn infer_profession_from_specs(
     // (e.g. `skills_by_profession.get(name)`) will simply find nothing, which
     // is the correct outcome when we cannot infer.
     String::new()
+}
+
+/// Encode a displayed suggestion as a GW2 build-template chat code.
+/// Save/load stores names, not IDs — resolve against GameDb at encode time.
+pub(super) fn suggestion_to_chat_code(
+    suggestion: &crate::ui::comparison::BuildSuggestion,
+    db: &gw2_optimizer::gamedb::GameDb,
+) -> Option<String> {
+    use gw2_api::models::{Build, SpecSelection};
+
+    let profession = infer_profession_from_specs(&suggestion.specializations, db);
+    if profession.is_empty() {
+        return None;
+    }
+
+    let mut specializations = Vec::new();
+    for (spec_name, trait_names) in &suggestion.specializations {
+        let Some(spec) = spec_by_display_name(db, spec_name) else {
+            continue;
+        };
+        let trait_ids: Vec<Option<u32>> = trait_names
+            .iter()
+            .take(3)
+            .map(|name| {
+                db.traits_by_spec.get(&spec.id).and_then(|ids| {
+                    ids.iter()
+                        .filter_map(|id| db.traits.get(id))
+                        .find(|t| t.name.eq_ignore_ascii_case(name))
+                        .map(|t| t.id)
+                })
+            })
+            .collect();
+        specializations.push(SpecSelection {
+            id: Some(spec.id),
+            traits: trait_ids,
+        });
+    }
+
+    let skills = skill_selection_from_suggestion(&suggestion.skills, db, &profession);
+    let pets = pet_selection_from_suggestion(&suggestion.skills);
+
+    let api_build = Build {
+        name: None,
+        profession: Some(profession),
+        specializations,
+        skills: Some(skills.clone()),
+        aquatic_skills: Some(skills),
+        legends: vec![],
+        aquatic_legends: vec![],
+        pets,
+    };
+
+    let weapons: Vec<String> = parse_weapon_sets(&suggestion.weapons)
+        .into_iter()
+        .flat_map(|(_, types)| types)
+        .collect();
+
+    super::character::generate_build_chat_code(&api_build, db, &weapons)
+}
+
+fn spec_by_display_name<'a>(
+    db: &'a gw2_optimizer::gamedb::GameDb,
+    name: &str,
+) -> Option<&'a gw2_api::models::Specialization> {
+    let clean = name.replace(" [E]", "");
+    let mut ids: Vec<u32> = db.specializations.keys().copied().collect();
+    ids.sort_unstable();
+    for sid in ids {
+        if let Some(spec) = db.specializations.get(&sid) {
+            if spec.name.eq_ignore_ascii_case(&clean) {
+                return Some(spec);
+            }
+        }
+    }
+    None
+}
+
+fn skill_id_by_name(
+    db: &gw2_optimizer::gamedb::GameDb,
+    profession: &str,
+    name: &str,
+) -> Option<u32> {
+    if let Some(ids) = db.skills_by_profession.get(profession) {
+        for &id in ids {
+            if let Some(skill) = db.skills.get(&id) {
+                if skill.name.eq_ignore_ascii_case(name) {
+                    return Some(skill.id);
+                }
+            }
+        }
+    }
+    let mut ids: Vec<u32> = db.skills.keys().copied().collect();
+    ids.sort_unstable();
+    ids.iter().find_map(|id| {
+        db.skills
+            .get(id)
+            .filter(|s| s.name.eq_ignore_ascii_case(name))
+            .map(|s| s.id)
+    })
+}
+
+fn skill_selection_from_suggestion(
+    skills: &[String],
+    db: &gw2_optimizer::gamedb::GameDb,
+    profession: &str,
+) -> gw2_api::models::SkillSelection {
+    let mut heal = None;
+    let mut utilities = Vec::new();
+    let mut elite = None;
+    for s in skills {
+        if let Some(rest) = s.strip_prefix("Heal: ") {
+            heal = skill_id_by_name(db, profession, rest.trim());
+        } else if let Some(rest) = s.strip_prefix("Utils: ") {
+            for name in rest.split(',') {
+                let name = name.trim();
+                if !name.is_empty() {
+                    utilities.push(skill_id_by_name(db, profession, name));
+                }
+            }
+        } else if let Some(rest) = s.strip_prefix("Utility: ") {
+            let name = rest.trim();
+            if !name.is_empty() {
+                utilities.push(skill_id_by_name(db, profession, name));
+            }
+        } else if let Some(rest) = s.strip_prefix("Elite: ") {
+            elite = skill_id_by_name(db, profession, rest.trim());
+        }
+    }
+    utilities.truncate(3);
+    while utilities.len() < 3 {
+        utilities.push(None);
+    }
+    gw2_api::models::SkillSelection {
+        heal,
+        utilities,
+        elite,
+    }
+}
+
+fn pet_selection_from_suggestion(skills: &[String]) -> Option<gw2_api::models::PetSelection> {
+    for s in skills {
+        let Some(rest) = s.strip_prefix("Pets: ") else {
+            continue;
+        };
+        let mut ids = Vec::new();
+        for part in rest.split('/') {
+            let t = part.trim().trim_start_matches('#');
+            if let Ok(id) = t.parse::<u32>() {
+                ids.push(Some(id));
+            }
+        }
+        if ids.is_empty() {
+            return None;
+        }
+        let t1 = ids.first().copied().flatten();
+        let t2 = ids.get(1).copied().flatten();
+        return Some(gw2_api::models::PetSelection {
+            terrestrial: vec![t1, t2],
+            aquatic: vec![],
+        });
+    }
+    None
 }
 
 /// Summarize a ResolvedBuild as text for LLM prompts.
@@ -1452,4 +1619,108 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::suggestion_to_chat_code;
+    use crate::ui::comparison::BuildSuggestion;
+    use gw2_api::models::{Profession, Specialization, Trait};
+    use std::collections::HashMap;
+
+    fn skill(id: u32, name: &str) -> gw2_api::models::Skill {
+        serde_json::from_value(serde_json::json!({ "id": id, "name": name })).expect("skill")
+    }
+
+    fn chat_code_db() -> gw2_optimizer::gamedb::GameDb {
+        let mut db = gw2_optimizer::gamedb::GameDb::empty_for_tests();
+        db.professions.insert(
+            "Thief".into(),
+            Profession {
+                id: "Thief".into(),
+                name: "Thief".into(),
+                code: Some(5),
+                specializations: vec![7],
+                weapons: HashMap::new(),
+                training: vec![],
+                skills_by_palette: vec![],
+                icon: None,
+                icon_big: None,
+            },
+        );
+        db.specializations.insert(
+            7,
+            Specialization {
+                id: 7,
+                name: "Daredevil".into(),
+                profession: "Thief".into(),
+                elite: true,
+                minor_traits: vec![],
+                major_traits: vec![1, 2, 3, 4, 5, 6, 7, 8, 9],
+                weapon_trait: None,
+                icon: None,
+                background: None,
+                profession_icon: None,
+                profession_icon_big: None,
+            },
+        );
+        for (id, name) in [
+            (1u32, "Marauder's Resilience"),
+            (4, "Havoc Specialist"),
+            (7, "Unhindered Combatant"),
+        ] {
+            db.traits.insert(
+                id,
+                Trait {
+                    id,
+                    name: name.into(),
+                    icon: None,
+                    description: None,
+                    specialization: 7,
+                    tier: 1,
+                    order: 0,
+                    slot: "Major".into(),
+                    facts: vec![],
+                    traited_facts: vec![],
+                    skills: vec![],
+                },
+            );
+        }
+        db.traits_by_spec.insert(7, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        db.skills.insert(10, skill(10, "Hide in Shadows"));
+        db.skills.insert(11, skill(11, "Haste"));
+        db.skills.insert(12, skill(12, "Impairing Daggers"));
+        db.skills.insert(13, skill(13, "Skale Venom"));
+        db.skills.insert(14, skill(14, "Dagger Storm"));
+        db.skills_by_profession
+            .insert("Thief".into(), vec![10, 11, 12, 13, 14]);
+        db
+    }
+
+    #[test]
+    fn load_style_suggestion_encodes_chat_code_from_names() {
+        let db = chat_code_db();
+        let suggestion = BuildSuggestion {
+            specializations: vec![(
+                "Daredevil [E]".into(),
+                vec![
+                    "Marauder's Resilience".into(),
+                    "Havoc Specialist".into(),
+                    "Unhindered Combatant".into(),
+                ],
+            )],
+            weapons: vec!["Set 1: Axe / Dagger".into()],
+            skills: vec![
+                "Heal: Hide in Shadows".into(),
+                "Utility: Haste".into(),
+                "Utility: Impairing Daggers".into(),
+                "Utility: Skale Venom".into(),
+                "Elite: Dagger Storm".into(),
+            ],
+            ..Default::default()
+        };
+        let code = suggestion_to_chat_code(&suggestion, &db).expect("encode on load");
+        assert!(code.starts_with("[&"), "{code}");
+        assert!(code.ends_with(']'), "{code}");
+    }
 }

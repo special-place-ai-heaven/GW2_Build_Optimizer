@@ -81,7 +81,6 @@ pub fn render_result_pane_tabs(ui: &Ui, pane: &mut ResultPane) {
         }
         row_x += pill_w + 6.0;
     }
-    ui.spacing();
 }
 
 /// Hover a skill/trait/upgrade name to show live GameDb description + facts.
@@ -95,13 +94,13 @@ pub fn inspect_if_hovered(ui: &Ui, name: &str, db: Option<&GameDb>) {
     let Some(tip) = inspect_text(name, db) else {
         return;
     };
-    ui.tooltip(|| {
+    crate::ui::theme::wide_tooltip(ui, |ui| {
         let mut lines = tip.lines();
         if let Some(title) = lines.next() {
             ui.text_colored(crate::ui::theme::GOLD, title);
         }
         for line in lines {
-            ui.text_wrapped(line);
+            ui.text(line);
         }
     });
 }
@@ -344,8 +343,44 @@ pub struct ComparisonState {
     pub result_pane: ResultPane,
     /// Build tab shows Optimized when a suggestion exists. Default true.
     pub show_optimized: bool,
-    /// Frames remaining for "Copied" on the suggestion chat-code button.
-    pub copy_feedback_frames: u32,
+}
+
+/// Which build the top Chat strip is copying.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatSource {
+    Character,
+    Optimized,
+}
+
+impl ChatSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Character => "Character",
+            Self::Optimized => "Optimized",
+        }
+    }
+
+    pub fn color(self) -> [f32; 4] {
+        match self {
+            Self::Character => crate::ui::theme::CURRENT,
+            Self::Optimized => crate::ui::theme::OPTIMIZED,
+        }
+    }
+}
+
+impl ComparisonState {
+    /// Chat code for the Current / Optimized focus. One strip at the top follows this.
+    pub fn chat_focus(&self, current_code: Option<&str>) -> (ChatSource, Option<String>) {
+        if self.show_optimized && !self.suggestions.is_empty() {
+            let idx = self.selected_suggestion.min(self.suggestions.len() - 1);
+            (
+                ChatSource::Optimized,
+                self.suggestions[idx].chat_code.clone(),
+            )
+        } else {
+            (ChatSource::Character, current_code.map(str::to_string))
+        }
+    }
 }
 
 /// Render the comparison view: current build on left, suggestion on right.
@@ -390,6 +425,7 @@ pub fn render_comparison(
                 .build(ui)
             {
                 comparison.selected_suggestion = i;
+                comparison.show_optimized = true;
             }
             if i < tab_count - 1 {
                 ui.same_line();
@@ -402,20 +438,40 @@ pub fn render_comparison(
     comparison.selected_suggestion = idx;
 
     render_data_quality_badge(ui, &comparison.suggestions[idx]);
-    let chat_code = comparison.suggestions[idx].chat_code.clone();
-    render_chat_code_copy(
-        ui,
-        chat_code.as_deref(),
-        &format!("comparison_{}", idx),
-        &mut comparison.copy_feedback_frames,
-    );
     render_result_pane_tabs(ui, &mut comparison.result_pane);
+    if comparison.result_pane == ResultPane::Build {
+        ui.same_line_with_spacing(0.0, 16.0);
+        crate::ui::gear_sheet::render_view_toggle(ui, &mut comparison.show_optimized);
+    }
+    ui.spacing();
 
     let pane = comparison.result_pane;
     let suggestion = comparison.suggestions[idx].clone();
     match pane {
         ResultPane::Build => {
-            crate::ui::gear_sheet::render_view_toggle(ui, &mut comparison.show_optimized);
+            let viewing = comparison.show_optimized;
+            if viewing {
+                crate::ui::main_view::build_display::render_suggestion_skills(ui, &suggestion, db);
+            } else {
+                crate::ui::main_view::build_display::render_build_skills(ui, current_build, db);
+            }
+            ui.spacing();
+            if viewing {
+                crate::ui::main_view::lock_panel::render_optimized_specs_panel(
+                    ui,
+                    db,
+                    &suggestion.specializations,
+                    "OPTIMIZED SPECS & TRAITS",
+                );
+            } else {
+                let current_specs = spec_pairs_from_build(current_build);
+                crate::ui::main_view::lock_panel::render_optimized_specs_panel(
+                    ui,
+                    db,
+                    &current_specs,
+                    "SPECS & TRAITS",
+                );
+            }
             let gain = crate::ui::gear_sheet::combat_gain(
                 comparison.current_combat_solo.as_ref(),
                 suggestion.combat_solo.as_ref(),
@@ -425,15 +481,9 @@ pub fn render_comparison(
                 current_build,
                 Some(&suggestion),
                 db,
-                comparison.show_optimized,
+                viewing,
                 gain,
             );
-            ui.spacing();
-            if comparison.show_optimized {
-                render_skill_diff(ui, current_build, &suggestion, db);
-            } else {
-                crate::ui::main_view::build_display::render_build_skills(ui, current_build, db);
-            }
             let explanation_text = if !suggestion.synergy_explanation.is_empty() {
                 &suggestion.synergy_explanation
             } else {
@@ -596,69 +646,138 @@ pub(crate) fn render_stats_pane(
     }
 }
 
+fn spec_pairs_from_build(build: &ResolvedBuild) -> Vec<(String, Vec<String>)> {
+    build
+        .specializations
+        .iter()
+        .map(|s| {
+            let name = if s.elite {
+                format!("{} [E]", s.name)
+            } else {
+                s.name.clone()
+            };
+            let traits = s
+                .traits_selected
+                .iter()
+                .filter(|t| t.selected)
+                .map(|t| t.name.clone())
+                .collect();
+            (name, traits)
+        })
+        .collect()
+}
+
 /// Sticky copy strip for a GW2 build-template chat code.
+/// Click the line to copy onto the Windows clipboard (GW2 paste reads that).
+/// Rim and label follow [ChatSource]: blue = loaded character, green = optimized.
 pub fn render_chat_code_copy(
     ui: &Ui,
+    source: ChatSource,
     chat_code: Option<&str>,
     id_suffix: &str,
     copied_frames: &mut u32,
 ) {
-    let Some(code) = chat_code else {
-        return;
-    };
-
     if *copied_frames > 0 {
         *copied_frames = copied_frames.saturating_sub(1);
     }
 
-    ui.spacing();
-    let start = ui.cursor_screen_pos();
-    let width = ui.content_region_avail()[0];
-    {
-        let dl = ui.get_window_draw_list();
-        dl.add_rect(
-            [start[0] - 2.0, start[1] - 4.0],
-            [start[0] + width + 2.0, start[1] + 48.0],
-            crate::ui::theme::PLATE,
-        )
-        .filled(true)
-        .rounding(6.0)
-        .build();
-        dl.add_rect(
-            [start[0] - 2.0, start[1] - 4.0],
-            [start[0] + width + 2.0, start[1] + 48.0],
-            crate::ui::theme::GOLD_DIM,
-        )
-        .rounding(6.0)
-        .build();
+    let accent = source.color();
+    ui.text_colored(accent, "Chat");
+    ui.same_line_with_spacing(0.0, 6.0);
+    ui.text_colored(accent, format!("· {}", source.label()));
+    ui.same_line_with_spacing(0.0, 8.0);
+    if chat_code.is_some() {
+        if *copied_frames > 0 {
+            ui.text_colored(accent, "Copied");
+        } else {
+            ui.text_colored(crate::ui::theme::MUTED, "click to copy");
+        }
+    } else {
+        ui.text_colored(crate::ui::theme::MUTED, "no template");
     }
 
-    ui.dummy([4.0, 2.0]);
-    ui.text_colored(crate::ui::theme::GOLD, "  Chat code");
-    ui.same_line();
-    if crate::ui::theme::gold_button(ui, format!("Copy##suggestion_chat_code_{}", id_suffix)) {
-        ui.set_clipboard_text(code);
-        *copied_frames = 120;
+    let display = chat_code.unwrap_or(match source {
+        ChatSource::Character => "Load a character to copy a build template",
+        ChatSource::Optimized => "No chat code for this result",
+    });
+
+    let w = ui.content_region_avail()[0].max(80.0);
+    let pad = 8.0;
+    let inner_w = (w - pad * 2.0).max(40.0);
+    let lines = wrap_ascii(ui, display, inner_w);
+    let line_h = ui.text_line_height();
+    let h = (line_h * lines.len() as f32 + pad * 2.0).max(ui.frame_height());
+    let p = ui.cursor_screen_pos();
+    let clicked = ui.invisible_button(&format!("##chat_copy_{}", id_suffix), [w, h]);
+    let hovered = ui.is_item_hovered();
+    if clicked {
+        if let Some(code) = chat_code {
+            if crate::clipboard::copy_text(code) {
+                *copied_frames = 120;
+            }
+        }
     }
-    if *copied_frames > 0 {
-        ui.same_line();
-        ui.text_colored(
-            crate::ui::theme::OPTIMIZED,
-            "Copied \u{2014} paste in GW2 chat",
-        );
-    } else {
-        ui.same_line();
-        ui.text_colored(crate::ui::theme::MUTED, "Paste in GW2 chat to apply");
+
+    {
+        let dl = ui.get_window_draw_list();
+        let fill = if *copied_frames > 0 {
+            match source {
+                ChatSource::Character => [0.10, 0.16, 0.26, 0.95],
+                ChatSource::Optimized => [0.10, 0.22, 0.12, 0.95],
+            }
+        } else if hovered {
+            match source {
+                ChatSource::Character => [0.16, 0.20, 0.28, 0.95],
+                ChatSource::Optimized => [0.14, 0.22, 0.14, 0.95],
+            }
+        } else {
+            crate::ui::theme::PLATE
+        };
+        let rim = if chat_code.is_some() {
+            accent
+        } else {
+            crate::ui::theme::GOLD_DIM
+        };
+        let text_col = if chat_code.is_some() {
+            crate::ui::theme::CREAM
+        } else {
+            crate::ui::theme::MUTED
+        };
+        dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], fill)
+            .filled(true)
+            .rounding(crate::ui::theme::ICON_ROUNDING)
+            .build();
+        dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], rim)
+            .rounding(crate::ui::theme::ICON_ROUNDING)
+            .build();
+        let mut ty = p[1] + pad;
+        for line in &lines {
+            dl.add_text([p[0] + pad, ty], crate::ui::color_u32(text_col), line);
+            ty += line_h;
+        }
     }
-    ui.set_next_item_width(-8.0);
-    let mut code_buf = code.to_string();
-    ui.input_text(
-        &format!("##suggestion_chat_code_display_{}", id_suffix),
-        &mut code_buf,
-    )
-    .read_only(true)
-    .build();
-    ui.dummy([0.0, 6.0]);
+}
+
+fn wrap_ascii(ui: &Ui, text: &str, width: f32) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for ch in text.chars() {
+        let mut next = line.clone();
+        next.push(ch);
+        if !line.is_empty() && ui.calc_text_size(&next)[0] > width {
+            lines.push(std::mem::take(&mut line));
+            line.push(ch);
+        } else {
+            line = next;
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
 }
 
 /// Render gear comparison table: per-slot diff between current and optimized build.
@@ -1183,7 +1302,7 @@ fn render_data_quality_badge(ui: &Ui, suggestion: &BuildSuggestion) {
 
     ui.text_colored(col, label);
     if ui.is_item_hovered() {
-        ui.tooltip(|| {
+        crate::ui::theme::wide_tooltip(ui, |ui| {
             ui.text(tooltip_header);
             if !suggestion.quality_reasons.is_empty() {
                 ui.spacing();
@@ -1194,7 +1313,6 @@ fn render_data_quality_badge(ui: &Ui, suggestion: &BuildSuggestion) {
             }
         });
     }
-    ui.spacing();
 }
 
 /// Render benchmark delta vs community reference.
@@ -1418,6 +1536,33 @@ mod tests {
         };
 
         assert_eq!(s.chat_code.as_deref(), Some("[&DQIEAAA=]"));
+    }
+
+    #[test]
+    fn chat_code_follows_current_vs_optimized() {
+        let mut c = ComparisonState::default();
+        let (src, code) = c.chat_focus(Some("[&CUR]"));
+        assert_eq!(src, ChatSource::Character);
+        assert_eq!(code.as_deref(), Some("[&CUR]"));
+
+        c.show_optimized = true;
+        c.suggestions.push(BuildSuggestion {
+            chat_code: Some("[&OPT]".into()),
+            ..Default::default()
+        });
+        let (src, code) = c.chat_focus(Some("[&CUR]"));
+        assert_eq!(src, ChatSource::Optimized);
+        assert_eq!(code.as_deref(), Some("[&OPT]"));
+
+        c.suggestions[0].chat_code = None;
+        let (src, code) = c.chat_focus(Some("[&CUR]"));
+        assert_eq!(src, ChatSource::Optimized);
+        assert_eq!(code, None);
+
+        c.show_optimized = false;
+        let (src, code) = c.chat_focus(Some("[&CUR]"));
+        assert_eq!(src, ChatSource::Character);
+        assert_eq!(code.as_deref(), Some("[&CUR]"));
     }
 
     #[test]

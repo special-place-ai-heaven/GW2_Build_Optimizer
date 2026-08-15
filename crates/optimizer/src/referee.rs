@@ -191,13 +191,16 @@ pub fn evaluate_viability_gates(
             },
         });
 
-        if scenario.game_mode == GameMode::WvW && scenario.combat_tier == CombatTier::Solo {
+        if needs_mobility_out(scenario) {
+            let staller = scenario.combat_kind == CombatKind::Staller;
             gates.push(match rotation {
                 Some(rot) => GateResult {
                     gate: ViabilityGate::MobilityOut,
                     passed: rot.has_mobility_out,
                     note: if rot.has_mobility_out {
-                        "roam out present".into()
+                        "escape kit present".into()
+                    } else if staller {
+                        "no port/stealth/superspeed/leap — cannot evade a group".into()
                     } else {
                         "no teleport/stealth/superspeed/leap — not roam".into()
                     },
@@ -210,9 +213,7 @@ pub fn evaluate_viability_gates(
             });
         }
 
-        if scenario.combat_kind == CombatKind::Harasser
-            || (scenario.game_mode == GameMode::WvW && scenario.combat_tier == CombatTier::Solo)
-        {
+        if needs_harasser_strip(scenario) {
             gates.push(match rotation {
                 Some(rot) => GateResult {
                     gate: ViabilityGate::HarasserStrip,
@@ -271,14 +272,22 @@ pub fn evaluate_viability_gates(
     // WvW floor varies by combat tier: Roamers need more personal sustain than Zerg players.
     // PvP uses its own (lower) floor — amulet-based gear has a smaller stat budget than
     // ascended WvW, so reusing WvW floors here would non-viably score most real PvP builds.
-    let ehp_floor = match scenario.game_mode {
-        GameMode::WvW => match scenario.combat_tier {
-            crate::scenario::CombatTier::Solo => EHP_FLOOR_WVW_ROAM,
-            crate::scenario::CombatTier::Party => EHP_FLOOR_WVW_HAVOC,
-            crate::scenario::CombatTier::Squad => EHP_FLOOR_WVW_ZERG,
-        },
-        GameMode::PvP => EHP_FLOOR_PVP,
-        GameMode::PvE => EHP_FLOOR_PVE,
+    let ehp_floor = if scenario.combat_kind == CombatKind::Staller {
+        match scenario.game_mode {
+            GameMode::WvW => EHP_FLOOR_WVW_ROAM,
+            GameMode::PvP => EHP_FLOOR_PVP,
+            GameMode::PvE => EHP_FLOOR_PVE,
+        }
+    } else {
+        match scenario.game_mode {
+            GameMode::WvW => match scenario.combat_tier {
+                crate::scenario::CombatTier::Solo => EHP_FLOOR_WVW_ROAM,
+                crate::scenario::CombatTier::Party => EHP_FLOOR_WVW_HAVOC,
+                crate::scenario::CombatTier::Squad => EHP_FLOOR_WVW_ZERG,
+            },
+            GameMode::PvP => EHP_FLOOR_PVP,
+            GameMode::PvE => EHP_FLOOR_PVE,
+        }
     };
     let passed = combat_perf.effective_health >= ehp_floor;
     gates.push(GateResult {
@@ -294,10 +303,19 @@ pub fn evaluate_viability_gates(
     ViabilityReport { gates, is_viable }
 }
 
+fn needs_mobility_out(scenario: &ScenarioSpec) -> bool {
+    scenario.combat_kind == CombatKind::Staller
+        || (scenario.game_mode == GameMode::WvW && scenario.combat_tier == CombatTier::Solo)
+}
+
+fn needs_harasser_strip(scenario: &ScenarioSpec) -> bool {
+    scenario.combat_kind == CombatKind::Harasser
+}
+
 fn needs_kill_clock(scenario: &ScenarioSpec) -> bool {
     if matches!(
         scenario.combat_kind,
-        CombatKind::Support | CombatKind::Commander
+        CombatKind::Support | CombatKind::Commander | CombatKind::Staller
     ) {
         return false;
     }
@@ -1046,16 +1064,15 @@ mod tests {
     }
 
     #[test]
-    fn gate_wvw_roam_fails_without_strip() {
+    fn gate_roam_power_does_not_require_strip() {
         let mut rot = make_viable_rotation();
         rot.has_strip = false;
         let combat = make_viable_combat();
         let mut scenario = make_wvw_scenario();
         scenario.combat_tier = CombatTier::Solo;
+        scenario.combat_kind = crate::scenario::CombatKind::StrikeSpike;
         let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
-        let g = gate_by_kind(&report.gates, &ViabilityGate::HarasserStrip).unwrap();
-        assert!(!g.passed);
-        assert!(!report.is_viable);
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::HarasserStrip).is_none());
     }
 
     #[test]
@@ -1131,5 +1148,38 @@ mod tests {
         scenario.combat_kind = crate::scenario::CombatKind::Support;
         let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
         assert!(gate_by_kind(&report.gates, &ViabilityGate::KillWindow).is_none());
+    }
+
+    #[test]
+    fn gate_staller_skips_kill_and_strip_even_on_roam() {
+        let mut rot = make_viable_rotation();
+        rot.downed = false;
+        rot.has_interrupt = false;
+        rot.has_strip = false;
+        rot.has_mobility_out = true;
+        let combat = make_viable_combat();
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_tier = CombatTier::Solo;
+        scenario.combat_kind = crate::scenario::CombatKind::Staller;
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::KillWindow).is_none());
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::HarasserStrip).is_none());
+        let out = gate_by_kind(&report.gates, &ViabilityGate::MobilityOut).unwrap();
+        assert!(out.passed);
+        assert!(report.is_viable);
+    }
+
+    #[test]
+    fn gate_staller_on_zerg_still_needs_escape_kit() {
+        let mut rot = make_viable_rotation();
+        rot.has_mobility_out = false;
+        let combat = make_viable_combat();
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_tier = CombatTier::Squad;
+        scenario.combat_kind = crate::scenario::CombatKind::Staller;
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let g = gate_by_kind(&report.gates, &ViabilityGate::MobilityOut).unwrap();
+        assert!(!g.passed);
+        assert!(!report.is_viable);
     }
 }

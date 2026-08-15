@@ -168,6 +168,8 @@ pub struct SkillInfo {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResolvedWeaponSet {
     pub label: String, // "Set 1", "Set 2"
+    #[serde(default)]
+    pub stat_prefix: String,
     pub main_hand: Option<WeaponInfo>,
     pub off_hand: Option<WeaponInfo>,
     pub sigils: Vec<UpgradeInfo>,

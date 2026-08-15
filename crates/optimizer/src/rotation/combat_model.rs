@@ -10,16 +10,22 @@ use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect};
 pub fn simulation_window_ms(tier: CombatTier, kind: CombatKind) -> u32 {
     match (tier, kind) {
         (CombatTier::Solo, CombatKind::CondiRamp) => 5_000,
-        (CombatTier::Solo, CombatKind::Commander | CombatKind::Support) => 10_000,
+        (CombatTier::Solo, CombatKind::Commander | CombatKind::Support | CombatKind::Staller) => {
+            10_000
+        }
         (CombatTier::Solo, _) => 2_000,
         (CombatTier::Party, CombatKind::CondiRamp) => 5_000,
-        (CombatTier::Party, CombatKind::Commander | CombatKind::Support) => 10_000,
+        (CombatTier::Party, CombatKind::Commander | CombatKind::Support | CombatKind::Staller) => {
+            10_000
+        }
         (CombatTier::Party, _) => 2_500,
         (CombatTier::Squad, CombatKind::StrikeSpike) => 3_000,
         (CombatTier::Squad, CombatKind::CondiRamp) => 7_000,
         (CombatTier::Squad, CombatKind::Harasser) => 2_500,
         (CombatTier::Squad, CombatKind::Disabler) => 7_000,
-        (CombatTier::Squad, CombatKind::Commander | CombatKind::Support) => 10_000,
+        (CombatTier::Squad, CombatKind::Commander | CombatKind::Support | CombatKind::Staller) => {
+            10_000
+        }
     }
 }
 
@@ -137,7 +143,10 @@ pub fn corrupt_into(boon: &str) -> Option<&'static str> {
 
 /// Glass roam pick / havoc bruiser. Support and zerg DPS have no solo-kill dummy.
 pub fn dummy_hp(tier: CombatTier, kind: CombatKind) -> Option<f64> {
-    if matches!(kind, CombatKind::Support | CombatKind::Commander) {
+    if matches!(
+        kind,
+        CombatKind::Support | CombatKind::Commander | CombatKind::Staller
+    ) {
         return None;
     }
     match (tier, kind) {
@@ -389,6 +398,16 @@ mod tests {
         assert_eq!(havoc.hp, Some(20_000.0));
         let support = EnemyDummy::for_scenario(CombatTier::Solo, CombatKind::Support);
         assert!(support.hp.is_none());
+        let troll = EnemyDummy::for_scenario(CombatTier::Squad, CombatKind::Staller);
+        assert!(troll.hp.is_none());
+        assert_eq!(
+            simulation_window_ms(CombatTier::Solo, CombatKind::Staller),
+            10_000
+        );
+        assert_eq!(
+            simulation_window_ms(CombatTier::Squad, CombatKind::Staller),
+            10_000
+        );
     }
 
     #[test]

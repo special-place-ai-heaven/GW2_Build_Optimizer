@@ -82,7 +82,7 @@ pub struct AppConfig {
     pub font_scale: f32,
 
     // ─── Layout Tuning ───
-    /// Left panel width in pixels. Default 255.
+    /// Left panel width in pixels. Default 360.
     #[serde(default = "default_left_panel_width")]
     pub left_panel_width: f32,
     /// Inner padding for left panel (px from edge). Default 6.
@@ -122,7 +122,7 @@ impl Default for AppConfig {
             openrouter_model: None,
             window_opacity: 1.0,
             font_scale: 1.0,
-            left_panel_width: 255.0,
+            left_panel_width: 360.0,
             panel_padding: 6.0,
             section_spacing: 4.0,
             content_indent: 4.0,
@@ -142,7 +142,7 @@ macro_rules! default_f32 {
 
 default_f32!(default_opacity = 1.0);
 default_f32!(default_font_scale = 1.0);
-default_f32!(default_left_panel_width = 255.0);
+default_f32!(default_left_panel_width = 360.0);
 default_f32!(default_panel_padding = 6.0);
 default_f32!(default_section_spacing = 4.0);
 default_f32!(default_content_indent = 4.0);

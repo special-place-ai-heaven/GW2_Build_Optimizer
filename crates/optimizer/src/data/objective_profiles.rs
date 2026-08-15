@@ -385,32 +385,32 @@ mod tests {
     }
 
     #[test]
-    fn test_pve_has_5_profiles() {
+    fn test_pve_has_7_profiles() {
         let data = load_all_objective_profiles().unwrap();
         assert_eq!(
             data.files["PvE"].profiles.len(),
-            5,
-            "PvE should have 5 profiles"
+            7,
+            "PvE should have 7 profiles"
         );
     }
 
     #[test]
-    fn test_pvp_has_4_profiles() {
+    fn test_pvp_has_5_profiles() {
         let data = load_all_objective_profiles().unwrap();
         assert_eq!(
             data.files["PvP"].profiles.len(),
-            4,
-            "PvP should have 4 profiles"
+            5,
+            "PvP should have 5 profiles"
         );
     }
 
     #[test]
-    fn test_wvw_has_4_profiles() {
+    fn test_wvw_has_6_profiles() {
         let data = load_all_objective_profiles().unwrap();
         assert_eq!(
             data.files["WvW"].profiles.len(),
-            4,
-            "WvW should have 4 profiles"
+            6,
+            "WvW should have 6 profiles"
         );
     }
 

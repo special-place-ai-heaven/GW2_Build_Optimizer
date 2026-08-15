@@ -1,7 +1,9 @@
-use nexus::imgui::{ChildWindow, ComboBox, Selectable, Ui};
+use nexus::imgui::{ChildWindow, ComboBox, Selectable, TreeNodeFlags, Ui};
 
 use crate::state::{AddonState, MainTab};
 use crate::ui::theme;
+use gw2_core::types::GameMode;
+use gw2_optimizer::scenario::{CombatTier, RoleObjective};
 use gw2_optimizer::scoring::OptimizationWeights;
 
 pub(crate) mod build_display;
@@ -85,15 +87,19 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     render_top_tabs(ui, state);
 
     ui.spacing();
+    render_focus_chat(ui, state);
+    ui.spacing();
 
     // ── Two-column layout: left dynamic panel + center content ──
     let pad = state.config.panel_padding;
     let content_indent = state.config.content_indent;
     let avail = ui.content_region_avail();
     let left_panel_width = {
-        let scaled = state.config.left_panel_width * scale;
-        let max_w = (avail[0] * 0.42).max(160.0);
-        scaled.clamp(160.0, max_w)
+        let scale_row = theme::segment_row_min_width(ui, &["Roam", "Havoc", "Cloud/Zerg"]);
+        let min_left = (scale_row + pad * 2.0 + 18.0).max(360.0);
+        let want = (state.config.left_panel_width * scale).max(min_left);
+        let cap = (avail[0] * 0.58).max(min_left);
+        want.min(cap)
     };
     // Leave a small footer margin so the bottom row (Save/Clear buttons, etc.)
     // is not tight against the game window edge or clipped on some resolutions.
@@ -117,6 +123,19 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
             render_main_content(ui, state);
             ui.unindent_by(content_indent);
         });
+}
+
+/// One always-on chat strip. Follows Current vs Optimized focus.
+fn render_focus_chat(ui: &Ui, state: &mut AddonState) {
+    let current = state.main.build_chat_code.clone();
+    let (source, code) = state.main.comparison.chat_focus(current.as_deref());
+    crate::ui::comparison::render_chat_code_copy(
+        ui,
+        source,
+        code.as_deref(),
+        "top",
+        &mut state.main.copy_feedback_frames,
+    );
 }
 
 /// Top status bar: API health indicator + loading banner + error bar.
@@ -423,11 +442,14 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
     {
         let pos = ui.cursor_screen_pos();
         let width = ui.content_region_avail()[0];
+        let th = ui.calc_text_size(title)[1];
+        let bar_h = (th + 10.0).max(22.0);
+        let ty = pos[1] + ((bar_h - th) * 0.5).round();
         let draw_list = ui.get_window_draw_list();
         draw_list
             .add_rect(
                 [pos[0], pos[1]],
-                [pos[0] + width, pos[1] + 18.0],
+                [pos[0] + width, pos[1] + bar_h],
                 [0.18, 0.15, 0.08, 0.95],
             )
             .filled(true)
@@ -436,52 +458,101 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
         draw_list
             .add_rect(
                 [pos[0], pos[1]],
-                [pos[0] + 3.0, pos[1] + 18.0],
+                [pos[0] + 3.0, pos[1] + bar_h],
                 crate::ui::theme::GOLD,
             )
             .filled(true)
             .rounding(2.0)
             .build();
-        draw_list.add_text([pos[0] + 8.0, pos[1] + 2.0], crate::ui::theme::GOLD, title);
+        draw_list.add_text([pos[0] + 8.0, ty], crate::ui::theme::GOLD, title);
+        ui.dummy([0.0, bar_h]);
     }
-    ui.dummy([0.0, 20.0]);
     ui.dummy([0.0, spacing * 0.5]); // gap below
 }
 
-/// WvW fight scale: Roaming / Havoc / Zerg.
+/// WvW fight scale: Roam / Havoc / Cloud/Zerg.
 /// Independent of role/task — changing scale does not rewrite healer vs DPS weights.
 fn render_wvw_sub_role(ui: &Ui, state: &mut AddonState) {
-    use gw2_optimizer::scenario::CombatTier;
-
-    render_left_section_header(ui, "WVW SCALE", state.config.section_spacing);
-    ui.spacing();
-    ui.text_colored(
-        theme::MUTED,
-        "Fight size. Role (task) is chosen separately.",
-    );
+    render_left_section_header(ui, "SCALE", state.config.section_spacing);
     ui.spacing();
 
-    let tiers = [
-        (
-            CombatTier::Solo,
-            "Roaming",
-            "Solo / small-scale — pick and leave",
-        ),
-        (CombatTier::Party, "Havoc", "5-15 player small group"),
-        (CombatTier::Squad, "Zerg", "Large squad / blob"),
-    ];
-    for (tier, label, tooltip) in &tiers {
-        let selected = state.main.wvw_combat_tier == *tier;
-        if ui.radio_button_bool(label, selected) && !selected {
-            state.main.wvw_combat_tier = *tier;
-            state.main.comparison.suggestions.clear();
-            state.main.comparison.error = None;
+    let tiers = [CombatTier::Solo, CombatTier::Party, CombatTier::Squad];
+    let labels: Vec<&str> = tiers.iter().map(|t| t.label()).collect();
+    let selected = tiers
+        .iter()
+        .position(|t| *t == state.main.wvw_combat_tier)
+        .unwrap_or(2);
+    if let Some(i) = theme::segment_row(ui, &labels, selected, "##scale") {
+        state.main.wvw_combat_tier = tiers[i];
+        state.main.comparison.suggestions.clear();
+        state.main.comparison.error = None;
+    }
+    theme::wrapped(ui, theme::MUTED, "1–5  ·  5–15  ·  15+");
+}
+
+fn role_pip(role: RoleObjective) -> [f32; 4] {
+    use RoleObjective::*;
+    match role {
+        PowerDps | CondiDps | WvWRoamer | WvWZergDps | PvPBurst => theme::PIP_DAMAGE,
+        Healer | Buffer | WvWZergSupport => theme::PIP_HEAL,
+        Disabler | WvWDisruptor | PvPDisruptor => theme::PIP_CTRL,
+        _ => theme::PIP_FRONT,
+    }
+}
+
+fn role_hint(role: RoleObjective) -> &'static str {
+    match role {
+        RoleObjective::WvWRoamer => "Pick and leave. Burst a target, crack cover, get out.",
+        RoleObjective::PowerDps => "Strike damage — burst and sustained power DPS.",
+        RoleObjective::CondiDps => "Condition pressure and duration.",
+        RoleObjective::Hybrid => {
+            "Jack of all trades. Celestial-style, master of none. Occupies until backup."
+        }
+        RoleObjective::Sustain => "Bruiser — fights and lives.",
+        RoleObjective::Staller => {
+            "Troll. Stall, don't kill. Evade, port, stealth, speed — live through a blob until the group arrives."
+        }
+        RoleObjective::Healer => "Healing and group sustain.",
+        RoleObjective::Buffer => "Boons and support for allies.",
+        RoleObjective::Disabler => "CC, interrupts, boon strip.",
+        RoleObjective::Tank => "Frontline / commander — toughness and presence.",
+        _ => role.label(),
+    }
+}
+
+fn apply_role(state: &mut AddonState, role: RoleObjective) {
+    state.main.selected_role = Some(role);
+    state.main.weights = role.to_weights(&state.main.game_mode);
+    state.main.comparison.suggestions.clear();
+    state.main.comparison.selected_suggestion = 0;
+    state.main.comparison.error = None;
+}
+
+fn render_role_chips(ui: &Ui, state: &mut AddonState) {
+    render_left_section_header(ui, "ROLE", state.config.section_spacing);
+    ui.spacing();
+    theme::wrapped(ui, theme::MUTED, "Same jobs in every mode.");
+    ui.spacing();
+
+    let current = state.main.selected_role;
+    let avail = ui.content_region_avail()[0];
+    let mut row_x = 0.0_f32;
+    let mut picked: Option<RoleObjective> = None;
+    for role in RoleObjective::PLAY_ROLES {
+        let label = role.play_label();
+        let id = format!("##play_{:?}", role);
+        let [cw, _] = theme::select_chip_size(ui, label, true);
+        theme::wrap_chip(ui, avail, &mut row_x, cw, 4.0);
+        let selected = current == Some(role);
+        if theme::select_chip(ui, label, selected, &id, Some(role_pip(role))) {
+            picked = Some(role);
         }
         if ui.is_item_hovered() {
-            ui.tooltip_text(tooltip);
+            ui.tooltip_text(role_hint(role));
         }
-        // Stack vertically to avoid clipping on narrow left panels.
-        ui.spacing();
+    }
+    if let Some(role) = picked {
+        apply_role(state, role);
     }
 }
 
@@ -538,6 +609,7 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
         state.main.comparison.suggestions.clear();
         state.main.comparison.selected_suggestion = 0;
         state.main.comparison.error = None;
+        state.main.comparison.show_optimized = false;
         state.main.comparison.current_combat_solo = None;
         state.main.comparison.current_combat_party = None;
         state.main.comparison.current_combat_squad = None;
@@ -593,6 +665,7 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
             state.main.comparison.suggestions.clear();
             state.main.comparison.selected_suggestion = 0;
             state.main.comparison.error = None;
+            state.main.comparison.show_optimized = false;
             character::update_build_chat_code(state);
             resolution::resolve_selected_build(state);
         }
@@ -645,6 +718,7 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
             state.main.comparison.suggestions.clear();
             state.main.comparison.selected_suggestion = 0;
             state.main.comparison.error = None;
+            state.main.comparison.show_optimized = false;
             resolution::resolve_selected_build(state);
         }
     }
@@ -653,115 +727,97 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
     if state.main.build_loading {
         ui.text_colored(theme::WARN, "Resolving build...");
     }
-
-    if let Some(code) = state.main.build_chat_code.clone() {
-        crate::ui::comparison::render_chat_code_copy(
-            ui,
-            Some(&code),
-            "current",
-            &mut state.main.copy_feedback_frames,
-        );
-    }
 }
 
-/// Build controls: game mode, radar chart, presets, action buttons.
+/// Build controls: mode, scale, shared roles, optional weight radar, actions.
 fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
-    // Game mode selector
-    render_left_section_header(ui, "GAME MODE", state.config.section_spacing);
+    render_left_section_header(ui, "MODE", state.config.section_spacing);
     ui.spacing();
-    for mode in &gw2_core::types::GameMode::ALL {
-        let selected = state.main.game_mode == *mode;
-        if ui.radio_button_bool(mode.label(), selected) {
-            state.main.game_mode = mode.clone();
-            state.main.weights = OptimizationWeights::default_for_mode(mode.label());
-            // Clear suggestions from the prior mode — PvE results are invalid for PvP
-            // and vice versa. Locks are also reset since mode changes affect stat scaling.
-            state.main.comparison.suggestions.clear();
-            state.main.comparison.selected_suggestion = 0;
-            state.main.comparison.error = None;
-            state.main.build_locks = gw2_core::types::BuildLocks::default();
-            resolution::resolve_selected_build(state);
-        }
-        ui.same_line();
+    let mode_idx = GameMode::ALL
+        .iter()
+        .position(|m| *m == state.main.game_mode)
+        .unwrap_or(0);
+    if let Some(i) = theme::segment_row(ui, &["PvE", "PvP", "WvW"], mode_idx, "##mode") {
+        let mode = GameMode::ALL[i].clone();
+        state.main.game_mode = mode.clone();
+        state.main.weights = if let Some(role) = state.main.selected_role {
+            role.to_weights(&mode)
+        } else {
+            OptimizationWeights::default_for_mode(mode.label())
+        };
+        state.main.comparison.suggestions.clear();
+        state.main.comparison.selected_suggestion = 0;
+        state.main.comparison.error = None;
+        state.main.build_locks = gw2_core::types::BuildLocks::default();
+        resolution::resolve_selected_build(state);
     }
-    ui.new_line();
 
-    // WvW sub-role selector (only shown when WvW mode is active)
-    if state.main.game_mode == gw2_core::types::GameMode::WvW {
+    if state.main.game_mode == GameMode::WvW {
         render_wvw_sub_role(ui, state);
     }
 
-    // Radar chart + presets
-    render_left_section_header(ui, "OPTIMIZATION WEIGHTS", state.config.section_spacing);
+    render_role_chips(ui, state);
 
-    // Compute overlays for radar chart
-    let current_axes = state
-        .main
-        .comparison
-        .current_combat_solo
-        .as_ref()
-        .map(crate::ui::radar_chart::compute_axes_from_metrics);
-    let optimized_axes = if !state.main.comparison.suggestions.is_empty() {
-        let idx = state
+    if ui.collapsing_header("Fine-tune weights", TreeNodeFlags::empty()) {
+        let current_axes = state
             .main
             .comparison
-            .selected_suggestion
-            .min(state.main.comparison.suggestions.len() - 1);
-        state.main.comparison.suggestions[idx]
-            .combat_solo
+            .current_combat_solo
             .as_ref()
-            .map(crate::ui::radar_chart::compute_axes_from_metrics)
-    } else {
-        None
-    };
-
-    let show_current = state.main.active_tab == MainTab::Improve;
-    let _chart_modified = crate::ui::radar_chart::render_radar_chart(
-        ui,
-        &mut state.main.weights,
-        &mut state.main.radar_dragging,
-        if show_current {
-            current_axes.as_ref()
+            .map(crate::ui::radar_chart::compute_axes_from_metrics);
+        let optimized_axes = if !state.main.comparison.suggestions.is_empty() {
+            let idx = state
+                .main
+                .comparison
+                .selected_suggestion
+                .min(state.main.comparison.suggestions.len() - 1);
+            state.main.comparison.suggestions[idx]
+                .combat_solo
+                .as_ref()
+                .map(crate::ui::radar_chart::compute_axes_from_metrics)
         } else {
             None
-        },
-        optimized_axes.as_ref(),
-    );
-    if current_axes.is_some() || optimized_axes.is_some() {
-        crate::ui::radar_chart::render_legend(
+        };
+
+        let show_current = state.main.active_tab == MainTab::Improve;
+        let _chart_modified = crate::ui::radar_chart::render_radar_chart(
             ui,
-            show_current && current_axes.is_some(),
-            optimized_axes.is_some(),
+            &mut state.main.weights,
+            &mut state.main.radar_dragging,
+            if show_current {
+                current_axes.as_ref()
+            } else {
+                None
+            },
+            optimized_axes.as_ref(),
         );
+        if current_axes.is_some() || optimized_axes.is_some() {
+            crate::ui::radar_chart::render_legend(
+                ui,
+                show_current && current_axes.is_some(),
+                optimized_axes.is_some(),
+            );
+        }
     }
 
-    // Preset buttons
     ui.spacing();
-    if let Some(preset) = crate::ui::radar_chart::render_presets(ui) {
-        state.main.weights = preset;
-    }
-
-    // Summary
-    ui.spacing();
-    let summary = state.main.weights.summary_label();
-    let focus_label = if state.main.game_mode == gw2_core::types::GameMode::WvW {
-        let task = state
-            .main
-            .selected_role
-            .map(|r| r.combat_kind().label())
-            .unwrap_or("Strike spike");
+    let role_bit = state
+        .main
+        .selected_role
+        .map(|r| r.play_label())
+        .unwrap_or("pick a role");
+    let focus = if state.main.game_mode == GameMode::WvW {
         format!(
-            "  Focus: {} / {} — {}",
+            "{} · {} · {}",
+            state.main.game_mode.label(),
             state.main.wvw_combat_tier.label(),
-            task,
-            summary
+            role_bit
         )
     } else {
-        format!("  Focus: {}", summary)
+        format!("{} · {}", state.main.game_mode.label(), role_bit)
     };
-    ui.text_colored(theme::CURRENT, &focus_label);
+    theme::wrapped(ui, theme::CURRENT, &focus);
 
-    // Action buttons
     render_left_section_header(ui, "ACTIONS", state.config.section_spacing);
 
     let is_improve = state.main.active_tab == MainTab::Improve;
@@ -769,7 +825,7 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     let btn_label: &str = if is_improve {
         "Improve Build"
     } else if let Some(role) = state.main.selected_role {
-        btn_label_owned = format!("Optimize: {}", role.label());
+        btn_label_owned = format!("Optimize: {}", role.play_label());
         &btn_label_owned
     } else {
         "Optimize Build"
@@ -806,13 +862,12 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         }
     }
 
-    // Refresh button
     ui.dummy([0.0, 2.0]);
     if state.main.characters_loading {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
         theme::gold_button_sized(ui, "Refreshing...", [-1.0, 0.0]);
         style.pop();
-    } else if theme::gold_button_sized(ui, "Refresh Data", [-1.0, 0.0]) {
+    } else if ui.small_button("Refresh Data") {
         character::load_characters(state);
     }
     ui.dummy([0.0, 4.0]);

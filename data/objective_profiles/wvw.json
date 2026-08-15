@@ -240,6 +240,126 @@
       "is_mode_default": false,
       "notes": "WvW disruptor focused on CC, boon corruption, and condition pressure. Maximum control axis. Corrupts_boon is the highest-valued interaction (converts enemy boons to conditions, creating double pressure). Fear, Immobilize, Slow, Chilled all high priority for movement denial in WvW.",
       "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "WvW_Hybrid",
+      "axis_weights": {
+        "power": 0.4,
+        "condition": 0.4,
+        "boon_support": 0.2,
+        "healing": 0.3,
+        "sustain": 0.4,
+        "control": 0.3
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.6,
+        "Fury": 0.6,
+        "Quickness": 0.5,
+        "Alacrity": 0.3,
+        "Swiftness": 0.9,
+        "Protection": 0.6,
+        "Regeneration": 0.5,
+        "Vigor": 0.7,
+        "Aegis": 0.5,
+        "Stability": 0.7,
+        "Resistance": 0.6,
+        "Resolution": 0.4
+      },
+      "condition_priorities": {
+        "Burning": 0.4,
+        "Bleeding": 0.4,
+        "Poison": 0.4,
+        "Torment": 0.3,
+        "Confusion": 0.3,
+        "Vulnerability": 0.5,
+        "Weakness": 0.5,
+        "Blind": 0.4,
+        "Crippled": 0.6,
+        "Immobilize": 0.7,
+        "Slow": 0.5,
+        "Chilled": 0.5,
+        "Fear": 0.4,
+        "Taunt": 0.3
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.4,
+        "corrupts_boon": 0.4,
+        "removes_condition": 0.7,
+        "converts_condition_to_boon": 0.6,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": false,
+      "notes": "Celestial-style roam/havoc hybrid. Jack of all trades. Occupies until backup; some of every axis, master of none.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "WvW_Staller",
+      "axis_weights": {
+        "power": 0.1,
+        "condition": 0.1,
+        "boon_support": 0.1,
+        "healing": 0.4,
+        "sustain": 1.0,
+        "control": 0.3
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.2,
+        "Fury": 0.2,
+        "Quickness": 0.4,
+        "Alacrity": 0.2,
+        "Swiftness": 1.0,
+        "Protection": 0.7,
+        "Regeneration": 0.7,
+        "Vigor": 0.9,
+        "Aegis": 0.6,
+        "Stability": 0.7,
+        "Resistance": 0.8,
+        "Resolution": 0.5
+      },
+      "condition_priorities": {
+        "Burning": 0.1,
+        "Bleeding": 0.1,
+        "Poison": 0.2,
+        "Torment": 0.1,
+        "Confusion": 0.2,
+        "Vulnerability": 0.2,
+        "Weakness": 0.5,
+        "Blind": 0.5,
+        "Crippled": 0.7,
+        "Immobilize": 0.8,
+        "Slow": 0.6,
+        "Chilled": 0.6,
+        "Fear": 0.3,
+        "Taunt": 0.4
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.2,
+        "corrupts_boon": 0.2,
+        "removes_condition": 0.8,
+        "converts_condition_to_boon": 0.7,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": false,
+      "notes": "Troll/occupy. Job is stall until the blob arrives — not damage. Survive a zerg with heal, toughness, evade, port, stealth, and speed.",
+      "evidence_level": "Heuristic"
     }
   ]
 }
