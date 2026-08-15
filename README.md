@@ -10,8 +10,17 @@ top of the overlay copies a GW2 build-template code onto the Windows clipboard s
 
 ## Screenshots
 
-Add overlay captures here when you have them. Suggested shots: setup download bar,
-Current vs Optimized Chat strip, Improve locks, and a WvW Cloud/Zerg result.
+First-time setup downloads skills, traits, and items over the gold progress bar.
+
+![First-time setup downloading game data](docs/screenshots/download_resources.png)
+
+Optimized WvW Cloud/Zerg Harasser, with a Chat strip that copies the build template.
+
+![Optimized build overlay](docs/screenshots/load_optimized_build.png)
+
+Settings: AI provider, layout, cache, and data quality.
+
+![Settings tab](docs/screenshots/settings.png)
 
 ## Download
 
