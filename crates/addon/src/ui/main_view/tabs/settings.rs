@@ -428,7 +428,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     ui.text_colored([0.7, 0.7, 0.75, 1.0], "Layout Tuning:");
 
     let fields: &mut [(&str, &str, f32, f32, f32)] = &mut [
-        ("Left Panel Width:", "##left_panel_w", 180.0, 400.0, 5.0),
+        ("Left Panel Width:", "##left_panel_w", 320.0, 480.0, 5.0),
         ("Panel Padding:", "##panel_pad", 0.0, 20.0, 1.0),
         ("Section Spacing:", "##section_sp", 0.0, 16.0, 1.0),
         ("Content Indent:", "##content_ind", 0.0, 20.0, 1.0),
@@ -464,7 +464,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
 
     ui.spacing();
     if ui.small_button("Reset Layout Defaults") {
-        state.config.left_panel_width = 255.0;
+        state.config.left_panel_width = 360.0;
         state.config.panel_padding = 6.0;
         state.config.section_spacing = 4.0;
         state.config.content_indent = 4.0;

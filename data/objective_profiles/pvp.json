@@ -240,6 +240,66 @@
       "is_mode_default": false,
       "notes": "PvP control/disruptor build focused on CC, boon denial, and condition pressure. High control axis for Fear, Immobilize, Slow, Chilled. Corruption and theft interactions highly valued for disrupting enemy boons. Moderate sustain for self-preservation.",
       "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvP_Hybrid",
+      "axis_weights": {
+        "power": 0.35,
+        "condition": 0.35,
+        "boon_support": 0.25,
+        "healing": 0.3,
+        "sustain": 0.4,
+        "control": 0.35
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.6,
+        "Fury": 0.6,
+        "Quickness": 0.7,
+        "Alacrity": 0.3,
+        "Swiftness": 0.6,
+        "Protection": 0.5,
+        "Regeneration": 0.4,
+        "Vigor": 0.6,
+        "Aegis": 0.6,
+        "Stability": 0.7,
+        "Resistance": 0.5,
+        "Resolution": 0.4
+      },
+      "condition_priorities": {
+        "Burning": 0.4,
+        "Bleeding": 0.3,
+        "Poison": 0.4,
+        "Torment": 0.3,
+        "Confusion": 0.4,
+        "Vulnerability": 0.5,
+        "Weakness": 0.5,
+        "Blind": 0.5,
+        "Crippled": 0.5,
+        "Immobilize": 0.7,
+        "Slow": 0.5,
+        "Chilled": 0.5,
+        "Fear": 0.5,
+        "Taunt": 0.3
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.5,
+        "corrupts_boon": 0.5,
+        "removes_condition": 0.6,
+        "converts_condition_to_boon": 0.5,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": false,
+      "notes": "Celestial PvP all-rounder. Some of everything for mixed node fights.",
+      "evidence_level": "Heuristic"
     }
   ]
 }

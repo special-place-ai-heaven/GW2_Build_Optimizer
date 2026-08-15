@@ -296,7 +296,7 @@ fn saved_to_suggestion(
         })
         .unwrap_or((None, None, None));
 
-    crate::ui::comparison::BuildSuggestion {
+    let mut suggestion = crate::ui::comparison::BuildSuggestion {
         label: if saved.label.is_empty() {
             saved.name.clone()
         } else {
@@ -323,7 +323,11 @@ fn saved_to_suggestion(
         benchmark_delta: None,
         data_quality: gw2_optimizer::data::DataQuality::Verified,
         quality_reasons: vec![],
+    };
+    if let Some(db) = game_db {
+        suggestion.chat_code = optimization::suggestion_to_chat_code(&suggestion, db);
     }
+    suggestion
 }
 
 /// Reconstruct DamageModifiers from a saved build by resolving spec/trait/rune/sigil/relic
@@ -340,10 +344,11 @@ fn reconstruct_damage_modifiers(
     // still resolve. find() returns one hit at most for exact-name lookup, so
     // HashMap iteration order doesn't matter here.
     for (spec_name, trait_names) in &saved.specializations {
+        let clean = spec_name.replace(" [E]", "");
         let spec = db
             .specializations
             .values()
-            .find(|s| s.name.eq_ignore_ascii_case(spec_name));
+            .find(|s| s.name.eq_ignore_ascii_case(&clean));
         let Some(spec) = spec else {
             nexus::log::log(
                 nexus::log::LogLevel::Warning,

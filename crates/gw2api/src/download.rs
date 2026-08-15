@@ -14,6 +14,9 @@ pub struct DownloadProgress {
     pub done: bool,
     /// Optional sub-step detail (e.g. "batch 5/500")
     pub detail: Option<String>,
+    /// Intra-step counts (items/icons). `0` total means no inner bar.
+    pub inner_done: usize,
+    pub inner_total: usize,
 }
 
 const TOTAL_STEPS: usize = 9;
@@ -31,6 +34,8 @@ fn report(
         step_name: name.to_string(),
         done: *step >= TOTAL_STEPS,
         detail,
+        inner_done: 0,
+        inner_total: 0,
     });
 }
 
@@ -134,6 +139,8 @@ pub fn download_all(
             step_name: "Items (equipment)".to_string(),
             done: false,
             detail: Some("fetching item IDs...".into()),
+            inner_done: 0,
+            inner_total: 0,
         });
         let ids: Vec<serde_json::Value> = client.get("items")?;
 
@@ -146,6 +153,8 @@ pub fn download_all(
                     step_name: "Items (equipment)".to_string(),
                     done: false,
                     detail: Some(format!("{} / {} items fetched", fetched, total)),
+                    inner_done: fetched,
+                    inner_total: total,
                 });
             })?;
 
@@ -175,7 +184,7 @@ pub fn download_all(
     let gfx = cache.graphics_dir();
     let _ = crate::graphics::download_missing(client, &gfx, &urls, |done, total| {
         on_progress(DownloadProgress {
-            current_step: step + 1,
+            current_step: step,
             total_steps: TOTAL_STEPS,
             step_name: "Icons".into(),
             done: false,
@@ -184,6 +193,8 @@ pub fn download_all(
             } else {
                 format!("{done} / {total}")
             }),
+            inner_done: done,
+            inner_total: total,
         });
     });
     report(&mut on_progress, &mut step, "Icons", None);

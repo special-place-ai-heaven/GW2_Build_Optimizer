@@ -73,6 +73,45 @@ fn is_in_hexagon(mouse: [f32; 2], center: [f32; 2], radius: f32) -> bool {
     is_in_circle(mouse, center, radius)
 }
 
+fn spec_hex_width(ui: &Ui, hex_radius: f32, s: f32) -> f32 {
+    let name_w = ui.calc_text_size("Dragonhunter")[0] + 8.0;
+    (hex_radius * 2.0 + 16.0 * s).max(name_w)
+}
+
+fn bezier4(p0: [f32; 2], p1: [f32; 2], p2: [f32; 2], p3: [f32; 2], t: f32) -> [f32; 2] {
+    let u = 1.0 - t;
+    let uu = u * u;
+    let tt = t * t;
+    let a = uu * u;
+    let b = 3.0 * uu * t;
+    let c = 3.0 * u * tt;
+    let d = tt * t;
+    [
+        a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0],
+        a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1],
+    ]
+}
+
+/// Faint path from selected trait text-end to the next selected icon.
+fn draw_ghost_link(draw_list: &nexus::imgui::DrawListMut, from: [f32; 2], to: [f32; 2]) {
+    let dx = to[0] - from[0];
+    if dx < 8.0 {
+        return;
+    }
+    let c1 = [from[0] + dx * 0.42, from[1]];
+    let c2 = [to[0] - dx * 0.42, to[1]];
+    let color = color_u32([0.95, 0.84, 0.42, 0.18]);
+    let n = 20;
+    let mut prev = from;
+    for i in 1..=n {
+        let p = bezier4(from, c1, c2, to, i as f32 / n as f32);
+        if (i - 1) % 3 != 2 {
+            draw_list.add_line(prev, p, color).thickness(1.0).build();
+        }
+        prev = p;
+    }
+}
+
 // ─── Hover animation ───
 
 /// Identifies a single interactive element inside the lock panel for hover tracking.
@@ -229,11 +268,12 @@ pub fn render_lock_panel(
     let s = (font_size / 13.0).max(0.5); // derive scale from font size (13px baseline)
     let avail_width = ui.content_region_avail()[0];
     let hex_radius = (22.0 * s).round();
-    let hex_area_width = hex_radius * 2.0 + 16.0 * s;
+    let hex_area_width = spec_hex_width(ui, hex_radius, s);
     let trait_area_width = avail_width - hex_area_width - 8.0 * s;
-    let circle_radius = (10.0 * s).round();
     let col_spacing = trait_area_width / 3.0;
     let row_height = (28.0 * s).round();
+    // Fill the row; ~2px gap so neighbors can almost touch.
+    let circle_radius = (row_height * 0.5 - 1.0).max(8.0);
 
     for slot in 0..3_usize {
         let row_start = ui.cursor_screen_pos();
@@ -362,7 +402,7 @@ pub fn render_lock_panel(
         if is_in_hexagon(mouse_pos, hex_center, hex_radius + 4.0 + 2.0 * hex_t) {
             hovered_now = Some(hex_id);
             // Tooltip
-            ui.tooltip(|| {
+            crate::ui::theme::wide_tooltip(ui, |ui| {
                 if spec_locked {
                     ui.text(format!("{} (LOCKED)", spec_name));
                     ui.text_colored(DIM_COLOR, "Click to unlock");
@@ -402,6 +442,7 @@ pub fn render_lock_panel(
                 if spec.major_traits.len() == 9 {
                     let grid_x = row_start[0] + hex_area_width + 4.0;
                     let grid_y = row_start[1] + 2.0;
+                    let mut selected_link: [Option<([f32; 2], [f32; 2])>; 3] = [None; 3];
 
                     for col in 0..3_usize {
                         for row in 0..3_usize {
@@ -410,10 +451,18 @@ pub fn render_lock_panel(
                             let trait_info = db.traits.get(&trait_id);
                             let trait_name = trait_info.map(|t| t.name.as_str()).unwrap_or("?");
 
-                            let cx = grid_x + col as f32 * col_spacing + col_spacing / 2.0;
+                            let cx = grid_x + col as f32 * col_spacing + circle_radius + 2.0;
                             let cy = grid_y + row as f32 * row_height + row_height / 2.0;
 
                             let is_selected = selected_traits.contains(&trait_id);
+                            if is_selected {
+                                let text_end =
+                                    cx + circle_radius + 8.0 + ui.calc_text_size(trait_name)[0];
+                                selected_link[col] = Some((
+                                    [text_end + 4.0, cy],
+                                    [cx - circle_radius - 1.0, cy],
+                                ));
+                            }
                             let is_locked = locks
                                 .locked_trait(sid, col)
                                 .is_some_and(|id| id == trait_id);
@@ -424,7 +473,7 @@ pub fn render_lock_panel(
                                 row: row as u8,
                             };
                             let trait_t = hover_t_for(hover_state, trait_element);
-                            let circle_radius_anim = circle_radius + 1.5 * trait_t;
+                            let circle_radius_anim = circle_radius + 0.5 * trait_t;
 
                             {
                                 let draw_list = ui.get_window_draw_list();
@@ -458,7 +507,7 @@ pub fn render_lock_panel(
                                     .build();
 
                                 if let Some(url) = crate::ui::icons::trait_url(db, trait_id) {
-                                    let r = circle_radius_anim * 0.92;
+                                    let r = circle_radius_anim;
                                     crate::ui::icons::paint_on(
                                         &draw_list,
                                         Some(url),
@@ -507,7 +556,7 @@ pub fn render_lock_panel(
                                     DIM_COLOR
                                 };
                                 draw_list.add_text(
-                                    [cx + circle_radius + 6.0, cy - 6.0],
+                                    [cx + circle_radius + 8.0, cy - 6.0],
                                     color_u32(brighten(text_color_base, trait_t, 0.25)),
                                     trait_name,
                                 );
@@ -517,15 +566,15 @@ pub fn render_lock_panel(
                             if is_in_circle(
                                 mouse_pos,
                                 [cx, cy],
-                                circle_radius + 4.0 + 1.5 * trait_t,
+                                circle_radius + 4.0 + 0.5 * trait_t,
                             ) {
                                 hovered_now = Some(trait_element);
                                 // Tooltip with full trait info
-                                ui.tooltip(|| {
+                                crate::ui::theme::wide_tooltip(ui, |ui| {
                                     if let Some(tip) =
                                         crate::ui::comparison::inspect_text(trait_name, db)
                                     {
-                                        ui.text_wrapped(tip);
+                                        ui.text(tip);
                                     } else {
                                         ui.text(trait_name);
                                     }
@@ -563,6 +612,16 @@ pub fn render_lock_panel(
                                     }
                                     modified = true;
                                 }
+                            }
+                        }
+                    }
+                    {
+                        let draw_list = ui.get_window_draw_list();
+                        for col in 0..2 {
+                            if let (Some((from, _)), Some((_, to))) =
+                                (selected_link[col], selected_link[col + 1])
+                            {
+                                draw_ghost_link(&draw_list, from, to);
                             }
                         }
                     }
@@ -643,6 +702,7 @@ pub fn render_optimized_specs_panel(
     ui: &Ui,
     db: Option<&GameDb>,
     suggestion_specs: &[(String, Vec<String>)], // (spec_name, [trait1, trait2, trait3])
+    title: &str,
 ) {
     let spacing = 4.0_f32;
 
@@ -663,7 +723,7 @@ pub fn render_optimized_specs_panel(
         draw_list.add_text(
             [pos[0] + 6.0, pos[1] + 2.0],
             color_u32([0.3, 1.0, 0.5, 1.0]),
-            "OPTIMIZED SPECS & TRAITS",
+            title,
         );
     }
     ui.dummy([ui.content_region_avail()[0], 18.0]);
@@ -679,11 +739,11 @@ pub fn render_optimized_specs_panel(
     let s = (font_size / 13.0).max(0.5);
     let avail_width = ui.content_region_avail()[0];
     let hex_radius = (22.0 * s).round();
-    let hex_area_width = hex_radius * 2.0 + 16.0 * s;
+    let hex_area_width = spec_hex_width(ui, hex_radius, s);
     let trait_area_width = avail_width - hex_area_width - 8.0 * s;
-    let circle_radius = (10.0 * s).round();
     let col_spacing = trait_area_width / 3.0;
     let row_height = (28.0 * s).round();
+    let circle_radius = (row_height * 0.5 - 1.0).max(8.0);
 
     // Look up spec info from DB for visual rendering
     // Build name→spec map from DB
@@ -775,6 +835,7 @@ pub fn render_optimized_specs_panel(
             if spec.major_traits.len() == 9 {
                 let grid_x = row_start[0] + hex_area_width + 4.0;
                 let grid_y = row_start[1] + 2.0;
+                let mut selected_link: [Option<([f32; 2], [f32; 2])>; 3] = [None; 3];
 
                 for col in 0..3_usize {
                     for row in 0..3_usize {
@@ -783,11 +844,19 @@ pub fn render_optimized_specs_panel(
                         let trait_info = db.and_then(|d| d.traits.get(&trait_id));
                         let trait_name = trait_info.map(|t| t.name.as_str()).unwrap_or("?");
 
-                        let cx = grid_x + col as f32 * col_spacing + col_spacing / 2.0;
+                        let cx = grid_x + col as f32 * col_spacing + circle_radius + 2.0;
                         let cy = grid_y + row as f32 * row_height + row_height / 2.0;
 
                         // Check if this trait was selected by the optimizer
                         let is_selected = trait_names.iter().any(|tn| tn == trait_name);
+                        if is_selected {
+                            let text_end =
+                                cx + circle_radius + 8.0 + ui.calc_text_size(trait_name)[0];
+                            selected_link[col] = Some((
+                                [text_end + 4.0, cy],
+                                [cx - circle_radius - 1.0, cy],
+                            ));
+                        }
 
                         {
                             let draw_list = ui.get_window_draw_list();
@@ -808,7 +877,7 @@ pub fn render_optimized_specs_panel(
                                 .build();
 
                             if let Some(url) = trait_info.and_then(|t| t.icon.as_deref()) {
-                                let r = circle_radius * 0.92;
+                                let r = circle_radius;
                                 crate::ui::icons::paint_on(
                                     &draw_list,
                                     Some(url),
@@ -825,7 +894,7 @@ pub fn render_optimized_specs_panel(
                                 DIM_COLOR
                             };
                             draw_list.add_text(
-                                [cx + circle_radius + 6.0, cy - 6.0],
+                                [cx + circle_radius + 8.0, cy - 6.0],
                                 color_u32(text_color),
                                 trait_name,
                             );
@@ -834,11 +903,11 @@ pub fn render_optimized_specs_panel(
                         // Tooltip on hover
                         let mouse_pos = ui.io().mouse_pos;
                         if is_in_circle(mouse_pos, [cx, cy], circle_radius + 4.0) {
-                            ui.tooltip(|| {
+                            crate::ui::theme::wide_tooltip(ui, |ui| {
                                 if let Some(tip) = db.and_then(|d| {
                                     crate::ui::comparison::inspect_text(trait_name, d)
                                 }) {
-                                    ui.text_wrapped(tip);
+                                    ui.text(tip);
                                 } else {
                                     ui.text(trait_name);
                                 }
@@ -846,6 +915,16 @@ pub fn render_optimized_specs_panel(
                                     ui.text_colored(optimized_color, "OPTIMIZER SELECTED");
                                 }
                             });
+                        }
+                    }
+                }
+                {
+                    let draw_list = ui.get_window_draw_list();
+                    for col in 0..2 {
+                        if let (Some((from, _)), Some((_, to))) =
+                            (selected_link[col], selected_link[col + 1])
+                        {
+                            draw_ghost_link(&draw_list, from, to);
                         }
                     }
                 }
@@ -959,5 +1038,17 @@ mod tests {
 
         let c2 = brighten([1.0, 1.0, 1.0, 1.0], 1.0, 1.0);
         assert_eq!(c2, [1.0, 1.0, 1.0, 1.0]); // white stays white
+    }
+
+    #[test]
+    fn ghost_bezier_starts_and_ends_on_anchors() {
+        let a = [10.0, 20.0];
+        let b = [110.0, 80.0];
+        let c1 = [50.0, 20.0];
+        let c2 = [70.0, 80.0];
+        let p0 = bezier4(a, c1, c2, b, 0.0);
+        let p1 = bezier4(a, c1, c2, b, 1.0);
+        assert!((p0[0] - a[0]).abs() < 0.01 && (p0[1] - a[1]).abs() < 0.01);
+        assert!((p1[0] - b[0]).abs() < 0.01 && (p1[1] - b[1]).abs() < 0.01);
     }
 }

@@ -1,4 +1,4 @@
-use nexus::imgui::{ProgressBar, Ui};
+use nexus::imgui::Ui;
 
 use crate::state::{AddonState, DownloadState, KeyStatus, Screen, SetupStep};
 use crate::ui::theme;
@@ -450,6 +450,8 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                     current_step: 0,
                     total_steps: 9,
                     step_name: "Starting...".into(),
+                    inner_done: 0,
+                    inner_total: 0,
                     done: false,
                     error: None,
                 });
@@ -499,6 +501,8 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                                 current_step: progress.current_step,
                                                 total_steps: progress.total_steps,
                                                 step_name: name,
+                                                inner_done: progress.inner_done,
+                                                inner_total: progress.inner_total,
                                                 done: progress.done,
                                                 error: None,
                                             });
@@ -554,6 +558,8 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                 current_step: 0,
                                 total_steps: 0,
                                 step_name: String::new(),
+                                inner_done: 0,
+                                inner_total: 0,
                                 done: true,
                                 error: Some("thread panicked".into()),
                             });
@@ -564,14 +570,8 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
         }
         Some(dl) => {
             // Show progress
-            let fraction = if dl.total_steps > 0 {
-                dl.current_step as f32 / dl.total_steps as f32
-            } else {
-                0.0
-            };
-
-            let overlay = format!("{}/{} - {}", dl.current_step, dl.total_steps, dl.step_name);
-            ProgressBar::new(fraction).overlay_text(&overlay).build(ui);
+            let overlay = format!("{}/{} — {}", dl.current_step, dl.total_steps, dl.step_name);
+            theme::download_scribble(ui, dl.fraction(), &overlay);
 
             if let Some(ref err) = dl.error {
                 ui.spacing();

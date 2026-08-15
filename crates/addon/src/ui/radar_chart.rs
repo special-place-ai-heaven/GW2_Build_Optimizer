@@ -54,7 +54,7 @@ pub fn render_radar_chart(
     optimized_perf: Option<&[f64; 6]>,
 ) -> bool {
     let mut modified = false;
-    let size = 200.0_f32;
+    let size = 156.0_f32;
     let radius = size * 0.38;
     let cursor_pos = ui.cursor_screen_pos();
     let center = [cursor_pos[0] + size / 2.0, cursor_pos[1] + size / 2.0];
@@ -220,6 +220,8 @@ pub fn render_radar_chart(
         )
         .filled(true)
         .build();
+
+    ui.dummy([0.0, 14.0]);
 
     modified
 }

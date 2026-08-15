@@ -1,3 +1,4 @@
+mod clipboard;
 mod state;
 pub mod ui;
 

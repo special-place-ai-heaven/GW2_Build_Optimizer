@@ -1,7 +1,7 @@
 //! Sub-tab renderers dispatched by `render_main_content`.
 //!
 //! Each tab lives in its own file:
-//! - `new_build` — initial build creation, role picker
+//! - `new_build` — scenario summary + comparison (role lives in the left menu)
 //! - `improve` — iterate on an existing build
 //! - `settings` — API keys, models, theme, cache
 //! - `saveload` — saved-build list + reconstruction
@@ -16,6 +16,5 @@ pub(super) mod saveload;
 pub(super) mod settings;
 
 pub(super) use super::{
-    build_display, lock_panel, optimization, render_left_section_header,
-    render_optimization_progress,
+    build_display, lock_panel, optimization, render_optimization_progress,
 };

@@ -33,6 +33,8 @@ pub enum CombatKind {
     Support,
     Disabler,
     Commander,
+    /// Occupy / escape — survive until backup. Not a kill job.
+    Staller,
 }
 
 impl CombatKind {
@@ -44,6 +46,7 @@ impl CombatKind {
             CombatKind::Support => "Support",
             CombatKind::Disabler => "Disabler",
             CombatKind::Commander => "Commander",
+            CombatKind::Staller => "Staller",
         }
     }
 }
@@ -52,9 +55,9 @@ impl CombatTier {
     /// Human-readable label used in UI and logs.
     pub fn label(&self) -> &'static str {
         match self {
-            CombatTier::Solo => "Solo / Roaming",
-            CombatTier::Party => "Havoc / Small Group",
-            CombatTier::Squad => "Zerg / Squad",
+            CombatTier::Solo => "Roam",
+            CombatTier::Party => "Havoc",
+            CombatTier::Squad => "Cloud/Zerg",
         }
     }
 }
@@ -99,16 +102,13 @@ impl ScenarioSpec {
 
 // ─── Role Objectives ─────────────────────────────────────────────────────────
 
-/// Structured role archetype that maps to an objective profile and combat tier.
+/// Job the player picked. Mode (PvE/PvP/WvW) remaps weights via [`profile_id`].
+/// Scale (Roam/Havoc/Cloud/Zerg) is independent — see [`CombatTier`].
 ///
-/// Covers the 8 user-facing archetypes (R008) plus WvW-specific sub-roles that
-/// carry distinct combat tier and scoring weights.
-///
-/// Call `to_weights(&game_mode)` to get the `OptimizationWeights` for this role,
-/// and `combat_tier()` to get the appropriate `CombatTier` for `ScenarioSpec`.
+/// Overlay chips use [`PLAY_ROLES`] + [`play_label`]. Legacy WvW/PvP variants
+/// stay so old mappings and tests still compile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoleObjective {
-    // ── Generic archetypes (mode-agnostic, mapped to mode default profile) ──
     PowerDps,
     CondiDps,
     Sustain,
@@ -116,18 +116,34 @@ pub enum RoleObjective {
     Healer,
     Disabler,
     Buffer,
-    // ── WvW-specific sub-roles ──
+    /// Celestial-style all-rounder. Occupies; not a specialist.
+    Hybrid,
+    /// Stall until backup. Survive via tank/heal/evade/port/stealth — not DPS.
+    Staller,
     WvWRoamer,
     WvWZergDps,
     WvWZergSupport,
     WvWDisruptor,
-    // ── PvP-specific sub-roles ──
     PvPBurst,
     PvPSustain,
     PvPDisruptor,
 }
 
 impl RoleObjective {
+    /// Shared overlay chips. Same jobs in every mode; [`profile_id`] changes the build.
+    pub const PLAY_ROLES: [RoleObjective; 10] = [
+        RoleObjective::WvWRoamer,
+        RoleObjective::PowerDps,
+        RoleObjective::CondiDps,
+        RoleObjective::Hybrid,
+        RoleObjective::Sustain,
+        RoleObjective::Staller,
+        RoleObjective::Healer,
+        RoleObjective::Buffer,
+        RoleObjective::Disabler,
+        RoleObjective::Tank,
+    ];
+
     /// Display label shown in the UI.
     pub fn label(&self) -> &'static str {
         match self {
@@ -138,7 +154,9 @@ impl RoleObjective {
             RoleObjective::Healer => "Healer",
             RoleObjective::Disabler => "Disabler / CC",
             RoleObjective::Buffer => "Buffer / Support",
-            RoleObjective::WvWRoamer => "WvW Roaming",
+            RoleObjective::Hybrid => "Hybrid",
+            RoleObjective::Staller => "Troll",
+            RoleObjective::WvWRoamer => "Harasser",
             RoleObjective::WvWZergDps => "WvW Zerg DPS",
             RoleObjective::WvWZergSupport => "WvW Zerg Support",
             RoleObjective::WvWDisruptor => "WvW Disruptor",
@@ -148,30 +166,56 @@ impl RoleObjective {
         }
     }
 
+    /// Short chip label (same as [`label`] for play roles).
+    pub fn play_label(&self) -> &'static str {
+        match self {
+            RoleObjective::PowerDps => "Power",
+            RoleObjective::CondiDps => "Condi",
+            RoleObjective::Sustain => "Bruiser",
+            RoleObjective::Tank => "Commander",
+            RoleObjective::Healer => "Heal",
+            RoleObjective::Disabler => "Disabler",
+            RoleObjective::Buffer => "Support",
+            RoleObjective::Hybrid => "Hybrid",
+            RoleObjective::Staller => "Troll",
+            RoleObjective::WvWRoamer => "Harasser",
+            other => other.label(),
+        }
+    }
+
     /// The `objective_profile_id` this role maps to for the given game mode.
     /// Falls back to mode default if the role has no direct profile for that mode.
     pub fn profile_id(&self, game_mode: &GameMode) -> &'static str {
         match (self, game_mode) {
-            // WvW-specific roles always use their own profiles regardless of game_mode arg
-            (RoleObjective::WvWRoamer, _) => "WvW_Roamer",
+            (RoleObjective::WvWRoamer, GameMode::WvW) => "WvW_Roamer",
+            (RoleObjective::WvWRoamer, GameMode::PvP) => "PvP_Burst",
+            (RoleObjective::WvWRoamer, GameMode::PvE) => "PvE_Power_DPS",
             (RoleObjective::WvWZergDps, _) => "WvW_Zerg_DPS",
             (RoleObjective::WvWZergSupport, _) => "WvW_Zerg_Support",
             (RoleObjective::WvWDisruptor, _) => "WvW_Disruptor",
-            // PvP-specific roles
             (RoleObjective::PvPBurst, _) => "PvP_Burst",
             (RoleObjective::PvPSustain, _) => "PvP_Sustain",
             (RoleObjective::PvPDisruptor, _) => "PvP_Control_Disruptor",
-            // Generic roles: look up the best-fit profile per mode
             (RoleObjective::PowerDps, GameMode::PvE) => "PvE_Power_DPS",
             (RoleObjective::CondiDps, GameMode::PvE) => "PvE_Condi_DPS",
             (RoleObjective::Healer, GameMode::PvE) => "PvE_Healer",
             (RoleObjective::Buffer, GameMode::PvE) => "PvE_Boon_Support",
+            (RoleObjective::Hybrid, GameMode::PvE) => "PvE_Hybrid",
+            (RoleObjective::Staller, GameMode::PvE) => "PvE_Staller",
             (RoleObjective::PowerDps, GameMode::WvW) => "WvW_Zerg_DPS",
+            (RoleObjective::CondiDps, GameMode::WvW) => "WvW_Zerg_DPS",
+            (RoleObjective::Healer, GameMode::WvW) => "WvW_Zerg_Support",
             (RoleObjective::Disabler, GameMode::WvW) => "WvW_Disruptor",
             (RoleObjective::Buffer, GameMode::WvW) => "WvW_Zerg_Support",
+            (RoleObjective::Sustain, GameMode::WvW) => "WvW_Roamer",
+            (RoleObjective::Hybrid, GameMode::WvW) => "WvW_Hybrid",
+            (RoleObjective::Staller, GameMode::WvW) => "WvW_Staller",
             (RoleObjective::PowerDps, GameMode::PvP) => "PvP_Burst",
+            (RoleObjective::Healer, GameMode::PvP) => "PvP_Sustain",
+            (RoleObjective::Sustain, GameMode::PvP) => "PvP_Sustain",
+            (RoleObjective::Staller, GameMode::PvP) => "PvP_Sustain",
             (RoleObjective::Disabler, GameMode::PvP) => "PvP_Control_Disruptor",
-            // Fallback: use mode default (covers Tank, Sustain, etc. without a direct profile)
+            (RoleObjective::Hybrid, GameMode::PvP) => "PvP_Hybrid",
             (_, GameMode::PvE) => "PvE_Power_DPS",
             (_, GameMode::WvW) => "WvW_Zerg_DPS",
             (_, GameMode::PvP) => "PvP_Burst",
@@ -188,6 +232,7 @@ impl RoleObjective {
             RoleObjective::PvPBurst => CombatTier::Solo,
             RoleObjective::PvPSustain => CombatTier::Solo,
             RoleObjective::PvPDisruptor => CombatTier::Solo,
+            RoleObjective::Hybrid | RoleObjective::Staller => CombatTier::Solo,
             // Generic archetypes default to Party (sensible middle ground)
             _ => CombatTier::Party,
         }
@@ -204,6 +249,7 @@ impl RoleObjective {
                 CombatKind::Disabler
             }
             RoleObjective::WvWRoamer => CombatKind::Harasser,
+            RoleObjective::Hybrid | RoleObjective::Staller => CombatKind::Staller,
             RoleObjective::Tank => CombatKind::Commander,
             RoleObjective::PowerDps
             | RoleObjective::Sustain
@@ -365,5 +411,52 @@ mod tests {
             RoleObjective::WvWZergDps.combat_kind(),
             CombatKind::StrikeSpike
         );
+    }
+
+    #[test]
+    fn play_roles_are_shared_and_remap_per_mode() {
+        assert_eq!(RoleObjective::PLAY_ROLES.len(), 10);
+        assert_eq!(RoleObjective::Healer.play_label(), "Heal");
+        assert_eq!(RoleObjective::Staller.play_label(), "Troll");
+        assert_eq!(RoleObjective::WvWRoamer.play_label(), "Harasser");
+        assert_eq!(
+            RoleObjective::Healer.profile_id(&GameMode::PvE),
+            "PvE_Healer"
+        );
+        assert_eq!(
+            RoleObjective::Healer.profile_id(&GameMode::WvW),
+            "WvW_Zerg_Support"
+        );
+        assert_eq!(
+            RoleObjective::Healer.profile_id(&GameMode::PvP),
+            "PvP_Sustain"
+        );
+        assert_eq!(
+            RoleObjective::Hybrid.profile_id(&GameMode::WvW),
+            "WvW_Hybrid"
+        );
+        assert_eq!(
+            RoleObjective::Staller.profile_id(&GameMode::WvW),
+            "WvW_Staller"
+        );
+        let pve = RoleObjective::Healer.to_weights(&GameMode::PvE);
+        let wvw = RoleObjective::Healer.to_weights(&GameMode::WvW);
+        assert!(
+            (pve.healing - wvw.healing).abs() > 0.01 || (pve.sustain - wvw.sustain).abs() > 0.01,
+            "Heal in PvE vs WvW should not share the same weight vector"
+        );
+    }
+
+    #[test]
+    fn hybrid_and_troll_are_occupy_jobs_not_kills() {
+        assert_eq!(RoleObjective::Hybrid.combat_kind(), CombatKind::Staller);
+        assert_eq!(RoleObjective::Staller.combat_kind(), CombatKind::Staller);
+        let hybrid = RoleObjective::Hybrid.to_weights(&GameMode::WvW);
+        let troll = RoleObjective::Staller.to_weights(&GameMode::WvW);
+        assert!(
+            troll.power + troll.condition < hybrid.power + hybrid.condition,
+            "troll should dump damage vs hybrid celestial"
+        );
+        assert!(troll.sustain >= 0.9, "troll sustain {}", troll.sustain);
     }
 }

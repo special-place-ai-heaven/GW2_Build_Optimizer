@@ -32,6 +32,9 @@ coverage/
 .cache/
 tmp/
 
+# ArenaNet press kit — not UI chrome, keep it out of the repo.
+/Guild Wars 2 Asset Kit/
+
 /.octogent/*
 !/.octogent/tentacles/
 /.octogent/tentacles/*

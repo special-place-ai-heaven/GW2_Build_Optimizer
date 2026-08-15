@@ -300,6 +300,126 @@
       "is_mode_default": false,
       "notes": "Hybrid support build combining boon support with healing and some DPS contribution. Similar to Harrier/Celestial support builds. Balanced boon priorities with emphasis on offensive boons for group DPS and protective boons for group sustain.",
       "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvE_Hybrid",
+      "axis_weights": {
+        "power": 0.33,
+        "condition": 0.33,
+        "boon_support": 0.33,
+        "healing": 0.33,
+        "sustain": 0.34,
+        "control": 0.34
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.6,
+        "Fury": 0.6,
+        "Quickness": 0.6,
+        "Alacrity": 0.5,
+        "Swiftness": 0.5,
+        "Protection": 0.5,
+        "Regeneration": 0.5,
+        "Vigor": 0.4,
+        "Aegis": 0.4,
+        "Stability": 0.4,
+        "Resistance": 0.3,
+        "Resolution": 0.3
+      },
+      "condition_priorities": {
+        "Burning": 0.4,
+        "Bleeding": 0.4,
+        "Poison": 0.3,
+        "Torment": 0.3,
+        "Confusion": 0.2,
+        "Vulnerability": 0.5,
+        "Weakness": 0.3,
+        "Blind": 0.2,
+        "Crippled": 0.2,
+        "Immobilize": 0.2,
+        "Slow": 0.2,
+        "Chilled": 0.2,
+        "Fear": 0.1,
+        "Taunt": 0.1
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.2,
+        "corrupts_boon": 0.2,
+        "removes_condition": 0.5,
+        "converts_condition_to_boon": 0.5,
+        "transfers_condition": 0.2
+      },
+      "is_mode_default": false,
+      "notes": "Open-world celestial all-rounder. Distinct from PvE_Hybrid_Support (boon+heal).",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvE_Staller",
+      "axis_weights": {
+        "power": 0.1,
+        "condition": 0.1,
+        "boon_support": 0.1,
+        "healing": 0.5,
+        "sustain": 1.0,
+        "control": 0.2
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.2,
+        "Fury": 0.2,
+        "Quickness": 0.3,
+        "Alacrity": 0.2,
+        "Swiftness": 0.8,
+        "Protection": 0.8,
+        "Regeneration": 0.8,
+        "Vigor": 0.7,
+        "Aegis": 0.6,
+        "Stability": 0.6,
+        "Resistance": 0.6,
+        "Resolution": 0.5
+      },
+      "condition_priorities": {
+        "Burning": 0.1,
+        "Bleeding": 0.1,
+        "Poison": 0.2,
+        "Torment": 0.1,
+        "Confusion": 0.1,
+        "Vulnerability": 0.2,
+        "Weakness": 0.4,
+        "Blind": 0.3,
+        "Crippled": 0.5,
+        "Immobilize": 0.5,
+        "Slow": 0.4,
+        "Chilled": 0.4,
+        "Fear": 0.2,
+        "Taunt": 0.3
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.1,
+        "corrupts_boon": 0.1,
+        "removes_condition": 0.8,
+        "converts_condition_to_boon": 0.6,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": false,
+      "notes": "Kite/stall. Survive, don't race DPS.",
+      "evidence_level": "Heuristic"
     }
   ]
 }
