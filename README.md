@@ -15,17 +15,16 @@ Current vs Optimized Chat strip, Improve locks, and a WvW Cloud/Zerg result.
 
 ## Download
 
-The last published GitHub Release is **v1.0.1**. `main` is newer than that DLL
-(overlay Chat strip, Scale × Task scoring, and related UI). For the current addon,
-build from source below.
+Prebuilt Nexus DLL from GitHub Releases:
 
-- [Latest release](https://github.com/special-place-administrator/GW2_Build_Optimizer/releases/latest)
-- [v1.0.1 DLL](https://github.com/special-place-administrator/GW2_Build_Optimizer/releases/download/v1.0.1/gw2_build_optimizer.dll)
+- [Latest release](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest)
+- [Direct DLL download](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/gw2_build_optimizer.dll)
+- [Checksum file](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/SHA256SUMS.txt)
 
-v1.0.1 DLL SHA256:
+Current release (v1.1.0) DLL SHA256:
 
 ```text
-b23caca1ce6be21354d29ae5760aef6de2ee3d32ad51cc46827ac872f35f2828
+F41A14330A93817E6559DB085E659DA093FDC5E7E8F1E90AE0A40343A548B2F3
 ```
 
 A source build writes:
