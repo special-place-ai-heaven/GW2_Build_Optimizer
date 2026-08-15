@@ -549,7 +549,7 @@ mod tests {
     fn test_profiles_for_mode() {
         let data = load_all_objective_profiles().unwrap();
         let pve = data.profiles_for_mode("PvE");
-        assert_eq!(pve.len(), 5);
+        assert_eq!(pve.len(), 7);
         let unknown = data.profiles_for_mode("Unknown");
         assert!(unknown.is_empty());
     }
