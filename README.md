@@ -50,6 +50,17 @@ A source build writes:
 target/release/gw2_build_optimizer.dll
 ```
 
+> [!IMPORTANT]
+> Copy `gw2_build_optimizer.dll` into the Guild Wars 2 **addons** folder.
+> Not a nested folder. The file name must stay exactly `gw2_build_optimizer.dll`.
+>
+> ```text
+> C:\GAMES\Guild Wars 2\addons\gw2_build_optimizer.dll
+> ```
+>
+> If the game lives somewhere else, use `<GW2 folder>\addons\gw2_build_optimizer.dll`
+> (same folder Nexus uses, next to `Gw2-64.exe`).
+
 ## Requirements
 
 - Guild Wars 2 on Windows.
@@ -61,12 +72,7 @@ target/release/gw2_build_optimizer.dll
 
 1. Install Nexus and launch GW2 once so the Nexus menu appears.
 2. Get `gw2_build_optimizer.dll` from a Release or from `cargo build --release`.
-3. Copy it into your GW2 `addons` folder (not a nested folder):
-
-```text
-C:\GAMES\Guild Wars 2\addons\gw2_build_optimizer.dll
-```
-
+3. Copy it into `C:\GAMES\Guild Wars 2\addons\` (see the Important note above).
 4. Restart Guild Wars 2. Nexus loads the addon at startup.
 
 ## First-time setup
@@ -170,7 +176,7 @@ when a result leaned on incomplete facts.
 **Addon does not appear**
 
 - Nexus must be installed and working.
-- File name must be exactly `gw2_build_optimizer.dll` in the GW2 `addons` folder.
+- File name must be exactly `gw2_build_optimizer.dll` in `C:\GAMES\Guild Wars 2\addons\` (or `<GW2 folder>\addons\`).
 - Restart GW2 after copying a new DLL.
 
 **GW2 key missing scopes** — new key with at least `account, characters, builds`.
