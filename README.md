@@ -22,6 +22,10 @@ Optimized WvW Cloud/Zerg Harasser, with a Chat strip that copies the build templ
 
 ![Optimized build overlay](docs/screenshots/load_optimized_build.png)
 
+Stats tab: Current vs Optimized attributes, defense, and damage under Solo / Party / Squad.
+
+![Stats comparison](docs/screenshots/stats.png)
+
 Settings: AI provider, layout, cache, and data quality.
 
 ![Settings tab](docs/screenshots/settings.png)
