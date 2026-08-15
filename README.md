@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/screenshots/gw2_build_optimizer.jpg" alt="GW2 Build Optimizer" width="720">
+</p>
+
 # GW2 Build Optimizer
 
 In-game Guild Wars 2 addon for [Nexus](https://raidcore.gg/Nexus). It reads your
