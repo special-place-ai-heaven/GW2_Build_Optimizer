@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/screenshots/gw2_build_optimizer.jpg" alt="GW2 Build Optimizer" width="720">
+  <img src="docs/screenshots/banner_02.jpg" alt="GW2 Build Optimizer" width="720">
 </p>
 
 # GW2 Build Optimizer
