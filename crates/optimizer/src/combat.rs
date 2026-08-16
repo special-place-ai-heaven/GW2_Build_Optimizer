@@ -9,7 +9,7 @@ use gw2_api::models::{Fact, Item, Trait};
 
 use crate::balance::BalanceContext;
 use crate::stats::{self, DerivedStats, StatBlock};
-use crate::text_util::{capitalize, extract_percent_before};
+use crate::text_util::{capitalize, stack_multiplier, strip_gw2_markup};
 
 /// Percentage-based damage modifiers from traits, runes, sigils, relics.
 /// Stacks multiplicatively: total = product(1 + modifier) for each source.
@@ -31,6 +31,10 @@ pub struct DamageModifiers {
     pub boon_duration_pct: Vec<f64>,
     /// Outgoing healing increase percentages
     pub healing_pct: Vec<f64>,
+    /// Additive crit chance bonus (percentage points, e.g. 7.0 for +7%).
+    pub crit_chance_pct: Vec<f64>,
+    /// Bonus strings / facts that had a `%` but matched no known category.
+    pub unparsed: Vec<String>,
 }
 
 impl DamageModifiers {
@@ -86,6 +90,11 @@ impl DamageModifiers {
     /// Total multiplicative healing modifier.
     pub fn total_healing_mult(&self) -> f64 {
         self.healing_pct.iter().fold(1.0, |acc, &m| acc * (1.0 + m))
+    }
+
+    /// Total additive crit chance bonus (percentage points).
+    pub fn total_crit_chance_bonus(&self) -> f64 {
+        self.crit_chance_pct.iter().sum()
     }
 }
 
@@ -210,31 +219,15 @@ pub fn condition_weights_for_profession(
 // - https://wiki.guildwars2.com/wiki/Boon_Duration (cap at 100%)
 // - https://wiki.guildwars2.com/wiki/Condition_Duration (cap at 100%)
 //
-// The divisor 1500 derives from: 15 Expertise = 1 percentage point = 0.01 ratio,
-// so 1 Expertise = 1/1500 ratio.
-// TODO: read divisor from loaded universal formulas (P3-03) once available
-
-/// Divisor for converting Expertise to condition duration bonus ratio.
-/// 15 Expertise = 1% = 0.01, so 1 Expertise = 1/1500.
-/// Source: wiki/Expertise — "15 points of Expertise = 1% Condition Duration"
-// TODO: derive from loaded `expertise_per_condition_duration_pct` (P3-03)
-const EXPERTISE_DIVISOR: f64 = 1500.0;
-
-/// Divisor for converting Concentration to boon duration bonus ratio.
-/// 15 Concentration = 1% = 0.01, so 1 Concentration = 1/1500.
-/// Source: wiki/Concentration — "15 points of Concentration = 1% Boon Duration"
-// TODO: derive from loaded `concentration_per_boon_duration_pct` (P3-03)
-const CONCENTRATION_DIVISOR: f64 = 1500.0;
-
-/// Maximum condition duration bonus as a ratio (1.0 = 100% bonus = double duration).
-/// Source: wiki/Condition_Duration — "maximum 100%"
-// TODO: read from loaded `condition_duration_cap` (P3-03)
-const CONDITION_DURATION_CAP: f64 = 1.0;
-
-/// Maximum boon duration bonus as a ratio (1.0 = 100% bonus = double duration).
-/// Source: wiki/Boon_Duration — "maximum 100%"
-// TODO: read from loaded `boon_duration_cap` (P3-03)
-const BOON_DURATION_CAP: f64 = 1.0;
+/// Convert an attribute (Expertise / Concentration) into a duration-bonus ratio.
+/// `per_pct` is "points per 1%" from `universal.json` (15 → 1500 divisor).
+fn duration_ratio_from_attribute(attr: f64, per_pct: f64) -> f64 {
+    if per_pct <= 0.0 {
+        0.0
+    } else {
+        attr / 100.0 / per_pct
+    }
+}
 
 /// Compute the capped condition duration bonus as a ratio (0.0–1.0).
 ///
@@ -251,7 +244,11 @@ pub fn condition_duration_bonus(
     cap: f64,
     _ctx: &BalanceContext,
 ) -> f64 {
-    ((expertise / EXPERTISE_DIVISOR) + global_condi_bonus + specific_condi_bonus)
+    let f = crate::data::universal_formulas::formulas();
+    let cap = cap.min(f.condition_duration_cap);
+    (duration_ratio_from_attribute(expertise, f.expertise_per_condition_duration_pct)
+        + global_condi_bonus
+        + specific_condi_bonus)
         .max(0.0)
         .min(cap)
 }
@@ -293,7 +290,10 @@ pub fn boon_duration_bonus(
     cap: f64,
     _ctx: &BalanceContext,
 ) -> f64 {
-    ((concentration / CONCENTRATION_DIVISOR) + global_boon_bonus)
+    let f = crate::data::universal_formulas::formulas();
+    let cap = cap.min(f.boon_duration_cap);
+    (duration_ratio_from_attribute(concentration, f.concentration_per_boon_duration_pct)
+        + global_boon_bonus)
         .max(0.0)
         .min(cap)
 }
@@ -347,7 +347,10 @@ pub fn calculate_combat_performance(
     // Crit chance: base from precision + fury
     // Source: https://wiki.guildwars2.com/wiki/Critical_Chance
     let f = crate::data::universal_formulas::formulas();
-    let crit_chance = (f.crit_chance(total_precision) + fury_crit).clamp(0.0, 100.0);
+    let crit_chance = (f.crit_chance(total_precision)
+        + fury_crit
+        + modifiers.total_crit_chance_bonus())
+    .clamp(0.0, 100.0);
     // Crit damage: base + ferocity component + trait bonuses
     // Source: https://wiki.guildwars2.com/wiki/Ferocity
     let crit_damage = f.crit_damage(stats.ferocity) + modifiers.total_crit_damage_bonus();
@@ -369,12 +372,11 @@ pub fn calculate_combat_performance(
     // Condition duration from Expertise + modifiers
     // Global condi duration bonus as ratio (e.g. 0.10 for 10%)
     let global_condi_ratio: f64 = modifiers.condi_duration_pct.iter().sum();
-    // Overall condition duration bonus (no per-condition specifics) for UI display
     let total_condi_bonus = condition_duration_bonus(
         stats.expertise,
         global_condi_ratio,
         0.0,
-        CONDITION_DURATION_CAP,
+        f.condition_duration_cap,
         ctx,
     );
     // CombatPerformance.condi_duration_pct is percentage points (0-100)
@@ -393,7 +395,7 @@ pub fn calculate_combat_performance(
             stats.expertise,
             global_condi_ratio,
             specific,
-            CONDITION_DURATION_CAP,
+            f.condition_duration_cap,
             ctx,
         )
     };
@@ -420,7 +422,7 @@ pub fn calculate_combat_performance(
     let boon_duration_pct = boon_duration_bonus(
         stats.concentration,
         global_boon_ratio,
-        BOON_DURATION_CAP,
+        f.boon_duration_cap,
         ctx,
     ) * 100.0;
 
@@ -528,7 +530,7 @@ pub fn extract_damage_modifiers(
     relic_id: Option<u32>,
     traits_cache: &HashMap<u32, Trait>,
     items_cache: &HashMap<u32, Item>,
-    _ctx: &BalanceContext,
+    ctx: &BalanceContext,
 ) -> DamageModifiers {
     let mut mods = DamageModifiers::default();
     // Hoist into a HashSet once — `equipped_trait_ids` is scanned twice per
@@ -580,7 +582,7 @@ pub fn extract_damage_modifiers(
     // 3. Sigils — known permanent damage sigils
     for &id in sigil_ids {
         if let Some(sigil) = items_cache.get(&id) {
-            parse_sigil_modifier(&mut mods, sigil);
+            parse_sigil_modifier(&mut mods, sigil, ctx);
         }
     }
 
@@ -602,49 +604,15 @@ fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
             percent: Some(pct),
             ..
         } => {
-            let text_lower = text.to_lowercase();
-            let decimal = *pct / 100.0;
-
-            // Crit damage MUST be checked before the generic "damage" catch-all:
-            // "Critical Damage" contains the substring "damage" but is neither
-            // strike nor condition damage. Ordering it first prevents it from
-            // being misclassified as a strike modifier.
-            if text_lower.contains("critical damage") || text_lower.contains("crit damage") {
-                mods.crit_damage_pct.push(*pct); // already in percentage points
-            } else if text_lower.contains("condition damage") {
-                // Mirror the strike branch: trust the structured Percent fact and
-                // its sign. Requiring the literal word "increase" silently dropped
-                // condition-damage facts phrased as "Condition Damage: +X%".
-                if decimal.abs() > 0.001 {
-                    mods.condition_pct.push(decimal);
-                }
-            } else if text_lower.contains("damage") {
-                // Generic damage increase (applies to strike)
-                if decimal.abs() > 0.001 {
-                    mods.strike_pct.push(decimal);
-                }
-            } else if text_lower.contains("condition duration") {
-                mods.condi_duration_pct.push(decimal);
-            } else if text_lower.contains("boon duration") {
-                mods.boon_duration_pct.push(decimal);
-            } else if text_lower.contains("outgoing healing") {
-                mods.healing_pct.push(decimal);
+            if percent_text_is_conditional(text) && !(text_lower_has_90hp(text)) {
+                return;
             }
-
-            // Specific condition duration patterns.
-            // Search terms stay verb-form (GW2 tooltip text uses "Poison Duration",
-            // not "Poisoned Duration"); the map key is canonicalized so reads via
-            // `total_condi_duration_for("Poisoned")` and `condi_dur_for("Poisoned")`
-            // hit the entry inserted here.
-            for condi in &["Bleeding", "Burning", "Poison", "Torment", "Confusion"] {
-                if text_lower.contains(&condi.to_lowercase()) && text_lower.contains("duration") {
-                    let canonical =
-                        crate::data::boon_condition_formulas::canonical_condition_name(condi);
-                    mods.specific_condi_duration
-                        .entry(canonical.to_string())
-                        .or_default()
-                        .push(decimal);
-                }
+            let text_lower = text.to_lowercase();
+            let uptime = if text_lower_has_90hp(text) { 0.9 } else { 1.0 };
+            let decimal = *pct / 100.0 * uptime;
+            let applied = apply_percent_category(mods, &text_lower, *pct * uptime, decimal);
+            if !applied {
+                mods.unparsed.push(text.clone());
             }
         }
         Fact::Buff {
@@ -653,13 +621,150 @@ fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
             ..
         } => {
             // Self-applied damage buffs (e.g. traits that grant Fury, Might)
-            // These are transient/conditional, not permanent modifiers.
-            // We don't count self-applied boons as permanent modifiers here
-            // since they depend on skill usage/uptime.
-            let _ = (text, status); // Acknowledge but skip
+            // are uptime-dependent, not permanent modifiers.
+            let _ = (text, status);
         }
         _ => {}
     }
+}
+
+fn text_lower_has_90hp(text: &str) -> bool {
+    let t = text.to_lowercase();
+    t.contains("90") && t.contains("health")
+}
+
+pub(crate) fn percent_text_is_conditional(text: &str) -> bool {
+    let t = text.to_lowercase();
+    // Scholar-style "while above 90% health" is high-uptime, not a skip.
+    if t.contains("90") && t.contains("health") {
+        return false;
+    }
+    [
+        "while ",
+        "when ",
+        "after ",
+        "if ",
+        "below",
+        "above",
+        "on critical",
+        "on crit",
+        "chance to",
+        "for each",
+        "per ally",
+        "per foe",
+        "disabled",
+        "downed",
+    ]
+    .iter()
+    .any(|k| t.contains(k))
+}
+
+/// Map a percent + surrounding text into DamageModifiers.
+/// `points` is the raw tooltip number (7.0 for +7%); `decimal` is 0.07.
+/// Returns true if a known category was written.
+fn apply_percent_category(
+    mods: &mut DamageModifiers,
+    hay: &str,
+    points: f64,
+    decimal: f64,
+) -> bool {
+    if hay.contains("critical chance")
+        || hay.contains("crit chance")
+        || hay.contains("critical-strike chance")
+        || hay.contains("critical-hit chance")
+        || hay.contains("critical strike chance")
+    {
+        mods.crit_chance_pct.push(points);
+        return true;
+    }
+    if hay.contains("critical damage") || hay.contains("crit damage") {
+        mods.crit_damage_pct.push(points);
+        return true;
+    }
+    if hay.contains("condition damage") {
+        if decimal.abs() > 0.001 {
+            mods.condition_pct.push(decimal);
+        }
+        return true;
+    }
+    if hay.contains("outgoing healing") || hay.contains("healing effectiveness") {
+        mods.healing_pct.push(decimal);
+        return true;
+    }
+    if hay.contains("incoming") {
+        return true;
+    }
+    if hay.contains("condition duration") {
+        mods.condi_duration_pct.push(decimal);
+        return true;
+    }
+    if hay.contains("boon duration") {
+        mods.boon_duration_pct.push(decimal);
+        return true;
+    }
+    for boon in &[
+        "might",
+        "fury",
+        "swiftness",
+        "protection",
+        "quickness",
+        "alacrity",
+        "regeneration",
+        "vigor",
+        "resistance",
+        "resolution",
+        "aegis",
+        "stability",
+    ] {
+        if hay.contains(boon) && hay.contains("duration") {
+            mods.boon_duration_pct.push(decimal);
+            return true;
+        }
+    }
+    for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
+        if hay.contains(condi) && hay.contains("duration") {
+            let condi_cap = capitalize(condi);
+            let canonical =
+                crate::data::boon_condition_formulas::canonical_condition_name(&condi_cap);
+            mods.specific_condi_duration
+                .entry(canonical.to_string())
+                .or_default()
+                .push(decimal);
+            return true;
+        }
+    }
+    if hay.contains("strike damage") {
+        if decimal.abs() > 0.001 {
+            mods.strike_pct.push(decimal);
+        }
+        return true;
+    }
+    if hay.contains("damage") && !hay.contains("condition") {
+        if decimal.abs() > 0.001 {
+            mods.strike_pct.push(decimal);
+        }
+        return true;
+    }
+    false
+}
+
+fn percent_is_vs_target(rest_after_percent: &str) -> bool {
+    let head: String = rest_after_percent.chars().take(48).collect();
+    let t = head.to_lowercase();
+    t.contains("vs.") || t.contains("versus") || t.contains(" against ")
+}
+
+fn percent_text_is_ignored(hay: &str) -> bool {
+    hay.contains("movement")
+        || hay.contains("speed")
+        || hay.contains("endurance")
+        || hay.contains("experience")
+        || hay.contains("incoming")
+        || hay.contains("stun duration")
+        || hay.contains("daze duration")
+        || hay.contains("chill duration")
+        || hay.contains("cripple duration")
+        || hay.contains("weakness duration")
 }
 
 /// Test-only shim for the cross-parser consistency suite.
@@ -715,256 +820,188 @@ pub(crate) mod tests_consistency_shim {
 }
 
 /// Parse a rune bonus string for percentage modifiers.
-/// Examples: "+7% Burning Duration", "+5% damage", "+10% Condition Duration"
+/// Accepts `+N%`, `-N%`, or `N%` (API strings are not always prefixed).
 fn parse_rune_modifier(mods: &mut DamageModifiers, bonus: &str) {
-    let s = bonus.trim().to_lowercase();
+    parse_percent_clauses(mods, bonus);
+}
 
-    // Match patterns like "+N% <thing>"
-    if !s.starts_with('+') {
-        return;
-    }
-    let without_plus = &s[1..];
-    let pct_idx = match without_plus.find('%') {
-        Some(i) => i,
-        None => return,
-    };
-    let num_str = &without_plus[..pct_idx];
-    let rest = without_plus[pct_idx + 1..].trim();
-
-    let Ok(value) = num_str.trim().parse::<f64>() else {
-        return;
-    };
-    let decimal = value / 100.0;
-
-    // Specific condition duration: "+7% Burning Duration".
-    // Canonicalize the key (e.g. "poison" → "Poisoned") so downstream lookups
-    // via `total_condi_duration_for("Poisoned")` / `condi_dur_for("Poisoned")`
-    // actually hit this entry. Storing the verb-form key dropped rune-sourced
-    // specific duration bonuses on read.
-    for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
-        if rest.contains(condi) && rest.contains("duration") {
-            let condi_cap = capitalize(condi);
-            let canonical =
-                crate::data::boon_condition_formulas::canonical_condition_name(&condi_cap);
-            mods.specific_condi_duration
-                .entry(canonical.to_string())
-                .or_default()
-                .push(decimal);
-            return;
+/// Walk every `N%` in `text` and map it to a modifier category.
+pub(crate) fn parse_percent_clauses(mods: &mut DamageModifiers, text: &str) -> bool {
+    let s = strip_gw2_markup(text).trim().to_lowercase();
+    let stacks = stack_multiplier(&s);
+    let mut from = 0;
+    let mut any = false;
+    while let Some(rel) = s[from..].find('%') {
+        let pct_idx = from + rel;
+        let is_num_part = |c: char| c.is_ascii_digit() || c == '.' || c == '-' || c == '−';
+        let num_start = s[..pct_idx]
+            .char_indices()
+            .rev()
+            .find(|(_, c)| !is_num_part(*c))
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(0);
+        if num_start >= pct_idx {
+            from = pct_idx + 1;
+            continue;
         }
+        let num = s[num_start..pct_idx].replace('−', "-");
+        let Ok(value) = num.parse::<f64>() else {
+            from = pct_idx + 1;
+            continue;
+        };
+        let rest = s[pct_idx + 1..].trim();
+        let before = s[..num_start].trim();
+        let hay = format!("{before} {rest}");
+        if percent_text_is_ignored(&hay) {
+            from = pct_idx + 1;
+            continue;
+        }
+        if percent_is_vs_target(rest) {
+            from = pct_idx + 1;
+            continue;
+        }
+        if percent_text_is_conditional(&hay) && stacks <= 1.0 && !text_lower_has_90hp(&hay) {
+            from = pct_idx + 1;
+            continue;
+        }
+        let uptime = if text_lower_has_90hp(&hay) { 0.9 } else { 1.0 };
+        let scaled = value * stacks * uptime;
+        let decimal = scaled / 100.0;
+        if apply_percent_category(mods, &hay, scaled, decimal) {
+            any = true;
+        } else {
+            mods.unparsed.push(text.to_string());
+        }
+        from = pct_idx + 1;
     }
+    any
+}
 
-    // Global condition duration
-    if rest.contains("condition duration") {
-        mods.condi_duration_pct.push(decimal);
+/// Parse API upgrade prose (rune bonus, sigil buff, relic description) into mods.
+/// Percents first; numberless "increased strike damage" text uses expected-value uptime.
+pub(crate) fn apply_upgrade_text(mods: &mut DamageModifiers, text: &str) {
+    let stripped = strip_gw2_markup(text);
+    if parse_percent_clauses(mods, &stripped) {
         return;
     }
+    apply_upgrade_prose(mods, &stripped);
+}
 
-    // Boon duration
-    if rest.contains("boon duration") {
-        mods.boon_duration_pct.push(decimal);
+fn trigger_uptime(text: &str) -> f64 {
+    let t = text.to_lowercase();
+    let triggered = t.contains("after ")
+        || t.contains("when ")
+        || t.contains("on using")
+        || t.contains("upon ");
+    if !triggered {
+        return 1.0;
+    }
+    if t.contains("weapon skill") || t.contains("resource cost") {
+        0.7
+    } else if t.contains("elite") {
+        0.35
+    } else if t.contains("evade") || t.contains("dodge") {
+        0.4
+    } else if t.contains("heal") {
+        0.4
+    } else if t.contains("swap") {
+        0.33
+    } else if t.contains("disable") {
+        0.25
+    } else if t.contains("critical") {
+        0.5
+    } else {
+        0.4
+    }
+}
+
+fn apply_upgrade_prose(mods: &mut DamageModifiers, text: &str) {
+    let t = text.to_lowercase();
+    if t.contains('%') {
         return;
     }
-
-    // Flat condition damage increase, e.g. "+5% Condition Damage". Must precede
-    // the generic-damage branch, which deliberately excludes "condition".
-    if rest.contains("condition damage") {
-        mods.condition_pct.push(decimal);
+    let uptime = trigger_uptime(&t);
+    if t.contains("increased strike")
+        || t.contains("deal increased strike")
+        || (t.contains("strike damage") && t.contains("increased"))
+    {
+        mods.strike_pct.push(0.07 * uptime);
         return;
     }
-
-    // Outgoing healing, e.g. Rune of the Monk's "+10% Outgoing Healing". Runes
-    // deliver this as a bonus string (no facts), so it is dropped unless handled
-    // here. Matches the `outgoing healing` branch in the fact parser.
-    if rest.contains("outgoing healing") || rest.contains("healing effectiveness") {
-        mods.healing_pct.push(decimal);
+    if t.contains("increased condition duration") {
+        mods.condi_duration_pct.push(0.10 * uptime);
         return;
     }
-
-    // Generic damage
-    if rest.contains("damage") && !rest.contains("condition") {
-        mods.strike_pct.push(decimal);
+    if t.contains("healing effectiveness") || t.contains("increase healing") {
+        mods.healing_pct.push(0.10 * uptime);
+        return;
     }
+    if t.contains("critical-strike chance")
+        || t.contains("critical-hit chance")
+        || t.contains("guaranteed critical")
+        || (t.contains("critical") && t.contains("chance") && t.contains("increased"))
+    {
+        mods.crit_chance_pct.push(7.0 * uptime);
+        return;
+    }
+    if t.contains("increased damage") && !t.contains("condition") {
+        mods.strike_pct.push(0.05 * uptime);
+        mods.condition_pct.push(0.05 * uptime);
+    }
+}
+
+pub(crate) fn item_buff_description(item: &Item) -> Option<&str> {
+    item.details
+        .as_ref()
+        .and_then(|d| d.infix_upgrade.as_ref())
+        .and_then(|iu| iu.buff.as_ref())
+        .and_then(|b| b.description.as_deref())
+        .filter(|s| !s.is_empty())
 }
 
 /// Parse known sigil damage modifiers from item data.
-fn parse_sigil_modifier(mods: &mut DamageModifiers, sigil: &Item) {
+fn parse_sigil_modifier(mods: &mut DamageModifiers, sigil: &Item, ctx: &BalanceContext) {
+    if let Some(buff) = item_buff_description(sigil) {
+        apply_upgrade_text(mods, buff);
+        if !mods.strike_pct.is_empty()
+            || !mods.condition_pct.is_empty()
+            || !mods.condi_duration_pct.is_empty()
+            || !mods.boon_duration_pct.is_empty()
+            || !mods.healing_pct.is_empty()
+            || !mods.crit_chance_pct.is_empty()
+            || !mods.crit_damage_pct.is_empty()
+            || !mods.specific_condi.is_empty()
+            || !mods.specific_condi_duration.is_empty()
+        {
+            return;
+        }
+    }
+
     let name_lower = sigil.name.to_lowercase();
+    let competitive = matches!(
+        ctx.game_mode,
+        gw2_core::types::GameMode::PvP | gw2_core::types::GameMode::WvW
+    );
 
-    // Known permanent/high-uptime damage sigils
     if name_lower.contains("sigil of force") {
-        // Superior Sigil of Force: +5% damage
-        mods.strike_pct.push(0.05);
-    } else if name_lower.contains("sigil of impact") {
-        // Superior Sigil of Impact: +3% damage vs stunned/knocked down
-        mods.strike_pct.push(0.015); // ~50% uptime estimate
-    } else if name_lower.contains("sigil of the night") {
-        // Superior Sigil of the Night: +10% damage at night
-        mods.strike_pct.push(0.05); // ~50% uptime estimate
+        mods.strike_pct.push(if competitive { 0.03 } else { 0.05 });
     } else if name_lower.contains("sigil of bursting") {
-        // Superior Sigil of Bursting: +6% condition damage
-        mods.condition_pct.push(0.06);
-    } else if name_lower.contains("sigil of malice") {
-        // Superior Sigil of Malice: +10% condition duration
-        mods.condi_duration_pct.push(0.10);
-    } else if name_lower.contains("sigil of concentration") {
-        // Superior Sigil of Concentration: +10% boon duration on weapon swap (33% uptime)
-        mods.boon_duration_pct.push(0.033);
-    } else if name_lower.contains("sigil of smoldering") {
-        // Superior Sigil of Smoldering: +10% Burning duration
-        mods.specific_condi_duration
-            .entry("Burning".into())
-            .or_default()
-            .push(0.10);
-    } else if name_lower.contains("sigil of earth") {
-        // Superior Sigil of Earth: 60% chance to cause Bleeding on crit (proc-based, skip)
-    } else if name_lower.contains("sigil of agony") {
-        // Superior Sigil of Agony: +10% Torment duration
-        mods.specific_condi_duration
-            .entry("Torment".into())
-            .or_default()
-            .push(0.10);
-    } else if name_lower.contains("sigil of venom") {
-        // Superior Sigil of Venom: +10% Poison duration.
-        // Map key uses canonical form to match the read paths.
-        mods.specific_condi_duration
-            .entry("Poisoned".into())
-            .or_default()
-            .push(0.10);
-    } else if name_lower.contains("sigil of doom") {
-        // Superior Sigil of Doom: apply Poison on weapon swap (proc, skip)
-    } else if name_lower.contains("sigil of geomancy") {
-        // Superior Sigil of Geomancy: Bleeding on weapon swap (proc, skip)
-    } else if name_lower.contains("sigil of absorption") {
-        // Superior Sigil of Absorption: steal a boon on hit (utility, skip)
-    } else if name_lower.contains("sigil of transference") {
-        // Superior Sigil of Transference: +10% outgoing healing
-        mods.healing_pct.push(0.10);
-    } else if name_lower.contains("sigil of benevolence") {
-        // Superior Sigil of Benevolence: stacking +1% outgoing healing per kill (estimate ~3%)
-        mods.healing_pct.push(0.03);
-    } else {
-        // Fallback: try parsing from description
-        parse_sigil_from_description(mods, sigil);
+        mods.condition_pct.push(if competitive { 0.04 } else { 0.06 });
+    } else if let Some(desc) = sigil.description.as_deref() {
+        apply_upgrade_text(mods, desc);
     }
 }
 
-/// Try to extract modifiers from a sigil's description text.
-fn parse_sigil_from_description(mods: &mut DamageModifiers, sigil: &Item) {
-    let desc = match sigil.description {
-        Some(ref d) => d.to_lowercase(),
-        None => return,
-    };
-
-    // Look for "+N% <condition> duration" patterns. Canonicalize the key so
-    // downstream lookups via "Poisoned" hit "poison"-sourced entries.
-    for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
-        if let Some(pct) = extract_percent_before(&desc, &format!("{} duration", condi)) {
-            let condi_cap = capitalize(condi);
-            let canonical =
-                crate::data::boon_condition_formulas::canonical_condition_name(&condi_cap);
-            mods.specific_condi_duration
-                .entry(canonical.to_string())
-                .or_default()
-                .push(pct / 100.0);
-        }
-    }
-
-    // "+N% condition duration"
-    if let Some(pct) = extract_percent_before(&desc, "condition duration") {
-        mods.condi_duration_pct.push(pct / 100.0);
-    }
-    // "+N% boon duration"
-    if let Some(pct) = extract_percent_before(&desc, "boon duration") {
-        mods.boon_duration_pct.push(pct / 100.0);
-    }
-    // "+N% condition damage" — must be checked before the generic-damage branch,
-    // which excludes "condition damage" and would otherwise drop it.
-    if desc.contains("condition damage") {
-        if let Some(pct) = extract_percent_before(&desc, "condition damage") {
-            mods.condition_pct.push(pct / 100.0);
-        }
-    } else if desc.contains("damage") {
-        // "+N% damage" (strike)
-        if let Some(pct) = extract_percent_before(&desc, "damage") {
-            mods.strike_pct.push(pct / 100.0);
-        }
-    }
-}
-
-/// Parse known relic damage modifiers.
+/// Parse relic modifiers from the API description (always present on live relics).
 fn parse_relic_modifier(mods: &mut DamageModifiers, relic: &Item) {
-    let name_lower = relic.name.to_lowercase();
-
-    // Known relics with permanent or high-uptime damage modifiers
-    if name_lower.contains("relic of the thief") {
-        // +1% damage per boon on target (estimate ~5 boons avg in group)
-        mods.strike_pct.push(0.05);
-    } else if name_lower.contains("relic of fireworks") {
-        // +10% damage for 6s after dodge (estimate ~40% uptime)
-        mods.strike_pct.push(0.04);
-    } else if name_lower.contains("relic of isgarren") {
-        // +10% crit damage while above health threshold (high uptime for DPS)
-        mods.crit_damage_pct.push(10.0);
-    } else if name_lower.contains("relic of the aristocracy") {
-        // +5% damage per ally affected by your boons (support builds, estimate ~15%)
-        // Only relevant for boon support
-        mods.strike_pct.push(0.05);
-    } else if name_lower.contains("relic of cerus") {
-        // +1% condition damage per condition on target (estimate ~5 conditions)
-        mods.condition_pct.push(0.05);
-    } else if name_lower.contains("relic of the nightmare") {
-        // +10% condition duration
-        mods.condi_duration_pct.push(0.10);
-    } else if name_lower.contains("relic of the krait") {
-        // Bleeding on skill use (proc-based, skip)
-    } else if name_lower.contains("relic of the monk") {
-        // +10% outgoing healing
-        mods.healing_pct.push(0.10);
-    } else if name_lower.contains("relic of karakosa") {
-        // +10% outgoing healing while above health threshold
-        mods.healing_pct.push(0.08); // ~80% uptime estimate
-    } else if name_lower.contains("relic of nourys") {
-        // +10% boon duration for 10s after weapon swap (~33% uptime)
-        mods.boon_duration_pct.push(0.033);
-    } else if name_lower.contains("relic of the fractal") {
-        // +15% damage in fractals (content-specific, skip)
-    } else {
-        // Fallback: try parsing from description
-        parse_relic_from_description(mods, relic);
-    }
-}
-
-/// Try to extract modifiers from a relic's description text.
-fn parse_relic_from_description(mods: &mut DamageModifiers, relic: &Item) {
-    let desc = match relic.description {
-        Some(ref d) => d.to_lowercase(),
-        None => return,
-    };
-
-    // Check for common patterns
-    if desc.contains("outgoing healing") {
-        if let Some(pct) = extract_percent_before(&desc, "outgoing healing") {
-            mods.healing_pct.push(pct / 100.0);
+    if let Some(desc) = relic.description.as_deref() {
+        if !desc.is_empty() {
+            apply_upgrade_text(mods, desc);
             return;
         }
     }
-    if desc.contains("condition duration") {
-        if let Some(pct) = extract_percent_before(&desc, "condition duration") {
-            mods.condi_duration_pct.push(pct / 100.0);
-            return;
-        }
-    }
-    if desc.contains("boon duration") {
-        if let Some(pct) = extract_percent_before(&desc, "boon duration") {
-            mods.boon_duration_pct.push(pct / 100.0);
-            return;
-        }
-    }
-    if desc.contains("condition damage") {
-        if let Some(pct) = extract_percent_before(&desc, "condition damage") {
-            mods.condition_pct.push(pct / 100.0);
-        }
+    if let Some(buff) = item_buff_description(relic) {
+        apply_upgrade_text(mods, buff);
     }
 }
 
@@ -1456,7 +1493,7 @@ mod tests {
             restrictions: vec![],
             details: None,
         };
-        parse_sigil_modifier(&mut mods, &sigil);
+        parse_sigil_modifier(&mut mods, &sigil, &BalanceContext::pve());
         assert_eq!(
             mods.specific_condi_duration.get("Bleeding").unwrap().len(),
             1
@@ -1517,7 +1554,7 @@ mod tests {
             "UpgradeComponent",
             "Grants +6% condition damage.",
         );
-        parse_sigil_modifier(&mut mods, &sigil);
+        parse_sigil_modifier(&mut mods, &sigil, &BalanceContext::pve());
         assert_eq!(mods.condition_pct.len(), 1);
         assert!((mods.condition_pct[0] - 0.06).abs() < 0.001);
         assert!(mods.strike_pct.is_empty());
@@ -1540,50 +1577,28 @@ mod tests {
     #[test]
     fn test_parse_sigil_smoldering() {
         let mut mods = DamageModifiers::default();
-        let sigil = Item {
-            id: 1,
-            name: "Superior Sigil of Smoldering".into(),
-            item_type: "UpgradeComponent".into(),
-            rarity: "Exotic".into(),
-            level: 60,
-            description: None,
-            icon: None,
-            vendor_value: None,
-            chat_link: None,
-            default_skin: None,
-            flags: vec![],
-            game_types: vec![],
-            restrictions: vec![],
-            details: None,
-        };
-        parse_sigil_modifier(&mut mods, &sigil);
+        let sigil = item_with_desc(
+            "Superior Sigil of Smoldering",
+            "UpgradeComponent",
+            "Increase Inflicted Burning Duration: 20%.",
+        );
+        parse_sigil_modifier(&mut mods, &sigil, &BalanceContext::pve());
         assert_eq!(
             mods.specific_condi_duration.get("Burning").unwrap().len(),
             1
         );
-        assert!((mods.specific_condi_duration["Burning"][0] - 0.10).abs() < 0.001);
+        assert!((mods.specific_condi_duration["Burning"][0] - 0.20).abs() < 0.001);
     }
 
     #[test]
     fn test_parse_sigil_transference() {
         let mut mods = DamageModifiers::default();
-        let sigil = Item {
-            id: 1,
-            name: "Superior Sigil of Transference".into(),
-            item_type: "UpgradeComponent".into(),
-            rarity: "Exotic".into(),
-            level: 60,
-            description: None,
-            icon: None,
-            vendor_value: None,
-            chat_link: None,
-            default_skin: None,
-            flags: vec![],
-            game_types: vec![],
-            restrictions: vec![],
-            details: None,
-        };
-        parse_sigil_modifier(&mut mods, &sigil);
+        let sigil = item_with_desc(
+            "Superior Sigil of Transference",
+            "UpgradeComponent",
+            "Outgoing healing is increased by 10%.",
+        );
+        parse_sigil_modifier(&mut mods, &sigil, &BalanceContext::pve());
         assert_eq!(mods.healing_pct.len(), 1);
         assert!((mods.healing_pct[0] - 0.10).abs() < 0.001);
     }
@@ -1591,22 +1606,11 @@ mod tests {
     #[test]
     fn test_parse_relic_isgarren() {
         let mut mods = DamageModifiers::default();
-        let relic = Item {
-            id: 1,
-            name: "Relic of Isgarren".into(),
-            item_type: "Relic".into(),
-            rarity: "Legendary".into(),
-            level: 80,
-            description: None,
-            icon: None,
-            vendor_value: None,
-            chat_link: None,
-            default_skin: None,
-            flags: vec![],
-            game_types: vec![],
-            restrictions: vec![],
-            details: None,
-        };
+        let relic = item_with_desc(
+            "Relic of Isgarren",
+            "Relic",
+            "Gain 10% critical damage.",
+        );
         parse_relic_modifier(&mut mods, &relic);
         assert_eq!(mods.crit_damage_pct.len(), 1);
         assert!((mods.crit_damage_pct[0] - 10.0).abs() < 0.1);
@@ -1615,25 +1619,16 @@ mod tests {
     #[test]
     fn test_parse_relic_nightmare() {
         let mut mods = DamageModifiers::default();
-        let relic = Item {
-            id: 1,
-            name: "Relic of the Nightmare".into(),
-            item_type: "Relic".into(),
-            rarity: "Legendary".into(),
-            level: 80,
-            description: None,
-            icon: None,
-            vendor_value: None,
-            chat_link: None,
-            default_skin: None,
-            flags: vec![],
-            game_types: vec![],
-            restrictions: vec![],
-            details: None,
-        };
+        let relic = item_with_desc(
+            "Relic of the Nightmare",
+            "Relic",
+            "Your elite skill inflicts fear and pulses poison around you.",
+        );
         parse_relic_modifier(&mut mods, &relic);
-        assert_eq!(mods.condi_duration_pct.len(), 1);
-        assert!((mods.condi_duration_pct[0] - 0.10).abs() < 0.001);
+        assert!(
+            mods.condi_duration_pct.is_empty(),
+            "current Nightmare is not +10% condition duration"
+        );
     }
 
     #[test]
@@ -2124,7 +2119,7 @@ mod tests {
         // Source: https://wiki.guildwars2.com/wiki/Expertise
         let ctx = BalanceContext::pve();
         let result =
-            condition_duration_multiplied(3.0, 450.0, 0.0, 0.20, CONDITION_DURATION_CAP, &ctx);
+            condition_duration_multiplied(3.0, 450.0, 0.0, 0.20, 1.0, &ctx);
         assert!((result - 4.5).abs() < 0.001, "Expected 4.5, got {result}",);
     }
 
@@ -2134,7 +2129,7 @@ mod tests {
         // result = 5.0 * (1 + 0.40) = 5.0 * 1.40 = 7.0s
         // Source: https://wiki.guildwars2.com/wiki/Boon_Duration
         let ctx = BalanceContext::pve();
-        let result = boon_duration_multiplied(5.0, 600.0, 0.0, BOON_DURATION_CAP, &ctx);
+        let result = boon_duration_multiplied(5.0, 600.0, 0.0, 1.0, &ctx);
         assert!((result - 7.0).abs() < 0.001, "Expected 7.0, got {result}",);
     }
 
@@ -2145,7 +2140,7 @@ mod tests {
         // Source: https://wiki.guildwars2.com/wiki/Condition_Duration ("maximum 100%")
         let ctx = BalanceContext::pve();
         let result =
-            condition_duration_multiplied(3.0, 1800.0, 0.0, 0.30, CONDITION_DURATION_CAP, &ctx);
+            condition_duration_multiplied(3.0, 1800.0, 0.0, 0.30, 1.0, &ctx);
         assert!(
             (result - 6.0).abs() < 0.001,
             "Expected 6.0 (capped), got {result}",
@@ -2158,7 +2153,7 @@ mod tests {
         // result = 5.0 * (1 + 1.0) = 10.0s
         // Source: https://wiki.guildwars2.com/wiki/Boon_Duration ("maximum 100%")
         let ctx = BalanceContext::pve();
-        let result = boon_duration_multiplied(5.0, 2000.0, 0.0, BOON_DURATION_CAP, &ctx);
+        let result = boon_duration_multiplied(5.0, 2000.0, 0.0, 1.0, &ctx);
         assert!(
             (result - 10.0).abs() < 0.001,
             "Expected 10.0 (capped), got {result}",
@@ -2173,7 +2168,7 @@ mod tests {
         // Source: https://wiki.guildwars2.com/wiki/Expertise
         let ctx = BalanceContext::pve();
         let result =
-            condition_duration_multiplied(4.0, 300.0, 0.10, 0.20, CONDITION_DURATION_CAP, &ctx);
+            condition_duration_multiplied(4.0, 300.0, 0.10, 0.20, 1.0, &ctx);
         assert!((result - 6.0).abs() < 0.001, "Expected 6.0, got {result}",);
     }
 
@@ -2184,10 +2179,10 @@ mod tests {
         // Source: https://wiki.guildwars2.com/wiki/Expertise
         let ctx = BalanceContext::pve();
         let result =
-            condition_duration_multiplied(5.0, 0.0, 0.0, 0.0, CONDITION_DURATION_CAP, &ctx);
+            condition_duration_multiplied(5.0, 0.0, 0.0, 0.0, 1.0, &ctx);
         assert!((result - 5.0).abs() < 0.001, "Expected 5.0, got {result}",);
 
-        let boon_result = boon_duration_multiplied(5.0, 0.0, 0.0, BOON_DURATION_CAP, &ctx);
+        let boon_result = boon_duration_multiplied(5.0, 0.0, 0.0, 1.0, &ctx);
         assert!(
             (boon_result - 5.0).abs() < 0.001,
             "Expected 5.0, got {boon_result}",
@@ -2201,16 +2196,16 @@ mod tests {
         let ctx = BalanceContext::pve();
 
         // 750 Expertise, 5% global, 10% specific: 750/1500 + 0.05 + 0.10 = 0.65
-        let condi = condition_duration_bonus(750.0, 0.05, 0.10, CONDITION_DURATION_CAP, &ctx);
+        let condi = condition_duration_bonus(750.0, 0.05, 0.10, 1.0, &ctx);
         assert!((condi - 0.65).abs() < 0.001, "Expected 0.65, got {condi}",);
 
         // 900 Concentration, 10% global: 900/1500 + 0.10 = 0.60 + 0.10 = 0.70
-        let boon = boon_duration_bonus(900.0, 0.10, BOON_DURATION_CAP, &ctx);
+        let boon = boon_duration_bonus(900.0, 0.10, 1.0, &ctx);
         assert!((boon - 0.70).abs() < 0.001, "Expected 0.70, got {boon}",);
 
         // Capped: 1500 Expertise, 20% global, 10% specific:
         // 1500/1500 + 0.20 + 0.10 = 1.30 -> capped at 1.0
-        let capped = condition_duration_bonus(1500.0, 0.20, 0.10, CONDITION_DURATION_CAP, &ctx);
+        let capped = condition_duration_bonus(1500.0, 0.20, 0.10, 1.0, &ctx);
         assert!(
             (capped - 1.0).abs() < 0.001,
             "Expected 1.0 (capped), got {capped}",
@@ -2265,9 +2260,9 @@ mod tests {
         let pvp = BalanceContext::pvp();
         let wvw = BalanceContext::wvw();
 
-        let condi_pve = condition_duration_bonus(600.0, 0.10, 0.05, CONDITION_DURATION_CAP, &pve);
-        let condi_pvp = condition_duration_bonus(600.0, 0.10, 0.05, CONDITION_DURATION_CAP, &pvp);
-        let condi_wvw = condition_duration_bonus(600.0, 0.10, 0.05, CONDITION_DURATION_CAP, &wvw);
+        let condi_pve = condition_duration_bonus(600.0, 0.10, 0.05, 1.0, &pve);
+        let condi_pvp = condition_duration_bonus(600.0, 0.10, 0.05, 1.0, &pvp);
+        let condi_wvw = condition_duration_bonus(600.0, 0.10, 0.05, 1.0, &wvw);
         assert!(
             (condi_pve - condi_pvp).abs() < 0.001,
             "PvE and PvP should match (currently mode-invariant)",
@@ -2277,9 +2272,9 @@ mod tests {
             "PvE and WvW should match (currently mode-invariant)",
         );
 
-        let boon_pve = boon_duration_bonus(600.0, 0.10, BOON_DURATION_CAP, &pve);
-        let boon_pvp = boon_duration_bonus(600.0, 0.10, BOON_DURATION_CAP, &pvp);
-        let boon_wvw = boon_duration_bonus(600.0, 0.10, BOON_DURATION_CAP, &wvw);
+        let boon_pve = boon_duration_bonus(600.0, 0.10, 1.0, &pve);
+        let boon_pvp = boon_duration_bonus(600.0, 0.10, 1.0, &pvp);
+        let boon_wvw = boon_duration_bonus(600.0, 0.10, 1.0, &wvw);
         assert!(
             (boon_pve - boon_pvp).abs() < 0.001,
             "PvE and PvP boon should match (currently mode-invariant)",

@@ -17,6 +17,8 @@
 
 use std::collections::HashMap;
 
+use gw2_core::types::GameMode;
+
 use super::combat_model::{
     kit_has_corrupt, kit_has_interrupt, kit_has_mobility_out, kit_has_stability_cover,
     kit_has_strip, setup_priority, setup_window_ms, EnemyDummy,
@@ -69,6 +71,33 @@ struct SkillState {
     cooldown_remaining_ms: u32,
 }
 
+/// Combat inputs for a rotation sim. `precision == 0` skips the crit term so
+/// existing CC-only tests keep the same strike numbers.
+#[derive(Debug, Clone)]
+pub struct SimParams {
+    pub power: f64,
+    pub condition_damage: f64,
+    pub weapon_strength: f64,
+    pub precision: f64,
+    pub ferocity: f64,
+    pub strike_mult: f64,
+    pub mode: GameMode,
+}
+
+impl SimParams {
+    pub fn basic(power: f64, condition_damage: f64, weapon_strength: f64) -> Self {
+        Self {
+            power,
+            condition_damage,
+            weapon_strength,
+            precision: 0.0,
+            ferocity: 0.0,
+            strike_mult: 1.0,
+            mode: GameMode::PvE,
+        }
+    }
+}
+
 /// Run a rotation simulation with the given skills and parameters.
 ///
 /// Skills should have their `weapon_set` field set:
@@ -85,12 +114,10 @@ pub fn simulate(
     condition_damage: f64,
     weapon_strength: f64,
 ) -> SimulationResult {
-    simulate_against(
+    simulate_with(
         skills,
         duration_ms,
-        power,
-        condition_damage,
-        weapon_strength,
+        &SimParams::basic(power, condition_damage, weapon_strength),
         EnemyDummy::open(),
     )
 }
@@ -104,15 +131,30 @@ pub fn simulate_against(
     weapon_strength: f64,
     enemy: EnemyDummy,
 ) -> SimulationResult {
+    simulate_with(
+        skills,
+        duration_ms,
+        &SimParams::basic(power, condition_damage, weapon_strength),
+        enemy,
+    )
+}
+
+/// Full combat-aware simulation (mode, crit, strike modifiers).
+pub fn simulate_with(
+    skills: &[RotationSkill],
+    duration_ms: u32,
+    params: &SimParams,
+    enemy: EnemyDummy,
+) -> SimulationResult {
     let duration = if duration_ms == 0 {
         DEFAULT_DURATION_MS
     } else {
         duration_ms
     };
 
-    let mut sim = SimState::new(skills, duration, enemy);
+    let mut sim = SimState::new(skills, duration, enemy, params.clone());
     sim.setup_until_ms = setup_window_ms(duration);
-    sim.run(power, condition_damage, weapon_strength);
+    sim.run();
     sim.into_result()
 }
 
@@ -146,10 +188,11 @@ struct SimState {
     skill_damage: HashMap<u32, f64>,       // skill_id → total damage
     condition_ticks: HashMap<String, u32>, // condition → total ticks
     buff_active_ms: HashMap<String, u32>,  // buff → total ms active
+    params: SimParams,
 }
 
 impl SimState {
-    fn new(skills: &[RotationSkill], duration_ms: u32, enemy: EnemyDummy) -> Self {
+    fn new(skills: &[RotationSkill], duration_ms: u32, enemy: EnemyDummy, params: SimParams) -> Self {
         let skill_states = skills
             .iter()
             .map(|_| SkillState {
@@ -182,18 +225,27 @@ impl SimState {
             skill_damage: HashMap::new(),
             condition_ticks: HashMap::new(),
             buff_active_ms: HashMap::new(),
+            params,
         }
     }
 
-    fn run(&mut self, power: f64, condition_damage: f64, weapon_strength: f64) {
+    fn run(&mut self) {
+        let power = self.params.power;
+        let condition_damage = self.params.condition_damage;
+        let weapon_strength = self.params.weapon_strength;
         while self.current_time_ms < self.duration_ms {
             // Tick conditions and buffs
             self.tick_conditions(condition_damage);
             self.tick_buffs();
 
-            // Reduce all cooldowns by TICK_MS
+            // Alacrity: skills recharge 33% faster → 100ms wall = 133ms CD.
+            let cd_tick = if self.buffs.iter().any(|b| b.buff == "Alacrity") {
+                TICK_MS + TICK_MS / 3
+            } else {
+                TICK_MS
+            };
             for state in &mut self.skill_states {
-                state.cooldown_remaining_ms = state.cooldown_remaining_ms.saturating_sub(TICK_MS);
+                state.cooldown_remaining_ms = state.cooldown_remaining_ms.saturating_sub(cd_tick);
             }
             self.weapon_swap_cooldown_ms = self.weapon_swap_cooldown_ms.saturating_sub(TICK_MS);
 
@@ -252,7 +304,13 @@ impl SimState {
                 continue;
             }
 
-            let dpct = skill_dps_efficiency(skill, power, condition_damage, weapon_strength);
+            let dpct = skill_dps_efficiency(
+                skill,
+                power,
+                condition_damage,
+                weapon_strength,
+                &self.params.mode,
+            );
             if dpct > best_dpct {
                 best_dpct = dpct;
                 best_idx = Some(i);
@@ -318,7 +376,7 @@ impl SimState {
             s.weapon_set == other_set
                 && s.slot != SkillSlot::Weapon1
                 && self.skill_states[i].cooldown_remaining_ms == 0
-                && skill_dps_efficiency(s, power, condition_damage, weapon_strength) > 0.0
+                && skill_dps_efficiency(s, power, condition_damage, weapon_strength, &self.params.mode) > 0.0
         })
     }
 
@@ -351,6 +409,10 @@ impl SimState {
                     let mut damage = weapon_strength * power / reference_armor()
                         * dmg_multiplier
                         * (*hit_count as f64);
+                    damage *= strike_crit_factor(
+                        self.params.precision,
+                        self.params.ferocity,
+                    ) * self.params.strike_mult;
                     if self.enemy.protection {
                         damage *=
                             crate::data::boon_condition_formulas::boons().protection_multiplier();
@@ -364,15 +426,13 @@ impl SimState {
                     stacks,
                     duration_ms,
                 } => {
-                    // GW2 caps most conditions at 25 stacks; enforce cap to avoid overestimating DPS.
-                    const CONDITION_STACK_CAP: usize = 25;
+                    let cap = condition_stack_cap(&condition, &self.params.mode);
                     let current = self
                         .conditions
                         .iter()
                         .filter(|s| s.condition == *condition)
                         .count();
-                    let can_apply =
-                        (*stacks as usize).min(CONDITION_STACK_CAP.saturating_sub(current));
+                    let can_apply = (*stacks as usize).min(cap.saturating_sub(current));
                     for _ in 0..can_apply {
                         self.conditions.push(ConditionStack {
                             condition: condition.clone(),
@@ -444,7 +504,8 @@ impl SimState {
         let mut tick_total = 0.0;
         for stack in &mut self.conditions {
             if stack.remaining_ms > 0 {
-                let tick_dmg = condition_tick_damage(&stack.condition, condition_damage);
+                let tick_dmg =
+                    condition_tick_damage(&stack.condition, condition_damage, &self.params.mode);
                 self.total_condition_damage += tick_dmg;
                 tick_total += tick_dmg;
                 // Skip the per-tick `stack.condition.clone()` once the key is
@@ -623,6 +684,7 @@ fn skill_dps_efficiency(
     power: f64,
     condition_damage: f64,
     weapon_strength: f64,
+    mode: &GameMode,
 ) -> f64 {
     let cast_time_s = (skill.cast_time_ms + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS) as f64 / 1000.0;
     if cast_time_s <= 0.0 {
@@ -647,7 +709,7 @@ fn skill_dps_efficiency(
                 duration_ms,
             } => {
                 // Total condition damage over the full duration of all stacks
-                let tick_dmg = condition_tick_damage(condition, condition_damage);
+                let tick_dmg = condition_tick_damage(condition, condition_damage, mode);
                 let duration_s = *duration_ms as f64 / 1000.0;
                 total_damage_value += tick_dmg * (*stacks as f64) * duration_s;
             }
@@ -698,7 +760,8 @@ fn estimate_buff_dps_value(
             // Fury: mode-dependent crit chance bonus (loaded from data).
             // Using PvE default here; TODO: P3-XX thread BalanceContext through simulator.
             let base_hit = power * weapon_strength / reference_armor();
-            base_hit * 0.15 * duration_s * (stacks.min(1) as f64)
+            let fury = crate::data::boons().fury_crit_bonus(GameMode::PvE);
+            base_hit * fury * duration_s * (stacks.min(1) as f64)
         }
         "Quickness" => {
             // Quickness = +50% attack speed → massive DPS multiplier.
@@ -709,17 +772,41 @@ fn estimate_buff_dps_value(
     }
 }
 
-/// Condition tick damage formula (GW2 level 80, per tick).
-/// Delegates to data-driven formulas loaded from data/formulas/conditions.json.
-/// Uses PvE mode as default. TODO: P3-XX thread BalanceContext through simulator.
-/// Torment uses stationary baseline; Confusion uses on_skill_use baseline.
-fn condition_tick_damage(condition: &str, condition_damage: f64) -> f64 {
-    use gw2_core::types::GameMode;
+/// Expected-value crit multiplier. Precision 0 → 1.0 (no crit term).
+fn strike_crit_factor(precision: f64, ferocity: f64) -> f64 {
+    if precision <= 0.0 {
+        return 1.0;
+    }
+    let f = crate::data::universal_formulas::formulas();
+    let chance = (f.crit_chance(precision) / 100.0).clamp(0.0, 1.0);
+    let crit_mult = f.crit_damage(ferocity) / 100.0;
+    1.0 + chance * (crit_mult - 1.0)
+}
+
+/// Intensity-stack cap from conditions.json, with competitive 100-stack ceiling.
+/// Vulnerability is 25 in every mode. Duration conditions cap at 1.
+pub(crate) fn condition_stack_cap(condition: &str, mode: &GameMode) -> usize {
     let conds = crate::data::conditions();
+    let canonical = crate::data::boon_condition_formulas::canonical_condition_name(condition);
+    let pve_cap = conds.max_stacks(canonical).unwrap_or(1500) as usize;
+    if canonical.eq_ignore_ascii_case("Vulnerability") {
+        return pve_cap.min(25);
+    }
+    match mode {
+        GameMode::PvE => pve_cap,
+        GameMode::PvP | GameMode::WvW => pve_cap.min(100),
+    }
+}
+
+/// Condition tick damage formula (GW2 level 80, per tick).
+/// Torment uses stationary baseline; Confusion uses on_skill_use baseline.
+fn condition_tick_damage(condition: &str, condition_damage: f64, mode: &GameMode) -> f64 {
+    let conds = crate::data::conditions();
+    let mode = mode.clone();
     match condition {
-        "Torment" => conds.torment_tick(condition_damage, GameMode::PvE, false),
-        "Confusion" => conds.confusion_tick(condition_damage, GameMode::PvE, true),
-        _ => conds.tick_damage(condition, condition_damage, GameMode::PvE),
+        "Torment" => conds.torment_tick(condition_damage, mode, false),
+        "Confusion" => conds.confusion_tick(condition_damage, mode, true),
+        _ => conds.tick_damage(condition, condition_damage, mode),
     }
 }
 
@@ -839,15 +926,26 @@ mod tests {
     fn test_condition_tick_damage_formulas() {
         // Formulas loaded from data/formulas/conditions.json (PvE default)
         let cd = 1000.0;
-        assert!((condition_tick_damage("Bleeding", cd) - 82.0).abs() < 0.1);
+        let pve = GameMode::PvE;
+        assert!((condition_tick_damage("Bleeding", cd, &pve) - 82.0).abs() < 0.1);
         // Burning: 0.155*1000 + 131.0 = 286.0 (L1: base=131.0)
-        assert!((condition_tick_damage("Burning", cd) - 286.0).abs() < 0.1);
-        assert!((condition_tick_damage("Poison", cd) - 93.5).abs() < 0.1);
+        assert!((condition_tick_damage("Burning", cd, &pve) - 286.0).abs() < 0.1);
+        assert!((condition_tick_damage("Poison", cd, &pve) - 93.5).abs() < 0.1);
         // Torment PvE stationary: 0.09*1000 + 31.8 = 121.8 (L2 verified)
-        assert!((condition_tick_damage("Torment", cd) - 121.8).abs() < 0.1);
+        assert!((condition_tick_damage("Torment", cd, &pve) - 121.8).abs() < 0.1);
         // Confusion PvE on-skill-use: 0.0325*1000 + 16.24 = 48.74 (L3 verified)
-        assert!((condition_tick_damage("Confusion", cd) - 48.74).abs() < 0.1);
-        assert_eq!(condition_tick_damage("Vulnerability", cd), 0.0);
+        assert!((condition_tick_damage("Confusion", cd, &pve) - 48.74).abs() < 0.1);
+        assert_eq!(condition_tick_damage("Vulnerability", cd, &pve), 0.0);
+    }
+
+    #[test]
+    fn test_condition_stack_caps() {
+        assert_eq!(condition_stack_cap("Bleeding", &GameMode::PvE), 1500);
+        assert_eq!(condition_stack_cap("Bleeding", &GameMode::PvP), 100);
+        assert_eq!(condition_stack_cap("Bleeding", &GameMode::WvW), 100);
+        assert_eq!(condition_stack_cap("Vulnerability", &GameMode::PvE), 25);
+        assert_eq!(condition_stack_cap("Vulnerability", &GameMode::PvP), 25);
+        assert_eq!(condition_stack_cap("Burning", &GameMode::PvP), 100);
     }
 
     #[test]
@@ -882,8 +980,8 @@ mod tests {
             weapon_set: 0,
         };
 
-        let high_dpct = skill_dps_efficiency(&high_dmg, 2000.0, 0.0, 1100.0);
-        let low_dpct = skill_dps_efficiency(&low_dmg, 2000.0, 0.0, 1100.0);
+        let high_dpct = skill_dps_efficiency(&high_dmg, 2000.0, 0.0, 1100.0, &GameMode::PvE);
+        let low_dpct = skill_dps_efficiency(&low_dmg, 2000.0, 0.0, 1100.0, &GameMode::PvE);
         assert!(
             high_dpct > low_dpct,
             "High-damage skill ({:.1}) should have higher DPCT than slow weak skill ({:.1})",
@@ -911,7 +1009,7 @@ mod tests {
             weapon_set: 0,
         };
 
-        let dpct = skill_dps_efficiency(&condi_skill, 1000.0, 1500.0, 1100.0);
+        let dpct = skill_dps_efficiency(&condi_skill, 1000.0, 1500.0, 1100.0, &GameMode::PvE);
         assert!(dpct > 0.0, "Condition skill should have positive DPCT");
 
         // Burning at 1500 CD = 0.155*1500+131 = 363.5 per tick
@@ -943,7 +1041,7 @@ mod tests {
             weapon_set: 0,
         };
 
-        let dpct = skill_dps_efficiency(&buff, 2000.0, 0.0, 1100.0);
+        let dpct = skill_dps_efficiency(&buff, 2000.0, 0.0, 1100.0, &GameMode::PvE);
         assert!(dpct > 0.0, "Might buff should have positive DPCT value");
     }
 

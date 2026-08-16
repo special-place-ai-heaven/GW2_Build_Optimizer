@@ -1,10 +1,4 @@
 //! Shared string-parsing helpers used across the optimizer crate.
-//!
-//! These were previously duplicated across `combat.rs`, `synergy.rs`,
-//! `search_v2.rs`, and `synergy_pipeline.rs`. They are consolidated here so
-//! every caller shares one correct implementation. In particular,
-//! [`extract_percent_before`] uses the closest-percent algorithm (the buggy
-//! first-percent variant that used to live in `synergy.rs` has been removed).
 
 /// Extract a percentage number associated with `keyword` from text.
 /// Picks the `N%` occurrence closest (by char distance) to the keyword,
@@ -17,6 +11,7 @@
 ///   → `Some(5.0)` (the closer percent, not the first one).
 ///
 /// Uses char-level iteration to avoid UTF-8 boundary panics.
+#[cfg(test)]
 pub(crate) fn extract_percent_before(text: &str, keyword: &str) -> Option<f64> {
     let chars: Vec<char> = text.chars().collect();
     let keyword_chars: Vec<char> = keyword.chars().collect();
@@ -86,6 +81,53 @@ pub(crate) fn text_describes_condition_cleanse(text: &str) -> bool {
     let lower = text.to_lowercase();
     lower.contains("condit")
         && (lower.contains("remov") || lower.contains("cleanse") || lower.contains("cure"))
+}
+
+/// Strip GW2 tooltip markup (`<br>`, `<c=@reminder>`, `@abilitytype`).
+pub(crate) fn strip_gw2_markup(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_tag = false;
+    for c in text.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.replace('\u{00a0}', " ")
+}
+
+/// Stack cap from API text (`max 25 stacks`, `maximum of 5 stacks`).
+/// Returns 1 when the word "stack" is a verb (Fireworks "refreshes duration on stack").
+pub(crate) fn stack_multiplier(text: &str) -> f64 {
+    let t = text.to_lowercase();
+    let mut search_from = 0;
+    while let Some(rel) = t[search_from..].find("stack") {
+        let idx = search_from + rel;
+        let before = t[..idx].trim_end();
+        let digits: String = before
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        if let Ok(n) = digits.parse::<f64>() {
+            if (2.0..=25.0).contains(&n) {
+                let prefix = before[..before.len() - digits.len()].trim_end();
+                if prefix.ends_with("maximum of")
+                    || prefix.ends_with("max")
+                    || prefix.ends_with("up to")
+                {
+                    return n;
+                }
+            }
+        }
+        search_from = idx + 1;
+    }
+    1.0
 }
 
 #[cfg(test)]
@@ -203,5 +245,27 @@ mod tests {
         assert!(!text_describes_condition_cleanse(
             "Conditions you apply last longer"
         ));
+    }
+
+    #[test]
+    fn strip_gw2_markup_drops_tags() {
+        assert_eq!(
+            strip_gw2_markup("<c=@reminder>Deal increased strike damage</c>"),
+            "Deal increased strike damage"
+        );
+        assert_eq!(strip_gw2_markup("A<br>B"), "AB");
+    }
+
+    #[test]
+    fn stack_multiplier_reads_cap_not_verb() {
+        assert_eq!(
+            stack_multiplier("Gain 3% condition duration. Maximum of 5 stacks."),
+            5.0
+        );
+        assert_eq!(
+            stack_multiplier("Deal increased strike damage. Refreshes duration on stack."),
+            1.0
+        );
+        assert_eq!(stack_multiplier("+10 power. Max 25 stacks."), 25.0);
     }
 }

@@ -9,7 +9,7 @@ use gw2_api::models::{Fact, Item, Skill, Trait as GW2Trait};
 
 use crate::data::boon_condition_formulas::{boon_weight, condition_importance};
 use crate::scoring::OptimizationWeights;
-use crate::text_util::{capitalize, extract_percent_before};
+use crate::text_util::{stack_multiplier, strip_gw2_markup, text_describes_condition_cleanse};
 
 // ─── Supporting Enums ───
 
@@ -240,236 +240,51 @@ pub fn extract_rune_effects(rune: &Item) -> Vec<NormalizedEffect> {
 }
 
 /// Extract normalized effects from a sigil item.
-pub fn extract_sigil_effects(sigil: &Item) -> Vec<NormalizedEffect> {
-    let mut effects = Vec::new();
-    let name_lower = sigil.name.to_lowercase();
-
-    // Known permanent/high-uptime sigils
-    if name_lower.contains("sigil of force") {
-        effects.push(NormalizedEffect::DamageModifier {
-            category: DamageCategory::Strike,
-            percent: 5.0,
-        });
-    } else if name_lower.contains("sigil of impact") {
-        // +3% damage while foe is stunned/knocked down; actual uptime 5-15% in PvE
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::OnHit,
-            effect: Box::new(NormalizedEffect::DamageModifier {
-                category: DamageCategory::Strike,
-                percent: 3.0,
-            }),
-            estimated_uptime: 0.1,
-        });
-    } else if name_lower.contains("sigil of the night") {
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::Passive,
-            effect: Box::new(NormalizedEffect::DamageModifier {
-                category: DamageCategory::Strike,
-                percent: 10.0,
-            }),
-            estimated_uptime: 0.5,
-        });
-    } else if name_lower.contains("sigil of bursting") {
-        effects.push(NormalizedEffect::DamageModifier {
-            category: DamageCategory::Condition,
-            percent: 6.0,
-        });
-    } else if name_lower.contains("sigil of malice") {
-        effects.push(NormalizedEffect::DurationBonus {
-            kind: DurationKind::AllCondition,
-            percent: 10.0,
-        });
-    } else if name_lower.contains("sigil of concentration") {
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::OnWeaponSwap,
-            effect: Box::new(NormalizedEffect::DurationBonus {
-                kind: DurationKind::AllBoon,
-                percent: 10.0,
-            }),
-            estimated_uptime: 0.33,
-        });
-    } else if name_lower.contains("sigil of smoldering") {
-        effects.push(NormalizedEffect::DurationBonus {
-            kind: DurationKind::SpecificCondition("Burning".into()),
-            percent: 10.0,
-        });
-    } else if name_lower.contains("sigil of agony") {
-        effects.push(NormalizedEffect::DurationBonus {
-            kind: DurationKind::SpecificCondition("Torment".into()),
-            percent: 10.0,
-        });
-    } else if name_lower.contains("sigil of venom") {
-        // Canonicalize the condition name so the synergy matcher
-        // (`duration_matches_condition`) hits the same key the trait/skill
-        // extractors use. The wiki/tooltip text says "Poison Duration" but
-        // canonical form everywhere else is "Poisoned".
-        effects.push(NormalizedEffect::DurationBonus {
-            kind: DurationKind::SpecificCondition(
-                crate::data::boon_condition_formulas::canonical_condition_name("Poison")
-                    .to_string(),
-            ),
-            percent: 10.0,
-        });
-    } else if name_lower.contains("sigil of transference") {
-        effects.push(NormalizedEffect::DamageModifier {
-            category: DamageCategory::Healing,
-            percent: 10.0,
-        });
-    } else if name_lower.contains("sigil of benevolence") {
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::OnKill,
-            effect: Box::new(NormalizedEffect::DamageModifier {
-                category: DamageCategory::Healing,
-                percent: 10.0,
-            }),
-            estimated_uptime: 0.3,
-        });
-    } else if name_lower.contains("sigil of earth") {
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::OnCrit,
-            effect: Box::new(NormalizedEffect::AppliesStatus {
-                status: "Bleeding".into(),
-                is_condition: true,
-                duration_s: 5,
-                stacks: 1,
-            }),
-            estimated_uptime: 0.6,
-        });
-    } else if name_lower.contains("sigil of doom") {
-        // Use canonical "Poisoned" so the AppliesStatus matcher in
-        // compute_marginal_synergy can chain this with traits that
-        // benefit from Poisoned application.
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::OnWeaponSwap,
-            effect: Box::new(NormalizedEffect::AppliesStatus {
-                status: crate::data::boon_condition_formulas::canonical_condition_name("Poison")
-                    .to_string(),
-                is_condition: true,
-                duration_s: 5,
-                stacks: 1,
-            }),
-            estimated_uptime: 0.33,
-        });
-    } else if name_lower.contains("sigil of geomancy") {
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::OnWeaponSwap,
-            effect: Box::new(NormalizedEffect::AppliesStatus {
-                status: "Bleeding".into(),
-                is_condition: true,
-                duration_s: 5,
-                stacks: 3,
-            }),
-            estimated_uptime: 0.33,
-        });
-    } else {
-        // Try parsing from description
-        if let Some(ref desc) = sigil.description {
-            effects.extend(parse_description_to_effects(desc));
+pub fn extract_sigil_effects(sigil: &Item, ctx: &crate::balance::BalanceContext) -> Vec<NormalizedEffect> {
+    if let Some(buff) = crate::combat::item_buff_description(sigil) {
+        let effects = effects_from_upgrade_text(buff);
+        if !effects.is_empty() {
+            return effects;
+        }
+    }
+    if let Some(ref desc) = sigil.description {
+        let effects = effects_from_upgrade_text(desc);
+        if !effects.is_empty() {
+            return effects;
         }
     }
 
-    effects
+    let name_lower = sigil.name.to_lowercase();
+    let competitive = matches!(
+        ctx.game_mode,
+        gw2_core::types::GameMode::PvP | gw2_core::types::GameMode::WvW
+    );
+    if name_lower.contains("sigil of force") {
+        vec![NormalizedEffect::DamageModifier {
+            category: DamageCategory::Strike,
+            percent: if competitive { 3.0 } else { 5.0 },
+        }]
+    } else if name_lower.contains("sigil of bursting") {
+        vec![NormalizedEffect::DamageModifier {
+            category: DamageCategory::Condition,
+            percent: if competitive { 4.0 } else { 6.0 },
+        }]
+    } else {
+        Vec::new()
+    }
 }
 
 /// Extract normalized effects from a relic item.
 pub fn extract_relic_effects(relic: &Item) -> Vec<NormalizedEffect> {
-    let mut effects = Vec::new();
-    let name_lower = relic.name.to_lowercase();
-
-    if name_lower.contains("relic of the thief") {
-        // +1% per boon up to 10%; with good boon coverage ~85% effective uptime at 8-10 stacks
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::Passive,
-            effect: Box::new(NormalizedEffect::DamageModifier {
-                category: DamageCategory::Strike,
-                percent: 10.0,
-            }),
-            estimated_uptime: 0.85,
-        });
-    } else if name_lower.contains("relic of fireworks") {
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::OnDodge,
-            effect: Box::new(NormalizedEffect::DamageModifier {
-                category: DamageCategory::Strike,
-                percent: 10.0,
-            }),
-            estimated_uptime: 0.4,
-        });
-    } else if name_lower.contains("relic of isgarren") {
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::OnHealthThreshold,
-            effect: Box::new(NormalizedEffect::DamageModifier {
-                category: DamageCategory::Crit,
-                percent: 10.0,
-            }),
-            estimated_uptime: 0.85,
-        });
-    } else if name_lower.contains("relic of the aristocracy") {
-        // +1% per boon up to 5%; with good boon coverage ~80% effective uptime at 4-5 stacks
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::Passive,
-            effect: Box::new(NormalizedEffect::DamageModifier {
-                category: DamageCategory::Strike,
-                percent: 5.0,
-            }),
-            estimated_uptime: 0.8,
-        });
-    } else if name_lower.contains("relic of cerus") {
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::Passive,
-            effect: Box::new(NormalizedEffect::DamageModifier {
-                category: DamageCategory::Condition,
-                percent: 5.0,
-            }),
-            estimated_uptime: 0.5,
-        });
-    } else if name_lower.contains("relic of the nightmare") {
-        effects.push(NormalizedEffect::DurationBonus {
-            kind: DurationKind::AllCondition,
-            percent: 10.0,
-        });
-    } else if name_lower.contains("relic of the krait") {
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::OnHit,
-            effect: Box::new(NormalizedEffect::AppliesStatus {
-                status: "Bleeding".into(),
-                is_condition: true,
-                duration_s: 4,
-                stacks: 1,
-            }),
-            estimated_uptime: 0.5,
-        });
-    } else if name_lower.contains("relic of the monk") {
-        effects.push(NormalizedEffect::DamageModifier {
-            category: DamageCategory::Healing,
-            percent: 10.0,
-        });
-    } else if name_lower.contains("relic of karakosa") {
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::OnHealthThreshold,
-            effect: Box::new(NormalizedEffect::DamageModifier {
-                category: DamageCategory::Healing,
-                percent: 10.0,
-            }),
-            estimated_uptime: 0.8,
-        });
-    } else if name_lower.contains("relic of nourys") {
-        effects.push(NormalizedEffect::ProcEffect {
-            trigger: ProcTrigger::OnWeaponSwap,
-            effect: Box::new(NormalizedEffect::DurationBonus {
-                kind: DurationKind::AllBoon,
-                percent: 10.0,
-            }),
-            estimated_uptime: 0.33,
-        });
-    } else {
-        // Try parsing from description
-        if let Some(ref desc) = relic.description {
-            effects.extend(parse_description_to_effects(desc));
+    if let Some(ref desc) = relic.description {
+        if !desc.is_empty() {
+            return effects_from_upgrade_text(desc);
         }
     }
-
-    effects
+    if let Some(buff) = crate::combat::item_buff_description(relic) {
+        return effects_from_upgrade_text(buff);
+    }
+    Vec::new()
 }
 
 /// Extract normalized effects from a skill.
@@ -505,7 +320,15 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             percent: Some(pct),
             ..
         } => {
+            if crate::combat::percent_text_is_conditional(text) {
+                return effects;
+            }
             let text_lower = text.to_lowercase();
+            let pct = if text_lower.contains("90") && text_lower.contains("health") {
+                *pct * 0.9
+            } else {
+                *pct
+            };
             // Crit damage MUST be checked before the generic "damage" catch-all:
             // "Critical Damage" contains the substring "damage" but is neither
             // strike nor condition damage. Ordering it first prevents it from
@@ -513,7 +336,7 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             if text_lower.contains("critical damage") || text_lower.contains("crit damage") {
                 effects.push(NormalizedEffect::DamageModifier {
                     category: DamageCategory::Crit,
-                    percent: *pct,
+                    percent: pct,
                 });
             } else if text_lower.contains("condition damage") {
                 // Mirror the strike branch below: trust the structured Percent fact.
@@ -521,27 +344,27 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
                 // damage facts phrased as "Condition Damage: +X%".
                 effects.push(NormalizedEffect::DamageModifier {
                     category: DamageCategory::Condition,
-                    percent: *pct,
+                    percent: pct,
                 });
             } else if text_lower.contains("damage") {
                 effects.push(NormalizedEffect::DamageModifier {
                     category: DamageCategory::Strike,
-                    percent: *pct,
+                    percent: pct,
                 });
             } else if text_lower.contains("outgoing healing") {
                 effects.push(NormalizedEffect::DamageModifier {
                     category: DamageCategory::Healing,
-                    percent: *pct,
+                    percent: pct,
                 });
             } else if text_lower.contains("boon duration") {
                 effects.push(NormalizedEffect::DurationBonus {
                     kind: DurationKind::AllBoon,
-                    percent: *pct,
+                    percent: pct,
                 });
             } else if text_lower.contains("condition duration") {
                 effects.push(NormalizedEffect::DurationBonus {
                     kind: DurationKind::AllCondition,
-                    percent: *pct,
+                    percent: pct,
                 });
             }
 
@@ -556,7 +379,7 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
                         crate::data::boon_condition_formulas::canonical_condition_name(condi);
                     effects.push(NormalizedEffect::DurationBonus {
                         kind: DurationKind::SpecificCondition(canonical.to_string()),
-                        percent: *pct,
+                        percent: pct,
                     });
                 }
             }
@@ -625,139 +448,159 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
 }
 
 /// Parse a rune bonus string into NormalizedEffects.
-/// Examples: "+7% Burning Duration", "+5% damage", "+175 Power"
+/// Examples: "+7% Burning Duration", "7% Burning Duration", "+5% damage", "+175 Power"
 fn parse_rune_bonus_to_effects(bonus: &str) -> Vec<NormalizedEffect> {
-    let mut effects = Vec::new();
+    let mut effects = effects_from_upgrade_text(bonus);
+    if !effects.is_empty() {
+        return effects;
+    }
     let s = bonus.trim().to_lowercase();
-
-    // Match "+N <Stat>" patterns (flat stat bonuses)
     if let Some(without_plus) = s.strip_prefix('+') {
-        // Check for percentage patterns first
-        if let Some(pct_idx) = without_plus.find('%') {
-            let num_str = &without_plus[..pct_idx];
-            let rest = without_plus[pct_idx + 1..].trim();
-
-            if let Ok(value) = num_str.trim().parse::<f64>() {
-                // Specific condition duration. Canonicalize so "Poison" verb
-                // form becomes "Poisoned" — matches trait/skill emitters and
-                // `duration_matches_condition`'s key comparison.
-                for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
-                    if rest.contains(condi) && rest.contains("duration") {
-                        let condi_cap = capitalize(condi);
-                        let canonical =
-                            crate::data::boon_condition_formulas::canonical_condition_name(
-                                &condi_cap,
-                            );
-                        effects.push(NormalizedEffect::DurationBonus {
-                            kind: DurationKind::SpecificCondition(canonical.to_string()),
-                            percent: value,
-                        });
-                        return effects;
-                    }
-                }
-
-                if rest.contains("condition duration") {
-                    effects.push(NormalizedEffect::DurationBonus {
-                        kind: DurationKind::AllCondition,
-                        percent: value,
-                    });
-                } else if rest.contains("boon duration") {
-                    effects.push(NormalizedEffect::DurationBonus {
-                        kind: DurationKind::AllBoon,
-                        percent: value,
-                    });
-                } else if rest.contains("condition") && rest.contains("damage") {
-                    // "+X% Condition Damage" — percentage bonus to all condition damage output.
-                    effects.push(NormalizedEffect::DamageModifier {
-                        category: DamageCategory::Condition,
-                        percent: value,
-                    });
-                } else if rest.contains("damage") {
-                    effects.push(NormalizedEffect::DamageModifier {
-                        category: DamageCategory::Strike,
-                        percent: value,
-                    });
-                } else if rest.contains("healing") {
-                    effects.push(NormalizedEffect::DamageModifier {
-                        category: DamageCategory::Healing,
-                        percent: value,
-                    });
-                }
-            }
-        } else {
-            // Flat stat bonus: "+175 Power"
-            let parts: Vec<&str> = without_plus.splitn(2, ' ').collect();
-            if parts.len() == 2 {
-                if let Ok(value) = parts[0].trim().parse::<f64>() {
-                    let stat_name = parts[1].trim();
-                    if let Some(stat) = stat_type_from_display_name(stat_name) {
-                        effects.push(NormalizedEffect::StatBonus { stat, value });
-                    }
+        let parts: Vec<&str> = without_plus.splitn(2, ' ').collect();
+        if parts.len() == 2 {
+            if let Ok(value) = parts[0].trim().parse::<f64>() {
+                let stat_name = parts[1].trim();
+                if let Some(stat) = stat_type_from_display_name(stat_name) {
+                    effects.push(NormalizedEffect::StatBonus { stat, value });
                 }
             }
         }
     }
-
     effects
 }
 
-/// Parse item description text into effects (fallback).
-fn parse_description_to_effects(desc: &str) -> Vec<NormalizedEffect> {
-    let mut effects = Vec::new();
-    let desc_lower = desc.to_lowercase();
+fn effects_from_upgrade_text(text: &str) -> Vec<NormalizedEffect> {
+    let mut mods = crate::combat::DamageModifiers::default();
+    crate::combat::apply_upgrade_text(&mut mods, text);
+    let mut effects = normalized_from_modifiers(&mods);
+    effects.extend(prose_status_effects(text));
+    effects
+}
 
-    // "+N% <condition> duration". Canonicalize so descriptions that say
-    // "Poison duration" produce the same key the rest of the system uses.
-    for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
-        if let Some(pct) = extract_percent_before(&desc_lower, &format!("{} duration", condi)) {
-            let condi_cap = capitalize(condi);
-            let canonical =
-                crate::data::boon_condition_formulas::canonical_condition_name(&condi_cap);
-            effects.push(NormalizedEffect::DurationBonus {
-                kind: DurationKind::SpecificCondition(canonical.to_string()),
-                percent: pct,
+fn prose_status_effects(text: &str) -> Vec<NormalizedEffect> {
+    let t = strip_gw2_markup(text).to_lowercase();
+    let mut effects = Vec::new();
+    let duration_mod = t.contains("increase") && t.contains("duration");
+    if !duration_mod {
+        let applying = t.contains("inflict") || t.contains("applies") || t.contains("apply ");
+        if applying {
+            for (needle, status) in [
+                ("bleeding", "Bleeding"),
+                ("burning", "Burning"),
+                ("poison", "Poisoned"),
+                ("torment", "Torment"),
+                ("confusion", "Confusion"),
+                ("vulnerability", "Vulnerability"),
+            ] {
+                if t.contains(needle) {
+                    effects.push(NormalizedEffect::AppliesStatus {
+                        status: status.into(),
+                        is_condition: true,
+                        duration_s: 5,
+                        stacks: 1,
+                    });
+                    break;
+                }
+            }
+        }
+        for (needle, status) in [
+            ("might", "Might"),
+            ("fury", "Fury"),
+            ("quickness", "Quickness"),
+            ("alacrity", "Alacrity"),
+            ("protection", "Protection"),
+        ] {
+            if (t.contains("grant") || t.contains("gain ")) && t.contains(needle) {
+                effects.push(NormalizedEffect::AppliesStatus {
+                    status: status.into(),
+                    is_condition: false,
+                    duration_s: 5,
+                    stacks: 1,
+                });
+                break;
+            }
+        }
+    }
+    if text_describes_condition_cleanse(&t) {
+        effects.push(NormalizedEffect::AppliesStatus {
+            status: "Cleanse".into(),
+            is_condition: false,
+            duration_s: 0,
+            stacks: 1,
+        });
+    }
+    if (t.contains("on kill") || t.contains("charge")) && t.contains("power") {
+        let cap = stack_multiplier(&t);
+        if cap > 1.0 {
+            effects.push(NormalizedEffect::StatBonus {
+                stat: StatType::Power,
+                value: 10.0 * cap * 0.5,
             });
         }
     }
+    effects
+}
 
-    if let Some(pct) = extract_percent_before(&desc_lower, "condition duration") {
+fn normalized_from_modifiers(mods: &crate::combat::DamageModifiers) -> Vec<NormalizedEffect> {
+    let mut effects = Vec::new();
+    for &d in &mods.strike_pct {
+        effects.push(NormalizedEffect::DamageModifier {
+            category: DamageCategory::Strike,
+            percent: d * 100.0,
+        });
+    }
+    for &d in &mods.condition_pct {
+        effects.push(NormalizedEffect::DamageModifier {
+            category: DamageCategory::Condition,
+            percent: d * 100.0,
+        });
+    }
+    for &d in &mods.crit_damage_pct {
+        effects.push(NormalizedEffect::DamageModifier {
+            category: DamageCategory::Crit,
+            percent: d,
+        });
+    }
+    for &d in &mods.crit_chance_pct {
+        effects.push(NormalizedEffect::DamageModifier {
+            category: DamageCategory::Crit,
+            percent: d,
+        });
+    }
+    for &d in &mods.healing_pct {
+        effects.push(NormalizedEffect::DamageModifier {
+            category: DamageCategory::Healing,
+            percent: d * 100.0,
+        });
+    }
+    for &d in &mods.condi_duration_pct {
         effects.push(NormalizedEffect::DurationBonus {
             kind: DurationKind::AllCondition,
-            percent: pct,
+            percent: d * 100.0,
         });
     }
-    if let Some(pct) = extract_percent_before(&desc_lower, "boon duration") {
+    for &d in &mods.boon_duration_pct {
         effects.push(NormalizedEffect::DurationBonus {
             kind: DurationKind::AllBoon,
-            percent: pct,
+            percent: d * 100.0,
         });
     }
-    if desc_lower.contains("outgoing healing") {
-        if let Some(pct) = extract_percent_before(&desc_lower, "outgoing healing") {
-            effects.push(NormalizedEffect::DamageModifier {
-                category: DamageCategory::Healing,
-                percent: pct,
+    for (cond, vals) in &mods.specific_condi_duration {
+        for &d in vals {
+            effects.push(NormalizedEffect::DurationBonus {
+                kind: DurationKind::SpecificCondition(cond.clone()),
+                percent: d * 100.0,
             });
         }
     }
-    if desc_lower.contains("condition damage") {
-        // Checked before the generic-damage branch, which excludes "condition
-        // damage" and would otherwise drop a "+N% condition damage" description.
-        if let Some(pct) = extract_percent_before(&desc_lower, "condition damage") {
+    for (cond, vals) in &mods.specific_condi {
+        for &d in vals {
             effects.push(NormalizedEffect::DamageModifier {
-                category: DamageCategory::Condition,
-                percent: pct,
-            });
-        }
-    } else if desc_lower.contains("damage") {
-        if let Some(pct) = extract_percent_before(&desc_lower, "damage") {
-            effects.push(NormalizedEffect::DamageModifier {
-                category: DamageCategory::Strike,
-                percent: pct,
+                category: DamageCategory::SpecificCondition(cond.clone()),
+                percent: d * 100.0,
             });
         }
     }
-
     effects
 }
 
@@ -1517,7 +1360,7 @@ mod tests {
             restrictions: vec![],
             details: None,
         };
-        let effects = extract_sigil_effects(&sigil);
+        let effects = extract_sigil_effects(&sigil, &crate::balance::BalanceContext::pve());
         assert!(!effects.is_empty());
         assert!(matches!(&effects[0], NormalizedEffect::DamageModifier {
             category: DamageCategory::Strike, percent
@@ -1532,7 +1375,9 @@ mod tests {
             item_type: "Relic".into(),
             rarity: "Legendary".into(),
             level: 80,
-            description: None,
+            description: Some(
+                "Your elite skill inflicts fear and pulses poison around you.".into(),
+            ),
             icon: None,
             vendor_value: None,
             chat_link: None,
@@ -1543,9 +1388,20 @@ mod tests {
             details: None,
         };
         let effects = extract_relic_effects(&relic);
-        assert_eq!(effects.len(), 1);
-        assert!(matches!(&effects[0], NormalizedEffect::DurationBonus {
-            kind: DurationKind::AllCondition, percent
-        } if (*percent - 10.0).abs() < 0.01));
+        assert!(!effects.iter().any(|e| matches!(
+            e,
+            NormalizedEffect::DurationBonus {
+                kind: DurationKind::AllCondition,
+                ..
+            }
+        )));
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            NormalizedEffect::AppliesStatus {
+                status,
+                is_condition: true,
+                ..
+            } if status == "Poisoned"
+        )));
     }
 }
