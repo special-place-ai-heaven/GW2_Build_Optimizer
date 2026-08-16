@@ -458,10 +458,8 @@ pub fn render_lock_panel(
                             if is_selected {
                                 let text_end =
                                     cx + circle_radius + 8.0 + ui.calc_text_size(trait_name)[0];
-                                selected_link[col] = Some((
-                                    [text_end + 4.0, cy],
-                                    [cx - circle_radius - 1.0, cy],
-                                ));
+                                selected_link[col] =
+                                    Some(([text_end + 4.0, cy], [cx - circle_radius - 1.0, cy]));
                             }
                             let is_locked = locks
                                 .locked_trait(sid, col)
@@ -852,10 +850,8 @@ pub fn render_optimized_specs_panel(
                         if is_selected {
                             let text_end =
                                 cx + circle_radius + 8.0 + ui.calc_text_size(trait_name)[0];
-                            selected_link[col] = Some((
-                                [text_end + 4.0, cy],
-                                [cx - circle_radius - 1.0, cy],
-                            ));
+                            selected_link[col] =
+                                Some(([text_end + 4.0, cy], [cx - circle_radius - 1.0, cy]));
                         }
 
                         {

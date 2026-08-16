@@ -235,9 +235,16 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
         }
     }
 
-    // Chat bar at bottom
+    // Kitchen chat at bottom
     if state.main.current_build.is_some() {
-        if let Some(msg) = crate::ui::chat_bar::render_chat_bar(ui, &mut state.main.chat) {
+        let cooking = if state.main.chat.waiting {
+            Some(state.main.optimize_stage.clone())
+        } else {
+            None
+        };
+        if let Some(msg) =
+            crate::ui::chat_bar::render_chat_bar(ui, &mut state.main.chat, cooking.as_deref())
+        {
             optimization::send_chat_message(state, msg);
         }
     }

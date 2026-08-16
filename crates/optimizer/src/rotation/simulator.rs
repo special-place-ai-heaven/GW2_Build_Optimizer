@@ -192,7 +192,12 @@ struct SimState {
 }
 
 impl SimState {
-    fn new(skills: &[RotationSkill], duration_ms: u32, enemy: EnemyDummy, params: SimParams) -> Self {
+    fn new(
+        skills: &[RotationSkill],
+        duration_ms: u32,
+        enemy: EnemyDummy,
+        params: SimParams,
+    ) -> Self {
         let skill_states = skills
             .iter()
             .map(|_| SkillState {
@@ -376,7 +381,13 @@ impl SimState {
             s.weapon_set == other_set
                 && s.slot != SkillSlot::Weapon1
                 && self.skill_states[i].cooldown_remaining_ms == 0
-                && skill_dps_efficiency(s, power, condition_damage, weapon_strength, &self.params.mode) > 0.0
+                && skill_dps_efficiency(
+                    s,
+                    power,
+                    condition_damage,
+                    weapon_strength,
+                    &self.params.mode,
+                ) > 0.0
         })
     }
 
@@ -409,10 +420,8 @@ impl SimState {
                     let mut damage = weapon_strength * power / reference_armor()
                         * dmg_multiplier
                         * (*hit_count as f64);
-                    damage *= strike_crit_factor(
-                        self.params.precision,
-                        self.params.ferocity,
-                    ) * self.params.strike_mult;
+                    damage *= strike_crit_factor(self.params.precision, self.params.ferocity)
+                        * self.params.strike_mult;
                     if self.enemy.protection {
                         damage *=
                             crate::data::boon_condition_formulas::boons().protection_multiplier();

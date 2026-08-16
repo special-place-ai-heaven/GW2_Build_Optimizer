@@ -1,3 +1,4 @@
+mod chat_links;
 mod clipboard;
 mod state;
 pub mod ui;
@@ -45,7 +46,10 @@ fn on_load() {
     log(
         LogLevel::Info,
         "GW2 Build Optimizer",
-        "v1.0.0 loaded. Press Ctrl+Shift+O to open.",
+        format!(
+            "v{} loaded. Press Ctrl+Shift+O to open.",
+            env!("CARGO_PKG_VERSION")
+        ),
     );
 }
 

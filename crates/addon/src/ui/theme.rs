@@ -379,17 +379,13 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
     ui.set_window_font_scale(CAP_SCALE);
     let cap_sz = ui.calc_text_size(caption);
     ui.set_window_font_scale(1.0);
-    let total_h =
-        title_h + headroom + bar_h + line_gap + 6.0 + coin_h + CAP_GAP + cap_sz[1] + 8.0;
+    let total_h = title_h + headroom + bar_h + line_gap + 6.0 + coin_h + CAP_GAP + cap_sz[1] + 8.0;
     let origin = ui.cursor_screen_pos();
     let p = [origin[0] + SIDE, origin[1]];
     let _ = ui.invisible_button("##dl_scribble", [full, total_h]);
     let t = ui.frame_count() as f32;
     let labels = ["Bronze", "Silver", "Gold", "GEM"];
-    let end_half = ui.calc_text_size(labels[0])[0]
-        .max(ui.calc_text_size(labels[3])[0])
-        * 0.5
-        + 6.0;
+    let end_half = ui.calc_text_size(labels[0])[0].max(ui.calc_text_size(labels[3])[0]) * 0.5 + 6.0;
     {
         let dl = ui.get_window_draw_list();
 
@@ -561,12 +557,8 @@ fn draw_choya(
     let w = h * (172.0 / 192.0);
     let tilt = sway * 0.18;
     let (c, s) = (tilt.cos(), tilt.sin());
-    let rot = |dx: f32, dy: f32| -> [f32; 2] {
-        [
-            feet[0] + dx * c - dy * s,
-            feet[1] + dx * s + dy * c,
-        ]
-    };
+    let rot =
+        |dx: f32, dy: f32| -> [f32; 2] { [feet[0] + dx * c - dy * s, feet[1] + dx * s + dy * c] };
     dl.add_image_quad(
         tid,
         rot(-w * 0.5, -h),

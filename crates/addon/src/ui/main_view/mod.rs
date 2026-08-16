@@ -65,19 +65,25 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         }
     }
 
-    // Chat timeout recovery: if waiting > 1800 frames (~30s), unblock
+    // Kitchen timeout: 8 tool turns can exceed 30s. Wall clock, not FPS.
+    const KITCHEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
     if state.main.chat.waiting {
-        state.main.chat_wait_frames += 1;
-        if state.main.chat_wait_frames > 1800 {
+        let started = state
+            .main
+            .chat_wait_started
+            .get_or_insert_with(std::time::Instant::now);
+        if started.elapsed() >= KITCHEN_TIMEOUT {
+            state.main.chat_epoch = state.main.chat_epoch.wrapping_add(1);
             state.main.chat.waiting = false;
-            state.main.chat_wait_frames = 0;
+            state.main.chat_wait_started = None;
+            state.main.optimize_stage.clear();
             crate::ui::chat_bar::add_ai_response(
                 &mut state.main.chat,
-                "Request timed out. Please try again.".into(),
+                "The kitchen took too long. Place the order again.".into(),
             );
         }
     } else {
-        state.main.chat_wait_frames = 0;
+        state.main.chat_wait_started = None;
     }
 
     // ── Top status bar: API health + loading + errors ──
@@ -123,6 +129,11 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
             render_main_content(ui, state);
             ui.unindent_by(content_indent);
         });
+
+    if state.main.chat.dirty {
+        crate::ui::chat_bar::save_history(&state.addon_dir, &state.main.chat.history);
+        state.main.chat.dirty = false;
+    }
 }
 
 /// One always-on chat strip. Follows Current vs Optimized focus.
@@ -831,6 +842,7 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         "Optimize Build"
     };
     let disabled = state.main.optimizing
+        || state.main.chat.waiting
         || state.main.game_db.is_none()
         || (is_improve && state.main.current_build.is_none());
 
@@ -841,6 +853,8 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         if ui.is_item_hovered() {
             ui.tooltip_text(if state.main.optimizing {
                 "Optimization in progress..."
+            } else if state.main.chat.waiting {
+                "Chef is plating..."
             } else if state.main.game_db.is_none() {
                 "Waiting for game data to load..."
             } else {

@@ -107,7 +107,8 @@ fn extract_sigil(name: &str, buff: Option<&str>, ctx: &BalanceContext) -> combat
     let sigil = item(
         2,
         name,
-        buff.map(details_buff).or_else(|| Some(details_bonuses(vec![]))),
+        buff.map(details_buff)
+            .or_else(|| Some(details_bonuses(vec![]))),
     );
     let mut items = HashMap::new();
     items.insert(2, sigil);
@@ -151,7 +152,15 @@ fn extract_trait_percent(text: &str, pct: f64) -> combat::DamageModifiers {
     };
     let mut traits = HashMap::new();
     traits.insert(9, t);
-    combat::extract_damage_modifiers(&[9], None, &[], None, &traits, &HashMap::new(), &BalanceContext::pve())
+    combat::extract_damage_modifiers(
+        &[9],
+        None,
+        &[],
+        None,
+        &traits,
+        &HashMap::new(),
+        &BalanceContext::pve(),
+    )
 }
 
 fn auto(id: u32) -> RotationSkill {
@@ -478,7 +487,12 @@ fn strike_crit_factor_only_when_precision_positive() {
     some.ferocity = 0.0;
     let a = simulate_with(&skills, 5_000, &none, EnemyDummy::open());
     let b = simulate_with(&skills, 5_000, &some, EnemyDummy::open());
-    assert!(b.strike_dps > a.strike_dps, "{} vs {}", b.strike_dps, a.strike_dps);
+    assert!(
+        b.strike_dps > a.strike_dps,
+        "{} vs {}",
+        b.strike_dps,
+        a.strike_dps
+    );
 }
 
 #[test]
@@ -652,7 +666,18 @@ fn relic_fireworks_elite_strike_expected_value() {
         "After using an elite skill, gain a stack of Fireworks. Deal increased strike damage for a duration. Refreshes duration on stack.",
     );
     assert_eq!(mods.strike_pct.len(), 1);
-    assert!(almost(mods.strike_pct[0], 0.07 * 0.35));
+    // 6s buff / 40s elite CD — easy to press, too long to treat as permanent.
+    assert!(almost(mods.strike_pct[0], 0.07 * (6.0 / 40.0)));
+}
+
+#[test]
+fn relic_fireworks_long_recharge_weapon_skill() {
+    let mods = extract_relic(
+        "Relic of Fireworks",
+        "After using a weapon skill with a recharge of 20 seconds or more, deal increased strike damage for a duration.",
+    );
+    assert_eq!(mods.strike_pct.len(), 1);
+    assert!(almost(mods.strike_pct[0], 0.07 * (6.0 / 20.0)));
 }
 
 #[test]
@@ -672,15 +697,52 @@ fn relic_thief_weapon_skill_strike() {
         "After using a weapon skill with a resource cost, deal increased strike damage.",
     );
     assert_eq!(mods.strike_pct.len(), 1);
-    assert!(almost(mods.strike_pct[0], 0.07 * 0.7));
+    assert!(almost(mods.strike_pct[0], 0.07));
+}
+
+#[test]
+fn relic_weapon_swap_is_easy_trigger() {
+    let mods = extract_relic(
+        "Relic of Nourys",
+        "After swapping weapons, deal increased strike damage for a duration.",
+    );
+    assert_eq!(mods.strike_pct.len(), 1);
+    assert!(almost(mods.strike_pct[0], 0.07 * (6.0 / 9.0)));
+}
+
+#[test]
+fn relic_evade_is_easy_trigger() {
+    let mods = extract_relic(
+        "Relic of Evasion",
+        "After evading an attack, deal increased strike damage for a duration.",
+    );
+    assert_eq!(mods.strike_pct.len(), 1);
+    assert!(almost(mods.strike_pct[0], 0.07 * (6.0 / 8.0)));
+}
+
+#[test]
+fn sigil_strike_disabled_is_easy_trigger() {
+    let mods = extract_sigil(
+        "Superior Sigil of Impact",
+        Some("Deal increased strike damage when you hit a stunned or disabled foe."),
+        &BalanceContext::pve(),
+    );
+    assert_eq!(mods.strike_pct.len(), 1);
+    assert!(almost(mods.strike_pct[0], 0.07 * (6.0 / 15.0)));
+}
+
+#[test]
+fn relic_kill_stacks_are_not_relied_on() {
+    let mods = extract_relic(
+        "Relic of Bloodlust",
+        "Gain 2% strike damage when you kill a foe, up to a maximum of 25 stacks. Lost on death.",
+    );
+    assert!(mods.strike_pct.is_empty());
 }
 
 #[test]
 fn relic_monk_healing() {
-    let mods = extract_relic(
-        "Relic of the Monk",
-        "Increase your healing effectiveness.",
-    );
+    let mods = extract_relic("Relic of the Monk", "Increase your healing effectiveness.");
     assert_eq!(mods.healing_pct.len(), 1);
     assert!(almost(mods.healing_pct[0], 0.10));
 }

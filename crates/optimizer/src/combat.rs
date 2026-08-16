@@ -347,10 +347,9 @@ pub fn calculate_combat_performance(
     // Crit chance: base from precision + fury
     // Source: https://wiki.guildwars2.com/wiki/Critical_Chance
     let f = crate::data::universal_formulas::formulas();
-    let crit_chance = (f.crit_chance(total_precision)
-        + fury_crit
-        + modifiers.total_crit_chance_bonus())
-    .clamp(0.0, 100.0);
+    let crit_chance =
+        (f.crit_chance(total_precision) + fury_crit + modifiers.total_crit_chance_bonus())
+            .clamp(0.0, 100.0);
     // Crit damage: base + ferocity component + trait bonuses
     // Source: https://wiki.guildwars2.com/wiki/Ferocity
     let crit_damage = f.crit_damage(stats.ferocity) + modifiers.total_crit_damage_bonus();
@@ -751,6 +750,9 @@ fn apply_percent_category(
 fn percent_is_vs_target(rest_after_percent: &str) -> bool {
     let head: String = rest_after_percent.chars().take(48).collect();
     let t = head.to_lowercase();
+    if foe_cc_trigger(&t) {
+        return false;
+    }
     t.contains("vs.") || t.contains("versus") || t.contains(" against ")
 }
 
@@ -860,11 +862,20 @@ pub(crate) fn parse_percent_clauses(mods: &mut DamageModifiers, text: &str) -> b
             from = pct_idx + 1;
             continue;
         }
-        if percent_text_is_conditional(&hay) && stacks <= 1.0 && !text_lower_has_90hp(&hay) {
+        if upgrade_unreliable(&s) || upgrade_unreliable(&hay) {
             from = pct_idx + 1;
             continue;
         }
-        let uptime = if text_lower_has_90hp(&hay) { 0.9 } else { 1.0 };
+        if percent_text_is_conditional(&hay)
+            && stacks <= 1.0
+            && !text_lower_has_90hp(&hay)
+            && !easy_rotation_trigger(&hay)
+        {
+            from = pct_idx + 1;
+            continue;
+        }
+        let stacks = if upgrade_unreliable(&s) { 0.0 } else { stacks };
+        let uptime = upgrade_uptime(&s);
         let scaled = value * stacks * uptime;
         let decimal = scaled / 100.0;
         if apply_percent_category(mods, &hay, scaled, decimal) {
@@ -887,32 +898,178 @@ pub(crate) fn apply_upgrade_text(mods: &mut DamageModifiers, text: &str) {
     apply_upgrade_prose(mods, &stripped);
 }
 
-fn trigger_uptime(text: &str) -> f64 {
+/// On-kill and death-reset stacks cannot carry a build. Do not match `kill`
+/// inside `skill`.
+pub(crate) fn upgrade_unreliable(text: &str) -> bool {
     let t = text.to_lowercase();
-    let triggered = t.contains("after ")
+    t.contains("on kill")
+        || t.contains("when you kill")
+        || t.contains("kill a foe")
+        || t.contains("kill an enemy")
+        || t.contains("killing a")
+        || t.contains("each kill")
+        || t.contains("per kill")
+        || t.contains("until you die")
+        || t.contains("when you die")
+        || t.contains("lost on")
+        || t.contains("downed")
+}
+
+fn upgrade_is_triggered(t: &str) -> bool {
+    t.contains("after ")
         || t.contains("when ")
+        || t.contains("upon ")
         || t.contains("on using")
-        || t.contains("upon ");
-    if !triggered {
+        || t.contains("on crit")
+        || t.contains("on dodge")
+        || t.contains("on evade")
+        || t.contains("on weapon swap")
+        || t.contains("weapon swap")
+        || t.contains("while ")
+}
+
+/// Dodge, weapon swap, elite, hitting a CC'd foe, and weapon skills are rotation-normal.
+fn easy_rotation_trigger(t: &str) -> bool {
+    t.contains("evade")
+        || t.contains("dodge")
+        || t.contains("elite")
+        || t.contains("weapon swap")
+        || t.contains("swap weapon")
+        || (t.contains("swap") && (t.contains("after") || t.contains("when") || t.contains("on ")))
+        || foe_cc_trigger(t)
+        || t.contains("weapon skill")
+        || t.contains("resource cost")
+        || t.contains("critical")
+        || t.contains("on crit")
+        || t.contains("when you hit")
+        || t.contains("after hitting")
+        || t.contains("when you strike")
+        || t.contains("grant a boon")
+        || t.contains("apply a boon")
+}
+
+pub(crate) fn foe_cc_trigger(t: &str) -> bool {
+    t.contains("stun")
+        || t.contains("daze")
+        || t.contains("knock")
+        || t.contains("launch")
+        || t.contains("float")
+        || t.contains("sink")
+        || t.contains("fear")
+        || t.contains("taunt")
+        || t.contains("immobil")
+        || t.contains("disable")
+}
+
+const UPGRADE_BUFF_S: f64 = 6.0;
+
+/// Seconds printed next to "recharge" (Fireworks: weapon skill recharge ≥20s).
+fn recharge_seconds(t: &str) -> Option<f64> {
+    let idx = t.find("recharge")?;
+    let start = idx.saturating_sub(48);
+    let end = (idx + 48).min(t.len());
+    let window = &t[start..end];
+    let mut best: Option<f64> = None;
+    let mut i = 0;
+    let bytes = window.as_bytes();
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let rest = &window[i..];
+            let num: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            if let Ok(n) = num.parse::<f64>() {
+                if (8.0..=180.0).contains(&n) {
+                    best = Some(best.map_or(n, |b| b.max(n)));
+                }
+            }
+            i += num.len().max(1);
+        } else {
+            i += 1;
+        }
+    }
+    best
+}
+
+/// How much a build can rely on this upgrade: passive / rotation / long CD / kill luck.
+pub(crate) fn upgrade_rely_label(text: &str) -> &'static str {
+    if upgrade_unreliable(text) {
+        return "unreliable";
+    }
+    let t = text.to_lowercase();
+    if t.contains("elite") {
+        return "elite_cd";
+    }
+    if recharge_seconds(&t).is_some_and(|n| n >= 15.0) {
+        return "long_recharge";
+    }
+    if upgrade_is_triggered(&t) {
+        return "rotation";
+    }
+    "passive"
+}
+
+fn buff_duration_s(t: &str) -> f64 {
+    let mut from = 0;
+    while let Some(rel) = t[from..].find("for ") {
+        let i = from + rel + 4;
+        let rest = &t[i..];
+        let num: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
+        if let Ok(n) = num.parse::<f64>() {
+            let after = rest[num.len()..].trim_start();
+            if after.starts_with("second")
+                || after.starts_with("sec")
+                || (after.starts_with('s') && !after.starts_with("stack"))
+            {
+                return n.clamp(1.0, 30.0);
+            }
+        }
+        from = i.max(from + 1);
+    }
+    UPGRADE_BUFF_S
+}
+
+fn upgrade_uptime(text: &str) -> f64 {
+    let t = text.to_lowercase();
+    if text_lower_has_90hp(&t) {
+        return 0.9;
+    }
+    if !upgrade_is_triggered(&t) {
         return 1.0;
     }
-    if t.contains("weapon skill") || t.contains("resource cost") {
-        0.7
-    } else if t.contains("elite") {
-        0.35
-    } else if t.contains("evade") || t.contains("dodge") {
-        0.4
-    } else if t.contains("heal") {
-        0.4
-    } else if t.contains("swap") {
-        0.33
-    } else if t.contains("disable") {
-        0.25
-    } else if t.contains("critical") {
-        0.5
-    } else {
-        0.4
+    if stack_multiplier(&t) > 1.0 && !upgrade_unreliable(&t) {
+        return 1.0;
     }
+    let dur = buff_duration_s(&t);
+    // Elite is press-anytime but a long CD (30–90s). 40s ≈ on-CD with some Alacrity.
+    // Long weapon-skill recharge (Fireworks live text) must beat the generic 5s skill period.
+    let period = if t.contains("elite") {
+        40.0
+    } else if let Some(cd) = recharge_seconds(&t).filter(|n| *n >= 15.0) {
+        cd
+    } else if t.contains("evade") || t.contains("dodge") {
+        8.0
+    } else if t.contains("weapon swap") || t.contains("swap weapon") || t.contains("swap") {
+        9.0
+    } else if foe_cc_trigger(&t) {
+        15.0
+    } else if t.contains("weapon skill") || t.contains("resource cost") {
+        5.0
+    } else if t.contains("critical") || t.contains("on crit") {
+        4.0
+    } else if t.contains("when you hit")
+        || t.contains("after hitting")
+        || t.contains("when you strike")
+    {
+        5.0
+    } else {
+        8.0
+    };
+    (dur / period).clamp(0.0, 1.0)
 }
 
 fn apply_upgrade_prose(mods: &mut DamageModifiers, text: &str) {
@@ -920,7 +1077,10 @@ fn apply_upgrade_prose(mods: &mut DamageModifiers, text: &str) {
     if t.contains('%') {
         return;
     }
-    let uptime = trigger_uptime(&t);
+    if upgrade_unreliable(&t) {
+        return;
+    }
+    let uptime = upgrade_uptime(&t);
     if t.contains("increased strike")
         || t.contains("deal increased strike")
         || (t.contains("strike damage") && t.contains("increased"))
@@ -986,7 +1146,8 @@ fn parse_sigil_modifier(mods: &mut DamageModifiers, sigil: &Item, ctx: &BalanceC
     if name_lower.contains("sigil of force") {
         mods.strike_pct.push(if competitive { 0.03 } else { 0.05 });
     } else if name_lower.contains("sigil of bursting") {
-        mods.condition_pct.push(if competitive { 0.04 } else { 0.06 });
+        mods.condition_pct
+            .push(if competitive { 0.04 } else { 0.06 });
     } else if let Some(desc) = sigil.description.as_deref() {
         apply_upgrade_text(mods, desc);
     }
@@ -1606,11 +1767,7 @@ mod tests {
     #[test]
     fn test_parse_relic_isgarren() {
         let mut mods = DamageModifiers::default();
-        let relic = item_with_desc(
-            "Relic of Isgarren",
-            "Relic",
-            "Gain 10% critical damage.",
-        );
+        let relic = item_with_desc("Relic of Isgarren", "Relic", "Gain 10% critical damage.");
         parse_relic_modifier(&mut mods, &relic);
         assert_eq!(mods.crit_damage_pct.len(), 1);
         assert!((mods.crit_damage_pct[0] - 10.0).abs() < 0.1);
@@ -2118,8 +2275,7 @@ mod tests {
         // result = 3.0 * (1 + 0.50) = 3.0 * 1.50 = 4.5s
         // Source: https://wiki.guildwars2.com/wiki/Expertise
         let ctx = BalanceContext::pve();
-        let result =
-            condition_duration_multiplied(3.0, 450.0, 0.0, 0.20, 1.0, &ctx);
+        let result = condition_duration_multiplied(3.0, 450.0, 0.0, 0.20, 1.0, &ctx);
         assert!((result - 4.5).abs() < 0.001, "Expected 4.5, got {result}",);
     }
 
@@ -2139,8 +2295,7 @@ mod tests {
         // result = 3.0 * (1 + 1.0) = 6.0s
         // Source: https://wiki.guildwars2.com/wiki/Condition_Duration ("maximum 100%")
         let ctx = BalanceContext::pve();
-        let result =
-            condition_duration_multiplied(3.0, 1800.0, 0.0, 0.30, 1.0, &ctx);
+        let result = condition_duration_multiplied(3.0, 1800.0, 0.0, 0.30, 1.0, &ctx);
         assert!(
             (result - 6.0).abs() < 0.001,
             "Expected 6.0 (capped), got {result}",
@@ -2167,8 +2322,7 @@ mod tests {
         // result = 4.0 * (1 + 0.50) = 4.0 * 1.50 = 6.0s
         // Source: https://wiki.guildwars2.com/wiki/Expertise
         let ctx = BalanceContext::pve();
-        let result =
-            condition_duration_multiplied(4.0, 300.0, 0.10, 0.20, 1.0, &ctx);
+        let result = condition_duration_multiplied(4.0, 300.0, 0.10, 0.20, 1.0, &ctx);
         assert!((result - 6.0).abs() < 0.001, "Expected 6.0, got {result}",);
     }
 
@@ -2178,8 +2332,7 @@ mod tests {
         // result = base * 1.0 = base
         // Source: https://wiki.guildwars2.com/wiki/Expertise
         let ctx = BalanceContext::pve();
-        let result =
-            condition_duration_multiplied(5.0, 0.0, 0.0, 0.0, 1.0, &ctx);
+        let result = condition_duration_multiplied(5.0, 0.0, 0.0, 0.0, 1.0, &ctx);
         assert!((result - 5.0).abs() < 0.001, "Expected 5.0, got {result}",);
 
         let boon_result = boon_duration_multiplied(5.0, 0.0, 0.0, 1.0, &ctx);

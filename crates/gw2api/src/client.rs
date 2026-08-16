@@ -721,7 +721,11 @@ mod tests {
 
     #[test]
     fn merge_bulk_fetch_splits_500_and_skips_rotten_id() {
-        let ids = vec![serde_json::json!(1), serde_json::json!(2), serde_json::json!(3)];
+        let ids = vec![
+            serde_json::json!(1),
+            serde_json::json!(2),
+            serde_json::json!(3),
+        ];
         let mut fetch = |part: &[serde_json::Value]| -> Result<Vec<u32>, ApiError> {
             if part.len() > 1 {
                 return Err(api_500());

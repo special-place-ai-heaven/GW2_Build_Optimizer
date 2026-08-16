@@ -152,7 +152,8 @@ fn render_resolved_sheet(
                 let prefix = piece.map(|p| p.stat_prefix.as_str()).unwrap_or("");
                 let name = piece.map(|p| p.name.as_str()).unwrap_or("");
                 let url = db.and_then(|d| piece.and_then(|p| icons::item_url(d, p.id)));
-                let changed = suggestion.is_some() && prefix != sug_prefix && !sug_prefix.is_empty();
+                let changed =
+                    suggestion.is_some() && prefix != sug_prefix && !sug_prefix.is_empty();
                 let other = suggestion.map(|s| format!("{} {}", s.stat_prefix, slot_label(slot)));
                 row(
                     ui,
