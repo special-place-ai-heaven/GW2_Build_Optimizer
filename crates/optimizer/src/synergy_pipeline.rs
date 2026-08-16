@@ -15,7 +15,6 @@ use std::collections::HashMap;
 
 use crate::balance::BalanceContext;
 use crate::combat;
-use crate::data;
 use crate::engine::{self, OptimizeProgress, SynergyResult};
 use crate::gamedb::GameDb;
 use crate::scenario::ScenarioSpec;
@@ -121,7 +120,7 @@ pub fn optimize_synergy(
         stage: "Selecting optimal sigils...".into(),
         done: false,
     });
-    select_sigils(&mut candidates, db, weights);
+    select_sigils(&mut candidates, db, weights, ctx);
 
     // Stage 5: Relic
     on_progress(OptimizeProgress {
@@ -462,7 +461,12 @@ fn select_rune(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Optim
 
 // ─── Stage 4: Sigils ───
 
-fn select_sigils(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &OptimizationWeights) {
+fn select_sigils(
+    candidates: &mut [SynergyCandidate],
+    db: &GameDb,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+) {
     let sigils = db.all_sigils();
     let superior_sigils: Vec<_> = sigils
         .iter()
@@ -496,7 +500,7 @@ fn select_sigils(candidates: &mut [SynergyCandidate], db: &GameDb, weights: &Opt
                         continue;
                     }
 
-                    let effects = extract_sigil_effects(sigil);
+                    let effects = extract_sigil_effects(sigil, ctx);
                     let base: f64 = effects
                         .iter()
                         .map(|e| score_normalized_effect(e, weights))
@@ -1176,14 +1180,22 @@ fn rank_and_select(
         .max(1.0);
 
     for (idx, candidate) in candidates.iter().enumerate() {
-        let stats = compute_candidate_stats(candidate, db, gear_prefix_id);
+        let stats = compute_candidate_stats(candidate, db, gear_prefix_id, ctx);
         let derived = stats::compute_derived(&stats, profession_name);
 
-        // Use default (identity) modifiers for ranking to avoid trait fact inflation.
-        // extract_damage_modifiers() treats conditional/proc Fact::Percent values
-        // as permanent multipliers, producing total_strike_mult of 5-15x.
-        // The synergy scoring already evaluates trait modifier value.
-        let modifiers = combat::DamageModifiers::default();
+        let modifiers = combat::extract_damage_modifiers(
+            &candidate.all_trait_ids,
+            candidate.rune.as_ref().map(|(id, _)| *id),
+            &candidate
+                .sigils
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            candidate.relic.as_ref().map(|(id, _)| *id),
+            &db.traits,
+            &db.items,
+            ctx,
+        );
 
         let combat_perf = combat::calculate_combat_performance(
             &stats,
@@ -1196,7 +1208,7 @@ fn rank_and_select(
         );
 
         let combat_score = score_with_weights(&combat_perf, weights);
-        // Blend: 40% combat performance (gear-only), 60% synergy score (captures trait value)
+        // Blend: 40% combat (gear + parsed modifiers), 60% synergy score.
         let synergy_normalized = candidate.score / max_synergy;
         let final_score = combat_score * 0.4 + synergy_normalized * 0.6;
 
@@ -1212,21 +1224,11 @@ fn compute_candidate_stats(
     candidate: &SynergyCandidate,
     db: &GameDb,
     gear_prefix_id: Option<u32>,
+    ctx: &BalanceContext,
 ) -> stats::StatBlock {
     let mut full_stats = stats::base_stats();
 
-    // Gear stats (from prefix applied to each slot via slot budget data)
-    if let Some(stat_id) = gear_prefix_id {
-        if let Some(itemstat) = db.itemstats.get(&stat_id) {
-            let budgets = data::slot_budgets::slot_budgets();
-            let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
-            for &(slot_type, _) in data::EQUIPMENT_SLOTS {
-                if let Some(budget) = budgets.get(slot_type, shape) {
-                    engine::add_budget_stats_for_itemstat(&mut full_stats, itemstat, budget);
-                }
-            }
-        }
-    }
+    crate::engine::apply_optimized_gear_stats(&mut full_stats, db, gear_prefix_id, ctx);
 
     // Include trait flat stat bonuses (AttributeAdjust facts) so that estimated stats
     // use the same calculation as calculate_full_stats() on the current build.
@@ -1363,12 +1365,12 @@ fn build_synergy_result(
     });
 
     let gear_prefix_id = validated.gear_prefix.as_ref().map(|p| p.itemstat_id);
-    let full_stats = compute_candidate_stats(&candidate, db, gear_prefix_id);
+    let full_stats = compute_candidate_stats(&candidate, db, gear_prefix_id, ctx);
     let derived = stats::compute_derived(&full_stats, profession_name);
 
     // Extract damage modifiers from traits/rune/sigils/relic, but cap to prevent
     // inflation from conditional/proc Fact::Percent values being treated as permanent.
-    let mut modifiers = combat::extract_damage_modifiers(
+    let modifiers = combat::extract_damage_modifiers(
         &candidate.all_trait_ids,
         candidate.rune.as_ref().map(|(id, _)| *id),
         &candidate
@@ -1381,15 +1383,6 @@ fn build_synergy_result(
         &db.items,
         ctx,
     );
-    // Cap multiplicative modifiers to realistic ranges.
-    // extract_damage_modifiers() treats conditional/proc Fact::Percent as permanent,
-    // producing runaway multiplication (total_strike_mult of 5-15x).
-    // In GW2, permanent trait modifiers rarely exceed ~30% total (3-4 sources of 5-7%).
-    // Keep only the top-3 largest modifiers from each category.
-    cap_modifiers_vec(&mut modifiers.strike_pct, 3);
-    cap_modifiers_vec(&mut modifiers.condition_pct, 3);
-    cap_modifiers_vec(&mut modifiers.crit_damage_pct, 3);
-    cap_modifiers_vec(&mut modifiers.healing_pct, 3);
 
     // 3-tier combat using profession-specific rotation profiles
     let buff_profiles = combat::buff_profiles_for_profession(profession_name, ctx);
@@ -1435,6 +1428,12 @@ fn build_synergy_result(
         done: true,
     });
 
+    let (data_quality, quality_reasons) = engine::quality_from_modifiers(
+        &modifiers,
+        &validated.warnings,
+        !validated.errors.is_empty(),
+        ctx.game_mode.label(),
+    );
     Ok(SynergyResult {
         validated,
         stats: full_stats,
@@ -1443,18 +1442,9 @@ fn build_synergy_result(
         combat_squad,
         modifiers,
         rotation: rotation_result,
-        data_quality: data::DataQuality::Verified,
-        quality_reasons: vec![],
+        data_quality,
+        quality_reasons,
     })
-}
-
-/// Keep only the top-N largest modifiers in a Vec, discarding the rest.
-/// Prevents runaway multiplicative inflation from conditional/proc trait facts.
-fn cap_modifiers_vec(v: &mut Vec<f64>, max_entries: usize) {
-    if v.len() > max_entries {
-        v.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-        v.truncate(max_entries);
-    }
 }
 
 #[cfg(test)]
@@ -1960,7 +1950,7 @@ mod runtime_diagnostics_tests {
 
     #[test]
     fn test_runtime_non_improvement_diagnostics_two_contexts() {
-        // TEMP DIAGNOSTIC: runtime trace to reproduce "optimizer suggestion never beats loaded build".
+        // Diagnostic: ranking now uses extracted modifiers (not empty / top-3 cap).
         let db = make_diag_db();
         let weights = OptimizationWeights::preset_power_dps();
         let ctx = BalanceContext::pve();
@@ -2070,7 +2060,7 @@ mod runtime_diagnostics_tests {
                 "diagnostic setup should produce candidates"
             );
             select_rune(&mut candidates, &db, &weights);
-            select_sigils(&mut candidates, &db, &weights);
+            select_sigils(&mut candidates, &db, &weights, &ctx);
             select_relic(&mut candidates, &db, &weights);
             select_weapons(&mut candidates, profession, &db, &weights);
             select_skills(&mut candidates, &db, "Warrior", &weights, &ctx);
@@ -2109,12 +2099,21 @@ mod runtime_diagnostics_tests {
                 .max(1.0);
             let mut ranked_preview: Vec<(usize, f64, f64, f64, Vec<u32>)> = Vec::new();
             for (idx, c) in candidates.iter().enumerate() {
-                let stats = compute_candidate_stats(c, &db, gear_prefix_id);
+                let stats = compute_candidate_stats(c, &db, gear_prefix_id, &ctx);
                 let derived = crate::stats::compute_derived(&stats, "Warrior");
+                let modifiers = crate::combat::extract_damage_modifiers(
+                    &c.all_trait_ids,
+                    c.rune.as_ref().map(|(id, _)| *id),
+                    &c.sigils.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+                    c.relic.as_ref().map(|(id, _)| *id),
+                    &db.traits,
+                    &db.items,
+                    &ctx,
+                );
                 let combat_perf = crate::combat::calculate_combat_performance(
                     &stats,
                     &derived,
-                    &crate::combat::DamageModifiers::default(),
+                    &modifiers,
                     &crate::combat::buff_profiles_for_profession("Warrior", &ctx)[0],
                     &crate::combat::condition_weights_for_profession("Warrior", &ctx),
                     "Warrior",
@@ -2130,7 +2129,7 @@ mod runtime_diagnostics_tests {
                 ranked_preview.iter().take(5).enumerate()
             {
                 println!(
-                    "rank-trace #{:<2} idx={} synergy={:.4} combat(no_mods)={:.4} final={:.4} specs={:?}",
+                    "rank-trace #{:<2} idx={} synergy={:.4} combat={:.4} final={:.4} specs={:?}",
                     rank + 1,
                     idx,
                     syn,
@@ -2200,6 +2199,7 @@ mod runtime_diagnostics_tests {
                 &selected,
                 &db,
                 result.validated.gear_prefix.as_ref().map(|p| p.itemstat_id),
+                &ctx,
             );
             let selected_derived = crate::stats::compute_derived(&selected_stats, "Warrior");
             let uncapped_perf = crate::combat::calculate_combat_performance(
@@ -2227,8 +2227,8 @@ mod runtime_diagnostics_tests {
             );
 
             assert!(
-                baseline_perf.total_dps_index >= result.combat_solo.total_dps_index,
-                "repro expected: loaded baseline total_dps should be >= suggestion in {}, got baseline_total_dps={:.1}, suggestion_total_dps={:.1}",
+                result.combat_solo.total_dps_index + 0.1 >= baseline_perf.total_dps_index,
+                "optimizer must not regress vs loaded baseline in {}, got baseline_total_dps={:.1}, suggestion_total_dps={:.1}",
                 name,
                 baseline_perf.total_dps_index,
                 result.combat_solo.total_dps_index

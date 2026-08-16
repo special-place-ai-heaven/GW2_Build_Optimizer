@@ -151,6 +151,12 @@ pub fn armor_weight(profession: &str) -> &'static str {
         .unwrap_or("Medium")
 }
 
+/// ArenaNet itemstat formula: `round(attribute_adjustment * multiplier + value)`.
+/// Source: `/v2/itemstats` and `/v2/items` `details.attribute_adjustment`.
+pub fn itemstat_value(attribute_adjustment: f64, multiplier: f64, value: i32) -> f64 {
+    (attribute_adjustment * multiplier + value as f64).round()
+}
+
 /// Calculate stats from equipped gear using the itemstat formula.
 /// For each equipment piece: look up its attribute_adjustment and the stat prefix,
 /// then apply `attribute_adjustment * multiplier + value` for each stat.
@@ -193,8 +199,10 @@ pub fn calculate_gear_stats(
         if let Some(sid) = stat_id {
             if let Some(itemstat) = itemstats_cache.get(&sid) {
                 for attr in &itemstat.attributes {
-                    let value = attribute_adjustment * attr.multiplier + attr.value as f64;
-                    stats.add(&attr.attribute, value.round());
+                    stats.add(
+                        &attr.attribute,
+                        itemstat_value(attribute_adjustment, attr.multiplier, attr.value),
+                    );
                 }
             }
         } else {

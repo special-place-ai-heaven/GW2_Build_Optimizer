@@ -663,7 +663,7 @@ mod tests {
             gw2_api::models::Item {
                 id: relic_id,
                 name: "Relic of the Nightmare".into(),
-                description: None,
+                description: Some("Gain 10% condition duration.".into()),
                 icon: None,
                 item_type: "Relic".into(),
                 rarity: "Exotic".into(),

@@ -458,6 +458,12 @@ impl ConditionFormulas {
         }
     }
 
+    /// Intensity/duration stack cap from conditions.json (`max_stacks`).
+    pub fn max_stacks(&self, condition: &str) -> Option<u32> {
+        let canonical = canonical_condition_name(condition);
+        self.map.get(canonical).and_then(|c| c.max_stacks)
+    }
+
     /// Torment tick damage with explicit mode and movement state.
     /// `moving`: true = target is moving, false = stationary.
     pub fn torment_tick(&self, condition_damage: f64, mode: GameMode, moving: bool) -> f64 {

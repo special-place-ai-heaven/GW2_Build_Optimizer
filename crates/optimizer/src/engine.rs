@@ -310,6 +310,8 @@ pub fn optimize(
                 ctx,
             );
             let score = score_with_weights(&combat_perf, weights);
+            let (data_quality, quality_reasons) =
+                quality_from_modifiers(&spec.modifiers, &[], false, ctx.game_mode.label());
 
             all_candidates.push(BuildCandidate {
                 gear: gear.clone(),
@@ -322,8 +324,8 @@ pub fn optimize(
                 combat: combat_perf,
                 modifiers: spec.modifiers.clone(),
                 pvp_amulet: None,
-                data_quality: data::DataQuality::Verified,
-                quality_reasons: vec![],
+                data_quality,
+                quality_reasons,
             });
         }
     }
@@ -482,6 +484,8 @@ fn optimize_pvp(
                 ctx,
             );
             let score = score_with_weights(&combat_perf, weights);
+            let (data_quality, quality_reasons) =
+                quality_from_modifiers(&spec.modifiers, &[], false, ctx.game_mode.label());
 
             all_candidates.push(BuildCandidate {
                 gear: empty_gear.clone(),
@@ -498,8 +502,8 @@ fn optimize_pvp(
                     name: amulet.name.clone(),
                     stats: amulet.attributes.clone(),
                 }),
-                data_quality: data::DataQuality::Verified,
-                quality_reasons: vec![],
+                data_quality,
+                quality_reasons,
             });
         }
     }
@@ -550,6 +554,104 @@ fn calculate_candidate_stats(
     }
 
     stats
+}
+
+/// PvE/WvW: 16 slot budgets from the prefix. PvP: matching amulet attributes only.
+pub fn apply_optimized_gear_stats(
+    stats: &mut stats::StatBlock,
+    db: &GameDb,
+    prefix_id: Option<u32>,
+    ctx: &BalanceContext,
+) {
+    let Some(id) = prefix_id else {
+        return;
+    };
+    let Some(itemstat) = db.itemstats.get(&id) else {
+        return;
+    };
+    if ctx.game_mode == GameMode::PvP {
+        if let Some(amulet) = match_pvp_amulet(db, &itemstat.name) {
+            for (attr, &value) in &amulet.attributes {
+                stats.add(attr, value as f64);
+            }
+            return;
+        }
+    }
+    let budgets = data::slot_budgets::slot_budgets();
+    let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
+    for &(slot_type, _) in data::EQUIPMENT_SLOTS {
+        if let Some(budget) = budgets.get(slot_type, shape) {
+            add_budget_stats_for_itemstat(stats, itemstat, budget);
+        }
+    }
+}
+
+/// Match a PvE prefix name (e.g. "Berserker's") to a PvP amulet ("Berserker Amulet").
+pub fn match_pvp_amulet<'a>(db: &'a GameDb, prefix_name: &str) -> Option<&'a PvpAmulet> {
+    let needle = prefix_name.trim_end_matches("'s").trim().to_lowercase();
+    if needle.is_empty() {
+        return None;
+    }
+    let mut best: Option<(&PvpAmulet, usize)> = None;
+    for a in db.pvp_amulets.values() {
+        let n = a.name.to_lowercase();
+        let stem = n.replace(" amulet", "");
+        if !(n.contains(&needle) || stem.contains(&needle) || needle.contains(&stem)) {
+            continue;
+        }
+        let dist = n.len().abs_diff(needle.len());
+        match best {
+            None => best = Some((a, dist)),
+            Some((_, d)) if dist < d => best = Some((a, dist)),
+            Some((prev, d)) if dist == d && a.id < prev.id => best = Some((a, dist)),
+            _ => {}
+        }
+    }
+    best.map(|(a, _)| a)
+}
+
+pub fn quality_from_modifiers(
+    modifiers: &DamageModifiers,
+    warnings: &[String],
+    has_errors: bool,
+    mode: &str,
+) -> (data::DataQuality, Vec<data::DataQualityReason>) {
+    let mut quality = data::DataQuality::Verified;
+    let mut reasons = Vec::new();
+    if !warnings.is_empty() {
+        quality = quality.merge(&data::DataQuality::Provisional);
+        for w in warnings {
+            reasons.push(data::DataQualityReason {
+                field: "validated_build.warning".into(),
+                entity: mode.into(),
+                modes: vec![mode.to_string()],
+                explanation: w.clone(),
+            });
+        }
+    }
+    if has_errors {
+        quality = quality.merge(&data::DataQuality::Blocked);
+        reasons.push(data::DataQualityReason {
+            field: "validated_build.error".into(),
+            entity: mode.into(),
+            modes: vec![mode.to_string()],
+            explanation: "Validation errors present".into(),
+        });
+    }
+    if !modifiers.unparsed.is_empty() {
+        quality = quality.merge(&data::DataQuality::Provisional);
+        reasons.push(data::DataQualityReason {
+            field: "modifiers.unparsed".into(),
+            entity: mode.into(),
+            modes: vec![mode.to_string()],
+            explanation: format!(
+                "{} bonus string(s) had % but no known category: {}",
+                modifiers.unparsed.len(),
+                modifiers.unparsed.iter().take(3).cloned().collect::<Vec<_>>().join("; ")
+            ),
+        });
+    }
+    (quality, reasons)
 }
 
 /// Add stat values from a slot budget entry, classifying each itemstat
@@ -1082,6 +1184,12 @@ pub fn optimize_with_gemini(
         done: true,
     });
 
+    let (data_quality, quality_reasons) = quality_from_modifiers(
+        &modifiers,
+        &validated.warnings,
+        !validated.errors.is_empty(),
+        ctx.game_mode.label(),
+    );
     Ok(SynergyResult {
         validated,
         stats: full_stats,
@@ -1090,8 +1198,8 @@ pub fn optimize_with_gemini(
         combat_squad,
         modifiers,
         rotation: rotation_result,
-        data_quality: data::DataQuality::Verified,
-        quality_reasons: vec![],
+        data_quality,
+        quality_reasons,
     })
 }
 
@@ -1104,18 +1212,12 @@ pub fn calculate_validated_stats(
 ) -> (stats::StatBlock, DamageModifiers) {
     let mut full_stats = stats::base_stats();
 
-    // Gear stats from validated prefix using slot budget data
-    if let Some(ref prefix) = validated.gear_prefix {
-        if let Some(itemstat) = db.itemstats.get(&prefix.itemstat_id) {
-            let budgets = data::slot_budgets::slot_budgets();
-            let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
-            for &(slot_type, _) in data::EQUIPMENT_SLOTS {
-                if let Some(budget) = budgets.get(slot_type, shape) {
-                    add_budget_stats_for_itemstat(&mut full_stats, itemstat, budget);
-                }
-            }
-        }
-    }
+    apply_optimized_gear_stats(
+        &mut full_stats,
+        db,
+        validated.gear_prefix.as_ref().map(|p| p.itemstat_id),
+        ctx,
+    );
 
     // Rune and sigil flat stat bonuses (permanent stats only).
     let rune_id = validated.rune.as_ref().map(|r| r.id);
@@ -1229,11 +1331,13 @@ pub fn simulate_validated_rotation(
 
     let power = stats.get("Power");
     let condition_damage = stats.get("ConditionDamage");
-    let weapon_strength = 1100.0; // GW2 reference weapon strength
+    let precision = stats.get("Precision");
+    let ferocity = stats.get("Ferocity");
+    let weapon_strength = 1100.0;
 
     let duration_ms = scenario
         .map(|s| crate::rotation::combat_model::simulation_window_ms(s.combat_tier, s.combat_kind))
-        .unwrap_or(0); // 0 = 30s DPCT default
+        .unwrap_or(0);
 
     let enemy = scenario
         .map(|s| {
@@ -1241,12 +1345,25 @@ pub fn simulate_validated_rotation(
         })
         .unwrap_or_default();
 
-    Some(rotation::simulator::simulate_against(
-        &rotation_skills,
-        duration_ms,
+    let mode = scenario
+        .map(|s| s.game_mode.clone())
+        .unwrap_or(GameMode::PvE);
+    let sim_ctx = BalanceContext::new(mode.clone());
+    let (_, mods) = calculate_validated_stats(validated, db, profession_name, &sim_ctx);
+    let params = rotation::simulator::SimParams {
         power,
         condition_damage,
         weapon_strength,
+        precision,
+        ferocity,
+        strike_mult: mods.total_strike_mult(),
+        mode,
+    };
+
+    Some(rotation::simulator::simulate_with(
+        &rotation_skills,
+        duration_ms,
+        &params,
         enemy,
     ))
 }
@@ -1311,6 +1428,12 @@ pub fn synergy_result_from_validated(
         ctx,
     );
     let rotation = simulate_validated_rotation(&validated, db, &full_stats, scenario);
+    let (data_quality, quality_reasons) = quality_from_modifiers(
+        &modifiers,
+        &validated.warnings,
+        !validated.errors.is_empty(),
+        ctx.game_mode.label(),
+    );
     SynergyResult {
         validated,
         stats: full_stats,
@@ -1319,8 +1442,8 @@ pub fn synergy_result_from_validated(
         combat_squad,
         modifiers,
         rotation,
-        data_quality: data::DataQuality::Verified,
-        quality_reasons: vec![],
+        data_quality,
+        quality_reasons,
     }
 }
 
