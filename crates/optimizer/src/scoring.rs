@@ -32,6 +32,16 @@ pub const AXIS_LABELS: [&str; 6] = [
     "Control",
 ];
 
+/// Machine keys for the same 6 axes (`OptimizationWeights` field names).
+pub const AXIS_KEYS: [&str; 6] = [
+    "power",
+    "condition",
+    "boon_support",
+    "healing",
+    "sustain",
+    "control",
+];
+
 /// Default total weight budget. Now loaded from objective profile data at runtime.
 /// This constant is kept for backward compatibility with code that doesn't have
 /// a profile available yet.

@@ -145,8 +145,10 @@ pub struct MainState {
     pub save_status_frames: u32,
     /// Index of the saved build pending delete confirmation (None = no dialog).
     pub confirm_delete: Option<usize>,
-    /// Frame counter while chat is in "waiting" state; used for timeout recovery.
-    pub chat_wait_frames: u32,
+    /// Generation for in-flight kitchen orders. Timeout and send bump it; late applies are ignored.
+    pub chat_epoch: u64,
+    /// Wall-clock start of the current kitchen wait (90s, not frame-counted).
+    pub chat_wait_started: Option<std::time::Instant>,
     /// Frame counter for "Copied!" tooltip feedback.
     pub copy_feedback_frames: u32,
     // Dynamic model list
@@ -354,6 +356,7 @@ pub fn init(addon_dir: PathBuf) {
         _ => gw2_core::types::GameMode::PvE,
     };
     main.weights = OptimizationWeights::default_for_mode(main.game_mode.label());
+    main.chat.history = crate::ui::chat_bar::load_history(&addon_dir);
     crate::ui::icons::set_graphics_dir(addon_dir.join("cache").join("graphics"));
     *lock_state() = Some(AddonState {
         window_visible: false,
@@ -587,6 +590,11 @@ mod tests {
         assert!(
             main.build_locks.trait_locks.is_empty(),
             "build_locks.trait_locks must start empty"
+        );
+        assert_eq!(main.chat_epoch, 0, "kitchen epoch starts at 0");
+        assert!(
+            main.chat_wait_started.is_none(),
+            "kitchen wait clock starts unset"
         );
     }
 

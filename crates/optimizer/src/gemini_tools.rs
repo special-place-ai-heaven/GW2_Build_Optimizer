@@ -119,6 +119,8 @@ pub fn tool_declarations() -> Vec<Tool> {
             decl_list_runes(),
             decl_list_sigils(),
             decl_list_relics(),
+            decl_search_upgrades(),
+            decl_upgrade_synergies(),
             decl_calculate_stats(),
             decl_simulate_combat(),
             decl_score_build(),
@@ -146,6 +148,8 @@ pub fn execute_tool(name: &str, args: &Value, ctx: &ToolContext) -> Value {
         "list_runes" => exec_list_runes(ctx),
         "list_sigils" => exec_list_sigils(ctx),
         "list_relics" => exec_list_relics(ctx),
+        "search_upgrades" => exec_search_upgrades(args, ctx),
+        "upgrade_synergies" => exec_upgrade_synergies(args, ctx),
         "calculate_stats" => exec_calculate_stats(args, ctx),
         "simulate_combat" => exec_simulate_combat(args, ctx),
         "score_build" => exec_score_build(args, ctx),
@@ -234,7 +238,7 @@ fn decl_get_skill_info() -> FunctionDeclaration {
 fn decl_list_runes() -> FunctionDeclaration {
     FunctionDeclaration {
         name: "list_runes".into(),
-        description: "List top runes with their 6-piece set bonuses. Returns the most relevant Superior runes.".into(),
+        description: "Top Superior runes for the current 6-axis radar (Power, Condition, Boon Support, Heal, Sustain, Control). Not A–Z. Use search_upgrades for another focus.".into(),
         parameters: json!({
             "type": "object",
             "properties": {}
@@ -246,7 +250,7 @@ fn decl_list_sigils() -> FunctionDeclaration {
     FunctionDeclaration {
         name: "list_sigils".into(),
         description:
-            "List top sigils with their effects. Returns the most relevant Superior sigils.".into(),
+            "Top Superior sigils for the current 6-axis radar. Not A–Z. Use search_upgrades for another focus.".into(),
         parameters: json!({
             "type": "object",
             "properties": {}
@@ -257,10 +261,59 @@ fn decl_list_sigils() -> FunctionDeclaration {
 fn decl_list_relics() -> FunctionDeclaration {
     FunctionDeclaration {
         name: "list_relics".into(),
-        description: "List available relics with their effects.".into(),
+        description: "Top relics for the current 6-axis radar. Not A–Z. Use search_upgrades for another focus.".into(),
         parameters: json!({
             "type": "object",
             "properties": {}
+        }),
+    }
+}
+
+fn decl_search_upgrades() -> FunctionDeclaration {
+    FunctionDeclaration {
+        name: "search_upgrades".into(),
+        description: "Search runes/sigils/relics on the full 6-axis matrix. focus is power|condition|boon_support|healing|sustain|control. Optional kind and tag (burning, crit, cc, heal, kill). Returns a short ranked list with rely + all 6 axis scores.".into(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "focus": {
+                    "type": "string",
+                    "description": "Axis: power, condition, boon_support, healing, sustain, or control"
+                },
+                "kind": {
+                    "type": "string",
+                    "description": "rune, sigil, or relic"
+                },
+                "tag": {
+                    "type": "string",
+                    "description": "Optional tag such as burning, crit, swap, evade, cc, heal, kill"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 12)"
+                }
+            }
+        }),
+    }
+}
+
+fn decl_upgrade_synergies() -> FunctionDeclaration {
+    FunctionDeclaration {
+        name: "upgrade_synergies".into(),
+        description: "Neighbors of a rune/sigil/relic in the upgrade graph (shared tags and duration↔apply pairs) with the full 6-axis scores.".into(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Upgrade name (partial match ok)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max neighbors (default 8)"
+                }
+            },
+            "required": ["name"]
         }),
     }
 }
@@ -698,85 +751,58 @@ fn exec_get_skill_info(args: &Value, ctx: &ToolContext) -> Value {
 }
 
 fn exec_list_runes(ctx: &ToolContext) -> Value {
-    let mut runes: Vec<Value> = ctx
-        .db
-        .all_runes()
-        .iter()
-        .filter(|item| item.name.contains("Superior"))
-        .take(40)
-        .map(|item| {
-            let raw_bonuses = item
-                .details
-                .as_ref()
-                .map(|d| &d.bonuses)
-                .cloned()
-                .unwrap_or_default();
-            let parsed_bonuses: Vec<Value> = raw_bonuses
-                .iter()
-                .map(|b| parse_rune_bonus_structured(b))
-                .collect();
-            json!({
-                "id": item.id,
-                "name": &item.name,
-                "bonuses_raw": raw_bonuses,
-                "bonuses_parsed": parsed_bonuses
-            })
-        })
-        .collect();
-
-    runes.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-    runes.truncate(30);
-
-    json!({ "runes": runes })
+    exec_list_kind(ctx, crate::upgrade_graph::UpgradeKind::Rune)
 }
 
 fn exec_list_sigils(ctx: &ToolContext) -> Value {
-    let mut sigils: Vec<Value> = ctx
-        .db
-        .all_sigils()
-        .iter()
-        .filter(|item| item.name.contains("Superior"))
-        .take(40)
-        .map(|item| {
-            let desc = item.description.as_deref().unwrap_or("");
-            let triggers = detect_proc_triggers(&[], Some(desc));
-            json!({
-                "id": item.id,
-                "name": &item.name,
-                "description": desc,
-                "triggers": triggers
-            })
-        })
-        .collect();
-
-    sigils.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-    sigils.truncate(30);
-
-    json!({ "sigils": sigils })
+    exec_list_kind(ctx, crate::upgrade_graph::UpgradeKind::Sigil)
 }
 
 fn exec_list_relics(ctx: &ToolContext) -> Value {
-    let mut relics: Vec<Value> = ctx
-        .db
-        .all_relics()
+    exec_list_kind(ctx, crate::upgrade_graph::UpgradeKind::Relic)
+}
+
+fn graph(ctx: &ToolContext) -> crate::upgrade_graph::UpgradeGraph {
+    crate::upgrade_graph::UpgradeGraph::from_db(ctx.db, ctx.balance_ctx)
+}
+
+fn exec_list_kind(ctx: &ToolContext, kind: crate::upgrade_graph::UpgradeKind) -> Value {
+    let g = graph(ctx);
+    let hits: Vec<Value> = g
+        .search(None, Some(kind), None, Some(&ctx.weights), 12)
         .iter()
-        .take(40)
-        .map(|item| {
-            let desc = item.description.as_deref().unwrap_or("");
-            let triggers = detect_proc_triggers(&[], Some(desc));
-            json!({
-                "id": item.id,
-                "name": &item.name,
-                "description": desc,
-                "triggers": triggers
-            })
-        })
+        .map(|n| n.to_json())
         .collect();
+    match kind {
+        crate::upgrade_graph::UpgradeKind::Rune => json!({ "runes": hits }),
+        crate::upgrade_graph::UpgradeKind::Sigil => json!({ "sigils": hits }),
+        crate::upgrade_graph::UpgradeKind::Relic => json!({ "relics": hits }),
+    }
+}
 
-    relics.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-    relics.truncate(30);
+fn exec_search_upgrades(args: &Value, ctx: &ToolContext) -> Value {
+    let g = graph(ctx);
+    let focus = args["focus"].as_str();
+    let kind = args["kind"]
+        .as_str()
+        .and_then(crate::upgrade_graph::parse_kind);
+    let tag = args["tag"].as_str();
+    let limit = args["limit"].as_u64().unwrap_or(12) as usize;
+    let hits = g.search(focus, kind, tag, Some(&ctx.weights), limit.min(24));
+    json!({
+        "focus": focus,
+        "kind": kind.map(|k| k.as_str()),
+        "axes": ["power", "condition", "boon_support", "healing", "sustain", "control"],
+        "upgrades": hits.iter().map(|n| n.to_json()).collect::<Vec<_>>()
+    })
+}
 
-    json!({ "relics": relics })
+fn exec_upgrade_synergies(args: &Value, ctx: &ToolContext) -> Value {
+    let Some(name) = args["name"].as_str() else {
+        return json!({ "error": "name is required" });
+    };
+    let limit = args["limit"].as_u64().unwrap_or(8) as usize;
+    graph(ctx).synergies(name, limit.min(16))
 }
 
 fn exec_calculate_stats(args: &Value, ctx: &ToolContext) -> Value {
@@ -1725,6 +1751,11 @@ fn detect_proc_triggers(facts: &[Fact], description: Option<&str>) -> Vec<String
         ("on kill", "on_kill"),
         ("when you use a heal", "on_heal_skill"),
         ("on interval", "periodic"),
+        ("recharge of 20", "long_recharge"),
+        ("20 seconds or more", "long_recharge"),
+        ("stunned", "on_cc"),
+        ("disabled foe", "on_cc"),
+        ("hitting a disabled", "on_cc"),
     ];
 
     let mut check_text = |text: &str| {
@@ -2033,7 +2064,7 @@ mod tests {
     fn test_tool_declarations_count() {
         let tools = tool_declarations();
         assert_eq!(tools.len(), 1); // Single tool block
-        assert_eq!(tools[0].function_declarations.len(), 18);
+        assert_eq!(tools[0].function_declarations.len(), 20);
     }
 
     #[test]
@@ -2048,6 +2079,8 @@ mod tests {
         assert!(names.contains(&"get_spec_traits"));
         assert!(names.contains(&"simulate_combat"));
         assert!(names.contains(&"list_runes"));
+        assert!(names.contains(&"search_upgrades"));
+        assert!(names.contains(&"upgrade_synergies"));
         assert!(names.contains(&"get_optimizer_results"));
         // Synergy tools
         assert!(names.contains(&"search_traits_by_effect"));

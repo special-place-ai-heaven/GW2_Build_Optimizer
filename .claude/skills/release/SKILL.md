@@ -7,7 +7,7 @@ description: Release procedure for GW2 Build Optimizer — local DLL build and d
 
 This project ships as a single Windows DLL loaded by Nexus inside Guild Wars 2. There is no remote registry, no CI pipeline, and no released artifact other than the file you copy onto your own machine.
 
-Current version: **1.0.0** (see `Cargo.toml` `[workspace.package] version`).
+Current version: **1.2.0** (see `Cargo.toml` `[workspace.package] version`).
 
 ## Pre-Release Checklist
 

@@ -29,6 +29,11 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
         return;
     }
 
+    if state.main.chat.waiting {
+        state.main.error = Some("Chef is plating. Wait for the kitchen.".into());
+        return;
+    }
+
     if profession_name.is_empty() {
         state.main.error = Some("No character selected".into());
         return;
@@ -1317,6 +1322,141 @@ fn apply_gemini_response(
     }
 }
 
+/// Merge validator-resolved names onto the raw LLM tasting so the plate is edible.
+fn gemini_from_validated(
+    mut raw: gw2_optimizer::prompts::GeminiBuildResponse,
+    v: &gw2_optimizer::validation::ValidatedBuild,
+) -> gw2_optimizer::prompts::GeminiBuildResponse {
+    if !v.specializations.is_empty() {
+        raw.specializations = v
+            .specializations
+            .iter()
+            .map(|s| (s.name.clone(), s.trait_names.clone()))
+            .collect();
+    }
+    let mut weapons = Vec::new();
+    let fmt_set =
+        |set: &gw2_optimizer::validation::ValidatedWeaponSet, label: &str| -> Option<String> {
+            match (&set.main_hand, &set.off_hand) {
+                (Some(main), Some(off)) => Some(format!("{}: {} / {}", label, main, off)),
+                (Some(main), None) => Some(format!("{}: {}", label, main)),
+                _ => None,
+            }
+        };
+    if let Some(s) = fmt_set(&v.weapons.set1, "Set 1") {
+        weapons.push(s);
+    }
+    if let Some(s) = fmt_set(&v.weapons.set2, "Set 2") {
+        weapons.push(s);
+    }
+    if !weapons.is_empty() {
+        raw.weapons = weapons;
+    }
+    let mut skills = Vec::new();
+    if !v.legends.is_empty() {
+        skills.push(format!("Stances: {}", v.legends.join(" / ")));
+    }
+    if let Some((_, name)) = &v.skills.heal {
+        skills.push(format!("Heal: {}", name));
+    }
+    for (_, name) in v.skills.utilities.iter().flatten() {
+        skills.push(format!("Utility: {}", name));
+    }
+    if let Some((_, name)) = &v.skills.elite {
+        skills.push(format!("Elite: {}", name));
+    }
+    if !skills.is_empty() {
+        raw.skills = skills;
+    }
+    if let Some(r) = &v.rune {
+        raw.rune = r.name.clone();
+    }
+    if !v.sigils.is_empty() {
+        raw.sigils = v.sigils.iter().map(|s| s.name.clone()).collect();
+    }
+    if let Some(r) = &v.relic {
+        raw.relic = r.name.clone();
+    }
+    if let Some(p) = &v.gear_prefix {
+        raw.stat_prefix = p.name.clone();
+    }
+    if !v.explanation.is_empty() {
+        raw.explanation = v.explanation.clone();
+    }
+    if !v.synergy_explanation.is_empty() {
+        raw.synergy_explanation = Some(v.synergy_explanation.clone());
+    }
+    if !v.changes.is_empty() {
+        raw.changes_made = v
+            .changes
+            .iter()
+            .map(|c| {
+                if c.from.is_empty() {
+                    format!("[{}] → {} ({})", c.slot, c.to, c.reason)
+                } else {
+                    format!("[{}] {} → {} ({})", c.slot, c.from, c.to, c.reason)
+                }
+            })
+            .collect();
+    }
+    raw
+}
+
+fn kitchen_brief(
+    game_mode: &str,
+    weights: &OptimizationWeights,
+    locks: &str,
+    character: &str,
+    on_the_pass: &str,
+) -> String {
+    let w = weights.clamped();
+    let locks = if locks.is_empty() { "none" } else { locks };
+    format!(
+        "Mode: {mode}\nRadar: Power {power:.0}% · Condition {condition:.0}% · Boon {boon:.0}% · Heal {heal:.0}% · Sustain {sustain:.0}% · Control {control:.0}%\nLocks: {locks}\nCharacter:\n{character}\nOn the pass:\n{pass}\nNote: get_optimizer_results is empty unless Optimize ran; cook from this brief and the dish on the pass.",
+        mode = game_mode,
+        power = w.power * 100.0,
+        condition = w.condition * 100.0,
+        boon = w.boon_support * 100.0,
+        heal = w.healing * 100.0,
+        sustain = w.sustain * 100.0,
+        control = w.control * 100.0,
+        locks = locks,
+        character = character,
+        pass = on_the_pass,
+    )
+}
+
+fn apply_radar_prefix(
+    parsed: &mut gw2_optimizer::prompts::GeminiBuildResponse,
+    weights: &OptimizationWeights,
+) {
+    parsed.stat_prefix = gw2_optimizer::scoring::select_gear_prefix(weights)
+        .primary
+        .to_string();
+}
+
+fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -> bool {
+    v.errors.is_empty() && !v.specializations.is_empty()
+}
+
+fn summarize_suggestion(s: &crate::ui::comparison::BuildSuggestion) -> String {
+    let specs: String = s
+        .specializations
+        .iter()
+        .map(|(n, t)| format!("{} [{}]", n, t.join(", ")))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    format!(
+        "{} · {} · {} · {} · rune {} · relic {}",
+        s.label,
+        s.stat_prefix,
+        specs,
+        s.weapons.join(" / "),
+        s.rune,
+        s.relic
+    )
+}
+
 /// Convert Gemini tool function names to human-readable descriptions.
 fn humanize_tool_names(tool_names: &[String]) -> String {
     let labels: Vec<&str> = tool_names
@@ -1329,6 +1469,8 @@ fn humanize_tool_names(tool_names: &[String]) -> String {
             "list_runes" => "browsing runes",
             "list_sigils" => "browsing sigils",
             "list_relics" => "browsing relics",
+            "search_upgrades" => "searching upgrades",
+            "upgrade_synergies" => "upgrade synergies",
             "calculate_stats" => "calculating stats",
             "simulate_combat" => "simulating combat",
             "score_build" => "scoring build",
@@ -1436,36 +1578,97 @@ fn enrich_with_llm(
     Ok(())
 }
 
-/// Send a chat message to the active LLM provider for build refinement.
-/// Uses function calling so the LLM can query game data to answer questions.
+/// Send a chat order to the chef (active LLM) for a plated build.
+/// Uses function calling so the chef has the full pantry and every station.
 pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
-    // Guard against concurrent chat messages
     if state.main.chat.waiting {
         return;
     }
 
+    let (display, inbound_chips, _chef_order) =
+        crate::chat_links::annotate_order(&message, state.main.game_db.as_ref());
+    crate::ui::chat_bar::attach_order_chips(
+        &mut state.main.chat,
+        display.clone(),
+        inbound_chips.clone(),
+    );
+
     if !state.config.has_active_llm_key() {
         crate::ui::chat_bar::add_ai_response(
             &mut state.main.chat,
-            "No AI API key configured. Set one in Settings.".into(),
+            "The kitchen is closed. Set an AI API key in Settings.".into(),
+        );
+        return;
+    }
+    if state.main.optimizing {
+        crate::ui::chat_bar::add_ai_response(
+            &mut state.main.chat,
+            "The stove is already on. Wait for Optimize to finish.".into(),
+        );
+        return;
+    }
+    if state.main.game_db.is_none() {
+        crate::ui::chat_bar::add_ai_response(
+            &mut state.main.chat,
+            "The pantry is empty. Wait for game data to load.".into(),
         );
         return;
     }
 
-    state.main.chat.waiting = true;
-
-    let config = state.config.clone();
     let profession = state
         .main
         .current_build
         .as_ref()
         .map(|b| b.profession.clone())
         .unwrap_or_default();
-    let build_summary = state
+    if profession.is_empty() {
+        crate::ui::chat_bar::add_ai_response(
+            &mut state.main.chat,
+            "Select a character first.".into(),
+        );
+        return;
+    }
+
+    state.main.chat_epoch = state.main.chat_epoch.wrapping_add(1);
+    let epoch = state.main.chat_epoch;
+    state.main.chat.waiting = true;
+    state.main.chat_wait_started = Some(std::time::Instant::now());
+    state.main.optimize_stage = "Chef is reading the order\u{2026}".into();
+
+    let config = state.config.clone();
+    let character = state
         .main
         .current_build
         .as_ref()
-        .map(summarize_resolved_build);
+        .map(summarize_resolved_build)
+        .unwrap_or_default();
+    let game_mode_label = state.main.game_mode.label().to_string();
+    let locks = state.main.build_locks.describe_constraints();
+    let on_the_pass = state
+        .main
+        .comparison
+        .suggestions
+        .get(state.main.comparison.selected_suggestion)
+        .map(summarize_suggestion)
+        .unwrap_or_else(|| "(empty — plate a new dish from the pantry)".into());
+    let mut kitchen = kitchen_brief(
+        &game_mode_label,
+        &state.main.weights,
+        &locks,
+        &character,
+        &on_the_pass,
+    );
+    if !inbound_chips.is_empty() {
+        kitchen.push_str("\nPasted: ");
+        kitchen.push_str(
+            &inbound_chips
+                .iter()
+                .map(|c| format!("{} ({})", c.label, c.kind.as_str()))
+                .collect::<Vec<_>>()
+                .join("; "),
+        );
+    }
+    let message = display;
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
     let db_clone = state.main.game_db.clone();
@@ -1475,6 +1678,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     std::thread::spawn(move || {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             if token.is_cancelled() {
+                crate::state::with_state(|s| {
+                    if s.main.chat_epoch == epoch {
+                        s.main.chat.waiting = false;
+                    }
+                });
                 return;
             }
 
@@ -1486,11 +1694,13 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     return Err("Cancelled".into());
                 }
 
-                // Use tool-enabled generation if GameDb is available
                 if let Some(ref db) = db_clone {
                     let prompt = gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
                         &profession,
+                        &game_mode_label,
                         &message,
+                        &kitchen,
+                        &weights,
                     );
                     let tools = gw2_optimizer::llm::tools::tool_definitions();
                     let empty_candidates = vec![];
@@ -1498,7 +1708,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         db,
                         profession_name: &profession,
                         candidates: &empty_candidates,
-                        current_build_summary: build_summary.as_deref(),
+                        current_build_summary: Some(kitchen.as_str()),
                         weights: weights.clone(),
                         balance_ctx: &chat_balance_ctx,
                     };
@@ -1514,8 +1724,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
                                 let tools_str = humanize_tool_names(tool_names);
                                 crate::state::with_state(|s| {
+                                    if s.main.chat_epoch != epoch {
+                                        return;
+                                    }
                                     s.main.optimize_stage = format!(
-                                        "AI thinking ({}/{})... {}",
+                                        "Chef is plating ({}/{})\u{2026} {}",
                                         turn, max_turns, tools_str
                                     );
                                 });
@@ -1523,27 +1736,16 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         )
                         .map_err(|e| e.to_string())?;
 
-                    gw2_optimizer::prompts::parse_gemini_build(&response)
-                        .map_err(|e| format!("Parse failed: {}", e))
+                    let mut parsed = gw2_optimizer::prompts::parse_gemini_build(&response)
+                        .map_err(|e| format!("Parse failed: {}", e))?;
+                    apply_radar_prefix(&mut parsed, &weights);
+                    Ok(parsed)
                 } else {
-                    // Fallback: no GameDb, use simple prompt
-                    let build_summary_str = build_summary.as_deref().unwrap_or("");
-                    let context =
-                        gw2_optimizer::prompts::build_game_context(&profession, &weights, "PvE");
-                    let prompt = gw2_optimizer::prompts::chat_refinement_prompt(
-                        &profession,
-                        build_summary_str,
-                        &message,
-                        &context,
-                    );
-                    let response = client.generate_cached(&prompt).map_err(|e| e.to_string())?;
-                    gw2_optimizer::prompts::parse_gemini_build(&response)
-                        .map_err(|e| format!("Parse failed: {}", e))
+                    Err("Game data not loaded".into())
                 }
             })();
 
-            // Validate Gemini's response against GameDb before applying (if available)
-            let validated_result = result.as_ref().ok().and_then(|gemini_build| {
+            let validated = result.as_ref().ok().and_then(|gemini_build| {
                 db_clone.as_ref().map(|db| {
                     let validated = gw2_optimizer::validation::validate_gemini_build(
                         gemini_build,
@@ -1555,7 +1757,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             nexus::log::LogLevel::Warning,
                             "GW2BuildOpt",
                             format!(
-                                "Chat refinement validation errors: {}",
+                                "Kitchen validation errors: {}",
                                 validated
                                     .errors
                                     .iter()
@@ -1568,45 +1770,102 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     validated
                 })
             });
-            let _ = validated_result; // Validation logged; apply_gemini_response uses raw parsed fields
 
             if !token.is_cancelled() {
-                crate::state::with_state(|s| match result {
-                    Ok(gemini_build) => {
-                        let display = if gemini_build.explanation.is_empty() {
-                            "Build updated.".to_string()
-                        } else {
-                            gemini_build.explanation.clone()
-                        };
-                        crate::ui::chat_bar::add_ai_response(&mut s.main.chat, display);
-
-                        let mut suggestion = crate::ui::comparison::BuildSuggestion {
-                            label: "Chat Refinement".into(),
-                            ..Default::default()
-                        };
-                        apply_gemini_response(&mut suggestion, &gemini_build);
-                        if let Some(ref db) = s.main.game_db {
-                            simulate_suggestion_rotation(&mut suggestion, db);
-                        }
-                        s.main.comparison.error = None;
-                        s.main.comparison.suggestions.push(suggestion);
-                        s.main.comparison.selected_suggestion =
-                            s.main.comparison.suggestions.len() - 1;
-                        s.main.comparison.show_optimized = true;
+                crate::state::with_state(|s| {
+                    if s.main.chat_epoch != epoch {
+                        return;
                     }
-                    Err(e) => {
-                        crate::ui::chat_bar::add_ai_response(
-                            &mut s.main.chat,
-                            format!("Error: {}", e),
-                        );
+                    s.main.optimize_stage.clear();
+                    match result {
+                        Ok(raw) => {
+                            if !validated.as_ref().is_some_and(plate_is_servable) {
+                                let mut display = if raw.explanation.is_empty() {
+                                    "That tasting was not legal. I will not plate it.".to_string()
+                                } else {
+                                    raw.explanation.clone()
+                                };
+                                if let Some(v) = &validated {
+                                    if !v.errors.is_empty() {
+                                        display.push_str("\n\n(Kitchen note: ");
+                                        display.push_str(
+                                            &v.errors
+                                                .iter()
+                                                .map(|e| e.detail.as_str())
+                                                .collect::<Vec<_>>()
+                                                .join("; "),
+                                        );
+                                        display.push(')');
+                                    } else if v.specializations.is_empty() {
+                                        display.push_str(
+                                        "\n\n(Kitchen note: no legal specializations in the tasting.)",
+                                    );
+                                    }
+                                }
+                                crate::ui::chat_bar::add_ai_response(&mut s.main.chat, display);
+                                return;
+                            }
+                            let plated = match &validated {
+                                Some(v) => gemini_from_validated(raw, v),
+                                None => raw,
+                            };
+                            let display = if plated.explanation.is_empty() {
+                                "Tonight's plate is up.".to_string()
+                            } else {
+                                plated.explanation.clone()
+                            };
+                            let mut suggestion = crate::ui::comparison::BuildSuggestion {
+                                label: "Tonight's plate".into(),
+                                ..Default::default()
+                            };
+                            apply_gemini_response(&mut suggestion, &plated);
+                            if let Some(ref db) = s.main.game_db {
+                                if let Some(v) = &validated {
+                                    suggestion.chat_code =
+                                        validated_build_to_chat_code(v, &profession, db);
+                                }
+                                if suggestion.chat_code.is_none() {
+                                    suggestion.chat_code = suggestion_to_chat_code(&suggestion, db);
+                                }
+                                simulate_suggestion_rotation(&mut suggestion, db);
+                            }
+                            let chips = match (s.main.game_db.as_ref(), validated.as_ref()) {
+                                (Some(db), Some(v)) => crate::chat_links::chips_from_plate(
+                                    db,
+                                    v,
+                                    suggestion.chat_code.as_deref(),
+                                ),
+                                _ => suggestion
+                                    .chat_code
+                                    .as_deref()
+                                    .filter(|c| c.starts_with("[&"))
+                                    .map(|c| vec![crate::chat_links::build_template_chip(c)])
+                                    .unwrap_or_default(),
+                            };
+                            crate::ui::chat_bar::add_plated_response(
+                                &mut s.main.chat,
+                                display,
+                                chips,
+                            );
+                            s.main.comparison.error = None;
+                            s.main.comparison.suggestions.push(suggestion);
+                            s.main.comparison.selected_suggestion =
+                                s.main.comparison.suggestions.len() - 1;
+                            s.main.comparison.show_optimized = true;
+                        }
+                        Err(e) => {
+                            crate::ui::chat_bar::add_ai_response(
+                                &mut s.main.chat,
+                                format!("The kitchen could not plate that: {}", e),
+                            );
+                        }
                     }
                 });
             } else {
-                // Cancelled mid-flight. `add_ai_response` would normally clear the
-                // waiting flag; without this branch the UI stays stuck on "AI thinking…"
-                // until another chat completes successfully.
                 crate::state::with_state(|s| {
-                    s.main.chat.waiting = false;
+                    if s.main.chat_epoch == epoch {
+                        s.main.chat.waiting = false;
+                    }
                 });
             }
         }));
@@ -1617,7 +1876,9 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                 "bg thread panicked: send_chat_message",
             );
             crate::state::with_state(|s| {
-                s.main.chat.waiting = false;
+                if s.main.chat_epoch == epoch {
+                    s.main.chat.waiting = false;
+                }
             });
         }
     });
@@ -1625,7 +1886,10 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
 
 #[cfg(test)]
 mod tests {
-    use super::suggestion_to_chat_code;
+    use super::{
+        apply_radar_prefix, gemini_from_validated, kitchen_brief, plate_is_servable,
+        suggestion_to_chat_code,
+    };
     use crate::ui::comparison::BuildSuggestion;
     use base64::Engine as _;
     use gw2_api::models::{Profession, Specialization, Trait};
@@ -1745,5 +2009,77 @@ mod tests {
             assert_ne!(land, 0, "land palette {i} should resolve");
             assert_eq!(aqua, 0, "aquatic palette {i} must stay empty");
         }
+    }
+
+    #[test]
+    fn kitchen_brief_lists_radar_and_pass() {
+        let brief = kitchen_brief(
+            "WvW",
+            &gw2_optimizer::scoring::OptimizationWeights::default(),
+            "",
+            "Profession: Warrior",
+            "(empty)",
+        );
+        assert!(brief.contains("WvW"), "{brief}");
+        assert!(brief.contains("Power"), "{brief}");
+        assert!(brief.contains("Profession: Warrior"), "{brief}");
+        assert!(brief.contains("Locks: none"), "{brief}");
+        assert!(brief.contains("On the pass:"), "{brief}");
+        assert!(brief.contains("get_optimizer_results is empty"), "{brief}");
+    }
+
+    #[test]
+    fn gemini_from_validated_prefers_resolved_rune() {
+        let raw = gw2_optimizer::prompts::GeminiBuildResponse {
+            rune: "Hallucinated Rune".into(),
+            explanation: "A sharp plate.".into(),
+            ..Default::default()
+        };
+        let mut v = gw2_optimizer::validation::ValidatedBuild::default();
+        v.rune = Some(gw2_optimizer::validation::ValidatedItem {
+            id: 1,
+            name: "Scholar".into(),
+        });
+        let plated = gemini_from_validated(raw, &v);
+        assert_eq!(plated.rune, "Scholar");
+    }
+
+    #[test]
+    fn plate_is_servable_needs_specs_and_no_errors() {
+        let mut v = gw2_optimizer::validation::ValidatedBuild::default();
+        assert!(!plate_is_servable(&v));
+        v.specializations
+            .push(gw2_optimizer::validation::ValidatedSpec {
+                spec_id: 1,
+                name: "Arms".into(),
+                elite: false,
+                trait_ids: vec![],
+                trait_names: vec![],
+                all_trait_ids: vec![],
+            });
+        assert!(plate_is_servable(&v));
+        v.errors.push(gw2_optimizer::validation::ValidationReject {
+            code: gw2_optimizer::validation::RejectCode::SpecNotFound {
+                spec: "Nope".into(),
+                profession: "Warrior".into(),
+            },
+            detail: "nope".into(),
+        });
+        assert!(!plate_is_servable(&v));
+    }
+
+    #[test]
+    fn apply_radar_prefix_overwrites_llm_choice() {
+        let weights = gw2_optimizer::scoring::OptimizationWeights::preset_power_dps();
+        let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
+            stat_prefix: "Celestial".into(),
+            ..Default::default()
+        };
+        apply_radar_prefix(&mut parsed, &weights);
+        assert_eq!(
+            parsed.stat_prefix,
+            gw2_optimizer::scoring::select_gear_prefix(&weights).primary
+        );
+        assert_ne!(parsed.stat_prefix, "Celestial");
     }
 }

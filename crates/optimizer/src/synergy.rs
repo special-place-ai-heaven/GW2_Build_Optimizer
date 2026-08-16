@@ -9,7 +9,7 @@ use gw2_api::models::{Fact, Item, Skill, Trait as GW2Trait};
 
 use crate::data::boon_condition_formulas::{boon_weight, condition_importance};
 use crate::scoring::OptimizationWeights;
-use crate::text_util::{stack_multiplier, strip_gw2_markup, text_describes_condition_cleanse};
+use crate::text_util::{strip_gw2_markup, text_describes_condition_cleanse};
 
 // ─── Supporting Enums ───
 
@@ -240,7 +240,10 @@ pub fn extract_rune_effects(rune: &Item) -> Vec<NormalizedEffect> {
 }
 
 /// Extract normalized effects from a sigil item.
-pub fn extract_sigil_effects(sigil: &Item, ctx: &crate::balance::BalanceContext) -> Vec<NormalizedEffect> {
+pub fn extract_sigil_effects(
+    sigil: &Item,
+    ctx: &crate::balance::BalanceContext,
+) -> Vec<NormalizedEffect> {
     if let Some(buff) = crate::combat::item_buff_description(sigil) {
         let effects = effects_from_upgrade_text(buff);
         if !effects.is_empty() {
@@ -450,6 +453,9 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
 /// Parse a rune bonus string into NormalizedEffects.
 /// Examples: "+7% Burning Duration", "7% Burning Duration", "+5% damage", "+175 Power"
 fn parse_rune_bonus_to_effects(bonus: &str) -> Vec<NormalizedEffect> {
+    if let Some(all) = parse_all_stats_bonus(bonus) {
+        return all;
+    }
     let mut effects = effects_from_upgrade_text(bonus);
     if !effects.is_empty() {
         return effects;
@@ -467,6 +473,40 @@ fn parse_rune_bonus_to_effects(bonus: &str) -> Vec<NormalizedEffect> {
         }
     }
     effects
+}
+
+const ALL_STATS: [StatType; 9] = [
+    StatType::Power,
+    StatType::Precision,
+    StatType::Toughness,
+    StatType::Vitality,
+    StatType::ConditionDamage,
+    StatType::Expertise,
+    StatType::Concentration,
+    StatType::Ferocity,
+    StatType::HealingPower,
+];
+
+fn parse_all_stats_bonus(bonus: &str) -> Option<Vec<NormalizedEffect>> {
+    let s = bonus.trim().to_lowercase();
+    if !s.contains("all stats") {
+        return None;
+    }
+    let rest = s.strip_prefix('+').unwrap_or(s.as_str());
+    let num: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let value: f64 = num.parse().ok()?;
+    if value <= 0.0 {
+        return None;
+    }
+    Some(
+        ALL_STATS
+            .iter()
+            .map(|&stat| NormalizedEffect::StatBonus { stat, value })
+            .collect(),
+    )
 }
 
 fn effects_from_upgrade_text(text: &str) -> Vec<NormalizedEffect> {
@@ -528,15 +568,6 @@ fn prose_status_effects(text: &str) -> Vec<NormalizedEffect> {
             duration_s: 0,
             stacks: 1,
         });
-    }
-    if (t.contains("on kill") || t.contains("charge")) && t.contains("power") {
-        let cap = stack_multiplier(&t);
-        if cap > 1.0 {
-            effects.push(NormalizedEffect::StatBonus {
-                stat: StatType::Power,
-                value: 10.0 * cap * 0.5,
-            });
-        }
     }
     effects
 }
@@ -1049,6 +1080,26 @@ mod tests {
         );
         assert_eq!(StatType::from_api("CritDamage"), Some(StatType::Ferocity));
         assert_eq!(StatType::from_api("AgonyResistance"), None);
+    }
+
+    #[test]
+    fn all_stats_bonus_emits_nine_attributes() {
+        let fx = parse_rune_bonus_to_effects("+8 to All Stats");
+        assert_eq!(fx.len(), 9);
+        assert!(fx.iter().any(|e| matches!(
+            e,
+            NormalizedEffect::StatBonus {
+                stat: StatType::HealingPower,
+                value
+            } if (*value - 8.0).abs() < 1e-9
+        )));
+        assert!(fx.iter().any(|e| matches!(
+            e,
+            NormalizedEffect::StatBonus {
+                stat: StatType::ConditionDamage,
+                value
+            } if (*value - 8.0).abs() < 1e-9
+        )));
     }
 
     #[test]

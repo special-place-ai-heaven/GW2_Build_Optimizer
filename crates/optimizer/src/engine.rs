@@ -647,7 +647,13 @@ pub fn quality_from_modifiers(
             explanation: format!(
                 "{} bonus string(s) had % but no known category: {}",
                 modifiers.unparsed.len(),
-                modifiers.unparsed.iter().take(3).cloned().collect::<Vec<_>>().join("; ")
+                modifiers
+                    .unparsed
+                    .iter()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("; ")
             ),
         });
     }

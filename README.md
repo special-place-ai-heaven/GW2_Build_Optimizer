@@ -10,7 +10,9 @@ characters through the official GW2 API and suggests builds for PvE, WvW, and Pv
 Pick a mode, fight scale, and role. The optimizer searches gear, traits, and skills,
 checks viability, and shows Current vs Optimized side by side. One Chat strip at the
 top of the overlay copies a GW2 build-template code onto the Windows clipboard so
-**Paste Build Template** in the hero panel can use it.
+**Paste Build Template** in the hero panel can use it. Improve and New Build also
+have a Kitchen: order a plated build from the chef, copy item/skill/trait chips
+into game chat, and keep the conversation across sessions.
 
 ## Screenshots
 
@@ -38,10 +40,10 @@ Prebuilt Nexus DLL from GitHub Releases:
 - [Direct DLL download](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/gw2_build_optimizer.dll)
 - [Checksum file](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/SHA256SUMS.txt)
 
-Current release (v1.1.0) DLL SHA256:
+Current release (v1.2.0) DLL SHA256:
 
 ```text
-C20BADD69020641BC73049412AD9A6C759E0B5B1ED62B5DCD08F8D065F945A12
+ACDDCCE69F5FF6803FF4351F28FB0CA98D8B4DF512247FA3EEAF4132FC8AAF6E
 ```
 
 A source build writes:

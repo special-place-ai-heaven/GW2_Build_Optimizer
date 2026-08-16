@@ -1,16 +1,14 @@
 //! Pre-computed context builder for Gemini synergy-driven optimization.
-//! Gathers ALL profession-relevant game data from GameDb into a structured
-//! text document (~35-50K tokens) that Gemini receives in a single prompt.
-//!
-//! This replaces multi-turn tool calling with upfront context — Gemini sees
-//! every trait, skill, rune, sigil, and relic at once, enabling genuine
-//! synergy reasoning across all build components.
+//! Profession traits/skills plus a 6-axis ranked upgrade graph slice
+//! (not an A–Z dump of every rune/sigil/relic).
 
 use gw2_api::models::facts::Fact;
-use gw2_api::models::{Item, Skill, Specialization, Trait as GW2Trait};
+use gw2_api::models::{Skill, Specialization, Trait as GW2Trait};
 
+use crate::balance::BalanceContext;
 use crate::gamedb::GameDb;
 use crate::scoring::OptimizationWeights;
+use crate::upgrade_graph::UpgradeGraph;
 
 /// Configuration for context generation.
 pub struct ContextConfig<'a> {
@@ -31,9 +29,7 @@ pub fn build_gemini_context(config: &ContextConfig) -> String {
         section_profession_info(config),
         section_specializations_and_traits(config),
         section_profession_skills(config),
-        section_runes(config.db),
-        section_sigils(config.db),
-        section_relics(config.db),
+        section_upgrade_graph(config),
         section_gear_prefixes(config),
     ];
 
@@ -354,94 +350,14 @@ fn format_skill_entry(out: &mut String, skill: &Skill) {
     }
 }
 
-/// ALL Superior Runes with their 6-tier bonuses.
-fn section_runes(db: &GameDb) -> String {
-    let mut out = String::from("=== ALL SUPERIOR RUNES ===\n");
-    out.push_str(
-        "(Always use 6 of the same rune for the set bonus. The 6th bonus is build-defining.)\n\n",
-    );
-
-    let mut runes: Vec<&Item> = db
-        .all_runes()
-        .into_iter()
-        .filter(|item| item.name.starts_with("Superior Rune"))
-        .collect();
-    runes.sort_by(|a, b| a.name.cmp(&b.name));
-
-    for rune in &runes {
-        // Strip "Superior Rune of " prefix for token economy
-        let short_name = rune
-            .name
-            .strip_prefix("Superior Rune of the ")
-            .or_else(|| rune.name.strip_prefix("Superior Rune of "))
-            .unwrap_or(&rune.name);
-
-        out.push_str(&format!("{}:\n", short_name));
-
-        if let Some(ref details) = rune.details {
-            for (i, bonus) in details.bonuses.iter().enumerate() {
-                out.push_str(&format!("  {}: {}\n", i + 1, bonus));
-            }
-        }
-    }
-
-    out
-}
-
-/// ALL Superior Sigils with their effect descriptions.
-fn section_sigils(db: &GameDb) -> String {
-    let mut out = String::from(
-        "=== ALL SUPERIOR SIGILS ===\n\
-         \n\
-         SIGIL RULES:\n\
-         - 4 sigil slots total: 2 per weapon set (Set 1 main/off, Set 2 main/off).\n\
-         - No duplicate sigils WITHIN a weapon set (Set 1 must have 2 different sigils).\n\
-         - The same sigil CAN appear in BOTH weapon sets (e.g. Sigil of Force in Set 1 AND Set 2).\n\
-         - Passive stat sigils (Force, Accuracy, Bloodlust…) are always active.\n\
-         - On-swap/on-crit sigils have internal cooldowns — frequency matters for their value.\n\
-         \n",
-    );
-
-    let mut sigils: Vec<&Item> = db
-        .all_sigils()
-        .into_iter()
-        .filter(|item| item.name.starts_with("Superior Sigil"))
-        .collect();
-    sigils.sort_by(|a, b| a.name.cmp(&b.name));
-
-    for sigil in &sigils {
-        let short_name = sigil
-            .name
-            .strip_prefix("Superior Sigil of the ")
-            .or_else(|| sigil.name.strip_prefix("Superior Sigil of "))
-            .unwrap_or(&sigil.name);
-
-        let desc = sigil.description.as_deref().unwrap_or("(no description)");
-        out.push_str(&format!("{}: {}\n", short_name, desc));
-    }
-
-    out
-}
-
-/// ALL Relics with their effect descriptions.
-fn section_relics(db: &GameDb) -> String {
-    let mut out = String::from("=== ALL RELICS ===\n\n");
-
-    let mut relics: Vec<&Item> = db.all_relics();
-    relics.sort_by(|a, b| a.name.cmp(&b.name));
-
-    for relic in &relics {
-        let short_name = relic
-            .name
-            .strip_prefix("Relic of the ")
-            .or_else(|| relic.name.strip_prefix("Relic of "))
-            .unwrap_or(&relic.name);
-
-        let desc = relic.description.as_deref().unwrap_or("(no description)");
-        out.push_str(&format!("{}: {}\n", short_name, desc));
-    }
-
-    out
+/// Ranked upgrade slice on all 6 radar axes. Full catalog via search_upgrades.
+fn section_upgrade_graph(config: &ContextConfig) -> String {
+    let ctx = match config.game_mode {
+        "PvP" => BalanceContext::pvp(),
+        "WvW" => BalanceContext::wvw(),
+        _ => BalanceContext::pve(),
+    };
+    UpgradeGraph::from_db(config.db, &ctx).format_catalog_slice(config.weights)
 }
 
 /// Selected gear prefixes with their stat distributions.
