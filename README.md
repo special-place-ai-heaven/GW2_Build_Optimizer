@@ -31,6 +31,10 @@ Settings: AI provider, layout, cache, and data quality.
 
 ![Settings tab](docs/screenshots/settings.png)
 
+Choya tab: talk through a plated build, pick a model, open the result onto Improve.
+
+![Choya chat with a plated Daredevil roam build](docs/screenshots/choya_witch_doctor.png)
+
 ## Download
 
 Prebuilt Nexus DLL from GitHub Releases:
