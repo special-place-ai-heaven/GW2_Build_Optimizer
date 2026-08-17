@@ -6,7 +6,8 @@ use crate::scenario::{CombatKind, CombatTier};
 use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect};
 
 /// Simulation window 0–T in milliseconds for (scale × kind).
-/// Zerg T=3s / 6–8s are derived (not log-measured); roam dive 2.0s is sourced.
+/// Zerg T=3s / 6–8s are derived (not log-measured).
+/// Roam: dive 2s, condi/trickster 5s, blender/staller 10s.
 pub fn simulation_window_ms(tier: CombatTier, kind: CombatKind) -> u32 {
     match (tier, kind) {
         (CombatTier::Solo, CombatKind::CondiRamp) => 5_000,
@@ -39,12 +40,41 @@ pub fn setup_window_ms(duration_ms: u32) -> u32 {
 }
 
 pub fn kit_has_mobility_out(skills: &[RotationSkill]) -> bool {
-    skills.iter().any(|s| {
-        s.effects
-            .iter()
-            .any(|e| matches!(e, SkillEffect::Mobility { .. }))
-    })
+    kit_escape_kinds(skills) > 0
 }
+
+/// Distinct roam-out categories: mobility, stealth, block, invuln/aegis.
+pub fn kit_escape_kinds(skills: &[RotationSkill]) -> u32 {
+    let mut mobility = false;
+    let mut stealth = false;
+    let mut block = false;
+    let mut cover = false;
+    for skill in skills {
+        for e in &skill.effects {
+            match e {
+                SkillEffect::Mobility {
+                    kind: MobilityKind::Stealth,
+                } => stealth = true,
+                SkillEffect::Mobility { .. } => mobility = true,
+                SkillEffect::Cover {
+                    kind: CoverKind::Stealth,
+                    ..
+                } => stealth = true,
+                SkillEffect::Cover {
+                    kind: CoverKind::Block,
+                    ..
+                } => block = true,
+                SkillEffect::Cover {
+                    kind: CoverKind::Invulnerability | CoverKind::Aegis,
+                    ..
+                } => cover = true,
+                _ => {}
+            }
+        }
+    }
+    u32::from(mobility) + u32::from(stealth) + u32::from(block) + u32::from(cover)
+}
+
 
 pub fn kit_has_strip(skills: &[RotationSkill]) -> bool {
     skills.iter().any(|s| {
@@ -290,8 +320,14 @@ mod tests {
         let with_out = vec![skill_with(vec![SkillEffect::Mobility {
             kind: MobilityKind::Teleport,
         }])];
+        let with_block = vec![skill_with(vec![SkillEffect::Cover {
+            kind: CoverKind::Block,
+            duration_ms: 1000,
+            strippable: false,
+        }])];
         assert!(!kit_has_mobility_out(&burst));
         assert!(kit_has_mobility_out(&with_out));
+        assert!(kit_has_mobility_out(&with_block));
     }
 
     #[test]

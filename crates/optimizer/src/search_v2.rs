@@ -9,7 +9,7 @@ use std::time::Instant;
 use crate::balance::BalanceContext;
 use crate::engine::OptimizeProgress;
 use crate::gamedb::GameDb;
-use crate::referee::{self, RefereeReport};
+use crate::referee::{self, RefereeReport, ViabilityGate};
 use crate::scenario::ScenarioSpec;
 use crate::scoring::{self, OptimizationWeights};
 use crate::synergy_pipeline;
@@ -73,15 +73,21 @@ pub fn generate_neighbors(
     profession_name: &str,
     locks: &BuildLocks,
 ) -> Vec<ValidatedBuild> {
-    let groups: [Vec<ValidatedBuild>; 7] = [
-        swap_gear_prefix(candidate, db),
-        swap_rune(candidate, db),
-        swap_sigil_slots(candidate, db),
-        swap_relic(candidate, db),
-        swap_utility_skills(candidate, db, profession_name),
-        swap_elite_spec(candidate, db, profession_name, locks),
-        swap_weapons(candidate, db, profession_name),
-    ];
+    let mut groups: Vec<Vec<ValidatedBuild>> = Vec::new();
+    if !candidate.report.viability.is_viable {
+        groups.push(swap_utilities_for_failed_gates(
+            candidate,
+            db,
+            profession_name,
+        ));
+    }
+    groups.push(swap_gear_prefix(candidate, db));
+    groups.push(swap_rune(candidate, db));
+    groups.push(swap_sigil_slots(candidate, db));
+    groups.push(swap_relic(candidate, db));
+    groups.push(swap_utility_skills(candidate, db, profession_name));
+    groups.push(swap_elite_spec(candidate, db, profession_name, locks));
+    groups.push(swap_weapons(candidate, db, profession_name));
 
     let total: usize = groups.iter().map(|g| g.len()).sum();
     let max_len = groups.iter().map(|g| g.len()).max().unwrap_or(0);
@@ -192,19 +198,17 @@ pub fn optimize_v2_search(
             }
         }
 
-        // Sort: higher user_intent_score first.
-        next.sort_by(|a, b| {
-            b.report
-                .user_intent_score
-                .partial_cmp(&a.report.user_intent_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // Viable kit first; roam ranks the fight sim, not paper combat indices.
+        next.sort_by(|a, b| referee::search_rank(&b.report).cmp(&referee::search_rank(&a.report)));
 
-        // De-duplicate by (score, gear_prefix, rune) to keep diversity.
+        // Same gear+rune with different utilities are different kits.
         next.dedup_by(|a, b| {
-            a.report.user_intent_score == b.report.user_intent_score
-                && a.validated.gear_prefix == b.validated.gear_prefix
+            a.validated.gear_prefix == b.validated.gear_prefix
                 && a.validated.rune == b.validated.rune
+                && a.validated.relic == b.validated.relic
+                && a.validated.skills.heal == b.validated.skills.heal
+                && a.validated.skills.elite == b.validated.skills.elite
+                && a.validated.skills.utilities == b.validated.skills.utilities
         });
 
         next.truncate(config.beam_width);
@@ -215,11 +219,17 @@ pub fn optimize_v2_search(
         beam = next;
     }
 
-    // Step 6: return best.
-    beam.into_iter()
+    let best = beam
+        .into_iter()
         .next()
-        .map(|c| c.validated)
-        .ok_or_else(|| "No candidates survived beam search".to_string())
+        .ok_or_else(|| "No candidates survived beam search".to_string())?;
+    if !best.report.viability.is_viable {
+        return Err(format!(
+            "Couldn't find a viable build. Failed: {}",
+            referee::viability_failure_summary(&best.report.viability)
+        ));
+    }
+    Ok(best.validated)
 }
 
 // ─── Individual mutation operators (private helpers) ─────────────────────────
@@ -434,6 +444,81 @@ fn swap_utility_skills(
         }
     }
 
+    neighbors
+}
+
+fn gate_failed(report: &crate::referee::ViabilityReport, gate: ViabilityGate) -> bool {
+    report.gates.iter().any(|g| g.gate == gate && !g.passed)
+}
+
+/// When the current kit fails stunbreak/stability/cleanse, try those utilities first
+/// instead of burning the eval budget on gear-prefix neighbors.
+fn swap_utilities_for_failed_gates(
+    candidate: &BeamCandidate,
+    db: &GameDb,
+    profession_name: &str,
+) -> Vec<ValidatedBuild> {
+    if profession_name == "Revenant" {
+        return Vec::new();
+    }
+    let need_stability = gate_failed(&candidate.report.viability, ViabilityGate::StabilityAccess);
+    let need_stunbreak = gate_failed(&candidate.report.viability, ViabilityGate::StunbreakCount);
+    let need_cleanse = gate_failed(&candidate.report.viability, ViabilityGate::CleanseRate);
+    if !(need_stability || need_stunbreak || need_cleanse) {
+        return Vec::new();
+    }
+
+    let equipped_spec_ids: Vec<u32> = candidate
+        .validated
+        .specializations
+        .iter()
+        .map(|s| s.spec_id)
+        .collect();
+    let prof_skill_ids: Vec<u32> = db
+        .skills_by_profession
+        .get(profession_name)
+        .cloned()
+        .unwrap_or_default();
+    if prof_skill_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let utility_skills: Vec<u32> = prof_skill_ids
+        .iter()
+        .copied()
+        .filter(|&id| {
+            let Some(skill) = db.skills.get(&id) else {
+                return false;
+            };
+            if skill.slot.as_deref() != Some("Utility") || db.skill_palette_id(id) == 0 {
+                return false;
+            }
+            if let Some(req_spec) = skill.specialization {
+                if !equipped_spec_ids.contains(&req_spec) {
+                    return false;
+                }
+            }
+            (need_stability && synergy_pipeline::skill_has_stability(skill))
+                || (need_stunbreak && synergy_pipeline::skill_is_stunbreak(skill))
+                || (need_cleanse && synergy_pipeline::skill_cleanse_count(skill) > 0)
+        })
+        .collect();
+
+    let mut neighbors: Vec<ValidatedBuild> = Vec::new();
+    for slot_idx in 0..3usize {
+        for &skill_id in &utility_skills {
+            let skill = match db.skills.get(&skill_id) {
+                Some(s) => s,
+                None => continue,
+            };
+            let mut b = candidate.validated.clone();
+            while b.skills.utilities.len() <= slot_idx {
+                b.skills.utilities.push(None);
+            }
+            b.skills.utilities[slot_idx] = Some((skill_id, skill.name.clone()));
+            neighbors.push(b);
+        }
+    }
     neighbors
 }
 
@@ -692,7 +777,7 @@ mod tests {
     use super::*;
     use crate::combat::CombatPerformance;
     use crate::data::DataQuality;
-    use crate::referee::{RefereeReport, ViabilityReport};
+    use crate::referee::{GateResult, RefereeReport, ViabilityGate, ViabilityReport};
     use crate::scenario::{CombatTier, ScenarioSpec};
     use crate::stats::StatBlock;
     use crate::validation::ValidatedBuild;
@@ -758,6 +843,47 @@ mod tests {
             validated,
             report: dummy_report(),
         }
+    }
+
+    #[test]
+    fn roam_rank_prefers_viable_kit_over_paper_stack() {
+        let mut playable = dummy_report();
+        playable.scenario.game_mode = GameMode::WvW;
+        playable.scenario.combat_tier = CombatTier::Solo;
+        playable.viability.is_viable = true;
+        playable.user_intent_score = 0.2;
+
+        let mut glass = playable.clone();
+        glass.viability.is_viable = false;
+        glass.user_intent_score = -1.0;
+
+        assert!(
+            crate::referee::search_rank(&playable) > crate::referee::search_rank(&glass),
+            "viable roam kit must beat a non-viable number stack"
+        );
+    }
+
+    #[test]
+    fn roam_rank_prefers_more_gates_when_both_nonviable() {
+        let mut closer = dummy_report();
+        closer.scenario.game_mode = GameMode::WvW;
+        closer.scenario.combat_tier = CombatTier::Solo;
+        closer.viability.is_viable = false;
+        closer.viability.gates = vec![
+            GateResult {
+                gate: ViabilityGate::StabilityAccess,
+                passed: true,
+                note: String::new(),
+            },
+            GateResult {
+                gate: ViabilityGate::KillWindow,
+                passed: false,
+                note: String::new(),
+            },
+        ];
+        let mut farther = closer.clone();
+        farther.viability.gates[0].passed = false;
+        assert!(crate::referee::search_rank(&closer) > crate::referee::search_rank(&farther));
     }
 
     /// generate_neighbors on an empty DB must not panic and must return an

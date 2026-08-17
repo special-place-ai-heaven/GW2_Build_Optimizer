@@ -26,7 +26,9 @@ use crate::synergy::{
     extract_sigil_effects, extract_skill_effects, extract_trait_effects, score_normalized_effect,
     ComponentId, NormalizedEffect, SynergyLink,
 };
-use crate::text_util::{normalize_sigil_family, text_describes_condition_cleanse};
+use crate::text_util::{
+    normalize_sigil_family, text_describes_condition_cleanse, text_describes_stability,
+};
 use crate::validation::{
     ValidatedBuild, ValidatedGearPrefix, ValidatedItem, ValidatedSkills, ValidatedSpec,
     ValidatedWeaponSet, ValidatedWeapons,
@@ -1051,7 +1053,7 @@ fn select_required_competitive_utilities(
     }
 }
 
-fn skill_is_stunbreak(skill: &Skill) -> bool {
+pub(crate) fn skill_is_stunbreak(skill: &Skill) -> bool {
     skill.facts.iter().any(|fact| {
         matches!(
             fact,
@@ -1063,8 +1065,8 @@ fn skill_is_stunbreak(skill: &Skill) -> bool {
     })
 }
 
-fn skill_has_stability(skill: &Skill) -> bool {
-    skill.facts.iter().any(|fact| match fact {
+pub(crate) fn skill_has_stability(skill: &Skill) -> bool {
+    let from_facts = skill.facts.iter().any(|fact| match fact {
         Fact::Buff {
             status: Some(status),
             ..
@@ -1074,10 +1076,15 @@ fn skill_has_stability(skill: &Skill) -> bool {
             ..
         } => status.eq_ignore_ascii_case("Stability"),
         _ => false,
-    })
+    });
+    from_facts
+        || skill
+            .description
+            .as_deref()
+            .is_some_and(text_describes_stability)
 }
 
-fn skill_cleanse_count(skill: &Skill) -> u32 {
+pub(crate) fn skill_cleanse_count(skill: &Skill) -> u32 {
     let fact_count: u32 = skill
         .facts
         .iter()

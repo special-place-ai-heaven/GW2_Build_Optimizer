@@ -6,7 +6,9 @@ use gw2_api::models::Skill;
 
 use crate::data::normalized_effects::{EffectCategory, NormalizedEffect};
 use crate::gamedb::GameDb;
-use crate::text_util::text_describes_condition_cleanse;
+use crate::text_util::{
+    text_describes_block, text_describes_condition_cleanse, text_describes_stability,
+};
 
 use super::skill_timings::timing_for;
 use super::{ControlKind, CoverKind, MobilityKind, RotationSkill, SkillEffect, SkillSlot};
@@ -394,6 +396,42 @@ fn push_description_effects(effects: &mut Vec<SkillEffect>, description: &str) {
             effects.push(SkillEffect::Mobility { kind });
         }
     }
+    let has_block_cover = effects.iter().any(|e| {
+        matches!(
+            e,
+            SkillEffect::Cover {
+                kind: CoverKind::Block,
+                ..
+            }
+        )
+    });
+    if !has_block_cover && text_describes_block(&d) {
+        effects.push(SkillEffect::Cover {
+            kind: CoverKind::Block,
+            duration_ms: 1000,
+            strippable: false,
+        });
+    }
+    let has_stability = effects.iter().any(|e| match e {
+        SkillEffect::Cover {
+            kind: CoverKind::Stability,
+            ..
+        } => true,
+        SkillEffect::ApplyBuff { buff, .. } => buff.eq_ignore_ascii_case("Stability"),
+        _ => false,
+    });
+    if !has_stability && text_describes_stability(&d) {
+        effects.push(SkillEffect::Cover {
+            kind: CoverKind::Stability,
+            duration_ms: 5000,
+            strippable: true,
+        });
+        effects.push(SkillEffect::ApplyBuff {
+            buff: "Stability".into(),
+            stacks: 1,
+            duration_ms: 5000,
+        });
+    }
 }
 
 fn describes_corrupt(d: &str) -> bool {
@@ -416,6 +454,8 @@ fn mobility_from_text(d: &str) -> Option<MobilityKind> {
         Some(MobilityKind::Stealth)
     } else if d.contains("superspeed") {
         Some(MobilityKind::Superspeed)
+    } else if d.contains("evade") || d.contains("dodge") {
+        Some(MobilityKind::Evade)
     } else if d.contains("leap") || d.contains("dash") || d.contains("retreat") {
         Some(MobilityKind::Leap)
     } else {
@@ -704,6 +744,38 @@ mod tests {
             }
         )));
     }
+
+    #[test]
+    fn evade_description_is_roam_out() {
+        let effects = extract_effects(&[], Some("Evade backward. Dodge incoming attacks."));
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            SkillEffect::Mobility {
+                kind: MobilityKind::Evade
+            }
+        )));
+    }
+
+    #[test]
+    fn block_description_is_roam_out() {
+        let effects = extract_effects(&[], Some("Block the next attack."));
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            SkillEffect::Cover {
+                kind: CoverKind::Block,
+                ..
+            }
+        )));
+        let unblockable = extract_effects(&[], Some("This attack is unblockable."));
+        assert!(!unblockable.iter().any(|e| matches!(
+            e,
+            SkillEffect::Cover {
+                kind: CoverKind::Block,
+                ..
+            }
+        )));
+    }
+
 
     #[test]
     fn distortion_is_unstrippable_cover() {

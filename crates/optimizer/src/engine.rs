@@ -1750,7 +1750,6 @@ pub fn llm_advisor(
         ctx,
         scenario,
     );
-    let baseline_score = current_report.user_intent_score;
 
     // Call LLM.
     let response = match llm_client.generate(&prompt) {
@@ -1763,7 +1762,7 @@ pub fn llm_advisor(
 
     // Parse SWAP: lines from response.
     let mut best_validated = current.clone();
-    let mut best_score = baseline_score;
+    let mut best_rank = crate::referee::search_rank(&current_report);
 
     for line in response.lines() {
         let line = line.trim();
@@ -1818,8 +1817,8 @@ pub fn llm_advisor(
             ctx,
             scenario,
         );
-        if report.user_intent_score > best_score {
-            best_score = report.user_intent_score;
+        if crate::referee::search_rank(&report) > best_rank {
+            best_rank = crate::referee::search_rank(&report);
             best_validated = candidate;
         }
     }

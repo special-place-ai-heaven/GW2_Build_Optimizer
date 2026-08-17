@@ -83,6 +83,19 @@ pub(crate) fn text_describes_condition_cleanse(text: &str) -> bool {
         && (lower.contains("remov") || lower.contains("cleanse") || lower.contains("cure"))
 }
 
+/// Heuristic: skill text grants Stability (not "instability").
+pub(crate) fn text_describes_stability(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("stability") && !lower.contains("instability")
+}
+
+/// Heuristic: skill text grants a block (not "unblockable").
+pub(crate) fn text_describes_block(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("block") && !lower.contains("unblockable")
+}
+
+
 /// Strip GW2 tooltip markup (`<br>`, `<c=@reminder>`, `@abilitytype`).
 pub(crate) fn strip_gw2_markup(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -246,6 +259,21 @@ mod tests {
             "Conditions you apply last longer"
         ));
     }
+
+    #[test]
+    fn stability_text_ignores_instability() {
+        assert!(text_describes_stability("Grant 3 stacks of stability."));
+        assert!(!text_describes_stability("Cause instability on hit."));
+        assert!(!text_describes_stability("Gain might and fury."));
+    }
+
+    #[test]
+    fn block_text_ignores_unblockable() {
+        assert!(text_describes_block("Block the next attack."));
+        assert!(!text_describes_block("This attack is unblockable."));
+        assert!(!text_describes_block("Gain might and fury."));
+    }
+
 
     #[test]
     fn strip_gw2_markup_drops_tags() {
