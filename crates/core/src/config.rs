@@ -34,6 +34,15 @@ impl LlmProvider {
             LlmProvider::OpenRouter => "OpenRouter",
         }
     }
+
+    pub fn short_label(&self) -> &str {
+        match self {
+            LlmProvider::Gemini => "Gemini",
+            LlmProvider::OpenAI => "OpenAI",
+            LlmProvider::Anthropic => "Claude",
+            LlmProvider::OpenRouter => "OpenRouter",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -276,6 +285,15 @@ impl AppConfig {
             LlmProvider::OpenAI => self.openai_model_id(),
             LlmProvider::Anthropic => self.anthropic_model_id(),
             LlmProvider::OpenRouter => self.openrouter_model_id(),
+        }
+    }
+
+    pub fn set_active_model_id(&mut self, id: String) {
+        match self.active_provider {
+            LlmProvider::Gemini => self.gemini_model = Some(id),
+            LlmProvider::OpenAI => self.openai_model = Some(id),
+            LlmProvider::Anthropic => self.anthropic_model = Some(id),
+            LlmProvider::OpenRouter => self.openrouter_model = Some(id),
         }
     }
 
@@ -554,6 +572,11 @@ mod tests {
         config.active_provider = LlmProvider::OpenAI;
         assert_eq!(config.active_api_key(), Some("openai-key"));
         assert_eq!(config.active_model_id(), "openai-custom");
+
+        config.set_active_model_id("openai-switched".into());
+        assert_eq!(config.active_model_id(), "openai-switched");
+        assert_eq!(config.openai_model.as_deref(), Some("openai-switched"));
+        assert_eq!(config.gemini_model.as_deref(), Some("gemini-custom"));
 
         config.active_provider = LlmProvider::Anthropic;
         assert_eq!(config.active_api_key(), Some("anthropic-key"));

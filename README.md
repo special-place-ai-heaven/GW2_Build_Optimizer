@@ -39,10 +39,10 @@ Prebuilt Nexus DLL from GitHub Releases:
 - [Direct DLL download](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/gw2_build_optimizer.dll)
 - [Checksum file](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/SHA256SUMS.txt)
 
-Current release (v1.2.1) DLL SHA256:
+Current release (v1.2.2) DLL SHA256:
 
 ```text
-D675F51765DFD18FB2ACA4B617E210A96027731608B36A40C55D558D9D0E8230
+E6D72E2BA569DE59B71B050EE71743A5A6FFEA9A22139FAC63DEED6B14FCB41E
 ```
 
 A source build writes:

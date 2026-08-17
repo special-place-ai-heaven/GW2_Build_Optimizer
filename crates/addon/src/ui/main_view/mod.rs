@@ -65,8 +65,8 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         }
     }
 
-    // Kitchen timeout: 8 tool turns can exceed 30s. Wall clock, not FPS.
-    const KITCHEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+    // Chat timeout. Wall clock, not FPS. Include the live model so a stall isn't a mystery.
+    const KITCHEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
     if state.main.chat.waiting {
         let started = state
             .main
@@ -77,10 +77,13 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
             state.main.chat.waiting = false;
             state.main.chat_wait_started = None;
             state.main.optimize_stage.clear();
-            crate::ui::chat_bar::add_ai_response(
-                &mut state.main.chat,
-                "That took too long. Ask again — I'll use the equipped build instead of a long lookup.".into(),
+            let msg = optimization::format_provider_issue(
+                "timeout",
+                state.config.active_provider.short_label(),
+                state.config.active_model_id(),
             );
+            state.main.provider_issue = Some(msg.clone());
+            crate::ui::chat_bar::add_ai_response(&mut state.main.chat, msg);
         }
     } else {
         state.main.chat_wait_started = None;
@@ -386,8 +389,22 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
             ui.same_line_with_spacing(0.0, 8.0);
         }
         let is_active = state.main.active_tab == *tab;
-        if crate::ui::theme::pill(ui, label, is_active, &format!("##main_tab_{}", label)) {
+        let pulse = if state.main.tab_alert.as_ref() == Some(tab) && !is_active {
+            0.45 + 0.55 * (ui.frame_count() as f32 * 0.14).sin().abs()
+        } else {
+            0.0
+        };
+        if crate::ui::theme::pill_pulse(
+            ui,
+            label,
+            is_active,
+            &format!("##main_tab_{}", label),
+            pulse,
+        ) {
             state.main.active_tab = tab.clone();
+            if state.main.tab_alert.as_ref() == Some(tab) {
+                state.main.tab_alert = None;
+            }
             match tab {
                 MainTab::NewBuild => {
                     state.main.build_locks = gw2_core::types::BuildLocks::default();
