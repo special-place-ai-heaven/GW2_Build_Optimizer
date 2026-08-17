@@ -30,7 +30,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
     }
 
     if state.main.chat.waiting {
-        state.main.error = Some("Chef is plating. Wait for the kitchen.".into());
+        state.main.error = Some("Chat is still thinking. Wait a moment.".into());
         return;
     }
 
@@ -1402,6 +1402,17 @@ fn gemini_from_validated(
     raw
 }
 
+fn keep_equipped_weapons(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    if !m.contains("weapon") {
+        return false;
+    }
+    m.contains("keep")
+        || m.contains("same")
+        || m.contains("don't change")
+        || m.contains("dont change")
+}
+
 fn kitchen_brief(
     game_mode: &str,
     weights: &OptimizationWeights,
@@ -1433,6 +1444,21 @@ fn apply_radar_prefix(
     parsed.stat_prefix = gw2_optimizer::scoring::select_gear_prefix(weights)
         .primary
         .to_string();
+}
+
+fn chat_display_text(explanation: &str, spec_count: usize, error_details: &[String]) -> String {
+    let mut display = if explanation.is_empty() {
+        "I couldn't make a legal build from that.".to_string()
+    } else {
+        explanation.to_string()
+    };
+    // Talk replies send empty specs on purpose. Don't paste validation into the bubble.
+    if spec_count > 0 && !error_details.is_empty() {
+        display.push_str("\n\n(");
+        display.push_str(&error_details.join("; "));
+        display.push(')');
+    }
+    display
 }
 
 fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -> bool {
@@ -1596,21 +1622,21 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     if !state.config.has_active_llm_key() {
         crate::ui::chat_bar::add_ai_response(
             &mut state.main.chat,
-            "The kitchen is closed. Set an AI API key in Settings.".into(),
+            "Set an AI API key in Settings first.".into(),
         );
         return;
     }
     if state.main.optimizing {
         crate::ui::chat_bar::add_ai_response(
             &mut state.main.chat,
-            "The stove is already on. Wait for Optimize to finish.".into(),
+            "Optimize is still running. Wait for it to finish.".into(),
         );
         return;
     }
     if state.main.game_db.is_none() {
         crate::ui::chat_bar::add_ai_response(
             &mut state.main.chat,
-            "The pantry is empty. Wait for game data to load.".into(),
+            "Game data is still loading. Try again in a moment.".into(),
         );
         return;
     }
@@ -1620,20 +1646,14 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         .current_build
         .as_ref()
         .map(|b| b.profession.clone())
-        .unwrap_or_default();
-    if profession.is_empty() {
-        crate::ui::chat_bar::add_ai_response(
-            &mut state.main.chat,
-            "Select a character first.".into(),
-        );
-        return;
-    }
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".into());
 
     state.main.chat_epoch = state.main.chat_epoch.wrapping_add(1);
     let epoch = state.main.chat_epoch;
     state.main.chat.waiting = true;
     state.main.chat_wait_started = Some(std::time::Instant::now());
-    state.main.optimize_stage = "Chef is reading the order\u{2026}".into();
+    state.main.optimize_stage = "Choya is thinking\u{2026}".into();
 
     let config = state.config.clone();
     let character = state
@@ -1643,14 +1663,22 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         .map(summarize_resolved_build)
         .unwrap_or_default();
     let game_mode_label = state.main.game_mode.label().to_string();
-    let locks = state.main.build_locks.describe_constraints();
+    let mut locks = state.main.build_locks.describe_constraints();
+    if keep_equipped_weapons(&display) {
+        if locks.is_empty() {
+            locks = "keep equipped weapons".into();
+        } else {
+            locks.push_str("; keep equipped weapons");
+        }
+    }
+    let has_loadout = !character.is_empty();
     let on_the_pass = state
         .main
         .comparison
         .suggestions
         .get(state.main.comparison.selected_suggestion)
         .map(summarize_suggestion)
-        .unwrap_or_else(|| "(empty — plate a new dish from the pantry)".into());
+        .unwrap_or_else(|| "(none yet — talk or run Optimize first)".into());
     let mut kitchen = kitchen_brief(
         &game_mode_label,
         &state.main.weights,
@@ -1667,6 +1695,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                 .collect::<Vec<_>>()
                 .join("; "),
         );
+    }
+    let transcript = crate::ui::chat_bar::recent_transcript(&state.main.chat.history, 8);
+    if !transcript.is_empty() {
+        kitchen.push_str("\nRecent chat:\n");
+        kitchen.push_str(&transcript);
     }
     let message = display;
     let addon_dir = state.addon_dir.clone();
@@ -1713,31 +1746,54 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         balance_ctx: &chat_balance_ctx,
                     };
 
-                    let response = client
-                        .generate_with_tools_progress(
-                            &prompt,
-                            &tools,
-                            &mut |name: &str, args: &serde_json::Value| {
-                                gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx)
-                            },
-                            8,
-                            &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
-                                let tools_str = humanize_tool_names(tool_names);
-                                crate::state::with_state(|s| {
-                                    if s.main.chat_epoch != epoch {
-                                        return;
+                    let response = if has_loadout {
+                        client.generate(&prompt).map_err(|e| e.to_string())?
+                    } else {
+                        client
+                            .generate_with_tools_progress(
+                                &prompt,
+                                &tools,
+                                &mut |name: &str, args: &serde_json::Value| {
+                                    let stale =
+                                        crate::state::with_state(|s| s.main.chat_epoch != epoch)
+                                            .unwrap_or(true);
+                                    if stale {
+                                        return serde_json::json!({"error": "cancelled"});
                                     }
-                                    s.main.optimize_stage = format!(
-                                        "Chef is plating ({}/{})\u{2026} {}",
-                                        turn, max_turns, tools_str
-                                    );
-                                });
-                            },
-                        )
-                        .map_err(|e| e.to_string())?;
+                                    gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx)
+                                },
+                                3,
+                                &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
+                                    let tools_str = humanize_tool_names(tool_names);
+                                    crate::state::with_state(|s| {
+                                        if s.main.chat_epoch != epoch {
+                                            return;
+                                        }
+                                        s.main.optimize_stage = format!(
+                                            "Choya is looking ({}/{})\u{2026} {}",
+                                            turn, max_turns, tools_str
+                                        );
+                                    });
+                                },
+                            )
+                            .map_err(|e| e.to_string())?
+                    };
 
-                    let mut parsed = gw2_optimizer::prompts::parse_gemini_build(&response)
-                        .map_err(|e| format!("Parse failed: {}", e))?;
+                    let mut parsed = match gw2_optimizer::prompts::parse_gemini_build(&response) {
+                        Ok(p) => p,
+                        Err(_) => {
+                            let explanation: String =
+                                response.chars().filter(|c| *c != '`').take(800).collect();
+                            let explanation = explanation.trim().to_string();
+                            if explanation.is_empty() {
+                                return Err("Empty reply".into());
+                            }
+                            gw2_optimizer::prompts::GeminiBuildResponse {
+                                explanation,
+                                ..Default::default()
+                            }
+                        }
+                    };
                     apply_radar_prefix(&mut parsed, &weights);
                     Ok(parsed)
                 } else {
@@ -1752,7 +1808,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         db,
                         &profession,
                     );
-                    if !validated.errors.is_empty() {
+                    if !validated.errors.is_empty() && !gemini_build.specializations.is_empty() {
                         nexus::log::log(
                             nexus::log::LogLevel::Warning,
                             "GW2BuildOpt",
@@ -1780,29 +1836,18 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     match result {
                         Ok(raw) => {
                             if !validated.as_ref().is_some_and(plate_is_servable) {
-                                let mut display = if raw.explanation.is_empty() {
-                                    "That tasting was not legal. I will not plate it.".to_string()
-                                } else {
-                                    raw.explanation.clone()
-                                };
-                                if let Some(v) = &validated {
-                                    if !v.errors.is_empty() {
-                                        display.push_str("\n\n(Kitchen note: ");
-                                        display.push_str(
-                                            &v.errors
-                                                .iter()
-                                                .map(|e| e.detail.as_str())
-                                                .collect::<Vec<_>>()
-                                                .join("; "),
-                                        );
-                                        display.push(')');
-                                    } else if v.specializations.is_empty() {
-                                        display.push_str(
-                                        "\n\n(Kitchen note: no legal specializations in the tasting.)",
-                                    );
-                                    }
-                                }
-                                crate::ui::chat_bar::add_ai_response(&mut s.main.chat, display);
+                                let errors: Vec<String> = validated
+                                    .as_ref()
+                                    .map(|v| v.errors.iter().map(|e| e.detail.clone()).collect())
+                                    .unwrap_or_default();
+                                crate::ui::chat_bar::add_ai_response(
+                                    &mut s.main.chat,
+                                    chat_display_text(
+                                        &raw.explanation,
+                                        raw.specializations.len(),
+                                        &errors,
+                                    ),
+                                );
                                 return;
                             }
                             let plated = match &validated {
@@ -1810,12 +1855,12 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 None => raw,
                             };
                             let display = if plated.explanation.is_empty() {
-                                "Tonight's plate is up.".to_string()
+                                "Here's a build.".to_string()
                             } else {
                                 plated.explanation.clone()
                             };
                             let mut suggestion = crate::ui::comparison::BuildSuggestion {
-                                label: "Tonight's plate".into(),
+                                label: "Choya's pick".into(),
                                 ..Default::default()
                             };
                             apply_gemini_response(&mut suggestion, &plated);
@@ -1856,7 +1901,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         Err(e) => {
                             crate::ui::chat_bar::add_ai_response(
                                 &mut s.main.chat,
-                                format!("The kitchen could not plate that: {}", e),
+                                format!("Choya couldn't reply: {}", e),
                             );
                         }
                     }
@@ -1887,8 +1932,8 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_radar_prefix, gemini_from_validated, kitchen_brief, plate_is_servable,
-        suggestion_to_chat_code,
+        apply_radar_prefix, chat_display_text, gemini_from_validated, keep_equipped_weapons,
+        kitchen_brief, plate_is_servable, suggestion_to_chat_code,
     };
     use crate::ui::comparison::BuildSuggestion;
     use base64::Engine as _;
@@ -2012,6 +2057,14 @@ mod tests {
     }
 
     #[test]
+    fn keep_equipped_weapons_matches_keep_same() {
+        assert!(keep_equipped_weapons(
+            "I already have a condi build. I want to keep same weapons."
+        ));
+        assert!(!keep_equipped_weapons("make me a power build"));
+    }
+
+    #[test]
     fn kitchen_brief_lists_radar_and_pass() {
         let brief = kitchen_brief(
             "WvW",
@@ -2066,6 +2119,22 @@ mod tests {
             detail: "nope".into(),
         });
         assert!(!plate_is_servable(&v));
+    }
+
+    #[test]
+    fn talk_reply_hides_empty_spec_validation() {
+        let t = chat_display_text(
+            "Hey there!",
+            0,
+            &["Expected 3 specializations, got 0".into()],
+        );
+        assert_eq!(t, "Hey there!");
+    }
+
+    #[test]
+    fn illegal_plate_keeps_validation_in_chat() {
+        let t = chat_display_text("Nope", 2, &["Expected 3 specializations, got 2".into()]);
+        assert!(t.contains("Expected 3 specializations, got 2"));
     }
 
     #[test]

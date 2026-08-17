@@ -78,7 +78,8 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.text_colored(
         [0.4, 0.4, 0.4, 1.0],
         format!(
-            "GW2 Build Optimizer v1.0.0  —  AI: {}",
+            "GW2 Build Optimizer v{}  —  AI: {}",
+            crate::VERSION,
             state.config.active_provider.label()
         ),
     );
@@ -468,6 +469,11 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         state.config.panel_padding = 6.0;
         state.config.section_spacing = 4.0;
         state.config.content_indent = 4.0;
+        state.config.window_x = None;
+        state.config.window_y = None;
+        state.config.window_w = None;
+        state.config.window_h = None;
+        state.force_window_pos = true;
         let _ = state.config.save(&state.config_path);
     }
 }

@@ -232,7 +232,7 @@ fn suggestion_to_saved(
         character_name: character_name.to_string(),
         game_mode: game_mode.clone(),
         profession: profession.to_string(),
-        engine_version: env!("CARGO_PKG_VERSION").to_string(),
+        engine_version: crate::VERSION.to_string(),
         balance_manifest_version: balance_manifest_version.map(|s| s.to_string()),
         label: suggestion.label.clone(),
         stat_prefix: suggestion.stat_prefix.clone(),

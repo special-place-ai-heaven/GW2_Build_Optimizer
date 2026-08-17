@@ -79,7 +79,7 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
             state.main.optimize_stage.clear();
             crate::ui::chat_bar::add_ai_response(
                 &mut state.main.chat,
-                "The kitchen took too long. Place the order again.".into(),
+                "That took too long. Ask again — I'll use the equipped build instead of a long lookup.".into(),
             );
         }
     } else {
@@ -91,10 +91,6 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
 
     // ── Horizontal tab bar (main navigation) ──
     render_top_tabs(ui, state);
-
-    ui.spacing();
-    render_focus_chat(ui, state);
-    ui.spacing();
 
     // ── Two-column layout: left dynamic panel + center content ──
     let pad = state.config.panel_padding;
@@ -380,18 +376,15 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
 
 /// Horizontal tab bar for main navigation (styled buttons with active indicator).
 fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
-    let tabs = [
+    let modes = [
         (MainTab::NewBuild, "New Build"),
-        (MainTab::Improve, "Improve"),
-        (MainTab::SaveLoad, "Save / Load"),
-        (MainTab::Settings, "Settings"),
+        (MainTab::Improve, "Improve Build"),
+        (MainTab::Talk, "Choya"),
     ];
-
-    for (i, (tab, label)) in tabs.iter().enumerate() {
+    for (i, (tab, label)) in modes.iter().enumerate() {
         if i > 0 {
             ui.same_line_with_spacing(0.0, 8.0);
         }
-
         let is_active = state.main.active_tab == *tab;
         if crate::ui::theme::pill(ui, label, is_active, &format!("##main_tab_{}", label)) {
             state.main.active_tab = tab.clone();
@@ -410,7 +403,19 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
         }
     }
 
-    ui.dummy([0.0, 6.0]);
+    ui.same_line_with_spacing(0.0, 28.0);
+    for (tab, label) in [
+        (MainTab::SaveLoad, "Saves"),
+        (MainTab::Settings, "Settings"),
+    ] {
+        let is_active = state.main.active_tab == tab;
+        if crate::ui::theme::pill(ui, label, is_active, &format!("##main_tab_{}", label)) {
+            state.main.active_tab = tab;
+        }
+        ui.same_line_with_spacing(0.0, 8.0);
+    }
+
+    render_focus_chat(ui, state);
 }
 
 /// Dynamic left panel: content varies by active tab.
@@ -421,7 +426,7 @@ fn render_left_panel(ui: &Ui, state: &mut AddonState) {
     }
 
     match state.main.active_tab {
-        MainTab::NewBuild | MainTab::Improve => {
+        MainTab::NewBuild | MainTab::Improve | MainTab::Talk => {
             render_left_build_controls(ui, state);
         }
         MainTab::SaveLoad => {
@@ -439,7 +444,7 @@ fn render_left_panel(ui: &Ui, state: &mut AddonState) {
             // Settings info
             render_left_section_header(ui, "INFO", state.config.section_spacing);
             ui.text_colored(theme::MUTED, "  GW2 Build Optimizer");
-            ui.text_colored(theme::MUTED, "  v1.0.0");
+            ui.text_colored(theme::MUTED, format!("  v{}", crate::VERSION));
             ui.spacing();
             let provider_label = state.config.active_provider.label();
             ui.text_colored(theme::MUTED, format!("  AI: {}", provider_label));
@@ -485,8 +490,6 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
 /// Independent of role/task — changing scale does not rewrite healer vs DPS weights.
 fn render_wvw_sub_role(ui: &Ui, state: &mut AddonState) {
     render_left_section_header(ui, "SCALE", state.config.section_spacing);
-    ui.spacing();
-
     let tiers = [CombatTier::Solo, CombatTier::Party, CombatTier::Squad];
     let labels: Vec<&str> = tiers.iter().map(|t| t.label()).collect();
     let selected = tiers
@@ -498,16 +501,24 @@ fn render_wvw_sub_role(ui: &Ui, state: &mut AddonState) {
         state.main.comparison.suggestions.clear();
         state.main.comparison.error = None;
     }
-    theme::wrapped(ui, theme::MUTED, "1–5  ·  5–15  ·  15+");
 }
 
 fn role_pip(role: RoleObjective) -> [f32; 4] {
-    use RoleObjective::*;
     match role {
-        PowerDps | CondiDps | WvWRoamer | WvWZergDps | PvPBurst => theme::PIP_DAMAGE,
-        Healer | Buffer | WvWZergSupport => theme::PIP_HEAL,
-        Disabler | WvWDisruptor | PvPDisruptor => theme::PIP_CTRL,
-        _ => theme::PIP_FRONT,
+        RoleObjective::WvWRoamer => [0.95, 0.48, 0.18, 1.0],
+        RoleObjective::PowerDps => theme::PIP_DAMAGE,
+        RoleObjective::CondiDps => [0.52, 0.82, 0.28, 1.0],
+        RoleObjective::Hybrid => [0.95, 0.78, 0.35, 1.0],
+        RoleObjective::Sustain => [0.72, 0.52, 0.88, 1.0],
+        RoleObjective::Staller => [0.62, 0.48, 0.32, 1.0],
+        RoleObjective::Healer => theme::PIP_HEAL,
+        RoleObjective::Buffer => [0.32, 0.78, 0.82, 1.0],
+        RoleObjective::Disabler => theme::PIP_CTRL,
+        RoleObjective::Tank => theme::PIP_FRONT,
+        RoleObjective::WvWZergDps | RoleObjective::PvPBurst => theme::PIP_DAMAGE,
+        RoleObjective::WvWZergSupport => theme::PIP_HEAL,
+        RoleObjective::WvWDisruptor | RoleObjective::PvPDisruptor => theme::PIP_CTRL,
+        RoleObjective::PvPSustain => [0.32, 0.78, 0.82, 1.0],
     }
 }
 
@@ -541,9 +552,6 @@ fn apply_role(state: &mut AddonState, role: RoleObjective) {
 
 fn render_role_chips(ui: &Ui, state: &mut AddonState) {
     render_left_section_header(ui, "ROLE", state.config.section_spacing);
-    ui.spacing();
-    theme::wrapped(ui, theme::MUTED, "Same jobs in every mode.");
-    ui.spacing();
 
     let current = state.main.selected_role;
     let avail = ui.content_region_avail()[0];
@@ -743,7 +751,6 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
 /// Build controls: mode, scale, shared roles, optional weight radar, actions.
 fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     render_left_section_header(ui, "MODE", state.config.section_spacing);
-    ui.spacing();
     let mode_idx = GameMode::ALL
         .iter()
         .position(|m| *m == state.main.game_mode)
@@ -790,7 +797,7 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
             None
         };
 
-        let show_current = state.main.active_tab == MainTab::Improve;
+        let show_current = matches!(state.main.active_tab, MainTab::Improve | MainTab::Talk);
         let _chart_modified = crate::ui::radar_chart::render_radar_chart(
             ui,
             &mut state.main.weights,
@@ -854,7 +861,7 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
             ui.tooltip_text(if state.main.optimizing {
                 "Optimization in progress..."
             } else if state.main.chat.waiting {
-                "Chef is plating..."
+                "Thinking..."
             } else if state.main.game_db.is_none() {
                 "Waiting for game data to load..."
             } else {
@@ -894,6 +901,9 @@ fn render_main_content(ui: &Ui, state: &mut AddonState) {
         }
         MainTab::Improve => {
             tabs::improve::render_improve_tab(ui, state);
+        }
+        MainTab::Talk => {
+            tabs::kitchen::render_talk_tab(ui, state);
         }
         MainTab::SaveLoad => {
             tabs::saveload::render_saveload_tab(ui, state);

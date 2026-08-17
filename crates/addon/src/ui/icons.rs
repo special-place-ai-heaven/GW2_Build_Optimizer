@@ -103,6 +103,42 @@ pub fn paint_on(
     }
 }
 
+pub fn profession_icon_url<'a>(db: &'a GameDb, profession: &str) -> Option<&'a str> {
+    let p = db.profession(profession).or_else(|| {
+        db.professions.values().find(|p| {
+            p.id.eq_ignore_ascii_case(profession) || p.name.eq_ignore_ascii_case(profession)
+        })
+    })?;
+    p.icon_big
+        .as_deref()
+        .or(p.icon.as_deref())
+        .filter(|s| !s.is_empty())
+}
+
+pub fn paint_avatar(ui: &Ui, url: Option<&str>, p: [f32; 2], size: f32, letter: char) {
+    let dl = ui.get_window_draw_list();
+    let p_max = [p[0] + size, p[1] + size];
+    let r = size * 0.5;
+    if let Some(tid) = url.and_then(ensure_texture) {
+        dl.add_image_rounded(tid, p, p_max, r)
+            .col([1.0, 1.0, 1.0, 1.0])
+            .build();
+    } else {
+        dl.add_rect(p, p_max, theme::PLATE)
+            .filled(true)
+            .rounding(r)
+            .build();
+        let s = letter.to_ascii_uppercase().to_string();
+        let sz = ui.calc_text_size(&s);
+        dl.add_text(
+            [p[0] + (size - sz[0]) * 0.5, p[1] + (size - sz[1]) * 0.5],
+            crate::ui::color_u32(theme::CURRENT),
+            &s,
+        );
+    }
+    dl.add_rect(p, p_max, theme::GOLD_DIM).rounding(r).build();
+}
+
 pub fn item_url(db: &GameDb, id: u32) -> Option<&str> {
     db.items.get(&id).and_then(|i| i.icon.as_deref())
 }

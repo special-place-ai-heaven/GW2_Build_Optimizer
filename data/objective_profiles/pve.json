@@ -420,6 +420,246 @@
       "is_mode_default": false,
       "notes": "Kite/stall. Survive, don't race DPS.",
       "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvE_Harasser",
+      "axis_weights": {
+        "power": 0.7,
+        "condition": 0.2,
+        "boon_support": 0.0,
+        "healing": 0.1,
+        "sustain": 0.4,
+        "control": 0.6
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.9,
+        "Fury": 0.8,
+        "Quickness": 0.7,
+        "Alacrity": 0.6,
+        "Swiftness": 0.2,
+        "Protection": 0.1,
+        "Regeneration": 0.05,
+        "Vigor": 0.1,
+        "Aegis": 0.05,
+        "Stability": 0.05,
+        "Resistance": 0.05,
+        "Resolution": 0.1
+      },
+      "condition_priorities": {
+        "Burning": 0.4,
+        "Bleeding": 0.3,
+        "Poison": 0.2,
+        "Torment": 0.3,
+        "Confusion": 0.1,
+        "Vulnerability": 0.9,
+        "Weakness": 0.1,
+        "Blind": 0.05,
+        "Crippled": 0.05,
+        "Immobilize": 0.05,
+        "Slow": 0.05,
+        "Chilled": 0.05,
+        "Fear": 0.05,
+        "Taunt": 0.05
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.1,
+        "corrupts_boon": 0.2,
+        "removes_condition": 0.3,
+        "converts_condition_to_boon": 0.35,
+        "transfers_condition": 0.15
+      },
+      "is_mode_default": false,
+      "notes": "Open-world harasser. Burst a target and leave. Control/mobility over pure raid DPS.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvE_Bruiser",
+      "axis_weights": {
+        "power": 0.5,
+        "condition": 0.2,
+        "boon_support": 0.0,
+        "healing": 0.2,
+        "sustain": 0.8,
+        "control": 0.3
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.9,
+        "Fury": 0.8,
+        "Quickness": 0.7,
+        "Alacrity": 0.6,
+        "Swiftness": 0.2,
+        "Protection": 0.1,
+        "Regeneration": 0.05,
+        "Vigor": 0.1,
+        "Aegis": 0.05,
+        "Stability": 0.05,
+        "Resistance": 0.05,
+        "Resolution": 0.1
+      },
+      "condition_priorities": {
+        "Burning": 0.4,
+        "Bleeding": 0.3,
+        "Poison": 0.2,
+        "Torment": 0.3,
+        "Confusion": 0.1,
+        "Vulnerability": 0.9,
+        "Weakness": 0.1,
+        "Blind": 0.05,
+        "Crippled": 0.05,
+        "Immobilize": 0.05,
+        "Slow": 0.05,
+        "Chilled": 0.05,
+        "Fear": 0.05,
+        "Taunt": 0.05
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.1,
+        "corrupts_boon": 0.2,
+        "removes_condition": 0.3,
+        "converts_condition_to_boon": 0.35,
+        "transfers_condition": 0.15
+      },
+      "is_mode_default": false,
+      "notes": "Open-world bruiser. Damage plus EHP. Not a glass Power DPS clone.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvE_Disabler",
+      "axis_weights": {
+        "power": 0.2,
+        "condition": 0.3,
+        "boon_support": 0.0,
+        "healing": 0.1,
+        "sustain": 0.4,
+        "control": 1.0
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.7,
+        "Fury": 0.5,
+        "Quickness": 0.7,
+        "Alacrity": 0.6,
+        "Swiftness": 0.2,
+        "Protection": 0.1,
+        "Regeneration": 0.05,
+        "Vigor": 0.1,
+        "Aegis": 0.05,
+        "Stability": 0.05,
+        "Resistance": 0.05,
+        "Resolution": 0.05
+      },
+      "condition_priorities": {
+        "Burning": 0.9,
+        "Bleeding": 0.85,
+        "Poison": 0.7,
+        "Torment": 0.8,
+        "Confusion": 0.6,
+        "Vulnerability": 0.5,
+        "Weakness": 0.1,
+        "Blind": 0.05,
+        "Crippled": 0.05,
+        "Immobilize": 0.05,
+        "Slow": 0.05,
+        "Chilled": 0.05,
+        "Fear": 0.05,
+        "Taunt": 0.05
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.1,
+        "corrupts_boon": 0.25,
+        "removes_condition": 0.2,
+        "converts_condition_to_boon": 0.25,
+        "transfers_condition": 0.2
+      },
+      "is_mode_default": false,
+      "notes": "PvE disabler. CC and interrupt first, damage second.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvE_Commander",
+      "axis_weights": {
+        "power": 0.3,
+        "condition": 0.1,
+        "boon_support": 0.4,
+        "healing": 0.2,
+        "sustain": 0.7,
+        "control": 0.3
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.4,
+        "Fury": 0.3,
+        "Quickness": 0.5,
+        "Alacrity": 0.5,
+        "Swiftness": 0.3,
+        "Protection": 0.8,
+        "Regeneration": 1.0,
+        "Vigor": 0.4,
+        "Aegis": 0.7,
+        "Stability": 0.5,
+        "Resistance": 0.6,
+        "Resolution": 0.5
+      },
+      "condition_priorities": {
+        "Burning": 0.05,
+        "Bleeding": 0.05,
+        "Poison": 0.1,
+        "Torment": 0.05,
+        "Confusion": 0.05,
+        "Vulnerability": 0.2,
+        "Weakness": 0.3,
+        "Blind": 0.1,
+        "Crippled": 0.05,
+        "Immobilize": 0.05,
+        "Slow": 0.1,
+        "Chilled": 0.1,
+        "Fear": 0.05,
+        "Taunt": 0.05
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.05,
+        "corrupts_boon": 0.05,
+        "removes_condition": 0.9,
+        "converts_condition_to_boon": 0.95,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": false,
+      "notes": "PvE commander/tank. Toughness and group presence, not healer or power DPS.",
+      "evidence_level": "Heuristic"
     }
   ]
 }

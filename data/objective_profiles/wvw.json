@@ -118,7 +118,7 @@
         "transfers_condition": 0.3
       },
       "is_mode_default": false,
-      "notes": "WvW zerg support (Firebrand/Scrapper). Stability is the #1 boon — zerg survival depends on it. Condition cleanse extremely important in large fights. High boon generation for team-wide buffs. Sustain for personal survivability in the blob.",
+      "notes": "WvW zerg support (Firebrand/Scrapper). Stability is the #1 boon \u2014 zerg survival depends on it. Condition cleanse extremely important in large fights. High boon generation for team-wide buffs. Sustain for personal survivability in the blob.",
       "evidence_level": "Heuristic"
     },
     {
@@ -358,7 +358,247 @@
         "transfers_condition": 0.3
       },
       "is_mode_default": false,
-      "notes": "Troll/occupy. Job is stall until the blob arrives — not damage. Survive a zerg with heal, toughness, evade, port, stealth, and speed.",
+      "notes": "Troll/occupy. Job is stall until the blob arrives \u2014 not damage. Survive a zerg with heal, toughness, evade, port, stealth, and speed.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "WvW_Condi",
+      "axis_weights": {
+        "power": 0.15,
+        "condition": 0.85,
+        "boon_support": 0.1,
+        "healing": 0.0,
+        "sustain": 0.5,
+        "control": 0.4
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.8,
+        "Fury": 0.7,
+        "Quickness": 0.5,
+        "Alacrity": 0.4,
+        "Swiftness": 0.7,
+        "Protection": 0.6,
+        "Regeneration": 0.3,
+        "Vigor": 0.3,
+        "Aegis": 0.5,
+        "Stability": 0.9,
+        "Resistance": 0.5,
+        "Resolution": 0.3
+      },
+      "condition_priorities": {
+        "Burning": 0.5,
+        "Bleeding": 0.3,
+        "Poison": 0.3,
+        "Torment": 0.3,
+        "Confusion": 0.1,
+        "Vulnerability": 0.6,
+        "Weakness": 0.4,
+        "Blind": 0.3,
+        "Crippled": 0.5,
+        "Immobilize": 0.6,
+        "Slow": 0.5,
+        "Chilled": 0.5,
+        "Fear": 0.6,
+        "Taunt": 0.3
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.4,
+        "corrupts_boon": 0.6,
+        "removes_condition": 0.4,
+        "converts_condition_to_boon": 0.4,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": false,
+      "notes": "WvW condition DPS. Distinct from zerg power DPS: Expertise/condition pressure, not Berserker spike.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "WvW_Bruiser",
+      "axis_weights": {
+        "power": 0.55,
+        "condition": 0.15,
+        "boon_support": 0.0,
+        "healing": 0.15,
+        "sustain": 0.85,
+        "control": 0.3
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.6,
+        "Fury": 0.7,
+        "Quickness": 0.6,
+        "Alacrity": 0.3,
+        "Swiftness": 0.9,
+        "Protection": 0.5,
+        "Regeneration": 0.4,
+        "Vigor": 0.6,
+        "Aegis": 0.5,
+        "Stability": 0.8,
+        "Resistance": 0.6,
+        "Resolution": 0.3
+      },
+      "condition_priorities": {
+        "Burning": 0.4,
+        "Bleeding": 0.3,
+        "Poison": 0.5,
+        "Torment": 0.3,
+        "Confusion": 0.3,
+        "Vulnerability": 0.5,
+        "Weakness": 0.5,
+        "Blind": 0.5,
+        "Crippled": 0.7,
+        "Immobilize": 0.8,
+        "Slow": 0.6,
+        "Chilled": 0.6,
+        "Fear": 0.6,
+        "Taunt": 0.3
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.5,
+        "corrupts_boon": 0.5,
+        "removes_condition": 0.7,
+        "converts_condition_to_boon": 0.7,
+        "transfers_condition": 0.4
+      },
+      "is_mode_default": false,
+      "notes": "WvW bruiser. Fights and lives in the blob. High sustain vs Harasser pick-and-leave.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "WvW_Heal",
+      "axis_weights": {
+        "power": 0.0,
+        "condition": 0.0,
+        "boon_support": 0.3,
+        "healing": 1.0,
+        "sustain": 0.5,
+        "control": 0.2
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.9,
+        "Fury": 0.7,
+        "Quickness": 0.8,
+        "Alacrity": 0.7,
+        "Swiftness": 0.8,
+        "Protection": 0.9,
+        "Regeneration": 0.8,
+        "Vigor": 0.5,
+        "Aegis": 0.8,
+        "Stability": 1.0,
+        "Resistance": 0.7,
+        "Resolution": 0.5
+      },
+      "condition_priorities": {
+        "Burning": 0.05,
+        "Bleeding": 0.05,
+        "Poison": 0.1,
+        "Torment": 0.05,
+        "Confusion": 0.05,
+        "Vulnerability": 0.2,
+        "Weakness": 0.4,
+        "Blind": 0.1,
+        "Crippled": 0.1,
+        "Immobilize": 0.1,
+        "Slow": 0.1,
+        "Chilled": 0.1,
+        "Fear": 0.1,
+        "Taunt": 0.05
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.1,
+        "corrupts_boon": 0.1,
+        "removes_condition": 0.9,
+        "converts_condition_to_boon": 0.95,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": false,
+      "notes": "WvW healer. Raw healing output first; boons are secondary. Distinct from zerg boon support.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "WvW_Commander",
+      "axis_weights": {
+        "power": 0.25,
+        "condition": 0.05,
+        "boon_support": 0.45,
+        "healing": 0.15,
+        "sustain": 0.7,
+        "control": 0.4
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.9,
+        "Fury": 0.7,
+        "Quickness": 0.8,
+        "Alacrity": 0.7,
+        "Swiftness": 0.8,
+        "Protection": 0.9,
+        "Regeneration": 0.8,
+        "Vigor": 0.5,
+        "Aegis": 0.8,
+        "Stability": 1.0,
+        "Resistance": 0.7,
+        "Resolution": 0.5
+      },
+      "condition_priorities": {
+        "Burning": 0.05,
+        "Bleeding": 0.05,
+        "Poison": 0.1,
+        "Torment": 0.05,
+        "Confusion": 0.05,
+        "Vulnerability": 0.2,
+        "Weakness": 0.4,
+        "Blind": 0.1,
+        "Crippled": 0.1,
+        "Immobilize": 0.1,
+        "Slow": 0.1,
+        "Chilled": 0.1,
+        "Fear": 0.1,
+        "Taunt": 0.05
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.1,
+        "corrupts_boon": 0.1,
+        "removes_condition": 0.9,
+        "converts_condition_to_boon": 0.95,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": false,
+      "notes": "WvW commander/frontline. Presence, toughness, stability, not a DPS clone.",
       "evidence_level": "Heuristic"
     }
   ]

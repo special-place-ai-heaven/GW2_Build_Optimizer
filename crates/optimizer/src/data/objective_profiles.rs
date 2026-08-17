@@ -385,32 +385,32 @@ mod tests {
     }
 
     #[test]
-    fn test_pve_has_7_profiles() {
+    fn test_pve_has_11_profiles() {
         let data = load_all_objective_profiles().unwrap();
         assert_eq!(
             data.files["PvE"].profiles.len(),
-            7,
-            "PvE should have 7 profiles"
+            11,
+            "PvE should have 11 profiles"
         );
     }
 
     #[test]
-    fn test_pvp_has_5_profiles() {
+    fn test_pvp_has_10_profiles() {
         let data = load_all_objective_profiles().unwrap();
         assert_eq!(
             data.files["PvP"].profiles.len(),
-            5,
-            "PvP should have 5 profiles"
+            10,
+            "PvP should have 10 profiles"
         );
     }
 
     #[test]
-    fn test_wvw_has_6_profiles() {
+    fn test_wvw_has_10_profiles() {
         let data = load_all_objective_profiles().unwrap();
         assert_eq!(
             data.files["WvW"].profiles.len(),
-            6,
-            "WvW should have 6 profiles"
+            10,
+            "WvW should have 10 profiles"
         );
     }
 
@@ -549,7 +549,7 @@ mod tests {
     fn test_profiles_for_mode() {
         let data = load_all_objective_profiles().unwrap();
         let pve = data.profiles_for_mode("PvE");
-        assert_eq!(pve.len(), 7);
+        assert_eq!(pve.len(), 11);
         let unknown = data.profiles_for_mode("Unknown");
         assert!(unknown.is_empty());
     }

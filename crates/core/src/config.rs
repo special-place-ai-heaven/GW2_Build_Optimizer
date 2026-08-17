@@ -95,6 +95,20 @@ pub struct AppConfig {
     #[serde(default = "default_content_indent")]
     pub content_indent: f32,
 
+    /// Show the overlay when GW2 / Nexus loads. Default true.
+    #[serde(default = "default_window_visible")]
+    pub window_visible: bool,
+    /// Last overlay position (screen px). None = default corner.
+    #[serde(default)]
+    pub window_x: Option<f32>,
+    #[serde(default)]
+    pub window_y: Option<f32>,
+    /// Last overlay size (px). None = 800×600. Tiny values are clamped on restore.
+    #[serde(default)]
+    pub window_w: Option<f32>,
+    #[serde(default)]
+    pub window_h: Option<f32>,
+
     // ─── Optimization Defaults ───
     /// Default game mode for new optimizations.
     #[serde(default)]
@@ -126,6 +140,11 @@ impl Default for AppConfig {
             panel_padding: 6.0,
             section_spacing: 4.0,
             content_indent: 4.0,
+            window_visible: true,
+            window_x: None,
+            window_y: None,
+            window_w: None,
+            window_h: None,
             default_game_mode: None,
             auto_refresh_cache: false,
         }
@@ -146,6 +165,14 @@ default_f32!(default_left_panel_width = 360.0);
 default_f32!(default_panel_padding = 6.0);
 default_f32!(default_section_spacing = 4.0);
 default_f32!(default_content_indent = 4.0);
+
+fn default_window_visible() -> bool {
+    true
+}
+
+pub const DEFAULT_WINDOW_POS: [f32; 2] = [80.0, 80.0];
+pub const DEFAULT_WINDOW_SIZE: [f32; 2] = [800.0, 600.0];
+pub const MIN_WINDOW_SIZE: [f32; 2] = [640.0, 400.0];
 
 /// Known Gemini models — fallback shown when list_models() API call fails.
 /// The Settings tab populates this list dynamically from the API at runtime.
@@ -198,6 +225,30 @@ pub const DEFAULT_OPENROUTER_MODEL: &str = "anthropic/claude-sonnet-4-5";
 pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-6";
 
 impl AppConfig {
+    /// Restored overlay rect. Missing or tiny saved sizes fall back to 800x600.
+    pub fn window_rect(&self) -> ([f32; 2], [f32; 2]) {
+        let pos = [
+            self.window_x.unwrap_or(DEFAULT_WINDOW_POS[0]),
+            self.window_y.unwrap_or(DEFAULT_WINDOW_POS[1]),
+        ];
+        let size = [
+            self.window_w
+                .unwrap_or(DEFAULT_WINDOW_SIZE[0])
+                .max(MIN_WINDOW_SIZE[0]),
+            self.window_h
+                .unwrap_or(DEFAULT_WINDOW_SIZE[1])
+                .max(MIN_WINDOW_SIZE[1]),
+        ];
+        (pos, size)
+    }
+
+    pub fn set_window_rect(&mut self, pos: [f32; 2], size: [f32; 2]) {
+        self.window_x = Some(pos[0]);
+        self.window_y = Some(pos[1]);
+        self.window_w = Some(size[0].max(MIN_WINDOW_SIZE[0]));
+        self.window_h = Some(size[1].max(MIN_WINDOW_SIZE[1]));
+    }
+
     pub fn gemini_model_id(&self) -> &str {
         self.gemini_model.as_deref().unwrap_or(DEFAULT_GEMINI_MODEL)
     }
@@ -375,6 +426,11 @@ mod tests {
         assert_eq!(config.font_scale, 1.0);
         assert!(!config.auto_refresh_cache);
         assert!(config.is_setup_complete());
+        assert!(config.window_visible);
+        assert_eq!(
+            config.window_rect(),
+            (DEFAULT_WINDOW_POS, DEFAULT_WINDOW_SIZE)
+        );
     }
 
     #[test]
@@ -389,6 +445,23 @@ mod tests {
         assert_eq!(config.panel_padding, defaults.panel_padding);
         assert_eq!(config.section_spacing, defaults.section_spacing);
         assert_eq!(config.content_indent, defaults.content_indent);
+        assert!(config.window_visible);
+        assert_eq!(
+            config.window_rect(),
+            (DEFAULT_WINDOW_POS, DEFAULT_WINDOW_SIZE)
+        );
+    }
+
+    #[test]
+    fn window_rect_clamps_tiny_saved_size() {
+        let mut config = AppConfig::default();
+        config.window_x = Some(120.0);
+        config.window_y = Some(40.0);
+        config.window_w = Some(80.0);
+        config.window_h = Some(20.0);
+        let (pos, size) = config.window_rect();
+        assert_eq!(pos, [120.0, 40.0]);
+        assert_eq!(size, MIN_WINDOW_SIZE);
     }
 
     #[test]

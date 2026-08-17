@@ -55,7 +55,7 @@ pub fn render_radar_chart(
 ) -> bool {
     let mut modified = false;
     let avail = ui.content_region_avail()[0].max(156.0);
-    let size = avail.min(300.0);
+    let size = avail.min(176.0);
     let indent = ((avail - size) * 0.5).max(0.0);
     let origin = ui.cursor_screen_pos();
     let cursor_pos = [origin[0] + indent, origin[1]];

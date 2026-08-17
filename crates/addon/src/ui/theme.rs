@@ -1,6 +1,9 @@
 //! Tyrian night overlay tokens. Dark stone + warm gold — GW2, not a dashboard.
 //! Hold the return value of [`push`] for the whole window frame or styles pop.
 
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use nexus::imgui::{DrawListMut, StyleColor, StyleVar, TextureId, Ui};
 
 use super::color_u32;
@@ -376,10 +379,24 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
     let coin_h = coin_r * 2.0;
     const CAP_SCALE: f32 = 1.45;
     const CAP_GAP: f32 = 28.0;
+    const NOTE: &str = "Speed depends on GW2 servers, not this addon.";
+    const NOTE_SCALE: f32 = 0.68;
     ui.set_window_font_scale(CAP_SCALE);
     let cap_sz = ui.calc_text_size(caption);
+    ui.set_window_font_scale(NOTE_SCALE);
+    let note_sz = ui.calc_text_size(NOTE);
     ui.set_window_font_scale(1.0);
-    let total_h = title_h + headroom + bar_h + line_gap + 6.0 + coin_h + CAP_GAP + cap_sz[1] + 8.0;
+    let total_h = title_h
+        + headroom
+        + bar_h
+        + line_gap
+        + 6.0
+        + coin_h
+        + CAP_GAP
+        + cap_sz[1]
+        + 3.0
+        + note_sz[1]
+        + 8.0;
     let origin = ui.cursor_screen_pos();
     let p = [origin[0] + SIDE, origin[1]];
     let _ = ui.invisible_button("##dl_scribble", [full, total_h]);
@@ -482,7 +499,6 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
             [feet_x, bar_y + bar_h - hop],
             choya_h,
             sway,
-            t,
             track_x1,
         );
 
@@ -491,6 +507,12 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
         let cap_x = origin[0] + ((full - cap_sz[0]) * 0.5).max(0.0);
         let cap_y = label_y + CAP_GAP;
         dl.add_text([cap_x, cap_y], color_u32(GOLD), caption);
+        ui.set_window_font_scale(NOTE_SCALE);
+        let note_sz = ui.calc_text_size(NOTE);
+        let note_x = origin[0] + ((full - note_sz[0]) * 0.5).max(0.0);
+        let note_y = cap_y + cap_sz[1] + 3.0;
+        let faint = [MUTED[0], MUTED[1], MUTED[2], 0.42];
+        dl.add_text([note_x, note_y], color_u32(faint), NOTE);
         ui.set_window_font_scale(1.0);
     }
 }
@@ -539,26 +561,113 @@ fn mystic_coin_tex(metal: usize) -> Option<TextureId> {
     embedded_tex(key, bytes)
 }
 
-/// Piñata choya standing on `feet`, slow bob + rock, chatting.
-fn draw_choya(
-    ui: &Ui,
-    dl: &DrawListMut,
-    feet: [f32; 2],
-    height: f32,
-    sway: f32,
-    t: f32,
-    bar_right: f32,
-) {
-    let Some(tid) = embedded_tex("GW2BO_CHOYA", include_bytes!("../../assets/choya.png")) else {
+const CHOYA_SHEET_W: f32 = 1536.0;
+const CHOYA_SHEET_H: f32 = 1024.0;
+/// Pixel rect on `choya_animated.png`: x, y, w, h
+const CHOYA_HERO: [f32; 4] = [42.0, 18.0, 456.0, 460.0];
+const CHOYA_DANCE: [f32; 4] = [523.0, 98.0, 248.0, 277.0];
+const CHOYA_THINK: [f32; 4] = [1101.0, 634.0, 117.0, 89.0];
+const CHOYA_IDLE: [[f32; 4]; 9] = [
+    [446.0, 417.0, 111.0, 119.0],
+    [559.0, 415.0, 118.0, 122.0],
+    [694.0, 418.0, 99.0, 118.0],
+    [798.0, 421.0, 100.0, 115.0],
+    [912.0, 421.0, 108.0, 115.0],
+    [1030.0, 421.0, 104.0, 116.0],
+    [1146.0, 424.0, 89.0, 115.0],
+    [1263.0, 425.0, 106.0, 116.0],
+    [1387.0, 417.0, 106.0, 123.0],
+];
+
+/// `choya_animated_02.png` — same atlas size, isolated props + portraits.
+const CHOYA2_HERO: [f32; 4] = [8.0, 7.0, 286.0, 269.0];
+const CHOYA2_PEEK: [f32; 4] = [870.0, 628.0, 208.0, 133.0];
+const CHOYA2_PARTY: [f32; 4] = [1198.0, 297.0, 261.0, 259.0];
+const CHOYA2_WALK: [[f32; 4]; 6] = [
+    [5.0, 569.0, 122.0, 170.0],
+    [138.0, 572.0, 125.0, 164.0],
+    [270.0, 570.0, 139.0, 170.0],
+    [414.0, 570.0, 142.0, 164.0],
+    [567.0, 571.0, 147.0, 164.0],
+    [707.0, 573.0, 154.0, 166.0],
+];
+const CHOYA2_FACE: [[f32; 4]; 5] = [
+    [4.0, 784.0, 150.0, 190.0],
+    [162.0, 792.0, 145.0, 178.0],
+    [312.0, 784.0, 148.0, 184.0],
+    [469.0, 797.0, 156.0, 176.0],
+    [635.0, 790.0, 155.0, 183.0],
+];
+const CHOYA2_SOMBRERO: [f32; 4] = [1198.0, 799.0, 180.0, 108.0];
+const CHOYA2_SHADES: [f32; 4] = [1378.0, 804.0, 138.0, 51.0];
+const CHOYA2_MARACA: [f32; 4] = [842.0, 814.0, 68.0, 138.0];
+const CHOYA2_MARACA2: [f32; 4] = [801.0, 897.0, 93.0, 110.0];
+const CHOYA2_NOTE: [f32; 4] = [1145.0, 874.0, 32.0, 40.0];
+const CHOYA2_HEART: [f32; 4] = [964.0, 944.0, 43.0, 44.0];
+const CHOYA2_LEI: [f32; 4] = [1396.0, 863.0, 121.0, 65.0];
+
+fn choya_sheet() -> Option<TextureId> {
+    embedded_tex(
+        "GW2BO_CHOYA_SHEET",
+        include_bytes!("../../assets/choya_animated.png"),
+    )
+}
+
+fn choya_sheet2() -> Option<TextureId> {
+    embedded_tex(
+        "GW2BO_CHOYA_SHEET2",
+        include_bytes!("../../assets/choya_animated_02.png"),
+    )
+}
+
+fn sheet_uv(frame: [f32; 4]) -> ([f32; 2], [f32; 2]) {
+    let [x, y, w, h] = frame;
+    (
+        [x / CHOYA_SHEET_W, y / CHOYA_SHEET_H],
+        [(x + w) / CHOYA_SHEET_W, (y + h) / CHOYA_SHEET_H],
+    )
+}
+
+fn blit_choya_frame(dl: &DrawListMut, center: [f32; 2], size: f32, frame: [f32; 4]) {
+    let Some(tid) = choya_sheet() else {
         return;
     };
-    // cropped asset is 172x192
+    blit_frame(dl, tid, center, size, frame);
+}
+
+fn blit_frame(dl: &DrawListMut, tid: TextureId, center: [f32; 2], size: f32, frame: [f32; 4]) {
+    let [_, _, w, h] = frame;
+    let aspect = (w / h).max(0.01);
+    let (dw, dh) = if aspect > 1.0 {
+        (size, size / aspect)
+    } else {
+        (size * aspect, size)
+    };
+    let pmin = [center[0] - dw * 0.5, center[1] - dh * 0.5];
+    let pmax = [center[0] + dw * 0.5, center[1] + dh * 0.5];
+    let (uv0, uv1) = sheet_uv(frame);
+    dl.add_image(tid, pmin, pmax)
+        .uv_min(uv0)
+        .uv_max(uv1)
+        .build();
+}
+
+fn draw_choya_sprite(dl: &DrawListMut, feet: [f32; 2], height: f32, sway: f32) {
+    let (tid, frame) = if let Some(tid) = choya_sheet2() {
+        (tid, CHOYA2_PARTY)
+    } else if let Some(tid) = choya_sheet() {
+        (tid, CHOYA_DANCE)
+    } else {
+        return;
+    };
+    let [_, _, fw, fh] = frame;
     let h = height;
-    let w = h * (172.0 / 192.0);
+    let w = h * (fw / fh);
     let tilt = sway * 0.18;
     let (c, s) = (tilt.cos(), tilt.sin());
     let rot =
         |dx: f32, dy: f32| -> [f32; 2] { [feet[0] + dx * c - dy * s, feet[1] + dx * s + dy * c] };
+    let (uv0, uv1) = sheet_uv(frame);
     dl.add_image_quad(
         tid,
         rot(-w * 0.5, -h),
@@ -566,28 +675,24 @@ fn draw_choya(
         rot(w * 0.5, 0.0),
         rot(-w * 0.5, 0.0),
     )
+    .uv(
+        [uv0[0], uv0[1]],
+        [uv1[0], uv0[1]],
+        [uv1[0], uv1[1]],
+        [uv0[0], uv1[1]],
+    )
     .build();
+}
 
-    const LINES: &[&str] = &[
-        "poke!",
-        "not salad.",
-        "fiesta!",
-        "olé!",
-        "don't hug",
-        "candy?",
-        "spiky.",
-        "ow ow ow",
-        "shake it!",
-        "I'm a plant",
-        "needles.",
-        "boom?",
-    ];
-    let slot = 160;
-    let i = ((t as i32 / slot).rem_euclid(LINES.len() as i32)) as usize;
-    if (t as i32).rem_euclid(slot) >= 120 {
+/// Piñata choya standing on `feet`, slow bob + rock, chatting.
+fn draw_choya(ui: &Ui, dl: &DrawListMut, feet: [f32; 2], height: f32, sway: f32, bar_right: f32) {
+    draw_choya_sprite(dl, feet, height, sway);
+    let [_, _, fw, fh] = CHOYA2_PARTY;
+    let w = height * (fw / fh);
+
+    let Some(text) = choya_quip() else {
         return;
-    }
-    let text = LINES[i];
+    };
     let pad = 6.0;
     let sz = ui.calc_text_size(text);
     let bw = sz[0] + pad * 2.0;
@@ -597,7 +702,7 @@ fn draw_choya(
     if bx + bw > bar_right {
         bx = feet[0] - w * 0.5 - gap - bw;
     }
-    let by = feet[1] - h * 0.78;
+    let by = feet[1] - height * 0.78;
     dl.add_rect([bx, by], [bx + bw, by + bh], PLATE)
         .filled(true)
         .rounding(6.0)
@@ -606,6 +711,206 @@ fn draw_choya(
         .rounding(6.0)
         .build();
     dl.add_text([bx + pad, by + pad * 0.4], color_u32(CREAM), text);
+}
+
+/// Face portraits from sheet 2. `center` is the avatar slot center.
+pub fn draw_choya_avatar(ui: &Ui, center: [f32; 2], size: f32) {
+    let Some(tid) = choya_sheet2() else {
+        let i = (ui.frame_count() as usize / 6) % CHOYA_IDLE.len();
+        blit_choya_frame(&ui.get_window_draw_list(), center, size, CHOYA_IDLE[i]);
+        return;
+    };
+    let i = (ui.frame_count() as usize / 48) % CHOYA2_FACE.len();
+    blit_frame(
+        &ui.get_window_draw_list(),
+        tid,
+        center,
+        size,
+        CHOYA2_FACE[i],
+    );
+}
+
+/// Standing pose plus isolated props (sombrero, shades, maracas, notes).
+pub fn draw_choya_hero(ui: &Ui, center: [f32; 2], size: f32) {
+    let dl = ui.get_window_draw_list();
+    let Some(tid) = choya_sheet2() else {
+        blit_choya_frame(&dl, center, size, CHOYA_HERO);
+        return;
+    };
+    blit_frame(&dl, tid, center, size, CHOYA2_HERO);
+    blit_frame(
+        &dl,
+        tid,
+        [center[0], center[1] + size * 0.22],
+        size * 0.55,
+        CHOYA2_LEI,
+    );
+    blit_frame(
+        &dl,
+        tid,
+        [center[0], center[1] - size * 0.46],
+        size * 0.78,
+        CHOYA2_SOMBRERO,
+    );
+    blit_frame(
+        &dl,
+        tid,
+        [center[0], center[1] - size * 0.04],
+        size * 0.44,
+        CHOYA2_SHADES,
+    );
+    let t = ui.frame_count() as f32 * 0.09;
+    let bounce = t.sin() * size * 0.05;
+    blit_frame(
+        &dl,
+        tid,
+        [center[0] - size * 0.52, center[1] + size * 0.16 + bounce],
+        size * 0.32,
+        CHOYA2_MARACA,
+    );
+    blit_frame(
+        &dl,
+        tid,
+        [center[0] + size * 0.54, center[1] + size * 0.20 - bounce],
+        size * 0.28,
+        CHOYA2_MARACA2,
+    );
+    let a = t * 0.45;
+    blit_frame(
+        &dl,
+        tid,
+        [
+            center[0] + a.cos() * size * 0.62,
+            center[1] - size * 0.18 + a.sin() * size * 0.22,
+        ],
+        size * 0.16,
+        CHOYA2_NOTE,
+    );
+    blit_frame(
+        &dl,
+        tid,
+        [
+            center[0] - (a + 2.2).cos() * size * 0.55,
+            center[1] + size * 0.38 + (a + 2.2).sin() * size * 0.10,
+        ],
+        size * 0.14,
+        CHOYA2_HEART,
+    );
+}
+
+/// Peeking-from-the-rock pose while the LLM is working.
+pub fn draw_choya_thinking(ui: &Ui, center: [f32; 2], size: f32) {
+    let Some(tid) = choya_sheet2() else {
+        blit_choya_frame(&ui.get_window_draw_list(), center, size, CHOYA_THINK);
+        return;
+    };
+    blit_frame(&ui.get_window_draw_list(), tid, center, size, CHOYA2_PEEK);
+}
+
+/// Six-frame bounce from sheet 2 (composer / small slots).
+pub fn draw_choya_walk(ui: &Ui, center: [f32; 2], size: f32) {
+    let Some(tid) = choya_sheet2() else {
+        draw_choya_avatar(ui, center, size);
+        return;
+    };
+    let i = (ui.frame_count() as usize / 6) % CHOYA2_WALK.len();
+    blit_frame(
+        &ui.get_window_draw_list(),
+        tid,
+        center,
+        size,
+        CHOYA2_WALK[i],
+    );
+}
+
+const CHOYA_LINES: &[&str] = &[
+    "poke!",
+    "not salad.",
+    "fiesta!",
+    "olé!",
+    "don't hug",
+    "candy?",
+    "spiky.",
+    "ow ow ow",
+    "shake it!",
+    "I'm a plant",
+    "needles.",
+    "boom?",
+    "hit me",
+    "loot inside",
+    "no touchy",
+    "yeet?",
+    "pop!",
+    "not a pear",
+    "hug = ouch",
+    "I bite",
+    "piñata!",
+    "amigo!",
+    "ay ay ay",
+    "boop?",
+    "no candy",
+    "violence!",
+    "revenge poke",
+    "don't sit",
+    "I'm loot",
+    "wiggle",
+    "too cute",
+    "coins?",
+    "spicy hug",
+    "keep off",
+    "Elona!",
+];
+
+struct ChoyaTalk {
+    rng: u64,
+    line: usize,
+    showing: bool,
+    until: Instant,
+}
+
+static CHOYA_TALK: Mutex<Option<ChoyaTalk>> = Mutex::new(None);
+
+fn choya_gap_ms(rng: u64) -> u64 {
+    1000 + rng % 4001
+}
+
+fn choya_rng_step(rng: u64) -> u64 {
+    rng.wrapping_mul(6364136223846793005).wrapping_add(1)
+}
+
+fn choya_quip() -> Option<&'static str> {
+    let now = Instant::now();
+    let mut guard = CHOYA_TALK.lock().unwrap_or_else(|e| e.into_inner());
+    let talk = guard.get_or_insert_with(|| {
+        let rng = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0xC0C0_A11CE);
+        ChoyaTalk {
+            rng,
+            line: 0,
+            showing: false,
+            until: now + Duration::from_millis(choya_gap_ms(rng)),
+        }
+    });
+    if now >= talk.until {
+        talk.rng = choya_rng_step(talk.rng);
+        if talk.showing {
+            talk.showing = false;
+            talk.until = now + Duration::from_millis(choya_gap_ms(talk.rng));
+        } else {
+            talk.showing = true;
+            let n = CHOYA_LINES.len();
+            let skip = 1 + (talk.rng as usize % (n - 1).max(1));
+            talk.line = (talk.line + skip) % n;
+            talk.until = now + Duration::from_millis(1600);
+        }
+    }
+    if talk.showing {
+        Some(CHOYA_LINES[talk.line])
+    } else {
+        None
+    }
 }
 
 fn draw_gem_chest(dl: &DrawListMut, top: [f32; 2], height: f32) {
@@ -635,5 +940,46 @@ fn draw_mystic_coin(
             .build();
     } else {
         draw_coin(dl, c, r, fallback, fill);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::choya_gap_ms;
+
+    #[test]
+    fn choya_gap_is_one_to_five_seconds() {
+        for seed in [0u64, 1, 4000, 4001, u64::MAX] {
+            let ms = choya_gap_ms(seed);
+            assert!((1000..=5000).contains(&ms), "{ms} from {seed}");
+        }
+    }
+
+    #[test]
+    fn choya_sheet_uvs_stay_on_atlas() {
+        let extra = [
+            super::CHOYA2_HERO,
+            super::CHOYA2_PEEK,
+            super::CHOYA2_PARTY,
+            super::CHOYA2_SOMBRERO,
+            super::CHOYA2_SHADES,
+            super::CHOYA2_MARACA,
+            super::CHOYA2_MARACA2,
+            super::CHOYA2_NOTE,
+            super::CHOYA2_HEART,
+            super::CHOYA2_LEI,
+        ];
+        for frame in [super::CHOYA_HERO, super::CHOYA_DANCE, super::CHOYA_THINK]
+            .into_iter()
+            .chain(super::CHOYA_IDLE)
+            .chain(extra)
+            .chain(super::CHOYA2_WALK)
+            .chain(super::CHOYA2_FACE)
+        {
+            let (a, b) = super::sheet_uv(frame);
+            assert!(a[0] >= 0.0 && a[1] >= 0.0, "{frame:?} {a:?}");
+            assert!(b[0] <= 1.0 && b[1] <= 1.0, "{frame:?} {b:?}");
+            assert!(b[0] > a[0] && b[1] > a[1], "{frame:?}");
+        }
     }
 }

@@ -8,11 +8,10 @@ In-game Guild Wars 2 addon for [Nexus](https://raidcore.gg/Nexus). It reads your
 characters through the official GW2 API and suggests builds for PvE, WvW, and PvP.
 
 Pick a mode, fight scale, and role. The optimizer searches gear, traits, and skills,
-checks viability, and shows Current vs Optimized side by side. One Chat strip at the
-top of the overlay copies a GW2 build-template code onto the Windows clipboard so
-**Paste Build Template** in the hero panel can use it. Improve and New Build also
-have a Kitchen: order a plated build from the chef, copy item/skill/trait chips
-into game chat, and keep the conversation across sessions.
+checks viability, and shows Current vs Optimized side by side. A chat-code strip
+copies a GW2 build-template onto the Windows clipboard so **Paste Build Template**
+in the hero panel can use it. Choya is a full tab for talking through a new build
+or improving the selected character, with history saved across sessions.
 
 ## Screenshots
 
@@ -40,10 +39,10 @@ Prebuilt Nexus DLL from GitHub Releases:
 - [Direct DLL download](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/gw2_build_optimizer.dll)
 - [Checksum file](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/SHA256SUMS.txt)
 
-Current release (v1.2.0) DLL SHA256:
+Current release (v1.2.1) DLL SHA256:
 
 ```text
-ACDDCCE69F5FF6803FF4351F28FB0CA98D8B4DF512247FA3EEAF4132FC8AAF6E
+D675F51765DFD18FB2ACA4B617E210A96027731608B36A40C55D558D9D0E8230
 ```
 
 A source build writes:

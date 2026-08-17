@@ -188,37 +188,41 @@ impl RoleObjective {
     pub fn profile_id(&self, game_mode: &GameMode) -> &'static str {
         match (self, game_mode) {
             (RoleObjective::WvWRoamer, GameMode::WvW) => "WvW_Roamer",
-            (RoleObjective::WvWRoamer, GameMode::PvP) => "PvP_Burst",
-            (RoleObjective::WvWRoamer, GameMode::PvE) => "PvE_Power_DPS",
+            (RoleObjective::WvWRoamer, GameMode::PvP) => "PvP_Harasser",
+            (RoleObjective::WvWRoamer, GameMode::PvE) => "PvE_Harasser",
+            (RoleObjective::PowerDps, GameMode::PvE) => "PvE_Power_DPS",
+            (RoleObjective::PowerDps, GameMode::WvW) => "WvW_Zerg_DPS",
+            (RoleObjective::PowerDps, GameMode::PvP) => "PvP_Burst",
+            (RoleObjective::CondiDps, GameMode::PvE) => "PvE_Condi_DPS",
+            (RoleObjective::CondiDps, GameMode::WvW) => "WvW_Condi",
+            (RoleObjective::CondiDps, GameMode::PvP) => "PvP_Condi",
+            (RoleObjective::Hybrid, GameMode::PvE) => "PvE_Hybrid",
+            (RoleObjective::Hybrid, GameMode::WvW) => "WvW_Hybrid",
+            (RoleObjective::Hybrid, GameMode::PvP) => "PvP_Hybrid",
+            (RoleObjective::Sustain, GameMode::PvE) => "PvE_Bruiser",
+            (RoleObjective::Sustain, GameMode::WvW) => "WvW_Bruiser",
+            (RoleObjective::Sustain, GameMode::PvP) => "PvP_Bruiser",
+            (RoleObjective::Staller, GameMode::PvE) => "PvE_Staller",
+            (RoleObjective::Staller, GameMode::WvW) => "WvW_Staller",
+            (RoleObjective::Staller, GameMode::PvP) => "PvP_Staller",
+            (RoleObjective::Healer, GameMode::PvE) => "PvE_Healer",
+            (RoleObjective::Healer, GameMode::WvW) => "WvW_Heal",
+            (RoleObjective::Healer, GameMode::PvP) => "PvP_Sustain",
+            (RoleObjective::Buffer, GameMode::PvE) => "PvE_Boon_Support",
+            (RoleObjective::Buffer, GameMode::WvW) => "WvW_Zerg_Support",
+            (RoleObjective::Buffer, GameMode::PvP) => "PvP_Boon_Pressure",
+            (RoleObjective::Disabler, GameMode::PvE) => "PvE_Disabler",
+            (RoleObjective::Disabler, GameMode::WvW) => "WvW_Disruptor",
+            (RoleObjective::Disabler, GameMode::PvP) => "PvP_Control_Disruptor",
+            (RoleObjective::Tank, GameMode::PvE) => "PvE_Commander",
+            (RoleObjective::Tank, GameMode::WvW) => "WvW_Commander",
+            (RoleObjective::Tank, GameMode::PvP) => "PvP_Commander",
             (RoleObjective::WvWZergDps, _) => "WvW_Zerg_DPS",
             (RoleObjective::WvWZergSupport, _) => "WvW_Zerg_Support",
             (RoleObjective::WvWDisruptor, _) => "WvW_Disruptor",
             (RoleObjective::PvPBurst, _) => "PvP_Burst",
             (RoleObjective::PvPSustain, _) => "PvP_Sustain",
             (RoleObjective::PvPDisruptor, _) => "PvP_Control_Disruptor",
-            (RoleObjective::PowerDps, GameMode::PvE) => "PvE_Power_DPS",
-            (RoleObjective::CondiDps, GameMode::PvE) => "PvE_Condi_DPS",
-            (RoleObjective::Healer, GameMode::PvE) => "PvE_Healer",
-            (RoleObjective::Buffer, GameMode::PvE) => "PvE_Boon_Support",
-            (RoleObjective::Hybrid, GameMode::PvE) => "PvE_Hybrid",
-            (RoleObjective::Staller, GameMode::PvE) => "PvE_Staller",
-            (RoleObjective::PowerDps, GameMode::WvW) => "WvW_Zerg_DPS",
-            (RoleObjective::CondiDps, GameMode::WvW) => "WvW_Zerg_DPS",
-            (RoleObjective::Healer, GameMode::WvW) => "WvW_Zerg_Support",
-            (RoleObjective::Disabler, GameMode::WvW) => "WvW_Disruptor",
-            (RoleObjective::Buffer, GameMode::WvW) => "WvW_Zerg_Support",
-            (RoleObjective::Sustain, GameMode::WvW) => "WvW_Roamer",
-            (RoleObjective::Hybrid, GameMode::WvW) => "WvW_Hybrid",
-            (RoleObjective::Staller, GameMode::WvW) => "WvW_Staller",
-            (RoleObjective::PowerDps, GameMode::PvP) => "PvP_Burst",
-            (RoleObjective::Healer, GameMode::PvP) => "PvP_Sustain",
-            (RoleObjective::Sustain, GameMode::PvP) => "PvP_Sustain",
-            (RoleObjective::Staller, GameMode::PvP) => "PvP_Sustain",
-            (RoleObjective::Disabler, GameMode::PvP) => "PvP_Control_Disruptor",
-            (RoleObjective::Hybrid, GameMode::PvP) => "PvP_Hybrid",
-            (_, GameMode::PvE) => "PvE_Power_DPS",
-            (_, GameMode::WvW) => "WvW_Zerg_DPS",
-            (_, GameMode::PvP) => "PvP_Burst",
         }
     }
 
@@ -423,10 +427,7 @@ mod tests {
             RoleObjective::Healer.profile_id(&GameMode::PvE),
             "PvE_Healer"
         );
-        assert_eq!(
-            RoleObjective::Healer.profile_id(&GameMode::WvW),
-            "WvW_Zerg_Support"
-        );
+        assert_eq!(RoleObjective::Healer.profile_id(&GameMode::WvW), "WvW_Heal");
         assert_eq!(
             RoleObjective::Healer.profile_id(&GameMode::PvP),
             "PvP_Sustain"
@@ -445,6 +446,31 @@ mod tests {
             (pve.healing - wvw.healing).abs() > 0.01 || (pve.sustain - wvw.sustain).abs() > 0.01,
             "Heal in PvE vs WvW should not share the same weight vector"
         );
+    }
+
+    #[test]
+    fn play_roles_have_unique_weights_in_every_mode() {
+        for mode in [GameMode::PvE, GameMode::PvP, GameMode::WvW] {
+            let mut seen: Vec<(RoleObjective, [i32; 6])> = Vec::new();
+            for role in RoleObjective::PLAY_ROLES {
+                let w = role.to_weights(&mode);
+                let key = [
+                    (w.power * 100.0).round() as i32,
+                    (w.condition * 100.0).round() as i32,
+                    (w.boon_support * 100.0).round() as i32,
+                    (w.healing * 100.0).round() as i32,
+                    (w.sustain * 100.0).round() as i32,
+                    (w.control * 100.0).round() as i32,
+                ];
+                if let Some((other, _)) = seen.iter().find(|(_, k)| *k == key) {
+                    panic!(
+                        "{:?} and {:?} share weights {:?} in {:?}",
+                        role, other, key, mode
+                    );
+                }
+                seen.push((role, key));
+            }
+        }
     }
 
     #[test]

@@ -670,6 +670,7 @@ fn spec_pairs_from_build(build: &ResolvedBuild) -> Vec<(String, Vec<String>)> {
 /// Sticky copy strip for a GW2 build-template chat code.
 /// Click the line to copy onto the Windows clipboard (GW2 paste reads that).
 /// Rim and label follow [ChatSource]: blue = loaded character, green = optimized.
+/// One line — lives on the tab row so the left panel keeps that height.
 pub fn render_chat_code_copy(
     ui: &Ui,
     source: ChatSource,
@@ -681,32 +682,15 @@ pub fn render_chat_code_copy(
         *copied_frames = copied_frames.saturating_sub(1);
     }
 
-    let accent = source.color();
-    ui.text_colored(accent, "Chat");
-    ui.same_line_with_spacing(0.0, 6.0);
-    ui.text_colored(accent, format!("· {}", source.label()));
-    ui.same_line_with_spacing(0.0, 8.0);
-    if chat_code.is_some() {
-        if *copied_frames > 0 {
-            ui.text_colored(accent, "Copied");
-        } else {
-            ui.text_colored(crate::ui::theme::MUTED, "click to copy");
-        }
-    } else {
-        ui.text_colored(crate::ui::theme::MUTED, "no template");
+    let remain = ui.content_region_avail()[0];
+    if remain < 96.0 {
+        ui.dummy([0.0, 0.0]);
+        return;
     }
 
-    let display = chat_code.unwrap_or(match source {
-        ChatSource::Character => "Load a character to copy a build template",
-        ChatSource::Optimized => "No chat code for this result",
-    });
-
-    let w = ui.content_region_avail()[0].max(80.0);
-    let pad = 8.0;
-    let inner_w = (w - pad * 2.0).max(40.0);
-    let lines = wrap_ascii(ui, display, inner_w);
-    let line_h = ui.text_line_height();
-    let h = (line_h * lines.len() as f32 + pad * 2.0).max(ui.frame_height());
+    let accent = source.color();
+    let h = ui.frame_height().max(ui.text_line_height() + 6.0);
+    let w = (remain - 4.0).max(80.0);
     let p = ui.cursor_screen_pos();
     let clicked = ui.invisible_button(&format!("##chat_copy_{}", id_suffix), [w, h]);
     let hovered = ui.is_item_hovered();
@@ -717,32 +701,61 @@ pub fn render_chat_code_copy(
             }
         }
     }
+    if hovered {
+        ui.tooltip_text(if chat_code.is_some() {
+            "Click to copy chat code"
+        } else {
+            "No chat code yet"
+        });
+    }
+
+    let fill = if *copied_frames > 0 {
+        match source {
+            ChatSource::Character => [0.10, 0.16, 0.26, 0.95],
+            ChatSource::Optimized => [0.10, 0.22, 0.12, 0.95],
+        }
+    } else if hovered {
+        match source {
+            ChatSource::Character => [0.16, 0.20, 0.28, 0.95],
+            ChatSource::Optimized => [0.14, 0.22, 0.14, 0.95],
+        }
+    } else {
+        crate::ui::theme::PLATE
+    };
+    let rim = if chat_code.is_some() {
+        accent
+    } else {
+        crate::ui::theme::GOLD_DIM
+    };
+    let text_col = if chat_code.is_some() {
+        crate::ui::theme::CREAM
+    } else {
+        crate::ui::theme::MUTED
+    };
+
+    let prefix = if *copied_frames > 0 {
+        format!("Chat · {}  Copied", source.label())
+    } else {
+        format!("Chat · {}", source.label())
+    };
+    let code_part = chat_code.unwrap_or(match source {
+        ChatSource::Character => "Load a character to copy a build template",
+        ChatSource::Optimized => "No chat code for this result",
+    });
+
+    let pad = 8.0;
+    let inner_w = (w - pad * 2.0).max(20.0);
+    let prefix_w = ui.calc_text_size(&prefix)[0];
+    let gap = 8.0;
+    let code_w = (inner_w - prefix_w - gap).max(12.0);
+    let shown_code = if *copied_frames > 0 {
+        String::new()
+    } else {
+        truncate_ui_text(ui, code_part, code_w)
+    };
 
     {
         let dl = ui.get_window_draw_list();
-        let fill = if *copied_frames > 0 {
-            match source {
-                ChatSource::Character => [0.10, 0.16, 0.26, 0.95],
-                ChatSource::Optimized => [0.10, 0.22, 0.12, 0.95],
-            }
-        } else if hovered {
-            match source {
-                ChatSource::Character => [0.16, 0.20, 0.28, 0.95],
-                ChatSource::Optimized => [0.14, 0.22, 0.14, 0.95],
-            }
-        } else {
-            crate::ui::theme::PLATE
-        };
-        let rim = if chat_code.is_some() {
-            accent
-        } else {
-            crate::ui::theme::GOLD_DIM
-        };
-        let text_col = if chat_code.is_some() {
-            crate::ui::theme::CREAM
-        } else {
-            crate::ui::theme::MUTED
-        };
         dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], fill)
             .filled(true)
             .rounding(crate::ui::theme::ICON_ROUNDING)
@@ -750,34 +763,35 @@ pub fn render_chat_code_copy(
         dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], rim)
             .rounding(crate::ui::theme::ICON_ROUNDING)
             .build();
-        let mut ty = p[1] + pad;
-        for line in &lines {
-            dl.add_text([p[0] + pad, ty], crate::ui::color_u32(text_col), line);
-            ty += line_h;
+        let ty = p[1] + ((h - ui.text_line_height()) * 0.5).round();
+        dl.add_text([p[0] + pad, ty], crate::ui::color_u32(accent), &prefix);
+        if !shown_code.is_empty() {
+            dl.add_text(
+                [p[0] + pad + prefix_w + gap, ty],
+                crate::ui::color_u32(text_col),
+                &shown_code,
+            );
         }
     }
 }
 
-fn wrap_ascii(ui: &Ui, text: &str, width: f32) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut line = String::new();
+fn truncate_ui_text(ui: &Ui, text: &str, width: f32) -> String {
+    if ui.calc_text_size(text)[0] <= width {
+        return text.to_string();
+    }
+    let ellipsis = "...";
+    let budget = (width - ui.calc_text_size(ellipsis)[0]).max(0.0);
+    let mut s = String::new();
     for ch in text.chars() {
-        let mut next = line.clone();
+        let mut next = s.clone();
         next.push(ch);
-        if !line.is_empty() && ui.calc_text_size(&next)[0] > width {
-            lines.push(std::mem::take(&mut line));
-            line.push(ch);
-        } else {
-            line = next;
+        if ui.calc_text_size(&next)[0] > budget {
+            s.push_str(ellipsis);
+            return s;
         }
+        s = next;
     }
-    if !line.is_empty() {
-        lines.push(line);
-    }
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-    lines
+    s
 }
 
 /// Render gear comparison table: per-slot diff between current and optimized build.
