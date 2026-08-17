@@ -541,7 +541,9 @@ fn role_pip(role: RoleObjective) -> [f32; 4] {
 
 fn role_hint(role: RoleObjective) -> &'static str {
     match role {
-        RoleObjective::WvWRoamer => "Pick and leave. Burst a target, crack cover, get out.",
+        RoleObjective::WvWRoamer => {
+            "Outnumbered. Dive (2s port-burst), blender (cover + AoE), or trickster (stealth/kite). One damage type."
+        }
         RoleObjective::PowerDps => "Strike damage — burst and sustained power DPS.",
         RoleObjective::CondiDps => "Condition pressure and duration.",
         RoleObjective::Hybrid => {

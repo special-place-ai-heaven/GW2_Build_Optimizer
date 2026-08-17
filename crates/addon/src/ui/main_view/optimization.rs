@@ -114,7 +114,9 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     use gw2_optimizer::scenario::{
                         OptimizationTarget, ScenarioSpec, TargetProfile,
                     };
-                    let combat_kind = selected_role.map(|r| r.combat_kind()).unwrap_or_else(|| {
+                    let combat_kind = selected_role
+                        .map(|r| r.combat_kind_for_weights(&weights))
+                        .unwrap_or_else(|| {
                         if weights.condition > weights.power {
                             gw2_optimizer::scenario::CombatKind::CondiRamp
                         } else {
@@ -176,6 +178,9 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             return Ok(vec![suggestion]);
                         }
                         Err(e) => {
+                            if e.starts_with("Couldn't find a viable") {
+                                return Err(e);
+                            }
                             nexus::log::log(
                                 nexus::log::LogLevel::Warning,
                                 "GW2 Build Optimizer",

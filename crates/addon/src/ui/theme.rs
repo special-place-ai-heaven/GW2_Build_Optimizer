@@ -851,8 +851,8 @@ pub fn draw_choya_sleep(ui: &Ui, center: [f32; 2], size: f32) {
     blit_choya_frame(&ui.get_window_draw_list(), center, size, CHOYA_SLEEP);
 }
 
-pub fn draw_gem_icon(ui: &Ui, top: [f32; 2], height: f32) {
-    draw_gem_chest(&ui.get_window_draw_list(), top, height);
+pub fn draw_gem_icon(dl: &DrawListMut, top: [f32; 2], height: f32) {
+    draw_gem_chest(dl, top, height);
 }
 
 const CHOYA_LINES: &[&str] = &[

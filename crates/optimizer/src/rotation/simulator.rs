@@ -20,8 +20,8 @@ use std::collections::HashMap;
 use gw2_core::types::GameMode;
 
 use super::combat_model::{
-    kit_has_corrupt, kit_has_interrupt, kit_has_mobility_out, kit_has_stability_cover,
-    kit_has_strip, setup_priority, setup_window_ms, EnemyDummy,
+    kit_escape_kinds, kit_has_corrupt, kit_has_interrupt, kit_has_mobility_out,
+    kit_has_stability_cover, kit_has_strip, setup_priority, setup_window_ms, EnemyDummy,
 };
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::{RotationSkill, SimulationResult, SkillEffect, SkillSlot, SkillUsage};
@@ -670,6 +670,7 @@ impl SimState {
             cleanse_count,
             cleanse_rate_per_20s,
             has_mobility_out: kit_has_mobility_out(&self.skills),
+            escape_kinds: kit_escape_kinds(&self.skills),
             has_strip: kit_has_strip(&self.skills),
             has_corrupt: kit_has_corrupt(&self.skills),
             downed: self.downed,

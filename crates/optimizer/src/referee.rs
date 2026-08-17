@@ -72,11 +72,11 @@ pub enum ViabilityGate {
     CleanseRate,
     /// Build effective health must meet the mode-specific EHP floor.
     EffectiveHealth,
-    /// WvW roam (Solo): kit must have teleport/stealth/superspeed/leap.
+    /// WvW roam (Solo): stealth, evade, block, or mobility to disengage a group.
     MobilityOut,
     /// Harasser: strip/steal/corrupt before dump (Stability strip-all + Protection).
     HarasserStrip,
-    /// Roam / harasser: dummy HP reached 0 inside the clock.
+    /// Harasser / PvP duel: dummy HP reached 0 inside the clock. Not a WvW roam gate.
     KillWindow,
     /// Roam / harasser: kit can interrupt (secures the stomp).
     SecureFinish,
@@ -109,6 +109,43 @@ impl ViabilityReport {
     /// Returns the first failing gate, if any.
     pub fn first_failure(&self) -> Option<&GateResult> {
         self.gates.iter().find(|g| !g.passed)
+    }
+}
+
+/// WvW roam and stallers: rank fight DPS and escape kit, not paper zerg indices.
+pub(crate) fn is_roam_objective(scenario: &ScenarioSpec) -> bool {
+    needs_kill_clock(scenario) || needs_mobility_out(scenario)
+}
+
+/// Higher is better. Roam ranks specialized fight DPS, EHP, and escape tools over paper combat indices.
+pub fn search_rank(report: &RefereeReport) -> [i64; 6] {
+    let viable = i64::from(report.viability.is_viable);
+    let gates = report.viability.gates.iter().filter(|g| g.passed).count() as i64;
+    if is_roam_objective(&report.scenario) {
+        let rot = report.rotation.as_ref();
+        let dps = rot.map(|r| (r.total_dps * 100.0) as i64).unwrap_or(0);
+        let ehp = report.primary_combat.effective_health.round() as i64;
+        let escape = rot.map(|r| r.escape_kinds as i64).unwrap_or(0);
+        let downed = rot.map(|r| i64::from(r.downed)).unwrap_or(0);
+        [viable, gates, dps, ehp, escape, downed]
+    } else {
+        let score = (report.user_intent_score * 1_000_000.0) as i64;
+        [viable, gates, score, 0, 0, 0]
+    }
+}
+
+/// Failed-gate notes for the optimize error path.
+pub fn viability_failure_summary(report: &ViabilityReport) -> String {
+    let fails: Vec<&str> = report
+        .gates
+        .iter()
+        .filter(|g| !g.passed)
+        .map(|g| g.note.as_str())
+        .collect();
+    if fails.is_empty() {
+        "unknown gate failure".into()
+    } else {
+        fails.join("; ")
     }
 }
 
@@ -200,9 +237,9 @@ pub fn evaluate_viability_gates(
                     note: if rot.has_mobility_out {
                         "escape kit present".into()
                     } else if staller {
-                        "no port/stealth/superspeed/leap — cannot evade a group".into()
+                        "no stealth/evade/block/mobility — cannot evade a group".into()
                     } else {
-                        "no teleport/stealth/superspeed/leap — not roam".into()
+                        "no stealth/evade/block/mobility — cannot disengage a group".into()
                     },
                 },
                 None => GateResult {
@@ -320,8 +357,7 @@ fn needs_kill_clock(scenario: &ScenarioSpec) -> bool {
         return false;
     }
     scenario.combat_kind == CombatKind::Harasser
-        || (matches!(scenario.game_mode, GameMode::WvW | GameMode::PvP)
-            && scenario.combat_tier == CombatTier::Solo)
+        || (scenario.game_mode == GameMode::PvP && scenario.combat_tier == CombatTier::Solo)
 }
 
 /// Deterministic build evaluation output.
@@ -486,6 +522,7 @@ mod tests {
             cleanse_count: 2,
             cleanse_rate_per_20s: 4.0,
             has_mobility_out: true,
+            escape_kinds: 1,
             has_strip: true,
             has_corrupt: false,
             downed: true,
@@ -1100,12 +1137,26 @@ mod tests {
     }
 
     #[test]
-    fn gate_roam_fails_without_down() {
+    fn gate_wvw_solo_does_not_require_kill_window() {
+        let mut rot = make_viable_rotation();
+        rot.downed = false;
+        rot.has_interrupt = false;
+        let combat = make_viable_combat();
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_tier = CombatTier::Solo;
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::KillWindow).is_none());
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::SecureFinish).is_none());
+        assert!(report.is_viable);
+    }
+
+    #[test]
+    fn gate_harasser_fails_without_down() {
         let mut rot = make_viable_rotation();
         rot.downed = false;
         let combat = make_viable_combat();
         let mut scenario = make_wvw_scenario();
-        scenario.combat_tier = CombatTier::Solo;
+        scenario.combat_kind = crate::scenario::CombatKind::Harasser;
         let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
         let g = gate_by_kind(&report.gates, &ViabilityGate::KillWindow).unwrap();
         assert!(!g.passed);
@@ -1113,12 +1164,12 @@ mod tests {
     }
 
     #[test]
-    fn gate_roam_fails_without_interrupt() {
+    fn gate_harasser_fails_without_interrupt() {
         let mut rot = make_viable_rotation();
         rot.has_interrupt = false;
         let combat = make_viable_combat();
         let mut scenario = make_wvw_scenario();
-        scenario.combat_tier = CombatTier::Solo;
+        scenario.combat_kind = crate::scenario::CombatKind::Harasser;
         let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
         let g = gate_by_kind(&report.gates, &ViabilityGate::SecureFinish).unwrap();
         assert!(!g.passed);

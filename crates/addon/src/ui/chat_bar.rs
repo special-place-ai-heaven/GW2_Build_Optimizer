@@ -313,25 +313,27 @@ fn render_build_card(ui: &Ui, msg_i: usize, width: f32) -> bool {
     } else {
         theme::PLATE
     };
-    let dl = ui.get_window_draw_list();
-    dl.add_rect(p, [p[0] + w, p[1] + CARD_H], fill)
-        .filled(true)
-        .rounding(10.0)
-        .build();
-    dl.add_rect(p, [p[0] + w, p[1] + CARD_H], theme::GOLD)
-        .rounding(10.0)
-        .build();
-    theme::draw_gem_icon(ui, [p[0] + 22.0, p[1] + 4.0], CARD_H - 8.0);
-    dl.add_text(
-        [p[0] + 48.0, p[1] + 8.0],
-        color_u32(theme::GOLD),
-        "Build is ready",
-    );
-    dl.add_text(
-        [p[0] + 48.0, p[1] + 24.0],
-        color_u32(theme::MUTED),
-        "Open Optimized Build",
-    );
+    {
+        let dl = ui.get_window_draw_list();
+        dl.add_rect(p, [p[0] + w, p[1] + CARD_H], fill)
+            .filled(true)
+            .rounding(10.0)
+            .build();
+        dl.add_rect(p, [p[0] + w, p[1] + CARD_H], theme::GOLD)
+            .rounding(10.0)
+            .build();
+        theme::draw_gem_icon(&dl, [p[0] + 22.0, p[1] + 4.0], CARD_H - 8.0);
+        dl.add_text(
+            [p[0] + 48.0, p[1] + 8.0],
+            color_u32(theme::GOLD),
+            "Build is ready",
+        );
+        dl.add_text(
+            [p[0] + 48.0, p[1] + 24.0],
+            color_u32(theme::MUTED),
+            "Open Optimized Build",
+        );
+    }
     if hovered {
         ui.tooltip_text("Open the Optimized Build tab");
     }

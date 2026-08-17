@@ -387,6 +387,20 @@ mod tests {
     }
 
     #[test]
+    fn annotate_order_accepts_gw2skills_virtuoso_template() {
+        let code = "[&DQUcGzYnBxqFAAAAKRMAABkBAABYAAAAnwEAAAAAAAAAAAAAAAAAAAAAAAA=]";
+        assert_eq!(decode(code), Some((LinkKind::Build, None)));
+        let (display, chips, chef) = annotate_order(code, None);
+        assert_eq!(chips.len(), 1);
+        assert_eq!(chips[0].kind, LinkKind::Build);
+        assert_eq!(chips[0].code, code);
+        assert!(display.contains("profession"));
+        assert!(chef.contains("Pasted links:"));
+        let spans = find_code_spans(&format!("try {code} please"));
+        assert_eq!(spans.len(), 1);
+    }
+
+    #[test]
     fn decode_item_ignores_flags_byte() {
         // qty=1, id=24836, flags=1 in byte 5 — must not become 16_802_052.
         let bytes = [0x02, 1, 0x04, 0x61, 0x00, 0x01];

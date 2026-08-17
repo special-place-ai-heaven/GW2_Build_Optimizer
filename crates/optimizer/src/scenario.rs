@@ -156,7 +156,7 @@ impl RoleObjective {
             RoleObjective::Buffer => "Buffer / Support",
             RoleObjective::Hybrid => "Hybrid",
             RoleObjective::Staller => "Troll",
-            RoleObjective::WvWRoamer => "Harasser",
+            RoleObjective::WvWRoamer => "Roamer",
             RoleObjective::WvWZergDps => "WvW Zerg DPS",
             RoleObjective::WvWZergSupport => "WvW Zerg Support",
             RoleObjective::WvWDisruptor => "WvW Disruptor",
@@ -178,7 +178,7 @@ impl RoleObjective {
             RoleObjective::Buffer => "Support",
             RoleObjective::Hybrid => "Hybrid",
             RoleObjective::Staller => "Troll",
-            RoleObjective::WvWRoamer => "Harasser",
+            RoleObjective::WvWRoamer => "Roamer",
             other => other.label(),
         }
     }
@@ -252,7 +252,7 @@ impl RoleObjective {
             RoleObjective::Disabler | RoleObjective::WvWDisruptor | RoleObjective::PvPDisruptor => {
                 CombatKind::Disabler
             }
-            RoleObjective::WvWRoamer => CombatKind::Harasser,
+            RoleObjective::WvWRoamer => CombatKind::StrikeSpike,
             RoleObjective::Hybrid | RoleObjective::Staller => CombatKind::Staller,
             RoleObjective::Tank => CombatKind::Commander,
             RoleObjective::PowerDps
@@ -262,6 +262,25 @@ impl RoleObjective {
             | RoleObjective::PvPSustain => CombatKind::StrikeSpike,
         }
     }
+
+    /// Roamers are three jobs, not one 1v1 dummy.
+    /// Dive: 2s port-in burst. Trickster: 5s peck/attrition. Bruiser: 10s cover fight.
+    pub fn combat_kind_for_weights(&self, weights: &OptimizationWeights) -> CombatKind {
+        if !matches!(self, RoleObjective::WvWRoamer) {
+            return self.combat_kind();
+        }
+        let power = weights.power;
+        let condi = weights.condition;
+        let sustain = weights.sustain;
+        if sustain > power && sustain > condi {
+            CombatKind::Staller
+        } else if condi > power {
+            CombatKind::CondiRamp
+        } else {
+            CombatKind::StrikeSpike
+        }
+    }
+
 
     /// Convert this role to `OptimizationWeights` by reading the objective profile data.
     /// Falls back to mode default weights if the profile is not found.
@@ -400,7 +419,10 @@ mod tests {
 
     #[test]
     fn role_combat_kind_is_independent_of_scale() {
-        assert_eq!(RoleObjective::WvWRoamer.combat_kind(), CombatKind::Harasser);
+        assert_eq!(
+            RoleObjective::WvWRoamer.combat_kind(),
+            CombatKind::StrikeSpike
+        );
         assert_eq!(
             RoleObjective::WvWZergSupport.combat_kind(),
             CombatKind::Support
@@ -418,11 +440,46 @@ mod tests {
     }
 
     #[test]
+    fn roam_weights_pick_dive_trickster_or_bruiser_clock() {
+        let dive = crate::scoring::OptimizationWeights {
+            power: 0.8,
+            condition: 0.2,
+            sustain: 0.3,
+            ..crate::scoring::OptimizationWeights::default()
+        };
+        assert_eq!(
+            RoleObjective::WvWRoamer.combat_kind_for_weights(&dive),
+            CombatKind::StrikeSpike
+        );
+        let trickster = crate::scoring::OptimizationWeights {
+            power: 0.2,
+            condition: 0.8,
+            sustain: 0.3,
+            ..crate::scoring::OptimizationWeights::default()
+        };
+        assert_eq!(
+            RoleObjective::WvWRoamer.combat_kind_for_weights(&trickster),
+            CombatKind::CondiRamp
+        );
+        let bruiser = crate::scoring::OptimizationWeights {
+            power: 0.4,
+            condition: 0.2,
+            sustain: 0.9,
+            ..crate::scoring::OptimizationWeights::default()
+        };
+        assert_eq!(
+            RoleObjective::WvWRoamer.combat_kind_for_weights(&bruiser),
+            CombatKind::Staller
+        );
+    }
+
+
+    #[test]
     fn play_roles_are_shared_and_remap_per_mode() {
         assert_eq!(RoleObjective::PLAY_ROLES.len(), 10);
         assert_eq!(RoleObjective::Healer.play_label(), "Heal");
         assert_eq!(RoleObjective::Staller.play_label(), "Troll");
-        assert_eq!(RoleObjective::WvWRoamer.play_label(), "Harasser");
+        assert_eq!(RoleObjective::WvWRoamer.play_label(), "Roamer");
         assert_eq!(
             RoleObjective::Healer.profile_id(&GameMode::PvE),
             "PvE_Healer"

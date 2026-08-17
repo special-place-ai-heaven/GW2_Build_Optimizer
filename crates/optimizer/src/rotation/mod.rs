@@ -111,6 +111,7 @@ pub enum MobilityKind {
     Stealth,
     Superspeed,
     Leap,
+    Evade,
 }
 
 /// An effect that a skill produces when used.
@@ -222,8 +223,10 @@ pub struct SimulationResult {
     pub cleanse_count: u32,
     /// Estimated conditions removed per 20 seconds (sum of conditions_removed × uptime_factor).
     pub cleanse_rate_per_20s: f64,
-    /// Kit has teleport/stealth/superspeed/leap (roam out gate).
+    /// Kit has stealth, evade, block, invuln/aegis, or mobility to disengage a group.
     pub has_mobility_out: bool,
+    /// Distinct roam-out categories (mobility, stealth, block, invuln/aegis).
+    pub escape_kinds: u32,
     /// Kit has strip, steal, or corrupt (harasser cover-crack gate).
     pub has_strip: bool,
     /// Kit converts enemy boons to conditions (disabler identity).
