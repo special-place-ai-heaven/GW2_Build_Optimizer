@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use nexus::imgui::{ChildWindow, StyleColor, Ui};
+use nexus::imgui::{ChildWindow, InputTextFlags, StyleColor, StyleVar, Ui};
 use serde::{Deserialize, Serialize};
 
 use crate::chat_links::ChatChip;
@@ -20,11 +20,19 @@ pub struct ChatBarState {
     pub dirty: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub from_user: bool,
     pub text: String,
     pub chips: Vec<ChatChip>,
+    /// Clickable "Build is ready" card under this reply.
+    #[serde(default)]
+    pub open_result: bool,
+}
+
+pub enum ChatAction {
+    Send(String),
+    OpenBuild,
 }
 
 /// Maximum chat history entries retained. Beyond this, the oldest entries are
@@ -35,7 +43,10 @@ const AVATAR: f32 = 42.0;
 const AVATAR_GAP: f32 = 10.0;
 const BUBBLE_PAD: f32 = 10.0;
 const BUBBLE_ROUND: f32 = 14.0;
-const COMPOSER_H: f32 = 32.0;
+const COMPOSER_H: f32 = 76.0;
+const COMPOSER_CHOYA: f32 = 56.0;
+const SEND_SZ: f32 = 36.0;
+const CARD_H: f32 = 44.0;
 const ROW_GAP: f32 = 12.0;
 
 fn trim_history(history: &mut Vec<ChatMessage>) {
@@ -55,6 +66,7 @@ pub fn queue_user_message(state: &mut ChatBarState, msg: &str) -> Option<String>
         from_user: true,
         text: msg.to_string(),
         chips: Vec::new(),
+        open_result: false,
     });
     trim_history(&mut state.history);
     state.input.clear();
@@ -182,8 +194,8 @@ pub fn render_chat_bar(
     cooking: Option<&str>,
     user_icon: Option<&str>,
     user_letter: char,
-) -> Option<String> {
-    let mut submitted = None;
+) -> Option<ChatAction> {
+    let mut action = None;
 
     if state.copied_frames > 0 {
         state.copied_frames = state.copied_frames.saturating_sub(1);
@@ -193,7 +205,7 @@ pub fn render_chat_bar(
     }
 
     let avail_h = ui.content_region_avail()[1];
-    let scroll_h = (avail_h - COMPOSER_H - 8.0).max(80.0);
+    let scroll_h = (avail_h - COMPOSER_H - 10.0).max(80.0);
     let _child_bg = ui.push_style_color(StyleColor::ChildBg, [0.05, 0.04, 0.03, 0.35]);
     ChildWindow::new("##talk_scroll")
         .size([0.0, scroll_h])
@@ -211,9 +223,11 @@ pub fn render_chat_bar(
             for i in 0..n {
                 let from_user = state.history[i].from_user;
                 let text = state.history[i].text.clone();
+                let open_result = state.history[i].open_result;
                 let (lines, bw, bh) = bubble_size(ui, &text, avail);
                 let chip_h = chip_block_h(ui, &state.history[i].chips, bw);
-                let row_h = bh.max(AVATAR) + chip_h + ROW_GAP;
+                let card_h = if open_result { CARD_H + 6.0 } else { 0.0 };
+                let row_h = bh.max(AVATAR) + chip_h + card_h + ROW_GAP;
                 let origin = ui.cursor_screen_pos();
                 let id = format!("##talk_row{i}");
                 ui.invisible_button(&id, [avail, row_h]);
@@ -240,9 +254,17 @@ pub fn render_chat_bar(
                 draw_bubble_rect(ui, [bub_x, bub_y], bw, bh, from_user);
                 draw_bubble_text(ui, [bub_x, bub_y], &lines);
 
+                let mut y = bub_y + bh + 2.0;
                 if chip_h > 0.0 {
-                    ui.set_cursor_screen_pos([bub_x, bub_y + bh + 2.0]);
+                    ui.set_cursor_screen_pos([bub_x, y]);
                     render_chips(ui, state, i, bw);
+                    y += chip_h;
+                }
+                if open_result {
+                    ui.set_cursor_screen_pos([bub_x, y + 4.0]);
+                    if render_build_card(ui, i, bw.max(180.0).min(avail - AVATAR - AVATAR_GAP)) {
+                        action = Some(ChatAction::OpenBuild);
+                    }
                 }
                 ui.set_cursor_screen_pos(after);
             }
@@ -274,48 +296,155 @@ pub fn render_chat_bar(
         });
     drop(_child_bg);
 
-    let avail_width = ui.content_region_avail()[0];
-    let button_width = 64.0;
-    let choya_slot = 26.0;
+    if let Some(send) = render_composer(ui, state) {
+        action = Some(ChatAction::Send(send));
+    }
+    action
+}
+
+fn render_build_card(ui: &Ui, msg_i: usize, width: f32) -> bool {
+    let w = width.max(160.0);
     let p = ui.cursor_screen_pos();
-    ui.dummy([choya_slot, COMPOSER_H]);
-    theme::draw_choya_walk(
-        ui,
-        [p[0] + choya_slot * 0.5, p[1] + COMPOSER_H * 0.45],
-        24.0,
+    let id = format!("##build_card{msg_i}");
+    let clicked = ui.invisible_button(&id, [w, CARD_H]);
+    let hovered = ui.is_item_hovered();
+    let fill = if hovered {
+        [0.22, 0.18, 0.08, 0.96]
+    } else {
+        theme::PLATE
+    };
+    let dl = ui.get_window_draw_list();
+    dl.add_rect(p, [p[0] + w, p[1] + CARD_H], fill)
+        .filled(true)
+        .rounding(10.0)
+        .build();
+    dl.add_rect(p, [p[0] + w, p[1] + CARD_H], theme::GOLD)
+        .rounding(10.0)
+        .build();
+    theme::draw_gem_icon(ui, [p[0] + 22.0, p[1] + 4.0], CARD_H - 8.0);
+    dl.add_text(
+        [p[0] + 48.0, p[1] + 8.0],
+        color_u32(theme::GOLD),
+        "Build is ready",
     );
-    ui.same_line_with_spacing(0.0, 6.0);
-    ui.set_next_item_width((avail_width - button_width - choya_slot - 16.0).max(40.0));
+    dl.add_text(
+        [p[0] + 48.0, p[1] + 24.0],
+        color_u32(theme::MUTED),
+        "Open Optimized Build",
+    );
+    if hovered {
+        ui.tooltip_text("Open the Optimized Build tab");
+    }
+    clicked
+}
+
+fn draw_send_icon(ui: &Ui, c: [f32; 2], on: bool) {
+    let col = if on { theme::GOLD } else { theme::MUTED };
+    let dl = ui.get_window_draw_list();
+    let s = 11.0;
+    dl.add_triangle(
+        [c[0] - s * 0.7, c[1] - s * 0.55],
+        [c[0] + s * 0.85, c[1]],
+        [c[0] - s * 0.7, c[1] + s * 0.55],
+        col,
+    )
+    .filled(true)
+    .build();
+}
+
+fn render_composer(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
+    let avail = ui.content_region_avail()[0];
+    let origin = ui.cursor_screen_pos();
+    ui.dummy([avail, COMPOSER_H]);
+    let after = ui.cursor_screen_pos();
+
+    let choya_c = [
+        origin[0] + COMPOSER_CHOYA * 0.5,
+        origin[1] + COMPOSER_H * 0.52,
+    ];
     if state.waiting {
-        let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+        theme::draw_choya_thinking(ui, choya_c, COMPOSER_CHOYA);
+    } else if !state.input.is_empty() {
+        theme::draw_choya_walk(ui, choya_c, COMPOSER_CHOYA);
+    } else {
+        theme::draw_choya_sleep(ui, choya_c, COMPOSER_CHOYA);
+    }
+
+    let bx = origin[0] + COMPOSER_CHOYA + 8.0;
+    let by = origin[1];
+    let bw = (avail - COMPOSER_CHOYA - 8.0).max(80.0);
+    let bh = COMPOSER_H;
+    {
+        let dl = ui.get_window_draw_list();
+        dl.add_rect([bx, by], [bx + bw, by + bh], theme::PLATE)
+            .filled(true)
+            .rounding(18.0)
+            .build();
+        dl.add_rect([bx, by], [bx + bw, by + bh], theme::GOLD_DIM)
+            .rounding(18.0)
+            .build();
+    }
+
+    let input_w = (bw - SEND_SZ - 20.0).max(40.0);
+    ui.set_cursor_screen_pos([bx + 12.0, by + 8.0]);
+    let _pad = ui.push_style_var(StyleVar::FramePadding([8.0, 8.0]));
+    let _bg = ui.push_style_color(StyleColor::FrameBg, [0.0, 0.0, 0.0, 0.0]);
+    let _bgh = ui.push_style_color(StyleColor::FrameBgHovered, [0.0, 0.0, 0.0, 0.0]);
+    let _bga = ui.push_style_color(StyleColor::FrameBgActive, [0.0, 0.0, 0.0, 0.0]);
+    let _brd = ui.push_style_var(StyleVar::FrameBorderSize(0.0));
+
+    let enter_pressed = if state.waiting {
         let mut dummy = String::new();
-        ui.input_text("##chat_input", &mut dummy)
+        ui.input_text_multiline("##chat_input", &mut dummy, [input_w, bh - 16.0])
             .read_only(true)
             .build();
-        style.pop();
-        ui.same_line();
-        let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui, "Send", [button_width, 0.0]);
-        style.pop();
-        return submitted;
+        false
+    } else {
+        ui.input_text_multiline("##chat_input", &mut state.input, [input_w, bh - 16.0])
+            .flags(
+                InputTextFlags::CALLBACK_RESIZE
+                    | InputTextFlags::ENTER_RETURNS_TRUE
+                    | InputTextFlags::CTRL_ENTER_FOR_NEW_LINE,
+            )
+            .build()
+    };
+    drop(_brd);
+    drop(_bga);
+    drop(_bgh);
+    drop(_bg);
+    drop(_pad);
+
+    if !state.waiting && state.input.is_empty() {
+        ui.get_window_draw_list().add_text(
+            [bx + 20.0, by + 16.0],
+            color_u32(theme::MUTED),
+            "Ask Choya about the build\u{2026}",
+        );
     }
 
-    let enter_pressed = ui
-        .input_text("##chat_input", &mut state.input)
-        .hint("Ask Choya about the build\u{2026}")
-        .enter_returns_true(true)
-        .build();
-
-    ui.same_line();
-
-    let can_send = !state.input.is_empty();
-    let send_clicked = theme::gold_button_sized(ui, "Send", [button_width, 0.0]) && can_send;
-
-    if (enter_pressed || send_clicked) && can_send {
-        submitted = queue_user_message(state, &state.input.clone());
+    ui.set_cursor_screen_pos([bx + bw - SEND_SZ - 10.0, by + (bh - SEND_SZ) * 0.5]);
+    let send_hit = ui.invisible_button("##chat_send", [SEND_SZ, SEND_SZ]);
+    let send_on = !state.waiting && !state.input.trim().is_empty();
+    let send_p = ui.item_rect_min();
+    draw_send_icon(
+        ui,
+        [send_p[0] + SEND_SZ * 0.5, send_p[1] + SEND_SZ * 0.5],
+        send_on,
+    );
+    if ui.is_item_hovered() {
+        ui.tooltip_text("Send  (Enter \u{00b7} Ctrl+Enter for a new line)");
     }
 
-    submitted
+    ui.set_cursor_screen_pos(after);
+
+    if state.waiting {
+        return None;
+    }
+    let can_send = !state.input.trim().is_empty();
+    if (enter_pressed || send_hit) && can_send {
+        return queue_user_message(state, &state.input.clone());
+    }
+    None
 }
 
 fn render_chips(ui: &Ui, state: &mut ChatBarState, msg_i: usize, max_w: f32) {
@@ -361,11 +490,16 @@ fn render_chips(ui: &Ui, state: &mut ChatBarState, msg_i: usize, max_w: f32) {
 
 /// Add an assistant reply with no serving chips (errors, timeout, talk).
 pub fn add_ai_response(state: &mut ChatBarState, text: String) {
-    add_plated_response(state, text, Vec::new());
+    add_plated_response(state, text, Vec::new(), false);
 }
 
 /// Add an assistant reply and optional GW2 chat-link chips.
-pub fn add_plated_response(state: &mut ChatBarState, text: String, chips: Vec<ChatChip>) {
+pub fn add_plated_response(
+    state: &mut ChatBarState,
+    text: String,
+    chips: Vec<ChatChip>,
+    open_result: bool,
+) {
     state.waiting = false;
     // Cap for the bubble, not the suggestion panel. Char-safe (no UTF-8 panic).
     let display = if text.chars().count() > 600 {
@@ -378,6 +512,7 @@ pub fn add_plated_response(state: &mut ChatBarState, text: String, chips: Vec<Ch
         from_user: false,
         text: display,
         chips,
+        open_result,
     });
     trim_history(&mut state.history);
     state.scroll_to_end = true;
@@ -449,6 +584,7 @@ mod tests {
                 from_user: i % 2 == 0,
                 text: format!("m{i}"),
                 chips: Vec::new(),
+                open_result: false,
             });
         }
         let t = recent_transcript(&history, 3);
@@ -483,9 +619,11 @@ mod tests {
                 label: "Rune of the Scholar".into(),
                 code: encode_item(24836),
             }],
+            true,
         );
         assert_eq!(state.history[0].chips.len(), 1);
         assert_eq!(state.history[0].chips[0].code, "[&AgEEYQAA]");
+        assert!(state.history[0].open_result);
     }
 
     #[test]
@@ -495,6 +633,7 @@ mod tests {
             from_user: true,
             text: "[&AgEEYQAA]".into(),
             chips: Vec::new(),
+            open_result: false,
         });
         attach_order_chips(
             &mut state,
@@ -528,6 +667,7 @@ mod tests {
                 label: "Scholar".into(),
                 code: encode_item(24836),
             }],
+            open_result: false,
         }];
         save_history(&dir, &history);
         let loaded = load_history(&dir);
@@ -535,5 +675,13 @@ mod tests {
         assert_eq!(loaded[0].text, "plate this");
         assert_eq!(loaded[0].chips[0].code, encode_item(24836));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_kitchen_json_defaults_open_result_off() {
+        let hist: Vec<ChatMessage> =
+            serde_json::from_str(r#"[{"from_user":true,"text":"hi","chips":[]}]"#).unwrap();
+        assert!(!hist[0].open_result);
+        assert_eq!(hist[0].text, "hi");
     }
 }

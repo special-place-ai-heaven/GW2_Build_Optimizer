@@ -87,6 +87,11 @@ pub fn gold_button_sized(ui: &Ui, label: impl AsRef<str>, size: [f32; 2]) -> boo
 
 /// Rounded pill tab. `id` must be unique (used as an invisible button id).
 pub fn pill(ui: &Ui, label: &str, selected: bool, id: &str) -> bool {
+    pill_pulse(ui, label, selected, id, 0.0)
+}
+
+/// `pulse` 0..=1 gold blink for a waiting result tab.
+pub fn pill_pulse(ui: &Ui, label: &str, selected: bool, id: &str, pulse: f32) -> bool {
     let pad_x = 10.0;
     let pad_y = 3.0;
     let sz = ui.calc_text_size(label);
@@ -95,21 +100,33 @@ pub fn pill(ui: &Ui, label: &str, selected: bool, id: &str) -> bool {
     let p = ui.cursor_screen_pos();
     let clicked = ui.invisible_button(id, [w, h]);
     let hovered = ui.is_item_hovered();
-    let fill = if selected {
+    let pulse = pulse.clamp(0.0, 1.0);
+    let mut fill = if selected {
         GOLD_FILL
     } else if hovered {
         GOLD_HOVER
     } else {
         [0.10, 0.09, 0.06, 0.55]
     };
-    let rim = if selected {
+    let mut rim = if selected {
         GOLD
     } else if hovered {
         GOLD_DIM
     } else {
         [0.32, 0.26, 0.12, 0.55]
     };
+    if pulse > 0.0 && !selected {
+        fill = [
+            fill[0] + (GOLD_FILL[0] - fill[0]) * pulse,
+            fill[1] + (GOLD_FILL[1] - fill[1]) * pulse,
+            fill[2] + (GOLD_FILL[2] - fill[2]) * pulse,
+            0.55 + 0.40 * pulse,
+        ];
+        rim = [GOLD[0], GOLD[1], GOLD[2], 0.45 + 0.55 * pulse];
+    }
     let text = if selected {
+        [0.10, 0.08, 0.04, 1.0]
+    } else if pulse > 0.45 {
         [0.10, 0.08, 0.04, 1.0]
     } else {
         CREAM
@@ -605,6 +622,8 @@ const CHOYA2_MARACA2: [f32; 4] = [801.0, 897.0, 93.0, 110.0];
 const CHOYA2_NOTE: [f32; 4] = [1145.0, 874.0, 32.0, 40.0];
 const CHOYA2_HEART: [f32; 4] = [964.0, 944.0, 43.0, 44.0];
 const CHOYA2_LEI: [f32; 4] = [1396.0, 863.0, 121.0, 65.0];
+/// Belly-sleep + Zzz on sheet 1 (idle composer / header).
+const CHOYA_SLEEP: [f32; 4] = [1180.0, 700.0, 311.0, 265.0];
 
 fn choya_sheet() -> Option<TextureId> {
     embedded_tex(
@@ -759,7 +778,7 @@ pub fn draw_choya_hero(ui: &Ui, center: [f32; 2], size: f32) {
         size * 0.44,
         CHOYA2_SHADES,
     );
-    let t = ui.frame_count() as f32 * 0.09;
+    let t = ui.frame_count() as f32 * 0.035;
     let bounce = t.sin() * size * 0.05;
     blit_frame(
         &dl,
@@ -809,11 +828,16 @@ pub fn draw_choya_thinking(ui: &Ui, center: [f32; 2], size: f32) {
 
 /// Six-frame bounce from sheet 2 (composer / small slots).
 pub fn draw_choya_walk(ui: &Ui, center: [f32; 2], size: f32) {
+    draw_choya_walk_paced(ui, center, size, 14);
+}
+
+pub fn draw_choya_walk_paced(ui: &Ui, center: [f32; 2], size: f32, frames_per_cell: usize) {
     let Some(tid) = choya_sheet2() else {
         draw_choya_avatar(ui, center, size);
         return;
     };
-    let i = (ui.frame_count() as usize / 6) % CHOYA2_WALK.len();
+    let step = frames_per_cell.max(1);
+    let i = (ui.frame_count() as usize / step) % CHOYA2_WALK.len();
     blit_frame(
         &ui.get_window_draw_list(),
         tid,
@@ -821,6 +845,14 @@ pub fn draw_choya_walk(ui: &Ui, center: [f32; 2], size: f32) {
         size,
         CHOYA2_WALK[i],
     );
+}
+
+pub fn draw_choya_sleep(ui: &Ui, center: [f32; 2], size: f32) {
+    blit_choya_frame(&ui.get_window_draw_list(), center, size, CHOYA_SLEEP);
+}
+
+pub fn draw_gem_icon(ui: &Ui, top: [f32; 2], height: f32) {
+    draw_gem_chest(&ui.get_window_draw_list(), top, height);
 }
 
 const CHOYA_LINES: &[&str] = &[
@@ -968,6 +1000,7 @@ mod tests {
             super::CHOYA2_NOTE,
             super::CHOYA2_HEART,
             super::CHOYA2_LEI,
+            super::CHOYA_SLEEP,
         ];
         for frame in [super::CHOYA_HERO, super::CHOYA_DANCE, super::CHOYA_THINK]
             .into_iter()

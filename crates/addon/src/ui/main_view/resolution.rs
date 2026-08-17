@@ -81,7 +81,7 @@ pub(super) fn resolve_selected_build_inner(state: &mut AddonState) {
 /// Auto-populate BuildLocks from the current resolved build.
 /// Locks only the elite specialization slot (slot 2) so the optimizer preserves the
 /// profession identity. Core specs and all traits remain unlocked by default.
-pub(super) fn auto_populate_locks(
+pub(in crate::ui::main_view) fn auto_populate_locks(
     build: &gw2_core::types::ResolvedBuild,
     locks: &mut gw2_core::types::BuildLocks,
 ) {

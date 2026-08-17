@@ -337,6 +337,9 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             s.main.comparison.suggestions = suggestions;
                             s.main.comparison.selected_suggestion = 0;
                             s.main.comparison.show_optimized = true;
+                            s.main.tab_alert =
+                                Some(result_alert_tab(s.main.current_build.is_some()));
+                            s.main.provider_issue = None;
                         }
                         Err(e) => {
                             s.main.comparison.error = Some(e);
@@ -1461,6 +1464,41 @@ fn chat_display_text(explanation: &str, spec_count: usize, error_details: &[Stri
     display
 }
 
+fn result_alert_tab(has_current: bool) -> crate::state::MainTab {
+    if has_current {
+        crate::state::MainTab::Improve
+    } else {
+        crate::state::MainTab::NewBuild
+    }
+}
+
+pub(super) fn format_provider_issue(err: &str, provider: &str, model: &str) -> String {
+    let lower = err.to_lowercase();
+    let detail = if lower.contains("rate limit") || lower.contains("429") {
+        "Rate limited. Wait a minute or switch model.".to_string()
+    } else if lower.contains("invalid api key")
+        || lower.contains("401")
+        || lower.contains("unauthorized")
+    {
+        "API key rejected. Check Settings.".to_string()
+    } else if lower.contains("billing")
+        || lower.contains("quota")
+        || lower.contains("credit")
+        || lower.contains("insufficient")
+    {
+        "Billing or quota issue on this provider. Check the account or switch provider.".to_string()
+    } else if lower.contains("timeout") || lower.contains("timed out") || lower.contains("deadline")
+    {
+        "Request timed out. Try a larger/faster model.".to_string()
+    } else if lower.contains("529") || lower.contains("overloaded") || lower.contains("unavailable")
+    {
+        "Provider is overloaded. Retry or pick another model.".to_string()
+    } else {
+        err.chars().take(240).collect()
+    };
+    format!("{provider} \u{00b7} {model}: {detail}")
+}
+
 fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -> bool {
     v.errors.is_empty() && !v.specializations.is_empty()
 }
@@ -1891,18 +1929,25 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 &mut s.main.chat,
                                 display,
                                 chips,
+                                true,
                             );
                             s.main.comparison.error = None;
                             s.main.comparison.suggestions.push(suggestion);
                             s.main.comparison.selected_suggestion =
                                 s.main.comparison.suggestions.len() - 1;
                             s.main.comparison.show_optimized = true;
+                            s.main.tab_alert =
+                                Some(result_alert_tab(s.main.current_build.is_some()));
+                            s.main.provider_issue = None;
                         }
                         Err(e) => {
-                            crate::ui::chat_bar::add_ai_response(
-                                &mut s.main.chat,
-                                format!("Choya couldn't reply: {}", e),
+                            let msg = format_provider_issue(
+                                &e,
+                                s.config.active_provider.short_label(),
+                                s.config.active_model_id(),
                             );
+                            s.main.provider_issue = Some(msg.clone());
+                            crate::ui::chat_bar::add_ai_response(&mut s.main.chat, msg);
                         }
                     }
                 });
@@ -1932,8 +1977,8 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_radar_prefix, chat_display_text, gemini_from_validated, keep_equipped_weapons,
-        kitchen_brief, plate_is_servable, suggestion_to_chat_code,
+        apply_radar_prefix, chat_display_text, format_provider_issue, gemini_from_validated,
+        keep_equipped_weapons, kitchen_brief, plate_is_servable, suggestion_to_chat_code,
     };
     use crate::ui::comparison::BuildSuggestion;
     use base64::Engine as _;
@@ -2150,5 +2195,17 @@ mod tests {
             gw2_optimizer::scoring::select_gear_prefix(&weights).primary
         );
         assert_ne!(parsed.stat_prefix, "Celestial");
+    }
+
+    #[test]
+    fn format_provider_issue_names_model_and_classifies() {
+        let t = format_provider_issue("HTTP 429 rate limit", "OpenRouter", "llama-tiny");
+        assert!(t.contains("OpenRouter"));
+        assert!(t.contains("llama-tiny"));
+        assert!(t.contains("Rate limited"));
+        let t = format_provider_issue("Invalid API key", "Gemini", "gemini-2.5-flash");
+        assert!(t.contains("API key rejected"));
+        let t = format_provider_issue("credit balance too low", "OpenAI", "gpt-4o");
+        assert!(t.contains("Billing"));
     }
 }

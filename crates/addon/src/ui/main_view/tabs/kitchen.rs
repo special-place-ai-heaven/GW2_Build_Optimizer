@@ -2,12 +2,13 @@
 
 use nexus::imgui::Ui;
 
-use crate::state::AddonState;
+use crate::state::{AddonState, MainTab};
+use crate::ui::chat_bar::ChatAction;
 use crate::ui::theme;
 
 use super::optimization;
 
-const MASCOT: f32 = 96.0;
+const MASCOT: f32 = 132.0;
 
 const STARTERS: &[(&str, &str)] = &[
     (
@@ -55,14 +56,35 @@ pub(in crate::ui::main_view) fn render_talk_tab(ui: &Ui, state: &mut AddonState)
     } else {
         None
     };
-    if let Some(msg) = crate::ui::chat_bar::render_chat_bar(
+    match crate::ui::chat_bar::render_chat_bar(
         ui,
         &mut state.main.chat,
         cooking.as_deref(),
         user_icon.as_deref(),
         user_letter,
     ) {
-        optimization::send_chat_message(state, msg);
+        Some(ChatAction::Send(msg)) => optimization::send_chat_message(state, msg),
+        Some(ChatAction::OpenBuild) => open_optimized_tab(state),
+        None => {}
+    }
+}
+
+fn open_optimized_tab(state: &mut AddonState) {
+    state.main.active_tab = if state.main.current_build.is_some() {
+        MainTab::Improve
+    } else {
+        MainTab::NewBuild
+    };
+    state.main.tab_alert = None;
+    state.main.comparison.show_optimized = true;
+    if state.main.active_tab == MainTab::Improve {
+        if let Some(ref build) = state.main.current_build {
+            let build_clone = build.clone();
+            super::super::resolution::auto_populate_locks(
+                &build_clone,
+                &mut state.main.build_locks,
+            );
+        }
     }
 }
 
@@ -77,11 +99,14 @@ fn render_choya_identity(ui: &Ui, state: &mut AddonState) {
     let top = ui.cursor_screen_pos();
     ui.invisible_button("##choya_mascot", [box_w, box_h]);
     let below = ui.cursor_screen_pos();
-    theme::draw_choya_hero(
-        ui,
-        [top[0] + PAD_L + MASCOT * 0.5, top[1] + PAD_T + MASCOT * 0.5],
-        MASCOT,
-    );
+    let center = [top[0] + PAD_L + MASCOT * 0.5, top[1] + PAD_T + MASCOT * 0.5];
+    if state.main.chat.waiting {
+        theme::draw_choya_thinking(ui, center, MASCOT);
+    } else if !state.main.chat.input.is_empty() {
+        theme::draw_choya_hero(ui, center, MASCOT);
+    } else {
+        theme::draw_choya_sleep(ui, center, MASCOT);
+    }
 
     let text_x = top[0] + box_w + 10.0;
     let ty0 = top[1] + PAD_T + 8.0;
@@ -115,6 +140,9 @@ fn render_choya_identity(ui: &Ui, state: &mut AddonState) {
     ui.dummy([12.0, th]);
     ui.same_line();
     ui.text_colored(pip, if online { "Online" } else { "Set API key" });
+
+    ui.set_cursor_screen_pos([text_x, ty0 + ui.text_line_height() * 2.0 + 12.0]);
+    super::settings::render_talk_model_row(ui, state);
 
     let after_id = ui.cursor_screen_pos();
     ui.set_cursor_screen_pos([top[0], below[1].max(after_id[1])]);

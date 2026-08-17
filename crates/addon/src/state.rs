@@ -179,6 +179,10 @@ pub struct MainState {
     pub settings_graphics_size: u64,
     /// Frame counter that throttles `settings_cache_size` refresh.
     pub settings_cache_size_frames: u32,
+    /// Blink Improve/New Build until the player opens that tab.
+    pub tab_alert: Option<MainTab>,
+    /// Last LLM/provider failure shown on the Choya header (timeout, 429, billing).
+    pub provider_issue: Option<String>,
     /// Search filter text for the Settings tab model-picker dropdown.
     /// Case-insensitive substring filter against model id + display label.
     /// Persists across frames so the user can refine. Cleared when the

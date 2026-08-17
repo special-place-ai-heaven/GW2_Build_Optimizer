@@ -268,6 +268,124 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     }
 }
 
+fn model_catalog(state: &AddonState) -> Vec<(String, String)> {
+    if !state.main.available_models.is_empty() {
+        return state.main.available_models.clone();
+    }
+    let hardcoded: &[(&str, &str)] = match state.config.active_provider {
+        gw2_core::config::LlmProvider::Gemini => gw2_core::config::GEMINI_MODELS,
+        gw2_core::config::LlmProvider::OpenAI => gw2_core::config::OPENAI_MODELS,
+        gw2_core::config::LlmProvider::Anthropic => gw2_core::config::ANTHROPIC_MODELS,
+        gw2_core::config::LlmProvider::OpenRouter => gw2_core::config::OPENROUTER_MODELS,
+    };
+    hardcoded
+        .iter()
+        .map(|(id, label)| (id.to_string(), label.to_string()))
+        .collect()
+}
+
+fn render_model_combo(
+    ui: &Ui,
+    state: &mut AddonState,
+    preview: &str,
+    display_models: &[(String, String)],
+    current_model: &str,
+    id: &str,
+) {
+    if let Some(_c) = ComboBox::new(&format!("##{id}_model"))
+        .preview_value(preview)
+        .begin(ui)
+    {
+        ui.set_next_item_width(-1.0);
+        ui.input_text(
+            &format!("##{id}_model_search"),
+            &mut state.main.settings_model_search,
+        )
+        .hint("Search models...")
+        .build();
+        let needle = state.main.settings_model_search.trim().to_lowercase();
+        let mut visible = 0usize;
+        for (mid, label) in display_models {
+            if !needle.is_empty()
+                && !mid.to_lowercase().contains(&needle)
+                && !label.to_lowercase().contains(&needle)
+            {
+                continue;
+            }
+            visible += 1;
+            let sel = *mid == current_model;
+            if Selectable::new(label).selected(sel).build(ui) {
+                state.config.set_active_model_id(mid.clone());
+                state.main.provider_issue = None;
+                let _ = state.config.save(&state.config_path);
+            }
+        }
+        if visible == 0 && !needle.is_empty() {
+            ui.text_colored(
+                [0.7, 0.7, 0.7, 1.0],
+                format!(
+                    "No models match \"{}\"",
+                    state.main.settings_model_search.trim()
+                ),
+            );
+        }
+    }
+}
+
+/// Compact provider + model row for the Choya header.
+pub(in crate::ui::main_view) fn render_talk_model_row(ui: &Ui, state: &mut AddonState) {
+    let has_key = state.config.has_active_llm_key();
+    if state.main.available_models.is_empty() && !state.main.models_loading && has_key {
+        stats::start_fetch_models(state);
+    }
+    let current_model = state.config.active_model_id().to_string();
+    let display_models = model_catalog(state);
+    let preview = display_models
+        .iter()
+        .find(|(id, _)| *id == current_model)
+        .map(|(_, l)| l.as_str())
+        .unwrap_or(&current_model)
+        .to_string();
+
+    let avail = ui.content_region_avail()[0];
+    ui.set_next_item_width((avail * 0.34).clamp(96.0, 150.0));
+    let provider_preview = state.config.active_provider.short_label().to_string();
+    if let Some(_c) = ComboBox::new("##talk_provider")
+        .preview_value(&provider_preview)
+        .begin(ui)
+    {
+        for provider in &gw2_core::config::LlmProvider::ALL {
+            let sel = state.config.active_provider == *provider;
+            if Selectable::new(provider.short_label())
+                .selected(sel)
+                .build(ui)
+                && !sel
+            {
+                state.config.active_provider = provider.clone();
+                state.main.available_models.clear();
+                state.main.models_error = None;
+                state.main.settings_model_search.clear();
+                state.main.provider_issue = None;
+                let _ = state.config.save(&state.config_path);
+            }
+        }
+    }
+    ui.same_line_with_spacing(0.0, 6.0);
+    let rest = ui.content_region_avail()[0];
+    ui.set_next_item_width((rest - 28.0).max(120.0));
+    render_model_combo(ui, state, &preview, &display_models, &current_model, "talk");
+    if state.main.models_loading {
+        ui.same_line();
+        ui.text_colored(theme::MUTED, "...");
+    }
+    if let Some(err) = state.main.models_error.clone() {
+        theme::wrapped(ui, theme::WARN, &err);
+    }
+    if let Some(issue) = state.main.provider_issue.clone() {
+        theme::wrapped(ui, theme::ERR, &issue);
+    }
+}
+
 fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let current_model = match state.config.active_provider {
         gw2_core::config::LlmProvider::Gemini => state.config.gemini_model_id().to_string(),
@@ -307,60 +425,14 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     ui.text("Model:");
     ui.same_line();
     ui.set_next_item_width(col_w - 140.0);
-    if let Some(_c) = ComboBox::new(&format!("##{}_model", config_field))
-        .preview_value(preview)
-        .begin(ui)
-    {
-        // Search box pinned at the top of the dropdown — filters the model
-        // list by case-insensitive substring match against both id and
-        // display label. OpenRouter's catalog can have hundreds of entries,
-        // so without a filter the user has to scroll/eyeball through them.
-        ui.set_next_item_width(-1.0);
-        ui.input_text(
-            &format!("##{}_model_search", config_field),
-            &mut state.main.settings_model_search,
-        )
-        .hint("Search models...")
-        .build();
-        let needle = state.main.settings_model_search.trim().to_lowercase();
-        let mut visible = 0usize;
-        for (id, label) in &display_models {
-            if !needle.is_empty()
-                && !id.to_lowercase().contains(&needle)
-                && !label.to_lowercase().contains(&needle)
-            {
-                continue;
-            }
-            visible += 1;
-            let sel = *id == current_model;
-            if Selectable::new(label).selected(sel).build(ui) {
-                match state.config.active_provider {
-                    gw2_core::config::LlmProvider::Gemini => {
-                        state.config.gemini_model = Some(id.clone())
-                    }
-                    gw2_core::config::LlmProvider::OpenAI => {
-                        state.config.openai_model = Some(id.clone())
-                    }
-                    gw2_core::config::LlmProvider::Anthropic => {
-                        state.config.anthropic_model = Some(id.clone())
-                    }
-                    gw2_core::config::LlmProvider::OpenRouter => {
-                        state.config.openrouter_model = Some(id.clone())
-                    }
-                }
-                let _ = state.config.save(&state.config_path);
-            }
-        }
-        if visible == 0 && !needle.is_empty() {
-            ui.text_colored(
-                [0.7, 0.7, 0.7, 1.0],
-                format!(
-                    "No models match \"{}\"",
-                    state.main.settings_model_search.trim()
-                ),
-            );
-        }
-    }
+    render_model_combo(
+        ui,
+        state,
+        preview,
+        &display_models,
+        &current_model,
+        config_field,
+    );
     ui.same_line();
     if state.main.models_loading {
         ui.text_colored([0.7, 0.7, 0.7, 1.0], "...");
