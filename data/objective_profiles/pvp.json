@@ -300,6 +300,306 @@
       "is_mode_default": false,
       "notes": "Celestial PvP all-rounder. Some of everything for mixed node fights.",
       "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvP_Harasser",
+      "axis_weights": {
+        "power": 0.6,
+        "condition": 0.15,
+        "boon_support": 0.05,
+        "healing": 0.1,
+        "sustain": 0.4,
+        "control": 0.7
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.7,
+        "Fury": 0.8,
+        "Quickness": 0.9,
+        "Alacrity": 0.3,
+        "Swiftness": 0.6,
+        "Protection": 0.3,
+        "Regeneration": 0.2,
+        "Vigor": 0.5,
+        "Aegis": 0.6,
+        "Stability": 0.7,
+        "Resistance": 0.4,
+        "Resolution": 0.3
+      },
+      "condition_priorities": {
+        "Burning": 0.3,
+        "Bleeding": 0.2,
+        "Poison": 0.4,
+        "Torment": 0.2,
+        "Confusion": 0.3,
+        "Vulnerability": 0.7,
+        "Weakness": 0.5,
+        "Blind": 0.6,
+        "Crippled": 0.5,
+        "Immobilize": 0.8,
+        "Slow": 0.6,
+        "Chilled": 0.5,
+        "Fear": 0.7,
+        "Taunt": 0.4
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.5,
+        "corrupts_boon": 0.6,
+        "removes_condition": 0.5,
+        "converts_condition_to_boon": 0.5,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": false,
+      "notes": "PvP harasser. Dive, spike, leave. More control than Burst, less bunker than Bruiser.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvP_Condi",
+      "axis_weights": {
+        "power": 0.2,
+        "condition": 0.8,
+        "boon_support": 0.1,
+        "healing": 0.1,
+        "sustain": 0.4,
+        "control": 0.4
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.7,
+        "Fury": 0.8,
+        "Quickness": 0.9,
+        "Alacrity": 0.3,
+        "Swiftness": 0.6,
+        "Protection": 0.3,
+        "Regeneration": 0.2,
+        "Vigor": 0.5,
+        "Aegis": 0.6,
+        "Stability": 0.7,
+        "Resistance": 0.4,
+        "Resolution": 0.3
+      },
+      "condition_priorities": {
+        "Burning": 0.3,
+        "Bleeding": 0.2,
+        "Poison": 0.4,
+        "Torment": 0.2,
+        "Confusion": 0.3,
+        "Vulnerability": 0.7,
+        "Weakness": 0.5,
+        "Blind": 0.6,
+        "Crippled": 0.5,
+        "Immobilize": 0.8,
+        "Slow": 0.6,
+        "Chilled": 0.5,
+        "Fear": 0.7,
+        "Taunt": 0.4
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.5,
+        "corrupts_boon": 0.6,
+        "removes_condition": 0.5,
+        "converts_condition_to_boon": 0.5,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": false,
+      "notes": "PvP condition pressure. Distinct from Burst power spike.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvP_Bruiser",
+      "axis_weights": {
+        "power": 0.45,
+        "condition": 0.2,
+        "boon_support": 0.1,
+        "healing": 0.25,
+        "sustain": 0.8,
+        "control": 0.2
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.3,
+        "Fury": 0.3,
+        "Quickness": 0.3,
+        "Alacrity": 0.3,
+        "Swiftness": 0.5,
+        "Protection": 0.9,
+        "Regeneration": 0.9,
+        "Vigor": 0.6,
+        "Aegis": 0.8,
+        "Stability": 0.8,
+        "Resistance": 0.8,
+        "Resolution": 0.6
+      },
+      "condition_priorities": {
+        "Burning": 0.2,
+        "Bleeding": 0.2,
+        "Poison": 0.3,
+        "Torment": 0.2,
+        "Confusion": 0.2,
+        "Vulnerability": 0.3,
+        "Weakness": 0.5,
+        "Blind": 0.3,
+        "Crippled": 0.3,
+        "Immobilize": 0.3,
+        "Slow": 0.3,
+        "Chilled": 0.3,
+        "Fear": 0.2,
+        "Taunt": 0.2
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.2,
+        "corrupts_boon": 0.2,
+        "removes_condition": 0.9,
+        "converts_condition_to_boon": 0.95,
+        "transfers_condition": 0.4
+      },
+      "is_mode_default": false,
+      "notes": "PvP bruiser. Fights on node and lives. Not a bunker Heal clone.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvP_Staller",
+      "axis_weights": {
+        "power": 0.1,
+        "condition": 0.1,
+        "boon_support": 0.1,
+        "healing": 0.4,
+        "sustain": 1.0,
+        "control": 0.3
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.3,
+        "Fury": 0.3,
+        "Quickness": 0.3,
+        "Alacrity": 0.3,
+        "Swiftness": 0.5,
+        "Protection": 0.9,
+        "Regeneration": 0.9,
+        "Vigor": 0.6,
+        "Aegis": 0.8,
+        "Stability": 0.8,
+        "Resistance": 0.8,
+        "Resolution": 0.6
+      },
+      "condition_priorities": {
+        "Burning": 0.2,
+        "Bleeding": 0.2,
+        "Poison": 0.3,
+        "Torment": 0.2,
+        "Confusion": 0.2,
+        "Vulnerability": 0.3,
+        "Weakness": 0.5,
+        "Blind": 0.3,
+        "Crippled": 0.3,
+        "Immobilize": 0.3,
+        "Slow": 0.3,
+        "Chilled": 0.3,
+        "Fear": 0.2,
+        "Taunt": 0.2
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.2,
+        "corrupts_boon": 0.2,
+        "removes_condition": 0.9,
+        "converts_condition_to_boon": 0.95,
+        "transfers_condition": 0.4
+      },
+      "is_mode_default": false,
+      "notes": "PvP troll/stall. Hold until help. Not Heal and not Bruiser.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "PvP_Commander",
+      "axis_weights": {
+        "power": 0.25,
+        "condition": 0.1,
+        "boon_support": 0.4,
+        "healing": 0.2,
+        "sustain": 0.65,
+        "control": 0.4
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.3,
+        "Fury": 0.3,
+        "Quickness": 0.3,
+        "Alacrity": 0.3,
+        "Swiftness": 0.5,
+        "Protection": 0.9,
+        "Regeneration": 0.9,
+        "Vigor": 0.6,
+        "Aegis": 0.8,
+        "Stability": 0.8,
+        "Resistance": 0.8,
+        "Resolution": 0.6
+      },
+      "condition_priorities": {
+        "Burning": 0.2,
+        "Bleeding": 0.2,
+        "Poison": 0.3,
+        "Torment": 0.2,
+        "Confusion": 0.2,
+        "Vulnerability": 0.3,
+        "Weakness": 0.5,
+        "Blind": 0.3,
+        "Crippled": 0.3,
+        "Immobilize": 0.3,
+        "Slow": 0.3,
+        "Chilled": 0.3,
+        "Fear": 0.2,
+        "Taunt": 0.2
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.2,
+        "corrupts_boon": 0.2,
+        "removes_condition": 0.9,
+        "converts_condition_to_boon": 0.95,
+        "transfers_condition": 0.4
+      },
+      "is_mode_default": false,
+      "notes": "PvP commander. Frontline presence and stab, not Burst DPS.",
+      "evidence_level": "Heuristic"
     }
   ]
 }

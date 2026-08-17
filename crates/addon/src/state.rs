@@ -222,6 +222,7 @@ pub enum MainTab {
     #[default]
     NewBuild,
     Improve,
+    Talk,
     SaveLoad,
     Settings,
 }
@@ -359,7 +360,7 @@ pub fn init(addon_dir: PathBuf) {
     main.chat.history = crate::ui::chat_bar::load_history(&addon_dir);
     crate::ui::icons::set_graphics_dir(addon_dir.join("cache").join("graphics"));
     *lock_state() = Some(AddonState {
-        window_visible: false,
+        window_visible: config.window_visible,
         config,
         config_path,
         addon_dir,
@@ -374,6 +375,15 @@ pub fn init(addon_dir: PathBuf) {
 pub fn toggle_window() {
     if let Some(state) = lock_state().as_mut() {
         state.window_visible = !state.window_visible;
+        state.config.window_visible = state.window_visible;
+        let _ = state.config.save(&state.config_path);
+    }
+}
+
+pub fn persist_window() {
+    if let Some(state) = lock_state().as_mut() {
+        state.config.window_visible = state.window_visible;
+        let _ = state.config.save(&state.config_path);
     }
 }
 
@@ -750,7 +760,24 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         init(dir);
         let result = with_state(|s| s.window_visible);
-        assert_eq!(result, Some(false));
+        assert_eq!(result, Some(true));
+        reset_state();
+    }
+
+    #[test]
+    fn test_init_restores_hidden_window() {
+        let _serial = state_test_guard();
+        reset_state();
+        let config = AppConfig {
+            gw2_api_key: Some("test-gw2-key".into()),
+            gemini_api_key: Some("test-gemini-key".into()),
+            cache_build_number: Some(12345),
+            window_visible: false,
+            ..Default::default()
+        };
+        let dir = config_in_tempdir(&config, "window_hidden");
+        init(dir);
+        assert_eq!(with_state(|s| s.window_visible), Some(false));
         reset_state();
     }
 

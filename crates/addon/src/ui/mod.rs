@@ -8,7 +8,9 @@ pub mod radar_chart;
 mod setup;
 pub(crate) mod theme;
 
-use nexus::imgui::{Condition, MouseCursor, Ui, Window, WindowHoveredFlags};
+use nexus::imgui::{
+    Condition, MouseButton, MouseCursor, Ui, Window, WindowFlags, WindowHoveredFlags,
+};
 
 /// Convert RGBA `[f32;4]` (each channel 0.0–1.0) to ImGui's packed `u32` color
 /// (ABGR byte order). Shared by `radar_chart` and `lock_panel` to avoid
@@ -46,12 +48,24 @@ pub fn render(ui: &Ui) {
         return;
     }
 
-    let snap = state::with_state(|s| {
-        let v = s.force_window_pos;
+    let (snap, pos, size) = state::with_state(|s| {
+        let snap = s.force_window_pos;
         s.force_window_pos = false;
-        v
+        if snap {
+            s.config.set_window_rect(
+                gw2_core::config::DEFAULT_WINDOW_POS,
+                gw2_core::config::DEFAULT_WINDOW_SIZE,
+            );
+            let _ = s.config.save(&s.config_path);
+        }
+        let (pos, size) = s.config.window_rect();
+        (snap, pos, size)
     })
-    .unwrap_or(false);
+    .unwrap_or((
+        false,
+        gw2_core::config::DEFAULT_WINDOW_POS,
+        gw2_core::config::DEFAULT_WINDOW_SIZE,
+    ));
 
     // Catch panics inside the ImGui frame so a bug in any render path
     // doesn't unwind through Nexus' C-unwind FFI boundary. A panic mid-frame
@@ -61,37 +75,62 @@ pub fn render(ui: &Ui) {
     // rest of the game's ImGui state intact.
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _theme = theme::push(ui);
-        let mut window = Window::new("GW2 Build Optimizer")
-            .size([800.0, 600.0], Condition::FirstUseEver)
-            .position([80.0, 80.0], Condition::FirstUseEver);
-        if snap {
-            window = window
-                .position([80.0, 80.0], Condition::Always)
-                .size([800.0, 600.0], Condition::Always);
-        }
-        window.build(ui, || {
-            state::with_state(|s| {
-                if window_needs_snap(ui.window_pos(), ui.window_size(), ui.io().display_size) {
-                    s.force_window_pos = true;
-                }
-                match &s.screen {
-                    Screen::Setup(step) => {
-                        setup::render_setup(ui, s, step.clone());
+        let mut opened = true;
+        let cond = if snap {
+            Condition::Always
+        } else {
+            Condition::Appearing
+        };
+        Window::new("GW2 Build Optimizer")
+            .opened(&mut opened)
+            .flags(WindowFlags::NO_SAVED_SETTINGS)
+            .size_constraints(gw2_core::config::MIN_WINDOW_SIZE, [99999.0, 99999.0])
+            .collapsed(false, cond)
+            .position(pos, cond)
+            .size(size, cond)
+            .build(ui, || {
+                state::with_state(|s| {
+                    if window_needs_snap(ui.window_pos(), ui.window_size(), ui.io().display_size) {
+                        s.force_window_pos = true;
                     }
-                    Screen::Main => {
-                        main_view::render_main(ui, s);
+                    if !ui.is_window_collapsed() && !ui.is_mouse_down(MouseButton::Left) {
+                        let p = ui.window_pos();
+                        let sz = ui.window_size();
+                        let (old_p, old_sz) = s.config.window_rect();
+                        if (p[0] - old_p[0]).abs() > 0.5
+                            || (p[1] - old_p[1]).abs() > 0.5
+                            || (sz[0] - old_sz[0]).abs() > 0.5
+                            || (sz[1] - old_sz[1]).abs() > 0.5
+                        {
+                            s.config.set_window_rect(p, sz);
+                            let _ = s.config.save(&s.config_path);
+                        }
                     }
-                }
-                // Last write wins: buttons/selectables/pills set Hand while hovered.
-                // Nexus maps that to GW2's gloved click cursor. Pin arrow after all widgets,
-                // but only while the mouse is over this overlay so the world cursor stays intact.
-                if ui.is_window_hovered_with_flags(WindowHoveredFlags::ROOT_AND_CHILD_WINDOWS)
-                    || ui.is_any_item_hovered()
-                {
-                    ui.set_mouse_cursor(Some(MouseCursor::Arrow));
-                }
+                    match &s.screen {
+                        Screen::Setup(step) => {
+                            setup::render_setup(ui, s, step.clone());
+                        }
+                        Screen::Main => {
+                            main_view::render_main(ui, s);
+                        }
+                    }
+                    // Last write wins: buttons/selectables/pills set Hand while hovered.
+                    // Nexus maps that to GW2's gloved click cursor. Pin arrow after all widgets,
+                    // but only while the mouse is over this overlay so the world cursor stays intact.
+                    if ui.is_window_hovered_with_flags(WindowHoveredFlags::ROOT_AND_CHILD_WINDOWS)
+                        || ui.is_any_item_hovered()
+                    {
+                        ui.set_mouse_cursor(Some(MouseCursor::Arrow));
+                    }
+                });
             });
-        });
+        if !opened {
+            state::with_state(|s| {
+                s.window_visible = false;
+                s.config.window_visible = false;
+                let _ = s.config.save(&s.config_path);
+            });
+        }
     }));
     if outcome.is_err() {
         nexus::log::log(

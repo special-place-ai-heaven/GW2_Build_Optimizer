@@ -6,7 +6,7 @@ use nexus::imgui::Ui;
 use crate::state::AddonState;
 use crate::ui::theme;
 
-use super::{optimization, render_optimization_progress};
+use super::render_optimization_progress;
 
 fn render_scenario_ready(ui: &Ui, state: &AddonState) {
     let mode = state.main.game_mode.label();
@@ -72,7 +72,7 @@ pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonS
     }
 
     if !state.main.comparison.suggestions.is_empty() {
-        let footer = 36.0 + crate::ui::chat_bar::reserved_height(&state.main.chat);
+        let footer = 36.0;
         let scroll_h = (ui.content_region_avail()[1] - footer).max(64.0);
         nexus::imgui::ChildWindow::new("##new_build_scroll")
             .size([0.0, scroll_h])
@@ -97,17 +97,5 @@ pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonS
             state.main.comparison.suggestions.clear();
             state.main.comparison.error = None;
         }
-    }
-
-    ui.spacing();
-    let cooking = if state.main.chat.waiting {
-        Some(state.main.optimize_stage.clone())
-    } else {
-        None
-    };
-    if let Some(msg) =
-        crate::ui::chat_bar::render_chat_bar(ui, &mut state.main.chat, cooking.as_deref())
-    {
-        optimization::send_chat_message(state, msg);
     }
 }

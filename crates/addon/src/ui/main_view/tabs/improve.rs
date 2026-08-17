@@ -1,4 +1,4 @@
-//! Improve tab — current vs optimized side-by-side, lock panel, chat bar.
+//! Improve tab — current vs optimized side-by-side, lock panel.
 
 use nexus::imgui::{ChildWindow, Selectable, Ui};
 
@@ -6,7 +6,7 @@ use crate::state::AddonState;
 use crate::ui::comparison::ResultPane;
 use crate::ui::theme;
 
-use super::{build_display, lock_panel, optimization, render_optimization_progress};
+use super::{build_display, lock_panel, render_optimization_progress};
 
 pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
     if state.main.build_loading {
@@ -46,13 +46,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
 
     // ── Two-panel layout: Current Build | Optimized Build ──
     let has_suggestion = !state.main.comparison.suggestions.is_empty();
-    let show_chat = state.main.current_build.is_some();
-    let footer = (if has_suggestion { 36.0 } else { 0.0 })
-        + if show_chat {
-            crate::ui::chat_bar::reserved_height(&state.main.chat)
-        } else {
-            0.0
-        };
+    let footer = if has_suggestion { 36.0 } else { 0.0 };
 
     if state.main.current_build.is_some() {
         // Clone build data upfront to avoid borrow conflicts with mutable lock_panel state
@@ -232,20 +226,6 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
         if ui.small_button("Clear Results##improve") {
             state.main.comparison.suggestions.clear();
             state.main.comparison.error = None;
-        }
-    }
-
-    // Kitchen chat at bottom
-    if state.main.current_build.is_some() {
-        let cooking = if state.main.chat.waiting {
-            Some(state.main.optimize_stage.clone())
-        } else {
-            None
-        };
-        if let Some(msg) =
-            crate::ui::chat_bar::render_chat_bar(ui, &mut state.main.chat, cooking.as_deref())
-        {
-            optimization::send_chat_message(state, msg);
         }
     }
 }

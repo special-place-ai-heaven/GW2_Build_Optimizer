@@ -1,4 +1,4 @@
-//! Kitchen chat: the player orders, the chef plates an optimal build.
+//! Bubble chat: player on the right, animated Choya on the left.
 
 use std::path::Path;
 
@@ -6,9 +6,9 @@ use nexus::imgui::{ChildWindow, StyleColor, Ui};
 use serde::{Deserialize, Serialize};
 
 use crate::chat_links::ChatChip;
-use crate::ui::theme;
+use crate::ui::{color_u32, icons, theme};
 
-/// State for the kitchen chat bar.
+/// State for the talk-tab transcript.
 #[derive(Default)]
 pub struct ChatBarState {
     pub input: String,
@@ -28,9 +28,15 @@ pub struct ChatMessage {
 }
 
 /// Maximum chat history entries retained. Beyond this, the oldest entries are
-/// dropped on append so a long-running session can't grow the Vec without
-/// bound. The plate scrolls; reserved height stays fixed.
+/// dropped on append so a long-running session can't grow the Vec without bound.
 const CHAT_HISTORY_CAP: usize = 100;
+
+const AVATAR: f32 = 42.0;
+const AVATAR_GAP: f32 = 10.0;
+const BUBBLE_PAD: f32 = 10.0;
+const BUBBLE_ROUND: f32 = 14.0;
+const COMPOSER_H: f32 = 32.0;
+const ROW_GAP: f32 = 12.0;
 
 fn trim_history(history: &mut Vec<ChatMessage>) {
     if history.len() > CHAT_HISTORY_CAP {
@@ -39,24 +45,144 @@ fn trim_history(history: &mut Vec<ChatMessage>) {
     }
 }
 
-const HEADER_H: f32 = 20.0;
-const HISTORY_H: f32 = 128.0;
-const COOKING_H: f32 = 18.0;
-const INPUT_H: f32 = 28.0;
-const PAD: f32 = 6.0;
-
-/// Vertical space this bar will consume. Callers reserve this before the
-/// scroll child so the input is not drawn on top of results. Height is
-/// independent of history length — the plate scrolls instead.
-pub fn reserved_height(state: &ChatBarState) -> f32 {
-    let cooking = if state.waiting { COOKING_H } else { 0.0 };
-    PAD + HEADER_H + HISTORY_H + cooking + INPUT_H
+/// Push a player line and return it for `send_chat_message`. None if waiting.
+pub fn queue_user_message(state: &mut ChatBarState, msg: &str) -> Option<String> {
+    let msg = msg.trim();
+    if state.waiting || msg.is_empty() {
+        return None;
+    }
+    state.history.push(ChatMessage {
+        from_user: true,
+        text: msg.to_string(),
+        chips: Vec::new(),
+    });
+    trim_history(&mut state.history);
+    state.input.clear();
+    state.scroll_to_end = true;
+    state.dirty = true;
+    Some(msg.to_string())
 }
 
-/// Render the kitchen chat bar at the bottom of the build view.
-/// `cooking` is the live plating line (tool names) while the chef is working.
-/// Returns Some(message) if the user submitted an order.
-pub fn render_chat_bar(ui: &Ui, state: &mut ChatBarState, cooking: Option<&str>) -> Option<String> {
+/// Last `n` turns for the LLM brief. Oldest first.
+pub fn recent_transcript(history: &[ChatMessage], n: usize) -> String {
+    let start = history.len().saturating_sub(n);
+    history[start..]
+        .iter()
+        .map(|m| {
+            let who = if m.from_user { "Player" } else { "Assistant" };
+            let text: String = m.text.chars().take(240).collect();
+            format!("{who}: {text}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn wrap_text(ui: &Ui, text: &str, max_w: f32) -> (Vec<String>, f32, f32) {
+    let mut lines = Vec::new();
+    let mut max_line_w = 0.0f32;
+    let line_h = ui.calc_text_size("Ag")[1];
+    for para in text.split('\n') {
+        if para.is_empty() {
+            lines.push(String::new());
+            continue;
+        }
+        let mut cur = String::new();
+        for word in para.split_whitespace() {
+            let trial = if cur.is_empty() {
+                word.to_string()
+            } else {
+                format!("{cur} {word}")
+            };
+            if !cur.is_empty() && ui.calc_text_size(&trial)[0] > max_w {
+                max_line_w = max_line_w.max(ui.calc_text_size(&cur)[0]);
+                lines.push(std::mem::take(&mut cur));
+                cur = word.to_string();
+            } else {
+                cur = trial;
+            }
+        }
+        if !cur.is_empty() {
+            max_line_w = max_line_w.max(ui.calc_text_size(&cur)[0]);
+            lines.push(cur);
+        }
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    let h = (lines.len() as f32) * line_h;
+    (lines, max_line_w.min(max_w), h.max(line_h))
+}
+
+fn chip_block_h(ui: &Ui, chips: &[ChatChip], max_w: f32) -> f32 {
+    if chips.is_empty() {
+        return 0.0;
+    }
+    let mut row_x = 0.0;
+    let mut rows = 1u32;
+    for chip in chips {
+        let pill_w = ui.calc_text_size(&chip.label)[0] + 20.0;
+        if row_x > 0.0 && row_x + pill_w + 4.0 > max_w {
+            rows += 1;
+            row_x = 0.0;
+        }
+        row_x += pill_w + 4.0;
+    }
+    rows as f32 * 22.0 + 4.0
+}
+
+fn bubble_size(ui: &Ui, text: &str, avail: f32) -> (Vec<String>, f32, f32) {
+    let max_text = ((avail - AVATAR - AVATAR_GAP - 24.0) * 0.78).max(72.0);
+    let (lines, text_w, text_h) = wrap_text(ui, text, max_text);
+    let bw = (text_w + BUBBLE_PAD * 2.0).clamp(48.0, max_text + BUBBLE_PAD * 2.0);
+    let bh = (text_h + BUBBLE_PAD * 2.0).max(AVATAR * 0.65);
+    (lines, bw, bh)
+}
+
+fn draw_bubble_rect(ui: &Ui, p: [f32; 2], bw: f32, bh: f32, from_user: bool) {
+    let dl = ui.get_window_draw_list();
+    let fill = if from_user {
+        [0.16, 0.20, 0.28, 0.96]
+    } else {
+        theme::PLATE
+    };
+    let rim = if from_user {
+        [
+            theme::CURRENT[0],
+            theme::CURRENT[1],
+            theme::CURRENT[2],
+            0.55,
+        ]
+    } else {
+        theme::GOLD_DIM
+    };
+    dl.add_rect(p, [p[0] + bw, p[1] + bh], fill)
+        .filled(true)
+        .rounding(BUBBLE_ROUND)
+        .build();
+    dl.add_rect(p, [p[0] + bw, p[1] + bh], rim)
+        .rounding(BUBBLE_ROUND)
+        .build();
+}
+
+fn draw_bubble_text(ui: &Ui, p: [f32; 2], lines: &[String]) {
+    let dl = ui.get_window_draw_list();
+    let line_h = ui.calc_text_size("Ag")[1];
+    let mut ty = p[1] + BUBBLE_PAD;
+    for line in lines {
+        dl.add_text([p[0] + BUBBLE_PAD, ty], color_u32(theme::CREAM), line);
+        ty += line_h;
+    }
+}
+
+/// Transcript fills leftover height; composer stays pinned. `user_icon` is the
+/// profession portrait when a character is selected.
+pub fn render_chat_bar(
+    ui: &Ui,
+    state: &mut ChatBarState,
+    cooking: Option<&str>,
+    user_icon: Option<&str>,
+    user_letter: char,
+) -> Option<String> {
     let mut submitted = None;
 
     if state.copied_frames > 0 {
@@ -66,45 +192,80 @@ pub fn render_chat_bar(ui: &Ui, state: &mut ChatBarState, cooking: Option<&str>)
         }
     }
 
-    ui.spacing();
-    ui.text_colored(theme::GOLD, "Kitchen");
-    ui.same_line_with_spacing(0.0, 8.0);
-    ui.text_colored(theme::MUTED, "customer \u{00b7} chef");
-    if !state.history.is_empty() && !state.waiting {
-        ui.same_line_with_spacing(0.0, 12.0);
-        if ui.small_button("Clear##kitchen") {
-            state.history.clear();
-            state.copied_code = None;
-            state.copied_frames = 0;
-            state.dirty = true;
-        }
-    }
-
-    let _child_bg = ui.push_style_color(StyleColor::ChildBg, theme::PLATE);
-    ChildWindow::new("##kitchen_scroll")
-        .size([0.0, HISTORY_H])
+    let avail_h = ui.content_region_avail()[1];
+    let scroll_h = (avail_h - COMPOSER_H - 8.0).max(80.0);
+    let _child_bg = ui.push_style_color(StyleColor::ChildBg, [0.05, 0.04, 0.03, 0.35]);
+    ChildWindow::new("##talk_scroll")
+        .size([0.0, scroll_h])
         .build(ui, || {
+            let avail = ui.content_region_avail()[0];
             if state.history.is_empty() && !state.waiting {
                 theme::wrapped(
                     ui,
                     theme::MUTED,
-                    "The kitchen is open. Paste a GW2 chat link or tell the chef what you want on the plate. Click a chip to copy it into game chat.",
+                    "Ask Choya about a new build or how to improve the selected character. Paste a GW2 chat link if you have one.",
                 );
                 return;
             }
             let n = state.history.len();
             for i in 0..n {
                 let from_user = state.history[i].from_user;
-                let (who, color) = if from_user {
-                    ("You", theme::CURRENT)
-                } else {
-                    ("Chef", theme::GOLD)
-                };
-                ui.text_colored(color, who);
                 let text = state.history[i].text.clone();
-                theme::wrapped(ui, theme::CREAM, &text);
-                render_chips(ui, state, i);
-                ui.dummy([0.0, 4.0]);
+                let (lines, bw, bh) = bubble_size(ui, &text, avail);
+                let chip_h = chip_block_h(ui, &state.history[i].chips, bw);
+                let row_h = bh.max(AVATAR) + chip_h + ROW_GAP;
+                let origin = ui.cursor_screen_pos();
+                let id = format!("##talk_row{i}");
+                ui.invisible_button(&id, [avail, row_h]);
+                let after = ui.cursor_screen_pos();
+
+                let (av_x, bub_x) = if from_user {
+                    let av_x = origin[0] + avail - AVATAR;
+                    (av_x, av_x - AVATAR_GAP - bw)
+                } else {
+                    (origin[0], origin[0] + AVATAR + AVATAR_GAP)
+                };
+                let av_y = origin[1];
+                let bub_y = origin[1];
+
+                if from_user {
+                    icons::paint_avatar(ui, user_icon, [av_x, av_y], AVATAR, user_letter);
+                } else {
+                    theme::draw_choya_avatar(
+                        ui,
+                        [av_x + AVATAR * 0.5, av_y + AVATAR * 0.5],
+                        AVATAR,
+                    );
+                }
+                draw_bubble_rect(ui, [bub_x, bub_y], bw, bh, from_user);
+                draw_bubble_text(ui, [bub_x, bub_y], &lines);
+
+                if chip_h > 0.0 {
+                    ui.set_cursor_screen_pos([bub_x, bub_y + bh + 2.0]);
+                    render_chips(ui, state, i, bw);
+                }
+                ui.set_cursor_screen_pos(after);
+            }
+            if state.waiting {
+                let n = (ui.frame_count() / 18) % 4;
+                let dots = ".".repeat(n as usize);
+                let line = cooking
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("Choya is thinking{dots}"));
+                let (lines, bw, bh) = bubble_size(ui, &line, avail);
+                let row_h = bh.max(AVATAR) + ROW_GAP;
+                let origin = ui.cursor_screen_pos();
+                ui.invisible_button("##talk_thinking", [avail, row_h]);
+                let av_x = origin[0];
+                theme::draw_choya_thinking(
+                    ui,
+                    [av_x + AVATAR * 0.5, origin[1] + AVATAR * 0.5],
+                    AVATAR,
+                );
+                let bub_x = origin[0] + AVATAR + AVATAR_GAP;
+                draw_bubble_rect(ui, [bub_x, origin[1]], bw, bh, false);
+                draw_bubble_text(ui, [bub_x, origin[1]], &lines);
             }
             if state.scroll_to_end {
                 ui.set_scroll_here_y();
@@ -113,16 +274,18 @@ pub fn render_chat_bar(ui: &Ui, state: &mut ChatBarState, cooking: Option<&str>)
         });
     drop(_child_bg);
 
-    if state.waiting {
-        let line = cooking
-            .filter(|s| !s.is_empty())
-            .unwrap_or("Chef is plating\u{2026}");
-        theme::wrapped(ui, theme::GOLD, line);
-    }
-
     let avail_width = ui.content_region_avail()[0];
     let button_width = 64.0;
-    ui.set_next_item_width((avail_width - button_width - 10.0).max(40.0));
+    let choya_slot = 26.0;
+    let p = ui.cursor_screen_pos();
+    ui.dummy([choya_slot, COMPOSER_H]);
+    theme::draw_choya_walk(
+        ui,
+        [p[0] + choya_slot * 0.5, p[1] + COMPOSER_H * 0.45],
+        24.0,
+    );
+    ui.same_line_with_spacing(0.0, 6.0);
+    ui.set_next_item_width((avail_width - button_width - choya_slot - 16.0).max(40.0));
     if state.waiting {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
         let mut dummy = String::new();
@@ -132,47 +295,34 @@ pub fn render_chat_bar(ui: &Ui, state: &mut ChatBarState, cooking: Option<&str>)
         style.pop();
         ui.same_line();
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui, "Order", [button_width, 0.0]);
+        theme::gold_button_sized(ui, "Send", [button_width, 0.0]);
         style.pop();
         return submitted;
     }
 
     let enter_pressed = ui
         .input_text("##chat_input", &mut state.input)
-        .hint("What shall we plate?")
+        .hint("Ask Choya about the build\u{2026}")
         .enter_returns_true(true)
         .build();
 
     ui.same_line();
 
     let can_send = !state.input.is_empty();
-    let send_clicked = theme::gold_button_sized(ui, "Order", [button_width, 0.0]) && can_send;
+    let send_clicked = theme::gold_button_sized(ui, "Send", [button_width, 0.0]) && can_send;
 
     if (enter_pressed || send_clicked) && can_send {
-        let msg = state.input.trim().to_string();
-        if !msg.is_empty() {
-            state.history.push(ChatMessage {
-                from_user: true,
-                text: msg.clone(),
-                chips: Vec::new(),
-            });
-            trim_history(&mut state.history);
-            state.input.clear();
-            state.scroll_to_end = true;
-            state.dirty = true;
-            submitted = Some(msg);
-        }
+        submitted = queue_user_message(state, &state.input.clone());
     }
 
     submitted
 }
 
-fn render_chips(ui: &Ui, state: &mut ChatBarState, msg_i: usize) {
+fn render_chips(ui: &Ui, state: &mut ChatBarState, msg_i: usize, max_w: f32) {
     let n = state.history[msg_i].chips.len();
     if n == 0 {
         return;
     }
-    let avail = ui.content_region_avail()[0];
     let mut row_x = 0.0;
     for chip_i in 0..n {
         let label = if state.copied_code.as_deref()
@@ -185,7 +335,7 @@ fn render_chips(ui: &Ui, state: &mut ChatBarState, msg_i: usize) {
         };
         let pill_w = ui.calc_text_size(&label)[0] + 20.0;
         if chip_i > 0 {
-            if row_x + pill_w + 4.0 > avail {
+            if row_x + pill_w + 4.0 > max_w {
                 row_x = 0.0;
             } else {
                 ui.same_line_with_spacing(0.0, 4.0);
@@ -209,15 +359,15 @@ fn render_chips(ui: &Ui, state: &mut ChatBarState, msg_i: usize) {
     }
 }
 
-/// Add a chef reply with no serving chips (errors, timeout).
+/// Add an assistant reply with no serving chips (errors, timeout, talk).
 pub fn add_ai_response(state: &mut ChatBarState, text: String) {
     add_plated_response(state, text, Vec::new());
 }
 
-/// Add a chef reply and the plated serving tray.
+/// Add an assistant reply and optional GW2 chat-link chips.
 pub fn add_plated_response(state: &mut ChatBarState, text: String, chips: Vec<ChatChip>) {
     state.waiting = false;
-    // Cap for the plate, not the suggestion panel. Char-safe (no UTF-8 panic).
+    // Cap for the bubble, not the suggestion panel. Char-safe (no UTF-8 panic).
     let display = if text.chars().count() > 600 {
         let truncated: String = text.chars().take(600).collect();
         format!("{}...", truncated)
@@ -234,7 +384,7 @@ pub fn add_plated_response(state: &mut ChatBarState, text: String, chips: Vec<Ch
     state.dirty = true;
 }
 
-/// Attach inbound chips to the latest customer order.
+/// Attach inbound chips to the latest player message.
 pub fn attach_order_chips(state: &mut ChatBarState, display: String, chips: Vec<ChatChip>) {
     if let Some(last) = state.history.last_mut() {
         if last.from_user {
@@ -277,29 +427,35 @@ mod tests {
     use crate::chat_links::{encode_item, ChatChip, LinkKind};
 
     #[test]
-    fn reserved_height_is_stable_with_history() {
+    fn queue_user_message_skips_when_waiting() {
         let mut state = ChatBarState::default();
-        let empty = reserved_height(&state);
-        for i in 0..8 {
-            state.history.push(ChatMessage {
-                from_user: i % 2 == 0,
-                text: "a".into(),
-                chips: Vec::new(),
-            });
-        }
+        state.waiting = true;
+        assert!(queue_user_message(&mut state, "hi").is_none());
+        assert!(state.history.is_empty());
+        state.waiting = false;
         assert_eq!(
-            reserved_height(&state),
-            empty,
-            "the plate scrolls; footer height must not grow with history"
+            queue_user_message(&mut state, "  hi  ").as_deref(),
+            Some("hi")
         );
+        assert_eq!(state.history.len(), 1);
+        assert!(state.history[0].from_user);
     }
 
     #[test]
-    fn reserved_height_includes_waiting_line() {
-        let mut state = ChatBarState::default();
-        let idle = reserved_height(&state);
-        state.waiting = true;
-        assert!(reserved_height(&state) > idle);
+    fn recent_transcript_keeps_last_n() {
+        let mut history = Vec::new();
+        for i in 0..5 {
+            history.push(ChatMessage {
+                from_user: i % 2 == 0,
+                text: format!("m{i}"),
+                chips: Vec::new(),
+            });
+        }
+        let t = recent_transcript(&history, 3);
+        assert!(t.contains("m2"));
+        assert!(t.contains("m4"));
+        assert!(!t.contains("m0"));
+        assert!(t.starts_with("Player: m2") || t.contains("Player: m4"));
     }
 
     #[test]
@@ -321,7 +477,7 @@ mod tests {
         state.waiting = true;
         add_plated_response(
             &mut state,
-            "Tonight: Scholar.".into(),
+            "Scholar rune.".into(),
             vec![ChatChip {
                 kind: LinkKind::Item,
                 label: "Rune of the Scholar".into(),

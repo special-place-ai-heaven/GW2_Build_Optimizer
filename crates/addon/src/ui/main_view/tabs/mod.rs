@@ -3,6 +3,7 @@
 //! Each tab lives in its own file:
 //! - `new_build` — scenario summary + comparison (role lives in the left menu)
 //! - `improve` — iterate on an existing build
+//! - `kitchen` — Choya chat (not a footer on Improve)
 //! - `settings` — API keys, models, theme, cache
 //! - `saveload` — saved-build list + reconstruction
 //!
@@ -11,6 +12,7 @@
 //! can refer to them as `super::name` (one hop) instead of `super::super::name`.
 
 pub(super) mod improve;
+pub(super) mod kitchen;
 pub(super) mod new_build;
 pub(super) mod saveload;
 pub(super) mod settings;
