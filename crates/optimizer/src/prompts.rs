@@ -449,11 +449,14 @@ pub fn chat_refinement_prompt_with_tools(
     game_mode: &str,
     user_request: &str,
     kitchen_brief: &str,
+    reply_language: &str,
 ) -> String {
     let request = sanitize_order(user_request);
     let kitchen = sanitize_build_summary(kitchen_brief);
     format!(
         r#"You are Choya, a Guild Wars 2 cactus piñata and build advisor in chat with the player. Mode: {game_mode}. Profession: {profession} (unknown means they have not selected a character yet). A little cactus personality is fine; do not drown answers in quips.
+
+Write the "explanation" field in {reply_language}. JSON keys and Guild Wars 2 specialization, trait, skill, and item names stay in English.
 
 Role chips are families, not finished jobs. The player's words pick the lean (power vs condi, celestial fight-support vs zerg stab specialist, etc.). Context lists Mode, Scale, and Role — use those. Do not treat equipped gear, radar sliders, or trait locks as cages unless the player asked to keep them.
 
@@ -462,9 +465,9 @@ Named gear prefix in the player's message wins (including Celestial). Ignore a p
 If they greet you, ask a question, or are just talking — do not call tools. Reply with JSON:
 {{"explanation": "<your spoken reply>", "specializations": []}}
 
-If Context already lists an equipped Character loadout, do not call tools. Edit that loadout. Copy weapons unchanged if they asked to keep them. Reply with the full JSON build object. explanation: 2-4 sentences in plain language.
+If Context already lists an equipped Character loadout, do not call tools. Edit that loadout. Copy weapons unchanged if they asked to keep them. Reply with the full JSON build object. explanation: 2-4 sentences in {reply_language}.
 
-If they want a new build and Context has no Character loadout: use at most two tool rounds, then reply with the full JSON build object. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: 2-4 sentences in plain language.
+If they want a new build and Context has no Character loadout: use at most two tool rounds, then reply with the full JSON build object. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: 2-4 sentences in {reply_language}.
 
 The player's message:
 <message>
@@ -506,13 +509,14 @@ Prefer search_upgrades / upgrade_synergies over list_* dumps. When plating a bui
   "relic": "Full Relic Name",
   "stat_prefix": "PrefixName",
   "changes_made": ["..."],
-  "explanation": "2-4 sentences in plain language."
+  "explanation": "2-4 sentences in {reply_language}."
 }}
 ```"#,
         profession = profession,
         game_mode = game_mode,
         request = request,
         kitchen = kitchen,
+        reply_language = reply_language,
     )
 }
 
@@ -1309,6 +1313,11 @@ Every field is REQUIRED. Do not leave any field empty or null."#;
             "PvE",
             "make this build more bursty please",
             kitchen,
+            "English",
+        );
+        assert!(
+            prompt.contains("Write the \"explanation\" field in English"),
+            "reply language instruction missing: {prompt}"
         );
         assert!(
             prompt.contains("If Context already lists an equipped Character loadout"),
@@ -1385,6 +1394,7 @@ Every field is REQUIRED. Do not leave any field empty or null."#;
             "PvE",
             &order,
             kitchen,
+            "English",
         );
         assert!(
             prompt.contains("Pasted: Rune of the Scholar (item)"),
@@ -1393,6 +1403,25 @@ Every field is REQUIRED. Do not leave any field empty or null."#;
         assert!(
             prompt.contains(&"x".repeat(500)),
             "full capped order should still be present"
+        );
+    }
+
+    #[test]
+    fn chef_prompt_asks_for_selected_reply_language() {
+        let prompt = chat_refinement_prompt_with_tools(
+            "Warrior",
+            "PvE",
+            "salut",
+            "Mode: PvE",
+            "French",
+        );
+        assert!(
+            prompt.contains("Write the \"explanation\" field in French"),
+            "{prompt}"
+        );
+        assert!(
+            !prompt.contains("Write the \"explanation\" field in English"),
+            "must not also demand English"
         );
     }
 }

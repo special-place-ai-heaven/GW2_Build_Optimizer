@@ -2,6 +2,7 @@ use nexus::imgui::{ChildWindow, ComboBox, Selectable, TreeNodeFlags, Ui};
 
 use crate::state::{AddonState, MainTab};
 use crate::ui::theme;
+use gw2_core::i18n::{t, tf};
 use gw2_core::types::GameMode;
 use gw2_optimizer::scenario::{CombatTier, RoleObjective};
 use gw2_optimizer::scoring::OptimizationWeights;
@@ -100,7 +101,10 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     let content_indent = state.config.content_indent;
     let avail = ui.content_region_avail();
     let left_panel_width = {
-        let scale_row = theme::segment_row_min_width(ui, &["Roam", "Havoc", "Cloud/Zerg"]);
+        let roam = t("scale.roam");
+        let havoc = t("scale.havoc");
+        let cloud = t("scale.cloud");
+        let scale_row = theme::segment_row_min_width(ui, &[roam.as_str(), havoc.as_str(), cloud.as_str()]);
         let min_left = (scale_row + pad * 2.0 + 18.0).max(360.0);
         let want = (state.config.left_panel_width * scale).max(min_left);
         let cap = (avail[0] * 0.58).max(min_left);
@@ -167,10 +171,10 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
 
     // API health indicator
     let (label, color) = match state.main.api_status {
-        crate::state::ApiStatus::Unknown => ("Checking API\u{2026}", crate::ui::theme::MUTED),
-        crate::state::ApiStatus::Online => ("API ready", crate::ui::theme::OPTIMIZED),
-        crate::state::ApiStatus::Degraded => ("API slow", crate::ui::theme::GOLD),
-        crate::state::ApiStatus::Offline => ("API offline", crate::ui::theme::ERR),
+        crate::state::ApiStatus::Unknown => (t("status.checking_api"), crate::ui::theme::MUTED),
+        crate::state::ApiStatus::Online => (t("status.api_ready"), crate::ui::theme::OPTIMIZED),
+        crate::state::ApiStatus::Degraded => (t("status.api_slow"), crate::ui::theme::GOLD),
+        crate::state::ApiStatus::Offline => (t("status.api_offline"), crate::ui::theme::ERR),
     };
     {
         let p = ui.cursor_screen_pos();
@@ -184,12 +188,10 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
     ui.text_colored(color, label);
     if ui.is_item_hovered() {
         ui.tooltip_text(match state.main.api_status {
-            crate::state::ApiStatus::Unknown => "Checking GW2 API availability...",
-            crate::state::ApiStatus::Online => "GW2 API is responding normally.",
-            crate::state::ApiStatus::Degraded => "GW2 API is responding slowly (>5s).",
-            crate::state::ApiStatus::Offline => {
-                "GW2 API is unavailable. Cached data is being used."
-            }
+            crate::state::ApiStatus::Unknown => t("tip.api_checking"),
+            crate::state::ApiStatus::Online => t("tip.api_ready"),
+            crate::state::ApiStatus::Degraded => t("tip.api_slow"),
+            crate::state::ApiStatus::Offline => t("tip.api_offline"),
         });
     }
 
@@ -201,15 +203,19 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
             ui.same_line();
             ui.text_colored(
                 theme::WARN,
-                format!("| Game data stale ({cached} \u{2192} {live})"),
+                tf(
+                    "fmt.stale_cache",
+                    &[
+                        ("cached", &cached.to_string()),
+                        ("live", &live.to_string()),
+                    ],
+                ),
             );
             if ui.is_item_hovered() {
-                ui.tooltip_text(
-                    "ArenaNet shipped a new game build. Refresh game data — icons stay cached.",
-                );
+                ui.tooltip_text(t("tip.stale_cache"));
             }
             ui.same_line();
-            if theme::gold_button(ui, "Refresh##stale_data") {
+            if theme::gold_button(ui, &format!("{}##stale_data", t("btn.refresh"))) {
                 stats::start_game_data_refresh(state);
             }
         }
@@ -222,7 +228,7 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
         if !stage.is_empty() {
             ui.text_colored(theme::WARN, format!("| {}", stage));
         } else {
-            ui.text_colored(theme::WARN, "| Loading game data...");
+            ui.text_colored(theme::WARN, format!("| {}", t("status.loading_data")));
         }
     }
 
@@ -236,7 +242,7 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
     if let Some(ref err) = state.main.error {
         ui.text_colored(theme::ERR, format!("  [!] {}", err));
         ui.same_line();
-        if ui.small_button("Dismiss##err") {
+        if ui.small_button(&format!("{}##err", t("btn.dismiss"))) {
             state.main.error = None;
         }
     }
@@ -314,15 +320,17 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
         }
 
         // "OPTIMIZING..." title
+        let finding = t("status.finding_build");
         draw_list.add_text(
             [start[0] + 56.0, start[1] + 10.0],
             crate::ui::theme::GOLD,
-            "Finding a better build\u{2026}",
+            &finding,
         );
 
         // Stage detail text
+        let starting = t("status.starting_opt");
         let detail = if stage.is_empty() {
-            "Starting optimization pipeline..."
+            starting.as_str()
         } else {
             stage
         };
@@ -379,12 +387,15 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
 
 /// Horizontal tab bar for main navigation (styled buttons with active indicator).
 fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
+    let new_build = t("tab.new_build");
+    let improve = t("tab.improve");
+    let choya = t("tab.choya");
     let modes = [
-        (MainTab::NewBuild, "New Build"),
-        (MainTab::Improve, "Improve Build"),
-        (MainTab::Talk, "Choya"),
+        (MainTab::NewBuild, new_build.as_str(), "##main_tab_new_build"),
+        (MainTab::Improve, improve.as_str(), "##main_tab_improve"),
+        (MainTab::Talk, choya.as_str(), "##main_tab_choya"),
     ];
-    for (i, (tab, label)) in modes.iter().enumerate() {
+    for (i, (tab, label, id)) in modes.iter().enumerate() {
         if i > 0 {
             ui.same_line_with_spacing(0.0, 8.0);
         }
@@ -395,13 +406,7 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
         } else {
             0.0
         };
-        if crate::ui::theme::pill_pulse(
-            ui,
-            label,
-            is_active,
-            &format!("##main_tab_{}", label),
-            pulse,
-        ) {
+        if crate::ui::theme::pill_pulse(ui, label, is_active, id, pulse) {
             state.main.active_tab = tab.clone();
             if state.main.tab_alert.as_ref() == Some(tab) {
                 state.main.tab_alert = None;
@@ -422,12 +427,14 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
     }
 
     ui.same_line_with_spacing(0.0, 28.0);
-    for (tab, label) in [
-        (MainTab::SaveLoad, "Saves"),
-        (MainTab::Settings, "Settings"),
+    let saves = t("tab.saves");
+    let settings = t("tab.settings");
+    for (tab, label, id) in [
+        (MainTab::SaveLoad, saves.as_str(), "##main_tab_saves"),
+        (MainTab::Settings, settings.as_str(), "##main_tab_settings"),
     ] {
         let is_active = state.main.active_tab == tab;
-        if crate::ui::theme::pill(ui, label, is_active, &format!("##main_tab_{}", label)) {
+        if crate::ui::theme::pill(ui, label, is_active, id) {
             state.main.active_tab = tab;
         }
         ui.same_line_with_spacing(0.0, 8.0);
@@ -452,20 +459,26 @@ fn render_left_panel(ui: &Ui, state: &mut AddonState) {
             ui.spacing();
             if state.main.characters_loading {
                 let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-                theme::gold_button_sized(ui, "Refreshing...", [-1.0, 0.0]);
+                theme::gold_button_sized(ui, t("btn.refreshing"), [-1.0, 0.0]);
                 style.pop();
-            } else if theme::gold_button_sized(ui, "Refresh Data", [-1.0, 0.0]) {
+            } else if theme::gold_button_sized(ui, &t("btn.refresh_data"), [-1.0, 0.0]) {
                 character::load_characters(state);
             }
         }
         MainTab::Settings => {
             // Settings info
-            render_left_section_header(ui, "INFO", state.config.section_spacing);
-            ui.text_colored(theme::MUTED, "  GW2 Build Optimizer");
-            ui.text_colored(theme::MUTED, format!("  v{}", crate::VERSION));
+            render_left_section_header(ui, &t("section.info"), state.config.section_spacing);
+            ui.text_colored(theme::MUTED, format!("  {}", t("info.product")));
+            ui.text_colored(
+                theme::MUTED,
+                format!("  {}", tf("fmt.version", &[("ver", crate::VERSION)])),
+            );
             ui.spacing();
             let provider_label = state.config.active_provider.label();
-            ui.text_colored(theme::MUTED, format!("  AI: {}", provider_label));
+            ui.text_colored(
+                theme::MUTED,
+                format!("  {}", tf("fmt.ai", &[("provider", provider_label)])),
+            );
         }
     }
 }
@@ -507,9 +520,12 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
 /// WvW fight scale: Roam / Havoc / Cloud/Zerg.
 /// Retunes Support: small groups self-reliant; Cloud/Zerg specialists.
 fn render_wvw_sub_role(ui: &Ui, state: &mut AddonState) {
-    render_left_section_header(ui, "SCALE", state.config.section_spacing);
+    render_left_section_header(ui, &t("section.scale"), state.config.section_spacing);
     let tiers = [CombatTier::Solo, CombatTier::Party, CombatTier::Squad];
-    let labels: Vec<&str> = tiers.iter().map(|t| t.label()).collect();
+    let roam = t("scale.roam");
+    let havoc = t("scale.havoc");
+    let cloud = t("scale.cloud");
+    let labels = [roam.as_str(), havoc.as_str(), cloud.as_str()];
     let selected = tiers
         .iter()
         .position(|t| *t == state.main.wvw_combat_tier)
@@ -544,30 +560,13 @@ fn role_pip(role: RoleObjective) -> [f32; 4] {
     }
 }
 
-fn role_hint(role: RoleObjective) -> &'static str {
-    match role {
-        RoleObjective::WvWRoamer => {
-            "Outnumbered. Dive (2s port-burst), blender (cover + AoE), or trickster (stealth/kite). One damage type."
-        }
-        RoleObjective::PowerDps => {
-            "Damage family — power, condi, or hybrid from the conversation."
-        }
-        RoleObjective::CondiDps => "Condition pressure and duration.",
-        RoleObjective::Hybrid => {
-            "Jack of all trades. Celestial-style, master of none. Occupies until backup."
-        }
-        RoleObjective::Sustain => "Bruiser — fights and lives.",
-        RoleObjective::Staller => {
-            "Troll. Stall, don't kill. Evade, port, stealth, speed — live through a blob until the group arrives."
-        }
-        RoleObjective::Healer => "Healing and group sustain.",
-        RoleObjective::Buffer => {
-            "Support family. Cloud/Zerg: specialists (stab / heal-cleanse / boons). Roam/Havoc: self-reliant — prot, invuln, some fight. Dead support is not support."
-        }
-        RoleObjective::Disabler => "Disable family — CC, interrupts, boon strip.",
-        RoleObjective::Tank => "Frontline / commander — toughness and presence.",
-        _ => role.label(),
-    }
+fn named_tab(n: u32, name: Option<&str>) -> String {
+    let n = n.to_string();
+    let name = match name {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => t("label.unnamed"),
+    };
+    tf("fmt.tab", &[("n", &n), ("name", &name)])
 }
 
 fn apply_role(state: &mut AddonState, role: RoleObjective) {
@@ -578,24 +577,50 @@ fn apply_role(state: &mut AddonState, role: RoleObjective) {
     state.main.comparison.error = None;
 }
 
+pub(crate) fn role_i18n_key(role: RoleObjective) -> &'static str {
+    match role {
+        RoleObjective::WvWRoamer => "role.roamer",
+        RoleObjective::PowerDps => "role.damage",
+        RoleObjective::Sustain => "role.bruiser",
+        RoleObjective::Staller => "role.troll",
+        RoleObjective::Buffer => "role.support",
+        RoleObjective::Disabler => "role.disable",
+        RoleObjective::Tank => "role.commander",
+        _ => "label.pick_role",
+    }
+}
+
+fn role_hint_key(role: RoleObjective) -> &'static str {
+    match role {
+        RoleObjective::WvWRoamer => "role.hint.roamer",
+        RoleObjective::PowerDps => "role.hint.damage",
+        RoleObjective::Sustain => "role.hint.bruiser",
+        RoleObjective::Staller => "role.hint.troll",
+        RoleObjective::Buffer => "role.hint.support",
+        RoleObjective::Disabler => "role.hint.disable",
+        RoleObjective::Tank => "role.hint.commander",
+        _ => "label.pick_role",
+    }
+}
+
 fn render_role_chips(ui: &Ui, state: &mut AddonState) {
-    render_left_section_header(ui, "ROLE", state.config.section_spacing);
+    render_left_section_header(ui, &t("section.role"), state.config.section_spacing);
 
     let current = state.main.selected_role;
     let avail = ui.content_region_avail()[0];
     let mut row_x = 0.0_f32;
     let mut picked: Option<RoleObjective> = None;
     for role in RoleObjective::PLAY_ROLES {
-        let label = role.play_label();
+        let label = t(role_i18n_key(role));
         let id = format!("##play_{:?}", role);
-        let [cw, _] = theme::select_chip_size(ui, label, true);
+        let [cw, _] = theme::select_chip_size(ui, &label, true);
         theme::wrap_chip(ui, avail, &mut row_x, cw, 4.0);
         let selected = current == Some(role);
-        if theme::select_chip(ui, label, selected, &id, Some(role_pip(role))) {
+        if theme::select_chip(ui, &label, selected, &id, Some(role_pip(role))) {
             picked = Some(role);
         }
         if ui.is_item_hovered() {
-            ui.tooltip_text(role_hint(role));
+            ui.tooltip_text(t(role_hint_key(role)));
         }
     }
     if let Some(role) = picked {
@@ -605,7 +630,7 @@ fn render_role_chips(ui: &Ui, state: &mut AddonState) {
 
 /// Character picker + build/equip template dropdowns.
 fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
-    render_left_section_header(ui, "CHARACTER", state.config.section_spacing);
+    render_left_section_header(ui, &t("section.character"), state.config.section_spacing);
     ui.spacing();
 
     // Character dropdown
@@ -617,11 +642,11 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
         .cloned()
         .unwrap_or_else(|| {
             if state.main.characters_loading {
-                "Loading...".into()
+                t("status.loading")
             } else if state.main.characters.is_empty() {
-                "No characters".into()
+                t("status.no_characters")
             } else {
-                "Select...".into()
+                t("status.select")
             }
         });
 
@@ -667,27 +692,21 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
     // Build Template dropdown
     if !state.main.build_tabs.is_empty() {
         ui.spacing();
-        ui.text_colored([0.6, 0.6, 0.7, 1.0], "Build:");
+        ui.text_colored([0.6, 0.6, 0.7, 1.0], t("label.build"));
         ui.set_next_item_width(-1.0);
         let bt_preview = state
             .main
             .selected_build_tab
             .and_then(|i| state.main.build_tabs.get(i))
-            .map(|t| {
-                let name = t.build.name.as_deref().unwrap_or("Unnamed");
-                format!("Tab {}: {}", t.tab, name)
-            })
-            .unwrap_or_else(|| "Select...".into());
+            .map(|tab| named_tab(tab.tab, tab.build.name.as_deref()))
+            .unwrap_or_else(|| t("status.select"));
 
         let bt_labels: Vec<(usize, String)> = state
             .main
             .build_tabs
             .iter()
             .enumerate()
-            .map(|(i, t)| {
-                let name = t.build.name.as_deref().unwrap_or("Unnamed");
-                (i, format!("Tab {}: {}", t.tab, name))
-            })
+            .map(|(i, tab)| (i, named_tab(tab.tab, tab.build.name.as_deref())))
             .collect();
 
         let mut bt_changed: Option<usize> = None;
@@ -720,27 +739,21 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
 
     // Equipment Template dropdown
     if !state.main.equipment_tabs.is_empty() {
-        ui.text_colored([0.6, 0.6, 0.7, 1.0], "Equipment:");
+        ui.text_colored([0.6, 0.6, 0.7, 1.0], t("label.equipment"));
         ui.set_next_item_width(-1.0);
         let et_preview = state
             .main
             .selected_equipment_tab
             .and_then(|i| state.main.equipment_tabs.get(i))
-            .map(|t| {
-                let name = t.name.as_deref().unwrap_or("Unnamed");
-                format!("Tab {}: {}", t.tab, name)
-            })
-            .unwrap_or_else(|| "Select...".into());
+            .map(|tab| named_tab(tab.tab, tab.name.as_deref()))
+            .unwrap_or_else(|| t("status.select"));
 
         let et_labels: Vec<(usize, String)> = state
             .main
             .equipment_tabs
             .iter()
             .enumerate()
-            .map(|(i, t)| {
-                let name = t.name.as_deref().unwrap_or("Unnamed");
-                (i, format!("Tab {}: {}", t.tab, name))
-            })
+            .map(|(i, tab)| (i, named_tab(tab.tab, tab.name.as_deref())))
             .collect();
 
         let mut et_changed: Option<usize> = None;
@@ -772,13 +785,13 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
 
     // Build resolution indicator
     if state.main.build_loading {
-        ui.text_colored(theme::WARN, "Resolving build...");
+        ui.text_colored(theme::WARN, t("status.resolving"));
     }
 }
 
 /// Build controls: mode, scale, shared roles, optional weight radar, actions.
 fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
-    render_left_section_header(ui, "MODE", state.config.section_spacing);
+    render_left_section_header(ui, &t("section.mode"), state.config.section_spacing);
     let mode_idx = GameMode::ALL
         .iter()
         .position(|m| *m == state.main.game_mode)
@@ -804,7 +817,7 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
 
     render_role_chips(ui, state);
 
-    if ui.collapsing_header("Fine-tune weights", TreeNodeFlags::empty()) {
+    if ui.collapsing_header(t("weights.fine_tune"), TreeNodeFlags::empty()) {
         let current_axes = state
             .main
             .comparison
@@ -850,8 +863,8 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     let role_bit = state
         .main
         .selected_role
-        .map(|r| r.play_label())
-        .unwrap_or("pick a role");
+        .map(|r| t(role_i18n_key(r)))
+        .unwrap_or_else(|| t("label.pick_role"));
     let focus = if state.main.game_mode == GameMode::WvW {
         format!(
             "{} · {} · {}",
@@ -864,17 +877,20 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     };
     theme::wrapped(ui, theme::CURRENT, &focus);
 
-    render_left_section_header(ui, "ACTIONS", state.config.section_spacing);
+    render_left_section_header(ui, &t("section.actions"), state.config.section_spacing);
 
     let is_improve = state.main.active_tab == MainTab::Improve;
     let btn_label_owned;
     let btn_label: &str = if is_improve {
-        "Improve Build"
+        btn_label_owned = t("btn.improve_build");
+        &btn_label_owned
     } else if let Some(role) = state.main.selected_role {
-        btn_label_owned = format!("Optimize: {}", role.play_label());
+        let role_l = t(role_i18n_key(role));
+        btn_label_owned = tf("btn.optimize_role", &[("role", &role_l)]);
         &btn_label_owned
     } else {
-        "Optimize Build"
+        btn_label_owned = t("btn.optimize_build");
+        &btn_label_owned
     };
     let disabled = state.main.optimizing
         || state.main.chat.waiting
@@ -887,13 +903,13 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         style.pop();
         if ui.is_item_hovered() {
             ui.tooltip_text(if state.main.optimizing {
-                "Optimization in progress..."
+                t("status.opt_in_progress")
             } else if state.main.chat.waiting {
-                "Thinking..."
+                t("status.thinking")
             } else if state.main.game_db.is_none() {
-                "Waiting for game data to load..."
+                t("status.wait_data")
             } else {
-                "Select a character first"
+                t("status.select_character")
             });
         }
     } else if theme::gold_button_sized(ui, btn_label, [-1.0, 28.0]) {
@@ -914,9 +930,9 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     ui.dummy([0.0, 2.0]);
     if state.main.characters_loading {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui, "Refreshing...", [-1.0, 0.0]);
+        theme::gold_button_sized(ui, t("btn.refreshing"), [-1.0, 0.0]);
         style.pop();
-    } else if ui.small_button("Refresh Data") {
+    } else if ui.small_button(&t("btn.refresh_data")) {
         character::load_characters(state);
     }
     ui.dummy([0.0, 4.0]);

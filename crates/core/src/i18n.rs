@@ -1,0 +1,277 @@
+//! Overlay chrome translations. Game data names stay as the GW2 API returned them.
+//!
+//! Add a language: write `locales/xx.json` with the same keys as `en.json`,
+//! then append an entry to [`LANGUAGES`] and [`SOURCES`].
+
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+/// One shipped UI language.
+pub struct Language {
+    pub code: &'static str,
+    /// Name in that language, for the Settings combo.
+    pub native_name: &'static str,
+    /// English name passed to Choya ("French", "German").
+    pub choya_name: &'static str,
+}
+
+/// `auto` is config-only (detect OS). Real catalogs start at English.
+pub const LANGUAGES: &[Language] = &[
+    Language {
+        code: "en",
+        native_name: "English",
+        choya_name: "English",
+    },
+    Language {
+        code: "fr",
+        native_name: "Français",
+        choya_name: "French",
+    },
+    Language {
+        code: "de",
+        native_name: "Deutsch",
+        choya_name: "German",
+    },
+    Language {
+        code: "es",
+        native_name: "Español",
+        choya_name: "Spanish",
+    },
+    Language {
+        code: "it",
+        native_name: "Italiano",
+        choya_name: "Italian",
+    },
+    Language {
+        code: "pt",
+        native_name: "Português",
+        choya_name: "Portuguese",
+    },
+    Language {
+        code: "nl",
+        native_name: "Nederlands",
+        choya_name: "Dutch",
+    },
+    Language {
+        code: "pl",
+        native_name: "Polski",
+        choya_name: "Polish",
+    },
+    Language {
+        code: "ru",
+        native_name: "Русский",
+        choya_name: "Russian",
+    },
+    Language {
+        code: "zh",
+        native_name: "简体中文",
+        choya_name: "Simplified Chinese",
+    },
+    Language {
+        code: "ja",
+        native_name: "日本語",
+        choya_name: "Japanese",
+    },
+    Language {
+        code: "ko",
+        native_name: "한국어",
+        choya_name: "Korean",
+    },
+];
+
+const SOURCES: &[(&str, &str)] = &[
+    ("en", include_str!("../../../locales/en.json")),
+    ("fr", include_str!("../../../locales/fr.json")),
+    ("de", include_str!("../../../locales/de.json")),
+    ("es", include_str!("../../../locales/es.json")),
+    ("it", include_str!("../../../locales/it.json")),
+    ("pt", include_str!("../../../locales/pt.json")),
+    ("nl", include_str!("../../../locales/nl.json")),
+    ("pl", include_str!("../../../locales/pl.json")),
+    ("ru", include_str!("../../../locales/ru.json")),
+    ("zh", include_str!("../../../locales/zh.json")),
+    ("ja", include_str!("../../../locales/ja.json")),
+    ("ko", include_str!("../../../locales/ko.json")),
+];
+
+static CATALOGS: OnceLock<HashMap<String, HashMap<String, String>>> = OnceLock::new();
+static CURRENT: Mutex<String> = Mutex::new(String::new());
+
+fn catalogs() -> &'static HashMap<String, HashMap<String, String>> {
+    CATALOGS.get_or_init(|| {
+        let mut all = HashMap::new();
+        for (code, raw) in SOURCES {
+            if let Ok(map) = serde_json::from_str::<HashMap<String, String>>(raw) {
+                all.insert((*code).to_string(), map);
+            }
+        }
+        all
+    })
+}
+
+fn current_code() -> String {
+    let g = CURRENT.lock().unwrap_or_else(|e| e.into_inner());
+    if g.is_empty() {
+        "en".into()
+    } else {
+        g.clone()
+    }
+}
+
+/// Resolve `auto` or a language code to a catalog that exists.
+pub fn resolve(code: &str) -> &'static str {
+    let raw = code.trim();
+    if raw.is_empty() || raw.eq_ignore_ascii_case("auto") {
+        return detect_os_language();
+    }
+    let lower = raw.to_ascii_lowercase();
+    if catalogs().contains_key(&lower) {
+        LANGUAGES
+            .iter()
+            .find(|l| l.code == lower)
+            .map(|l| l.code)
+            .unwrap_or("en")
+    } else {
+        "en"
+    }
+}
+
+/// Apply a config value (`auto` or a code). Safe to call every frame; cheap if unchanged.
+pub fn set_language(code: &str) {
+    let resolved = resolve(code).to_string();
+    let mut g = CURRENT.lock().unwrap_or_else(|e| e.into_inner());
+    if *g != resolved {
+        *g = resolved;
+    }
+}
+
+pub fn current() -> String {
+    current_code()
+}
+
+pub fn language_by_code(code: &str) -> Option<&'static Language> {
+    LANGUAGES.iter().find(|l| l.code == code)
+}
+
+/// English language name for the Choya prompt.
+pub fn choya_name_for(code: &str) -> &'static str {
+    language_by_code(resolve(code))
+        .map(|l| l.choya_name)
+        .unwrap_or("English")
+}
+
+pub fn t(key: &str) -> String {
+    let lang = current_code();
+    let cats = catalogs();
+    cats.get(&lang)
+        .and_then(|c| c.get(key))
+        .or_else(|| cats.get("en").and_then(|c| c.get(key)))
+        .cloned()
+        .unwrap_or_else(|| key.to_string())
+}
+
+/// Replace `{name}` placeholders.
+pub fn tf(key: &str, args: &[(&str, &str)]) -> String {
+    let mut s = t(key);
+    for (k, v) in args {
+        s = s.replace(&format!("{{{k}}}"), v);
+    }
+    s
+}
+
+fn detect_os_language() -> &'static str {
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetUserDefaultUILanguage() -> u16;
+        }
+        let langid = unsafe { GetUserDefaultUILanguage() };
+        return match langid & 0x3ff {
+            0x0c => "fr",
+            0x07 => "de",
+            0x0a => "es",
+            0x10 => "it",
+            0x16 => "pt",
+            0x13 => "nl",
+            0x15 => "pl",
+            0x19 => "ru",
+            0x04 => "zh",
+            0x11 => "ja",
+            0x12 => "ko",
+            _ => "en",
+        };
+    }
+    #[cfg(not(windows))]
+    {
+        "en"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn english_catalog_has_core_chrome() {
+        set_language("en");
+        assert_eq!(t("tab.settings"), "Settings");
+        assert_eq!(t("tab.choya"), "Choya");
+        assert_eq!(t("btn.optimize_build"), "Optimize Build");
+    }
+
+    #[test]
+    fn french_translates_settings() {
+        set_language("fr");
+        assert_eq!(t("tab.settings"), "Paramètres");
+        assert_eq!(t("choya.assistant"), "Assistant de build");
+        set_language("en");
+    }
+
+    #[test]
+    fn missing_key_falls_back_to_english() {
+        set_language("en");
+        let missing = t("this.key.does.not.exist");
+        assert_eq!(missing, "this.key.does.not.exist");
+    }
+
+    #[test]
+    fn unknown_locale_is_english() {
+        assert_eq!(resolve("xx"), "en");
+        assert_eq!(resolve("auto").len(), 2);
+    }
+
+    #[test]
+    fn tf_replaces_named_placeholders() {
+        set_language("en");
+        let s = tf("fmt.usage_today", &[("n", "12")]);
+        assert!(s.contains("12"));
+        assert!(s.to_lowercase().contains("request"));
+    }
+
+    #[test]
+    fn every_locale_parses_and_covers_english_keys() {
+        let cats = catalogs();
+        let en = cats.get("en").expect("english catalog");
+        assert!(en.len() > 80, "catalog too small: {}", en.len());
+        for lang in LANGUAGES {
+            let cat = cats
+                .get(lang.code)
+                .unwrap_or_else(|| panic!("{}", lang.code));
+            for key in en.keys() {
+                assert!(
+                    cat.contains_key(key),
+                    "{} missing key {}",
+                    lang.code,
+                    key
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn choya_name_french() {
+        assert_eq!(choya_name_for("fr"), "French");
+        assert!(choya_name_for("auto").len() > 2);
+    }
+}

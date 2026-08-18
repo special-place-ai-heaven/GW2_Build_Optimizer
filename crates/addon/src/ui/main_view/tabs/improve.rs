@@ -5,12 +5,13 @@ use nexus::imgui::{ChildWindow, Selectable, Ui};
 use crate::state::AddonState;
 use crate::ui::comparison::ResultPane;
 use crate::ui::theme;
+use gw2_core::i18n::t;
 
 use super::{build_display, lock_panel, render_optimization_progress};
 
 pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
     if state.main.build_loading {
-        ui.text_colored(theme::WARN, "Resolving build from API data...");
+        ui.text_colored(theme::WARN, t("status.resolving_api"));
         return;
     }
 
@@ -18,7 +19,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
     if let Some(err) = state.main.comparison.error.clone() {
         ui.text_colored(theme::ERR, format!("[!] {}", err));
         ui.same_line();
-        if ui.small_button("Dismiss##opt_err_improve") {
+        if ui.small_button(&format!("{}##opt_err_improve", t("btn.dismiss"))) {
             state.main.comparison.error = None;
         }
         ui.spacing();

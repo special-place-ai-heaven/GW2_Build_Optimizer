@@ -351,6 +351,7 @@ pub fn init(addon_dir: PathBuf) {
     }
 
     let mut main = MainState::default();
+    gw2_core::i18n::set_language(&config.ui_language);
     // Surface any config parse error in the UI status bar
     main.error = config_err;
     // Apply saved default game mode from config

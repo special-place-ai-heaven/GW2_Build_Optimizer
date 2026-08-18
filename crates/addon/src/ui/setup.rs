@@ -2,15 +2,20 @@ use nexus::imgui::Ui;
 
 use crate::state::{AddonState, DownloadState, KeyStatus, Screen, SetupStep};
 use crate::ui::theme;
+use gw2_core::i18n::{t, tf};
 
 pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
-    theme::header(ui, "FIRST-TIME SETUP");
+    theme::header(ui, &t("setup.title"));
 
+    let s_gw2 = t("setup.step_gw2");
+    let s_ai = t("setup.step_ai");
+    let s_data = t("setup.step_data");
+    let s_ready = t("setup.step_ready");
     let steps = [
-        (SetupStep::Gw2ApiKey, "GW2 key"),
-        (SetupStep::LlmApiKey, "AI key"),
-        (SetupStep::DataDownload, "Game data"),
-        (SetupStep::Complete, "Ready"),
+        (SetupStep::Gw2ApiKey, s_gw2.as_str()),
+        (SetupStep::LlmApiKey, s_ai.as_str()),
+        (SetupStep::DataDownload, s_data.as_str()),
+        (SetupStep::Complete, s_ready.as_str()),
     ];
     let current_idx = match step {
         SetupStep::Gw2ApiKey => 0,
@@ -40,13 +45,10 @@ pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
 }
 
 fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
-    theme::header(ui, "STEP 1  ·  GW2 API KEY");
+    theme::header(ui, &t("setup.gw2_header"));
     ui.spacing();
 
-    ui.text_wrapped(
-        "Create an API key at ArenaNet's website. \
-         Copy the URL below and paste it in your browser:",
-    );
+    ui.text_wrapped(t("setup.gw2_help"));
     ui.spacing();
 
     // Copyable URL
@@ -58,7 +60,7 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
         .build();
     ui.spacing();
 
-    ui.text_wrapped("Create a 'New Key', name it anything, and select these permissions:");
+    ui.text_wrapped(t("setup.gw2_create"));
     ui.bullet_text("account (required)");
     ui.bullet_text("characters (required)");
     ui.bullet_text("builds (required)");
@@ -67,7 +69,7 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
 
     // Key input
-    ui.text("Paste your API key:");
+    ui.text(t("setup.paste_key"));
     ui.set_next_item_width(-1.0);
     ui.input_text("##gw2_key", &mut state.setup.gw2_key_input)
         .build();
@@ -77,7 +79,7 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
     let can_validate = !state.setup.gw2_key_input.is_empty()
         && state.setup.gw2_key_status != KeyStatus::Validating;
 
-    if theme::gold_button_sized(ui, "Validate", [120.0, 0.0]) && can_validate {
+    if theme::gold_button_sized(ui, t("btn.validate"), [120.0, 0.0]) && can_validate {
         let key = state.setup.gw2_key_input.clone();
         state.setup.gw2_key_status = KeyStatus::Validating;
 
@@ -188,25 +190,25 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
 
     // Status indicator
     match &state.setup.gw2_key_status {
-        KeyStatus::NotValidated => ui.text("Enter your key and click Validate"),
-        KeyStatus::Validating => ui.text("Validating..."),
+        KeyStatus::NotValidated => ui.text(t("setup.enter_validate")),
+        KeyStatus::Validating => ui.text(t("setup.validating")),
         KeyStatus::Valid => {
-            ui.text_colored(theme::OPTIMIZED, "Valid!");
+            ui.text_colored(theme::OPTIMIZED, t("setup.valid"));
         }
         KeyStatus::Invalid(msg) => {
-            ui.text_colored(theme::ERR, format!("Error: {}", msg));
+            ui.text_colored(theme::ERR, tf("setup.error", &[("msg", msg)]));
         }
     }
 
     // Show scopes if validated
     if !state.setup.gw2_key_scopes.is_empty() {
         ui.spacing();
-        ui.text("Permissions:");
+        ui.text(t("setup.permissions"));
         for (scope, present) in &state.setup.gw2_key_scopes {
             if *present {
                 ui.text_colored(theme::OPTIMIZED, format!("  [v] {}", scope));
             } else {
-                ui.text_colored(theme::WARN, format!("  [x] {} (missing)", scope));
+                ui.text_colored(theme::WARN, format!("  [x] {}", tf("setup.missing", &[("scope", scope)])));
             }
         }
     }
@@ -214,7 +216,7 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
     // Next button
     ui.spacing();
     if state.setup.gw2_key_status == KeyStatus::Valid
-        && theme::gold_button_sized(ui, "Next >>", [120.0, 0.0])
+        && theme::gold_button_sized(ui, t("btn.next"), [120.0, 0.0])
     {
         state.screen = Screen::Setup(SetupStep::LlmApiKey);
     }
@@ -223,17 +225,14 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
 fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
     use gw2_core::config::LlmProvider;
 
-    theme::header(ui, "STEP 2  ·  AI PROVIDER");
+    theme::header(ui, &t("setup.ai_header"));
     ui.spacing();
 
-    ui.text_wrapped(
-        "Choose an AI provider and enter your API key. \
-         The optimizer uses AI for build synergy reasoning.",
-    );
+    ui.text_wrapped(t("setup.ai_intro"));
     ui.spacing();
 
     // Provider radio buttons
-    ui.text("Provider:");
+    ui.text(t("setup.provider"));
     for provider in &LlmProvider::ALL {
         let label = provider.label();
         if ui.radio_button_bool(label, state.config.active_provider == *provider)
@@ -291,7 +290,7 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
 
     // Key input
     let provider_label = state.config.active_provider.label();
-    ui.text(format!("Paste your {} API key:", provider_label));
+    ui.text(tf("setup.paste_provider_key", &[("provider", provider_label)]));
     ui.set_next_item_width(-1.0);
     ui.input_text("##llm_key", &mut state.setup.llm_key_input)
         .build();
@@ -301,7 +300,7 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
     let can_validate = !state.setup.llm_key_input.is_empty()
         && state.setup.llm_key_status != KeyStatus::Validating;
 
-    if theme::gold_button_sized(ui, "Validate", [120.0, 0.0]) && can_validate {
+    if theme::gold_button_sized(ui, t("btn.validate"), [120.0, 0.0]) && can_validate {
         let key = state.setup.llm_key_input.clone();
         let provider = state.config.active_provider.clone();
         state.setup.llm_key_status = KeyStatus::Validating;
@@ -408,44 +407,41 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
     ui.same_line();
 
     match &state.setup.llm_key_status {
-        KeyStatus::NotValidated => ui.text("Enter your key and click Validate"),
-        KeyStatus::Validating => ui.text("Validating..."),
+        KeyStatus::NotValidated => ui.text(t("setup.enter_validate")),
+        KeyStatus::Validating => ui.text(t("setup.validating")),
         KeyStatus::Valid => {
-            ui.text_colored(theme::OPTIMIZED, "Valid!");
+            ui.text_colored(theme::OPTIMIZED, t("setup.valid"));
         }
         KeyStatus::Invalid(msg) => {
-            ui.text_colored(theme::ERR, format!("Error: {}", msg));
+            ui.text_colored(theme::ERR, tf("setup.error", &[("msg", msg)]));
         }
     }
 
     // Navigation
     ui.spacing();
-    if theme::gold_button_sized(ui, "<< Back", [120.0, 0.0]) {
+    if theme::gold_button_sized(ui, t("btn.back"), [120.0, 0.0]) {
         state.screen = Screen::Setup(SetupStep::Gw2ApiKey);
     }
     if state.setup.llm_key_status == KeyStatus::Valid {
         ui.same_line();
-        if theme::gold_button_sized(ui, "Next >>", [120.0, 0.0]) {
+        if theme::gold_button_sized(ui, t("btn.next"), [120.0, 0.0]) {
             state.screen = Screen::Setup(SetupStep::DataDownload);
         }
     }
 }
 
 fn render_download_step(ui: &Ui, state: &mut AddonState) {
-    theme::header(ui, "STEP 3  ·  GAME DATA");
+    theme::header(ui, &t("setup.data_header"));
     ui.spacing();
 
-    ui.text_wrapped(
-        "Downloading skills, traits, items, and other game data. \
-         This only happens once and when the game updates.",
-    );
+    ui.text_wrapped(t("setup.data_intro"));
     ui.spacing();
 
     let progress_snapshot = state.setup.download_progress.clone();
     match progress_snapshot {
         None => {
             // Not started yet — show start button
-            if theme::gold_button_sized(ui, "Start Download", [160.0, 0.0]) {
+            if theme::gold_button_sized(ui, t("btn.start_download"), [160.0, 0.0]) {
                 state.setup.download_progress = Some(DownloadState {
                     current_step: 0,
                     total_steps: 9,
@@ -575,16 +571,16 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
 
             if let Some(ref err) = dl.error {
                 ui.spacing();
-                ui.text_colored(theme::ERR, format!("Error: {}", err));
+                ui.text_colored(theme::ERR, tf("setup.error", &[("msg", err)]));
                 ui.spacing();
-                if theme::gold_button_sized(ui, "Retry", [120.0, 0.0]) {
+                if theme::gold_button_sized(ui, t("btn.retry"), [120.0, 0.0]) {
                     state.setup.download_progress = None;
                 }
             } else if dl.done {
                 ui.spacing();
-                ui.text_colored(theme::OPTIMIZED, "Download complete!");
+                ui.text_colored(theme::OPTIMIZED, t("setup.download_complete"));
                 ui.spacing();
-                if theme::gold_button_sized(ui, "Next >>", [120.0, 0.0]) {
+                if theme::gold_button_sized(ui, t("btn.next"), [120.0, 0.0]) {
                     state.screen = Screen::Setup(SetupStep::Complete);
                 }
             }
@@ -600,26 +596,23 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
 
     if !is_downloading {
         ui.spacing();
-        if theme::gold_button_sized(ui, "<< Back", [120.0, 0.0]) {
+        if theme::gold_button_sized(ui, t("btn.back"), [120.0, 0.0]) {
             state.screen = Screen::Setup(SetupStep::LlmApiKey);
         }
     }
 }
 
 fn render_complete_step(ui: &Ui, state: &mut AddonState) {
-    theme::header(ui, "SETUP COMPLETE");
+    theme::header(ui, &t("setup.complete_header"));
     ui.spacing();
 
-    ui.text_colored(theme::OPTIMIZED, "Everything is configured and ready.");
+    ui.text_colored(theme::OPTIMIZED, t("setup.ready_msg"));
     ui.spacing();
 
-    ui.text_wrapped(
-        "You can now use the GW2 Build Optimizer. \
-         Press Ctrl+Shift+O anytime to open this window.",
-    );
+    ui.text_wrapped(t("setup.hotkey_hint"));
     ui.spacing();
 
-    if theme::gold_button_sized(ui, "Get Started >>", [160.0, 0.0]) {
+    if theme::gold_button_sized(ui, t("btn.get_started"), [160.0, 0.0]) {
         state.screen = Screen::Main;
     }
 }

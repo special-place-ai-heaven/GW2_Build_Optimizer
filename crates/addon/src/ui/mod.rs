@@ -106,6 +106,7 @@ pub fn render(ui: &Ui) {
                             let _ = s.config.save(&s.config_path);
                         }
                     }
+                    gw2_core::i18n::set_language(&s.config.ui_language);
                     match &s.screen {
                         Screen::Setup(step) => {
                             setup::render_setup(ui, s, step.clone());

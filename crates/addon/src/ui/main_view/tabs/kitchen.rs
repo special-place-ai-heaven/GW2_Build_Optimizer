@@ -5,6 +5,7 @@ use nexus::imgui::Ui;
 use crate::state::{AddonState, MainTab};
 use crate::ui::chat_bar::ChatAction;
 use crate::ui::theme;
+use gw2_core::i18n::t;
 
 use super::optimization;
 
@@ -12,20 +13,20 @@ const MASCOT: f32 = 132.0;
 
 const STARTERS: &[(&str, &str)] = &[
     (
-        "Power build",
+        "starter.power",
         "Optimize a power DPS build for my current mode and role.",
     ),
     (
-        "Condi raids",
+        "starter.condi",
         "Best condition DPS build for raids and strikes.",
     ),
     (
-        "Sustain vs damage",
+        "starter.sustain",
         "How should I trade survivability vs damage on this character?",
     ),
-    ("WvW roam", "Build me a WvW roaming loadout."),
+    ("starter.wvw", "Build me a WvW roaming loadout."),
     (
-        "Improve this",
+        "starter.improve",
         "Improve my current equipped build. Keep the playstyle, raise the weak axes.",
     ),
 ];
@@ -114,7 +115,7 @@ fn render_choya_identity(ui: &Ui, state: &mut AddonState) {
     ui.text_colored(theme::GOLD, "Choya");
     if !state.main.chat.history.is_empty() && !state.main.chat.waiting {
         ui.same_line_with_spacing(0.0, 12.0);
-        if ui.small_button("Clear##talk") {
+        if ui.small_button(&format!("{}##talk", t("btn.clear"))) {
             state.main.chat.history.clear();
             state.main.chat.copied_code = None;
             state.main.chat.copied_frames = 0;
@@ -123,7 +124,7 @@ fn render_choya_identity(ui: &Ui, state: &mut AddonState) {
     }
 
     ui.set_cursor_screen_pos([text_x, ty0 + ui.text_line_height() + 4.0]);
-    ui.text_colored(theme::MUTED, "Build assistant");
+    ui.text_colored(theme::MUTED, t("choya.assistant"));
     ui.same_line_with_spacing(0.0, 10.0);
     let online = state.config.has_active_llm_key();
     let pip = if online {
@@ -131,15 +132,20 @@ fn render_choya_identity(ui: &Ui, state: &mut AddonState) {
     } else {
         theme::MUTED
     };
+    let status = if online {
+        t("status.online")
+    } else {
+        t("status.set_api_key")
+    };
     let p = ui.cursor_screen_pos();
-    let th = ui.calc_text_size("Online")[1];
+    let th = ui.calc_text_size(&status)[1];
     ui.get_window_draw_list()
         .add_circle([p[0] + 5.0, p[1] + th * 0.5], 4.0, pip)
         .filled(true)
         .build();
     ui.dummy([12.0, th]);
     ui.same_line();
-    ui.text_colored(pip, if online { "Online" } else { "Set API key" });
+    ui.text_colored(pip, &status);
 
     ui.set_cursor_screen_pos([text_x, ty0 + ui.text_line_height() * 2.0 + 12.0]);
     super::settings::render_talk_model_row(ui, state);
@@ -152,8 +158,9 @@ fn render_starters(ui: &Ui, state: &mut AddonState) {
     let avail = ui.content_region_avail()[0];
     let mut row_x = 0.0;
     let mut send: Option<String> = None;
-    for (i, (label, prompt)) in STARTERS.iter().enumerate() {
-        let pill_w = ui.calc_text_size(label)[0] + 20.0;
+    for (i, (label_key, prompt)) in STARTERS.iter().enumerate() {
+        let label = t(label_key);
+        let pill_w = ui.calc_text_size(&label)[0] + 20.0;
         if i > 0 {
             if row_x + pill_w + 4.0 > avail {
                 row_x = 0.0;
@@ -162,7 +169,7 @@ fn render_starters(ui: &Ui, state: &mut AddonState) {
             }
         }
         let id = format!("##choya_ask{i}");
-        if theme::pill(ui, label, false, &id) {
+        if theme::pill(ui, &label, false, &id) {
             send = Some((*prompt).to_string());
         }
         row_x += pill_w + 4.0;
@@ -179,19 +186,20 @@ fn talk_context(state: &AddonState) -> String {
         .main
         .selected_character
         .and_then(|i| state.main.characters.get(i))
-        .map(|s| s.as_str())
-        .unwrap_or("no character");
+        .cloned()
+        .unwrap_or_else(|| t("talk.no_character"));
     let prof = state
         .main
         .current_build
         .as_ref()
-        .map(|b| b.profession.as_str())
-        .unwrap_or("any profession");
+        .map(|b| b.profession.clone())
+        .unwrap_or_else(|| t("talk.any_profession"));
     let role = state
         .main
         .selected_role
-        .map(|r| r.play_label())
-        .unwrap_or("no role");
+        .map(super::super::role_i18n_key)
+        .map(t)
+        .unwrap_or_else(|| t("talk.no_role"));
     format!(
         "{} \u{00b7} {} \u{00b7} {} \u{00b7} {}",
         who,
