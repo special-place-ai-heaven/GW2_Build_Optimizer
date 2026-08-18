@@ -46,7 +46,6 @@ const BUBBLE_ROUND: f32 = 14.0;
 const COMPOSER_H: f32 = 76.0;
 const COMPOSER_CHOYA: f32 = 56.0;
 const SEND_SZ: f32 = 36.0;
-const CARD_H: f32 = 44.0;
 const ROW_GAP: f32 = 12.0;
 
 fn trim_history(history: &mut Vec<ChatMessage>) {
@@ -123,23 +122,6 @@ fn wrap_text(ui: &Ui, text: &str, max_w: f32) -> (Vec<String>, f32, f32) {
     }
     let h = (lines.len() as f32) * line_h;
     (lines, max_line_w.min(max_w), h.max(line_h))
-}
-
-fn chip_block_h(ui: &Ui, chips: &[ChatChip], max_w: f32) -> f32 {
-    if chips.is_empty() {
-        return 0.0;
-    }
-    let mut row_x = 0.0;
-    let mut rows = 1u32;
-    for chip in chips {
-        let pill_w = ui.calc_text_size(&chip.label)[0] + 20.0;
-        if row_x > 0.0 && row_x + pill_w + 4.0 > max_w {
-            rows += 1;
-            row_x = 0.0;
-        }
-        row_x += pill_w + 4.0;
-    }
-    rows as f32 * 22.0 + 4.0
 }
 
 fn bubble_size(ui: &Ui, text: &str, avail: f32) -> (Vec<String>, f32, f32) {
@@ -225,13 +207,9 @@ pub fn render_chat_bar(
                 let text = state.history[i].text.clone();
                 let open_result = state.history[i].open_result;
                 let (lines, bw, bh) = bubble_size(ui, &text, avail);
-                let chip_h = chip_block_h(ui, &state.history[i].chips, bw);
-                let card_h = if open_result { CARD_H + 6.0 } else { 0.0 };
-                let row_h = bh.max(AVATAR) + chip_h + card_h + ROW_GAP;
                 let origin = ui.cursor_screen_pos();
-                let id = format!("##talk_row{i}");
-                ui.invisible_button(&id, [avail, row_h]);
-                let after = ui.cursor_screen_pos();
+                let bubble_h = bh.max(AVATAR);
+                ui.dummy([avail, bubble_h]);
 
                 let (av_x, bub_x) = if from_user {
                     let av_x = origin[0] + avail - AVATAR;
@@ -254,19 +232,21 @@ pub fn render_chat_bar(
                 draw_bubble_rect(ui, [bub_x, bub_y], bw, bh, from_user);
                 draw_bubble_text(ui, [bub_x, bub_y], &lines);
 
-                let mut y = bub_y + bh + 2.0;
-                if chip_h > 0.0 {
-                    ui.set_cursor_screen_pos([bub_x, y]);
+                ui.set_cursor_screen_pos([bub_x, bub_y + bh + 4.0]);
+                if !state.history[i].chips.is_empty() {
                     render_chips(ui, state, i, bw);
-                    y += chip_h;
                 }
                 if open_result {
-                    ui.set_cursor_screen_pos([bub_x, y + 4.0]);
-                    if render_build_card(ui, i, bw.max(180.0).min(avail - AVATAR - AVATAR_GAP)) {
+                    let cy = ui.cursor_screen_pos()[1] + 6.0;
+                    ui.set_cursor_screen_pos([bub_x, cy]);
+                    if render_build_card(ui, i) {
                         action = Some(ChatAction::OpenBuild);
                     }
                 }
-                ui.set_cursor_screen_pos(after);
+                let end_y = ui.cursor_screen_pos()[1]
+                    .max(origin[1] + bubble_h)
+                    + ROW_GAP;
+                ui.set_cursor_screen_pos([origin[0], end_y]);
             }
             if state.waiting {
                 let n = (ui.frame_count() / 18) % 4;
@@ -302,11 +282,23 @@ pub fn render_chat_bar(
     action
 }
 
-fn render_build_card(ui: &Ui, msg_i: usize, width: f32) -> bool {
-    let w = width.max(160.0);
+fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
+    const PAD_X: f32 = 14.0;
+    const PAD_Y: f32 = 10.0;
+    const GEM_H: f32 = 28.0;
+    const GEM_GAP: f32 = 10.0;
+    const TITLE: &str = "Build is ready";
+    const SUB: &str = "Open Optimized Build";
+    let title_sz = ui.calc_text_size(TITLE);
+    let sub_sz = ui.calc_text_size(SUB);
+    let text_w = title_sz[0].max(sub_sz[0]);
+    let gem_w = GEM_H * (308.0 / 256.0);
+    let w = PAD_X + gem_w + GEM_GAP + text_w + PAD_X;
+    let text_h = title_sz[1] + 4.0 + sub_sz[1];
+    let h = (text_h + PAD_Y * 2.0).max(GEM_H + PAD_Y * 2.0);
     let p = ui.cursor_screen_pos();
     let id = format!("##build_card{msg_i}");
-    let clicked = ui.invisible_button(&id, [w, CARD_H]);
+    let clicked = ui.invisible_button(&id, [w, h]);
     let hovered = ui.is_item_hovered();
     let fill = if hovered {
         [0.22, 0.18, 0.08, 0.96]
@@ -315,23 +307,23 @@ fn render_build_card(ui: &Ui, msg_i: usize, width: f32) -> bool {
     };
     {
         let dl = ui.get_window_draw_list();
-        dl.add_rect(p, [p[0] + w, p[1] + CARD_H], fill)
+        dl.add_rect(p, [p[0] + w, p[1] + h], fill)
             .filled(true)
             .rounding(10.0)
             .build();
-        dl.add_rect(p, [p[0] + w, p[1] + CARD_H], theme::GOLD)
+        dl.add_rect(p, [p[0] + w, p[1] + h], theme::GOLD)
             .rounding(10.0)
             .build();
-        theme::draw_gem_icon(&dl, [p[0] + 22.0, p[1] + 4.0], CARD_H - 8.0);
+        let gem_cx = p[0] + PAD_X + gem_w * 0.5;
+        let gem_top = p[1] + (h - GEM_H) * 0.5;
+        theme::draw_gem_icon(&dl, [gem_cx, gem_top], GEM_H);
+        let tx = p[0] + PAD_X + gem_w + GEM_GAP;
+        let ty = p[1] + (h - text_h) * 0.5;
+        dl.add_text([tx, ty], color_u32(theme::GOLD), TITLE);
         dl.add_text(
-            [p[0] + 48.0, p[1] + 8.0],
-            color_u32(theme::GOLD),
-            "Build is ready",
-        );
-        dl.add_text(
-            [p[0] + 48.0, p[1] + 24.0],
+            [tx, ty + title_sz[1] + 4.0],
             color_u32(theme::MUTED),
-            "Open Optimized Build",
+            SUB,
         );
     }
     if hovered {

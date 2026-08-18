@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "gw2-api"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "chrono",
  "gw2-core",
@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "gw2-build-optimizer"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "base64",
  "chrono",
@@ -372,7 +372,7 @@ dependencies = [
 
 [[package]]
 name = "gw2-core"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -380,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "gw2-optimizer"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "chrono",
  "gw2-api",

@@ -390,7 +390,8 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
         }
         let is_active = state.main.active_tab == *tab;
         let pulse = if state.main.tab_alert.as_ref() == Some(tab) && !is_active {
-            0.45 + 0.55 * (ui.frame_count() as f32 * 0.14).sin().abs()
+            // ~3s breathe at 60fps (abs(sin) period π / 0.0175).
+            0.18 + 0.55 * (ui.frame_count() as f32 * 0.0175).sin().abs()
         } else {
             0.0
         };

@@ -126,8 +126,14 @@ pub fn pill_pulse(ui: &Ui, label: &str, selected: bool, id: &str, pulse: f32) ->
     }
     let text = if selected {
         [0.10, 0.08, 0.04, 1.0]
-    } else if pulse > 0.45 {
-        [0.10, 0.08, 0.04, 1.0]
+    } else if pulse > 0.0 {
+        let d = [0.10, 0.08, 0.04, 1.0];
+        [
+            CREAM[0] + (d[0] - CREAM[0]) * pulse,
+            CREAM[1] + (d[1] - CREAM[1]) * pulse,
+            CREAM[2] + (d[2] - CREAM[2]) * pulse,
+            1.0,
+        ]
     } else {
         CREAM
     };
