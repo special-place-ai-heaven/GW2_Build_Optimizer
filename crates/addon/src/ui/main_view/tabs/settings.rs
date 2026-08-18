@@ -10,7 +10,9 @@ use super::super::{build_display, stats};
 
 pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     let avail_w = ui.content_region_avail()[0];
-    let col_w = (avail_w - 12.0) / 2.0;
+    let scale = state.config.font_scale.max(0.5);
+    let gutter = 48.0 * scale;
+    let col_w = ((avail_w - gutter) * 0.5).max(220.0);
 
     ui.columns(2, "##settings_cols", false);
     ui.set_column_width(0, col_w);
@@ -56,6 +58,7 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
 
     // ── RIGHT COLUMN ────────────────────────────────────────────────
     ui.next_column();
+    ui.indent_by(gutter);
 
     build_display::render_card_header(ui, &t("settings.ui_prefs"), [1.0, 0.88, 0.35, 1.0]);
     render_theme_section(ui, state, col_w);
@@ -70,6 +73,7 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     build_display::render_card_header(ui, &t("settings.benchmarks"), [0.6, 0.8, 1.0, 1.0]);
     render_benchmark_section(ui, state);
 
+    ui.unindent_by(gutter);
     ui.columns(1, "##settings_end", false);
 
     // ── Footer ─────────────────────────────────────────────────────
