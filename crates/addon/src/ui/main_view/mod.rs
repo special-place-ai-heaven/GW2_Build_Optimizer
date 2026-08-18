@@ -509,16 +509,12 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
             .filled(true)
             .rounding(4.0)
             .build();
-        draw_list
-            .add_rect(
-                [pos[0], pos[1]],
-                [pos[0] + 3.0, pos[1] + bar_h],
-                crate::ui::theme::GOLD,
-            )
-            .filled(true)
-            .rounding(2.0)
-            .build();
-        draw_list.add_text([pos[0] + 8.0, ty], crate::ui::theme::GOLD, title);
+        crate::ui::theme::paint_header_accent(&draw_list, pos[0], pos[1], bar_h);
+        draw_list.add_text(
+            [crate::ui::theme::header_title_x(pos[0]), ty],
+            crate::ui::theme::GOLD,
+            title,
+        );
         ui.dummy([0.0, bar_h]);
     }
     ui.dummy([0.0, spacing * 0.5]); // gap below
