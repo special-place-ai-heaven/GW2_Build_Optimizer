@@ -26,6 +26,24 @@ pub const ERR: [f32; 4] = [1.0, 0.38, 0.28, 1.0];
 pub const WARN: [f32; 4] = [1.0, 0.72, 0.28, 1.0];
 /// Same as `FrameRounding` in [`push`] — icons match buttons/windows.
 pub const ICON_ROUNDING: f32 = 5.0;
+/// Gold tick on section headers. Title starts this far after the tick.
+pub const HEADER_ACCENT_W: f32 = 3.0;
+pub const HEADER_TITLE_GAP: f32 = 10.0;
+
+pub fn header_title_x(left: f32) -> f32 {
+    left + HEADER_ACCENT_W + HEADER_TITLE_GAP
+}
+
+pub fn paint_header_accent(draw: &DrawListMut, left: f32, top: f32, height: f32) {
+    draw.add_rect(
+        [left, top],
+        [left + HEADER_ACCENT_W, top + height],
+        GOLD,
+    )
+    .filled(true)
+    .rounding(2.0)
+    .build();
+}
 
 /// Push overlay colors/rounding. Keep the value alive for the window frame.
 pub fn push<'ui>(ui: &'ui Ui<'_>) -> impl Sized + 'ui {
@@ -60,8 +78,9 @@ pub fn push<'ui>(ui: &'ui Ui<'_>) -> impl Sized + 'ui {
     )
 }
 
-/// Gold plate button (Copy, Send). Dark text on gold so it reads as the action.
+/// Gold plate button (Copy, Send, Test). Dark text on gold so it reads as the action.
 pub fn gold_button(ui: &Ui, label: impl AsRef<str>) -> bool {
+    let _pad = push_gold_button_pad(ui);
     let _bg = ui.push_style_color(StyleColor::Button, GOLD_FILL);
     let _h = ui.push_style_color(StyleColor::ButtonHovered, [0.90, 0.74, 0.28, 1.0]);
     let _a = ui.push_style_color(StyleColor::ButtonActive, [0.70, 0.55, 0.16, 1.0]);
@@ -72,17 +91,29 @@ pub fn gold_button(ui: &Ui, label: impl AsRef<str>) -> bool {
 pub fn gold_button_sized(ui: &Ui, label: impl AsRef<str>, size: [f32; 2]) -> bool {
     let label = label.as_ref();
     let visible = label.split("##").next().unwrap_or(label);
-    let need_w = ui.calc_text_size(visible)[0] + 18.0;
+    let (pad_x, _pad_y) = gold_button_pad(ui);
+    let need_w = ui.calc_text_size(visible)[0] + pad_x * 2.0;
     let w = if size[0] < 0.0 {
         size[0]
     } else {
         size[0].max(need_w)
     };
+    let _pad = push_gold_button_pad(ui);
     let _bg = ui.push_style_color(StyleColor::Button, GOLD_FILL);
     let _h = ui.push_style_color(StyleColor::ButtonHovered, [0.90, 0.74, 0.28, 1.0]);
     let _a = ui.push_style_color(StyleColor::ButtonActive, [0.70, 0.55, 0.16, 1.0]);
     let _t = ui.push_style_color(StyleColor::Text, [0.10, 0.08, 0.04, 1.0]);
     ui.button_with_size(label, [w, size[1]])
+}
+
+fn gold_button_pad(ui: &Ui) -> (f32, f32) {
+    let scale = (ui.current_font_size() / 13.0).max(0.75);
+    (10.0 * scale, 5.0 * scale)
+}
+
+fn push_gold_button_pad<'ui>(ui: &'ui Ui<'_>) -> impl Sized + 'ui {
+    let (pad_x, pad_y) = gold_button_pad(ui);
+    ui.push_style_var(StyleVar::FramePadding([pad_x, pad_y]))
 }
 
 /// Rounded pill tab. `id` must be unique (used as an invisible button id).
@@ -341,15 +372,10 @@ pub fn header(ui: &Ui, title: &str) {
         .round_bot_left(false)
         .round_bot_right(false)
         .build();
-        dl.add_rect(
-            [start[0] - 1.0, start[1]],
-            [start[0] + 3.0, start[1] + 22.0],
-            GOLD,
-        )
-        .filled(true)
-        .rounding(2.0)
-        .build();
-        dl.add_text([start[0] + 10.0, start[1] + 3.0], color_u32(GOLD), title);
+        paint_header_accent(&dl, start[0], start[1], 22.0);
+        let th = ui.calc_text_size(title)[1];
+        let ty = start[1] + ((22.0 - th) * 0.5).round();
+        dl.add_text([header_title_x(start[0]), ty], color_u32(GOLD), title);
     }
     ui.dummy([0.0, 24.0]);
 }

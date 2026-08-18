@@ -53,12 +53,15 @@ const CARD_GAP: f32 = 8.0;
 pub fn render_card_header(ui: &Ui, title: &str, color: [f32; 4]) {
     let start = ui.cursor_screen_pos();
     let width = ui.content_region_avail()[0];
+    let th = ui.calc_text_size(title)[1];
+    let bar_h = 22.0;
+    let ty = start[1] + ((bar_h - th) * 0.5).round();
     {
         let draw_list = ui.get_window_draw_list();
         draw_list
             .add_rect(
                 [start[0] - 1.0, start[1]],
-                [start[0] + width + 1.0, start[1] + 22.0],
+                [start[0] + width + 1.0, start[1] + bar_h],
                 [0.15, 0.13, 0.08, 0.9],
             )
             .filled(true)
@@ -66,16 +69,8 @@ pub fn render_card_header(ui: &Ui, title: &str, color: [f32; 4]) {
             .round_bot_left(false)
             .round_bot_right(false)
             .build();
-        draw_list.add_text([start[0] + 8.0, start[1] + 3.0], color, title);
-        draw_list
-            .add_rect(
-                [start[0] - 1.0, start[1]],
-                [start[0] + 3.0, start[1] + 22.0],
-                crate::ui::theme::GOLD,
-            )
-            .filled(true)
-            .rounding(2.0)
-            .build();
+        crate::ui::theme::paint_header_accent(&draw_list, start[0], start[1], bar_h);
+        draw_list.add_text([crate::ui::theme::header_title_x(start[0]), ty], color, title);
     }
     ui.dummy([0.0, 24.0]);
 }
@@ -103,19 +98,11 @@ fn render_card_section(ui: &Ui, title: &str, content: impl FnOnce(&Ui)) {
             .round_bot_right(false)
             .build();
         draw_list.add_text(
-            [start[0] + 10.0, hdr_top + CARD_PAD],
+            [crate::ui::theme::header_title_x(start[0]), hdr_top + CARD_PAD],
             SECTION_TITLE_COLOR,
             title,
         );
-        draw_list
-            .add_rect(
-                [start[0] - 1.0, hdr_top],
-                [start[0] + 3.0, hdr_bottom],
-                crate::ui::theme::GOLD,
-            )
-            .filled(true)
-            .rounding(2.0)
-            .build();
+        crate::ui::theme::paint_header_accent(&draw_list, start[0], hdr_top, hdr_bottom - hdr_top);
     } // DrawListMut dropped here
 
     // Reserve space for the header
