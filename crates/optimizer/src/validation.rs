@@ -124,6 +124,14 @@ pub enum RejectCode {
     ItemNotFound { item_type: String, name: String },
     /// Gear prefix (stat name) not in itemstats.
     GearPrefixNotFound { name: String },
+    /// A specialization resolved with fewer than 3 major traits.
+    IncompleteSpecTraits { spec: String, actual: usize },
+    /// Heal / 3 utilities / elite bar is missing slots.
+    IncompleteSkillBar {
+        heal: bool,
+        utilities: usize,
+        elite: bool,
+    },
 }
 
 /// Structured validator rejection. `detail` mirrors the prior flat string
@@ -256,6 +264,44 @@ pub fn validate_gemini_build(
     }
     validate_weapons(response, db, profession_name, &mut result);
     validate_skills(response, db, profession_name, &mut result);
+    if !response.specializations.is_empty() {
+        for spec in &result.specializations {
+            if spec.trait_ids.len() != 3 {
+                result.errors.push(ValidationReject {
+                    code: RejectCode::IncompleteSpecTraits {
+                        spec: spec.name.clone(),
+                        actual: spec.trait_ids.len(),
+                    },
+                    detail: format!(
+                        "{}: expected 3 traits, got {}",
+                        spec.name,
+                        spec.trait_ids.len()
+                    ),
+                });
+            }
+        }
+        let utils = result
+            .skills
+            .utilities
+            .iter()
+            .filter(|u| u.is_some())
+            .count();
+        if result.skills.heal.is_none() || result.skills.elite.is_none() || utils != 3 {
+            result.errors.push(ValidationReject {
+                code: RejectCode::IncompleteSkillBar {
+                    heal: result.skills.heal.is_some(),
+                    utilities: utils,
+                    elite: result.skills.elite.is_some(),
+                },
+                detail: format!(
+                    "Need heal, 3 utilities, and elite (heal={}, utils={}, elite={})",
+                    result.skills.heal.is_some(),
+                    utils,
+                    result.skills.elite.is_some()
+                ),
+            });
+        }
+    }
     if profession_name == "Revenant" {
         fill_revenant_legends(&mut result, db);
     }

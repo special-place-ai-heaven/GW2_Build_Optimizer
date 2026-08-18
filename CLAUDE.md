@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**GW2 Build Optimizer v1.2.4** — In-game Guild Wars 2 addon (Nexus plugin) that optimizes character builds across all game modes (PvE, PvP, WvW). Uses the GW2 API for game/character data and a pluggable LLM backend (Gemini, OpenAI, Anthropic, or OpenRouter) for build reasoning. Feature complete (S01-S15).
+**GW2 Build Optimizer v1.2.5** — In-game Guild Wars 2 addon (Nexus plugin) that optimizes character builds across all game modes (PvE, PvP, WvW). Uses the GW2 API for game/character data and a pluggable LLM backend (Gemini, OpenAI, Anthropic, or OpenRouter) for build reasoning. Feature complete (S01-S15).
 
 ## Build & Development
 
@@ -13,6 +13,8 @@ cargo check              # Fast compilation check
 cargo build --release    # Produces target/release/gw2_build_optimizer.dll
 # Deploy: copy DLL to C:\GAMES\Guild Wars 2\addons\
 ```
+
+**Every code fix ships.** After any addon/optimizer/core/gw2api change: bump patch version, `cargo test`, `cargo build --release`, copy `gw2_build_optimizer.dll` to `C:\GAMES\Guild Wars 2\addons\`, commit, push, and `gh release create` with the DLL + `SHA256SUMS.txt`. README Download links stay on `/releases/latest` — do not paste a SHA into README.
 
 ## Architecture
 
