@@ -1172,25 +1172,34 @@ fn skill_selection_from_suggestion(
     db: &gw2_optimizer::gamedb::GameDb,
     profession: &str,
 ) -> gw2_api::models::SkillSelection {
+    fn strip_label_ci<'a>(s: &'a str, label: &str) -> Option<&'a str> {
+        let head = s.get(..label.len())?;
+        if head.eq_ignore_ascii_case(label) {
+            Some(&s[label.len()..])
+        } else {
+            None
+        }
+    }
+
     let mut heal = None;
     let mut utilities = Vec::new();
     let mut elite = None;
     for s in skills {
-        if let Some(rest) = s.strip_prefix("Heal: ") {
+        if let Some(rest) = strip_label_ci(s, "Heal: ") {
             heal = skill_id_by_name(db, profession, rest.trim());
-        } else if let Some(rest) = s.strip_prefix("Utils: ") {
+        } else if let Some(rest) = strip_label_ci(s, "Utils: ") {
             for name in rest.split(',') {
                 let name = name.trim();
                 if !name.is_empty() {
                     utilities.push(skill_id_by_name(db, profession, name));
                 }
             }
-        } else if let Some(rest) = s.strip_prefix("Utility: ") {
+        } else if let Some(rest) = strip_label_ci(s, "Utility: ") {
             let name = rest.trim();
             if !name.is_empty() {
                 utilities.push(skill_id_by_name(db, profession, name));
             }
-        } else if let Some(rest) = s.strip_prefix("Elite: ") {
+        } else if let Some(rest) = strip_label_ci(s, "Elite: ") {
             elite = skill_id_by_name(db, profession, rest.trim());
         }
     }
@@ -1684,13 +1693,22 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         return;
     }
 
-    let profession = state
+    let mut profession = state
         .main
         .current_build
         .as_ref()
         .map(|b| b.profession.clone())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "unknown".into());
+    if let Some(db) = state.main.game_db.as_ref() {
+        if db.profession(&profession).is_none() {
+            if let Some(inferred) =
+                gw2_optimizer::validation::infer_profession_from_text(db, &display)
+            {
+                profession = inferred;
+            }
+        }
+    }
 
     state.main.chat_epoch = state.main.chat_epoch.wrapping_add(1);
     let epoch = state.main.chat_epoch;
@@ -1843,6 +1861,16 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     Err("Game data not loaded".into())
                 }
             })();
+
+            let mut profession = profession;
+            if let (Ok(parsed), Some(db)) = (result.as_ref(), db_clone.as_ref()) {
+                if let Some(inferred) = gw2_optimizer::validation::infer_profession_from_spec_names(
+                    db,
+                    parsed.specializations.iter().map(|(n, _)| n.as_str()),
+                ) {
+                    profession = inferred;
+                }
+            }
 
             let validated = result.as_ref().ok().and_then(|gemini_build| {
                 db_clone.as_ref().map(|db| {
@@ -2103,6 +2131,16 @@ mod tests {
             let aqua = u16::from_le_bytes([buf[10 + i * 4], buf[11 + i * 4]]);
             assert_ne!(land, 0, "land palette {i} should resolve");
             assert_eq!(aqua, 0, "aquatic palette {i} must stay empty");
+        }
+        let rest = &buf[44..];
+        if !rest.is_empty() {
+            let count = rest[0] as usize;
+            assert_eq!(rest.len(), 1 + count * 2 + 1, "SotO trailer must be count+ids+override");
+            assert_eq!(*rest.last().unwrap(), 0);
+            for i in 0..count {
+                let id = u16::from_le_bytes([rest[1 + i * 2], rest[2 + i * 2]]);
+                assert_ne!(id, 265, "aquatic weapon type");
+            }
         }
     }
 

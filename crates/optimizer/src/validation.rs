@@ -150,11 +150,86 @@ impl std::fmt::Display for ValidationReject {
 // The result is populated incrementally as each validation stage runs; a single
 // struct literal would not match the staged, side-effecting validation flow.
 #[allow(clippy::field_reassign_with_default)]
+/// Resolve a profession from specialization names (Tempest → Elementalist).
+pub fn infer_profession_from_spec_names<'a>(
+    db: &GameDb,
+    spec_names: impl IntoIterator<Item = &'a str>,
+) -> Option<String> {
+    let mut spec_ids: Vec<u32> = db.specializations.keys().copied().collect();
+    spec_ids.sort_unstable();
+    for name in spec_names {
+        let clean = name.trim_end_matches(" [E]").trim();
+        for sid in &spec_ids {
+            if let Some(spec) = db.specializations.get(sid) {
+                if spec.name.eq_ignore_ascii_case(clean) {
+                    return Some(spec.profession.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn alnum_spaces(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect()
+}
+
+fn contains_as_words(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let hay = format!(" {} ", alnum_spaces(haystack));
+    let n = format!(" {} ", alnum_spaces(needle).trim());
+    hay.contains(&n)
+}
+
+/// Scan free text for a spec or profession name ("tempest celestial" → Elementalist).
+pub fn infer_profession_from_text(db: &GameDb, text: &str) -> Option<String> {
+    let mut specs: Vec<(&str, &str)> = db
+        .specializations
+        .values()
+        .map(|s| (s.name.as_str(), s.profession.as_str()))
+        .collect();
+    specs.sort_by_key(|(n, _)| std::cmp::Reverse(n.len()));
+    for (name, profession) in specs {
+        if contains_as_words(text, name) {
+            return Some(profession.to_string());
+        }
+    }
+    let mut professions: Vec<&str> = db.professions.values().map(|p| p.name.as_str()).collect();
+    professions.sort_by_key(|n| std::cmp::Reverse(n.len()));
+    for name in professions {
+        if contains_as_words(text, name) {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+
+
 pub fn validate_gemini_build(
     response: &GeminiBuildResponse,
     db: &GameDb,
     profession_name: &str,
 ) -> ValidatedBuild {
+    let inferred_profession = infer_profession_from_spec_names(
+        db,
+        response.specializations.iter().map(|(n, _)| n.as_str()),
+    );
+    let profession_name = match db.profession(profession_name) {
+        Some(_) => profession_name,
+        None => inferred_profession.as_deref().unwrap_or(profession_name),
+    };
+
     let mut result = ValidatedBuild::default();
 
     // Copy explanation fields
@@ -988,6 +1063,11 @@ fn parse_skill_names_from_response(
             heal = Some(rest.trim().to_string());
         } else if let Some(rest) = strip_label_ci(skill_line, "Utils: ") {
             utilities.extend(rest.split(',').map(|s| s.trim().to_string()));
+        } else if let Some(rest) = strip_label_ci(skill_line, "Utility: ") {
+            let name = rest.trim();
+            if !name.is_empty() {
+                utilities.push(name.to_string());
+            }
         } else if let Some(rest) = strip_label_ci(skill_line, "Elite: ") {
             elite = Some(rest.trim().to_string());
         }
@@ -1461,4 +1541,89 @@ mod tests {
         assert!(result.errors.is_empty());
         assert!(result.warnings.is_empty());
     }
+
+
+    #[test]
+    fn test_parse_skill_names_utility_prefix() {
+        let mut response = GeminiBuildResponse::default();
+        response.skills = vec![
+            "Heal: Mending".into(),
+            "Utility: Signet of Fury".into(),
+            "utility: Banner of Strength".into(),
+            "Elite: Signet of Rage".into(),
+        ];
+        let (heal, utils, elite) = parse_skill_names_from_response(&response);
+        assert_eq!(heal.as_deref(), Some("Mending"));
+        assert_eq!(utils, vec!["Signet of Fury", "Banner of Strength"]);
+        assert_eq!(elite.as_deref(), Some("Signet of Rage"));
+    }
+
+    fn ele_db_with_tempest() -> GameDb {
+        let mut db = GameDb::empty_for_tests();
+        db.professions.insert(
+            "Elementalist".into(),
+            gw2_api::models::Profession {
+                id: "Elementalist".into(),
+                name: "Elementalist".into(),
+                code: Some(6),
+                specializations: vec![48, 17, 41],
+                weapons: HashMap::new(),
+                training: vec![],
+                skills_by_palette: vec![],
+                icon: None,
+                icon_big: None,
+            },
+        );
+        for (id, name, elite) in [
+            (48u32, "Tempest", true),
+            (17, "Water", false),
+            (41, "Arcane", false),
+        ] {
+            db.specializations.insert(
+                id,
+                Specialization {
+                    id,
+                    name: name.into(),
+                    profession: "Elementalist".into(),
+                    elite,
+                    minor_traits: vec![],
+                    major_traits: vec![],
+                    weapon_trait: None,
+                    icon: None,
+                    background: None,
+                    profession_icon: None,
+                    profession_icon_big: None,
+                },
+            );
+        }
+        db
+    }
+
+    #[test]
+    fn test_unknown_profession_infers_elementalist_from_tempest() {
+        let db = ele_db_with_tempest();
+        assert_eq!(
+            infer_profession_from_text(&db, "tempest celestial support").as_deref(),
+            Some("Elementalist")
+        );
+        assert_eq!(
+            infer_profession_from_spec_names(&db, ["Tempest", "Water", "Arcane"]).as_deref(),
+            Some("Elementalist")
+        );
+
+        let mut response = GeminiBuildResponse::default();
+        response.specializations = vec![
+            ("Tempest".into(), vec![]),
+            ("Water".into(), vec![]),
+            ("Arcane".into(), vec![]),
+        ];
+        let result = validate_gemini_build(&response, &db, "unknown");
+        let names: Vec<&str> = result.specializations.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["Tempest", "Water", "Arcane"]);
+        assert!(
+            !result.errors.iter().any(|e| e.detail.contains("unknown")),
+            "{result:?}"
+        );
+    }
+
 }

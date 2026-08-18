@@ -521,18 +521,19 @@ fn infer_revenant_legends(
 }
 
 fn append_soto_weapons(buf: &mut Vec<u8>, weapons: &[String]) {
-    if weapons.is_empty() {
-        return;
-    }
     let mut ids: Vec<u16> = Vec::new();
     for name in weapons {
-        if let Some(id) = weapon_type_id(name) {
-            if !ids.contains(&id) {
-                ids.push(id);
-            }
+        let Some(id) = weapon_type_id(name) else {
+            continue;
+        };
+        if !ids.contains(&id) {
+            ids.push(id);
         }
     }
     ids.truncate(8);
+    if ids.is_empty() {
+        return;
+    }
     buf.push(ids.len() as u8);
     for id in ids {
         buf.extend_from_slice(&id.to_le_bytes());
@@ -558,7 +559,8 @@ fn weapon_type_id(name: &str) -> Option<u16> {
         "Torch" => 102,
         "Warhorn" => 103,
         "Shortbow" => 107,
-        "Spear" | "Trident" | "HarpoonGun" => 265,
+        // Aquatic types (265) in the land trailer make GW2 reject the template.
+        "Spear" | "Trident" | "HarpoonGun" => return None,
         _ => return None,
     })
 }
@@ -714,4 +716,43 @@ mod tests {
         assert_eq!(&buf[28..32], &[31, 0, 7, 8]);
         assert_eq!(buf.len(), 44);
     }
+
+
+    #[test]
+    fn aquatic_weapon_names_do_not_extend_template() {
+        let db = revenant_db();
+        let build = Build {
+            name: None,
+            profession: Some("Revenant".into()),
+            specializations: vec![],
+            skills: None,
+            aquatic_skills: None,
+            legends: vec![],
+            aquatic_legends: vec![],
+            pets: None,
+        };
+        let spear_only =
+            decode_template(&generate_build_chat_code(&build, &db, &["Spear".into()]).unwrap());
+        assert_eq!(spear_only.len(), 44, "aquatic-only list must stay 44-byte");
+
+        let buf = decode_template(
+            &generate_build_chat_code(
+                &build,
+                &db,
+                &["Staff".into(), "Spear".into(), "Trident".into()],
+            )
+            .unwrap(),
+        );
+        assert!(buf.len() > 44);
+        let rest = &buf[44..];
+        assert_eq!(rest[0], 1, "only Staff is a land weapon");
+        assert_eq!(u16_at(rest, 1), 89);
+        assert_eq!(*rest.last().unwrap(), 0);
+        assert_eq!(rest.len(), 1 + 2 + 1);
+        assert!(
+            !rest.windows(2).any(|w| u16::from_le_bytes([w[0], w[1]]) == 265),
+            "must not write aquatic type 265"
+        );
+    }
+
 }
