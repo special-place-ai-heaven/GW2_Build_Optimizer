@@ -443,26 +443,28 @@ Every field is REQUIRED. Do not leave any field empty or null."#,
 
 /// Build a tool-aware prompt for kitchen chat.
 /// The player is the customer; the LLM is the chef; the delicacy is an optimal build.
-/// `kitchen_brief` is the pass (mode, radar, locks, character, dish on the pass).
+/// `kitchen_brief` is Mode, Scale, Role family, character, dish on the pass.
 pub fn chat_refinement_prompt_with_tools(
     profession: &str,
     game_mode: &str,
     user_request: &str,
     kitchen_brief: &str,
-    weights: &OptimizationWeights,
 ) -> String {
     let request = sanitize_order(user_request);
     let kitchen = sanitize_build_summary(kitchen_brief);
-    let weights_guidance = weights_context(weights);
     format!(
         r#"You are Choya, a Guild Wars 2 cactus piñata and build advisor in chat with the player. Mode: {game_mode}. Profession: {profession} (unknown means they have not selected a character yet). A little cactus personality is fine; do not drown answers in quips.
+
+Role chips are families, not finished jobs. The player's words pick the lean (power vs condi, celestial fight-support vs zerg stab specialist, etc.). Context lists Mode, Scale, and Role — use those. Do not treat equipped gear, radar sliders, or trait locks as cages unless the player asked to keep them.
+
+Named gear prefix in the player's message wins (including Celestial). Ignore a prefix they negated ("not minstrel").
 
 If they greet you, ask a question, or are just talking — do not call tools. Reply with JSON:
 {{"explanation": "<your spoken reply>", "specializations": []}}
 
-If Context already lists an equipped Character loadout, do not call tools. Edit that loadout. Copy weapons unchanged if they asked to keep them. Honor Locks. Reply with the full JSON build object. explanation: 2-4 sentences in plain language.
+If Context already lists an equipped Character loadout, do not call tools. Edit that loadout. Copy weapons unchanged if they asked to keep them. Reply with the full JSON build object. explanation: 2-4 sentences in plain language.
 
-If they want a new build and Context has no Character loadout: use at most two tool rounds, then reply with the full JSON build object. Honor locks. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: 2-4 sentences in plain language.
+If they want a new build and Context has no Character loadout: use at most two tool rounds, then reply with the full JSON build object. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: 2-4 sentences in plain language.
 
 The player's message:
 <message>
@@ -471,8 +473,6 @@ The player's message:
 
 Context:
 {kitchen}
-
-{weights_guidance}
 
 Tools — use any of them when cooking a build:
 - Pass: get_current_build, get_optimizer_results
@@ -513,7 +513,6 @@ Prefer search_upgrades / upgrade_synergies over list_* dumps. When plating a bui
         game_mode = game_mode,
         request = request,
         kitchen = kitchen,
-        weights_guidance = weights_guidance,
     )
 }
 
@@ -1310,7 +1309,6 @@ Every field is REQUIRED. Do not leave any field empty or null."#;
             "PvE",
             "make this build more bursty please",
             kitchen,
-            &OptimizationWeights::default(),
         );
         assert!(
             prompt.contains("If Context already lists an equipped Character loadout"),
@@ -1329,10 +1327,16 @@ Every field is REQUIRED. Do not leave any field empty or null."#;
             "context brief missing"
         );
         assert!(
-            prompt.contains(
-                "PLAYER PRIORITIES (6-axis radar chart): Power damage (40%), Survivability (40%)"
-            ),
-            "radar controls missing"
+            prompt.contains("Role chips are families"),
+            "family-role instruction missing: {prompt}"
+        );
+        assert!(
+            !prompt.contains("PLAYER PRIORITIES"),
+            "radar must not cage Choya: {prompt}"
+        );
+        assert!(
+            !prompt.contains("Honor Locks"),
+            "locks must not cage Choya: {prompt}"
         );
         assert!(
             prompt.contains("\"stat_prefix\""),
@@ -1381,7 +1385,6 @@ Every field is REQUIRED. Do not leave any field empty or null."#;
             "PvE",
             &order,
             kitchen,
-            &OptimizationWeights::default(),
         );
         assert!(
             prompt.contains("Pasted: Rune of the Scholar (item)"),

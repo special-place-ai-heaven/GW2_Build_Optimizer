@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**GW2 Build Optimizer v1.2.6** — In-game Guild Wars 2 addon (Nexus plugin) that optimizes character builds across all game modes (PvE, PvP, WvW). Uses the GW2 API for game/character data and a pluggable LLM backend (Gemini, OpenAI, Anthropic, or OpenRouter) for build reasoning. Feature complete (S01-S15).
+**GW2 Build Optimizer v1.3.0** — In-game Guild Wars 2 addon (Nexus plugin) that optimizes character builds across all game modes (PvE, PvP, WvW). Uses the GW2 API for game/character data and a pluggable LLM backend (Gemini, OpenAI, Anthropic, or OpenRouter) for build reasoning. Feature complete (S01-S15).
 
 ## Build & Development
 
@@ -77,7 +77,7 @@ See `~/.claude/projects/.../memory/gw2-domain.md` for full reference. Key points
 - **Stat alias normalization**: GW2 API uses both old ("ConditionDuration") and new ("Expertise") attribute names. `StatBlock::add/get` normalizes both.
 - **Traited-fact overrides**: Active traited_facts replace base facts by index. Must collect override indices first, then skip overridden base facts.
 - **Rune bonuses are strings**: Rune tier bonuses come as unstructured text ("+7% Burning Duration"), not structured Facts. Parsed via `parse_rune_modifier()`.
-- **Gemini prefix override**: Gemini ignores gear constraints. `select_gear_prefix()` (cosine similarity) is authoritative — Gemini's choice is always overwritten.
+- **Gemini prefix override**: Optimize overwrites Gemini with `select_gear_prefix()` (cosine). Choya chat does not — named prefix in the player's message wins, including after “not minstrel”.
 - **Validation before apply**: Always call `validate_gemini_build()` before `apply_gemini_response()`. Gemini hallucinates specs/weapons.
 - **Elite spec skill gating**: Filter skills by `Skill::specialization` — only core skills (None) or equipped elite spec skills allowed.
 - **Billing-tolerant key validation**: HTTP 401 = invalid key. 400/403/429 with billing keywords = valid key, billing issue. Don't reject valid keys.

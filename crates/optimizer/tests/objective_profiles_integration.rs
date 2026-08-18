@@ -129,7 +129,7 @@ fn test_pvp_has_expected_profile_count() {
 fn test_wvw_has_expected_profile_count() {
     let data = objective_profiles::objective_profiles();
     let wvw = data.profiles_for_mode("WvW");
-    assert_eq!(wvw.len(), 10, "WvW should have 10 profiles");
+    assert_eq!(wvw.len(), 11, "WvW should have 11 profiles");
 }
 
 #[test]

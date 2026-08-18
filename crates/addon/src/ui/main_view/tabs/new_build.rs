@@ -33,7 +33,7 @@ fn render_scenario_ready(ui: &Ui, state: &AddonState) {
         theme::wrapped(
             ui,
             theme::MUTED,
-            "Same job in every mode — this mode sets the spec and weights.",
+            "Same family in every mode — this mode and scale set the prior; chat picks the lean.",
         );
         ui.spacing();
         theme::wrapped(
