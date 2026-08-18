@@ -4,6 +4,7 @@ use nexus::imgui::Ui;
 
 use crate::state::{AddonState, MainTab};
 use crate::ui::theme;
+use gw2_core::i18n::{t, tf};
 
 use super::super::{build_display, optimization, stats};
 
@@ -14,7 +15,7 @@ pub(in crate::ui::main_view) fn render_save_build_ui(ui: &Ui, state: &mut AddonS
     }
     ui.spacing();
     ui.separator();
-    ui.text("Save Build:");
+    ui.text(t("save.build"));
     ui.same_line();
     ui.set_next_item_width(200.0);
     ui.input_text("##save_name", &mut state.main.save_name_input)
@@ -23,13 +24,13 @@ pub(in crate::ui::main_view) fn render_save_build_ui(ui: &Ui, state: &mut AddonS
 
     let can_save = !state.main.save_name_input.trim().is_empty();
     let save_clicked = if can_save {
-        theme::gold_button_sized(ui, "Save", [60.0, 0.0])
+        theme::gold_button_sized(ui, t("btn.save"), [60.0, 0.0])
     } else {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui, "Save", [60.0, 0.0]);
+        theme::gold_button_sized(ui, t("btn.save"), [60.0, 0.0]);
         style.pop();
         if ui.is_item_hovered() {
-            ui.tooltip_text("Enter a build name first");
+            ui.tooltip_text(t("save.need_name"));
         }
         false
     };
@@ -69,13 +70,13 @@ pub(in crate::ui::main_view) fn render_save_build_ui(ui: &Ui, state: &mut AddonS
         let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
         match storage.save_new(&saved) {
             Ok(()) => {
-                state.main.save_status = Some(format!("Saved '{}'", saved.name));
+                state.main.save_status = Some(tf("fmt.saved", &[("name", &saved.name)]));
                 state.main.save_status_frames = 0;
                 state.main.save_name_input.clear();
                 state.main.saved_builds_loaded = false; // force refresh
             }
             Err(e) => {
-                state.main.save_status = Some(format!("Save failed: {}", e));
+                state.main.save_status = Some(tf("fmt.save_failed", &[("err", &e.to_string())]));
                 state.main.save_status_frames = 0;
             }
         }

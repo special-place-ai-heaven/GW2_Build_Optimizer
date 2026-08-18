@@ -2,6 +2,7 @@ use super::stats::{compute_3tier_combat, perf_to_combat_metrics};
 use crate::state::AddonState;
 use gw2_optimizer::balance::BalanceContext;
 use gw2_optimizer::scoring::OptimizationWeights;
+use gw2_core::i18n::{t, tf};
 
 /// Start optimization in background thread (S11-T01, S11-T02, S11-T03)
 pub(super) fn start_optimization(state: &mut AddonState) {
@@ -1749,21 +1750,21 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     if !state.config.has_active_llm_key() {
         crate::ui::chat_bar::add_ai_response(
             &mut state.main.chat,
-            "Set an AI API key in Settings first.".into(),
+            t("choya.need_key"),
         );
         return;
     }
     if state.main.optimizing {
         crate::ui::chat_bar::add_ai_response(
             &mut state.main.chat,
-            "Optimize is still running. Wait for it to finish.".into(),
+            t("choya.optimize_running"),
         );
         return;
     }
     if state.main.game_db.is_none() {
         crate::ui::chat_bar::add_ai_response(
             &mut state.main.chat,
-            "Game data is still loading. Try again in a moment.".into(),
+            t("choya.data_loading"),
         );
         return;
     }
@@ -1789,7 +1790,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     let epoch = state.main.chat_epoch;
     state.main.chat.waiting = true;
     state.main.chat_wait_started = Some(std::time::Instant::now());
-    state.main.optimize_stage = "Choya is thinking\u{2026}".into();
+    state.main.optimize_stage = t("choya.thinking");
 
     let config = state.config.clone();
     let character = state
@@ -1880,6 +1881,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         &game_mode_label,
                         &message,
                         &kitchen,
+                        gw2_core::i18n::choya_name_for(&config.ui_language),
                     );
                     let tools = gw2_optimizer::llm::tools::tool_definitions();
                     let empty_candidates = vec![];
@@ -1915,9 +1917,13 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                         if s.main.chat_epoch != epoch {
                                             return;
                                         }
-                                        s.main.optimize_stage = format!(
-                                            "Choya is looking ({}/{})\u{2026} {}",
-                                            turn, max_turns, tools_str
+                                        s.main.optimize_stage = tf(
+                                            "fmt.choya_looking",
+                                            &[
+                                                ("turn", &turn.to_string()),
+                                                ("max", &max_turns.to_string()),
+                                                ("tools", &tools_str),
+                                            ],
                                         );
                                     });
                                 },

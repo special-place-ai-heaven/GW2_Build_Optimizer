@@ -127,6 +127,10 @@ pub struct AppConfig {
     /// Auto-refresh game data cache on startup.
     #[serde(default)]
     pub auto_refresh_cache: bool,
+
+    /// Overlay language. `"auto"` follows the OS UI language. Additive — old configs omit this.
+    #[serde(default = "default_ui_language")]
+    pub ui_language: String,
 }
 
 impl Default for AppConfig {
@@ -156,6 +160,7 @@ impl Default for AppConfig {
             window_h: None,
             default_game_mode: None,
             auto_refresh_cache: false,
+            ui_language: "auto".into(),
         }
     }
 }
@@ -177,6 +182,10 @@ default_f32!(default_content_indent = 4.0);
 
 fn default_window_visible() -> bool {
     true
+}
+
+fn default_ui_language() -> String {
+    "auto".into()
 }
 
 pub const DEFAULT_WINDOW_POS: [f32; 2] = [80.0, 80.0];
@@ -443,6 +452,7 @@ mod tests {
         assert_eq!(config.window_opacity, 1.0);
         assert_eq!(config.font_scale, 1.0);
         assert!(!config.auto_refresh_cache);
+        assert_eq!(config.ui_language, "auto");
         assert!(config.is_setup_complete());
         assert!(config.window_visible);
         assert_eq!(
@@ -464,6 +474,7 @@ mod tests {
         assert_eq!(config.section_spacing, defaults.section_spacing);
         assert_eq!(config.content_indent, defaults.content_indent);
         assert!(config.window_visible);
+        assert_eq!(config.ui_language, "auto");
         assert_eq!(
             config.window_rect(),
             (DEFAULT_WINDOW_POS, DEFAULT_WINDOW_SIZE)

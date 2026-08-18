@@ -4,6 +4,7 @@ use nexus::imgui::{ComboBox, Selectable, Ui};
 
 use crate::state::AddonState;
 use crate::ui::theme;
+use gw2_core::i18n::{t, tf};
 
 use super::super::{build_display, stats};
 
@@ -15,16 +16,16 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.set_column_width(0, col_w);
 
     // ── LEFT COLUMN ─────────────────────────────────────────────────
-    build_display::render_card_header(ui, "AI PROVIDER", [1.0, 0.88, 0.35, 1.0]);
+    build_display::render_card_header(ui, &t("settings.ai_provider"), [1.0, 0.88, 0.35, 1.0]);
     render_api_keys_section(ui, state, col_w);
     ui.spacing();
     render_model_picker_section(ui, state, col_w);
 
     ui.dummy([0.0, 8.0]);
 
-    build_display::render_card_header(ui, "OPTIMIZATION DEFAULTS", [1.0, 0.88, 0.35, 1.0]);
+    build_display::render_card_header(ui, &t("settings.opt_defaults"), [1.0, 0.88, 0.35, 1.0]);
     {
-        ui.text("Default Game Mode:");
+        ui.text(t("settings.default_mode"));
         let current_default = state
             .config
             .default_game_mode
@@ -41,32 +42,32 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
 
     ui.dummy([0.0, 8.0]);
 
-    build_display::render_card_header(ui, "DATA QUALITY LEGEND", [0.7, 0.7, 0.7, 1.0]);
+    build_display::render_card_header(ui, &t("settings.legend"), [0.7, 0.7, 0.7, 1.0]);
     ui.spacing();
-    ui.text_colored([0.3, 0.9, 0.3, 1.0], "\u{25cf} Verified");
+    ui.text_colored([0.3, 0.9, 0.3, 1.0], format!("\u{25cf} {}", t("settings.verified")));
     ui.same_line();
-    ui.text_colored([0.6, 0.6, 0.6, 1.0], "— All input data is source-backed.");
-    ui.text_colored([0.95, 0.75, 0.15, 1.0], "\u{25cf} Provisional");
+    ui.text_colored([0.6, 0.6, 0.6, 1.0], t("settings.verified_note"));
+    ui.text_colored([0.95, 0.75, 0.15, 1.0], format!("\u{25cf} {}", t("settings.provisional")));
     ui.same_line();
-    ui.text_colored([0.6, 0.6, 0.6, 1.0], "— Some data estimated. Less certain.");
-    ui.text_colored([1.0, 0.3, 0.2, 1.0], "\u{25cf} Blocked");
+    ui.text_colored([0.6, 0.6, 0.6, 1.0], t("settings.provisional_note"));
+    ui.text_colored([1.0, 0.3, 0.2, 1.0], format!("\u{25cf} {}", t("settings.blocked")));
     ui.same_line();
-    ui.text_colored([0.6, 0.6, 0.6, 1.0], "— Critical data missing.");
+    ui.text_colored([0.6, 0.6, 0.6, 1.0], t("settings.blocked_note"));
 
     // ── RIGHT COLUMN ────────────────────────────────────────────────
     ui.next_column();
 
-    build_display::render_card_header(ui, "UI PREFERENCES", [1.0, 0.88, 0.35, 1.0]);
+    build_display::render_card_header(ui, &t("settings.ui_prefs"), [1.0, 0.88, 0.35, 1.0]);
     render_theme_section(ui, state, col_w);
 
     ui.dummy([0.0, 8.0]);
 
-    build_display::render_card_header(ui, "CACHE & DATA", [1.0, 0.88, 0.35, 1.0]);
+    build_display::render_card_header(ui, &t("settings.cache"), [1.0, 0.88, 0.35, 1.0]);
     render_cache_section(ui, state);
 
     ui.dummy([0.0, 8.0]);
 
-    build_display::render_card_header(ui, "BENCHMARK DATA", [0.6, 0.8, 1.0, 1.0]);
+    build_display::render_card_header(ui, &t("settings.benchmarks"), [0.6, 0.8, 1.0, 1.0]);
     render_benchmark_section(ui, state);
 
     ui.columns(1, "##settings_end", false);
@@ -78,9 +79,10 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.text_colored(
         [0.4, 0.4, 0.4, 1.0],
         format!(
-            "GW2 Build Optimizer v{}  —  AI: {}",
-            crate::VERSION,
-            state.config.active_provider.label()
+            "{} {}  —  {}",
+            t("info.product"),
+            tf("fmt.version", &[("ver", crate::VERSION)]),
+            tf("fmt.ai", &[("provider", state.config.active_provider.label())]),
         ),
     );
 }
@@ -117,12 +119,12 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     if has_key {
         ui.text_colored(
             [0.0, 1.0, 0.0, 1.0],
-            format!("{} Key: configured", provider_label),
+            tf("fmt.key_configured", &[("provider", &provider_label)]),
         );
     } else {
         ui.text_colored(
             [1.0, 0.5, 0.0, 1.0],
-            format!("{} Key: not set", provider_label),
+            tf("fmt.key_not_set", &[("provider", &provider_label)]),
         );
     }
 
@@ -131,11 +133,11 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         let validating = state.main.settings_key_validating;
         if validating {
             let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-            theme::gold_button_sized(ui, "Testing...", [100.0, 0.0]);
+            theme::gold_button_sized(ui, &t("btn.testing"), [100.0, 0.0]);
             style.pop();
-        } else if theme::gold_button_sized(ui, "Test", [60.0, 0.0]) {
+        } else if theme::gold_button_sized(ui, &t("btn.test"), [60.0, 0.0]) {
             state.main.settings_key_validating = true;
-            state.main.settings_key_status = Some("Testing...".into());
+            state.main.settings_key_status = Some(t("btn.testing"));
             state.main.settings_key_valid = false;
             state.main.settings_key_warning = None;
             let addon_dir = state.addon_dir.clone();
@@ -301,7 +303,7 @@ fn render_model_combo(
             &format!("##{id}_model_search"),
             &mut state.main.settings_model_search,
         )
-        .hint("Search models...")
+        .hint(&t("settings.search_models"))
         .build();
         let needle = state.main.settings_model_search.trim().to_lowercase();
         let mut visible = 0usize;
@@ -468,14 +470,66 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     }
     ui.text_colored(
         [0.5, 0.5, 0.5, 1.0],
-        format!("Usage today: {} requests", state.main.settings_usage_today),
+        format!(
+            "{}",
+            tf(
+                "fmt.usage_today",
+                &[("n", &state.main.settings_usage_today.to_string())]
+            )
+        ),
     );
 }
 
 fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let right_item_w = col_w - 12.0;
 
-    ui.text("Window Opacity:");
+    ui.text(t("settings.language"));
+    ui.set_next_item_width(right_item_w * 0.6);
+    let resolved = gw2_core::i18n::resolve(&state.config.ui_language);
+    let auto_preview = format!(
+        "{} — {}",
+        t("settings.language_auto"),
+        gw2_core::i18n::language_by_code(resolved)
+            .map(|l| l.native_name)
+            .unwrap_or("English")
+    );
+    let preview = if state.config.ui_language.eq_ignore_ascii_case("auto") {
+        auto_preview
+    } else {
+        gw2_core::i18n::language_by_code(&state.config.ui_language)
+            .map(|l| l.native_name.to_string())
+            .unwrap_or_else(|| state.config.ui_language.clone())
+    };
+    if let Some(_c) = ComboBox::new("##ui_language")
+        .preview_value(&preview)
+        .begin(ui)
+    {
+        let auto_sel = state.config.ui_language.eq_ignore_ascii_case("auto");
+        if Selectable::new(t("settings.language_auto"))
+            .selected(auto_sel)
+            .build(ui)
+            && !auto_sel
+        {
+            state.config.ui_language = "auto".into();
+            gw2_core::i18n::set_language("auto");
+            let _ = state.config.save(&state.config_path);
+        }
+        for lang in gw2_core::i18n::LANGUAGES {
+            let sel = state.config.ui_language == lang.code;
+            if Selectable::new(lang.native_name)
+                .selected(sel)
+                .build(ui)
+                && !sel
+            {
+                state.config.ui_language = lang.code.into();
+                gw2_core::i18n::set_language(lang.code);
+                let _ = state.config.save(&state.config_path);
+            }
+        }
+    }
+    ui.spacing();
+
+    ui.text(t("settings.opacity"));
     ui.set_next_item_width(right_item_w * 0.6);
     let mut opacity = state.config.window_opacity;
     if nexus::imgui::Slider::new("##opacity", 0.3, 1.0)
@@ -486,7 +540,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         let _ = state.config.save(&state.config_path);
     }
 
-    ui.text("Global Scale:");
+    ui.text(t("settings.scale"));
     ui.set_next_item_width(right_item_w * 0.6);
     let mut scale = state.config.font_scale;
     if nexus::imgui::Slider::new("##font_scale", 0.5, 2.0)
@@ -498,13 +552,17 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     }
 
     ui.spacing();
-    ui.text_colored([0.7, 0.7, 0.75, 1.0], "Layout Tuning:");
+    ui.text_colored([0.7, 0.7, 0.75, 1.0], t("settings.layout"));
 
-    let fields: &mut [(&str, &str, f32, f32, f32)] = &mut [
-        ("Left Panel Width:", "##left_panel_w", 320.0, 480.0, 5.0),
-        ("Panel Padding:", "##panel_pad", 0.0, 20.0, 1.0),
-        ("Section Spacing:", "##section_sp", 0.0, 16.0, 1.0),
-        ("Content Indent:", "##content_ind", 0.0, 20.0, 1.0),
+    let left_l = t("settings.left_panel");
+    let pad_l = t("settings.panel_padding");
+    let sp_l = t("settings.section_spacing");
+    let ind_l = t("settings.content_indent");
+    let fields: [(&str, &str, f32, f32, f32); 4] = [
+        (left_l.as_str(), "##left_panel_w", 320.0, 480.0, 5.0),
+        (pad_l.as_str(), "##panel_pad", 0.0, 20.0, 1.0),
+        (sp_l.as_str(), "##section_sp", 0.0, 16.0, 1.0),
+        (ind_l.as_str(), "##content_ind", 0.0, 20.0, 1.0),
     ];
     let vals: &mut [f32] = &mut [
         state.config.left_panel_width,
@@ -536,7 +594,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     }
 
     ui.spacing();
-    if ui.small_button("Reset Layout Defaults") {
+    if ui.small_button(&t("btn.reset_layout")) {
         state.config.left_panel_width = 360.0;
         state.config.panel_padding = 6.0;
         state.config.section_spacing = 4.0;
@@ -566,20 +624,26 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
         } else {
             "****".into()
         };
-        ui.text(format!("GW2 API Key: {}", display));
+        ui.text(format!("{} {}", t("label.gw2_api_key"), display));
     }
     if let Some(build) = state.config.cache_build_number {
         if let Some(live) = state.main.live_build_number {
             if live != build {
                 ui.text_colored(
                     theme::WARN,
-                    format!("Game build: {build} (live {live} — refresh data)"),
+                    tf(
+                        "fmt.game_build_live",
+                        &[
+                            ("cached", &build.to_string()),
+                            ("live", &live.to_string()),
+                        ],
+                    ),
                 );
             } else {
-                ui.text(format!("Game build: {build}"));
+                ui.text(tf("fmt.game_build", &[("n", &build.to_string())]));
             }
         } else {
-            ui.text(format!("Game build: {build}"));
+            ui.text(tf("fmt.game_build", &[("n", &build.to_string())]));
         }
     }
 

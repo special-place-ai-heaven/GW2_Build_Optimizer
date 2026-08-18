@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::chat_links::ChatChip;
 use crate::ui::{color_u32, icons, theme};
+use gw2_core::i18n::t;
 
 /// State for the talk-tab transcript.
 #[derive(Default)]
@@ -211,7 +212,7 @@ pub fn render_chat_bar(
                 theme::wrapped(
                     ui,
                     theme::MUTED,
-                    "Ask Choya about a new build or how to improve the selected character. Paste a GW2 chat link if you have one.",
+                    &t("chat.placeholder_new"),
                 );
                 return;
             }
@@ -252,9 +253,9 @@ pub fn render_chat_bar(
                         }
                         if ui.is_item_hovered() {
                             ui.tooltip_text(if copied {
-                                "Copied"
+                                t("chat.copied")
                             } else {
-                                "Copy message"
+                                t("chat.copy_gw2")
                             });
                         }
                         draw_copy_glyph(ui, [copy_x, copy_y], COPY, copied);
@@ -286,12 +287,10 @@ pub fn render_chat_bar(
                 ui.set_cursor_screen_pos([origin[0], end_y]);
             }
             if state.waiting {
-                let n = (ui.frame_count() / 18) % 4;
-                let dots = ".".repeat(n as usize);
                 let line = cooking
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string())
-                    .unwrap_or_else(|| format!("Choya is thinking{dots}"));
+                    .unwrap_or_else(|| t("choya.thinking"));
                 let (lines, bw, bh) = bubble_size(ui, &line, avail, false);
                 let row_h = bh.max(AVATAR) + ROW_GAP;
                 let origin = ui.cursor_screen_pos();
@@ -324,10 +323,10 @@ fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
     const PAD_Y: f32 = 10.0;
     const GEM_H: f32 = 28.0;
     const GEM_GAP: f32 = 10.0;
-    const TITLE: &str = "Build is ready";
-    const SUB: &str = "Open Optimized Build";
-    let title_sz = ui.calc_text_size(TITLE);
-    let sub_sz = ui.calc_text_size(SUB);
+    let title = t("chat.build_ready");
+    let sub = t("chat.open_optimized");
+    let title_sz = ui.calc_text_size(&title);
+    let sub_sz = ui.calc_text_size(&sub);
     let text_w = title_sz[0].max(sub_sz[0]);
     let gem_w = GEM_H * (308.0 / 256.0);
     let w = PAD_X + gem_w + GEM_GAP + text_w + PAD_X;
@@ -356,15 +355,15 @@ fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
         theme::draw_gem_icon(&dl, [gem_cx, gem_top], GEM_H);
         let tx = p[0] + PAD_X + gem_w + GEM_GAP;
         let ty = p[1] + (h - text_h) * 0.5;
-        dl.add_text([tx, ty], color_u32(theme::GOLD), TITLE);
+        dl.add_text([tx, ty], color_u32(theme::GOLD), &title);
         dl.add_text(
             [tx, ty + title_sz[1] + 4.0],
             color_u32(theme::MUTED),
-            SUB,
+            &sub,
         );
     }
     if hovered {
-        ui.tooltip_text("Open the Optimized Build tab");
+        ui.tooltip_text(t("chat.open_optimized"));
     }
     clicked
 }
@@ -449,7 +448,7 @@ fn render_composer(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
         ui.get_window_draw_list().add_text(
             [bx + 20.0, by + 16.0],
             color_u32(theme::MUTED),
-            "Ask Choya about the build\u{2026}",
+            t("chat.placeholder"),
         );
     }
 
@@ -463,7 +462,7 @@ fn render_composer(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
         send_on,
     );
     if ui.is_item_hovered() {
-        ui.tooltip_text("Send  (Enter \u{00b7} Ctrl+Enter for a new line)");
+        ui.tooltip_text(t("chat.send_tip"));
     }
 
     ui.set_cursor_screen_pos(after);
@@ -489,7 +488,7 @@ fn render_chips(ui: &Ui, state: &mut ChatBarState, msg_i: usize, max_w: f32) {
             == Some(state.history[msg_i].chips[chip_i].code.as_str())
             && state.copied_frames > 0
         {
-            "Copied".to_string()
+            t("chat.copied")
         } else {
             state.history[msg_i].chips[chip_i].label.clone()
         };
@@ -513,7 +512,7 @@ fn render_chips(ui: &Ui, state: &mut ChatBarState, msg_i: usize, max_w: f32) {
             }
         }
         if ui.is_item_hovered() {
-            ui.tooltip_text("Copy to Guild Wars 2 chat");
+            ui.tooltip_text(t("chat.copy_gw2"));
         }
         row_x += pill_w + 4.0;
     }
