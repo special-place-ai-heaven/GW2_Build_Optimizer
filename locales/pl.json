@@ -28,6 +28,7 @@
   "status.resolving": "Odczytywanie buildu...",
   "status.resolving_api": "Odczytywanie buildu z danych API...",
   "status.loading_data": "Wczytywanie danych gry...",
+  "status.names": "Pobieranie nazw ({lang})…",
   "status.checking_api": "Sprawdzanie API…",
   "status.api_ready": "API gotowe",
   "status.api_slow": "API wolne",

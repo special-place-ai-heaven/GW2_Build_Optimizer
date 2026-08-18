@@ -706,6 +706,7 @@ mod tests {
             skills_by_condition: std::collections::HashMap::new(),
             traits_by_buff: std::collections::HashMap::new(),
             skills_by_buff: std::collections::HashMap::new(),
+            localized: None,
         }
     }
 

@@ -28,6 +28,7 @@
   "status.resolving": "Build ophalen...",
   "status.resolving_api": "Build ophalen uit API-gegevens...",
   "status.loading_data": "Spelgegevens laden...",
+  "status.names": "{lang}-namen downloaden…",
   "status.checking_api": "API controleren…",
   "status.api_ready": "API gereed",
   "status.api_slow": "API traag",

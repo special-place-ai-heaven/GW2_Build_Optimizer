@@ -108,6 +108,10 @@ pub fn inspect_if_hovered(ui: &Ui, name: &str, db: Option<&GameDb>) {
     });
 }
 
+pub fn loc_name<'a>(db: Option<&'a GameDb>, english: &'a str) -> &'a str {
+    db.map(|d| d.loc_name(english)).unwrap_or(english)
+}
+
 pub(crate) fn compact_stance_name(name: &str) -> String {
     name.trim_start_matches("Legendary ")
         .trim_end_matches(" Stance")
@@ -904,11 +908,11 @@ fn render_diff_row(ui: &Ui, diff: &SlotDiff, db: Option<&GameDb>) {
     }
     ui.next_column();
 
-    ui.text_colored(cur_color, &diff.current_value);
+    ui.text_colored(cur_color, loc_name(db, &diff.current_value));
     inspect_if_hovered(ui, &diff.current_value, db);
     ui.next_column();
 
-    ui.text_colored(opt_color, &diff.proposed_value);
+    ui.text_colored(opt_color, loc_name(db, &diff.proposed_value));
     inspect_if_hovered(ui, &diff.proposed_value, db);
     ui.next_column();
 

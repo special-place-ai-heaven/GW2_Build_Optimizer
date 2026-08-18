@@ -1,6 +1,107 @@
 use super::resolution::resolve_selected_build_inner;
 use crate::state::AddonState;
 
+/// Load or download official API names for de/es/fr/zh. English GameDb stays put.
+pub(super) fn ensure_localized_names(state: &mut AddonState) {
+    let Some(lang) = gw2_core::i18n::api_lang(&state.config.ui_language) else {
+        if let Some(db) = state.main.game_db.as_mut() {
+            db.localized = None;
+        }
+        state.main.names_loading = false;
+        state.main.names_stage.clear();
+        state.main.names_lang.clear();
+        return;
+    };
+    if state
+        .main
+        .game_db
+        .as_ref()
+        .and_then(|d| d.localized.as_ref())
+        .is_some_and(|l| l.lang == lang)
+    {
+        return;
+    }
+    if state.main.game_db.is_none() {
+        return;
+    }
+    if state.main.names_loading && state.main.names_lang == lang {
+        return;
+    }
+    let cache = gw2_api::cache::DataCache::new(state.addon_dir.join("cache"));
+    if let Ok(Some(names)) =
+        gw2_api::localize::load(&cache, lang, state.config.cache_build_number)
+    {
+        if let Some(db) = state.main.game_db.as_mut() {
+            db.attach_localized(names);
+        }
+        state.main.names_loading = false;
+        state.main.names_stage.clear();
+        state.main.names_lang = lang.to_string();
+        return;
+    }
+    state.main.names_loading = true;
+    state.main.names_lang = lang.to_string();
+    state.main.names_stage = gw2_core::i18n::tf("status.names", &[("lang", lang)]);
+    let cache_dir = state.addon_dir.join("cache");
+    let token = state.cancel_token.clone();
+    let lang = lang.to_string();
+    std::thread::spawn(move || {
+        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let cache = gw2_api::cache::DataCache::new(&cache_dir);
+            let lang_for_status = lang.clone();
+            let result = gw2_api::localize::download(
+                &cache,
+                &lang,
+                || token.is_cancelled(),
+                |msg| {
+                    crate::state::with_state(|s| {
+                        s.main.names_stage = format!(
+                            "{} ({msg})",
+                            gw2_core::i18n::tf("status.names", &[("lang", &lang_for_status)])
+                        );
+                    });
+                },
+            );
+            crate::state::with_state(|s| {
+                if s.main.names_lang != lang {
+                    return;
+                }
+                s.main.names_loading = false;
+                s.main.names_stage.clear();
+                match result {
+                    Ok(names) => {
+                        if gw2_core::i18n::api_lang(&s.config.ui_language) == Some(names.lang.as_str())
+                        {
+                            if let Some(db) = s.main.game_db.as_mut() {
+                                db.attach_localized(names);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        nexus::log::log(
+                            nexus::log::LogLevel::Warning,
+                            "GW2BuildOpt",
+                            format!("Localized names failed: {e}"),
+                        );
+                    }
+                }
+            });
+        }));
+        if panic_result.is_err() {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                "bg thread panicked: localized names",
+            );
+            crate::state::with_state(|s| {
+                if s.main.names_lang == lang {
+                    s.main.names_loading = false;
+                    s.main.names_stage.clear();
+                }
+            });
+        }
+    });
+}
 /// Fetch available models from the active provider's API in a background thread.
 pub(super) fn start_fetch_models(state: &mut AddonState) {
     state.main.models_loading = true;
@@ -149,6 +250,7 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                                 "Game data refreshed successfully",
                             );
                             s.main.game_db = Some(db);
+                            crate::ui::main_view::stats::ensure_localized_names(s);
                             if s.main.selected_build_tab.is_some()
                                 && s.main.selected_equipment_tab.is_some()
                             {
@@ -263,6 +365,7 @@ pub(super) fn load_game_db(state: &mut AddonState) {
                             db.summary(),
                         );
                         s.main.game_db = Some(db);
+                        crate::ui::main_view::stats::ensure_localized_names(s);
                         // If build tabs were loaded before GameDb, trigger resolve now
                         if s.main.selected_build_tab.is_some()
                             && s.main.selected_equipment_tab.is_some()

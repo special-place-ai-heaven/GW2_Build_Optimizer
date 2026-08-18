@@ -111,6 +111,7 @@ pub struct Gw2Client {
     http: Client,
     api_key: Option<String>,
     bucket: Mutex<TokenBucket>,
+    lang: Option<String>,
 }
 
 struct TokenBucket {
@@ -200,6 +201,21 @@ struct BuildInfo {
     id: u32,
 }
 
+fn apply_lang_query(url: &mut String, params: &[(&str, &str)], lang: Option<&str>) {
+    let Some(lang) = lang else {
+        return;
+    };
+    if params.iter().any(|(k, _)| *k == "lang") {
+        return;
+    }
+    if url.contains('?') {
+        url.push_str("&lang=");
+    } else {
+        url.push_str("?lang=");
+    }
+    url.push_str(lang);
+}
+
 impl Gw2Client {
     pub fn new(api_key: Option<String>) -> Result<Self, ApiError> {
         let http = Client::builder().timeout(Duration::from_secs(30)).build()?;
@@ -207,6 +223,7 @@ impl Gw2Client {
             http,
             api_key,
             bucket: Mutex::new(TokenBucket::new()),
+            lang: None,
         })
     }
 
@@ -216,6 +233,15 @@ impl Gw2Client {
 
     pub fn without_key() -> Result<Self, ApiError> {
         Self::new(None)
+    }
+
+    /// Official `/v2` locales that return translated names. `None` = English cache.
+    pub fn with_lang(mut self, lang: Option<&str>) -> Self {
+        self.lang = lang.and_then(|c| match c {
+            "de" | "es" | "fr" | "zh" => Some(c.to_string()),
+            _ => None,
+        });
+        self
     }
 
     /// Make a GET request to the API with rate limiting and retries.
@@ -242,7 +268,7 @@ impl Gw2Client {
         // which triples separator length and can exceed URL limits for bulk ID requests.
         // We URL-encode values for safety but preserve commas (GW2 API uses them as
         // list separators in bulk ID requests).
-        let url = if params.is_empty() {
+        let mut url = if params.is_empty() {
             base_url
         } else {
             let query = params
@@ -255,6 +281,7 @@ impl Gw2Client {
                 .join("&");
             format!("{}?{}", base_url, query)
         };
+        apply_lang_query(&mut url, params, self.lang.as_deref());
 
         let mut last_error: Option<ApiError> = None;
         // When Some, the next retry waits this duration instead of exponential
@@ -518,6 +545,23 @@ mod tests {
         // Preserves prior behavior: empty Vec joined with "," → empty string.
         assert_eq!(build_bulk_ids_query(&[] as &[u32]), "");
     }
+
+    #[test]
+        fn apply_lang_query_appends_when_absent() {
+            let mut url = "https://api.guildwars2.com/v2/skills".to_string();
+        apply_lang_query(&mut url, &[], Some("fr"));
+        assert_eq!(url, "https://api.guildwars2.com/v2/skills?lang=fr");
+        let mut url = "https://api.guildwars2.com/v2/skills?ids=1".to_string();
+        apply_lang_query(&mut url, &[("ids", "1")], Some("fr"));
+        assert_eq!(url, "https://api.guildwars2.com/v2/skills?ids=1&lang=fr");
+        }
+
+        #[test]
+        fn apply_lang_query_skips_if_param_present() {
+            let mut url = "https://api.guildwars2.com/v2/skills?ids=1".to_string();
+            apply_lang_query(&mut url, &[("ids", "1"), ("lang", "es")], Some("fr"));
+            assert_eq!(url, "https://api.guildwars2.com/v2/skills?ids=1");
+        }
 
     #[test]
     fn build_bulk_ids_query_single_id() {

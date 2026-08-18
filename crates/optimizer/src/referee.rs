@@ -750,6 +750,7 @@ mod tests {
             skills_by_condition: Default::default(),
             traits_by_buff: Default::default(),
             skills_by_buff: Default::default(),
+            localized: None,
         }
     }
 

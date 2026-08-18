@@ -1,6 +1,6 @@
 //! One-page shopping-list loadout: prefix on every slot, nested upgrades, icons.
 
-use gw2_core::i18n::t;
+use gw2_core::i18n::{loc_weapon_types, t};
 use gw2_core::types::{CombatMetrics, ResolvedBuild};
 use gw2_optimizer::gamedb::GameDb;
 use nexus::imgui::Ui;
@@ -437,13 +437,13 @@ fn row(
     ui.same_line();
     ui.set_cursor_screen_pos([p[0] + ICON + GAP, p[1]]);
     if !prefix.is_empty() {
-        ui.text_colored(theme::GOLD, prefix);
+        ui.text_colored(theme::GOLD, comparison::loc_name(db, prefix));
         ui.same_line();
     }
     ui.text_colored(theme::CREAM, slot);
     if !name.is_empty() && name != slot {
         ui.same_line();
-        ui.text_colored(theme::MUTED, name);
+        ui.text_colored(theme::MUTED, comparison::loc_name(db, name));
     }
     if ui.is_item_hovered() {
         tooltip(ui, prefix, slot, name, nested, other);
@@ -455,7 +455,7 @@ fn row(
         icons::draw(ui, nested_url, 18.0, [1.0, 1.0, 1.0, 1.0]);
         ui.same_line();
         ui.set_cursor_screen_pos([np[0] + 18.0 + 10.0, np[1]]);
-        ui.text_colored(theme::MUTED, nested);
+        ui.text_colored(theme::MUTED, comparison::loc_name(db, nested));
         comparison::inspect_if_hovered(ui, nested, db);
         ui.unindent();
     }
@@ -479,12 +479,12 @@ fn weapon_row(
     ui.same_line();
     ui.set_cursor_screen_pos([p[0] + ICON + GAP, p[1]]);
     if !prefix.is_empty() {
-        ui.text_colored(theme::GOLD, prefix);
+        ui.text_colored(theme::GOLD, comparison::loc_name(db, prefix));
         ui.same_line();
     }
     ui.text_colored(theme::CREAM, set_label);
     ui.same_line();
-    ui.text_colored(theme::CREAM, weapons);
+    ui.text_colored(theme::CREAM, loc_weapon_types(weapons));
     if ui.is_item_hovered() {
         tooltip(ui, prefix, set_label, weapons, &sigils.join(" · "), other);
     }
@@ -498,7 +498,7 @@ fn weapon_row(
         icons::draw(ui, surl, 18.0, [1.0, 1.0, 1.0, 1.0]);
         ui.same_line();
         ui.set_cursor_screen_pos([sp[0] + 18.0 + 10.0, sp[1]]);
-        ui.text_colored(theme::MUTED, sig);
+        ui.text_colored(theme::MUTED, comparison::loc_name(db, sig));
         comparison::inspect_if_hovered(ui, sig, db);
         ui.unindent();
     }

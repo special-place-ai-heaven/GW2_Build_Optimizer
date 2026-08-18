@@ -516,6 +516,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             state.config.ui_language = "auto".into();
             gw2_core::i18n::set_language("auto");
             let _ = state.config.save(&state.config_path);
+            super::super::stats::ensure_localized_names(state);
         }
         for lang in gw2_core::i18n::LANGUAGES {
             let sel = state.config.ui_language == lang.code;
@@ -527,6 +528,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
                 state.config.ui_language = lang.code.into();
                 gw2_core::i18n::set_language(lang.code);
                 let _ = state.config.save(&state.config_path);
+                super::super::stats::ensure_localized_names(state);
             }
         }
     }
