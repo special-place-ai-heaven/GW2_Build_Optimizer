@@ -51,6 +51,8 @@ target/release/gw2_build_optimizer.dll
 
 If GW2 is running, restart Nexus from the in-game menu (or relaunch GW2) to pick up the new DLL.
 
+Do **not** paste the SHA256 into `README.md`. The Download section uses `/releases/latest/download/…` so it always hits the current DLL and `SHA256SUMS.txt`. Attach `SHA256SUMS.txt` to the GitHub Release only.
+
 ## Smoke Test In-Game
 
 After the addon reloads:
