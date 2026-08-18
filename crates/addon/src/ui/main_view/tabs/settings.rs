@@ -167,7 +167,8 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
                             }
                             Some(Err(e)) => {
                                 s.main.settings_key_valid = false;
-                                s.main.settings_key_status = Some(format!("Failed: {}", e));
+                                s.main.settings_key_status =
+                                    Some(tf("fmt.failed", &[("err", &e.to_string())]));
                                 s.main.settings_key_warning = None;
                             }
                             None => { /* cancelled — flag cleared */ }
@@ -183,7 +184,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         &format!("##{}_key", provider_label),
         &mut state.main.settings_key_input,
     )
-    .hint("Enter new API key...")
+    .hint(&t("settings.enter_key"))
     .build();
     ui.same_line();
     let validating = state.main.settings_key_validating;
@@ -191,7 +192,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
         theme::gold_button_sized(ui, "...", [50.0, 0.0]);
         style.pop();
-    } else if theme::gold_button_sized(ui, "Save", [50.0, 0.0]) {
+    } else if theme::gold_button_sized(ui, t("btn.save"), [50.0, 0.0]) {
         let key = state.main.settings_key_input.trim().to_string();
         if !key.is_empty() {
             match state.config.active_provider {
@@ -210,7 +211,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             }
             let _ = state.config.save(&state.config_path);
             state.main.settings_key_input.clear();
-            state.main.settings_key_status = Some("Saved. Validating...".into());
+            state.main.settings_key_status = Some(t("settings.saved_validating"));
             state.main.settings_key_valid = false;
             state.main.settings_key_validating = true;
             let addon_dir = state.addon_dir.clone();
@@ -240,8 +241,10 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
                             }
                             Some(Err(e)) => {
                                 s.main.settings_key_valid = false;
-                                s.main.settings_key_status =
-                                    Some(format!("Saved but validation failed: {}", e));
+                                s.main.settings_key_status = Some(tf(
+                                    "fmt.saved_validation_failed",
+                                    &[("err", &e.to_string())],
+                                ));
                                 s.main.settings_key_warning = None;
                             }
                             None => { /* cancelled — flag cleared */ }
@@ -255,10 +258,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     if let Some(ref status) = state.main.settings_key_status {
         let col = if state.main.settings_key_valid {
             [0.0, 1.0, 0.0, 1.0]
-        } else if status.contains("saved")
-            || status.contains("Testing")
-            || status.contains("Validating")
-        {
+        } else if state.main.settings_key_validating {
             [0.7, 0.7, 0.7, 1.0]
         } else {
             [1.0, 0.3, 0.3, 1.0]
@@ -266,7 +266,10 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         ui.text_colored(col, status);
     }
     if let Some(ref w) = state.main.settings_key_warning {
-        ui.text_colored([1.0, 0.7, 0.0, 1.0], format!("  Warning: {}", w));
+        ui.text_colored(
+            [1.0, 0.7, 0.0, 1.0],
+            format!("  {}", tf("fmt.warning", &[("msg", w)])),
+        );
     }
 }
 
@@ -325,9 +328,9 @@ fn render_model_combo(
         if visible == 0 && !needle.is_empty() {
             ui.text_colored(
                 [0.7, 0.7, 0.7, 1.0],
-                format!(
-                    "No models match \"{}\"",
-                    state.main.settings_model_search.trim()
+                tf(
+                    "fmt.no_models",
+                    &[("q", state.main.settings_model_search.trim())],
                 ),
             );
         }
@@ -424,7 +427,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         .find(|(id, _)| *id == current_model)
         .map(|(_, l)| l.as_str())
         .unwrap_or(&current_model);
-    ui.text("Model:");
+    ui.text(t("settings.model"));
     ui.same_line();
     ui.set_next_item_width(col_w - 140.0);
     render_model_combo(
@@ -438,7 +441,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     ui.same_line();
     if state.main.models_loading {
         ui.text_colored([0.7, 0.7, 0.7, 1.0], "...");
-    } else if ui.small_button("Refresh##models") {
+    } else if ui.small_button(&format!("{}##models", t("btn.refresh"))) {
         state.main.available_models.clear();
         state.main.models_error = None;
         stats::start_fetch_models(state);
@@ -658,25 +661,28 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     } else {
         state.main.settings_cache_size_frames -= 1;
     }
-    ui.text(format!(
-        "Data: {}",
-        format_bytes(state.main.settings_cache_size)
+    ui.text(tf(
+        "fmt.data_size",
+        &[("size", &format_bytes(state.main.settings_cache_size))],
     ));
     ui.same_line();
     ui.text_colored(
         theme::MUTED,
-        format!("Icons: {}", format_bytes(state.main.settings_graphics_size)),
+        tf(
+            "fmt.icons_size",
+            &[("size", &format_bytes(state.main.settings_graphics_size))],
+        ),
     );
     ui.same_line();
     let refreshing = state.main.game_db_loading;
     if refreshing {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui, "Clear Cache", [100.0, 0.0]);
+        theme::gold_button_sized(ui, t("btn.clear_cache"), [100.0, 0.0]);
         style.pop();
-    } else if theme::gold_button_sized(ui, "Clear Cache", [100.0, 0.0]) {
+    } else if theme::gold_button_sized(ui, t("btn.clear_cache"), [100.0, 0.0]) {
         let cache = gw2_api::cache::DataCache::new(&cache_dir);
         if let Err(e) = cache.clear_all() {
-            state.main.error = Some(format!("Failed to clear cache: {}", e));
+            state.main.error = Some(tf("fmt.err_clear_cache", &[("err", &e.to_string())]));
         } else {
             state.config.cache_build_number = None;
             let _ = state.config.save(&state.config_path);
@@ -691,7 +697,10 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
 
     ui.spacing();
     let mut auto_refresh = state.config.auto_refresh_cache;
-    if ui.checkbox("Auto-refresh on startup", &mut auto_refresh) {
+    if ui.checkbox(
+        format!("{}##auto_refresh", t("settings.auto_refresh")),
+        &mut auto_refresh,
+    ) {
         state.config.auto_refresh_cache = auto_refresh;
         let _ = state.config.save(&state.config_path);
     }
@@ -699,21 +708,22 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
     if refreshing {
         let stage = state.main.game_refresh_stage.clone();
+        let downloading = t("settings.downloading");
         ui.text_colored(
             [1.0, 1.0, 0.0, 1.0],
             if stage.is_empty() {
-                "Downloading game data..."
+                downloading.as_str()
             } else {
                 &stage
             },
         );
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui, "Refreshing...", [160.0, 0.0]);
+        theme::gold_button_sized(ui, t("btn.refreshing"), [160.0, 0.0]);
         style.pop();
-    } else if theme::gold_button_sized(ui, "Refresh Game Data", [160.0, 0.0]) {
+    } else if theme::gold_button_sized(ui, t("btn.refresh_game"), [160.0, 0.0]) {
         let cache = gw2_api::cache::DataCache::new(&cache_dir);
         if let Err(e) = cache.clear_all() {
-            state.main.error = Some(format!("Failed to refresh: {}", e));
+            state.main.error = Some(tf("fmt.err_refresh", &[("err", &e.to_string())]));
         } else {
             state.config.cache_build_number = None;
             let _ = state.config.save(&state.config_path);
@@ -727,19 +737,19 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
 
     ui.spacing();
     if !state.main.confirm_reset {
-        if theme::gold_button_sized(ui, "Reset Setup", [160.0, 0.0]) {
+        if theme::gold_button_sized(ui, t("btn.reset_setup"), [160.0, 0.0]) {
             state.main.confirm_reset = true;
         }
     } else {
-        ui.text_colored([1.0, 0.3, 0.0, 1.0], "Reset all settings?");
-        if theme::gold_button_sized(ui, "Yes, Reset", [100.0, 0.0]) {
+        ui.text_colored([1.0, 0.3, 0.0, 1.0], t("settings.reset_q"));
+        if theme::gold_button_sized(ui, t("btn.yes_reset"), [100.0, 0.0]) {
             state.main.confirm_reset = false;
             if let Err(e) = state.reset_to_first_run() {
-                state.main.error = Some(format!("Reset failed: {}", e));
+                state.main.error = Some(tf("fmt.err_reset", &[("err", &e.to_string())]));
             }
         }
         ui.same_line();
-        if theme::gold_button_sized(ui, "Cancel", [80.0, 0.0]) {
+        if theme::gold_button_sized(ui, t("btn.cancel"), [80.0, 0.0]) {
             state.main.confirm_reset = false;
         }
     }
@@ -749,7 +759,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
     ui.text_colored(
         [0.7, 0.7, 0.7, 1.0],
-        "Snowcrows (PvE) · Hardstuck · GuildJen (WvW/PvP)",
+        t("settings.sources"),
     );
     ui.spacing();
     if let Some(ref last) = state.main.benchmark_last_synced {
@@ -773,10 +783,18 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
             .unwrap_or(0);
         ui.text_colored(
             [0.5, 0.9, 0.5, 1.0],
-            format!("Synced: {}  SC:{} HS:{} GJ:{}", last, sc, hs, gj),
+            tf(
+                "fmt.synced",
+                &[
+                    ("when", last),
+                    ("sc", &sc.to_string()),
+                    ("hs", &hs.to_string()),
+                    ("gj", &gj.to_string()),
+                ],
+            ),
         );
     } else {
-        ui.text_colored([0.5, 0.5, 0.5, 1.0], "Never synced.");
+        ui.text_colored([0.5, 0.5, 0.5, 1.0], t("settings.never_synced"));
     }
     if let Some(ref err) = state.main.benchmark_error.clone() {
         let short = if err.chars().count() > 80 {
@@ -796,13 +814,13 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         theme::gold_button_sized(
             ui,
             if state.main.benchmark_running {
-                "Syncing..."
+                t("btn.syncing")
             } else {
-                "Sync Benchmarks"
+                t("btn.sync")
             },
             [160.0, 0.0],
         );
-    } else if theme::gold_button_sized(ui, "Sync Benchmarks", [160.0, 0.0]) {
+    } else if theme::gold_button_sized(ui, t("btn.sync"), [160.0, 0.0]) {
         let addon_dir = state.addon_dir.clone();
         let token = state.cancel_token.clone();
         state.main.benchmark_running = true;

@@ -118,6 +118,7 @@ pub struct MainState {
     pub saved_builds_loaded: bool,
     pub save_name_input: String,
     pub save_status: Option<String>,
+    pub save_status_err: bool,
     // Benchmark scraping
     pub benchmark_running: bool,
     pub benchmark_last_synced: Option<String>,

@@ -78,13 +78,13 @@ pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonS
                         state.main.game_db.as_ref(),
                     );
                 } else {
-                    ui.text_colored(theme::WARN, "Waiting for build data to load...");
+                    ui.text_colored(theme::WARN, t("cmp.wait_build"));
                 }
             });
 
         super::saveload::render_save_build_ui(ui, state);
         ui.same_line();
-        if ui.small_button("Clear Results") {
+        if ui.small_button(&t("btn.clear_results")) {
             state.main.comparison.suggestions.clear();
             state.main.comparison.error = None;
         }

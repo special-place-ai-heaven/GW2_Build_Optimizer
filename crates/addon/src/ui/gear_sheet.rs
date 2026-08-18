@@ -1,5 +1,6 @@
 //! One-page shopping-list loadout: prefix on every slot, nested upgrades, icons.
 
+use gw2_core::i18n::t;
 use gw2_core::types::{CombatMetrics, ResolvedBuild};
 use gw2_optimizer::gamedb::GameDb;
 use nexus::imgui::Ui;
@@ -26,15 +27,20 @@ pub enum GainTint {
     Down,
 }
 
-pub fn slot_label(api: &str) -> &str {
-    match api {
-        "Coat" => "Chest",
-        "Leggings" => "Legs",
-        "Backpack" => "Back",
-        "Accessory1" | "Accessory2" => "Accessory",
-        "Ring1" | "Ring2" => "Ring",
-        other => other,
-    }
+pub fn slot_label(api: &str) -> String {
+    t(match api {
+        "Helm" => "slot.helm",
+        "Shoulders" => "slot.shoulders",
+        "Coat" => "slot.chest",
+        "Gloves" => "slot.gloves",
+        "Leggings" => "slot.legs",
+        "Boots" => "slot.boots",
+        "Backpack" => "slot.back",
+        "Accessory1" | "Accessory2" => "slot.accessory",
+        "Amulet" => "slot.amulet",
+        "Ring1" | "Ring2" => "slot.ring",
+        _ => return api.to_string(),
+    })
 }
 
 /// Combat result delta — not Power. DPS first, then healing, then eHP.
@@ -74,11 +80,11 @@ fn icon_tint(gain: GainTint) -> [f32; 4] {
 }
 
 pub fn render_view_toggle(ui: &Ui, show_optimized: &mut bool) {
-    if theme::pill(ui, "Current", !*show_optimized, "##view_current") {
+    if theme::pill(ui, &t("label.current"), !*show_optimized, "##view_current") {
         *show_optimized = false;
     }
     ui.same_line_with_spacing(0.0, 6.0);
-    if theme::pill(ui, "Optimized", *show_optimized, "##view_optimized") {
+    if theme::pill(ui, &t("label.optimized"), *show_optimized, "##view_optimized") {
         *show_optimized = true;
     }
 }
@@ -122,7 +128,7 @@ fn render_resolved_sheet(
     gear_columns(
         ui,
         |ui| {
-            section(ui, "ARMOR");
+            section(ui, &t("section.armor"));
             for slot in ARMOR_SLOTS {
                 let piece = build.armor.iter().find(|p| p.slot == slot);
                 let prefix = piece.map(|p| p.stat_prefix.as_str()).unwrap_or("");
@@ -146,7 +152,7 @@ fn render_resolved_sheet(
             }
         },
         |ui| {
-            section(ui, "TRINKETS");
+            section(ui, &t("section.trinkets"));
             for slot in TRINKET_SLOTS {
                 let piece = build.trinkets.iter().find(|p| p.slot == slot);
                 let prefix = piece.map(|p| p.stat_prefix.as_str()).unwrap_or("");
@@ -195,7 +201,7 @@ fn render_resolved_sheet(
             }
         },
         |ui| {
-            section(ui, "WEAPONS");
+            section(ui, &t("section.weapons"));
             let sug_sets = suggestion
                 .map(|s| parse_suggestion_weapons(&s.weapons))
                 .unwrap_or_default();
@@ -260,7 +266,7 @@ fn render_suggestion_sheet(
     gear_columns(
         ui,
         |ui| {
-            section(ui, "ARMOR");
+            section(ui, &t("section.armor"));
             for slot in ARMOR_SLOTS {
                 let cur = current.armor.iter().find(|p| p.slot == slot);
                 let cur_prefix = cur.map(|p| p.stat_prefix.as_str()).unwrap_or("");
@@ -294,7 +300,7 @@ fn render_suggestion_sheet(
             }
         },
         |ui| {
-            section(ui, "TRINKETS");
+            section(ui, &t("section.trinkets"));
             for slot in TRINKET_SLOTS {
                 let cur = current.trinkets.iter().find(|p| p.slot == slot);
                 let cur_prefix = cur.map(|p| p.stat_prefix.as_str()).unwrap_or("");
@@ -341,7 +347,7 @@ fn render_suggestion_sheet(
             }
         },
         |ui| {
-            section(ui, "WEAPONS");
+            section(ui, &t("section.weapons"));
             let sets = parse_suggestion_weapons(&sug.weapons);
             let sigil_pairs = sug.sigils.chunks(2);
             for (i, ((label, weapons), sigils)) in sets.iter().zip(sigil_pairs).enumerate() {
@@ -409,13 +415,14 @@ fn row(
     db: Option<&GameDb>,
     url: Option<&str>,
     prefix: &str,
-    slot: &str,
+    slot: impl AsRef<str>,
     name: &str,
     nested: &str,
     nested_url: Option<&str>,
     other: Option<&str>,
     tint: GainTint,
 ) {
+    let slot = slot.as_ref();
     const ICON: f32 = 28.0;
     const GAP: f32 = 14.0;
     let p = ui.cursor_screen_pos();
@@ -506,7 +513,7 @@ fn tooltip(ui: &Ui, prefix: &str, slot: &str, name: &str, nested: &str, other: O
         }
         if let Some(o) = other {
             ui.spacing();
-            ui.text_colored(theme::MUTED, "Other version");
+            ui.text_colored(theme::MUTED, t("gear.other"));
             ui.text_colored(theme::CREAM, o);
         }
     });
@@ -518,6 +525,7 @@ mod tests {
 
     #[test]
     fn coat_is_chest() {
+        gw2_core::i18n::set_language("en");
         assert_eq!(slot_label("Coat"), "Chest");
         assert_eq!(slot_label("Helm"), "Helm");
     }

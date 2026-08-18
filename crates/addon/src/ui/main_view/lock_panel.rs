@@ -2,6 +2,7 @@
 //! Renders hexagons (specs) + 3×3 circle grids (traits) in the content area.
 //! Click to lock/unlock — locked items are preserved by the optimizer.
 
+use gw2_core::i18n::{t, tf};
 use gw2_core::types::BuildLocks;
 use gw2_optimizer::gamedb::GameDb;
 use nexus::imgui::Ui;
@@ -214,11 +215,8 @@ pub fn render_lock_panel(
             )
             .filled(true)
             .build();
-        draw_list.add_text(
-            [pos[0] + 6.0, pos[1] + 2.0],
-            HEADER_COLOR,
-            "SPEC & TRAIT LOCKS",
-        );
+        let title = t("section.locks");
+        draw_list.add_text([pos[0] + 6.0, pos[1] + 2.0], HEADER_COLOR, &title);
         // Collapse indicator
         let indicator = if *expanded { "v" } else { ">" };
         let iw = ui.calc_text_size(indicator)[0];
@@ -239,12 +237,12 @@ pub fn render_lock_panel(
     }
 
     let Some(db) = db else {
-        ui.text_colored(DIM_COLOR, "  (Load game data first)");
+        ui.text_colored(DIM_COLOR, format!("  {}", t("lock.need_data")));
         return modified;
     };
 
     if profession_name.is_empty() {
-        ui.text_colored(DIM_COLOR, "  (Select a character first)");
+        ui.text_colored(DIM_COLOR, format!("  {}", t("lock.need_character")));
         return modified;
     }
 
@@ -404,11 +402,11 @@ pub fn render_lock_panel(
             // Tooltip
             crate::ui::theme::wide_tooltip(ui, |ui| {
                 if spec_locked {
-                    ui.text(format!("{} (LOCKED)", spec_name));
-                    ui.text_colored(DIM_COLOR, "Click to unlock");
+                    ui.text(format!("{} ({})", spec_name, t("lock.locked")));
+                    ui.text_colored(DIM_COLOR, t("lock.click_unlock"));
                 } else {
                     ui.text(spec_name);
-                    ui.text_colored(DIM_COLOR, "Click to lock");
+                    ui.text_colored(DIM_COLOR, t("lock.click_lock"));
                 }
             });
 
@@ -577,10 +575,10 @@ pub fn render_lock_panel(
                                         ui.text(trait_name);
                                     }
                                     if is_locked {
-                                        ui.text_colored(LOCKED_COLOR, "LOCKED");
-                                        ui.text_colored(DIM_COLOR, "Click to unlock");
+                                        ui.text_colored(LOCKED_COLOR, t("lock.locked"));
+                                        ui.text_colored(DIM_COLOR, t("lock.click_unlock"));
                                     } else {
-                                        ui.text_colored(DIM_COLOR, "Click to lock");
+                                        ui.text_colored(DIM_COLOR, t("lock.click_lock"));
                                     }
                                 });
 
@@ -648,7 +646,7 @@ pub fn render_lock_panel(
     // ── Lock All / Unlock All buttons ──
     ui.dummy([0.0, 4.0]);
     let btn_width = (avail_width - 6.0) / 2.0;
-    if crate::ui::theme::gold_button_sized(ui, "Lock All", [btn_width, 0.0]) {
+    if crate::ui::theme::gold_button_sized(ui, t("btn.lock_all"), [btn_width, 0.0]) {
         // Lock all current build specs and traits
         for (slot, (spec_id, trait_ids)) in current_specs.iter().enumerate() {
             locks.specs[slot] = Some(*spec_id);
@@ -670,7 +668,7 @@ pub fn render_lock_panel(
         modified = true;
     }
     ui.same_line();
-    if crate::ui::theme::gold_button_sized(ui, "Unlock All", [btn_width, 0.0]) {
+    if crate::ui::theme::gold_button_sized(ui, t("btn.unlock_all"), [btn_width, 0.0]) {
         locks.specs = [None; 3];
         locks.trait_locks.clear();
         modified = true;
@@ -685,7 +683,12 @@ pub fn render_lock_panel(
             .filter(|t| t.is_some())
             .count();
     if lock_count > 0 {
-        ui.text_colored(LOCKED_COLOR, format!("  {} locks active", lock_count));
+        let lock_msg = if lock_count == 1 {
+            tf("fmt.lock_one", &[("n", "1")])
+        } else {
+            tf("fmt.lock_many", &[("n", &lock_count.to_string())])
+        };
+        ui.text_colored(LOCKED_COLOR, format!("  {lock_msg}"));
     }
 
     // Advance the hover animation for next frame.
@@ -728,7 +731,7 @@ pub fn render_optimized_specs_panel(
     ui.dummy([0.0, spacing * 0.5]);
 
     if suggestion_specs.is_empty() {
-        ui.text_colored(DIM_COLOR, "  (No optimization result yet)");
+        ui.text_colored(DIM_COLOR, format!("  {}", t("lock.no_result")));
         return;
     }
 
@@ -908,7 +911,7 @@ pub fn render_optimized_specs_panel(
                                     ui.text(trait_name);
                                 }
                                 if is_selected {
-                                    ui.text_colored(optimized_color, "OPTIMIZER SELECTED");
+                                    ui.text_colored(optimized_color, t("section.optimized_specs"));
                                 }
                             });
                         }
