@@ -405,12 +405,12 @@ mod tests {
     }
 
     #[test]
-    fn test_wvw_has_10_profiles() {
+    fn test_wvw_has_11_profiles() {
         let data = load_all_objective_profiles().unwrap();
         assert_eq!(
             data.files["WvW"].profiles.len(),
-            10,
-            "WvW should have 10 profiles"
+            11,
+            "WvW should have 11 profiles"
         );
     }
 

@@ -790,6 +790,7 @@ pub fn select_gear_prefix(weights: &OptimizationWeights) -> GearPrefixMatch {
 }
 
 /// Longest gear-prefix name mentioned in free text (`celestial` → `Celestial`).
+/// Skips a name the player negated (`not minstrel`, `without harrier`).
 pub fn prefix_named_in_text(text: &str) -> Option<&'static str> {
     let hay = format!(
         " {} ",
@@ -807,13 +808,36 @@ pub fn prefix_named_in_text(text: &str) -> Option<&'static str> {
     for &(name, _) in GEAR_PROFILES {
         let stem = name.trim_end_matches("'s").to_ascii_lowercase();
         let pats = [format!(" {stem} "), format!(" {stem}s ")];
-        if pats.iter().any(|p| hay.contains(p.as_str()))
-            && best.map(|b| b.len()).unwrap_or(0) < name.len()
-        {
+        if !pats.iter().any(|p| hay.contains(p.as_str())) {
+            continue;
+        }
+        if stem_negated(&hay, &stem) {
+            continue;
+        }
+        if best.map(|b| b.len()).unwrap_or(0) < name.len() {
             best = Some(name);
         }
     }
     best
+}
+
+fn stem_negated(hay: &str, stem: &str) -> bool {
+    let needles = [format!(" {stem} "), format!(" {stem}s ")];
+    for n in &needles {
+        let mut rest = hay;
+        while let Some(idx) = rest.find(n.as_str()) {
+            let before = &rest[..idx];
+            if before.ends_with(" not")
+                || before.ends_with(" no")
+                || before.ends_with(" without")
+                || before.ends_with(" instead of")
+            {
+                return true;
+            }
+            rest = &rest[idx + 1..];
+        }
+    }
+    false
 }
 
 /// Euclidean magnitude of a 6-element vector.
@@ -850,6 +874,14 @@ mod tests {
         assert_eq!(
             prefix_named_in_text("Optimize a power DPS build"),
             None
+        );
+        assert_eq!(
+            prefix_named_in_text("I said CELESTIAL support, not minstrel"),
+            Some("Celestial")
+        );
+        assert_eq!(
+            prefix_named_in_text("not celestial, use minstrel"),
+            Some("Minstrel's")
         );
     }
 

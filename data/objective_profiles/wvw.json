@@ -118,7 +118,7 @@
         "transfers_condition": 0.3
       },
       "is_mode_default": false,
-      "notes": "WvW zerg support (Firebrand/Scrapper). Stability is the #1 boon \u2014 zerg survival depends on it. Condition cleanse extremely important in large fights. High boon generation for team-wide buffs. Sustain for personal survivability in the blob.",
+      "notes": "WvW Cloud/Zerg support specialist. Large groups field several supports who split the job: one maximizes stability so the blob cannot be disabled, another heal/cleanse, another boon uptime. Conversation picks which specialist. Not a lone Magi's/Minstrel heal-bot.",
       "evidence_level": "Heuristic"
     },
     {
@@ -599,6 +599,66 @@
       },
       "is_mode_default": false,
       "notes": "WvW commander/frontline. Presence, toughness, stability, not a DPS clone.",
+      "evidence_level": "Heuristic"
+    },
+    {
+      "objective_profile_id": "WvW_Support",
+      "axis_weights": {
+        "power": 0.3,
+        "condition": 0.15,
+        "boon_support": 0.35,
+        "healing": 0.25,
+        "sustain": 0.55,
+        "control": 0.4
+      },
+      "weight_budget": 2.0,
+      "normalization_constants": {
+        "strike_dps_norm": 3000.0,
+        "condi_dps_norm": 3500.0,
+        "boon_support_norm": 1.0,
+        "healing_power_norm": 1500.0,
+        "effective_health_norm": 50000.0,
+        "control_norm": 1.0
+      },
+      "boon_priorities": {
+        "Might": 0.6,
+        "Fury": 0.5,
+        "Quickness": 0.5,
+        "Alacrity": 0.4,
+        "Swiftness": 0.7,
+        "Protection": 1.0,
+        "Regeneration": 0.6,
+        "Vigor": 0.5,
+        "Aegis": 0.9,
+        "Stability": 0.9,
+        "Resistance": 0.8,
+        "Resolution": 0.5
+      },
+      "condition_priorities": {
+        "Burning": 0.1,
+        "Bleeding": 0.1,
+        "Poison": 0.15,
+        "Torment": 0.1,
+        "Confusion": 0.05,
+        "Vulnerability": 0.3,
+        "Weakness": 0.5,
+        "Blind": 0.2,
+        "Crippled": 0.3,
+        "Immobilize": 0.4,
+        "Slow": 0.3,
+        "Chilled": 0.3,
+        "Fear": 0.2,
+        "Taunt": 0.1
+      },
+      "interaction_priorities": {
+        "removes_boon": 0.3,
+        "corrupts_boon": 0.2,
+        "removes_condition": 0.85,
+        "converts_condition_to_boon": 0.8,
+        "transfers_condition": 0.3
+      },
+      "is_mode_default": false,
+      "notes": "Small-group WvW support (Roam/Havoc). Must stay alive under focus — protection, aegis, invulns, stunbreaks, some personal damage. Teammates are in the fight and cannot peel. Dead support is not support. Distinct from Cloud/Zerg specialists who split stab vs heal/cleanse vs boon uptime.",
       "evidence_level": "Heuristic"
     }
   ]

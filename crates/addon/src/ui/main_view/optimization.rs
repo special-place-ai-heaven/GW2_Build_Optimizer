@@ -1432,40 +1432,34 @@ fn keep_equipped_weapons(msg: &str) -> bool {
 
 fn kitchen_brief(
     game_mode: &str,
-    weights: &OptimizationWeights,
-    locks: &str,
+    scale: &str,
+    role: &str,
+    role_brief: &str,
     character: &str,
     on_the_pass: &str,
+    keep_weapons: bool,
 ) -> String {
-    let w = weights.clamped();
-    let locks = if locks.is_empty() { "none" } else { locks };
+    let keep = if keep_weapons {
+        "Keep equipped weapons.\n"
+    } else {
+        ""
+    };
     format!(
-        "Mode: {mode}\nRadar: Power {power:.0}% · Condition {condition:.0}% · Boon {boon:.0}% · Heal {heal:.0}% · Sustain {sustain:.0}% · Control {control:.0}%\nLocks: {locks}\nCharacter:\n{character}\nOn the pass:\n{pass}\nNote: get_optimizer_results is empty unless Optimize ran; cook from this brief and the dish on the pass.",
-        mode = game_mode,
-        power = w.power * 100.0,
-        condition = w.condition * 100.0,
-        boon = w.boon_support * 100.0,
-        heal = w.healing * 100.0,
-        sustain = w.sustain * 100.0,
-        control = w.control * 100.0,
-        locks = locks,
-        character = character,
+        "Mode: {game_mode}\nScale: {scale}\nRole: {role}\n{role_brief}\n{keep}Character:\n{character}\nOn the pass:\n{pass}\nNote: get_optimizer_results is empty unless Optimize ran; cook from this brief and the dish on the pass.",
         pass = on_the_pass,
     )
 }
 
 fn apply_radar_prefix(
     parsed: &mut gw2_optimizer::prompts::GeminiBuildResponse,
-    weights: &OptimizationWeights,
+    _weights: &gw2_optimizer::scoring::OptimizationWeights,
     order: &str,
 ) {
+    // Choya is a conversation. Named prefix in the order wins; otherwise keep the LLM's pick.
+    // Radar is a starting prior for Optimize, not a cage for chat.
     if let Some(named) = gw2_optimizer::scoring::prefix_named_in_text(order) {
         parsed.stat_prefix = named.to_string();
-        return;
     }
-    parsed.stat_prefix = gw2_optimizer::scoring::select_gear_prefix(weights)
-        .primary
-        .to_string();
 }
 
 fn fill_holes_from_loadout(
@@ -1805,14 +1799,22 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         .map(summarize_resolved_build)
         .unwrap_or_default();
     let game_mode_label = state.main.game_mode.label().to_string();
-    let mut locks = state.main.build_locks.describe_constraints();
-    if keep_equipped_weapons(&display) {
-        if locks.is_empty() {
-            locks = "keep equipped weapons".into();
-        } else {
-            locks.push_str("; keep equipped weapons");
-        }
-    }
+    let scale = if state.main.game_mode == gw2_core::types::GameMode::WvW {
+        state.main.wvw_combat_tier.label()
+    } else {
+        "n/a"
+    };
+    let role_label = state
+        .main
+        .selected_role
+        .map(|r| r.play_label())
+        .unwrap_or("unspecified");
+    let role_brief = state
+        .main
+        .selected_role
+        .map(|r| r.family_brief(&state.main.game_mode, state.main.wvw_combat_tier))
+        .unwrap_or("No role chip. Infer the job from the player's words.");
+    let keep_weapons = keep_equipped_weapons(&display);
     let has_loadout = !character.is_empty();
     let on_the_pass = state
         .main
@@ -1823,10 +1825,12 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         .unwrap_or_else(|| "(none yet — talk or run Optimize first)".into());
     let mut kitchen = kitchen_brief(
         &game_mode_label,
-        &state.main.weights,
-        &locks,
+        scale,
+        role_label,
+        role_brief,
         &character,
         &on_the_pass,
+        keep_weapons,
     );
     if !inbound_chips.is_empty() {
         kitchen.push_str("\nPasted: ");
@@ -1876,7 +1880,6 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         &game_mode_label,
                         &message,
                         &kitchen,
-                        &weights,
                     );
                     let tools = gw2_optimizer::llm::tools::tool_definitions();
                     let empty_candidates = vec![];
@@ -2239,18 +2242,23 @@ mod tests {
     }
 
     #[test]
-    fn kitchen_brief_lists_radar_and_pass() {
+    fn kitchen_brief_lists_mode_scale_role() {
         let brief = kitchen_brief(
             "WvW",
-            &gw2_optimizer::scoring::OptimizationWeights::default(),
-            "",
-            "Profession: Warrior",
+            "Roam",
+            "Support",
+            "Small-group Support: self-reliant.",
+            "Profession: Elementalist",
             "(empty)",
+            false,
         );
-        assert!(brief.contains("WvW"), "{brief}");
-        assert!(brief.contains("Power"), "{brief}");
-        assert!(brief.contains("Profession: Warrior"), "{brief}");
-        assert!(brief.contains("Locks: none"), "{brief}");
+        assert!(brief.contains("Mode: WvW"), "{brief}");
+        assert!(brief.contains("Scale: Roam"), "{brief}");
+        assert!(brief.contains("Role: Support"), "{brief}");
+        assert!(brief.contains("self-reliant"), "{brief}");
+        assert!(brief.contains("Profession: Elementalist"), "{brief}");
+        assert!(!brief.contains("Radar:"), "{brief}");
+        assert!(!brief.contains("Locks:"), "{brief}");
         assert!(brief.contains("On the pass:"), "{brief}");
         assert!(brief.contains("get_optimizer_results is empty"), "{brief}");
     }
@@ -2315,18 +2323,29 @@ mod tests {
     }
 
     #[test]
-    fn apply_radar_prefix_uses_radar_when_order_silent() {
+    fn apply_radar_prefix_keeps_llm_when_order_silent() {
         let weights = gw2_optimizer::scoring::OptimizationWeights::preset_power_dps();
         let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
             stat_prefix: "Celestial".into(),
             ..Default::default()
         };
         apply_radar_prefix(&mut parsed, &weights, "make me a power build");
-        assert_eq!(
-            parsed.stat_prefix,
-            gw2_optimizer::scoring::select_gear_prefix(&weights).primary
+        assert_eq!(parsed.stat_prefix, "Celestial");
+    }
+
+    #[test]
+    fn apply_radar_prefix_skips_negated_minstrel() {
+        let weights = gw2_optimizer::scoring::OptimizationWeights::preset_power_dps();
+        let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
+            stat_prefix: "Harrier's".into(),
+            ..Default::default()
+        };
+        apply_radar_prefix(
+            &mut parsed,
+            &weights,
+            "I said CELESTIAL support, not minstrel",
         );
-        assert_ne!(parsed.stat_prefix, "Celestial");
+        assert_eq!(parsed.stat_prefix, "Celestial");
     }
 
     #[test]

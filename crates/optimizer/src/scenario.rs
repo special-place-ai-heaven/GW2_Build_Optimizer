@@ -102,11 +102,12 @@ impl ScenarioSpec {
 
 // ─── Role Objectives ─────────────────────────────────────────────────────────
 
-/// Job the player picked. Mode (PvE/PvP/WvW) remaps weights via [`profile_id`].
-/// Scale (Roam/Havoc/Cloud/Zerg) is independent — see [`CombatTier`].
+/// Job the player picked. Mode remaps weights via [`profile_id_for`].
+/// Overlay chips are families ([`PLAY_ROLES`]); conversation picks the lean
+/// (power vs condi, celestial fight-support vs zerg stab specialist).
+/// Scale retunes WvW Support: Roam/Havoc is self-reliant; Cloud/Zerg specializes.
 ///
-/// Overlay chips use [`PLAY_ROLES`] + [`play_label`]. Legacy WvW/PvP variants
-/// stay so old mappings and tests still compile.
+/// Legacy WvW/PvP variants stay so old mappings and tests still compile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoleObjective {
     PowerDps,
@@ -130,15 +131,12 @@ pub enum RoleObjective {
 }
 
 impl RoleObjective {
-    /// Shared overlay chips. Same jobs in every mode; [`profile_id`] changes the build.
-    pub const PLAY_ROLES: [RoleObjective; 10] = [
+    /// Shared overlay chips. Families, not finished jobs. Conversation picks the lean.
+    pub const PLAY_ROLES: [RoleObjective; 7] = [
         RoleObjective::WvWRoamer,
         RoleObjective::PowerDps,
-        RoleObjective::CondiDps,
-        RoleObjective::Hybrid,
         RoleObjective::Sustain,
         RoleObjective::Staller,
-        RoleObjective::Healer,
         RoleObjective::Buffer,
         RoleObjective::Disabler,
         RoleObjective::Tank,
@@ -169,12 +167,12 @@ impl RoleObjective {
     /// Short chip label (same as [`label`] for play roles).
     pub fn play_label(&self) -> &'static str {
         match self {
-            RoleObjective::PowerDps => "Power",
+            RoleObjective::PowerDps => "Damage",
             RoleObjective::CondiDps => "Condi",
             RoleObjective::Sustain => "Bruiser",
             RoleObjective::Tank => "Commander",
             RoleObjective::Healer => "Heal",
-            RoleObjective::Disabler => "Disabler",
+            RoleObjective::Disabler => "Disable",
             RoleObjective::Buffer => "Support",
             RoleObjective::Hybrid => "Hybrid",
             RoleObjective::Staller => "Troll",
@@ -183,9 +181,54 @@ impl RoleObjective {
         }
     }
 
+    /// How this family plays at the given scale. Conversation still picks the lean.
+    pub fn family_brief(&self, game_mode: &GameMode, tier: CombatTier) -> &'static str {
+        match self {
+            RoleObjective::PowerDps => {
+                "Damage family: power, condi, or hybrid from the player's words."
+            }
+            RoleObjective::Buffer => match (game_mode, tier) {
+                (GameMode::WvW, CombatTier::Squad) => {
+                    "Large-group Support: several supports specialize — one stab uptime so the blob cannot be disabled, one heal/cleanse, one boon duration. Player's words pick which. Not a lone Magi's/Minstrel heal-bot unless they asked."
+                }
+                (GameMode::WvW, _) => {
+                    "Small-group Support: self-reliant. If focused, teammates are busy — prot, invuln, stunbreaks, some fight. Dead support is not support. Player's words pick the lean (celestial hybrid, boon, cleanse, disable)."
+                }
+                _ => {
+                    "Support: force multiplier (boons, prot, cleanse, disable, some fight). Not a dedicated healer unless they asked. Player's words pick the lean."
+                }
+            },
+            RoleObjective::Disabler => {
+                "Disable family: CC, strip, interrupt. Player's words pick the lean."
+            }
+            RoleObjective::Sustain => "Bruiser: fights and lives. Player's words pick the lean.",
+            RoleObjective::Staller => {
+                "Troll: stall, don't kill. Evade, port, stealth until backup."
+            }
+            RoleObjective::WvWRoamer => {
+                "Roamer: outnumbered. Dive, blender, or trickster from the player's words."
+            }
+            RoleObjective::Tank => "Commander: frontline presence, toughness, stability.",
+            RoleObjective::Healer => "Dedicated healer. Only if they asked for a heal-bot.",
+            _ => "Infer the job from the player's words.",
+        }
+    }
+
     /// The `objective_profile_id` this role maps to for the given game mode.
-    /// Falls back to mode default if the role has no direct profile for that mode.
+    /// Scale defaults to Cloud/Zerg — use [`profile_id_for`] when Scale is known.
     pub fn profile_id(&self, game_mode: &GameMode) -> &'static str {
+        self.profile_id_for(game_mode, CombatTier::default())
+    }
+
+    /// Like [`profile_id`], but WvW Support splits on Scale:
+    /// Roam/Havoc → self-reliant `WvW_Support`; Cloud/Zerg → specialist `WvW_Zerg_Support`.
+    pub fn profile_id_for(&self, game_mode: &GameMode, tier: CombatTier) -> &'static str {
+        if matches!(self, RoleObjective::Buffer) && *game_mode == GameMode::WvW {
+            return match tier {
+                CombatTier::Squad => "WvW_Zerg_Support",
+                CombatTier::Solo | CombatTier::Party => "WvW_Support",
+            };
+        }
         match (self, game_mode) {
             (RoleObjective::WvWRoamer, GameMode::WvW) => "WvW_Roamer",
             (RoleObjective::WvWRoamer, GameMode::PvP) => "PvP_Harasser",
@@ -285,7 +328,12 @@ impl RoleObjective {
     /// Convert this role to `OptimizationWeights` by reading the objective profile data.
     /// Falls back to mode default weights if the profile is not found.
     pub fn to_weights(&self, game_mode: &GameMode) -> OptimizationWeights {
-        let id = self.profile_id(game_mode);
+        self.to_weights_for(game_mode, CombatTier::default())
+    }
+
+    /// Like [`to_weights`], passing Scale so WvW Support can split roam vs zerg.
+    pub fn to_weights_for(&self, game_mode: &GameMode, tier: CombatTier) -> OptimizationWeights {
+        let id = self.profile_id_for(game_mode, tier);
         let profiles = crate::data::objective_profiles::objective_profiles();
         if let Some(profile) = profiles.profile_by_id(id) {
             let aw = &profile.axis_weights;
@@ -476,7 +524,10 @@ mod tests {
 
     #[test]
     fn play_roles_are_shared_and_remap_per_mode() {
-        assert_eq!(RoleObjective::PLAY_ROLES.len(), 10);
+        assert_eq!(RoleObjective::PLAY_ROLES.len(), 7);
+        assert_eq!(RoleObjective::PowerDps.play_label(), "Damage");
+        assert_eq!(RoleObjective::Buffer.play_label(), "Support");
+        assert_eq!(RoleObjective::Disabler.play_label(), "Disable");
         assert_eq!(RoleObjective::Healer.play_label(), "Heal");
         assert_eq!(RoleObjective::Staller.play_label(), "Troll");
         assert_eq!(RoleObjective::WvWRoamer.play_label(), "Roamer");
@@ -508,26 +559,55 @@ mod tests {
     #[test]
     fn play_roles_have_unique_weights_in_every_mode() {
         for mode in [GameMode::PvE, GameMode::PvP, GameMode::WvW] {
-            let mut seen: Vec<(RoleObjective, [i32; 6])> = Vec::new();
-            for role in RoleObjective::PLAY_ROLES {
-                let w = role.to_weights(&mode);
-                let key = [
-                    (w.power * 100.0).round() as i32,
-                    (w.condition * 100.0).round() as i32,
-                    (w.boon_support * 100.0).round() as i32,
-                    (w.healing * 100.0).round() as i32,
-                    (w.sustain * 100.0).round() as i32,
-                    (w.control * 100.0).round() as i32,
-                ];
-                if let Some((other, _)) = seen.iter().find(|(_, k)| *k == key) {
-                    panic!(
-                        "{:?} and {:?} share weights {:?} in {:?}",
-                        role, other, key, mode
-                    );
+            for tier in [CombatTier::Solo, CombatTier::Party, CombatTier::Squad] {
+                let mut seen: Vec<(RoleObjective, [i32; 6])> = Vec::new();
+                for role in RoleObjective::PLAY_ROLES {
+                    let w = role.to_weights_for(&mode, tier);
+                    let key = [
+                        (w.power * 100.0).round() as i32,
+                        (w.condition * 100.0).round() as i32,
+                        (w.boon_support * 100.0).round() as i32,
+                        (w.healing * 100.0).round() as i32,
+                        (w.sustain * 100.0).round() as i32,
+                        (w.control * 100.0).round() as i32,
+                    ];
+                    if let Some((other, _)) = seen.iter().find(|(_, k)| *k == key) {
+                        panic!(
+                            "{:?} and {:?} share weights {:?} in {:?} {:?}",
+                            role, other, key, mode, tier
+                        );
+                    }
+                    seen.push((role, key));
                 }
-                seen.push((role, key));
             }
         }
+    }
+
+    #[test]
+    fn wvw_support_splits_on_scale() {
+        assert_eq!(
+            RoleObjective::Buffer.profile_id_for(&GameMode::WvW, CombatTier::Solo),
+            "WvW_Support"
+        );
+        assert_eq!(
+            RoleObjective::Buffer.profile_id_for(&GameMode::WvW, CombatTier::Party),
+            "WvW_Support"
+        );
+        assert_eq!(
+            RoleObjective::Buffer.profile_id_for(&GameMode::WvW, CombatTier::Squad),
+            "WvW_Zerg_Support"
+        );
+        let roam = RoleObjective::Buffer.to_weights_for(&GameMode::WvW, CombatTier::Solo);
+        let zerg = RoleObjective::Buffer.to_weights_for(&GameMode::WvW, CombatTier::Squad);
+        assert!(
+            roam.power > zerg.power,
+            "roam support must fight, not wet-noodle"
+        );
+        assert!(
+            roam.control > zerg.control,
+            "roam support must fend off focus"
+        );
+        assert!(zerg.boon_support > roam.boon_support || zerg.healing > roam.healing);
     }
 
     #[test]

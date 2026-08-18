@@ -115,10 +115,13 @@ Left rail:
 
 - Character, build tab, and equipment tab from the GW2 API.
 - **Mode:** PvE / PvP / WvW.
-- **Scale:** Roam / Havoc / Cloud/Zerg (fight size; independent of role).
-- **Role** chips such as Harasser, Power, Condi, Hybrid, Bruiser, Troll, Heal,
-  Support, Disabler, Commander. The same chips are used in every mode; the
-  optimizer maps them onto that mode’s objective profile.
+- **Scale:** Roam / Havoc / Cloud/Zerg (fight size). Same Support chip: small
+  groups must be self-reliant under focus; large groups can specialize
+  (stability vs heal/cleanse vs boon uptime).
+- **Role** chips: Roamer, Damage, Bruiser, Troll, Support, Disable, Commander.
+  Each is a family — conversation picks the lean (power vs condi, celestial
+  fight-support vs zerg stab specialist, and so on). The optimizer maps the
+  chip onto that mode’s objective profile; Scale retunes Support in WvW.
 - **Optimize Build** and **Refresh Data**.
 
 Center pane shows the focused build (skills, specs/traits, armor, trinkets,

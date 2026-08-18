@@ -505,7 +505,7 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
 }
 
 /// WvW fight scale: Roam / Havoc / Cloud/Zerg.
-/// Independent of role/task — changing scale does not rewrite healer vs DPS weights.
+/// Retunes Support: small groups self-reliant; Cloud/Zerg specialists.
 fn render_wvw_sub_role(ui: &Ui, state: &mut AddonState) {
     render_left_section_header(ui, "SCALE", state.config.section_spacing);
     let tiers = [CombatTier::Solo, CombatTier::Party, CombatTier::Squad];
@@ -516,6 +516,10 @@ fn render_wvw_sub_role(ui: &Ui, state: &mut AddonState) {
         .unwrap_or(2);
     if let Some(i) = theme::segment_row(ui, &labels, selected, "##scale") {
         state.main.wvw_combat_tier = tiers[i];
+        if let Some(role) = state.main.selected_role {
+            state.main.weights =
+                role.to_weights_for(&state.main.game_mode, state.main.wvw_combat_tier);
+        }
         state.main.comparison.suggestions.clear();
         state.main.comparison.error = None;
     }
@@ -545,7 +549,9 @@ fn role_hint(role: RoleObjective) -> &'static str {
         RoleObjective::WvWRoamer => {
             "Outnumbered. Dive (2s port-burst), blender (cover + AoE), or trickster (stealth/kite). One damage type."
         }
-        RoleObjective::PowerDps => "Strike damage — burst and sustained power DPS.",
+        RoleObjective::PowerDps => {
+            "Damage family — power, condi, or hybrid from the conversation."
+        }
         RoleObjective::CondiDps => "Condition pressure and duration.",
         RoleObjective::Hybrid => {
             "Jack of all trades. Celestial-style, master of none. Occupies until backup."
@@ -555,8 +561,10 @@ fn role_hint(role: RoleObjective) -> &'static str {
             "Troll. Stall, don't kill. Evade, port, stealth, speed — live through a blob until the group arrives."
         }
         RoleObjective::Healer => "Healing and group sustain.",
-        RoleObjective::Buffer => "Boons and support for allies.",
-        RoleObjective::Disabler => "CC, interrupts, boon strip.",
+        RoleObjective::Buffer => {
+            "Support family. Cloud/Zerg: specialists (stab / heal-cleanse / boons). Roam/Havoc: self-reliant — prot, invuln, some fight. Dead support is not support."
+        }
+        RoleObjective::Disabler => "Disable family — CC, interrupts, boon strip.",
         RoleObjective::Tank => "Frontline / commander — toughness and presence.",
         _ => role.label(),
     }
@@ -564,7 +572,7 @@ fn role_hint(role: RoleObjective) -> &'static str {
 
 fn apply_role(state: &mut AddonState, role: RoleObjective) {
     state.main.selected_role = Some(role);
-    state.main.weights = role.to_weights(&state.main.game_mode);
+    state.main.weights = role.to_weights_for(&state.main.game_mode, state.main.wvw_combat_tier);
     state.main.comparison.suggestions.clear();
     state.main.comparison.selected_suggestion = 0;
     state.main.comparison.error = None;
@@ -779,7 +787,7 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         let mode = GameMode::ALL[i].clone();
         state.main.game_mode = mode.clone();
         state.main.weights = if let Some(role) = state.main.selected_role {
-            role.to_weights(&mode)
+            role.to_weights_for(&mode, state.main.wvw_combat_tier)
         } else {
             OptimizationWeights::default_for_mode(mode.label())
         };
