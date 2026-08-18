@@ -28,6 +28,7 @@
   "status.resolving": "Resolviendo build...",
   "status.resolving_api": "Resolviendo desde la API...",
   "status.loading_data": "Cargando datos del juego...",
+  "status.names": "Descargando nombres ({lang})…",
   "status.checking_api": "Comprobando API…",
   "status.api_ready": "API lista",
   "status.api_slow": "API lenta",

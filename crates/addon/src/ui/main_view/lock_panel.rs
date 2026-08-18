@@ -289,13 +289,11 @@ pub fn render_lock_panel(
         let spec_id = locks.specs[slot];
         let spec_locked = spec_id.is_some();
         let spec_name = spec_id
-            .and_then(|id| db.specializations.get(&id))
-            .map(|s| s.name.as_str())
+            .and_then(|id| db.specializations.get(&id).map(|s| db.loc_spec(id, &s.name)))
             .or_else(|| {
-                // Fall back to current build spec for this slot
                 current_specs
                     .get(slot)
-                    .and_then(|(id, _)| db.specializations.get(id).map(|s| s.name.as_str()))
+                    .and_then(|(id, _)| db.specializations.get(id).map(|s| db.loc_spec(*id, &s.name)))
             })
             .unwrap_or("(empty)");
         let is_elite = spec_id
@@ -447,7 +445,7 @@ pub fn render_lock_panel(
                             let trait_idx = col * 3 + row;
                             let trait_id = spec.major_traits[trait_idx];
                             let trait_info = db.traits.get(&trait_id);
-                            let trait_name = trait_info.map(|t| t.name.as_str()).unwrap_or("?");
+                            let trait_name = trait_info.map(|t| db.loc_trait(trait_id, &t.name)).unwrap_or("?");
 
                             let cx = grid_x + col as f32 * col_spacing + circle_radius + 2.0;
                             let cy = grid_y + row as f32 * row_height + row_height / 2.0;
@@ -822,7 +820,9 @@ pub fn render_optimized_specs_panel(
             }
 
             // Spec name below hexagon (strip " [E]" — hexagon already has elite marker)
-            let display_name = lookup_name;
+            let display_name = spec_info
+                .and_then(|s| db.map(|d| d.loc_spec(s.id, lookup_name)))
+                .unwrap_or(lookup_name);
             let nw = ui.calc_text_size(display_name)[0];
             draw_list.add_text(
                 [hex_center[0] - nw / 2.0, hex_center[1] + hex_radius + 3.0],
@@ -843,7 +843,12 @@ pub fn render_optimized_specs_panel(
                         let trait_idx = col * 3 + row;
                         let trait_id = spec.major_traits[trait_idx];
                         let trait_info = db.and_then(|d| d.traits.get(&trait_id));
-                        let trait_name = trait_info.map(|t| t.name.as_str()).unwrap_or("?");
+                        let trait_name = trait_info
+                            .map(|t| {
+                                db.map(|d| d.loc_trait(trait_id, &t.name))
+                                    .unwrap_or(t.name.as_str())
+                            })
+                            .unwrap_or("?");
 
                         let cx = grid_x + col as f32 * col_spacing + circle_radius + 2.0;
                         let cy = grid_y + row as f32 * row_height + row_height / 2.0;

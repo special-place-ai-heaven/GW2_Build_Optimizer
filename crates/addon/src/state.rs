@@ -103,6 +103,10 @@ pub struct MainState {
     // GameDb (loaded once on main screen entry)
     pub game_db: Option<GameDb>,
     pub game_db_loading: bool,
+    /// Overlay download for official API names (de/es/fr/zh).
+    pub names_loading: bool,
+    pub names_stage: String,
+    pub names_lang: String,
     /// Progress text for game data refresh (separate from optimize_stage to avoid clobbering).
     pub game_refresh_stage: String,
     // Optimization state

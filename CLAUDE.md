@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**GW2 Build Optimizer v1.4.1** — In-game Guild Wars 2 addon (Nexus plugin) that optimizes character builds across all game modes (PvE, PvP, WvW). Uses the GW2 API for game/character data and a pluggable LLM backend (Gemini, OpenAI, Anthropic, or OpenRouter) for build reasoning. Feature complete (S01-S15). Overlay chrome is localized (Settings → Language).
+**GW2 Build Optimizer v1.4.2** — In-game Guild Wars 2 addon (Nexus plugin) that optimizes character builds across all game modes (PvE, PvP, WvW). Uses the GW2 API for game/character data and a pluggable LLM backend (Gemini, OpenAI, Anthropic, or OpenRouter) for build reasoning. Feature complete (S01-S15). Overlay chrome is localized (Settings → Language). Skill/trait/item names follow official API `lang=` for Deutsch, Español, Français, and 简体中文.
 
 ## Build & Development
 

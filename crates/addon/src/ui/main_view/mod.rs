@@ -46,6 +46,9 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     if state.main.game_db.is_none() && !state.main.game_db_loading {
         stats::load_game_db(state);
     }
+    if state.main.game_db.is_some() {
+        stats::ensure_localized_names(state);
+    }
 
     // Periodic API health check (~every 60s at 60fps)
     state.main.api_status_frames += 1;
@@ -230,6 +233,10 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
         } else {
             ui.text_colored(theme::WARN, format!("| {}", t("status.loading_data")));
         }
+    }
+    if state.main.names_loading {
+        ui.same_line();
+        ui.text_colored(theme::WARN, format!("| {}", state.main.names_stage));
     }
 
     // Optimization progress

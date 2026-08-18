@@ -38,6 +38,9 @@ pub struct GameDb {
     pub skills_by_condition: HashMap<String, Vec<u32>>,
     pub traits_by_buff: HashMap<String, Vec<u32>>,
     pub skills_by_buff: HashMap<String, Vec<u32>>,
+
+    /// Official API names for the current UI language. Optimizer still uses English `.name`.
+    pub localized: Option<std::sync::Arc<gw2_api::localize::LocalizedNames>>,
 }
 
 impl GameDb {
@@ -277,6 +280,7 @@ impl GameDb {
             skills_by_condition,
             traits_by_buff,
             skills_by_buff,
+            localized: None,
         })
     }
 
@@ -318,6 +322,110 @@ impl GameDb {
         }
         exact.or(fuzzy.map(|(_, _, is)| is))
     }
+
+    pub fn attach_localized(&mut self, mut names: gw2_api::localize::LocalizedNames) {
+            names.by_english.clear();
+            let mut add = |en: &str, loc: &str| {
+                if !en.is_empty() && !loc.is_empty() {
+                    names
+                        .by_english
+                        .insert(en.to_ascii_lowercase(), loc.to_string());
+                }
+            };
+            for (id, loc) in &names.skills {
+                if let Some(s) = self.skills.get(id) {
+                    add(&s.name, loc);
+                }
+            }
+            for (id, loc) in &names.traits {
+                if let Some(t) = self.traits.get(id) {
+                    add(&t.name, loc);
+                }
+            }
+            for (id, loc) in &names.specs {
+                if let Some(s) = self.specializations.get(id) {
+                    add(&s.name, loc);
+                }
+            }
+            for (id, loc) in &names.items {
+                if let Some(i) = self.items.get(id) {
+                    add(&i.name, loc);
+                }
+            }
+            for (id, loc) in &names.itemstats {
+                if let Some(s) = self.itemstats.get(id) {
+                    add(&s.name, loc);
+                }
+            }
+            for (id, loc) in &names.professions {
+                add(id, loc);
+                if let Some(p) = self.professions.get(id) {
+                    add(&p.name, loc);
+                }
+            }
+            for (id, loc) in &names.legends {
+                add(id, loc);
+            }
+            for (id, loc) in &names.pvp_amulets {
+                if let Some(a) = self.pvp_amulets.get(id) {
+                    add(&a.name, loc);
+                }
+            }
+            self.localized = Some(std::sync::Arc::new(names));
+        }
+
+        pub fn loc_skill<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
+            self.localized
+                .as_ref()
+                .and_then(|l| l.skills.get(&id))
+                .map(String::as_str)
+                .unwrap_or(fallback)
+        }
+
+        pub fn loc_trait<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
+            self.localized
+                .as_ref()
+                .and_then(|l| l.traits.get(&id))
+                .map(String::as_str)
+                .unwrap_or(fallback)
+        }
+
+        pub fn loc_spec<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
+            self.localized
+                .as_ref()
+                .and_then(|l| l.specs.get(&id))
+                .map(String::as_str)
+                .unwrap_or(fallback)
+        }
+
+        pub fn loc_item<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
+            self.localized
+                .as_ref()
+                .and_then(|l| l.items.get(&id))
+                .map(String::as_str)
+                .unwrap_or(fallback)
+        }
+
+        pub fn loc_prefix<'a>(&'a self, english: &'a str) -> &'a str {
+            self.itemstat_by_name(english)
+                .and_then(|s| {
+                    self.localized
+                        .as_ref()
+                        .and_then(|l| l.itemstats.get(&s.id))
+                        .map(String::as_str)
+                })
+                .unwrap_or(english)
+        }
+
+        pub fn loc_name<'a>(&'a self, english: &'a str) -> &'a str {
+            let Some(loc) = &self.localized else {
+                return english;
+            };
+            loc.by_english
+                .get(&english.to_ascii_lowercase())
+                .map(String::as_str)
+                .unwrap_or(english)
+        }
 
     /// Palette ID for a build-template skill slot.
     ///
@@ -511,6 +619,7 @@ impl GameDb {
             skills_by_condition: HashMap::new(),
             traits_by_buff: HashMap::new(),
             skills_by_buff: HashMap::new(),
+            localized: None,
         }
     }
 }
@@ -646,4 +755,25 @@ mod tests {
         assert!(!db.legend_available("Legend1", &[3, 9]));
         assert!(db.legend_available("Legend1", &[3, 9, 52]));
     }
+
+    #[test]
+        fn loc_skill_falls_back_and_uses_overlay() {
+            let mut db = GameDb::empty_for_tests();
+            let skill: Skill = serde_json::from_value(serde_json::json!({
+                "id": 1,
+                "name": "Signet of Malice"
+            }))
+            .unwrap();
+            db.skills.insert(1, skill);
+            assert_eq!(db.loc_skill(1, "Signet of Malice"), "Signet of Malice");
+            assert_eq!(db.loc_name("Signet of Malice"), "Signet of Malice");
+            let mut names = gw2_api::localize::LocalizedNames {
+                lang: "fr".into(),
+                ..Default::default()
+            };
+            names.skills.insert(1, "Sceau de malice".into());
+            db.attach_localized(names);
+            assert_eq!(db.loc_skill(1, "Signet of Malice"), "Sceau de malice");
+            assert_eq!(db.loc_name("Signet of Malice"), "Sceau de malice");
+        }
 }

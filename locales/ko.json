@@ -28,6 +28,7 @@
   "status.resolving": "빌드를 해석하는 중...",
   "status.resolving_api": "API 데이터에서 빌드를 해석하는 중...",
   "status.loading_data": "게임 데이터를 불러오는 중...",
+  "status.names": "{lang} 이름 다운로드 중…",
   "status.checking_api": "API 확인 중…",
   "status.api_ready": "API 준비됨",
   "status.api_slow": "API 느림",

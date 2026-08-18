@@ -290,7 +290,7 @@ fn render_label_value_inspect(
 ) {
     ui.text_colored(LABEL_COLOR, format!("  {}: ", label));
     ui.same_line();
-    ui.text_colored(VALUE_COLOR, value);
+    ui.text_colored(VALUE_COLOR, crate::ui::comparison::loc_name(db, value));
     crate::ui::comparison::inspect_if_hovered(ui, value, db);
 }
 
@@ -337,7 +337,7 @@ fn render_slash_list(
         if i > 0 {
             ui.same_line_with_spacing(0.0, 6.0);
         }
-        crate::ui::theme::chip(ui, part, &format!("##{label}_chip_{i}"));
+        crate::ui::theme::chip(ui, crate::ui::comparison::loc_name(db, part), &format!("##{label}_chip_{i}"));
         crate::ui::comparison::inspect_if_hovered(ui, part, db);
     }
 }
@@ -409,7 +409,13 @@ fn render_stance_tabs(
         let [cw, _] = crate::ui::theme::select_chip_size(ui, name, false);
         crate::ui::theme::wrap_chip(ui, avail, &mut row_x, cw, 4.0);
         let id = format!("##stance_tab_{id_suffix}_{i}");
-        if crate::ui::theme::select_chip(ui, name, i == selected, &id, None) {
+        if crate::ui::theme::select_chip(
+            ui,
+            crate::ui::comparison::loc_name(db, name),
+            i == selected,
+            &id,
+            None,
+        ) {
             selected = i;
             STANCE_PREVIEW.with(|c| c.set(i));
         }
@@ -548,7 +554,11 @@ fn render_skill_bar(
                 crate::ui::color_u32(crate::ui::theme::GOLD),
                 *label,
             );
-            let shown = if empty { "\u{2014}" } else { *value };
+            let shown = if empty {
+                "\u{2014}"
+            } else {
+                crate::ui::comparison::loc_name(db, value)
+            };
             let color = if empty {
                 crate::ui::theme::MUTED
             } else {

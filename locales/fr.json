@@ -28,6 +28,7 @@
   "status.resolving": "Résolution de la build…",
   "status.resolving_api": "Résolution depuis l'API…",
   "status.loading_data": "Chargement des données…",
+  "status.names": "Téléchargement des noms ({lang})…",
   "status.checking_api": "Vérification de l'API…",
   "status.api_ready": "API prête",
   "status.api_slow": "API lente",

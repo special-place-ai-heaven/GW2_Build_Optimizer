@@ -28,6 +28,7 @@
   "status.resolving": "正在解析配装…",
   "status.resolving_api": "正在从 API 解析配装…",
   "status.loading_data": "正在加载游戏数据…",
+  "status.names": "正在下载{lang}名称…",
   "status.checking_api": "正在检查 API…",
   "status.api_ready": "API 就绪",
   "status.api_slow": "API 缓慢",

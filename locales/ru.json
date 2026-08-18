@@ -28,6 +28,7 @@
   "status.resolving": "Сборка билда...",
   "status.resolving_api": "Сборка билда по данным API...",
   "status.loading_data": "Загрузка игровых данных...",
+  "status.names": "Загрузка названий ({lang})…",
   "status.checking_api": "Проверка API…",
   "status.api_ready": "API готова",
   "status.api_slow": "API медленная",

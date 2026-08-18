@@ -2146,6 +2146,7 @@ mod tests {
             skills_by_condition: HashMap::new(),
             traits_by_buff: HashMap::new(),
             skills_by_buff: HashMap::new(),
+            localized: None,
         }
     }
 

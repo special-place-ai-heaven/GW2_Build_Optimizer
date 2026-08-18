@@ -1,4 +1,5 @@
-//! Overlay chrome translations. Game data names stay as the GW2 API returned them.
+//! Overlay chrome translations. Game-data names use an official `/v2?lang=` overlay
+//! (`de`/`es`/`fr`/`zh`); the English GameDb stays the optimizer source of truth.
 //!
 //! Add a language: write `locales/xx.json` with the same keys as `en.json`,
 //! then append an entry to [`LANGUAGES`] and [`SOURCES`].
@@ -136,6 +137,17 @@ pub fn resolve(code: &str) -> &'static str {
     }
 }
 
+/// ArenaNet `/v2` name locales. `None` = keep English GameDb names.
+pub fn api_lang(ui_code: &str) -> Option<&'static str> {
+    match resolve(ui_code) {
+        "de" => Some("de"),
+        "es" => Some("es"),
+        "fr" => Some("fr"),
+        "zh" => Some("zh"),
+        _ => None,
+    }
+}
+
 /// Apply a config value (`auto` or a code). Safe to call every frame; cheap if unchanged.
 pub fn set_language(code: &str) {
     let resolved = resolve(code).to_string();
@@ -168,6 +180,72 @@ pub fn t(key: &str) -> String {
         .or_else(|| cats.get("en").and_then(|c| c.get(key)))
         .cloned()
         .unwrap_or_else(|| key.to_string())
+}
+
+/// Weapon-type enums stay English on the wire.
+pub fn loc_weapon_type(api_type: &str) -> String {
+    let lang = current_code();
+    if api_lang(&lang).is_none() {
+        return api_type.to_string();
+    }
+    weapon_label(&lang, api_type)
+        .unwrap_or(api_type)
+        .to_string()
+}
+
+/// Localize a `Dagger / Dagger` weapon-set label.
+pub fn loc_weapon_types(joined: &str) -> String {
+    joined
+        .split(" / ")
+        .map(|part| loc_weapon_type(part.trim()))
+        .collect::<Vec<_>>()
+        .join(" / ")
+}
+
+fn weapon_label<'a>(lang: &str, ty: &'a str) -> Option<&'a str> {
+    let key = ty.to_ascii_lowercase();
+    let row: [&str; 5] = match key.as_str() {
+        "axe" => ["Axe", "Hache", "Axt", "Hacha", "斧"],
+        "dagger" => ["Dagger", "Dague", "Dolch", "Daga", "匕首"],
+        "mace" => ["Mace", "Masse", "Streitkolben", "Maza", "锤"],
+        "pistol" => ["Pistol", "Pistolet", "Pistole", "Pistola", "手枪"],
+        "scepter" => ["Scepter", "Sceptre", "Zepter", "Cetro", "节杖"],
+        "sword" => ["Sword", "Épée", "Schwert", "Espada", "剑"],
+        "focus" => ["Focus", "Focus", "Fokus", "Foco", "聚能器"],
+        "shield" => ["Shield", "Bouclier", "Schild", "Escudo", "盾"],
+        "torch" => ["Torch", "Torche", "Fackel", "Antorcha", "火炬"],
+        "warhorn" => [
+            "Warhorn",
+            "Cor de guerre",
+            "Kriegshorn",
+            "Cuerno de guerra",
+            "战争号角",
+        ],
+        "greatsword" => ["Greatsword", "Espadon", "Großschwert", "Mandoble", "巨剑"],
+        "hammer" => ["Hammer", "Marteau", "Hammer", "Martillo", "锤子"],
+        "longbow" => ["LongBow", "Arc long", "Langbogen", "Arco largo", "长弓"],
+        "rifle" => ["Rifle", "Fusil", "Gewehr", "Rifle", "步枪"],
+        "shortbow" => ["ShortBow", "Arc court", "Kurzbogen", "Arco corto", "短弓"],
+        "staff" => ["Staff", "Bâton", "Stab", "Báculo", "法杖"],
+        "harpoon" => ["Harpoon", "Harpon", "Harpune", "Arpón", "鱼叉"],
+        "speargun" => [
+            "Speargun",
+            "Fusil-harpon",
+            "Harpunenschleuder",
+            "Cañón arpón",
+            "鱼叉枪",
+        ],
+        "trident" => ["Trident", "Trident", "Dreizack", "Tridente", "三叉戟"],
+        "spear" => ["Spear", "Lance", "Speer", "Lanza", "长矛"],
+        _ => return None,
+    };
+    Some(match lang {
+        "fr" => row[1],
+        "de" => row[2],
+        "es" => row[3],
+        "zh" => row[4],
+        _ => row[0],
+    })
 }
 
 /// Replace `{name}` placeholders.
@@ -250,6 +328,28 @@ mod tests {
         assert_eq!(resolve("xx"), "en");
         assert_eq!(resolve("auto").len(), 2);
     }
+
+    #[test]
+        fn api_lang_maps_official_locales_only() {
+            assert_eq!(api_lang("fr"), Some("fr"));
+            assert_eq!(api_lang("de"), Some("de"));
+            assert_eq!(api_lang("es"), Some("es"));
+            assert_eq!(api_lang("zh"), Some("zh"));
+            assert_eq!(api_lang("en"), None);
+            assert_eq!(api_lang("it"), None);
+            assert_eq!(api_lang("ko"), None);
+        }
+
+        #[test]
+        fn loc_weapon_type_french_dagger() {
+            with_lang("fr", || {
+                assert_eq!(loc_weapon_type("Dagger"), "Dague");
+                assert_eq!(loc_weapon_types("Dagger / ShortBow"), "Dague / Arc court");
+            });
+            with_lang("en", || {
+                assert_eq!(loc_weapon_type("Dagger"), "Dagger");
+            });
+        }
 
     #[test]
     fn tf_replaces_named_placeholders() {
