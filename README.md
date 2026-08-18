@@ -37,17 +37,11 @@ Choya tab: talk through a plated build, pick a model, open the result onto Impro
 
 ## Download
 
-Prebuilt Nexus DLL from GitHub Releases:
+Always use the **latest** GitHub Release. These URLs do not include a version and stay correct after every publish:
 
-- [Latest release](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest)
-- [Direct DLL download](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/gw2_build_optimizer.dll)
-- [Checksum file](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/SHA256SUMS.txt)
-
-Current release (v1.2.4) DLL SHA256:
-
-```text
-171DC125C62D71DE90E97B5A31DC408CBDED0EF52E70D2136E78F3067D0A0FCA
-```
+- **[gw2_build_optimizer.dll](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/gw2_build_optimizer.dll)** — current Nexus addon
+- [SHA256SUMS.txt](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/SHA256SUMS.txt) — checksum for that DLL
+- [Latest release notes](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest)
 
 A source build writes:
 
@@ -76,7 +70,7 @@ target/release/gw2_build_optimizer.dll
 ## Install
 
 1. Install Nexus and launch GW2 once so the Nexus menu appears.
-2. Get `gw2_build_optimizer.dll` from a Release or from `cargo build --release`.
+2. Download [`gw2_build_optimizer.dll`](https://github.com/special-place-ai-heaven/GW2_Build_Optimizer/releases/latest/download/gw2_build_optimizer.dll) (or build with `cargo build --release`).
 3. Copy it into `C:\GAMES\Guild Wars 2\addons\` (see the Important note above).
 4. Restart Guild Wars 2. Nexus loads the addon at startup.
 
