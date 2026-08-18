@@ -789,6 +789,33 @@ pub fn select_gear_prefix(weights: &OptimizationWeights) -> GearPrefixMatch {
     }
 }
 
+/// Longest gear-prefix name mentioned in free text (`celestial` → `Celestial`).
+pub fn prefix_named_in_text(text: &str) -> Option<&'static str> {
+    let hay = format!(
+        " {} ",
+        text.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    ' '
+                }
+            })
+            .collect::<String>()
+    );
+    let mut best: Option<&'static str> = None;
+    for &(name, _) in GEAR_PROFILES {
+        let stem = name.trim_end_matches("'s").to_ascii_lowercase();
+        let pats = [format!(" {stem} "), format!(" {stem}s ")];
+        if pats.iter().any(|p| hay.contains(p.as_str()))
+            && best.map(|b| b.len()).unwrap_or(0) < name.len()
+        {
+            best = Some(name);
+        }
+    }
+    best
+}
+
 /// Euclidean magnitude of a 6-element vector.
 fn magnitude_6(v: &[f64; 6]) -> f64 {
     v.iter().map(|x| x * x).sum::<f64>().sqrt()
@@ -812,6 +839,18 @@ mod tests {
         assert_eq!(c.power, 1.0);
         assert_eq!(c.control, 0.0);
         assert_eq!(c.condition, 0.5);
+    }
+
+    #[test]
+    fn prefix_named_in_text_finds_celestial() {
+        assert_eq!(
+            prefix_named_in_text("celestial gear tempest support"),
+            Some("Celestial")
+        );
+        assert_eq!(
+            prefix_named_in_text("Optimize a power DPS build"),
+            None
+        );
     }
 
     #[test]

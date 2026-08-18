@@ -7,7 +7,9 @@ description: Release procedure for GW2 Build Optimizer — local DLL build and d
 
 This project ships as a single Windows DLL loaded by Nexus inside Guild Wars 2. There is no remote registry, no CI pipeline, and no released artifact other than the file you copy onto your own machine.
 
-Current version: **1.2.0** (see `Cargo.toml` `[workspace.package] version`).
+Current version: **1.2.4** (see `Cargo.toml` `[workspace.package] version`).
+
+Standing order: **every code fix is a patch release.** Build the DLL, copy it to `C:\GAMES\Guild Wars 2\addons\`, push, and `gh release create` with `gw2_build_optimizer.dll` + `SHA256SUMS.txt`. README Download URLs stay on `/releases/latest` — never paste a SHA into README.
 
 ## Pre-Release Checklist
 
@@ -70,5 +72,4 @@ Keep the previous `gw2_build_optimizer.dll` somewhere outside `target/` (which `
 
 - **No CI.** There is no GitHub Actions workflow that builds or tests on push. Run `cargo check` / `cargo test` locally.
 - **No `cargo publish`.** This is a `cdylib` for an addon manager, not a crate.
-- **No release tagging convention enforced.** Tag in git if you want a marker, but nothing depends on it.
-- **No auto-update.** Players (including you) replace the DLL manually.
+- **No auto-update.** Players replace the DLL from GitHub Releases or a local copy.

@@ -41,6 +41,8 @@ const CHAT_HISTORY_CAP: usize = 100;
 
 const AVATAR: f32 = 42.0;
 const AVATAR_GAP: f32 = 10.0;
+const COPY: f32 = 16.0;
+const COPY_GAP: f32 = 6.0;
 const BUBBLE_PAD: f32 = 10.0;
 const BUBBLE_ROUND: f32 = 14.0;
 const COMPOSER_H: f32 = 76.0;
@@ -124,8 +126,9 @@ fn wrap_text(ui: &Ui, text: &str, max_w: f32) -> (Vec<String>, f32, f32) {
     (lines, max_line_w.min(max_w), h.max(line_h))
 }
 
-fn bubble_size(ui: &Ui, text: &str, avail: f32) -> (Vec<String>, f32, f32) {
-    let max_text = ((avail - AVATAR - AVATAR_GAP - 24.0) * 0.78).max(72.0);
+fn bubble_size(ui: &Ui, text: &str, avail: f32, from_user: bool) -> (Vec<String>, f32, f32) {
+    let copy_slot = if from_user { COPY + COPY_GAP } else { 0.0 };
+    let max_text = ((avail - AVATAR - AVATAR_GAP - copy_slot - 24.0) * 0.78).max(72.0);
     let (lines, text_w, text_h) = wrap_text(ui, text, max_text);
     let bw = (text_w + BUBBLE_PAD * 2.0).clamp(48.0, max_text + BUBBLE_PAD * 2.0);
     let bh = (text_h + BUBBLE_PAD * 2.0).max(AVATAR * 0.65);
@@ -156,6 +159,17 @@ fn draw_bubble_rect(ui: &Ui, p: [f32; 2], bw: f32, bh: f32, from_user: bool) {
     dl.add_rect(p, [p[0] + bw, p[1] + bh], rim)
         .rounding(BUBBLE_ROUND)
         .build();
+}
+
+fn draw_copy_glyph(ui: &Ui, p: [f32; 2], size: f32, copied: bool) {
+    let dl = ui.get_window_draw_list();
+    let col = if copied { theme::GOLD } else { theme::MUTED };
+    let back = [p[0] + size * 0.28, p[1]];
+    let back_br = [p[0] + size, p[1] + size * 0.78];
+    let front = [p[0], p[1] + size * 0.22];
+    let front_br = [p[0] + size * 0.72, p[1] + size];
+    dl.add_rect(back, back_br, col).rounding(2.0).build();
+    dl.add_rect(front, front_br, col).rounding(2.0).build();
 }
 
 fn draw_bubble_text(ui: &Ui, p: [f32; 2], lines: &[String]) {
@@ -206,22 +220,45 @@ pub fn render_chat_bar(
                 let from_user = state.history[i].from_user;
                 let text = state.history[i].text.clone();
                 let open_result = state.history[i].open_result;
-                let (lines, bw, bh) = bubble_size(ui, &text, avail);
+                let (lines, bw, bh) = bubble_size(ui, &text, avail, from_user);
                 let origin = ui.cursor_screen_pos();
                 let bubble_h = bh.max(AVATAR);
                 ui.dummy([avail, bubble_h]);
 
-                let (av_x, bub_x) = if from_user {
+                let (av_x, bub_x, copy_x) = if from_user {
                     let av_x = origin[0] + avail - AVATAR;
-                    (av_x, av_x - AVATAR_GAP - bw)
+                    let copy_x = av_x - COPY_GAP - COPY;
+                    (av_x, copy_x - AVATAR_GAP - bw, Some(copy_x))
                 } else {
-                    (origin[0], origin[0] + AVATAR + AVATAR_GAP)
+                    (origin[0], origin[0] + AVATAR + AVATAR_GAP, None)
                 };
                 let av_y = origin[1];
                 let bub_y = origin[1];
 
                 if from_user {
                     icons::paint_avatar(ui, user_icon, [av_x, av_y], AVATAR, user_letter);
+                    if let Some(copy_x) = copy_x {
+                        let copy_y = av_y + (AVATAR - COPY) * 0.5;
+                        let key = format!("##msg{i}");
+                        let mut copied = state.copied_code.as_deref() == Some(key.as_str())
+                            && state.copied_frames > 0;
+                        ui.set_cursor_screen_pos([copy_x, copy_y]);
+                        if ui.invisible_button(&format!("##copy_msg{i}"), [COPY, COPY]) {
+                            if crate::clipboard::copy_text(&text) {
+                                state.copied_code = Some(key);
+                                state.copied_frames = 120;
+                                copied = true;
+                            }
+                        }
+                        if ui.is_item_hovered() {
+                            ui.tooltip_text(if copied {
+                                "Copied"
+                            } else {
+                                "Copy message"
+                            });
+                        }
+                        draw_copy_glyph(ui, [copy_x, copy_y], COPY, copied);
+                    }
                 } else {
                     theme::draw_choya_avatar(
                         ui,
@@ -255,7 +292,7 @@ pub fn render_chat_bar(
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| format!("Choya is thinking{dots}"));
-                let (lines, bw, bh) = bubble_size(ui, &line, avail);
+                let (lines, bw, bh) = bubble_size(ui, &line, avail, false);
                 let row_h = bh.max(AVATAR) + ROW_GAP;
                 let origin = ui.cursor_screen_pos();
                 ui.invisible_button("##talk_thinking", [avail, row_h]);

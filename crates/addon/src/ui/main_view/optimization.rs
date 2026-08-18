@@ -1457,10 +1457,86 @@ fn kitchen_brief(
 fn apply_radar_prefix(
     parsed: &mut gw2_optimizer::prompts::GeminiBuildResponse,
     weights: &OptimizationWeights,
+    order: &str,
 ) {
+    if let Some(named) = gw2_optimizer::scoring::prefix_named_in_text(order) {
+        parsed.stat_prefix = named.to_string();
+        return;
+    }
     parsed.stat_prefix = gw2_optimizer::scoring::select_gear_prefix(weights)
         .primary
         .to_string();
+}
+
+fn fill_holes_from_loadout(
+    parsed: &mut gw2_optimizer::prompts::GeminiBuildResponse,
+    current: &gw2_core::types::ResolvedBuild,
+) {
+    if parsed.specializations.is_empty() {
+        return;
+    }
+    for (spec_name, traits) in &mut parsed.specializations {
+        if traits.len() >= 3 {
+            continue;
+        }
+        let clean = spec_name.replace(" [E]", "");
+        let Some(cur) = current
+            .specializations
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(clean.trim()))
+        else {
+            continue;
+        };
+        let mut extras: Vec<(usize, String)> = cur
+            .traits_selected
+            .iter()
+            .filter(|t| t.selected && t.column < 3)
+            .map(|t| (t.column, t.name.clone()))
+            .collect();
+        for (col, opts) in cur.traits_available.iter().enumerate() {
+            if extras.iter().any(|(c, _)| *c == col) {
+                continue;
+            }
+            if let Some(o) = opts.iter().find(|o| o.selected) {
+                extras.push((col, o.name.clone()));
+            }
+        }
+        extras.sort_by_key(|(col, _)| *col);
+        for (_, name) in extras {
+            if traits.len() >= 3 {
+                break;
+            }
+            if !traits.iter().any(|t| t.eq_ignore_ascii_case(&name)) {
+                traits.push(name);
+            }
+        }
+    }
+
+    let blob = parsed.skills.join("\n").to_lowercase();
+    if !parsed
+        .skills
+        .iter()
+        .any(|s| s.get(..5).is_some_and(|h| h.eq_ignore_ascii_case("Heal:")))
+    {
+        if let Some(h) = &current.skills.heal {
+            parsed.skills.insert(0, format!("Heal: {}", h.name));
+        }
+    }
+    for u in current.skills.utilities.iter().flatten() {
+        if blob.contains(&u.name.to_lowercase()) {
+            continue;
+        }
+        parsed.skills.push(format!("Utility: {}", u.name));
+    }
+    if !parsed
+        .skills
+        .iter()
+        .any(|s| s.get(..6).is_some_and(|h| h.eq_ignore_ascii_case("Elite:")))
+    {
+        if let Some(e) = &current.skills.elite {
+            parsed.skills.push(format!("Elite: {}", e.name));
+        }
+    }
 }
 
 fn chat_display_text(explanation: &str, spec_count: usize, error_details: &[String]) -> String {
@@ -1514,7 +1590,12 @@ pub(super) fn format_provider_issue(err: &str, provider: &str, model: &str) -> S
 }
 
 fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -> bool {
-    v.errors.is_empty() && !v.specializations.is_empty()
+    v.errors.is_empty()
+        && v.specializations.len() == 3
+        && v.specializations.iter().all(|s| s.trait_ids.len() == 3)
+        && v.skills.heal.is_some()
+        && v.skills.elite.is_some()
+        && v.skills.utilities.iter().filter(|u| u.is_some()).count() == 3
 }
 
 fn summarize_suggestion(s: &crate::ui::comparison::BuildSuggestion) -> String {
@@ -1767,6 +1848,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     let token = state.cancel_token.clone();
     let db_clone = state.main.game_db.clone();
     let weights = state.main.weights.clone();
+    let loadout = state.main.current_build.clone();
     let chat_balance_ctx = BalanceContext::new(state.main.game_mode.clone());
 
     std::thread::spawn(move || {
@@ -1855,7 +1937,10 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             }
                         }
                     };
-                    apply_radar_prefix(&mut parsed, &weights);
+                    if let Some(ref cur) = loadout {
+                        fill_holes_from_loadout(&mut parsed, cur);
+                    }
+                    apply_radar_prefix(&mut parsed, &weights, &message);
                     Ok(parsed)
                 } else {
                     Err("Game data not loaded".into())
@@ -2010,8 +2095,9 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_radar_prefix, chat_display_text, format_provider_issue, gemini_from_validated,
-        keep_equipped_weapons, kitchen_brief, plate_is_servable, suggestion_to_chat_code,
+        apply_radar_prefix, chat_display_text, fill_holes_from_loadout, format_provider_issue,
+        gemini_from_validated, keep_equipped_weapons, kitchen_brief, plate_is_servable,
+        suggestion_to_chat_code,
     };
     use crate::ui::comparison::BuildSuggestion;
     use base64::Engine as _;
@@ -2186,27 +2272,143 @@ mod tests {
     }
 
     #[test]
-    fn plate_is_servable_needs_specs_and_no_errors() {
+    fn plate_is_servable_needs_full_bar() {
         let mut v = gw2_optimizer::validation::ValidatedBuild::default();
         assert!(!plate_is_servable(&v));
-        v.specializations
-            .push(gw2_optimizer::validation::ValidatedSpec {
-                spec_id: 1,
-                name: "Arms".into(),
-                elite: false,
-                trait_ids: vec![],
-                trait_names: vec![],
-                all_trait_ids: vec![],
-            });
+        let spec = |id, name: &str| gw2_optimizer::validation::ValidatedSpec {
+            spec_id: id,
+            name: name.into(),
+            elite: id == 3,
+            trait_ids: vec![id, id + 1, id + 2],
+            trait_names: vec!["a".into(), "b".into(), "c".into()],
+            all_trait_ids: vec![id, id + 1, id + 2],
+        };
+        v.specializations = vec![spec(1, "Water"), spec(2, "Arcane"), spec(3, "Tempest")];
+        v.skills.heal = Some((1, "H".into()));
+        v.skills.elite = Some((9, "E".into()));
+        v.skills.utilities = vec![
+            Some((2, "U1".into())),
+            Some((3, "U2".into())),
+            Some((4, "U3".into())),
+        ];
         assert!(plate_is_servable(&v));
-        v.errors.push(gw2_optimizer::validation::ValidationReject {
-            code: gw2_optimizer::validation::RejectCode::SpecNotFound {
-                spec: "Nope".into(),
-                profession: "Warrior".into(),
-            },
-            detail: "nope".into(),
-        });
+        v.skills.utilities.pop();
         assert!(!plate_is_servable(&v));
+        v.skills.utilities.push(Some((4, "U3".into())));
+        v.specializations[1].trait_ids.pop();
+        assert!(!plate_is_servable(&v));
+    }
+
+    #[test]
+    fn apply_radar_prefix_honors_celestial_in_order() {
+        let weights = gw2_optimizer::scoring::OptimizationWeights::preset_power_dps();
+        let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
+            stat_prefix: "Harrier's".into(),
+            ..Default::default()
+        };
+        apply_radar_prefix(
+            &mut parsed,
+            &weights,
+            "I want celestial gear tempest support",
+        );
+        assert_eq!(parsed.stat_prefix, "Celestial");
+    }
+
+    #[test]
+    fn apply_radar_prefix_uses_radar_when_order_silent() {
+        let weights = gw2_optimizer::scoring::OptimizationWeights::preset_power_dps();
+        let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
+            stat_prefix: "Celestial".into(),
+            ..Default::default()
+        };
+        apply_radar_prefix(&mut parsed, &weights, "make me a power build");
+        assert_eq!(
+            parsed.stat_prefix,
+            gw2_optimizer::scoring::select_gear_prefix(&weights).primary
+        );
+        assert_ne!(parsed.stat_prefix, "Celestial");
+    }
+
+    #[test]
+    fn fill_holes_from_loadout_adds_missing_trait_and_util() {
+        let current = gw2_core::types::ResolvedBuild {
+            specializations: vec![gw2_core::types::ResolvedSpec {
+                id: 41,
+                name: "Arcane".into(),
+                elite: false,
+                traits_selected: vec![
+                    gw2_core::types::ResolvedTrait {
+                        id: 1,
+                        name: "Arcane Precision".into(),
+                        description: String::new(),
+                        column: 0,
+                        selected: true,
+                    },
+                    gw2_core::types::ResolvedTrait {
+                        id: 2,
+                        name: "Arcane Resurrection".into(),
+                        description: String::new(),
+                        column: 1,
+                        selected: true,
+                    },
+                    gw2_core::types::ResolvedTrait {
+                        id: 3,
+                        name: "Evasive Arcana".into(),
+                        description: String::new(),
+                        column: 2,
+                        selected: true,
+                    },
+                ],
+                traits_available: vec![],
+            }],
+            skills: gw2_core::types::ResolvedSkills {
+                heal: Some(gw2_core::types::SkillInfo {
+                    id: 10,
+                    name: "Wash the Pain Away!".into(),
+                }),
+                utilities: vec![
+                    Some(gw2_core::types::SkillInfo {
+                        id: 11,
+                        name: "Aftershock!".into(),
+                    }),
+                    Some(gw2_core::types::SkillInfo {
+                        id: 12,
+                        name: "Eye of the Storm!".into(),
+                    }),
+                    Some(gw2_core::types::SkillInfo {
+                        id: 13,
+                        name: "Arcane Blast".into(),
+                    }),
+                ],
+                elite: Some(gw2_core::types::SkillInfo {
+                    id: 14,
+                    name: "Rebound!".into(),
+                }),
+            },
+            ..Default::default()
+        };
+        let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
+            specializations: vec![(
+                "Arcane".into(),
+                vec!["Arcane Resurrection".into(), "Evasive Arcana".into()],
+            )],
+            skills: vec![
+                "Heal: Wash the Pain Away!".into(),
+                "Utils: Aftershock!, Eye of the Storm!".into(),
+                "Elite: Rebound!".into(),
+            ],
+            ..Default::default()
+        };
+        fill_holes_from_loadout(&mut parsed, &current);
+        assert_eq!(parsed.specializations[0].1.len(), 3);
+        assert!(parsed.specializations[0]
+            .1
+            .iter()
+            .any(|t| t == "Arcane Precision"));
+        assert!(parsed
+            .skills
+            .iter()
+            .any(|s| s.contains("Arcane Blast")));
     }
 
     #[test]
@@ -2223,21 +2425,6 @@ mod tests {
     fn illegal_plate_keeps_validation_in_chat() {
         let t = chat_display_text("Nope", 2, &["Expected 3 specializations, got 2".into()]);
         assert!(t.contains("Expected 3 specializations, got 2"));
-    }
-
-    #[test]
-    fn apply_radar_prefix_overwrites_llm_choice() {
-        let weights = gw2_optimizer::scoring::OptimizationWeights::preset_power_dps();
-        let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
-            stat_prefix: "Celestial".into(),
-            ..Default::default()
-        };
-        apply_radar_prefix(&mut parsed, &weights);
-        assert_eq!(
-            parsed.stat_prefix,
-            gw2_optimizer::scoring::select_gear_prefix(&weights).primary
-        );
-        assert_ne!(parsed.stat_prefix, "Celestial");
     }
 
     #[test]
