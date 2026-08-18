@@ -411,6 +411,15 @@ fn validate_specializations(
             }
         }
 
+        complete_major_trait_columns(
+            &major_traits,
+            &mut resolved_trait_ids,
+            &mut resolved_trait_names,
+            &mut used_tiers,
+            &spec.name,
+            &mut result.warnings,
+        );
+
         // Collect minor traits (always active)
         let minor_ids: Vec<u32> = spec.minor_traits.clone();
         let mut all_trait_ids = minor_ids;
@@ -878,6 +887,52 @@ fn find_trait_by_name<'a>(name: &str, major_traits: &[&'a GW2Trait]) -> Option<&
         .copied()
 }
 
+/// Fill empty Adept/Master/Grandmaster columns so a nearly-complete LLM plate is still legal.
+/// Picks the lowest-order major in the missing tier (top row). Orders Adept → Master → Grandmaster.
+fn complete_major_trait_columns(
+    major_traits: &[&GW2Trait],
+    resolved_ids: &mut Vec<u32>,
+    resolved_names: &mut Vec<String>,
+    used_tiers: &mut HashMap<u32, String>,
+    spec_name: &str,
+    warnings: &mut Vec<String>,
+) {
+    for tier in [1u32, 2, 3] {
+        if used_tiers.contains_key(&tier) {
+            continue;
+        }
+        let Some(t) = major_traits
+            .iter()
+            .filter(|t| t.tier == tier)
+            .min_by_key(|t| (t.order, t.id))
+        else {
+            continue;
+        };
+        used_tiers.insert(tier, t.name.clone());
+        resolved_ids.push(t.id);
+        resolved_names.push(t.name.clone());
+        warnings.push(format!(
+            "Spec '{}': filled {} with '{}'",
+            spec_name,
+            tier_label(tier),
+            t.name
+        ));
+    }
+    let mut ordered_ids = Vec::with_capacity(resolved_ids.len());
+    let mut ordered_names = Vec::with_capacity(resolved_names.len());
+    for tier in [1u32, 2, 3] {
+        if let Some(t) = major_traits
+            .iter()
+            .find(|t| t.tier == tier && resolved_ids.contains(&t.id))
+        {
+            ordered_ids.push(t.id);
+            ordered_names.push(t.name.clone());
+        }
+    }
+    *resolved_ids = ordered_ids;
+    *resolved_names = ordered_names;
+}
+
 /// Find a skill by name (case-insensitive) and validate its slot type.
 fn find_skill_by_name(
     name: &str,
@@ -1294,6 +1349,90 @@ mod tests {
             "5-char needle must match via contains fallback"
         );
         assert_eq!(result.unwrap().id, 2);
+    }
+
+    fn arcane_ele_db() -> GameDb {
+        let mut db = empty_db_with_itemstats(vec![]);
+        db.professions.insert(
+            "Elementalist".into(),
+            gw2_api::models::Profession {
+                id: "Elementalist".into(),
+                name: "Elementalist".into(),
+                code: None,
+                specializations: vec![41],
+                weapons: std::collections::HashMap::new(),
+                training: vec![],
+                skills_by_palette: vec![],
+                icon: None,
+                icon_big: None,
+            },
+        );
+        db.specializations.insert(
+            41,
+            Specialization {
+                id: 41,
+                name: "Arcane".into(),
+                profession: "Elementalist".into(),
+                elite: false,
+                minor_traits: vec![],
+                major_traits: vec![1, 2, 3],
+                weapon_trait: None,
+                icon: None,
+                background: None,
+                profession_icon: None,
+                profession_icon_big: None,
+            },
+        );
+        let mut t1 = make_trait(1, "Arcane Precision");
+        t1.tier = 1;
+        t1.specialization = 41;
+        let mut t2 = make_trait(2, "Arcane Resurrection");
+        t2.tier = 2;
+        t2.specialization = 41;
+        let mut t3 = make_trait(3, "Evasive Arcana");
+        t3.tier = 3;
+        t3.specialization = 41;
+        db.traits.insert(1, t1);
+        db.traits.insert(2, t2);
+        db.traits.insert(3, t3);
+        db.traits_by_spec.insert(41, vec![1, 2, 3]);
+        db
+    }
+
+    #[test]
+    fn validate_gemini_build_fills_missing_arcane_trait_column() {
+        // Choya named Arcane but only two traits (the live "got 2" reject).
+        // Fill Adept from game data so the plate is legal.
+        let db = arcane_ele_db();
+        let response = GeminiBuildResponse {
+            specializations: vec![(
+                "Arcane".into(),
+                vec!["Arcane Resurrection".into(), "Evasive Arcana".into()],
+            )],
+            ..Default::default()
+        };
+        let result = validate_gemini_build(&response, &db, "Elementalist");
+        assert_eq!(result.specializations[0].trait_ids, vec![1, 2, 3]);
+        assert_eq!(
+            result.specializations[0].trait_names,
+            vec![
+                "Arcane Precision".to_string(),
+                "Arcane Resurrection".to_string(),
+                "Evasive Arcana".to_string()
+            ]
+        );
+        assert!(
+            !result
+                .errors
+                .iter()
+                .any(|e| matches!(e.code, RejectCode::IncompleteSpecTraits { .. })),
+            "filled plate must not reject traits: {:?}",
+            result.errors
+        );
+        assert!(result
+            .warnings
+            .iter()
+            .any(|w| w.contains("Arcane Precision")));
     }
 
     // ── validate_gear_prefix() determinism + tie-break ───────────────────────
