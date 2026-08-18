@@ -1,11 +1,20 @@
 //! Interactive 6-axis radar chart for optimization weights and build comparison.
 //! Uses ImGui DrawList for custom rendering with dual-polygon overlay support.
 
+use gw2_core::i18n::t;
 use gw2_optimizer::scoring::{
-    OptimizationWeights, AXIS_LABELS, CONDI_DPS_NORM, EFFECTIVE_HEALTH_NORM, HEALING_NORM,
-    STRIKE_DPS_NORM,
+    OptimizationWeights, CONDI_DPS_NORM, EFFECTIVE_HEALTH_NORM, HEALING_NORM, STRIKE_DPS_NORM,
 };
 use nexus::imgui::Ui;
+
+const AXIS_I18N: [&str; 6] = [
+    "axis.power",
+    "axis.condition",
+    "axis.boon",
+    "axis.heal",
+    "axis.sustain",
+    "axis.control",
+];
 
 /// Axis colors (RGBA) for each of the 6 axes.
 const AXIS_COLORS: [[f32; 4]; 6] = [
@@ -181,7 +190,7 @@ pub fn render_radar_chart(
     // Axis labels + percentage
     for i in 0..NUM_AXES {
         let label_pos = axis_point(center, radius + 16.0, i, 1.0);
-        let label = format!("{} {:.0}%", AXIS_LABELS[i], w[i] * 100.0);
+        let label = format!("{} {:.0}%", t(AXIS_I18N[i]), w[i] * 100.0);
         let text_size = ui.calc_text_size(&label);
         draw_list.add_text(
             [
@@ -280,7 +289,16 @@ pub fn render_presets(ui: &Ui) -> Option<OptimizationWeights> {
         if i % 2 == 1 {
             ui.same_line();
         }
-        if ui.button_with_size(name, [btn_width, 0.0]) {
+        let label = match *name {
+            "Power DPS" => t("preset.power_dps"),
+            "Condi DPS" => t("preset.condi_dps"),
+            "Tank" => t("preset.tank"),
+            "Healer" => t("preset.healer"),
+            "Balanced" => t("preset.balanced"),
+            "Celestial" => t("preset.celestial"),
+            other => other.to_string(),
+        };
+        if ui.button_with_size(&format!("{label}##preset_{i}"), [btn_width, 0.0]) {
             result = Some(preset_fn());
         }
     }
@@ -290,12 +308,12 @@ pub fn render_presets(ui: &Ui) -> Option<OptimizationWeights> {
 /// Render the legend showing what each polygon color represents.
 pub fn render_legend(ui: &Ui, show_current: bool, show_optimized: bool) {
     if show_current {
-        ui.text_colored(CURRENT_OUTLINE, "-- Current Build");
+        ui.text_colored(CURRENT_OUTLINE, t("legend.current"));
     }
     if show_optimized {
-        ui.text_colored(OPTIMIZED_OUTLINE, "-- Optimized Build");
+        ui.text_colored(OPTIMIZED_OUTLINE, t("legend.optimized"));
     }
-    ui.text_colored(WEIGHTS_OUTLINE, "-- Target Weights");
+    ui.text_colored(WEIGHTS_OUTLINE, t("legend.weights"));
 }
 
 /// Compute 6-axis performance values from CombatMetrics (i32 UI type).

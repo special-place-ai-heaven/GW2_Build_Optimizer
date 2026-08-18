@@ -71,12 +71,14 @@ pub(in crate::ui::main_view) fn render_save_build_ui(ui: &Ui, state: &mut AddonS
         match storage.save_new(&saved) {
             Ok(()) => {
                 state.main.save_status = Some(tf("fmt.saved", &[("name", &saved.name)]));
+                state.main.save_status_err = false;
                 state.main.save_status_frames = 0;
                 state.main.save_name_input.clear();
                 state.main.saved_builds_loaded = false; // force refresh
             }
             Err(e) => {
                 state.main.save_status = Some(tf("fmt.save_failed", &[("err", &e.to_string())]));
+                state.main.save_status_err = true;
                 state.main.save_status_frames = 0;
             }
         }
@@ -84,7 +86,7 @@ pub(in crate::ui::main_view) fn render_save_build_ui(ui: &Ui, state: &mut AddonS
 
     if let Some(ref status) = state.main.save_status {
         ui.same_line();
-        if status.starts_with("Save failed") {
+        if state.main.save_status_err {
             ui.text_colored(theme::ERR, status);
         } else {
             ui.text_colored(theme::OPTIMIZED, status);
@@ -103,17 +105,17 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
 
     build_display::render_card_header(
         ui,
-        &format!("SAVED BUILDS ({})", state.main.saved_builds.len()),
+        &tf(
+            "fmt.saved_builds",
+            &[("n", &state.main.saved_builds.len().to_string())],
+        ),
         theme::GOLD,
     );
 
     if state.main.saved_builds.is_empty() {
         ui.spacing();
-        ui.text_colored(theme::MUTED, "No saved builds yet.");
-        ui.text_colored(
-            theme::MUTED,
-            "Optimize a build, then use Save to store it here.",
-        );
+        ui.text_colored(theme::MUTED, t("save.none"));
+        ui.text_colored(theme::MUTED, t("save.hint"));
         return;
     }
 
@@ -142,24 +144,25 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
         // Name + action buttons on one line
         ui.text_colored(theme::CURRENT, name);
         ui.same_line();
-        if theme::gold_button_sized(ui, format!("Load##load_{}", i), [50.0, 0.0]) {
+        if theme::gold_button_sized(ui, format!("{}##load_{}", t("btn.load"), i), [50.0, 0.0]) {
             load_idx = Some(i);
         }
         ui.same_line();
 
         // Delete with confirmation
         if state.main.confirm_delete == Some(i) {
-            ui.text_colored(theme::WARN, "Delete?");
+            ui.text_colored(theme::WARN, t("save.delete_q"));
             ui.same_line();
-            if ui.small_button(format!("Yes##confirm_del_{}", i)) {
+            if ui.small_button(format!("{}##confirm_del_{}", t("btn.yes"), i)) {
                 request_delete = Some(i);
                 state.main.confirm_delete = None;
             }
             ui.same_line();
-            if ui.small_button(format!("No##cancel_del_{}", i)) {
+            if ui.small_button(format!("{}##cancel_del_{}", t("btn.no"), i)) {
                 state.main.confirm_delete = None;
             }
-        } else if theme::gold_button_sized(ui, format!("Delete##del_{}", i), [50.0, 0.0]) {
+        } else if theme::gold_button_sized(ui, format!("{}##del_{}", t("btn.delete"), i), [50.0, 0.0])
+        {
             state.main.confirm_delete = Some(i);
         }
 
@@ -205,7 +208,7 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
                 }
             }
             Err(e) => {
-                state.main.error = Some(format!("Delete failed: {}", e));
+                state.main.error = Some(tf("fmt.err_delete", &[("err", &e.to_string())]));
             }
         }
     }

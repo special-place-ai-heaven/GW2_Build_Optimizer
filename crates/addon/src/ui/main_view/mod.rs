@@ -577,6 +577,14 @@ fn apply_role(state: &mut AddonState, role: RoleObjective) {
     state.main.comparison.error = None;
 }
 
+pub(crate) fn scale_i18n_key(tier: CombatTier) -> &'static str {
+    match tier {
+        CombatTier::Solo => "scale.roam",
+        CombatTier::Party => "scale.havoc",
+        CombatTier::Squad => "scale.cloud",
+    }
+}
+
 pub(crate) fn role_i18n_key(role: RoleObjective) -> &'static str {
     match role {
         RoleObjective::WvWRoamer => "role.roamer",
@@ -869,7 +877,7 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         format!(
             "{} · {} · {}",
             state.main.game_mode.label(),
-            state.main.wvw_combat_tier.label(),
+            t(scale_i18n_key(state.main.wvw_combat_tier)),
             role_bit
         )
     } else {

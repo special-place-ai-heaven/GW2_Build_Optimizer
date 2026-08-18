@@ -252,30 +252,32 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
 
     // Provider-specific help text and URL
-    let (help_text, url, url_instructions) = match state.config.active_provider {
+    let (help_key, url, next_key) = match state.config.active_provider {
         LlmProvider::Gemini => (
-            "Get a free Gemini API key from Google AI Studio:",
+            "setup.gemini_help",
             "https://aistudio.google.com/apikey",
-            "Click 'Create API key', select any project, and copy the key.",
+            "setup.gemini_next",
         ),
         LlmProvider::OpenAI => (
-            "Get an OpenAI API key from the OpenAI platform:",
+            "setup.openai_help",
             "https://platform.openai.com/api-keys",
-            "Click 'Create new secret key', name it, and copy the key.",
+            "setup.openai_next",
         ),
         LlmProvider::Anthropic => (
-            "Get an Anthropic API key from the Anthropic console:",
+            "setup.anthropic_help",
             "https://console.anthropic.com/settings/keys",
-            "Click 'Create Key', name it, and copy the key.",
+            "setup.anthropic_next",
         ),
         LlmProvider::OpenRouter => (
-            "Get an OpenRouter API key (one key, hundreds of models):",
+            "setup.openrouter_help",
             "https://openrouter.ai/keys",
-            "Click 'Create Key', name it, and copy the key. You can pre-load credits at openrouter.ai/credits.",
+            "setup.openrouter_next",
         ),
     };
+    let help_text = t(help_key);
+    let url_instructions = t(next_key);
 
-    ui.text_wrapped(help_text);
+    ui.text_wrapped(&help_text);
     ui.spacing();
 
     let mut url_buf = String::from(url);
@@ -445,7 +447,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                 state.setup.download_progress = Some(DownloadState {
                     current_step: 0,
                     total_steps: 9,
-                    step_name: "Starting...".into(),
+                    step_name: t("status.starting"),
                     inner_done: 0,
                     inner_total: 0,
                     done: false,

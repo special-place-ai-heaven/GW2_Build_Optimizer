@@ -2,6 +2,7 @@
 
 use nexus::imgui::Ui;
 
+use gw2_core::i18n::{t, tf};
 use gw2_core::types::{CombatMetrics, ResolvedBuild, RotationBreakdown, StatBlock};
 
 // ─── Color palette ───
@@ -170,7 +171,7 @@ pub fn render_build_card_no_specs(
 #[allow(dead_code)]
 pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::BuildSuggestion) {
     // ── Specializations Card ──
-    render_card_section(ui, "SPECIALIZATIONS", |ui| {
+    render_card_section(ui, &t("section.specializations"), |ui| {
         for (name, traits) in &suggestion.specializations {
             ui.text_colored(SPEC_COLOR, format!("  {}", name));
             if !traits.is_empty() {
@@ -180,7 +181,7 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
     });
 
     // ── Skills Card ──
-    render_card_section(ui, "SKILLS", |ui| {
+    render_card_section(ui, &t("section.skills"), |ui| {
         let parsed = crate::ui::gear_diff::parse_suggestion_skills(&suggestion.skills);
         render_skill_bar(
             ui,
@@ -195,47 +196,47 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
     });
 
     // ── Weapons Card ──
-    render_card_section(ui, "WEAPONS", |ui| {
+    render_card_section(ui, &t("section.weapons"), |ui| {
         for weapon in &suggestion.weapons {
             ui.text_colored(VALUE_COLOR, format!("  {}", weapon));
         }
         if !suggestion.sigils.is_empty() {
             ui.text_colored(
                 DIM_COLOR,
-                format!("  Sigils: {}", suggestion.sigils.join(", ")),
+                format!("  {}", tf("fmt.sigils", &[("list", &suggestion.sigils.join(", "))])),
             );
         }
     });
 
     // ── Gear Card ──
-    render_card_section(ui, "GEAR", |ui| {
+    render_card_section(ui, &t("section.gear"), |ui| {
         if !suggestion.stat_prefix.is_empty() {
-            render_label_value(ui, "Prefix", &suggestion.stat_prefix);
+            render_label_value(ui, &t("slot.prefix"), &suggestion.stat_prefix);
         }
         if !suggestion.rune.is_empty() {
-            render_label_value_colored(ui, "Rune", &suggestion.rune, GEAR_COLOR);
+            render_label_value_colored(ui, &t("slot.rune"), &suggestion.rune, GEAR_COLOR);
         }
         if !suggestion.relic.is_empty() {
-            render_label_value_colored(ui, "Relic", &suggestion.relic, GEAR_COLOR);
+            render_label_value_colored(ui, &t("slot.relic"), &suggestion.relic, GEAR_COLOR);
         }
     });
 
     // ── Stats Card ──
     if let Some(ref s) = suggestion.estimated_stats {
-        render_card_section(ui, "STATS", |ui| {
+        render_card_section(ui, &t("section.stats"), |ui| {
             ui.columns(2, "##sug_stats", false);
             let rows = [
-                ("Power", s.power),
-                ("Precision", s.precision),
-                ("Toughness", s.toughness),
-                ("Vitality", s.vitality),
-                ("Condi Dmg", s.condition_damage),
-                ("Ferocity", s.ferocity),
-                ("Healing", s.healing_power),
-                ("Expertise", s.expertise),
+                ("stat.power", s.power),
+                ("stat.precision", s.precision),
+                ("stat.toughness", s.toughness),
+                ("stat.vitality", s.vitality),
+                ("stat.condi", s.condition_damage),
+                ("stat.ferocity", s.ferocity),
+                ("stat.healing", s.healing_power),
+                ("stat.expertise", s.expertise),
             ];
-            for (name, val) in &rows {
-                ui.text_colored(LABEL_COLOR, format!("  {}: ", name));
+            for (key, val) in &rows {
+                ui.text_colored(LABEL_COLOR, format!("  {}: ", t(key)));
                 ui.same_line();
                 ui.text_colored(VALUE_COLOR, format!("{}", val));
                 ui.next_column();
@@ -244,8 +245,15 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
             ui.text_colored(
                 DIM_COLOR,
                 format!(
-                    "  Crit {:.1}% | HP {} | Armor {}",
-                    s.crit_chance, s.health, s.armor
+                    "  {}",
+                    tf(
+                        "fmt.crit_hp_armor",
+                        &[
+                            ("crit", &format!("{:.1}", s.crit_chance)),
+                            ("hp", &s.health.to_string()),
+                            ("armor", &s.armor.to_string()),
+                        ],
+                    )
                 ),
             );
         });
@@ -384,7 +392,7 @@ fn render_stance_tabs(
     if names.is_empty() {
         return None;
     }
-    ui.text_colored(LABEL_COLOR, "Stances");
+    ui.text_colored(LABEL_COLOR, t("slot.stances"));
     let n = names.len();
     let mut selected = STANCE_PREVIEW.with(|c| {
         let v = c.get();
@@ -451,7 +459,7 @@ fn render_skill_bar(
     id_suffix: &str,
 ) {
     let kit = render_stance_tabs(ui, db, stances, id_suffix);
-    render_slash_list(ui, "Pets", pets, db);
+    render_slash_list(ui, &t("slot.pets"), pets, db);
 
     let (heal, utilities, elite) = match kit {
         Some((h, u, e)) => (h, u, e),
@@ -460,12 +468,17 @@ fn render_skill_bar(
     let u1 = utilities.first().map(|s| s.as_str()).unwrap_or("");
     let u2 = utilities.get(1).map(|s| s.as_str()).unwrap_or("");
     let u3 = utilities.get(2).map(|s| s.as_str()).unwrap_or("");
+    let l_heal = t("slot.heal");
+    let l_u1 = t("slot.util1");
+    let l_u2 = t("slot.util2");
+    let l_u3 = t("slot.util3");
+    let l_elite = t("slot.elite");
     let slots = [
-        ("Heal", heal.as_str(), crate::ui::theme::HEAL_RIM),
-        ("Util 1", u1, crate::ui::theme::GOLD_DIM),
-        ("Util 2", u2, crate::ui::theme::GOLD_DIM),
-        ("Util 3", u3, crate::ui::theme::GOLD_DIM),
-        ("Elite", elite.as_str(), crate::ui::theme::ELITE_RIM),
+        (l_heal.as_str(), heal.as_str(), crate::ui::theme::HEAL_RIM),
+        (l_u1.as_str(), u1, crate::ui::theme::GOLD_DIM),
+        (l_u2.as_str(), u2, crate::ui::theme::GOLD_DIM),
+        (l_u3.as_str(), u3, crate::ui::theme::GOLD_DIM),
+        (l_elite.as_str(), elite.as_str(), crate::ui::theme::ELITE_RIM),
     ];
     let avail = ui.content_region_avail()[0].max(1.0);
     let gap = 5.0;
@@ -560,7 +573,7 @@ pub fn render_build_skills(
     build: &ResolvedBuild,
     db: Option<&gw2_optimizer::gamedb::GameDb>,
 ) {
-    render_card_section(ui, "SKILLS", |ui| {
+    render_card_section(ui, &t("section.skills"), |ui| {
         let heal = build
             .skills
             .heal
@@ -602,7 +615,7 @@ pub fn render_build_weapons(
     build: &ResolvedBuild,
     db: Option<&gw2_optimizer::gamedb::GameDb>,
 ) {
-    render_card_section(ui, "WEAPONS", |ui| {
+    render_card_section(ui, &t("section.weapons"), |ui| {
         for set in &build.weapons {
             let mut parts = Vec::new();
             if let Some(ref mh) = set.main_hand {
@@ -615,7 +628,7 @@ pub fn render_build_weapons(
                 render_label_value(ui, &set.label, &parts.join(" / "));
             }
             for sigil in &set.sigils {
-                render_label_value_inspect(ui, "Sigil", &sigil.name, db);
+                render_label_value_inspect(ui, &t("slot.sigil"), &sigil.name, db);
             }
         }
     });
@@ -627,7 +640,7 @@ pub fn render_build_gear(
     build: &ResolvedBuild,
     db: Option<&gw2_optimizer::gamedb::GameDb>,
 ) {
-    render_card_section(ui, "GEAR", |ui| {
+    render_card_section(ui, &t("section.gear"), |ui| {
         if !build.armor.is_empty() {
             let mut prefixes: Vec<&str> = build
                 .armor
@@ -638,26 +651,31 @@ pub fn render_build_gear(
             prefixes.sort();
             prefixes.dedup();
             let prefix_str = if prefixes.len() <= 1 {
-                prefixes.first().copied().unwrap_or("(none)").to_string()
+                prefixes.first().copied().unwrap_or("").to_string()
             } else {
-                format!("Mixed ({})", prefixes.join(", "))
+                tf("fmt.mixed", &[("list", &prefixes.join(", "))])
             };
-            render_label_value(ui, "Prefix", &prefix_str);
+            let prefix_str = if prefix_str.is_empty() {
+                t("label.none")
+            } else {
+                prefix_str
+            };
+            render_label_value(ui, &t("slot.prefix"), &prefix_str);
         }
         if let Some(ref r) = build.rune {
-            ui.text_colored(LABEL_COLOR, "  Rune: ");
+            ui.text_colored(LABEL_COLOR, format!("  {}: ", t("slot.rune")));
             ui.same_line();
             ui.text_colored(GEAR_COLOR, &r.name);
             crate::ui::comparison::inspect_if_hovered(ui, &r.name, db);
         }
         if let Some(ref r) = build.relic {
-            ui.text_colored(LABEL_COLOR, "  Relic: ");
+            ui.text_colored(LABEL_COLOR, format!("  {}: ", t("slot.relic")));
             ui.same_line();
             ui.text_colored(GEAR_COLOR, &r.name);
             crate::ui::comparison::inspect_if_hovered(ui, &r.name, db);
         }
         if let Some(ref a) = build.pvp_amulet {
-            render_label_value_colored(ui, "Amulet", &a.name, GEAR_COLOR);
+            render_label_value_colored(ui, &t("slot.amulet"), &a.name, GEAR_COLOR);
         }
     });
 }
@@ -666,20 +684,20 @@ pub fn render_build_gear(
 /// Color-coded against compare_stats if provided.
 pub fn render_build_stats(ui: &Ui, stats: Option<&StatBlock>, compare_stats: Option<&StatBlock>) {
     if let Some(s) = stats {
-        render_card_section(ui, "STATS", |ui| {
+        render_card_section(ui, &t("section.stats"), |ui| {
             let cmp = compare_stats.cloned().unwrap_or_default();
             let rows = [
-                ("Power", s.power, cmp.power),
-                ("Precision", s.precision, cmp.precision),
-                ("Toughness", s.toughness, cmp.toughness),
-                ("Vitality", s.vitality, cmp.vitality),
-                ("Condi Dmg", s.condition_damage, cmp.condition_damage),
-                ("Ferocity", s.ferocity, cmp.ferocity),
-                ("Healing", s.healing_power, cmp.healing_power),
-                ("Expertise", s.expertise, cmp.expertise),
+                ("stat.power", s.power, cmp.power),
+                ("stat.precision", s.precision, cmp.precision),
+                ("stat.toughness", s.toughness, cmp.toughness),
+                ("stat.vitality", s.vitality, cmp.vitality),
+                ("stat.condi", s.condition_damage, cmp.condition_damage),
+                ("stat.ferocity", s.ferocity, cmp.ferocity),
+                ("stat.healing", s.healing_power, cmp.healing_power),
+                ("stat.expertise", s.expertise, cmp.expertise),
             ];
-            for (name, val, cmp_val) in &rows {
-                ui.text_colored(LABEL_COLOR, format!("  {}: ", name));
+            for (key, val, cmp_val) in &rows {
+                ui.text_colored(LABEL_COLOR, format!("  {}: ", t(key)));
                 ui.same_line();
                 let color = if compare_stats.is_some() {
                     stat_color(*val, *cmp_val)
@@ -691,8 +709,15 @@ pub fn render_build_stats(ui: &Ui, stats: Option<&StatBlock>, compare_stats: Opt
             ui.text_colored(
                 DIM_COLOR,
                 format!(
-                    "  Crit {:.1}% | HP {} | Armor {}",
-                    s.crit_chance, s.health, s.armor
+                    "  {}",
+                    tf(
+                        "fmt.crit_hp_armor",
+                        &[
+                            ("crit", &format!("{:.1}", s.crit_chance)),
+                            ("hp", &s.health.to_string()),
+                            ("armor", &s.armor.to_string()),
+                        ],
+                    )
                 ),
             );
         });
@@ -705,7 +730,7 @@ pub fn render_suggestion_skills(
     suggestion: &super::super::comparison::BuildSuggestion,
     db: Option<&gw2_optimizer::gamedb::GameDb>,
 ) {
-    render_card_section(ui, "SKILLS", |ui| {
+    render_card_section(ui, &t("section.skills"), |ui| {
         let parsed = crate::ui::gear_diff::parse_suggestion_skills(&suggestion.skills);
         render_skill_bar(
             ui,
@@ -726,12 +751,12 @@ pub fn render_suggestion_weapons(
     suggestion: &super::super::comparison::BuildSuggestion,
     db: Option<&gw2_optimizer::gamedb::GameDb>,
 ) {
-    render_card_section(ui, "WEAPONS", |ui| {
+    render_card_section(ui, &t("section.weapons"), |ui| {
         for weapon in &suggestion.weapons {
             ui.text_colored(VALUE_COLOR, format!("  {}", weapon));
         }
         for sigil in &suggestion.sigils {
-            render_label_value_inspect(ui, "Sigil", sigil, db);
+            render_label_value_inspect(ui, &t("slot.sigil"), sigil, db);
         }
     });
 }
@@ -742,18 +767,18 @@ pub fn render_suggestion_gear(
     suggestion: &super::super::comparison::BuildSuggestion,
     db: Option<&gw2_optimizer::gamedb::GameDb>,
 ) {
-    render_card_section(ui, "GEAR", |ui| {
+    render_card_section(ui, &t("section.gear"), |ui| {
         if !suggestion.stat_prefix.is_empty() {
-            render_label_value(ui, "Prefix", &suggestion.stat_prefix);
+            render_label_value(ui, &t("slot.prefix"), &suggestion.stat_prefix);
         }
         if !suggestion.rune.is_empty() {
-            ui.text_colored(LABEL_COLOR, "  Rune: ");
+            ui.text_colored(LABEL_COLOR, format!("  {}: ", t("slot.rune")));
             ui.same_line();
             ui.text_colored(GEAR_COLOR, &suggestion.rune);
             crate::ui::comparison::inspect_if_hovered(ui, &suggestion.rune, db);
         }
         if !suggestion.relic.is_empty() {
-            ui.text_colored(LABEL_COLOR, "  Relic: ");
+            ui.text_colored(LABEL_COLOR, format!("  {}: ", t("slot.relic")));
             ui.same_line();
             ui.text_colored(GEAR_COLOR, &suggestion.relic);
             crate::ui::comparison::inspect_if_hovered(ui, &suggestion.relic, db);
@@ -769,20 +794,20 @@ pub fn render_suggestion_stats(
     compare_stats: Option<&StatBlock>,
 ) {
     if let Some(ref s) = suggestion.estimated_stats {
-        render_card_section(ui, "STATS", |ui| {
+        render_card_section(ui, &t("section.stats"), |ui| {
             let cmp = compare_stats.cloned().unwrap_or_default();
             let rows = [
-                ("Power", s.power, cmp.power),
-                ("Precision", s.precision, cmp.precision),
-                ("Toughness", s.toughness, cmp.toughness),
-                ("Vitality", s.vitality, cmp.vitality),
-                ("Condi Dmg", s.condition_damage, cmp.condition_damage),
-                ("Ferocity", s.ferocity, cmp.ferocity),
-                ("Healing", s.healing_power, cmp.healing_power),
-                ("Expertise", s.expertise, cmp.expertise),
+                ("stat.power", s.power, cmp.power),
+                ("stat.precision", s.precision, cmp.precision),
+                ("stat.toughness", s.toughness, cmp.toughness),
+                ("stat.vitality", s.vitality, cmp.vitality),
+                ("stat.condi", s.condition_damage, cmp.condition_damage),
+                ("stat.ferocity", s.ferocity, cmp.ferocity),
+                ("stat.healing", s.healing_power, cmp.healing_power),
+                ("stat.expertise", s.expertise, cmp.expertise),
             ];
-            for (name, val, cmp_val) in &rows {
-                ui.text_colored(LABEL_COLOR, format!("  {}: ", name));
+            for (key, val, cmp_val) in &rows {
+                ui.text_colored(LABEL_COLOR, format!("  {}: ", t(key)));
                 ui.same_line();
                 let color = if compare_stats.is_some() {
                     stat_color(*val, *cmp_val)
@@ -794,8 +819,15 @@ pub fn render_suggestion_stats(
             ui.text_colored(
                 DIM_COLOR,
                 format!(
-                    "  Crit {:.1}% | HP {} | Armor {}",
-                    s.crit_chance, s.health, s.armor
+                    "  {}",
+                    tf(
+                        "fmt.crit_hp_armor",
+                        &[
+                            ("crit", &format!("{:.1}", s.crit_chance)),
+                            ("hp", &s.health.to_string()),
+                            ("armor", &s.armor.to_string()),
+                        ],
+                    )
                 ),
             );
         });
@@ -827,69 +859,42 @@ fn render_combat_pct(ui: &Ui, label: &str, val: f64, cmp_val: f64, has_cmp: bool
 }
 
 fn render_combat_metrics_inner(ui: &Ui, c: &CombatMetrics, cmp: &CombatMetrics, has_cmp: bool) {
+    let ep = t("stat.effective_power");
+    let crit = t("stat.crit");
+    let strike = t("stat.strike_dps");
+    let condi = t("stat.condi_dps");
+    let total = t("stat.total_dps");
+    let boon = t("stat.boon_dur");
+    let condi_dur = t("stat.condi_dur");
+    let heal = t("stat.heal_index");
+    let ehp = t("stat.effective_hp");
+    render_combat_int(ui, &ep, c.effective_power, cmp.effective_power, has_cmp);
+    render_combat_pct(ui, &crit, c.crit_chance, cmp.crit_chance, has_cmp);
+    render_combat_int(ui, &strike, c.strike_dps_index, cmp.strike_dps_index, has_cmp);
     render_combat_int(
         ui,
-        "Effective Power",
-        c.effective_power,
-        cmp.effective_power,
-        has_cmp,
-    );
-    render_combat_pct(ui, "Crit Chance", c.crit_chance, cmp.crit_chance, has_cmp);
-    render_combat_int(
-        ui,
-        "Strike DPS",
-        c.strike_dps_index,
-        cmp.strike_dps_index,
-        has_cmp,
-    );
-    render_combat_int(
-        ui,
-        "Condi DPS",
+        &condi,
         c.condition_dps_index,
         cmp.condition_dps_index,
         has_cmp,
     );
-    render_combat_int(
-        ui,
-        "Total DPS",
-        c.total_dps_index,
-        cmp.total_dps_index,
-        has_cmp,
-    );
+    render_combat_int(ui, &total, c.total_dps_index, cmp.total_dps_index, has_cmp);
     if c.boon_duration_pct > 0.1 || cmp.boon_duration_pct > 0.1 {
-        render_combat_pct(
-            ui,
-            "Boon Duration",
-            c.boon_duration_pct,
-            cmp.boon_duration_pct,
-            has_cmp,
-        );
+        render_combat_pct(ui, &boon, c.boon_duration_pct, cmp.boon_duration_pct, has_cmp);
     }
     if c.condi_duration_pct > 0.1 || cmp.condi_duration_pct > 0.1 {
         render_combat_pct(
             ui,
-            "Condi Duration",
+            &condi_dur,
             c.condi_duration_pct,
             cmp.condi_duration_pct,
             has_cmp,
         );
     }
     if c.healing_index > 0 || cmp.healing_index > 0 {
-        render_combat_int(
-            ui,
-            "Healing Index",
-            c.healing_index,
-            cmp.healing_index,
-            has_cmp,
-        );
+        render_combat_int(ui, &heal, c.healing_index, cmp.healing_index, has_cmp);
     }
-    render_combat_int(
-        ui,
-        "Effective HP",
-        c.effective_health,
-        cmp.effective_health,
-        has_cmp,
-    );
+    render_combat_int(ui, &ehp, c.effective_health, cmp.effective_health, has_cmp);
 }
 
 /// Render COMBAT PERFORMANCE section for the current build.
@@ -899,12 +904,12 @@ pub fn render_build_combat(
     combat: Option<&CombatMetrics>,
     compare: Option<&CombatMetrics>,
 ) {
-    render_card_section(ui, "COMBAT PERFORMANCE", |ui| {
+    render_card_section(ui, &t("section.combat"), |ui| {
         if let Some(c) = combat {
             let cmp = compare.cloned().unwrap_or_default();
             render_combat_metrics_inner(ui, c, &cmp, compare.is_some());
         } else {
-            ui.text_colored(DIM_COLOR, "  (not computed)");
+            ui.text_colored(DIM_COLOR, format!("  {}", t("note.not_computed")));
         }
     });
 }
@@ -916,12 +921,12 @@ pub fn render_suggestion_combat(
     suggestion: &super::super::comparison::BuildSuggestion,
     compare: Option<&CombatMetrics>,
 ) {
-    render_card_section(ui, "COMBAT PERFORMANCE", |ui| {
+    render_card_section(ui, &t("section.combat"), |ui| {
         if let Some(ref c) = suggestion.combat_solo {
             let cmp = compare.cloned().unwrap_or_default();
             render_combat_metrics_inner(ui, c, &cmp, compare.is_some());
         } else {
-            ui.text_colored(DIM_COLOR, "  (not computed)");
+            ui.text_colored(DIM_COLOR, format!("  {}", t("note.not_computed")));
         }
     });
 }
@@ -932,27 +937,34 @@ pub fn render_rotation_section(
     rotation: &RotationBreakdown,
     db: Option<&gw2_optimizer::gamedb::GameDb>,
 ) {
-    render_card_section(ui, "ROTATION (simulated)", |ui| {
-        ui.text_colored(
-            DIM_COLOR,
-            "  Not a live combat log \u{2014} model of this template.",
-        );
+    render_card_section(ui, &t("section.rotation_sim"), |ui| {
+        ui.text_colored(DIM_COLOR, format!("  {}", t("note.rotation_model")));
         ui.text_colored(
             VALUE_COLOR,
             format!(
-                "  Simulated DPS: {}  (Strike: {} | Condi: {})",
-                rotation.simulated_dps, rotation.strike_dps, rotation.condition_dps
+                "  {}",
+                tf(
+                    "fmt.sim_dps_bar",
+                    &[
+                        ("dps", &rotation.simulated_dps.to_string()),
+                        ("strike", &rotation.strike_dps.to_string()),
+                        ("condi", &rotation.condition_dps.to_string()),
+                    ],
+                )
             ),
         );
         if rotation.stunbreak_count > 0 || rotation.has_stability {
             let mut parts = Vec::new();
             if rotation.stunbreak_count > 0 {
-                parts.push(format!("Stunbreaks: {}", rotation.stunbreak_count));
+                parts.push(tf(
+                    "fmt.stunbreaks",
+                    &[("n", &rotation.stunbreak_count.to_string())],
+                ));
             }
             if rotation.has_stability {
-                parts.push(format!(
-                    "Stability: {:.0}%",
-                    rotation.stability_uptime * 100.0
+                parts.push(tf(
+                    "fmt.stability_pct",
+                    &[("pct", &format!("{:.0}", rotation.stability_uptime * 100.0))],
                 ));
             }
             ui.text_colored([0.4, 0.9, 0.4, 1.0], format!("  {}", parts.join("  |  ")));
@@ -965,12 +977,12 @@ pub fn render_rotation_section(
                 .map(|(name, stacks)| format!("{}: {:.1}", name, stacks))
                 .collect();
             if !uptimes.is_empty() {
-                ui.text_colored(LABEL_COLOR, "  Condition Stacks:");
+                ui.text_colored(LABEL_COLOR, format!("  {}", t("label.condition_stacks")));
                 ui.text_colored(VALUE_COLOR, format!("    {}", uptimes.join("  |  ")));
             }
         }
         if !rotation.skill_usage.is_empty() {
-            ui.text_colored(LABEL_COLOR, "  Key Skills:");
+            ui.text_colored(LABEL_COLOR, format!("  {}", t("label.key_skills")));
             for (name, casts, dps) in &rotation.skill_usage {
                 if *casts > 0 {
                     ui.text_colored(DIM_COLOR, format!("    {} x{} ({} DPS)", name, casts, dps));
@@ -1004,7 +1016,7 @@ pub fn render_why_section(ui: &Ui, explanation: &str, changes: &[String]) {
         draw_list.add_text(
             [pos[0] + 8.0, pos[1] + 3.0],
             SECTION_TITLE_COLOR,
-            "HOW TO PLAY (advisory)",
+            &t("section.how_to_play"),
         );
     }
     ui.dummy([width, 24.0]);
@@ -1015,7 +1027,7 @@ pub fn render_why_section(ui: &Ui, explanation: &str, changes: &[String]) {
 
     if !changes.is_empty() {
         ui.spacing();
-        ui.text_colored(SECTION_TITLE_COLOR, "  CHANGES");
+        ui.text_colored(SECTION_TITLE_COLOR, format!("  {}", t("section.changes")));
         for change in changes {
             ui.text_colored(GEAR_COLOR, format!("    * {}", change));
         }

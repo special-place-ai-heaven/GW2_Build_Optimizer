@@ -26,17 +26,17 @@ pub(super) fn start_optimization(state: &mut AddonState) {
 /// Uses `state.main.build_locks` for spec/trait lock constraints.
 pub(super) fn start_optimization_with_profession(state: &mut AddonState, profession_name: &str) {
     if state.main.game_db.is_none() {
-        state.main.error = Some("Game data not loaded. Wait for cache to load.".into());
+        state.main.error = Some(t("err.no_gamedb"));
         return;
     }
 
     if state.main.chat.waiting {
-        state.main.error = Some("Chat is still thinking. Wait a moment.".into());
+        state.main.error = Some(t("err.chat_busy"));
         return;
     }
 
     if profession_name.is_empty() {
-        state.main.error = Some("No character selected".into());
+        state.main.error = Some(t("err.no_character"));
         return;
     }
 
@@ -78,7 +78,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
     let optimizing_for_equip_tab = state.main.selected_equipment_tab;
 
     state.main.optimizing = true;
-    state.main.optimize_stage = "Starting...".into();
+    state.main.optimize_stage = t("status.starting");
 
     // Log the weights and deterministic gear prefix for debugging
     let gear_match = gw2_optimizer::scoring::select_gear_prefix(&weights);
@@ -172,7 +172,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                                 selected_role,
                                 locked_spec_name
                                     .as_ref()
-                                    .map(|n| format!("Improved: {}", n)),
+                                    .map(|n| tf("fmt.improved", &[("name", n)])),
                                 &addon_dir,
                                 &weights,
                             );
@@ -233,7 +233,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                                 selected_role,
                                 locked_spec_name
                                     .as_ref()
-                                    .map(|n| format!("Improved: {}", n)),
+                                    .map(|n| tf("fmt.improved", &[("name", n)])),
                                 &addon_dir,
                                 &weights,
                             );
@@ -296,7 +296,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     }
 
                     crate::state::with_state(|s| {
-                        s.main.optimize_stage = "Consulting AI for synergy analysis...".into();
+                        s.main.optimize_stage = t("status.consulting");
                     });
 
                     match enrich_with_llm(
@@ -365,11 +365,11 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
         // If the thread panicked, recover and show error
         if let Err(panic_info) = thread_result {
             let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                format!("Internal error (panic): {}", s)
+                tf("fmt.internal_panic", &[("msg", s)])
             } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                format!("Internal error (panic): {}", s)
+                tf("fmt.internal_panic", &[("msg", s)])
             } else {
-                "Internal error: optimization thread panicked".into()
+                t("err.opt_panic")
             };
             if !panic_token.is_cancelled() {
                 crate::state::with_state(|s| {
@@ -1560,24 +1560,24 @@ fn result_alert_tab(has_current: bool) -> crate::state::MainTab {
 pub(super) fn format_provider_issue(err: &str, provider: &str, model: &str) -> String {
     let lower = err.to_lowercase();
     let detail = if lower.contains("rate limit") || lower.contains("429") {
-        "Rate limited. Wait a minute or switch model.".to_string()
+        t("err.rate_limited")
     } else if lower.contains("invalid api key")
         || lower.contains("401")
         || lower.contains("unauthorized")
     {
-        "API key rejected. Check Settings.".to_string()
+        t("err.bad_key")
     } else if lower.contains("billing")
         || lower.contains("quota")
         || lower.contains("credit")
         || lower.contains("insufficient")
     {
-        "Billing or quota issue on this provider. Check the account or switch provider.".to_string()
+        t("err.billing")
     } else if lower.contains("timeout") || lower.contains("timed out") || lower.contains("deadline")
     {
-        "Request timed out. Try a larger/faster model.".to_string()
+        t("err.timeout")
     } else if lower.contains("529") || lower.contains("overloaded") || lower.contains("unavailable")
     {
-        "Provider is overloaded. Retry or pick another model.".to_string()
+        t("err.overloaded")
     } else {
         err.chars().take(240).collect()
     };
@@ -1690,8 +1690,14 @@ fn enrich_with_llm(
             &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
                 let tools_str = humanize_tool_names(tool_names);
                 crate::state::with_state(|s| {
-                    s.main.optimize_stage =
-                        format!("AI thinking ({}/{})... {}", turn, max_turns, tools_str);
+                    s.main.optimize_stage = tf(
+                        "fmt.ai_thinking",
+                        &[
+                            ("turn", &turn.to_string()),
+                            ("max", &max_turns.to_string()),
+                            ("tools", &tools_str),
+                        ],
+                    );
                 });
             },
         )
@@ -1720,7 +1726,7 @@ fn enrich_with_llm(
     }
 
     crate::state::with_state(|s| {
-        s.main.optimize_stage = "Applying AI build + simulating rotation...".into();
+        s.main.optimize_stage = t("status.applying");
     });
 
     if let Some(first) = suggestions.first_mut() {
@@ -2020,12 +2026,12 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 None => raw,
                             };
                             let display = if plated.explanation.is_empty() {
-                                "Here's a build.".to_string()
+                                t("choya.heres_a_build")
                             } else {
                                 plated.explanation.clone()
                             };
                             let mut suggestion = crate::ui::comparison::BuildSuggestion {
-                                label: "Choya's pick".into(),
+                                label: t("choya.pick"),
                                 ..Default::default()
                             };
                             apply_gemini_response(&mut suggestion, &plated);
@@ -2454,6 +2460,7 @@ mod tests {
 
     #[test]
     fn format_provider_issue_names_model_and_classifies() {
+        gw2_core::i18n::set_language("en");
         let t = format_provider_issue("HTTP 429 rate limit", "OpenRouter", "llama-tiny");
         assert!(t.contains("OpenRouter"));
         assert!(t.contains("llama-tiny"));

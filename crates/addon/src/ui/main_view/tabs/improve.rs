@@ -5,7 +5,7 @@ use nexus::imgui::{ChildWindow, Selectable, Ui};
 use crate::state::AddonState;
 use crate::ui::comparison::ResultPane;
 use crate::ui::theme;
-use gw2_core::i18n::t;
+use gw2_core::i18n::{t, tf};
 
 use super::{build_display, lock_panel, render_optimization_progress};
 
@@ -75,9 +75,15 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 for (i, sug) in state.main.comparison.suggestions.iter().enumerate() {
                     let selected = state.main.comparison.selected_suggestion == i;
                     let label = if sug.label.is_empty() {
-                        format!("Build {}", i + 1)
+                        tf("fmt.build_n", &[("n", &(i + 1).to_string())])
                     } else if sug.label.starts_with("Score:") {
-                        format!("Option {} ({})", i + 1, sug.stat_prefix)
+                        tf(
+                            "fmt.option_n",
+                            &[
+                                ("n", &(i + 1).to_string()),
+                                ("prefix", &sug.stat_prefix),
+                            ],
+                        )
                     } else {
                         sug.label.clone()
                     };
@@ -97,9 +103,9 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
             }
 
             if let Some(spec_name) = locked_spec_name.as_deref() {
-                ui.text_colored(theme::OPTIMIZED, format!("Locked: {}", spec_name));
+                ui.text_colored(theme::OPTIMIZED, tf("fmt.locked", &[("name", spec_name)]));
                 ui.same_line();
-                if ui.small_button("Unlock##improve") {
+                if ui.small_button(&format!("{}##improve", t("btn.unlock"))) {
                     state.main.build_locks.specs[2] = None;
                 }
                 ui.same_line_with_spacing(0.0, 12.0);
@@ -148,7 +154,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                                 ui,
                                 db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
                                 &suggestion.specializations,
-                                "OPTIMIZED SPECS & TRAITS",
+                                &t("section.optimized_specs"),
                             );
                         } else {
                             let mut specs_open = true;
@@ -189,7 +195,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
             ChildWindow::new("##improve_single")
                 .size([0.0, scroll_height])
                 .build(ui, || {
-                    build_display::render_card_header(ui, "CURRENT BUILD", theme::CURRENT);
+                    build_display::render_card_header(ui, &t("section.current_build"), theme::CURRENT);
                     build_display::render_build_skills(ui, &build, state.main.game_db.as_ref());
                     {
                         let db_ref = state.main.game_db.as_ref();
@@ -215,16 +221,16 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 });
         }
     } else if state.main.selected_character.is_some() {
-        ui.text_colored(theme::MUTED, "Loading character build...");
+        ui.text_colored(theme::MUTED, t("improve.loading"));
     } else {
-        ui.text_colored(theme::MUTED, "Select a character from the left panel.");
+        ui.text_colored(theme::MUTED, t("improve.select"));
     }
 
     // Save build UI + clear button
     if has_suggestion {
         super::saveload::render_save_build_ui(ui, state);
         ui.same_line();
-        if ui.small_button("Clear Results##improve") {
+        if ui.small_button(&format!("{}##improve", t("btn.clear_results"))) {
             state.main.comparison.suggestions.clear();
             state.main.comparison.error = None;
         }

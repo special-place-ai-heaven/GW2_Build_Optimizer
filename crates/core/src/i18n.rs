@@ -212,27 +212,37 @@ fn detect_os_language() -> &'static str {
 mod tests {
     use super::*;
 
+    static LANG_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_lang<R>(code: &str, f: impl FnOnce() -> R) -> R {
+        let _g = LANG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_language(code);
+        f()
+    }
+
     #[test]
     fn english_catalog_has_core_chrome() {
-        set_language("en");
-        assert_eq!(t("tab.settings"), "Settings");
-        assert_eq!(t("tab.choya"), "Choya");
-        assert_eq!(t("btn.optimize_build"), "Optimize Build");
+        with_lang("en", || {
+            assert_eq!(t("tab.settings"), "Settings");
+            assert_eq!(t("tab.choya"), "Choya");
+            assert_eq!(t("btn.optimize_build"), "Optimize Build");
+        });
     }
 
     #[test]
     fn french_translates_settings() {
-        set_language("fr");
-        assert_eq!(t("tab.settings"), "Paramètres");
-        assert_eq!(t("choya.assistant"), "Assistant de build");
-        set_language("en");
+        with_lang("fr", || {
+            assert_eq!(t("tab.settings"), "Paramètres");
+            assert_eq!(t("choya.assistant"), "Assistant de build");
+        });
     }
 
     #[test]
     fn missing_key_falls_back_to_english() {
-        set_language("en");
-        let missing = t("this.key.does.not.exist");
-        assert_eq!(missing, "this.key.does.not.exist");
+        with_lang("en", || {
+            let missing = t("this.key.does.not.exist");
+            assert_eq!(missing, "this.key.does.not.exist");
+        });
     }
 
     #[test]
@@ -243,10 +253,11 @@ mod tests {
 
     #[test]
     fn tf_replaces_named_placeholders() {
-        set_language("en");
-        let s = tf("fmt.usage_today", &[("n", "12")]);
-        assert!(s.contains("12"));
-        assert!(s.to_lowercase().contains("request"));
+        with_lang("en", || {
+            let s = tf("fmt.usage_today", &[("n", "12")]);
+            assert!(s.contains("12"));
+            assert!(s.to_lowercase().contains("request"));
+        });
     }
 
     #[test]

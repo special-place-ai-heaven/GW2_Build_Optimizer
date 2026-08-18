@@ -112,7 +112,7 @@ fn render_choya_identity(ui: &Ui, state: &mut AddonState) {
     let text_x = top[0] + box_w + 10.0;
     let ty0 = top[1] + PAD_T + 8.0;
     ui.set_cursor_screen_pos([text_x, ty0]);
-    ui.text_colored(theme::GOLD, "Choya");
+    ui.text_colored(theme::GOLD, t("tab.choya"));
     if !state.main.chat.history.is_empty() && !state.main.chat.waiting {
         ui.same_line_with_spacing(0.0, 12.0);
         if ui.small_button(&format!("{}##talk", t("btn.clear"))) {
