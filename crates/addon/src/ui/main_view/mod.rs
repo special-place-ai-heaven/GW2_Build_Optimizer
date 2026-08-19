@@ -830,48 +830,6 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
 
     render_role_chips(ui, state);
 
-    if ui.collapsing_header(t("weights.fine_tune"), TreeNodeFlags::empty()) {
-        let current_axes = state
-            .main
-            .comparison
-            .current_combat_solo
-            .as_ref()
-            .map(crate::ui::radar_chart::compute_axes_from_metrics);
-        let optimized_axes = if !state.main.comparison.suggestions.is_empty() {
-            let idx = state
-                .main
-                .comparison
-                .selected_suggestion
-                .min(state.main.comparison.suggestions.len() - 1);
-            state.main.comparison.suggestions[idx]
-                .combat_solo
-                .as_ref()
-                .map(crate::ui::radar_chart::compute_axes_from_metrics)
-        } else {
-            None
-        };
-
-        let show_current = matches!(state.main.active_tab, MainTab::Improve | MainTab::Talk);
-        let _chart_modified = crate::ui::radar_chart::render_radar_chart(
-            ui,
-            &mut state.main.weights,
-            &mut state.main.radar_dragging,
-            if show_current {
-                current_axes.as_ref()
-            } else {
-                None
-            },
-            optimized_axes.as_ref(),
-        );
-        if current_axes.is_some() || optimized_axes.is_some() {
-            crate::ui::radar_chart::render_legend(
-                ui,
-                show_current && current_axes.is_some(),
-                optimized_axes.is_some(),
-            );
-        }
-    }
-
     ui.spacing();
     let role_bit = state
         .main
@@ -949,6 +907,48 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         character::load_characters(state);
     }
     ui.dummy([0.0, 4.0]);
+
+    if ui.collapsing_header(t("weights.fine_tune"), TreeNodeFlags::DEFAULT_OPEN) {
+        let current_axes = state
+            .main
+            .comparison
+            .current_combat_solo
+            .as_ref()
+            .map(crate::ui::radar_chart::compute_axes_from_metrics);
+        let optimized_axes = if !state.main.comparison.suggestions.is_empty() {
+            let idx = state
+                .main
+                .comparison
+                .selected_suggestion
+                .min(state.main.comparison.suggestions.len() - 1);
+            state.main.comparison.suggestions[idx]
+                .combat_solo
+                .as_ref()
+                .map(crate::ui::radar_chart::compute_axes_from_metrics)
+        } else {
+            None
+        };
+
+        let show_current = matches!(state.main.active_tab, MainTab::Improve | MainTab::Talk);
+        let _chart_modified = crate::ui::radar_chart::render_radar_chart(
+            ui,
+            &mut state.main.weights,
+            &mut state.main.radar_dragging,
+            if show_current {
+                current_axes.as_ref()
+            } else {
+                None
+            },
+            optimized_axes.as_ref(),
+        );
+        if current_axes.is_some() || optimized_axes.is_some() {
+            crate::ui::radar_chart::render_legend(
+                ui,
+                show_current && current_axes.is_some(),
+                optimized_axes.is_some(),
+            );
+        }
+    }
 }
 
 fn render_main_content(ui: &Ui, state: &mut AddonState) {

@@ -63,7 +63,7 @@ pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonS
     }
 
     if !state.main.comparison.suggestions.is_empty() {
-        let footer = 36.0;
+        let footer = ui.current_font_size() + 22.0;
         let scroll_h = (ui.content_region_avail()[1] - footer).max(64.0);
         nexus::imgui::ChildWindow::new("##new_build_scroll")
             .size([0.0, scroll_h])
