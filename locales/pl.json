@@ -407,5 +407,5 @@
   "setup.step_lang": "Język",
   "setup.lang_header": "KROK 1  ·  JĘZYK",
   "setup.lang_help": "Wybierz język interfejsu. Dane gry i oficjalne nazwy (Deutsch, Español, Français, 简体中文) pobiorą się raz w następnym kroku.",
-  "settings.lang_pack_legend": "● nazwy gotowe   ○ brak   ● aktualizacja   · tylko interfejs (nazwy angielskie)"
+  "settings.lang_pack_legend": "* nazwy gotowe   ! brak   ~ aktualizacja   - tylko interfejs (nazwy angielskie)"
 }

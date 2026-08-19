@@ -407,5 +407,5 @@
   "setup.step_lang": "Sprache",
   "setup.lang_header": "SCHRITT 1  ·  SPRACHE",
   "setup.lang_help": "Sprache der Oberfläche wählen. Spieldaten und offizielle Namen (Deutsch, Español, Français, 简体中文) werden später einmal geladen.",
-  "settings.lang_pack_legend": "● Namen bereit   ○ fehlt   ● Update   · nur Oberfläche (englische Namen)"
+  "settings.lang_pack_legend": "* Namen bereit   ! fehlt   ~ Update   - nur Oberfläche (englische Namen)"
 }

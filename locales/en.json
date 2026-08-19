@@ -103,7 +103,7 @@
   "settings.ui_prefs": "UI PREFERENCES",
   "settings.language": "Language:",
   "settings.language_auto": "Auto (OS)",
-  "settings.lang_pack_legend": "● names ready   ○ missing   ● update   · overlay only (English names)",
+  "settings.lang_pack_legend": "* names ready   ! missing   ~ update   - overlay only (English names)",
   "settings.cache": "CACHE & DATA",
   "settings.benchmarks": "BENCHMARK DATA",
   "settings.opacity": "Window Opacity:",

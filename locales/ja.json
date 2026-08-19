@@ -407,5 +407,5 @@
   "setup.step_lang": "言語",
   "setup.lang_header": "ステップ1  ·  言語",
   "setup.lang_help": "オーバーレイの言語を選びます。ゲームデータと公式名称（Deutsch、Español、Français、简体中文）は後の手順で一度だけ取得します。",
-  "settings.lang_pack_legend": "● 名称あり   ○ なし   ● 更新   · 画面のみ（英語名）"
+  "settings.lang_pack_legend": "* 名称あり   ! なし   ~ 更新   - 画面のみ（英語名）"
 }
