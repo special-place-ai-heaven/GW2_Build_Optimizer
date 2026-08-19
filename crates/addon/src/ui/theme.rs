@@ -35,14 +35,10 @@ pub fn header_title_x(left: f32) -> f32 {
 }
 
 pub fn paint_header_accent(draw: &DrawListMut, left: f32, top: f32, height: f32) {
-    draw.add_rect(
-        [left, top],
-        [left + HEADER_ACCENT_W, top + height],
-        GOLD,
-    )
-    .filled(true)
-    .rounding(2.0)
-    .build();
+    draw.add_rect([left, top], [left + HEADER_ACCENT_W, top + height], GOLD)
+        .filled(true)
+        .rounding(2.0)
+        .build();
 }
 
 fn fade(c: [f32; 4], opacity: f32) -> [f32; 4] {
@@ -83,6 +79,18 @@ pub fn push<'ui>(ui: &'ui Ui<'_>, opacity: f32) -> impl Sized + 'ui {
     )
 }
 
+/// Shared frame pad so InputText and gold buttons are the same height.
+pub fn control_pad(ui: &Ui) -> [f32; 2] {
+    let s = (ui.current_font_size() / 13.0).max(0.75);
+    [6.0 * s, 4.0 * s]
+}
+
+/// Font size + pad.y*2 — use this for sized buttons next to InputText.
+pub fn control_height(ui: &Ui) -> f32 {
+    let p = control_pad(ui);
+    (ui.current_font_size() + p[1] * 2.0).round()
+}
+
 /// Gold plate button (Copy, Send, Test). Dark text on gold so it reads as the action.
 pub fn gold_button(ui: &Ui, label: impl AsRef<str>) -> bool {
     let _pad = push_gold_button_pad(ui);
@@ -96,18 +104,19 @@ pub fn gold_button(ui: &Ui, label: impl AsRef<str>) -> bool {
 pub fn gold_button_sized(ui: &Ui, label: impl AsRef<str>, size: [f32; 2]) -> bool {
     let label = label.as_ref();
     let visible = label.split("##").next().unwrap_or(label);
-    let (pad_x, pad_y) = gold_button_pad(ui);
+    let (pad_x, _) = gold_button_pad(ui);
     let need_w = ui.calc_text_size(visible)[0] + pad_x * 2.0;
-    let need_h = ui.current_font_size() + pad_y * 2.0;
     let w = if size[0] < 0.0 {
         size[0]
+    } else if size[0] <= 0.0 {
+        need_w
     } else {
         size[0].max(need_w)
     };
     let h = if size[1] <= 0.0 {
-        need_h
+        control_height(ui)
     } else {
-        size[1].max(need_h)
+        size[1]
     };
     let _pad = push_gold_button_pad(ui);
     let _bg = ui.push_style_color(StyleColor::Button, GOLD_FILL);
@@ -118,8 +127,9 @@ pub fn gold_button_sized(ui: &Ui, label: impl AsRef<str>, size: [f32; 2]) -> boo
 }
 
 fn gold_button_pad(ui: &Ui) -> (f32, f32) {
-    let scale = (ui.current_font_size() / 13.0).max(0.75);
-    (10.0 * scale, 5.0 * scale)
+    let p = control_pad(ui);
+    let extra_x = 4.0 * (ui.current_font_size() / 13.0).max(0.75);
+    (p[0] + extra_x, p[1])
 }
 
 fn push_gold_button_pad<'ui>(ui: &'ui Ui<'_>) -> impl Sized + 'ui {

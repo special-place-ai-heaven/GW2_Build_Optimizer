@@ -80,6 +80,7 @@ pub fn generate_neighbors(
             db,
             profession_name,
         ));
+        groups.push(swap_relics_for_failed_gates(candidate, db));
     }
     groups.push(swap_gear_prefix(candidate, db));
     groups.push(swap_rune(candidate, db));
@@ -449,6 +450,39 @@ fn swap_utility_skills(
 
 fn gate_failed(report: &crate::referee::ViabilityReport, gate: ViabilityGate) -> bool {
     report.gates.iter().any(|g| g.gate == gate && !g.passed)
+}
+
+/// When Stability is missing on the bar, try relics that grant it (Cavalier, etc.).
+fn swap_relics_for_failed_gates(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuild> {
+    if !gate_failed(&candidate.report.viability, ViabilityGate::StabilityAccess) {
+        return Vec::new();
+    }
+    db.all_relics()
+        .into_iter()
+        .filter(|r| {
+            let bonuses = r
+                .details
+                .as_ref()
+                .map(|d| d.bonuses.as_slice())
+                .unwrap_or(&[]);
+            let desc = r.description.as_deref().or_else(|| {
+                r.details
+                    .as_ref()
+                    .and_then(|d| d.infix_upgrade.as_ref())
+                    .and_then(|u| u.buff.as_ref())
+                    .and_then(|b| b.description.as_deref())
+            });
+            crate::text_util::gear_text_grants_stability(&r.name, desc, bonuses)
+        })
+        .map(|r| {
+            let mut b = candidate.validated.clone();
+            b.relic = Some(ValidatedItem {
+                id: r.id,
+                name: r.name.clone(),
+            });
+            b
+        })
+        .collect()
 }
 
 /// When the current kit fails stunbreak/stability/cleanse, try those utilities first

@@ -115,12 +115,7 @@ fn persist_notes(state: &mut AddonState, name: &str) {
         .get(name)
         .cloned()
         .unwrap_or_default();
-    let Some(saved) = state
-        .main
-        .saved_builds
-        .iter_mut()
-        .find(|b| b.name == name)
-    else {
+    let Some(saved) = state.main.saved_builds.iter_mut().find(|b| b.name == name) else {
         return;
     };
     if saved.notes == draft {
@@ -134,9 +129,7 @@ fn persist_notes(state: &mut AddonState, name: &str) {
     }
 }
 
-fn current_suggestion(
-    state: &AddonState,
-) -> Option<&crate::ui::comparison::BuildSuggestion> {
+fn current_suggestion(state: &AddonState) -> Option<&crate::ui::comparison::BuildSuggestion> {
     let sug = &state.main.comparison.suggestions;
     if sug.is_empty() {
         return None;
@@ -148,7 +141,6 @@ fn current_suggestion(
         .min(sug.len().saturating_sub(1));
     sug.get(idx)
 }
-
 
 fn action_btn_size(ui: &Ui) -> [f32; 2] {
     let labels = [
@@ -163,7 +155,7 @@ fn action_btn_size(ui: &Ui) -> [f32; 2] {
         .map(|s| ui.calc_text_size(s)[0])
         .fold(72.0_f32, f32::max)
         + 24.0;
-    [w, 32.0]
+    [w, theme::control_height(ui)]
 }
 
 fn clip_label(ui: &Ui, text: &str, max_w: f32) -> String {
@@ -268,6 +260,7 @@ fn render_empty_paddock(ui: &Ui, char_name: Option<&str>) {
 
 fn render_corral_bar(ui: &Ui, state: &mut AddonState) {
     let btn = action_btn_size(ui);
+    ui.align_text_to_frame_padding();
     ui.text_colored(theme::MUTED, t("ranch.corral_name"));
     ui.same_line_with_spacing(0.0, 10.0);
     ui.set_next_item_width(280.0);
@@ -278,7 +271,11 @@ fn render_corral_bar(ui: &Ui, state: &mut AddonState) {
     let named = !state.main.save_name_input.trim().is_empty();
     let has_opt = current_suggestion(state).is_some();
     let corral = if named && has_opt {
-        theme::gold_button_sized(ui, format!("{}##corral", t("ranch.corral")), [btn[0] + 24.0, btn[1]])
+        theme::gold_button_sized(
+            ui,
+            format!("{}##corral", t("ranch.corral")),
+            [btn[0] + 24.0, btn[1]],
+        )
     } else {
         let tip = if !has_opt {
             t("ranch.need_opt")
