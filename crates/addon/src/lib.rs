@@ -32,6 +32,7 @@ fn on_load() {
     };
 
     state::init(addon_dir);
+    ui::fonts::init();
 
     register_keybind_with_string(
         "GW2_BUILD_OPT_TOGGLE",

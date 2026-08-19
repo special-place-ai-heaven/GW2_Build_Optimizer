@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**GW2 Build Optimizer v1.4.11** — In-game Guild Wars 2 addon (Nexus plugin) that optimizes character builds across all game modes (PvE, PvP, WvW). Uses the GW2 API for game/character data and a pluggable LLM backend (Gemini, OpenAI, Anthropic, or OpenRouter) for build reasoning. Feature complete (S01-S15). Overlay chrome is localized (Settings → Language). Skill/trait/item names follow official API `lang=` for Deutsch, Español, Français, and 简体中文.
+**GW2 Build Optimizer v1.4.12** — In-game Guild Wars 2 addon (Nexus plugin) that optimizes character builds across all game modes (PvE, PvP, WvW). Uses the GW2 API for game/character data and a pluggable LLM backend (Gemini, OpenAI, Anthropic, or OpenRouter) for build reasoning. Feature complete (S01-S15). Overlay chrome is localized (Settings → Language). Skill/trait/item names follow official API `lang=` for Deutsch, Español, Français, and 简体中文.
 
 ## Build & Development
 
@@ -73,6 +73,7 @@ See `~/.claude/projects/.../memory/gw2-domain.md` for full reference. Key points
 
 ## Critical Patterns (Gotchas)
 
+- **Overlay fonts**: Nexus `add_font_from_file` + `igPushFont`. Do not call `AddFontFromFileTTF` yourself. Atlas rebuild passes a null font — store `None` and skip push.
 - **HP-class ≠ armor-class**: GW2 health and armor classes don't align by profession. Two separate lookup tables required.
 - **Stat alias normalization**: GW2 API uses both old ("ConditionDuration") and new ("Expertise") attribute names. `StatBlock::add/get` normalizes both.
 - **Traited-fact overrides**: Active traited_facts replace base facts by index. Must collect override indices first, then skip overridden base facts.

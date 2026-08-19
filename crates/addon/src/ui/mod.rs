@@ -1,3 +1,5 @@
+pub(crate) mod fonts;
+
 pub mod chat_bar;
 pub mod comparison;
 mod gear_diff;
@@ -48,7 +50,7 @@ pub fn render(ui: &Ui) {
         return;
     }
 
-    let (snap, pos, size, opacity) = state::with_state(|s| {
+    let (snap, pos, size, opacity, ui_font, ui_lang) = state::with_state(|s| {
         let snap = s.force_window_pos;
         s.force_window_pos = false;
         if snap {
@@ -59,13 +61,22 @@ pub fn render(ui: &Ui) {
             let _ = s.config.save(&s.config_path);
         }
         let (pos, size) = s.config.window_rect();
-        (snap, pos, size, s.config.window_opacity)
+        (
+            snap,
+            pos,
+            size,
+            s.config.window_opacity,
+            s.config.ui_font.clone(),
+            s.config.ui_language.clone(),
+        )
     })
     .unwrap_or((
         false,
         gw2_core::config::DEFAULT_WINDOW_POS,
         gw2_core::config::DEFAULT_WINDOW_SIZE,
         1.0,
+        String::from("auto"),
+        String::from("auto"),
     ));
 
     // Catch panics inside the ImGui frame so a bug in any render path
@@ -76,6 +87,8 @@ pub fn render(ui: &Ui) {
     // rest of the game's ImGui state intact.
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _theme = theme::push(ui, opacity);
+        fonts::init();
+        let _font = fonts::push(&ui_font, &ui_lang);
         let mut opened = true;
         let cond = if snap {
             Condition::Always
