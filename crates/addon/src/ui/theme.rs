@@ -104,8 +104,7 @@ pub fn gold_button(ui: &Ui, label: impl AsRef<str>) -> bool {
 pub fn gold_button_sized(ui: &Ui, label: impl AsRef<str>, size: [f32; 2]) -> bool {
     let label = label.as_ref();
     let visible = label.split("##").next().unwrap_or(label);
-    let (pad_x, _) = gold_button_pad(ui);
-    let need_w = ui.calc_text_size(visible)[0] + pad_x * 2.0;
+    let need_w = gold_button_width(ui, visible);
     let w = if size[0] < 0.0 {
         size[0]
     } else if size[0] <= 0.0 {
@@ -130,6 +129,59 @@ fn gold_button_pad(ui: &Ui) -> (f32, f32) {
     let p = control_pad(ui);
     let extra_x = 4.0 * (ui.current_font_size() / 13.0).max(0.75);
     (p[0] + extra_x, p[1])
+}
+
+/// Width a gold button needs so its label is not clipped at the current font.
+pub fn gold_button_width(ui: &Ui, label: impl AsRef<str>) -> f32 {
+    let label = label.as_ref();
+    let visible = label.split("##").next().unwrap_or(label);
+    let (pad_x, _) = gold_button_pad(ui);
+    ui.calc_text_size(visible)[0] + pad_x * 2.0
+}
+
+/// Combo frame width that fits `preview` plus the arrow, at the current font.
+pub fn combo_width_for(ui: &Ui, preview: &str) -> f32 {
+    let text_w = ui.calc_text_size(preview)[0];
+    let arrow = ui.frame_height();
+    let pad_x = control_pad(ui)[0];
+    (text_w + pad_x * 2.0 + arrow + 2.0).ceil()
+}
+
+fn clip_to_width(ui: &Ui, text: &str, max_w: f32) -> String {
+    if max_w <= 4.0 {
+        return String::new();
+    }
+    if ui.calc_text_size(text)[0] <= max_w {
+        return text.to_string();
+    }
+    let mut s = String::new();
+    for ch in text.chars() {
+        let mut probe = s.clone();
+        probe.push(ch);
+        probe.push_str("...");
+        if ui.calc_text_size(&probe)[0] > max_w {
+            break;
+        }
+        s.push(ch);
+    }
+    s.push_str("...");
+    s
+}
+
+/// ImGui Combo previews are left-aligned. Draw `preview` centered in the value area.
+pub fn paint_centered_combo_preview(ui: &Ui, preview: &str, origin: [f32; 2], width: f32) {
+    if preview.is_empty() || width <= 0.0 {
+        return;
+    }
+    let h = ui.frame_height();
+    let pad = control_pad(ui)[0];
+    let inner_w = (width - h - pad * 2.0).max(4.0);
+    let shown = clip_to_width(ui, preview, inner_w);
+    let sz = ui.calc_text_size(&shown);
+    let tx = origin[0] + pad + (inner_w - sz[0]) * 0.5;
+    let ty = origin[1] + (h - sz[1]) * 0.5;
+    ui.get_window_draw_list()
+        .add_text([tx, ty], color_u32(CREAM), &shown);
 }
 
 fn push_gold_button_pad<'ui>(ui: &'ui Ui<'_>) -> impl Sized + 'ui {
@@ -651,7 +703,9 @@ const CHOYA_IDLE: [[f32; 4]; 9] = [
 
 /// `choya_animated_02.png` — same atlas size, isolated props + portraits.
 const CHOYA2_HERO: [f32; 4] = [8.0, 7.0, 286.0, 269.0];
-const CHOYA2_PEEK: [f32; 4] = [870.0, 628.0, 208.0, 133.0];
+
+/// Peek-behind-rocks on sheet 2 (thinking). Sleep+Zzz is ~871,626 — do not reuse that rect.
+const CHOYA2_PEEK: [f32; 4] = [1312.0, 570.0, 216.0, 189.0];
 const CHOYA2_PARTY: [f32; 4] = [1198.0, 297.0, 261.0, 259.0];
 const CHOYA2_WALK: [[f32; 4]; 6] = [
     [5.0, 569.0, 122.0, 170.0],
@@ -678,6 +732,9 @@ const CHOYA2_LEI: [f32; 4] = [1396.0, 863.0, 121.0, 65.0];
 /// Belly-sleep + Zzz on sheet 1 (idle composer / header).
 const CHOYA_SLEEP: [f32; 4] = [1180.0, 700.0, 311.0, 265.0];
 
+/// Isolated belly-sleep + Zzz on sheet 2. Tight crop — the sheet-1 rect packed several icons.
+const CHOYA2_SLEEP: [f32; 4] = [871.0, 630.0, 206.0, 128.0];
+
 fn choya_sheet() -> Option<TextureId> {
     embedded_tex(
         "GW2BO_CHOYA_SHEET",
@@ -694,9 +751,14 @@ fn choya_sheet2() -> Option<TextureId> {
 
 fn sheet_uv(frame: [f32; 4]) -> ([f32; 2], [f32; 2]) {
     let [x, y, w, h] = frame;
+    let inset = 0.5;
+    let u0 = ((x + inset) / CHOYA_SHEET_W).clamp(0.0, 1.0);
+    let v0 = ((y + inset) / CHOYA_SHEET_H).clamp(0.0, 1.0);
+    let u1 = ((x + w - inset) / CHOYA_SHEET_W).clamp(0.0, 1.0);
+    let v1 = ((y + h - inset) / CHOYA_SHEET_H).clamp(0.0, 1.0);
     (
-        [x / CHOYA_SHEET_W, y / CHOYA_SHEET_H],
-        [(x + w) / CHOYA_SHEET_W, (y + h) / CHOYA_SHEET_H],
+        [u0, v0],
+        [u1.max(u0 + f32::EPSILON), v1.max(v0 + f32::EPSILON)],
     )
 }
 
@@ -900,7 +962,61 @@ pub fn draw_choya_walk_paced(ui: &Ui, center: [f32; 2], size: f32, frames_per_ce
     );
 }
 
+pub fn draw_choya_party(ui: &Ui, center: [f32; 2], size: f32) {
+    let Some(tid) = choya_sheet2() else {
+        blit_choya_frame(&ui.get_window_draw_list(), center, size, CHOYA_DANCE);
+        return;
+    };
+    blit_frame(&ui.get_window_draw_list(), tid, center, size, CHOYA2_PARTY);
+}
+
+pub const HEADER_POSE_COUNT: u8 = 4;
+pub const HEADER_POSE_SECS: u64 = 60;
+pub const COMPOSER_BOB_SECS: f32 = 3.0;
+
+/// Pick a different idle pose. `mix` is typically `frame_count`.
+pub fn next_header_pose(prev: u8, mix: u32) -> u8 {
+    let n = HEADER_POSE_COUNT;
+    let step = 1 + (mix % (n as u32 - 1)) as u8;
+    prev.wrapping_add(step) % n
+}
+
+pub fn tick_header_pose(pose: &mut u8, since: &mut Option<Instant>, mix: u32, now: Instant) {
+    match *since {
+        None => *since = Some(now),
+        Some(t) if now.saturating_duration_since(t).as_secs() >= HEADER_POSE_SECS => {
+            *pose = next_header_pose(*pose, mix);
+            *since = Some(now);
+        }
+        _ => {}
+    }
+}
+
+pub fn composer_choya_bobbing(last_typed: Option<Instant>, now: Instant) -> bool {
+    last_typed
+        .map(|t| now.saturating_duration_since(t).as_secs_f32() < COMPOSER_BOB_SECS)
+        .unwrap_or(false)
+}
+
+/// Header mascot: peek while the LLM works, otherwise a minute-cycled idle pose.
+pub fn draw_choya_header(ui: &Ui, center: [f32; 2], size: f32, waiting: bool, pose: u8) {
+    if waiting {
+        draw_choya_thinking(ui, center, size);
+        return;
+    }
+    match pose {
+        1 => draw_choya_hero(ui, center, size),
+        2 => draw_choya_walk(ui, center, size),
+        3 => draw_choya_party(ui, center, size),
+        _ => draw_choya_sleep(ui, center, size),
+    }
+}
+
 pub fn draw_choya_sleep(ui: &Ui, center: [f32; 2], size: f32) {
+    if let Some(tid) = choya_sheet2() {
+        blit_frame(&ui.get_window_draw_list(), tid, center, size, CHOYA2_SLEEP);
+        return;
+    }
     blit_choya_frame(&ui.get_window_draw_list(), center, size, CHOYA_SLEEP);
 }
 
@@ -1031,6 +1147,7 @@ fn draw_mystic_coin(
 #[cfg(test)]
 mod tests {
     use super::choya_gap_ms;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn choya_gap_is_one_to_five_seconds() {
@@ -1054,6 +1171,7 @@ mod tests {
             super::CHOYA2_HEART,
             super::CHOYA2_LEI,
             super::CHOYA_SLEEP,
+            super::CHOYA2_SLEEP,
         ];
         for frame in [super::CHOYA_HERO, super::CHOYA_DANCE, super::CHOYA_THINK]
             .into_iter()
@@ -1067,5 +1185,62 @@ mod tests {
             assert!(b[0] <= 1.0 && b[1] <= 1.0, "{frame:?} {b:?}");
             assert!(b[0] > a[0] && b[1] > a[1], "{frame:?}");
         }
+    }
+
+    #[test]
+    fn sheet_uv_insets_half_pixel() {
+        let frame = super::CHOYA2_SLEEP;
+        let [x, y, w, h] = frame;
+        let (a, b) = super::sheet_uv(frame);
+        assert!(a[0] > x / super::CHOYA_SHEET_W);
+        assert!(a[1] > y / super::CHOYA_SHEET_H);
+        assert!(b[0] < (x + w) / super::CHOYA_SHEET_W);
+        assert!(b[1] < (y + h) / super::CHOYA_SHEET_H);
+    }
+
+    #[test]
+    fn next_header_pose_always_changes() {
+        for prev in 0..super::HEADER_POSE_COUNT {
+            for mix in 0..16u32 {
+                let next = super::next_header_pose(prev, mix);
+                assert!(next < super::HEADER_POSE_COUNT);
+                assert_ne!(next, prev);
+            }
+        }
+    }
+
+    #[test]
+    fn tick_header_pose_advances_after_a_minute() {
+        let t0 = Instant::now();
+        let mut pose = 0u8;
+        let mut since = Some(t0);
+        super::tick_header_pose(&mut pose, &mut since, 0, t0);
+        assert_eq!(pose, 0);
+        super::tick_header_pose(
+            &mut pose,
+            &mut since,
+            0,
+            t0 + Duration::from_secs(super::HEADER_POSE_SECS),
+        );
+        assert_ne!(pose, 0);
+        assert_eq!(
+            since,
+            Some(t0 + Duration::from_secs(super::HEADER_POSE_SECS))
+        );
+    }
+
+    #[test]
+    fn composer_choya_sleeps_three_seconds_after_typing() {
+        let t0 = Instant::now();
+        assert!(!super::composer_choya_bobbing(None, t0));
+        assert!(super::composer_choya_bobbing(Some(t0), t0));
+        assert!(super::composer_choya_bobbing(
+            Some(t0),
+            t0 + Duration::from_millis(2999)
+        ));
+        assert!(!super::composer_choya_bobbing(
+            Some(t0),
+            t0 + Duration::from_secs(4)
+        ));
     }
 }

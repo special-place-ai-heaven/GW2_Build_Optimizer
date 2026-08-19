@@ -303,11 +303,14 @@ impl GameDb {
             return None;
         }
         let needle_lower = needle.to_lowercase();
+        let needle_key = gw2_core::i18n::alnum_key(needle);
         let mut exact: Option<&ItemStat> = None;
         let mut fuzzy: Option<(usize, u32, &ItemStat)> = None;
         for is in self.itemstats.values() {
             let lower = is.name.to_lowercase();
-            if lower == needle_lower {
+            let alnum_hit =
+                !needle_key.is_empty() && gw2_core::i18n::alnum_key(&is.name) == needle_key;
+            if lower == needle_lower || alnum_hit {
                 match exact {
                     Some(prev) if prev.id <= is.id => {}
                     _ => exact = Some(is),
@@ -324,108 +327,108 @@ impl GameDb {
     }
 
     pub fn attach_localized(&mut self, mut names: gw2_api::localize::LocalizedNames) {
-            names.by_english.clear();
-            let mut add = |en: &str, loc: &str| {
-                if !en.is_empty() && !loc.is_empty() {
-                    names
-                        .by_english
-                        .insert(en.to_ascii_lowercase(), loc.to_string());
-                }
-            };
-            for (id, loc) in &names.skills {
-                if let Some(s) = self.skills.get(id) {
-                    add(&s.name, loc);
-                }
+        names.by_english.clear();
+        let mut add = |en: &str, loc: &str| {
+            if !en.is_empty() && !loc.is_empty() {
+                names
+                    .by_english
+                    .insert(en.to_ascii_lowercase(), loc.to_string());
             }
-            for (id, loc) in &names.traits {
-                if let Some(t) = self.traits.get(id) {
-                    add(&t.name, loc);
-                }
+        };
+        for (id, loc) in &names.skills {
+            if let Some(s) = self.skills.get(id) {
+                add(&s.name, loc);
             }
-            for (id, loc) in &names.specs {
-                if let Some(s) = self.specializations.get(id) {
-                    add(&s.name, loc);
-                }
-            }
-            for (id, loc) in &names.items {
-                if let Some(i) = self.items.get(id) {
-                    add(&i.name, loc);
-                }
-            }
-            for (id, loc) in &names.itemstats {
-                if let Some(s) = self.itemstats.get(id) {
-                    add(&s.name, loc);
-                }
-            }
-            for (id, loc) in &names.professions {
-                add(id, loc);
-                if let Some(p) = self.professions.get(id) {
-                    add(&p.name, loc);
-                }
-            }
-            for (id, loc) in &names.legends {
-                add(id, loc);
-            }
-            for (id, loc) in &names.pvp_amulets {
-                if let Some(a) = self.pvp_amulets.get(id) {
-                    add(&a.name, loc);
-                }
-            }
-            self.localized = Some(std::sync::Arc::new(names));
         }
+        for (id, loc) in &names.traits {
+            if let Some(t) = self.traits.get(id) {
+                add(&t.name, loc);
+            }
+        }
+        for (id, loc) in &names.specs {
+            if let Some(s) = self.specializations.get(id) {
+                add(&s.name, loc);
+            }
+        }
+        for (id, loc) in &names.items {
+            if let Some(i) = self.items.get(id) {
+                add(&i.name, loc);
+            }
+        }
+        for (id, loc) in &names.itemstats {
+            if let Some(s) = self.itemstats.get(id) {
+                add(&s.name, loc);
+            }
+        }
+        for (id, loc) in &names.professions {
+            add(id, loc);
+            if let Some(p) = self.professions.get(id) {
+                add(&p.name, loc);
+            }
+        }
+        for (id, loc) in &names.legends {
+            add(id, loc);
+        }
+        for (id, loc) in &names.pvp_amulets {
+            if let Some(a) = self.pvp_amulets.get(id) {
+                add(&a.name, loc);
+            }
+        }
+        self.localized = Some(std::sync::Arc::new(names));
+    }
 
-        pub fn loc_skill<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
-            self.localized
-                .as_ref()
-                .and_then(|l| l.skills.get(&id))
-                .map(String::as_str)
-                .unwrap_or(fallback)
-        }
+    pub fn loc_skill<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
+        self.localized
+            .as_ref()
+            .and_then(|l| l.skills.get(&id))
+            .map(String::as_str)
+            .unwrap_or(fallback)
+    }
 
-        pub fn loc_trait<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
-            self.localized
-                .as_ref()
-                .and_then(|l| l.traits.get(&id))
-                .map(String::as_str)
-                .unwrap_or(fallback)
-        }
+    pub fn loc_trait<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
+        self.localized
+            .as_ref()
+            .and_then(|l| l.traits.get(&id))
+            .map(String::as_str)
+            .unwrap_or(fallback)
+    }
 
-        pub fn loc_spec<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
-            self.localized
-                .as_ref()
-                .and_then(|l| l.specs.get(&id))
-                .map(String::as_str)
-                .unwrap_or(fallback)
-        }
+    pub fn loc_spec<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
+        self.localized
+            .as_ref()
+            .and_then(|l| l.specs.get(&id))
+            .map(String::as_str)
+            .unwrap_or(fallback)
+    }
 
-        pub fn loc_item<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
-            self.localized
-                .as_ref()
-                .and_then(|l| l.items.get(&id))
-                .map(String::as_str)
-                .unwrap_or(fallback)
-        }
+    pub fn loc_item<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
+        self.localized
+            .as_ref()
+            .and_then(|l| l.items.get(&id))
+            .map(String::as_str)
+            .unwrap_or(fallback)
+    }
 
-        pub fn loc_prefix<'a>(&'a self, english: &'a str) -> &'a str {
-            self.itemstat_by_name(english)
-                .and_then(|s| {
-                    self.localized
-                        .as_ref()
-                        .and_then(|l| l.itemstats.get(&s.id))
-                        .map(String::as_str)
-                })
-                .unwrap_or(english)
-        }
+    pub fn loc_prefix<'a>(&'a self, english: &'a str) -> &'a str {
+        self.itemstat_by_name(english)
+            .and_then(|s| {
+                self.localized
+                    .as_ref()
+                    .and_then(|l| l.itemstats.get(&s.id))
+                    .map(String::as_str)
+            })
+            .unwrap_or(english)
+    }
 
-        pub fn loc_name<'a>(&'a self, english: &'a str) -> &'a str {
-            let Some(loc) = &self.localized else {
-                return english;
-            };
-            loc.by_english
-                .get(&english.to_ascii_lowercase())
-                .map(String::as_str)
-                .unwrap_or(english)
-        }
+    pub fn loc_name<'a>(&'a self, english: &'a str) -> &'a str {
+        let Some(loc) = &self.localized else {
+            return english;
+        };
+        loc.by_english
+            .get(&english.to_ascii_lowercase())
+            .map(String::as_str)
+            .unwrap_or(english)
+    }
 
     /// Palette ID for a build-template skill slot.
     ///
@@ -679,6 +682,21 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn itemstat_by_name_ignores_apostrophe() {
+        let mut db = GameDb::empty_for_tests();
+        db.itemstats.insert(
+            1,
+            gw2_api::models::ItemStat {
+                id: 1,
+                name: "Knight's".into(),
+                attributes: vec![],
+            },
+        );
+        assert_eq!(db.itemstat_by_name("Knights").unwrap().name, "Knight's");
+        assert_eq!(db.itemstat_by_name("Knight's").unwrap().name, "Knight's");
+    }
+
     fn revenant_older_legend_skill_uses_shared_palette() {
         let mut db = GameDb::empty_for_tests();
         db.legends.insert(
@@ -757,23 +775,23 @@ mod tests {
     }
 
     #[test]
-        fn loc_skill_falls_back_and_uses_overlay() {
-            let mut db = GameDb::empty_for_tests();
-            let skill: Skill = serde_json::from_value(serde_json::json!({
-                "id": 1,
-                "name": "Signet of Malice"
-            }))
-            .unwrap();
-            db.skills.insert(1, skill);
-            assert_eq!(db.loc_skill(1, "Signet of Malice"), "Signet of Malice");
-            assert_eq!(db.loc_name("Signet of Malice"), "Signet of Malice");
-            let mut names = gw2_api::localize::LocalizedNames {
-                lang: "fr".into(),
-                ..Default::default()
-            };
-            names.skills.insert(1, "Sceau de malice".into());
-            db.attach_localized(names);
-            assert_eq!(db.loc_skill(1, "Signet of Malice"), "Sceau de malice");
-            assert_eq!(db.loc_name("Signet of Malice"), "Sceau de malice");
-        }
+    fn loc_skill_falls_back_and_uses_overlay() {
+        let mut db = GameDb::empty_for_tests();
+        let skill: Skill = serde_json::from_value(serde_json::json!({
+            "id": 1,
+            "name": "Signet of Malice"
+        }))
+        .unwrap();
+        db.skills.insert(1, skill);
+        assert_eq!(db.loc_skill(1, "Signet of Malice"), "Signet of Malice");
+        assert_eq!(db.loc_name("Signet of Malice"), "Signet of Malice");
+        let mut names = gw2_api::localize::LocalizedNames {
+            lang: "fr".into(),
+            ..Default::default()
+        };
+        names.skills.insert(1, "Sceau de malice".into());
+        db.attach_localized(names);
+        assert_eq!(db.loc_skill(1, "Signet of Malice"), "Sceau de malice");
+        assert_eq!(db.loc_name("Signet of Malice"), "Sceau de malice");
+    }
 }

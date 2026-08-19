@@ -83,10 +83,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                     } else if sug.label.starts_with("Score:") {
                         tf(
                             "fmt.option_n",
-                            &[
-                                ("n", &(i + 1).to_string()),
-                                ("prefix", &sug.stat_prefix),
-                            ],
+                            &[("n", &(i + 1).to_string()), ("prefix", &sug.stat_prefix)],
                         )
                     } else {
                         sug.label.clone()
@@ -199,7 +196,11 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
             ChildWindow::new("##improve_single")
                 .size([0.0, scroll_height])
                 .build(ui, || {
-                    build_display::render_card_header(ui, &t("section.current_build"), theme::CURRENT);
+                    build_display::render_card_header(
+                        ui,
+                        &t("section.current_build"),
+                        theme::CURRENT,
+                    );
                     build_display::render_build_skills(ui, &build, state.main.game_db.as_ref());
                     {
                         let db_ref = state.main.game_db.as_ref();

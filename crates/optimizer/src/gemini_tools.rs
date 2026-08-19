@@ -564,10 +564,16 @@ fn exec_get_profession_info(args: &Value, ctx: &ToolContext) -> Value {
     let weapons: Vec<Value> = prof
         .weapons
         .iter()
+        .filter(|(name, info)| info.land_usable(name))
         .map(|(name, info)| {
+            let flags: Vec<&String> = info
+                .flags
+                .iter()
+                .filter(|f| !f.eq_ignore_ascii_case("Aquatic"))
+                .collect();
             let mut w = json!({
                 "name": name,
-                "flags": &info.flags
+                "flags": flags
             });
             if let Some(spec_id) = info.specialization {
                 if let Some(spec) = ctx.db.spec(spec_id) {
@@ -808,19 +814,14 @@ fn exec_upgrade_synergies(args: &Value, ctx: &ToolContext) -> Value {
 fn exec_calculate_stats(args: &Value, ctx: &ToolContext) -> Value {
     let gear_prefix = args["gear_prefix"].as_str().unwrap_or("");
 
-    let itemstat = find_itemstat_by_name(ctx.db, gear_prefix);
-
-    let Some(itemstat) = itemstat else {
+    let Some((prefix_name, full_stats, derived)) =
+        estimate_prefix_stats(ctx.db, gear_prefix, ctx.profession_name)
+    else {
         return json!({ "error": format!("Stat prefix '{}' not found", gear_prefix) });
     };
 
-    let gear_stats = calculate_full_set_stats(itemstat);
-    let mut full_stats = stats::base_stats();
-    full_stats += &gear_stats;
-    let derived = stats::compute_derived(&full_stats, ctx.profession_name);
-
     json!({
-        "prefix": &itemstat.name,
+        "prefix": prefix_name,
         "stats": {
             "power": full_stats.power.round() as i32,
             "precision": full_stats.precision.round() as i32,
@@ -1219,7 +1220,13 @@ fn exec_search_skills_by_effect(args: &Value, ctx: &ToolContext) -> Value {
                 continue;
             };
             if let Some(wt) = weapon_filter {
-                if skill.weapon_type.as_deref() != Some(wt) {
+                let want = gw2_core::i18n::weapon_type_key(wt);
+                let got = skill
+                    .weapon_type
+                    .as_deref()
+                    .map(gw2_core::i18n::weapon_type_key)
+                    .unwrap_or_default();
+                if got != want {
                     continue;
                 }
             }
@@ -1544,6 +1551,21 @@ fn calculate_full_set_stats(itemstat: &ItemStat) -> stats::StatBlock {
         }
     }
     gear_stats
+}
+
+/// Gear + base + derived stats for a named prefix. Used by the calculate_stats
+/// tool and by Choya plating so the Stats tab is not a column of zeros.
+pub fn estimate_prefix_stats(
+    db: &GameDb,
+    prefix: &str,
+    profession: &str,
+) -> Option<(String, stats::StatBlock, stats::DerivedStats)> {
+    let itemstat = db.itemstat_by_name(prefix)?;
+    let gear = calculate_full_set_stats(itemstat);
+    let mut full = stats::base_stats();
+    full += &gear;
+    let derived = stats::compute_derived(&full, profession);
+    Some((itemstat.name.clone(), full, derived))
 }
 
 /// Summarize a trait's key mechanical effects (for trait column overview).

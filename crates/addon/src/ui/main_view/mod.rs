@@ -507,13 +507,11 @@ fn render_left_panel(ui: &Ui, state: &mut AddonState) {
 
 /// Render a compact section header with accent line in the left panel.
 pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
-    ui.dummy([0.0, spacing]); // gap above
+    ui.dummy([0.0, spacing]);
+    let pos = ui.cursor_screen_pos();
+    let width = ui.content_region_avail()[0];
+    let bar_h = theme::control_height(ui).max(ui.frame_height());
     {
-        let pos = ui.cursor_screen_pos();
-        let width = ui.content_region_avail()[0];
-        let th = ui.calc_text_size(title)[1];
-        let bar_h = (th + 10.0).max(22.0);
-        let ty = pos[1] + ((bar_h - th) * 0.5).round();
         let draw_list = ui.get_window_draw_list();
         draw_list
             .add_rect(
@@ -525,14 +523,13 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
             .rounding(4.0)
             .build();
         crate::ui::theme::paint_header_accent(&draw_list, pos[0], pos[1], bar_h);
-        draw_list.add_text(
-            [crate::ui::theme::header_title_x(pos[0]), ty],
-            crate::ui::theme::GOLD,
-            title,
-        );
-        ui.dummy([0.0, bar_h]);
     }
-    ui.dummy([0.0, spacing * 0.5]); // gap below
+    // `Text` follows WindowFontScale + FramePadding; DrawList add_text does not.
+    ui.set_cursor_screen_pos([crate::ui::theme::header_title_x(pos[0]), pos[1]]);
+    ui.align_text_to_frame_padding();
+    ui.text_colored(theme::GOLD, title);
+    ui.set_cursor_screen_pos([pos[0], pos[1] + bar_h]);
+    ui.dummy([0.0, spacing * 0.5]);
 }
 
 /// WvW fight scale: Roam / Havoc / Cloud/Zerg.
@@ -867,6 +864,48 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     };
     theme::wrapped(ui, theme::CURRENT, &focus);
 
+    if ui.collapsing_header(t("weights.fine_tune"), TreeNodeFlags::DEFAULT_OPEN) {
+        let current_axes = state
+            .main
+            .comparison
+            .current_combat_solo
+            .as_ref()
+            .map(crate::ui::radar_chart::compute_axes_from_metrics);
+        let optimized_axes = if !state.main.comparison.suggestions.is_empty() {
+            let idx = state
+                .main
+                .comparison
+                .selected_suggestion
+                .min(state.main.comparison.suggestions.len() - 1);
+            state.main.comparison.suggestions[idx]
+                .combat_solo
+                .as_ref()
+                .map(crate::ui::radar_chart::compute_axes_from_metrics)
+        } else {
+            None
+        };
+
+        let show_current = matches!(state.main.active_tab, MainTab::Improve | MainTab::Talk);
+        let _chart_modified = crate::ui::radar_chart::render_radar_chart(
+            ui,
+            &mut state.main.weights,
+            &mut state.main.radar_dragging,
+            if show_current {
+                current_axes.as_ref()
+            } else {
+                None
+            },
+            optimized_axes.as_ref(),
+        );
+        if current_axes.is_some() || optimized_axes.is_some() {
+            crate::ui::radar_chart::render_legend(
+                ui,
+                show_current && current_axes.is_some(),
+                optimized_axes.is_some(),
+            );
+        }
+    }
+
     render_left_section_header(ui, &t("section.actions"), state.config.section_spacing);
 
     let is_improve = state.main.active_tab == MainTab::Improve;
@@ -914,50 +953,6 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
             }
         } else {
             optimization::start_optimization(state);
-        }
-    }
-
-    ui.dummy([0.0, 4.0]);
-
-    if ui.collapsing_header(t("weights.fine_tune"), TreeNodeFlags::DEFAULT_OPEN) {
-        let current_axes = state
-            .main
-            .comparison
-            .current_combat_solo
-            .as_ref()
-            .map(crate::ui::radar_chart::compute_axes_from_metrics);
-        let optimized_axes = if !state.main.comparison.suggestions.is_empty() {
-            let idx = state
-                .main
-                .comparison
-                .selected_suggestion
-                .min(state.main.comparison.suggestions.len() - 1);
-            state.main.comparison.suggestions[idx]
-                .combat_solo
-                .as_ref()
-                .map(crate::ui::radar_chart::compute_axes_from_metrics)
-        } else {
-            None
-        };
-
-        let show_current = matches!(state.main.active_tab, MainTab::Improve | MainTab::Talk);
-        let _chart_modified = crate::ui::radar_chart::render_radar_chart(
-            ui,
-            &mut state.main.weights,
-            &mut state.main.radar_dragging,
-            if show_current {
-                current_axes.as_ref()
-            } else {
-                None
-            },
-            optimized_axes.as_ref(),
-        );
-        if current_axes.is_some() || optimized_axes.is_some() {
-            crate::ui::radar_chart::render_legend(
-                ui,
-                show_current && current_axes.is_some(),
-                optimized_axes.is_some(),
-            );
         }
     }
 }

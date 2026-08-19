@@ -172,12 +172,10 @@ pub fn choya_name_for(code: &str) -> &'static str {
         .unwrap_or("English")
 }
 
-
 /// English name for the current overlay language (Choya / LLM prose).
 pub fn current_choya_name() -> &'static str {
     choya_name_for(&current_code())
 }
-
 
 pub fn t(key: &str) -> String {
     let lang = current_code();
@@ -193,7 +191,7 @@ pub fn t(key: &str) -> String {
 pub fn loc_weapon_type(api_type: &str) -> String {
     let lang = current_code();
     if api_lang(&lang).is_none() {
-        return api_type.to_string();
+        return canonical_weapon_type(api_type);
     }
     weapon_label(&lang, api_type)
         .unwrap_or(api_type)
@@ -209,8 +207,53 @@ pub fn loc_weapon_types(joined: &str) -> String {
         .join(" / ")
 }
 
+/// Letters-only lowercase key: "Short Bow" / "ShortBow" / "Shortbow",
+/// "Knight's" / "Knights".
+pub fn alnum_key(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+/// Profession and skill APIs use Shortbow/Longbow/Spear/Speargun.
+/// Item `details.type` uses ShortBow/LongBow/Harpoon.
+pub fn weapon_type_key(s: &str) -> String {
+    match alnum_key(s).as_str() {
+        "harpoon" => "spear".to_string(),
+        "harpoongun" => "speargun".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Profession HashMap key for a weapon type string from any API spelling.
+pub fn canonical_weapon_type(name: &str) -> String {
+    match weapon_type_key(name).as_str() {
+        "axe" => "Axe".into(),
+        "dagger" => "Dagger".into(),
+        "focus" => "Focus".into(),
+        "greatsword" => "Greatsword".into(),
+        "hammer" => "Hammer".into(),
+        "longbow" => "Longbow".into(),
+        "mace" => "Mace".into(),
+        "pistol" => "Pistol".into(),
+        "rifle" => "Rifle".into(),
+        "scepter" => "Scepter".into(),
+        "shield" => "Shield".into(),
+        "shortbow" => "Shortbow".into(),
+        "spear" => "Spear".into(),
+        "speargun" => "Speargun".into(),
+        "staff" => "Staff".into(),
+        "sword" => "Sword".into(),
+        "torch" => "Torch".into(),
+        "trident" => "Trident".into(),
+        "warhorn" => "Warhorn".into(),
+        _ => name.trim().to_string(),
+    }
+}
+
 fn weapon_label<'a>(lang: &str, ty: &'a str) -> Option<&'a str> {
-    let key = ty.to_ascii_lowercase();
+    let key = alnum_key(ty);
     let row: [&str; 5] = match key.as_str() {
         "axe" => ["Axe", "Hache", "Axt", "Hacha", "斧"],
         "dagger" => ["Dagger", "Dague", "Dolch", "Daga", "匕首"],
@@ -350,28 +393,42 @@ mod tests {
     }
 
     #[test]
-        fn api_lang_maps_official_locales_only() {
-            assert_eq!(api_lang("fr"), Some("fr"));
-            assert_eq!(api_lang("de"), Some("de"));
-            assert_eq!(api_lang("es"), Some("es"));
-            assert_eq!(api_lang("zh"), Some("zh"));
-            assert_eq!(api_lang("en"), None);
-            assert_eq!(api_lang("it"), None);
-            assert_eq!(api_lang("ko"), None);
-        }
-
-        #[test]
-        fn loc_weapon_type_french_dagger() {
-            with_lang("fr", || {
-                assert_eq!(loc_weapon_type("Dagger"), "Dague");
-                assert_eq!(loc_weapon_types("Dagger / ShortBow"), "Dague / Arc court");
-            });
-            with_lang("en", || {
-                assert_eq!(loc_weapon_type("Dagger"), "Dagger");
-            });
-        }
+    fn api_lang_maps_official_locales_only() {
+        assert_eq!(api_lang("fr"), Some("fr"));
+        assert_eq!(api_lang("de"), Some("de"));
+        assert_eq!(api_lang("es"), Some("es"));
+        assert_eq!(api_lang("zh"), Some("zh"));
+        assert_eq!(api_lang("en"), None);
+        assert_eq!(api_lang("it"), None);
+        assert_eq!(api_lang("ko"), None);
+    }
 
     #[test]
+    fn loc_weapon_type_french_dagger() {
+        with_lang("fr", || {
+            assert_eq!(loc_weapon_type("Dagger"), "Dague");
+            assert_eq!(loc_weapon_types("Dagger / ShortBow"), "Dague / Arc court");
+            assert_eq!(loc_weapon_type("Short Bow"), "Arc court");
+        });
+        with_lang("en", || {
+            assert_eq!(loc_weapon_type("Dagger"), "Dagger");
+            assert_eq!(loc_weapon_type("ShortBow"), "Shortbow");
+        });
+    }
+
+    #[test]
+    #[test]
+    fn weapon_type_keys_collapse_api_spellings() {
+        assert_eq!(alnum_key("Short Bow"), "shortbow");
+        assert_eq!(weapon_type_key("ShortBow"), "shortbow");
+        assert_eq!(weapon_type_key("Harpoon"), "spear");
+        assert_eq!(weapon_type_key("Harpoon Gun"), "speargun");
+        assert_eq!(canonical_weapon_type("ShortBow"), "Shortbow");
+        assert_eq!(canonical_weapon_type("Long Bow"), "Longbow");
+        assert_eq!(canonical_weapon_type("Harpoon"), "Spear");
+        assert_eq!(alnum_key("Knight's"), alnum_key("Knights"));
+    }
+
     fn tf_replaces_named_placeholders() {
         with_lang("en", || {
             let s = tf("fmt.usage_today", &[("n", "12")]);
@@ -390,12 +447,7 @@ mod tests {
                 .get(lang.code)
                 .unwrap_or_else(|| panic!("{}", lang.code));
             for key in en.keys() {
-                assert!(
-                    cat.contains_key(key),
-                    "{} missing key {}",
-                    lang.code,
-                    key
-                );
+                assert!(cat.contains_key(key), "{} missing key {}", lang.code, key);
             }
         }
     }

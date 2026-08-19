@@ -289,11 +289,17 @@ pub fn render_lock_panel(
         let spec_id = locks.specs[slot];
         let spec_locked = spec_id.is_some();
         let spec_name = spec_id
-            .and_then(|id| db.specializations.get(&id).map(|s| db.loc_spec(id, &s.name)))
+            .and_then(|id| {
+                db.specializations
+                    .get(&id)
+                    .map(|s| db.loc_spec(id, &s.name))
+            })
             .or_else(|| {
-                current_specs
-                    .get(slot)
-                    .and_then(|(id, _)| db.specializations.get(id).map(|s| db.loc_spec(*id, &s.name)))
+                current_specs.get(slot).and_then(|(id, _)| {
+                    db.specializations
+                        .get(id)
+                        .map(|s| db.loc_spec(*id, &s.name))
+                })
             })
             .unwrap_or("(empty)");
         let is_elite = spec_id
@@ -445,7 +451,9 @@ pub fn render_lock_panel(
                             let trait_idx = col * 3 + row;
                             let trait_id = spec.major_traits[trait_idx];
                             let trait_info = db.traits.get(&trait_id);
-                            let trait_name = trait_info.map(|t| db.loc_trait(trait_id, &t.name)).unwrap_or("?");
+                            let trait_name = trait_info
+                                .map(|t| db.loc_trait(trait_id, &t.name))
+                                .unwrap_or("?");
 
                             let cx = grid_x + col as f32 * col_spacing + circle_radius + 2.0;
                             let cy = grid_y + row as f32 * row_height + row_height / 2.0;

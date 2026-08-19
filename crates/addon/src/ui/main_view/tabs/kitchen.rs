@@ -101,13 +101,19 @@ fn render_choya_identity(ui: &Ui, state: &mut AddonState) {
     ui.invisible_button("##choya_mascot", [box_w, box_h]);
     let below = ui.cursor_screen_pos();
     let center = [top[0] + PAD_L + MASCOT * 0.5, top[1] + PAD_T + MASCOT * 0.5];
-    if state.main.chat.waiting {
-        theme::draw_choya_thinking(ui, center, MASCOT);
-    } else if !state.main.chat.input.is_empty() {
-        theme::draw_choya_hero(ui, center, MASCOT);
-    } else {
-        theme::draw_choya_sleep(ui, center, MASCOT);
-    }
+    theme::tick_header_pose(
+        &mut state.main.chat.header_pose,
+        &mut state.main.chat.header_pose_at,
+        ui.frame_count() as u32,
+        std::time::Instant::now(),
+    );
+    theme::draw_choya_header(
+        ui,
+        center,
+        MASCOT,
+        state.main.chat.waiting,
+        state.main.chat.header_pose,
+    );
 
     let text_x = top[0] + box_w + 10.0;
     let ty0 = top[1] + PAD_T + 8.0;
@@ -148,7 +154,15 @@ fn render_choya_identity(ui: &Ui, state: &mut AddonState) {
     ui.text_colored(pip, &status);
 
     ui.set_cursor_screen_pos([text_x, ty0 + ui.text_line_height() * 2.0 + 12.0]);
+    if let Some(issue) = state.main.provider_issue.clone() {
+        theme::wrapped(ui, theme::ERR, &issue);
+        ui.set_cursor_screen_pos([text_x, ui.cursor_screen_pos()[1] + 4.0]);
+    }
     super::settings::render_talk_model_row(ui, state);
+    if let Some(err) = state.main.models_error.clone() {
+        ui.set_cursor_screen_pos([text_x, ui.cursor_screen_pos()[1]]);
+        theme::wrapped(ui, theme::WARN, &err);
+    }
 
     let after_id = ui.cursor_screen_pos();
     ui.set_cursor_screen_pos([top[0], below[1].max(after_id[1])]);

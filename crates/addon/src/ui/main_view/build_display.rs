@@ -70,7 +70,11 @@ pub fn render_card_header(ui: &Ui, title: &str, color: [f32; 4]) {
             .round_bot_right(false)
             .build();
         crate::ui::theme::paint_header_accent(&draw_list, start[0], start[1], bar_h);
-        draw_list.add_text([crate::ui::theme::header_title_x(start[0]), ty], color, title);
+        draw_list.add_text(
+            [crate::ui::theme::header_title_x(start[0]), ty],
+            color,
+            title,
+        );
     }
     ui.dummy([0.0, 24.0]);
 }
@@ -98,7 +102,10 @@ fn render_card_section(ui: &Ui, title: &str, content: impl FnOnce(&Ui)) {
             .round_bot_right(false)
             .build();
         draw_list.add_text(
-            [crate::ui::theme::header_title_x(start[0]), hdr_top + CARD_PAD],
+            [
+                crate::ui::theme::header_title_x(start[0]),
+                hdr_top + CARD_PAD,
+            ],
             SECTION_TITLE_COLOR,
             title,
         );
@@ -190,7 +197,10 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
         if !suggestion.sigils.is_empty() {
             ui.text_colored(
                 DIM_COLOR,
-                format!("  {}", tf("fmt.sigils", &[("list", &suggestion.sigils.join(", "))])),
+                format!(
+                    "  {}",
+                    tf("fmt.sigils", &[("list", &suggestion.sigils.join(", "))])
+                ),
             );
         }
     });
@@ -324,7 +334,11 @@ fn render_slash_list(
         if i > 0 {
             ui.same_line_with_spacing(0.0, 6.0);
         }
-        crate::ui::theme::chip(ui, crate::ui::comparison::loc_name(db, part), &format!("##{label}_chip_{i}"));
+        crate::ui::theme::chip(
+            ui,
+            crate::ui::comparison::loc_name(db, part),
+            &format!("##{label}_chip_{i}"),
+        );
         crate::ui::comparison::inspect_if_hovered(ui, part, db);
     }
 }
@@ -471,7 +485,11 @@ fn render_skill_bar(
         (l_u1.as_str(), u1, crate::ui::theme::GOLD_DIM),
         (l_u2.as_str(), u2, crate::ui::theme::GOLD_DIM),
         (l_u3.as_str(), u3, crate::ui::theme::GOLD_DIM),
-        (l_elite.as_str(), elite.as_str(), crate::ui::theme::ELITE_RIM),
+        (
+            l_elite.as_str(),
+            elite.as_str(),
+            crate::ui::theme::ELITE_RIM,
+        ),
     ];
     let avail = ui.content_region_avail()[0].max(1.0);
     let gap = 5.0;
@@ -867,7 +885,13 @@ fn render_combat_metrics_inner(ui: &Ui, c: &CombatMetrics, cmp: &CombatMetrics, 
     let ehp = t("stat.effective_hp");
     render_combat_int(ui, &ep, c.effective_power, cmp.effective_power, has_cmp);
     render_combat_pct(ui, &crit, c.crit_chance, cmp.crit_chance, has_cmp);
-    render_combat_int(ui, &strike, c.strike_dps_index, cmp.strike_dps_index, has_cmp);
+    render_combat_int(
+        ui,
+        &strike,
+        c.strike_dps_index,
+        cmp.strike_dps_index,
+        has_cmp,
+    );
     render_combat_int(
         ui,
         &condi,
@@ -877,7 +901,13 @@ fn render_combat_metrics_inner(ui: &Ui, c: &CombatMetrics, cmp: &CombatMetrics, 
     );
     render_combat_int(ui, &total, c.total_dps_index, cmp.total_dps_index, has_cmp);
     if c.boon_duration_pct > 0.1 || cmp.boon_duration_pct > 0.1 {
-        render_combat_pct(ui, &boon, c.boon_duration_pct, cmp.boon_duration_pct, has_cmp);
+        render_combat_pct(
+            ui,
+            &boon,
+            c.boon_duration_pct,
+            cmp.boon_duration_pct,
+            has_cmp,
+        );
     }
     if c.condi_duration_pct > 0.1 || cmp.condi_duration_pct > 0.1 {
         render_combat_pct(

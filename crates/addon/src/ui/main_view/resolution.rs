@@ -420,7 +420,8 @@ fn resolve_equipment_db(
                 ws1.main_hand = Some(WeaponInfo {
                     name: item_name,
                     weapon_type: item
-                        .and_then(|i| i.details.as_ref()?.detail_type.clone())
+                        .and_then(|i| i.details.as_ref()?.detail_type.as_deref())
+                        .map(gw2_core::i18n::canonical_weapon_type)
                         .unwrap_or_default(),
                     id: piece.id,
                 });
@@ -433,7 +434,8 @@ fn resolve_equipment_db(
                 ws1.off_hand = Some(WeaponInfo {
                     name: item_name,
                     weapon_type: item
-                        .and_then(|i| i.details.as_ref()?.detail_type.clone())
+                        .and_then(|i| i.details.as_ref()?.detail_type.as_deref())
+                        .map(gw2_core::i18n::canonical_weapon_type)
                         .unwrap_or_default(),
                     id: piece.id,
                 });
@@ -446,7 +448,8 @@ fn resolve_equipment_db(
                 ws2.main_hand = Some(WeaponInfo {
                     name: item_name,
                     weapon_type: item
-                        .and_then(|i| i.details.as_ref()?.detail_type.clone())
+                        .and_then(|i| i.details.as_ref()?.detail_type.as_deref())
+                        .map(gw2_core::i18n::canonical_weapon_type)
                         .unwrap_or_default(),
                     id: piece.id,
                 });
@@ -459,7 +462,8 @@ fn resolve_equipment_db(
                 ws2.off_hand = Some(WeaponInfo {
                     name: item_name,
                     weapon_type: item
-                        .and_then(|i| i.details.as_ref()?.detail_type.clone())
+                        .and_then(|i| i.details.as_ref()?.detail_type.as_deref())
+                        .map(gw2_core::i18n::canonical_weapon_type)
                         .unwrap_or_default(),
                     id: piece.id,
                 });

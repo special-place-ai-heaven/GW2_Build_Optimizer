@@ -608,8 +608,8 @@ fn select_weapons(
         let available: Vec<(&str, bool)> = profession
             .weapons
             .iter()
-            .filter(|(_, info)| {
-                if info.is_aquatic() {
+            .filter(|(name, info)| {
+                if !info.land_usable(name) {
                     return false;
                 }
                 if let Some(req_spec) = info.specialization {
@@ -750,6 +750,14 @@ fn score_weapon_skills(
     let mut score = 0.0;
     for skill_ref in &weapon_info.skills {
         if let Some(skill) = db.skills.get(&skill_ref.id) {
+            if weapon_info.is_aquatic()
+                && !skill
+                    .flags
+                    .iter()
+                    .any(|f| f.eq_ignore_ascii_case("NoUnderwater"))
+            {
+                continue;
+            }
             let effects = extract_skill_effects(skill);
             for eff in &effects {
                 score += score_normalized_effect(eff, weights);
@@ -2481,5 +2489,31 @@ mod land_weapon_tests {
             "should still pick a land set; got {:?}",
             candidates[0].weapons
         );
+    }
+
+    #[test]
+    fn select_weapons_treats_spear_as_land() {
+        let mut weapons = std::collections::HashMap::new();
+        weapons.insert("Spear".into(), weapon(&["TwoHand", "Aquatic"]));
+        weapons.insert("Trident".into(), weapon(&["TwoHand", "Aquatic"]));
+        let prof = Profession {
+            id: "Guardian".into(),
+            name: "Guardian".into(),
+            code: None,
+            specializations: vec![],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        let db = GameDb::empty_for_tests();
+        let mut candidates = [empty_candidate()];
+        select_weapons(&mut candidates, &prof, &db, &OptimizationWeights::default());
+        let (s1m, s1o, s2m, s2o) = &candidates[0].weapons;
+        assert_eq!(s1m.as_deref(), Some("Spear"));
+        for w in [s1m, s1o, s2m, s2o].into_iter().flatten() {
+            assert_ne!(w.as_str(), "Trident");
+        }
     }
 }
