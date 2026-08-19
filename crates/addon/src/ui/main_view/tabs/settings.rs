@@ -587,6 +587,25 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         let _ = state.config.save(&state.config_path);
     }
 
+    ui.text(t("settings.font"));
+    ui.set_next_item_width(right_item_w * 0.6);
+    let current_font = state.config.ui_font.clone();
+    let font_preview = t(crate::ui::fonts::label_key(&current_font));
+    if let Some(_c) = ComboBox::new("##ui_font")
+        .preview_value(&font_preview)
+        .begin(ui)
+    {
+        for (id, key) in crate::ui::fonts::combo_options() {
+            let label = t(key);
+            let sel = current_font == id;
+            if Selectable::new(&label).selected(sel).build(ui) && !sel {
+                state.config.ui_font = id.to_string();
+                let _ = state.config.save(&state.config_path);
+            }
+        }
+    }
+    ui.text_colored(theme::MUTED, t("settings.font_hint"));
+
     ui.spacing();
     ui.text_colored([0.7, 0.7, 0.75, 1.0], t("settings.layout"));
 

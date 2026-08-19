@@ -131,6 +131,10 @@ pub struct AppConfig {
     /// Overlay language. `"auto"` follows the OS UI language. Additive — old configs omit this.
     #[serde(default = "default_ui_language")]
     pub ui_language: String,
+
+    /// Overlay typeface. `"auto"` picks a Windows font from language; `"game"` keeps Nexus.
+    #[serde(default = "default_ui_font")]
+    pub ui_font: String,
 }
 
 impl Default for AppConfig {
@@ -161,6 +165,7 @@ impl Default for AppConfig {
             default_game_mode: None,
             auto_refresh_cache: false,
             ui_language: "auto".into(),
+            ui_font: "auto".into(),
         }
     }
 }
@@ -185,6 +190,10 @@ fn default_window_visible() -> bool {
 }
 
 fn default_ui_language() -> String {
+    "auto".into()
+}
+
+fn default_ui_font() -> String {
     "auto".into()
 }
 
@@ -453,6 +462,7 @@ mod tests {
         assert_eq!(config.font_scale, 1.0);
         assert!(!config.auto_refresh_cache);
         assert_eq!(config.ui_language, "auto");
+        assert_eq!(config.ui_font, "auto");
         assert!(config.is_setup_complete());
         assert!(config.window_visible);
         assert_eq!(
@@ -475,6 +485,7 @@ mod tests {
         assert_eq!(config.content_indent, defaults.content_indent);
         assert!(config.window_visible);
         assert_eq!(config.ui_language, "auto");
+        assert_eq!(config.ui_font, "auto");
         assert_eq!(
             config.window_rect(),
             (DEFAULT_WINDOW_POS, DEFAULT_WINDOW_SIZE)
