@@ -75,7 +75,6 @@ pub fn kit_escape_kinds(skills: &[RotationSkill]) -> u32 {
     u32::from(mobility) + u32::from(stealth) + u32::from(block) + u32::from(cover)
 }
 
-
 pub fn kit_has_strip(skills: &[RotationSkill]) -> bool {
     skills.iter().any(|s| {
         s.effects.iter().any(|e| {
@@ -116,6 +115,29 @@ pub fn kit_has_stability_cover(skills: &[RotationSkill]) -> bool {
             _ => false,
         })
     })
+}
+
+/// Cover that eats the incoming alpha: Stability, evade, block, invuln/aegis, stealth, or blind.
+/// Leap/teleport is an *out*, not cover — that is `kit_has_mobility_out`.
+pub fn kit_has_cover_answer(skills: &[RotationSkill]) -> bool {
+    kit_has_stability_cover(skills)
+        || skills.iter().any(|s| {
+            s.effects.iter().any(|e| match e {
+                SkillEffect::Mobility {
+                    kind: MobilityKind::Evade | MobilityKind::Stealth,
+                } => true,
+                SkillEffect::Cover {
+                    kind:
+                        CoverKind::Stealth
+                        | CoverKind::Block
+                        | CoverKind::Invulnerability
+                        | CoverKind::Aegis
+                        | CoverKind::Blind,
+                    ..
+                } => true,
+                _ => false,
+            })
+        })
 }
 
 /// Which of the three BuffProfile slots (Solo / Party / Squad) this scale uses.
@@ -328,6 +350,18 @@ mod tests {
         assert!(!kit_has_mobility_out(&burst));
         assert!(kit_has_mobility_out(&with_out));
         assert!(kit_has_mobility_out(&with_block));
+    }
+
+    #[test]
+    fn cover_answer_evade_not_leap() {
+        let leap = vec![skill_with(vec![SkillEffect::Mobility {
+            kind: MobilityKind::Leap,
+        }])];
+        let evade = vec![skill_with(vec![SkillEffect::Mobility {
+            kind: MobilityKind::Evade,
+        }])];
+        assert!(!kit_has_cover_answer(&leap));
+        assert!(kit_has_cover_answer(&evade));
     }
 
     #[test]

@@ -66,7 +66,8 @@ pub const EHP_FLOOR_PVP: f64 = 8_000.0;
 pub enum ViabilityGate {
     /// Build must have ≥ MIN_STUNBREAKS stunbreak skills (WvW/PvP only).
     StunbreakCount,
-    /// Build must have access to Stability (WvW/PvP only).
+    /// WvW/PvP: personal cover vs CC — Stability *or* evade/block/invuln/stealth.
+    /// Roam also accepts interrupt/disable-first (cut their cast before yours).
     StabilityAccess,
     /// Build must have ≥ MIN_CLEANSE_COUNT cleanse skills (WvW/PvP only).
     CleanseRate,
@@ -187,18 +188,27 @@ pub fn evaluate_viability_gates(
             },
         });
 
-        // ── Stability gate ──────────────────────────────────────────────────
+        // Cover, not Stability-only. Meta roam (Daredevil stealth/evade, Mesmer
+        // Distortion, Fresh Air invuln, Spellbreaker Full Counter) survives without
+        // a dedicated stab utility. Roam also counts interrupt/disable-first.
         gates.push(match rotation {
             Some(rot) => {
-                let passed = rot.has_stability;
+                let roam = scenario.combat_tier == CombatTier::Solo;
+                let passed =
+                    rot.has_stability || rot.has_cover_answer || (roam && rot.has_interrupt);
+                let note = if rot.has_stability {
+                    "stability available".into()
+                } else if rot.has_cover_answer {
+                    "cover: evade/block/invuln/stealth".into()
+                } else if roam && rot.has_interrupt {
+                    "interrupt/disable before incoming CC".into()
+                } else {
+                    "no cover (stability, evade, block, invuln, stealth) and no interrupt".into()
+                };
                 GateResult {
                     gate: ViabilityGate::StabilityAccess,
                     passed,
-                    note: if passed {
-                        "stability available".into()
-                    } else {
-                        "no stability access".into()
-                    },
+                    note,
                 }
             }
             None => GateResult {
@@ -609,6 +619,7 @@ mod tests {
             downed: true,
             finished: true,
             has_interrupt: true,
+            has_cover_answer: true,
         }
     }
 
@@ -696,6 +707,8 @@ mod tests {
     fn gate_wvw_no_stability_fails() {
         let mut rot = make_viable_rotation();
         rot.has_stability = false;
+        rot.has_cover_answer = false;
+        rot.has_interrupt = false;
         let combat = make_viable_combat();
         let scenario = make_wvw_scenario();
         let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
@@ -703,7 +716,48 @@ mod tests {
         assert!(!report.is_viable);
         let g = gate_by_kind(&report.gates, &ViabilityGate::StabilityAccess).unwrap();
         assert!(!g.passed);
-        assert_eq!(g.note, "no stability access");
+        assert!(g.note.contains("no cover"));
+    }
+
+    #[test]
+    fn gate_wvw_evade_without_stability_passes() {
+        let mut rot = make_viable_rotation();
+        rot.has_stability = false;
+        rot.has_cover_answer = true;
+        rot.has_interrupt = false;
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let g = gate_by_kind(&report.gates, &ViabilityGate::StabilityAccess).unwrap();
+        assert!(g.passed, "note={}", g.note);
+        assert!(report.is_viable);
+    }
+
+    #[test]
+    fn gate_roam_interrupt_without_stability_passes() {
+        let mut rot = make_viable_rotation();
+        rot.has_stability = false;
+        rot.has_cover_answer = false;
+        rot.has_interrupt = true;
+        let combat = make_viable_combat();
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_tier = CombatTier::Solo;
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let g = gate_by_kind(&report.gates, &ViabilityGate::StabilityAccess).unwrap();
+        assert!(g.passed, "note={}", g.note);
+    }
+
+    #[test]
+    fn gate_zerg_interrupt_without_cover_fails() {
+        let mut rot = make_viable_rotation();
+        rot.has_stability = false;
+        rot.has_cover_answer = false;
+        rot.has_interrupt = true;
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let g = gate_by_kind(&report.gates, &ViabilityGate::StabilityAccess).unwrap();
+        assert!(!g.passed);
     }
 
     /// WvW build with no cleanse skills → non-viable, cleanse gate fails.

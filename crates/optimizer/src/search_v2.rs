@@ -45,8 +45,8 @@ impl Default for SearchConfig {
     fn default() -> Self {
         Self {
             beam_width: 10,
-            eval_budget: 200,
-            time_limit_secs: 28,
+            eval_budget: 1500,
+            time_limit_secs: 45,
         }
     }
 }
@@ -63,7 +63,7 @@ impl Default for SearchConfig {
 ///
 /// Five original operators plus elite-spec and weapon jumps.
 /// Output is interleaved round-robin across operators rather than concatenated.
-/// `optimize_v2_search` caps evaluation per beam member at ~30 neighbors;
+/// `optimize_v2_search` caps evaluation per beam member at ~80 neighbors;
 /// concatenated order would burn the entire budget on `swap_gear_prefix`
 /// (which produces ~50 neighbors and appears first), and the search would
 /// never explore rune/sigil/relic/utility mutations at all.
@@ -165,9 +165,18 @@ pub fn optimize_v2_search(
 
     let start = Instant::now();
     let mut eval_count = 0usize;
+    let mut generation = 0u32;
 
-    // Step 5: beam loop.
+    // Step 5: beam loop — keep permuting until the clock or eval budget is gone.
     while eval_count < config.eval_budget && start.elapsed().as_secs() < config.time_limit_secs {
+        generation += 1;
+        on_progress(OptimizeProgress {
+            stage: format!(
+                "Permuting kits (gen {generation}, {eval_count} evals, {:.0}s)...",
+                start.elapsed().as_secs_f32()
+            ),
+            done: false,
+        });
         let mut next: Vec<BeamCandidate> = Vec::new();
 
         // Elitism: keep current beam members in the candidate pool.
@@ -175,7 +184,7 @@ pub fn optimize_v2_search(
 
         // Budget per candidate to avoid spending all evals on a single member.
         let budget_per = config.eval_budget.saturating_sub(eval_count) / beam.len().max(1);
-        let neighbor_cap = budget_per.clamp(1, 30);
+        let neighbor_cap = budget_per.clamp(1, 80);
 
         for candidate in &beam {
             let neighbors = generate_neighbors(candidate, db, profession_name, locks);
@@ -532,7 +541,7 @@ fn swap_utilities_for_failed_gates(
                     return false;
                 }
             }
-            (need_stability && synergy_pipeline::skill_has_stability(skill))
+            (need_stability && synergy_pipeline::skill_has_cc_answer(skill))
                 || (need_stunbreak && synergy_pipeline::skill_is_stunbreak(skill))
                 || (need_cleanse && synergy_pipeline::skill_cleanse_count(skill) > 0)
         })
@@ -550,6 +559,27 @@ fn swap_utilities_for_failed_gates(
                 b.skills.utilities.push(None);
             }
             b.skills.utilities[slot_idx] = Some((skill_id, skill.name.clone()));
+            neighbors.push(b);
+        }
+    }
+    if need_stability {
+        for &skill_id in &prof_skill_ids {
+            let Some(skill) = db.skills.get(&skill_id) else {
+                continue;
+            };
+            if skill.slot.as_deref() != Some("Heal") || db.skill_palette_id(skill_id) == 0 {
+                continue;
+            }
+            if let Some(req_spec) = skill.specialization {
+                if !equipped_spec_ids.contains(&req_spec) {
+                    continue;
+                }
+            }
+            if !synergy_pipeline::skill_has_cc_answer(skill) {
+                continue;
+            }
+            let mut b = candidate.validated.clone();
+            b.skills.heal = Some((skill_id, skill.name.clone()));
             neighbors.push(b);
         }
     }
@@ -1117,7 +1147,11 @@ mod tests {
     fn test_search_config_default() {
         let config = SearchConfig::default();
         assert_eq!(config.beam_width, 10, "default beam_width should be 10");
-        assert_eq!(config.eval_budget, 200, "default eval_budget should be 200");
+        assert_eq!(
+            config.eval_budget, 1500,
+            "default eval_budget should be 1500"
+        );
+        assert_eq!(config.time_limit_secs, 45);
     }
 
     fn twohand(name: &str, spec: Option<u32>) -> (String, gw2_api::models::WeaponInfo) {

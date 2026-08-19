@@ -27,7 +27,8 @@ use crate::synergy::{
     ComponentId, NormalizedEffect, SynergyLink,
 };
 use crate::text_util::{
-    normalize_sigil_family, text_describes_condition_cleanse, text_describes_stability,
+    normalize_sigil_family, text_describes_cc_answer, text_describes_condition_cleanse,
+    text_describes_stability,
 };
 use crate::validation::{
     ValidatedBuild, ValidatedGearPrefix, ValidatedItem, ValidatedSkills, ValidatedSpec,
@@ -983,7 +984,7 @@ struct CompetitiveUtilityCoverage {
 impl CompetitiveUtilityCoverage {
     fn add_skill(&mut self, skill: &Skill) {
         self.stunbreak |= skill_is_stunbreak(skill);
-        self.stability |= skill_has_stability(skill);
+        self.stability |= skill_has_cc_answer(skill);
         self.cleanse |= skill_cleanse_count(skill) > 0;
     }
 
@@ -1000,7 +1001,7 @@ impl CompetitiveUtilityGate {
     fn matches(self, skill: &Skill) -> bool {
         match self {
             CompetitiveUtilityGate::Stunbreak => skill_is_stunbreak(skill),
-            CompetitiveUtilityGate::Stability => skill_has_stability(skill),
+            CompetitiveUtilityGate::Stability => skill_has_cc_answer(skill),
             CompetitiveUtilityGate::Cleanse => skill_cleanse_count(skill) > 0,
         }
     }
@@ -1082,6 +1083,34 @@ pub(crate) fn skill_has_stability(skill: &Skill) -> bool {
             .description
             .as_deref()
             .is_some_and(text_describes_stability)
+}
+
+pub(crate) fn skill_has_cc_answer(skill: &Skill) -> bool {
+    if skill_has_stability(skill) {
+        return true;
+    }
+    let from_facts = skill.facts.iter().any(|fact| match fact {
+        Fact::Buff {
+            status: Some(status),
+            ..
+        }
+        | Fact::PrefixedBuff {
+            status: Some(status),
+            ..
+        } => {
+            let s = status.to_ascii_lowercase();
+            matches!(
+                s.as_str(),
+                "stealth" | "distortion" | "aegis" | "invulnerability" | "determined" | "blind"
+            )
+        }
+        _ => false,
+    });
+    from_facts
+        || skill
+            .description
+            .as_deref()
+            .is_some_and(text_describes_cc_answer)
 }
 
 pub(crate) fn skill_cleanse_count(skill: &Skill) -> u32 {
