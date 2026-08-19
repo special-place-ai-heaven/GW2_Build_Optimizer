@@ -91,19 +91,25 @@ pub fn gold_button(ui: &Ui, label: impl AsRef<str>) -> bool {
 pub fn gold_button_sized(ui: &Ui, label: impl AsRef<str>, size: [f32; 2]) -> bool {
     let label = label.as_ref();
     let visible = label.split("##").next().unwrap_or(label);
-    let (pad_x, _pad_y) = gold_button_pad(ui);
+    let (pad_x, pad_y) = gold_button_pad(ui);
     let need_w = ui.calc_text_size(visible)[0] + pad_x * 2.0;
+    let need_h = ui.current_font_size() + pad_y * 2.0;
     let w = if size[0] < 0.0 {
         size[0]
     } else {
         size[0].max(need_w)
+    };
+    let h = if size[1] <= 0.0 {
+        need_h
+    } else {
+        size[1].max(need_h)
     };
     let _pad = push_gold_button_pad(ui);
     let _bg = ui.push_style_color(StyleColor::Button, GOLD_FILL);
     let _h = ui.push_style_color(StyleColor::ButtonHovered, [0.90, 0.74, 0.28, 1.0]);
     let _a = ui.push_style_color(StyleColor::ButtonActive, [0.70, 0.55, 0.16, 1.0]);
     let _t = ui.push_style_color(StyleColor::Text, [0.10, 0.08, 0.04, 1.0]);
-    ui.button_with_size(label, [w, size[1]])
+    ui.button_with_size(label, [w, h])
 }
 
 fn gold_button_pad(ui: &Ui) -> (f32, f32) {
