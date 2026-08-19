@@ -33,9 +33,39 @@ pub struct WeaponInfo {
 }
 
 impl WeaponInfo {
-    /// Underwater-only (Trident, Harpoon Gun, aquatic Spear). Not a land weapon set.
+    /// Profession API Aquatic flag. Spear still has this; use [`Self::land_usable`] for land kits.
     pub fn is_aquatic(&self) -> bool {
         self.flags.iter().any(|f| f.eq_ignore_ascii_case("Aquatic"))
+    }
+
+    /// Land kit. Spear keeps the Aquatic flag (underwater palette) but is a
+    /// terrestrial two-hander since Janthir Wilds. Trident/Speargun stay water-only.
+    pub fn land_usable(&self, weapon_name: &str) -> bool {
+        !self.is_aquatic() || gw2_core::i18n::weapon_type_key(weapon_name) == "spear"
+    }
+}
+
+#[cfg(test)]
+mod weapon_info_tests {
+    use super::WeaponInfo;
+
+    fn info(flags: &[&str]) -> WeaponInfo {
+        WeaponInfo {
+            specialization: None,
+            flags: flags.iter().map(|s| (*s).to_string()).collect(),
+            skills: vec![],
+        }
+    }
+
+    #[test]
+    fn spear_is_land_usable_despite_aquatic_flag() {
+        let spear = info(&["TwoHand", "Aquatic"]);
+        assert!(spear.is_aquatic());
+        assert!(spear.land_usable("Spear"));
+        assert!(spear.land_usable("Harpoon"));
+        assert!(!info(&["TwoHand", "Aquatic"]).land_usable("Trident"));
+        assert!(!info(&["TwoHand", "Aquatic"]).land_usable("Speargun"));
+        assert!(info(&["TwoHand"]).land_usable("Staff"));
     }
 }
 

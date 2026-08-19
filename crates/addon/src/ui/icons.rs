@@ -196,7 +196,12 @@ pub fn upgrade_url<'a>(db: &'a GameDb, name: &str) -> Option<&'a str> {
 
 pub fn weapon_type_url<'a>(db: &'a GameDb, profession: &str, weapon_type: &str) -> Option<&'a str> {
     let prof = db.professions.get(profession)?;
-    let w = prof.weapons.get(weapon_type)?;
+    let needle = gw2_core::i18n::weapon_type_key(weapon_type);
+    let w = prof
+        .weapons
+        .iter()
+        .find(|(k, _)| gw2_core::i18n::weapon_type_key(k) == needle)
+        .map(|(_, info)| info)?;
     let sid = w.skills.first()?.id;
     skill_url(db, sid)
 }

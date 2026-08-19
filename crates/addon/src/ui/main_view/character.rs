@@ -571,25 +571,27 @@ fn append_soto_weapons(buf: &mut Vec<u8>, weapons: &[String]) {
 }
 
 fn weapon_type_id(name: &str) -> Option<u16> {
-    Some(match name {
-        "Axe" => 5,
-        "Longbow" => 35,
-        "Dagger" => 47,
-        "Focus" => 49,
-        "Greatsword" => 50,
-        "Hammer" => 51,
-        "Mace" => 53,
-        "Pistol" => 54,
-        "Rifle" => 85,
-        "Scepter" => 86,
-        "Shield" => 87,
-        "Staff" => 89,
-        "Sword" => 90,
-        "Torch" => 102,
-        "Warhorn" => 103,
-        "Shortbow" => 107,
-        // Aquatic types (265) in the land trailer make GW2 reject the template.
-        "Spear" | "Trident" | "HarpoonGun" => return None,
+    Some(match gw2_core::i18n::weapon_type_key(name).as_str() {
+        "axe" => 5,
+        "longbow" => 35,
+        "dagger" => 47,
+        "focus" => 49,
+        "greatsword" => 50,
+        "hammer" => 51,
+        "mace" => 53,
+        "pistol" => 54,
+        "rifle" => 85,
+        "scepter" => 86,
+        "shield" => 87,
+        "staff" => 89,
+        "sword" => 90,
+        "torch" => 102,
+        "warhorn" => 103,
+        "shortbow" => 107,
+        // Land spear (Janthir). Type 265 in the SotO trailer is how GW2 encodes it.
+        // Trident / Speargun stay aquatic-only and must not appear here.
+        "spear" => 265,
+        "trident" | "speargun" => return None,
         _ => return None,
     })
 }
@@ -600,6 +602,18 @@ mod tests {
     use gw2_api::models::{Build, PetSelection, Profession, SkillSelection};
     use gw2_optimizer::gamedb::GameDb;
     use std::collections::HashMap;
+
+    #[test]
+    fn weapon_type_id_accepts_item_api_spellings() {
+        assert_eq!(weapon_type_id("Shortbow"), Some(107));
+        assert_eq!(weapon_type_id("ShortBow"), Some(107));
+        assert_eq!(weapon_type_id("Short Bow"), Some(107));
+        assert_eq!(weapon_type_id("LongBow"), Some(35));
+        assert_eq!(weapon_type_id("Harpoon"), Some(265));
+        assert_eq!(weapon_type_id("Spear"), Some(265));
+        assert_eq!(weapon_type_id("HarpoonGun"), None);
+        assert_eq!(weapon_type_id("Trident"), None);
+    }
 
     fn revenant_db() -> GameDb {
         let mut db = GameDb::empty_for_tests();
@@ -746,9 +760,8 @@ mod tests {
         assert_eq!(buf.len(), 44);
     }
 
-
     #[test]
-    fn aquatic_weapon_names_do_not_extend_template() {
+    fn land_spear_encodes_in_soto_trailer_trident_does_not() {
         let db = revenant_db();
         let build = Build {
             name: None,
@@ -762,7 +775,18 @@ mod tests {
         };
         let spear_only =
             decode_template(&generate_build_chat_code(&build, &db, &["Spear".into()]).unwrap());
-        assert_eq!(spear_only.len(), 44, "aquatic-only list must stay 44-byte");
+        assert!(
+            spear_only.len() > 44,
+            "land spear must use the SotO trailer"
+        );
+        let rest = &spear_only[44..];
+        assert_eq!(rest[0], 1);
+        assert_eq!(u16_at(rest, 1), 265);
+        assert_eq!(*rest.last().unwrap(), 0);
+
+        let trident_only =
+            decode_template(&generate_build_chat_code(&build, &db, &["Trident".into()]).unwrap());
+        assert_eq!(trident_only.len(), 44, "trident must stay aquatic-only");
 
         let buf = decode_template(
             &generate_build_chat_code(
@@ -774,14 +798,9 @@ mod tests {
         );
         assert!(buf.len() > 44);
         let rest = &buf[44..];
-        assert_eq!(rest[0], 1, "only Staff is a land weapon");
+        assert_eq!(rest[0], 2, "Staff + land Spear; not Trident");
         assert_eq!(u16_at(rest, 1), 89);
+        assert_eq!(u16_at(rest, 3), 265);
         assert_eq!(*rest.last().unwrap(), 0);
-        assert_eq!(rest.len(), 1 + 2 + 1);
-        assert!(
-            !rest.windows(2).any(|w| u16::from_le_bytes([w[0], w[1]]) == 265),
-            "must not write aquatic type 265"
-        );
     }
-
 }

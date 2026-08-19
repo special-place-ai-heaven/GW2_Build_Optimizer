@@ -464,10 +464,10 @@ Role chips are families, not finished jobs. The player's words pick the lean (po
 
 Named gear prefix in the player's message wins (including Celestial). Ignore a prefix they negated ("not minstrel").
 
-If they greet you, ask a question, or are just talking — do not call tools. Reply with JSON:
+If they greet you, ask a question, or are just chatting — no build. Reply with JSON:
 {{"explanation": "<your spoken reply>", "specializations": []}}
 
-If Context already lists an equipped Character loadout, do not call tools. Edit that loadout. Copy weapons unchanged if they asked to keep them. Reply with the full JSON build object. explanation: 2-4 sentences in {reply_language}.
+If they want a build, a loadout, an improve, or anything to equip: reply with the FULL JSON build object (specializations, weapons, skills, rune, sigils, relic, stat_prefix). Never explanation-only. Weapon type names match the API: Shortbow, Longbow, Greatsword (no spaces). If Context already lists an equipped Character loadout, do not call tools; edit that loadout. Copy weapons unchanged only if they asked to keep them. explanation: 2-4 sentences in {reply_language}.
 
 If they want a new build and Context has no Character loadout: use at most two tool rounds, then reply with the full JSON build object. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: 2-4 sentences in {reply_language}.
 
@@ -1363,6 +1363,14 @@ Every field is REQUIRED. Do not leave any field empty or null."#;
             prompt.contains("\"traits\":"),
             "spec objects missing traits"
         );
+        assert!(
+            prompt.contains("Never explanation-only"),
+            "build requests must ask for a full kit: {prompt}"
+        );
+        assert!(
+            prompt.contains("Shortbow, Longbow, Greatsword"),
+            "API weapon names missing: {prompt}"
+        );
         for tool in [
             "get_profession_info",
             "get_spec_traits",
@@ -1393,13 +1401,8 @@ Every field is REQUIRED. Do not leave any field empty or null."#;
     fn chef_prompt_keeps_pasted_names_in_kitchen_when_order_is_capped() {
         let order = "x".repeat(500);
         let kitchen = "Mode: PvE\nPasted: Rune of the Scholar (item)";
-        let prompt = chat_refinement_prompt_with_tools(
-            "Warrior",
-            "PvE",
-            &order,
-            kitchen,
-            "English",
-        );
+        let prompt =
+            chat_refinement_prompt_with_tools("Warrior", "PvE", &order, kitchen, "English");
         assert!(
             prompt.contains("Pasted: Rune of the Scholar (item)"),
             "pasted names must live in the kitchen brief, not the 500-char order"
@@ -1412,13 +1415,8 @@ Every field is REQUIRED. Do not leave any field empty or null."#;
 
     #[test]
     fn chef_prompt_asks_for_selected_reply_language() {
-        let prompt = chat_refinement_prompt_with_tools(
-            "Warrior",
-            "PvE",
-            "salut",
-            "Mode: PvE",
-            "French",
-        );
+        let prompt =
+            chat_refinement_prompt_with_tools("Warrior", "PvE", "salut", "Mode: PvE", "French");
         assert!(
             prompt.contains("Write the \"explanation\" field in French"),
             "{prompt}"

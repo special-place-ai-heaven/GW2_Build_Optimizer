@@ -100,7 +100,7 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     );
 }
 
-fn render_api_keys_section(ui: &Ui, state: &mut AddonState, _col_w: f32) {
+fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let mut provider_changed = false;
     for provider in &gw2_core::config::LlmProvider::ALL {
         let is_selected = state.config.active_provider == *provider;
@@ -127,8 +127,10 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, _col_w: f32) {
     }
     ui.spacing();
 
+    let row_w = (col_w - 8.0).max(80.0);
     let provider_label = state.config.active_provider.label().to_string();
     let has_key = state.config.has_active_llm_key();
+    let status_origin = ui.cursor_screen_pos();
     if has_key {
         ui.text_colored(
             [0.0, 1.0, 0.0, 1.0],
@@ -140,15 +142,25 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, _col_w: f32) {
             tf("fmt.key_not_set", &[("provider", &provider_label)]),
         );
     }
+    let after_status = ui.cursor_screen_pos();
 
     if has_key {
-        ui.same_line();
         let validating = state.main.settings_key_validating;
+        let test_label = if validating {
+            t("btn.testing")
+        } else {
+            t("btn.test")
+        };
+        let test_w = theme::gold_button_width(ui, test_label.as_str());
+        ui.set_cursor_screen_pos([
+            status_origin[0] + (row_w - test_w).max(0.0),
+            status_origin[1],
+        ]);
         if validating {
             let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-            theme::gold_button_sized(ui, &t("btn.testing"), [100.0, 0.0]);
+            theme::gold_button_sized(ui, test_label.as_str(), [test_w, 0.0]);
             style.pop();
-        } else if theme::gold_button_sized(ui, &t("btn.test"), [60.0, 0.0]) {
+        } else if theme::gold_button_sized(ui, test_label.as_str(), [test_w, 0.0]) {
             state.main.settings_key_validating = true;
             state.main.settings_key_status = Some(t("btn.testing"));
             state.main.settings_key_valid = false;
@@ -191,11 +203,16 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, _col_w: f32) {
             });
         }
     }
+    ui.set_cursor_screen_pos([
+        status_origin[0],
+        after_status[1].max(status_origin[1] + theme::control_height(ui)) + 2.0,
+    ]);
 
     let save_label = t("btn.save");
-    let gap = 10.0;
-    let btn_w = ui.calc_text_size(save_label.as_str())[0] + 24.0;
-    let input_w = (ui.content_region_avail()[0] - btn_w - gap).max(80.0);
+    let gap = 8.0;
+    let save_origin = ui.cursor_screen_pos();
+    let btn_w = theme::gold_button_width(ui, save_label.as_str());
+    let input_w = (row_w - btn_w - gap).max(40.0);
     ui.set_next_item_width(input_w);
     ui.input_text(
         &format!("##{}_key", provider_label),
@@ -203,7 +220,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, _col_w: f32) {
     )
     .hint(&t("settings.enter_key"))
     .build();
-    ui.same_line_with_spacing(0.0, gap);
+    ui.set_cursor_screen_pos([save_origin[0] + row_w - btn_w, save_origin[1]]);
     let validating = state.main.settings_key_validating;
     if validating {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
@@ -271,6 +288,10 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, _col_w: f32) {
             });
         }
     }
+    ui.set_cursor_screen_pos([
+        save_origin[0],
+        save_origin[1] + theme::control_height(ui).max(ui.frame_height()) + 4.0,
+    ]);
 
     if let Some(ref status) = state.main.settings_key_status {
         let col = if state.main.settings_key_valid {
@@ -313,9 +334,12 @@ fn render_model_combo(
     display_models: &[(String, String)],
     current_model: &str,
     id: &str,
+    width: f32,
 ) {
+    let origin = ui.cursor_screen_pos();
+    ui.set_next_item_width(width);
     if let Some(_c) = ComboBox::new(&format!("##{id}_model"))
-        .preview_value(preview)
+        .preview_value("\u{00A0}")
         .begin(ui)
     {
         ui.set_next_item_width(-1.0);
@@ -352,6 +376,7 @@ fn render_model_combo(
             );
         }
     }
+    theme::paint_centered_combo_preview(ui, preview, origin, width);
 }
 
 /// Compact provider + model row for the Choya header.
@@ -370,10 +395,24 @@ pub(in crate::ui::main_view) fn render_talk_model_row(ui: &Ui, state: &mut Addon
         .to_string();
 
     let avail = ui.content_region_avail()[0];
-    ui.set_next_item_width((avail * 0.34).clamp(96.0, 150.0));
-    let provider_preview = state.config.active_provider.short_label().to_string();
+    let gap = 8.0;
+    let load_w = if state.main.models_loading {
+        ui.calc_text_size("...")[0] + gap
+    } else {
+        0.0
+    };
+    let provider_need = gw2_core::config::LlmProvider::ALL
+        .iter()
+        .map(|p| theme::combo_width_for(ui, p.short_label()))
+        .fold(0.0_f32, f32::max);
+    let leftover = (avail - load_w).max(0.0);
+    let provider_w = provider_need.min(leftover);
+    let rest = leftover - provider_w;
+
+    let provider_origin = ui.cursor_screen_pos();
+    ui.set_next_item_width(provider_w);
     if let Some(_c) = ComboBox::new("##talk_provider")
-        .preview_value(&provider_preview)
+        .preview_value("\u{00A0}")
         .begin(ui)
     {
         for provider in &gw2_core::config::LlmProvider::ALL {
@@ -392,19 +431,33 @@ pub(in crate::ui::main_view) fn render_talk_model_row(ui: &Ui, state: &mut Addon
             }
         }
     }
-    ui.same_line_with_spacing(0.0, 6.0);
-    let rest = ui.content_region_avail()[0];
-    ui.set_next_item_width((rest - 28.0).max(120.0));
-    render_model_combo(ui, state, &preview, &display_models, &current_model, "talk");
+    theme::paint_centered_combo_preview(
+        ui,
+        state.config.active_provider.short_label(),
+        provider_origin,
+        provider_w,
+    );
+
+    let model_w = if rest >= gap + 80.0 {
+        rest - gap
+    } else {
+        leftover.max(80.0)
+    };
+    if rest >= gap + 80.0 {
+        ui.same_line_with_spacing(0.0, gap);
+    }
+    render_model_combo(
+        ui,
+        state,
+        &preview,
+        &display_models,
+        &current_model,
+        "talk",
+        model_w,
+    );
     if state.main.models_loading {
         ui.same_line();
         ui.text_colored(theme::MUTED, "...");
-    }
-    if let Some(err) = state.main.models_error.clone() {
-        theme::wrapped(ui, theme::WARN, &err);
-    }
-    if let Some(issue) = state.main.provider_issue.clone() {
-        theme::wrapped(ui, theme::ERR, &issue);
     }
 }
 
@@ -444,11 +497,22 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         .find(|(id, _)| *id == current_model)
         .map(|(_, l)| l.as_str())
         .unwrap_or(&current_model);
-    ui.text(t("settings.model"));
-    ui.same_line();
+    let row_w = (col_w - 8.0).max(80.0);
+    let origin = ui.cursor_screen_pos();
+    let model_label = t("settings.model");
+    let label_w = ui.calc_text_size(model_label.as_str())[0];
     let refresh = t("btn.refresh");
-    let refresh_w = ui.calc_text_size(refresh.as_str())[0] + theme::control_pad(ui)[0] * 2.0 + 8.0;
-    ui.set_next_item_width((col_w - refresh_w - 16.0).max(80.0));
+    let refresh_w = theme::gold_button_width(ui, refresh.as_str());
+    let gap = 8.0;
+    let combo_w = (row_w - label_w - refresh_w - gap * 2.0).max(48.0);
+    let row_h = ui.frame_height().max(theme::control_height(ui));
+
+    ui.set_cursor_screen_pos([
+        origin[0],
+        origin[1] + ((row_h - ui.text_line_height()) * 0.5).max(0.0),
+    ]);
+    ui.text(model_label);
+    ui.set_cursor_screen_pos([origin[0] + label_w + gap, origin[1]]);
     render_model_combo(
         ui,
         state,
@@ -456,8 +520,9 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         &display_models,
         &current_model,
         config_field,
+        combo_w,
     );
-    ui.same_line();
+    ui.set_cursor_screen_pos([origin[0] + row_w - refresh_w, origin[1]]);
     if state.main.models_loading {
         ui.text_colored([0.7, 0.7, 0.7, 1.0], "...");
     } else if theme::gold_button_sized(ui, format!("{}##models", refresh), [refresh_w, 0.0]) {
@@ -465,6 +530,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         state.main.models_error = None;
         stats::start_fetch_models(state);
     }
+    ui.set_cursor_screen_pos([origin[0], origin[1] + row_h + 4.0]);
     if let Some(ref err) = state.main.models_error {
         ui.text_colored([1.0, 0.5, 0.0, 1.0], format!("  {}", err));
     }

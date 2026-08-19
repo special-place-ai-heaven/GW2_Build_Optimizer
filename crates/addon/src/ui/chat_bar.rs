@@ -19,6 +19,11 @@ pub struct ChatBarState {
     pub copied_frames: u32,
     pub scroll_to_end: bool,
     pub dirty: bool,
+    /// Last keystroke in the composer. Bob while this is recent; otherwise sleep.
+    pub last_typed: Option<std::time::Instant>,
+    /// Header idle pose (0..HEADER_POSE_COUNT). Cycles about once a minute.
+    pub header_pose: u8,
+    pub header_pose_at: Option<std::time::Instant>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -58,10 +63,10 @@ fn trim_history(history: &mut Vec<ChatMessage>) {
     }
 }
 
-/// Push a player line and return it for `send_chat_message`. None if waiting.
+/// Push a player line and return it for `send_chat_message`.
 pub fn queue_user_message(state: &mut ChatBarState, msg: &str) -> Option<String> {
     let msg = msg.trim();
-    if state.waiting || msg.is_empty() {
+    if msg.is_empty() {
         return None;
     }
     state.history.push(ChatMessage {
@@ -209,11 +214,7 @@ pub fn render_chat_bar(
         .build(ui, || {
             let avail = ui.content_region_avail()[0];
             if state.history.is_empty() && !state.waiting {
-                theme::wrapped(
-                    ui,
-                    theme::MUTED,
-                    &t("chat.placeholder_new"),
-                );
+                theme::wrapped(ui, theme::MUTED, &t("chat.placeholder_new"));
                 return;
             }
             let n = state.history.len();
@@ -281,9 +282,7 @@ pub fn render_chat_bar(
                         action = Some(ChatAction::OpenBuild);
                     }
                 }
-                let end_y = ui.cursor_screen_pos()[1]
-                    .max(origin[1] + bubble_h)
-                    + ROW_GAP;
+                let end_y = ui.cursor_screen_pos()[1].max(origin[1] + bubble_h) + ROW_GAP;
                 ui.set_cursor_screen_pos([origin[0], end_y]);
             }
             if state.waiting {
@@ -356,11 +355,7 @@ fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
         let tx = p[0] + PAD_X + gem_w + GEM_GAP;
         let ty = p[1] + (h - text_h) * 0.5;
         dl.add_text([tx, ty], color_u32(theme::GOLD), &title);
-        dl.add_text(
-            [tx, ty + title_sz[1] + 4.0],
-            color_u32(theme::MUTED),
-            &sub,
-        );
+        dl.add_text([tx, ty + title_sz[1] + 4.0], color_u32(theme::MUTED), &sub);
     }
     if hovered {
         ui.tooltip_text(t("chat.open_optimized"));
@@ -392,9 +387,7 @@ fn render_composer(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
         origin[0] + COMPOSER_CHOYA * 0.5,
         origin[1] + COMPOSER_H * 0.52,
     ];
-    if state.waiting {
-        theme::draw_choya_thinking(ui, choya_c, COMPOSER_CHOYA);
-    } else if !state.input.is_empty() {
+    if theme::composer_choya_bobbing(state.last_typed, std::time::Instant::now()) {
         theme::draw_choya_walk(ui, choya_c, COMPOSER_CHOYA);
     } else {
         theme::draw_choya_sleep(ui, choya_c, COMPOSER_CHOYA);
@@ -423,28 +416,24 @@ fn render_composer(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
     let _bga = ui.push_style_color(StyleColor::FrameBgActive, [0.0, 0.0, 0.0, 0.0]);
     let _brd = ui.push_style_var(StyleVar::FrameBorderSize(0.0));
 
-    let enter_pressed = if state.waiting {
-        let mut dummy = String::new();
-        ui.input_text_multiline("##chat_input", &mut dummy, [input_w, bh - 16.0])
-            .read_only(true)
-            .build();
-        false
-    } else {
-        ui.input_text_multiline("##chat_input", &mut state.input, [input_w, bh - 16.0])
-            .flags(
-                InputTextFlags::CALLBACK_RESIZE
-                    | InputTextFlags::ENTER_RETURNS_TRUE
-                    | InputTextFlags::CTRL_ENTER_FOR_NEW_LINE,
-            )
-            .build()
-    };
+    let enter_pressed = ui
+        .input_text_multiline("##chat_input", &mut state.input, [input_w, bh - 16.0])
+        .flags(
+            InputTextFlags::CALLBACK_RESIZE
+                | InputTextFlags::ENTER_RETURNS_TRUE
+                | InputTextFlags::CTRL_ENTER_FOR_NEW_LINE,
+        )
+        .build();
+    if ui.is_item_edited() {
+        state.last_typed = Some(std::time::Instant::now());
+    }
     drop(_brd);
     drop(_bga);
     drop(_bgh);
     drop(_bg);
     drop(_pad);
 
-    if !state.waiting && state.input.is_empty() {
+    if state.input.is_empty() {
         ui.get_window_draw_list().add_text(
             [bx + 20.0, by + 16.0],
             color_u32(theme::MUTED),
@@ -454,7 +443,7 @@ fn render_composer(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
 
     ui.set_cursor_screen_pos([bx + bw - SEND_SZ - 10.0, by + (bh - SEND_SZ) * 0.5]);
     let send_hit = ui.invisible_button("##chat_send", [SEND_SZ, SEND_SZ]);
-    let send_on = !state.waiting && !state.input.trim().is_empty();
+    let send_on = !state.input.trim().is_empty();
     let send_p = ui.item_rect_min();
     draw_send_icon(
         ui,
@@ -467,9 +456,6 @@ fn render_composer(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
 
     ui.set_cursor_screen_pos(after);
 
-    if state.waiting {
-        return None;
-    }
     let can_send = !state.input.trim().is_empty();
     if (enter_pressed || send_hit) && can_send {
         return queue_user_message(state, &state.input.clone());
@@ -592,18 +578,19 @@ mod tests {
     use crate::chat_links::{encode_item, ChatChip, LinkKind};
 
     #[test]
-    fn queue_user_message_skips_when_waiting() {
+    fn queue_user_message_while_waiting_still_queues() {
         let mut state = ChatBarState::default();
         state.waiting = true;
-        assert!(queue_user_message(&mut state, "hi").is_none());
-        assert!(state.history.is_empty());
-        state.waiting = false;
-        assert_eq!(
-            queue_user_message(&mut state, "  hi  ").as_deref(),
-            Some("hi")
-        );
+        assert_eq!(queue_user_message(&mut state, "hi").as_deref(), Some("hi"));
         assert_eq!(state.history.len(), 1);
         assert!(state.history[0].from_user);
+        assert!(state.waiting);
+        state.waiting = false;
+        assert_eq!(
+            queue_user_message(&mut state, "  yo  ").as_deref(),
+            Some("yo")
+        );
+        assert_eq!(state.history.len(), 2);
     }
 
     #[test]

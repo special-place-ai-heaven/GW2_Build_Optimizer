@@ -59,7 +59,16 @@ fn section_profession_info(config: &ContextConfig) -> String {
         weapons.sort_by_key(|(name, _)| (*name).clone());
 
         for (weapon_name, info) in weapons {
-            let flags = info.flags.join(", ");
+            if !info.land_usable(weapon_name) {
+                continue;
+            }
+            let flags = info
+                .flags
+                .iter()
+                .filter(|f| !f.eq_ignore_ascii_case("Aquatic"))
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
             let gate = if let Some(spec_id) = info.specialization {
                 config
                     .db

@@ -729,7 +729,7 @@ fn weapon_ok(name: &str, profession: &Profession, elite_ids: &[u32]) -> bool {
     let Some(info) = profession.weapons.get(name) else {
         return false;
     };
-    if info.is_aquatic() {
+    if !info.land_usable(name) {
         return false;
     }
     match info.specialization {
@@ -746,7 +746,7 @@ fn land_weapon_combos(
     let mut main = Vec::new();
     let mut off = Vec::new();
     for (name, info) in &profession.weapons {
-        if info.is_aquatic() {
+        if !info.land_usable(name) {
             continue;
         }
         if let Some(req) = info.specialization {
@@ -1163,6 +1163,53 @@ mod tests {
                 skills: Vec::new(),
             },
         )
+    }
+
+    #[test]
+    fn land_weapon_combos_includes_spear_with_aquatic_flag() {
+        let mut weapons = HashMap::new();
+        weapons.insert(
+            "Spear".into(),
+            gw2_api::models::WeaponInfo {
+                specialization: None,
+                flags: vec!["TwoHand".into(), "Aquatic".into()],
+                skills: Vec::new(),
+            },
+        );
+        weapons.insert(
+            "Trident".into(),
+            gw2_api::models::WeaponInfo {
+                specialization: None,
+                flags: vec!["TwoHand".into(), "Aquatic".into()],
+                skills: Vec::new(),
+            },
+        );
+        weapons.insert(
+            "Staff".into(),
+            gw2_api::models::WeaponInfo {
+                specialization: None,
+                flags: vec!["TwoHand".into()],
+                skills: Vec::new(),
+            },
+        );
+        let prof = gw2_api::models::Profession {
+            id: "Guardian".into(),
+            name: "Guardian".into(),
+            code: None,
+            specializations: vec![],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        let mains: Vec<_> = land_weapon_combos(&prof, &[])
+            .into_iter()
+            .filter_map(|(m, _)| m)
+            .collect();
+        assert!(mains.iter().any(|w| w == "Spear"));
+        assert!(mains.iter().any(|w| w == "Staff"));
+        assert!(!mains.iter().any(|w| w == "Trident"));
     }
 
     fn spec_line(id: u32, name: &str, elite: bool) -> gw2_api::models::Specialization {

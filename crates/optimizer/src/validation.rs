@@ -222,8 +222,6 @@ pub fn infer_profession_from_text(db: &GameDb, text: &str) -> Option<String> {
     None
 }
 
-
-
 pub fn validate_gemini_build(
     response: &GeminiBuildResponse,
     db: &GameDb,
@@ -469,7 +467,7 @@ fn validate_weapon_set(
     // Validate main hand
     if let Some(ref mh) = weapons.0 {
         if let Some((canonical, info)) = find_weapon(mh, prof) {
-            if info.is_aquatic() {
+            if !info.land_usable(&canonical) {
                 result.errors.push(ValidationReject {
                     code: RejectCode::WeaponNotAvailable {
                         slot: label.to_string(),
@@ -501,7 +499,7 @@ fn validate_weapon_set(
     // Validate off hand
     if let Some(ref oh) = weapons.1 {
         if let Some((canonical, info)) = find_weapon(oh, prof) {
-            if info.is_aquatic() {
+            if !info.land_usable(&canonical) {
                 result.errors.push(ValidationReject {
                     code: RejectCode::WeaponNotAvailable {
                         slot: label.to_string(),
@@ -865,10 +863,7 @@ fn find_trait_by_name<'a>(name: &str, major_traits: &[&'a GW2Trait]) -> Option<&
     let needle = name.to_lowercase();
 
     // Exact match
-    if let Some(t) = major_traits
-        .iter()
-        .find(|t| t.name.to_lowercase() == needle)
-    {
+    if let Some(t) = major_traits.iter().find(|t| names_eq(&t.name, name)) {
         return Some(t);
     }
 
@@ -947,7 +942,7 @@ fn find_skill_by_name(
     // "heal" or "fire" would over-match skills they never named (e.g. "heal"
     // matching the first heal-tagged skill alphabetically). Matches the same
     // guard used by `find_trait_by_name`.
-    let exact_match = prof_skills.iter().find(|s| s.name.to_lowercase() == needle);
+    let exact_match = prof_skills.iter().find(|s| names_eq(&s.name, name));
     let found = if exact_match.is_some() {
         exact_match
     } else if needle.len() >= 5 {
@@ -971,7 +966,7 @@ fn find_skill_by_name(
             }
         }
 
-        let exact = skill.name.to_lowercase() == needle;
+        let exact = names_eq(&skill.name, name);
         if !exact {
             result.warnings.push(format!(
                 "Skill '{}' fuzzy-matched to '{}'",
@@ -988,6 +983,14 @@ fn find_skill_by_name(
     }
 }
 
+fn names_eq(a: &str, b: &str) -> bool {
+    if a.eq_ignore_ascii_case(b) {
+        return true;
+    }
+    let ka = gw2_core::i18n::alnum_key(a);
+    !ka.is_empty() && ka == gw2_core::i18n::alnum_key(b)
+}
+
 /// Find an item (rune/sigil/relic) by name (case-insensitive).
 fn find_item_by_name(
     name: &str,
@@ -998,7 +1001,7 @@ fn find_item_by_name(
     let needle = name.to_lowercase();
 
     // Exact match
-    let found = items.iter().find(|i| i.name.to_lowercase() == needle);
+    let found = items.iter().find(|i| names_eq(&i.name, name));
 
     if let Some(item) = found {
         return Some(ValidatedItem {
@@ -1091,10 +1094,15 @@ fn find_weapon<'a>(
     name: &str,
     prof: &'a gw2_api::models::Profession,
 ) -> Option<(&'a String, &'a gw2_api::models::WeaponInfo)> {
-    let needle = name.to_lowercase();
+    // Profession/skill: Shortbow. Items: ShortBow. Models: "Short Bow".
+    // Items also use Harpoon for profession Spear.
+    let needle = gw2_core::i18n::weapon_type_key(name);
+    if needle.is_empty() {
+        return None;
+    }
     prof.weapons
         .iter()
-        .find(|(k, _)| k.to_lowercase() == needle)
+        .find(|(k, _)| gw2_core::i18n::weapon_type_key(k) == needle)
 }
 
 // ---------------------------------------------------------------------------
@@ -1645,6 +1653,81 @@ mod tests {
     }
 
     #[test]
+    fn test_find_weapon_ignores_spaces() {
+        let mut weapons = std::collections::HashMap::new();
+        weapons.insert(
+            "Shortbow".to_string(),
+            gw2_api::models::WeaponInfo {
+                specialization: None,
+                flags: vec!["TwoHand".into()],
+                skills: vec![],
+            },
+        );
+        let prof = gw2_api::models::Profession {
+            id: "Thief".into(),
+            name: "Thief".into(),
+            code: None,
+            specializations: vec![],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        let (key, _) = find_weapon("Short Bow", &prof).expect("Short Bow should match Shortbow");
+        assert_eq!(key, "Shortbow");
+        assert!(find_weapon("shortbow", &prof).is_some());
+        assert_eq!(
+            find_weapon("ShortBow", &prof).map(|(k, _)| k.as_str()),
+            Some("Shortbow")
+        );
+
+        let db = empty_db_with_itemstats(vec![]);
+        let mut result = ValidatedBuild::default();
+        let set = validate_weapon_set(
+            &(Some("Short Bow".into()), None),
+            Some(&prof),
+            &db,
+            &mut result,
+            "Set 2",
+        );
+        assert_eq!(set.main_hand.as_deref(), Some("Shortbow"));
+        assert!(
+            result.errors.is_empty(),
+            "spaced Short Bow should not reject; got {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn test_find_weapon_item_api_aliases() {
+        let mut weapons = std::collections::HashMap::new();
+        weapons.insert(
+            "Spear".to_string(),
+            gw2_api::models::WeaponInfo {
+                specialization: None,
+                flags: vec!["TwoHand".into()],
+                skills: vec![],
+            },
+        );
+        let prof = gw2_api::models::Profession {
+            id: "Thief".into(),
+            name: "Thief".into(),
+            code: None,
+            specializations: vec![],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        assert_eq!(
+            find_weapon("Harpoon", &prof).map(|(k, _)| k.as_str()),
+            Some("Spear")
+        );
+    }
+
+    #[test]
     fn test_validate_weapon_set_rejects_aquatic_trident_on_land() {
         let mut weapons = std::collections::HashMap::new();
         weapons.insert(
@@ -1710,6 +1793,41 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_weapon_set_accepts_land_spear_with_aquatic_flag() {
+        let mut weapons = std::collections::HashMap::new();
+        weapons.insert(
+            "Spear".to_string(),
+            gw2_api::models::WeaponInfo {
+                specialization: None,
+                flags: vec!["TwoHand".into(), "Aquatic".into()],
+                skills: vec![],
+            },
+        );
+        let prof = gw2_api::models::Profession {
+            id: "Thief".into(),
+            name: "Thief".into(),
+            code: None,
+            specializations: vec![],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        let db = empty_db_with_itemstats(vec![]);
+        let mut result = ValidatedBuild::default();
+        let set = validate_weapon_set(
+            &(Some("Spear".into()), None),
+            Some(&prof),
+            &db,
+            &mut result,
+            "Set 1",
+        );
+        assert_eq!(set.main_hand.as_deref(), Some("Spear"));
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+    }
+
+    #[test]
     fn test_find_skill_exact_match_bypasses_guard() {
         // Exact match for a 4-char skill name must still succeed.
         let s = make_skill(3, "Bolt");
@@ -1727,7 +1845,6 @@ mod tests {
         assert!(result.errors.is_empty());
         assert!(result.warnings.is_empty());
     }
-
 
     #[test]
     fn test_parse_skill_names_utility_prefix() {
@@ -1804,12 +1921,15 @@ mod tests {
             ("Arcane".into(), vec![]),
         ];
         let result = validate_gemini_build(&response, &db, "unknown");
-        let names: Vec<&str> = result.specializations.iter().map(|s| s.name.as_str()).collect();
+        let names: Vec<&str> = result
+            .specializations
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
         assert_eq!(names, ["Tempest", "Water", "Arcane"]);
         assert!(
             !result.errors.iter().any(|e| e.detail.contains("unknown")),
             "{result:?}"
         );
     }
-
 }

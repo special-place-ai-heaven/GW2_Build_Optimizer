@@ -10,10 +10,15 @@ characters through the official GW2 API and suggests builds for PvE, WvW, and Pv
 Pick a mode, fight scale, and role. The optimizer searches gear, traits, and skills,
 checks viability, and shows Current vs Optimized side by side. A chat-code strip
 copies a GW2 build-template onto the Windows clipboard so **Paste Build Template**
-in the hero panel can use it. Choya is a full tab for talking through a new build
-or improving the selected character, with history saved across sessions.
+in the hero panel can use it. **Choya** is its own tab: talk through a new build or
+improve the selected character, get a plated kit with stats (not a text-only recipe),
+and open that result onto Improve. History is saved across sessions. You can keep
+typing while Choya is thinking; a new send cancels the in-flight reply.
 
 ## Screenshots
+
+Overlay shots below can lag a release. Captions match the live tabs; replace the
+images when you have fresh captures.
 
 First-time setup downloads skills, traits, and items over the gold progress bar.
 
@@ -109,7 +114,9 @@ patch, use Settings → refresh game data if skills or traits look wrong.
 
 ## Overlay
 
-Tabs: **New Build**, **Improve**, **Save / Load**, **Settings**.
+Tabs: **New Build**, **Improve**, **Choya**, **Saves**, **Settings**. Overlay chrome
+follows Settings → Language. Skill, trait, and item names use the official GW2 API
+`lang=` pack (Deutsch, Español, Français, 简体中文).
 
 Left rail:
 
@@ -142,7 +149,8 @@ Load/save stores names, not template bytes. Loading a save encodes a `[&…]` co
 from those names against the game database.
 
 Chat codes are build templates (profession, specs, traits, skills, weapons). They
-are not a full gear dump.
+are not a full gear dump. Land **Spear** (Janthir Wilds) encodes in the weapon
+trailer. Trident and Speargun stay underwater-only and are not written there.
 
 ### New Build vs Improve
 
@@ -150,11 +158,18 @@ are not a full gear dump.
 - **Improve** — start from the equipped build. Lock an elite spec or other pieces
   so the search keeps them.
 
-After a result, the bottom chat box can ask for follow-ups (“keep axe/dagger”,
-“more cleanse”). The deterministic search and viability checks stay in charge;
-the LLM explains and refines.
+### Choya
 
-### Save / Load
+Talk through a new build or the selected character. Choya plates a full kit with
+estimated stats, not a text-only recipe, and can open that result onto Improve.
+History is saved across sessions. You can type (and send) while a request is in
+flight; a new send cancels the old reply. The header mascot idles; the composer
+Choya sleeps until you type.
+
+The deterministic search and viability checks stay in charge. The LLM explains
+and refines (“keep axe/dagger”, “more cleanse”, “raise the weak axes”).
+
+### Saves
 
 Save a result by name. Load puts it in the overlay as the Optimized view and
 encodes its chat code. Saved records are addon files, not official GW2 account
@@ -163,15 +178,21 @@ templates.
 ### Settings
 
 GW2 key check, AI provider and model, key test, game-data refresh, optional
-benchmark sync, opacity, font scale, and layout sizing.
+benchmark sync, language, opacity, font scale, and layout sizing.
 
 ## Scoring (short)
 
 Optimization is **Scale × Task**, not a single WvW blob. Roam, Havoc, and
 Cloud/Zerg use different dummy HP, kill windows, and gates (for example
-harasser strip before a dump). WvW/PvP results can fail viability for missing
-stunbreaks, Stability, cleanse, or effective health. Data-quality warnings show
+harasser strip before a dump). WvW cover can be evade, block, invuln, stealth,
+or (on roam) interrupt — not Stability-only. Results can still fail viability
+for missing stunbreaks, cleanse, or effective health. Data-quality warnings show
 when a result leaned on incomplete facts.
+
+Land **Spear** is a terrestrial two-hander for every profession that has it.
+The GW2 profession API still tags Spear as Aquatic (underwater palette); the
+optimizer treats that flag as a land exception. Trident and Speargun stay
+water-only and are never mixed into a land set.
 
 ## Troubleshooting
 
@@ -230,6 +251,8 @@ Crates:
 - Chat codes cannot carry a full equipment shopping list.
 - Saved builds are local addon records.
 - Provider cost and rate limits are yours.
+- Underwater kits are not optimized. Spear on land is supported; the separate
+  water palettes (Trident, Speargun, aquatic Spear 1–5) are not a land loadout.
 
 ## License
 

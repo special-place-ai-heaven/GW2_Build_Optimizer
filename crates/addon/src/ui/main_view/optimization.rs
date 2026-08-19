@@ -860,9 +860,12 @@ pub(super) fn simulate_suggestion_rotation(
                     let Some(skill) = db.skills.get(&id) else {
                         continue;
                     };
-                    let matches_weapon = weapon_types
-                        .iter()
-                        .any(|wt| skill.weapon_type.as_deref() == Some(wt.as_str()));
+                    let matches_weapon = weapon_types.iter().any(|wt| {
+                        skill.weapon_type.as_deref().is_some_and(|swt| {
+                            gw2_core::i18n::weapon_type_key(swt)
+                                == gw2_core::i18n::weapon_type_key(wt)
+                        })
+                    });
                     if !matches_weapon {
                         continue;
                     }
@@ -1342,6 +1345,44 @@ fn apply_gemini_response(
     }
 }
 
+fn attach_chat_stats(
+    suggestion: &mut crate::ui::comparison::BuildSuggestion,
+    db: &gw2_optimizer::gamedb::GameDb,
+    profession: &str,
+    game_mode: &gw2_core::types::GameMode,
+) {
+    if suggestion.stat_prefix.is_empty() {
+        return;
+    }
+    let Some((_name, full, derived)) =
+        gw2_optimizer::gemini_tools::estimate_prefix_stats(db, &suggestion.stat_prefix, profession)
+    else {
+        return;
+    };
+    suggestion.estimated_stats = Some(gw2_core::types::StatBlock {
+        power: full.power.round() as i32,
+        precision: full.precision.round() as i32,
+        toughness: full.toughness.round() as i32,
+        vitality: full.vitality.round() as i32,
+        condition_damage: full.condition_damage.round() as i32,
+        expertise: full.expertise.round() as i32,
+        concentration: full.concentration.round() as i32,
+        ferocity: full.ferocity.round() as i32,
+        healing_power: full.healing_power.round() as i32,
+        crit_chance: derived.crit_chance,
+        crit_damage: derived.crit_damage,
+        health: derived.health.round() as i32,
+        armor: derived.armor.round() as i32,
+    });
+    let modifiers = gw2_optimizer::combat::DamageModifiers::default();
+    let balance_ctx = BalanceContext::new(game_mode.clone());
+    let (solo, party, squad) =
+        compute_3tier_combat(&full, &derived, &modifiers, profession, &balance_ctx);
+    suggestion.combat_solo = solo;
+    suggestion.combat_party = party;
+    suggestion.combat_squad = squad;
+}
+
 /// Merge validator-resolved names onto the raw LLM tasting so the plate is edible.
 fn gemini_from_validated(
     mut raw: gw2_optimizer::prompts::GeminiBuildResponse,
@@ -1534,6 +1575,17 @@ fn fill_holes_from_loadout(
             parsed.skills.push(format!("Elite: {}", e.name));
         }
     }
+    if parsed.stat_prefix.is_empty() {
+        if let Some(prefix) = current
+            .armor
+            .iter()
+            .chain(current.trinkets.iter())
+            .map(|p| p.stat_prefix.as_str())
+            .find(|p| !p.is_empty())
+        {
+            parsed.stat_prefix = prefix.to_string();
+        }
+    }
 }
 
 fn chat_display_text(explanation: &str, spec_count: usize, error_details: &[String]) -> String {
@@ -1587,8 +1639,8 @@ pub(super) fn format_provider_issue(err: &str, provider: &str, model: &str) -> S
 }
 
 fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -> bool {
-    v.errors.is_empty()
-        && v.specializations.len() == 3
+    // Weapon/prefix typos stay as warnings in the bubble. A complete kit still plates.
+    v.specializations.len() == 3
         && v.specializations.iter().all(|s| s.trait_ids.len() == 3)
         && v.skills.heal.is_some()
         && v.skills.elite.is_some()
@@ -1743,10 +1795,6 @@ fn enrich_with_llm(
 /// Send a chat order to the chef (active LLM) for a plated build.
 /// Uses function calling so the chef has the full pantry and every station.
 pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
-    if state.main.chat.waiting {
-        return;
-    }
-
     let (display, inbound_chips, _chef_order) =
         crate::chat_links::annotate_order(&message, state.main.game_db.as_ref());
     crate::ui::chat_bar::attach_order_chips(
@@ -1788,6 +1836,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     state.main.chat_epoch = state.main.chat_epoch.wrapping_add(1);
     let epoch = state.main.chat_epoch;
     state.main.chat.waiting = true;
+    state.main.provider_issue = None;
     state.main.chat_wait_started = Some(std::time::Instant::now());
     state.main.optimize_stage = t("choya.thinking");
 
@@ -2018,17 +2067,29 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 Some(v) => gemini_from_validated(raw, v),
                                 None => raw,
                             };
-                            let display = if plated.explanation.is_empty() {
+                            let errors: Vec<String> = validated
+                                .as_ref()
+                                .map(|v| v.errors.iter().map(|e| e.detail.clone()).collect())
+                                .unwrap_or_default();
+                            let body = if plated.explanation.is_empty() {
                                 t("choya.heres_a_build")
                             } else {
                                 plated.explanation.clone()
                             };
+                            let display =
+                                chat_display_text(&body, plated.specializations.len(), &errors);
                             let mut suggestion = crate::ui::comparison::BuildSuggestion {
                                 label: t("choya.pick"),
                                 ..Default::default()
                             };
                             apply_gemini_response(&mut suggestion, &plated);
                             if let Some(ref db) = s.main.game_db {
+                                attach_chat_stats(
+                                    &mut suggestion,
+                                    db,
+                                    &profession,
+                                    &s.main.game_mode,
+                                );
                                 if let Some(v) = &validated {
                                     suggestion.chat_code =
                                         validated_build_to_chat_code(v, &profession, db);
@@ -2312,6 +2373,19 @@ mod tests {
         v.skills.utilities.pop();
         assert!(!plate_is_servable(&v));
         v.skills.utilities.push(Some((4, "U3".into())));
+        assert!(plate_is_servable(&v));
+        v.errors.push(gw2_optimizer::validation::ValidationReject {
+            code: gw2_optimizer::validation::RejectCode::WeaponNotAvailable {
+                slot: "Set 2".into(),
+                weapon: "Short Bow".into(),
+                profession: "Thief".into(),
+            },
+            detail: "Set 2: weapon 'Short Bow' not available for Thief".into(),
+        });
+        assert!(
+            plate_is_servable(&v),
+            "leftover weapon typos must not hide a complete kit"
+        );
         v.specializations[1].trait_ids.pop();
         assert!(!plate_is_servable(&v));
     }

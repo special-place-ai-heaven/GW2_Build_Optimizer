@@ -25,8 +25,7 @@ pub(super) fn ensure_localized_names(state: &mut AddonState) {
         return;
     }
     let cache = gw2_api::cache::DataCache::new(state.addon_dir.join("cache"));
-    if let Ok(Some(names)) =
-        gw2_api::localize::load(&cache, lang, state.config.cache_build_number)
+    if let Ok(Some(names)) = gw2_api::localize::load(&cache, lang, state.config.cache_build_number)
     {
         if let Some(db) = state.main.game_db.as_mut() {
             db.attach_localized(names);
@@ -118,8 +117,11 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                 };
                 let cache = gw2_api::cache::DataCache::new(&cache_dir);
 
-                let download_result =
-                    gw2_api::download::download_game_and_names(&client, &cache, || token.is_cancelled(), |progress| {
+                let download_result = gw2_api::download::download_game_and_names(
+                    &client,
+                    &cache,
+                    || token.is_cancelled(),
+                    |progress| {
                         if token.is_cancelled() {
                             return;
                         }
@@ -140,7 +142,8 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                                 error: None,
                             });
                         });
-                    });
+                    },
+                );
 
                 if token.is_cancelled() {
                     break 'refresh Outcome::Cancelled;
