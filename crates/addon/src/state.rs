@@ -314,12 +314,14 @@ pub(crate) fn download_fraction(
     if total_steps == 0 {
         return 0.0;
     }
+    // `current_step` is 1-based and in-progress (13/13 still has work).
     let inner = if inner_total > 0 {
         (inner_done as f32 / inner_total as f32).clamp(0.0, 1.0)
     } else {
         0.0
     };
-    ((current_step as f32 + inner) / total_steps as f32).clamp(0.0, 1.0)
+    let completed = current_step.saturating_sub(1) as f32;
+    ((completed + inner) / total_steps as f32).clamp(0.0, 1.0)
 }
 
 fn lock_state() -> std::sync::MutexGuard<'static, Option<AddonState>> {
@@ -1080,11 +1082,23 @@ mod tests {
     #[test]
     fn download_fraction_crawls_during_item_batches() {
         let start = download_fraction(7, 9, 0, 74056, false);
-        assert!((start - 7.0 / 9.0).abs() < 1e-5);
+        assert!((start - 6.0 / 9.0).abs() < 1e-5);
         let mid = download_fraction(7, 9, 24000, 74056, false);
         assert!(mid > start);
-        assert!(mid < 8.0 / 9.0);
+        assert!(mid < 7.0 / 9.0);
         assert_eq!(download_fraction(9, 9, 0, 0, true), 1.0);
         assert_eq!(download_fraction(0, 0, 0, 0, false), 0.0);
     }
+
+
+    #[test]
+    fn download_fraction_last_step_stays_open_until_inner_finishes() {
+        let start = download_fraction(13, 13, 0, 17232, false);
+        assert!((start - 12.0 / 13.0).abs() < 1e-5);
+        let mid = download_fraction(13, 13, 4000, 17232, false);
+        assert!(mid > start);
+        assert!(mid < 1.0);
+        assert!((download_fraction(13, 13, 17232, 17232, false) - 1.0).abs() < 1e-5);
+    }
+
 }
