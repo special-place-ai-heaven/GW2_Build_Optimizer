@@ -24,10 +24,8 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     let scale = state.config.font_scale;
     ui.set_window_font_scale(scale);
     // Scale element sizes proportionally
-    let _s1 = ui.push_style_var(nexus::imgui::StyleVar::FramePadding([
-        4.0 * scale,
-        3.0 * scale,
-    ]));
+    let pad = theme::control_pad(ui);
+    let _s1 = ui.push_style_var(nexus::imgui::StyleVar::FramePadding(pad));
     let _s2 = ui.push_style_var(nexus::imgui::StyleVar::ItemSpacing([
         8.0 * scale,
         4.0 * scale,
@@ -110,7 +108,8 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         let roam = t("scale.roam");
         let havoc = t("scale.havoc");
         let cloud = t("scale.cloud");
-        let scale_row = theme::segment_row_min_width(ui, &[roam.as_str(), havoc.as_str(), cloud.as_str()]);
+        let scale_row =
+            theme::segment_row_min_width(ui, &[roam.as_str(), havoc.as_str(), cloud.as_str()]);
         let min_left = (scale_row + pad * 2.0 + 18.0).max(360.0);
         let want = (state.config.left_panel_width * scale).max(min_left);
         let cap = (avail[0] * 0.58).max(min_left);
@@ -213,10 +212,7 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
                 theme::WARN,
                 tf(
                     "fmt.stale_cache",
-                    &[
-                        ("cached", &cached.to_string()),
-                        ("live", &live.to_string()),
-                    ],
+                    &[("cached", &cached.to_string()), ("live", &live.to_string())],
                 ),
             );
             if ui.is_item_hovered() {
@@ -232,7 +228,10 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
     if !state.main.game_db_loading {
         if let Some(lang) = gw2_core::i18n::api_lang(&state.config.ui_language) {
             let cache = gw2_api::cache::DataCache::new(state.addon_dir.join("cache"));
-            let build = state.main.live_build_number.or(state.config.cache_build_number);
+            let build = state
+                .main
+                .live_build_number
+                .or(state.config.cache_build_number);
             match gw2_api::localize::pack_status(&cache, lang, build) {
                 gw2_api::localize::PackStatus::Missing | gw2_api::localize::PackStatus::Stale => {
                     ui.same_line();
@@ -420,7 +419,11 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
     let improve = t("tab.improve");
     let choya = t("tab.choya");
     let modes = [
-        (MainTab::NewBuild, new_build.as_str(), "##main_tab_new_build"),
+        (
+            MainTab::NewBuild,
+            new_build.as_str(),
+            "##main_tab_new_build",
+        ),
         (MainTab::Improve, improve.as_str(), "##main_tab_improve"),
         (MainTab::Talk, choya.as_str(), "##main_tab_choya"),
     ];

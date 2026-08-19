@@ -46,10 +46,16 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
 
     build_display::render_card_header(ui, &t("settings.legend"), [0.7, 0.7, 0.7, 1.0]);
     ui.spacing();
-    ui.text_colored([0.3, 0.9, 0.3, 1.0], format!("* {}", t("settings.verified")));
+    ui.text_colored(
+        [0.3, 0.9, 0.3, 1.0],
+        format!("* {}", t("settings.verified")),
+    );
     ui.same_line();
     ui.text_colored([0.6, 0.6, 0.6, 1.0], t("settings.verified_note"));
-    ui.text_colored([0.95, 0.75, 0.15, 1.0], format!("* {}", t("settings.provisional")));
+    ui.text_colored(
+        [0.95, 0.75, 0.15, 1.0],
+        format!("* {}", t("settings.provisional")),
+    );
     ui.same_line();
     ui.text_colored([0.6, 0.6, 0.6, 1.0], t("settings.provisional_note"));
     ui.text_colored([1.0, 0.3, 0.2, 1.0], format!("* {}", t("settings.blocked")));
@@ -86,7 +92,10 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
             "{} {}  —  {}",
             t("info.product"),
             tf("fmt.version", &[("ver", crate::VERSION)]),
-            tf("fmt.ai", &[("provider", state.config.active_provider.label())]),
+            tf(
+                "fmt.ai",
+                &[("provider", state.config.active_provider.label())]
+            ),
         ),
     );
 }
@@ -437,7 +446,9 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         .unwrap_or(&current_model);
     ui.text(t("settings.model"));
     ui.same_line();
-    ui.set_next_item_width(col_w - 140.0);
+    let refresh = t("btn.refresh");
+    let refresh_w = ui.calc_text_size(refresh.as_str())[0] + theme::control_pad(ui)[0] * 2.0 + 8.0;
+    ui.set_next_item_width((col_w - refresh_w - 16.0).max(80.0));
     render_model_combo(
         ui,
         state,
@@ -449,7 +460,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     ui.same_line();
     if state.main.models_loading {
         ui.text_colored([0.7, 0.7, 0.7, 1.0], "...");
-    } else if ui.small_button(&format!("{}##models", t("btn.refresh"))) {
+    } else if theme::gold_button_sized(ui, format!("{}##models", refresh), [refresh_w, 0.0]) {
         state.main.available_models.clear();
         state.main.models_error = None;
         stats::start_fetch_models(state);
@@ -498,7 +509,10 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     ui.set_next_item_width(right_item_w * 0.6);
     let resolved = gw2_core::i18n::resolve(&state.config.ui_language);
     let cache = gw2_api::cache::DataCache::new(state.addon_dir.join("cache"));
-    let build = state.main.live_build_number.or(state.config.cache_build_number);
+    let build = state
+        .main
+        .live_build_number
+        .or(state.config.cache_build_number);
     let preview_code = if state.config.ui_language.eq_ignore_ascii_case("auto") {
         resolved
     } else {
@@ -533,11 +547,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         {
             let auto_label = format!("{auto_mark} {}", t("settings.language_auto"));
             let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, auto_color);
-            if Selectable::new(&auto_label)
-                .selected(auto_sel)
-                .build(ui)
-                && !auto_sel
-            {
+            if Selectable::new(&auto_label).selected(auto_sel).build(ui) && !auto_sel {
                 state.config.ui_language = "auto".into();
                 gw2_core::i18n::set_language("auto");
                 let _ = state.config.save(&state.config_path);
@@ -546,15 +556,10 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         }
         for lang in gw2_core::i18n::LANGUAGES {
             let sel = state.config.ui_language == lang.code;
-            let (mark, color) =
-                pack_mark(gw2_api::localize::pack_status(&cache, lang.code, build));
+            let (mark, color) = pack_mark(gw2_api::localize::pack_status(&cache, lang.code, build));
             let label = format!("{mark} {}", lang.native_name);
             let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, color);
-            if Selectable::new(&label)
-                .selected(sel)
-                .build(ui)
-                && !sel
-            {
+            if Selectable::new(&label).selected(sel).build(ui) && !sel {
                 state.config.ui_language = lang.code.into();
                 gw2_core::i18n::set_language(lang.code);
                 let _ = state.config.save(&state.config_path);
@@ -663,7 +668,6 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     }
 }
 
-
 fn pack_mark(status: gw2_api::localize::PackStatus) -> (&'static str, [f32; 4]) {
     match status {
         gw2_api::localize::PackStatus::Ready => ("*", theme::OPTIMIZED),
@@ -672,7 +676,6 @@ fn pack_mark(status: gw2_api::localize::PackStatus) -> (&'static str, [f32; 4]) 
         gw2_api::localize::PackStatus::None => ("-", theme::MUTED),
     }
 }
-
 
 fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     if let Some(ref key) = state.config.gw2_api_key {
@@ -699,10 +702,7 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
                     theme::WARN,
                     tf(
                         "fmt.game_build_live",
-                        &[
-                            ("cached", &build.to_string()),
-                            ("live", &live.to_string()),
-                        ],
+                        &[("cached", &build.to_string()), ("live", &live.to_string())],
                     ),
                 );
             } else {
@@ -781,10 +781,7 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
             },
         );
         if let Some(ref dl) = state.setup.download_progress {
-            let overlay = format!(
-                "{}/{} — {}",
-                dl.current_step, dl.total_steps, dl.step_name
-            );
+            let overlay = format!("{}/{} — {}", dl.current_step, dl.total_steps, dl.step_name);
             theme::download_scribble(ui, dl.fraction(), &overlay);
         }
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
@@ -827,10 +824,7 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
 
 fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
-    ui.text_colored(
-        [0.7, 0.7, 0.7, 1.0],
-        t("settings.sources"),
-    );
+    ui.text_colored([0.7, 0.7, 0.7, 1.0], t("settings.sources"));
     ui.spacing();
     if let Some(ref last) = state.main.benchmark_last_synced {
         let sc = state

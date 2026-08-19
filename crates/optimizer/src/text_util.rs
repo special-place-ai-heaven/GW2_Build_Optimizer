@@ -89,12 +89,27 @@ pub(crate) fn text_describes_stability(text: &str) -> bool {
     lower.contains("stability") && !lower.contains("instability")
 }
 
+/// Relic/rune tooltip or name grants self-Stability (Cavalier relic has no skill fact).
+pub(crate) fn gear_text_grants_stability(
+    name: &str,
+    description: Option<&str>,
+    bonuses: &[String],
+) -> bool {
+    if text_describes_stability(name)
+        || description.is_some_and(text_describes_stability)
+        || bonuses.iter().any(|b| text_describes_stability(b))
+    {
+        return true;
+    }
+    let n = name.to_lowercase();
+    n.contains("relic") && n.contains("cavalier")
+}
+
 /// Heuristic: skill text grants a block (not "unblockable").
 pub(crate) fn text_describes_block(text: &str) -> bool {
     let lower = text.to_lowercase();
     lower.contains("block") && !lower.contains("unblockable")
 }
-
 
 /// Strip GW2 tooltip markup (`<br>`, `<c=@reminder>`, `@abilitytype`).
 pub(crate) fn strip_gw2_markup(text: &str) -> String {
@@ -268,12 +283,26 @@ mod tests {
     }
 
     #[test]
+    fn cavalier_relic_counts_as_stability_without_the_word() {
+        assert!(gear_text_grants_stability(
+            "Relic of the Cavalier",
+            None,
+            &[],
+        ));
+        assert!(gear_text_grants_stability(
+            "Some Relic",
+            Some("Gain stability when you use a healing skill."),
+            &[],
+        ));
+        assert!(!gear_text_grants_stability("Cavalier's armor", None, &[]));
+    }
+
+    #[test]
     fn block_text_ignores_unblockable() {
         assert!(text_describes_block("Block the next attack."));
         assert!(!text_describes_block("This attack is unblockable."));
         assert!(!text_describes_block("Gain might and fury."));
     }
-
 
     #[test]
     fn strip_gw2_markup_drops_tags() {

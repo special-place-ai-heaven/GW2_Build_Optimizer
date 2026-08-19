@@ -340,6 +340,86 @@ pub fn evaluate_viability_gates(
     ViabilityReport { gates, is_viable }
 }
 
+/// Relic, rune, or trait grants Stability even when the skill bar has none.
+/// Thief/Daredevil kits often use Relic of the Cavalier for this.
+pub fn kit_grants_stability(validated: &ValidatedBuild, db: &GameDb) -> bool {
+    if let Some(r) = &validated.relic {
+        let item = db.items.get(&r.id);
+        let bonuses: &[String] = item
+            .and_then(|i| i.details.as_ref())
+            .map(|d| d.bonuses.as_slice())
+            .unwrap_or(&[]);
+        let desc = item.and_then(|i| {
+            i.description.as_deref().or_else(|| {
+                i.details
+                    .as_ref()
+                    .and_then(|d| d.infix_upgrade.as_ref())
+                    .and_then(|u| u.buff.as_ref())
+                    .and_then(|b| b.description.as_deref())
+            })
+        });
+        if crate::text_util::gear_text_grants_stability(&r.name, desc, bonuses) {
+            return true;
+        }
+    }
+    if let Some(r) = &validated.rune {
+        if let Some(item) = db.items.get(&r.id) {
+            let bonuses = item
+                .details
+                .as_ref()
+                .map(|d| d.bonuses.as_slice())
+                .unwrap_or(&[]);
+            let desc = item.description.as_deref().or_else(|| {
+                item.details
+                    .as_ref()
+                    .and_then(|d| d.infix_upgrade.as_ref())
+                    .and_then(|u| u.buff.as_ref())
+                    .and_then(|b| b.description.as_deref())
+            });
+            if crate::text_util::gear_text_grants_stability(&item.name, desc, bonuses) {
+                return true;
+            }
+        }
+    }
+    for spec in &validated.specializations {
+        for &id in spec.all_trait_ids.iter().chain(spec.trait_ids.iter()) {
+            if let Some(tr) = db.traits.get(&id) {
+                if crate::text_util::text_describes_stability(&tr.name)
+                    || tr
+                        .description
+                        .as_deref()
+                        .is_some_and(crate::text_util::text_describes_stability)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Count relic/rune/trait Stability as passing the skill-bar gate.
+pub fn apply_offbar_stability(
+    report: &mut ViabilityReport,
+    validated: &ValidatedBuild,
+    db: &GameDb,
+) {
+    if !kit_grants_stability(validated, db) {
+        return;
+    }
+    let mut changed = false;
+    for g in &mut report.gates {
+        if g.gate == ViabilityGate::StabilityAccess && !g.passed {
+            g.passed = true;
+            g.note = "stability from relic, rune, or trait".into();
+            changed = true;
+        }
+    }
+    if changed {
+        report.is_viable = report.gates.iter().all(|g| g.passed);
+    }
+}
+
 fn needs_mobility_out(scenario: &ScenarioSpec) -> bool {
     scenario.combat_kind == CombatKind::Staller
         || (scenario.game_mode == GameMode::WvW && scenario.combat_tier == CombatTier::Solo)
@@ -436,7 +516,8 @@ pub fn evaluate_validated_build(
 
     // ── Viability gating ──────────────────────────────────────────────────────
     // Run before score computation. Non-viable builds receive sentinel score -1.0.
-    let viability = evaluate_viability_gates(rotation.as_ref(), &primary_combat, scenario);
+    let mut viability = evaluate_viability_gates(rotation.as_ref(), &primary_combat, scenario);
+    apply_offbar_stability(&mut viability, validated, db);
     let user_intent_score = if viability.is_viable {
         score_with_weights(&primary_combat, weights)
     } else {

@@ -1,8 +1,8 @@
 use super::stats::{compute_3tier_combat, perf_to_combat_metrics};
 use crate::state::AddonState;
+use gw2_core::i18n::{t, tf};
 use gw2_optimizer::balance::BalanceContext;
 use gw2_optimizer::scoring::OptimizationWeights;
-use gw2_core::i18n::{t, tf};
 
 /// Start optimization in background thread (S11-T01, S11-T02, S11-T03)
 pub(super) fn start_optimization(state: &mut AddonState) {
@@ -118,12 +118,12 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     let combat_kind = selected_role
                         .map(|r| r.combat_kind_for_weights(&weights))
                         .unwrap_or_else(|| {
-                        if weights.condition > weights.power {
-                            gw2_optimizer::scenario::CombatKind::CondiRamp
-                        } else {
-                            gw2_optimizer::scenario::CombatKind::StrikeSpike
-                        }
-                    });
+                            if weights.condition > weights.power {
+                                gw2_optimizer::scenario::CombatKind::CondiRamp
+                            } else {
+                                gw2_optimizer::scenario::CombatKind::StrikeSpike
+                            }
+                        });
                     ScenarioSpec {
                         game_mode: balance_ctx.game_mode.clone(),
                         combat_tier,
@@ -559,11 +559,13 @@ fn synergy_result_to_suggestion(
         gw2_optimizer::scenario::CombatTier::Party => &result.combat_party,
         gw2_optimizer::scenario::CombatTier::Squad => &result.combat_squad,
     };
-    let viability = Some(gw2_optimizer::referee::evaluate_viability_gates(
+    let mut viability = gw2_optimizer::referee::evaluate_viability_gates(
         result.rotation.as_ref(),
         primary_combat,
         scenario,
-    ));
+    );
+    gw2_optimizer::referee::apply_offbar_stability(&mut viability, v, db);
+    let viability = Some(viability);
 
     // Suggestion label: label_override > role name > generic
     let label = label_override
@@ -1754,24 +1756,15 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     );
 
     if !state.config.has_active_llm_key() {
-        crate::ui::chat_bar::add_ai_response(
-            &mut state.main.chat,
-            t("choya.need_key"),
-        );
+        crate::ui::chat_bar::add_ai_response(&mut state.main.chat, t("choya.need_key"));
         return;
     }
     if state.main.optimizing {
-        crate::ui::chat_bar::add_ai_response(
-            &mut state.main.chat,
-            t("choya.optimize_running"),
-        );
+        crate::ui::chat_bar::add_ai_response(&mut state.main.chat, t("choya.optimize_running"));
         return;
     }
     if state.main.game_db.is_none() {
-        crate::ui::chat_bar::add_ai_response(
-            &mut state.main.chat,
-            t("choya.data_loading"),
-        );
+        crate::ui::chat_bar::add_ai_response(&mut state.main.chat, t("choya.data_loading"));
         return;
     }
 
@@ -2236,7 +2229,11 @@ mod tests {
         let rest = &buf[44..];
         if !rest.is_empty() {
             let count = rest[0] as usize;
-            assert_eq!(rest.len(), 1 + count * 2 + 1, "SotO trailer must be count+ids+override");
+            assert_eq!(
+                rest.len(),
+                1 + count * 2 + 1,
+                "SotO trailer must be count+ids+override"
+            );
             assert_eq!(*rest.last().unwrap(), 0);
             for i in 0..count {
                 let id = u16::from_le_bytes([rest[1 + i * 2], rest[2 + i * 2]]);
@@ -2436,10 +2433,7 @@ mod tests {
             .1
             .iter()
             .any(|t| t == "Arcane Precision"));
-        assert!(parsed
-            .skills
-            .iter()
-            .any(|s| s.contains("Arcane Blast")));
+        assert!(parsed.skills.iter().any(|s| s.contains("Arcane Blast")));
     }
 
     #[test]
