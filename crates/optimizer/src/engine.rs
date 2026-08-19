@@ -1642,7 +1642,7 @@ pub fn optimize_deterministic(
 /// complete build states using the gated referee as the fitness function.
 /// If `llm_client` is Some, runs the LLM advisor post-beam to propose
 /// additional candidate mutations — the referee is still the final authority.
-/// Completes within `SearchConfig::time_limit_secs` (default 28 s).
+/// Completes within `SearchConfig::time_limit_secs` (default 45 s).
 // Beam-search pipeline entry point; db, weights, context, scenario, and
 // optional LLM client are independent inputs — a params struct adds no clarity.
 #[allow(clippy::too_many_arguments)]

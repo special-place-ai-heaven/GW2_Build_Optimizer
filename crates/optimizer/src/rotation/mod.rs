@@ -237,6 +237,8 @@ pub struct SimulationResult {
     pub finished: bool,
     /// Kit has any CrowdControl (secures stomp / cuts casts).
     pub has_interrupt: bool,
+    /// Personal cover vs incoming CC: stab, evade, block, invuln, stealth, or blind.
+    pub has_cover_answer: bool,
 }
 
 /// Per-skill breakdown in a simulation result.

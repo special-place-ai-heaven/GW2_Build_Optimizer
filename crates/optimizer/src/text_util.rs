@@ -111,6 +111,33 @@ pub(crate) fn text_describes_block(text: &str) -> bool {
     lower.contains("block") && !lower.contains("unblockable")
 }
 
+/// Heuristic: evade / dodge frames (Daredevil Bound, Roll for Initiative).
+pub(crate) fn text_describes_evade(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("evade") || lower.contains("dodge")
+}
+
+/// Heuristic: stealth / invisibility (not just the word "hidden").
+pub(crate) fn text_describes_stealth(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("stealth") || lower.contains("invisib")
+}
+
+/// Heuristic: true invuln (Distortion, Mist Form) — not a strippable boon.
+pub(crate) fn text_describes_invulnerability(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("invulnerab") || lower.contains("distortion") || lower.contains("mist form")
+}
+
+/// Personal cover vs incoming CC: stab, evade, block, invuln, or stealth.
+pub(crate) fn text_describes_cc_answer(text: &str) -> bool {
+    text_describes_stability(text)
+        || text_describes_evade(text)
+        || text_describes_block(text)
+        || text_describes_stealth(text)
+        || text_describes_invulnerability(text)
+}
+
 /// Strip GW2 tooltip markup (`<br>`, `<c=@reminder>`, `@abilitytype`).
 pub(crate) fn strip_gw2_markup(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -280,6 +307,16 @@ mod tests {
         assert!(text_describes_stability("Grant 3 stacks of stability."));
         assert!(!text_describes_stability("Cause instability on hit."));
         assert!(!text_describes_stability("Gain might and fury."));
+    }
+
+    #[test]
+    fn cc_answer_accepts_evade_stealth_invuln_not_unblockable() {
+        assert!(text_describes_cc_answer("Evade backward and break stun."));
+        assert!(text_describes_cc_answer("Grant stealth to yourself."));
+        assert!(text_describes_cc_answer("Distortion: immune to damage."));
+        assert!(text_describes_block("Block the next attack."));
+        assert!(!text_describes_block("This attack is unblockable."));
+        assert!(!text_describes_cc_answer("Deal more damage."));
     }
 
     #[test]
