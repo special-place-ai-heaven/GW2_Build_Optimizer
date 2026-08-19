@@ -8,8 +8,31 @@ fn report_cache_write_error(state: &mut AddonState, message: String) {
     state.main.error = Some(message);
 }
 
+/// Refresh account characters and the selected character's tabs from the API.
+pub(super) fn reload_from_api(state: &mut AddonState) {
+    if state.config.gw2_api_key.is_none() {
+        return;
+    }
+    if !state.main.characters_loading {
+        load_characters(state);
+    }
+    let Some(name) = state
+        .main
+        .selected_character
+        .and_then(|i| state.main.characters.get(i).cloned())
+    else {
+        return;
+    };
+    if !state.main.build_loading {
+        load_character_tabs(state, name);
+    }
+}
+
 /// Phase 1: Load characters from cache (instant) then refresh from API in background.
 pub(super) fn load_characters(state: &mut AddonState) {
+    if state.main.characters_loading {
+        return;
+    }
     let Some(ref key) = state.config.gw2_api_key else {
         state.main.error = Some("No GW2 API key configured".into());
         return;
@@ -65,7 +88,13 @@ pub(super) fn load_characters(state: &mut AddonState) {
 
                         // Only update UI if data changed
                         if s.main.characters != fresh_chars {
+                            let keep = s
+                                .main
+                                .selected_character
+                                .and_then(|i| s.main.characters.get(i).cloned());
                             s.main.characters = fresh_chars;
+                            s.main.selected_character =
+                                keep.and_then(|n| s.main.characters.iter().position(|c| *c == n));
                         }
                     }
                     Some(Err(e)) => {

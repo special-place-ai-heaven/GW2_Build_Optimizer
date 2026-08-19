@@ -38,7 +38,10 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     ]));
 
     // Trigger character load on first render
-    if state.main.characters.is_empty() && !state.main.characters_loading {
+    if state.needs_character_reload {
+        state.needs_character_reload = false;
+        character::reload_from_api(state);
+    } else if state.main.characters.is_empty() && !state.main.characters_loading {
         character::load_characters(state);
     }
 
@@ -222,6 +225,23 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
             ui.same_line();
             if theme::gold_button(ui, &format!("{}##stale_data", t("btn.refresh"))) {
                 stats::start_game_data_refresh(state);
+            }
+        }
+    }
+
+    if !state.main.game_db_loading {
+        if let Some(lang) = gw2_core::i18n::api_lang(&state.config.ui_language) {
+            let cache = gw2_api::cache::DataCache::new(state.addon_dir.join("cache"));
+            let build = state.main.live_build_number.or(state.config.cache_build_number);
+            match gw2_api::localize::pack_status(&cache, lang, build) {
+                gw2_api::localize::PackStatus::Missing | gw2_api::localize::PackStatus::Stale => {
+                    ui.same_line();
+                    ui.text_colored(theme::WARN, t("status.names_english"));
+                    if ui.is_item_hovered() {
+                        ui.tooltip_text(t("tip.names_english"));
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -463,17 +483,7 @@ fn render_left_panel(ui: &Ui, state: &mut AddonState) {
         MainTab::NewBuild | MainTab::Improve | MainTab::Talk => {
             render_left_build_controls(ui, state);
         }
-        MainTab::SaveLoad => {
-            // Minimal: just refresh button
-            ui.spacing();
-            if state.main.characters_loading {
-                let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-                theme::gold_button_sized(ui, t("btn.refreshing"), [-1.0, 0.0]);
-                style.pop();
-            } else if theme::gold_button_sized(ui, &t("btn.refresh_data"), [-1.0, 0.0]) {
-                character::load_characters(state);
-            }
-        }
+        MainTab::SaveLoad => {}
         MainTab::Settings => {
             // Settings info
             render_left_section_header(ui, &t("section.info"), state.config.section_spacing);
@@ -663,13 +673,19 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
             }
         });
 
-    let chars_snapshot = state.main.characters.clone();
     let mut new_selection: Option<(usize, String)> = None;
-
-    if let Some(_combo) = ComboBox::new("##char_select")
+    let combo_open = ComboBox::new("##char_select")
         .preview_value(&preview)
-        .begin(ui)
-    {
+        .begin(ui);
+    if combo_open.is_some() && !state.main.char_combo_open {
+        state.main.char_combo_open = true;
+        character::reload_from_api(state);
+    }
+    if combo_open.is_none() {
+        state.main.char_combo_open = false;
+    }
+    let chars_snapshot = state.main.characters.clone();
+    if let Some(_combo) = combo_open {
         for (i, name) in chars_snapshot.iter().enumerate() {
             let selected = state.main.selected_character == Some(i);
             if Selectable::new(name).selected(selected).build(ui)
@@ -898,14 +914,6 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         }
     }
 
-    ui.dummy([0.0, 2.0]);
-    if state.main.characters_loading {
-        let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui, t("btn.refreshing"), [-1.0, 0.0]);
-        style.pop();
-    } else if ui.small_button(&t("btn.refresh_data")) {
-        character::load_characters(state);
-    }
     ui.dummy([0.0, 4.0]);
 
     if ui.collapsing_header(t("weights.fine_tune"), TreeNodeFlags::DEFAULT_OPEN) {
