@@ -4,7 +4,7 @@
   "tab.choya": "Choya",
   "tab.saves": "Opgeslagen",
   "tab.settings": "Instellingen",
-  "section.mode": "MODUS",
+  "section.mode": "SPEELMODUS",
   "section.scale": "SCHAAL",
   "section.role": "ROL",
   "section.character": "PERSONAGE",
@@ -407,5 +407,14 @@
   "setup.step_lang": "Taal",
   "setup.lang_header": "STAP 1  ·  TAAL",
   "setup.lang_help": "Kies de interfacetaal. Speldata en officiële namen (Deutsch, Español, Français, 简体中文) worden later eenmalig gedownload.",
-  "settings.lang_pack_legend": "* namen klaar   ! ontbreekt   ~ update   - alleen interface (Engelse namen)"
+  "settings.lang_pack_legend": "* namen klaar   ! ontbreekt   ~ update   - alleen interface (Engelse namen)",
+  "explain.uses_gear": "This {profession} build uses {gear} gear.",
+  "explain.uses_gear_empty": "This {profession} build uses {gear} gear for optimal stat distribution. Traits, rune, sigils, and relic were selected to maximize synergy with the chosen weight priorities.",
+  "explain.traited_fact": "Equipped trait activates a conditional effect upgrade.",
+  "explain.applies_enables": "{status} application enables a bonus effect.",
+  "explain.existing_feeds": "Existing {status} application feeds into a bonus effect.",
+  "explain.condition_stack": "Multiple sources of {status} stack for higher sustained damage.",
+  "explain.modifier_stack": "Stacking {category} damage modifiers multiply for greater effect.",
+  "explain.duration_extends": "{status} duration bonus extends {status} ticks for more damage.",
+  "explain.duration_benefits": "Existing {status} application benefits from added duration bonus."
 }

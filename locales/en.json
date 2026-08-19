@@ -407,5 +407,14 @@
   "err.opt_panic": "Internal error: optimization thread panicked",
   "fmt.improved": "Improved: {name}",
   "choya.pick": "Choya's pick",
-  "choya.heres_a_build": "Here's a build."
+  "choya.heres_a_build": "Here's a build.",
+  "explain.uses_gear": "This {profession} build uses {gear} gear.",
+  "explain.uses_gear_empty": "This {profession} build uses {gear} gear for optimal stat distribution. Traits, rune, sigils, and relic were selected to maximize synergy with the chosen weight priorities.",
+  "explain.traited_fact": "Equipped trait activates a conditional effect upgrade.",
+  "explain.applies_enables": "{status} application enables a bonus effect.",
+  "explain.existing_feeds": "Existing {status} application feeds into a bonus effect.",
+  "explain.condition_stack": "Multiple sources of {status} stack for higher sustained damage.",
+  "explain.modifier_stack": "Stacking {category} damage modifiers multiply for greater effect.",
+  "explain.duration_extends": "{status} duration bonus extends {status} ticks for more damage.",
+  "explain.duration_benefits": "Existing {status} application benefits from added duration bonus."
 }

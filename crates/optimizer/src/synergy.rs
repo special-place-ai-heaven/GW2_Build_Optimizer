@@ -746,8 +746,7 @@ pub fn compute_marginal_synergy(
                             target_name: "Conditional effect".into(),
                             link_type: SynergyLinkType::TraitedFact,
                             score: bonus,
-                            description: "Equipped trait activates a conditional effect upgrade."
-                                .into(),
+                            description: gw2_core::i18n::t("explain.traited_fact"),
                         });
                     }
                 }
@@ -773,7 +772,10 @@ pub fn compute_marginal_synergy(
                             target_name: format!("Applies {}", applied),
                             link_type: SynergyLinkType::EnablerPayoff,
                             score: bonus,
-                            description: format!("{} application enables a bonus effect.", applied),
+                            description: gw2_core::i18n::tf(
+                                "explain.applies_enables",
+                                &[("status", &applied.to_string())],
+                            ),
                         });
                     }
                 }
@@ -797,9 +799,9 @@ pub fn compute_marginal_synergy(
                             target_name: format!("Benefits from {}", needed),
                             link_type: SynergyLinkType::EnablerPayoff,
                             score: bonus,
-                            description: format!(
-                                "Existing {} application feeds into a bonus effect.",
-                                applied
+                            description: gw2_core::i18n::tf(
+                                "explain.existing_feeds",
+                                &[("status", &applied.to_string())],
                             ),
                         });
                     }
@@ -829,9 +831,9 @@ pub fn compute_marginal_synergy(
                             target_name: format!("{} source", s1),
                             link_type: SynergyLinkType::ConditionStacking,
                             score: bonus,
-                            description: format!(
-                                "Multiple sources of {} stack for higher sustained damage.",
-                                s1
+                            description: gw2_core::i18n::tf(
+                                "explain.condition_stack",
+                                &[("status", &s1.to_string())],
                             ),
                         });
                     }
@@ -862,9 +864,9 @@ pub fn compute_marginal_synergy(
                                 target_name: format!("{:?} +{}%", c1, p1),
                                 link_type: SynergyLinkType::ModifierStacking,
                                 score: bonus,
-                                description: format!(
-                                    "Stacking {:?} damage modifiers multiply for greater effect.",
-                                    c1
+                                description: gw2_core::i18n::tf(
+                                    "explain.modifier_stack",
+                                    &[("category", &format!("{c1:?}"))],
                                 ),
                             });
                         }
@@ -890,9 +892,9 @@ pub fn compute_marginal_synergy(
                             target_name: format!("{} application", status),
                             link_type: SynergyLinkType::DurationAlignment,
                             score: bonus,
-                            description: format!(
-                                "{} duration bonus extends {} ticks for more damage.",
-                                status, status
+                            description: gw2_core::i18n::tf(
+                                "explain.duration_extends",
+                                &[("status", &status.to_string())],
                             ),
                         });
                     }
@@ -915,9 +917,9 @@ pub fn compute_marginal_synergy(
                             target_name: format!("{:?} duration", kind),
                             link_type: SynergyLinkType::DurationAlignment,
                             score: bonus,
-                            description: format!(
-                                "Existing {} application benefits from added duration bonus.",
-                                status
+                            description: gw2_core::i18n::tf(
+                                "explain.duration_benefits",
+                                &[("status", &status.to_string())],
                             ),
                         });
                     }
@@ -937,24 +939,28 @@ pub fn template_explanation(
     gear_prefix: &str,
     profession: &str,
 ) -> String {
+    use gw2_core::i18n::tf;
     if synergy_links.is_empty() {
-        return format!(
-            "This {} build uses {} gear for optimal stat distribution. \
-             Traits, rune, sigils, and relic were selected to maximize synergy with the chosen weight priorities.",
-            profession, gear_prefix,
+        return tf(
+            "explain.uses_gear_empty",
+            &[("profession", profession), ("gear", gear_prefix)],
         );
     }
 
     let mut parts = Vec::new();
-    parts.push(format!(
-        "This {} build uses {} gear.",
-        profession, gear_prefix,
+    parts.push(tf(
+        "explain.uses_gear",
+        &[("profession", profession), ("gear", gear_prefix)],
     ));
-
-    for link in synergy_links.iter().take(5) {
-        parts.push(link.description.clone());
+    let mut seen = std::collections::HashSet::new();
+    for link in synergy_links {
+        if seen.insert(link.description.as_str()) {
+            parts.push(link.description.clone());
+        }
+        if parts.len() >= 6 {
+            break;
+        }
     }
-
     parts.join(" ")
 }
 
@@ -1081,6 +1087,29 @@ mod tests {
         assert_eq!(StatType::from_api("CritDamage"), Some(StatType::Ferocity));
         assert_eq!(StatType::from_api("AgonyResistance"), None);
     }
+
+    #[test]
+    fn template_explanation_dedupes_repeated_blurbs() {
+        gw2_core::i18n::set_language("en");
+        let link = SynergyLink {
+            source: ComponentId::Trait(1),
+            source_name: "A".into(),
+            target: ComponentId::Trait(2),
+            target_name: "B".into(),
+            link_type: SynergyLinkType::ModifierStacking,
+            score: 1.0,
+            description: "Stacking Strike damage modifiers multiply for greater effect."
+                .into(),
+        };
+        let text = template_explanation(&[link.clone(), link.clone(), link], "Valkyrie", "Thief");
+        assert!(text.starts_with("This Thief build uses Valkyrie gear."));
+        assert_eq!(
+            text.matches("Stacking Strike damage modifiers multiply for greater effect.")
+                .count(),
+            1
+        );
+    }
+
 
     #[test]
     fn all_stats_bonus_emits_nine_attributes() {

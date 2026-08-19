@@ -364,6 +364,7 @@ pub fn synergy_build_prompt(
 
     format!(
         r#"You are an expert Guild Wars 2 build optimizer with deep knowledge of trait-skill-equipment synergies.
+Write synergy_explanation and any prose in {reply_language}. JSON keys and Guild Wars 2 specialization, trait, skill, and item names stay in English.
 
 {task}
 
@@ -423,7 +424,7 @@ After reasoning about synergies, respond with ONLY a JSON build object:
   }},
   "relic": "Full Relic Name",
   "stat_prefix": "{stat_prefix_value}",
-  "synergy_explanation": "3-5 sentences explaining the synergy chains: how traits, skills, rune, sigils, and relic work together as a system.",
+  "synergy_explanation": "3-5 sentences in {reply_language} explaining the synergy chains.",
   "changes": [
     {{"slot": "What was changed", "from": "Old choice", "to": "New choice", "reason": "Why — cite the synergy"}}
   ]
@@ -438,6 +439,7 @@ Every field is REQUIRED. Do not leave any field empty or null."#,
         context = pre_computed_context,
         current_build = current_build_section,
         stat_prefix_value = determined_prefix.unwrap_or("PrefixName"),
+        reply_language = gw2_core::i18n::current_choya_name(),
     )
 }
 
@@ -1208,6 +1210,7 @@ After gathering data, respond with ONLY a JSON build object:
         // BuildLocks::trait_locks is a HashMap with nondeterministic iteration
         // order, so embedding lock_constraints with multiple specs would flake
         // across runs. A separate task addresses the source of that ordering.
+        gw2_core::i18n::set_language("en");
         let prompt = synergy_build_prompt(
             "Warrior",
             &OptimizationWeights::preset_power_dps(),
@@ -1218,6 +1221,7 @@ After gathering data, respond with ONLY a JSON build object:
             None,
         );
         let expected = r#"You are an expert Guild Wars 2 build optimizer with deep knowledge of trait-skill-equipment synergies.
+Write synergy_explanation and any prose in English. JSON keys and Guild Wars 2 specialization, trait, skill, and item names stay in English.
 
 Create an optimal Power build for Warrior in PvE.
 
@@ -1293,7 +1297,7 @@ After reasoning about synergies, respond with ONLY a JSON build object:
   },
   "relic": "Full Relic Name",
   "stat_prefix": "PrefixName",
-  "synergy_explanation": "3-5 sentences explaining the synergy chains: how traits, skills, rune, sigils, and relic work together as a system.",
+  "synergy_explanation": "3-5 sentences in English explaining the synergy chains.",
   "changes": [
     {"slot": "What was changed", "from": "Old choice", "to": "New choice", "reason": "Why — cite the synergy"}
   ]

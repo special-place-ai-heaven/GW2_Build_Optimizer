@@ -172,6 +172,13 @@ pub fn choya_name_for(code: &str) -> &'static str {
         .unwrap_or("English")
 }
 
+
+/// English name for the current overlay language (Choya / LLM prose).
+pub fn current_choya_name() -> &'static str {
+    choya_name_for(&current_code())
+}
+
+
 pub fn t(key: &str) -> String {
     let lang = current_code();
     let cats = catalogs();
@@ -312,6 +319,18 @@ mod tests {
         with_lang("fr", || {
             assert_eq!(t("tab.settings"), "Paramètres");
             assert_eq!(t("choya.assistant"), "Assistant de build");
+            assert_eq!(t("label.build"), "Composition :");
+            assert_eq!(t("section.mode"), "MODE DE JEU");
+            assert_eq!(t("section.actions"), "COMMANDES");
+            assert_eq!(t("pane.build"), "Composition");
+            assert_eq!(t("pane.stats"), "Statistiques");
+            assert_eq!(
+                tf(
+                    "explain.uses_gear",
+                    &[("profession", "Thief"), ("gear", "Valkyrie")],
+                ),
+                "Ce build Thief utilise l'équipement Valkyrie.",
+            );
         });
     }
 
