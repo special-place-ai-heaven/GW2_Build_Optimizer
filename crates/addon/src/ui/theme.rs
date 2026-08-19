@@ -45,8 +45,13 @@ pub fn paint_header_accent(draw: &DrawListMut, left: f32, top: f32, height: f32)
     .build();
 }
 
+fn fade(c: [f32; 4], opacity: f32) -> [f32; 4] {
+    [c[0], c[1], c[2], c[3] * opacity.clamp(0.3, 1.0)]
+}
+
 /// Push overlay colors/rounding. Keep the value alive for the window frame.
-pub fn push<'ui>(ui: &'ui Ui<'_>) -> impl Sized + 'ui {
+pub fn push<'ui>(ui: &'ui Ui<'_>, opacity: f32) -> impl Sized + 'ui {
+    let a = opacity.clamp(0.3, 1.0);
     (
         ui.push_style_var(StyleVar::WindowRounding(8.0)),
         ui.push_style_var(StyleVar::ChildRounding(6.0)),
@@ -55,9 +60,9 @@ pub fn push<'ui>(ui: &'ui Ui<'_>) -> impl Sized + 'ui {
         ui.push_style_var(StyleVar::PopupRounding(6.0)),
         ui.push_style_var(StyleVar::WindowBorderSize(1.0)),
         ui.push_style_var(StyleVar::WindowPadding([24.0, 16.0])),
-        ui.push_style_color(StyleColor::WindowBg, INK),
-        ui.push_style_color(StyleColor::ChildBg, CHILD),
-        ui.push_style_color(StyleColor::PopupBg, [0.08, 0.07, 0.05, 0.98]),
+        ui.push_style_color(StyleColor::WindowBg, fade(INK, a)),
+        ui.push_style_color(StyleColor::ChildBg, fade(CHILD, a)),
+        ui.push_style_color(StyleColor::PopupBg, fade([0.08, 0.07, 0.05, 0.98], a)),
         ui.push_style_color(StyleColor::Border, GOLD_DIM),
         ui.push_style_color(StyleColor::FrameBg, [0.12, 0.10, 0.07, 0.95]),
         ui.push_style_color(StyleColor::FrameBgHovered, [0.18, 0.15, 0.09, 1.0]),
@@ -67,8 +72,8 @@ pub fn push<'ui>(ui: &'ui Ui<'_>) -> impl Sized + 'ui {
         ui.push_style_color(StyleColor::ButtonActive, [0.58, 0.45, 0.12, 1.0]),
         ui.push_style_color(StyleColor::Header, [0.22, 0.18, 0.08, 0.9]),
         ui.push_style_color(StyleColor::HeaderHovered, [0.30, 0.24, 0.10, 1.0]),
-        ui.push_style_color(StyleColor::TitleBg, [0.10, 0.08, 0.05, 1.0]),
-        ui.push_style_color(StyleColor::TitleBgActive, [0.16, 0.12, 0.06, 1.0]),
+        ui.push_style_color(StyleColor::TitleBg, fade([0.10, 0.08, 0.05, 1.0], a)),
+        ui.push_style_color(StyleColor::TitleBgActive, fade([0.16, 0.12, 0.06, 1.0], a)),
         ui.push_style_color(StyleColor::Separator, GOLD_DIM),
         ui.push_style_color(StyleColor::CheckMark, GOLD),
         ui.push_style_color(StyleColor::SliderGrab, GOLD_FILL),

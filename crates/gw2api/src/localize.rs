@@ -46,6 +46,34 @@ struct NamedStr {
     name: String,
 }
 
+pub const API_LANGS: &[&str] = &["de", "es", "fr", "zh"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackStatus {
+    /// Chrome-only language; GameDb names stay English.
+    None,
+    Ready,
+    Missing,
+    Stale,
+}
+
+/// Cache state for an official `/v2?lang=` name pack.
+pub fn pack_status(cache: &DataCache, lang: &str, current_build: Option<u32>) -> PackStatus {
+    if !API_LANGS.contains(&lang) {
+        return PackStatus::None;
+    }
+    match cache.cached_build(&cache_key(lang)) {
+        None => PackStatus::Missing,
+        Some(b) => {
+            if current_build.is_some_and(|c| c != b) {
+                PackStatus::Stale
+            } else {
+                PackStatus::Ready
+            }
+        }
+    }
+}
+
 pub fn cache_key(lang: &str) -> String {
     format!("loc_{lang}")
 }
@@ -218,5 +246,50 @@ mod tests {
     #[test]
     fn cache_key_is_lang_namespaced() {
         assert_eq!(cache_key("fr"), "loc_fr");
+    }
+
+    fn temp_cache() -> DataCache {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_loc_pack_{}_{}",
+            std::process::id(),
+            id
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        DataCache::new(dir)
+    }
+
+    #[test]
+    fn pack_status_en_is_none() {
+        let cache = temp_cache();
+        assert_eq!(pack_status(&cache, "en", Some(1)), PackStatus::None);
+        let _ = cache.clear_all();
+    }
+
+    #[test]
+    fn pack_status_fr_empty_is_missing() {
+        let cache = temp_cache();
+        assert_eq!(pack_status(&cache, "fr", Some(1)), PackStatus::Missing);
+        let _ = cache.clear_all();
+    }
+
+    #[test]
+    fn pack_status_fr_ready_and_stale() {
+        let cache = temp_cache();
+        cache
+            .save(
+                &cache_key("fr"),
+                &LocalizedNames {
+                    lang: "fr".into(),
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        assert_eq!(pack_status(&cache, "fr", Some(100)), PackStatus::Ready);
+        assert_eq!(pack_status(&cache, "fr", Some(101)), PackStatus::Stale);
+        let _ = cache.clear_all();
     }
 }

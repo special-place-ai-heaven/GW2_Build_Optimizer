@@ -7,21 +7,24 @@ use gw2_core::i18n::{t, tf};
 pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
     theme::header(ui, &t("setup.title"));
 
+    let s_lang = t("setup.step_lang");
     let s_gw2 = t("setup.step_gw2");
     let s_ai = t("setup.step_ai");
     let s_data = t("setup.step_data");
     let s_ready = t("setup.step_ready");
     let steps = [
+        (SetupStep::Language, s_lang.as_str()),
         (SetupStep::Gw2ApiKey, s_gw2.as_str()),
         (SetupStep::LlmApiKey, s_ai.as_str()),
         (SetupStep::DataDownload, s_data.as_str()),
         (SetupStep::Complete, s_ready.as_str()),
     ];
     let current_idx = match step {
-        SetupStep::Gw2ApiKey => 0,
-        SetupStep::LlmApiKey => 1,
-        SetupStep::DataDownload => 2,
-        SetupStep::Complete => 3,
+        SetupStep::Language => 0,
+        SetupStep::Gw2ApiKey => 1,
+        SetupStep::LlmApiKey => 2,
+        SetupStep::DataDownload => 3,
+        SetupStep::Complete => 4,
     };
     for (i, (target, name)) in steps.iter().enumerate() {
         if i > 0 {
@@ -37,12 +40,73 @@ pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
     ui.spacing();
 
     match step {
+        SetupStep::Language => render_language_step(ui, state),
         SetupStep::Gw2ApiKey => render_gw2_key_step(ui, state),
         SetupStep::LlmApiKey => render_llm_key_step(ui, state),
         SetupStep::DataDownload => render_download_step(ui, state),
         SetupStep::Complete => render_complete_step(ui, state),
     }
 }
+
+
+fn render_language_step(ui: &Ui, state: &mut AddonState) {
+    use nexus::imgui::{ComboBox, Selectable};
+
+    theme::header(ui, &t("setup.lang_header"));
+    ui.spacing();
+    ui.text_wrapped(t("setup.lang_help"));
+    ui.spacing();
+
+    ui.text(t("settings.language"));
+    ui.set_next_item_width(-1.0);
+    let resolved = gw2_core::i18n::resolve(&state.config.ui_language);
+    let preview = if state.config.ui_language.eq_ignore_ascii_case("auto") {
+        format!(
+            "{} — {}",
+            t("settings.language_auto"),
+            gw2_core::i18n::language_by_code(resolved)
+                .map(|l| l.native_name)
+                .unwrap_or("English")
+        )
+    } else {
+        gw2_core::i18n::language_by_code(&state.config.ui_language)
+            .map(|l| l.native_name.to_string())
+            .unwrap_or_else(|| state.config.ui_language.clone())
+    };
+    if let Some(_c) = ComboBox::new("##setup_ui_language")
+        .preview_value(&preview)
+        .begin(ui)
+    {
+        let auto_sel = state.config.ui_language.eq_ignore_ascii_case("auto");
+        if Selectable::new(t("settings.language_auto"))
+            .selected(auto_sel)
+            .build(ui)
+            && !auto_sel
+        {
+            state.config.ui_language = "auto".into();
+            gw2_core::i18n::set_language("auto");
+            let _ = state.config.save(&state.config_path);
+        }
+        for lang in gw2_core::i18n::LANGUAGES {
+            let sel = state.config.ui_language == lang.code;
+            if Selectable::new(lang.native_name)
+                .selected(sel)
+                .build(ui)
+                && !sel
+            {
+                state.config.ui_language = lang.code.into();
+                gw2_core::i18n::set_language(lang.code);
+                let _ = state.config.save(&state.config_path);
+            }
+        }
+    }
+
+    ui.spacing();
+    if theme::gold_button_sized(ui, t("btn.next"), [120.0, 0.0]) {
+        state.screen = Screen::Setup(SetupStep::Gw2ApiKey);
+    }
+}
+
 
 fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
     theme::header(ui, &t("setup.gw2_header"));
@@ -213,12 +277,15 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
         }
     }
 
-    // Next button
     ui.spacing();
-    if state.setup.gw2_key_status == KeyStatus::Valid
-        && theme::gold_button_sized(ui, t("btn.next"), [120.0, 0.0])
-    {
-        state.screen = Screen::Setup(SetupStep::LlmApiKey);
+    if theme::gold_button_sized(ui, t("btn.back"), [120.0, 0.0]) {
+        state.screen = Screen::Setup(SetupStep::Language);
+    }
+    if state.setup.gw2_key_status == KeyStatus::Valid {
+        ui.same_line();
+        if theme::gold_button_sized(ui, t("btn.next"), [120.0, 0.0]) {
+            state.screen = Screen::Setup(SetupStep::LlmApiKey);
+        }
     }
 }
 
@@ -446,7 +513,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
             if theme::gold_button_sized(ui, t("btn.start_download"), [160.0, 0.0]) {
                 state.setup.download_progress = Some(DownloadState {
                     current_step: 0,
-                    total_steps: 9,
+                    total_steps: 13,
                     step_name: t("status.starting"),
                     inner_done: 0,
                     inner_total: 0,
@@ -485,7 +552,11 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
 
                                 let token_inner = token.clone();
                                 let result =
-                                    gw2_api::download::download_all(&client, &cache, |progress| {
+                                    gw2_api::download::download_game_and_names(
+                                        &client,
+                                        &cache,
+                                        || token_inner.is_cancelled(),
+                                        |progress| {
                                         if token_inner.is_cancelled() {
                                             return;
                                         }

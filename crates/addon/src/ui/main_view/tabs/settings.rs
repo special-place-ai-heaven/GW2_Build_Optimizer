@@ -497,8 +497,16 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     ui.text(t("settings.language"));
     ui.set_next_item_width(right_item_w * 0.6);
     let resolved = gw2_core::i18n::resolve(&state.config.ui_language);
+    let cache = gw2_api::cache::DataCache::new(state.addon_dir.join("cache"));
+    let build = state.main.live_build_number.or(state.config.cache_build_number);
+    let preview_code = if state.config.ui_language.eq_ignore_ascii_case("auto") {
+        resolved
+    } else {
+        state.config.ui_language.as_str()
+    };
+    let (preview_mark, _) = pack_mark(gw2_api::localize::pack_status(&cache, preview_code, build));
     let auto_preview = format!(
-        "{} — {}",
+        "{preview_mark} {} — {}",
         t("settings.language_auto"),
         gw2_core::i18n::language_by_code(resolved)
             .map(|l| l.native_name)
@@ -507,28 +515,42 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let preview = if state.config.ui_language.eq_ignore_ascii_case("auto") {
         auto_preview
     } else {
-        gw2_core::i18n::language_by_code(&state.config.ui_language)
-            .map(|l| l.native_name.to_string())
-            .unwrap_or_else(|| state.config.ui_language.clone())
+        format!(
+            "{preview_mark} {}",
+            gw2_core::i18n::language_by_code(&state.config.ui_language)
+                .map(|l| l.native_name)
+                .unwrap_or(state.config.ui_language.as_str())
+        )
     };
     if let Some(_c) = ComboBox::new("##ui_language")
         .preview_value(&preview)
         .begin(ui)
     {
         let auto_sel = state.config.ui_language.eq_ignore_ascii_case("auto");
-        if Selectable::new(t("settings.language_auto"))
-            .selected(auto_sel)
-            .build(ui)
-            && !auto_sel
+        let auto_code = gw2_core::i18n::resolve("auto");
+        let (auto_mark, auto_color) =
+            pack_mark(gw2_api::localize::pack_status(&cache, auto_code, build));
         {
-            state.config.ui_language = "auto".into();
-            gw2_core::i18n::set_language("auto");
-            let _ = state.config.save(&state.config_path);
-            super::super::stats::ensure_localized_names(state);
+            let auto_label = format!("{auto_mark} {}", t("settings.language_auto"));
+            let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, auto_color);
+            if Selectable::new(&auto_label)
+                .selected(auto_sel)
+                .build(ui)
+                && !auto_sel
+            {
+                state.config.ui_language = "auto".into();
+                gw2_core::i18n::set_language("auto");
+                let _ = state.config.save(&state.config_path);
+                super::super::stats::ensure_localized_names(state);
+            }
         }
         for lang in gw2_core::i18n::LANGUAGES {
             let sel = state.config.ui_language == lang.code;
-            if Selectable::new(lang.native_name)
+            let (mark, color) =
+                pack_mark(gw2_api::localize::pack_status(&cache, lang.code, build));
+            let label = format!("{mark} {}", lang.native_name);
+            let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, color);
+            if Selectable::new(&label)
                 .selected(sel)
                 .build(ui)
                 && !sel
@@ -540,6 +562,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             }
         }
     }
+    ui.text_colored(theme::MUTED, t("settings.lang_pack_legend"));
     ui.spacing();
 
     ui.text(t("settings.opacity"));
@@ -620,6 +643,17 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         let _ = state.config.save(&state.config_path);
     }
 }
+
+
+fn pack_mark(status: gw2_api::localize::PackStatus) -> (&'static str, [f32; 4]) {
+    match status {
+        gw2_api::localize::PackStatus::Ready => ("\u{25cf}", theme::OPTIMIZED),
+        gw2_api::localize::PackStatus::Missing => ("\u{25cb}", theme::ERR),
+        gw2_api::localize::PackStatus::Stale => ("\u{25cf}", theme::WARN),
+        gw2_api::localize::PackStatus::None => ("\u{00b7}", theme::MUTED),
+    }
+}
+
 
 fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     if let Some(ref key) = state.config.gw2_api_key {
@@ -727,6 +761,13 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
                 &stage
             },
         );
+        if let Some(ref dl) = state.setup.download_progress {
+            let overlay = format!(
+                "{}/{} — {}",
+                dl.current_step, dl.total_steps, dl.step_name
+            );
+            theme::download_scribble(ui, dl.fraction(), &overlay);
+        }
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
         theme::gold_button_sized(ui, t("btn.refreshing"), [160.0, 0.0]);
         style.pop();

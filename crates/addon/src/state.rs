@@ -38,6 +38,8 @@ impl CancellationToken {
 
 pub struct AddonState {
     pub window_visible: bool,
+    /// Set when the overlay opens; consumed on the next Main render.
+    pub needs_character_reload: bool,
     pub config: AppConfig,
     pub config_path: PathBuf,
     pub addon_dir: PathBuf,
@@ -67,7 +69,7 @@ impl AddonState {
         let mut main = MainState::default();
         main.weights = OptimizationWeights::default_for_mode(main.game_mode.label());
         self.main = main;
-        self.screen = Screen::Setup(SetupStep::Gw2ApiKey);
+        self.screen = Screen::Setup(SetupStep::Language);
 
         Ok(())
     }
@@ -77,6 +79,8 @@ impl AddonState {
 pub struct MainState {
     pub characters: Vec<String>,
     pub characters_loading: bool,
+    /// Rising-edge guard so opening the character combo refreshes once.
+    pub char_combo_open: bool,
     pub selected_character: Option<usize>,
     pub game_mode: GameMode,
     /// WvW combat sub-tier: Solo (Roaming), Party (Havoc/small group), Squad (Zerg).
@@ -244,6 +248,7 @@ pub enum Screen {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SetupStep {
+    Language,
     Gw2ApiKey,
     LlmApiKey,
     DataDownload,
@@ -336,6 +341,8 @@ pub fn init(addon_dir: PathBuf) {
 
     let screen = if config.is_setup_complete() {
         Screen::Main
+    } else if !config.has_gw2_key() {
+        Screen::Setup(SetupStep::Language)
     } else if config.has_gw2_key() && config.has_active_llm_key() {
         // Keys present but cache missing — go to download
         Screen::Setup(SetupStep::DataDownload)
@@ -371,6 +378,7 @@ pub fn init(addon_dir: PathBuf) {
     crate::ui::icons::set_graphics_dir(addon_dir.join("cache").join("graphics"));
     *lock_state() = Some(AddonState {
         window_visible: config.window_visible,
+        needs_character_reload: config.window_visible,
         config,
         config_path,
         addon_dir,
@@ -386,6 +394,9 @@ pub fn toggle_window() {
     if let Some(state) = lock_state().as_mut() {
         state.window_visible = !state.window_visible;
         state.config.window_visible = state.window_visible;
+        if state.window_visible {
+            state.needs_character_reload = true;
+        }
         let _ = state.config.save(&state.config_path);
     }
 }
@@ -662,7 +673,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         init(dir);
         let screen = with_state(|s| s.screen.clone()).unwrap();
-        assert_eq!(screen, Screen::Setup(SetupStep::Gw2ApiKey));
+        assert_eq!(screen, Screen::Setup(SetupStep::Language));
         reset_state();
     }
 
@@ -896,7 +907,7 @@ mod tests {
 
         assert!(old_cancelled, "old token should be cancelled during reset");
         assert!(!new_cancelled, "replacement token must start uncancelled");
-        assert_eq!(screen, Screen::Setup(SetupStep::Gw2ApiKey));
+        assert_eq!(screen, Screen::Setup(SetupStep::Language));
         assert!(!has_gw2_key);
         assert!(!has_llm_key);
         assert_eq!(cache_build, None);

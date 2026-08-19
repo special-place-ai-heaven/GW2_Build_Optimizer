@@ -1,7 +1,7 @@
 use super::resolution::resolve_selected_build_inner;
 use crate::state::AddonState;
 
-/// Load or download official API names for de/es/fr/zh. English GameDb stays put.
+/// Attach cached official API names for de/es/fr/zh. Never downloads — packs come from setup/refresh.
 pub(super) fn ensure_localized_names(state: &mut AddonState) {
     let Some(lang) = gw2_core::i18n::api_lang(&state.config.ui_language) else {
         if let Some(db) = state.main.game_db.as_mut() {
@@ -24,9 +24,6 @@ pub(super) fn ensure_localized_names(state: &mut AddonState) {
     if state.main.game_db.is_none() {
         return;
     }
-    if state.main.names_loading && state.main.names_lang == lang {
-        return;
-    }
     let cache = gw2_api::cache::DataCache::new(state.addon_dir.join("cache"));
     if let Ok(Some(names)) =
         gw2_api::localize::load(&cache, lang, state.config.cache_build_number)
@@ -34,73 +31,10 @@ pub(super) fn ensure_localized_names(state: &mut AddonState) {
         if let Some(db) = state.main.game_db.as_mut() {
             db.attach_localized(names);
         }
-        state.main.names_loading = false;
-        state.main.names_stage.clear();
         state.main.names_lang = lang.to_string();
-        return;
     }
-    state.main.names_loading = true;
-    state.main.names_lang = lang.to_string();
-    state.main.names_stage = gw2_core::i18n::tf("status.names", &[("lang", lang)]);
-    let cache_dir = state.addon_dir.join("cache");
-    let token = state.cancel_token.clone();
-    let lang = lang.to_string();
-    std::thread::spawn(move || {
-        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let cache = gw2_api::cache::DataCache::new(&cache_dir);
-            let lang_for_status = lang.clone();
-            let result = gw2_api::localize::download(
-                &cache,
-                &lang,
-                || token.is_cancelled(),
-                |msg| {
-                    crate::state::with_state(|s| {
-                        s.main.names_stage = format!(
-                            "{} ({msg})",
-                            gw2_core::i18n::tf("status.names", &[("lang", &lang_for_status)])
-                        );
-                    });
-                },
-            );
-            crate::state::with_state(|s| {
-                if s.main.names_lang != lang {
-                    return;
-                }
-                s.main.names_loading = false;
-                s.main.names_stage.clear();
-                match result {
-                    Ok(names) => {
-                        if gw2_core::i18n::api_lang(&s.config.ui_language) == Some(names.lang.as_str())
-                        {
-                            if let Some(db) = s.main.game_db.as_mut() {
-                                db.attach_localized(names);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        nexus::log::log(
-                            nexus::log::LogLevel::Warning,
-                            "GW2BuildOpt",
-                            format!("Localized names failed: {e}"),
-                        );
-                    }
-                }
-            });
-        }));
-        if panic_result.is_err() {
-            nexus::log::log(
-                nexus::log::LogLevel::Warning,
-                "GW2BuildOpt",
-                "bg thread panicked: localized names",
-            );
-            crate::state::with_state(|s| {
-                if s.main.names_lang == lang {
-                    s.main.names_loading = false;
-                    s.main.names_stage.clear();
-                }
-            });
-        }
-    });
+    state.main.names_loading = false;
+    state.main.names_stage.clear();
 }
 /// Fetch available models from the active provider's API in a background thread.
 pub(super) fn start_fetch_models(state: &mut AddonState) {
@@ -185,7 +119,7 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                 let cache = gw2_api::cache::DataCache::new(&cache_dir);
 
                 let download_result =
-                    gw2_api::download::download_all(&client, &cache, |progress| {
+                    gw2_api::download::download_game_and_names(&client, &cache, || token.is_cancelled(), |progress| {
                         if token.is_cancelled() {
                             return;
                         }
@@ -196,6 +130,15 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                                 format!("Refreshing: {}", progress.step_name)
                             };
                             s.main.game_refresh_stage = detail;
+                            s.setup.download_progress = Some(crate::state::DownloadState {
+                                current_step: progress.current_step,
+                                total_steps: progress.total_steps,
+                                step_name: progress.step_name,
+                                inner_done: progress.inner_done,
+                                inner_total: progress.inner_total,
+                                done: progress.done,
+                                error: None,
+                            });
                         });
                     });
 
@@ -237,6 +180,7 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
             crate::state::with_state(|s| {
                 s.main.game_db_loading = false;
                 s.main.game_refresh_stage = String::new();
+                s.setup.download_progress = None;
                 match outcome {
                     Outcome::Cancelled => {}
                     Outcome::ClientError(e) | Outcome::DownloadError(e) => {
@@ -273,6 +217,7 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
             crate::state::with_state(|s| {
                 s.main.game_db_loading = false;
                 s.main.game_refresh_stage = String::new();
+                s.setup.download_progress = None;
             });
         }
     });

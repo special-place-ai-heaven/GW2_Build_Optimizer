@@ -201,3 +201,75 @@ pub fn download_all(
 
     Ok(build)
 }
+
+/// Game data plus official name packs (de/es/fr/zh). One bar; skips packs that match `build`.
+pub fn download_game_and_names(
+    client: &Gw2Client,
+    cache: &DataCache,
+    cancelled: impl Fn() -> bool,
+    mut on_progress: impl FnMut(DownloadProgress),
+) -> Result<u32, ApiError> {
+    const NAME_STEPS: usize = 4;
+    let total = TOTAL_STEPS + NAME_STEPS;
+    let build = download_all(client, cache, |p| {
+        on_progress(DownloadProgress {
+            current_step: p.current_step,
+            total_steps: total,
+            step_name: p.step_name,
+            done: false,
+            detail: p.detail,
+            inner_done: p.inner_done,
+            inner_total: p.inner_total,
+        });
+    })?;
+    for (i, lang) in crate::localize::API_LANGS.iter().enumerate() {
+        if cancelled() {
+            return Err(ApiError::Internal("cancelled".into()));
+        }
+        let step = TOTAL_STEPS + i + 1;
+        on_progress(DownloadProgress {
+            current_step: step,
+            total_steps: total,
+            step_name: format!("Names ({lang})"),
+            done: false,
+            detail: None,
+            inner_done: 0,
+            inner_total: 0,
+        });
+        if cache.is_stale(&crate::localize::cache_key(lang), build) {
+            crate::localize::download(cache, lang, || cancelled(), |msg| {
+                let (inner_done, inner_total) = parse_items_progress(msg);
+                on_progress(DownloadProgress {
+                    current_step: step,
+                    total_steps: total,
+                    step_name: format!("Names ({lang})"),
+                    done: false,
+                    detail: Some(msg.to_string()),
+                    inner_done,
+                    inner_total,
+                });
+            })?;
+        }
+    }
+    on_progress(DownloadProgress {
+        current_step: total,
+        total_steps: total,
+        step_name: "Done".into(),
+        done: true,
+        detail: None,
+        inner_done: 0,
+        inner_total: 0,
+    });
+    Ok(build)
+}
+
+fn parse_items_progress(msg: &str) -> (usize, usize) {
+    let Some(rest) = msg.strip_prefix("items ") else {
+        return (0, 0);
+    };
+    let mut parts = rest.split('/');
+    let done = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let total = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    (done, total)
+}
+
