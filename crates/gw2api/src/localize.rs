@@ -37,12 +37,14 @@ pub struct LocalizedNames {
 #[derive(Deserialize)]
 struct NamedU32 {
     id: u32,
+    #[serde(default)]
     name: String,
 }
 
 #[derive(Deserialize)]
 struct NamedStr {
     id: String,
+    #[serde(default)]
     name: String,
 }
 
@@ -158,19 +160,18 @@ pub fn download(
 }
 
 fn ids_from_cache_u32(cache: &DataCache, key: &str) -> Result<Vec<serde_json::Value>, ApiError> {
-    let rows: Vec<NamedU32> = cache
+    let rows: Vec<serde_json::Value> = cache
         .load(key)
         .map_err(|e| ApiError::Cache(e.to_string()))?
         .unwrap_or_default();
-    Ok(rows.into_iter().map(|r| serde_json::json!(r.id)).collect())
+    Ok(rows
+        .into_iter()
+        .filter_map(|v| v.get("id").cloned())
+        .collect())
 }
 
 fn ids_from_cache_str(cache: &DataCache, key: &str) -> Result<Vec<serde_json::Value>, ApiError> {
-    let rows: Vec<NamedStr> = cache
-        .load(key)
-        .map_err(|e| ApiError::Cache(e.to_string()))?
-        .unwrap_or_default();
-    Ok(rows.into_iter().map(|r| serde_json::json!(r.id)).collect())
+    ids_from_cache_u32(cache, key)
 }
 
 fn fetch_u32(
@@ -241,6 +242,29 @@ mod tests {
         let n: NamedU32 = serde_json::from_value(v).unwrap();
         assert_eq!(n.id, 7);
         assert_eq!(n.name, "Sceau de malice");
+    }
+
+    #[test]
+    fn named_str_defaults_missing_name() {
+        let v = serde_json::json!({"id": "Legend1", "swap": 62891});
+        let n: NamedStr = serde_json::from_value(v).unwrap();
+        assert_eq!(n.id, "Legend1");
+        assert!(n.name.is_empty());
+    }
+
+    #[test]
+    fn ids_from_cache_reads_legend_without_name() {
+        let cache = temp_cache();
+        cache
+            .save(
+                "legends",
+                &vec![serde_json::json!({"id": "Legend1", "swap": 62891})],
+                1,
+            )
+            .unwrap();
+        let ids = ids_from_cache_str(&cache, "legends").unwrap();
+        assert_eq!(ids, vec![serde_json::json!("Legend1")]);
+        let _ = cache.clear_all();
     }
 
     #[test]

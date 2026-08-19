@@ -137,7 +137,7 @@
   "setup.ai_header": "STEP 3  ·  AI PROVIDER",
   "setup.data_header": "STEP 4  ·  GAME DATA",
   "setup.complete_header": "SETUP COMPLETE",
-  "setup.data_intro": "Downloading skills, traits, items, and official names (Deutsch, Español, Français, 简体中文). This only happens once and when the game updates.",
+  "setup.data_intro": "Downloading skills, traits, items, and official names (Deutsch, Español, Français, Chinese). This only happens once and when the game updates.",
   "setup.hotkey_hint": "You can now use the GW2 Build Optimizer. Press Ctrl+Shift+O anytime to open this window.",
   "settings.search_models": "Search models...",
   "label.gw2_api_key": "GW2 API Key:",
