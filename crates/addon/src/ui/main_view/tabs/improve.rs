@@ -47,7 +47,11 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
 
     // ── Two-panel layout: Current Build | Optimized Build ──
     let has_suggestion = !state.main.comparison.suggestions.is_empty();
-    let footer = if has_suggestion { 36.0 } else { 0.0 };
+    let footer = if has_suggestion {
+        ui.current_font_size() + 22.0
+    } else {
+        0.0
+    };
 
     if state.main.current_build.is_some() {
         // Clone build data upfront to avoid borrow conflicts with mutable lock_panel state

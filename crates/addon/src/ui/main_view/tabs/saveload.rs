@@ -13,8 +13,6 @@ pub(in crate::ui::main_view) fn render_save_build_ui(ui: &Ui, state: &mut AddonS
     if state.main.comparison.suggestions.is_empty() {
         return;
     }
-    ui.spacing();
-    ui.separator();
     ui.text(t("save.build"));
     ui.same_line();
     ui.set_next_item_width(200.0);
