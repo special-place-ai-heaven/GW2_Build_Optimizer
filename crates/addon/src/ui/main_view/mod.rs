@@ -131,6 +131,8 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     ChildWindow::new("##center_content")
         .size([0.0, child_height])
         .build(ui, || {
+            // Match left rail: dummy(2) + section header dummy(section_spacing).
+            ui.dummy([0.0, 2.0 + state.config.section_spacing]);
             ui.indent_by(content_indent);
             render_main_content(ui, state);
             ui.unindent_by(content_indent);

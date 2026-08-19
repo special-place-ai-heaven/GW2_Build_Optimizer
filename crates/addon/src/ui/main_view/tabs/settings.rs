@@ -91,7 +91,7 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     );
 }
 
-fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
+fn render_api_keys_section(ui: &Ui, state: &mut AddonState, _col_w: f32) {
     let mut provider_changed = false;
     for provider in &gw2_core::config::LlmProvider::ALL {
         let is_selected = state.config.active_provider == *provider;
@@ -183,20 +183,24 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         }
     }
 
-    ui.set_next_item_width(col_w - 80.0);
+    let save_label = t("btn.save");
+    let gap = 10.0;
+    let btn_w = ui.calc_text_size(save_label.as_str())[0] + 24.0;
+    let input_w = (ui.content_region_avail()[0] - btn_w - gap).max(80.0);
+    ui.set_next_item_width(input_w);
     ui.input_text(
         &format!("##{}_key", provider_label),
         &mut state.main.settings_key_input,
     )
     .hint(&t("settings.enter_key"))
     .build();
-    ui.same_line();
+    ui.same_line_with_spacing(0.0, gap);
     let validating = state.main.settings_key_validating;
     if validating {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui, "...", [50.0, 0.0]);
+        theme::gold_button_sized(ui, "...", [btn_w, 0.0]);
         style.pop();
-    } else if theme::gold_button_sized(ui, t("btn.save"), [50.0, 0.0]) {
+    } else if theme::gold_button_sized(ui, save_label, [btn_w, 0.0]) {
         let key = state.main.settings_key_input.trim().to_string();
         if !key.is_empty() {
             match state.config.active_provider {
