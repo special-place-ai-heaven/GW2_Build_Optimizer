@@ -216,6 +216,7 @@ mod tests {
             synergy_explanation: String::new(),
             changes_made: vec![],
             estimated_stats: None,
+            notes: String::new(),
         }
     }
 
@@ -280,6 +281,7 @@ mod tests {
         assert_eq!(saved.profession, "");
         assert_eq!(saved.engine_version, "");
         assert!(saved.balance_manifest_version.is_none());
+        assert_eq!(saved.notes, "");
         assert_eq!(saved.name, "Old Build");
     }
 

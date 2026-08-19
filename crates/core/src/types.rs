@@ -342,6 +342,9 @@ pub struct SavedBuild {
     pub synergy_explanation: String,
     pub changes_made: Vec<String>,
     pub estimated_stats: Option<StatBlock>,
+    /// Free-form player note. Empty on older saves.
+    #[serde(default)]
+    pub notes: String,
 }
 
 #[cfg(test)]

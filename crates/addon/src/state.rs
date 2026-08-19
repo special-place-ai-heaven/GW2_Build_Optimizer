@@ -152,8 +152,12 @@ pub struct MainState {
     // UX feedback
     /// Frame counter for auto-dismissing save status messages (~180 frames ≈ 3s at 60fps).
     pub save_status_frames: u32,
-    /// Index of the saved build pending delete confirmation (None = no dialog).
-    pub confirm_delete: Option<usize>,
+    /// Name of the saved build pending delete confirmation (None = no dialog).
+    pub confirm_delete: Option<String>,
+    /// Name of the saved build pending overwrite confirmation.
+    pub confirm_overwrite: Option<String>,
+    /// In-progress note drafts keyed by save name.
+    pub note_drafts: std::collections::HashMap<String, String>,
     /// Generation for in-flight kitchen orders. Timeout and send bump it; late applies are ignored.
     pub chat_epoch: u64,
     /// Wall-clock start of the current kitchen wait (90s, not frame-counted).

@@ -6,7 +6,7 @@ use crate::state::{AddonState, MainTab};
 use crate::ui::theme;
 use gw2_core::i18n::{t, tf};
 
-use super::super::{build_display, optimization, stats};
+use super::super::{optimization, stats};
 
 /// Render the save build UI (name input + Save button) below the comparison view.
 pub(in crate::ui::main_view) fn render_save_build_ui(ui: &Ui, state: &mut AddonState) {
@@ -92,124 +92,567 @@ pub(in crate::ui::main_view) fn render_save_build_ui(ui: &Ui, state: &mut AddonS
     }
 }
 
-/// Render the Save/Load tab.
-pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
-    // Lazy-load saved builds on first view
-    if !state.main.saved_builds_loaded {
-        let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
-        state.main.saved_builds = storage.list();
-        state.main.saved_builds_loaded = true;
-    }
+fn selected_character_name(state: &AddonState) -> Option<String> {
+    state
+        .main
+        .selected_character
+        .and_then(|i| state.main.characters.get(i).cloned())
+}
 
-    build_display::render_card_header(
-        ui,
-        &tf(
-            "fmt.saved_builds",
-            &[("n", &state.main.saved_builds.len().to_string())],
-        ),
-        theme::GOLD,
-    );
+fn ranch_indices(builds: &[gw2_core::types::SavedBuild], character: Option<&str>) -> Vec<usize> {
+    builds
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| character.map(|c| b.character_name == c).unwrap_or(true))
+        .map(|(i, _)| i)
+        .collect()
+}
 
-    if state.main.saved_builds.is_empty() {
-        ui.spacing();
-        ui.text_colored(theme::MUTED, t("save.none"));
-        ui.text_colored(theme::MUTED, t("save.hint"));
+fn persist_notes(state: &mut AddonState, name: &str) {
+    let draft = state
+        .main
+        .note_drafts
+        .get(name)
+        .cloned()
+        .unwrap_or_default();
+    let Some(saved) = state
+        .main
+        .saved_builds
+        .iter_mut()
+        .find(|b| b.name == name)
+    else {
+        return;
+    };
+    if saved.notes == draft {
         return;
     }
+    saved.notes = draft;
+    let snapshot = saved.clone();
+    let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
+    if let Err(e) = storage.save_overwrite(&snapshot) {
+        state.main.error = Some(tf("fmt.save_failed", &[("err", &e.to_string())]));
+    }
+}
 
-    // Snapshot for iteration (avoids borrow conflict with mut state)
-    let builds_snapshot: Vec<(String, String, String, String, String)> = state
+fn current_suggestion(
+    state: &AddonState,
+) -> Option<&crate::ui::comparison::BuildSuggestion> {
+    let sug = &state.main.comparison.suggestions;
+    if sug.is_empty() {
+        return None;
+    }
+    let idx = state
+        .main
+        .comparison
+        .selected_suggestion
+        .min(sug.len().saturating_sub(1));
+    sug.get(idx)
+}
+
+
+fn action_btn_size(ui: &Ui) -> [f32; 2] {
+    let labels = [
+        t("btn.load"),
+        t("btn.save"),
+        t("btn.delete"),
+        t("btn.yes"),
+        t("btn.no"),
+    ];
+    let w = labels
+        .iter()
+        .map(|s| ui.calc_text_size(s)[0])
+        .fold(72.0_f32, f32::max)
+        + 24.0;
+    [w, 32.0]
+}
+
+fn clip_label(ui: &Ui, text: &str, max_w: f32) -> String {
+    if ui.calc_text_size(text)[0] <= max_w {
+        return text.to_string();
+    }
+    let mut s = String::new();
+    for ch in text.chars() {
+        let mut probe = s.clone();
+        probe.push(ch);
+        probe.push_str("...");
+        if ui.calc_text_size(&probe)[0] > max_w {
+            break;
+        }
+        s.push(ch);
+    }
+    s.push_str("...");
+    s
+}
+
+fn toss_button(ui: &Ui, label: impl AsRef<str>, size: [f32; 2]) -> bool {
+    let _bg = ui.push_style_color(nexus::imgui::StyleColor::Button, [0.62, 0.22, 0.14, 0.95]);
+    let _h = ui.push_style_color(
+        nexus::imgui::StyleColor::ButtonHovered,
+        [0.78, 0.30, 0.18, 1.0],
+    );
+    let _a = ui.push_style_color(
+        nexus::imgui::StyleColor::ButtonActive,
+        [0.50, 0.16, 0.10, 1.0],
+    );
+    let _t = ui.push_style_color(nexus::imgui::StyleColor::Text, theme::CREAM);
+    ui.button_with_size(label.as_ref(), size)
+}
+
+fn muted_gold(ui: &Ui, label: impl AsRef<str>, size: [f32; 2], tip: &str) {
+    let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+    theme::gold_button_sized(ui, label, size);
+    style.pop();
+    if ui.is_item_hovered() {
+        ui.tooltip_text(tip);
+    }
+}
+
+fn render_ranch_hero(ui: &Ui, char_name: Option<&str>, shown: usize, total: usize) {
+    const MASCOT: f32 = 96.0;
+    const PAD_L: f32 = 20.0;
+    const PAD_T: f32 = 38.0;
+    const PAD_R: f32 = 24.0;
+    const PAD_B: f32 = 8.0;
+    let box_w = PAD_L + MASCOT + PAD_R;
+    let box_h = PAD_T + MASCOT + PAD_B;
+    let top = ui.cursor_screen_pos();
+    ui.invisible_button("##ranch_mascot", [box_w, box_h]);
+    let below = ui.cursor_screen_pos();
+    let center = [top[0] + PAD_L + MASCOT * 0.5, top[1] + PAD_T + MASCOT * 0.5];
+    if shown == 0 {
+        theme::draw_choya_sleep(ui, center, MASCOT);
+    } else {
+        theme::draw_choya_hero(ui, center, MASCOT);
+    }
+
+    let text_x = top[0] + box_w + 8.0;
+    let ty0 = top[1] + PAD_T + 10.0;
+    let lh = ui.text_line_height();
+    ui.set_cursor_screen_pos([text_x, ty0]);
+    ui.text_colored(theme::GOLD, t("ranch.title"));
+
+    ui.set_cursor_screen_pos([text_x, ty0 + lh + 6.0]);
+    let sub = match char_name {
+        Some(name) => tf(
+            "ranch.for_char",
+            &[("name", name), ("n", &shown.to_string())],
+        ),
+        None => t("ranch.herd"),
+    };
+    ui.text_colored(theme::CREAM, sub);
+
+    ui.set_cursor_screen_pos([text_x, ty0 + lh * 2.0 + 12.0]);
+    ui.text_colored(theme::MUTED, t("ranch.quip"));
+
+    if char_name.is_some() && total > shown {
+        ui.set_cursor_screen_pos([text_x, ty0 + lh * 3.0 + 16.0]);
+        ui.text_colored(
+            theme::MUTED,
+            tf("ranch.others", &[("n", &(total - shown).to_string())]),
+        );
+    }
+
+    let after = ui.cursor_screen_pos();
+    ui.set_cursor_screen_pos([top[0], below[1].max(after[1] + 8.0)]);
+}
+
+fn render_empty_paddock(ui: &Ui, char_name: Option<&str>) {
+    ui.dummy([0.0, 8.0]);
+    let msg = match char_name {
+        Some(name) => tf("ranch.empty_char", &[("name", name)]),
+        None => t("ranch.empty"),
+    };
+    ui.text_colored(theme::MUTED, msg);
+    ui.text_colored(theme::MUTED, t("ranch.empty_hint"));
+}
+
+fn render_corral_bar(ui: &Ui, state: &mut AddonState) {
+    let btn = action_btn_size(ui);
+    ui.text_colored(theme::MUTED, t("ranch.corral_name"));
+    ui.same_line_with_spacing(0.0, 10.0);
+    ui.set_next_item_width(280.0);
+    ui.input_text("##ranch_new_name", &mut state.main.save_name_input)
+        .build();
+    ui.same_line_with_spacing(0.0, 10.0);
+
+    let named = !state.main.save_name_input.trim().is_empty();
+    let has_opt = current_suggestion(state).is_some();
+    let corral = if named && has_opt {
+        theme::gold_button_sized(ui, format!("{}##corral", t("ranch.corral")), [btn[0] + 24.0, btn[1]])
+    } else {
+        let tip = if !has_opt {
+            t("ranch.need_opt")
+        } else {
+            t("save.need_name")
+        };
+        muted_gold(
+            ui,
+            format!("{}##corral", t("ranch.corral")),
+            [btn[0] + 24.0, btn[1]],
+            &tip,
+        );
+        false
+    };
+    if corral {
+        corral_current(state);
+    }
+
+    if let Some(ref status) = state.main.save_status {
+        ui.same_line_with_spacing(0.0, 12.0);
+        if state.main.save_status_err {
+            ui.text_colored(theme::ERR, status);
+        } else {
+            ui.text_colored(theme::OPTIMIZED, status);
+        }
+    }
+}
+
+fn corral_current(state: &mut AddonState) {
+    let Some(suggestion) = current_suggestion(state).cloned() else {
+        return;
+    };
+    let character_name = selected_character_name(state)
+        .or_else(|| {
+            state
+                .main
+                .current_build
+                .as_ref()
+                .map(|b| b.character_name.clone())
+        })
+        .unwrap_or_default();
+    let profession = state
+        .main
+        .current_build
+        .as_ref()
+        .map(|b| b.profession.clone())
+        .unwrap_or_default();
+    let game_mode = state.main.game_mode.clone();
+    let balance_ctx = gw2_optimizer::balance::BalanceContext::new(game_mode.clone());
+    let saved = suggestion_to_saved(
+        &state.main.save_name_input,
+        &character_name,
+        &profession,
+        &game_mode,
+        Some(&balance_ctx.patch_id),
+        &suggestion,
+    );
+    let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
+    match storage.save_new(&saved) {
+        Ok(()) => {
+            state.main.save_status = Some(tf("fmt.saved", &[("name", &saved.name)]));
+            state.main.save_status_err = false;
+            state.main.save_status_frames = 0;
+            state.main.save_name_input.clear();
+            state.main.saved_builds_loaded = false;
+        }
+        Err(e) => {
+            state.main.save_status = Some(tf("fmt.save_failed", &[("err", &e.to_string())]));
+            state.main.save_status_err = true;
+            state.main.save_status_frames = 0;
+        }
+    }
+}
+
+fn overwrite_named(state: &mut AddonState, name: &str) {
+    let Some(existing) = state
         .main
         .saved_builds
         .iter()
+        .find(|b| b.name == name)
+        .cloned()
+    else {
+        return;
+    };
+    let Some(suggestion) = current_suggestion(state).cloned() else {
+        state.main.save_status = Some(t("ranch.need_opt"));
+        state.main.save_status_err = true;
+        state.main.save_status_frames = 0;
+        return;
+    };
+    let profession = state
+        .main
+        .current_build
+        .as_ref()
+        .map(|b| b.profession.clone())
+        .unwrap_or(existing.profession.clone());
+    let game_mode = state.main.game_mode.clone();
+    let balance_ctx = gw2_optimizer::balance::BalanceContext::new(game_mode.clone());
+    let notes = state
+        .main
+        .note_drafts
+        .get(name)
+        .cloned()
+        .unwrap_or(existing.notes.clone());
+    let mut saved = suggestion_to_saved(
+        name,
+        &existing.character_name,
+        &profession,
+        &game_mode,
+        Some(&balance_ctx.patch_id),
+        &suggestion,
+    );
+    saved.timestamp = existing.timestamp;
+    saved.notes = notes;
+    let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
+    match storage.save_overwrite(&saved) {
+        Ok(()) => {
+            if let Some(slot) = state.main.saved_builds.iter_mut().find(|b| b.name == name) {
+                *slot = saved.clone();
+            }
+            state.main.save_status = Some(tf("ranch.updated", &[("name", name)]));
+            state.main.save_status_err = false;
+            state.main.save_status_frames = 0;
+        }
+        Err(e) => {
+            state.main.save_status = Some(tf("fmt.save_failed", &[("err", &e.to_string())]));
+            state.main.save_status_err = true;
+            state.main.save_status_frames = 0;
+        }
+    }
+}
+
+fn load_named(state: &mut AddonState, name: &str) {
+    persist_notes(state, name);
+    let Some(saved) = state
+        .main
+        .saved_builds
+        .iter()
+        .find(|b| b.name == name)
+        .cloned()
+    else {
+        return;
+    };
+    let db_ref = state.main.game_db.as_ref();
+    let mut suggestion = saved_to_suggestion(&saved, db_ref);
+    if let Some(ref db) = state.main.game_db {
+        optimization::simulate_suggestion_rotation(&mut suggestion, db);
+    }
+    state.main.comparison.suggestions = vec![suggestion];
+    state.main.comparison.selected_suggestion = 0;
+    state.main.comparison.show_optimized = true;
+    state.main.comparison.error = None;
+    state.main.active_tab = MainTab::NewBuild;
+}
+
+fn delete_named(state: &mut AddonState, name: &str) {
+    let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
+    match storage.delete(name) {
+        Ok(()) => {
+            state.main.saved_builds.retain(|b| b.name != name);
+            state.main.note_drafts.remove(name);
+            if state.main.confirm_delete.as_deref() == Some(name) {
+                state.main.confirm_delete = None;
+            }
+        }
+        Err(e) => {
+            state.main.error = Some(tf("fmt.err_delete", &[("err", &e.to_string())]));
+        }
+    }
+}
+
+fn paint_row_plate(ui: &Ui, height: f32, header: bool) {
+    let p = ui.cursor_screen_pos();
+    let w = ui.content_region_avail()[0];
+    let fill = if header {
+        [0.16, 0.13, 0.08, 0.7]
+    } else {
+        [0.12, 0.10, 0.07, 0.42]
+    };
+    ui.get_window_draw_list()
+        .add_rect(p, [p[0] + w, p[1] + height], fill)
+        .filled(true)
+        .rounding(5.0)
+        .build();
+}
+
+fn render_ranch_table(ui: &Ui, state: &mut AddonState, rows: &[usize]) {
+    const GAP: f32 = 8.0;
+    const ROW_H: f32 = 56.0;
+    const HDR_H: f32 = 28.0;
+    let avail = ui.content_region_avail()[0];
+    let btn = action_btn_size(ui);
+    let actions_w = btn[0] * 3.0 + GAP * 2.0 + 12.0;
+    let created_w = 150.0;
+    let name_w = (avail * 0.26).clamp(150.0, 260.0);
+    let notes_w = (avail - name_w - created_w - actions_w - 36.0).max(140.0);
+
+    paint_row_plate(ui, HDR_H, true);
+    let origin = ui.cursor_screen_pos();
+    let y = origin[1] + 6.0;
+    ui.set_cursor_screen_pos([origin[0] + 10.0, y]);
+    ui.text_colored(theme::GOLD, t("ranch.col.build"));
+    ui.set_cursor_screen_pos([origin[0] + 10.0 + name_w + GAP, y]);
+    ui.text_colored(theme::GOLD, t("ranch.col.created"));
+    ui.set_cursor_screen_pos([origin[0] + 10.0 + name_w + created_w + GAP * 2.0, y]);
+    ui.text_colored(theme::GOLD, t("ranch.col.notes"));
+    ui.set_cursor_screen_pos([origin[0] + avail - actions_w, y]);
+    ui.text_colored(theme::GOLD, t("ranch.col.actions"));
+    ui.set_cursor_screen_pos([origin[0], origin[1] + HDR_H + 6.0]);
+
+    let mut load_name: Option<String> = None;
+    let mut delete_name: Option<String> = None;
+    let mut overwrite_name: Option<String> = None;
+    let has_opt = current_suggestion(state).is_some();
+    let snapshot: Vec<(String, String, String, String, String)> = rows
+        .iter()
+        .filter_map(|&i| state.main.saved_builds.get(i))
         .map(|b| {
-            let time = format_timestamp(b.timestamp);
-            let mode = b.game_mode.label().to_string();
             (
                 b.name.clone(),
-                b.character_name.clone(),
+                format_timestamp(b.timestamp),
+                b.game_mode.label().to_string(),
                 b.stat_prefix.clone(),
-                time,
-                mode,
+                b.character_name.clone(),
             )
         })
         .collect();
 
-    let mut load_idx: Option<usize> = None;
-    let mut request_delete: Option<usize> = None;
+    for (name, created, mode, prefix, character) in &snapshot {
+        paint_row_plate(ui, ROW_H, false);
+        let row = ui.cursor_screen_pos();
+        let text_y = row[1] + 8.0;
+        let btn_y = row[1] + ((ROW_H - btn[1]) * 0.5).round();
 
-    for (i, (name, character, prefix, time, mode)) in builds_snapshot.iter().enumerate() {
-        // Name + action buttons on one line
-        ui.text_colored(theme::CURRENT, name);
-        ui.same_line();
-        if theme::gold_button_sized(ui, format!("{}##load_{}", t("btn.load"), i), [50.0, 0.0]) {
-            load_idx = Some(i);
+        ui.set_cursor_screen_pos([row[0] + 10.0, text_y]);
+        ui.text_colored(theme::CURRENT, clip_label(ui, name, name_w - 8.0));
+        ui.set_cursor_screen_pos([row[0] + 10.0, text_y + ui.text_line_height() + 2.0]);
+        let meta = if state.main.selected_character.is_some() {
+            format!("{mode}  ·  {prefix}")
+        } else {
+            format!("{character}  ·  {mode}  ·  {prefix}")
+        };
+        ui.text_colored(theme::MUTED, clip_label(ui, &meta, name_w - 8.0));
+
+        ui.set_cursor_screen_pos([row[0] + 10.0 + name_w + GAP, text_y + 8.0]);
+        ui.text_colored(theme::CREAM, created);
+
+        let notes_x = row[0] + 10.0 + name_w + created_w + GAP * 2.0;
+        ui.set_cursor_screen_pos([notes_x, btn_y]);
+        ui.set_next_item_width(notes_w - 4.0);
+        let stored = state
+            .main
+            .saved_builds
+            .iter()
+            .find(|b| b.name == *name)
+            .map(|b| b.notes.clone())
+            .unwrap_or_default();
+        let keep_notes = {
+            let draft = state
+                .main
+                .note_drafts
+                .entry(name.clone())
+                .or_insert_with(|| stored.clone());
+            let enter = ui
+                .input_text(format!("##notes_{name}"), draft)
+                .enter_returns_true(true)
+                .build();
+            let editing = ui.is_item_active();
+            if ui.is_item_hovered() {
+                ui.tooltip_text(t("ranch.notes_hint"));
+            }
+            enter || (!editing && draft.as_str() != stored.as_str())
+        };
+        if keep_notes {
+            persist_notes(state, name);
         }
-        ui.same_line();
 
-        // Delete with confirmation
-        if state.main.confirm_delete == Some(i) {
+        let mut ax = row[0] + avail - actions_w;
+        ui.set_cursor_screen_pos([ax, btn_y]);
+        if state.main.confirm_delete.as_deref() == Some(name.as_str()) {
             ui.text_colored(theme::WARN, t("save.delete_q"));
-            ui.same_line();
-            if ui.small_button(format!("{}##confirm_del_{}", t("btn.yes"), i)) {
-                request_delete = Some(i);
+            ui.same_line_with_spacing(0.0, GAP);
+            if theme::gold_button_sized(ui, format!("{}##yes_{name}", t("btn.yes")), btn) {
+                delete_name = Some(name.clone());
                 state.main.confirm_delete = None;
             }
-            ui.same_line();
-            if ui.small_button(format!("{}##cancel_del_{}", t("btn.no"), i)) {
+            ui.same_line_with_spacing(0.0, GAP);
+            if ui.button_with_size(format!("{}##no_{name}", t("btn.no")), btn) {
                 state.main.confirm_delete = None;
             }
-        } else if theme::gold_button_sized(ui, format!("{}##del_{}", t("btn.delete"), i), [50.0, 0.0])
-        {
-            state.main.confirm_delete = Some(i);
-        }
-
-        // Details on second line
-        ui.text_colored(
-            theme::MUTED,
-            format!("  {} | {} | {} | {}", character, mode, prefix, time),
-        );
-
-        ui.spacing();
-    }
-
-    // Handle load
-    if let Some(idx) = load_idx {
-        let saved = state.main.saved_builds[idx].clone();
-        let db_ref = state.main.game_db.as_ref();
-        let mut suggestion = saved_to_suggestion(&saved, db_ref);
-        // Run rotation simulation if GameDb is available
-        if let Some(ref db) = state.main.game_db {
-            optimization::simulate_suggestion_rotation(&mut suggestion, db);
-        }
-        state.main.comparison.suggestions = vec![suggestion];
-        state.main.comparison.selected_suggestion = 0;
-        state.main.comparison.show_optimized = true;
-        state.main.comparison.error = None;
-        state.main.active_tab = MainTab::NewBuild;
-    }
-
-    // Handle delete (confirmed)
-    if let Some(idx) = request_delete {
-        let name = state.main.saved_builds[idx].name.clone();
-        let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
-        match storage.delete(&name) {
-            Ok(()) => {
-                state.main.saved_builds.remove(idx);
-                // Reset confirmation index if it was beyond the removed item
-                if let Some(ref mut ci) = state.main.confirm_delete {
-                    if *ci > idx {
-                        *ci -= 1;
-                    } else if *ci == idx {
-                        state.main.confirm_delete = None;
-                    }
+        } else if state.main.confirm_overwrite.as_deref() == Some(name.as_str()) {
+            ui.text_colored(theme::WARN, t("ranch.replace_q"));
+            ui.same_line_with_spacing(0.0, GAP);
+            if theme::gold_button_sized(ui, format!("{}##oy_{name}", t("btn.yes")), btn) {
+                overwrite_name = Some(name.clone());
+                state.main.confirm_overwrite = None;
+            }
+            ui.same_line_with_spacing(0.0, GAP);
+            if ui.button_with_size(format!("{}##on_{name}", t("btn.no")), btn) {
+                state.main.confirm_overwrite = None;
+            }
+        } else {
+            if theme::gold_button_sized(ui, format!("{}##load_{name}", t("btn.load")), btn) {
+                load_name = Some(name.clone());
+            }
+            ax += btn[0] + GAP;
+            ui.set_cursor_screen_pos([ax, btn_y]);
+            if has_opt {
+                if theme::gold_button_sized(ui, format!("{}##save_{name}", t("btn.save")), btn) {
+                    state.main.confirm_overwrite = Some(name.clone());
+                    state.main.confirm_delete = None;
                 }
+            } else {
+                muted_gold(
+                    ui,
+                    format!("{}##save_{name}", t("btn.save")),
+                    btn,
+                    &t("ranch.need_opt"),
+                );
             }
-            Err(e) => {
-                state.main.error = Some(tf("fmt.err_delete", &[("err", &e.to_string())]));
+            ax += btn[0] + GAP;
+            ui.set_cursor_screen_pos([ax, btn_y]);
+            if toss_button(ui, format!("{}##del_{name}", t("btn.delete")), btn) {
+                persist_notes(state, name);
+                state.main.confirm_delete = Some(name.clone());
+                state.main.confirm_overwrite = None;
             }
         }
+
+        ui.set_cursor_screen_pos([row[0], row[1] + ROW_H + 6.0]);
     }
+
+    if let Some(name) = load_name {
+        load_named(state, &name);
+    }
+    if let Some(name) = overwrite_name {
+        overwrite_named(state, &name);
+    }
+    if let Some(name) = delete_name {
+        delete_named(state, &name);
+    }
+}
+
+/// Render the Save/Load tab.
+pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
+    if !state.main.saved_builds_loaded {
+        let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
+        state.main.saved_builds = storage.list();
+        for b in &state.main.saved_builds {
+            state
+                .main
+                .note_drafts
+                .entry(b.name.clone())
+                .or_insert_with(|| b.notes.clone());
+        }
+        state.main.saved_builds_loaded = true;
+    }
+
+    let char_name = selected_character_name(state);
+    let rows = ranch_indices(&state.main.saved_builds, char_name.as_deref());
+    let shown = rows.len();
+    let total = state.main.saved_builds.len();
+
+    render_ranch_hero(ui, char_name.as_deref(), shown, total);
+    ui.dummy([0.0, 10.0]);
+    render_corral_bar(ui, state);
+    ui.dummy([0.0, 14.0]);
+
+    if rows.is_empty() {
+        render_empty_paddock(ui, char_name.as_deref());
+        return;
+    }
+
+    render_ranch_table(ui, state, &rows);
 }
 
 /// Convert a BuildSuggestion to a SavedBuild.
@@ -248,6 +691,7 @@ fn suggestion_to_saved(
         synergy_explanation: suggestion.synergy_explanation.clone(),
         changes_made: suggestion.changes_made.clone(),
         estimated_stats: suggestion.estimated_stats.clone(),
+        notes: String::new(),
     }
 }
 
@@ -540,6 +984,7 @@ mod tests {
             explanation: String::new(),
             synergy_explanation: String::new(),
             changes_made: vec![],
+            notes: String::new(),
             estimated_stats: Some(gw2_core::types::StatBlock {
                 power: 1800,
                 precision: 1800,
@@ -761,5 +1206,18 @@ mod tests {
             with_solo.total_dps_index > without_solo.total_dps_index,
             "total DPS should reflect reconstructed modifiers on load"
         );
+    }
+
+    #[test]
+    fn ranch_indices_filters_to_selected_character() {
+        let mut a = build_saved_for_modifier_reconstruction();
+        a.name = "a".into();
+        a.character_name = "Darth".into();
+        let mut b = a.clone();
+        b.name = "b".into();
+        b.character_name = "Other".into();
+        let builds = vec![a, b];
+        assert_eq!(super::ranch_indices(&builds, Some("Darth")), vec![0]);
+        assert_eq!(super::ranch_indices(&builds, None), vec![0, 1]);
     }
 }

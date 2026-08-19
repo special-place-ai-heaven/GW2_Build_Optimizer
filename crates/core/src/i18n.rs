@@ -324,6 +324,7 @@ mod tests {
             assert_eq!(t("section.actions"), "COMMANDES");
             assert_eq!(t("pane.build"), "Composition");
             assert_eq!(t("pane.stats"), "Statistiques");
+            assert_eq!(t("ranch.title"), "RANCH CHOYA");
             assert_eq!(
                 tf(
                     "explain.uses_gear",
