@@ -46,13 +46,13 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
 
     build_display::render_card_header(ui, &t("settings.legend"), [0.7, 0.7, 0.7, 1.0]);
     ui.spacing();
-    ui.text_colored([0.3, 0.9, 0.3, 1.0], format!("\u{25cf} {}", t("settings.verified")));
+    ui.text_colored([0.3, 0.9, 0.3, 1.0], format!("* {}", t("settings.verified")));
     ui.same_line();
     ui.text_colored([0.6, 0.6, 0.6, 1.0], t("settings.verified_note"));
-    ui.text_colored([0.95, 0.75, 0.15, 1.0], format!("\u{25cf} {}", t("settings.provisional")));
+    ui.text_colored([0.95, 0.75, 0.15, 1.0], format!("* {}", t("settings.provisional")));
     ui.same_line();
     ui.text_colored([0.6, 0.6, 0.6, 1.0], t("settings.provisional_note"));
-    ui.text_colored([1.0, 0.3, 0.2, 1.0], format!("\u{25cf} {}", t("settings.blocked")));
+    ui.text_colored([1.0, 0.3, 0.2, 1.0], format!("* {}", t("settings.blocked")));
     ui.same_line();
     ui.text_colored([0.6, 0.6, 0.6, 1.0], t("settings.blocked_note"));
 
@@ -647,10 +647,10 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
 
 fn pack_mark(status: gw2_api::localize::PackStatus) -> (&'static str, [f32; 4]) {
     match status {
-        gw2_api::localize::PackStatus::Ready => ("\u{25cf}", theme::OPTIMIZED),
-        gw2_api::localize::PackStatus::Missing => ("\u{25cb}", theme::ERR),
-        gw2_api::localize::PackStatus::Stale => ("\u{25cf}", theme::WARN),
-        gw2_api::localize::PackStatus::None => ("\u{00b7}", theme::MUTED),
+        gw2_api::localize::PackStatus::Ready => ("*", theme::OPTIMIZED),
+        gw2_api::localize::PackStatus::Missing => ("!", theme::ERR),
+        gw2_api::localize::PackStatus::Stale => ("~", theme::WARN),
+        gw2_api::localize::PackStatus::None => ("-", theme::MUTED),
     }
 }
 

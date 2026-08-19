@@ -407,5 +407,5 @@
   "setup.step_lang": "语言",
   "setup.lang_header": "第 1 步  ·  语言",
   "setup.lang_help": "选择界面语言。游戏数据和官方名称（Deutsch、Español、Français、简体中文）会在后面一次性下载。",
-  "settings.lang_pack_legend": "● 名称已就绪   ○ 缺失   ● 需更新   · 仅界面（英文名称）"
+  "settings.lang_pack_legend": "* 名称已就绪   ! 缺失   ~ 需更新   - 仅界面（英文名称）"
 }

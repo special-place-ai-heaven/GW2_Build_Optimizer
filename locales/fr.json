@@ -407,5 +407,5 @@
   "setup.step_lang": "Langue",
   "setup.lang_header": "ÉTAPE 1  ·  LANGUE",
   "setup.lang_help": "Choisis la langue de l’interface. Les données du jeu et les noms officiels (Deutsch, Español, Français, 简体中文) se téléchargent une fois plus tard.",
-  "settings.lang_pack_legend": "● noms prêts   ○ manquants   ● màj   · interface seule (noms anglais)"
+  "settings.lang_pack_legend": "* noms prêts   ! manquants   ~ màj   - interface seule (noms anglais)"
 }

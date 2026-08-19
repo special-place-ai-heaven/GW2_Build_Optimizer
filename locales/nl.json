@@ -407,5 +407,5 @@
   "setup.step_lang": "Taal",
   "setup.lang_header": "STAP 1  ·  TAAL",
   "setup.lang_help": "Kies de interfacetaal. Speldata en officiële namen (Deutsch, Español, Français, 简体中文) worden later eenmalig gedownload.",
-  "settings.lang_pack_legend": "● namen klaar   ○ ontbreekt   ● update   · alleen interface (Engelse namen)"
+  "settings.lang_pack_legend": "* namen klaar   ! ontbreekt   ~ update   - alleen interface (Engelse namen)"
 }

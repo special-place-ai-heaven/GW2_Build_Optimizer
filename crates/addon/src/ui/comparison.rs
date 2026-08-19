@@ -1323,17 +1323,17 @@ fn render_data_quality_badge(ui: &Ui, suggestion: &BuildSuggestion) {
     use gw2_optimizer::data::DataQuality;
     let (label, col, tooltip_header) = match suggestion.data_quality {
         DataQuality::Verified => (
-            format!("\u{25cf} {}", t("settings.verified")),
+            format!("* {}", t("settings.verified")),
             [0.3, 0.9, 0.3, 1.0],
             t("quality.verified_tip"),
         ),
         DataQuality::Provisional => (
-            format!("\u{25cf} {}", t("settings.provisional")),
+            format!("* {}", t("settings.provisional")),
             [0.95, 0.75, 0.15, 1.0],
             t("quality.provisional_tip"),
         ),
         DataQuality::Blocked => (
-            format!("\u{25cf} {}", t("settings.blocked")),
+            format!("* {}", t("settings.blocked")),
             [1.0, 0.3, 0.2, 1.0],
             t("quality.blocked_tip"),
         ),
