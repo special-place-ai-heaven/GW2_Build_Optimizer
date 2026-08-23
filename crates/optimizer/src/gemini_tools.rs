@@ -2291,7 +2291,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_stat_bonuses_ignores_tooltip_effect_amounts() {
+    fn extract_stat_bonuses_keeps_only_unconditional_panel_stats() {
         let facts = vec![
             Fact::AttributeAdjust {
                 text: Some("Life Siphon Damage".into()),
@@ -2308,8 +2308,6 @@ mod tests {
         ];
 
         let bonuses = extract_stat_bonuses(&facts);
-        assert_eq!(bonuses.len(), 1);
-        assert_eq!(bonuses[0]["stat"], "Power");
-        assert_eq!(bonuses[0]["value"], 80);
+        assert!(bonuses.is_empty());
     }
 }

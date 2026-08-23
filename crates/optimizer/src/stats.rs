@@ -372,37 +372,136 @@ pub fn calculate_trait_stats(
     stats
 }
 
-/// True when an AttributeAdjust is a permanent character-stat bonus.
+/// Calculate the unbuffed Hero-panel trait attributes for one game mode.
 ///
-/// Tooltip coefficients reuse the same fact type with labels like "Healing",
-/// "Barrier", or "Life Siphon Damage". Real bonuses have no text, or a label
-/// that names the attribute.
-pub fn is_permanent_stat_adjust(text: Option<&str>) -> bool {
-    let Some(text) = text else {
-        return true;
+/// The official API flattens mode-split `AttributeAdjust` rows and does not tag
+/// each row with its mode. Known split traits are therefore resolved from an
+/// explicit, sourced table. Conditional and pet-only rows return zero here;
+/// their values belong in the timed activation report, not the standing panel.
+pub fn calculate_trait_stats_for_mode(
+    equipped_trait_ids: &[u32],
+    traits_cache: &HashMap<u32, Trait>,
+    mode: &gw2_core::types::GameMode,
+) -> StatBlock {
+    let mut stats = StatBlock::default();
+    let equipped_set: std::collections::HashSet<u32> = equipped_trait_ids.iter().copied().collect();
+
+    for &trait_id in equipped_trait_ids {
+        let Some(trait_data) = traits_cache.get(&trait_id) else {
+            continue;
+        };
+        let overridden: std::collections::HashSet<u32> = trait_data
+            .traited_facts
+            .iter()
+            .filter(|tf| equipped_set.contains(&tf.requires_trait))
+            .filter_map(|tf| tf.overrides)
+            .collect();
+
+        let mut by_target: HashMap<String, Vec<f64>> = HashMap::new();
+        let mut collect = |fact: &Fact| {
+            if let Fact::AttributeAdjust {
+                text,
+                value: Some(value),
+                target: Some(target),
+                ..
+            } = fact
+            {
+                if is_permanent_stat_adjust(text.as_deref()) {
+                    by_target
+                        .entry(target.clone())
+                        .or_default()
+                        .push(*value as f64);
+                }
+            }
+        };
+
+        for (idx, fact) in trait_data.facts.iter().enumerate() {
+            if !overridden.contains(&(idx as u32)) {
+                collect(fact);
+            }
+        }
+        for tf in &trait_data.traited_facts {
+            if equipped_set.contains(&tf.requires_trait) {
+                collect(&tf.fact);
+            }
+        }
+
+        for (target, values) in by_target {
+            let value = match values.as_slice() {
+                [value] => Some(*value),
+                _ => mode_split_trait_attribute(trait_id, &target, mode),
+            };
+            if let Some(value) = value {
+                stats.add(&target, value);
+            }
+        }
+    }
+
+    stats
+}
+
+/// Exact level-80 mode splits from the matching Guild Wars 2 Wiki trait pages,
+/// verified against the live API rows on 2026-08-23. Unknown duplicate groups
+/// are omitted instead of being summed or guessed.
+fn mode_split_trait_attribute(
+    trait_id: u32,
+    target: &str,
+    mode: &gw2_core::types::GameMode,
+) -> Option<f64> {
+    use gw2_core::types::GameMode;
+
+    let by_mode = |pve: f64, pvp: f64, wvw: f64| match mode {
+        GameMode::PvE => pve,
+        GameMode::PvP => pvp,
+        GameMode::WvW => wvw,
     };
-    let t = text.to_ascii_lowercase();
-    const MARKERS: &[&str] = &[
-        "healing power",
-        "condition damage",
-        "ferocity",
-        "precision",
-        "toughness",
-        "vitality",
-        "expertise",
-        "concentration",
-        "attribute",
-        "power",
-    ];
-    MARKERS.iter().any(|marker| t.contains(marker))
+
+    Some(match (trait_id, target) {
+        // Conditional or pet-only values: absent from the unbuffed player panel.
+        (1849, "Power")
+        | (1865, "BoonDuration")
+        | (1865, "ConditionDuration")
+        | (1016, "CritDamage")
+        | (1016, "Precision")
+        | (2046, "ConditionDamage")
+        | (2148, "ConditionDamage")
+        | (2148, "Healing")
+        | (2148, "Vitality")
+        | (1904, "CritDamage")
+        | (2121, "BoonDuration")
+        | (2121, "ConditionDuration") => 0.0,
+
+        (2371, "BoonDuration") => by_mode(180.0, 60.0, 60.0),
+        (413, "BoonDuration") => by_mode(240.0, 75.0, 75.0),
+        (1164, "ConditionDamage") => by_mode(180.0, 120.0, 120.0),
+        (2004, "BoonDuration") => by_mode(180.0, 120.0, 120.0),
+        (1938, "BoonDuration") => by_mode(240.0, 120.0, 120.0),
+        (2418, "BoonDuration") => by_mode(180.0, 60.0, 60.0),
+        (1059, "BoonDuration") => by_mode(240.0, 120.0, 120.0),
+        (2160, "BoonDuration") => by_mode(180.0, 60.0, 60.0),
+        (1788, "BoonDuration") => by_mode(240.0, 60.0, 60.0),
+        (1471, "BoonDuration") => by_mode(120.0, 60.0, 60.0),
+        (1801, "ConditionDamage") => by_mode(120.0, 240.0, 120.0),
+        (2006, "ConditionDuration") => by_mode(150.0, 60.0, 60.0),
+        _ => return None,
+    })
+}
+
+/// True when an AttributeAdjust is an unconditional character-stat bonus.
+///
+/// The API uses `text == None` for the passive value shown in the Hero panel.
+/// Text-labelled rows describe either an effect coefficient or a conditional
+/// bonus (for example, an extra value for a particular weapon or health state).
+/// Those rows require an activation context and must not be folded into the
+/// unbuffed character sheet.
+pub fn is_permanent_stat_adjust(text: Option<&str>) -> bool {
+    text.is_none()
 }
 
 /// Apply an AttributeAdjust fact to a stat block.
 ///
-/// The API reuses this fact type for tooltip coefficients (heal/barrier/siphon
-/// amounts). Those have a descriptive `text` that does not name a character
-/// attribute. Permanent bonuses have `text == None` or a label that names the
-/// stat ("Additional Power", "Healing Power below 75%").
+/// The API reuses this fact type for tooltip coefficients and conditional stat
+/// bonuses. Only `text == None` belongs in the unbuffed Hero-panel total.
 fn apply_attribute_adjust(stats: &mut StatBlock, fact: &Fact) {
     if let Fact::AttributeAdjust {
         value: Some(val),
@@ -883,7 +982,7 @@ mod tests {
     }
 
     #[test]
-    fn attribute_adjust_keeps_named_stat_bonuses() {
+    fn attribute_adjust_keeps_only_unconditional_stat_bonuses() {
         let mut cache = HashMap::new();
         cache.insert(
             1,
@@ -901,9 +1000,9 @@ mod tests {
         let stats = calculate_trait_stats(&[1], &cache);
         assert_eq!(stats.vitality, 240.0);
         assert_eq!(stats.concentration, 240.0);
-        assert_eq!(stats.power, 80.0);
-        assert_eq!(stats.healing_power, 100.0);
-        assert_eq!(stats.ferocity, 120.0);
+        assert_eq!(stats.power, 0.0);
+        assert_eq!(stats.healing_power, 0.0);
+        assert_eq!(stats.ferocity, 0.0);
     }
 
     #[test]
@@ -947,6 +1046,47 @@ mod tests {
         assert_eq!(stats.power, 0.0);
         assert_eq!(stats.healing_power, 0.0);
         assert_eq!(stats.vitality, 240.0);
+    }
+
+    #[test]
+    fn mode_split_attribute_adjust_selects_exact_wvw_value() {
+        let mut cache = HashMap::new();
+        cache.insert(
+            1059,
+            trait_with_facts(
+                1059,
+                vec![
+                    attr("BoonDuration", 240, None),
+                    attr("BoonDuration", 120, None),
+                ],
+            ),
+        );
+
+        let pve = calculate_trait_stats_for_mode(&[1059], &cache, &gw2_core::types::GameMode::PvE);
+        let wvw = calculate_trait_stats_for_mode(&[1059], &cache, &gw2_core::types::GameMode::WvW);
+        assert_eq!(pve.concentration, 240.0);
+        assert_eq!(wvw.concentration, 120.0);
+    }
+
+    #[test]
+    fn conditional_and_pet_only_mode_pairs_do_not_enter_player_panel() {
+        let mut cache = HashMap::new();
+        cache.insert(
+            1849,
+            trait_with_facts(1849, vec![attr("Power", 30, None), attr("Power", 10, None)]),
+        );
+        cache.insert(
+            1016,
+            trait_with_facts(
+                1016,
+                vec![attr("Precision", 420, None), attr("Precision", 315, None)],
+            ),
+        );
+
+        let stats =
+            calculate_trait_stats_for_mode(&[1849, 1016], &cache, &gw2_core::types::GameMode::WvW);
+        assert_eq!(stats.power, 0.0);
+        assert_eq!(stats.precision, 0.0);
     }
 
     // Helper constructors for test data

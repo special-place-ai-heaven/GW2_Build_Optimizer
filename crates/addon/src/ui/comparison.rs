@@ -60,8 +60,10 @@ pub enum ResultPane {
 }
 
 impl ResultPane {
-    const ALL: [(ResultPane, &'static str); 2] =
-        [(ResultPane::Build, "pane.build"), (ResultPane::Stats, "pane.stats")];
+    const ALL: [(ResultPane, &'static str); 2] = [
+        (ResultPane::Build, "pane.build"),
+        (ResultPane::Stats, "pane.stats"),
+    ];
 }
 
 /// Compact section tabs as gold pills. Wraps instead of clipping on a narrow overlay.
@@ -435,7 +437,10 @@ pub fn render_comparison(
             } else if suggestion.label.starts_with("Score:") {
                 tf(
                     "fmt.option_n",
-                    &[("n", &(i + 1).to_string()), ("prefix", &suggestion.stat_prefix)],
+                    &[
+                        ("n", &(i + 1).to_string()),
+                        ("prefix", &suggestion.stat_prefix),
+                    ],
                 )
             } else {
                 suggestion.label.clone()
@@ -512,10 +517,7 @@ pub fn render_comparison(
             };
             if !explanation_text.is_empty() {
                 ui.spacing();
-                ui.text_colored(
-                    crate::ui::theme::MUTED,
-                    t("note.how_to_play"),
-                );
+                ui.text_colored(crate::ui::theme::MUTED, t("note.how_to_play"));
                 ui.spacing();
                 ui.text_wrapped(explanation_text);
             }
@@ -544,41 +546,11 @@ pub(crate) fn render_stats_pane(
 ) {
     ui.text_colored(crate::ui::theme::GOLD, t("section.attributes"));
     ui.text_colored(crate::ui::theme::MUTED, t("note.attributes"));
+    ui.text_colored(crate::ui::theme::MUTED, t("tier.solo"));
     ui.spacing();
     render_primary_stats(ui, current_stats, suggestion.estimated_stats.as_ref());
     ui.spacing();
     render_defenses(ui, comparison, current_stats, suggestion);
-
-    ui.spacing();
-    ui.text_colored(crate::ui::theme::GOLD, t("section.damage"));
-    ui.text_colored(crate::ui::theme::MUTED, t("note.damage"));
-    ui.spacing();
-    render_combat_performance(ui, comparison, suggestion);
-
-    ui.spacing();
-    ui.text_colored(crate::ui::theme::GOLD, t("section.modifiers"));
-    ui.text_colored(crate::ui::theme::MUTED, t("note.modifiers"));
-    ui.spacing();
-    if let Some(sug) = suggestion.combat_solo.as_ref() {
-        let cur = comparison.current_combat_solo.as_ref();
-        ui.columns(4, "##mod_dur", true);
-        bonus_header(ui);
-        let boon = t("stat.boon_dur");
-        let condi_dur = t("stat.condi_dur");
-        render_pct_row_opt(
-            ui,
-            &boon,
-            cur.map(|c| c.boon_duration_pct),
-            sug.boon_duration_pct,
-        );
-        render_pct_row_opt(
-            ui,
-            &condi_dur,
-            cur.map(|c| c.condi_duration_pct),
-            sug.condi_duration_pct,
-        );
-        ui.columns(1, "##mod_dur_end", false);
-    }
 
     ui.spacing();
     ui.text_colored(crate::ui::theme::GOLD, t("section.boons"));
@@ -625,10 +597,7 @@ pub(crate) fn render_stats_pane(
 
     ui.spacing();
     ui.text_colored(crate::ui::theme::GOLD, t("section.conditions"));
-    ui.text_colored(
-        crate::ui::theme::MUTED,
-        t("note.conditions_full"),
-    );
+    ui.text_colored(crate::ui::theme::MUTED, t("note.conditions_full"));
     if let Some(rotation) = suggestion.rotation.as_ref() {
         ui.spacing();
         ui.text_colored(
@@ -658,7 +627,6 @@ pub(crate) fn render_stats_pane(
     if let Some(ref viability) = suggestion.viability {
         render_viability_report(ui, viability);
     }
-    render_tradeoff_analysis(ui, comparison, suggestion);
     render_benchmark_delta(ui, suggestion);
     if !suggestion.changes_made.is_empty() {
         ui.spacing();
@@ -886,9 +854,9 @@ fn render_upgrade_diff(
 fn diff_header(ui: &Ui) {
     ui.text_colored(crate::ui::theme::GOLD, t("table.slot"));
     ui.next_column();
-                ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
+    ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
     ui.next_column();
-                ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
+    ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
     ui.next_column();
     ui.text("");
     ui.next_column();
@@ -962,7 +930,11 @@ fn render_primary_stats(ui: &Ui, current: Option<&StatBlock>, suggested: Option<
         (names[0].as_str(), cur.power, sug.power),
         (names[1].as_str(), cur.precision, sug.precision),
         (names[2].as_str(), cur.ferocity, sug.ferocity),
-        (names[3].as_str(), cur.condition_damage, sug.condition_damage),
+        (
+            names[3].as_str(),
+            cur.condition_damage,
+            sug.condition_damage,
+        ),
         (names[4].as_str(), cur.expertise, sug.expertise),
         (names[5].as_str(), cur.concentration, sug.concentration),
         (names[6].as_str(), cur.toughness, sug.toughness),
@@ -973,7 +945,10 @@ fn render_primary_stats(ui: &Ui, current: Option<&StatBlock>, suggested: Option<
     render_stat_table(ui, "##primary_stats", &stats);
 }
 
-/// Render combat performance metrics with three tiers: Solo, Party, Full Squad.
+/// Legacy synthetic combat metrics retained for internal diagnostics only.
+/// Player-facing build comparisons use observable Hero-panel attributes and
+/// the explicitly labelled rotation report instead.
+#[allow(dead_code)]
 fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: &BuildSuggestion) {
     let solo = t("tier.solo");
     let party = t("tier.party");
@@ -1032,7 +1007,12 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
                 cur.map(|c| c.condition_dps_index),
                 sug.condition_dps_index,
             );
-            render_int_row_opt(ui, &total, cur.map(|c| c.total_dps_index), sug.total_dps_index);
+            render_int_row_opt(
+                ui,
+                &total,
+                cur.map(|c| c.total_dps_index),
+                sug.total_dps_index,
+            );
             if sug.healing_index > 0 || cur.is_some_and(|c| c.healing_index > 0) {
                 render_int_row_opt(ui, &heal, cur.map(|c| c.healing_index), sug.healing_index);
             }
@@ -1094,17 +1074,14 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
             .collect();
 
         if !ticks_to_show.is_empty() {
-            ui.text_colored(
-                [0.9, 0.6, 0.2, 1.0],
-                t("note.condi_ticks"),
-            );
+            ui.text_colored([0.9, 0.6, 0.2, 1.0], t("note.condi_ticks"));
             ui.columns(4, "##condi_ticks", true);
 
             ui.text_colored(crate::ui::theme::GOLD, t("table.condition"));
             ui.next_column();
-                ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
+            ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
             ui.next_column();
-                ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
+            ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
             ui.next_column();
             ui.text(t("table.info"));
             ui.next_column();
@@ -1146,9 +1123,9 @@ fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: 
 fn bonus_header(ui: &Ui) {
     ui.text_colored(crate::ui::theme::GOLD, t("table.metric"));
     ui.next_column();
-                ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
+    ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
     ui.next_column();
-                ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
+    ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
     ui.next_column();
     ui.text(t("table.diff"));
     ui.next_column();
@@ -1159,7 +1136,7 @@ fn bonus_header(ui: &Ui) {
 /// Effective HP and Damage Reduction are shown per-tier in Combat Performance.
 fn render_defenses(
     ui: &Ui,
-    comparison: &ComparisonState,
+    _comparison: &ComparisonState,
     current_stats: Option<&StatBlock>,
     suggestion: &BuildSuggestion,
 ) {
@@ -1176,9 +1153,9 @@ fn render_defenses(
     ui.columns(4, "##defense_cols", true);
     ui.text_colored(crate::ui::theme::GOLD, t("table.defense"));
     ui.next_column();
-                ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
+    ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
     ui.next_column();
-                ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
+    ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
     ui.next_column();
     ui.text(t("table.diff"));
     ui.next_column();
@@ -1187,19 +1164,6 @@ fn render_defenses(
     for (name, cur_val, sug_val) in &stats {
         render_int_row(ui, name, *cur_val, *sug_val);
     }
-    if let Some(sug_hp) = suggestion.combat_solo.as_ref().map(|c| c.effective_health) {
-        let ehp = t("stat.effective_hp");
-        render_int_row_opt(
-            ui,
-            &ehp,
-            comparison
-                .current_combat_solo
-                .as_ref()
-                .map(|c| c.effective_health),
-            sug_hp,
-        );
-    }
-
     ui.columns(1, "##end_defense", false);
 }
 
@@ -1270,9 +1234,9 @@ fn render_stat_table(ui: &Ui, id: &str, stats: &[(&str, i32, i32)]) {
 
     ui.text_colored(crate::ui::theme::GOLD, t("table.attribute"));
     ui.next_column();
-                ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
+    ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
     ui.next_column();
-                ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
+    ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
     ui.next_column();
     ui.text(t("table.diff"));
     ui.next_column();
@@ -1298,10 +1262,7 @@ fn diff_color(diff: f64) -> [f32; 4] {
 
 /// Render rotation simulation breakdown: simulated DPS, condition uptimes, skill usage.
 fn render_rotation_breakdown(ui: &Ui, rotation: &RotationBreakdown, db: Option<&GameDb>) {
-    ui.text_colored(
-        [0.55, 0.55, 0.55, 1.0],
-        t("note.rotation_sim"),
-    );
+    ui.text_colored([0.55, 0.55, 0.55, 1.0], t("note.rotation_sim"));
     ui.text(tf(
         "fmt.sim_dps",
         &[
@@ -1497,15 +1458,13 @@ fn render_viability_report(ui: &Ui, report: &ViabilityReport) {
         }
         if !report.is_viable {
             ui.spacing();
-            ui.text_colored(
-                [1.0, 0.7, 0.2, 1.0],
-                format!("  {}", t("note.nonviable")),
-            );
+            ui.text_colored([1.0, 0.7, 0.2, 1.0], format!("  {}", t("note.nonviable")));
         }
     }
 }
 
-/// Render tradeoff analysis: what this build gains/loses vs current stats.
+/// Legacy synthetic tradeoff report retained for internal diagnostics only.
+#[allow(dead_code)]
 fn render_tradeoff_analysis(ui: &Ui, comparison: &ComparisonState, suggestion: &BuildSuggestion) {
     let Some(ref new_metrics) = suggestion.combat_solo else {
         return;
@@ -1712,6 +1671,9 @@ mod tests {
             target: Some("Power".into()),
         };
 
-        assert_eq!(fact_line(&fact).as_deref(), Some("Life Siphon Damage: 3517"));
+        assert_eq!(
+            fact_line(&fact).as_deref(),
+            Some("Life Siphon Damage: 3517")
+        );
     }
 }
