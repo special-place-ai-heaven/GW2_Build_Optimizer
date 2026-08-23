@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/screenshots/banner_02.jpg" alt="GW2 Build Optimizer" width="100%">
-</p>
-
 # GW2 Build Optimizer
 
 In-game Guild Wars 2 addon for [Nexus](https://raidcore.gg/Nexus). It reads your
@@ -17,28 +13,34 @@ typing while Choya is thinking; a new send cancels the in-flight reply.
 
 ## Screenshots
 
-Overlay shots below can lag a release. Captions match the live tabs; replace the
-images when you have fresh captures.
+**Improve Build** starts from the selected character's equipped skills, traits,
+and gear. Lock anything that must stay, choose the WvW/PvP/PvE role profile,
+then let the optimizer search for a stronger version around those constraints.
 
-First-time setup downloads skills, traits, and items over the gold progress bar.
+![Improve Build view](docs/screenshots/improve.png)
 
-![First-time setup downloading game data](docs/screenshots/download_resources.png)
+**Settings** configures the AI provider and model, interface language and scale,
+and local game-data cache. The refresh panel shows live download progress, while
+benchmark sync supplies additional build knowledge.
 
-Optimized WvW Cloud/Zerg Harasser, with a Chat strip that copies the build template.
+![Settings view](docs/screenshots/settings.png)
 
-![Optimized build overlay](docs/screenshots/load_optimized_build.png)
-
-Stats tab: Current vs Optimized attributes, defense, and damage under Solo / Party / Squad.
+**Stats** compares Current and Optimized attributes, defenses, healing, and
+damage estimates. Separate Solo, Party, and Squad scenarios show how common
+boons and target conditions change the result instead of presenting one DPS number.
 
 ![Stats comparison](docs/screenshots/stats.png)
 
-Settings: AI provider, layout, cache, and data quality.
+**Saves** keeps named optimized builds grouped by character. A saved result can
+be loaded back into the overlay, updated in place, or deleted when it is obsolete.
 
-![Settings tab](docs/screenshots/settings.png)
+![Saved builds view](docs/screenshots/saved_builds.png)
 
-Choya tab: talk through a plated build, pick a model, open the result onto Improve.
+**Choya** is the conversational build assistant. Ask for a playstyle or a change
+to the selected build; it parses the response into a plated build, flags names
+it cannot resolve in game data, and can open the result directly in Improve.
 
-![Choya chat with a plated Daredevil roam build](docs/screenshots/choya_witch_doctor.png)
+![Choya build assistant](docs/screenshots/ai_choya.png)
 
 ## Download
 

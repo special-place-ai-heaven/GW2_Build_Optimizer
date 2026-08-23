@@ -64,4 +64,6 @@ User input (UI tab)
 
 ## Domain Reference
 
-See `CLAUDE.md` "GW2 Domain Context" and `~/.claude/projects/.../memory/gw2-domain.md` for profession/spec/gear schema details.
+See [`optimizer-data-schemas.md`](optimizer-data-schemas.md) for the persisted
+optimizer schemas and [`crates/core/src/types.rs`](../crates/core/src/types.rs)
+for the canonical Rust domain types.

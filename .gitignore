@@ -1,11 +1,6 @@
 /target
-.claude/worktrees/
-.symforge/
-.genesis/
-.kilocode/mcp.json
+/SHA256SUMS.txt
 
-# ── GSD baseline (auto-generated) ──
-.gsd
 .DS_Store
 Thumbs.db
 *.swp
@@ -16,7 +11,6 @@ Thumbs.db
 *.code-workspace
 .env
 .env.*
-!.env.example
 node_modules/
 .next/
 dist/
@@ -34,15 +28,3 @@ tmp/
 
 # ArenaNet press kit — not UI chrome, keep it out of the repo.
 /Guild Wars 2 Asset Kit/
-
-/.octogent/*
-!/.octogent/tentacles/
-/.octogent/tentacles/*
-!/.octogent/tentacles/*/
-/.octogent/tentacles/*/*
-!/.octogent/tentacles/*/CONTEXT.md
-!/.octogent/tentacles/*/todo.md
-
-# Claude Code local state (per-machine permissions) — never shared.
-.claude/settings.local.json
-.claude/worktrees/
