@@ -2,6 +2,10 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.5.2 - 2026-08-24
+
+A locked specialization now returns the best lock-respecting candidate even when no build passes every viability gate. The result stays on the locked spec and is marked provisional with the failed requirements instead of erroring out or swapping to another elite.
+
 ## 1.5.1 - 2026-08-23
 
 Empty `gear_groups` now inherit the build prefix for armor, trinkets, and weapons, and every sheet path counts only the active land weapon set. Legacy saves with blank groups fill from `stat_prefix` on load. Empty inherited Strong and explicit all-Strong both lock at Power 2556 / Precision 2186 for the Ranger axe/axe fixture.
