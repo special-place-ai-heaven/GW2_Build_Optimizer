@@ -2,6 +2,10 @@
 name = "gw2-build-optimizer"
 version.workspace = true
 edition.workspace = true
+authors = ["special-place-ai-heaven"]
+description = "In-game Guild Wars 2 build optimizer and AI build assistant for Nexus"
+license.workspace = true
+repository = "https://github.com/special-place-ai-heaven/GW2_Build_Optimizer"
 
 [lib]
 crate-type = ["cdylib"]

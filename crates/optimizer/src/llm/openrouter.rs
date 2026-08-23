@@ -30,7 +30,7 @@ const OPENROUTER_API_BASE: &str = "https://openrouter.ai/api/v1";
 /// Identify this app in OpenRouter's request logs / leaderboards. Optional
 /// but recommended by OpenRouter docs.
 const OPENROUTER_HTTP_REFERER: &str =
-    "https://github.com/special-place-administrator/GW2_Build_Optimizer";
+    "https://github.com/special-place-ai-heaven/GW2_Build_Optimizer";
 const OPENROUTER_X_TITLE: &str = "GW2 Build Optimizer";
 
 pub struct OpenRouterClient {

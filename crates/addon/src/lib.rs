@@ -8,6 +8,8 @@ use nexus::gui::{register_render, RenderType};
 use nexus::keybind::{keybind_handler, register_keybind_with_string};
 use nexus::log::{log, LogLevel};
 use nexus::paths::get_addon_dir;
+use nexus::quick_access::add_quick_access;
+use nexus::texture::get_texture_or_create_from_memory;
 
 /// Crate version from `Cargo.toml`. UI and logs must use this, never a literal.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -18,7 +20,7 @@ nexus::export! {
     load: on_load,
     unload: on_unload,
     provider: UpdateProvider::GitHub,
-    update_link: "https://github.com/special-place-administrator/GW2_Build_Optimizer",
+    update_link: "https://github.com/special-place-ai-heaven/GW2_Build_Optimizer",
 }
 
 fn on_load() {
@@ -42,6 +44,23 @@ fn on_load() {
             }
         }),
         "CTRL+SHIFT+O",
+    )
+    .revert_on_unload();
+
+    let _ = get_texture_or_create_from_memory(
+        "GW2_BUILD_OPT_ICON_v1",
+        include_bytes!("../assets/build_optimizer.png"),
+    );
+    let _ = get_texture_or_create_from_memory(
+        "GW2_BUILD_OPT_ICON_HOVER_v1",
+        include_bytes!("../assets/build_optimizer_hover.png"),
+    );
+    add_quick_access(
+        "QA_GW2_BUILD_OPTIMIZER",
+        "GW2_BUILD_OPT_ICON_v1",
+        "GW2_BUILD_OPT_ICON_HOVER_v1",
+        "GW2_BUILD_OPT_TOGGLE",
+        "GW2 Build Optimizer",
     )
     .revert_on_unload();
 

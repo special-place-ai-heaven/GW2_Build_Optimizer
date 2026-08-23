@@ -785,11 +785,10 @@ mod tests {
 
     #[test]
     fn test_stat_add_all_alias_pairs() {
-        // CLAUDE.md calls out the ConditionDuration/Expertise rename as the
-        // primary API compatibility concern. The GW2 API still emits the old
-        // spellings alongside the new ones depending on the endpoint, so every
-        // alias pair must normalize symmetrically through `add` and round-trip
-        // through `get`. Missing any pair silently drops stats on either path.
+        // The GW2 API emits both legacy and current stat names depending on the
+        // endpoint, so every alias pair must normalize symmetrically through
+        // `add` and round-trip through `get`. Missing a pair silently drops
+        // stats on either path.
         let pairs = [
             ("ConditionDuration", "Expertise"),
             ("BoonDuration", "Concentration"),

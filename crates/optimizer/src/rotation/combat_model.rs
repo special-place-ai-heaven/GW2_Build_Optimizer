@@ -1,4 +1,4 @@
-//! Fight-dummy clocks and kit gates (research/kimi-combat-model.md).
+//! Fight-dummy clocks and kit gates used by the rotation scorer.
 //! Mapping lives in `builder`; this module is the scorer contract.
 
 use crate::scenario::{CombatKind, CombatTier};
@@ -385,7 +385,7 @@ mod tests {
         ])]));
     }
 
-    /// 18 calibration rows: clock + gates (research/kimi-combat-model.md §7).
+    /// 18 calibration rows covering the supported combat clocks and kit gates.
     #[test]
     fn calibration_eighteen_rows() {
         use CombatKind::*;
