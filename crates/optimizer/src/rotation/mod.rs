@@ -6,6 +6,9 @@ pub mod builder;
 pub mod combat_model;
 pub mod simulator;
 pub mod skill_timings;
+pub mod wvw_timeline;
+
+pub use wvw_timeline::WvwCombatReport;
 
 use std::collections::HashMap;
 
@@ -92,6 +95,8 @@ pub enum ControlKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoverKind {
     Invulnerability,
+    /// Active evade frame. Unlike Block, this also avoids unblockable attacks.
+    Evade,
     Stealth,
     Aegis,
     Stability,
@@ -137,6 +142,21 @@ pub enum SkillEffect {
     /// Combo field placement.
     ComboField {
         field_type: String,
+        duration_ms: u32,
+    },
+    /// Combo finisher. The active field and finisher type determine the result.
+    ComboFinisher {
+        finisher_type: String,
+        percent: u32,
+    },
+    /// Direct self-healing. GW2's public API exposes the hit count but not every
+    /// coefficient, so the timeline uses a conservative healing-power model.
+    Healing {
+        hit_count: u32,
+    },
+    /// Barrier applied to self. `amount` is a conservative resolved estimate.
+    Barrier {
+        amount: f64,
     },
     /// Removes one or more conditions from self (cleanse).
     /// `conditions_removed` is the number of conditions removed per use.
@@ -239,6 +259,8 @@ pub struct SimulationResult {
     pub has_interrupt: bool,
     /// Personal cover vs incoming CC: stab, evade, block, invuln, stealth, or blind.
     pub has_cover_answer: bool,
+    /// Counterplay-aware WvW execution report. Present only for WvW scenarios.
+    pub wvw: Option<WvwCombatReport>,
 }
 
 /// Per-skill breakdown in a simulation result.

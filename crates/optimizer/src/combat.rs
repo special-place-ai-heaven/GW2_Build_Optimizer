@@ -2573,4 +2573,91 @@ mod tests {
             "PvE and WvW boon should match (currently mode-invariant)",
         );
     }
+
+    fn percent_trait(id: u32, name: &str, pairs: &[(&str, f64)]) -> Trait {
+        Trait {
+            id,
+            name: name.to_string(),
+            icon: None,
+            description: None,
+            specialization: 0,
+            tier: 0,
+            order: 0,
+            slot: "Minor".into(),
+            facts: pairs
+                .iter()
+                .map(|(text, pct)| Fact::Percent {
+                    text: Some((*text).into()),
+                    icon: None,
+                    percent: Some(*pct),
+                })
+                .collect(),
+            traited_facts: vec![],
+            skills: vec![],
+        }
+    }
+
+    #[test]
+    fn screenshot_percent_facts_are_legal_in_wvw() {
+        let traits = [
+            percent_trait(
+                1011,
+                "Precise Strike",
+                &[("Critical Chance Increase", 100.0)],
+            ),
+            percent_trait(
+                1001,
+                "Wolfsong",
+                &[("Damage Increase", 5.0), ("Damage Increase", 10.0)],
+            ),
+            percent_trait(
+                2156,
+                "Furious Strength",
+                &[("Damage Increase", 15.0), ("Damage Increase", 7.0)],
+            ),
+            percent_trait(
+                2119,
+                "Second Skin",
+                &[("Damage Reduced", 25.0), ("Damage Reduced", 33.0)],
+            ),
+            percent_trait(1015, "Remorseless", &[("Damage Increase", 25.0)]),
+            percent_trait(1698, "Lead the Wind", &[("Recharge Reduced", 20.0)]),
+        ];
+        let cache: HashMap<u32, Trait> = traits.into_iter().map(|t| (t.id, t)).collect();
+        let ids: Vec<u32> = cache.keys().copied().collect();
+        let items = HashMap::new();
+
+        let wvw = extract_damage_modifiers(
+            &ids,
+            None,
+            &[],
+            None,
+            &cache,
+            &items,
+            &BalanceContext::wvw(),
+        );
+        assert!(
+            wvw.crit_chance_pct.is_empty(),
+            "Precise Strike must not add standing crit: {:?}",
+            wvw.crit_chance_pct
+        );
+        let mut strike = wvw.strike_pct.clone();
+        strike.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(strike, vec![0.05, 0.07, 0.25]);
+        let expected_mult = 1.05 * 1.07 * 1.25;
+        assert!((wvw.total_strike_mult() - expected_mult).abs() < 1e-9);
+
+        let pve = extract_damage_modifiers(
+            &ids,
+            None,
+            &[],
+            None,
+            &cache,
+            &items,
+            &BalanceContext::pve(),
+        );
+        let mut pve_strike = pve.strike_pct.clone();
+        pve_strike.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(pve_strike, vec![0.10, 0.15, 0.25]);
+    }
 }

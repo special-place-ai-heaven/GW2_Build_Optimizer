@@ -238,7 +238,8 @@ mod tests {
 
     #[test]
     fn named_u32_ignores_extra_item_fields() {
-        let v = serde_json::json!({"id": 7, "name": "Sceau de malice", "type": "Skill", "facts": []});
+        let v =
+            serde_json::json!({"id": 7, "name": "Sceau de malice", "type": "Skill", "facts": []});
         let n: NamedU32 = serde_json::from_value(v).unwrap();
         assert_eq!(n.id, 7);
         assert_eq!(n.name, "Sceau de malice");
@@ -276,11 +277,7 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "gw2_loc_pack_{}_{}",
-            std::process::id(),
-            id
-        ));
+        let dir = std::env::temp_dir().join(format!("gw2_loc_pack_{}_{}", std::process::id(), id));
         let _ = std::fs::remove_dir_all(&dir);
         DataCache::new(dir)
     }

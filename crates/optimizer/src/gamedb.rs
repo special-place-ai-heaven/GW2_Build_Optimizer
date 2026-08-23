@@ -682,7 +682,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn itemstat_by_name_ignores_apostrophe() {
         let mut db = GameDb::empty_for_tests();
         db.itemstats.insert(
@@ -697,6 +696,7 @@ mod tests {
         assert_eq!(db.itemstat_by_name("Knight's").unwrap().name, "Knight's");
     }
 
+    #[test]
     fn revenant_older_legend_skill_uses_shared_palette() {
         let mut db = GameDb::empty_for_tests();
         db.legends.insert(

@@ -2,41 +2,78 @@
 //! Mapping lives in `builder`; this module is the scorer contract.
 
 use crate::scenario::{CombatKind, CombatTier};
+use gw2_core::types::GameMode;
 
 use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect};
 
 /// Simulation window 0–T in milliseconds for (scale × kind).
 /// Zerg T=3s / 6–8s are derived (not log-measured).
-/// Roam: dive 2s, condi/trickster 5s, blender/staller 10s.
-pub fn simulation_window_ms(tier: CombatTier, kind: CombatKind) -> u32 {
+/// WvW needs enough wall-clock for a protected opener and the enemy's answer.
+/// A two-second spike remains a reported sub-window, but the exchange itself is
+/// never truncated at the instant the minimum chain completes.
+pub fn simulation_window_ms_for_mode(mode: &GameMode, tier: CombatTier, kind: CombatKind) -> u32 {
+    if *mode != GameMode::WvW {
+        return match (tier, kind) {
+            (CombatTier::Solo, CombatKind::CondiRamp) => 5_000,
+            (
+                CombatTier::Solo,
+                CombatKind::Commander | CombatKind::Support | CombatKind::Staller,
+            ) => 10_000,
+            (CombatTier::Solo, _) => 2_000,
+            (CombatTier::Party, CombatKind::CondiRamp) => 5_000,
+            (
+                CombatTier::Party,
+                CombatKind::Commander | CombatKind::Support | CombatKind::Staller,
+            ) => 10_000,
+            (CombatTier::Party, _) => 2_500,
+            (CombatTier::Squad, CombatKind::StrikeSpike) => 3_000,
+            (CombatTier::Squad, CombatKind::CondiRamp) => 7_000,
+            (CombatTier::Squad, CombatKind::Harasser) => 2_500,
+            (CombatTier::Squad, CombatKind::Disabler) => 7_000,
+            (
+                CombatTier::Squad,
+                CombatKind::Commander | CombatKind::Support | CombatKind::Staller,
+            ) => 10_000,
+        };
+    }
     match (tier, kind) {
-        (CombatTier::Solo, CombatKind::CondiRamp) => 5_000,
+        (CombatTier::Solo, CombatKind::StrikeSpike) => 5_000,
+        (CombatTier::Solo, CombatKind::CondiRamp) => 20_000,
+        (CombatTier::Solo, CombatKind::Harasser | CombatKind::Disabler) => 10_000,
         (CombatTier::Solo, CombatKind::Commander | CombatKind::Support | CombatKind::Staller) => {
-            10_000
+            20_000
         }
-        (CombatTier::Solo, _) => 2_000,
-        (CombatTier::Party, CombatKind::CondiRamp) => 5_000,
+        (CombatTier::Party, CombatKind::StrikeSpike) => 5_000,
+        (CombatTier::Party, CombatKind::CondiRamp) => 20_000,
+        (CombatTier::Party, CombatKind::Harasser | CombatKind::Disabler) => 10_000,
         (CombatTier::Party, CombatKind::Commander | CombatKind::Support | CombatKind::Staller) => {
-            10_000
+            20_000
         }
-        (CombatTier::Party, _) => 2_500,
-        (CombatTier::Squad, CombatKind::StrikeSpike) => 3_000,
-        (CombatTier::Squad, CombatKind::CondiRamp) => 7_000,
-        (CombatTier::Squad, CombatKind::Harasser) => 2_500,
-        (CombatTier::Squad, CombatKind::Disabler) => 7_000,
+        (CombatTier::Squad, CombatKind::StrikeSpike) => 5_000,
+        (CombatTier::Squad, CombatKind::CondiRamp) => 20_000,
+        (CombatTier::Squad, CombatKind::Harasser | CombatKind::Disabler) => 10_000,
         (CombatTier::Squad, CombatKind::Commander | CombatKind::Support | CombatKind::Staller) => {
-            10_000
+            20_000
         }
     }
 }
 
+/// WvW exchange window retained for callers that do not carry game mode.
+pub fn simulation_window_ms(tier: CombatTier, kind: CombatKind) -> u32 {
+    simulation_window_ms_for_mode(&GameMode::WvW, tier, kind)
+}
+
 /// Prefer CC/strip/cover over DPCT for this long at the start of a short clock.
-pub fn setup_window_ms(duration_ms: u32) -> u32 {
-    if duration_ms > 10_000 {
-        0
-    } else {
+pub fn setup_window_ms_for_mode(duration_ms: u32, wvw: bool) -> u32 {
+    if wvw || duration_ms <= 10_000 {
         2_000.min(duration_ms)
+    } else {
+        0
     }
+}
+
+pub fn setup_window_ms(duration_ms: u32) -> u32 {
+    setup_window_ms_for_mode(duration_ms, true)
 }
 
 pub fn kit_has_mobility_out(skills: &[RotationSkill]) -> bool {
@@ -65,7 +102,7 @@ pub fn kit_escape_kinds(skills: &[RotationSkill]) -> u32 {
                     ..
                 } => block = true,
                 SkillEffect::Cover {
-                    kind: CoverKind::Invulnerability | CoverKind::Aegis,
+                    kind: CoverKind::Invulnerability | CoverKind::Aegis | CoverKind::Evade,
                     ..
                 } => cover = true,
                 _ => {}
@@ -122,20 +159,21 @@ pub fn kit_has_stability_cover(skills: &[RotationSkill]) -> bool {
 pub fn kit_has_cover_answer(skills: &[RotationSkill]) -> bool {
     kit_has_stability_cover(skills)
         || skills.iter().any(|s| {
-            s.effects.iter().any(|e| match e {
-                SkillEffect::Mobility {
-                    kind: MobilityKind::Evade | MobilityKind::Stealth,
-                } => true,
-                SkillEffect::Cover {
-                    kind:
-                        CoverKind::Stealth
-                        | CoverKind::Block
-                        | CoverKind::Invulnerability
-                        | CoverKind::Aegis
-                        | CoverKind::Blind,
-                    ..
-                } => true,
-                _ => false,
+            s.effects.iter().any(|e| {
+                matches!(
+                    e,
+                    SkillEffect::Mobility {
+                        kind: MobilityKind::Evade | MobilityKind::Stealth,
+                    } | SkillEffect::Cover {
+                        kind: CoverKind::Stealth
+                            | CoverKind::Evade
+                            | CoverKind::Block
+                            | CoverKind::Invulnerability
+                            | CoverKind::Aegis
+                            | CoverKind::Blind,
+                        ..
+                    }
+                )
             })
         })
 }
@@ -193,7 +231,7 @@ pub fn corrupt_into(boon: &str) -> Option<&'static str> {
     })
 }
 
-/// Glass roam pick / havoc bruiser. Support and zerg DPS have no solo-kill dummy.
+/// Glass roam pick / havoc bruiser. Support and large-scale pressure have no solo outcome target.
 pub fn dummy_hp(tier: CombatTier, kind: CombatKind) -> Option<f64> {
     if matches!(
         kind,
@@ -214,7 +252,7 @@ pub fn dummy_hp(tier: CombatTier, kind: CombatKind) -> Option<f64> {
 pub struct EnemyDummy {
     pub protection: bool,
     pub stability: bool,
-    /// `None` = open dummy (no kill tracking).
+    /// `None` = open dummy (no encounter-outcome tracking).
     pub hp: Option<f64>,
 }
 
@@ -286,14 +324,14 @@ mod tests {
     }
 
     #[test]
-    fn roam_dive_clock_is_2s() {
+    fn roam_exchange_includes_the_minimum_chain_and_response() {
         assert_eq!(
             simulation_window_ms(CombatTier::Solo, CombatKind::StrikeSpike),
-            2_000
+            5_000
         );
         assert_eq!(
             simulation_window_ms(CombatTier::Solo, CombatKind::Harasser),
-            2_000
+            10_000
         );
     }
 
@@ -301,21 +339,21 @@ mod tests {
     fn zerg_kinds_do_not_share_a_clock() {
         assert_eq!(
             simulation_window_ms(CombatTier::Squad, CombatKind::StrikeSpike),
-            3_000
+            5_000
         );
         assert_eq!(
             simulation_window_ms(CombatTier::Squad, CombatKind::CondiRamp),
-            7_000
+            20_000
         );
         assert_eq!(
             simulation_window_ms(CombatTier::Squad, CombatKind::Harasser),
-            2_500
+            10_000
         );
     }
 
     #[test]
-    fn long_sim_does_not_steal_dpct_setup() {
-        assert_eq!(setup_window_ms(30_000), 0);
+    fn setup_window_keeps_the_two_second_opening() {
+        assert_eq!(setup_window_ms(30_000), 2_000);
         assert_eq!(setup_window_ms(2_000), 2_000);
     }
 
@@ -391,24 +429,24 @@ mod tests {
         use CombatKind::*;
         use CombatTier::*;
         let rows: [(CombatTier, CombatKind, u32); 18] = [
-            (Squad, StrikeSpike, 3_000), // 1 Reaper
-            (Squad, StrikeSpike, 3_000), // 2 Untamed
-            (Squad, StrikeSpike, 3_000), // 3 Evoker ranged
-            (Squad, Support, 10_000),    // 4 Firebrand
-            (Squad, Support, 10_000),    // 5 Druid
-            (Squad, Support, 10_000),    // 6 Troubadour
-            (Squad, Disabler, 7_000),    // 7 Core Necro corrupt
-            (Squad, Disabler, 7_000),    // 8 Spellbreaker
-            (Squad, Harasser, 2_500),    // 9 Conduit
-            (Squad, Harasser, 2_500),    // 10 Dragonhunter
-            (Squad, Commander, 10_000),  // 11 Luminary tag
-            (Solo, Harasser, 2_000),     // 12 Willbender
-            (Solo, Harasser, 2_000),     // 13 Deadeye
-            (Solo, Harasser, 2_000),     // 14 Virtuoso
-            (Solo, Harasser, 2_000),     // 15 Herald
-            (Solo, CondiRamp, 5_000),    // 16 Soulbeast
-            (Party, StrikeSpike, 2_500), // 17 Celestial Herald havoc
-            (Party, StrikeSpike, 2_500), // 18 Scrapper havoc
+            (Squad, StrikeSpike, 5_000), // 1 Reaper
+            (Squad, StrikeSpike, 5_000), // 2 Untamed
+            (Squad, StrikeSpike, 5_000), // 3 Evoker ranged
+            (Squad, Support, 20_000),    // 4 Firebrand
+            (Squad, Support, 20_000),    // 5 Druid
+            (Squad, Support, 20_000),    // 6 Troubadour
+            (Squad, Disabler, 10_000),   // 7 Core Necro corrupt
+            (Squad, Disabler, 10_000),   // 8 Spellbreaker
+            (Squad, Harasser, 10_000),   // 9 Conduit
+            (Squad, Harasser, 10_000),   // 10 Dragonhunter
+            (Squad, Commander, 20_000),  // 11 Luminary tag
+            (Solo, Harasser, 10_000),    // 12 Willbender
+            (Solo, Harasser, 10_000),    // 13 Deadeye
+            (Solo, Harasser, 10_000),    // 14 Virtuoso
+            (Solo, Harasser, 10_000),    // 15 Herald
+            (Solo, CondiRamp, 20_000),   // 16 Soulbeast
+            (Party, StrikeSpike, 5_000), // 17 Celestial Herald havoc
+            (Party, StrikeSpike, 5_000), // 18 Scrapper havoc
         ];
         for (i, (tier, kind, t)) in rows.iter().enumerate() {
             assert_eq!(
@@ -472,11 +510,11 @@ mod tests {
         assert!(troll.hp.is_none());
         assert_eq!(
             simulation_window_ms(CombatTier::Solo, CombatKind::Staller),
-            10_000
+            20_000
         );
         assert_eq!(
             simulation_window_ms(CombatTier::Squad, CombatKind::Staller),
-            10_000
+            20_000
         );
     }
 

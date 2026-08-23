@@ -8,8 +8,8 @@
 
 use gw2_core::types::GameMode;
 
-/// Snapshot constant for patch_id until P3-08 adds manifest-backed sourcing.
-const SNAPSHOT_PATCH_ID: &str = "snapshot-2026-03-06";
+/// Current sourced balance snapshot. Keep this aligned with the active manifest.
+const SNAPSHOT_PATCH_ID: &str = "2026-07-15";
 
 /// Context that travels through every mode-sensitive calculation.
 ///

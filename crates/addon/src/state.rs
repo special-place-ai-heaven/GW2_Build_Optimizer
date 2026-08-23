@@ -1094,7 +1094,6 @@ mod tests {
         assert_eq!(download_fraction(0, 0, 0, 0, false), 0.0);
     }
 
-
     #[test]
     fn download_fraction_last_step_stays_open_until_inner_finishes() {
         let start = download_fraction(13, 13, 0, 17232, false);
@@ -1104,5 +1103,4 @@ mod tests {
         assert!(mid < 1.0);
         assert!((download_fraction(13, 13, 17232, 17232, false) - 1.0).abs() < 1e-5);
     }
-
 }

@@ -4,7 +4,9 @@
 
 use nexus::imgui::{Selectable, TreeNodeFlags, Ui};
 
-use gw2_core::types::{CombatMetrics, ResolvedBuild, RotationBreakdown, StatBlock};
+use gw2_core::types::{
+    CombatMetrics, GearPrefixGroups, ResolvedBuild, RotationBreakdown, StatBlock,
+};
 use gw2_optimizer::gamedb::GameDb;
 use gw2_optimizer::ViabilityReport;
 
@@ -18,6 +20,9 @@ pub struct BuildSuggestion {
     pub label: String,
     pub build_summary: String,
     pub stat_prefix: String,
+    /// Effective prefix for each equipment group. This is authoritative when
+    /// the optimizer proposes a mixed allocation.
+    pub gear_prefixes: GearPrefixGroups,
     pub specializations: Vec<(String, Vec<String>)>, // (spec_name, [trait1, trait2, trait3])
     pub weapons: Vec<String>,
     pub skills: Vec<String>,

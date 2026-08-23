@@ -1,0 +1,30 @@
+patch_id: "2026-07-15"
+inherits_from: "2026-01-13"
+changes:
+  - source_type: Skill
+    source_id: 13113
+    source_name: "Black Powder"
+    mode: WvW
+    field: initiative_cost
+    old_value: "8"
+    new_value: "7"
+    evidence_level: Factual
+    source: "https://wiki.guildwars2.com/wiki/Black_Powder"
+  - source_type: Skill
+    source_id: 13097
+    source_name: "Heartseeker"
+    mode: PvE
+    field: damage_coefficient_below_50
+    old_value: "1.75"
+    new_value: "1.6"
+    evidence_level: Factual
+    source: "https://wiki.guildwars2.com/wiki/Heartseeker"
+  - source_type: Skill
+    source_id: 13097
+    source_name: "Heartseeker"
+    mode: PvE
+    field: damage_coefficient_below_25
+    old_value: "2.5"
+    new_value: "2.2"
+    evidence_level: Factual
+    source: "https://wiki.guildwars2.com/wiki/Heartseeker"
