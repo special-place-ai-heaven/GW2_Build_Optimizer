@@ -774,10 +774,14 @@ pub fn score_trait_for_archetype(
 fn score_fact(fact: &Fact, weights: &crate::scoring::StatWeights) -> f64 {
     match fact {
         Fact::AttributeAdjust {
+            text,
             value: Some(val),
             target: Some(ref target),
             ..
         } => {
+            if !crate::stats::is_permanent_stat_adjust(text.as_deref()) {
+                return 0.0;
+            }
             let w = match target.as_str() {
                 "Power" => weights.power,
                 "Precision" => weights.precision,
@@ -1218,12 +1222,7 @@ pub fn calculate_validated_stats(
 ) -> (stats::StatBlock, DamageModifiers) {
     let mut full_stats = stats::base_stats();
 
-    apply_optimized_gear_stats(
-        &mut full_stats,
-        db,
-        validated.gear_prefix.as_ref().map(|p| p.itemstat_id),
-        ctx,
-    );
+    apply_validated_gear_stats(&mut full_stats, db, validated, ctx);
 
     // Rune and sigil flat stat bonuses (permanent stats only).
     let rune_id = validated.rune.as_ref().map(|r| r.id);
@@ -1296,6 +1295,21 @@ pub fn simulate_validated_rotation(
         ""
     };
 
+    let equipped_spec_ids: Vec<u32> = validated
+        .specializations
+        .iter()
+        .map(|spec| spec.spec_id)
+        .collect();
+    let resolved_profession_skills;
+    let profession_skills = if validated.skills.profession.is_empty() {
+        resolved_profession_skills =
+            rotation::builder::profession_skills_for_build(db, profession_name, &equipped_spec_ids);
+        &resolved_profession_skills
+    } else {
+        &validated.skills.profession
+    };
+    non_weapon_ids.extend(profession_skills.iter().map(|(id, _)| *id));
+
     let mut set1_ids: Vec<u32> = Vec::new();
     let mut set2_ids: Vec<u32> = Vec::new();
 
@@ -1335,12 +1349,6 @@ pub fn simulate_validated_rotation(
         return None;
     }
 
-    let power = stats.get("Power");
-    let condition_damage = stats.get("ConditionDamage");
-    let precision = stats.get("Precision");
-    let ferocity = stats.get("Ferocity");
-    let weapon_strength = 1100.0;
-
     let duration_ms = scenario
         .map(|s| crate::rotation::combat_model::simulation_window_ms(s.combat_tier, s.combat_kind))
         .unwrap_or(0);
@@ -1356,22 +1364,271 @@ pub fn simulate_validated_rotation(
         .unwrap_or(GameMode::PvE);
     let sim_ctx = BalanceContext::new(mode.clone());
     let (_, mods) = calculate_validated_stats(validated, db, profession_name, &sim_ctx);
+    let power = stats.get("Power");
+    let condition_damage = stats.get("ConditionDamage");
+    let precision = stats.get("Precision");
+    let ferocity = stats.get("Ferocity") + mods.total_crit_damage_bonus() * 15.0;
+    let expertise = stats.get("Expertise");
+    let concentration = stats.get("Concentration");
+    let healing_power = stats.get("HealingPower");
+    let weapon_strength = 1100.0;
+    let derived = stats::compute_derived(stats, profession_name);
+    let condition_duration_bonus =
+        (expertise / 15.0 + mods.total_condi_duration_bonus()).clamp(0.0, 100.0);
+    let boon_duration_bonus =
+        (concentration / 15.0 + mods.total_boon_duration_bonus()).clamp(0.0, 100.0);
     let params = rotation::simulator::SimParams {
         power,
         condition_damage,
         weapon_strength,
         precision,
         ferocity,
+        crit_chance_bonus: mods.total_crit_chance_bonus(),
+        fury_crit_chance_bonus: crate::data::boon_condition_formulas::boons()
+            .fury_crit_bonus(mode.clone())
+            * 100.0,
         strike_mult: mods.total_strike_mult(),
-        mode,
+        condition_mult: mods.total_condi_mult(),
+        condition_duration_mult: 1.0 + condition_duration_bonus / 100.0,
+        boon_duration_mult: 1.0 + boon_duration_bonus / 100.0,
+        healing_power,
+        healing_mult: mods.total_healing_mult(),
+        max_health: derived.health,
+        armor: derived.armor,
+        mode: mode.clone(),
     };
 
-    Some(rotation::simulator::simulate_with(
-        &rotation_skills,
-        duration_ms,
-        &params,
-        enemy,
-    ))
+    let mut result =
+        rotation::simulator::simulate_with(&rotation_skills, duration_ms, &params, enemy);
+
+    if let Some(scenario) = scenario.filter(|scenario| scenario.game_mode == GameMode::WvW) {
+        let (active_effects, unmodeled_sources) =
+            active_normalized_effects(validated, &rotation_skills, mode.label());
+        let resource_rules = wvw_resource_rules(validated, &rotation_skills, db, profession_name);
+        result.wvw = Some(rotation::wvw_timeline::evaluate_wvw_timeline(
+            rotation::wvw_timeline::WvwTimelineInput {
+                skills: &rotation_skills,
+                duration_ms,
+                params: &params,
+                enemy,
+                scenario,
+                active_effects: &active_effects,
+                resource_rules: &resource_rules,
+                unmodeled_effect_sources: unmodeled_sources,
+            },
+        ));
+    }
+
+    Some(result)
+}
+
+fn apply_validated_gear_stats(
+    stats: &mut stats::StatBlock,
+    db: &GameDb,
+    validated: &ValidatedBuild,
+    ctx: &BalanceContext,
+) {
+    let fallback = validated
+        .gear_prefix
+        .as_ref()
+        .map(|prefix| prefix.itemstat_id);
+    let groups = &validated.gear_groups;
+    if ctx.game_mode == GameMode::PvP
+        || (groups.armor.is_none() && groups.trinkets.is_none() && groups.weapons.is_none())
+    {
+        apply_optimized_gear_stats(stats, db, fallback, ctx);
+        return;
+    }
+
+    let budgets = data::slot_budgets::slot_budgets();
+    for &(slot_type, slot_name) in data::EQUIPMENT_SLOTS {
+        let group_prefix = if matches!(
+            slot_name,
+            "Helm" | "Shoulders" | "Coat" | "Gloves" | "Leggings" | "Boots"
+        ) {
+            groups.armor.as_ref()
+        } else if slot_name.starts_with("Weapon") {
+            groups.weapons.as_ref()
+        } else {
+            groups.trinkets.as_ref()
+        };
+        let Some(prefix_id) = group_prefix.map(|prefix| prefix.itemstat_id).or(fallback) else {
+            continue;
+        };
+        let Some(itemstat) = db.itemstats.get(&prefix_id) else {
+            continue;
+        };
+        let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
+        if let Some(budget) = budgets.get(slot_type, shape) {
+            add_budget_stats_for_itemstat(stats, itemstat, budget);
+        }
+    }
+}
+
+fn active_normalized_effects(
+    validated: &ValidatedBuild,
+    rotation_skills: &[rotation::RotationSkill],
+    mode: &str,
+) -> (
+    Vec<&'static crate::data::normalized_effects::NormalizedEffect>,
+    u32,
+) {
+    use crate::data::normalized_effects::SourceType;
+
+    let trait_ids: std::collections::HashSet<u32> = validated
+        .specializations
+        .iter()
+        .flat_map(|spec| spec.all_trait_ids.iter().copied())
+        .collect();
+    let skill_ids: std::collections::HashSet<u32> =
+        rotation_skills.iter().map(|skill| skill.skill_id).collect();
+    let rune_ids: std::collections::HashSet<u32> =
+        validated.rune.iter().map(|item| item.id).collect();
+    let sigil_ids: std::collections::HashSet<u32> =
+        validated.sigils.iter().map(|item| item.id).collect();
+    let relic_ids: std::collections::HashSet<u32> =
+        validated.relic.iter().map(|item| item.id).collect();
+
+    let selected = |source_type: &SourceType, source_id: u32| match source_type {
+        SourceType::Trait => trait_ids.contains(&source_id),
+        SourceType::Skill => skill_ids.contains(&source_id),
+        SourceType::Rune => rune_ids.contains(&source_id),
+        SourceType::Sigil => sigil_ids.contains(&source_id),
+        SourceType::Relic => relic_ids.contains(&source_id),
+    };
+
+    let effects = crate::data::normalized_effects::effects().effects_for_mode(mode);
+    let active: Vec<_> = effects
+        .iter()
+        .filter(|effect| selected(&effect.source_type, effect.source_id))
+        .collect();
+    let modeled: std::collections::HashSet<(u8, u32)> = active
+        .iter()
+        .map(|effect| (source_type_tag(&effect.source_type), effect.source_id))
+        .collect();
+    let mut equipped: std::collections::HashSet<(u8, u32)> = trait_ids
+        .iter()
+        .map(|id| (source_type_tag(&SourceType::Trait), *id))
+        .collect();
+    equipped.extend(
+        skill_ids
+            .iter()
+            .map(|id| (source_type_tag(&SourceType::Skill), *id)),
+    );
+    equipped.extend(
+        rune_ids
+            .iter()
+            .map(|id| (source_type_tag(&SourceType::Rune), *id)),
+    );
+    equipped.extend(
+        sigil_ids
+            .iter()
+            .map(|id| (source_type_tag(&SourceType::Sigil), *id)),
+    );
+    equipped.extend(
+        relic_ids
+            .iter()
+            .map(|id| (source_type_tag(&SourceType::Relic), *id)),
+    );
+    let unmodeled = equipped.difference(&modeled).count() as u32;
+    (active, unmodeled)
+}
+
+fn source_type_tag(source_type: &crate::data::normalized_effects::SourceType) -> u8 {
+    use crate::data::normalized_effects::SourceType;
+    match source_type {
+        SourceType::Trait => 0,
+        SourceType::Skill => 1,
+        SourceType::Rune => 2,
+        SourceType::Sigil => 3,
+        SourceType::Relic => 4,
+    }
+}
+
+fn wvw_resource_rules(
+    validated: &ValidatedBuild,
+    rotation_skills: &[rotation::RotationSkill],
+    db: &GameDb,
+    profession_name: &str,
+) -> Vec<rotation::wvw_timeline::SkillResourceRule> {
+    use rotation::wvw_timeline::{ResourceKind, SkillResourceRule};
+
+    let virtuoso = validated
+        .specializations
+        .iter()
+        .any(|spec| spec.name.eq_ignore_ascii_case("Virtuoso"));
+    let mut rules = Vec::new();
+    for rotation_skill in rotation_skills {
+        let Some(skill) = db.skills.get(&rotation_skill.skill_id) else {
+            continue;
+        };
+        let description = skill.description.as_deref().unwrap_or("").to_lowercase();
+        let profession_slot = skill
+            .slot
+            .as_deref()
+            .is_some_and(|slot| slot.starts_with("Profession_"));
+
+        if let Some(cost) = skill.initiative {
+            rules.push(SkillResourceRule {
+                skill_id: skill.id,
+                kind: ResourceKind::Initiative,
+                cost: cost as f64,
+                gain_on_hit: 0.0,
+                spend_all: false,
+            });
+            continue;
+        }
+        if profession_name == "Revenant" && skill.cost.is_some() {
+            rules.push(SkillResourceRule {
+                skill_id: skill.id,
+                kind: ResourceKind::Energy,
+                cost: skill.cost.unwrap_or(0) as f64,
+                gain_on_hit: 0.0,
+                spend_all: false,
+            });
+            continue;
+        }
+        if profession_name == "Warrior" && profession_slot {
+            rules.push(SkillResourceRule {
+                skill_id: skill.id,
+                kind: ResourceKind::Adrenaline,
+                cost: skill.cost.unwrap_or(10) as f64,
+                gain_on_hit: 0.0,
+                spend_all: false,
+            });
+            continue;
+        }
+        if profession_name == "Mesmer" && profession_slot {
+            rules.push(SkillResourceRule {
+                skill_id: skill.id,
+                kind: if virtuoso {
+                    ResourceKind::Blades
+                } else {
+                    ResourceKind::Illusions
+                },
+                cost: skill.cost.unwrap_or(1).max(1) as f64,
+                gain_on_hit: 0.0,
+                spend_all: true,
+            });
+            continue;
+        }
+        if profession_name == "Mesmer"
+            && (description.contains("clone") || description.contains("blade"))
+        {
+            rules.push(SkillResourceRule {
+                skill_id: skill.id,
+                kind: if virtuoso {
+                    ResourceKind::Blades
+                } else {
+                    ResourceKind::Illusions
+                },
+                cost: 0.0,
+                gain_on_hit: 1.0,
+                spend_all: false,
+            });
+        }
+    }
+    rules
 }
 
 /// Add weapon skill IDs for a given weapon type from the profession's weapon data.
@@ -1968,6 +2225,19 @@ mod tests {
             selected[0], 100,
             "PowerDPS should prefer Power trait over Vitality"
         );
+    }
+
+    #[test]
+    fn score_fact_ignores_tooltip_effect_amounts() {
+        let tooltip_amount = Fact::AttributeAdjust {
+            text: Some("Life Siphon Damage".into()),
+            icon: None,
+            value: Some(3517),
+            target: Some("Power".into()),
+        };
+        let power_weights = OptimizationWeights::preset_power_dps().to_stat_weights();
+
+        assert_eq!(score_fact(&tooltip_amount, &power_weights), 0.0);
     }
 
     #[test]

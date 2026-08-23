@@ -16,6 +16,8 @@ use crate::prompts::GeminiBuildResponse;
 // ---------------------------------------------------------------------------
 
 /// A fully validated and resolved build from Gemini output.
+pub type ValidatedPets = (Option<u32>, Option<u32>, Option<u32>, Option<u32>);
+
 #[derive(Debug, Clone, Default)]
 pub struct ValidatedBuild {
     pub specializations: Vec<ValidatedSpec>,
@@ -26,11 +28,14 @@ pub struct ValidatedBuild {
     /// Revenant aquatic legends. Empty → encoder copies terrestrial.
     pub aquatic_legends: Vec<String>,
     /// Ranger pet IDs: terrestrial[2] then aquatic[2].
-    pub pets: Option<(Option<u32>, Option<u32>, Option<u32>, Option<u32>)>,
+    pub pets: Option<ValidatedPets>,
     pub rune: Option<ValidatedItem>,
     pub sigils: Vec<ValidatedItem>,
     pub relic: Option<ValidatedItem>,
     pub gear_prefix: Option<ValidatedGearPrefix>,
+    /// Optional mixed-stat allocation. A missing group inherits
+    /// `gear_prefix`; this keeps old single-prefix builds compatible.
+    pub gear_groups: ValidatedGearGroups,
     pub explanation: String,
     pub synergy_explanation: String,
     pub changes: Vec<ChangeEntry>,
@@ -38,7 +43,7 @@ pub struct ValidatedBuild {
     pub errors: Vec<ValidationReject>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ValidatedSpec {
     pub spec_id: u32,
     pub name: String,
@@ -50,13 +55,13 @@ pub struct ValidatedSpec {
     pub all_trait_ids: Vec<u32>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ValidatedWeapons {
     pub set1: ValidatedWeaponSet,
     pub set2: ValidatedWeaponSet,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ValidatedWeaponSet {
     pub main_hand: Option<String>,
     pub off_hand: Option<String>,
@@ -67,6 +72,9 @@ pub struct ValidatedSkills {
     pub heal: Option<(u32, String)>,
     pub utilities: Vec<Option<(u32, String)>>,
     pub elite: Option<(u32, String)>,
+    /// F1-F5 and elite-spec mechanic skills (Steal, Full Counter, shatters,
+    /// bladesongs, etc.). These are part of the executable WvW chain.
+    pub profession: Vec<(u32, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,6 +87,13 @@ pub struct ValidatedItem {
 pub struct ValidatedGearPrefix {
     pub itemstat_id: u32,
     pub name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ValidatedGearGroups {
+    pub armor: Option<ValidatedGearPrefix>,
+    pub trinkets: Option<ValidatedGearPrefix>,
+    pub weapons: Option<ValidatedGearPrefix>,
 }
 
 /// A structured change entry from Gemini's output.
@@ -236,17 +251,15 @@ pub fn validate_gemini_build(
         None => inferred_profession.as_deref().unwrap_or(profession_name),
     };
 
-    let mut result = ValidatedBuild::default();
-
-    // Copy explanation fields
-    result.explanation = response.explanation.clone();
-    result.synergy_explanation = response
-        .synergy_explanation
-        .clone()
-        .unwrap_or_else(|| response.explanation.clone());
-
-    // Parse structured changes
-    result.changes = parse_changes(response);
+    let mut result = ValidatedBuild {
+        explanation: response.explanation.clone(),
+        synergy_explanation: response
+            .synergy_explanation
+            .clone()
+            .unwrap_or_else(|| response.explanation.clone()),
+        changes: parse_changes(response),
+        ..ValidatedBuild::default()
+    };
 
     // Validate each component
     validate_specializations(response, db, profession_name, &mut result);
@@ -467,7 +480,7 @@ fn validate_weapon_set(
     // Validate main hand
     if let Some(ref mh) = weapons.0 {
         if let Some((canonical, info)) = find_weapon(mh, prof) {
-            if !info.land_usable(&canonical) {
+            if !info.land_usable(canonical) {
                 result.errors.push(ValidationReject {
                     code: RejectCode::WeaponNotAvailable {
                         slot: label.to_string(),
@@ -499,7 +512,7 @@ fn validate_weapon_set(
     // Validate off hand
     if let Some(ref oh) = weapons.1 {
         if let Some((canonical, info)) = find_weapon(oh, prof) {
-            if !info.land_usable(&canonical) {
+            if !info.land_usable(canonical) {
                 result.errors.push(ValidationReject {
                     code: RejectCode::WeaponNotAvailable {
                         slot: label.to_string(),

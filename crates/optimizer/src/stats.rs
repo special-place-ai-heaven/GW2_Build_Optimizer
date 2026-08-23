@@ -372,14 +372,48 @@ pub fn calculate_trait_stats(
     stats
 }
 
+/// True when an AttributeAdjust is a permanent character-stat bonus.
+///
+/// Tooltip coefficients reuse the same fact type with labels like "Healing",
+/// "Barrier", or "Life Siphon Damage". Real bonuses have no text, or a label
+/// that names the attribute.
+pub(crate) fn is_permanent_stat_adjust(text: Option<&str>) -> bool {
+    let Some(text) = text else {
+        return true;
+    };
+    let t = text.to_ascii_lowercase();
+    const MARKERS: &[&str] = &[
+        "healing power",
+        "condition damage",
+        "ferocity",
+        "precision",
+        "toughness",
+        "vitality",
+        "expertise",
+        "concentration",
+        "attribute",
+        "power",
+    ];
+    MARKERS.iter().any(|marker| t.contains(marker))
+}
+
 /// Apply an AttributeAdjust fact to a stat block.
+///
+/// The API reuses this fact type for tooltip coefficients (heal/barrier/siphon
+/// amounts). Those have a descriptive `text` that does not name a character
+/// attribute. Permanent bonuses have `text == None` or a label that names the
+/// stat ("Additional Power", "Healing Power below 75%").
 fn apply_attribute_adjust(stats: &mut StatBlock, fact: &Fact) {
     if let Fact::AttributeAdjust {
         value: Some(val),
         target: Some(ref target),
+        text,
         ..
     } = fact
     {
+        if !is_permanent_stat_adjust(text.as_deref()) {
+            return;
+        }
         stats.add(target, *val as f64);
     }
 }
@@ -821,6 +855,98 @@ mod tests {
         let stats = StatBlock::default();
         assert_eq!(stats.get("AgonyResistance"), 0.0);
         assert_eq!(stats.get("TotallyFakeAttribute"), 0.0);
+    }
+
+    fn attr(target: &str, value: i32, text: Option<&str>) -> Fact {
+        Fact::AttributeAdjust {
+            text: text.map(str::to_string),
+            icon: None,
+            value: Some(value),
+            target: Some(target.to_string()),
+        }
+    }
+
+    fn trait_with_facts(id: u32, facts: Vec<Fact>) -> Trait {
+        Trait {
+            id,
+            name: String::new(),
+            icon: None,
+            description: None,
+            specialization: 0,
+            tier: 0,
+            order: 0,
+            slot: "Major".into(),
+            facts,
+            traited_facts: Vec::new(),
+            skills: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn attribute_adjust_keeps_named_stat_bonuses() {
+        let mut cache = HashMap::new();
+        cache.insert(
+            1,
+            trait_with_facts(
+                1,
+                vec![
+                    attr("Vitality", 240, None),
+                    attr("BoonDuration", 240, None),
+                    attr("Power", 80, Some("Additional Power")),
+                    attr("Healing", 100, Some("Healing Power below 75% Health")),
+                    attr("CritDamage", 120, Some("Additional Ferocity")),
+                ],
+            ),
+        );
+        let stats = calculate_trait_stats(&[1], &cache);
+        assert_eq!(stats.vitality, 240.0);
+        assert_eq!(stats.concentration, 240.0);
+        assert_eq!(stats.power, 80.0);
+        assert_eq!(stats.healing_power, 100.0);
+        assert_eq!(stats.ferocity, 120.0);
+    }
+
+    #[test]
+    fn attribute_adjust_drops_tooltip_coefficients() {
+        // Exact AttributeAdjust rows from the Fun Detected Disable screenshot:
+        // Allies' Aid + Invigorating Bond + Natural Fortitude, live traits cache.
+        // Old path: +5281 Power and +12821 Healing Power. Those are siphon/heal
+        // tooltip amounts, not character stats.
+        let mut cache = HashMap::new();
+        cache.insert(
+            1060,
+            trait_with_facts(1060, vec![attr("Healing", 2240, Some("Barrier"))]),
+        );
+        cache.insert(
+            1697,
+            trait_with_facts(
+                1697,
+                vec![
+                    attr("Healing", 2580, Some("Healing")),
+                    attr("Healing", 820, Some("Healing")),
+                    attr("Healing", 1020, Some("Healing")),
+                ],
+            ),
+        );
+        cache.insert(
+            2286,
+            trait_with_facts(
+                2286,
+                vec![
+                    attr("Vitality", 240, None),
+                    attr("Power", 3517, Some("Life Siphon Damage")),
+                    attr("Power", 1764, Some("Life Siphon Damage")),
+                    attr("Healing", 3517, Some("First-Hit Life Siphon Healing")),
+                    attr("Healing", 1764, Some("First-Hit Life Siphon Healing")),
+                    attr("Healing", 586, Some("Additional-Hit Healing")),
+                    attr("Healing", 294, Some("Additional-Hit Healing")),
+                ],
+            ),
+        );
+        let stats = calculate_trait_stats(&[1060, 1697, 2286], &cache);
+        assert_eq!(stats.power, 0.0);
+        assert_eq!(stats.healing_power, 0.0);
+        assert_eq!(stats.vitality, 240.0);
     }
 
     // Helper constructors for test data

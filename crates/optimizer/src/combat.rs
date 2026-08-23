@@ -521,7 +521,6 @@ pub fn buff_profiles_for_profession(profession: &str, ctx: &BalanceContext) -> V
 
 // ─── Damage Modifier Extraction ───
 
-/// Extract percentage-based damage modifiers from equipped traits, rune, and sigils.
 pub fn extract_damage_modifiers(
     equipped_trait_ids: &[u32],
     rune_id: Option<u32>,
@@ -531,19 +530,51 @@ pub fn extract_damage_modifiers(
     items_cache: &HashMap<u32, Item>,
     ctx: &BalanceContext,
 ) -> DamageModifiers {
-    let mut mods = DamageModifiers::default();
-    // Hoist into a HashSet once — `equipped_trait_ids` is scanned twice per
-    // traited_fact (overridden filter + activation gate) across every trait;
-    // O(n) linear scans add up across the ~36-trait hot path.
-    let equipped_set: std::collections::HashSet<u32> = equipped_trait_ids.iter().copied().collect();
+    fn absorb_pair(dst: &mut Vec<f64>, src: Vec<f64>, competitive: bool) {
+        match src.as_slice() {
+            [] => {}
+            [a, b] => dst.push(if competitive { a.min(*b) } else { a.max(*b) }),
+            _ => dst.extend(src),
+        }
+    }
+    fn absorb_map(
+        dst: &mut HashMap<String, Vec<f64>>,
+        src: HashMap<String, Vec<f64>>,
+        competitive: bool,
+    ) {
+        for (key, vals) in src {
+            absorb_pair(dst.entry(key).or_default(), vals, competitive);
+        }
+    }
+    fn absorb_mode_pairs(dst: &mut DamageModifiers, src: DamageModifiers, competitive: bool) {
+        absorb_pair(&mut dst.strike_pct, src.strike_pct, competitive);
+        absorb_pair(&mut dst.condition_pct, src.condition_pct, competitive);
+        absorb_pair(&mut dst.crit_damage_pct, src.crit_damage_pct, competitive);
+        absorb_pair(&mut dst.condi_duration_pct, src.condi_duration_pct, competitive);
+        absorb_pair(&mut dst.boon_duration_pct, src.boon_duration_pct, competitive);
+        absorb_pair(&mut dst.healing_pct, src.healing_pct, competitive);
+        absorb_pair(&mut dst.crit_chance_pct, src.crit_chance_pct, competitive);
+        absorb_map(&mut dst.specific_condi, src.specific_condi, competitive);
+        absorb_map(
+            &mut dst.specific_condi_duration,
+            src.specific_condi_duration,
+            competitive,
+        );
+        dst.unparsed.extend(src.unparsed);
+    }
 
-    // 1. Traits — look for Percent facts with damage-related text
+    let mut mods = DamageModifiers::default();
+    let equipped_set: std::collections::HashSet<u32> = equipped_trait_ids.iter().copied().collect();
+    let competitive = matches!(
+        ctx.game_mode,
+        gw2_core::types::GameMode::PvP | gw2_core::types::GameMode::WvW
+    );
+
     for &trait_id in equipped_trait_ids {
         let Some(t) = traits_cache.get(&trait_id) else {
             continue;
         };
 
-        // Collect overridden indices from active traited_facts
         let overridden: std::collections::HashSet<u32> = t
             .traited_facts
             .iter()
@@ -551,23 +582,22 @@ pub fn extract_damage_modifiers(
             .filter_map(|tf| tf.overrides)
             .collect();
 
-        // Process base facts
+        let mut trait_mods = DamageModifiers::default();
         for (idx, fact) in t.facts.iter().enumerate() {
             if overridden.contains(&(idx as u32)) {
                 continue;
             }
-            extract_modifier_from_fact(&mut mods, fact);
+            extract_modifier_from_fact(&mut trait_mods, fact);
         }
-
-        // Process active traited_facts
         for tf in &t.traited_facts {
             if equipped_set.contains(&tf.requires_trait) {
-                extract_modifier_from_fact(&mut mods, &tf.fact);
+                extract_modifier_from_fact(&mut trait_mods, &tf.fact);
             }
         }
+        // ponytail: pair = API PvE/competitive split; 3+ values stay summed
+        absorb_mode_pairs(&mut mods, trait_mods, competitive);
     }
 
-    // 2. Rune bonuses — parse strings like "+7% Burning Duration", "+5% damage"
     if let Some(id) = rune_id {
         if let Some(rune) = items_cache.get(&id) {
             if let Some(ref details) = rune.details {
@@ -578,14 +608,12 @@ pub fn extract_damage_modifiers(
         }
     }
 
-    // 3. Sigils — known permanent damage sigils
     for &id in sigil_ids {
         if let Some(sigil) = items_cache.get(&id) {
             parse_sigil_modifier(&mut mods, sigil, ctx);
         }
     }
 
-    // 4. Relics — parse known relic effects
     if let Some(id) = relic_id {
         if let Some(relic) = items_cache.get(&id) {
             parse_relic_modifier(&mut mods, relic);
@@ -658,48 +686,63 @@ pub(crate) fn percent_text_is_conditional(text: &str) -> bool {
     .any(|k| t.contains(k))
 }
 
-/// Map a percent + surrounding text into DamageModifiers.
-/// `points` is the raw tooltip number (7.0 for +7%); `decimal` is 0.07.
-/// Returns true if a known category was written.
-fn apply_percent_category(
-    mods: &mut DamageModifiers,
-    hay: &str,
-    points: f64,
-    decimal: f64,
-) -> bool {
-    if hay.contains("critical chance")
+/// Shared standing-percent classification used by combat and synergy.
+/// `Ignore` is a known non-outgoing tooltip (consumed, not unparsed).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PercentClass {
+    CritChancePts,
+    CritDamagePts,
+    Condition,
+    Healing,
+    CondiDuration,
+    BoonDuration,
+    SpecificCondiDuration(String),
+    Strike,
+    Ignore,
+}
+
+/// Map tooltip text + raw percent into one standing-combat bucket.
+/// Conditional gating stays in the callers (`percent_text_is_conditional`).
+pub(crate) fn classify_percent_text(text: &str, percent: f64) -> Option<PercentClass> {
+    let hay = text.to_lowercase();
+    let is_crit_chance = hay.contains("critical chance")
         || hay.contains("crit chance")
         || hay.contains("critical-strike chance")
         || hay.contains("critical-hit chance")
-        || hay.contains("critical strike chance")
-    {
-        mods.crit_chance_pct.push(points);
-        return true;
+        || hay.contains("critical strike chance");
+    if is_crit_chance {
+        // Precise Strike / Hidden Killer / Burst Precision: 100% is a guaranteed
+        // first hit, not +100 standing crit-chance points.
+        return Some(if percent >= 100.0 {
+            PercentClass::Ignore
+        } else {
+            PercentClass::CritChancePts
+        });
     }
     if hay.contains("critical damage") || hay.contains("crit damage") {
-        mods.crit_damage_pct.push(points);
-        return true;
+        return Some(PercentClass::CritDamagePts);
+    }
+    if hay.contains("recharge")
+        || hay.contains("reduced")
+        || hay.contains("reduction")
+        || hay.contains("incoming")
+    {
+        return Some(PercentClass::Ignore);
+    }
+    if hay.trim() == "percent" {
+        return Some(PercentClass::Ignore);
     }
     if hay.contains("condition damage") {
-        if decimal.abs() > 0.001 {
-            mods.condition_pct.push(decimal);
-        }
-        return true;
+        return Some(PercentClass::Condition);
     }
     if hay.contains("outgoing healing") || hay.contains("healing effectiveness") {
-        mods.healing_pct.push(decimal);
-        return true;
-    }
-    if hay.contains("incoming") {
-        return true;
+        return Some(PercentClass::Healing);
     }
     if hay.contains("condition duration") {
-        mods.condi_duration_pct.push(decimal);
-        return true;
+        return Some(PercentClass::CondiDuration);
     }
     if hay.contains("boon duration") {
-        mods.boon_duration_pct.push(decimal);
-        return true;
+        return Some(PercentClass::BoonDuration);
     }
     for boon in &[
         "might",
@@ -716,8 +759,7 @@ fn apply_percent_category(
         "stability",
     ] {
         if hay.contains(boon) && hay.contains("duration") {
-            mods.boon_duration_pct.push(decimal);
-            return true;
+            return Some(PercentClass::BoonDuration);
         }
     }
     for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
@@ -725,26 +767,64 @@ fn apply_percent_category(
             let condi_cap = capitalize(condi);
             let canonical =
                 crate::data::boon_condition_formulas::canonical_condition_name(&condi_cap);
+            return Some(PercentClass::SpecificCondiDuration(canonical.to_string()));
+        }
+    }
+    if hay.contains("strike damage") || (hay.contains("damage") && !hay.contains("condition")) {
+        return Some(PercentClass::Strike);
+    }
+    None
+}
+
+fn apply_percent_category(
+    mods: &mut DamageModifiers,
+    hay: &str,
+    points: f64,
+    decimal: f64,
+) -> bool {
+    match classify_percent_text(hay, points) {
+        Some(PercentClass::Ignore) => true,
+        Some(PercentClass::CritChancePts) => {
+            mods.crit_chance_pct.push(points);
+            true
+        }
+        Some(PercentClass::CritDamagePts) => {
+            mods.crit_damage_pct.push(points);
+            true
+        }
+        Some(PercentClass::Condition) => {
+            if decimal.abs() > 0.001 {
+                mods.condition_pct.push(decimal);
+            }
+            true
+        }
+        Some(PercentClass::Healing) => {
+            mods.healing_pct.push(decimal);
+            true
+        }
+        Some(PercentClass::CondiDuration) => {
+            mods.condi_duration_pct.push(decimal);
+            true
+        }
+        Some(PercentClass::BoonDuration) => {
+            mods.boon_duration_pct.push(decimal);
+            true
+        }
+        Some(PercentClass::SpecificCondiDuration(key)) => {
             mods.specific_condi_duration
-                .entry(canonical.to_string())
+                .entry(key)
                 .or_default()
                 .push(decimal);
-            return true;
+            true
         }
-    }
-    if hay.contains("strike damage") {
-        if decimal.abs() > 0.001 {
-            mods.strike_pct.push(decimal);
+        Some(PercentClass::Strike) => {
+            if decimal.abs() > 0.001 {
+                mods.strike_pct.push(decimal);
+            }
+            true
         }
-        return true;
+        None => false,
     }
-    if hay.contains("damage") && !hay.contains("condition") {
-        if decimal.abs() > 0.001 {
-            mods.strike_pct.push(decimal);
-        }
-        return true;
-    }
-    false
 }
 
 fn percent_is_vs_target(rest_after_percent: &str) -> bool {
@@ -2437,4 +2517,89 @@ mod tests {
             "PvE and WvW boon should match (currently mode-invariant)",
         );
     }
+
+
+    fn percent_trait(id: u32, name: &str, pairs: &[(&str, f64)]) -> Trait {
+        Trait {
+            id,
+            name: name.to_string(),
+            icon: None,
+            description: None,
+            specialization: 0,
+            tier: 0,
+            order: 0,
+            slot: "Minor".into(),
+            facts: pairs
+                .iter()
+                .map(|(text, pct)| Fact::Percent {
+                    text: Some((*text).into()),
+                    icon: None,
+                    percent: Some(*pct),
+                })
+                .collect(),
+            traited_facts: vec![],
+            skills: vec![],
+        }
+    }
+
+    #[test]
+    fn screenshot_percent_facts_are_legal_in_wvw() {
+        let traits = [
+            percent_trait(1011, "Precise Strike", &[("Critical Chance Increase", 100.0)]),
+            percent_trait(
+                1001,
+                "Wolfsong",
+                &[("Damage Increase", 5.0), ("Damage Increase", 10.0)],
+            ),
+            percent_trait(
+                2156,
+                "Furious Strength",
+                &[("Damage Increase", 15.0), ("Damage Increase", 7.0)],
+            ),
+            percent_trait(
+                2119,
+                "Second Skin",
+                &[("Damage Reduced", 25.0), ("Damage Reduced", 33.0)],
+            ),
+            percent_trait(1015, "Remorseless", &[("Damage Increase", 25.0)]),
+            percent_trait(1698, "Lead the Wind", &[("Recharge Reduced", 20.0)]),
+        ];
+        let cache: HashMap<u32, Trait> = traits.into_iter().map(|t| (t.id, t)).collect();
+        let ids: Vec<u32> = cache.keys().copied().collect();
+        let items = HashMap::new();
+
+        let wvw = extract_damage_modifiers(
+            &ids,
+            None,
+            &[],
+            None,
+            &cache,
+            &items,
+            &BalanceContext::wvw(),
+        );
+        assert!(
+            wvw.crit_chance_pct.is_empty(),
+            "Precise Strike must not add standing crit: {:?}",
+            wvw.crit_chance_pct
+        );
+        let mut strike = wvw.strike_pct.clone();
+        strike.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(strike, vec![0.05, 0.07, 0.25]);
+        let expected_mult = 1.05 * 1.07 * 1.25;
+        assert!((wvw.total_strike_mult() - expected_mult).abs() < 1e-9);
+
+        let pve = extract_damage_modifiers(
+            &ids,
+            None,
+            &[],
+            None,
+            &cache,
+            &items,
+            &BalanceContext::pve(),
+        );
+        let mut pve_strike = pve.strike_pct.clone();
+        pve_strike.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(pve_strike, vec![0.10, 0.15, 0.25]);
+    }
+
 }

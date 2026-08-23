@@ -83,10 +83,14 @@ pub fn generate_neighbors(
         groups.push(swap_relics_for_failed_gates(candidate, db));
     }
     groups.push(swap_gear_prefix(candidate, db));
+    groups.push(swap_gear_groups(candidate, db));
     groups.push(swap_rune(candidate, db));
     groups.push(swap_sigil_slots(candidate, db));
     groups.push(swap_relic(candidate, db));
+    groups.push(swap_heal_skills(candidate, db, profession_name));
     groups.push(swap_utility_skills(candidate, db, profession_name));
+    groups.push(swap_elite_skills(candidate, db, profession_name));
+    groups.push(swap_major_traits(candidate, db, locks));
     groups.push(swap_elite_spec(candidate, db, profession_name, locks));
     groups.push(swap_weapons(candidate, db, profession_name));
 
@@ -209,16 +213,23 @@ pub fn optimize_v2_search(
         }
 
         // Viable kit first; roam ranks the fight sim, not paper combat indices.
-        next.sort_by(|a, b| referee::search_rank(&b.report).cmp(&referee::search_rank(&a.report)));
+        next.sort_by_key(|candidate| std::cmp::Reverse(referee::search_rank(&candidate.report)));
 
-        // Same gear+rune with different utilities are different kits.
+        // A build identity includes every combat-relevant choice. Omitting
+        // weapons, sigils, or traits collapsed genuinely different WvW chains.
         next.dedup_by(|a, b| {
             a.validated.gear_prefix == b.validated.gear_prefix
+                && a.validated.gear_groups == b.validated.gear_groups
                 && a.validated.rune == b.validated.rune
+                && a.validated.sigils == b.validated.sigils
                 && a.validated.relic == b.validated.relic
+                && a.validated.specializations == b.validated.specializations
+                && a.validated.weapons == b.validated.weapons
                 && a.validated.skills.heal == b.validated.skills.heal
                 && a.validated.skills.elite == b.validated.skills.elite
                 && a.validated.skills.utilities == b.validated.skills.utilities
+                && a.validated.legends == b.validated.legends
+                && a.validated.pets == b.validated.pets
         });
 
         next.truncate(config.beam_width);
@@ -267,6 +278,31 @@ fn swap_gear_prefix(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuil
             b
         })
         .collect()
+}
+
+/// Mutate armor, trinkets, and weapons independently. Three groups capture the
+/// common WvW Marauder/Berserker/Demolisher mixes without exploding the search
+/// into sixteen independent slot dimensions.
+fn swap_gear_groups(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuild> {
+    let mut itemstats: Vec<&gw2_api::models::ItemStat> = db.itemstats.values().collect();
+    itemstats.sort_by_key(|itemstat| itemstat.id);
+    let mut out = Vec::with_capacity(itemstats.len() * 3);
+    for itemstat in itemstats {
+        let prefix = ValidatedGearPrefix {
+            itemstat_id: itemstat.id,
+            name: itemstat.name.clone(),
+        };
+        for group in 0..3 {
+            let mut build = candidate.validated.clone();
+            match group {
+                0 => build.gear_groups.armor = Some(prefix.clone()),
+                1 => build.gear_groups.trinkets = Some(prefix.clone()),
+                _ => build.gear_groups.weapons = Some(prefix.clone()),
+            }
+            out.push(build);
+        }
+    }
+    out
 }
 
 /// Operator 2 — swap rune.
@@ -368,6 +404,118 @@ fn swap_relic(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuild> {
             b
         })
         .collect()
+}
+
+fn eligible_slot_skills(
+    candidate: &BeamCandidate,
+    db: &GameDb,
+    profession_name: &str,
+    slot: &str,
+) -> Vec<(u32, String)> {
+    // Revenant bar skills are a legend package, not independent slot choices.
+    if profession_name == "Revenant" {
+        return Vec::new();
+    }
+    let equipped_specs: Vec<u32> = candidate
+        .validated
+        .specializations
+        .iter()
+        .map(|spec| spec.spec_id)
+        .collect();
+    let mut choices: Vec<_> = db
+        .skills_by_profession
+        .get(profession_name)
+        .into_iter()
+        .flatten()
+        .filter_map(|id| db.skills.get(id))
+        .filter(|skill| {
+            skill.slot.as_deref() == Some(slot)
+                && db.skill_palette_id(skill.id) != 0
+                && skill
+                    .specialization
+                    .is_none_or(|required| equipped_specs.contains(&required))
+        })
+        .map(|skill| (skill.id, skill.name.clone()))
+        .collect();
+    choices.sort_by_key(|(id, _)| *id);
+    choices
+}
+
+/// Heal skills define recovery timing and are a first-class search dimension.
+fn swap_heal_skills(
+    candidate: &BeamCandidate,
+    db: &GameDb,
+    profession_name: &str,
+) -> Vec<ValidatedBuild> {
+    eligible_slot_skills(candidate, db, profession_name, "Heal")
+        .into_iter()
+        .filter(|choice| candidate.validated.skills.heal.as_ref() != Some(choice))
+        .map(|choice| {
+            let mut build = candidate.validated.clone();
+            build.skills.heal = Some(choice);
+            build
+        })
+        .collect()
+}
+
+/// Elite skills can be the protected spike, defensive reset, or group-control
+/// endpoint; keeping them fixed made those complete chains unreachable.
+fn swap_elite_skills(
+    candidate: &BeamCandidate,
+    db: &GameDb,
+    profession_name: &str,
+) -> Vec<ValidatedBuild> {
+    eligible_slot_skills(candidate, db, profession_name, "Elite")
+        .into_iter()
+        .filter(|choice| candidate.validated.skills.elite.as_ref() != Some(choice))
+        .map(|choice| {
+            let mut build = candidate.validated.clone();
+            build.skills.elite = Some(choice);
+            build
+        })
+        .collect()
+}
+
+/// Mutate one unlocked major-trait column at a time while preserving the
+/// minor-trait spine and every explicit user lock.
+fn swap_major_traits(
+    candidate: &BeamCandidate,
+    db: &GameDb,
+    locks: &BuildLocks,
+) -> Vec<ValidatedBuild> {
+    let mut out = Vec::new();
+    for (spec_idx, validated_spec) in candidate.validated.specializations.iter().enumerate() {
+        let Some(spec) = db.specializations.get(&validated_spec.spec_id) else {
+            continue;
+        };
+        for column in 0..3usize {
+            if locks.locked_trait(spec.id, column).is_some() {
+                continue;
+            }
+            for trait_id in spec.major_traits.iter().skip(column * 3).take(3).copied() {
+                if validated_spec.trait_ids.get(column) == Some(&trait_id) {
+                    continue;
+                }
+                let Some(trait_data) = db.traits.get(&trait_id) else {
+                    continue;
+                };
+                let mut build = candidate.validated.clone();
+                let target = &mut build.specializations[spec_idx];
+                while target.trait_ids.len() < 3 {
+                    target.trait_ids.push(0);
+                    target.trait_names.push(String::new());
+                }
+                target.trait_ids[column] = trait_id;
+                target.trait_names[column] = trait_data.name.clone();
+                target.all_trait_ids = spec.minor_traits.clone();
+                target
+                    .all_trait_ids
+                    .extend(target.trait_ids.iter().copied().filter(|id| *id != 0));
+                out.push(build);
+            }
+        }
+    }
+    out
 }
 
 /// Operator 5 — swap utility skills.
@@ -688,6 +836,8 @@ fn retarget_after_elite_swap(build: &mut ValidatedBuild, db: &GameDb, profession
             build.skills.elite = None;
         }
     }
+    build.skills.profession =
+        crate::rotation::builder::profession_skills_for_build(db, &profession.name, &equipped);
 
     let combos = land_weapon_combos(profession, &elite_ids);
     if !weapon_set_ok(&build.weapons.set1, profession, &elite_ids) {
@@ -941,7 +1091,7 @@ mod tests {
                 note: String::new(),
             },
             GateResult {
-                gate: ViabilityGate::KillWindow,
+                gate: ViabilityGate::EncounterOutcome,
                 passed: false,
                 note: String::new(),
             },
@@ -1090,15 +1240,18 @@ mod tests {
 
         let candidate = make_candidate(ValidatedBuild::default());
         let neighbors = generate_neighbors(&candidate, &db, "Warrior", &BuildLocks::default());
-        // First two emitted positions: gear-prefix (group 0 round 0), then rune
-        // (group 1 round 0). Confirms rune is reachable inside a small cap.
+        // The first round now includes whole-build gear, grouped gear, and rune
+        // mutations. The rune must still be reachable inside a small cap.
         assert!(
             neighbors[0].gear_prefix.is_some(),
             "first neighbor should be a gear-prefix mutation"
         );
         assert!(
-            neighbors[1].rune.is_some(),
-            "second neighbor should be a rune mutation (round-robin interleave)"
+            neighbors
+                .iter()
+                .take(3)
+                .any(|neighbor| neighbor.rune.is_some()),
+            "the first operator round should include a rune mutation"
         );
     }
 

@@ -3,6 +3,7 @@
 
 use gw2_api::models::facts::Fact;
 use gw2_api::models::Skill;
+use std::collections::HashMap;
 
 use crate::data::normalized_effects::{EffectCategory, NormalizedEffect};
 use crate::gamedb::GameDb;
@@ -44,7 +45,6 @@ pub fn enrich_with_cleanse(
     db: &GameDb,
 ) {
     use crate::data::quality::FactualValue;
-    use std::collections::HashMap;
 
     // Build a fast lookup: source_id → max conditions_removed from NormalizedEffects.
     // A skill may appear as multiple RemovesCondition entries; take the largest amount.
@@ -140,6 +140,48 @@ pub fn tag_weapon_set(skills: &mut [RotationSkill], weapon_set: u8) {
     }
 }
 
+/// Resolve the F1-F5 mechanic bar for the equipped specialization set.
+/// Elite-spec replacements win over their core skill in the same profession
+/// slot; deterministic ID ordering breaks ties in incomplete API data.
+pub fn profession_skills_for_build(
+    db: &GameDb,
+    profession_name: &str,
+    equipped_spec_ids: &[u32],
+) -> Vec<(u32, String)> {
+    let mut by_slot: HashMap<String, Vec<&gw2_api::models::Skill>> = HashMap::new();
+    for skill_id in db
+        .skills_by_profession
+        .get(profession_name)
+        .into_iter()
+        .flatten()
+    {
+        let Some(skill) = db.skills.get(skill_id) else {
+            continue;
+        };
+        let Some(slot) = skill.slot.as_deref() else {
+            continue;
+        };
+        if !slot.starts_with("Profession_")
+            || skill
+                .specialization
+                .is_some_and(|required| !equipped_spec_ids.contains(&required))
+        {
+            continue;
+        }
+        by_slot.entry(slot.to_string()).or_default().push(skill);
+    }
+
+    let mut slots: Vec<_> = by_slot.into_iter().collect();
+    slots.sort_by(|a, b| a.0.cmp(&b.0));
+    slots
+        .into_iter()
+        .filter_map(|(_, mut skills)| {
+            skills.sort_by_key(|skill| (u8::from(skill.specialization.is_none()), skill.id));
+            skills.first().map(|skill| (skill.id, skill.name.clone()))
+        })
+        .collect()
+}
+
 /// Extract cooldown from Fact::Recharge (seconds → milliseconds).
 fn extract_cooldown(facts: &[Fact]) -> u32 {
     for fact in facts {
@@ -201,6 +243,21 @@ fn extract_effects(facts: &[Fact], description: Option<&str>) -> Vec<SkillEffect
                     field_type: ft.clone(),
                 });
             }
+            Fact::ComboFinisher {
+                finisher_type: Some(finisher_type),
+                percent,
+                ..
+            } => {
+                effects.push(SkillEffect::ComboFinisher {
+                    finisher_type: finisher_type.clone(),
+                    percent: percent.unwrap_or(100),
+                });
+            }
+            Fact::Heal { hit_count, .. } | Fact::HealingAdjust { hit_count, .. } => {
+                effects.push(SkillEffect::Healing {
+                    hit_count: hit_count.unwrap_or(1),
+                });
+            }
             Fact::Number {
                 text: Some(text),
                 value,
@@ -216,11 +273,10 @@ fn extract_effects(facts: &[Fact], description: Option<&str>) -> Vec<SkillEffect
                 } else if let Some(conditions_removed) =
                     condition_cleanse_count_from_text(text, *value)
                 {
-                    let pulses = if interval_ms == 0 {
-                        1
-                    } else {
-                        window_ms.max(interval_ms) / interval_ms
-                    };
+                    let pulses = window_ms
+                        .max(interval_ms)
+                        .checked_div(interval_ms)
+                        .unwrap_or(1);
                     effects.push(SkillEffect::RemovesCondition {
                         conditions_removed: conditions_removed * pulses,
                     });
@@ -228,16 +284,15 @@ fn extract_effects(facts: &[Fact], description: Option<&str>) -> Vec<SkillEffect
             }
             Fact::Distance {
                 distance: Some(d), ..
-            } if *d >= 200 => {
-                // Displacement this large is usually a leap/teleport, not a pull tick.
-                if !effects
+            } if *d >= 200
+                && !effects
                     .iter()
-                    .any(|e| matches!(e, SkillEffect::Mobility { .. }))
-                {
-                    effects.push(SkillEffect::Mobility {
-                        kind: MobilityKind::Leap,
-                    });
-                }
+                    .any(|e| matches!(e, SkillEffect::Mobility { .. })) =>
+            {
+                // Displacement this large is usually a leap/teleport, not a pull tick.
+                effects.push(SkillEffect::Mobility {
+                    kind: MobilityKind::Leap,
+                });
             }
             _ => {}
         }
@@ -431,6 +486,22 @@ fn push_description_effects(effects: &mut Vec<SkillEffect>, description: &str) {
             stacks: 1,
             duration_ms: 5000,
         });
+    }
+    if d.contains("barrier")
+        && !effects
+            .iter()
+            .any(|effect| matches!(effect, SkillEffect::Barrier { .. }))
+    {
+        // The public skill endpoint commonly omits barrier coefficients. Keep
+        // the estimate conservative; the WvW report marks heuristic effects.
+        effects.push(SkillEffect::Barrier { amount: 1_000.0 });
+    }
+    if (d.contains("heal yourself") || d.contains("heals you"))
+        && !effects
+            .iter()
+            .any(|effect| matches!(effect, SkillEffect::Healing { .. }))
+    {
+        effects.push(SkillEffect::Healing { hit_count: 1 });
     }
 }
 
@@ -776,7 +847,6 @@ mod tests {
         )));
     }
 
-
     #[test]
     fn distortion_is_unstrippable_cover() {
         let facts = vec![Fact::Buff {
@@ -1081,6 +1151,29 @@ mod tests {
             max_count,
             Some(5),
             "should take maximum conditions_removed across entries"
+        );
+    }
+
+    #[test]
+    fn profession_bar_prefers_the_equipped_elite_replacement() {
+        let mut db = empty_db();
+        let core_f1 = make_test_skill(1, "Core F1", "Profession_1", vec![]);
+        let mut elite_f1 = make_test_skill(2, "Elite F1", "Profession_1", vec![]);
+        elite_f1.specialization = Some(77);
+        let mut other_elite_f1 = make_test_skill(3, "Other Elite F1", "Profession_1", vec![]);
+        other_elite_f1.specialization = Some(88);
+        let core_f2 = make_test_skill(4, "Core F2", "Profession_2", vec![]);
+
+        for skill in [core_f1, elite_f1, other_elite_f1, core_f2] {
+            db.skills.insert(skill.id, skill);
+        }
+        db.skills_by_profession
+            .insert("Warrior".into(), vec![1, 2, 3, 4]);
+
+        let selected = profession_skills_for_build(&db, "Warrior", &[77]);
+        assert_eq!(
+            selected,
+            vec![(2, "Elite F1".into()), (4, "Core F2".into())]
         );
     }
 }
