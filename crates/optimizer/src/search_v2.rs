@@ -258,13 +258,19 @@ pub fn optimize_v2_search(
         return Err("Cancelled".into());
     }
 
-    let best = beam
+    finish_search(beam)
+}
+
+/// Take the already-ranked beam head. Empty is a real failure; a lock-respecting
+/// non-viable head is a provisional result, not an error.
+fn finish_search(beam: Vec<BeamCandidate>) -> Result<ValidatedBuild, String> {
+    let mut best = beam
         .into_iter()
         .next()
         .ok_or_else(|| "No candidates survived beam search".to_string())?;
     if !best.report.viability.is_viable {
-        return Err(format!(
-            "Couldn't find a viable build. Failed: {}",
+        best.validated.warnings.push(format!(
+            "Best lock-respecting result is provisional: {}",
             referee::viability_failure_summary(&best.report.viability)
         ));
     }
@@ -1082,7 +1088,7 @@ mod tests {
     use crate::referee::{GateResult, RefereeReport, ViabilityGate, ViabilityReport};
     use crate::scenario::{CombatTier, ScenarioSpec};
     use crate::stats::StatBlock;
-    use crate::validation::ValidatedBuild;
+    use crate::validation::{ValidatedBuild, ValidatedItem, ValidatedSpec};
     use gw2_core::types::{BuildLocks, GameMode};
 
     fn empty_db() -> GameDb {
@@ -1146,6 +1152,74 @@ mod tests {
             validated,
             report: dummy_report(),
         }
+    }
+
+    #[test]
+    fn finish_search_returns_best_nonviable_locked_candidate() {
+        let locked = ValidatedBuild {
+            specializations: vec![ValidatedSpec {
+                spec_id: 5,
+                name: "Druid".into(),
+                elite: true,
+                trait_ids: vec![1, 2, 3],
+                trait_names: vec!["A".into(), "B".into(), "C".into()],
+                all_trait_ids: vec![1, 2, 3],
+            }],
+            rune: Some(ValidatedItem {
+                id: 9,
+                name: "Scholar".into(),
+            }),
+            ..ValidatedBuild::default()
+        };
+        let mut report = dummy_report();
+        report.viability.is_viable = false;
+        report.viability.gates = vec![GateResult {
+            gate: ViabilityGate::ProtectedExecution,
+            passed: false,
+            note: "protected=0ms (minimum 2000ms secured inside the sequence)".into(),
+        }];
+        let result = finish_search(vec![BeamCandidate {
+            validated: locked,
+            report: report.clone(),
+        }])
+        .expect("non-viable locked candidate is a result");
+        assert_eq!(result.specializations[0].name, "Druid");
+        assert_eq!(result.rune.as_ref().map(|item| item.id), Some(9));
+        let summary = crate::referee::viability_failure_summary(&report.viability);
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains(&summary)),
+            "warnings: {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn finish_search_empty_beam_still_errors() {
+        let err = finish_search(Vec::new()).unwrap_err();
+        assert_eq!(err, "No candidates survived beam search");
+    }
+
+    #[test]
+    fn roam_nonviable_tie_honors_user_weights() {
+        let mut lower = dummy_report();
+        lower.scenario.game_mode = GameMode::WvW;
+        lower.scenario.combat_tier = CombatTier::Solo;
+        lower.viability.is_viable = false;
+        lower.viability.gates = vec![GateResult {
+            gate: ViabilityGate::ProtectedExecution,
+            passed: false,
+            note: "protected=0ms".into(),
+        }];
+        lower.user_intent_score = 0.1;
+        let mut higher = lower.clone();
+        higher.user_intent_score = 0.8;
+        assert!(
+            crate::referee::search_rank(&higher) > crate::referee::search_rank(&lower),
+            "user_intent_score must break a non-viable roam tie"
+        );
     }
 
     #[test]
