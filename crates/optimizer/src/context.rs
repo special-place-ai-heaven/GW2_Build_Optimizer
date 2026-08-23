@@ -438,10 +438,17 @@ fn section_current_build(summary: &str) -> String {
 fn format_fact_text(fact: &Fact) -> Option<String> {
     match fact {
         Fact::AttributeAdjust {
+            text,
             target: Some(t),
             value: Some(v),
             ..
-        } => Some(format!("- {}: {:+}", t, v)),
+        } => {
+            if crate::stats::is_permanent_stat_adjust(text.as_deref()) {
+                Some(format!("- {}: {:+}", t, v))
+            } else {
+                text.as_ref().map(|label| format!("- {}: {}", label, v))
+            }
+        }
 
         Fact::Buff {
             status: Some(s),
@@ -559,6 +566,20 @@ mod tests {
             target: Some("Power".into()),
         };
         assert_eq!(format_fact_text(&fact), Some("- Power: +180".into()));
+    }
+
+    #[test]
+    fn test_format_fact_text_tooltip_amount_preserves_label() {
+        let fact = Fact::AttributeAdjust {
+            text: Some("Life Siphon Damage".into()),
+            icon: None,
+            value: Some(3517),
+            target: Some("Power".into()),
+        };
+        assert_eq!(
+            format_fact_text(&fact),
+            Some("- Life Siphon Damage: 3517".into())
+        );
     }
 
     #[test]

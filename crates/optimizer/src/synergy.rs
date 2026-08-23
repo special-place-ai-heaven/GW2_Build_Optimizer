@@ -307,10 +307,14 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
 
     match fact {
         Fact::AttributeAdjust {
+            text,
             value: Some(val),
             target: Some(ref target),
             ..
         } => {
+            if !crate::stats::is_permanent_stat_adjust(text.as_deref()) {
+                return effects;
+            }
             if let Some(stat) = StatType::from_api(target) {
                 effects.push(NormalizedEffect::StatBonus {
                     stat,
@@ -332,59 +336,52 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             } else {
                 *pct
             };
-            // Crit damage MUST be checked before the generic "damage" catch-all:
-            // "Critical Damage" contains the substring "damage" but is neither
-            // strike nor condition damage. Ordering it first prevents it from
-            // being misclassified as a strike modifier.
-            if text_lower.contains("critical damage") || text_lower.contains("crit damage") {
-                effects.push(NormalizedEffect::DamageModifier {
-                    category: DamageCategory::Crit,
-                    percent: pct,
-                });
-            } else if text_lower.contains("condition damage") {
-                // Mirror the strike branch below: trust the structured Percent fact.
-                // Requiring the literal word "increase" silently dropped condition
-                // damage facts phrased as "Condition Damage: +X%".
-                effects.push(NormalizedEffect::DamageModifier {
-                    category: DamageCategory::Condition,
-                    percent: pct,
-                });
-            } else if text_lower.contains("damage") {
-                effects.push(NormalizedEffect::DamageModifier {
-                    category: DamageCategory::Strike,
-                    percent: pct,
-                });
-            } else if text_lower.contains("outgoing healing") {
-                effects.push(NormalizedEffect::DamageModifier {
-                    category: DamageCategory::Healing,
-                    percent: pct,
-                });
-            } else if text_lower.contains("boon duration") {
-                effects.push(NormalizedEffect::DurationBonus {
-                    kind: DurationKind::AllBoon,
-                    percent: pct,
-                });
-            } else if text_lower.contains("condition duration") {
-                effects.push(NormalizedEffect::DurationBonus {
-                    kind: DurationKind::AllCondition,
-                    percent: pct,
-                });
-            }
-
-            // Specific condition duration patterns. Search terms stay verb-form
-            // (tooltip text says "Poison Duration"); the stored key is
-            // canonicalized so it matches the "Poisoned" form every other path
-            // (and `duration_matches`) uses. Without this, a "+X% Poison Duration"
-            // bonus keyed as "Poison" would never match a "Poisoned" lookup.
-            for condi in &["Bleeding", "Burning", "Poison", "Torment", "Confusion"] {
-                if text_lower.contains(&condi.to_lowercase()) && text_lower.contains("duration") {
-                    let canonical =
-                        crate::data::boon_condition_formulas::canonical_condition_name(condi);
-                    effects.push(NormalizedEffect::DurationBonus {
-                        kind: DurationKind::SpecificCondition(canonical.to_string()),
+            match crate::combat::classify_percent_text(text, pct) {
+                Some(crate::combat::PercentClass::Strike) => {
+                    effects.push(NormalizedEffect::DamageModifier {
+                        category: DamageCategory::Strike,
                         percent: pct,
                     });
                 }
+                Some(crate::combat::PercentClass::Condition) => {
+                    effects.push(NormalizedEffect::DamageModifier {
+                        category: DamageCategory::Condition,
+                        percent: pct,
+                    });
+                }
+                Some(crate::combat::PercentClass::CritDamagePts) => {
+                    effects.push(NormalizedEffect::DamageModifier {
+                        category: DamageCategory::Crit,
+                        percent: pct,
+                    });
+                }
+                Some(crate::combat::PercentClass::Healing) => {
+                    effects.push(NormalizedEffect::DamageModifier {
+                        category: DamageCategory::Healing,
+                        percent: pct,
+                    });
+                }
+                Some(crate::combat::PercentClass::BoonDuration) => {
+                    effects.push(NormalizedEffect::DurationBonus {
+                        kind: DurationKind::AllBoon,
+                        percent: pct,
+                    });
+                }
+                Some(crate::combat::PercentClass::CondiDuration) => {
+                    effects.push(NormalizedEffect::DurationBonus {
+                        kind: DurationKind::AllCondition,
+                        percent: pct,
+                    });
+                }
+                Some(crate::combat::PercentClass::SpecificCondiDuration(canonical)) => {
+                    effects.push(NormalizedEffect::DurationBonus {
+                        kind: DurationKind::SpecificCondition(canonical),
+                        percent: pct,
+                    });
+                }
+                Some(crate::combat::PercentClass::CritChancePts)
+                | Some(crate::combat::PercentClass::Ignore)
+                | None => {}
             }
         }
         Fact::Buff {
@@ -1098,8 +1095,7 @@ mod tests {
             target_name: "B".into(),
             link_type: SynergyLinkType::ModifierStacking,
             score: 1.0,
-            description: "Stacking Strike damage modifiers multiply for greater effect."
-                .into(),
+            description: "Stacking Strike damage modifiers multiply for greater effect.".into(),
         };
         let text = template_explanation(&[link.clone(), link.clone(), link], "Valkyrie", "Thief");
         assert!(text.starts_with("This Thief build uses Valkyrie gear."));
@@ -1109,7 +1105,6 @@ mod tests {
             1
         );
     }
-
 
     #[test]
     fn all_stats_bonus_emits_nine_attributes() {
@@ -1134,7 +1129,7 @@ mod tests {
     #[test]
     fn test_extract_effects_from_attribute_adjust() {
         let fact = Fact::AttributeAdjust {
-            text: Some("Power".into()),
+            text: None,
             icon: None,
             value: Some(150),
             target: Some("Power".into()),
@@ -1148,6 +1143,29 @@ mod tests {
             }
             _ => panic!("Expected StatBonus"),
         }
+    }
+
+    #[test]
+    fn test_extract_effects_skips_conditional_attribute_adjust() {
+        let fact = Fact::AttributeAdjust {
+            text: Some("Additional Condition Damage".into()),
+            icon: None,
+            value: Some(120),
+            target: Some("ConditionDamage".into()),
+        };
+        assert!(extract_effects_from_fact(&fact).is_empty());
+    }
+
+    #[test]
+    fn extract_effects_ignores_tooltip_effect_amounts() {
+        let fact = Fact::AttributeAdjust {
+            text: Some("Life Siphon Damage".into()),
+            icon: None,
+            value: Some(3517),
+            target: Some("Power".into()),
+        };
+
+        assert!(extract_effects_from_fact(&fact).is_empty());
     }
 
     #[test]
