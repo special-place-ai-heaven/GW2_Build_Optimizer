@@ -749,7 +749,7 @@ fn saved_to_suggestion(
         },
         build_summary: String::new(),
         stat_prefix: saved.stat_prefix.clone(),
-        gear_prefixes: saved.gear_prefixes.clone(),
+        gear_prefixes: saved.gear_prefixes.inherit_empty(&saved.stat_prefix),
         specializations: saved.specializations.clone(),
         weapons: saved.weapons.clone(),
         skills: saved.skills.clone(),
@@ -1207,6 +1207,16 @@ mod tests {
             with_solo.total_dps_index > without_solo.total_dps_index,
             "total DPS should reflect reconstructed modifiers on load"
         );
+    }
+
+    #[test]
+    fn empty_gear_groups_inherit_stat_prefix_on_load() {
+        let saved = build_saved_for_modifier_reconstruction();
+        assert!(saved.gear_prefixes.armor.is_empty());
+        let suggestion = super::saved_to_suggestion(&saved, None);
+        assert_eq!(suggestion.gear_prefixes.armor, "Viper's");
+        assert_eq!(suggestion.gear_prefixes.trinkets, "Viper's");
+        assert_eq!(suggestion.gear_prefixes.weapons, "Viper's");
     }
 
     #[test]

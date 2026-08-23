@@ -542,6 +542,9 @@ fn calculate_candidate_stats(
             continue;
         };
 
+        if matches!(slot.as_str(), "WeaponB1" | "WeaponB2") {
+            continue;
+        }
         let Some(slot_type) = data::SlotType::from_api_slot(slot) else {
             continue;
         };
@@ -556,7 +559,7 @@ fn calculate_candidate_stats(
     stats
 }
 
-/// PvE/WvW: 16 slot budgets from the prefix. PvP: matching amulet attributes only.
+/// PvE/WvW: armor, trinkets, and the active land weapon set. PvP: matching amulet only.
 pub fn apply_optimized_gear_stats(
     stats: &mut stats::StatBlock,
     db: &GameDb,
@@ -579,7 +582,10 @@ pub fn apply_optimized_gear_stats(
     }
     let budgets = data::slot_budgets::slot_budgets();
     let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
-    for &(slot_type, _) in data::EQUIPMENT_SLOTS {
+    for &(slot_type, slot_name) in data::EQUIPMENT_SLOTS {
+        if matches!(slot_name, "WeaponB1" | "WeaponB2") {
+            continue;
+        }
         if let Some(budget) = budgets.get(slot_type, shape) {
             add_budget_stats_for_itemstat(stats, itemstat, budget);
         }
@@ -1474,15 +1480,21 @@ fn apply_validated_gear_stats(
         .as_ref()
         .map(|prefix| prefix.itemstat_id);
     let groups = &validated.gear_groups;
-    if ctx.game_mode == GameMode::PvP
-        || (groups.armor.is_none() && groups.trinkets.is_none() && groups.weapons.is_none())
-    {
+    if ctx.game_mode == GameMode::PvP {
         apply_optimized_gear_stats(stats, db, fallback, ctx);
         return;
     }
 
     let budgets = data::slot_budgets::slot_budgets();
     for &(slot_type, slot_name) in data::EQUIPMENT_SLOTS {
+        let slot_type = if slot_name.starts_with("Weapon") {
+            match active_land_weapon_budget(slot_name, &validated.weapons.set1) {
+                Some(kind) => kind,
+                None => continue,
+            }
+        } else {
+            slot_type
+        };
         let group_prefix = if matches!(
             slot_name,
             "Helm" | "Shoulders" | "Coat" | "Gloves" | "Leggings" | "Boots"
@@ -1503,6 +1515,26 @@ fn apply_validated_gear_stats(
         if let Some(budget) = budgets.get(slot_type, shape) {
             add_budget_stats_for_itemstat(stats, itemstat, budget);
         }
+    }
+}
+
+/// Active land set only. Two-hand when MH is present and OH is empty;
+/// one-hand per filled hand otherwise. The inactive set never enters the sheet.
+fn active_land_weapon_budget(
+    slot_name: &str,
+    set: &crate::validation::ValidatedWeaponSet,
+) -> Option<data::SlotType> {
+    match slot_name {
+        "WeaponA1" => match (&set.main_hand, &set.off_hand) {
+            (Some(_), None) => Some(data::SlotType::WeaponTwoHand),
+            (Some(_), Some(_)) => Some(data::SlotType::WeaponOneHand),
+            _ => None,
+        },
+        "WeaponA2" => match (&set.main_hand, &set.off_hand) {
+            (Some(_), Some(_)) | (None, Some(_)) => Some(data::SlotType::WeaponOneHand),
+            _ => None,
+        },
+        _ => None,
     }
 }
 

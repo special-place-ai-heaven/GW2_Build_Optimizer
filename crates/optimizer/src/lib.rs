@@ -7,6 +7,8 @@ pub mod engine;
 pub mod gamedb;
 pub mod gemini;
 pub mod gemini_tools;
+#[cfg(test)]
+mod grouped_sheet;
 pub mod llm;
 #[cfg(test)]
 pub mod parser_consistency_tests;

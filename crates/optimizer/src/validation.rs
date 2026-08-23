@@ -96,6 +96,35 @@ pub struct ValidatedGearGroups {
     pub weapons: Option<ValidatedGearPrefix>,
 }
 
+impl ValidatedBuild {
+    /// Prefix each group actually spends after inheriting `gear_prefix`.
+    pub fn effective_prefix_ids(&self) -> (Option<u32>, Option<u32>, Option<u32>) {
+        let inherit = self.gear_prefix.as_ref().map(|prefix| prefix.itemstat_id);
+        (
+            self.gear_groups
+                .armor
+                .as_ref()
+                .map(|prefix| prefix.itemstat_id)
+                .or(inherit),
+            self.gear_groups
+                .trinkets
+                .as_ref()
+                .map(|prefix| prefix.itemstat_id)
+                .or(inherit),
+            self.gear_groups
+                .weapons
+                .as_ref()
+                .map(|prefix| prefix.itemstat_id)
+                .or(inherit),
+        )
+    }
+
+    /// Search identity is the spent prefix set. Empty groups inherit `gear_prefix`.
+    pub fn gear_identity(&self) -> (Option<u32>, Option<u32>, Option<u32>) {
+        self.effective_prefix_ids()
+    }
+}
+
 /// A structured change entry from Gemini's output.
 #[derive(Debug, Clone)]
 pub struct ChangeEntry {
