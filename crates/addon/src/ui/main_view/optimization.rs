@@ -180,9 +180,6 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             return Ok(vec![suggestion]);
                         }
                         Err(e) => {
-                            if e.starts_with("Couldn't find a viable") {
-                                return Err(e);
-                            }
                             nexus::log::log(
                                 nexus::log::LogLevel::Warning,
                                 "GW2 Build Optimizer",
