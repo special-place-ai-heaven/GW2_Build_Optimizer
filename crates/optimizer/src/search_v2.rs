@@ -233,8 +233,7 @@ pub fn optimize_v2_search(
         // A build identity includes every combat-relevant choice. Omitting
         // weapons, sigils, or traits collapsed genuinely different WvW chains.
         next.dedup_by(|a, b| {
-            a.validated.gear_prefix == b.validated.gear_prefix
-                && a.validated.gear_groups == b.validated.gear_groups
+            a.validated.gear_identity() == b.validated.gear_identity()
                 && a.validated.rune == b.validated.rune
                 && a.validated.sigils == b.validated.sigils
                 && a.validated.relic == b.validated.relic
