@@ -127,8 +127,8 @@ pub(crate) fn is_roam_objective(scenario: &ScenarioSpec) -> bool {
     needs_outcome_clock(scenario) || needs_mobility_out(scenario)
 }
 
-/// Higher is better. WvW ranks landed protected execution and recovery before
-/// average dummy DPS or synthetic combat indices.
+/// Higher is better. WvW first requires a viable, completed exchange, then
+/// honors the player's radar weights before ranking surplus role execution.
 pub fn search_rank(report: &RefereeReport) -> [i64; 8] {
     let viable = i64::from(report.viability.is_viable);
     let gates = report.viability.gates.iter().filter(|g| g.passed).count() as i64;
@@ -164,9 +164,6 @@ pub fn search_rank(report: &RefereeReport) -> [i64; 8] {
         let sustain = wvw
             .map(|fight| (fight.remaining_health_ratio * 100_000.0) as i64)
             .unwrap_or(0);
-        let control_window = wvw
-            .map(|fight| fight.longest_protected_window_ms as i64)
-            .unwrap_or(0);
         let tempo = wvw
             .and_then(|fight| {
                 fight
@@ -174,15 +171,16 @@ pub fn search_rank(report: &RefereeReport) -> [i64; 8] {
                     .map(|at| fight.duration_ms.saturating_sub(at))
             })
             .unwrap_or(0) as i64;
+        let intent = (report.user_intent_score * 1_000_000.0).round() as i64;
         [
             viable,
             gates,
             sequence,
             outcome,
+            intent,
             execution,
             tempo,
             repeatable * 1_000_000 + sustain,
-            control_window,
         ]
     } else {
         let score = (report.user_intent_score * 1_000_000.0) as i64;
@@ -318,9 +316,9 @@ pub fn evaluate_viability_gates(
                         }
                         CombatKind::Harasser => {
                             fight.peak_protected_damage_2s >= fight.target_health * 0.15
-                                || fight.control_landed_ms >= 750
+                                || fight.secured_sequence_control_ms >= 750
                         }
-                        CombatKind::Disabler => fight.control_landed_ms >= 750,
+                        CombatKind::Disabler => fight.secured_sequence_control_ms >= 750,
                         CombatKind::Support | CombatKind::Commander | CombatKind::Staller => true,
                     };
                     let passed = fight.chain_completed && damage_route;
@@ -328,11 +326,11 @@ pub fn evaluate_viability_gates(
                         gate: ViabilityGate::ProtectedExecution,
                         passed,
                         note: format!(
-                            "protected={}ms, actions={}, 2s spike={:.0}, control={}ms, interrupted={} (minimum {}ms)",
+                            "protected={}ms, actions={}, 2s spike={:.0}, sequence control={}ms, interrupted={} (minimum {}ms secured inside the sequence)",
                             fight.longest_protected_window_ms,
                             fight.protected_action_count,
                             fight.peak_protected_damage_2s,
-                            fight.control_landed_ms,
+                            fight.secured_sequence_control_ms,
                             fight.interrupted_casts,
                             crate::rotation::wvw_timeline::MIN_PROTECTED_WINDOW_MS,
                         ),
@@ -434,15 +432,22 @@ pub fn evaluate_viability_gates(
 
         if needs_outcome_clock(scenario) {
             gates.push(match rotation {
-                Some(rot) => GateResult {
-                    gate: ViabilityGate::EncounterOutcome,
-                    passed: rot.downed,
-                    note: if rot.downed {
-                        "target threshold reached in window".into()
+                Some(rot) => {
+                    let target_reached = if scenario.game_mode == GameMode::WvW {
+                        rot.wvw.as_ref().is_some_and(|fight| fight.target_reached)
                     } else {
-                        "target threshold not reached by end of clock".into()
-                    },
-                },
+                        rot.downed
+                    };
+                    GateResult {
+                        gate: ViabilityGate::EncounterOutcome,
+                        passed: target_reached,
+                        note: if target_reached {
+                            "target threshold reached in window".into()
+                        } else {
+                            "target threshold not reached by end of clock".into()
+                        },
+                    }
+                }
                 None => GateResult {
                     gate: ViabilityGate::EncounterOutcome,
                     passed: false,
@@ -710,6 +715,31 @@ pub fn evaluate_validated_build(
         }));
     }
 
+    if let Some(fight) = rotation.as_ref().and_then(|result| result.wvw.as_ref()) {
+        if fight.unmodeled_effect_sources > 0 {
+            quality = quality.merge(&DataQuality::Provisional);
+            quality_reasons.push(DataQualityReason {
+                field: "wvw_timeline.effects".into(),
+                entity: profession_name.into(),
+                modes: vec![ctx.game_mode.label().to_string()],
+                explanation: format!(
+                    "{} equipped or triggered effect sources are not yet represented by timed rules",
+                    fight.unmodeled_effect_sources
+                ),
+            });
+        }
+        if !fight.resource_model_complete {
+            quality = quality.merge(&DataQuality::Provisional);
+            quality_reasons.push(DataQualityReason {
+                field: "wvw_timeline.resources".into(),
+                entity: profession_name.into(),
+                modes: vec![ctx.game_mode.label().to_string()],
+                explanation:
+                    "The active profession mechanic is outside the bounded resource ledger".into(),
+            });
+        }
+    }
+
     RefereeReport {
         scenario: scenario.clone(),
         stats,
@@ -796,11 +826,14 @@ mod tests {
                 remaining_health_ratio: 0.9,
                 sustain_margin: 400.0,
                 player_survived: true,
-                target_reached: false,
+                target_reached: true,
                 chain_completed: true,
+                secured_sequence_damage: 10_000.0,
+                secured_sequence_control_ms: 1_000,
                 repeatable: true,
                 resource_blocked_actions: 0,
                 resource_legal: true,
+                resource_model_complete: true,
                 unmodeled_effect_sources: 0,
             }),
         }
@@ -871,6 +904,32 @@ mod tests {
 
         assert!(search_rank(&make_rank_report(earlier)) > search_rank(&make_rank_report(later)));
     }
+    #[test]
+    fn roam_disabler_rank_honors_user_weights_after_required_exchange() {
+        let mut aligned_rotation = make_viable_rotation();
+        aligned_rotation
+            .wvw
+            .as_mut()
+            .expect("WvW report")
+            .control_landed_ms = 2_000;
+
+        let mut misaligned_rotation = aligned_rotation.clone();
+        misaligned_rotation
+            .wvw
+            .as_mut()
+            .expect("WvW report")
+            .control_landed_ms = 3_000;
+
+        let mut aligned = make_rank_report(aligned_rotation);
+        aligned.scenario.combat_kind = crate::scenario::CombatKind::Disabler;
+        aligned.user_intent_score = 0.85;
+
+        let mut misaligned = make_rank_report(misaligned_rotation);
+        misaligned.scenario.combat_kind = crate::scenario::CombatKind::Disabler;
+        misaligned.user_intent_score = 0.25;
+
+        assert!(search_rank(&aligned) > search_rank(&misaligned));
+    }
 
     fn make_wvw_scenario() -> ScenarioSpec {
         ScenarioSpec {
@@ -925,6 +984,23 @@ mod tests {
                 g.gate, g.note
             );
         }
+    }
+
+    #[test]
+    fn wvw_outcome_uses_timeline_not_legacy_dummy() {
+        let mut rot = make_viable_rotation();
+        rot.downed = true;
+        rot.wvw.as_mut().expect("WvW report").target_reached = false;
+        let combat = make_viable_combat();
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_tier = CombatTier::Solo;
+        scenario.combat_kind = crate::scenario::CombatKind::Harasser;
+
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let gate =
+            gate_by_kind(&report.gates, &ViabilityGate::EncounterOutcome).expect("outcome gate");
+
+        assert!(!gate.passed);
     }
 
     /// WvW build missing stunbreak → non-viable, stunbreak gate fails.
@@ -1531,6 +1607,7 @@ mod tests {
     fn gate_harasser_requires_the_target_threshold() {
         let mut rot = make_viable_rotation();
         rot.downed = false;
+        rot.wvw.as_mut().unwrap().target_reached = false;
         let combat = make_viable_combat();
         let mut scenario = make_wvw_scenario();
         scenario.combat_kind = crate::scenario::CombatKind::Harasser;

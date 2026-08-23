@@ -4,7 +4,7 @@
 //! `optimize_v2()`.  The search loop (T02) builds on top of the primitives
 //! defined here.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::balance::BalanceContext;
 use crate::engine::OptimizeProgress;
@@ -72,6 +72,7 @@ pub fn generate_neighbors(
     db: &GameDb,
     profession_name: &str,
     locks: &BuildLocks,
+    weights: &OptimizationWeights,
 ) -> Vec<ValidatedBuild> {
     let mut groups: Vec<Vec<ValidatedBuild>> = Vec::new();
     if !candidate.report.viability.is_viable {
@@ -82,8 +83,8 @@ pub fn generate_neighbors(
         ));
         groups.push(swap_relics_for_failed_gates(candidate, db));
     }
-    groups.push(swap_gear_prefix(candidate, db));
-    groups.push(swap_gear_groups(candidate, db));
+    groups.push(swap_gear_prefix(candidate, db, weights));
+    groups.push(swap_gear_groups(candidate, db, weights));
     groups.push(swap_rune(candidate, db));
     groups.push(swap_sigil_slots(candidate, db));
     groups.push(swap_relic(candidate, db));
@@ -130,7 +131,12 @@ pub fn optimize_v2_search(
     locks: &gw2_core::types::BuildLocks,
     config: &SearchConfig,
     on_progress: &mut dyn FnMut(OptimizeProgress),
+    is_cancelled: &dyn Fn() -> bool,
 ) -> Result<ValidatedBuild, String> {
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
+
     // Step 1: select gear prefix (cosine sim).
     let gear_match = scoring::select_gear_prefix(weights);
     let prefix_name = gear_match.primary;
@@ -151,6 +157,10 @@ pub fn optimize_v2_search(
         &mut |_| {},
     )?;
 
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
+
     // Step 3: evaluate seed.
     let seed_report = referee::evaluate_validated_build(
         &seed_result.validated,
@@ -168,11 +178,12 @@ pub fn optimize_v2_search(
     }];
 
     let start = Instant::now();
+    let deadline = start + Duration::from_secs(config.time_limit_secs);
     let mut eval_count = 0usize;
     let mut generation = 0u32;
 
     // Step 5: beam loop — keep permuting until the clock or eval budget is gone.
-    while eval_count < config.eval_budget && start.elapsed().as_secs() < config.time_limit_secs {
+    while eval_count < config.eval_budget && Instant::now() < deadline && !is_cancelled() {
         generation += 1;
         on_progress(OptimizeProgress {
             stage: format!(
@@ -191,9 +202,13 @@ pub fn optimize_v2_search(
         let neighbor_cap = budget_per.clamp(1, 80);
 
         for candidate in &beam {
-            let neighbors = generate_neighbors(candidate, db, profession_name, locks);
+            if Instant::now() >= deadline || is_cancelled() {
+                break;
+            }
+            let neighbors = generate_neighbors(candidate, db, profession_name, locks, weights);
             for neighbor in neighbors.into_iter().take(neighbor_cap) {
-                if eval_count >= config.eval_budget {
+                if eval_count >= config.eval_budget || Instant::now() >= deadline || is_cancelled()
+                {
                     break;
                 }
                 let report = referee::evaluate_validated_build(
@@ -240,6 +255,10 @@ pub fn optimize_v2_search(
         beam = next;
     }
 
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
+
     let best = beam
         .into_iter()
         .next()
@@ -264,17 +283,36 @@ pub fn optimize_v2_search(
 /// Iterates by id so beam-search neighbor ordering — and therefore the
 /// tie-break behavior in the downstream `sort_by + dedup_by + truncate`
 /// pipeline — is stable across runs.
-fn swap_gear_prefix(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuild> {
-    let mut itemstats: Vec<&gw2_api::models::ItemStat> = db.itemstats.values().collect();
-    itemstats.sort_by_key(|is| is.id);
+fn swap_gear_prefix(
+    candidate: &BeamCandidate,
+    db: &GameDb,
+    weights: &OptimizationWeights,
+) -> Vec<ValidatedBuild> {
+    let itemstats = prioritized_itemstats(db, weights);
     itemstats
         .into_iter()
+        .filter(|itemstat| {
+            candidate
+                .validated
+                .gear_prefix
+                .as_ref()
+                .is_none_or(|current| {
+                    current.itemstat_id != itemstat.id
+                        || candidate.validated.gear_groups.armor.as_ref() != Some(current)
+                        || candidate.validated.gear_groups.trinkets.as_ref() != Some(current)
+                        || candidate.validated.gear_groups.weapons.as_ref() != Some(current)
+                })
+        })
         .map(|is| {
             let mut b = candidate.validated.clone();
-            b.gear_prefix = Some(ValidatedGearPrefix {
+            let prefix = ValidatedGearPrefix {
                 itemstat_id: is.id,
                 name: is.name.clone(),
-            });
+            };
+            b.gear_prefix = Some(prefix.clone());
+            b.gear_groups.armor = Some(prefix.clone());
+            b.gear_groups.trinkets = Some(prefix.clone());
+            b.gear_groups.weapons = Some(prefix);
             b
         })
         .collect()
@@ -283,9 +321,12 @@ fn swap_gear_prefix(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuil
 /// Mutate armor, trinkets, and weapons independently. Three groups capture the
 /// common WvW Marauder/Berserker/Demolisher mixes without exploding the search
 /// into sixteen independent slot dimensions.
-fn swap_gear_groups(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuild> {
-    let mut itemstats: Vec<&gw2_api::models::ItemStat> = db.itemstats.values().collect();
-    itemstats.sort_by_key(|itemstat| itemstat.id);
+fn swap_gear_groups(
+    candidate: &BeamCandidate,
+    db: &GameDb,
+    weights: &OptimizationWeights,
+) -> Vec<ValidatedBuild> {
+    let itemstats = prioritized_itemstats(db, weights);
     let mut out = Vec::with_capacity(itemstats.len() * 3);
     for itemstat in itemstats {
         let prefix = ValidatedGearPrefix {
@@ -293,6 +334,14 @@ fn swap_gear_groups(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuil
             name: itemstat.name.clone(),
         };
         for group in 0..3 {
+            let current = match group {
+                0 => candidate.validated.gear_groups.armor.as_ref(),
+                1 => candidate.validated.gear_groups.trinkets.as_ref(),
+                _ => candidate.validated.gear_groups.weapons.as_ref(),
+            };
+            if current.is_some_and(|equipped| equipped.itemstat_id == prefix.itemstat_id) {
+                continue;
+            }
             let mut build = candidate.validated.clone();
             match group {
                 0 => build.gear_groups.armor = Some(prefix.clone()),
@@ -303,6 +352,46 @@ fn swap_gear_groups(candidate: &BeamCandidate, db: &GameDb) -> Vec<ValidatedBuil
         }
     }
     out
+}
+
+/// Put the two prefixes selected from the user's radar weights before the
+/// deterministic ID order. The beam evaluates at most 80 neighbors per member,
+/// so ID-only ordering made relevant condition/sustain mixes unreachable.
+fn prioritized_itemstats<'a>(
+    db: &'a GameDb,
+    weights: &OptimizationWeights,
+) -> Vec<&'a gw2_api::models::ItemStat> {
+    let preferred = scoring::select_gear_prefix(weights);
+    let primary = normalized_prefix_name(preferred.primary);
+    let secondary = preferred.secondary.map(normalized_prefix_name);
+    let mut itemstats: Vec<&gw2_api::models::ItemStat> = db.itemstats.values().collect();
+    itemstats.sort_by_key(|itemstat| {
+        let name = normalized_prefix_name(&itemstat.name);
+        let preference = if name == primary {
+            0
+        } else if secondary
+            .as_ref()
+            .is_some_and(|candidate| *candidate == name)
+        {
+            1
+        } else {
+            2
+        };
+        (preference, itemstat.id)
+    });
+    itemstats
+}
+
+fn normalized_prefix_name(name: &str) -> String {
+    let mut normalized: String = name
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect();
+    if normalized.ends_with('s') {
+        normalized.pop();
+    }
+    normalized
 }
 
 /// Operator 2 — swap rune.
@@ -1107,7 +1196,13 @@ mod tests {
     fn test_generate_neighbors_empty_db_no_panic() {
         let db = empty_db();
         let candidate = make_candidate(ValidatedBuild::default());
-        let neighbors = generate_neighbors(&candidate, &db, "Guardian", &BuildLocks::default());
+        let neighbors = generate_neighbors(
+            &candidate,
+            &db,
+            "Guardian",
+            &BuildLocks::default(),
+            &OptimizationWeights::default(),
+        );
         // No items or skills → no neighbors.
         assert!(
             neighbors.is_empty(),
@@ -1166,7 +1261,13 @@ mod tests {
         db.runes.push(102);
 
         let candidate = make_candidate(ValidatedBuild::default());
-        let neighbors = generate_neighbors(&candidate, &db, "Warrior", &BuildLocks::default());
+        let neighbors = generate_neighbors(
+            &candidate,
+            &db,
+            "Warrior",
+            &BuildLocks::default(),
+            &OptimizationWeights::default(),
+        );
 
         // Collect the rune IDs that appear in results.
         let rune_ids: Vec<u32> = neighbors
@@ -1239,7 +1340,13 @@ mod tests {
         db.runes.push(200);
 
         let candidate = make_candidate(ValidatedBuild::default());
-        let neighbors = generate_neighbors(&candidate, &db, "Warrior", &BuildLocks::default());
+        let neighbors = generate_neighbors(
+            &candidate,
+            &db,
+            "Warrior",
+            &BuildLocks::default(),
+            &OptimizationWeights::default(),
+        );
         // The first round now includes whole-build gear, grouped gear, and rune
         // mutations. The rune must still be reachable inside a small cap.
         assert!(
@@ -1253,6 +1360,53 @@ mod tests {
                 .any(|neighbor| neighbor.rune.is_some()),
             "the first operator round should include a rune mutation"
         );
+    }
+
+    #[test]
+    fn weighted_prefixes_are_reachable_before_the_neighbor_cap() {
+        let mut db = empty_db();
+        for (id, name) in [
+            (1, "Berserker's"),
+            (2, "Marauder's"),
+            (3, "Soldier's"),
+            (900, "Plaguedoctor's"),
+        ] {
+            db.itemstats.insert(
+                id,
+                gw2_api::models::ItemStat {
+                    id,
+                    name: name.into(),
+                    attributes: Vec::new(),
+                },
+            );
+        }
+        let weights = OptimizationWeights {
+            power: 0.10,
+            condition: 0.55,
+            boon_support: 0.19,
+            healing: 0.32,
+            sustain: 0.42,
+            control: 0.42,
+        };
+        let candidate = make_candidate(ValidatedBuild::default());
+
+        let neighbors =
+            generate_neighbors(&candidate, &db, "Ranger", &BuildLocks::default(), &weights);
+
+        assert_eq!(
+            neighbors[0]
+                .gear_prefix
+                .as_ref()
+                .map(|prefix| prefix.name.as_str()),
+            Some("Plaguedoctor's")
+        );
+        assert!(neighbors.iter().take(12).any(|build| {
+            build
+                .gear_groups
+                .armor
+                .as_ref()
+                .is_some_and(|prefix| prefix.name == "Plaguedoctor's")
+        }));
     }
 
     /// optimize_v2_search on an empty DB (no professions) must return Err and
@@ -1287,6 +1441,7 @@ mod tests {
             &locks,
             &config,
             &mut |_| {},
+            &|| false,
         );
 
         assert!(
@@ -1423,7 +1578,13 @@ mod tests {
             specs: [None, None, Some(27)],
             trait_locks: HashMap::new(),
         };
-        let none_locked = generate_neighbors(&candidate, &db, "Guardian", &locked);
+        let none_locked = generate_neighbors(
+            &candidate,
+            &db,
+            "Guardian",
+            &locked,
+            &OptimizationWeights::default(),
+        );
         assert!(
             none_locked
                 .iter()
@@ -1431,7 +1592,13 @@ mod tests {
             "locked elite must not jump"
         );
 
-        let jumped = generate_neighbors(&candidate, &db, "Guardian", &BuildLocks::default());
+        let jumped = generate_neighbors(
+            &candidate,
+            &db,
+            "Guardian",
+            &BuildLocks::default(),
+            &OptimizationWeights::default(),
+        );
         assert!(
             jumped
                 .iter()
@@ -1473,7 +1640,13 @@ mod tests {
             ..Default::default()
         };
         let candidate = make_candidate(build);
-        let neighbors = generate_neighbors(&candidate, &db, "Guardian", &BuildLocks::default());
+        let neighbors = generate_neighbors(
+            &candidate,
+            &db,
+            "Guardian",
+            &BuildLocks::default(),
+            &OptimizationWeights::default(),
+        );
         assert!(
             neighbors
                 .iter()

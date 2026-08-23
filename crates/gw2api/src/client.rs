@@ -547,21 +547,21 @@ mod tests {
     }
 
     #[test]
-        fn apply_lang_query_appends_when_absent() {
-            let mut url = "https://api.guildwars2.com/v2/skills".to_string();
+    fn apply_lang_query_appends_when_absent() {
+        let mut url = "https://api.guildwars2.com/v2/skills".to_string();
         apply_lang_query(&mut url, &[], Some("fr"));
         assert_eq!(url, "https://api.guildwars2.com/v2/skills?lang=fr");
         let mut url = "https://api.guildwars2.com/v2/skills?ids=1".to_string();
         apply_lang_query(&mut url, &[("ids", "1")], Some("fr"));
         assert_eq!(url, "https://api.guildwars2.com/v2/skills?ids=1&lang=fr");
-        }
+    }
 
-        #[test]
-        fn apply_lang_query_skips_if_param_present() {
-            let mut url = "https://api.guildwars2.com/v2/skills?ids=1".to_string();
-            apply_lang_query(&mut url, &[("ids", "1"), ("lang", "es")], Some("fr"));
-            assert_eq!(url, "https://api.guildwars2.com/v2/skills?ids=1");
-        }
+    #[test]
+    fn apply_lang_query_skips_if_param_present() {
+        let mut url = "https://api.guildwars2.com/v2/skills?ids=1".to_string();
+        apply_lang_query(&mut url, &[("ids", "1"), ("lang", "es")], Some("fr"));
+        assert_eq!(url, "https://api.guildwars2.com/v2/skills?ids=1");
+    }
 
     #[test]
     fn build_bulk_ids_query_single_id() {

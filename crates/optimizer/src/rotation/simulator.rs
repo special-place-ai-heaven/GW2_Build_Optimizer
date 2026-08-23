@@ -21,8 +21,8 @@ use gw2_core::types::GameMode;
 
 use super::combat_model::{
     kit_escape_kinds, kit_has_corrupt, kit_has_cover_answer, kit_has_interrupt,
-    kit_has_mobility_out, kit_has_stability_cover, kit_has_strip, setup_priority, setup_window_ms,
-    EnemyDummy,
+    kit_has_mobility_out, kit_has_stability_cover, kit_has_strip, setup_priority,
+    setup_window_ms_for_mode, EnemyDummy,
 };
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::{RotationSkill, SimulationResult, SkillEffect, SkillSlot, SkillUsage};
@@ -173,7 +173,7 @@ pub fn simulate_with(
     };
 
     let mut sim = SimState::new(skills, duration, enemy, params.clone());
-    sim.setup_until_ms = setup_window_ms(duration);
+    sim.setup_until_ms = setup_window_ms_for_mode(duration, params.mode == GameMode::WvW);
     sim.run();
     sim.into_result()
 }

@@ -84,7 +84,12 @@ pub fn render_view_toggle(ui: &Ui, show_optimized: &mut bool) {
         *show_optimized = false;
     }
     ui.same_line_with_spacing(0.0, 6.0);
-    if theme::pill(ui, &t("label.optimized"), *show_optimized, "##view_optimized") {
+    if theme::pill(
+        ui,
+        &t("label.optimized"),
+        *show_optimized,
+        "##view_optimized",
+    ) {
         *show_optimized = true;
     }
 }

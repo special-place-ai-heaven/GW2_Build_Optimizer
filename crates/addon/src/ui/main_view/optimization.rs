@@ -159,6 +159,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                                 s.main.optimize_stage = progress.stage.clone();
                             });
                         },
+                        &|| token.is_cancelled(),
                     ) {
                         Ok(synergy_result) => {
                             if token.is_cancelled() {
@@ -608,22 +609,35 @@ fn synergy_result_to_suggestion(
         }
     };
 
-    let mixed_gear = [
-        ("Armor", v.gear_groups.armor.as_ref()),
-        ("Trinkets", v.gear_groups.trinkets.as_ref()),
-        ("Weapons", v.gear_groups.weapons.as_ref()),
-    ]
-    .into_iter()
-    .filter_map(|(group, prefix)| prefix.map(|prefix| format!("{group}: {}", prefix.name)))
-    .collect::<Vec<_>>();
-    let gear_summary = if mixed_gear.is_empty() {
-        v.gear_prefix
+    let fallback_prefix = v
+        .gear_prefix
+        .as_ref()
+        .map(|prefix| prefix.name.clone())
+        .unwrap_or_else(|| "Unknown".into());
+    let gear_prefixes = gw2_core::types::GearPrefixGroups {
+        armor: v
+            .gear_groups
+            .armor
             .as_ref()
             .map(|prefix| prefix.name.clone())
-            .unwrap_or_else(|| "Unknown".into())
-    } else {
-        mixed_gear.join(" · ")
+            .unwrap_or_else(|| fallback_prefix.clone()),
+        trinkets: v
+            .gear_groups
+            .trinkets
+            .as_ref()
+            .map(|prefix| prefix.name.clone())
+            .unwrap_or_else(|| fallback_prefix.clone()),
+        weapons: v
+            .gear_groups
+            .weapons
+            .as_ref()
+            .map(|prefix| prefix.name.clone())
+            .unwrap_or_else(|| fallback_prefix.clone()),
     };
+    let gear_summary = format!(
+        "Armor: {} · Trinkets: {} · Weapons: {}",
+        gear_prefixes.armor, gear_prefixes.trinkets, gear_prefixes.weapons
+    );
 
     let mut suggestion = BuildSuggestion {
         label,
@@ -633,6 +647,7 @@ fn synergy_result_to_suggestion(
             .as_ref()
             .map(|p| p.name.clone())
             .unwrap_or_default(),
+        gear_prefixes,
         specializations,
         weapons,
         skills,
@@ -825,6 +840,11 @@ fn candidate_to_suggestion(
         label: format!("Score: {:.2}", candidate.score),
         build_summary: format!("Gear: {}", candidate.gear.stat_prefix_name),
         stat_prefix: candidate.gear.stat_prefix_name.clone(),
+        gear_prefixes: gw2_core::types::GearPrefixGroups {
+            armor: candidate.gear.stat_prefix_name.clone(),
+            trinkets: candidate.gear.stat_prefix_name.clone(),
+            weapons: candidate.gear.stat_prefix_name.clone(),
+        },
         specializations,
         weapons: Vec::new(),
         skills: Vec::new(),
@@ -857,6 +877,7 @@ fn candidate_to_suggestion(
 pub(super) fn simulate_suggestion_rotation(
     suggestion: &mut crate::ui::comparison::BuildSuggestion,
     db: &gw2_optimizer::gamedb::GameDb,
+    balance_ctx: &BalanceContext,
 ) {
     if suggestion.skills.is_empty() && suggestion.weapons.is_empty() {
         return;
@@ -906,7 +927,11 @@ pub(super) fn simulate_suggestion_rotation(
             }
             if !set_skill_ids.is_empty() {
                 let mut set_skills =
-                    gw2_optimizer::rotation::builder::build_rotation_skills(&set_skill_ids, db);
+                    gw2_optimizer::rotation::builder::build_rotation_skills_for_context(
+                        &set_skill_ids,
+                        db,
+                        balance_ctx,
+                    );
                 gw2_optimizer::rotation::builder::tag_weapon_set(&mut set_skills, *set_num);
                 all_rotation_skills.extend(set_skills);
             }
@@ -951,7 +976,11 @@ pub(super) fn simulate_suggestion_rotation(
             if let Some(skill) = skill {
                 if !all_rotation_skills.iter().any(|rs| rs.skill_id == skill.id) {
                     let mut rs_vec =
-                        gw2_optimizer::rotation::builder::build_rotation_skills(&[skill.id], db);
+                        gw2_optimizer::rotation::builder::build_rotation_skills_for_context(
+                            &[skill.id],
+                            db,
+                            balance_ctx,
+                        );
                     // Non-weapon skills stay at weapon_set=0 (always available)
                     all_rotation_skills.append(&mut rs_vec);
                 }
@@ -969,12 +998,32 @@ pub(super) fn simulate_suggestion_rotation(
     let condition_damage = stats.map(|s| s.condition_damage as f64).unwrap_or(0.0);
     let weapon_strength = 1100.0; // reference weapon strength (same as combat.rs)
 
-    let result = gw2_optimizer::rotation::simulator::simulate(
+    let mode = balance_ctx.game_mode.clone();
+    let result = gw2_optimizer::rotation::simulator::simulate_with(
         &all_rotation_skills,
         0,
-        power,
-        condition_damage,
-        weapon_strength,
+        &gw2_optimizer::rotation::simulator::SimParams {
+            power,
+            condition_damage,
+            weapon_strength,
+            precision: stats.map(|s| s.precision as f64).unwrap_or(1000.0),
+            ferocity: stats.map(|s| s.ferocity as f64).unwrap_or(0.0),
+            crit_chance_bonus: 0.0,
+            fury_crit_chance_bonus: gw2_optimizer::data::boon_condition_formulas::boons()
+                .fury_crit_bonus(mode.clone())
+                * 100.0,
+            strike_mult: 1.0,
+            condition_mult: 1.0,
+            condition_duration_mult: 1.0
+                + stats.map(|s| s.expertise as f64).unwrap_or(0.0) / 1500.0,
+            boon_duration_mult: 1.0 + stats.map(|s| s.concentration as f64).unwrap_or(0.0) / 1500.0,
+            healing_power: stats.map(|s| s.healing_power as f64).unwrap_or(0.0),
+            healing_mult: 1.0,
+            max_health: stats.map(|s| s.health as f64).unwrap_or(19_212.0),
+            armor: stats.map(|s| s.armor as f64).unwrap_or(2_597.0),
+            mode,
+        },
+        gw2_optimizer::rotation::combat_model::EnemyDummy::default(),
     );
 
     suggestion.rotation = Some(gw2_core::types::RotationBreakdown {
@@ -1808,7 +1857,7 @@ fn enrich_with_llm(
     if let Some(first) = suggestions.first_mut() {
         apply_gemini_response(first, &gemini_build);
         // Run rotation simulation now that LLM has populated skills
-        simulate_suggestion_rotation(first, db);
+        simulate_suggestion_rotation(first, db, balance_ctx);
     }
 
     Ok(())
@@ -2119,7 +2168,8 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 if suggestion.chat_code.is_none() {
                                     suggestion.chat_code = suggestion_to_chat_code(&suggestion, db);
                                 }
-                                simulate_suggestion_rotation(&mut suggestion, db);
+                                let balance_ctx = BalanceContext::new(s.main.game_mode.clone());
+                                simulate_suggestion_rotation(&mut suggestion, db, &balance_ctx);
                             }
                             let chips = match (s.main.game_db.as_ref(), validated.as_ref()) {
                                 (Some(db), Some(v)) => crate::chat_links::chips_from_plate(

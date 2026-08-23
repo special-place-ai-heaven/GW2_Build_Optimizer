@@ -237,18 +237,23 @@ pub fn download_game_and_names(
             inner_total: 0,
         });
         if cache.is_stale(&crate::localize::cache_key(lang), build) {
-            crate::localize::download(cache, lang, || cancelled(), |msg| {
-                let (inner_done, inner_total) = parse_items_progress(msg);
-                on_progress(DownloadProgress {
-                    current_step: step,
-                    total_steps: total,
-                    step_name: format!("Names ({lang})"),
-                    done: false,
-                    detail: Some(msg.to_string()),
-                    inner_done,
-                    inner_total,
-                });
-            })?;
+            crate::localize::download(
+                cache,
+                lang,
+                || cancelled(),
+                |msg| {
+                    let (inner_done, inner_total) = parse_items_progress(msg);
+                    on_progress(DownloadProgress {
+                        current_step: step,
+                        total_steps: total,
+                        step_name: format!("Names ({lang})"),
+                        done: false,
+                        detail: Some(msg.to_string()),
+                        inner_done,
+                        inner_total,
+                    });
+                },
+            )?;
         }
     }
     on_progress(DownloadProgress {
@@ -272,4 +277,3 @@ fn parse_items_progress(msg: &str) -> (usize, usize) {
     let total = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     (done, total)
 }
-

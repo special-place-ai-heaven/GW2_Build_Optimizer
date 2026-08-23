@@ -871,10 +871,7 @@ mod tests {
             prefix_named_in_text("celestial gear tempest support"),
             Some("Celestial")
         );
-        assert_eq!(
-            prefix_named_in_text("Optimize a power DPS build"),
-            None
-        );
+        assert_eq!(prefix_named_in_text("Optimize a power DPS build"), None);
         assert_eq!(
             prefix_named_in_text("I said CELESTIAL support, not minstrel"),
             Some("Celestial")
@@ -1410,6 +1407,25 @@ mod tests {
             m.primary == "Trailblazer's" || m.primary == "Viper's",
             "Condi max + low power + sustain should select Trailblazer's or Viper's, got {}",
             m.primary
+        );
+    }
+
+    #[test]
+    fn test_gear_prefix_screenshot_condi_disabler_weights() {
+        let w = OptimizationWeights {
+            power: 0.10,
+            condition: 0.55,
+            boon_support: 0.19,
+            healing: 0.32,
+            sustain: 0.42,
+            control: 0.42,
+        };
+
+        let m = select_gear_prefix(&w);
+
+        assert_eq!(
+            m.primary, "Plaguedoctor's",
+            "The screenshot's condition/control profile must not seed a power prefix"
         );
     }
 

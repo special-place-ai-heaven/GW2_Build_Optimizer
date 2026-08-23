@@ -1194,12 +1194,39 @@ pub fn optimize_with_gemini(
         done: true,
     });
 
-    let (data_quality, quality_reasons) = quality_from_modifiers(
+    let (mut data_quality, mut quality_reasons) = quality_from_modifiers(
         &modifiers,
         &validated.warnings,
         !validated.errors.is_empty(),
         ctx.game_mode.label(),
     );
+    if let Some(fight) = rotation_result
+        .as_ref()
+        .and_then(|result| result.wvw.as_ref())
+    {
+        if fight.unmodeled_effect_sources > 0 {
+            data_quality = data_quality.merge(&data::DataQuality::Provisional);
+            quality_reasons.push(data::DataQualityReason {
+                field: "wvw_timeline.effects".into(),
+                entity: profession_name.into(),
+                modes: vec![ctx.game_mode.label().to_string()],
+                explanation: format!(
+                    "{} equipped or triggered effect sources are not yet represented by timed rules",
+                    fight.unmodeled_effect_sources
+                ),
+            });
+        }
+        if !fight.resource_model_complete {
+            data_quality = data_quality.merge(&data::DataQuality::Provisional);
+            quality_reasons.push(data::DataQualityReason {
+                field: "wvw_timeline.resources".into(),
+                entity: profession_name.into(),
+                modes: vec![ctx.game_mode.label().to_string()],
+                explanation:
+                    "The active profession mechanic is outside the bounded resource ledger".into(),
+            });
+        }
+    }
     Ok(SynergyResult {
         validated,
         stats: full_stats,
@@ -1336,15 +1363,22 @@ pub fn simulate_validated_rotation(
         return None;
     }
 
-    let mut rotation_skills = rotation::builder::build_rotation_skills(&non_weapon_ids, db);
-    let mut set1_skills = rotation::builder::build_rotation_skills(&set1_ids, db);
+    let mode = scenario
+        .map(|s| s.game_mode.clone())
+        .unwrap_or(GameMode::PvE);
+    let sim_ctx = BalanceContext::new(mode.clone());
+
+    let mut rotation_skills =
+        rotation::builder::build_rotation_skills_for_context(&non_weapon_ids, db, &sim_ctx);
+    let mut set1_skills =
+        rotation::builder::build_rotation_skills_for_context(&set1_ids, db, &sim_ctx);
     rotation::builder::tag_weapon_set(&mut set1_skills, 1);
-    let mut set2_skills = rotation::builder::build_rotation_skills(&set2_ids, db);
+    let mut set2_skills =
+        rotation::builder::build_rotation_skills_for_context(&set2_ids, db, &sim_ctx);
     rotation::builder::tag_weapon_set(&mut set2_skills, 2);
     rotation_skills.extend(set1_skills);
     rotation_skills.extend(set2_skills);
-    let mode = scenario.map(|s| s.game_mode.label()).unwrap_or("PvE");
-    let ne = crate::data::normalized_effects::effects().effects_for_mode(mode);
+    let ne = crate::data::normalized_effects::effects().effects_for_mode(mode.label());
     rotation::builder::enrich_with_cleanse(&mut rotation_skills, ne, db);
 
     if rotation_skills.is_empty() {
@@ -1352,7 +1386,13 @@ pub fn simulate_validated_rotation(
     }
 
     let duration_ms = scenario
-        .map(|s| crate::rotation::combat_model::simulation_window_ms(s.combat_tier, s.combat_kind))
+        .map(|s| {
+            crate::rotation::combat_model::simulation_window_ms_for_mode(
+                &s.game_mode,
+                s.combat_tier,
+                s.combat_kind,
+            )
+        })
         .unwrap_or(0);
 
     let enemy = scenario
@@ -1361,10 +1401,6 @@ pub fn simulate_validated_rotation(
         })
         .unwrap_or_default();
 
-    let mode = scenario
-        .map(|s| s.game_mode.clone())
-        .unwrap_or(GameMode::PvE);
-    let sim_ctx = BalanceContext::new(mode.clone());
     let (_, mods) = calculate_validated_stats(validated, db, profession_name, &sim_ctx);
     let power = stats.get("Power");
     let condition_damage = stats.get("ConditionDamage");
@@ -1406,7 +1442,8 @@ pub fn simulate_validated_rotation(
     if let Some(scenario) = scenario.filter(|scenario| scenario.game_mode == GameMode::WvW) {
         let (active_effects, unmodeled_sources) =
             active_normalized_effects(validated, &rotation_skills, mode.label());
-        let resource_rules = wvw_resource_rules(validated, &rotation_skills, db, profession_name);
+        let (resource_rules, resource_model_complete) =
+            wvw_resource_rules(validated, &rotation_skills, db, profession_name, &sim_ctx);
         result.wvw = Some(rotation::wvw_timeline::evaluate_wvw_timeline(
             rotation::wvw_timeline::WvwTimelineInput {
                 skills: &rotation_skills,
@@ -1416,7 +1453,9 @@ pub fn simulate_validated_rotation(
                 scenario,
                 active_effects: &active_effects,
                 resource_rules: &resource_rules,
+                resource_model_complete,
                 unmodeled_effect_sources: unmodeled_sources,
+                weapon_swap_cooldown_ms: wvw_weapon_swap_cooldown_ms(profession_name, validated),
             },
         ));
     }
@@ -1552,7 +1591,8 @@ fn wvw_resource_rules(
     rotation_skills: &[rotation::RotationSkill],
     db: &GameDb,
     profession_name: &str,
-) -> Vec<rotation::wvw_timeline::SkillResourceRule> {
+    ctx: &BalanceContext,
+) -> (Vec<rotation::wvw_timeline::SkillResourceRule>, bool) {
     use rotation::wvw_timeline::{ResourceKind, SkillResourceRule};
 
     let virtuoso = validated
@@ -1570,11 +1610,14 @@ fn wvw_resource_rules(
             .as_deref()
             .is_some_and(|slot| slot.starts_with("Profession_"));
 
-        if let Some(cost) = skill.initiative {
+        let initiative_cost =
+            rotation::builder::sourced_skill_value(ctx, skill.id, "initiative_cost")
+                .or_else(|| skill.initiative.map(f64::from));
+        if let Some(cost) = initiative_cost {
             rules.push(SkillResourceRule {
                 skill_id: skill.id,
                 kind: ResourceKind::Initiative,
-                cost: cost as f64,
+                cost,
                 gain_on_hit: 0.0,
                 spend_all: false,
             });
@@ -1630,7 +1673,27 @@ fn wvw_resource_rules(
             });
         }
     }
-    rules
+    let resource_model_complete =
+        matches!(profession_name, "Thief" | "Revenant" | "Warrior" | "Mesmer");
+    (rules, resource_model_complete)
+}
+
+fn wvw_weapon_swap_cooldown_ms(profession_name: &str, validated: &ValidatedBuild) -> Option<u32> {
+    let bladesworn = validated
+        .specializations
+        .iter()
+        .any(|spec| spec.name.eq_ignore_ascii_case("Bladesworn"));
+    weapon_swap_cooldown_for(profession_name, bladesworn)
+}
+
+fn weapon_swap_cooldown_for(profession_name: &str, bladesworn: bool) -> Option<u32> {
+    if bladesworn || matches!(profession_name, "Engineer" | "Elementalist") {
+        None
+    } else if profession_name == "Warrior" {
+        Some(5_000)
+    } else {
+        Some(10_000)
+    }
 }
 
 /// Add weapon skill IDs for a given weapon type from the profession's weapon data.
@@ -1693,12 +1756,36 @@ pub fn synergy_result_from_validated(
         ctx,
     );
     let rotation = simulate_validated_rotation(&validated, db, &full_stats, scenario);
-    let (data_quality, quality_reasons) = quality_from_modifiers(
+    let (mut data_quality, mut quality_reasons) = quality_from_modifiers(
         &modifiers,
         &validated.warnings,
         !validated.errors.is_empty(),
         ctx.game_mode.label(),
     );
+    if let Some(fight) = rotation.as_ref().and_then(|result| result.wvw.as_ref()) {
+        if fight.unmodeled_effect_sources > 0 {
+            data_quality = data_quality.merge(&data::DataQuality::Provisional);
+            quality_reasons.push(data::DataQualityReason {
+                field: "wvw_timeline.effects".into(),
+                entity: profession_name.into(),
+                modes: vec![ctx.game_mode.label().to_string()],
+                explanation: format!(
+                    "{} equipped or triggered effect sources are not yet represented by timed rules",
+                    fight.unmodeled_effect_sources
+                ),
+            });
+        }
+        if !fight.resource_model_complete {
+            data_quality = data_quality.merge(&data::DataQuality::Provisional);
+            quality_reasons.push(data::DataQualityReason {
+                field: "wvw_timeline.resources".into(),
+                entity: profession_name.into(),
+                modes: vec![ctx.game_mode.label().to_string()],
+                explanation:
+                    "The active profession mechanic is outside the bounded resource ledger".into(),
+            });
+        }
+    }
     SynergyResult {
         validated,
         stats: full_stats,
@@ -1914,6 +2001,7 @@ pub fn optimize_v2(
     locks: &gw2_core::types::BuildLocks,
     llm_client: Option<&dyn LlmClient>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
+    is_cancelled: &dyn Fn() -> bool,
 ) -> Result<SynergyResult, String> {
     use crate::search_v2::SearchConfig;
 
@@ -1931,15 +2019,27 @@ pub fn optimize_v2(
         locks,
         &config,
         on_progress,
+        is_cancelled,
     )?;
+
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
 
     // Optional: LLM advisor pass — propose mutations, referee ranks them.
     if let Some(client) = llm_client {
+        if is_cancelled() {
+            return Err("Cancelled".into());
+        }
         on_progress(OptimizeProgress {
             stage: "LLM advisor: evaluating mutations...".into(),
             done: false,
         });
         best = llm_advisor(best, db, profession_name, weights, ctx, scenario, client);
+    }
+
+    if is_cancelled() {
+        return Err("Cancelled".into());
     }
 
     on_progress(OptimizeProgress {
@@ -2675,5 +2775,14 @@ mod tests {
             rotation.cleanse_rate_per_20s > 0.0,
             "cleanse fact should contribute to cleanse rate"
         );
+    }
+
+    #[test]
+    fn weapon_swap_policy_matches_profession_rules() {
+        assert_eq!(weapon_swap_cooldown_for("Ranger", false), Some(10_000));
+        assert_eq!(weapon_swap_cooldown_for("Warrior", false), Some(5_000));
+        assert_eq!(weapon_swap_cooldown_for("Engineer", false), None);
+        assert_eq!(weapon_swap_cooldown_for("Elementalist", false), None);
+        assert_eq!(weapon_swap_cooldown_for("Warrior", true), None);
     }
 }

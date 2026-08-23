@@ -1,0 +1,27 @@
+{
+  "patch_id": "2026-07-15",
+  "game_build_id": 205780,
+  "release_date": "2026-07-15",
+  "inherits_from": "2026-01-13",
+  "sources": [
+    {
+      "kind": "official-api-build",
+      "url": "https://api.guildwars2.com/v2/build"
+    },
+    {
+      "kind": "skill-reference",
+      "url": "https://wiki.guildwars2.com/wiki/Black_Powder"
+    },
+    {
+      "kind": "skill-reference",
+      "url": "https://wiki.guildwars2.com/wiki/Heartseeker"
+    },
+    {
+      "kind": "skill-reference",
+      "url": "https://wiki.guildwars2.com/wiki/Steal"
+    }
+  ],
+  "supported_modes": ["PvE", "PvP", "WvW"],
+  "status": "active",
+  "authoring_notes": "Current live balance lineage with explicit per-mode overrides. API facts remain the default only where no sourced mode split is recorded; uncertain competitive timing remains provisional."
+}

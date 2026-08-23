@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::data::normalized_effects::{
-    EffectCategory, NormalizedEffect, OperationType, TargetSide, TriggerRule,
+    EffectCategory, NormalizedEffect, OperationType, SourceType, TargetSide, TriggerRule,
 };
 use crate::data::quality::FactualValue;
 use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
@@ -67,9 +67,16 @@ pub struct WvwCombatReport {
     pub player_survived: bool,
     pub target_reached: bool,
     pub chain_completed: bool,
+    /// Pressure and control that occurred inside the qualifying secured
+    /// sequence, not totals collected from unrelated moments.
+    pub secured_sequence_damage: f64,
+    pub secured_sequence_control_ms: u32,
     pub repeatable: bool,
     pub resource_blocked_actions: u32,
     pub resource_legal: bool,
+    /// False when the active profession mechanic needs a state model that this
+    /// bounded resource ledger does not yet provide.
+    pub resource_model_complete: bool,
     /// Number of equipped effect sources for which the timeline had no timed
     /// normalized record. This never silently becomes verified data.
     pub unmodeled_effect_sources: u32,
@@ -83,7 +90,11 @@ pub struct WvwTimelineInput<'a> {
     pub scenario: &'a ScenarioSpec,
     pub active_effects: &'a [&'a NormalizedEffect],
     pub resource_rules: &'a [SkillResourceRule],
+    pub resource_model_complete: bool,
     pub unmodeled_effect_sources: u32,
+    /// Exact in-combat weapon swap cooldown for this profession. `None`
+    /// means the active specialization cannot swap weapons in combat.
+    pub weapon_swap_cooldown_ms: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -265,7 +276,25 @@ struct DamageEvent {
 }
 
 #[derive(Debug, Clone)]
+struct ProtectedActionEvent {
+    at_ms: u32,
+    skill_id: u32,
+    control_ms: u32,
+    applies_condition: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SecuredSequenceSummary {
+    completed: bool,
+    damage: f64,
+    control_ms: u32,
+    skill_ids: HashSet<u32>,
+}
+
+#[derive(Debug, Clone)]
 struct ProcSpec {
+    source_type: SourceType,
+    source_id: u32,
     trigger: TriggerRule,
     category: EffectCategory,
     value: f64,
@@ -284,6 +313,7 @@ struct Timeline<'a> {
     disabled_until_ms: u32,
     active_weapon_set: u8,
     weapon_swap_ready_ms: u32,
+    weapon_swap_cooldown_ms: Option<u32>,
     cooldown_ready_ms: Vec<u32>,
     pending: Option<PendingCast>,
     defenses: Vec<TimedDefense>,
@@ -301,6 +331,8 @@ struct Timeline<'a> {
     protected_run_ms: u32,
     longest_protected_window_ms: u32,
     charge_cover_consumed_this_tick: bool,
+    secured_tick_times: Vec<u32>,
+    protected_actions: Vec<ProtectedActionEvent>,
     damage_events: Vec<DamageEvent>,
     protected_action_count: u32,
     successful_action_count: u32,
@@ -324,6 +356,7 @@ struct Timeline<'a> {
     resource_rules: HashMap<u32, SkillResourceRule>,
     resources: HashMap<ResourceKind, f64>,
     resource_blocked_skills: HashSet<u32>,
+    resource_model_complete: bool,
 }
 
 /// Run the WvW exchange model. Effects resolve at cast completion, so incoming
@@ -337,7 +370,9 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
         scenario,
         active_effects,
         resource_rules,
+        resource_model_complete,
         unmodeled_effect_sources,
+        weapon_swap_cooldown_ms,
     } = input;
     let profile = WvwProfile::for_scenario(scenario, &enemy, params, duration_ms);
     let mut timeline = Timeline::new(
@@ -347,8 +382,10 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
         enemy,
         active_effects,
         resource_rules,
+        resource_model_complete,
         unmodeled_effect_sources,
     );
+    timeline.weapon_swap_cooldown_ms = weapon_swap_cooldown_ms;
     timeline.run();
     timeline.report()
 }
@@ -361,6 +398,7 @@ impl<'a> Timeline<'a> {
         enemy: EnemyDummy,
         active_effects: &[&NormalizedEffect],
         resource_rules: &[SkillResourceRule],
+        resource_model_complete: bool,
         unmodeled_effect_sources: u32,
     ) -> Self {
         let mut state = Self {
@@ -376,6 +414,7 @@ impl<'a> Timeline<'a> {
             disabled_until_ms: 0,
             active_weapon_set: 1,
             weapon_swap_ready_ms: 0,
+            weapon_swap_cooldown_ms: Some(10_000),
             cooldown_ready_ms: vec![0; skills.len()],
             pending: None,
             defenses: Vec::new(),
@@ -389,6 +428,8 @@ impl<'a> Timeline<'a> {
             protected_run_ms: 0,
             longest_protected_window_ms: 0,
             charge_cover_consumed_this_tick: false,
+            secured_tick_times: Vec::new(),
+            protected_actions: Vec::new(),
             damage_events: Vec::new(),
             protected_action_count: 0,
             successful_action_count: 0,
@@ -415,6 +456,7 @@ impl<'a> Timeline<'a> {
                 .collect(),
             resources: initial_resources(resource_rules),
             resource_blocked_skills: HashSet::new(),
+            resource_model_complete,
         };
         state.load_normalized_effects(active_effects);
         state
@@ -423,31 +465,30 @@ impl<'a> Timeline<'a> {
     fn load_normalized_effects(&mut self, effects: &[&NormalizedEffect]) {
         for effect in effects {
             let value = resolved(&effect.value).copied().unwrap_or(0.0);
-            let ratio = as_ratio(value);
             if matches!(effect.trigger_rule, TriggerRule::Passive) {
-                match effect.category {
-                    EffectCategory::StrikeDamagePct => self.passive_strike_mult *= 1.0 + ratio,
-                    EffectCategory::ConditionDamagePct => {
-                        self.passive_condition_mult *= 1.0 + ratio
-                    }
-                    EffectCategory::OutgoingHealingPct => self.passive_healing_mult *= 1.0 + ratio,
-                    EffectCategory::IncomingStrikeMultiplier => {
-                        self.incoming_strike_mult *= value.max(0.0)
-                    }
-                    EffectCategory::IncomingConditionMultiplier => {
-                        self.incoming_condition_mult *= value.max(0.0)
-                    }
-                    EffectCategory::BoonDurationPct => self.bonus_boon_duration += ratio,
-                    EffectCategory::ConditionDurationPct
-                    | EffectCategory::SpecificConditionDurationPct => {
-                        self.bonus_condition_duration += ratio
-                    }
-                    _ => self.apply_operation(effect.status_operation.as_ref()),
-                }
+                // Standing modifiers are already folded into SimParams by the
+                // shared combat parser. Applying them here would count the same
+                // trait/rune/sigil a second time.
+                continue;
+            }
+
+            if matches!(effect.source_type, SourceType::Skill)
+                && self.skill_directly_models_effect(effect)
+            {
+                continue;
+            }
+
+            let supported = matches!(effect.trigger_rule, TriggerRule::OnHit)
+                || (matches!(effect.trigger_rule, TriggerRule::OnSkillUse)
+                    && matches!(effect.source_type, SourceType::Skill));
+            if !supported {
+                self.unmodeled_effect_sources += 1;
                 continue;
             }
 
             self.proc_specs.push(ProcSpec {
+                source_type: effect.source_type.clone(),
+                source_id: effect.source_id,
                 trigger: effect.trigger_rule.clone(),
                 category: effect
                     .inner_category
@@ -511,10 +552,6 @@ impl<'a> Timeline<'a> {
         self.defenses
             .retain(|defense| defense.expires_at_ms > self.now_ms);
         self.buffs.retain(|buff| buff.expires_at_ms > self.now_ms);
-        self.outgoing_conditions
-            .retain(|condition| condition.expires_at_ms > self.now_ms);
-        self.incoming_conditions
-            .retain(|condition| condition.expires_at_ms > self.now_ms);
         if self
             .combo_field
             .as_ref()
@@ -535,18 +572,28 @@ impl<'a> Timeline<'a> {
         self.successful_action_count += 1;
         let protected_before = pending.protected_at_start || pending.saved_by_charge;
         let first_damage_event = self.damage_events.len();
+        let control_before = self.control_landed_ms;
         let skill_id = self.skills[pending.skill_idx].skill_id;
         let effects = self.skills[pending.skill_idx].effects.clone();
+        let applies_condition = effects
+            .iter()
+            .any(|effect| matches!(effect, SkillEffect::ApplyCondition { .. }));
         for effect in effects {
             self.apply_skill_effect(skill_id, &effect, protected_before);
         }
-        self.trigger_procs(TriggerRule::OnSkillUse, protected_before);
+        self.trigger_procs(TriggerRule::OnSkillUse, Some(skill_id), protected_before);
         let protected = protected_before || self.control_owned();
         if protected {
             self.protected_action_count += 1;
             for event in &mut self.damage_events[first_damage_event..] {
                 event.protected = true;
             }
+            self.protected_actions.push(ProtectedActionEvent {
+                at_ms: self.now_ms,
+                skill_id,
+                control_ms: self.control_landed_ms.saturating_sub(control_before),
+                applies_condition,
+            });
         }
     }
 
@@ -561,7 +608,7 @@ impl<'a> Timeline<'a> {
             skill.cast_time_ms
         }
         .max(TIMELINE_TICK_MS);
-        self.cooldown_ready_ms[skill_idx] = self.now_ms + skill.cooldown_ms;
+        self.set_skill_cooldown(skill.skill_id, skill.cooldown_ms);
         self.pending = Some(PendingCast {
             skill_idx,
             started_at_ms: self.now_ms,
@@ -658,6 +705,9 @@ impl<'a> Timeline<'a> {
     }
 
     fn try_weapon_swap(&mut self) {
+        let Some(cooldown_ms) = self.weapon_swap_cooldown_ms else {
+            return;
+        };
         if self.now_ms < self.weapon_swap_ready_ms
             || !self.skills.iter().any(|skill| skill.weapon_set > 0)
         {
@@ -668,7 +718,7 @@ impl<'a> Timeline<'a> {
             skill.weapon_set == other && self.cooldown_ready_ms[idx] <= self.now_ms
         }) {
             self.active_weapon_set = other;
-            self.weapon_swap_ready_ms = self.now_ms + 9_000;
+            self.weapon_swap_ready_ms = self.now_ms + cooldown_ms;
             self.next_action_ms = self.now_ms + 100;
         }
     }
@@ -677,16 +727,54 @@ impl<'a> Timeline<'a> {
         if self.now_ms >= self.disabled_until_ms {
             return;
         }
-        let Some((idx, _)) = self.skills.iter().enumerate().find(|(idx, skill)| {
-            skill.is_stunbreak
-                && self.cooldown_ready_ms[*idx] <= self.now_ms
-                && self.skill_available(skill)
+        let candidates: Vec<usize> = self
+            .skills
+            .iter()
+            .enumerate()
+            .filter(|(idx, skill)| {
+                skill.is_stunbreak
+                    && self.cooldown_ready_ms[*idx] <= self.now_ms
+                    && self.skill_available(skill)
+            })
+            .map(|(idx, _)| idx)
+            .collect();
+        let Some(idx) = candidates.into_iter().find(|idx| {
+            let skill_id = self.skills[*idx].skill_id;
+            let can_pay = self.can_pay_resource(skill_id);
+            if !can_pay {
+                self.resource_blocked_skills.insert(skill_id);
+            }
+            can_pay
         }) else {
             return;
         };
-        self.cooldown_ready_ms[idx] = self.now_ms + self.skills[idx].cooldown_ms;
+        let skill_id = self.skills[idx].skill_id;
+        self.pay_resource(skill_id);
+        self.resource_blocked_skills.remove(&skill_id);
+        self.set_skill_cooldown(skill_id, self.skills[idx].cooldown_ms);
         self.disabled_until_ms = self.now_ms;
         self.next_action_ms = self.now_ms + 100;
+        self.successful_action_count += 1;
+        let first_damage_event = self.damage_events.len();
+        let control_before = self.control_landed_ms;
+        let applies_condition = self.skills[idx]
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, SkillEffect::ApplyCondition { .. }));
+        for effect in self.skills[idx].effects.clone() {
+            self.apply_skill_effect(skill_id, &effect, true);
+        }
+        self.trigger_procs(TriggerRule::OnSkillUse, Some(skill_id), true);
+        for event in &mut self.damage_events[first_damage_event..] {
+            event.protected = true;
+        }
+        self.protected_action_count += 1;
+        self.protected_actions.push(ProtectedActionEvent {
+            at_ms: self.now_ms,
+            skill_id,
+            control_ms: self.control_landed_ms.saturating_sub(control_before),
+            applies_condition,
+        });
     }
 
     fn process_enemy_events(&mut self) {
@@ -752,9 +840,8 @@ impl<'a> Timeline<'a> {
     }
 
     fn receive_condition(&mut self, condition: String, stacks: u32, duration_ms: u32) {
-        if self.avoids_attack(false)
-            || self.has_defense(CoverKind::Resistance)
-            || self.has_defense(CoverKind::Invulnerability)
+        if self.has_defense(CoverKind::Invulnerability)
+            || (self.has_defense(CoverKind::Resistance) && !condition_is_damaging(&condition))
         {
             return;
         }
@@ -781,11 +868,20 @@ impl<'a> Timeline<'a> {
         }
     }
 
+    fn remove_enemy_boons(&mut self, count: u32) {
+        for _ in 0..count {
+            if self.enemy_stability {
+                self.enemy_stability = false;
+            } else if self.enemy_protection {
+                self.enemy_protection = false;
+            } else {
+                break;
+            }
+        }
+    }
+
     fn avoids_attack(&mut self, unblockable: bool) -> bool {
-        if self.has_defense(CoverKind::Invulnerability)
-            || self.has_defense(CoverKind::Evade)
-            || self.has_defense(CoverKind::Stealth)
-        {
+        if self.has_defense(CoverKind::Invulnerability) || self.has_defense(CoverKind::Evade) {
             return true;
         }
         if !unblockable {
@@ -797,9 +893,11 @@ impl<'a> Timeline<'a> {
                 return true;
             }
         }
-        if self.consume_defense(CoverKind::Blind) {
-            self.mark_charge_cover_consumed();
-            return true;
+        if !unblockable {
+            if self.consume_defense(CoverKind::Blind) {
+                self.mark_charge_cover_consumed();
+                return true;
+            }
         }
         false
     }
@@ -822,15 +920,18 @@ impl<'a> Timeline<'a> {
 
     fn tick_conditions(&mut self) {
         let mut outgoing_damage = 0.0;
+        let might = self.buff_stacks("Might").min(25) as f64;
+        let condition_damage = self.params.condition_damage
+            + might * crate::data::boon_condition_formulas::boons().might_condi_per_stack();
         for condition in &mut self.outgoing_conditions {
-            if condition.next_tick_ms <= self.now_ms {
-                let tick = condition_tick_damage(
-                    &condition.name,
-                    self.params.condition_damage,
-                    &self.params.mode,
-                ) * condition.stacks as f64
-                    * self.params.condition_mult
-                    * self.passive_condition_mult;
+            if condition.next_tick_ms <= self.now_ms
+                && condition.next_tick_ms <= condition.expires_at_ms
+            {
+                let tick =
+                    condition_tick_damage(&condition.name, condition_damage, &self.params.mode)
+                        * condition.stacks as f64
+                        * self.params.condition_mult
+                        * self.passive_condition_mult;
                 outgoing_damage += tick;
                 condition.next_tick_ms += 1_000;
             }
@@ -841,7 +942,9 @@ impl<'a> Timeline<'a> {
 
         let mut incoming_damage = 0.0;
         for condition in &mut self.incoming_conditions {
-            if condition.next_tick_ms <= self.now_ms {
+            if condition.next_tick_ms <= self.now_ms
+                && condition.next_tick_ms <= condition.expires_at_ms
+            {
                 incoming_damage +=
                     condition_tick_damage(&condition.name, 1_800.0, &self.params.mode)
                         * condition.stacks as f64;
@@ -851,6 +954,10 @@ impl<'a> Timeline<'a> {
         if incoming_damage > 0.0 {
             self.absorb_damage(incoming_damage * self.incoming_condition_mult);
         }
+        self.outgoing_conditions
+            .retain(|condition| condition.expires_at_ms > self.now_ms);
+        self.incoming_conditions
+            .retain(|condition| condition.expires_at_ms > self.now_ms);
     }
 
     fn apply_skill_effect(&mut self, skill_id: u32, effect: &SkillEffect, protected: bool) {
@@ -860,7 +967,8 @@ impl<'a> Timeline<'a> {
                 dmg_multiplier,
             } => {
                 let might = self.buff_stacks("Might").min(25) as f64;
-                let power = self.params.power + might * 30.0;
+                let power = self.params.power
+                    + might * crate::data::boon_condition_formulas::boons().might_power_per_stack();
                 let fury_bonus = if self.has_buff("Fury") {
                     self.params.fury_crit_chance_bonus
                 } else {
@@ -880,8 +988,9 @@ impl<'a> Timeline<'a> {
                     damage *= 0.67;
                 }
                 self.record_damage(damage, protected);
+                self.remove_defense(CoverKind::Stealth);
                 self.gain_resource_on_hit(skill_id);
-                self.trigger_procs(TriggerRule::OnHit, protected);
+                self.trigger_procs(TriggerRule::OnHit, Some(skill_id), protected);
             }
             SkillEffect::ApplyCondition {
                 condition,
@@ -904,10 +1013,13 @@ impl<'a> Timeline<'a> {
                 stacks,
                 duration_ms,
             } => self.apply_buff(buff, *stacks, *duration_ms, true),
-            SkillEffect::ComboField { field_type } => {
+            SkillEffect::ComboField {
+                field_type,
+                duration_ms,
+            } => {
                 self.combo_field = Some(ComboFieldState {
                     field_type: field_type.clone(),
-                    expires_at_ms: self.now_ms + 5_000,
+                    expires_at_ms: self.now_ms.saturating_add(*duration_ms),
                 });
             }
             SkillEffect::ComboFinisher {
@@ -929,17 +1041,22 @@ impl<'a> Timeline<'a> {
             }
             SkillEffect::CrowdControl { duration_ms, .. } => {
                 if !self.enemy_stability {
-                    self.enemy_disabled_until_ms =
-                        self.enemy_disabled_until_ms.max(self.now_ms + *duration_ms);
-                    self.control_landed_ms += *duration_ms;
+                    let previous_end = self.enemy_disabled_until_ms.max(self.now_ms);
+                    let new_end = self.enemy_disabled_until_ms.max(self.now_ms + *duration_ms);
+                    self.enemy_disabled_until_ms = new_end;
+                    self.control_landed_ms += new_end.saturating_sub(previous_end);
                 }
             }
-            SkillEffect::StripBoons { .. }
-            | SkillEffect::CorruptBoons
-            | SkillEffect::StealBoons => {
-                self.enemy_stability = false;
-                self.enemy_protection = false;
-            }
+            SkillEffect::StripBoons {
+                count_per_pulse,
+                interval_ms,
+                window_ms,
+            } => self.remove_enemy_boons(if *interval_ms == 0 {
+                *count_per_pulse
+            } else {
+                *count_per_pulse * ((*window_ms).max(*interval_ms) / *interval_ms)
+            }),
+            SkillEffect::CorruptBoons | SkillEffect::StealBoons => self.remove_enemy_boons(1),
             SkillEffect::ConvertConditions => {
                 let count = self.incoming_conditions.len() as u32;
                 self.cleanse(count.max(1));
@@ -950,16 +1067,17 @@ impl<'a> Timeline<'a> {
                 duration_ms,
                 strippable,
             } => self.apply_defense(*kind, *duration_ms, 1, *strippable),
-            SkillEffect::Mobility { kind } => match kind {
-                MobilityKind::Evade => self.apply_defense(CoverKind::Evade, 750, 1, false),
-                MobilityKind::Stealth => self.apply_defense(CoverKind::Stealth, 3_000, 1, false),
-                _ => {}
-            },
+            // Mobility is a capability tag, not a duration source. Quantitative
+            // cover must arrive as a mode-aware `Cover` fact.
+            SkillEffect::Mobility { .. } => {}
         }
     }
 
     fn resolve_combo(&mut self, finisher_type: &str, percent: u32) {
-        if percent == 0 {
+        if percent < 100 {
+            if percent > 0 {
+                self.unmodeled_effect_sources += 1;
+            }
             return;
         }
         let Some(field) = self.combo_field.as_ref() else {
@@ -971,17 +1089,38 @@ impl<'a> Timeline<'a> {
         if field_type.contains("smoke") {
             if finisher.contains("blast") || finisher.contains("leap") {
                 self.apply_defense(CoverKind::Stealth, 3_000, 1, false);
-            } else {
+            } else if finisher.contains("projectile") || finisher.contains("whirl") {
                 self.apply_defense(CoverKind::Blind, 3_000, 1, false);
+            } else {
+                self.unmodeled_effect_sources += 1;
             }
         } else if field_type.contains("water") {
-            self.heal(1_000.0 + self.params.healing_power * 0.25);
+            if finisher.contains("blast") {
+                self.heal(1_320.0 + self.params.healing_power * 0.20);
+            } else if finisher.contains("leap") {
+                self.heal(1_300.0 + self.params.healing_power * 0.50);
+            } else {
+                // Projectile/whirl apply regeneration; periodic regeneration
+                // is not represented by this timeline yet.
+                self.unmodeled_effect_sources += 1;
+            }
         } else if field_type.contains("light") {
-            self.cleanse(1);
+            if finisher.contains("blast") {
+                self.cleanse(1);
+            } else {
+                self.unmodeled_effect_sources += 1;
+            }
         } else if field_type.contains("fire") {
-            self.apply_buff("Might", 3, 10_000, true);
+            if finisher.contains("blast") {
+                self.apply_buff("Might", 3, 20_000, true);
+            } else {
+                self.unmodeled_effect_sources += 1;
+            }
         } else if field_type.contains("dark") {
-            self.apply_defense(CoverKind::Blind, 2_000, 1, false);
+            // Dark finishers produce auras or life-steal effects, not Blind.
+            self.unmodeled_effect_sources += 1;
+        } else {
+            self.unmodeled_effect_sources += 1;
         }
     }
 
@@ -1062,10 +1201,36 @@ impl<'a> Timeline<'a> {
         }
     }
 
-    fn trigger_procs(&mut self, trigger: TriggerRule, protected: bool) {
+    fn skill_directly_models_effect(&self, effect: &NormalizedEffect) -> bool {
+        let Some(skill) = self
+            .skills
+            .iter()
+            .find(|skill| skill.skill_id == effect.source_id)
+        else {
+            return false;
+        };
+        match effect.category {
+            EffectCategory::RemovesCondition => skill
+                .effects
+                .iter()
+                .any(|item| matches!(item, SkillEffect::RemovesCondition { .. })),
+            _ => false,
+        }
+    }
+
+    fn trigger_procs(
+        &mut self,
+        trigger: TriggerRule,
+        activating_skill_id: Option<u32>,
+        protected: bool,
+    ) {
         let mut ready = Vec::new();
         for (idx, proc_spec) in self.proc_specs.iter().enumerate() {
-            if same_trigger(&proc_spec.trigger, &trigger) && proc_spec.next_ready_ms <= self.now_ms
+            let source_matches = !matches!(proc_spec.source_type, SourceType::Skill)
+                || activating_skill_id == Some(proc_spec.source_id);
+            if same_trigger(&proc_spec.trigger, &trigger)
+                && source_matches
+                && proc_spec.next_ready_ms <= self.now_ms
             {
                 ready.push(idx);
             }
@@ -1106,6 +1271,7 @@ impl<'a> Timeline<'a> {
 
     fn track_protected_window(&mut self) {
         if self.control_owned() || self.charge_cover_consumed_this_tick {
+            self.secured_tick_times.push(self.now_ms);
             self.protected_run_ms += TIMELINE_TICK_MS;
             self.longest_protected_window_ms =
                 self.longest_protected_window_ms.max(self.protected_run_ms);
@@ -1154,6 +1320,21 @@ impl<'a> Timeline<'a> {
             self.defenses.remove(idx);
         }
         true
+    }
+
+    fn remove_defense(&mut self, kind: CoverKind) {
+        self.defenses.retain(|defense| defense.kind != kind);
+    }
+
+    /// The game tracks recharge by skill, not by rendered bar position. The
+    /// same skill equipped in both weapon sets therefore shares one timer.
+    fn set_skill_cooldown(&mut self, skill_id: u32, cooldown_ms: u32) {
+        let ready_ms = self.now_ms + cooldown_ms;
+        for (idx, skill) in self.skills.iter().enumerate() {
+            if skill.skill_id == skill_id {
+                self.cooldown_ready_ms[idx] = ready_ms;
+            }
+        }
     }
 
     fn consume_stability(&mut self) -> bool {
@@ -1293,17 +1474,26 @@ impl<'a> Timeline<'a> {
             - self.incoming_damage)
             / (self.profile.duration_ms as f64 / 1_000.0).max(1.0);
         let target_reached = self.enemy_health <= 0.0;
-        let chain_completed = self.longest_protected_window_ms >= self.profile.required_window_ms
-            && self.protected_action_count >= 2
-            && (protected_damage > 0.0 || self.control_landed_ms > 0);
-        let cooldown_recovery = self
-            .cooldown_ready_ms
-            .iter()
-            .filter(|ready| **ready <= self.profile.duration_ms + 5_000)
-            .count()
-            >= self.cooldown_ready_ms.len().saturating_div(2);
+        let sequence = secured_sequence_summary(
+            &self.secured_tick_times,
+            &self.protected_actions,
+            &self.damage_events,
+            self.profile.desired_window_ms,
+            self.profile.required_window_ms,
+        );
+        let chain_completed = sequence.completed;
+        let cooldown_recovery = !sequence.skill_ids.is_empty()
+            && sequence.skill_ids.iter().all(|skill_id| {
+                self.skills
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, skill)| skill.skill_id == *skill_id)
+                    .all(|(idx, _)| self.cooldown_ready_ms[idx] <= self.profile.duration_ms + 5_000)
+            });
+        let resource_recovery = self.sequence_resources_recovered(&sequence.skill_ids);
         let repeatable = self.player_health > 0.0
             && cooldown_recovery
+            && resource_recovery
             && (target_reached || sustain_margin >= 0.0 || remaining_health_ratio >= 0.50);
 
         WvwCombatReport {
@@ -1330,12 +1520,80 @@ impl<'a> Timeline<'a> {
             player_survived: self.player_health > 0.0,
             target_reached,
             chain_completed,
+            secured_sequence_damage: sequence.damage,
+            secured_sequence_control_ms: sequence.control_ms,
             repeatable,
             resource_blocked_actions: self.resource_blocked_skills.len() as u32,
             resource_legal: self.resource_blocked_skills.is_empty(),
+            resource_model_complete: self.resource_model_complete,
             unmodeled_effect_sources: self.unmodeled_effect_sources,
         }
     }
+
+    fn sequence_resources_recovered(&self, skill_ids: &HashSet<u32>) -> bool {
+        let mut required: HashMap<ResourceKind, f64> = HashMap::new();
+        for skill_id in skill_ids {
+            let Some(rule) = self.resource_rules.get(skill_id) else {
+                continue;
+            };
+            let entry = required.entry(rule.kind).or_default();
+            if rule.spend_all {
+                *entry = (*entry).max(rule.cost);
+            } else {
+                *entry += rule.cost;
+            }
+        }
+        required
+            .into_iter()
+            .all(|(kind, cost)| self.resources.get(&kind).copied().unwrap_or(0.0) >= cost)
+    }
+}
+
+fn secured_sequence_summary(
+    secured_tick_times: &[u32],
+    protected_actions: &[ProtectedActionEvent],
+    damage_events: &[DamageEvent],
+    max_span_ms: u32,
+    required_secured_ms: u32,
+) -> SecuredSequenceSummary {
+    let mut summary = SecuredSequenceSummary::default();
+    for (left, start_ms) in secured_tick_times.iter().copied().enumerate() {
+        let end_ms = start_ms + max_span_ms;
+        let secured_ticks = secured_tick_times[left..]
+            .iter()
+            .take_while(|at_ms| **at_ms <= end_ms)
+            .count() as u32;
+        if secured_ticks * TIMELINE_TICK_MS < required_secured_ms {
+            continue;
+        }
+        let actions: Vec<&ProtectedActionEvent> = protected_actions
+            .iter()
+            .filter(|action| action.at_ms >= start_ms && action.at_ms <= end_ms)
+            .collect();
+        if actions.len() < 2 {
+            continue;
+        }
+        let damage: f64 = damage_events
+            .iter()
+            .filter(|event| event.protected && event.at_ms >= start_ms && event.at_ms <= end_ms)
+            .map(|event| event.amount)
+            .sum();
+        let control_ms = actions.iter().map(|action| action.control_ms).sum();
+        let applies_condition = actions.iter().any(|action| action.applies_condition);
+        if damage <= 0.0 && control_ms == 0 && !applies_condition {
+            continue;
+        }
+        if !summary.completed
+            || damage > summary.damage
+            || (damage == summary.damage && control_ms > summary.control_ms)
+        {
+            summary.completed = true;
+            summary.damage = damage;
+            summary.control_ms = control_ms;
+            summary.skill_ids = actions.iter().map(|action| action.skill_id).collect();
+        }
+    }
+    summary
 }
 
 fn peak_damage(events: &[DamageEvent], window_ms: u32, protected_only: bool) -> f64 {
@@ -1437,7 +1695,7 @@ fn initial_resources(rules: &[SkillResourceRule]) -> HashMap<ResourceKind, f64> 
             .entry(rule.kind)
             .or_insert_with(|| match rule.kind {
                 ResourceKind::Initiative => 12.0,
-                ResourceKind::Energy => 100.0,
+                ResourceKind::Energy => 50.0,
                 ResourceKind::Adrenaline => 10.0,
                 ResourceKind::Illusions | ResourceKind::Blades => 0.0,
             });
@@ -1453,6 +1711,13 @@ fn resource_cap(kind: ResourceKind) -> f64 {
         ResourceKind::Illusions => 3.0,
         ResourceKind::Blades => 5.0,
     }
+}
+
+fn condition_is_damaging(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "bleeding" | "burning" | "confusion" | "poison" | "torment"
+    )
 }
 
 #[cfg(test)]
@@ -1509,7 +1774,7 @@ mod tests {
         profile: WvwProfile,
         params: &SimParams,
     ) -> WvwCombatReport {
-        let mut timeline = Timeline::new(skills, params, profile, enemy, &[], rules, 0);
+        let mut timeline = Timeline::new(skills, params, profile, enemy, &[], rules, true, 0);
         timeline.run();
         timeline.report()
     }
@@ -1837,7 +2102,7 @@ mod tests {
 
         assert!(
             report.chain_completed,
-            "{label} should complete its secured sequence"
+            "{label} should complete its secured sequence: {report:?}"
         );
         assert!(
             report.resource_legal,
@@ -1894,9 +2159,10 @@ mod tests {
     }
 
     #[test]
-    fn published_daredevil_fixture_beats_unprotected_pressure() {
-        // MetaBattle Power S/D and SA D/P roamers: control or stealth/evade
-        // creates the opening for initiative-limited weapon pressure.
+    fn mobility_label_without_timed_cover_does_not_complete_sequence() {
+        // A mobility tag says what a skill can do, not how long it protects an
+        // action. The sourced D/P fixture belongs after its explicit WvW facts
+        // and instant-during-cast ordering are represented.
         let skills = vec![
             skill(
                 100,
@@ -1932,12 +2198,14 @@ mod tests {
                 }],
             ),
         ];
-        assert_published_fixture(
-            "Daredevil",
-            skills,
-            vec![rule(102, ResourceKind::Initiative, 3.0, 0.0, false)],
-            false,
+        let report = run_report(
+            &skills,
+            &[rule(102, ResourceKind::Initiative, 3.0, 0.0, false)],
+            open_enemy(false),
+            published_fixture_profile(),
+            &params(),
         );
+        assert!(!report.chain_completed);
     }
 
     #[test]
@@ -2094,6 +2362,7 @@ mod tests {
             open_enemy(false),
             &[],
             &rules,
+            true,
             0,
         );
         for _ in 0..3 {
@@ -2101,6 +2370,142 @@ mod tests {
             timeline.pay_resource(1);
         }
         assert!(!timeline.can_pay_resource(1));
+    }
+
+    #[test]
+    fn exact_duration_conditions_receive_their_final_tick() {
+        let params = params();
+        let mut timeline = Timeline::new(
+            &[],
+            &params,
+            profile(5_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.outgoing_conditions.push(TimedCondition {
+            name: "Bleeding".into(),
+            stacks: 1,
+            expires_at_ms: 4_000,
+            next_tick_ms: 1_000,
+        });
+        let one_tick = condition_tick_damage("Bleeding", params.condition_damage, &params.mode);
+        for second in 1..=4 {
+            timeline.now_ms = second * 1_000;
+            timeline.tick_conditions();
+        }
+
+        let total: f64 = timeline
+            .damage_events
+            .iter()
+            .map(|event| event.amount)
+            .sum();
+        assert!((total - one_tick * 4.0).abs() < 0.001);
+        assert!(timeline.outgoing_conditions.is_empty());
+    }
+
+    #[test]
+    fn resistance_does_not_remove_damaging_conditions() {
+        let params = params();
+        let mut timeline = Timeline::new(
+            &[],
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.apply_defense(CoverKind::Resistance, 2_000, 1, false);
+        timeline.receive_condition("Burning".into(), 1, 1_000);
+        timeline.receive_condition("Crippled".into(), 1, 1_000);
+
+        assert_eq!(timeline.incoming_conditions.len(), 1);
+        assert_eq!(timeline.incoming_conditions[0].name, "Burning");
+    }
+
+    #[test]
+    fn reactive_stunbreak_must_pay_its_resource_cost() {
+        let mut stunbreak = skill(1, SkillSlot::Utility, 0, 10_000, vec![]);
+        stunbreak.is_stunbreak = true;
+        let skills = [stunbreak];
+        let rules = [rule(1, ResourceKind::Energy, 60.0, 0.0, false)];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &[],
+            &rules,
+            true,
+            0,
+        );
+        timeline.disabled_until_ms = 1_000;
+        timeline.try_stunbreak();
+
+        assert_eq!(timeline.disabled_until_ms, 1_000);
+        assert_eq!(timeline.resources[&ResourceKind::Energy], 50.0);
+        assert!(timeline.resource_blocked_skills.contains(&1));
+    }
+
+    #[test]
+    fn skill_owned_proc_only_runs_for_its_source_skill() {
+        let data = crate::data::normalized_effects::effects();
+        let effect = data
+            .effects_for_mode("WvW")
+            .iter()
+            .find(|effect| effect.source_id == 9120)
+            .expect("Virtue of Resolve normalized effect");
+        let params = params();
+        let mut timeline = Timeline::new(
+            &[],
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &[effect],
+            &[],
+            true,
+            0,
+        );
+        timeline.incoming_conditions.push(TimedCondition {
+            name: "Burning".into(),
+            stacks: 1,
+            expires_at_ms: 2_000,
+            next_tick_ms: 1_000,
+        });
+
+        timeline.trigger_procs(TriggerRule::OnSkillUse, Some(1), false);
+        assert_eq!(timeline.incoming_conditions.len(), 1);
+        timeline.trigger_procs(TriggerRule::OnSkillUse, Some(9120), false);
+        assert!(timeline.incoming_conditions.is_empty());
+    }
+
+    #[test]
+    fn unsupported_normalized_trigger_degrades_coverage() {
+        let data = crate::data::normalized_effects::effects();
+        let effect = data
+            .effects_for_mode("WvW")
+            .iter()
+            .find(|effect| matches!(effect.trigger_rule, TriggerRule::OnCrit))
+            .expect("OnCrit normalized effect");
+        let params = params();
+        let timeline = Timeline::new(
+            &[],
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &[effect],
+            &[],
+            true,
+            0,
+        );
+
+        assert_eq!(timeline.unmodeled_effect_sources, 1);
+        assert!(timeline.proc_specs.is_empty());
     }
 
     #[test]
@@ -2114,13 +2519,17 @@ mod tests {
             open_enemy(false),
             &[],
             &rules,
+            true,
             0,
         );
-        for _ in 0..4 {
+        for _ in 0..2 {
             assert!(timeline.can_pay_resource(1));
             timeline.pay_resource(1);
         }
         assert!(!timeline.can_pay_resource(1));
+        timeline.resources.insert(ResourceKind::Energy, 99.9);
+        timeline.regenerate_resources();
+        assert_eq!(timeline.resources[&ResourceKind::Energy], 100.0);
     }
 
     #[test]
@@ -2134,6 +2543,7 @@ mod tests {
             open_enemy(false),
             &[],
             &rules,
+            true,
             0,
         );
         timeline.resources.insert(ResourceKind::Adrenaline, 0.0);
@@ -2157,6 +2567,7 @@ mod tests {
             open_enemy(false),
             &[],
             &rules,
+            true,
             0,
         );
         assert!(!timeline.can_pay_resource(2));
@@ -2180,6 +2591,7 @@ mod tests {
             open_enemy(false),
             &[],
             &rules,
+            true,
             0,
         );
         assert!(!timeline.can_pay_resource(2));
@@ -2187,5 +2599,99 @@ mod tests {
         assert!(timeline.can_pay_resource(2));
         timeline.pay_resource(2);
         assert!(!timeline.can_pay_resource(2));
+    }
+
+    #[test]
+    fn duplicate_skill_ids_share_one_recharge_timer() {
+        let mut first = skill(42, SkillSlot::Weapon2, 100, 5_000, vec![]);
+        first.weapon_set = 1;
+        let mut second = first.clone();
+        second.weapon_set = 2;
+        let skills = [first, second];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(1_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+
+        timeline.set_skill_cooldown(42, 5_000);
+
+        assert_eq!(timeline.cooldown_ready_ms, vec![5_000, 5_000]);
+    }
+
+    #[test]
+    fn profession_swap_policy_controls_the_timeline_timer() {
+        let mut first = skill(1, SkillSlot::Weapon2, 100, 1_000, vec![]);
+        first.weapon_set = 1;
+        let mut second = skill(2, SkillSlot::Weapon2, 100, 1_000, vec![]);
+        second.weapon_set = 2;
+        let skills = [first, second];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(6_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.weapon_swap_cooldown_ms = Some(5_000);
+
+        timeline.try_weapon_swap();
+        assert_eq!(timeline.active_weapon_set, 2);
+        assert_eq!(timeline.weapon_swap_ready_ms, 5_000);
+        timeline.now_ms = 4_999;
+        timeline.try_weapon_swap();
+        assert_eq!(timeline.active_weapon_set, 2);
+        timeline.now_ms = 5_000;
+        timeline.try_weapon_swap();
+        assert_eq!(timeline.active_weapon_set, 1);
+
+        timeline.weapon_swap_cooldown_ms = None;
+        timeline.now_ms = 10_000;
+        timeline.try_weapon_swap();
+        assert_eq!(timeline.active_weapon_set, 1);
+    }
+
+    #[test]
+    fn stealth_breaks_on_landed_strike_but_is_not_full_immunity() {
+        let strike = skill(
+            1,
+            SkillSlot::Weapon2,
+            100,
+            1_000,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        );
+        let skills = [strike];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.apply_defense(CoverKind::Stealth, 3_000, 1, false);
+
+        timeline.receive_strike(1_000.0, false);
+        assert!(timeline.incoming_damage > 0.0);
+        assert!(timeline.has_defense(CoverKind::Stealth));
+
+        timeline.apply_skill_effect(1, &skills[0].effects[0], true);
+        assert!(!timeline.has_defense(CoverKind::Stealth));
     }
 }

@@ -2,6 +2,7 @@
 //! Mapping lives in `builder`; this module is the scorer contract.
 
 use crate::scenario::{CombatKind, CombatTier};
+use gw2_core::types::GameMode;
 
 use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect};
 
@@ -10,7 +11,31 @@ use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect};
 /// WvW needs enough wall-clock for a protected opener and the enemy's answer.
 /// A two-second spike remains a reported sub-window, but the exchange itself is
 /// never truncated at the instant the minimum chain completes.
-pub fn simulation_window_ms(tier: CombatTier, kind: CombatKind) -> u32 {
+pub fn simulation_window_ms_for_mode(mode: &GameMode, tier: CombatTier, kind: CombatKind) -> u32 {
+    if *mode != GameMode::WvW {
+        return match (tier, kind) {
+            (CombatTier::Solo, CombatKind::CondiRamp) => 5_000,
+            (
+                CombatTier::Solo,
+                CombatKind::Commander | CombatKind::Support | CombatKind::Staller,
+            ) => 10_000,
+            (CombatTier::Solo, _) => 2_000,
+            (CombatTier::Party, CombatKind::CondiRamp) => 5_000,
+            (
+                CombatTier::Party,
+                CombatKind::Commander | CombatKind::Support | CombatKind::Staller,
+            ) => 10_000,
+            (CombatTier::Party, _) => 2_500,
+            (CombatTier::Squad, CombatKind::StrikeSpike) => 3_000,
+            (CombatTier::Squad, CombatKind::CondiRamp) => 7_000,
+            (CombatTier::Squad, CombatKind::Harasser) => 2_500,
+            (CombatTier::Squad, CombatKind::Disabler) => 7_000,
+            (
+                CombatTier::Squad,
+                CombatKind::Commander | CombatKind::Support | CombatKind::Staller,
+            ) => 10_000,
+        };
+    }
     match (tier, kind) {
         (CombatTier::Solo, CombatKind::StrikeSpike) => 5_000,
         (CombatTier::Solo, CombatKind::CondiRamp) => 20_000,
@@ -33,9 +58,22 @@ pub fn simulation_window_ms(tier: CombatTier, kind: CombatKind) -> u32 {
     }
 }
 
+/// WvW exchange window retained for callers that do not carry game mode.
+pub fn simulation_window_ms(tier: CombatTier, kind: CombatKind) -> u32 {
+    simulation_window_ms_for_mode(&GameMode::WvW, tier, kind)
+}
+
 /// Prefer CC/strip/cover over DPCT for this long at the start of a short clock.
+pub fn setup_window_ms_for_mode(duration_ms: u32, wvw: bool) -> u32 {
+    if wvw || duration_ms <= 10_000 {
+        2_000.min(duration_ms)
+    } else {
+        0
+    }
+}
+
 pub fn setup_window_ms(duration_ms: u32) -> u32 {
-    2_000.min(duration_ms)
+    setup_window_ms_for_mode(duration_ms, true)
 }
 
 pub fn kit_has_mobility_out(skills: &[RotationSkill]) -> bool {

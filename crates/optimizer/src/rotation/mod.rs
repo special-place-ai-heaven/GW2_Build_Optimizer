@@ -142,6 +142,7 @@ pub enum SkillEffect {
     /// Combo field placement.
     ComboField {
         field_type: String,
+        duration_ms: u32,
     },
     /// Combo finisher. The active field and finisher type determine the result.
     ComboFinisher {

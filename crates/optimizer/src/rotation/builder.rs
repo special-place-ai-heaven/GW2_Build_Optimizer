@@ -5,6 +5,8 @@ use gw2_api::models::facts::Fact;
 use gw2_api::models::Skill;
 use std::collections::HashMap;
 
+use crate::balance::BalanceContext;
+use crate::data::balance_overrides::{overrides, OverrideResult};
 use crate::data::normalized_effects::{EffectCategory, NormalizedEffect};
 use crate::gamedb::GameDb;
 use crate::text_util::{
@@ -16,11 +18,21 @@ use super::{ControlKind, CoverKind, MobilityKind, RotationSkill, SkillEffect, Sk
 
 /// Build a list of RotationSkills from skill IDs, looking up data from GameDb.
 pub fn build_rotation_skills(skill_ids: &[u32], db: &GameDb) -> Vec<RotationSkill> {
+    build_rotation_skills_for_context(skill_ids, db, &BalanceContext::pve())
+}
+
+/// Build mode-aware rotation skills. Sourced overrides take precedence over
+/// the public API because the API does not label competitive mode splits.
+pub fn build_rotation_skills_for_context(
+    skill_ids: &[u32],
+    db: &GameDb,
+    ctx: &BalanceContext,
+) -> Vec<RotationSkill> {
     skill_ids
         .iter()
         .filter_map(|&id| {
             let skill = db.skills.get(&id)?;
-            Some(skill_to_rotation(skill))
+            Some(skill_to_rotation_for_context(skill, ctx))
         })
         .collect()
 }
@@ -97,7 +109,12 @@ pub fn enrich_with_cleanse(
 }
 
 /// Convert a GW2 API Skill into a RotationSkill with extracted timing and effects.
+#[cfg(test)]
 fn skill_to_rotation(skill: &Skill) -> RotationSkill {
+    skill_to_rotation_for_context(skill, &BalanceContext::pve())
+}
+
+fn skill_to_rotation_for_context(skill: &Skill, ctx: &BalanceContext) -> RotationSkill {
     let slot = skill
         .slot
         .as_deref()
@@ -105,8 +122,12 @@ fn skill_to_rotation(skill: &Skill) -> RotationSkill {
         .unwrap_or(SkillSlot::Utility);
 
     let timing = timing_for(skill.id, slot);
-    let cooldown_ms = extract_cooldown(&skill.facts);
-    let effects = extract_effects(&skill.facts, skill.description.as_deref());
+    let cast_time_ms =
+        sourced_skill_u32(ctx, skill.id, "activation_ms").unwrap_or_else(|| timing.total_ms());
+    let cooldown_ms = sourced_skill_u32(ctx, skill.id, "recharge_ms")
+        .unwrap_or_else(|| extract_cooldown(&skill.facts));
+    let effects =
+        extract_effects_for_context(skill.id, &skill.facts, skill.description.as_deref(), ctx);
     let is_stunbreak = skill.facts.iter().any(|f| {
         matches!(
             f,
@@ -121,13 +142,75 @@ fn skill_to_rotation(skill: &Skill) -> RotationSkill {
         skill_id: skill.id,
         name: skill.name.clone(),
         slot,
-        cast_time_ms: timing.total_ms(),
+        cast_time_ms,
         cooldown_ms,
         effects,
         next_chain: skill.next_chain,
         is_stunbreak,
         weapon_set: 0, // default; caller can tag with set 1/2 via tag_weapon_set()
     }
+}
+
+pub(crate) fn sourced_skill_value(ctx: &BalanceContext, skill_id: u32, field: &str) -> Option<f64> {
+    match overrides().lookup(
+        &ctx.patch_id,
+        ctx.game_mode.label(),
+        "Skill",
+        skill_id,
+        field,
+    ) {
+        Some(OverrideResult::Value { value, .. }) => Some(value),
+        Some(OverrideResult::Unknown { .. }) | None => None,
+    }
+}
+
+pub(crate) fn sourced_skill_u32(ctx: &BalanceContext, skill_id: u32, field: &str) -> Option<u32> {
+    sourced_skill_value(ctx, skill_id, field)
+        .filter(|value| value.is_finite() && *value >= 0.0 && *value <= u32::MAX as f64)
+        .map(|value| value.round() as u32)
+}
+
+/// Sourced coefficients for a skill whose damage changes with target health.
+///
+/// Rotation construction has no target-health input, so it cannot choose a
+/// threshold dynamically. `above_50` is the exact initial-target coefficient
+/// emitted into the rotation. Lower-health tiers remain recorded here and make
+/// that selection explicitly provisional rather than being averaged or summed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SourcedDamageCoefficientProfile {
+    above_50: f64,
+    below_50: Option<f64>,
+    below_25: Option<f64>,
+    threshold_selection_is_provisional: bool,
+}
+
+impl SourcedDamageCoefficientProfile {
+    fn initial_target_coefficient(self) -> f64 {
+        debug_assert_eq!(
+            self.threshold_selection_is_provisional,
+            self.below_50.is_some() || self.below_25.is_some()
+        );
+        self.above_50
+    }
+}
+
+fn sourced_damage_coefficient_profile(
+    ctx: &BalanceContext,
+    skill_id: u32,
+) -> Option<SourcedDamageCoefficientProfile> {
+    let valid_coefficient = |field| {
+        sourced_skill_value(ctx, skill_id, field).filter(|value| value.is_finite() && *value >= 0.0)
+    };
+    let above_50 = valid_coefficient("damage_coefficient:above_50")?;
+    let below_50 = valid_coefficient("damage_coefficient:below_50");
+    let below_25 = valid_coefficient("damage_coefficient:below_25");
+
+    Some(SourcedDamageCoefficientProfile {
+        above_50,
+        below_50,
+        below_25,
+        threshold_selection_is_provisional: below_50.is_some() || below_25.is_some(),
+    })
 }
 
 /// Tag weapon skills in a rotation with their weapon set number.
@@ -193,9 +276,38 @@ fn extract_cooldown(facts: &[Fact]) -> u32 {
 }
 
 /// Extract all combat-relevant effects from skill facts (+ description for corrupt/mobility).
+#[cfg(test)]
 fn extract_effects(facts: &[Fact], description: Option<&str>) -> Vec<SkillEffect> {
+    extract_effects_for_context(0, facts, description, &BalanceContext::pve())
+}
+
+fn extract_effects_for_context(
+    skill_id: u32,
+    facts: &[Fact],
+    description: Option<&str>,
+    ctx: &BalanceContext,
+) -> Vec<SkillEffect> {
     let mut effects = Vec::new();
     let (interval_ms, window_ms) = pulse_window_ms(facts);
+    let sourced_damage = sourced_damage_coefficient_profile(ctx, skill_id);
+
+    if let Some(profile) = sourced_damage {
+        // Threshold rows are mutually exclusive outcomes of one hit. The
+        // current rotation representation cannot switch coefficients as target
+        // health changes, so emit the exact above-50 initial-target value once.
+        // Never add the API's threshold rows as simultaneous strikes.
+        let hit_count = facts
+            .iter()
+            .find_map(|fact| match fact {
+                Fact::Damage { hit_count, .. } => *hit_count,
+                _ => None,
+            })
+            .unwrap_or(1);
+        effects.push(SkillEffect::StrikeDamage {
+            hit_count,
+            dmg_multiplier: profile.initial_target_coefficient(),
+        });
+    }
 
     for fact in facts {
         match fact {
@@ -203,24 +315,23 @@ fn extract_effects(facts: &[Fact], description: Option<&str>) -> Vec<SkillEffect
                 hit_count,
                 dmg_multiplier,
                 ..
-            } => {
+            } if sourced_damage.is_none() => {
                 effects.push(SkillEffect::StrikeDamage {
                     hit_count: hit_count.unwrap_or(1),
                     dmg_multiplier: dmg_multiplier.unwrap_or(1.0),
                 });
             }
+            Fact::Damage { .. } => {}
             Fact::Buff {
                 status: Some(status),
                 duration,
                 apply_count,
                 ..
             } => {
-                push_status_effect(
-                    &mut effects,
-                    status,
-                    apply_count.unwrap_or(1),
-                    duration.unwrap_or(0) * 1000,
-                );
+                let field = format!("status_duration_ms:{}", status.to_lowercase());
+                let duration_ms = sourced_skill_u32(ctx, skill_id, &field)
+                    .unwrap_or_else(|| duration.unwrap_or(0) * 1000);
+                push_status_effect(&mut effects, status, apply_count.unwrap_or(1), duration_ms);
             }
             Fact::PrefixedBuff {
                 status: Some(status),
@@ -228,12 +339,10 @@ fn extract_effects(facts: &[Fact], description: Option<&str>) -> Vec<SkillEffect
                 apply_count,
                 ..
             } => {
-                push_status_effect(
-                    &mut effects,
-                    status,
-                    apply_count.unwrap_or(1),
-                    duration.unwrap_or(0) * 1000,
-                );
+                let field = format!("status_duration_ms:{}", status.to_lowercase());
+                let duration_ms = sourced_skill_u32(ctx, skill_id, &field)
+                    .unwrap_or_else(|| duration.unwrap_or(0) * 1000);
+                push_status_effect(&mut effects, status, apply_count.unwrap_or(1), duration_ms);
             }
             Fact::ComboField {
                 field_type: Some(ft),
@@ -241,6 +350,8 @@ fn extract_effects(facts: &[Fact], description: Option<&str>) -> Vec<SkillEffect
             } => {
                 effects.push(SkillEffect::ComboField {
                     field_type: ft.clone(),
+                    duration_ms: sourced_skill_u32(ctx, skill_id, "combo_field_duration_ms")
+                        .unwrap_or(window_ms),
                 });
             }
             Fact::ComboFinisher {
@@ -414,7 +525,7 @@ fn cover_kind(status: &str) -> Option<(CoverKind, bool)> {
         "Stability" => (CoverKind::Stability, true),
         "Resistance" => (CoverKind::Resistance, true),
         "Protection" => (CoverKind::Protection, true),
-        "Blind" | "Blinded" => (CoverKind::Blind, false),
+        "Blind" | "Blinded" | "Blindness" => (CoverKind::Blind, false),
         _ => return None,
     })
 }
@@ -463,7 +574,7 @@ fn push_description_effects(effects: &mut Vec<SkillEffect>, description: &str) {
     if !has_block_cover && text_describes_block(&d) {
         effects.push(SkillEffect::Cover {
             kind: CoverKind::Block,
-            duration_ms: 1000,
+            duration_ms: 0,
             strippable: false,
         });
     }
@@ -478,13 +589,13 @@ fn push_description_effects(effects: &mut Vec<SkillEffect>, description: &str) {
     if !has_stability && text_describes_stability(&d) {
         effects.push(SkillEffect::Cover {
             kind: CoverKind::Stability,
-            duration_ms: 5000,
+            duration_ms: 0,
             strippable: true,
         });
         effects.push(SkillEffect::ApplyBuff {
             buff: "Stability".into(),
             stacks: 1,
-            duration_ms: 5000,
+            duration_ms: 0,
         });
     }
     if d.contains("barrier")
@@ -834,6 +945,7 @@ mod tests {
             e,
             SkillEffect::Cover {
                 kind: CoverKind::Block,
+                duration_ms: 0,
                 ..
             }
         )));
@@ -845,6 +957,129 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn description_only_cover_never_invents_a_duration() {
+        let effects = extract_effects(
+            &[],
+            Some("Block attacks and gain stability while channeling."),
+        );
+        assert!(effects
+            .iter()
+            .filter_map(|effect| match effect {
+                SkillEffect::Cover { duration_ms, .. } => Some(*duration_ms),
+                _ => None,
+            })
+            .all(|duration_ms| duration_ms == 0));
+    }
+
+    #[test]
+    fn sourced_skill_values_are_isolated_by_mode() {
+        let pve = BalanceContext::new(gw2_core::types::GameMode::PvE);
+        let pvp = BalanceContext::new(gw2_core::types::GameMode::PvP);
+        let wvw = BalanceContext::new(gw2_core::types::GameMode::WvW);
+
+        assert_eq!(sourced_skill_u32(&pve, 13113, "initiative_cost"), Some(6));
+        assert_eq!(sourced_skill_u32(&pvp, 13113, "initiative_cost"), Some(6));
+        assert_eq!(sourced_skill_u32(&wvw, 13113, "initiative_cost"), Some(7));
+        assert_eq!(
+            sourced_skill_u32(&wvw, 13113, "combo_field_duration_ms"),
+            Some(4_000)
+        );
+        assert_eq!(
+            sourced_skill_value(&pve, 13097, "damage_coefficient:below_25"),
+            Some(2.2)
+        );
+        assert_eq!(
+            sourced_skill_value(&wvw, 13097, "damage_coefficient:below_25"),
+            Some(2.0)
+        );
+    }
+
+    #[test]
+    fn sourced_damage_profiles_keep_exact_mode_specific_thresholds() {
+        let pve = sourced_damage_coefficient_profile(
+            &BalanceContext::new(gw2_core::types::GameMode::PvE),
+            13097,
+        )
+        .expect("PvE Heartseeker profile");
+        let pvp = sourced_damage_coefficient_profile(
+            &BalanceContext::new(gw2_core::types::GameMode::PvP),
+            13097,
+        )
+        .expect("PvP Heartseeker profile");
+        let wvw = sourced_damage_coefficient_profile(
+            &BalanceContext::new(gw2_core::types::GameMode::WvW),
+            13097,
+        )
+        .expect("WvW Heartseeker profile");
+
+        assert_eq!(
+            (pve.above_50, pve.below_50, pve.below_25),
+            (1.0, Some(1.6), Some(2.2))
+        );
+        assert_eq!(
+            (pvp.above_50, pvp.below_50, pvp.below_25),
+            (1.0, Some(1.5), Some(2.0))
+        );
+        assert_eq!(
+            (wvw.above_50, wvw.below_50, wvw.below_25),
+            (1.0, Some(1.5), Some(2.0))
+        );
+        assert!(pve.threshold_selection_is_provisional);
+        assert!(pvp.threshold_selection_is_provisional);
+        assert!(wvw.threshold_selection_is_provisional);
+    }
+
+    #[test]
+    fn sourced_threshold_rows_emit_one_initial_target_strike() {
+        let facts = vec![
+            Fact::Damage {
+                text: Some("Damage".into()),
+                icon: None,
+                hit_count: Some(1),
+                dmg_multiplier: Some(1.0),
+            },
+            Fact::Damage {
+                text: Some("Damage below 50%".into()),
+                icon: None,
+                hit_count: Some(1),
+                dmg_multiplier: Some(1.75),
+            },
+            Fact::Damage {
+                text: Some("Damage below 25%".into()),
+                icon: None,
+                hit_count: Some(1),
+                dmg_multiplier: Some(2.5),
+            },
+        ];
+
+        for mode in [
+            gw2_core::types::GameMode::PvE,
+            gw2_core::types::GameMode::PvP,
+            gw2_core::types::GameMode::WvW,
+        ] {
+            let mode_label = format!("{mode:?}");
+            let effects =
+                extract_effects_for_context(13097, &facts, None, &BalanceContext::new(mode));
+            let strikes: Vec<_> = effects
+                .iter()
+                .filter_map(|effect| match effect {
+                    SkillEffect::StrikeDamage {
+                        hit_count,
+                        dmg_multiplier,
+                    } => Some((*hit_count, *dmg_multiplier)),
+                    _ => None,
+                })
+                .collect();
+
+            assert_eq!(
+                strikes,
+                vec![(1, 1.0)],
+                "threshold rows stacked in {mode_label}"
+            );
+        }
     }
 
     #[test]
