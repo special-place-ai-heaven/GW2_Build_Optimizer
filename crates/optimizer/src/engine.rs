@@ -1483,6 +1483,14 @@ fn apply_validated_gear_stats(
 
     let budgets = data::slot_budgets::slot_budgets();
     for &(slot_type, slot_name) in data::EQUIPMENT_SLOTS {
+        let slot_type = if slot_name.starts_with("Weapon") {
+            match active_land_weapon_budget(slot_name, &validated.weapons.set1) {
+                Some(kind) => kind,
+                None => continue,
+            }
+        } else {
+            slot_type
+        };
         let group_prefix = if matches!(
             slot_name,
             "Helm" | "Shoulders" | "Coat" | "Gloves" | "Leggings" | "Boots"
@@ -1503,6 +1511,26 @@ fn apply_validated_gear_stats(
         if let Some(budget) = budgets.get(slot_type, shape) {
             add_budget_stats_for_itemstat(stats, itemstat, budget);
         }
+    }
+}
+
+/// Active land set only. Two-hand when MH is present and OH is empty;
+/// one-hand per filled hand otherwise. The inactive set never enters the sheet.
+fn active_land_weapon_budget(
+    slot_name: &str,
+    set: &crate::validation::ValidatedWeaponSet,
+) -> Option<data::SlotType> {
+    match slot_name {
+        "WeaponA1" => match (&set.main_hand, &set.off_hand) {
+            (Some(_), None) => Some(data::SlotType::WeaponTwoHand),
+            (Some(_), Some(_)) => Some(data::SlotType::WeaponOneHand),
+            _ => None,
+        },
+        "WeaponA2" => match (&set.main_hand, &set.off_hand) {
+            (Some(_), Some(_)) | (None, Some(_)) => Some(data::SlotType::WeaponOneHand),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
