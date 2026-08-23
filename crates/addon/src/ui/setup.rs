@@ -48,7 +48,6 @@ pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
     }
 }
 
-
 fn render_language_step(ui: &Ui, state: &mut AddonState) {
     use nexus::imgui::{ComboBox, Selectable};
 
@@ -89,11 +88,7 @@ fn render_language_step(ui: &Ui, state: &mut AddonState) {
         }
         for lang in gw2_core::i18n::LANGUAGES {
             let sel = state.config.ui_language == lang.code;
-            if Selectable::new(lang.native_name)
-                .selected(sel)
-                .build(ui)
-                && !sel
-            {
+            if Selectable::new(lang.native_name).selected(sel).build(ui) && !sel {
                 state.config.ui_language = lang.code.into();
                 gw2_core::i18n::set_language(lang.code);
                 let _ = state.config.save(&state.config_path);
@@ -106,7 +101,6 @@ fn render_language_step(ui: &Ui, state: &mut AddonState) {
         state.screen = Screen::Setup(SetupStep::Gw2ApiKey);
     }
 }
-
 
 fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
     theme::header(ui, &t("setup.gw2_header"));
@@ -272,7 +266,10 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
             if *present {
                 ui.text_colored(theme::OPTIMIZED, format!("  [v] {}", scope));
             } else {
-                ui.text_colored(theme::WARN, format!("  [x] {}", tf("setup.missing", &[("scope", scope)])));
+                ui.text_colored(
+                    theme::WARN,
+                    format!("  [x] {}", tf("setup.missing", &[("scope", scope)])),
+                );
             }
         }
     }
@@ -359,7 +356,10 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
 
     // Key input
     let provider_label = state.config.active_provider.label();
-    ui.text(tf("setup.paste_provider_key", &[("provider", provider_label)]));
+    ui.text(tf(
+        "setup.paste_provider_key",
+        &[("provider", provider_label)],
+    ));
     ui.set_next_item_width(-1.0);
     ui.input_text("##llm_key", &mut state.setup.llm_key_input)
         .build();
@@ -551,12 +551,11 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                 let cache = gw2_api::cache::DataCache::new(&cache_dir);
 
                                 let token_inner = token.clone();
-                                let result =
-                                    gw2_api::download::download_game_and_names(
-                                        &client,
-                                        &cache,
-                                        || token_inner.is_cancelled(),
-                                        |progress| {
+                                let result = gw2_api::download::download_game_and_names(
+                                    &client,
+                                    &cache,
+                                    || token_inner.is_cancelled(),
+                                    |progress| {
                                         if token_inner.is_cancelled() {
                                             return;
                                         }
@@ -576,7 +575,8 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                                                 error: None,
                                             });
                                         });
-                                    });
+                                    },
+                                );
 
                                 if token.is_cancelled() {
                                     break 'download DlOutcome::Cancelled;

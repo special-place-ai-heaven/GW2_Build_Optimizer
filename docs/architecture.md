@@ -21,6 +21,18 @@ Each tier falls back to the next on failure with a Warning log:
 2. **`engine::optimize_with_gemini()`** — cosine-similarity gear-prefix selection + pre-computed context (~40-50K tokens) + a single LLM call + `validate_gemini_build()`.
 3. **Legacy `engine::optimize()` -> `enrich_with_gemini()`** — deterministic gear+spec search, Gemini enriches post-hoc.
 
+### Mode-aware evaluation
+
+`BalanceContext` carries the selected patch and game mode into factual stat,
+condition, boon, skill-timing, and balance-override lookups. PvE, PvP, and WvW
+therefore do not share a flattened coefficient or duration table.
+
+WvW roaming search uses `rotation::wvw_timeline` as a two-sided evaluator. It
+schedules committed actions, opponent responses, control, defensive layers,
+resource payment, cooldown recovery, and weapon swaps. `referee` ranks the
+resulting secured sequence and the user's role weights; internal evaluation
+values remain separate from the passive Hero-panel attributes shown by the addon.
+
 ## LLM Provider Abstraction
 
 `crates/optimizer/src/llm/` defines a `LlmClient` trait (`Send + Sync`, `&self`) with a `create_client(config, addon_dir)` factory. Providers handle wire format internally:
@@ -39,6 +51,8 @@ User input (UI tab)
   -> background std::thread::spawn (clones CancellationToken)
   -> optimizer::engine::optimize_*() (tiered)
         |- gw2api::client (rate-limited, cached)
+        |- optimizer::balance::BalanceContext (patch + PvE/PvP/WvW)
+        |- optimizer::rotation::wvw_timeline (WvW exchange evaluation)
         |- optimizer::context::build_context() (~40-50K tokens)
         |- optimizer::llm::LlmClient (Gemini/OpenAI/Anthropic)
         |- optimizer::validation::validate_gemini_build()

@@ -3,7 +3,7 @@
 Status: Draft for adoption
 Owner: Project maintainers
 Audience: Human maintainers, AI coding agents, reviewers
-Last updated: 2026-03-06
+Last updated: 2026-08-23
 
 This document defines the machine-readable contracts that implement `docs/optimizer-source-of-truth.md`.
 
@@ -57,6 +57,7 @@ The data model must not:
 data/
   manifests/
     2026-01-13.json
+    2026-07-15.json
   profession_profiles.json
   slot_budgets/
     level80_ascended.json
@@ -70,8 +71,13 @@ data/
       pve.json
       pvp.json
       wvw.json
+    2026-07-15/
+      pve.json
+      pvp.json
+      wvw.json
   patch_ledgers/
     2026-01-13.yaml
+    2026-07-15.yaml
   normalized_effects/
     2026-01-13/
       pve.json

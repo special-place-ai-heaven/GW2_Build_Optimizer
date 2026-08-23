@@ -630,6 +630,27 @@ mod tests {
     }
 
     #[test]
+    fn test_wvw_elite_profiles_resolve_before_core_fallbacks() {
+        let data = rotation_profiles();
+        for (profession, elite_spec, profile_id) in [
+            ("Thief", "Daredevil", "wvw_daredevil_roam"),
+            ("Warrior", "Spellbreaker", "wvw_spellbreaker_roam"),
+            ("Mesmer", "Mirage", "wvw_mirage_roam"),
+            ("Mesmer", "Virtuoso", "wvw_virtuoso_roam"),
+        ] {
+            let profile = data
+                .lookup(
+                    profession,
+                    Some(elite_spec),
+                    &gw2_core::types::GameMode::WvW,
+                )
+                .expect("elite WvW profile should resolve");
+            assert_eq!(profile.profile_id, profile_id);
+            assert_eq!(profile.elite_spec.as_deref(), Some(elite_spec));
+        }
+    }
+
+    #[test]
     fn test_lookup_fallback_to_generic() {
         let data = rotation_profiles();
         // "FakeProfession" doesn't exist, should fall back to Generic

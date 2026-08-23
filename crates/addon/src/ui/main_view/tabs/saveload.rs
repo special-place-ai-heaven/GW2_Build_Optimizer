@@ -421,8 +421,9 @@ fn load_named(state: &mut AddonState, name: &str) {
     };
     let db_ref = state.main.game_db.as_ref();
     let mut suggestion = saved_to_suggestion(&saved, db_ref);
+    let balance_ctx = gw2_optimizer::balance::BalanceContext::new(state.main.game_mode.clone());
     if let Some(ref db) = state.main.game_db {
-        optimization::simulate_suggestion_rotation(&mut suggestion, db);
+        optimization::simulate_suggestion_rotation(&mut suggestion, db, &balance_ctx);
     }
     state.main.comparison.suggestions = vec![suggestion];
     state.main.comparison.selected_suggestion = 0;
@@ -678,6 +679,7 @@ fn suggestion_to_saved(
         balance_manifest_version: balance_manifest_version.map(|s| s.to_string()),
         label: suggestion.label.clone(),
         stat_prefix: suggestion.stat_prefix.clone(),
+        gear_prefixes: suggestion.gear_prefixes.clone(),
         specializations: suggestion.specializations.clone(),
         weapons: suggestion.weapons.clone(),
         skills: suggestion.skills.clone(),
@@ -747,6 +749,7 @@ fn saved_to_suggestion(
         },
         build_summary: String::new(),
         stat_prefix: saved.stat_prefix.clone(),
+        gear_prefixes: saved.gear_prefixes.clone(),
         specializations: saved.specializations.clone(),
         weapons: saved.weapons.clone(),
         skills: saved.skills.clone(),
@@ -972,6 +975,7 @@ mod tests {
             balance_manifest_version: None,
             label: "Test Build".into(),
             stat_prefix: "Viper's".into(),
+            gear_prefixes: gw2_core::types::GearPrefixGroups::default(),
             specializations: vec![("Test Spec".into(), vec!["Test Condition Trait".into()])],
             weapons: vec![],
             skills: vec![],

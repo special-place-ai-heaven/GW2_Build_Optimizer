@@ -312,6 +312,16 @@ pub struct RotationBreakdown {
 }
 
 /// A saved optimizer build for persistence (Save/Load tab).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GearPrefixGroups {
+    #[serde(default)]
+    pub armor: String,
+    #[serde(default)]
+    pub trinkets: String,
+    #[serde(default)]
+    pub weapons: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedBuild {
     pub name: String,
@@ -331,6 +341,10 @@ pub struct SavedBuild {
     // Build suggestion data (mirrors BuildSuggestion fields)
     pub label: String,
     pub stat_prefix: String,
+    /// Canonical per-group prefixes. Empty fields in older saves fall back to
+    /// `stat_prefix` when displayed.
+    #[serde(default)]
+    pub gear_prefixes: GearPrefixGroups,
     pub specializations: Vec<(String, Vec<String>)>,
     pub weapons: Vec<String>,
     pub skills: Vec<String>,

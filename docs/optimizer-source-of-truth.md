@@ -3,7 +3,7 @@
 Status: Draft for adoption
 Owner: Project maintainers
 Audience: Human maintainers, AI coding agents, reviewers
-Last updated: 2026-03-06
+Last updated: 2026-08-23
 
 ## Purpose
 
@@ -649,18 +649,23 @@ Any PR that changes optimizer math must state:
 3. whether the change touches factual logic or heuristic logic
 4. which modes are affected
 
-## Known Current Defects To Correct
+## Current Gaps To Correct
 
-These are current implementation defects or design debts that must be treated as actionable.
+v1.5.0 resolves the earlier profession health tiers, armor-weight baselines,
+mode-aware condition formulas, Fury split, and canonical ascended slot budgets.
+The remaining gaps are explicit:
 
-1. `Guardian` and `Necromancer` health classes are wrong in current code.
-2. Burning base value is currently off from the canonical level-80 wiki value.
-3. Torment and confusion formulas are mode-incomplete and numerically outdated.
-4. Fury is currently treated as one global value instead of PvE vs PvP/WvW split.
-5. Gear search uses local slot constants instead of a canonical slot-budget dataset.
-6. Disable scoring is a proxy, not a factual CC/defiance model.
-7. Condition weighting is still a heuristic preset system, not a spec-aware rotation model.
-8. Save/load currently loses profession-aware combat reconstruction in some flows.
+1. Mode-specific timing and coefficient coverage is still incremental. Facts not
+   present in the active snapshot remain `Unknown`, unmodeled, or `Provisional`.
+2. Health-threshold skill coefficients are stored by mode, but the initial-target
+   rotation model uses only the above-50% value. Dynamic threshold transitions
+   require target-health-aware effect representation.
+3. Disable and secured-sequence scoring is a timeline model, not a complete factual
+   representation of every profession mechanic and opponent response.
+4. Condition weighting remains a named heuristic profile system rather than a
+   complete profession/spec rotation library.
+5. Attunements, legends, shroud, heat, life force, pets, kits, and several other
+   profession state machines are not yet modeled end to end.
 
 ## Recommended Repository Structure
 

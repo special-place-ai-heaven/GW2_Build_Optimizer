@@ -1464,7 +1464,8 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
         };
 
     // Build rotation skills from the provided IDs
-    let rotation_skills = rotation::builder::build_rotation_skills(&skill_ids, ctx.db);
+    let rotation_skills =
+        rotation::builder::build_rotation_skills_for_context(&skill_ids, ctx.db, ctx.balance_ctx);
 
     if rotation_skills.is_empty() {
         return json!({ "error": "No valid skills found for the provided IDs" });

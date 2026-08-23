@@ -10,6 +10,6 @@
     }
   ],
   "supported_modes": ["PvE", "PvP", "WvW"],
-  "status": "active",
+  "status": "superseded",
   "authoring_notes": "Initial baseline snapshot. game_build_id is the first locally verified build number at authoring time. This manifest anchors to the closest verified supported build."
 }

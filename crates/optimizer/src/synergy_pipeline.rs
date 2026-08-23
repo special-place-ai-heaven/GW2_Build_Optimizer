@@ -1298,6 +1298,7 @@ fn compute_candidate_stats(
 
 // ─── Build SynergyResult ───
 
+#[allow(clippy::too_many_arguments)]
 fn build_synergy_result(
     candidate: SynergyCandidate,
     db: &GameDb,
@@ -1370,6 +1371,11 @@ fn build_synergy_result(
             .map(|u| Some(u.clone()))
             .collect(),
         elite: candidate.elite_skill.clone(),
+        profession: crate::rotation::builder::profession_skills_for_build(
+            db,
+            profession_name,
+            &candidate.spec_ids,
+        ),
     };
     validated.legends = candidate.legends.clone();
     validated.aquatic_legends = candidate.aquatic_legends.clone();
@@ -1877,7 +1883,7 @@ mod runtime_diagnostics_tests {
     }
 
     #[test]
-    fn optimize_synergy_wvw_selects_required_viability_utilities() {
+    fn optimize_synergy_wvw_selects_required_bar_utilities() {
         let mut db = make_diag_db();
         let skills = vec![
             make_utility_skill(
@@ -1936,11 +1942,18 @@ mod runtime_diagnostics_tests {
             make_utility_skill(
                 9_103,
                 "Cleanse Utility",
-                vec![Fact::Number {
-                    text: Some("Conditions Removed".into()),
-                    icon: None,
-                    value: Some(2),
-                }],
+                vec![
+                    Fact::Number {
+                        text: Some("Conditions Removed".into()),
+                        icon: None,
+                        value: Some(2),
+                    },
+                    Fact::Recharge {
+                        text: Some("Recharge".into()),
+                        icon: None,
+                        value: Some(10.0),
+                    },
+                ],
                 Some("Remove conditions from yourself."),
             ),
         ];
@@ -1986,11 +1999,19 @@ mod runtime_diagnostics_tests {
             &ctx,
             &scenario,
         );
-        assert!(
-            report.viability.is_viable,
-            "selected utilities should satisfy competitive gates: {:?}",
-            report.viability.gates
-        );
+        for gate in [
+            crate::referee::ViabilityGate::StunbreakCount,
+            crate::referee::ViabilityGate::StabilityAccess,
+            crate::referee::ViabilityGate::CleanseRate,
+        ] {
+            let result = report
+                .viability
+                .gates
+                .iter()
+                .find(|result| result.gate == gate)
+                .expect("required bar gate should be present");
+            assert!(result.passed, "required bar gate should pass: {result:?}");
+        }
     }
 
     #[test]

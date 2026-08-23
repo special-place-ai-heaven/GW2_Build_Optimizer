@@ -28,3 +28,5 @@ tmp/
 
 # ArenaNet press kit — not UI chrome, keep it out of the repo.
 /Guild Wars 2 Asset Kit/
+/.symforge/
+/.review/

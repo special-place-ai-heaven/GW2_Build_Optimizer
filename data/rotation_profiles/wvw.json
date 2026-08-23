@@ -291,5 +291,105 @@
     ],
     "evidence_level": "Heuristic",
     "notes": "Necromancer WvW: Bleeding/Torment AoE via Scourge shades, Fear pressure."
+  },
+  {
+    "profile_id": "wvw_daredevil_roam",
+    "profession": "Thief",
+    "elite_spec": "Daredevil",
+    "objective_profile_id": null,
+    "boon_generation": {},
+    "boon_uptime": { "Might": 0.35, "Fury": 0.55, "Protection": 0.15, "Resolution": 0.10, "Stability": 0.05 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 0.5 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 0.8 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 0.2 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 4.0 }
+    },
+    "incoming_suppression": { "Cripple": 0.35, "Immobilize": 0.35 },
+    "target_behavior": { "movement_fraction": 0.75, "skill_use_frequency_per_second": 0.70 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 3.0, "vulnerability_stacks": 3.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 10.0, "vulnerability_stacks": 7.0, "boon_overrides": { "Fury": 0.70, "Protection": 0.45, "Stability": 0.30 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 20.0, "vulnerability_stacks": 15.0, "boon_overrides": { "Fury": 0.90, "Protection": 0.75, "Resolution": 0.35, "Stability": 0.55 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Daredevil WvW roaming heuristic: mobile power pressure with evade and stealth coverage."
+  },
+  {
+    "profile_id": "wvw_spellbreaker_roam",
+    "profession": "Warrior",
+    "elite_spec": "Spellbreaker",
+    "objective_profile_id": null,
+    "boon_generation": { "Might": { "mode": "IntensityRate", "avg_stacks_per_second": 0.7 } },
+    "boon_uptime": { "Might": 0.65, "Fury": 0.55, "Protection": 0.45, "Resolution": 0.25, "Stability": 0.30 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 1.2 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 0.2 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 0.0 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 6.0 }
+    },
+    "incoming_suppression": { "Cripple": 0.20, "Immobilize": 0.30 },
+    "target_behavior": { "movement_fraction": 0.60, "skill_use_frequency_per_second": 0.65 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 5.0, "vulnerability_stacks": 4.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 13.0, "vulnerability_stacks": 9.0, "boon_overrides": { "Fury": 0.75, "Protection": 0.65, "Stability": 0.45 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 23.0, "vulnerability_stacks": 18.0, "boon_overrides": { "Fury": 0.90, "Protection": 0.90, "Resolution": 0.55, "Stability": 0.75 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Spellbreaker WvW roaming heuristic: power pressure, boon removal, and counter coverage."
+  },
+  {
+    "profile_id": "wvw_mirage_roam",
+    "profession": "Mesmer",
+    "elite_spec": "Mirage",
+    "objective_profile_id": null,
+    "boon_generation": { "Might": { "mode": "IntensityRate", "avg_stacks_per_second": 0.5 } },
+    "boon_uptime": { "Might": 0.60, "Fury": 0.55, "Protection": 0.35, "Resolution": 0.25, "Stability": 0.15 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 2.0 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 0.3 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 2.8 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 2.6 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 4.0 }
+    },
+    "incoming_suppression": { "Cripple": 0.30, "Immobilize": 0.30 },
+    "target_behavior": { "movement_fraction": 0.70, "skill_use_frequency_per_second": 0.65 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 4.0, "vulnerability_stacks": 3.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 12.0, "vulnerability_stacks": 7.0, "boon_overrides": { "Fury": 0.70, "Protection": 0.55, "Stability": 0.35 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 22.0, "vulnerability_stacks": 16.0, "boon_overrides": { "Fury": 0.90, "Protection": 0.80, "Resolution": 0.45, "Stability": 0.65 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Mirage WvW roaming heuristic: condition pressure with distortion, evade, and clone sequencing."
+  },
+  {
+    "profile_id": "wvw_virtuoso_roam",
+    "profession": "Mesmer",
+    "elite_spec": "Virtuoso",
+    "objective_profile_id": null,
+    "boon_generation": {},
+    "boon_uptime": { "Might": 0.45, "Fury": 0.65, "Protection": 0.25, "Resolution": 0.15, "Stability": 0.10 },
+    "condition_application": {
+      "Bleeding": { "mode": "IntensityRate", "avg_stacks_per_second": 0.8 },
+      "Burning": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Poison": { "mode": "IntensityRate", "avg_stacks_per_second": 0.1 },
+      "Torment": { "mode": "IntensityRate", "avg_stacks_per_second": 0.4 },
+      "Confusion": { "mode": "IntensityRate", "avg_stacks_per_second": 0.3 },
+      "Vulnerability": { "mode": "SteadyState", "avg_stacks": 7.0 }
+    },
+    "incoming_suppression": { "Cripple": 0.20, "Immobilize": 0.25 },
+    "target_behavior": { "movement_fraction": 0.65, "skill_use_frequency_per_second": 0.65 },
+    "scenarios": [
+      { "scenario_id": "solo", "label": "Solo", "might_stacks": 3.0, "vulnerability_stacks": 5.0, "boon_overrides": null },
+      { "scenario_id": "party", "label": "Party", "might_stacks": 11.0, "vulnerability_stacks": 10.0, "boon_overrides": { "Fury": 0.80, "Protection": 0.50, "Stability": 0.35 } },
+      { "scenario_id": "full_squad", "label": "Full Squad", "might_stacks": 21.0, "vulnerability_stacks": 19.0, "boon_overrides": { "Fury": 0.95, "Protection": 0.80, "Resolution": 0.40, "Stability": 0.65 } }
+    ],
+    "evidence_level": "Heuristic",
+    "notes": "Virtuoso WvW roaming heuristic: ranged power pressure with blade resources and distortion coverage."
   }
 ]

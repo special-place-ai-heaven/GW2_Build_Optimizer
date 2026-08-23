@@ -8,11 +8,11 @@ use super::{try_load, DataLoadError, DataQuality, DataQualityReason, EvidenceLev
 // ─── Embedded baseline JSON (compile-time) ───
 
 const PVE_OVERRIDES_JSON: &str =
-    include_str!("../../../../data/balance_overrides/2026-01-13/pve.json");
+    include_str!("../../../../data/balance_overrides/2026-07-15/pve.json");
 const PVP_OVERRIDES_JSON: &str =
-    include_str!("../../../../data/balance_overrides/2026-01-13/pvp.json");
+    include_str!("../../../../data/balance_overrides/2026-07-15/pvp.json");
 const WVW_OVERRIDES_JSON: &str =
-    include_str!("../../../../data/balance_overrides/2026-01-13/wvw.json");
+    include_str!("../../../../data/balance_overrides/2026-07-15/wvw.json");
 
 static OVERRIDES: OnceLock<BalanceOverrides> = OnceLock::new();
 
@@ -377,7 +377,12 @@ mod tests {
             3,
             "expected 3 override files (PvE, PvP, WvW)"
         );
-        assert_eq!(o.entity_count(), 0, "baseline has no entities");
+        assert_eq!(o.entity_count(), 9, "three sourced skills per mode");
+
+        assert!(matches!(
+            o.lookup("2026-07-15", "WvW", "Skill", 13113, "initiative_cost"),
+            Some(OverrideResult::Value { value: 7.0, .. })
+        ));
     }
 
     #[test]

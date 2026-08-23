@@ -5,6 +5,7 @@ use thiserror::Error;
 
 /// Canonical JSON embedded at compile time from data/manifests/2026-01-13.json.
 const MANIFEST_2026_01_13_JSON: &str = include_str!("../../../../data/manifests/2026-01-13.json");
+const MANIFEST_2026_07_15_JSON: &str = include_str!("../../../../data/manifests/2026-07-15.json");
 
 static MANIFESTS: OnceLock<Vec<PatchManifest>> = OnceLock::new();
 
@@ -14,8 +15,12 @@ static MANIFESTS: OnceLock<Vec<PatchManifest>> = OnceLock::new();
 /// Panics if the embedded JSON is malformed (compile-time data, should never happen).
 pub fn manifests() -> &'static [PatchManifest] {
     MANIFESTS.get_or_init(|| {
-        let all = vec![load_manifest(MANIFEST_2026_01_13_JSON)
-            .expect("embedded 2026-01-13 manifest is invalid")];
+        let all = vec![
+            load_manifest(MANIFEST_2026_01_13_JSON)
+                .expect("embedded 2026-01-13 manifest is invalid"),
+            load_manifest(MANIFEST_2026_07_15_JSON)
+                .expect("embedded 2026-07-15 manifest is invalid"),
+        ];
         validate_manifest_set(&all).expect("embedded manifest set validation failed");
         all
     })
@@ -203,9 +208,11 @@ mod tests {
     #[test]
     fn test_embedded_manifest_loads_successfully() {
         let ms = manifests();
-        assert_eq!(ms.len(), 1);
+        assert_eq!(ms.len(), 2);
         assert_eq!(ms[0].patch_id, "2026-01-13");
-        assert_eq!(ms[0].status, "active");
+        assert_eq!(ms[0].status, "superseded");
+        assert_eq!(ms[1].patch_id, "2026-07-15");
+        assert_eq!(ms[1].status, "active");
         assert!(ms[0].game_build_id > 0);
     }
 
@@ -213,7 +220,7 @@ mod tests {
     fn test_latest_manifest_returns_active() {
         let m = latest_manifest();
         assert_eq!(m.status, "active");
-        assert_eq!(m.patch_id, "2026-01-13");
+        assert_eq!(m.patch_id, "2026-07-15");
     }
 
     #[test]
@@ -244,11 +251,11 @@ mod tests {
         let m = latest_manifest();
         assert!(
             m.authoring_notes.is_some(),
-            "baseline manifest should have authoring_notes"
+            "active manifest should have authoring_notes"
         );
         assert!(
-            m.authoring_notes.as_ref().unwrap().contains("baseline"),
-            "authoring_notes should mention baseline"
+            m.authoring_notes.as_ref().unwrap().contains("per-mode"),
+            "authoring_notes should describe mode-aware sourcing"
         );
     }
 

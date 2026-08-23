@@ -21,8 +21,8 @@ use gw2_core::types::GameMode;
 
 use super::combat_model::{
     kit_escape_kinds, kit_has_corrupt, kit_has_cover_answer, kit_has_interrupt,
-    kit_has_mobility_out, kit_has_stability_cover, kit_has_strip, setup_priority, setup_window_ms,
-    EnemyDummy,
+    kit_has_mobility_out, kit_has_stability_cover, kit_has_strip, setup_priority,
+    setup_window_ms_for_mode, EnemyDummy,
 };
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::{RotationSkill, SimulationResult, SkillEffect, SkillSlot, SkillUsage};
@@ -47,7 +47,7 @@ const CONDITION_TICK_INTERVAL_MS: u32 = 1000;
 
 /// Reference armor value for damage calculation, loaded from data.
 /// Source: https://wiki.guildwars2.com/wiki/Damage
-fn reference_armor() -> f64 {
+pub(super) fn reference_armor() -> f64 {
     crate::data::universal_formulas::formulas().tooltip_reference_armor
 }
 
@@ -81,7 +81,17 @@ pub struct SimParams {
     pub weapon_strength: f64,
     pub precision: f64,
     pub ferocity: f64,
+    pub crit_chance_bonus: f64,
+    /// Fury critical-chance bonus in percentage points for the active mode.
+    pub fury_crit_chance_bonus: f64,
     pub strike_mult: f64,
+    pub condition_mult: f64,
+    pub condition_duration_mult: f64,
+    pub boon_duration_mult: f64,
+    pub healing_power: f64,
+    pub healing_mult: f64,
+    pub max_health: f64,
+    pub armor: f64,
     pub mode: GameMode,
 }
 
@@ -93,7 +103,16 @@ impl SimParams {
             weapon_strength,
             precision: 0.0,
             ferocity: 0.0,
+            crit_chance_bonus: 0.0,
+            fury_crit_chance_bonus: 25.0,
             strike_mult: 1.0,
+            condition_mult: 1.0,
+            condition_duration_mult: 1.0,
+            boon_duration_mult: 1.0,
+            healing_power: 0.0,
+            healing_mult: 1.0,
+            max_health: 20_000.0,
+            armor: 2_000.0,
             mode: GameMode::PvE,
         }
     }
@@ -154,7 +173,7 @@ pub fn simulate_with(
     };
 
     let mut sim = SimState::new(skills, duration, enemy, params.clone());
-    sim.setup_until_ms = setup_window_ms(duration);
+    sim.setup_until_ms = setup_window_ms_for_mode(duration, params.mode == GameMode::WvW);
     sim.run();
     sim.into_result()
 }
@@ -418,11 +437,30 @@ impl SimState {
                     hit_count,
                     dmg_multiplier,
                 } => {
-                    let mut damage = weapon_strength * power / reference_armor()
+                    let might_stacks = self
+                        .buffs
+                        .iter()
+                        .filter(|buff| buff.buff.eq_ignore_ascii_case("Might"))
+                        .count()
+                        .min(25) as f64;
+                    let effective_power = power + might_stacks * 30.0;
+                    let fury_bonus = if self
+                        .buffs
+                        .iter()
+                        .any(|buff| buff.buff.eq_ignore_ascii_case("Fury"))
+                    {
+                        self.params.fury_crit_chance_bonus
+                    } else {
+                        0.0
+                    };
+                    let mut damage = weapon_strength * effective_power / reference_armor()
                         * dmg_multiplier
                         * (*hit_count as f64);
-                    damage *= strike_crit_factor(self.params.precision, self.params.ferocity)
-                        * self.params.strike_mult;
+                    damage *= strike_crit_factor_with_bonus(
+                        self.params.precision,
+                        self.params.ferocity,
+                        self.params.crit_chance_bonus + fury_bonus,
+                    ) * self.params.strike_mult;
                     if self.enemy.protection {
                         damage *=
                             crate::data::boon_condition_formulas::boons().protection_multiplier();
@@ -436,7 +474,7 @@ impl SimState {
                     stacks,
                     duration_ms,
                 } => {
-                    let cap = condition_stack_cap(&condition, &self.params.mode);
+                    let cap = condition_stack_cap(condition, &self.params.mode);
                     let current = self
                         .conditions
                         .iter()
@@ -446,7 +484,9 @@ impl SimState {
                     for _ in 0..can_apply {
                         self.conditions.push(ConditionStack {
                             condition: condition.clone(),
-                            remaining_ms: *duration_ms,
+                            remaining_ms: (*duration_ms as f64
+                                * self.params.condition_duration_mult)
+                                .round() as u32,
                         });
                     }
                 }
@@ -458,12 +498,17 @@ impl SimState {
                     for _ in 0..*stacks {
                         self.buffs.push(BuffInstance {
                             buff: buff.clone(),
-                            remaining_ms: *duration_ms,
+                            remaining_ms: (*duration_ms as f64 * self.params.boon_duration_mult)
+                                .round() as u32,
                         });
                     }
                 }
-                SkillEffect::ComboField { .. } => {
+                SkillEffect::ComboField { .. } | SkillEffect::ComboFinisher { .. } => {
                     // Combo fields tracked but not simulated for damage
+                }
+                SkillEffect::Healing { .. } | SkillEffect::Barrier { .. } => {
+                    // Incoming pressure, healing, and barrier are resolved by
+                    // the counterplay-aware WvW timeline.
                 }
                 SkillEffect::RemovesCondition { .. } => {
                     // Cleanse effects are tracked at the roster level (cleanse_count / cleanse_rate_per_20s),
@@ -515,7 +560,8 @@ impl SimState {
         for stack in &mut self.conditions {
             if stack.remaining_ms > 0 {
                 let tick_dmg =
-                    condition_tick_damage(&stack.condition, condition_damage, &self.params.mode);
+                    condition_tick_damage(&stack.condition, condition_damage, &self.params.mode)
+                        * self.params.condition_mult;
                 self.total_condition_damage += tick_dmg;
                 tick_total += tick_dmg;
                 // Skip the per-tick `stack.condition.clone()` once the key is
@@ -678,6 +724,7 @@ impl SimState {
             finished: self.downed && self.duration_ms >= self.stomp_ends_ms,
             has_interrupt: kit_has_interrupt(&self.skills),
             has_cover_answer: kit_has_cover_answer(&self.skills),
+            wvw: None,
         }
     }
 }
@@ -784,13 +831,18 @@ fn estimate_buff_dps_value(
     }
 }
 
-/// Expected-value crit multiplier. Precision 0 → 1.0 (no crit term).
-fn strike_crit_factor(precision: f64, ferocity: f64) -> f64 {
+/// Expected-value crit multiplier with a direct mode-specific critical-chance
+/// bonus (Fury is +25 percentage points in PvE, +20 in PvP/WvW).
+pub(super) fn strike_crit_factor_with_bonus(
+    precision: f64,
+    ferocity: f64,
+    crit_chance_bonus_pct: f64,
+) -> f64 {
     if precision <= 0.0 {
         return 1.0;
     }
     let f = crate::data::universal_formulas::formulas();
-    let chance = (f.crit_chance(precision) / 100.0).clamp(0.0, 1.0);
+    let chance = ((f.crit_chance(precision) + crit_chance_bonus_pct) / 100.0).clamp(0.0, 1.0);
     let crit_mult = f.crit_damage(ferocity) / 100.0;
     1.0 + chance * (crit_mult - 1.0)
 }
@@ -812,7 +864,11 @@ pub(crate) fn condition_stack_cap(condition: &str, mode: &GameMode) -> usize {
 
 /// Condition tick damage formula (GW2 level 80, per tick).
 /// Torment uses stationary baseline; Confusion uses on_skill_use baseline.
-fn condition_tick_damage(condition: &str, condition_damage: f64, mode: &GameMode) -> f64 {
+pub(super) fn condition_tick_damage(
+    condition: &str,
+    condition_damage: f64,
+    mode: &GameMode,
+) -> f64 {
     let conds = crate::data::conditions();
     let mode = mode.clone();
     match condition {

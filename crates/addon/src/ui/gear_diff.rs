@@ -170,7 +170,18 @@ pub fn compute_build_diff(current: &ResolvedBuild, suggestion: &BuildSuggestion)
     } else {
         format!("Mixed ({})", unique_prefixes.join(", "))
     };
-    let gear_prefix = diff_slot("Gear Prefix", &current_prefix_str, &suggestion.stat_prefix);
+    let proposed_prefix =
+        if suggestion.gear_prefixes == gw2_core::types::GearPrefixGroups::default() {
+            suggestion.stat_prefix.clone()
+        } else {
+            format!(
+                "Armor: {}; Trinkets: {}; Weapons: {}",
+                suggestion.gear_prefixes.armor,
+                suggestion.gear_prefixes.trinkets,
+                suggestion.gear_prefixes.weapons
+            )
+        };
+    let gear_prefix = diff_slot("Gear Prefix", &current_prefix_str, &proposed_prefix);
 
     // --- Specializations ---
     let mut specializations = Vec::new();

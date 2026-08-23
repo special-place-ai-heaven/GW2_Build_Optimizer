@@ -207,7 +207,18 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
 
     // ── Gear Card ──
     render_card_section(ui, &t("section.gear"), |ui| {
-        if !suggestion.stat_prefix.is_empty() {
+        let groups = &suggestion.gear_prefixes;
+        if !groups.armor.is_empty() || !groups.trinkets.is_empty() || !groups.weapons.is_empty() {
+            if !groups.armor.is_empty() {
+                render_label_value(ui, "Armor", &groups.armor);
+            }
+            if !groups.trinkets.is_empty() {
+                render_label_value(ui, "Trinkets", &groups.trinkets);
+            }
+            if !groups.weapons.is_empty() {
+                render_label_value(ui, "Weapons", &groups.weapons);
+            }
+        } else if !suggestion.stat_prefix.is_empty() {
             render_label_value(ui, &t("slot.prefix"), &suggestion.stat_prefix);
         }
         if !suggestion.rune.is_empty() {

@@ -1,0 +1,38 @@
+{
+  "patch_id": "2026-07-15",
+  "mode": "PvP",
+  "entities": [
+    {
+      "source_type": "Skill",
+      "source_id": 13113,
+      "name": "Black Powder",
+      "overrides": {
+        "activation_ms": { "value": 500, "evidence_level": "Factual", "source": "https://wiki.guildwars2.com/wiki/Black_Powder" },
+        "initiative_cost": { "value": 6, "evidence_level": "Factual", "source": "https://wiki.guildwars2.com/wiki/Black_Powder" },
+        "status_duration_ms:blindness": { "value": 2000, "evidence_level": "Factual", "source": "https://wiki.guildwars2.com/wiki/Black_Powder" },
+        "combo_field_duration_ms": { "value": 4000, "evidence_level": "Factual", "source": "https://wiki.guildwars2.com/wiki/Black_Powder" }
+      }
+    },
+    {
+      "source_type": "Skill",
+      "source_id": 13097,
+      "name": "Heartseeker",
+      "overrides": {
+        "activation_ms": { "value": 750, "evidence_level": "Factual", "source": "https://wiki.guildwars2.com/wiki/Heartseeker" },
+        "initiative_cost": { "value": 3, "evidence_level": "Factual", "source": "https://wiki.guildwars2.com/wiki/Heartseeker" },
+        "damage_coefficient:above_50": { "value": 1.0, "evidence_level": "Factual", "source": "https://wiki.guildwars2.com/wiki/Heartseeker" },
+        "damage_coefficient:below_50": { "value": 1.5, "evidence_level": "Factual", "source": "https://wiki.guildwars2.com/wiki/Heartseeker" },
+        "damage_coefficient:below_25": { "value": 2.0, "evidence_level": "Factual", "source": "https://wiki.guildwars2.com/wiki/Heartseeker" }
+      }
+    },
+    {
+      "source_type": "Skill",
+      "source_id": 13014,
+      "name": "Steal",
+      "overrides": {
+        "activation_ms": { "value": 0, "evidence_level": "Factual", "source": "https://wiki.guildwars2.com/wiki/Steal" },
+        "recharge_ms": { "value": 25000, "evidence_level": "Factual", "source": "https://wiki.guildwars2.com/wiki/Steal" }
+      }
+    }
+  ]
+}

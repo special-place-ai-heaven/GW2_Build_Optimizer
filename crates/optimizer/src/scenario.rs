@@ -324,7 +324,6 @@ impl RoleObjective {
         }
     }
 
-
     /// Convert this role to `OptimizationWeights` by reading the objective profile data.
     /// Falls back to mode default weights if the profile is not found.
     pub fn to_weights(&self, game_mode: &GameMode) -> OptimizationWeights {
@@ -520,7 +519,6 @@ mod tests {
             CombatKind::Staller
         );
     }
-
 
     #[test]
     fn play_roles_are_shared_and_remap_per_mode() {

@@ -157,6 +157,43 @@ mod tests {
                 percent: 10.0,
                 expected: vec![Crit],
             },
+            // ── Screenshot / standing-percent rejects ──
+            Case {
+                label: "Precise Strike 100% is not standing crit",
+                text: "Critical Chance Increase",
+                percent: 100.0,
+                expected: vec![],
+            },
+            Case {
+                label: "standing crit chance has no FactClass",
+                text: "Critical Chance Increase",
+                percent: 10.0,
+                expected: vec![],
+            },
+            Case {
+                label: "Damage Reduced is not outgoing strike",
+                text: "Damage Reduced",
+                percent: 25.0,
+                expected: vec![],
+            },
+            Case {
+                label: "Recharge Reduced is not strike",
+                text: "Recharge Reduced",
+                percent: 20.0,
+                expected: vec![],
+            },
+            Case {
+                label: "bare Percent tooltip is not strike",
+                text: "Percent",
+                percent: 5.0,
+                expected: vec![],
+            },
+            Case {
+                label: "API Damage Increase stays strike",
+                text: "Damage Increase",
+                percent: 10.0,
+                expected: vec![Strike],
+            },
         ]
     }
 

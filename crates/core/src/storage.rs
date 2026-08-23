@@ -206,6 +206,7 @@ mod tests {
             balance_manifest_version: None,
             label: "Build 1".into(),
             stat_prefix: "Berserker's".into(),
+            gear_prefixes: crate::types::GearPrefixGroups::default(),
             specializations: vec![],
             weapons: vec![],
             skills: vec![],
