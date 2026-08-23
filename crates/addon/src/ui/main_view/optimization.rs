@@ -467,6 +467,17 @@ fn synergy_result_to_suggestion(
     if let Some((_, name)) = &v.skills.elite {
         skills.push(format!("Elite: {}", name));
     }
+    if !v.skills.profession.is_empty() {
+        skills.push(format!(
+            "Profession: {}",
+            v.skills
+                .profession
+                .iter()
+                .map(|(_, name)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(" / ")
+        ));
+    }
 
     // Sigils: flatten to display strings
     let sigils: Vec<String> = v.sigils.iter().map(|s| s.name.clone()).collect();
@@ -597,15 +608,26 @@ fn synergy_result_to_suggestion(
         }
     };
 
+    let mixed_gear = [
+        ("Armor", v.gear_groups.armor.as_ref()),
+        ("Trinkets", v.gear_groups.trinkets.as_ref()),
+        ("Weapons", v.gear_groups.weapons.as_ref()),
+    ]
+    .into_iter()
+    .filter_map(|(group, prefix)| prefix.map(|prefix| format!("{group}: {}", prefix.name)))
+    .collect::<Vec<_>>();
+    let gear_summary = if mixed_gear.is_empty() {
+        v.gear_prefix
+            .as_ref()
+            .map(|prefix| prefix.name.clone())
+            .unwrap_or_else(|| "Unknown".into())
+    } else {
+        mixed_gear.join(" · ")
+    };
+
     let mut suggestion = BuildSuggestion {
         label,
-        build_summary: format!(
-            "Gear: {}",
-            v.gear_prefix
-                .as_ref()
-                .map(|p| p.name.as_str())
-                .unwrap_or("Unknown")
-        ),
+        build_summary: format!("Gear: {gear_summary}"),
         stat_prefix: v
             .gear_prefix
             .as_ref()
