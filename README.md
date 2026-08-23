@@ -190,11 +190,13 @@ benchmark sync, language, opacity, font scale, and layout sizing.
 ## Scoring (short)
 
 Optimization is **Scale × Task**, not a single WvW blob. Roam, Havoc, and
-Cloud/Zerg use different dummy HP, kill windows, and gates (for example
-harasser strip before a dump). WvW cover can be evade, block, invuln, stealth,
-or (on roam) interrupt — not Stability-only. Results can still fail viability
-for missing stunbreaks, cleanse, or effective health. Data-quality warnings show
-when a result leaned on incomplete facts.
+Cloud/Zerg use different opponent profiles, timing windows, and viability gates.
+WvW roaming candidates are ranked through a two-sided timeline: committed actions,
+incoming pressure, interrupts, control, boon removal, defensive cover, resources,
+recovery, and an exit all occur on the clock. One applicable protection layer can
+secure a sequence; control and defensive cover are not both required. Role chips
+and fine-tune weights decide which viable exchange the search prefers. Data-quality
+warnings show when a result depends on incomplete or provisional facts.
 
 Land **Spear** is a terrestrial two-hander for every profession that has it.
 The GW2 profession API still tags Spear as Aquatic (underwater palette); the
