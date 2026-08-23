@@ -322,6 +322,24 @@ pub struct GearPrefixGroups {
     pub weapons: String,
 }
 
+impl GearPrefixGroups {
+    /// Fill blank group names from a legacy single `stat_prefix`.
+    pub fn inherit_empty(&self, fallback: &str) -> Self {
+        let fill = |value: &str| {
+            if value.trim().is_empty() {
+                fallback.to_string()
+            } else {
+                value.to_string()
+            }
+        };
+        Self {
+            armor: fill(&self.armor),
+            trinkets: fill(&self.trinkets),
+            weapons: fill(&self.weapons),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedBuild {
     pub name: String,
@@ -373,6 +391,24 @@ mod tests {
     /// `new_build_prompt_with_tools`, `synergy_build_prompt`). If you change the
     /// format intentionally, update both the prompt callers and these snapshots
     /// in the same change.
+    #[test]
+    fn empty_gear_groups_inherit_stat_prefix() {
+        let groups = GearPrefixGroups::default();
+        let filled = groups.inherit_empty("Strong");
+        assert_eq!(filled.armor, "Strong");
+        assert_eq!(filled.trinkets, "Strong");
+        assert_eq!(filled.weapons, "Strong");
+        let mixed = GearPrefixGroups {
+            armor: String::new(),
+            trinkets: "Ritualist's".into(),
+            weapons: String::new(),
+        }
+        .inherit_empty("Strong");
+        assert_eq!(mixed.armor, "Strong");
+        assert_eq!(mixed.trinkets, "Ritualist's");
+        assert_eq!(mixed.weapons, "Strong");
+    }
+
     #[test]
     fn describe_constraints_no_locks() {
         let locks = BuildLocks::default();

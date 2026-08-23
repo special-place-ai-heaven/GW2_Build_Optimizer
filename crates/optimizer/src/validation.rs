@@ -97,14 +97,6 @@ pub struct ValidatedGearGroups {
 }
 
 impl ValidatedBuild {
-    /// True when at least one group is set, so stats use slot budgets
-    /// instead of the 16-slot single-prefix fallback.
-    pub fn uses_grouped_gear_sheet(&self) -> bool {
-        self.gear_groups.armor.is_some()
-            || self.gear_groups.trinkets.is_some()
-            || self.gear_groups.weapons.is_some()
-    }
-
     /// Prefix each group actually spends after inheriting `gear_prefix`.
     pub fn effective_prefix_ids(&self) -> (Option<u32>, Option<u32>, Option<u32>) {
         let inherit = self.gear_prefix.as_ref().map(|prefix| prefix.itemstat_id);
@@ -127,9 +119,9 @@ impl ValidatedBuild {
         )
     }
 
-    /// Search identity for gear: grouped vs 16-slot path, then spent prefixes.
-    pub fn gear_identity(&self) -> (bool, (Option<u32>, Option<u32>, Option<u32>)) {
-        (self.uses_grouped_gear_sheet(), self.effective_prefix_ids())
+    /// Search identity is the spent prefix set. Empty groups inherit `gear_prefix`.
+    pub fn gear_identity(&self) -> (Option<u32>, Option<u32>, Option<u32>) {
+        self.effective_prefix_ids()
     }
 }
 

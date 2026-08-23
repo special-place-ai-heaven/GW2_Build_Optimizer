@@ -28,8 +28,6 @@ pub const STAT_SLOTS: &[&str] = &[
     "Boots",
     "WeaponA1",
     "WeaponA2",
-    "WeaponB1",
-    "WeaponB2",
     "Backpack",
     "Accessory1",
     "Accessory2",
@@ -47,7 +45,7 @@ const TRINKET_SLOTS: &[&str] = &[
     "Ring1",
     "Ring2",
 ];
-const WEAPON_SLOTS: &[&str] = &["WeaponA1", "WeaponA2", "WeaponB1", "WeaponB2"];
+const WEAPON_SLOTS: &[&str] = &["WeaponA1", "WeaponA2"];
 const ARMOR_SLOTS: &[&str] = &["Helm", "Shoulders", "Coat", "Gloves", "Leggings", "Boots"];
 
 /// Find gear prefix combinations using hierarchical tier selection.
@@ -292,8 +290,8 @@ mod tests {
 
     #[test]
     fn test_stat_slots_count() {
-        // 6 armor + 4 weapons + 6 trinkets = 16
-        assert_eq!(STAT_SLOTS.len(), 16);
+        // 6 armor + active land weapons + 6 trinkets
+        assert_eq!(STAT_SLOTS.len(), 14);
     }
 
     #[test]
@@ -324,7 +322,7 @@ mod tests {
             "Expected >=8 candidates, got {}",
             candidates.len()
         );
-        // All should have 16 slots
+        // All should fill every standing slot
         for c in &candidates {
             assert_eq!(c.slot_stats.len(), STAT_SLOTS.len());
         }

@@ -1,8 +1,7 @@
 //! Grouped-gear Hero-panel fixture and roam weight-ranking regression.
 //!
-//! The v1.4.18 screenshot (Power 3058 / Precision 2544) counted both weapon
-//! sets and treated main-hand as a two-hand budget. That is the empty-groups
-//! 16-slot fallback, not the grouped path this module locks.
+//! Empty `gear_groups` inherit `gear_prefix`. The v1.4.18 screenshot
+//! (Power 3058 / Precision 2544) counted both weapon sets; that path is gone.
 
 use std::collections::HashMap;
 
@@ -464,8 +463,14 @@ fn inherit_fallback_matches_explicit_group_and_search_identity() {
     assert_eq!(a.power, b.power);
     assert_eq!(a.precision, b.precision);
 
-    let legacy_all_none = ranger_grouped(ValidatedGearGroups::default(), axe_axe());
-    assert_ne!(legacy_all_none.gear_identity(), explicit.gear_identity());
+    let empty_groups = ranger_grouped(ValidatedGearGroups::default(), axe_axe());
+    assert_eq!(empty_groups.gear_identity(), explicit.gear_identity());
+    let (empty_stats, _) =
+        calculate_validated_stats(&empty_groups, &db, "Ranger", &BalanceContext::wvw());
+    assert_eq!(empty_stats.power.round() as i32, 2556);
+    assert_eq!(empty_stats.precision.round() as i32, 2186);
+    assert_eq!(a.power.round() as i32, 2556);
+    assert_eq!(a.precision.round() as i32, 2186);
 }
 
 #[test]
