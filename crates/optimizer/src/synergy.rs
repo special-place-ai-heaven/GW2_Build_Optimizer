@@ -307,10 +307,14 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
 
     match fact {
         Fact::AttributeAdjust {
+            text,
             value: Some(val),
             target: Some(ref target),
             ..
         } => {
+            if !crate::stats::is_permanent_stat_adjust(text.as_deref()) {
+                return effects;
+            }
             if let Some(stat) = StatType::from_api(target) {
                 effects.push(NormalizedEffect::StatBonus {
                     stat,
@@ -1098,8 +1102,7 @@ mod tests {
             target_name: "B".into(),
             link_type: SynergyLinkType::ModifierStacking,
             score: 1.0,
-            description: "Stacking Strike damage modifiers multiply for greater effect."
-                .into(),
+            description: "Stacking Strike damage modifiers multiply for greater effect.".into(),
         };
         let text = template_explanation(&[link.clone(), link.clone(), link], "Valkyrie", "Thief");
         assert!(text.starts_with("This Thief build uses Valkyrie gear."));
@@ -1109,7 +1112,6 @@ mod tests {
             1
         );
     }
-
 
     #[test]
     fn all_stats_bonus_emits_nine_attributes() {
@@ -1148,6 +1150,18 @@ mod tests {
             }
             _ => panic!("Expected StatBonus"),
         }
+    }
+
+    #[test]
+    fn extract_effects_ignores_tooltip_effect_amounts() {
+        let fact = Fact::AttributeAdjust {
+            text: Some("Life Siphon Damage".into()),
+            icon: None,
+            value: Some(3517),
+            target: Some("Power".into()),
+        };
+
+        assert!(extract_effects_from_fact(&fact).is_empty());
     }
 
     #[test]

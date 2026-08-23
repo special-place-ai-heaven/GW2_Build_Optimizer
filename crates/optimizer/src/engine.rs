@@ -774,10 +774,14 @@ pub fn score_trait_for_archetype(
 fn score_fact(fact: &Fact, weights: &crate::scoring::StatWeights) -> f64 {
     match fact {
         Fact::AttributeAdjust {
+            text,
             value: Some(val),
             target: Some(ref target),
             ..
         } => {
+            if !crate::stats::is_permanent_stat_adjust(text.as_deref()) {
+                return 0.0;
+            }
             let w = match target.as_str() {
                 "Power" => weights.power,
                 "Precision" => weights.precision,
@@ -1968,6 +1972,19 @@ mod tests {
             selected[0], 100,
             "PowerDPS should prefer Power trait over Vitality"
         );
+    }
+
+    #[test]
+    fn score_fact_ignores_tooltip_effect_amounts() {
+        let tooltip_amount = Fact::AttributeAdjust {
+            text: Some("Life Siphon Damage".into()),
+            icon: None,
+            value: Some(3517),
+            target: Some("Power".into()),
+        };
+        let power_weights = OptimizationWeights::preset_power_dps().to_stat_weights();
+
+        assert_eq!(score_fact(&tooltip_amount, &power_weights), 0.0);
     }
 
     #[test]

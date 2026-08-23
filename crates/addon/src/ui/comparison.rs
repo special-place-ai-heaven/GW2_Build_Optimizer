@@ -122,10 +122,17 @@ fn fact_line(fact: &gw2_api::models::facts::Fact) -> Option<String> {
     use gw2_api::models::facts::Fact;
     match fact {
         Fact::AttributeAdjust {
+            text,
             target: Some(t),
             value: Some(v),
             ..
-        } => Some(format!("{t}: {v:+}")),
+        } => {
+            if gw2_optimizer::stats::is_permanent_stat_adjust(text.as_deref()) {
+                Some(format!("{t}: {v:+}"))
+            } else {
+                text.as_ref().map(|label| format!("{label}: {v}"))
+            }
+        }
         Fact::Buff {
             status: Some(s),
             duration,
@@ -1694,5 +1701,17 @@ mod tests {
         let tip = inspect_text("Rune of the Scholar", &db).expect("rune lookup");
         assert!(tip.contains("Superior Rune of the Scholar"), "{tip}");
         assert!(tip.contains("+5% Strike Damage"), "{tip}");
+    }
+
+    #[test]
+    fn fact_line_preserves_tooltip_effect_label() {
+        let fact = gw2_api::models::facts::Fact::AttributeAdjust {
+            text: Some("Life Siphon Damage".into()),
+            icon: None,
+            value: Some(3517),
+            target: Some("Power".into()),
+        };
+
+        assert_eq!(fact_line(&fact).as_deref(), Some("Life Siphon Damage: 3517"));
     }
 }
