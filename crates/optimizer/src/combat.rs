@@ -521,7 +521,11 @@ pub fn buff_profiles_for_profession(profession: &str, ctx: &BalanceContext) -> V
 
 // ─── Damage Modifier Extraction ───
 
-/// Extract percentage-based damage modifiers from equipped traits, rune, and sigils.
+/// Extract percentage modifiers from equipped traits and upgrades.
+///
+/// Facts that describe defense, recharge, or tooltip-only critical chance are
+/// excluded. Two-value mode splits are collapsed within their source trait;
+/// conditional timing remains the responsibility of the activation evaluator.
 pub fn extract_damage_modifiers(
     equipped_trait_ids: &[u32],
     rune_id: Option<u32>,
@@ -531,11 +535,56 @@ pub fn extract_damage_modifiers(
     items_cache: &HashMap<u32, Item>,
     ctx: &BalanceContext,
 ) -> DamageModifiers {
+    fn absorb_pair(dst: &mut Vec<f64>, src: Vec<f64>, competitive: bool) {
+        match src.as_slice() {
+            [] => {}
+            [a, b] => dst.push(if competitive { a.min(*b) } else { a.max(*b) }),
+            _ => dst.extend(src),
+        }
+    }
+    fn absorb_map(
+        dst: &mut HashMap<String, Vec<f64>>,
+        src: HashMap<String, Vec<f64>>,
+        competitive: bool,
+    ) {
+        for (key, vals) in src {
+            absorb_pair(dst.entry(key).or_default(), vals, competitive);
+        }
+    }
+    fn absorb_mode_pairs(dst: &mut DamageModifiers, src: DamageModifiers, competitive: bool) {
+        absorb_pair(&mut dst.strike_pct, src.strike_pct, competitive);
+        absorb_pair(&mut dst.condition_pct, src.condition_pct, competitive);
+        absorb_pair(&mut dst.crit_damage_pct, src.crit_damage_pct, competitive);
+        absorb_pair(
+            &mut dst.condi_duration_pct,
+            src.condi_duration_pct,
+            competitive,
+        );
+        absorb_pair(
+            &mut dst.boon_duration_pct,
+            src.boon_duration_pct,
+            competitive,
+        );
+        absorb_pair(&mut dst.healing_pct, src.healing_pct, competitive);
+        absorb_pair(&mut dst.crit_chance_pct, src.crit_chance_pct, competitive);
+        absorb_map(&mut dst.specific_condi, src.specific_condi, competitive);
+        absorb_map(
+            &mut dst.specific_condi_duration,
+            src.specific_condi_duration,
+            competitive,
+        );
+        dst.unparsed.extend(src.unparsed);
+    }
+
     let mut mods = DamageModifiers::default();
     // Hoist into a HashSet once — `equipped_trait_ids` is scanned twice per
     // traited_fact (overridden filter + activation gate) across every trait;
     // O(n) linear scans add up across the ~36-trait hot path.
     let equipped_set: std::collections::HashSet<u32> = equipped_trait_ids.iter().copied().collect();
+    let competitive = matches!(
+        ctx.game_mode,
+        gw2_core::types::GameMode::PvP | gw2_core::types::GameMode::WvW
+    );
 
     // 1. Traits — look for Percent facts with damage-related text
     for &trait_id in equipped_trait_ids {
@@ -551,20 +600,26 @@ pub fn extract_damage_modifiers(
             .filter_map(|tf| tf.overrides)
             .collect();
 
+        let mut trait_mods = DamageModifiers::default();
+
         // Process base facts
         for (idx, fact) in t.facts.iter().enumerate() {
             if overridden.contains(&(idx as u32)) {
                 continue;
             }
-            extract_modifier_from_fact(&mut mods, fact);
+            extract_modifier_from_fact(&mut trait_mods, fact);
         }
 
         // Process active traited_facts
         for tf in &t.traited_facts {
             if equipped_set.contains(&tf.requires_trait) {
-                extract_modifier_from_fact(&mut mods, &tf.fact);
+                extract_modifier_from_fact(&mut trait_mods, &tf.fact);
             }
         }
+
+        // Two same-category values are the API's PvE/competitive split. Collapse
+        // them within one trait so they can never stack simultaneously.
+        absorb_mode_pairs(&mut mods, trait_mods, competitive);
     }
 
     // 2. Rune bonuses — parse strings like "+7% Burning Duration", "+5% damage"
@@ -578,8 +633,10 @@ pub fn extract_damage_modifiers(
         }
     }
 
-    // 3. Sigils — known permanent damage sigils
-    for &id in sigil_ids {
+    // 3. Sigils — only weapon set 1 is active on the unbuffed character sheet.
+    // The validated ordering is [set1 slot1, set1 slot2, set2 slot1, set2 slot2].
+    // Weapon-swap effects from the other set belong in the timed evaluator.
+    for &id in sigil_ids.iter().take(2) {
         if let Some(sigil) = items_cache.get(&id) {
             parse_sigil_modifier(&mut mods, sigil, ctx);
         }
@@ -603,14 +660,13 @@ fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
             percent: Some(pct),
             ..
         } => {
-            if percent_text_is_conditional(text) && !(text_lower_has_90hp(text)) {
+            if percent_text_is_conditional(text) && !text_lower_has_90hp(text) {
                 return;
             }
-            let text_lower = text.to_lowercase();
             let uptime = if text_lower_has_90hp(text) { 0.9 } else { 1.0 };
-            let decimal = *pct / 100.0 * uptime;
-            let applied = apply_percent_category(mods, &text_lower, *pct * uptime, decimal);
-            if !applied {
+            let points = *pct * uptime;
+            let decimal = points / 100.0;
+            if !apply_percent_category(mods, text, points, decimal) {
                 mods.unparsed.push(text.clone());
             }
         }
@@ -619,8 +675,6 @@ fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
             status: Some(ref status),
             ..
         } => {
-            // Self-applied damage buffs (e.g. traits that grant Fury, Might)
-            // are uptime-dependent, not permanent modifiers.
             let _ = (text, status);
         }
         _ => {}
@@ -658,48 +712,58 @@ pub(crate) fn percent_text_is_conditional(text: &str) -> bool {
     .any(|k| t.contains(k))
 }
 
-/// Map a percent + surrounding text into DamageModifiers.
-/// `points` is the raw tooltip number (7.0 for +7%); `decimal` is 0.07.
-/// Returns true if a known category was written.
-fn apply_percent_category(
-    mods: &mut DamageModifiers,
-    hay: &str,
-    points: f64,
-    decimal: f64,
-) -> bool {
-    if hay.contains("critical chance")
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PercentClass {
+    CritChancePts,
+    CritDamagePts,
+    Condition,
+    Healing,
+    CondiDuration,
+    BoonDuration,
+    SpecificCondiDuration(String),
+    Strike,
+    Ignore,
+}
+
+/// Map tooltip text and its raw percentage into one standing-combat category.
+pub(crate) fn classify_percent_text(text: &str, percent: f64) -> Option<PercentClass> {
+    let hay = text.to_lowercase();
+    let is_crit_chance = hay.contains("critical chance")
         || hay.contains("crit chance")
         || hay.contains("critical-strike chance")
         || hay.contains("critical-hit chance")
-        || hay.contains("critical strike chance")
-    {
-        mods.crit_chance_pct.push(points);
-        return true;
+        || hay.contains("critical strike chance");
+    if is_crit_chance {
+        return Some(if percent >= 100.0 {
+            PercentClass::Ignore
+        } else {
+            PercentClass::CritChancePts
+        });
     }
     if hay.contains("critical damage") || hay.contains("crit damage") {
-        mods.crit_damage_pct.push(points);
-        return true;
+        return Some(PercentClass::CritDamagePts);
+    }
+    if hay.contains("recharge")
+        || hay.contains("reduced")
+        || hay.contains("reduction")
+        || hay.contains("incoming")
+    {
+        return Some(PercentClass::Ignore);
+    }
+    if hay.trim() == "percent" {
+        return Some(PercentClass::Ignore);
     }
     if hay.contains("condition damage") {
-        if decimal.abs() > 0.001 {
-            mods.condition_pct.push(decimal);
-        }
-        return true;
+        return Some(PercentClass::Condition);
     }
     if hay.contains("outgoing healing") || hay.contains("healing effectiveness") {
-        mods.healing_pct.push(decimal);
-        return true;
-    }
-    if hay.contains("incoming") {
-        return true;
+        return Some(PercentClass::Healing);
     }
     if hay.contains("condition duration") {
-        mods.condi_duration_pct.push(decimal);
-        return true;
+        return Some(PercentClass::CondiDuration);
     }
     if hay.contains("boon duration") {
-        mods.boon_duration_pct.push(decimal);
-        return true;
+        return Some(PercentClass::BoonDuration);
     }
     for boon in &[
         "might",
@@ -716,35 +780,75 @@ fn apply_percent_category(
         "stability",
     ] {
         if hay.contains(boon) && hay.contains("duration") {
-            mods.boon_duration_pct.push(decimal);
-            return true;
+            return Some(PercentClass::BoonDuration);
         }
     }
     for condi in &["bleeding", "burning", "poison", "torment", "confusion"] {
         if hay.contains(condi) && hay.contains("duration") {
-            let condi_cap = capitalize(condi);
+            let condition_name = capitalize(condi);
             let canonical =
-                crate::data::boon_condition_formulas::canonical_condition_name(&condi_cap);
+                crate::data::boon_condition_formulas::canonical_condition_name(&condition_name);
+            return Some(PercentClass::SpecificCondiDuration(canonical.to_string()));
+        }
+    }
+    if hay.contains("strike damage") || (hay.contains("damage") && !hay.contains("condition")) {
+        return Some(PercentClass::Strike);
+    }
+    None
+}
+
+/// Map a percent + surrounding text into DamageModifiers.
+/// `points` is the raw tooltip number (7.0 for +7%); `decimal` is 0.07.
+/// Returns true if a known category was written.
+fn apply_percent_category(
+    mods: &mut DamageModifiers,
+    hay: &str,
+    points: f64,
+    decimal: f64,
+) -> bool {
+    match classify_percent_text(hay, points) {
+        Some(PercentClass::Ignore) => true,
+        Some(PercentClass::CritChancePts) => {
+            mods.crit_chance_pct.push(points);
+            true
+        }
+        Some(PercentClass::CritDamagePts) => {
+            mods.crit_damage_pct.push(points);
+            true
+        }
+        Some(PercentClass::Condition) => {
+            if decimal.abs() > 0.001 {
+                mods.condition_pct.push(decimal);
+            }
+            true
+        }
+        Some(PercentClass::Healing) => {
+            mods.healing_pct.push(decimal);
+            true
+        }
+        Some(PercentClass::CondiDuration) => {
+            mods.condi_duration_pct.push(decimal);
+            true
+        }
+        Some(PercentClass::BoonDuration) => {
+            mods.boon_duration_pct.push(decimal);
+            true
+        }
+        Some(PercentClass::SpecificCondiDuration(key)) => {
             mods.specific_condi_duration
-                .entry(canonical.to_string())
+                .entry(key)
                 .or_default()
                 .push(decimal);
-            return true;
+            true
         }
-    }
-    if hay.contains("strike damage") {
-        if decimal.abs() > 0.001 {
-            mods.strike_pct.push(decimal);
+        Some(PercentClass::Strike) => {
+            if decimal.abs() > 0.001 {
+                mods.strike_pct.push(decimal);
+            }
+            true
         }
-        return true;
+        None => false,
     }
-    if hay.contains("damage") && !hay.contains("condition") {
-        if decimal.abs() > 0.001 {
-            mods.strike_pct.push(decimal);
-        }
-        return true;
-    }
-    false
 }
 
 fn percent_is_vs_target(rest_after_percent: &str) -> bool {
@@ -1616,22 +1720,54 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_modifier_condition_damage_fact_without_increase_keyword() {
-        // A structured Percent fact phrased as "Condition Damage: +X%" (no literal
-        // word "increase") must still credit condition_pct — previously dropped.
+    fn test_percent_category_condition_damage_without_increase_keyword() {
         let mut mods = DamageModifiers::default();
-        extract_modifier_from_fact(&mut mods, &percent_fact("Condition Damage: +10%", 10.0));
+        assert!(apply_percent_category(
+            &mut mods,
+            "condition damage: +10%",
+            10.0,
+            0.10,
+        ));
         assert_eq!(mods.condition_pct.len(), 1);
         assert!((mods.condition_pct[0] - 0.10).abs() < 0.001);
         assert!(mods.strike_pct.is_empty());
     }
 
     #[test]
-    fn test_extract_modifier_generic_damage_fact_still_routes_to_strike() {
-        // Guard: a generic-damage fact must NOT leak into the condition branch.
+    fn test_percent_category_generic_damage_routes_to_strike() {
         let mut mods = DamageModifiers::default();
-        extract_modifier_from_fact(&mut mods, &percent_fact("Damage increased by 7%", 7.0));
+        assert!(apply_percent_category(
+            &mut mods,
+            "damage increased by 7%",
+            7.0,
+            0.07,
+        ));
         assert_eq!(mods.strike_pct.len(), 1);
+        assert!(mods.condition_pct.is_empty());
+    }
+
+    #[test]
+    fn screenshot_percent_facts_are_classified_without_inflation() {
+        let mut mods = DamageModifiers::default();
+        extract_modifier_from_fact(&mut mods, &percent_fact("Critical Chance Increase", 100.0));
+        extract_modifier_from_fact(&mut mods, &percent_fact("Damage Increase", 15.0));
+        extract_modifier_from_fact(&mut mods, &percent_fact("Damage Reduced", 33.0));
+
+        assert!(mods.crit_chance_pct.is_empty());
+        assert_eq!(mods.strike_pct, vec![0.15]);
+        assert!(mods.condition_pct.is_empty());
+    }
+
+    #[test]
+    fn defensive_percent_never_routes_to_outgoing_damage() {
+        let mut mods = DamageModifiers::default();
+        assert!(apply_percent_category(
+            &mut mods,
+            "damage reduced",
+            33.0,
+            0.33,
+        ));
+        assert!(mods.strike_pct.is_empty());
         assert!(mods.condition_pct.is_empty());
     }
 

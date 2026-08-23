@@ -774,10 +774,14 @@ pub fn score_trait_for_archetype(
 fn score_fact(fact: &Fact, weights: &crate::scoring::StatWeights) -> f64 {
     match fact {
         Fact::AttributeAdjust {
+            text,
             value: Some(val),
             target: Some(ref target),
             ..
         } => {
+            if !crate::stats::is_permanent_stat_adjust(text.as_deref()) {
+                return 0.0;
+            }
             let w = match target.as_str() {
                 "Power" => weights.power,
                 "Precision" => weights.precision,
@@ -1228,9 +1232,10 @@ pub fn calculate_validated_stats(
     // Rune and sigil flat stat bonuses (permanent stats only).
     let rune_id = validated.rune.as_ref().map(|r| r.id);
     let sigil_ids: Vec<u32> = validated.sigils.iter().map(|s| s.id).collect();
+    let active_sigil_ids = &sigil_ids[..sigil_ids.len().min(2)];
     let rune_stats = stats::calculate_rune_stats(rune_id, &db.items);
     full_stats += &rune_stats;
-    let sigil_stats = stats::calculate_sigil_stats(&sigil_ids, &db.items);
+    let sigil_stats = stats::calculate_sigil_stats(active_sigil_ids, &db.items);
     full_stats += &sigil_stats;
 
     // Collect all trait IDs from validated specializations
@@ -1241,7 +1246,8 @@ pub fn calculate_validated_stats(
         .collect();
 
     // Trait stats
-    let trait_stats = stats::calculate_trait_stats(&all_trait_ids, &db.traits);
+    let trait_stats =
+        stats::calculate_trait_stats_for_mode(&all_trait_ids, &db.traits, &ctx.game_mode);
     full_stats += &trait_stats;
     stats::apply_trait_conversions(&mut full_stats, &all_trait_ids, &db.traits);
 
@@ -1250,7 +1256,7 @@ pub fn calculate_validated_stats(
     let modifiers = combat::extract_damage_modifiers(
         &all_trait_ids,
         rune_id,
-        &sigil_ids,
+        active_sigil_ids,
         relic_id,
         &db.traits,
         &db.items,
@@ -1968,6 +1974,19 @@ mod tests {
             selected[0], 100,
             "PowerDPS should prefer Power trait over Vitality"
         );
+    }
+
+    #[test]
+    fn score_fact_ignores_tooltip_effect_amounts() {
+        let tooltip_amount = Fact::AttributeAdjust {
+            text: Some("Life Siphon Damage".into()),
+            icon: None,
+            value: Some(3517),
+            target: Some("Power".into()),
+        };
+        let power_weights = OptimizationWeights::preset_power_dps().to_stat_weights();
+
+        assert_eq!(score_fact(&tooltip_amount, &power_weights), 0.0);
     }
 
     #[test]

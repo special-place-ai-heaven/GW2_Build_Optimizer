@@ -1715,11 +1715,15 @@ fn extract_stat_bonuses(facts: &[Fact]) -> Vec<Value> {
         .iter()
         .filter_map(|f| {
             if let Fact::AttributeAdjust {
+                text,
                 target,
                 value: Some(val),
                 ..
             } = f
             {
+                if !crate::stats::is_permanent_stat_adjust(text.as_deref()) {
+                    return None;
+                }
                 Some(json!({
                     "stat": target.as_deref().unwrap_or("unknown"),
                     "value": val
@@ -2284,5 +2288,26 @@ mod tests {
     fn test_find_named_empty_needle_returns_none() {
         let traits = vec![make_trait(300, "Anything")];
         assert!(find_named(&traits, "").is_none());
+    }
+
+    #[test]
+    fn extract_stat_bonuses_keeps_only_unconditional_panel_stats() {
+        let facts = vec![
+            Fact::AttributeAdjust {
+                text: Some("Life Siphon Damage".into()),
+                icon: None,
+                value: Some(3517),
+                target: Some("Power".into()),
+            },
+            Fact::AttributeAdjust {
+                text: Some("Additional Power".into()),
+                icon: None,
+                value: Some(80),
+                target: Some("Power".into()),
+            },
+        ];
+
+        let bonuses = extract_stat_bonuses(&facts);
+        assert!(bonuses.is_empty());
     }
 }

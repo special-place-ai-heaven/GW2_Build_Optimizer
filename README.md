@@ -29,9 +29,10 @@ benchmark sync supplies additional build knowledge.
 
 ![Settings view](docs/screenshots/settings.png)
 
-**Stats** compares Current and Optimized attributes, defenses, healing, and
-damage estimates. Separate Solo, Party, and Squad scenarios show how common
-boons and target conditions change the result instead of presenting one DPS number.
+**Stats** compares Current and Optimized passive Hero-panel attributes and
+defenses using profession, armor weight, gear, upgrades, traits, and the selected
+game mode. Temporary effects and modeled rotation output stay in separately
+labeled sections instead of looking like permanent character-sheet values.
 
 ![Stats comparison](docs/screenshots/stats.png)
 
