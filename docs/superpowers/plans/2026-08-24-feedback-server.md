@@ -67,7 +67,15 @@ Nothing in later tasks can be deployed without this. It produces two values ever
 - Create: `server/feedback/deploy/README.md` (first section only; extended in Task 9)
 
 **Interfaces:**
-- Produces: `TRAEFIK_NETWORK` (Docker network name Traefik attaches to) and `CERT_RESOLVER` (Traefik certificate resolver name), recorded in `deploy/README.md` and used verbatim in `compose.yml` (Task 9).
+- Produces: `CERT_RESOLVER` (Traefik certificate resolver name) and the routing model, recorded in `deploy/README.md` and used verbatim in `compose.yml` (Task 9).
+
+**Discovered 2026-08-24 (user ran the commands in Hostinger's browser terminal):**
+- Traefik runs with `network_mode: host`, Docker provider, `exposedbydefault=false`. It reaches containers on their bridge IPs — there is **no shared Traefik network** and compose must not declare one.
+- `CERT_RESOLVER = letsencrypt` (HTTP-01 on entrypoint `web`); global `web → websecure` redirect is on.
+- Proven label set (from `/docker/agentmemory/docker-compose.yml`, service `iii-engine`):
+  `traefik.enable=true`, `traefik.http.routers.<name>.rule=Host(\`…\`)`, `traefik.http.routers.<name>.entrypoints=websecure`, `traefik.http.routers.<name>.tls.certresolver=letsencrypt`, `traefik.http.services.<name>.loadbalancer.server.port=<port>`.
+- App layout: `/docker/<app>/docker-compose.yml` + `.env`, owned by `svetipeter`. Hostinger's Docker Manager can also deploy a pasted compose.
+- Disk 155 GB free.
 
 - [ ] **Step 1: Confirm which key the VPS accepts**
 
@@ -103,12 +111,14 @@ Create `server/feedback/deploy/README.md`:
 
 | Name | Value | Where it came from |
 |---|---|---|
-| `TRAEFIK_NETWORK` | `<paste from Step 2>` | `docker inspect traefik` networks |
-| `CERT_RESOLVER` | `<paste from Step 2>` | `--certificatesresolvers.<name>` / agentmemory labels |
+| Traefik mode | `network_mode: host`, Docker provider, `exposedbydefault=false` | `/docker/traefik/docker-compose.yml` |
+| Shared network | **none** — Traefik reaches bridge IPs directly | `docker network ls` shows only per-app `*_default` networks |
+| `CERT_RESOLVER` | `letsencrypt` (HTTP-01 on `web`) | `--certificatesresolvers.letsencrypt.*` |
+| Entrypoint | `websecure` (`web` redirects to it globally) | same file |
 | Compose root | `/docker/feedback/` | same layout as `/docker/agentmemory/` |
 
-These two names are used verbatim in `compose.yml`. If Traefik is ever
-reconfigured, update them here and in `.env`.
+Labels copy `iii-engine`'s in `/docker/agentmemory/docker-compose.yml`. Do not
+add `traefik.docker.network` or an external network — there is none.
 ```
 
 (The two `<paste from Step 2>` cells are filled in during this step with the real output; they are the only content of this task.)
@@ -1574,8 +1584,8 @@ git commit -m "ci: test the feedback server against Postgres 16"
 - Modify: `server/feedback/deploy/README.md`
 
 **Interfaces:**
-- Consumes: `TRAEFIK_NETWORK`, `CERT_RESOLVER` from Task 0.
-- Produces: an image that starts, migrates, and serves on 8080; compose that puts it behind Traefik at `feedback.robagentic.tech` with Postgres on an internal network only.
+- Consumes: from Task 0 — Traefik is host-networked with the Docker provider; resolver `letsencrypt`; no shared network.
+- Produces: an image that starts, migrates, and serves on 8080; compose that puts it behind the host-networked Traefik at `feedback.robagentic.tech` with Postgres unpublished.
 
 - [ ] **Step 1: Dockerfile**
 
@@ -1621,14 +1631,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    networks: [internal, ${TRAEFIK_NETWORK}]
     labels:
-      traefik.enable: "true"
-      traefik.docker.network: ${TRAEFIK_NETWORK}
-      traefik.http.routers.feedback.rule: Host(`feedback.robagentic.tech`)
-      traefik.http.routers.feedback.entrypoints: websecure
-      traefik.http.routers.feedback.tls.certresolver: ${CERT_RESOLVER}
-      traefik.http.services.feedback.loadbalancer.server.port: "8080"
+      - traefik.enable=true
+      - "traefik.http.routers.feedback.rule=Host(`feedback.robagentic.tech`)"
+      - traefik.http.routers.feedback.entrypoints=websecure
+      - traefik.http.routers.feedback.tls.certresolver=letsencrypt
+      - traefik.http.services.feedback.loadbalancer.server.port=8080
 
   db:
     image: postgres:16-alpine
@@ -1639,23 +1647,21 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    networks: [internal]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U feedback -d feedback"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-networks:
-  internal:
-  ${TRAEFIK_NETWORK}:
-    external: true
-
 volumes:
   pgdata:
 ```
 
-`db` has no `ports:` — it is reachable only from `feedback` on `internal`.
+No `networks:` block on purpose: Traefik on this VPS is `network_mode: host`
+and reaches the compose default bridge directly (that is how `iii-engine` is
+served). `db` publishes no port, so it is reachable only from `feedback` on
+the project network. The label set is byte-for-byte the shape
+`/docker/agentmemory/docker-compose.yml` uses.
 
 - [ ] **Step 3: .env.example**
 
@@ -1665,8 +1671,6 @@ POSTGRES_PASSWORD=<<FILL_IN: openssl rand -hex 24>>
 FEEDBACK_ADMIN_TOKEN=<<FILL_IN: openssl rand -hex 32>>
 FEEDBACK_IP_SALT=<<FILL_IN: openssl rand -hex 16>>
 MIN_ADDON_VERSION=1.6.0
-TRAEFIK_NETWORK=<<FILL_IN: from deploy/README.md>>
-CERT_RESOLVER=<<FILL_IN: from deploy/README.md>>
 ```
 
 - [ ] **Step 4: backup.sh**
@@ -1693,7 +1697,8 @@ Append:
 ```markdown
 ## Deploy (first time)
 
-On the VPS as the compose user:
+Either paste `compose.yml` + the filled `.env` into Hostinger → VPS → Docker
+Manager → Compose (project name `feedback`), or on the VPS as `svetipeter`:
 
     sudo mkdir -p /docker/feedback/deploy && cd /docker/feedback
     # copy compose.yml, .env.example -> .env (filled), deploy/backup.sh from the repo
