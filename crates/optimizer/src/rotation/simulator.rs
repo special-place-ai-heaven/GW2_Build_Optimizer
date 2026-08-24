@@ -778,7 +778,7 @@ fn skill_dps_efficiency(
                 duration_ms,
             } => {
                 total_damage_value +=
-                    estimate_buff_dps_value(buff, *stacks, *duration_ms, power, weapon_strength);
+                    estimate_buff_dps_value(buff, *stacks, *duration_ms, power, weapon_strength, mode);
             }
             _ => {}
         }
@@ -798,6 +798,7 @@ fn estimate_buff_dps_value(
     duration_ms: u32,
     power: f64,
     weapon_strength: f64,
+    mode: &GameMode,
 ) -> f64 {
     let duration_s = duration_ms as f64 / 1000.0;
     match buff {
@@ -817,9 +818,9 @@ fn estimate_buff_dps_value(
         }
         "Fury" => {
             // Fury: mode-dependent crit chance bonus (loaded from data).
-            // Using PvE default here; TODO: P3-XX thread BalanceContext through simulator.
+            // +25pp in PvE, +20pp in PvP/WvW.
             let base_hit = power * weapon_strength / reference_armor();
-            let fury = crate::data::boons().fury_crit_bonus(GameMode::PvE);
+            let fury = crate::data::boons().fury_crit_bonus(mode.clone());
             base_hit * fury * duration_s * (stacks.min(1) as f64)
         }
         "Quickness" => {
@@ -1076,6 +1077,7 @@ mod tests {
             is_stunbreak: false,
             weapon_set: 0,
         };
+
 
         let dpct = skill_dps_efficiency(&condi_skill, 1000.0, 1500.0, 1100.0, &GameMode::PvE);
         assert!(dpct > 0.0, "Condition skill should have positive DPCT");
@@ -1452,5 +1454,18 @@ mod tests {
         let result = simulate(&[auto_attack(), cc], 2_000, 2000.0, 0.0, 1100.0);
         assert!(result.has_interrupt);
         assert!(!simulate(&[auto_attack()], 2_000, 2000.0, 0.0, 1100.0).has_interrupt);
+    }
+
+    #[test]
+    fn fury_buff_value_follows_game_mode() {
+        // Fury is +25pp crit in PvE but +20pp in PvP/WvW, so the same Fury
+        // application must be worth less outside PvE.
+        let pve = estimate_buff_dps_value("Fury", 1, 6000, 2000.0, 1100.0, &GameMode::PvE);
+        let wvw = estimate_buff_dps_value("Fury", 1, 6000, 2000.0, 1100.0, &GameMode::WvW);
+        let pvp = estimate_buff_dps_value("Fury", 1, 6000, 2000.0, 1100.0, &GameMode::PvP);
+        assert!(pve > 0.0, "pve fury value should be positive: {pve}");
+        assert!(wvw < pve, "wvw fury ({wvw}) must be worth less than pve ({pve})");
+        assert!((wvw - pvp).abs() < f64::EPSILON, "pvp and wvw share 0.20");
+        assert!((wvw / pve - 0.8).abs() < 1e-9, "0.20/0.25 = 0.8, got {}", wvw / pve);
     }
 }
