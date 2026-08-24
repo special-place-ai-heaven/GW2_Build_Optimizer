@@ -601,6 +601,12 @@ fn render_messages(ui: &Ui, state: &mut AddonState) {
         .map(|r| actions_width(&r.actions, btn_w, edit_w, GAP))
         .fold(btn_w, f32::max)
         + 12.0;
+    // Status column fits its widest text (header included) so a short id is never clipped;
+    // the cap keeps a long failure line from crowding the message column.
+    let status_text_w = rows
+        .iter()
+        .map(|r| ui.calc_text_size(&r.status)[0])
+        .fold(ui.calc_text_size(t("about.col.status"))[0], f32::max);
     // ~3s breathe at 60fps for Sending rows (same formula as the tab pills).
     let pulse = (ui.frame_count() as f32 * 0.0175).sin().abs();
 
@@ -624,7 +630,7 @@ fn render_messages(ui: &Ui, state: &mut AddonState) {
             let avail = ui.content_region_avail()[0];
             let lh = ui.text_line_height();
             let sent_w = ui.calc_text_size("0000-00-00 00:00")[0] + 12.0;
-            let status_w = (avail * 0.22).clamp(110.0, 220.0);
+            let status_w = (status_text_w + 16.0).clamp(110.0, avail * 0.35);
             let message_w = (avail - PAD - sent_w - status_w - actions_w - GAP * 2.0).max(140.0);
             let sent_dx = PAD + message_w + GAP;
             let status_dx = sent_dx + sent_w + GAP;
