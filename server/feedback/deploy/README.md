@@ -58,3 +58,7 @@ will not restart it on its own — the tag has not changed):
 ## Backups
 
 Install the cron line from `deploy/backup.sh`. Dumps land in `/docker/feedback/backups/`.
+
+## Go-live
+
+Went live 2026-08-24. First report short id: `QP0GZ7ZQ` (deploy smoke test; replied and closed). Verified over HTTPS: Let's Encrypt cert, `/healthz` 200, taxonomy v1, POST 201 + idempotent replay, 426 for addon 1.5.3, 401 without token, admin get → `read`, reply → `answered`, close → `closed`, player status carries the reply.
