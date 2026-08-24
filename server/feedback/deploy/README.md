@@ -6,14 +6,32 @@ Traefik on `srv1640039`, next to `db` (Postgres, unpublished).
 
 ## Deploy (first time)
 
-Either paste `compose.yml` + the filled `.env` into Hostinger → VPS → Docker
-Manager → Compose (project name `feedback`), or on the VPS as `svetipeter`:
+There is no registry in play: the image is built on the dev machine and shipped
+to the VPS over ssh. `compose.yml` therefore names a plain local tag
+(`gw2bo-feedback:latest`) and carries no `build:` block — the repo is not
+checked out on the VPS, so a relative build context there would resolve to
+`/docker` and fail.
+
+On the dev machine, from the repo root (the build context is the repo root
+because the image embeds `data/feedback_taxonomy.json`):
+
+    docker build -f server/feedback/Dockerfile -t gw2bo-feedback:latest .
+    docker save gw2bo-feedback:latest | ssh ai-vps docker load
+
+On the VPS as `svetipeter`:
 
     sudo mkdir -p /docker/feedback/deploy && cd /docker/feedback
     # copy compose.yml, .env.example -> .env (filled), deploy/backup.sh from the repo
-    docker compose pull || docker compose build
     docker compose up -d
     docker compose logs -f feedback   # expect: "feedback listening on 0.0.0.0:8080"
+
+Alternatively the compose text can be pasted into Hostinger → VPS → Docker
+Manager → Compose (project name `feedback`), with the `.env` values filled in
+there. The image still has to be loaded onto the VPS first by the `docker save`
+step above — Docker Manager does not build it.
+
+Later, a registry (ghcr) can replace the save/load step: push the image and
+change the one `image:` line in `compose.yml` to the registry reference.
 
 ## Verify
 
@@ -27,7 +45,15 @@ Manager → Compose (project name `feedback`), or on the VPS as `svetipeter`:
 
 ## Update
 
-    cd /docker/feedback && docker compose pull && docker compose up -d
+On the dev machine, rebuild and ship the new image:
+
+    docker build -f server/feedback/Dockerfile -t gw2bo-feedback:latest .
+    docker save gw2bo-feedback:latest | ssh ai-vps docker load
+
+On the VPS, recreate the container against the freshly loaded image (compose
+will not restart it on its own — the tag has not changed):
+
+    cd /docker/feedback && docker compose up -d --force-recreate feedback
 
 ## Backups
 

@@ -2,10 +2,10 @@ name: feedback
 
 services:
   feedback:
-    image: ghcr.io/special-place-ai-heaven/gw2bo-feedback:latest
-    build:
-      context: ../..
-      dockerfile: server/feedback/Dockerfile
+    # Built on the dev machine and shipped with `docker save | ssh docker load`.
+    # No `build:` block: the repo is not checked out on the VPS, so a relative
+    # build context would resolve to /docker and fail. See deploy/README.md.
+    image: gw2bo-feedback:latest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -21,6 +21,12 @@ services:
       - traefik.http.routers.feedback.entrypoints=websecure
       - traefik.http.routers.feedback.tls.certresolver=letsencrypt
       - traefik.http.services.feedback.loadbalancer.server.port=8080
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   db:
     image: postgres:16-alpine

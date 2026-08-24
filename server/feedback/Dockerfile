@@ -14,7 +14,8 @@ RUN find server/feedback/src -name '*.rs' -exec touch {} + \
  && cd server/feedback && cargo build --release
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+# wget is here for the compose healthcheck; bookworm-slim ships neither it nor curl.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/server/feedback/target/release/gw2bo-feedback /usr/local/bin/gw2bo-feedback
 USER 65534:65534
 EXPOSE 8080

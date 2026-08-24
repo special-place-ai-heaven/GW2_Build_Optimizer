@@ -2,6 +2,8 @@
 # from tarring up Rust build artifacts and other bulk that no image needs.
 target/
 server/feedback/target/
+# A local server/feedback/.env holds the real admin token and DB password.
+**/.env
 .git/
 .symforge/
 .review/
