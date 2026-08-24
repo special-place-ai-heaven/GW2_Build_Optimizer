@@ -522,6 +522,10 @@ async fn admin_get_one_returns_full_row_and_marks_read(pool: PgPool) {
     assert_eq!(row["category"], "bug");
     assert_eq!(row["title"], "Optimize picks Trident on land");
     assert_eq!(row["unvalidated"], false);
+    assert_eq!(
+        row["status"], "read",
+        "the response must show the status the fetch just wrote, not the one it replaced"
+    );
 
     let st_after = json_body(
         router(st.clone())
@@ -756,4 +760,73 @@ async fn extractor_rejections_carry_the_error_envelope(pool: PgPool) {
     let v = json_body(res).await;
     assert_eq!(v["error"], "bad_request");
     assert!(!v["reason"].as_str().unwrap().is_empty());
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_list_without_a_status_filter_returns_newest_first_and_marks_read(pool: PgPool) {
+    let st = state(pool.clone()).await;
+    let mut ids = Vec::new();
+    for i in 0..2 {
+        let created = json_body(
+            router(st.clone())
+                .oneshot(post_report(
+                    report_json(&format!("dddddddd-dddd-4ddd-8ddd-ddddddddd{:03}", i)),
+                    "203.0.113.5",
+                    "1.6.0",
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        ids.push(created["id"].as_str().unwrap().to_string());
+    }
+    // Both rows default received_at to now(); backdate the first so "newest first"
+    // is a deterministic assertion rather than a race between two round-trips.
+    sqlx::query("update reports set received_at = now() - interval '1 hour' where short_id = $1")
+        .bind(&ids[0])
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let list = json_body(
+        router(st.clone())
+            .oneshot(admin("GET", "/v1/admin/reports", None, "test-admin-token"))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let arr = list.as_array().unwrap();
+    assert_eq!(arr.len(), 2, "no filter means every row");
+    assert_eq!(arr[0]["id"], ids[1], "newest first");
+    assert_eq!(arr[1]["id"], ids[0]);
+
+    for id in &ids {
+        let seen = json_body(
+            router(st.clone())
+                .oneshot(status_req(id, CLIENT, "203.0.113.5"))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(seen[0]["status"], "read", "listing marks every row read");
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_accepts_any_case_of_the_bearer_scheme(pool: PgPool) {
+    let res = router(state(pool).await)
+        .oneshot(
+            Request::builder()
+                .uri("/v1/admin/reports")
+                .header("authorization", "bearer test-admin-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "RFC 7235 auth schemes are case-insensitive"
+    );
 }

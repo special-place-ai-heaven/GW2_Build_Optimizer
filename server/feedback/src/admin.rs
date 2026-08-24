@@ -18,11 +18,14 @@ async fn require_token(
     req: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
+    // RFC 7235 auth schemes are case-insensitive, so match on the scheme rather
+    // than on the literal "Bearer " prefix.
     let ok = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|t| constant_time_eq(t.as_bytes(), s.config.admin_token.as_bytes()))
+        .and_then(|v| v.split_once(' '))
+        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
+        .map(|(_, t)| constant_time_eq(t.trim().as_bytes(), s.config.admin_token.as_bytes()))
         .unwrap_or(false);
     if ok {
         Ok(next.run(req).await)
@@ -70,7 +73,7 @@ async fn list(
     Query(q): Query<ListQuery>,
 ) -> Result<Json<Vec<AdminRow>>, ApiError> {
     let limit = q.limit.unwrap_or(50).clamp(1, 500);
-    let rows = match q.status {
+    let mut rows = match q.status {
         Some(st) => {
             sqlx::query_as::<_, AdminRow>(&format!(
             "select {ADMIN_COLS} from reports where status = $1 order by received_at desc limit $2"
@@ -90,6 +93,7 @@ async fn list(
         }
     };
     mark_read(&s, rows.iter().map(|r| r.id.clone()).collect()).await?;
+    reflect_read(&mut rows);
     Ok(Json(rows))
 }
 
@@ -97,7 +101,7 @@ async fn get_one(
     State(s): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<AdminRow>, ApiError> {
-    let row = sqlx::query_as::<_, AdminRow>(&format!(
+    let mut row = sqlx::query_as::<_, AdminRow>(&format!(
         "select {ADMIN_COLS} from reports where short_id = $1"
     ))
     .bind(id.to_uppercase())
@@ -105,7 +109,19 @@ async fn get_one(
     .await?
     .ok_or(ApiError::NotFound)?;
     mark_read(&s, vec![row.id.clone()]).await?;
+    reflect_read(std::slice::from_mut(&mut row));
     Ok(Json(row))
+}
+
+/// Rows are selected before `mark_read` runs, so a row that was `received` at
+/// select time already says `read` in the database by the time it is serialised.
+/// Flip it here too — the admin must never be shown a status the DB no longer holds.
+fn reflect_read(rows: &mut [AdminRow]) {
+    for row in rows {
+        if row.status == "received" {
+            row.status = "read".into();
+        }
+    }
 }
 
 async fn mark_read(s: &AppState, ids: Vec<String>) -> Result<(), ApiError> {
