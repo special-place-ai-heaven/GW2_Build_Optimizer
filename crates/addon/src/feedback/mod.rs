@@ -27,7 +27,9 @@ pub enum WizardStep {
     Step(usize),
     Summary,
     Sending,
-    Sent { short_id: String },
+    Sent {
+        short_id: String,
+    },
     Thanks,
 }
 
@@ -219,14 +221,14 @@ impl Draft {
 
     /// Required step ids that still lack a value, in taxonomy order.
     pub fn missing_steps(&self) -> Vec<String> {
-            self.step_ids()
-                .iter()
-                .filter(|id| {
-                    (self.is_required(id) && !self.has_value(id)) || self.text_error(id).is_some()
-                })
-                .cloned()
-                .collect()
-        }
+        self.step_ids()
+            .iter()
+            .filter(|id| {
+                (self.is_required(id) && !self.has_value(id)) || self.text_error(id).is_some()
+            })
+            .cloned()
+            .collect()
+    }
 
     /// True when nothing is missing and the category is a `report` kind (links never post).
     pub fn can_send(&self) -> bool {
@@ -312,7 +314,7 @@ pub struct FeedbackState {
     pub loaded: bool,
     pub messages: Vec<LocalMessage>,
     pub last_path: Option<LastPath>,
-    /// Empty until the tab first renders (T014 loads embedded/cached), replaced by cache/server when no draft is open.
+    /// Embedded or cached copy once `ensure_loaded` ran; a newer server copy replaces it when no draft is open.
     pub taxonomy: FeedbackTaxonomy,
     pub taxonomy_fetching: bool,
     /// Arrived while a draft was open; applied once the draft closes.
@@ -328,6 +330,9 @@ pub struct FeedbackState {
     pub last_refresh_at: Option<Instant>,
     pub last_refresh_ok: Option<bool>,
     pub last_poll: Option<Instant>,
+    /// A successful send asks the next frame's `maybe_poll` for a refresh (the send
+    /// thread must not spawn from inside `with_state`).
+    pub refresh_requested: bool,
     pub account: Option<Result<String, ()>>,
     pub account_looking_up: bool,
     /// Built when the summary step opens.
@@ -784,6 +789,30 @@ mod tests {
         state.offer_taxonomy(v3.clone());
         assert_eq!(state.taxonomy, v3);
         assert_eq!(state.pending_taxonomy, None);
+    }
+
+    #[test]
+    fn older_or_equal_taxonomy_is_ignored() {
+        let mut v2 = taxonomy();
+        v2.taxonomy_version = 2;
+        let mut state = FeedbackState {
+            taxonomy: v2.clone(),
+            ..Default::default()
+        };
+
+        // No draft: neither an equal nor an older version replaces the one in use.
+        state.offer_taxonomy(v2.clone());
+        state.offer_taxonomy(taxonomy());
+        assert_eq!(state.taxonomy, v2);
+        assert_eq!(state.pending_taxonomy, None);
+
+        // Draft open: they are not queued either.
+        state.open_draft();
+        state.offer_taxonomy(v2.clone());
+        state.offer_taxonomy(taxonomy());
+        assert_eq!(state.pending_taxonomy, None);
+        state.close_draft();
+        assert_eq!(state.taxonomy, v2);
     }
 
     #[test]

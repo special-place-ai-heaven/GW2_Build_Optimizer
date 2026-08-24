@@ -60,6 +60,7 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         stats::check_api_health(state);
         state.main.api_status_frames = 0;
     }
+    crate::feedback::tasks::maybe_poll(state);
 
     // Auto-dismiss save status after ~180 frames (~3s at 60fps)
     if state.main.save_status.is_some() {

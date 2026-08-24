@@ -102,18 +102,19 @@ fn text_error_text(e: &TextError) -> String {
     }
 }
 
-/// Why `Next` is dimmed on a step, or `None` when the step may be left.
+/// Why `Next` is dimmed on a step, or `None` when the step may be left. A text over
+/// its limit blocks even on an optional step (mirrors `Draft::missing_steps`).
 fn next_block_text(draft: &Draft, step_id: &str) -> Option<String> {
+    if let Some(e) = draft.text_error(step_id) {
+        return Some(text_error_text(&e));
+    }
     if !draft.is_required(step_id) || draft.has_value(step_id) {
         return None;
     }
-    Some(match draft.text_error(step_id) {
-        Some(e) => text_error_text(&e),
-        None => tf(
-            "about.missing",
-            &[("steps", &step_prompt(&draft.taxonomy, step_id))],
-        ),
-    })
+    Some(tf(
+        "about.missing",
+        &[("steps", &step_prompt(&draft.taxonomy, step_id))],
+    ))
 }
 
 /// Player-facing text for a send failure (`msg.fail.*`). `Rejected` shows the
@@ -798,6 +799,21 @@ mod tests {
             );
             let mut praise = Draft::new(FeedbackTaxonomy::embedded());
             praise.pick("praise");
+            assert_eq!(next_block_text(&praise, "note_optional"), None);
+        });
+    }
+
+    #[test]
+    fn next_blocked_when_optional_note_too_long() {
+        with_en(|| {
+            let mut praise = Draft::new(FeedbackTaxonomy::embedded());
+            praise.pick("praise");
+            praise.set_text("note_optional", "x".repeat(1001));
+            assert_eq!(
+                next_block_text(&praise, "note_optional").as_deref(),
+                Some("At most 1000 characters")
+            );
+            praise.set_text("note_optional", "x".repeat(1000));
             assert_eq!(next_block_text(&praise, "note_optional"), None);
         });
     }

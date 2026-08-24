@@ -1,16 +1,22 @@
 //! Background tasks for the About tab: build and send a report, resend a failed
-//! one, look up the account name. The pure parts (`report_context`,
-//! `context_summary`, `build_report_with`, `apply_send_result`) are unit-tested;
-//! the thread bodies follow the `stats.rs` pattern (flag, clone what the thread
-//! needs, `catch_unwind`, write back through `with_state`).
+//! one, look up the account name, refresh message statuses, fetch the taxonomy.
+//! The pure parts (`report_context`, `context_summary`, `build_report_with`,
+//! `apply_send_result`, `apply_status_rows`, `apply_refresh_outcome`,
+//! `apply_taxonomy_fetch`) are unit-tested; the thread bodies follow the
+//! `stats.rs` pattern (flag, clone what the thread needs, `catch_unwind`, write
+//! back through `with_state`).
 
-use crate::feedback::client::{self, SendResult};
+use std::time::{Duration, Instant};
+
+use crate::feedback::client::{self, SendResult, StatusRow};
 use crate::feedback::{AboutView, FeedbackState, WizardStep};
-use crate::state::AddonState;
+use crate::state::{AddonState, MainTab};
 use gw2_core::feedback::message::{now_unix, FailReason, LastPath, LocalMessage, MessageStatus};
 use gw2_core::feedback::report::{
     request_bytes, title_for, to_json, Report, ReportContext, SCHEMA_VERSION,
 };
+use gw2_core::feedback::store::FeedbackStore;
+use gw2_core::feedback::taxonomy::FeedbackTaxonomy;
 use gw2_core::i18n::t;
 use gw2_core::types::GameMode;
 
@@ -295,6 +301,9 @@ pub fn apply_send_result(
             }
             feedback.view = AboutView::Messages;
             feedback.view_chosen = true;
+            // Runs inside `with_state` on the send thread: ask the frame loop to poll
+            // rather than spawning from here.
+            feedback.refresh_requested = true;
         }
         SendResult::Failed(reason) => {
             row.status = MessageStatus::Failed;
@@ -405,6 +414,293 @@ fn account_failed(feedback: &mut FeedbackState) {
     if let Some(draft) = feedback.draft.as_mut() {
         draft.include_account = false;
     }
+}
+
+/// Wall-clock gap between periodic status polls (design §6a: every five minutes while
+/// the overlay is visible).
+const POLL_INTERVAL: Duration = Duration::from_secs(300);
+
+/// The server reads at most this many ids per status request.
+const MAX_POLL_IDS: usize = 50;
+
+/// Load `messages.json` and the taxonomy into `state.main.feedback` once (idempotent).
+/// The cached server taxonomy wins over the embedded one when its version is higher.
+/// Runs from any tab so the periodic poll works before the About tab was ever opened.
+pub fn ensure_loaded(state: &mut AddonState) {
+    if state.main.feedback.loaded {
+        return;
+    }
+    let store = FeedbackStore::new(&state.addon_dir);
+    let file = store.load();
+    let mut taxonomy = FeedbackTaxonomy::embedded();
+    if let Some(cached) = store.load_taxonomy() {
+        if cached.taxonomy_version > taxonomy.taxonomy_version {
+            taxonomy = cached;
+        }
+    }
+    let feedback = &mut state.main.feedback;
+    feedback.messages = file.messages;
+    feedback.last_path = file.last_path;
+    feedback.taxonomy = taxonomy;
+    feedback.loaded = true;
+    if !feedback.view_chosen {
+        feedback.view = feedback.default_view();
+    }
+}
+
+/// Short ids of the rows the server may still change (`received`/`read`/`answered`),
+/// capped at the server's per-request limit.
+pub fn pollable_ids(messages: &[LocalMessage]) -> Vec<String> {
+    messages
+        .iter()
+        .filter(|m| m.pollable())
+        .filter_map(|m| m.short_id.clone())
+        .take(MAX_POLL_IDS)
+        .collect()
+}
+
+/// Server status word → enum; `None` for a word this build does not know, so a newer
+/// server never overwrites a known status with a guess.
+fn status_from_server(word: &str) -> Option<MessageStatus> {
+    match word {
+        "received" => Some(MessageStatus::Received),
+        "read" => Some(MessageStatus::Read),
+        "answered" => Some(MessageStatus::Answered),
+        "closed" => Some(MessageStatus::Closed),
+        _ => None,
+    }
+}
+
+/// Apply a successful status response to the rows that were polled: a returned row
+/// updates status, reply, `replied_at` and closing note; a polled id the server no
+/// longer has becomes `Unknown`. Rows outside `polled` are untouched. Returns true when
+/// some row flipped to `Answered`.
+pub fn apply_status_rows(
+    messages: &mut [LocalMessage],
+    polled: &[String],
+    rows: &[StatusRow],
+) -> bool {
+    let mut flipped = false;
+    for m in messages.iter_mut() {
+        let Some(id) = m.short_id.as_deref() else {
+            continue;
+        };
+        if !polled.iter().any(|p| p == id) {
+            continue;
+        }
+        match rows.iter().find(|r| r.id == id) {
+            Some(row) => {
+                if let Some(status) = status_from_server(&row.status) {
+                    flipped |=
+                        status == MessageStatus::Answered && m.status != MessageStatus::Answered;
+                    m.status = status;
+                }
+                m.reply = row.reply.clone();
+                m.replied_at = row.replied_at.clone();
+                m.closing_note = row.closing_note.clone();
+            }
+            None => m.status = MessageStatus::Unknown,
+        }
+    }
+    flipped
+}
+
+/// Apply one status fetch outcome. Success updates the rows and stamps the refresh; a
+/// failure only records it (design §6a: a failed refresh never blanks a known status and
+/// never yields `Unknown`). An answer landing while the player is on another tab pulses
+/// the About pill. Pure over `state`; also the thread's write-back.
+pub fn apply_refresh_outcome(
+    state: &mut AddonState,
+    polled: &[String],
+    result: Result<Vec<StatusRow>, ()>,
+) {
+    let feedback = &mut state.main.feedback;
+    feedback.refreshing = false;
+    let Ok(rows) = result else {
+        feedback.last_refresh_ok = Some(false);
+        return;
+    };
+    let flipped = apply_status_rows(&mut feedback.messages, polled, &rows);
+    feedback.last_refresh_at = Some(Instant::now());
+    feedback.last_refresh_ok = Some(true);
+    feedback.dirty = true;
+    if flipped && state.main.active_tab != MainTab::About {
+        state.main.tab_alert = Some(MainTab::About);
+    }
+}
+
+/// Refresh the status of every pollable row on a background thread. No-op when there is
+/// nothing to poll, a refresh is in flight, or no `client_id` was minted yet (then
+/// nothing could have been sent).
+pub fn refresh_status(state: &mut AddonState) {
+    let ids = pollable_ids(&state.main.feedback.messages);
+    if ids.is_empty() || state.main.feedback.refreshing {
+        return;
+    }
+    let Some(client_id) = state.config.client_id.clone() else {
+        return;
+    };
+    state.main.feedback.refreshing = true;
+    let token = state.cancel_token.clone();
+
+    std::thread::spawn(move || {
+        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let result = if token.is_cancelled() {
+                None
+            } else {
+                let r = client::fetch_status(&ids, &client_id, crate::VERSION);
+                if token.is_cancelled() {
+                    None
+                } else {
+                    Some(r)
+                }
+            };
+            crate::state::with_state(|s| match result {
+                Some(result) => apply_refresh_outcome(s, &ids, result),
+                None => s.main.feedback.refreshing = false,
+            });
+        }));
+        if panic_result.is_err() {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                "bg thread panicked: refresh_status",
+            );
+            crate::state::with_state(|s| {
+                let feedback = &mut s.main.feedback;
+                feedback.refreshing = false;
+                feedback.last_refresh_ok = Some(false);
+            });
+        }
+    });
+}
+
+/// Per-frame poll driver, called from `render_main` on every tab: loads the store once,
+/// forgets `was_open` while the player is elsewhere, honours a refresh requested by a
+/// successful send as soon as no refresh is in flight, and otherwise polls every
+/// [`POLL_INTERVAL`] while some row is pollable.
+pub fn maybe_poll(state: &mut AddonState) {
+    if state.main.active_tab != MainTab::About {
+        state.main.feedback.was_open = false;
+    }
+    ensure_loaded(state);
+    flush_dirty(state);
+    let feedback = &mut state.main.feedback;
+    if feedback.refreshing {
+        return;
+    }
+    if feedback.refresh_requested {
+        feedback.refresh_requested = false;
+        feedback.last_poll = Some(Instant::now());
+        refresh_status(state);
+        return;
+    }
+    let due = feedback
+        .last_poll
+        .is_none_or(|t| t.elapsed() >= POLL_INTERVAL);
+    if due && feedback.messages.iter().any(LocalMessage::pollable) {
+        feedback.last_poll = Some(Instant::now());
+        refresh_status(state);
+    }
+}
+
+/// Minimum gap between two tab-open status refreshes. The status GET shares the server's
+/// 10/min per-IP bucket with POST, so flipping tabs must not be able to starve a send.
+const OPEN_REFRESH_GAP: Duration = Duration::from_secs(30);
+
+/// First frame on the About tab since the last switch away: refresh statuses (throttled
+/// by [`OPEN_REFRESH_GAP`] and stamped as a poll) and fetch the taxonomy.
+pub fn refresh_on_open(state: &mut AddonState) {
+    if state.main.feedback.was_open {
+        return;
+    }
+    let feedback = &mut state.main.feedback;
+    feedback.was_open = true;
+    let due = feedback
+        .last_poll
+        .is_none_or(|t| t.elapsed() >= OPEN_REFRESH_GAP);
+    if due && feedback.messages.iter().any(LocalMessage::pollable) {
+        feedback.last_poll = Some(Instant::now());
+        refresh_status(state);
+    }
+    fetch_taxonomy(state);
+}
+
+/// Persist `messages.json` when a send, refresh, or row action marked the state dirty.
+/// Runs every frame from [`maybe_poll`] so a status that lands while another tab is
+/// active is saved without waiting for the About tab to render.
+pub fn flush_dirty(state: &mut AddonState) {
+    if !state.main.feedback.dirty {
+        return;
+    }
+    let file = gw2_core::feedback::message::MessagesFile {
+        last_path: state.main.feedback.last_path.clone(),
+        messages: state.main.feedback.messages.clone(),
+    };
+    if let Err(e) = FeedbackStore::new(&state.addon_dir).save(&file) {
+        nexus::log::log(
+            nexus::log::LogLevel::Warning,
+            "GW2BuildOpt",
+            format!("messages.json save failed: {e}"),
+        );
+    }
+    state.main.feedback.dirty = false;
+}
+
+/// Fetch `/v1/taxonomy` on a background thread. A version newer than the one in use is
+/// cached on disk and offered to the state (applied now, or once the open draft closes).
+/// Anything else — transport failure, unparseable body, same or older version — changes
+/// nothing: the embedded/cached copy stays and no message is shown.
+pub fn fetch_taxonomy(state: &mut AddonState) {
+    if state.main.feedback.taxonomy_fetching {
+        return;
+    }
+    state.main.feedback.taxonomy_fetching = true;
+    let token = state.cancel_token.clone();
+
+    std::thread::spawn(move || {
+        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let fetched = if token.is_cancelled() {
+                None
+            } else {
+                client::fetch_taxonomy().and_then(|raw| {
+                    let parsed = FeedbackTaxonomy::parse(&raw).ok()?;
+                    Some((raw, parsed))
+                })
+            };
+            let fetched = if token.is_cancelled() { None } else { fetched };
+            crate::state::with_state(|s| apply_taxonomy_fetch(s, fetched));
+        }));
+        if panic_result.is_err() {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                "bg thread panicked: fetch_taxonomy",
+            );
+            crate::state::with_state(|s| s.main.feedback.taxonomy_fetching = false);
+        }
+    });
+}
+
+/// Take a fetched `(raw json, parsed)` taxonomy: when newer than the one in use, cache
+/// the raw text (so the next load starts from it) and offer it to the state. Pure over
+/// `state`; also the thread's write-back.
+pub fn apply_taxonomy_fetch(state: &mut AddonState, fetched: Option<(String, FeedbackTaxonomy)>) {
+    state.main.feedback.taxonomy_fetching = false;
+    let Some((raw, taxonomy)) = fetched else {
+        return;
+    };
+    if taxonomy.taxonomy_version <= state.main.feedback.taxonomy.taxonomy_version {
+        return;
+    }
+    if let Err(e) = FeedbackStore::new(&state.addon_dir).save_taxonomy(&raw) {
+        nexus::log::log(
+            nexus::log::LogLevel::Warning,
+            "GW2BuildOpt",
+            format!("feedback_taxonomy.json save failed: {e}"),
+        );
+    }
+    state.main.feedback.offer_taxonomy(taxonomy);
 }
 
 #[cfg(test)]
@@ -1015,6 +1311,220 @@ mod tests {
                 state.main.feedback.messages[0].status,
                 MessageStatus::Failed
             );
+        });
+    }
+
+    // T027 — status refresh.
+
+    fn polled(short_id: &str, status: MessageStatus) -> LocalMessage {
+        LocalMessage {
+            short_id: Some(short_id.to_string()),
+            ..msg(short_id, status, None)
+        }
+    }
+
+    fn status_row(id: &str, status: &str, reply: Option<&str>) -> StatusRow {
+        StatusRow {
+            id: id.to_string(),
+            status: status.to_string(),
+            reply: reply.map(str::to_string),
+            replied_at: reply.map(|_| "2026-08-25T10:00:00Z".to_string()),
+            closing_note: None,
+        }
+    }
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn refresh_applies_rows_and_marks_unknown_only_on_success() {
+        let mut messages = vec![
+            polled("A", MessageStatus::Received),
+            polled("B", MessageStatus::Received),
+            polled("C", MessageStatus::Failed),
+        ];
+        let polled_ids = ids(&["A", "B"]);
+        let rows = vec![status_row("A", "answered", Some("Fixed in 1.6.1"))];
+
+        assert!(apply_status_rows(&mut messages, &polled_ids, &rows));
+        assert_eq!(messages[0].status, MessageStatus::Answered);
+        assert_eq!(messages[0].reply.as_deref(), Some("Fixed in 1.6.1"));
+        assert_eq!(
+            messages[0].replied_at.as_deref(),
+            Some("2026-08-25T10:00:00Z")
+        );
+        assert_eq!(messages[1].status, MessageStatus::Unknown);
+        assert_eq!(messages[2].status, MessageStatus::Failed);
+        assert_eq!(messages[2].reply, None);
+
+        // Already answered → no second flip.
+        assert!(!apply_status_rows(&mut messages, &polled_ids, &rows));
+        assert_eq!(messages[0].status, MessageStatus::Answered);
+    }
+
+    #[test]
+    fn apply_status_rows_ignores_unknown_status_string() {
+        let mut messages = vec![polled("A", MessageStatus::Received)];
+        let rows = vec![status_row("A", "archived", Some("note"))];
+        assert!(!apply_status_rows(&mut messages, &ids(&["A"]), &rows));
+        assert_eq!(messages[0].status, MessageStatus::Received);
+        assert_eq!(messages[0].reply.as_deref(), Some("note"));
+    }
+
+    #[test]
+    fn refresh_failure_keeps_statuses() {
+        with_fresh_state("refresh_failure", |state| {
+            state.main.feedback.messages = vec![
+                polled("A", MessageStatus::Received),
+                polled("B", MessageStatus::Read),
+            ];
+            state.main.feedback.refreshing = true;
+            state.main.feedback.dirty = false;
+
+            apply_refresh_outcome(state, &ids(&["A", "B"]), Err(()));
+
+            let feedback = &state.main.feedback;
+            assert_eq!(feedback.messages[0].status, MessageStatus::Received);
+            assert_eq!(feedback.messages[1].status, MessageStatus::Read);
+            assert!(!feedback.refreshing);
+            assert_eq!(feedback.last_refresh_ok, Some(false));
+            assert_eq!(feedback.last_refresh_at, None);
+            assert!(!feedback.dirty);
+            assert_eq!(state.main.tab_alert, None);
+        });
+    }
+
+    #[test]
+    fn only_pollable_rows_are_polled() {
+        let mut messages: Vec<LocalMessage> = [
+            MessageStatus::Received,
+            MessageStatus::Read,
+            MessageStatus::Answered,
+            MessageStatus::Closed,
+            MessageStatus::Failed,
+            MessageStatus::Local,
+            MessageStatus::Sending,
+            MessageStatus::Unknown,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, status)| polled(&format!("S{i}"), status))
+        .collect();
+        // Received but never acknowledged: nothing to ask the server about.
+        messages.push(msg("no-short-id", MessageStatus::Received, None));
+
+        assert_eq!(pollable_ids(&messages), ids(&["S0", "S1", "S2"]));
+
+        let many: Vec<LocalMessage> = (0..60)
+            .map(|i| polled(&format!("M{i}"), MessageStatus::Received))
+            .collect();
+        assert_eq!(pollable_ids(&many).len(), 50);
+    }
+
+    #[test]
+    fn answered_flip_sets_tab_alert_when_not_on_about() {
+        with_fresh_state("flip_alert", |state| {
+            state.main.active_tab = MainTab::Settings;
+            state.main.feedback.messages = vec![polled("A", MessageStatus::Read)];
+            state.main.feedback.refreshing = true;
+            state.main.feedback.dirty = false;
+
+            let answered = || Ok(vec![status_row("A", "answered", Some("hi"))]);
+            apply_refresh_outcome(state, &ids(&["A"]), answered());
+
+            assert_eq!(state.main.tab_alert, Some(MainTab::About));
+            let feedback = &state.main.feedback;
+            assert_eq!(feedback.messages[0].status, MessageStatus::Answered);
+            assert!(!feedback.refreshing);
+            assert_eq!(feedback.last_refresh_ok, Some(true));
+            assert!(feedback.last_refresh_at.is_some());
+            assert!(feedback.dirty);
+
+            // The same answer again is not news: no fresh pulse.
+            state.main.tab_alert = None;
+            apply_refresh_outcome(state, &ids(&["A"]), answered());
+            assert_eq!(state.main.tab_alert, None);
+        });
+    }
+
+    #[test]
+    fn no_alert_when_on_about() {
+        with_fresh_state("no_alert", |state| {
+            state.main.active_tab = MainTab::About;
+            state.main.feedback.messages = vec![polled("A", MessageStatus::Received)];
+
+            apply_refresh_outcome(
+                state,
+                &ids(&["A"]),
+                Ok(vec![status_row("A", "answered", Some("hi"))]),
+            );
+
+            assert_eq!(state.main.tab_alert, None);
+            assert_eq!(
+                state.main.feedback.messages[0].status,
+                MessageStatus::Answered
+            );
+        });
+    }
+
+    #[test]
+    fn maybe_poll_waits_for_request_and_forgets_was_open() {
+        with_fresh_state("maybe_poll", |state| {
+            state.main.feedback.loaded = true;
+            state.main.active_tab = MainTab::Settings;
+            state.main.feedback.was_open = true;
+            state.main.feedback.refresh_requested = true;
+            state.main.feedback.refreshing = true;
+
+            // A refresh in flight: the request waits, `was_open` is forgotten anyway.
+            maybe_poll(state);
+            assert!(!state.main.feedback.was_open);
+            assert!(state.main.feedback.refresh_requested);
+            assert_eq!(state.main.feedback.last_poll, None);
+
+            // Idle: the request is consumed and counts as the poll. A fresh config has no
+            // `client_id`, so `refresh_status` is a no-op and nothing is spawned.
+            state.main.feedback.refreshing = false;
+            maybe_poll(state);
+            assert!(!state.main.feedback.refresh_requested);
+            assert!(state.main.feedback.last_poll.is_some());
+            assert!(!state.main.feedback.refreshing);
+        });
+    }
+
+    // T029 — taxonomy refresh.
+
+    #[test]
+    fn fetched_taxonomy_is_cached_and_applied_only_when_newer() {
+        with_fresh_state("taxonomy_fetch", |state| {
+            let current = FeedbackTaxonomy::embedded();
+            state.main.feedback.taxonomy = current.clone();
+            let store = FeedbackStore::new(&state.addon_dir);
+
+            // Same version → ignored, nothing cached.
+            state.main.feedback.taxonomy_fetching = true;
+            let same_raw = serde_json::to_string(&current).unwrap();
+            apply_taxonomy_fetch(state, Some((same_raw, current.clone())));
+            assert!(!state.main.feedback.taxonomy_fetching);
+            assert_eq!(state.main.feedback.taxonomy, current);
+            assert_eq!(store.load_taxonomy(), None);
+
+            // Newer → cached on disk and in use.
+            let mut newer = current.clone();
+            newer.taxonomy_version += 1;
+            let raw = serde_json::to_string(&newer).unwrap();
+            state.main.feedback.taxonomy_fetching = true;
+            apply_taxonomy_fetch(state, Some((raw, newer.clone())));
+            assert!(!state.main.feedback.taxonomy_fetching);
+            assert_eq!(state.main.feedback.taxonomy, newer);
+            assert_eq!(store.load_taxonomy(), Some(newer.clone()));
+
+            // Nothing fetched → only the flag clears.
+            state.main.feedback.taxonomy_fetching = true;
+            apply_taxonomy_fetch(state, None);
+            assert!(!state.main.feedback.taxonomy_fetching);
+            assert_eq!(state.main.feedback.taxonomy, newer);
         });
     }
 }

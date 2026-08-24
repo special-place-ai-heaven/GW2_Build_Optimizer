@@ -3,30 +3,20 @@
 pub(super) mod glyphs;
 mod wizard;
 
+use std::time::Duration;
+
 use nexus::imgui::{ChildWindow, StyleColor, StyleVar, Ui};
 
 use crate::feedback::{AboutView, Draft, FeedbackState};
 use crate::state::AddonState;
 use crate::ui::theme;
 use gw2_core::feedback::changelog::{self, ChangelogEntry};
-use gw2_core::feedback::message::{
-    now_unix, FailReason, LocalMessage, MessageStatus, MessagesFile,
-};
-use gw2_core::feedback::store::FeedbackStore;
+use gw2_core::feedback::message::{now_unix, FailReason, LocalMessage, MessageStatus};
 use gw2_core::feedback::taxonomy::FeedbackTaxonomy;
 use gw2_core::i18n::{t, tf};
 
 /// How many changelog releases the What's new view shows.
 const CHANGELOG_SHOWN: usize = 5;
-
-/// Messages once a row was actually sent; otherwise the release notes.
-fn default_view(messages: &[LocalMessage]) -> AboutView {
-    if messages.iter().any(|m| !m.is_local()) {
-        AboutView::Messages
-    } else {
-        AboutView::WhatsNew
-    }
-}
 
 /// Rows that went to the server (everything that is not `Local`).
 fn sent_count(messages: &[LocalMessage]) -> usize {
@@ -45,25 +35,6 @@ fn changelog_entries() -> Vec<ChangelogEntry> {
     let mut entries = changelog::parse(changelog::EMBEDDED);
     entries.truncate(CHANGELOG_SHOWN);
     entries
-}
-
-fn load_feedback(state: &mut AddonState) {
-    let store = FeedbackStore::new(&state.addon_dir);
-    let file = store.load();
-    let mut taxonomy = FeedbackTaxonomy::embedded();
-    if let Some(cached) = store.load_taxonomy() {
-        if cached.taxonomy_version > taxonomy.taxonomy_version {
-            taxonomy = cached;
-        }
-    }
-    let feedback = &mut state.main.feedback;
-    feedback.messages = file.messages;
-    feedback.last_path = file.last_path;
-    feedback.taxonomy = taxonomy;
-    feedback.loaded = true;
-    if !feedback.view_chosen {
-        feedback.view = default_view(&feedback.messages);
-    }
 }
 
 fn render_about_hero(ui: &Ui, state: &AddonState) {
@@ -559,6 +530,33 @@ fn edit_and_resend(state: &mut AddonState, report_id: &str) {
     feedback.draft = Some(Draft::from_failed(feedback.taxonomy.clone(), &row));
 }
 
+/// The line under the table (design §6a): "Updated just now" in MUTED while the last
+/// refresh succeeded under a minute ago; "Status as of … · Choya unreachable" in WARN
+/// after a failed one, aged from the last success (or "—" when there never was one);
+/// nothing otherwise. `age` is the time since the last successful refresh.
+fn refresh_line(ok: Option<bool>, age: Option<Duration>) -> Option<(String, [f32; 4])> {
+    match ok {
+        Some(true) if age.is_some_and(|a| a < Duration::from_secs(60)) => {
+            Some((t("about.updated_now"), theme::MUTED))
+        }
+        Some(false) => {
+            let age = match age {
+                None => "—".to_string(),
+                Some(a) => {
+                    let mins = a.as_secs() / 60;
+                    if mins < 60 {
+                        tf("about.age_min", &[("n", &mins.to_string())])
+                    } else {
+                        tf("about.age_hour", &[("n", &(mins / 60).to_string())])
+                    }
+                }
+            };
+            Some((tf("about.stale", &[("age", &age)]), theme::WARN))
+        }
+        _ => None,
+    }
+}
+
 /// The Messages view: `render_ranch_table`'s row-plate layout over `feedback.messages`
 /// (newest first, as stored). Rows are snapshotted into [`RowView`]s first; button
 /// presses are deferred to after the loop so `state` is only borrowed mutably there.
@@ -610,6 +608,14 @@ fn render_messages(ui: &Ui, state: &mut AddonState) {
     let mut resend_id: Option<String> = None;
     let mut discard_id: Option<String> = None;
     let mut edit_id: Option<String> = None;
+
+    let refresh = {
+        let feedback = &state.main.feedback;
+        refresh_line(
+            feedback.last_refresh_ok,
+            feedback.last_refresh_at.map(|t| t.elapsed()),
+        )
+    };
 
     let scroll_h = (ui.content_region_avail()[1] - 4.0).max(64.0);
     ChildWindow::new("##about_messages")
@@ -747,7 +753,10 @@ fn render_messages(ui: &Ui, state: &mut AddonState) {
                 }
             }
 
-            // T028: refresh line ("Updated just now" / "Status as of …") goes here.
+            if let Some((text, color)) = &refresh {
+                ui.dummy([0.0, 4.0]);
+                ui.text_colored(*color, text);
+            }
         });
 
     if let Some((id, expand)) = toggle {
@@ -766,9 +775,8 @@ fn render_messages(ui: &Ui, state: &mut AddonState) {
 
 /// Render the About tab.
 pub(in crate::ui::main_view) fn render_about_tab(ui: &Ui, state: &mut AddonState) {
-    if !state.main.feedback.loaded {
-        load_feedback(state);
-    }
+    crate::feedback::tasks::ensure_loaded(state);
+    crate::feedback::tasks::refresh_on_open(state);
 
     render_about_hero(ui, state);
     render_action_row(ui, state);
@@ -782,34 +790,18 @@ pub(in crate::ui::main_view) fn render_about_tab(ui: &Ui, state: &mut AddonState
         AboutView::WhatsNew => render_whats_new(ui, state),
         AboutView::Messages => render_messages(ui, state),
     }
-    if state.main.feedback.dirty {
-        let file = MessagesFile {
-            last_path: state.main.feedback.last_path.clone(),
-            messages: state.main.feedback.messages.clone(),
-        };
-        if let Err(e) = FeedbackStore::new(&state.addon_dir).save(&file) {
-            nexus::log::log(
-                nexus::log::LogLevel::Warning,
-                "GW2BuildOpt",
-                format!("messages.json save failed: {e}"),
-            );
-        }
-        state.main.feedback.dirty = false;
-    }
+    // `messages.json` is flushed by `tasks::flush_dirty` from the frame loop, on any tab.
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::feedback::AboutView;
     use gw2_core::feedback::message::{FailReason, LocalMessage, MessageStatus};
-    use std::sync::Mutex;
 
-    /// `set_language` is process-global; serialise the tests that depend on `en`.
-    static LANG: Mutex<()> = Mutex::new(());
-
+    /// `set_language` is process-global and `state::init` calls it too, so the
+    /// tests that depend on `en` serialise on the shared STATE test lock.
     fn with_en<R>(f: impl FnOnce() -> R) -> R {
-        let _g = LANG.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = crate::state::state_test_guard();
         gw2_core::i18n::set_language("en");
         f()
     }
@@ -843,23 +835,6 @@ mod tests {
     }
 
     #[test]
-    fn default_view_is_whats_new_without_sent_rows() {
-        assert_eq!(default_view(&[]), AboutView::WhatsNew);
-        assert_eq!(
-            default_view(&[msg(MessageStatus::Local)]),
-            AboutView::WhatsNew
-        );
-    }
-
-    #[test]
-    fn default_view_is_messages_once_a_row_was_sent() {
-        assert_eq!(
-            default_view(&[msg(MessageStatus::Local), msg(MessageStatus::Failed)]),
-            AboutView::Messages
-        );
-    }
-
-    #[test]
     fn sent_count_excludes_local_rows() {
         let rows = [
             msg(MessageStatus::Local),
@@ -890,6 +865,41 @@ mod tests {
         let all = gw2_core::feedback::changelog::parse(gw2_core::feedback::changelog::EMBEDDED);
         assert_eq!(entries[0], all[0]);
         assert!(entries.iter().all(|e| !e.version.is_empty()));
+    }
+
+    #[test]
+    fn refresh_line_reports_fresh_stale_and_never() {
+        with_en(|| {
+            let secs = |n| Some(Duration::from_secs(n));
+            assert_eq!(
+                refresh_line(Some(true), secs(10)),
+                Some(("Updated just now".to_string(), theme::MUTED))
+            );
+            // A success older than a minute says nothing.
+            assert_eq!(refresh_line(Some(true), secs(61)), None);
+            assert_eq!(
+                refresh_line(Some(false), secs(120)),
+                Some((
+                    "Status as of 2 min ago  ·  Choya unreachable".to_string(),
+                    theme::WARN
+                ))
+            );
+            assert_eq!(
+                refresh_line(Some(false), secs(3 * 3600 + 5)),
+                Some((
+                    "Status as of 3 h ago  ·  Choya unreachable".to_string(),
+                    theme::WARN
+                ))
+            );
+            assert_eq!(
+                refresh_line(Some(false), None),
+                Some((
+                    "Status as of —  ·  Choya unreachable".to_string(),
+                    theme::WARN
+                ))
+            );
+            assert_eq!(refresh_line(None, None), None);
+        });
     }
 
     #[test]
