@@ -405,7 +405,7 @@ turns Answered in-game. That is the acceptance test.
 
 ## 13. Open items
 
-- Ko-fi URL (`https://ko-fi.com/specialplacerob` in taxonomy and README).
+- Ko-fi URL: https://ko-fi.com/specialplacerob (resolved).
 - SSH to `srv1640039` currently denied from this machine for both users; deploy
   needs a working key or is run from the user's shell.
 - Choya quips per step: write with the user; placeholders are locale keys only.
