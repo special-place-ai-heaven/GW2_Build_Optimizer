@@ -1,6 +1,7 @@
 //! About tab — in-game changelog, Message developer wizard, message list.
 
 pub(super) mod glyphs;
+mod wizard;
 
 use nexus::imgui::{ChildWindow, Ui};
 
@@ -8,7 +9,7 @@ use crate::feedback::AboutView;
 use crate::state::AddonState;
 use crate::ui::theme;
 use gw2_core::feedback::changelog::{self, ChangelogEntry};
-use gw2_core::feedback::message::{LocalMessage, MessageStatus};
+use gw2_core::feedback::message::{LocalMessage, MessageStatus, MessagesFile};
 use gw2_core::feedback::store::FeedbackStore;
 use gw2_core::feedback::taxonomy::FeedbackTaxonomy;
 use gw2_core::i18n::{t, tf};
@@ -116,19 +117,30 @@ fn render_about_hero(ui: &Ui, state: &AddonState) {
 }
 
 fn render_action_row(ui: &Ui, state: &mut AddonState) {
-    let _ = state;
     ui.dummy([0.0, 10.0]);
     let msg_label = t("about.btn.message");
     let coffee_label = t("about.btn.coffee");
     let btn_w = theme::gold_button_width(ui, &msg_label)
         .max(theme::gold_button_width(ui, &coffee_label))
         .max(160.0);
-    if theme::gold_button_sized(ui, format!("{msg_label}##about_msg"), [btn_w, 0.0]) {
-        // T020: open the wizard
+    if theme::gold_button_sized(ui, format!("{msg_label}##about_msg"), [btn_w, 0.0])
+        && state.main.feedback.draft.is_none()
+    {
+        state.main.feedback.open_draft();
     }
     ui.same_line_with_spacing(0.0, 10.0);
     if theme::gold_button_sized(ui, format!("{coffee_label}##about_coffee"), [btn_w, 0.0]) {
-        // T017/T020: open_url + local row
+        let url = state
+            .main
+            .feedback
+            .taxonomy
+            .categories
+            .iter()
+            .find(|c| c.kind == "link")
+            .and_then(|c| c.url.clone());
+        if let Some(url) = url {
+            wizard::coffee(state, &url);
+        }
     }
 }
 
@@ -204,6 +216,9 @@ pub(in crate::ui::main_view) fn render_about_tab(ui: &Ui, state: &mut AddonState
 
     render_about_hero(ui, state);
     render_action_row(ui, state);
+    if state.main.feedback.draft.is_some() {
+        wizard::render_wizard(ui, state);
+    }
     render_view_toggle(ui, state);
 
     ui.dummy([0.0, 10.0]);
@@ -211,7 +226,20 @@ pub(in crate::ui::main_view) fn render_about_tab(ui: &Ui, state: &mut AddonState
         AboutView::WhatsNew => render_whats_new(ui, state),
         AboutView::Messages => render_messages(ui, state),
     }
-    // T021 saves when `state.main.feedback.dirty`; nothing to persist yet.
+    if state.main.feedback.dirty {
+        let file = MessagesFile {
+            last_path: state.main.feedback.last_path.clone(),
+            messages: state.main.feedback.messages.clone(),
+        };
+        if let Err(e) = FeedbackStore::new(&state.addon_dir).save(&file) {
+            nexus::log::log(
+                nexus::log::LogLevel::Warning,
+                "GW2BuildOpt",
+                format!("messages.json save failed: {e}"),
+            );
+        }
+        state.main.feedback.dirty = false;
+    }
 }
 
 #[cfg(test)]

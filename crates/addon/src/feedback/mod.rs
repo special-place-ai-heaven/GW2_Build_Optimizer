@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use gw2_core::feedback::message::{FailReason, LastPath, LocalMessage, MessageStatus};
-use gw2_core::feedback::report::BuildSnapshot;
+use gw2_core::feedback::report::{snapshot_bytes, BuildSnapshot, MAX_SNAPSHOT_BYTES};
 use gw2_core::feedback::taxonomy::{Category, FeedbackTaxonomy};
 
 /// Which list the About tab shows under the hero.
@@ -378,6 +378,38 @@ impl FeedbackState {
             AboutView::WhatsNew
         }
     }
+
+    /// Rebuild `snapshot` from the currently selected suggestion (`None` when there is none).
+    /// Called when the summary step opens.
+    pub fn refresh_snapshot(&mut self, comparison: &crate::ui::comparison::ComparisonState) {
+        self.snapshot = comparison
+            .suggestions
+            .get(comparison.selected_suggestion)
+            .map(snapshot_from);
+    }
+
+    /// True when a snapshot exists and fits the server cap (`MAX_SNAPSHOT_BYTES`).
+    pub fn snapshot_attachable(&self) -> bool {
+        self.snapshot
+            .as_ref()
+            .is_some_and(|s| snapshot_bytes(s) <= MAX_SNAPSHOT_BYTES)
+    }
+}
+
+/// Slim allowlist of the last optimize result (design §6): names and the chat code, nothing
+/// else. Explanations, rotation, combat profiles, and quality notes never cross this boundary.
+pub fn snapshot_from(s: &crate::ui::comparison::BuildSuggestion) -> BuildSnapshot {
+    BuildSnapshot {
+        stat_prefix: s.stat_prefix.clone(),
+        gear_prefixes: s.gear_prefixes.clone(),
+        specializations: s.specializations.clone(),
+        weapons: s.weapons.clone(),
+        sigils: s.sigils.clone(),
+        skills: s.skills.clone(),
+        rune: s.rune.clone(),
+        relic: s.relic.clone(),
+        chat_code: s.chat_code.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -642,5 +674,109 @@ mod tests {
         state.messages.push(message(MessageStatus::Answered));
         assert_eq!(state.sent_count(), 2);
         assert_eq!(state.answered_count(), 1);
+    }
+
+    // T022 — build snapshot allowlist.
+
+    /// A suggestion whose non-allowlisted fields all carry bait text.
+    fn suggestion(stat_prefix: &str) -> crate::ui::comparison::BuildSuggestion {
+        crate::ui::comparison::BuildSuggestion {
+            label: "NOT-IN-SNAPSHOT label".to_string(),
+            build_summary: "NOT-IN-SNAPSHOT summary".to_string(),
+            stat_prefix: stat_prefix.to_string(),
+            gear_prefixes: gw2_core::types::GearPrefixGroups {
+                armor: "Marauder".to_string(),
+                trinkets: "Berserker".to_string(),
+                weapons: "Marauder".to_string(),
+            },
+            specializations: vec![(
+                "Skirmishing".to_string(),
+                vec!["Sharpened Edges".to_string()],
+            )],
+            weapons: vec!["Hammer".to_string()],
+            skills: vec!["Troll Unguent".to_string()],
+            rune: "Scholar".to_string(),
+            sigils: vec!["Force".to_string()],
+            relic: "Thief".to_string(),
+            chat_code: Some("[&DQQ...]".to_string()),
+            explanation: "NOT-IN-SNAPSHOT explanation".to_string(),
+            synergy_explanation: "NOT-IN-SNAPSHOT synergy".to_string(),
+            changes_made: vec!["NOT-IN-SNAPSHOT change".to_string()],
+            estimated_stats: Some(Default::default()),
+            combat_solo: Some(Default::default()),
+            combat_party: Some(Default::default()),
+            combat_squad: Some(Default::default()),
+            rotation: Some(Default::default()),
+            quality_reasons: vec!["NOT-IN-SNAPSHOT reason".to_string()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn snapshot_from_suggestion_contains_only_allowlist() {
+        let snap = snapshot_from(&suggestion("Marauder"));
+        let json = serde_json::to_string(&snap).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let keys: std::collections::BTreeSet<String> =
+            v.as_object().unwrap().keys().cloned().collect();
+        let want: std::collections::BTreeSet<String> = [
+            "stat_prefix",
+            "gear_prefixes",
+            "specializations",
+            "weapons",
+            "sigils",
+            "skills",
+            "rune",
+            "relic",
+            "chat_code",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(keys, want);
+        assert!(!json.contains("NOT-IN-SNAPSHOT"), "{json}");
+
+        assert_eq!(snap.stat_prefix, "Marauder");
+        assert_eq!(snap.gear_prefixes.trinkets, "Berserker");
+        assert_eq!(snap.specializations[0].0, "Skirmishing");
+        assert_eq!(snap.weapons, vec!["Hammer".to_string()]);
+        assert_eq!(snap.sigils, vec!["Force".to_string()]);
+        assert_eq!(snap.skills, vec!["Troll Unguent".to_string()]);
+        assert_eq!(snap.rune, "Scholar");
+        assert_eq!(snap.relic, "Thief");
+        assert_eq!(snap.chat_code.as_deref(), Some("[&DQQ...]"));
+    }
+
+    #[test]
+    fn snapshot_over_6144_bytes_is_not_attachable() {
+        let mut state = FeedbackState::default();
+        assert!(!state.snapshot_attachable());
+
+        state.snapshot = Some(snapshot_from(&suggestion("Marauder")));
+        assert!(state.snapshot_attachable());
+
+        let mut big = suggestion("Marauder");
+        big.relic = "x".repeat(7000);
+        state.snapshot = Some(snapshot_from(&big));
+        assert!(!state.snapshot_attachable());
+    }
+
+    #[test]
+    fn refresh_snapshot_uses_selected_suggestion() {
+        let mut comparison = crate::ui::comparison::ComparisonState::default();
+        comparison.suggestions.push(suggestion("Marauder"));
+        comparison.suggestions.push(suggestion("Berserker"));
+        comparison.selected_suggestion = 1;
+
+        let mut state = FeedbackState::default();
+        state.refresh_snapshot(&comparison);
+        assert_eq!(
+            state.snapshot.as_ref().map(|s| s.stat_prefix.as_str()),
+            Some("Berserker")
+        );
+
+        comparison.suggestions.clear();
+        state.refresh_snapshot(&comparison);
+        assert_eq!(state.snapshot, None);
     }
 }
