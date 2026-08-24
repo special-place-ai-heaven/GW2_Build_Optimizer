@@ -265,4 +265,4 @@ Crates:
 
 ## License
 
-MIT (`Cargo.toml`).
+MIT. See [LICENSE](LICENSE).
