@@ -433,7 +433,11 @@ Deploy is `docker compose up -d` in `/docker/feedback/` on the VPS.
 - Offline / server down: send fails fast (5 s timeout), row saved `failed`,
   Resend in `WARN`. Status refresh failure is silent; last known status stays.
 - Taxonomy fetch failure: embedded copy is used; no message shown.
-- Server rejects (400/413/429): error text under Send, form intact.
+- Server rejects (400/413/429): error text under Send, form intact. The
+  `{error, reason}` envelope is guaranteed for 400/426/429/503; a **413 may
+  arrive as plain text** (the body-size layer answers before the handler
+  when a Content-Length is over 16 KB), so the client never parses a 413
+  body and always shows its own "Message too long" line.
 - Local `messages.json` unreadable: start empty, log a warning, do not delete.
 
 ## 11. Testing
