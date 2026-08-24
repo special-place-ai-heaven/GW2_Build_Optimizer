@@ -15,7 +15,7 @@
 - The server lives in `server/feedback/` with its own `Cargo.toml` containing an empty `[workspace]` table; the root workspace adds `exclude = ["server/feedback"]`. It must never be linked into the DLL.
 - Database: PostgreSQL 16 only. The `db` container exposes **no host port**. Password and admin token come from `/docker/feedback/.env` on the VPS and are never committed (`server/feedback/.env.example` holds placeholders only).
 - Queries use runtime `sqlx::query(...)` with `.bind`, not the `query!` macros — the macros need a live database or offline metadata at every build, including on the developer's Windows machine and in CI. Every query is exercised by a `#[sqlx::test]` instead. (Deliberate simplification of the spec's "compile-time checked" wording.)
-- Limits copied from the spec: body cap 16 KB; 10 requests/min per `ip_hash`; 50/day per `client_id`; report `body` ≤ 4000 chars; `title` ≤ 120 chars; send timeout on the addon side 5 s (informs nothing here, but responses must be fast).
+- Limits copied from the spec: body cap 16 KB; 10 requests/min per `ip_hash` (POST **and** status GET share the bucket); 50/day per `client_id` (best-effort, honor-system); report `body` ≤ 4000 chars; `title` ≤ 120 chars; `build_snapshot` ≤ 6 KB serialized; send timeout on the addon side 5 s (informs nothing here, but responses must be fast).
 - Status vocabulary, verbatim: `received`, `read`, `answered`, `closed`.
 - Unknown category/choice ids are **accepted and stored** with `unvalidated = true`, never rejected (older DLL vs newer taxonomy and vice versa must not lose reports).
 - Nothing in this plan touches `crates/`, `Cargo.toml` version, README download links, or the release process. No DLL release results from this plan.
@@ -451,7 +451,7 @@ CREATE TABLE reports (
   contact        TEXT,
   account        TEXT,
   addon_version  TEXT NOT NULL,
-  game_build     INTEGER,
+  game_build     BIGINT,
   status         TEXT NOT NULL DEFAULT 'received'
                  CHECK (status IN ('received','read','answered','closed')),
   reply          TEXT,
@@ -858,6 +858,7 @@ use uuid::Uuid;
 
 pub const MAX_BODY_CHARS: usize = 4000;
 pub const MAX_TITLE_CHARS: usize = 120;
+pub const MAX_SNAPSHOT_BYTES: usize = 6 * 1024;
 
 #[derive(Debug, Deserialize)]
 pub struct NewReport {
@@ -919,11 +920,16 @@ pub async fn create(
     if req.title.chars().count() > MAX_TITLE_CHARS || req.title.trim().is_empty() {
         return Err(ApiError::BadRequest(format!("title must be 1..{MAX_TITLE_CHARS} characters")));
     }
+    if let Some(snap) = &req.build_snapshot {
+        if snap.to_string().len() > MAX_SNAPSHOT_BYTES {
+            return Err(ApiError::BadRequest(format!("build_snapshot over {MAX_SNAPSHOT_BYTES} bytes")));
+        }
+    }
     let unvalidated = !s.taxonomy.read().await.validate(&req.category, &req.path);
     let ip = client_ip(&headers, addr.map(|c| c.0));
     let hash = ip_hash(&ip, &s.config.ip_salt, chrono::Utc::now().date_naive());
     let addon_version = req.context["addon_version"].as_str().unwrap_or("unknown").to_string();
-    let game_build = req.context["game_build"].as_i64().map(|b| b as i32);
+    let game_build = req.context["game_build"].as_i64();
     let payload = serde_json::to_value(&RawEcho::from(&req)).map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Idempotent: a resend with the same report_id returns the original row.
@@ -1146,18 +1152,29 @@ git commit -m "feat(feedback): per-ip and per-client rate limits with Retry-Afte
 - Modify: `server/feedback/tests/api.rs`
 
 **Interfaces:**
-- Produces: `reports::status(state, Query<StatusQuery>) -> Json<Vec<StatusRow>>`, `StatusRow { id, status, reply: Option<String>, replied_at: Option<DateTime<Utc>>, closing_note: Option<String> }`. Only rows whose `short_id` is in `ids` are returned; ids not found are simply absent (the addon maps absent → `unknown`). Max 50 ids per call.
+- Produces: `reports::status(state, headers, addr, Query<StatusQuery>) -> Json<Vec<StatusRow>>`, `StatusQuery { ids: String, client_id: Uuid }`, `StatusRow { id, status, reply: Option<String>, replied_at: Option<DateTime<Utc>>, closing_note: Option<String> }`. A row is returned only when its `short_id` is in `ids` **and** its `client_id` equals the query's; anything else is simply absent (the addon maps absent-after-200 → `unknown`). Max 50 ids per call. Rate-limited per `ip_hash` with the same 10/min as POST (spec §14 ruling 2).
 
 - [ ] **Step 1: Write the failing test**
 
 ```rust
+const CLIENT: &str = "11111111-1111-4111-8111-111111111111"; // matches report_json()
+
+fn status_req(ids: &str, client_id: &str, ip: &str) -> Request<Body> {
+    Request::builder()
+        .uri(format!("/v1/reports/status?ids={ids}&client_id={client_id}"))
+        .header("x-forwarded-for", ip)
+        .body(Body::empty())
+        .unwrap()
+}
+
 #[sqlx::test(migrations = "./migrations")]
-async fn status_returns_only_requested_ids(pool: PgPool) {
+async fn status_returns_only_requested_ids_owned_by_client(pool: PgPool) {
     let st = state(pool.clone()).await;
     let a = json_body(router(st.clone()).oneshot(post_report(report_json("88888888-8888-4888-8888-888888888881"), "203.0.113.5", "1.6.0")).await.unwrap()).await;
     let _b = json_body(router(st.clone()).oneshot(post_report(report_json("88888888-8888-4888-8888-888888888882"), "203.0.113.5", "1.6.0")).await.unwrap()).await;
-    let uri = format!("/v1/reports/status?ids={},NOPE1234", a["id"].as_str().unwrap());
-    let res = router(st).oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+    let id = a["id"].as_str().unwrap();
+
+    let res = router(st.clone()).oneshot(status_req(&format!("{id},NOPE1234"), CLIENT, "203.0.113.5")).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let v = json_body(res).await;
     let arr = v.as_array().unwrap();
@@ -1165,12 +1182,28 @@ async fn status_returns_only_requested_ids(pool: PgPool) {
     assert_eq!(arr[0]["id"], a["id"]);
     assert_eq!(arr[0]["status"], "received");
     assert!(arr[0]["reply"].is_null());
+
+    // Same id, different client: nothing. Ownership is short_id AND client_id.
+    let other = json_body(router(st.clone()).oneshot(status_req(id, "22222222-2222-4222-8222-222222222222", "203.0.113.5")).await.unwrap()).await;
+    assert_eq!(other.as_array().unwrap().len(), 0);
+
+    // Missing client_id is a 400, not an open door.
+    let res = router(st.clone()).oneshot(Request::builder().uri(format!("/v1/reports/status?ids={id}")).body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    // Rate-limited per ip like POST: a fresh ip gets 10 GETs, then 429.
+    for i in 0..10 {
+        assert_eq!(router(st.clone()).oneshot(status_req(id, CLIENT, "203.0.113.77")).await.unwrap().status(), StatusCode::OK, "get {i}");
+    }
+    assert_eq!(router(st).oneshot(status_req(id, CLIENT, "203.0.113.77")).await.unwrap().status(), StatusCode::TOO_MANY_REQUESTS);
 }
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `cargo test status_returns`
+
+(Task 6 depends on Task 5's `limiter`; POST and status GET from one ip draw from the same 10/min bucket. A missing `client_id` is rejected by axum's `Query` extractor with 400.)
 Expected: FAIL — 404 (route missing).
 
 - [ ] **Step 3: Implement**
@@ -1182,7 +1215,7 @@ use axum::extract::Query;
 use chrono::{DateTime, Utc};
 
 #[derive(Deserialize)]
-pub struct StatusQuery { pub ids: String }
+pub struct StatusQuery { pub ids: String, pub client_id: Uuid }
 
 #[derive(Serialize, sqlx::FromRow)]
 pub struct StatusRow {
@@ -1194,15 +1227,25 @@ pub struct StatusRow {
     pub closing_note: Option<String>,
 }
 
-pub async fn status(State(s): State<AppState>, Query(q): Query<StatusQuery>) -> Result<Json<Vec<StatusRow>>, ApiError> {
+pub async fn status(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    addr: Option<ConnectInfo<SocketAddr>>,
+    Query(q): Query<StatusQuery>,
+) -> Result<Json<Vec<StatusRow>>, ApiError> {
+    let ip = client_ip(&headers, addr.map(|c| c.0));
+    let hash = ip_hash(&ip, &s.config.ip_salt, chrono::Utc::now().date_naive());
+    s.limiter.check(&format!("ip:{hash}"), 10, std::time::Duration::from_secs(60))
+        .map_err(|retry_after_secs| ApiError::RateLimited { retry_after_secs })?;
     let ids: Vec<String> = q.ids.split(',').map(|x| x.trim().to_uppercase()).filter(|x| !x.is_empty()).take(50).collect();
     if ids.is_empty() {
         return Err(ApiError::BadRequest("ids required".into()));
     }
     let rows = sqlx::query_as::<_, StatusRow>(
-        "select short_id, status, reply, replied_at, closing_note from reports where short_id = any($1)",
+        "select short_id, status, reply, replied_at, closing_note from reports where short_id = any($1) and client_id = $2",
     )
     .bind(&ids)
+    .bind(q.client_id)
     .fetch_all(&s.pool)
     .await?;
     Ok(Json(rows))
@@ -1264,14 +1307,14 @@ async fn admin_list_marks_read_and_reply_marks_answered(pool: PgPool) {
     let list = json_body(router(st.clone()).oneshot(admin("GET", "/v1/admin/reports?status=received", None, "test-admin-token")).await.unwrap()).await;
     assert_eq!(list.as_array().unwrap().len(), 1);
 
-    let st_after = json_body(router(st.clone()).oneshot(Request::builder().uri(format!("/v1/reports/status?ids={id}")).body(Body::empty()).unwrap()).await.unwrap()).await;
+    let st_after = json_body(router(st.clone()).oneshot(status_req(&id, CLIENT, "203.0.113.5")).await.unwrap()).await;
     assert_eq!(st_after[0]["status"], "read", "listing through admin marks it read");
 
     let res = router(st.clone()).oneshot(admin("POST", &format!("/v1/admin/reports/{id}/reply"),
         Some(serde_json::json!({ "reply": "Fixed in 1.6.1, thanks!", "status": "answered" })), "test-admin-token")).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    let final_status = json_body(router(st).oneshot(Request::builder().uri(format!("/v1/reports/status?ids={id}")).body(Body::empty()).unwrap()).await.unwrap()).await;
+    let final_status = json_body(router(st).oneshot(status_req(&id, CLIENT, "203.0.113.5")).await.unwrap()).await;
     assert_eq!(final_status[0]["status"], "answered");
     assert_eq!(final_status[0]["reply"], "Fixed in 1.6.1, thanks!");
     assert!(final_status[0]["replied_at"].is_string());
@@ -1344,7 +1387,7 @@ pub struct AdminRow {
     pub contact: Option<String>,
     pub account: Option<String>,
     pub addon_version: String,
-    pub game_build: Option<i32>,
+    pub game_build: Option<i64>,
     pub status: String,
     pub reply: Option<String>,
     pub unvalidated: bool,
@@ -1730,7 +1773,7 @@ ID=$(curl -s -X POST https://feedback.robagentic.tech/v1/reports \
 curl -s -H "authorization: Bearer $FEEDBACK_ADMIN_TOKEN" "https://feedback.robagentic.tech/v1/admin/reports/$ID" | jq .status   # "read"
 curl -s -X POST -H "authorization: Bearer $FEEDBACK_ADMIN_TOKEN" -H 'content-type: application/json' \
   "https://feedback.robagentic.tech/v1/admin/reports/$ID/reply" -d '{"reply":"Got it. Thanks!","status":"answered"}' | jq .status   # "answered"
-curl -s "https://feedback.robagentic.tech/v1/reports/status?ids=$ID" | jq '.[0].status'   # "answered"
+curl -s "https://feedback.robagentic.tech/v1/reports/status?ids=$ID&client_id=11111111-1111-4111-8111-111111111111" | jq '.[0].status'   # "answered"
 curl -s -o /dev/null -w '%{http_code}\n' https://feedback.robagentic.tech/v1/admin/reports   # 401
 ```
 
