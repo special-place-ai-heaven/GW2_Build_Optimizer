@@ -1,12 +1,16 @@
 use crate::config::Config;
+use crate::reports;
 use crate::taxonomy::{self, Taxonomy};
 use axum::extract::State;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Json;
 use axum::Router;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tower_http::limit::RequestBodyLimitLayer;
+
+pub const MAX_REQUEST_BYTES: usize = 16 * 1024;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -31,5 +35,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/v1/taxonomy", get(get_taxonomy))
+        .route("/v1/reports", post(reports::create))
+        .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BYTES))
         .with_state(state)
 }
