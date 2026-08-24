@@ -27,7 +27,10 @@ impl Taxonomy {
             return false;
         };
         let steps = self.body["steps"].as_object();
-        let step_ids: Vec<&str> = cat["steps"].as_array().map(|s| s.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+        let step_ids: Vec<&str> = cat["steps"]
+            .as_array()
+            .map(|s| s.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
         path.iter().all(|p| {
             step_ids.iter().any(|sid| {
                 steps
@@ -42,17 +45,23 @@ impl Taxonomy {
 
 pub async fn seed_if_empty(pool: &PgPool) -> sqlx::Result<()> {
     let t = Taxonomy::embedded();
-    sqlx::query("insert into taxonomy (version, body) values ($1, $2) on conflict (version) do nothing")
-        .bind(t.version)
-        .bind(&t.body)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "insert into taxonomy (version, body) values ($1, $2) on conflict (version) do nothing",
+    )
+    .bind(t.version)
+    .bind(&t.body)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
 pub async fn load_current(pool: &PgPool) -> sqlx::Result<Taxonomy> {
-    let row: (i32, Value) = sqlx::query_as("select version, body from taxonomy order by version desc limit 1")
-        .fetch_one(pool)
-        .await?;
-    Ok(Taxonomy { version: row.0, body: row.1 })
+    let row: (i32, Value) =
+        sqlx::query_as("select version, body from taxonomy order by version desc limit 1")
+            .fetch_one(pool)
+            .await?;
+    Ok(Taxonomy {
+        version: row.0,
+        body: row.1,
+    })
 }

@@ -59,7 +59,11 @@ pub fn check_addon_version(headers: &HeaderMap, min: &str) -> Result<(), ApiErro
         .get("x-addon-version")
         .and_then(|v| v.to_str().ok())
         .ok_or_else(|| ApiError::BadRequest("missing X-Addon-Version".into()))?;
-    if version_at_least(have, min) { Ok(()) } else { Err(ApiError::UpgradeRequired) }
+    if version_at_least(have, min) {
+        Ok(())
+    } else {
+        Err(ApiError::UpgradeRequired)
+    }
 }
 
 pub async fn create(
@@ -73,26 +77,42 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<Created>), ApiError> {
     check_addon_version(&headers, &s.config.min_addon_version)?;
     if req.body.chars().count() > MAX_BODY_CHARS {
-        return Err(ApiError::BadRequest(format!("body over {MAX_BODY_CHARS} characters")));
+        return Err(ApiError::BadRequest(format!(
+            "body over {MAX_BODY_CHARS} characters"
+        )));
     }
     if req.title.chars().count() > MAX_TITLE_CHARS || req.title.trim().is_empty() {
-        return Err(ApiError::BadRequest(format!("title must be 1..{MAX_TITLE_CHARS} characters")));
+        return Err(ApiError::BadRequest(format!(
+            "title must be 1..{MAX_TITLE_CHARS} characters"
+        )));
     }
     if let Some(snap) = &req.build_snapshot {
         if snap.to_string().len() > MAX_SNAPSHOT_BYTES {
-            return Err(ApiError::BadRequest(format!("build_snapshot over {MAX_SNAPSHOT_BYTES} bytes")));
+            return Err(ApiError::BadRequest(format!(
+                "build_snapshot over {MAX_SNAPSHOT_BYTES} bytes"
+            )));
         }
     }
     let unvalidated = !s.taxonomy.read().await.validate(&req.category, &req.path);
     let ip = client_ip(&headers, addr.map(|Extension(ConnectInfo(a))| a));
     let hash = ip_hash(&ip, &s.config.ip_salt, chrono::Utc::now().date_naive());
-    s.limiter.check(&format!("ip:{hash}"), 10, Duration::from_secs(60))
+    s.limiter
+        .check(&format!("ip:{hash}"), 10, Duration::from_secs(60))
         .map_err(|retry_after_secs| ApiError::RateLimited { retry_after_secs })?;
-    s.limiter.check(&format!("client:{}", req.client_id), 50, Duration::from_secs(24 * 3600))
+    s.limiter
+        .check(
+            &format!("client:{}", req.client_id),
+            50,
+            Duration::from_secs(24 * 3600),
+        )
         .map_err(|retry_after_secs| ApiError::RateLimited { retry_after_secs })?;
-    let addon_version = req.context["addon_version"].as_str().unwrap_or("unknown").to_string();
+    let addon_version = req.context["addon_version"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
     let game_build = req.context["game_build"].as_i64();
-    let payload = serde_json::to_value(&RawEcho::from(&req)).map_err(|e| ApiError::Internal(e.to_string()))?;
+    let payload =
+        serde_json::to_value(RawEcho::from(&req)).map_err(|e| ApiError::Internal(e.to_string()))?;
 
     // Idempotent: a resend with the same report_id returns the original row.
     let row: (String, String) = sqlx::query_as(
@@ -123,7 +143,13 @@ pub async fn create(
     .fetch_one(&s.pool)
     .await?;
 
-    Ok((StatusCode::CREATED, Json(Created { id: row.0, status: row.1 })))
+    Ok((
+        StatusCode::CREATED,
+        Json(Created {
+            id: row.0,
+            status: row.1,
+        }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -153,9 +179,16 @@ pub async fn status(
 ) -> Result<Json<Vec<StatusRow>>, ApiError> {
     let ip = client_ip(&headers, addr.map(|Extension(ConnectInfo(a))| a));
     let hash = ip_hash(&ip, &s.config.ip_salt, chrono::Utc::now().date_naive());
-    s.limiter.check(&format!("ip:{hash}"), 10, Duration::from_secs(60))
+    s.limiter
+        .check(&format!("ip:{hash}"), 10, Duration::from_secs(60))
         .map_err(|retry_after_secs| ApiError::RateLimited { retry_after_secs })?;
-    let ids: Vec<String> = q.ids.split(',').map(|x| x.trim().to_uppercase()).filter(|x| !x.is_empty()).take(50).collect();
+    let ids: Vec<String> = q
+        .ids
+        .split(',')
+        .map(|x| x.trim().to_uppercase())
+        .filter(|x| !x.is_empty())
+        .take(50)
+        .collect();
     if ids.is_empty() {
         return Err(ApiError::BadRequest("ids required".into()));
     }
@@ -188,9 +221,17 @@ struct RawEcho<'a> {
 impl<'a> From<&'a NewReport> for RawEcho<'a> {
     fn from(r: &'a NewReport) -> Self {
         Self {
-            schema_version: r.schema_version, report_id: r.report_id, client_id: r.client_id,
-            category: &r.category, path: &r.path, title: &r.title, body: &r.body,
-            contact: &r.contact, account: &r.account, context: &r.context, build_snapshot: &r.build_snapshot,
+            schema_version: r.schema_version,
+            report_id: r.report_id,
+            client_id: r.client_id,
+            category: &r.category,
+            path: &r.path,
+            title: &r.title,
+            body: &r.body,
+            contact: &r.contact,
+            account: &r.account,
+            context: &r.context,
+            build_snapshot: &r.build_snapshot,
         }
     }
 }

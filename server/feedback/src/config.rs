@@ -22,7 +22,8 @@ impl Config {
                 .map_err(|e| format!("BIND_ADDR: {e}"))?,
             admin_token: need("FEEDBACK_ADMIN_TOKEN")?,
             ip_salt: need("FEEDBACK_IP_SALT")?,
-            min_addon_version: std::env::var("MIN_ADDON_VERSION").unwrap_or_else(|_| "1.6.0".into()),
+            min_addon_version: std::env::var("MIN_ADDON_VERSION")
+                .unwrap_or_else(|_| "1.6.0".into()),
         })
     }
 }

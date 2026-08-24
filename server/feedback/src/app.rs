@@ -26,7 +26,12 @@ impl AppState {
     pub async fn new(pool: PgPool, config: Arc<Config>) -> Self {
         taxonomy::seed_if_empty(&pool).await.expect("seed taxonomy");
         let current = taxonomy::load_current(&pool).await.expect("load taxonomy");
-        Self { pool, config, taxonomy: Arc::new(RwLock::new(current)), limiter: Arc::new(RateLimiter::new()) }
+        Self {
+            pool,
+            config,
+            taxonomy: Arc::new(RwLock::new(current)),
+            limiter: Arc::new(RateLimiter::new()),
+        }
     }
 }
 

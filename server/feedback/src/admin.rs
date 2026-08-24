@@ -12,18 +12,29 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-async fn require_token(State(s): State<AppState>, headers: HeaderMap, req: Request, next: Next) -> Result<Response, ApiError> {
+async fn require_token(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    req: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
     let ok = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(|t| constant_time_eq(t.as_bytes(), s.config.admin_token.as_bytes()))
         .unwrap_or(false);
-    if ok { Ok(next.run(req).await) } else { Err(ApiError::Unauthorized) }
+    if ok {
+        Ok(next.run(req).await)
+    } else {
+        Err(ApiError::Unauthorized)
+    }
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() { return false; }
+    if a.len() != b.len() {
+        return false;
+    }
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
@@ -47,57 +58,114 @@ pub struct AdminRow {
 }
 
 #[derive(Deserialize)]
-pub struct ListQuery { pub status: Option<String>, pub limit: Option<i64> }
+pub struct ListQuery {
+    pub status: Option<String>,
+    pub limit: Option<i64>,
+}
 
 const ADMIN_COLS: &str = "short_id, received_at, category, path, title, body, contact, account, addon_version, game_build, status, reply, unvalidated, payload";
 
-async fn list(State(s): State<AppState>, Query(q): Query<ListQuery>) -> Result<Json<Vec<AdminRow>>, ApiError> {
+async fn list(
+    State(s): State<AppState>,
+    Query(q): Query<ListQuery>,
+) -> Result<Json<Vec<AdminRow>>, ApiError> {
     let limit = q.limit.unwrap_or(50).clamp(1, 500);
     let rows = match q.status {
-        Some(st) => sqlx::query_as::<_, AdminRow>(&format!("select {ADMIN_COLS} from reports where status = $1 order by received_at desc limit $2"))
-            .bind(st).bind(limit).fetch_all(&s.pool).await?,
-        None => sqlx::query_as::<_, AdminRow>(&format!("select {ADMIN_COLS} from reports order by received_at desc limit $1"))
-            .bind(limit).fetch_all(&s.pool).await?,
+        Some(st) => {
+            sqlx::query_as::<_, AdminRow>(&format!(
+            "select {ADMIN_COLS} from reports where status = $1 order by received_at desc limit $2"
+        ))
+            .bind(st)
+            .bind(limit)
+            .fetch_all(&s.pool)
+            .await?
+        }
+        None => {
+            sqlx::query_as::<_, AdminRow>(&format!(
+                "select {ADMIN_COLS} from reports order by received_at desc limit $1"
+            ))
+            .bind(limit)
+            .fetch_all(&s.pool)
+            .await?
+        }
     };
     mark_read(&s, rows.iter().map(|r| r.id.clone()).collect()).await?;
     Ok(Json(rows))
 }
 
-async fn get_one(State(s): State<AppState>, Path(id): Path<String>) -> Result<Json<AdminRow>, ApiError> {
-    let row = sqlx::query_as::<_, AdminRow>(&format!("select {ADMIN_COLS} from reports where short_id = $1"))
-        .bind(id.to_uppercase()).fetch_optional(&s.pool).await?.ok_or(ApiError::NotFound)?;
+async fn get_one(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<AdminRow>, ApiError> {
+    let row = sqlx::query_as::<_, AdminRow>(&format!(
+        "select {ADMIN_COLS} from reports where short_id = $1"
+    ))
+    .bind(id.to_uppercase())
+    .fetch_optional(&s.pool)
+    .await?
+    .ok_or(ApiError::NotFound)?;
     mark_read(&s, vec![row.id.clone()]).await?;
     Ok(Json(row))
 }
 
 async fn mark_read(s: &AppState, ids: Vec<String>) -> Result<(), ApiError> {
-    if ids.is_empty() { return Ok(()); }
-    sqlx::query("update reports set status = 'read' where short_id = any($1) and status = 'received'")
-        .bind(&ids).execute(&s.pool).await?;
+    if ids.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(
+        "update reports set status = 'read' where short_id = any($1) and status = 'received'",
+    )
+    .bind(&ids)
+    .execute(&s.pool)
+    .await?;
     Ok(())
 }
 
 #[derive(Deserialize)]
-pub struct ReplyBody { pub reply: String, pub status: String }
+pub struct ReplyBody {
+    pub reply: String,
+    pub status: String,
+}
 
-async fn reply(State(s): State<AppState>, Path(id): Path<String>, Json(b): Json<ReplyBody>) -> Result<Json<StatusRow>, ApiError> {
+async fn reply(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(b): Json<ReplyBody>,
+) -> Result<Json<StatusRow>, ApiError> {
     if !matches!(b.status.as_str(), "answered" | "closed") {
-        return Err(ApiError::BadRequest("status must be answered or closed".into()));
+        return Err(ApiError::BadRequest(
+            "status must be answered or closed".into(),
+        ));
     }
     let row = sqlx::query_as::<_, StatusRow>(
         "update reports set reply = $2, replied_at = now(), status = $3 where short_id = $1
          returning short_id, status, reply, replied_at, closing_note",
     )
-    .bind(id.to_uppercase()).bind(&b.reply).bind(&b.status)
-    .fetch_optional(&s.pool).await?.ok_or(ApiError::NotFound)?;
+    .bind(id.to_uppercase())
+    .bind(&b.reply)
+    .bind(&b.status)
+    .fetch_optional(&s.pool)
+    .await?
+    .ok_or(ApiError::NotFound)?;
     Ok(Json(row))
 }
 
 #[derive(Deserialize)]
-pub struct StatusBody { pub status: String, #[serde(default)] pub closing_note: Option<String> }
+pub struct StatusBody {
+    pub status: String,
+    #[serde(default)]
+    pub closing_note: Option<String>,
+}
 
-async fn set_status(State(s): State<AppState>, Path(id): Path<String>, Json(b): Json<StatusBody>) -> Result<Json<StatusRow>, ApiError> {
-    if !matches!(b.status.as_str(), "received" | "read" | "answered" | "closed") {
+async fn set_status(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(b): Json<StatusBody>,
+) -> Result<Json<StatusRow>, ApiError> {
+    if !matches!(
+        b.status.as_str(),
+        "received" | "read" | "answered" | "closed"
+    ) {
         return Err(ApiError::BadRequest("unknown status".into()));
     }
     let row = sqlx::query_as::<_, StatusRow>(
@@ -109,16 +177,30 @@ async fn set_status(State(s): State<AppState>, Path(id): Path<String>, Json(b): 
     Ok(Json(row))
 }
 
-async fn put_taxonomy(State(s): State<AppState>, Json(body): Json<Value>) -> Result<Json<Value>, ApiError> {
-    let version = body["taxonomy_version"].as_i64().ok_or_else(|| ApiError::BadRequest("taxonomy_version required".into()))? as i32;
+async fn put_taxonomy(
+    State(s): State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let version = body["taxonomy_version"]
+        .as_i64()
+        .ok_or_else(|| ApiError::BadRequest("taxonomy_version required".into()))?
+        as i32;
     let current = s.taxonomy.read().await.version;
     if version <= current {
-        return Err(ApiError::BadRequest(format!("taxonomy_version must be > {current}")));
+        return Err(ApiError::BadRequest(format!(
+            "taxonomy_version must be > {current}"
+        )));
     }
     if !body["categories"].is_array() || !body["steps"].is_object() {
-        return Err(ApiError::BadRequest("categories[] and steps{} required".into()));
+        return Err(ApiError::BadRequest(
+            "categories[] and steps{} required".into(),
+        ));
     }
-    sqlx::query("insert into taxonomy (version, body) values ($1, $2)").bind(version).bind(&body).execute(&s.pool).await?;
+    sqlx::query("insert into taxonomy (version, body) values ($1, $2)")
+        .bind(version)
+        .bind(&body)
+        .execute(&s.pool)
+        .await?;
     *s.taxonomy.write().await = Taxonomy { version, body };
     Ok(Json(serde_json::json!({ "version": version })))
 }

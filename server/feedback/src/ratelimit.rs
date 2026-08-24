@@ -11,7 +11,9 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Ok(()) if under `limit` within `window`; Err(seconds until the oldest hit expires) otherwise.
     pub fn check(&self, key: &str, limit: usize, window: Duration) -> Result<(), u64> {
@@ -21,7 +23,10 @@ impl RateLimiter {
         v.retain(|t| now.duration_since(*t) < window);
         if v.len() >= limit {
             let oldest = v[0];
-            let retry = window.saturating_sub(now.duration_since(oldest)).as_secs().max(1);
+            let retry = window
+                .saturating_sub(now.duration_since(oldest))
+                .as_secs()
+                .max(1);
             return Err(retry);
         }
         v.push(now);
