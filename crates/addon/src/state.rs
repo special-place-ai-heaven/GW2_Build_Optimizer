@@ -194,6 +194,8 @@ pub struct MainState {
     pub settings_cache_size_frames: u32,
     /// Blink Improve/New Build until the player opens that tab.
     pub tab_alert: Option<MainTab>,
+    /// About tab: messages, taxonomy, open draft, refresh timers.
+    pub feedback: crate::feedback::FeedbackState,
     /// Last LLM/provider failure shown on the Choya header (timeout, 429, billing).
     pub provider_issue: Option<String>,
     /// Search filter text for the Settings tab model-picker dropdown.
@@ -242,6 +244,7 @@ pub enum MainTab {
     Talk,
     SaveLoad,
     Settings,
+    About,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -633,6 +636,12 @@ mod tests {
             main.chat_wait_started.is_none(),
             "kitchen wait clock starts unset"
         );
+        assert_eq!(
+            main.feedback.view,
+            crate::feedback::AboutView::WhatsNew,
+            "About tab opens on What's new by default"
+        );
+        assert!(main.feedback.draft.is_none(), "no wizard draft at start");
     }
 
     #[test]

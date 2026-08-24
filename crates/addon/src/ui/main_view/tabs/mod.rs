@@ -11,6 +11,7 @@
 //! live in the parent `main_view` module and are re-exported here so each tab
 //! can refer to them as `super::name` (one hop) instead of `super::super::name`.
 
+pub(super) mod about;
 pub(super) mod improve;
 pub(super) mod kitchen;
 pub(super) mod new_build;
