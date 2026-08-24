@@ -417,7 +417,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn weapon_type_keys_collapse_api_spellings() {
         assert_eq!(alnum_key("Short Bow"), "shortbow");
         assert_eq!(weapon_type_key("ShortBow"), "shortbow");
@@ -429,6 +428,7 @@ mod tests {
         assert_eq!(alnum_key("Knight's"), alnum_key("Knights"));
     }
 
+    #[test]
     fn tf_replaces_named_placeholders() {
         with_lang("en", || {
             let s = tf("fmt.usage_today", &[("n", "12")]);
