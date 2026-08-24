@@ -149,7 +149,7 @@ new category reaches players without a DLL release.
     { "id": "praise",   "type": "report", "label": "cat.fistbump", "icon": "fist",   "color": "gold",
       "steps": ["liked", "note_optional"] },
     { "id": "coffee",   "type": "link",   "label": "cat.coffee",   "icon": "coffee", "color": "gold",
-      "url": "<<FILL_IN_KOFI_URL>>" }
+      "url": "https://ko-fi.com/specialplacerob" }
   ],
   "steps": {
     "area_screen":  { "prompt": "step.where",    "choices": ["optimize","improve","choya","saves","chat_code","settings","setup","data","other"] },
@@ -405,7 +405,7 @@ turns Answered in-game. That is the acceptance test.
 
 ## 13. Open items
 
-- Ko-fi URL (`<<FILL_IN_KOFI_URL>>` in taxonomy and README).
+- Ko-fi URL (`https://ko-fi.com/specialplacerob` in taxonomy and README).
 - SSH to `srv1640039` currently denied from this machine for both users; deploy
   needs a working key or is run from the user's shell.
 - Choya quips per step: write with the user; placeholders are locale keys only.
