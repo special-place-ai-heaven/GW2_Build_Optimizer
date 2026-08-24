@@ -29,3 +29,19 @@ async fn healthz_returns_ok(pool: PgPool) {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn schema_has_reports_and_taxonomy(pool: PgPool) {
+    let cols: Vec<(String,)> = sqlx::query_as(
+        "select column_name::text from information_schema.columns where table_name = 'reports' order by ordinal_position",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let names: Vec<&str> = cols.iter().map(|c| c.0.as_str()).collect();
+    for required in ["short_id", "report_id", "client_id", "category", "path", "body", "status", "payload", "ip_hash", "unvalidated", "closing_note"] {
+        assert!(names.contains(&required), "missing column {required}");
+    }
+    let (n,): (i64,) = sqlx::query_as("select count(*) from taxonomy").fetch_one(&pool).await.unwrap();
+    assert_eq!(n, 0);
+}
