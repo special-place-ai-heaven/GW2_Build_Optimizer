@@ -5,6 +5,7 @@ members = [
     "crates/gw2api",
     "crates/optimizer",
 ]
+exclude = ["server/feedback"]
 resolver = "2"
 
 [workspace.package]

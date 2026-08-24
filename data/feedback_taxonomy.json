@@ -1,0 +1,25 @@
+{
+  "taxonomy_version": 1,
+  "categories": [
+    { "id": "bug",         "type": "report", "label": "cat.bug",         "icon": "bug",      "color": "red",
+      "steps": ["area_screen", "severity", "describe"] },
+    { "id": "wrong_build", "type": "report", "label": "cat.wrong_build", "icon": "broken",   "color": "orange",
+      "steps": ["area_screen", "severity", "describe"], "attach_build": true },
+    { "id": "wish",        "type": "report", "label": "cat.wish",        "icon": "bulb",     "color": "green",
+      "steps": ["area_feature", "describe"] },
+    { "id": "question",    "type": "report", "label": "cat.question",    "icon": "question", "color": "blue",
+      "steps": ["area_feature", "describe"] },
+    { "id": "praise",      "type": "report", "label": "cat.fistbump",    "icon": "fist",     "color": "gold",
+      "steps": ["liked", "note_optional"] },
+    { "id": "coffee",      "type": "link",   "label": "cat.coffee",      "icon": "kofi",     "color": "gold",
+      "url": "https://ko-fi.com/specialplacerob" }
+  ],
+  "steps": {
+    "area_screen":  { "prompt": "step.where",    "choices": ["optimize", "improve", "choya", "saves", "chat_code", "settings", "setup", "data", "other"] },
+    "area_feature": { "prompt": "step.about",    "choices": ["optimizer", "choya", "ui", "data", "other"] },
+    "severity":     { "prompt": "step.how_bad",  "choices": ["crash", "blocks", "wrong", "cosmetic"] },
+    "liked":        { "prompt": "step.liked",    "choices": ["optimizer", "choya", "design", "speed", "everything"] },
+    "describe":     { "prompt": "step.describe", "text": { "min": 10, "max": 4000 } },
+    "note_optional":{ "prompt": "step.note",     "text": { "min": 0,  "max": 1000 } }
+  }
+}

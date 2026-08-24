@@ -1,0 +1,37 @@
+name: feedback-server
+
+on:
+  pull_request:
+    paths: ["server/feedback/**", "data/feedback_taxonomy.json", ".github/workflows/feedback-server.yml"]
+  push:
+    branches: [main]
+    paths: ["server/feedback/**", "data/feedback_taxonomy.json"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: feedback_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:test@localhost:5432/feedback_test
+    defaults:
+      run:
+        working-directory: server/feedback
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server/feedback
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
