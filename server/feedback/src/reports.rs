@@ -1,9 +1,10 @@
 use crate::app::AppState;
 use crate::error::ApiError;
 use crate::ids::{ip_hash, short_id};
-use axum::extract::{ConnectInfo, Extension, State};
+use axum::extract::{ConnectInfo, Extension, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::net::SocketAddr;
@@ -123,6 +124,49 @@ pub async fn create(
     .await?;
 
     Ok((StatusCode::CREATED, Json(Created { id: row.0, status: row.1 })))
+}
+
+#[derive(Deserialize)]
+pub struct StatusQuery {
+    pub ids: String,
+    pub client_id: Uuid,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct StatusRow {
+    #[sqlx(rename = "short_id")]
+    pub id: String,
+    pub status: String,
+    pub reply: Option<String>,
+    pub replied_at: Option<DateTime<Utc>>,
+    pub closing_note: Option<String>,
+}
+
+pub async fn status(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    // See the comment on `create`'s `addr` param: axum 0.8's `ConnectInfo` does
+    // not implement `OptionalFromRequestParts`, so `Option<Extension<ConnectInfo<_>>>`
+    // is the optional-aware form that reads the same request extension.
+    addr: Option<Extension<ConnectInfo<SocketAddr>>>,
+    Query(q): Query<StatusQuery>,
+) -> Result<Json<Vec<StatusRow>>, ApiError> {
+    let ip = client_ip(&headers, addr.map(|Extension(ConnectInfo(a))| a));
+    let hash = ip_hash(&ip, &s.config.ip_salt, chrono::Utc::now().date_naive());
+    s.limiter.check(&format!("ip:{hash}"), 10, Duration::from_secs(60))
+        .map_err(|retry_after_secs| ApiError::RateLimited { retry_after_secs })?;
+    let ids: Vec<String> = q.ids.split(',').map(|x| x.trim().to_uppercase()).filter(|x| !x.is_empty()).take(50).collect();
+    if ids.is_empty() {
+        return Err(ApiError::BadRequest("ids required".into()));
+    }
+    let rows = sqlx::query_as::<_, StatusRow>(
+        "select short_id, status, reply, replied_at, closing_note from reports where short_id = any($1) and client_id = $2",
+    )
+    .bind(&ids)
+    .bind(q.client_id)
+    .fetch_all(&s.pool)
+    .await?;
+    Ok(Json(rows))
 }
 
 /// The request as received, re-serialised for the JSONB `payload` column.

@@ -38,6 +38,7 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(|| async { "ok" }))
         .route("/v1/taxonomy", get(get_taxonomy))
         .route("/v1/reports", post(reports::create))
+        .route("/v1/reports/status", get(reports::status))
         .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BYTES))
         .with_state(state)
 }

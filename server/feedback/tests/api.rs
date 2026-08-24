@@ -172,6 +172,47 @@ async fn eleventh_post_in_a_minute_from_one_ip_is_429(pool: PgPool) {
     assert!(retry >= 1 && retry <= 60);
 }
 
+const CLIENT: &str = "11111111-1111-4111-8111-111111111111"; // matches report_json()
+
+fn status_req(ids: &str, client_id: &str, ip: &str) -> Request<Body> {
+    Request::builder()
+        .uri(format!("/v1/reports/status?ids={ids}&client_id={client_id}"))
+        .header("x-forwarded-for", ip)
+        .body(Body::empty())
+        .unwrap()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn status_returns_only_requested_ids_owned_by_client(pool: PgPool) {
+    let st = state(pool.clone()).await;
+    let a = json_body(router(st.clone()).oneshot(post_report(report_json("88888888-8888-4888-8888-888888888881"), "203.0.113.5", "1.6.0")).await.unwrap()).await;
+    let _b = json_body(router(st.clone()).oneshot(post_report(report_json("88888888-8888-4888-8888-888888888882"), "203.0.113.5", "1.6.0")).await.unwrap()).await;
+    let id = a["id"].as_str().unwrap();
+
+    let res = router(st.clone()).oneshot(status_req(&format!("{id},NOPE1234"), CLIENT, "203.0.113.5")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = json_body(res).await;
+    let arr = v.as_array().unwrap();
+    assert_eq!(arr.len(), 1, "only the requested, existing id — never the sibling row");
+    assert_eq!(arr[0]["id"], a["id"]);
+    assert_eq!(arr[0]["status"], "received");
+    assert!(arr[0]["reply"].is_null());
+
+    // Same id, different client: nothing. Ownership is short_id AND client_id.
+    let other = json_body(router(st.clone()).oneshot(status_req(id, "22222222-2222-4222-8222-222222222222", "203.0.113.5")).await.unwrap()).await;
+    assert_eq!(other.as_array().unwrap().len(), 0);
+
+    // Missing client_id is a 400, not an open door.
+    let res = router(st.clone()).oneshot(Request::builder().uri(format!("/v1/reports/status?ids={id}")).body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    // Rate-limited per ip like POST: a fresh ip gets 10 GETs, then 429.
+    for i in 0..10 {
+        assert_eq!(router(st.clone()).oneshot(status_req(id, CLIENT, "203.0.113.77")).await.unwrap().status(), StatusCode::OK, "get {i}");
+    }
+    assert_eq!(router(st).oneshot(status_req(id, CLIENT, "203.0.113.77")).await.unwrap().status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
 #[test]
 fn limiter_sliding_window() {
     use gw2bo_feedback::ratelimit::RateLimiter;
