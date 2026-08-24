@@ -4,6 +4,8 @@
 
 # GW2 Build Optimizer
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 In-game Guild Wars 2 addon for [Nexus](https://raidcore.gg/Nexus). It reads your
 characters through the official GW2 API and suggests builds for PvE, WvW, and PvP.
 
@@ -262,7 +264,3 @@ Crates:
 - Provider cost and rate limits are yours.
 - Underwater kits are not optimized. Spear on land is supported; the separate
   water palettes (Trident, Speargun, aquatic Spear 1–5) are not a land loadout.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
