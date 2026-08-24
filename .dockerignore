@@ -1,0 +1,9 @@
+# Keeps `docker build .` (repo root context, used by server/feedback/Dockerfile)
+# from tarring up Rust build artifacts and other bulk that no image needs.
+target/
+server/feedback/target/
+.git/
+.symforge/
+.review/
+node_modules/
+*.log

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "report_id": "7aabc139-7506-4d21-8956-222ebe78ee39",
+  "client_id": "11111111-1111-4111-8111-111111111111",
+  "category": "bug",
+  "path": ["optimize", "wrong"],
+  "title": "Optimize picks Trident on land",
+  "body": "Expected a land weapon, got Trident on a Ranger in WvW roam.",
+  "contact": null,
+  "account": null,
+  "context": { "addon_version": "1.6.0", "game_build": 174122, "locale": "en",
+               "mode": "WvW", "scale": "Roam", "role": "Damage",
+               "profession": "Ranger", "elite": "Untamed", "llm_provider": "gemini" },
+  "build_snapshot": null
+}
