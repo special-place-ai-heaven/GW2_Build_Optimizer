@@ -1,3 +1,4 @@
+use crate::admin;
 use crate::config::Config;
 use crate::ratelimit::RateLimiter;
 use crate::reports;
@@ -39,6 +40,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/taxonomy", get(get_taxonomy))
         .route("/v1/reports", post(reports::create))
         .route("/v1/reports/status", get(reports::status))
+        .nest("/v1/admin", admin::routes(state.clone()))
         .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BYTES))
         .with_state(state)
 }

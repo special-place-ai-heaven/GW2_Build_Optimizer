@@ -234,3 +234,52 @@ fn ids_are_shaped_right() {
     assert_eq!(ip_hash("1.2.3.4", "salt", d), ip_hash("1.2.3.4", "salt", d));
     assert_ne!(ip_hash("1.2.3.4", "salt", d), ip_hash("1.2.3.4", "salt", d.succ_opt().unwrap()));
 }
+
+fn admin(method: &str, uri: &str, body: Option<serde_json::Value>, token: &str) -> Request<Body> {
+    let mut b = Request::builder().method(method).uri(uri).header("authorization", format!("Bearer {token}"));
+    if body.is_some() { b = b.header("content-type", "application/json"); }
+    b.body(body.map(|v| Body::from(v.to_string())).unwrap_or(Body::empty())).unwrap()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_requires_token(pool: PgPool) {
+    let res = router(state(pool).await).oneshot(admin("GET", "/v1/admin/reports", None, "wrong")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_list_marks_read_and_reply_marks_answered(pool: PgPool) {
+    let st = state(pool).await;
+    let created = json_body(router(st.clone()).oneshot(post_report(report_json("99999999-9999-4999-8999-999999999991"), "203.0.113.5", "1.6.0")).await.unwrap()).await;
+    let id = created["id"].as_str().unwrap().to_string();
+
+    let list = json_body(router(st.clone()).oneshot(admin("GET", "/v1/admin/reports?status=received", None, "test-admin-token")).await.unwrap()).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+
+    let st_after = json_body(router(st.clone()).oneshot(status_req(&id, CLIENT, "203.0.113.5")).await.unwrap()).await;
+    assert_eq!(st_after[0]["status"], "read", "listing through admin marks it read");
+
+    let res = router(st.clone()).oneshot(admin("POST", &format!("/v1/admin/reports/{id}/reply"),
+        Some(serde_json::json!({ "reply": "Fixed in 1.6.1, thanks!", "status": "answered" })), "test-admin-token")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let final_status = json_body(router(st).oneshot(status_req(&id, CLIENT, "203.0.113.5")).await.unwrap()).await;
+    assert_eq!(final_status[0]["status"], "answered");
+    assert_eq!(final_status[0]["reply"], "Fixed in 1.6.1, thanks!");
+    assert!(final_status[0]["replied_at"].is_string());
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_can_replace_taxonomy_and_it_is_served(pool: PgPool) {
+    let st = state(pool).await;
+    let mut t = gw2bo_feedback::taxonomy::Taxonomy::embedded().body;
+    t["taxonomy_version"] = 2.into();
+    t["categories"].as_array_mut().unwrap().push(serde_json::json!({
+        "id": "translation", "type": "report", "label": "cat.translation", "icon": "globe", "color": "blue", "steps": ["describe"]
+    }));
+    let res = router(st.clone()).oneshot(admin("PUT", "/v1/admin/taxonomy", Some(t), "test-admin-token")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let served = json_body(router(st).oneshot(Request::builder().uri("/v1/taxonomy").body(Body::empty()).unwrap()).await.unwrap()).await;
+    assert_eq!(served["taxonomy_version"], 2);
+    assert!(served["categories"].as_array().unwrap().iter().any(|c| c["id"] == "translation"));
+}
