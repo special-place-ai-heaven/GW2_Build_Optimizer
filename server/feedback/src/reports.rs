@@ -1,6 +1,7 @@
 use crate::app::AppState;
 use crate::error::ApiError;
 use crate::ids::{ip_hash, short_id};
+use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{ConnectInfo, Extension, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
@@ -40,10 +41,13 @@ pub struct Created {
 }
 
 pub fn client_ip(headers: &HeaderMap, addr: Option<SocketAddr>) -> String {
+    // Rightmost, not leftmost: Traefik strips a client-supplied X-Forwarded-For by
+    // default and appends exactly one element, so the last entry is the only one the
+    // client cannot choose — and with no proxy in front there is no header at all.
     headers
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
+        .and_then(|s| s.split(',').next_back())
         .map(|s| s.trim().to_string())
         .or_else(|| addr.map(|a| a.ip().to_string()))
         .unwrap_or_else(|| "0.0.0.0".into())
@@ -66,6 +70,18 @@ pub fn check_addon_version(headers: &HeaderMap, min: &str) -> Result<(), ApiErro
     }
 }
 
+/// axum answers its own extractor rejections with a bare plain-text 4xx (422 for a
+/// wrong shape, 415 for a missing content-type). Route them through `ApiError` so
+/// every failure the client sees is a 400 carrying the `{error, reason}` envelope.
+/// The one status worth preserving is 413: the 16 KB cap is its own contract.
+fn rejected(r: JsonRejection) -> ApiError {
+    if r.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        ApiError::PayloadTooLarge
+    } else {
+        ApiError::BadRequest(r.body_text())
+    }
+}
+
 pub async fn create(
     State(s): State<AppState>,
     headers: HeaderMap,
@@ -73,9 +89,24 @@ pub async fn create(
     // `Option<ConnectInfo<_>>` doesn't compile; `Option<Extension<ConnectInfo<_>>>`
     // reads the same request extension and IS optional-aware.
     addr: Option<Extension<ConnectInfo<SocketAddr>>>,
-    Json(req): Json<NewReport>,
+    req: Result<Json<NewReport>, JsonRejection>,
 ) -> Result<(StatusCode, Json<Created>), ApiError> {
     check_addon_version(&headers, &s.config.min_addon_version)?;
+    // Both buckets are charged before any field is validated, so a flood of
+    // rejectable requests costs the sender the same as a flood of good ones.
+    let ip = client_ip(&headers, addr.map(|Extension(ConnectInfo(a))| a));
+    let hash = ip_hash(&ip, &s.config.ip_salt, chrono::Utc::now().date_naive());
+    s.limiter
+        .check(&format!("ip:{hash}"), 10, Duration::from_secs(60))
+        .map_err(|retry_after_secs| ApiError::RateLimited { retry_after_secs })?;
+    let Json(req) = req.map_err(rejected)?;
+    s.limiter
+        .check(
+            &format!("client:{}", req.client_id),
+            50,
+            Duration::from_secs(24 * 3600),
+        )
+        .map_err(|retry_after_secs| ApiError::RateLimited { retry_after_secs })?;
     if req.body.chars().count() > MAX_BODY_CHARS {
         return Err(ApiError::BadRequest(format!(
             "body over {MAX_BODY_CHARS} characters"
@@ -94,18 +125,6 @@ pub async fn create(
         }
     }
     let unvalidated = !s.taxonomy.read().await.validate(&req.category, &req.path);
-    let ip = client_ip(&headers, addr.map(|Extension(ConnectInfo(a))| a));
-    let hash = ip_hash(&ip, &s.config.ip_salt, chrono::Utc::now().date_naive());
-    s.limiter
-        .check(&format!("ip:{hash}"), 10, Duration::from_secs(60))
-        .map_err(|retry_after_secs| ApiError::RateLimited { retry_after_secs })?;
-    s.limiter
-        .check(
-            &format!("client:{}", req.client_id),
-            50,
-            Duration::from_secs(24 * 3600),
-        )
-        .map_err(|retry_after_secs| ApiError::RateLimited { retry_after_secs })?;
     let addon_version = req.context["addon_version"]
         .as_str()
         .unwrap_or("unknown")
@@ -175,8 +194,11 @@ pub async fn status(
     // not implement `OptionalFromRequestParts`, so `Option<Extension<ConnectInfo<_>>>`
     // is the optional-aware form that reads the same request extension.
     addr: Option<Extension<ConnectInfo<SocketAddr>>>,
-    Query(q): Query<StatusQuery>,
+    q: Result<Query<StatusQuery>, QueryRejection>,
 ) -> Result<Json<Vec<StatusRow>>, ApiError> {
+    // Deliberately no X-Addon-Version gate here: an addon too old to file a report
+    // can still poll the ids it already owns, and refusing that would strand replies.
+    let Query(q) = q.map_err(|r| ApiError::BadRequest(r.body_text()))?;
     let ip = client_ip(&headers, addr.map(|Extension(ConnectInfo(a))| a));
     let hash = ip_hash(&ip, &s.config.ip_salt, chrono::Utc::now().date_naive());
     s.limiter

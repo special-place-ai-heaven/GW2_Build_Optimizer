@@ -656,3 +656,104 @@ async fn admin_can_replace_taxonomy_and_it_is_served(pool: PgPool) {
         .iter()
         .any(|c| c["id"] == "translation"));
 }
+
+#[test]
+fn client_ip_takes_the_rightmost_forwarded_entry() {
+    use axum::http::HeaderMap;
+    use gw2bo_feedback::ids::ip_hash;
+    use gw2bo_feedback::reports::client_ip;
+    let mut h = HeaderMap::new();
+    h.insert("x-forwarded-for", "1.1.1.1, 203.0.113.5".parse().unwrap());
+    assert_eq!(client_ip(&h, None), "203.0.113.5");
+    let d = chrono::NaiveDate::from_ymd_opt(2026, 8, 24).unwrap();
+    assert_eq!(
+        ip_hash(&client_ip(&h, None), "salt", d),
+        ip_hash("203.0.113.5", "salt", d),
+        "the proxy-appended entry is what gets hashed"
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn spoofed_forwarded_prefix_shares_one_rate_bucket(pool: PgPool) {
+    let st = state(pool).await;
+    // Every request forges a different leftmost entry; only the rightmost one —
+    // the entry the proxy appended — may decide the bucket.
+    for i in 0..10 {
+        let id = format!("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb{:03}", i);
+        let xff = format!("10.0.0.{i}, 198.51.100.42");
+        let res = router(st.clone())
+            .oneshot(post_report(report_json(&id), &xff, "1.6.0"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED, "request {i}");
+    }
+    let res = router(st)
+        .oneshot(post_report(
+            report_json("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb999"),
+            "10.0.0.99, 198.51.100.42",
+            "1.6.0",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "a fresh left entry must not buy a fresh bucket"
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn extractor_rejections_carry_the_error_envelope(pool: PgPool) {
+    let st = state(pool).await;
+
+    // Valid JSON, wrong shape: axum would answer 422 in plain text on its own.
+    let mut missing = report_json("cccccccc-cccc-4ccc-8ccc-cccccccccc01");
+    missing.as_object_mut().unwrap().remove("category");
+    let res = router(st.clone())
+        .oneshot(post_report(missing, "203.0.113.5", "1.6.0"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let v = json_body(res).await;
+    assert_eq!(v["error"], "bad_request");
+    assert!(
+        !v["reason"].as_str().unwrap().is_empty(),
+        "the reason must say what was wrong"
+    );
+
+    // No content-type: axum would answer 415 in plain text on its own.
+    let res = router(st.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/reports")
+                .header("x-forwarded-for", "203.0.113.6")
+                .header("x-addon-version", "1.6.0")
+                .body(Body::from(
+                    report_json("cccccccc-cccc-4ccc-8ccc-cccccccccc02").to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let v = json_body(res).await;
+    assert_eq!(v["error"], "bad_request");
+    assert!(!v["reason"].as_str().unwrap().is_empty());
+
+    // Missing client_id on the status GET: a Query rejection, same envelope.
+    let res = router(st)
+        .oneshot(
+            Request::builder()
+                .uri("/v1/reports/status?ids=A3F9K2QD")
+                .header("x-forwarded-for", "203.0.113.7")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let v = json_body(res).await;
+    assert_eq!(v["error"], "bad_request");
+    assert!(!v["reason"].as_str().unwrap().is_empty());
+}
