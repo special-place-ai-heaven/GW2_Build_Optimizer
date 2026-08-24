@@ -270,6 +270,58 @@ async fn admin_list_marks_read_and_reply_marks_answered(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+async fn admin_get_one_returns_full_row_and_marks_read(pool: PgPool) {
+    let st = state(pool).await;
+    let created = json_body(router(st.clone()).oneshot(post_report(report_json("99999999-9999-4999-8999-999999999992"), "203.0.113.5", "1.6.0")).await.unwrap()).await;
+    let id = created["id"].as_str().unwrap().to_string();
+
+    let res = router(st.clone()).oneshot(admin("GET", &format!("/v1/admin/reports/{id}"), None, "test-admin-token")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let row = json_body(res).await;
+    assert_eq!(row["id"], id);
+    assert_eq!(row["category"], "bug");
+    assert_eq!(row["title"], "Optimize picks Trident on land");
+    assert_eq!(row["unvalidated"], false);
+
+    let st_after = json_body(router(st.clone()).oneshot(status_req(&id, CLIENT, "203.0.113.5")).await.unwrap()).await;
+    assert_eq!(st_after[0]["status"], "read", "fetching a single row through admin marks it read too");
+
+    let res = router(st).oneshot(admin("GET", "/v1/admin/reports/NOPE1234", None, "test-admin-token")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_set_status_updates_status_and_preserves_closing_note_when_omitted(pool: PgPool) {
+    let st = state(pool).await;
+    let created = json_body(router(st.clone()).oneshot(post_report(report_json("99999999-9999-4999-8999-999999999993"), "203.0.113.5", "1.6.0")).await.unwrap()).await;
+    let id = created["id"].as_str().unwrap().to_string();
+
+    let res = router(st.clone()).oneshot(admin("POST", &format!("/v1/admin/reports/{id}/status"),
+        Some(serde_json::json!({ "status": "closed", "closing_note": "duplicate of #42" })), "test-admin-token")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = json_body(res).await;
+    assert_eq!(body["status"], "closed");
+    assert_eq!(body["closing_note"], "duplicate of #42");
+
+    // Second call omits closing_note; the `coalesce($3, closing_note)` in the
+    // query must preserve the note already on the row rather than nulling it.
+    let res = router(st.clone()).oneshot(admin("POST", &format!("/v1/admin/reports/{id}/status"),
+        Some(serde_json::json!({ "status": "read" })), "test-admin-token")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = json_body(res).await;
+    assert_eq!(body["status"], "read");
+    assert_eq!(body["closing_note"], "duplicate of #42", "coalesce keeps the prior note when the field is omitted");
+
+    let res = router(st.clone()).oneshot(admin("POST", &format!("/v1/admin/reports/{id}/status"),
+        Some(serde_json::json!({ "status": "bogus" })), "test-admin-token")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    let res = router(st).oneshot(admin("POST", "/v1/admin/reports/NOPE1234/status",
+        Some(serde_json::json!({ "status": "closed" })), "test-admin-token")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrations = "./migrations")]
 async fn admin_can_replace_taxonomy_and_it_is_served(pool: PgPool) {
     let st = state(pool).await;
     let mut t = gw2bo_feedback::taxonomy::Taxonomy::embedded().body;
