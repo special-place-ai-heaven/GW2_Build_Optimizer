@@ -88,7 +88,13 @@ pub fn ensure_client_id(state: &mut AddonState) -> String {
     }
     let id = uuid::Uuid::new_v4().to_string();
     state.config.client_id = Some(id.clone());
-    let _ = state.config.save(&state.config_path);
+    if let Err(e) = state.config.save(&state.config_path) {
+        nexus::log::log(
+            nexus::log::LogLevel::Warning,
+            "GW2BuildOpt",
+            format!("could not save client_id to config: {e}"),
+        );
+    }
     id
 }
 
@@ -147,11 +153,44 @@ pub fn draft_request_bytes(state: &AddonState) -> Option<usize> {
     build_report_with(state, client_id).map(|r| request_bytes(&r))
 }
 
-/// Send the open draft: push a `Sending` row, lock the wizard, post in the background.
+/// Send the open draft: stage the row and lock the wizard, then post in the background.
 pub fn send_draft(state: &mut AddonState) {
-    let Some((report, json)) = build_report(state) else {
-        return;
-    };
+    if let Some((report_id, json, is_praise)) = stage_send(state) {
+        spawn_send(state, report_id, json, is_praise);
+    }
+}
+
+/// Everything `send_draft` does except the background post: refuse while a request is
+/// in flight; otherwise keep one row per `report_id` — a failed row whose payload is
+/// byte-identical is replayed in place, an edited draft discards it and ships under a
+/// fresh id, and a new draft inserts a `Sending` row at the front. Returns the
+/// `(report_id, json, is_praise)` triple that `spawn_send` posts, or `None` if nothing
+/// was staged. Pure over `state` (plus the `client_id` mint) so tests can drive it.
+pub fn stage_send(state: &mut AddonState) -> Option<(String, String, bool)> {
+    if state.main.feedback.sending.is_some() {
+        return None;
+    }
+    let (report, json) = build_report(state)?;
+    let fb = &mut state.main.feedback;
+    if let Some(pos) = fb
+        .messages
+        .iter()
+        .position(|m| m.report_id == report.report_id)
+    {
+        if fb.messages[pos].failed_payload.as_deref() == Some(json.as_str()) {
+            // Identical bytes → replay, one row.
+            let id = report.report_id.clone();
+            return stage_resend(state, &id);
+        }
+        // Edited → discard the old row and rebuild under a new id (recursion depth 1:
+        // the fresh uuid matches no row).
+        fb.messages.remove(pos);
+        if let Some(d) = fb.draft.as_mut() {
+            d.report_id = uuid::Uuid::new_v4().to_string();
+        }
+        return stage_send(state);
+    }
+
     let is_praise = report.category == PRAISE_CATEGORY;
     let row = LocalMessage {
         report_id: report.report_id.clone(),
@@ -172,37 +211,47 @@ pub fn send_draft(state: &mut AddonState) {
     };
     let report_id = row.report_id.clone();
 
-    let feedback = &mut state.main.feedback;
-    feedback.messages.insert(0, row);
-    feedback.sending = Some(report_id.clone());
-    if let Some(draft) = feedback.draft.as_mut() {
+    fb.messages.insert(0, row);
+    fb.sending = Some(report_id.clone());
+    if let Some(draft) = fb.draft.as_mut() {
         draft.step = WizardStep::Sending;
         draft.error = None;
     }
-    feedback.dirty = true;
-
-    spawn_send(state, report_id, json, is_praise);
+    fb.dirty = true;
+    Some((report_id, json, is_praise))
 }
 
 /// Replay a failed row's payload byte-for-byte.
 pub fn resend(state: &mut AddonState, report_id: &str) {
+    if let Some((report_id, json, is_praise)) = stage_resend(state, report_id) {
+        spawn_send(state, report_id, json, is_praise);
+    }
+}
+
+/// Everything `resend` does except the background post: refuse while a request is in
+/// flight; otherwise flip the failed row back to `Sending`, lock the draft if it is the
+/// one being replayed, and return the triple `spawn_send` posts. `is_praise` comes from
+/// the row's category so a replayed praise still lands on the Thanks plate.
+pub fn stage_resend(state: &mut AddonState, report_id: &str) -> Option<(String, String, bool)> {
     let feedback = &mut state.main.feedback;
-    let Some(row) = feedback
+    if feedback.sending.is_some() {
+        return None;
+    }
+    let row = feedback
         .messages
         .iter_mut()
-        .find(|m| m.report_id == report_id && m.status == MessageStatus::Failed)
-    else {
-        return;
-    };
-    let Some(json) = row.failed_payload.clone() else {
-        return;
-    };
+        .find(|m| m.report_id == report_id && m.status == MessageStatus::Failed)?;
+    let json = row.failed_payload.clone()?;
+    let is_praise = row.category == PRAISE_CATEGORY;
     row.status = MessageStatus::Sending;
     row.last_error = None;
+    if let Some(draft) = feedback.draft.as_mut().filter(|d| d.report_id == report_id) {
+        draft.step = WizardStep::Sending;
+        draft.error = None;
+    }
     feedback.sending = Some(report_id.to_string());
     feedback.dirty = true;
-
-    spawn_send(state, report_id.to_string(), json, false);
+    Some((report_id.to_string(), json, is_praise))
 }
 
 /// Apply a send outcome to the row (and the draft, when it is the one that was sent).
@@ -379,12 +428,9 @@ mod tests {
 
     /// `AddonState` is only constructible through `init` (the cancellation token's
     /// constructor is private to `state`), so these tests share the global `STATE`
-    /// like `state::tests` do. Serialised here; run the crate with `--test-threads=1`.
-    static TASKS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    /// Run `f` against a freshly initialised global state rooted in a per-test temp dir.
+    /// with `state::tests` and serialise on the same `state_test_guard` lock.
     fn with_fresh_state<R>(label: &str, f: impl FnOnce(&mut AddonState) -> R) -> R {
-        let _serial = TASKS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _serial = crate::state::state_test_guard();
         let dir: PathBuf = std::env::temp_dir().join(format!(
             "gw2_feedback_tasks_{}_{}",
             std::process::id(),
@@ -830,6 +876,145 @@ mod tests {
             let measured = draft_request_bytes(state).unwrap();
             let (_, json) = build_report(state).unwrap();
             assert_eq!(measured, json.len());
+        });
+    }
+
+    // Send path: one row per report_id, replay vs. discard, praise resend, in-flight guard.
+
+    const BODY: &str = "The optimizer picked a trident on land.";
+
+    #[test]
+    fn send_after_failure_with_same_bytes_replays_one_row() {
+        with_fresh_state("replay_same", |state| {
+            state.main.feedback.draft = Some(summary_draft("bug", BODY));
+
+            let (id, json, is_praise) = stage_send(state).expect("staged");
+            assert!(!is_praise);
+            {
+                let fb = &state.main.feedback;
+                assert_eq!(fb.messages.len(), 1);
+                assert_eq!(fb.messages[0].report_id, id);
+                assert_eq!(fb.messages[0].status, MessageStatus::Sending);
+                assert_eq!(
+                    fb.messages[0].failed_payload.as_deref(),
+                    Some(json.as_str())
+                );
+                assert_eq!(fb.sending.as_deref(), Some(id.as_str()));
+                assert_eq!(
+                    fb.draft.as_ref().map(|d| d.step.clone()),
+                    Some(WizardStep::Sending)
+                );
+            }
+
+            apply_send_result(state, &id, SendResult::Failed(FailReason::Server), false);
+            assert_eq!(
+                state.main.feedback.messages[0].status,
+                MessageStatus::Failed
+            );
+            assert_eq!(
+                state.main.feedback.draft.as_ref().map(|d| d.step.clone()),
+                Some(WizardStep::Summary)
+            );
+
+            // Same draft, same bytes → replay under the same id; still exactly one row.
+            let (id2, json2, _) = stage_send(state).expect("staged again");
+            let fb = &state.main.feedback;
+            assert_eq!(id2, id);
+            assert_eq!(json2, json);
+            assert_eq!(fb.messages.len(), 1);
+            assert_eq!(fb.messages[0].report_id, id);
+            assert_eq!(fb.messages[0].status, MessageStatus::Sending);
+            assert_eq!(fb.messages[0].last_error, None);
+            assert_eq!(fb.sending.as_deref(), Some(id.as_str()));
+            let draft = fb.draft.as_ref().unwrap();
+            assert_eq!(draft.report_id, id);
+            assert_eq!(draft.step, WizardStep::Sending);
+            assert_eq!(draft.error, None);
+        });
+    }
+
+    #[test]
+    fn send_after_failure_with_edited_body_discards_and_mints_new_id() {
+        with_fresh_state("replay_edited", |state| {
+            state.main.feedback.draft = Some(summary_draft("bug", BODY));
+            let (id, _, _) = stage_send(state).expect("staged");
+            apply_send_result(state, &id, SendResult::Failed(FailReason::Network), false);
+
+            let edited = "The optimizer picked a trident on land, twice.";
+            state
+                .main
+                .feedback
+                .draft
+                .as_mut()
+                .unwrap()
+                .set_text("describe", edited.to_string());
+
+            // Edited → the failed row is discarded and the draft ships under a new id.
+            let (id2, json2, _) = stage_send(state).expect("staged again");
+            let fb = &state.main.feedback;
+            assert_ne!(id2, id);
+            assert!(uuid::Uuid::parse_str(&id2).is_ok(), "{id2}");
+            assert_eq!(fb.messages.len(), 1);
+            assert_eq!(fb.messages[0].report_id, id2);
+            assert_eq!(fb.messages[0].body, edited);
+            assert_eq!(fb.messages[0].status, MessageStatus::Sending);
+            assert!(json2.contains(edited), "{json2}");
+            assert!(json2.contains(&id2), "{json2}");
+            assert!(!json2.contains(&id), "{json2}");
+            assert_eq!(fb.sending.as_deref(), Some(id2.as_str()));
+            let draft = fb.draft.as_ref().unwrap();
+            assert_eq!(draft.report_id, id2);
+            assert_eq!(draft.step, WizardStep::Sending);
+        });
+    }
+
+    #[test]
+    fn resend_of_praise_is_praise() {
+        with_fresh_state("resend_praise", |state| {
+            let mut praise = msg("p1", MessageStatus::Failed, Some("{\"praise\":1}"));
+            praise.category = PRAISE_CATEGORY.to_string();
+            state.main.feedback.messages =
+                vec![praise, msg("b1", MessageStatus::Failed, Some("{}"))];
+
+            let (id, json, is_praise) = stage_resend(state, "p1").expect("staged");
+            assert_eq!(id, "p1");
+            assert_eq!(json, "{\"praise\":1}");
+            assert!(is_praise);
+            assert_eq!(
+                state.main.feedback.messages[0].status,
+                MessageStatus::Sending
+            );
+            assert_eq!(state.main.feedback.sending.as_deref(), Some("p1"));
+
+            // A bug row is not praise; the in-flight guard applies to resend too.
+            assert!(stage_resend(state, "b1").is_none());
+            state.main.feedback.sending = None;
+            let (_, _, is_praise) = stage_resend(state, "b1").expect("staged");
+            assert!(!is_praise);
+        });
+    }
+
+    #[test]
+    fn send_refused_while_sending() {
+        with_fresh_state("refuse_in_flight", |state| {
+            state.main.feedback.draft = Some(summary_draft("bug", BODY));
+            state.main.feedback.sending = Some("other".to_string());
+
+            assert!(stage_send(state).is_none());
+            let fb = &state.main.feedback;
+            assert!(fb.messages.is_empty());
+            assert_eq!(fb.sending.as_deref(), Some("other"));
+            assert_eq!(
+                fb.draft.as_ref().map(|d| d.step.clone()),
+                Some(WizardStep::Summary)
+            );
+
+            state.main.feedback.messages = vec![msg("f1", MessageStatus::Failed, Some("{}"))];
+            assert!(stage_resend(state, "f1").is_none());
+            assert_eq!(
+                state.main.feedback.messages[0].status,
+                MessageStatus::Failed
+            );
         });
     }
 }

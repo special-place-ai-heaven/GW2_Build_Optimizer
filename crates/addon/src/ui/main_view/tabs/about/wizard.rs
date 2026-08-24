@@ -160,8 +160,11 @@ fn fade(c: [f32; 4], alpha: f32) -> [f32; 4] {
 }
 
 /// `text_wrapped` pinned to an absolute right edge (the plate's inner edge).
+/// `PushTextWrapPos` takes a window-local x (ImGui adds `window.Pos.x - Scroll.x`
+/// back in `CalcWrapWidthForPos`), so the screen-space edge is converted first.
 fn wrapped_to(ui: &Ui, color: [f32; 4], text: &str, right_x: f32) {
-    let wrap = ui.push_text_wrap_pos_with_pos(right_x);
+    let local = right_x - ui.window_pos()[0] + ui.scroll_x();
+    let wrap = ui.push_text_wrap_pos_with_pos(local);
     ui.text_colored(color, text);
     wrap.pop(ui);
 }
@@ -274,8 +277,9 @@ fn render_pick(ui: &Ui, draft: &Draft, feedback: &FeedbackState, inner_w: f32) -
         theme::wrap_chip(ui, inner_w, &mut row_x, tile_w, GAP);
         let kind = cat.kind.as_str();
         let live = matches!(kind, "report" | "link");
+        // Inert tiles are dimmed by `fade` on every draw-list colour below; the
+        // invisible button has no style colours of its own.
         let alpha = if live { 1.0 } else { 0.4 };
-        let style = (!live).then(|| ui.push_style_var(StyleVar::Alpha(0.4)));
         let p = ui.cursor_screen_pos();
         let clicked = ui.invisible_button(format!("##wz_tile_{}", cat.id), [tile_w, tile_h]);
         let hovered = ui.is_item_hovered();
@@ -308,9 +312,6 @@ fn render_pick(ui: &Ui, draft: &Draft, feedback: &FeedbackState, inner_w: f32) -
                 color_u32(fade(theme::CREAM, alpha)),
                 label,
             );
-        }
-        if let Some(style) = style {
-            style.pop();
         }
         match kind {
             "report" => {
@@ -544,10 +545,14 @@ fn render_summary(
     }
     ui.same_line_with_spacing(0.0, GAP);
     let send_label = format!("{}##wz_send", t("about.btn.send"));
+    // The box says the account name goes along; never ship `account: null` under it.
+    let account_pending = draft.include_account && feedback.account_looking_up;
     if !draft.can_send() {
         dimmed_gold(ui, send_label, &missing_text(draft));
     } else if let Some(bytes) = request_bytes.filter(|b| *b > MAX_REQUEST_BYTES) {
         dimmed_gold(ui, send_label, &too_big_text(bytes));
+    } else if account_pending {
+        dimmed_gold(ui, send_label, &t("about.account_lookup"));
     } else if theme::gold_button_sized(ui, send_label, [0.0, 0.0]) {
         action = Action::Send;
     }
@@ -628,7 +633,7 @@ fn apply(state: &mut AddonState, action: Action) {
     }
 }
 
-// ── hooks (later tasks replace the bodies) ───────────────────────────────────
+// ── hooks: state-side handlers behind the `apply` arms ───────────────────────
 
 /// Send the draft: row, lock, background post (`feedback::tasks::send_draft`).
 pub(super) fn on_send(state: &mut AddonState) {
@@ -690,13 +695,11 @@ pub(super) fn coffee(state: &mut AddonState, url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    /// `set_language` is process-global; serialise the tests that depend on `en`.
-    static LANG: Mutex<()> = Mutex::new(());
-
+    /// `set_language` is process-global and `state::init` calls it too, so the
+    /// tests that depend on `en` serialise on the shared STATE test lock.
     fn with_en<R>(f: impl FnOnce() -> R) -> R {
-        let _g = LANG.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = crate::state::state_test_guard();
         gw2_core::i18n::set_language("en");
         f()
     }
@@ -825,6 +828,43 @@ mod tests {
                 "bad schema"
             );
             assert_eq!(fail_text(&FailReason::Interrupted), "Interrupted");
+        });
+    }
+
+    #[test]
+    fn fail_text_maps_all_seven_reasons() {
+        with_en(|| {
+            let cases = [
+                (
+                    FailReason::Network,
+                    "Couldn't reach Choya. Check your connection.",
+                ),
+                (
+                    FailReason::Server,
+                    "Choya's mailbox is down. Your message is saved — try again later.",
+                ),
+                (FailReason::Timeout, "Took too long. Saved — try again."),
+                (
+                    FailReason::RateLimited {
+                        retry_after_secs: 90,
+                    },
+                    "Slow down — try again in 2 min.",
+                ),
+                (FailReason::TooLarge, "Message too long (limit 4000)."),
+                (
+                    FailReason::Rejected {
+                        reason: "bad schema".into(),
+                    },
+                    "bad schema",
+                ),
+                (FailReason::TooOld, "Update the addon to send messages."),
+                (FailReason::Interrupted, "Interrupted"),
+            ];
+            for (reason, expected) in cases {
+                let text = fail_text(&reason);
+                assert_eq!(text, expected, "{reason:?}");
+                assert!(!text.contains("msg.fail."), "{reason:?} leaked its key");
+            }
         });
     }
 }

@@ -106,6 +106,25 @@ impl Draft {
         draft
     }
 
+    /// "Edit and resend": a fresh draft (new `report_id`, design §6a) prefilled from a failed
+    /// row — its category and choice path via [`Self::from_last_path`], its body typed into the
+    /// first text step, opened on that step. An unknown category leaves the draft on Pick.
+    pub fn from_failed(taxonomy: FeedbackTaxonomy, m: &LocalMessage) -> Self {
+        let last = LastPath {
+            category: m.category.clone(),
+            path: m.path.clone(),
+        };
+        let mut draft = Self::from_last_path(taxonomy, &last);
+        let text_step = draft
+            .first_text_step()
+            .and_then(|i| draft.step_id(i))
+            .map(str::to_string);
+        if let Some(step_id) = text_step {
+            draft.set_text(&step_id, m.body.clone());
+        }
+        draft
+    }
+
     /// Pick a category: sets `category`, resets choices/texts and the last send error, and moves
     /// to `Step(0)` (or `Summary` when the category has no steps). Unknown ids are ignored.
     pub fn pick(&mut self, category_id: &str) {
@@ -200,12 +219,14 @@ impl Draft {
 
     /// Required step ids that still lack a value, in taxonomy order.
     pub fn missing_steps(&self) -> Vec<String> {
-        self.step_ids()
-            .iter()
-            .filter(|id| self.is_required(id) && !self.has_value(id))
-            .cloned()
-            .collect()
-    }
+            self.step_ids()
+                .iter()
+                .filter(|id| {
+                    (self.is_required(id) && !self.has_value(id)) || self.text_error(id).is_some()
+                })
+                .cloned()
+                .collect()
+        }
 
     /// True when nothing is missing and the category is a `report` kind (links never post).
     pub fn can_send(&self) -> bool {
@@ -412,6 +433,23 @@ pub fn snapshot_from(s: &crate::ui::comparison::BuildSuggestion) -> BuildSnapsho
     }
 }
 
+/// Whole minutes until a rate-limited row may be resent (`ceil` of the remaining seconds);
+/// 0 once [`LocalMessage::resend_allowed`] holds or when the failure is not a rate limit.
+pub fn minutes_left(m: &LocalMessage, now: u64) -> u64 {
+    if m.status != MessageStatus::Failed || m.resend_allowed(now) {
+        return 0;
+    }
+    match m.last_error {
+        Some(FailReason::RateLimited { retry_after_secs }) => m
+            .failed_at
+            .unwrap_or(0)
+            .saturating_add(retry_after_secs)
+            .saturating_sub(now)
+            .div_ceil(60),
+        _ => 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -490,6 +528,19 @@ mod tests {
         coffee.pick("coffee");
         assert!(coffee.missing_steps().is_empty());
         assert!(!coffee.can_send());
+    }
+
+    #[test]
+    fn optional_text_over_max_blocks_send() {
+        let mut praise = Draft::new(taxonomy());
+        praise.pick("praise");
+        praise.set_choice("liked", "choya");
+        assert!(praise.can_send(), "optional note may stay empty");
+        praise.set_text("note_optional", "x".repeat(1001));
+        assert!(!praise.can_send(), "over the taxonomy max must block Send");
+        assert_eq!(praise.missing_steps(), vec!["note_optional".to_string()]);
+        praise.set_text("note_optional", "x".repeat(1000));
+        assert!(praise.can_send());
     }
 
     #[test]
@@ -621,6 +672,86 @@ mod tests {
         let draft = Draft::from_last_path(taxonomy(), &short);
         assert_eq!(draft.step, WizardStep::Step(2));
         assert_eq!(draft.missing_steps(), vec!["severity", "describe"]);
+    }
+
+    #[test]
+    fn draft_from_failed_row_mints_new_report_id_and_keeps_text() {
+        let row = LocalMessage {
+            path: vec!["optimize".to_string(), "wrong".to_string()],
+            body: "Optimize picks Trident on land.".to_string(),
+            last_error: Some(FailReason::TooLarge),
+            failed_at: Some(1_000),
+            ..message(MessageStatus::Failed)
+        };
+        let draft = Draft::from_failed(taxonomy(), &row);
+        assert_ne!(draft.report_id, row.report_id);
+        assert_eq!(
+            uuid::Uuid::parse_str(&draft.report_id).map(|u| u.get_version_num()),
+            Ok(4)
+        );
+        assert_eq!(draft.category.as_deref(), Some("bug"));
+        assert_eq!(draft.path(), vec!["optimize", "wrong"]);
+        assert_eq!(draft.body(), "Optimize picks Trident on land.");
+        assert_eq!(
+            draft.texts.get("describe").map(String::as_str),
+            Some("Optimize picks Trident on land.")
+        );
+        // `describe` is the bug category's third step: the draft opens on it.
+        assert_eq!(draft.step, WizardStep::Step(2));
+        assert!(draft.missing_steps().is_empty());
+        assert_eq!(draft.error, None);
+
+        // An unknown category leaves the draft on Pick with nothing filled.
+        let stray = LocalMessage {
+            category: "vote".to_string(),
+            ..row.clone()
+        };
+        let draft = Draft::from_failed(taxonomy(), &stray);
+        assert_eq!(draft.category, None);
+        assert_eq!(draft.step, WizardStep::Pick);
+        assert!(draft.texts.is_empty());
+    }
+
+    #[test]
+    fn interrupted_rows_offer_resend() {
+        let now = 1_000;
+        let row = LocalMessage {
+            last_error: Some(FailReason::Interrupted),
+            failed_at: Some(now),
+            failed_payload: Some("{}".to_string()),
+            ..message(MessageStatus::Failed)
+        };
+        assert!(row.resend_allowed(now));
+        assert_eq!(minutes_left(&row, now), 0);
+    }
+
+    #[test]
+    fn rate_limited_countdown_minutes() {
+        let limited = |failed_at: u64| LocalMessage {
+            last_error: Some(FailReason::RateLimited {
+                retry_after_secs: 90,
+            }),
+            failed_at: Some(failed_at),
+            ..message(MessageStatus::Failed)
+        };
+        assert_eq!(minutes_left(&limited(1_000), 1_000), 2);
+        assert_eq!(minutes_left(&limited(1_000), 1_030), 1);
+        assert_eq!(minutes_left(&limited(1_000), 1_089), 1);
+        assert_eq!(minutes_left(&limited(1_000), 1_090), 0);
+        assert_eq!(minutes_left(&limited(1_000), 5_000), 0);
+        // Edit-only failures never count down.
+        let too_large = LocalMessage {
+            last_error: Some(FailReason::TooLarge),
+            failed_at: Some(1_000),
+            ..message(MessageStatus::Failed)
+        };
+        assert_eq!(minutes_left(&too_large, 1_000), 0);
+        // A rate limit on a row that is no longer Failed is moot.
+        let sent = LocalMessage {
+            status: MessageStatus::Received,
+            ..limited(1_000)
+        };
+        assert_eq!(minutes_left(&sent, 1_000), 0);
     }
 
     #[test]
