@@ -7,6 +7,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::net::SocketAddr;
+use std::time::Duration;
 use uuid::Uuid;
 
 pub const MAX_BODY_CHARS: usize = 4000;
@@ -84,6 +85,10 @@ pub async fn create(
     let unvalidated = !s.taxonomy.read().await.validate(&req.category, &req.path);
     let ip = client_ip(&headers, addr.map(|Extension(ConnectInfo(a))| a));
     let hash = ip_hash(&ip, &s.config.ip_salt, chrono::Utc::now().date_naive());
+    s.limiter.check(&format!("ip:{hash}"), 10, Duration::from_secs(60))
+        .map_err(|retry_after_secs| ApiError::RateLimited { retry_after_secs })?;
+    s.limiter.check(&format!("client:{}", req.client_id), 50, Duration::from_secs(24 * 3600))
+        .map_err(|retry_after_secs| ApiError::RateLimited { retry_after_secs })?;
     let addon_version = req.context["addon_version"].as_str().unwrap_or("unknown").to_string();
     let game_build = req.context["game_build"].as_i64();
     let payload = serde_json::to_value(&RawEcho::from(&req)).map_err(|e| ApiError::Internal(e.to_string()))?;

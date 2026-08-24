@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::ratelimit::RateLimiter;
 use crate::reports;
 use crate::taxonomy::{self, Taxonomy};
 use axum::extract::State;
@@ -17,13 +18,14 @@ pub struct AppState {
     pub pool: PgPool,
     pub config: Arc<Config>,
     pub taxonomy: Arc<RwLock<Taxonomy>>,
+    pub limiter: Arc<RateLimiter>,
 }
 
 impl AppState {
     pub async fn new(pool: PgPool, config: Arc<Config>) -> Self {
         taxonomy::seed_if_empty(&pool).await.expect("seed taxonomy");
         let current = taxonomy::load_current(&pool).await.expect("load taxonomy");
-        Self { pool, config, taxonomy: Arc::new(RwLock::new(current)) }
+        Self { pool, config, taxonomy: Arc::new(RwLock::new(current)), limiter: Arc::new(RateLimiter::new()) }
     }
 }
 

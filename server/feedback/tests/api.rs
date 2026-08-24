@@ -158,6 +158,31 @@ async fn post_rejects_too_long_body_and_bad_shape(pool: PgPool) {
     assert_eq!(res.status(), StatusCode::UPGRADE_REQUIRED);
 }
 
+#[sqlx::test(migrations = "./migrations")]
+async fn eleventh_post_in_a_minute_from_one_ip_is_429(pool: PgPool) {
+    let st = state(pool).await;
+    for i in 0..10 {
+        let id = format!("77777777-7777-4777-8777-7777777777{:02}", i);
+        let res = router(st.clone()).oneshot(post_report(report_json(&id), "198.51.100.9", "1.6.0")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED, "request {i}");
+    }
+    let res = router(st).oneshot(post_report(report_json("77777777-7777-4777-8777-777777777799"), "198.51.100.9", "1.6.0")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+    let retry: u64 = res.headers()["retry-after"].to_str().unwrap().parse().unwrap();
+    assert!(retry >= 1 && retry <= 60);
+}
+
+#[test]
+fn limiter_sliding_window() {
+    use gw2bo_feedback::ratelimit::RateLimiter;
+    use std::time::Duration;
+    let l = RateLimiter::new();
+    for _ in 0..3 { assert!(l.check("k", 3, Duration::from_secs(60)).is_ok()); }
+    let err = l.check("k", 3, Duration::from_secs(60)).unwrap_err();
+    assert!(err >= 1);
+    assert!(l.check("other", 3, Duration::from_secs(60)).is_ok());
+}
+
 #[test]
 fn ids_are_shaped_right() {
     use gw2bo_feedback::ids::{ip_hash, short_id};
