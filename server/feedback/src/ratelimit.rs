@@ -17,6 +17,12 @@ impl RateLimiter {
 
     /// Ok(()) if under `limit` within `window`; Err(seconds until the oldest hit expires) otherwise.
     pub fn check(&self, key: &str, limit: usize, window: Duration) -> Result<(), u64> {
+        // A zero limit admits nothing. Return before touching the window: an empty
+        // vec satisfies `len >= 0`, and indexing it would panic while holding the
+        // global Mutex, poisoning it for every later request.
+        if limit == 0 {
+            return Err(window.as_secs().max(1));
+        }
         let now = Instant::now();
         let mut map = self.hits.lock().unwrap();
         let v = map.entry(key.to_string()).or_default();

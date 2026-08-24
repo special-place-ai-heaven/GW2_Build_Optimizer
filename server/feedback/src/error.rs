@@ -11,6 +11,7 @@ pub enum ApiError {
     PayloadTooLarge,
     RateLimited { retry_after_secs: u64 },
     UpgradeRequired,
+    DbUnavailable,
     Internal(String),
 }
 
@@ -41,6 +42,12 @@ impl IntoResponse for ApiError {
                 StatusCode::UPGRADE_REQUIRED,
                 "addon_too_old",
                 "update the addon".into(),
+                None,
+            ),
+            ApiError::DbUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "db_unavailable",
+                "database unreachable".into(),
                 None,
             ),
             ApiError::Internal(r) => {

@@ -2,6 +2,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use gw2bo_feedback::app::{router, AppState};
 use gw2bo_feedback::config::Config;
+use http_body_util::BodyExt;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -20,19 +21,36 @@ async fn state(pool: PgPool) -> AppState {
     AppState::new(pool, test_config()).await
 }
 
+fn healthz_req() -> Request<Body> {
+    Request::builder()
+        .uri("/healthz")
+        .body(Body::empty())
+        .unwrap()
+}
+
 #[sqlx::test(migrations = "./migrations")]
 async fn healthz_returns_ok(pool: PgPool) {
-    let app = router(state(pool).await);
-    let res = app
-        .oneshot(
-            Request::builder()
-                .uri("/healthz")
-                .body(Body::empty())
-                .unwrap(),
-        )
+    let res = router(state(pool).await)
+        .oneshot(healthz_req())
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&bytes[..], b"ok");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn healthz_is_503_when_the_database_is_gone(pool: PgPool) {
+    let st = state(pool.clone()).await;
+    pool.close().await;
+    let res = router(st).oneshot(healthz_req()).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "healthz must probe the pool, not just answer from the router"
+    );
+    let v = json_body(res).await;
+    assert_eq!(v["error"], "db_unavailable");
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -65,8 +83,6 @@ async fn schema_has_reports_and_taxonomy(pool: PgPool) {
         .unwrap();
     assert_eq!(n, 0);
 }
-
-use http_body_util::BodyExt;
 
 async fn json_body(res: axum::response::Response) -> serde_json::Value {
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
@@ -829,4 +845,16 @@ async fn admin_accepts_any_case_of_the_bearer_scheme(pool: PgPool) {
         StatusCode::OK,
         "RFC 7235 auth schemes are case-insensitive"
     );
+}
+
+#[test]
+fn limiter_with_a_zero_limit_rejects_instead_of_panicking() {
+    use gw2bo_feedback::ratelimit::RateLimiter;
+    use std::time::Duration;
+    let l = RateLimiter::new();
+    // An empty window trivially satisfies `len >= 0`; indexing it would panic
+    // inside the global Mutex and poison every later request.
+    assert_eq!(l.check("k", 0, Duration::from_secs(60)), Err(60));
+    assert_eq!(l.check("k", 0, Duration::from_secs(0)), Err(1));
+    assert!(l.check("k", 1, Duration::from_secs(60)).is_ok());
 }

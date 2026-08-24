@@ -1,5 +1,6 @@
 use crate::admin;
 use crate::config::Config;
+use crate::error::ApiError;
 use crate::ratelimit::RateLimiter;
 use crate::reports;
 use crate::taxonomy::{self, Taxonomy};
@@ -35,13 +36,26 @@ impl AppState {
     }
 }
 
+/// Answers only when the pool answers: a container whose database went away is
+/// unhealthy, and the compose healthcheck exists to notice that.
+async fn healthz(State(s): State<AppState>) -> Result<&'static str, ApiError> {
+    sqlx::query("select 1")
+        .execute(&s.pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("healthz: {e}");
+            ApiError::DbUnavailable
+        })?;
+    Ok("ok")
+}
+
 async fn get_taxonomy(State(s): State<AppState>) -> Json<serde_json::Value> {
     Json(s.taxonomy.read().await.body.clone())
 }
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route("/healthz", get(|| async { "ok" }))
+        .route("/healthz", get(healthz))
         .route("/v1/taxonomy", get(get_taxonomy))
         .route("/v1/reports", post(reports::create))
         .route("/v1/reports/status", get(reports::status))
