@@ -230,7 +230,7 @@ async fn post_unknown_category_is_stored_unvalidated(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
-async fn post_rejects_too_long_body_and_bad_shape(pool: PgPool) {
+async fn post_rejects_too_long_body_and_oversize_request(pool: PgPool) {
     let st = state(pool).await;
     let mut long = report_json("55555555-5555-4555-8555-555555555555");
     long["body"] = "x".repeat(4001).into();
@@ -246,6 +246,7 @@ async fn post_rejects_too_long_body_and_bad_shape(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(json_body(res).await["error"], "too_large");
 
     let res = router(st)
         .oneshot(post_report(
@@ -857,4 +858,112 @@ fn limiter_with_a_zero_limit_rejects_instead_of_panicking() {
     assert_eq!(l.check("k", 0, Duration::from_secs(60)), Err(60));
     assert_eq!(l.check("k", 0, Duration::from_secs(0)), Err(1));
     assert!(l.check("k", 1, Duration::from_secs(60)).is_ok());
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn fifty_first_post_in_a_day_from_one_client_is_429(pool: PgPool) {
+    let st = state(pool).await;
+    // Every request comes from its own ip, so only the per-client daily bucket
+    // can be what stops the 51st.
+    for i in 0..50 {
+        let id = format!("eeeeeeee-eeee-4eee-8eee-eeeeeeeee{:03}", i);
+        let ip = format!("198.51.100.{}", i + 1);
+        let res = router(st.clone())
+            .oneshot(post_report(report_json(&id), &ip, "1.6.0"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED, "request {i}");
+    }
+    let res = router(st)
+        .oneshot(post_report(
+            report_json("eeeeeeee-eeee-4eee-8eee-eeeeeeeee999"),
+            "198.51.100.200",
+            "1.6.0",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+    let retry: u64 = res.headers()["retry-after"]
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((1..=24 * 3600).contains(&retry), "retry-after was {retry}");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn post_enforces_title_bounds(pool: PgPool) {
+    let st = state(pool).await;
+    let case = |suffix: &str, title: String| {
+        let mut b = report_json(&format!("ffffffff-ffff-4fff-8fff-ffffffffff{suffix}"));
+        b["title"] = title.into();
+        b
+    };
+
+    for (suffix, title) in [("01", "   ".to_string()), ("02", String::new())] {
+        let res = router(st.clone())
+            .oneshot(post_report(case(suffix, title), "203.0.113.5", "1.6.0"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST, "case {suffix}");
+        assert!(json_body(res).await["reason"]
+            .as_str()
+            .unwrap()
+            .contains("title"));
+    }
+
+    let res = router(st.clone())
+        .oneshot(post_report(
+            case("03", "t".repeat(121)),
+            "203.0.113.5",
+            "1.6.0",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST, "121 chars is over");
+
+    let res = router(st)
+        .oneshot(post_report(
+            case("04", "t".repeat(120)),
+            "203.0.113.5",
+            "1.6.0",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "120 chars is the ceiling"
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn post_enforces_the_build_snapshot_ceiling(pool: PgPool) {
+    let st = state(pool).await;
+    let mut over = report_json("abababab-abab-4bab-8bab-abababab0001");
+    over["build_snapshot"] = serde_json::json!("x".repeat(7000));
+    let res = router(st.clone())
+        .oneshot(post_report(over, "203.0.113.5", "1.6.0"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let v = json_body(res).await;
+    assert_eq!(v["error"], "bad_request");
+    assert!(
+        v["reason"].as_str().unwrap().contains("build_snapshot"),
+        "the reason must name the field: {}",
+        v["reason"]
+    );
+
+    let mut ok = report_json("abababab-abab-4bab-8bab-abababab0002");
+    ok["build_snapshot"] = serde_json::json!("x".repeat(1024));
+    let res = router(st)
+        .oneshot(post_report(ok, "203.0.113.5", "1.6.0"))
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "1 KB is well under the cap"
+    );
 }
