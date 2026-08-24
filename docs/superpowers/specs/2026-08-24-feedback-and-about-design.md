@@ -76,7 +76,11 @@ Decisions:
   `## ` headings; render the first 5 entries. Heading in `CREAM`, body in
   `MUTED` at 85 % font scale. Markdown is shown as-is, no renderer.
 - Row icons are draw-list glyphs (like the Choya mascots), colored with the
-  category color. No image assets.
+  category color. One exception: the coffee category and the header button
+  use Ko-fi's official logomark (`crates/addon/assets/kofi_cup.png`, from
+  storage.ko-fi.com/cdn/logomarkLogo.png; their creator kit permits use to
+  link to your page), embedded with `include_bytes!` and loaded through
+  `get_texture_or_create_from_memory` exactly like the mystic-coin icons.
 - `View` expands the row inline: full body, attached context, and the reply if
   answered. `Resend` appears only on rows whose `status == failed`, in `WARN`.
 
@@ -148,7 +152,7 @@ new category reaches players without a DLL release.
       "steps": ["area_feature", "describe"] },
     { "id": "praise",   "type": "report", "label": "cat.fistbump", "icon": "fist",   "color": "gold",
       "steps": ["liked", "note_optional"] },
-    { "id": "coffee",   "type": "link",   "label": "cat.coffee",   "icon": "coffee", "color": "gold",
+    { "id": "coffee",   "type": "link",   "label": "cat.coffee",   "icon": "kofi",   "color": "gold",
       "url": "https://ko-fi.com/specialplacerob" }
   ],
   "steps": {
@@ -168,8 +172,9 @@ Choya's line per step is `prompt` plus an optional `quip.<category>.<step>`.
 `type` is the extension point: `report` runs steps and posts; `link` opens a
 URL. A future `vote` or `discord` is one new match arm.
 
-Icons are named glyphs drawn in `theme.rs`; an unknown icon name falls back to
-a colored dot so a taxonomy newer than the DLL still renders.
+Icons are named glyphs drawn in `theme.rs` (`icon: "kofi"` maps to the
+embedded texture instead); an unknown icon name falls back to a colored dot
+so a taxonomy newer than the DLL still renders.
 
 ## 6. Payload and schema
 
