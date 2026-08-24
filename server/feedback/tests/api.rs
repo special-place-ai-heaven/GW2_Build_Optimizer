@@ -45,3 +45,35 @@ async fn schema_has_reports_and_taxonomy(pool: PgPool) {
     let (n,): (i64,) = sqlx::query_as("select count(*) from taxonomy").fetch_one(&pool).await.unwrap();
     assert_eq!(n, 0);
 }
+
+use http_body_util::BodyExt;
+
+async fn json_body(res: axum::response::Response) -> serde_json::Value {
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn taxonomy_is_seeded_and_served(pool: PgPool) {
+    let app = router(state(pool.clone()).await);
+    let res = app
+        .oneshot(Request::builder().uri("/v1/taxonomy").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let v = json_body(res).await;
+    assert_eq!(v["taxonomy_version"], 1);
+    assert!(v["categories"].as_array().unwrap().iter().any(|c| c["id"] == "praise"));
+    let (n,): (i64,) = sqlx::query_as("select count(*) from taxonomy").fetch_one(&pool).await.unwrap();
+    assert_eq!(n, 1, "seeded exactly once");
+}
+
+#[test]
+fn taxonomy_validate_knows_its_ids() {
+    use gw2bo_feedback::taxonomy::Taxonomy;
+    let t = Taxonomy::embedded();
+    assert!(t.validate("bug", &["optimize".into(), "wrong".into()]));
+    assert!(t.validate("praise", &["everything".into()]));
+    assert!(!t.validate("bug", &["optimize".into(), "nope".into()]));
+    assert!(!t.validate("teleport", &[]));
+}
