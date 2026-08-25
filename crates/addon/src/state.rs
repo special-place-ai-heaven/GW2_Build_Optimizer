@@ -194,6 +194,8 @@ pub struct MainState {
     pub settings_cache_size_frames: u32,
     /// Blink Improve/New Build until the player opens that tab.
     pub tab_alert: Option<MainTab>,
+    /// About tab: messages, taxonomy, open draft, refresh timers.
+    pub feedback: crate::feedback::FeedbackState,
     /// Last LLM/provider failure shown on the Choya header (timeout, 429, billing).
     pub provider_issue: Option<String>,
     /// Search filter text for the Settings tab model-picker dropdown.
@@ -242,6 +244,7 @@ pub enum MainTab {
     Talk,
     SaveLoad,
     Settings,
+    About,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -440,6 +443,26 @@ where
     lock_state().as_mut().map(f)
 }
 
+// Every test that touches the global STATE (`init`, `clear`, `with_state`), here or in
+// another module such as `feedback::tasks`, mutates the same static mutex. Parallel
+// execution can make one test reset/replace state while another is asserting, causing
+// flaky None/stale-value results. All of them serialise on this one lock.
+#[cfg(test)]
+static TEST_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Take the crate-wide STATE test lock; recovers from a poisoned lock (a test that
+/// panicked while holding it) so one failure does not cascade into the rest.
+#[cfg(test)]
+pub(crate) fn state_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    let current = std::thread::current();
+    let test_name = current.name().unwrap_or("<unnamed>");
+    eprintln!(
+        "[GW2BuildOpt][state::tests] acquiring shared STATE test lock: {}",
+        test_name
+    );
+    TEST_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     // Test fixtures are built field-by-field for readability.
@@ -447,21 +470,6 @@ mod tests {
     use super::*;
     use gw2_core::config::AppConfig;
     use gw2_optimizer::scoring::OptimizationWeights;
-
-    // Global state tests mutate the same static STATE mutex. Parallel execution can
-    // make one test reset/replace state while another is asserting, causing flaky
-    // None/stale-value results. Serialize these tests with a dedicated lock.
-    static TEST_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    fn state_test_guard() -> std::sync::MutexGuard<'static, ()> {
-        let current = std::thread::current();
-        let test_name = current.name().unwrap_or("<unnamed>");
-        eprintln!(
-            "[GW2BuildOpt][state::tests] acquiring shared STATE test lock: {}",
-            test_name
-        );
-        TEST_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-    }
 
     /// Reset the global STATE to None for test isolation.
     /// Call as the first line of every test that calls init(), clear(), or with_state().
@@ -633,6 +641,12 @@ mod tests {
             main.chat_wait_started.is_none(),
             "kitchen wait clock starts unset"
         );
+        assert_eq!(
+            main.feedback.view,
+            crate::feedback::AboutView::WhatsNew,
+            "About tab opens on What's new by default"
+        );
+        assert!(main.feedback.draft.is_none(), "no wizard draft at start");
     }
 
     #[test]

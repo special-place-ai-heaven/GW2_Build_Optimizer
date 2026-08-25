@@ -2,6 +2,10 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.6.0 - 2026-08-25
+
+New About tab. What's new shows the release notes for the last five versions in game. Message developer is a short guided form for a bug, a wrong build, a suggestion, a question, or a fistbump for Choya; each message shows its status (received, read, answered, closed) and the reply inline, refreshed on tab open and every five minutes, and the About pill pulses when an answer lands. Failed sends are kept locally with Resend, and nothing typed is lost. Ko-fi link in the header and on the first form step. Privacy: messages carry the category, choices, text, addon version, game build, language, mode/scale/role, profession and elite spec, and the AI provider name; a contact line, the account name, and a slim copy of the last optimize result are opt-in; API keys and character names are never sent.
+
 ## 1.5.3 - 2026-08-24
 
 The rotation scheduler now values Fury by game mode. It priced every Fury application at the PvE +25% crit bonus, so Fury-granting skills were overvalued by a quarter when ordering PvP and WvW rotations; they now use the +20% those modes actually grant. A dropped  attribute in the i18n suite is restored, so named-placeholder substitution is verified again.

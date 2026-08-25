@@ -1,5 +1,6 @@
 mod chat_links;
 mod clipboard;
+mod feedback;
 mod state;
 pub mod ui;
 
