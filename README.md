@@ -123,7 +123,7 @@ patch, use Settings → refresh game data if skills or traits look wrong.
 
 ## Overlay
 
-Tabs: **New Build**, **Improve**, **Choya**, **Saves**, **Settings**. Overlay chrome
+Tabs: **New Build**, **Improve**, **Choya**, **Saves**, **Settings**, **About**. Overlay chrome
 follows Settings → Language. Skill, trait, and item names use the official GW2 API
 `lang=` pack (Deutsch, Español, Français, 简体中文).
 
@@ -188,6 +188,38 @@ templates.
 
 GW2 key check, AI provider and model, key test, game-data refresh, optional
 benchmark sync, language, opacity, font scale, and layout sizing.
+
+### About
+
+Release notes in game (the last five versions), a **Messages** list, and
+**Message developer**. Messages shows what you sent, its status on the
+developer's side (Received, Read, Answered, Closed), and the reply inline once
+the developer answers. Message developer is a short guided form: report a bug,
+a wrong build, a suggestion, a question, or a fistbump for Choya. A send that
+fails is kept locally with a **Resend** button; nothing you typed is lost.
+
+Free to use. If it saved you gold, Choya takes coffee:
+<https://ko-fi.com/specialplacerob>. The link sits in the About header and on
+the first form step, nowhere else.
+
+#### Privacy
+
+A message contains your category and choices, the text you typed, the addon
+version, the game build number, the UI language, game mode / scale / role, the
+profession and elite spec of the current build, and the name of the AI provider
+you use (never its key). Optional and off by default: a contact line you type,
+your GW2 account name (fetched only when you tick the box), and, for wrong-build
+reports, a slim copy of your last optimize result (stat prefixes, specs and
+traits, weapons and sigils, skills, rune, relic, chat code). Never sent: API
+keys, character names, the API key label.
+
+Messages go to the developer's own server at `feedback.robagentic.tech`. The
+contact line is stored there in plain text. There is no automatic deletion or
+retention policy yet. A random per-install id is stored in `config.json` so
+replies can be matched to your messages; it is not tied to your account.
+
+Local history is `messages.json` in the addon folder. Delete it to clear the
+list.
 
 ## Scoring (short)
 

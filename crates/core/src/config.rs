@@ -135,6 +135,10 @@ pub struct AppConfig {
     /// Overlay typeface. `"auto"` picks a Windows font from language; `"game"` keeps Nexus.
     #[serde(default = "default_ui_font")]
     pub ui_font: String,
+
+    /// Random id minted once per install for the feedback server (never an account id).
+    #[serde(default)]
+    pub client_id: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -166,6 +170,7 @@ impl Default for AppConfig {
             auto_refresh_cache: false,
             ui_language: "auto".into(),
             ui_font: "auto".into(),
+            client_id: None,
         }
     }
 }
@@ -486,10 +491,43 @@ mod tests {
         assert!(config.window_visible);
         assert_eq!(config.ui_language, "auto");
         assert_eq!(config.ui_font, "auto");
+        assert!(config.client_id.is_none());
         assert_eq!(
             config.window_rect(),
             (DEFAULT_WINDOW_POS, DEFAULT_WINDOW_SIZE)
         );
+    }
+
+    #[test]
+    fn old_config_without_client_id_loads_none() {
+        // Pre-About-tab config.json: the original 3 fields only. client_id
+        // must deserialize as None, never fail or fabricate a value.
+        let json = r#"{
+            "gw2_api_key": "old-key",
+            "gemini_api_key": "old-gemini-key",
+            "cache_build_number": 12345
+        }"#;
+        let config: AppConfig = serde_json::from_str(json).unwrap();
+        assert!(config.client_id.is_none());
+    }
+
+    #[test]
+    fn client_id_round_trips() {
+        let dir = env::temp_dir().join(format!("gw2_config_client_id_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+
+        let config = AppConfig {
+            client_id: Some("11111111-1111-4111-8111-111111111111".into()),
+            ..Default::default()
+        };
+        config.save(&path).unwrap();
+
+        let (loaded, err) = AppConfig::load(&path);
+        assert!(err.is_none(), "unexpected parse error: {:?}", err);
+        assert_eq!(loaded.client_id, config.client_id);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

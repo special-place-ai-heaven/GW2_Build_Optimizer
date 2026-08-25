@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "gw2-api"
-version = "1.5.3"
+version = "1.6.0"
 dependencies = [
  "chrono",
  "gw2-core",
@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "gw2-build-optimizer"
-version = "1.5.3"
+version = "1.6.0"
 dependencies = [
  "base64",
  "chrono",
@@ -366,13 +366,15 @@ dependencies = [
  "gw2-core",
  "gw2-optimizer",
  "nexus",
+ "reqwest",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
 name = "gw2-core"
-version = "1.5.3"
+version = "1.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -380,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "gw2-optimizer"
-version = "1.5.3"
+version = "1.6.0"
 dependencies = [
  "chrono",
  "gw2-api",
@@ -1777,6 +1779,17 @@ name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
+
+[[package]]
+name = "uuid"
+version = "1.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f053576934f05a761a402421fbbe3d425d9366f75f978806a037b3ca481abecc"
+dependencies = [
+ "getrandom 0.4.1",
+ "js-sys",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "vcpkg"

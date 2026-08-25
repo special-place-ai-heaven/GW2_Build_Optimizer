@@ -60,6 +60,7 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         stats::check_api_health(state);
         state.main.api_status_frames = 0;
     }
+    crate::feedback::tasks::maybe_poll(state);
 
     // Auto-dismiss save status after ~180 frames (~3s at 60fps)
     if state.main.save_status.is_some() {
@@ -461,12 +462,22 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
     ui.same_line_with_spacing(0.0, 28.0);
     let saves = t("tab.saves");
     let settings = t("tab.settings");
+    let about = t("tab.about");
     for (tab, label, id) in [
         (MainTab::SaveLoad, saves.as_str(), "##main_tab_saves"),
         (MainTab::Settings, settings.as_str(), "##main_tab_settings"),
+        (MainTab::About, about.as_str(), "##main_tab_about"),
     ] {
         let is_active = state.main.active_tab == tab;
-        if crate::ui::theme::pill(ui, label, is_active, id) {
+        let pulse = if state.main.tab_alert.as_ref() == Some(&tab) && !is_active {
+            0.18 + 0.55 * (ui.frame_count() as f32 * 0.0175).sin().abs()
+        } else {
+            0.0
+        };
+        if crate::ui::theme::pill_pulse(ui, label, is_active, id, pulse) {
+            if state.main.tab_alert.as_ref() == Some(&tab) {
+                state.main.tab_alert = None;
+            }
             state.main.active_tab = tab;
         }
         ui.same_line_with_spacing(0.0, 8.0);
@@ -478,7 +489,7 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
 /// Dynamic left panel: content varies by active tab.
 fn render_left_panel(ui: &Ui, state: &mut AddonState) {
     // ── Character section (always visible except Settings) ──
-    if state.main.active_tab != MainTab::Settings {
+    if !matches!(state.main.active_tab, MainTab::Settings | MainTab::About) {
         render_left_character_section(ui, state);
     }
 
@@ -487,7 +498,7 @@ fn render_left_panel(ui: &Ui, state: &mut AddonState) {
             render_left_build_controls(ui, state);
         }
         MainTab::SaveLoad => {}
-        MainTab::Settings => {
+        MainTab::Settings | MainTab::About => {
             // Settings info
             render_left_section_header(ui, &t("section.info"), state.config.section_spacing);
             ui.text_colored(theme::MUTED, format!("  {}", t("info.product")));
@@ -973,6 +984,9 @@ fn render_main_content(ui: &Ui, state: &mut AddonState) {
         }
         MainTab::Settings => {
             tabs::settings::render_settings_tab(ui, state);
+        }
+        MainTab::About => {
+            tabs::about::render_about_tab(ui, state);
         }
     }
 }

@@ -9,7 +9,7 @@ exclude = ["server/feedback"]
 resolver = "2"
 
 [workspace.package]
-version = "1.5.3"
+version = "1.6.0"
 edition = "2021"
 license = "MIT"
 
@@ -22,3 +22,4 @@ urlencoding = "2"
 chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
 serde_yaml = "0.9"
+uuid = { version = "1", features = ["v4"] }
