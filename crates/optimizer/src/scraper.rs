@@ -706,11 +706,7 @@ fn fetch_html(client: &reqwest::blocking::Client, url: &str) -> Result<String, S
 
     // Cap the body: a hostile endpoint must not stream unbounded bytes into
     // the game process. Build pages are well under 1 MiB.
-    use std::io::Read as _;
-    const MAX_HTML_BYTES: u64 = 2 * 1024 * 1024;
-    let mut bytes = Vec::new();
-    resp.take(MAX_HTML_BYTES)
-        .read_to_end(&mut bytes)
+    let bytes = gw2_api::transport::read_body_capped(resp, 2 * 1024 * 1024)
         .map_err(|e| format!("error reading {}: {}", url, e))?;
     String::from_utf8(bytes).map_err(|_| format!("UTF-8 error reading {}", url))
 }
