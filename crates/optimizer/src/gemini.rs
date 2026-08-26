@@ -38,8 +38,11 @@ pub struct GeminiClient {
 }
 
 impl GeminiClient {
-    fn generate_url(&self) -> String {
-        format!("{}/{}:generateContent", GEMINI_API_BASE, self.model)
+    fn stream_url(&self) -> String {
+        format!(
+            "{}/{}:streamGenerateContent?alt=sse",
+            GEMINI_API_BASE, self.model
+        )
     }
 }
 
@@ -216,12 +219,94 @@ pub struct FunctionDeclaration {
     pub parameters: serde_json::Value,
 }
 
-// ─── Response Types ───
+// ─── SSE Streaming ───
+
+/// One Gemini SSE `data:` payload (streamGenerateContent?alt=sse chunks are
+/// full GenerateContentResponse objects with partial candidates).
+#[derive(Deserialize)]
+struct StreamGenerateResponse {
+    candidates: Option<Vec<Candidate>>,
+    /// Mid-stream failure: `{"error":{"code":…,"message":…,"status":…}}`.
+    #[serde(default)]
+    error: Option<StreamErrorPayload>,
+}
 
 #[derive(Deserialize)]
-struct GenerateResponse {
-    candidates: Option<Vec<Candidate>>,
+struct StreamErrorPayload {
+    #[serde(default)]
+    code: Option<u16>,
+    #[serde(default)]
+    message: Option<String>,
 }
+
+/// Reads a Gemini `streamGenerateContent` SSE body into one merged `Content`.
+///
+/// Each chunk carries partial `candidates[0].content.parts`; text parts are
+/// concatenated in arrival order and function-call parts are passed through
+/// whole (Gemini emits a `functionCall` part complete in a single chunk).
+/// An `error` payload is the mid-stream failure channel.
+fn read_gemini_stream<R: std::io::Read>(reader: R) -> Result<Content, GeminiError> {
+    use std::io::BufRead;
+
+    let mut role: Option<String> = None;
+    let mut text = String::new();
+    let mut parts: Vec<Part> = Vec::new();
+
+    for line in std::io::BufReader::new(reader).lines() {
+        let line = line.map_err(|e| GeminiError::Parse(format!("stream read failed: {e}")))?;
+        let line = line.trim();
+        if !line.starts_with("data: ") {
+            continue;
+        }
+        let chunk: StreamGenerateResponse = match serde_json::from_str(&line["data: ".len()..]) {
+            Ok(chunk) => chunk,
+            Err(_) => continue,
+        };
+        if let Some(err) = chunk.error {
+            return Err(GeminiError::Api {
+                status: err.code.unwrap_or(502),
+                message: err
+                    .message
+                    .unwrap_or_else(|| "Gemini stream error".to_string()),
+            });
+        }
+        let Some(content) = chunk
+            .candidates
+            .and_then(|c| c.into_iter().next())
+            .and_then(|c| c.content)
+        else {
+            continue;
+        };
+        if role.is_none() {
+            role = content.role.clone();
+        }
+        for part in content.parts {
+            if let Some(t) = part.text {
+                text.push_str(&t);
+            }
+            if let Some(call) = part.function_call {
+                parts.push(Part {
+                    text: None,
+                    function_call: Some(call),
+                    function_response: None,
+                });
+            }
+        }
+    }
+
+    if !text.is_empty() {
+        parts.insert(0, Part::text(text));
+    }
+    if parts.is_empty() {
+        return Err(GeminiError::Parse("No response content from Gemini".into()));
+    }
+    Ok(Content {
+        role: role.or(Some("model".to_string())),
+        parts,
+    })
+}
+
+// ─── Response Types ───
 
 #[derive(Deserialize)]
 struct Candidate {
@@ -554,14 +639,14 @@ impl GeminiClient {
             .unwrap_or_else(|e| e.into_inner())
             .check_and_reserve()?;
 
-        let url = self.generate_url();
+        let url = self.stream_url();
         let mut last_error: Option<GeminiError> = None;
+        let mut next_delay = std::time::Duration::from_secs(5);
 
         for attempt in 0..MAX_RETRIES {
             if attempt > 0 {
-                // Exponential backoff: 5s, 15s
-                let delay = std::time::Duration::from_secs(5 * (1 << (attempt - 1)));
-                std::thread::sleep(delay);
+                std::thread::sleep(next_delay);
+                next_delay *= 2;
             }
 
             let resp = match self
@@ -588,35 +673,7 @@ impl GeminiClient {
             let status = resp.status().as_u16();
             match status {
                 200 => {
-                    let body: GenerateResponse = match resp.json() {
-                        Ok(b) => b,
-                        Err(e) => {
-                            self.rate
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .undo_reserve();
-                            return Err(GeminiError::Http(e));
-                        }
-                    };
-                    let content = match body
-                        .candidates
-                        .and_then(|c| c.into_iter().next())
-                        .and_then(|c| c.content)
-                    {
-                        Some(c) => c,
-                        None => {
-                            // 200 with empty candidates: response is "successful" at the HTTP
-                            // layer but yielded no usable content. Release the rate slot so
-                            // this dead trip doesn't count against the quota.
-                            self.rate
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .undo_reserve();
-                            return Err(GeminiError::Parse(
-                                "No response content from Gemini".into(),
-                            ));
-                        }
-                    };
+                    let content = read_gemini_stream(resp)?;
 
                     // Persist usage
                     {
@@ -640,8 +697,16 @@ impl GeminiClient {
                         .undo_reserve();
                     return Err(GeminiError::RateLimited);
                 }
-                500 | 503 => {
-                    // Transient server error (ErrTimeout, overloaded) — retry
+                // Retryable: server failures + 408/504 gateway timeouts.
+                408 | 500 | 502 | 503 | 504 => {
+                    if let Some(secs) = resp
+                        .headers()
+                        .get("Retry-After")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok())
+                    {
+                        next_delay = std::time::Duration::from_secs(secs.min(60));
+                    }
                     let body = resp.text().unwrap_or_default();
                     last_error = Some(GeminiError::Api {
                         status,
@@ -650,8 +715,6 @@ impl GeminiClient {
                     continue;
                 }
                 _ => {
-                    // Release the reserved rate slot — this Err path bailed
-                    // without consuming a real successful response.
                     let body = resp.text().unwrap_or_default();
                     self.rate
                         .lock()
@@ -664,7 +727,6 @@ impl GeminiClient {
                 }
             }
         }
-
         // All retries exhausted
         self.rate
             .lock()
@@ -908,5 +970,46 @@ mod tests {
         }];
         trim_contents(&mut contents, 10_000);
         assert_eq!(contents.len(), 1);
+    }
+
+    #[test]
+    fn test_read_gemini_stream_merges_text_chunks() {
+        let sse = r#"data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"},"index":0}]}
+data: {"candidates":[{"content":{"parts":[{"text":"lo"}],"role":"model"},"index":0}]}
+
+data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":0}]}
+"#;
+        let content = read_gemini_stream(sse.as_bytes()).expect("stream parses");
+        assert_eq!(content.role.as_deref(), Some("model"));
+        assert_eq!(content.parts.len(), 1);
+        assert_eq!(content.parts[0].text.as_deref(), Some("Hello!"));
+    }
+
+    #[test]
+    fn test_read_gemini_stream_passes_function_calls_through() {
+        let sse = r#"data: {"candidates":[{"content":{"parts":[{"text":"Rolling"},{"functionCall":{"name":"pick","args":{"slot":"heal"}}}],"role":"model"},"index":0}]}
+"#;
+        let content = read_gemini_stream(sse.as_bytes()).expect("stream parses");
+        assert_eq!(content.parts.len(), 2);
+        assert_eq!(content.parts[0].text.as_deref(), Some("Rolling"));
+        let call = content.parts[1]
+            .function_call
+            .as_ref()
+            .expect("function call");
+        assert_eq!(call.name, "pick");
+        assert_eq!(call.args["slot"], "heal");
+    }
+
+    #[test]
+    fn test_read_gemini_stream_error_payload_maps_to_api_error() {
+        let sse = r#"data: {"error":{"code":429,"message":"Resource exhausted","status":"RESOURCE_EXHAUSTED"}}
+"#;
+        match read_gemini_stream(sse.as_bytes()) {
+            Err(GeminiError::Api { status, message }) => {
+                assert_eq!(status, 429);
+                assert!(message.contains("exhausted"));
+            }
+            _other => panic!("expected Api error"),
+        }
     }
 }
