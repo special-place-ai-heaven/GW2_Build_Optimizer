@@ -2109,104 +2109,139 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
             });
 
             if !token.is_cancelled() {
-                crate::state::with_state(|s| {
+                // Clear the stage and drop stale results before any work.
+                let stale = crate::state::with_state(|s| {
                     if s.main.chat_epoch != epoch {
-                        return;
+                        return true;
                     }
                     s.main.optimize_stage.clear();
+                    false
+                })
+                .unwrap_or(true);
+
+                if !stale {
                     match result {
                         Ok(raw) => {
                             if !validated.as_ref().is_some_and(plate_is_servable) {
+                                // Unservable plate: reply with the explanation text.
+                                crate::state::with_state(|s| {
+                                    if s.main.chat_epoch != epoch {
+                                        return;
+                                    }
+                                    let errors: Vec<String> = validated
+                                        .as_ref()
+                                        .map(|v| v.errors.iter().map(|e| e.detail.clone()).collect())
+                                        .unwrap_or_default();
+                                    crate::ui::chat_bar::add_ai_response(
+                                        &mut s.main.chat,
+                                        chat_display_text(
+                                            &raw.explanation,
+                                            raw.specializations.len(),
+                                            &errors,
+                                        ),
+                                    );
+                                });
+                            } else {
+                                // Heavy phase — runs WITHOUT the state lock. The
+                                // render callback shares this mutex and ImGui only
+                                // draws on the render thread, so a stalled frame
+                                // here reads as the whole game not responding.
+                                let Some((live_db, live_mode)) =
+                                    crate::state::with_state(|s| {
+                                        (s.main.game_db.clone(), s.main.game_mode.clone())
+                                    })
+                                else {
+                                    return; // state gone — addon shutting down
+                                };
+                                let plated = match &validated {
+                                    Some(v) => gemini_from_validated(raw, v),
+                                    None => raw,
+                                };
                                 let errors: Vec<String> = validated
                                     .as_ref()
                                     .map(|v| v.errors.iter().map(|e| e.detail.clone()).collect())
                                     .unwrap_or_default();
-                                crate::ui::chat_bar::add_ai_response(
-                                    &mut s.main.chat,
-                                    chat_display_text(
-                                        &raw.explanation,
-                                        raw.specializations.len(),
-                                        &errors,
+                                let body = if plated.explanation.is_empty() {
+                                    t("choya.heres_a_build")
+                                } else {
+                                    plated.explanation.clone()
+                                };
+                                let display =
+                                    chat_display_text(&body, plated.specializations.len(), &errors);
+                                let mut suggestion = crate::ui::comparison::BuildSuggestion {
+                                    label: t("choya.pick"),
+                                    ..Default::default()
+                                };
+                                apply_gemini_response(&mut suggestion, &plated);
+                                if let Some(ref db) = live_db {
+                                    attach_chat_stats(
+                                        &mut suggestion,
+                                        db,
+                                        &profession,
+                                        &live_mode,
+                                    );
+                                    if let Some(v) = &validated {
+                                        suggestion.chat_code =
+                                            validated_build_to_chat_code(v, &profession, db);
+                                    }
+                                    if suggestion.chat_code.is_none() {
+                                        suggestion.chat_code =
+                                            suggestion_to_chat_code(&suggestion, db);
+                                    }
+                                    let balance_ctx = BalanceContext::new(live_mode.clone());
+                                    simulate_suggestion_rotation(&mut suggestion, db, &balance_ctx);
+                                }
+                                let chips = match (live_db.as_ref(), validated.as_ref()) {
+                                    (Some(db), Some(v)) => crate::chat_links::chips_from_plate(
+                                        db,
+                                        v,
+                                        suggestion.chat_code.as_deref(),
                                     ),
-                                );
-                                return;
+                                    _ => suggestion
+                                        .chat_code
+                                        .as_deref()
+                                        .filter(|c| c.starts_with("[&"))
+                                        .map(|c| vec![crate::chat_links::build_template_chip(c)])
+                                        .unwrap_or_default(),
+                                };
+                                // Apply phase — short lock, pure state mutation.
+                                crate::state::with_state(|s| {
+                                    if s.main.chat_epoch != epoch {
+                                        return;
+                                    }
+                                    crate::ui::chat_bar::add_plated_response(
+                                        &mut s.main.chat,
+                                        display,
+                                        chips,
+                                        true,
+                                    );
+                                    s.main.comparison.error = None;
+                                    s.main.comparison.suggestions.push(suggestion);
+                                    s.main.comparison.selected_suggestion =
+                                        s.main.comparison.suggestions.len() - 1;
+                                    s.main.comparison.show_optimized = true;
+                                    s.main.tab_alert =
+                                        Some(result_alert_tab(s.main.current_build.is_some()));
+                                    s.main.provider_issue = None;
+                                });
                             }
-                            let plated = match &validated {
-                                Some(v) => gemini_from_validated(raw, v),
-                                None => raw,
-                            };
-                            let errors: Vec<String> = validated
-                                .as_ref()
-                                .map(|v| v.errors.iter().map(|e| e.detail.clone()).collect())
-                                .unwrap_or_default();
-                            let body = if plated.explanation.is_empty() {
-                                t("choya.heres_a_build")
-                            } else {
-                                plated.explanation.clone()
-                            };
-                            let display =
-                                chat_display_text(&body, plated.specializations.len(), &errors);
-                            let mut suggestion = crate::ui::comparison::BuildSuggestion {
-                                label: t("choya.pick"),
-                                ..Default::default()
-                            };
-                            apply_gemini_response(&mut suggestion, &plated);
-                            if let Some(ref db) = s.main.game_db {
-                                attach_chat_stats(
-                                    &mut suggestion,
-                                    db,
-                                    &profession,
-                                    &s.main.game_mode,
-                                );
-                                if let Some(v) = &validated {
-                                    suggestion.chat_code =
-                                        validated_build_to_chat_code(v, &profession, db);
-                                }
-                                if suggestion.chat_code.is_none() {
-                                    suggestion.chat_code = suggestion_to_chat_code(&suggestion, db);
-                                }
-                                let balance_ctx = BalanceContext::new(s.main.game_mode.clone());
-                                simulate_suggestion_rotation(&mut suggestion, db, &balance_ctx);
-                            }
-                            let chips = match (s.main.game_db.as_ref(), validated.as_ref()) {
-                                (Some(db), Some(v)) => crate::chat_links::chips_from_plate(
-                                    db,
-                                    v,
-                                    suggestion.chat_code.as_deref(),
-                                ),
-                                _ => suggestion
-                                    .chat_code
-                                    .as_deref()
-                                    .filter(|c| c.starts_with("[&"))
-                                    .map(|c| vec![crate::chat_links::build_template_chip(c)])
-                                    .unwrap_or_default(),
-                            };
-                            crate::ui::chat_bar::add_plated_response(
-                                &mut s.main.chat,
-                                display,
-                                chips,
-                                true,
-                            );
-                            s.main.comparison.error = None;
-                            s.main.comparison.suggestions.push(suggestion);
-                            s.main.comparison.selected_suggestion =
-                                s.main.comparison.suggestions.len() - 1;
-                            s.main.comparison.show_optimized = true;
-                            s.main.tab_alert =
-                                Some(result_alert_tab(s.main.current_build.is_some()));
-                            s.main.provider_issue = None;
                         }
                         Err(e) => {
-                            let msg = format_provider_issue(
-                                &e,
-                                s.config.active_provider.short_label(),
-                                s.config.active_model_id(),
-                            );
-                            s.main.provider_issue = Some(msg.clone());
-                            crate::ui::chat_bar::add_ai_response(&mut s.main.chat, msg);
+                            crate::state::with_state(|s| {
+                                if s.main.chat_epoch != epoch {
+                                    return;
+                                }
+                                let msg = format_provider_issue(
+                                    &e,
+                                    s.config.active_provider.short_label(),
+                                    s.config.active_model_id(),
+                                );
+                                s.main.provider_issue = Some(msg.clone());
+                                crate::ui::chat_bar::add_ai_response(&mut s.main.chat, msg);
+                            });
                         }
                     }
-                });
+                }
             } else {
                 crate::state::with_state(|s| {
                     if s.main.chat_epoch == epoch {
