@@ -9,7 +9,7 @@
 //! OpenRouter's errors-and-debugging docs). Anthropic's event-based SSE
 //! will need an adapter on top of these primitives.
 
-use super::openrouter::{FunctionCallData, Message, ToolCallResponse};
+use super::openai_compat::{FunctionCallData, Message, ToolCallResponse};
 use super::LlmError;
 use std::io::BufRead;
 

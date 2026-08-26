@@ -5,9 +5,10 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 
+use super::openai_compat::{http_client, send_chat, Message, ProviderCore, MAX_COMPLETION_TOKENS};
 use super::rate::{PersistedUsage, RateTracker};
 use super::{KeyValidationResult, LlmClient, LlmError, ToolDefinition};
 
@@ -25,77 +26,9 @@ pub struct OpenAiClient {
     usage_path: Option<PathBuf>,
 }
 
-// ─── OpenAI API Types ───
-
-#[derive(Serialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<Message>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<OpenAiTool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_tokens: Option<u32>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct Message {
-    role: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_calls: Option<Vec<ToolCallResponse>>,
-    /// For role="tool" messages: the ID of the tool call being responded to.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_call_id: Option<String>,
-}
-
-#[derive(Serialize, Debug, Clone)]
-struct OpenAiTool {
-    #[serde(rename = "type")]
-    tool_type: String,
-    function: OpenAiFunction,
-}
-
-#[derive(Serialize, Debug, Clone)]
-struct OpenAiFunction {
-    name: String,
-    description: String,
-    parameters: Value,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct ToolCallResponse {
-    id: String,
-    #[serde(rename = "type")]
-    call_type: String,
-    function: FunctionCallData,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct FunctionCallData {
-    name: String,
-    /// OpenAI sends arguments as a JSON *string*, not an object.
-    arguments: String,
-}
-
-#[derive(Deserialize)]
-struct ChatResponse {
-    choices: Option<Vec<Choice>>,
-}
-
-#[derive(Deserialize)]
-struct Choice {
-    message: Option<Message>,
-    #[allow(dead_code)]
-    finish_reason: Option<String>,
-}
-
 impl OpenAiClient {
     pub fn new(api_key: &str, model: &str) -> Result<Self, LlmError> {
-        let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(180))
-            .build()
-            .map_err(|e| LlmError::Http(e.to_string()))?;
+        let http = http_client()?;
         Ok(Self {
             api_key: api_key.to_string(),
             model: model.to_string(),
@@ -111,10 +44,7 @@ impl OpenAiClient {
         model: &str,
         usage_path: PathBuf,
     ) -> Result<Self, LlmError> {
-        let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(180))
-            .build()
-            .map_err(|e| LlmError::Http(e.to_string()))?;
+        let http = http_client()?;
 
         let rate = if usage_path.exists() {
             match std::fs::read_to_string(&usage_path)
@@ -143,147 +73,28 @@ impl OpenAiClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, LlmError> {
-        const MAX_RETRIES: u32 = 3;
-
-        self.rate
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .check_and_reserve()?;
-
-        let openai_tools = tools.map(|defs| {
-            defs.iter()
-                .map(|td| OpenAiTool {
-                    tool_type: "function".to_string(),
-                    function: OpenAiFunction {
-                        name: td.name.clone(),
-                        description: td.description.clone(),
-                        parameters: td.parameters.clone(),
-                    },
-                })
-                .collect::<Vec<_>>()
-        });
-
-        let request = ChatRequest {
-            model: self.model.clone(),
-            messages: messages.to_vec(),
-            tools: openai_tools,
-            max_tokens: Some(8192),
+        let extra_headers: [(&str, String); 0] = [];
+        let core = ProviderCore {
+            http: &self.http,
+            rate: &self.rate,
+            api_key: &self.api_key,
+            base_url: OPENAI_API_BASE,
+            model: &self.model,
+            extra_headers: &extra_headers,
+            label: "OpenAI",
+            // Same ceiling as OpenRouter: reasoning models share this budget
+            // between thinking and the answer.
+            max_tokens: MAX_COMPLETION_TOKENS,
+            reasoning_max_tokens: None,
+            require_tool_endpoints: tools.is_some(),
         };
-
-        let url = format!("{}/chat/completions", OPENAI_API_BASE);
-        let mut last_error: Option<LlmError> = None;
-
-        for attempt in 0..MAX_RETRIES {
-            if attempt > 0 {
-                let delay = std::time::Duration::from_secs(5 * (1 << (attempt - 1)));
-                std::thread::sleep(delay);
-            }
-
-            let resp = match self
-                .http
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
-                .json(&request)
-                .send()
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    if attempt == MAX_RETRIES - 1 {
-                        self.rate
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .undo_reserve();
-                        return Err(LlmError::Http(e.to_string()));
-                    }
-                    last_error = Some(LlmError::Http(e.to_string()));
-                    continue;
-                }
-            };
-
-            let status = resp.status().as_u16();
-            match status {
-                200 => {
-                    let body: ChatResponse = match resp.json() {
-                        Ok(b) => b,
-                        Err(e) => {
-                            self.rate
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .undo_reserve();
-                            return Err(LlmError::Http(e.to_string()));
-                        }
-                    };
-
-                    let message = match body
-                        .choices
-                        .and_then(|c| c.into_iter().next())
-                        .and_then(|c| c.message)
-                    {
-                        Some(m) => m,
-                        None => {
-                            // 200 with empty choices — release the rate slot so this
-                            // dead trip doesn't count against the daily counter.
-                            self.rate
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .undo_reserve();
-                            return Err(LlmError::Parse("No response from OpenAI".into()));
-                        }
-                    };
-
-                    // Persist usage
-                    {
-                        let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
-                        self.persist_usage(&rate);
-                    }
-
-                    return Ok(message);
-                }
-                401 => {
-                    self.rate
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .undo_reserve();
-                    return Err(LlmError::InvalidKey);
-                }
-                429 => {
-                    self.rate
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .undo_reserve();
-                    return Err(LlmError::RateLimited);
-                }
-                500 | 502 | 503 => {
-                    let body = resp.text().unwrap_or_default();
-                    last_error = Some(LlmError::Api {
-                        status,
-                        message: body,
-                    });
-                    continue;
-                }
-                _ => {
-                    let body = resp.text().unwrap_or_default();
-                    self.rate
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .undo_reserve();
-                    return Err(LlmError::Api {
-                        status,
-                        message: body,
-                    });
-                }
-            }
+        let message = send_chat(core, messages, tools)?;
+        // Persist usage
+        {
+            let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
+            self.persist_usage(&rate);
         }
-
-        self.rate
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .undo_reserve();
-        Err(last_error.unwrap_or_else(|| LlmError::Api {
-            status: 500,
-            message: "OpenAI server error after retries".into(),
-        }))
+        Ok(message)
     }
 
     fn persist_usage(&self, rate: &RateTracker) {
@@ -655,6 +466,10 @@ fn openai_display_name(id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::openai_compat::{
+        FunctionCallData, OpenAiFunction, OpenAiTool, ToolCallResponse,
+    };
+    use super::super::sse::{read_stream, StreamedMessage};
     use super::*;
 
     #[test]
@@ -856,32 +671,21 @@ mod tests {
 
     #[test]
     fn test_tool_call_id_round_trip() {
-        // Simulate a server response containing an assistant message with one
-        // tool call. Parse it the same way `send_chat` does, then echo the id
-        // back on a tool-role follow-up message — the same echo path
-        // `generate_with_tools_progress` uses.
-        let server_response_json = r#"{
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call_fRzHUzNm7",
-                        "type": "function",
-                        "function": {"name": "square_number", "arguments": "{\"number\":7}"}
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        }"#;
+        // Simulate a streamed server response carrying an assistant message
+        // with one tool call — accumulated the same way `send_chat` does via
+        // `read_stream` — then echo the id back on a tool-role follow-up, the
+        // same path `generate_with_tools_progress` uses.
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":null}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_fRzHUzNm7\",\"type\":\"function\",\"function\":{\"name\":\"square_number\",\"arguments\":\"{\\\"number\\\":7}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n",
+            "data: [DONE]\n",
+        );
 
-        let body: ChatResponse =
-            serde_json::from_str(server_response_json).expect("parse ChatResponse");
-        let assistant_msg = body
-            .choices
-            .and_then(|c| c.into_iter().next())
-            .and_then(|c| c.message)
-            .expect("assistant message");
+        let assistant_msg = match read_stream(sse.as_bytes()).expect("stream parses") {
+            StreamedMessage::Message(m) => m,
+            StreamedMessage::Empty(finish) => panic!("unexpected empty stream: {finish}"),
+        };
         let tool_calls = assistant_msg.tool_calls.clone().expect("tool_calls");
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].id, "call_fRzHUzNm7");

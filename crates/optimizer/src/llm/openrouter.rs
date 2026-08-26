@@ -14,11 +14,13 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 
+use super::openai_compat::{
+    http_client, send_chat, Message, ProviderCore, MAX_COMPLETION_TOKENS, REASONING_TOKEN_CAP,
+};
 use super::rate::{PersistedUsage, RateTracker};
-use super::sse::{read_stream, StreamedMessage};
 use super::{KeyValidationResult, LlmClient, LlmError, ToolDefinition};
 
 /// OpenRouter's conservative default requests-per-minute ceiling.
@@ -30,18 +32,6 @@ const OPENROUTER_API_BASE: &str = "https://openrouter.ai/api/v1";
 const OPENROUTER_HTTP_REFERER: &str =
     "https://github.com/special-place-ai-heaven/GW2_Build_Optimizer";
 const OPENROUTER_X_TITLE: &str = "GW2 Build Optimizer";
-/// Completion ceiling per chat completion. Reasoning models spend the same
-/// budget on hidden thinking, so the cap must cover both or the answer gets
-/// truncated (or arrives empty) with finish_reason "length".
-const MAX_COMPLETION_TOKENS: u32 = 16_384;
-/// Upper bound on hidden reasoning tokens per request (OpenRouter
-/// `reasoning.max_tokens`; ignored by providers without thinking support).
-const REASONING_TOKEN_CAP: u32 = 8_192;
-/// Whole-request ceiling for streamed completions. Streams flow continuously
-/// (OpenRouter interleaves `: OPENROUTER PROCESSING` keep-alive comments), so
-/// a reasoning model that thinks for minutes no longer trips the old 180s
-/// wall clock that aborted valid requests mid-generation.
-const REQUEST_TIMEOUT_SECS: u64 = 900;
 
 pub struct OpenRouterClient {
     api_key: String,
@@ -52,90 +42,9 @@ pub struct OpenRouterClient {
     usage_path: Option<PathBuf>,
 }
 
-// ─── OpenAI API Types ───
-
-#[derive(Serialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<Message>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<OpenAiTool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_tokens: Option<u32>,
-    /// Always streamed: keep-alive comments hold the connection open while
-    /// reasoning models think, and the first bytes land in seconds instead
-    /// of after the whole generation.
-    stream: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reasoning: Option<ReasoningConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    provider: Option<ProviderPrefs>,
-}
-
-/// OpenRouter `reasoning` parameter — caps hidden thinking so the completion
-/// budget survives for the actual answer. Providers without thinking support
-/// ignore unknown parameters (per OpenRouter's parameter docs).
-#[derive(Serialize, Debug, Clone)]
-struct ReasoningConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_tokens: Option<u32>,
-}
-/// OpenRouter `provider` routing preferences.
-#[derive(Serialize, Debug, Clone)]
-struct ProviderPrefs {
-    /// Only route to endpoints that natively support every parameter in the
-    /// request — never to one that fakes tools through a prompt template.
-    require_parameters: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct Message {
-    pub(crate) role: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) content: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) tool_calls: Option<Vec<ToolCallResponse>>,
-    /// For role="tool" messages: the ID of the tool call being responded to.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) tool_call_id: Option<String>,
-}
-
-#[derive(Serialize, Debug, Clone)]
-struct OpenAiTool {
-    #[serde(rename = "type")]
-    tool_type: String,
-    function: OpenAiFunction,
-}
-
-#[derive(Serialize, Debug, Clone)]
-struct OpenAiFunction {
-    name: String,
-    description: String,
-    parameters: Value,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct ToolCallResponse {
-    pub(crate) id: String,
-    #[serde(rename = "type")]
-    pub(crate) call_type: String,
-    pub(crate) function: FunctionCallData,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct FunctionCallData {
-    pub(crate) name: String,
-    /// OpenAI sends arguments as a JSON *string*, not an object.
-    pub(crate) arguments: String,
-}
-
 impl OpenRouterClient {
     pub fn new(api_key: &str, model: &str) -> Result<Self, LlmError> {
-        let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
-            .connect_timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| LlmError::Http(e.to_string()))?;
+        let http = http_client()?;
         Ok(Self {
             api_key: api_key.to_string(),
             model: model.to_string(),
@@ -151,11 +60,7 @@ impl OpenRouterClient {
         model: &str,
         usage_path: PathBuf,
     ) -> Result<Self, LlmError> {
-        let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
-            .connect_timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| LlmError::Http(e.to_string()))?;
+        let http = http_client()?;
 
         let rate = if usage_path.exists() {
             match std::fs::read_to_string(&usage_path)
@@ -184,163 +89,29 @@ impl OpenRouterClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, LlmError> {
-        const MAX_RETRIES: u32 = 3;
-
-        self.rate
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .check_and_reserve()?;
-
-        let openai_tools = tools.map(|defs| {
-            defs.iter()
-                .map(|td| OpenAiTool {
-                    tool_type: "function".to_string(),
-                    function: OpenAiFunction {
-                        name: td.name.clone(),
-                        description: td.description.clone(),
-                        parameters: td.parameters.clone(),
-                    },
-                })
-                .collect::<Vec<_>>()
-        });
-
-        let request = ChatRequest {
-            model: self.model.clone(),
-            messages: messages.to_vec(),
-            tools: openai_tools,
-            max_tokens: Some(MAX_COMPLETION_TOKENS),
-            stream: Some(true),
-            reasoning: Some(ReasoningConfig {
-                max_tokens: Some(REASONING_TOKEN_CAP),
-            }),
-            provider: Some(ProviderPrefs {
-                require_parameters: tools.is_some(),
-            }),
+        let extra_headers = [
+            ("HTTP-Referer", OPENROUTER_HTTP_REFERER.to_string()),
+            ("X-Title", OPENROUTER_X_TITLE.to_string()),
+        ];
+        let core = ProviderCore {
+            http: &self.http,
+            rate: &self.rate,
+            api_key: &self.api_key,
+            base_url: OPENROUTER_API_BASE,
+            model: &self.model,
+            extra_headers: &extra_headers,
+            label: "OpenRouter",
+            max_tokens: MAX_COMPLETION_TOKENS,
+            reasoning_max_tokens: Some(REASONING_TOKEN_CAP),
+            require_tool_endpoints: tools.is_some(),
         };
-
-        let url = format!("{}/chat/completions", OPENROUTER_API_BASE);
-        let mut last_error: Option<LlmError> = None;
-        let mut next_delay = std::time::Duration::from_secs(5);
-
-        for attempt in 0..MAX_RETRIES {
-            if attempt > 0 {
-                std::thread::sleep(next_delay);
-                next_delay *= 2;
-            }
-
-            let resp = match self
-                .http
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
-                // OpenRouter-recommended identity headers — show up in their
-                // model leaderboards / request logs for this app.
-                .header("HTTP-Referer", OPENROUTER_HTTP_REFERER)
-                .header("X-Title", OPENROUTER_X_TITLE)
-                .json(&request)
-                .send()
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    if attempt == MAX_RETRIES - 1 {
-                        self.rate
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .undo_reserve();
-                        return Err(LlmError::Http(e.to_string()));
-                    }
-                    last_error = Some(LlmError::Http(e.to_string()));
-                    continue;
-                }
-            };
-
-            let status = resp.status().as_u16();
-            match status {
-                200 => {
-                    match read_stream(resp) {
-                        Ok(StreamedMessage::Message(message)) => {
-                            // Persist usage
-                            {
-                                let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
-                                self.persist_usage(&rate);
-                            }
-                            return Ok(message);
-                        }
-                        Ok(StreamedMessage::Empty(finish)) => {
-                            // Nothing usable in a 200 — release the rate slot so
-                            // this dead trip doesn't count against the daily cap.
-                            self.rate
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .undo_reserve();
-                            return Err(LlmError::Parse(format!(
-                                "Empty response from OpenRouter (finish_reason: {finish})"
-                            )));
-                        }
-                        Err(e) => {
-                            self.rate
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .undo_reserve();
-                            return Err(e);
-                        }
-                    }
-                }
-                401 => {
-                    self.rate
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .undo_reserve();
-                    return Err(LlmError::InvalidKey);
-                }
-                429 => {
-                    self.rate
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .undo_reserve();
-                    return Err(LlmError::RateLimited);
-                }
-                // Retryable: server + gateway + provider failures. 408/504 are
-                // OpenRouter's "upstream didn't respond in time"; 529 is the
-                // Anthropic overloaded signal normalized through their router.
-                408 | 500 | 502 | 503 | 504 | 529 => {
-                    if let Some(secs) = resp
-                        .headers()
-                        .get("Retry-After")
-                        .and_then(|v| v.to_str().ok())
-                        .and_then(|s| s.parse::<u64>().ok())
-                    {
-                        next_delay = std::time::Duration::from_secs(secs.min(60));
-                    }
-                    let body = resp.text().unwrap_or_default();
-                    last_error = Some(LlmError::Api {
-                        status,
-                        message: body,
-                    });
-                    continue;
-                }
-                _ => {
-                    let body = resp.text().unwrap_or_default();
-                    self.rate
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .undo_reserve();
-                    return Err(LlmError::Api {
-                        status,
-                        message: body,
-                    });
-                }
-            }
+        let message = send_chat(core, messages, tools)?;
+        // Persist usage
+        {
+            let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
+            self.persist_usage(&rate);
         }
-
-        self.rate
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .undo_reserve();
-        Err(last_error.unwrap_or_else(|| LlmError::Api {
-            status: 500,
-            message: "OpenRouter server error after retries".into(),
-        }))
+        Ok(message)
     }
 
     fn persist_usage(&self, rate: &RateTracker) {
@@ -684,6 +455,10 @@ fn trim_messages(messages: &mut Vec<Message>, budget_tokens: usize) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::openai_compat::{
+        FunctionCallData, OpenAiFunction, OpenAiTool, ToolCallResponse,
+    };
+    use super::super::sse::{read_stream, StreamedMessage};
     use super::*;
 
     #[test]

@@ -5,6 +5,7 @@
 pub mod anthropic;
 pub mod gemini;
 pub mod openai;
+pub(crate) mod openai_compat;
 pub mod openrouter;
 pub(crate) mod rate;
 pub(crate) mod response_cache;
