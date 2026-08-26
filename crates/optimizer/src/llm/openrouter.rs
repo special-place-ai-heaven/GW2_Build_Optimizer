@@ -13,6 +13,7 @@
 //! API key is sent via `Authorization: Bearer <key>` header, same as OpenAI.
 
 use std::collections::HashMap;
+use std::io::BufRead;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
@@ -32,6 +33,18 @@ const OPENROUTER_API_BASE: &str = "https://openrouter.ai/api/v1";
 const OPENROUTER_HTTP_REFERER: &str =
     "https://github.com/special-place-ai-heaven/GW2_Build_Optimizer";
 const OPENROUTER_X_TITLE: &str = "GW2 Build Optimizer";
+/// Completion ceiling per chat completion. Reasoning models spend the same
+/// budget on hidden thinking, so the cap must cover both or the answer gets
+/// truncated (or arrives empty) with finish_reason "length".
+const MAX_COMPLETION_TOKENS: u32 = 16_384;
+/// Upper bound on hidden reasoning tokens per request (OpenRouter
+/// `reasoning.max_tokens`; ignored by providers without thinking support).
+const REASONING_TOKEN_CAP: u32 = 8_192;
+/// Whole-request ceiling for streamed completions. Streams flow continuously
+/// (OpenRouter interleaves `: OPENROUTER PROCESSING` keep-alive comments), so
+/// a reasoning model that thinks for minutes no longer trips the old 180s
+/// wall clock that aborted valid requests mid-generation.
+const REQUEST_TIMEOUT_SECS: u64 = 900;
 
 pub struct OpenRouterClient {
     api_key: String,
@@ -57,6 +70,30 @@ struct ChatRequest {
     tools: Option<Vec<OpenAiTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    /// Always streamed: keep-alive comments hold the connection open while
+    /// reasoning models think, and the first bytes land in seconds instead
+    /// of after the whole generation.
+    stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning: Option<ReasoningConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider: Option<ProviderPrefs>,
+}
+
+/// OpenRouter `reasoning` parameter — caps hidden thinking so the completion
+/// budget survives for the actual answer. Providers without thinking support
+/// ignore unknown parameters (per OpenRouter's parameter docs).
+#[derive(Serialize, Debug, Clone)]
+struct ReasoningConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+}
+/// OpenRouter `provider` routing preferences.
+#[derive(Serialize, Debug, Clone)]
+struct ProviderPrefs {
+    /// Only route to endpoints that natively support every parameter in the
+    /// request — never to one that fakes tools through a prompt template.
+    require_parameters: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -100,22 +137,170 @@ struct FunctionCallData {
     arguments: String,
 }
 
+// ─── SSE Streaming Types ───
+
+/// One `data:` payload from a streamed chat completion.
 #[derive(Deserialize)]
-struct ChatResponse {
-    choices: Option<Vec<Choice>>,
+struct StreamChunk {
+    #[serde(default)]
+    choices: Vec<StreamChoice>,
+    /// Top-level error for mid-stream failures — the HTTP status is already
+    /// 200 by then, so OpenRouter ships the failure in-band.
+    #[serde(default)]
+    error: Option<Value>,
 }
 
 #[derive(Deserialize)]
-struct Choice {
-    message: Option<Message>,
-    #[allow(dead_code)]
+struct StreamChoice {
+    delta: Option<StreamDelta>,
     finish_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct StreamDelta {
+    content: Option<String>,
+    tool_calls: Option<Vec<StreamToolCallDelta>>,
+}
+
+#[derive(Deserialize)]
+struct StreamToolCallDelta {
+    index: usize,
+    id: Option<String>,
+    function: Option<StreamFunctionDelta>,
+}
+
+#[derive(Deserialize)]
+struct StreamFunctionDelta {
+    name: Option<String>,
+    arguments: Option<String>,
+}
+
+/// Accumulates one streamed assistant message from ordered deltas.
+#[derive(Default)]
+struct StreamAccumulator {
+    content: String,
+    tool_calls: Vec<StreamToolCall>,
+}
+
+#[derive(Default)]
+struct StreamToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+/// What a completed stream produced.
+#[derive(Debug)]
+enum StreamedMessage {
+    Message(Message),
+    /// HTTP 200 but nothing usable came out; carries the finish reason.
+    Empty(String),
+}
+
+fn apply_chunk(acc: &mut StreamAccumulator, finish: &mut Option<String>, chunk: StreamChunk) {
+    for choice in chunk.choices {
+        if let Some(reason) = choice.finish_reason {
+            *finish = Some(reason);
+        }
+        let Some(delta) = choice.delta else { continue };
+        if let Some(text) = delta.content {
+            acc.content.push_str(&text);
+        }
+        for call in delta.tool_calls.unwrap_or_default() {
+            if acc.tool_calls.len() <= call.index {
+                acc.tool_calls
+                    .resize_with(call.index + 1, StreamToolCall::default);
+            }
+            let slot = &mut acc.tool_calls[call.index];
+            if let Some(id) = call.id {
+                slot.id.push_str(&id);
+            }
+            if let Some(function) = call.function {
+                if let Some(name) = function.name {
+                    slot.name.push_str(&name);
+                }
+                if let Some(args) = function.arguments {
+                    slot.arguments.push_str(&args);
+                }
+            }
+        }
+    }
+}
+
+impl StreamAccumulator {
+    /// `None` when the stream carried neither content nor tool calls.
+    fn into_message(self) -> Option<Message> {
+        let tool_calls = self
+            .tool_calls
+            .into_iter()
+            .filter(|call| !call.name.is_empty())
+            .map(|call| ToolCallResponse {
+                id: call.id,
+                call_type: "function".to_string(),
+                function: FunctionCallData {
+                    name: call.name,
+                    arguments: call.arguments,
+                },
+            })
+            .collect::<Vec<_>>();
+        let content = (!self.content.is_empty()).then_some(self.content);
+        if content.is_none() && tool_calls.is_empty() {
+            return None;
+        }
+        Some(Message {
+            role: "assistant".to_string(),
+            content,
+            tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
+            tool_call_id: None,
+        })
+    }
+}
+
+/// Reads an SSE chat-completions body: keep-alive comments and blank lines
+/// are skipped, `data:` payloads accumulate, `[DONE]` ends the stream. A
+/// top-level `error` payload is the mid-stream failure channel (the HTTP
+/// status is already 200 by then — see OpenRouter's error docs).
+fn read_stream<R: std::io::Read>(reader: R) -> Result<StreamedMessage, LlmError> {
+    let mut acc = StreamAccumulator::default();
+    let mut finish: Option<String> = None;
+
+    for line in std::io::BufReader::new(reader).lines() {
+        let line = line.map_err(|e| LlmError::Http(e.to_string()))?;
+        let line = line.trim_end();
+        if !line.starts_with("data: ") {
+            continue;
+        }
+        let data = &line["data: ".len()..];
+        if data == "[DONE]" {
+            break;
+        }
+        let chunk: StreamChunk = match serde_json::from_str(data) {
+            Ok(chunk) => chunk,
+            Err(_) => continue,
+        };
+        if let Some(err) = chunk.error {
+            let status = err.get("code").and_then(Value::as_u64).unwrap_or(502) as u16;
+            return Err(LlmError::Api {
+                status,
+                message: err.to_string(),
+            });
+        }
+        apply_chunk(&mut acc, &mut finish, chunk);
+    }
+
+    match acc.into_message() {
+        Some(message) => Ok(StreamedMessage::Message(message)),
+        None => Ok(StreamedMessage::Empty(
+            finish.unwrap_or_else(|| "unknown".to_string()),
+        )),
+    }
 }
 
 impl OpenRouterClient {
     pub fn new(api_key: &str, model: &str) -> Result<Self, LlmError> {
         let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(180))
+            .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .connect_timeout(std::time::Duration::from_secs(15))
             .build()
             .map_err(|e| LlmError::Http(e.to_string()))?;
         Ok(Self {
@@ -134,7 +319,8 @@ impl OpenRouterClient {
         usage_path: PathBuf,
     ) -> Result<Self, LlmError> {
         let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(180))
+            .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .connect_timeout(std::time::Duration::from_secs(15))
             .build()
             .map_err(|e| LlmError::Http(e.to_string()))?;
 
@@ -189,16 +375,24 @@ impl OpenRouterClient {
             model: self.model.clone(),
             messages: messages.to_vec(),
             tools: openai_tools,
-            max_tokens: Some(8192),
+            max_tokens: Some(MAX_COMPLETION_TOKENS),
+            stream: Some(true),
+            reasoning: Some(ReasoningConfig {
+                max_tokens: Some(REASONING_TOKEN_CAP),
+            }),
+            provider: Some(ProviderPrefs {
+                require_parameters: tools.is_some(),
+            }),
         };
 
         let url = format!("{}/chat/completions", OPENROUTER_API_BASE);
         let mut last_error: Option<LlmError> = None;
+        let mut next_delay = std::time::Duration::from_secs(5);
 
         for attempt in 0..MAX_RETRIES {
             if attempt > 0 {
-                let delay = std::time::Duration::from_secs(5 * (1 << (attempt - 1)));
-                std::thread::sleep(delay);
+                std::thread::sleep(next_delay);
+                next_delay *= 2;
             }
 
             let resp = match self
@@ -230,41 +424,34 @@ impl OpenRouterClient {
             let status = resp.status().as_u16();
             match status {
                 200 => {
-                    let body: ChatResponse = match resp.json() {
-                        Ok(b) => b,
+                    match read_stream(resp) {
+                        Ok(StreamedMessage::Message(message)) => {
+                            // Persist usage
+                            {
+                                let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
+                                self.persist_usage(&rate);
+                            }
+                            return Ok(message);
+                        }
+                        Ok(StreamedMessage::Empty(finish)) => {
+                            // Nothing usable in a 200 — release the rate slot so
+                            // this dead trip doesn't count against the daily cap.
+                            self.rate
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .undo_reserve();
+                            return Err(LlmError::Parse(format!(
+                                "Empty response from OpenRouter (finish_reason: {finish})"
+                            )));
+                        }
                         Err(e) => {
                             self.rate
                                 .lock()
                                 .unwrap_or_else(|e| e.into_inner())
                                 .undo_reserve();
-                            return Err(LlmError::Http(e.to_string()));
+                            return Err(e);
                         }
-                    };
-
-                    let message = match body
-                        .choices
-                        .and_then(|c| c.into_iter().next())
-                        .and_then(|c| c.message)
-                    {
-                        Some(m) => m,
-                        None => {
-                            // 200 with empty choices — release the rate slot so this
-                            // dead trip doesn't count against the daily counter.
-                            self.rate
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .undo_reserve();
-                            return Err(LlmError::Parse("No response from OpenRouter".into()));
-                        }
-                    };
-
-                    // Persist usage
-                    {
-                        let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
-                        self.persist_usage(&rate);
                     }
-
-                    return Ok(message);
                 }
                 401 => {
                     self.rate
@@ -280,7 +467,18 @@ impl OpenRouterClient {
                         .undo_reserve();
                     return Err(LlmError::RateLimited);
                 }
-                500 | 502 | 503 => {
+                // Retryable: server + gateway + provider failures. 408/504 are
+                // OpenRouter's "upstream didn't respond in time"; 529 is the
+                // Anthropic overloaded signal normalized through their router.
+                408 | 500 | 502 | 503 | 504 | 529 => {
+                    if let Some(secs) = resp
+                        .headers()
+                        .get("Retry-After")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok())
+                    {
+                        next_delay = std::time::Duration::from_secs(secs.min(60));
+                    }
                     let body = resp.text().unwrap_or_default();
                     last_error = Some(LlmError::Api {
                         status,
@@ -873,35 +1071,26 @@ mod tests {
 
     #[test]
     fn test_tool_call_id_round_trip() {
-        // Simulate a server response containing an assistant message with one
-        // tool call. Parse it the same way `send_chat` does, then echo the id
-        // back on a tool-role follow-up message — the same echo path
-        // `generate_with_tools_progress` uses.
-        let server_response_json = r#"{
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call_fRzHUzNm7",
-                        "type": "function",
-                        "function": {"name": "square_number", "arguments": "{\"number\":7}"}
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        }"#;
+        // Simulate a streamed server response carrying an assistant message
+        // with one tool call — accumulated the same way `send_chat` does via
+        // `read_stream` — then echo the id back on a tool-role follow-up, the
+        // same path `generate_with_tools_progress` uses.
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":null}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_fRzHUzNm7\",\"type\":\"function\",\"function\":{\"name\":\"square_number\",\"arguments\":\"{\\\"number\\\":7}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n",
+            "data: [DONE]\n",
+        );
 
-        let body: ChatResponse =
-            serde_json::from_str(server_response_json).expect("parse ChatResponse");
-        let assistant_msg = body
-            .choices
-            .and_then(|c| c.into_iter().next())
-            .and_then(|c| c.message)
-            .expect("assistant message");
+        let assistant_msg = match read_stream(sse.as_bytes()).expect("stream parses") {
+            StreamedMessage::Message(m) => m,
+            StreamedMessage::Empty(finish) => panic!("unexpected empty stream: {finish}"),
+        };
         let tool_calls = assistant_msg.tool_calls.clone().expect("tool_calls");
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].id, "call_fRzHUzNm7");
+        assert_eq!(tool_calls[0].function.name, "square_number");
+        assert_eq!(tool_calls[0].function.arguments, "{\"number\":7}");
 
         let follow_up = Message {
             role: "tool".into(),
@@ -912,5 +1101,77 @@ mod tests {
         let wire = serde_json::to_value(&follow_up).unwrap();
         assert_eq!(wire["role"], "tool");
         assert_eq!(wire["tool_call_id"], "call_fRzHUzNm7");
+    }
+
+    #[test]
+    fn test_read_stream_accumulates_content_and_skips_keepalives() {
+        let sse = concat!(
+            ": OPENROUTER PROCESSING\n",
+            "\n",
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\"}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n",
+            ": OPENROUTER PROCESSING\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"total_tokens\":9}}\n",
+            "data: [DONE]\n",
+            "data: {\"ignored\":\"after done\"}\n",
+        );
+        match read_stream(sse.as_bytes()).expect("ok") {
+            StreamedMessage::Message(m) => {
+                assert_eq!(m.role, "assistant");
+                assert_eq!(m.content.as_deref(), Some("Hello"));
+                assert!(m.tool_calls.is_none());
+            }
+            StreamedMessage::Empty(finish) => panic!("expected content, got empty: {finish}"),
+        }
+    }
+
+    #[test]
+    fn test_read_stream_merges_fragmented_parallel_tool_calls() {
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"a\",\"arguments\":\"{\\\"x\\\":\"}}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"c2\",\"function\":{\"name\":\"b\",\"arguments\":\"{}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"1}\"}}]}}]}\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n",
+            "data: [DONE]\n",
+        );
+        match read_stream(sse.as_bytes()).expect("ok") {
+            StreamedMessage::Message(m) => {
+                let calls = m.tool_calls.expect("tool calls");
+                assert_eq!(calls.len(), 2);
+                assert_eq!(calls[0].id, "c1");
+                assert_eq!(calls[0].function.name, "a");
+                assert_eq!(calls[0].function.arguments, "{\"x\":1}");
+                assert_eq!(calls[1].id, "c2");
+                assert_eq!(calls[1].function.arguments, "{}");
+            }
+            StreamedMessage::Empty(_) => panic!("expected tool calls"),
+        }
+    }
+
+    #[test]
+    fn test_read_stream_mid_stream_error_maps_to_api_error() {
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n",
+            "data: {\"id\":\"x\",\"error\":{\"code\":429,\"message\":\"Rate limit exceeded\",\"metadata\":{\"error_type\":\"rate_limit_exceeded\"}},\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"error\"}]}\n",
+        );
+        match read_stream(sse.as_bytes()).expect_err("mid-stream error must fail") {
+            LlmError::Api { status, message } => {
+                assert_eq!(status, 429);
+                assert!(message.contains("Rate limit exceeded"));
+            }
+            other => panic!("expected Api error, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn test_read_stream_empty_body_reports_finish_reason() {
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n",
+            "data: [DONE]\n",
+        );
+        match read_stream(sse.as_bytes()).expect("ok") {
+            StreamedMessage::Empty(finish) => assert_eq!(finish, "length"),
+            StreamedMessage::Message(_) => panic!("expected empty"),
+        }
     }
 }

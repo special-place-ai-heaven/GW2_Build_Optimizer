@@ -2,6 +2,42 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.6.1 - 2026-08-26
+
+Choya stopped going silent. Every OpenRouter request — chat, Optimize, and Improve — now streams its answer instead of waiting minutes for a single buffered payload, reasoning models get a dedicated thinking budget that cannot starve the actual reply, and transient gateway failures retry with backoff instead of killing the turn. If a model appeared to "stop responding entirely" — the request eventually failing with *Request timed out. Try a larger/faster model.* — that was this bug, and it is fixed.
+
+### Why requests timed out
+
+- The OpenRouter client sent one non-streaming `POST` per request and enforced a hard 180-second wall clock. Nothing arrived until the model finished the entire generation, so the connection sat completely idle while the model worked.
+- Reasoning models such as `z-ai/glm-5.3-flash` spend minutes on hidden thinking before their first output byte — measured at 220 seconds on a real request. OpenRouter's own gateway also aborts non-streaming requests whose provider does not answer in time, returning 408/504. Either way the request died as a false timeout on exactly the models that think the most, while quick non-reasoning models kept working — which is why only *some* models broke.
+
+### Streamed replies
+
+- All chat completions now use `stream: true`. OpenRouter interleaves `: OPENROUTER PROCESSING` keep-alive comments so the connection never idles, and the first bytes land in seconds (2.4 s measured, down from 220 s to anything at all).
+- The SSE parser follows OpenRouter's streaming contract: keep-alive comments and blank lines are skipped, content and tool-call deltas accumulate (parallel calls merged by index, fragmented JSON arguments stitched back together), `[DONE]` ends the stream, and the usage-bearing final chunk is tolerated.
+- Mid-stream failures arrive inside a 200 response, so they are now recognized in-band: a top-level `error` payload or `finish_reason: "error"` maps to the same typed messages as before (rate limited, billing, timeout, overloaded) instead of surfacing as a confusing empty reply.
+
+### Answers no longer starved by thinking
+
+- Reasoning models share one completion budget between hidden thinking and the visible answer. The old flat `max_tokens: 8192` let thinking consume the entire budget and return an empty message with `finish_reason: length` — reproduced live with 0 characters of content.
+- Requests now cap hidden reasoning at 8,192 tokens (`reasoning.max_tokens`) inside a 16,384-token completion ceiling, so a long thinking phase leaves room for the build JSON and its explanation. Providers without thinking support ignore the parameter.
+
+### Smarter retries and timeouts
+
+- Gateway timeouts are now retryable: 408, 504, and 529 join the existing 500/502/503 retry list. Previously a single OpenRouter 408 killed the turn immediately with no retry at all.
+- `Retry-After` is honored when OpenRouter sends one (capped at 60 seconds) instead of always guessing 5/10-second backoff.
+- The connection budget grew from a 180-second whole-request kill to 900 seconds total with a 15-second connect timeout — a stalled request still fails, but a model that legitimately thinks for minutes now finishes.
+
+### Tool-call routing
+
+- Any request that carries function-calling tools now sets `provider.require_parameters: true`, so OpenRouter only routes to endpoints that implement tools natively — never to one that would fake them through a prompt template and return unparseable pseudo tool calls.
+
+### Tests
+
+- Five new unit tests cover the SSE reader: keep-alive skipping, content accumulation, fragmented parallel tool-call merging, mid-stream error mapping, and empty-stream finish-reason reporting; the existing tool-call round-trip test now exercises the streaming path.
+- OpenRouter joined the live provider suite (`test_openrouter_validate_and_generate`): key validation, streamed generation, response caching, and a real streamed tool loop run against the production API. Full workspace suite: 785 passing.
+- The Gemini, OpenAI, and Anthropic providers are unchanged in this release.
+
 ## 1.6.0 - 2026-08-25
 
 New About tab. What's new shows the release notes for the last five versions in game. Message developer is a short guided form for a bug, a wrong build, a suggestion, a question, or a fistbump for Choya; each message shows its status (received, read, answered, closed) and the reply inline, refreshed on tab open and every five minutes, and the About pill pulses when an answer lands. Failed sends are kept locally with Resend, and nothing typed is lost. Ko-fi link in the header and on the first form step. Privacy: messages carry the category, choices, text, addon version, game build, language, mode/scale/role, profession and elite spec, and the AI provider name; a contact line, the account name, and a slim copy of the last optimize result are opt-in; API keys and character names are never sent.
