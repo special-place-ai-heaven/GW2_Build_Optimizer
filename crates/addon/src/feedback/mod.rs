@@ -427,7 +427,7 @@ impl FeedbackState {
 pub fn snapshot_from(s: &crate::ui::comparison::BuildSuggestion) -> BuildSnapshot {
     BuildSnapshot {
         stat_prefix: s.stat_prefix.clone(),
-        gear_prefixes: s.gear_prefixes.clone(),
+        slot_prefixes: s.slot_prefixes.clone(),
         specializations: s.specializations.clone(),
         weapons: s.weapons.clone(),
         sigils: s.sigils.clone(),
@@ -844,10 +844,23 @@ mod tests {
             label: "NOT-IN-SNAPSHOT label".to_string(),
             build_summary: "NOT-IN-SNAPSHOT summary".to_string(),
             stat_prefix: stat_prefix.to_string(),
-            gear_prefixes: gw2_core::types::GearPrefixGroups {
-                armor: "Marauder".to_string(),
-                trinkets: "Berserker".to_string(),
-                weapons: "Marauder".to_string(),
+            slot_prefixes: {
+                let mut slots = gw2_core::types::GearSlots::default();
+                slots.set(
+                    gw2_core::types::GearSlot::Amulet,
+                    gw2_core::types::PrefixRef {
+                        itemstat_id: 1,
+                        name: "Berserker".into(),
+                    },
+                );
+                slots.set(
+                    gw2_core::types::GearSlot::Helm,
+                    gw2_core::types::PrefixRef {
+                        itemstat_id: 1,
+                        name: "Marauder".into(),
+                    },
+                );
+                Some(slots)
             },
             specializations: vec![(
                 "Skirmishing".to_string(),
@@ -881,7 +894,7 @@ mod tests {
             v.as_object().unwrap().keys().cloned().collect();
         let want: std::collections::BTreeSet<String> = [
             "stat_prefix",
-            "gear_prefixes",
+            "slot_prefixes",
             "specializations",
             "weapons",
             "sigils",
@@ -897,7 +910,13 @@ mod tests {
         assert!(!json.contains("NOT-IN-SNAPSHOT"), "{json}");
 
         assert_eq!(snap.stat_prefix, "Marauder");
-        assert_eq!(snap.gear_prefixes.trinkets, "Berserker");
+        assert_eq!(
+            snap.slot_prefixes
+                .as_ref()
+                .and_then(|s| s.get(gw2_core::types::GearSlot::Amulet))
+                .map(|p| p.name.as_str()),
+            Some("Berserker")
+        );
         assert_eq!(snap.specializations[0].0, "Skirmishing");
         assert_eq!(snap.weapons, vec!["Hammer".to_string()]);
         assert_eq!(snap.sigils, vec!["Force".to_string()]);

@@ -849,6 +849,11 @@ pub struct GeminiBuildResponse {
     pub synergy_explanation: Option<String>,
     /// Structured changes with slot/from/to/reason (new format).
     pub changes_structured: Option<Vec<serde_json::Value>>,
+    /// Per-slot gear map: kebab-case slot name (`helm`, `ring-1`,
+    /// `weapon-set-1-main`, …) → stat-prefix **name**. Optional — plates
+    /// without it keep today's profile-prefix behavior. Names are resolved
+    /// against GameDb by `validation::validate_gemini_build`.
+    pub gear_slots: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Parse a Gemini response into a typed build suggestion.
@@ -962,6 +967,19 @@ pub fn parse_gemini_build(response: &str) -> Result<GeminiBuildResponse, String>
     if let Some(arr) = json.get("changes").and_then(|v| v.as_array()) {
         result.changes_structured = Some(arr.clone());
     }
+    // Per-slot gear map: kebab slot name → prefix name. Optional; plates
+    // without it keep the profile-prefix behavior (validation fills slots).
+    if let Some(obj) = json.get("gear_slots").and_then(|v| v.as_object()) {
+        let mut map = std::collections::HashMap::new();
+        for (k, v) in obj {
+            if let Some(s) = v.as_str() {
+                map.insert(k.clone(), s.to_string());
+            }
+        }
+        if !map.is_empty() {
+            result.gear_slots = Some(map);
+        }
+    }
 
     Ok(result)
 }
@@ -995,6 +1013,46 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn parse_gemini_build_accepts_per_slot_gear_map() {
+        let response = r#"{
+            "stat_prefix": "Berserker's",
+            "gear_slots": {
+                "helm": "Berserker's",
+                "coat": "Cavalier's",
+                "ring-1": "Sinister",
+                "weapon-set-1-main": "Assassin's"
+            }
+        }"#;
+        let parsed = parse_gemini_build(response).unwrap();
+        let map = parsed.gear_slots.expect("gear_slots must parse");
+        assert_eq!(map.get("helm").map(String::as_str), Some("Berserker's"));
+        assert_eq!(map.get("coat").map(String::as_str), Some("Cavalier's"));
+        assert_eq!(map.get("ring-1").map(String::as_str), Some("Sinister"));
+        assert_eq!(
+            map.get("weapon-set-1-main").map(String::as_str),
+            Some("Assassin's")
+        );
+    }
+
+    #[test]
+    fn parse_gemini_build_accepts_plate_without_gear_map() {
+        let response = r#"{"stat_prefix": "Viper's", "explanation": "Condi"}"#;
+        let parsed = parse_gemini_build(response).unwrap();
+        assert!(parsed.gear_slots.is_none());
+    }
+
+    #[test]
+    fn parse_gemini_build_ignores_non_string_gear_values() {
+        // A nested object / number for a slot is unusable; the parser keeps the
+        // string entries and drops the rest instead of failing the whole plate.
+        let response =
+            r#"{"stat_prefix": "Berserker's", "gear_slots": {"helm": 42, "boots": "Berserker's"}}"#;
+        let parsed = parse_gemini_build(response).unwrap();
+        let map = parsed.gear_slots.expect("string entries must survive");
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("boots").map(String::as_str), Some("Berserker's"));
+    }
     #[test]
     fn test_game_context_mentions_priorities() {
         let ctx = build_game_context("Warrior", &OptimizationWeights::preset_power_dps(), "PvE");

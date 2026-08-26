@@ -407,6 +407,7 @@ pub fn validate_gemini_build(
     validate_sigils(response, db, &mut result);
     validate_relic(response, db, &mut result);
     validate_gear_prefix(response, db, &mut result);
+    validate_gear_slot_map(response, db, &mut result);
 
     result
 }
@@ -898,6 +899,92 @@ fn validate_gear_prefix(response: &GeminiBuildResponse, db: &GameDb, result: &mu
         itemstat_id: itemstat.id,
         name: itemstat.name.clone(),
     });
+}
+
+/// Per-slot plate gear map (spec §12.3): Choya proposes, the referee disposes.
+///
+/// Runs AFTER [`validate_gear_prefix`] so every slot already holds the
+/// weight-profile prefix — that fill is the fallback for entries that cannot
+/// resolve. Each plate entry is applied with strict validation:
+/// - the slot name must match a known `GearSlot` kebab name (case-insensitive),
+///   else the entry is rejected with a warning;
+/// - the prefix name resolves via `db.itemstat_by_name`; unknown names keep
+///   the profile prefix and emit one warning per unique failing name.
+fn validate_gear_slot_map(
+    response: &GeminiBuildResponse,
+    db: &GameDb,
+    result: &mut ValidatedBuild,
+) {
+    let Some(map) = &response.gear_slots else {
+        return;
+    };
+    if map.is_empty() {
+        return;
+    }
+
+    // Deterministic application order: sort by (slot name, prefix name) so a
+    // HashMap-ordered plate can never reorder warnings or overwrites (the
+    // last write wins only when two keys normalize to the same slot).
+    let mut entries: Vec<(&str, &str)> = map
+        .iter()
+        .map(|(slot, prefix)| (slot.as_str(), prefix.as_str()))
+        .collect();
+    entries.sort_unstable();
+
+    let mut rejected_slots: Vec<&str> = Vec::new();
+    let mut fallback_names: Vec<&str> = Vec::new();
+    let mut fuzzy_matches: Vec<(&str, String)> = Vec::new();
+
+    for (raw_slot, raw_prefix) in entries {
+        let wanted = raw_slot.trim().to_lowercase();
+        let Some(slot) = GearSlot::ALL
+            .iter()
+            .copied()
+            .find(|s| s.kebab_name() == wanted)
+        else {
+            if !rejected_slots.contains(&raw_slot) {
+                rejected_slots.push(raw_slot);
+            }
+            continue;
+        };
+        let Some(itemstat) = db.itemstat_by_name(raw_prefix) else {
+            // Fallback per spec §9: the slot keeps the weight-profile prefix
+            // filled by validate_gear_prefix; warn once per unique name.
+            if !fallback_names.contains(&raw_prefix) {
+                fallback_names.push(raw_prefix);
+            }
+            continue;
+        };
+        let needle_key = gw2_core::i18n::alnum_key(raw_prefix);
+        let is_exact = itemstat.name.to_lowercase() == raw_prefix.to_lowercase()
+            || (!needle_key.is_empty() && gw2_core::i18n::alnum_key(&itemstat.name) == needle_key);
+        if !is_exact && !fuzzy_matches.iter().any(|(_, name)| *name == itemstat.name) {
+            fuzzy_matches.push((raw_prefix, itemstat.name.clone()));
+        }
+        result.gear_slots.set(
+            slot,
+            PrefixRef {
+                itemstat_id: itemstat.id,
+                name: itemstat.name.clone(),
+            },
+        );
+    }
+
+    for slot in rejected_slots {
+        result.warnings.push(format!(
+            "Plate gear slot '{slot}' is not a known equipment slot; entry ignored"
+        ));
+    }
+    for name in fallback_names {
+        result.warnings.push(format!(
+            "Plate gear prefix '{name}' not found; affected slots keep the profile prefix"
+        ));
+    }
+    for (needle, matched) in fuzzy_matches {
+        result.warnings.push(format!(
+            "Plate gear prefix '{needle}' fuzzy-matched to '{matched}'"
+        ));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1635,6 +1722,117 @@ mod tests {
             assert_eq!(p.itemstat_id, 101);
             assert_eq!(p.name, "Berserker's");
         }
+    }
+
+    // ── validate_gear_slot_map() — per-slot plate policy (spec §12.3) ────────
+
+    fn run_validate_slot_map(
+        stat_prefix: &str,
+        gear_slots: std::collections::HashMap<String, String>,
+        db: &GameDb,
+    ) -> ValidatedBuild {
+        let mut response = GeminiBuildResponse::default();
+        response.stat_prefix = stat_prefix.into();
+        response.gear_slots = Some(gear_slots);
+        let mut result = ValidatedBuild::default();
+        validate_gear_prefix(&response, db, &mut result);
+        validate_gear_slot_map(&response, db, &mut result);
+        result
+    }
+
+    #[test]
+    fn plate_full_map_overrides_each_named_slot() {
+        let db = empty_db_with_itemstats(vec![(101, "Berserker's"), (102, "Cavalier's")]);
+        let result = run_validate_slot_map(
+            "Berserker's",
+            [
+                ("helm".to_string(), "Cavalier's".to_string()),
+                ("coat".to_string(), "Berserker's".to_string()),
+                ("ring-1".to_string(), "cavalier's".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            &db,
+        );
+        assert_eq!(result.prefix_for(GearSlot::Helm).unwrap().itemstat_id, 102);
+        assert_eq!(result.prefix_for(GearSlot::Coat).unwrap().itemstat_id, 101);
+        assert_eq!(result.prefix_for(GearSlot::Ring1).unwrap().itemstat_id, 102);
+        // Unnamed slots keep the profile prefix.
+        assert_eq!(result.prefix_for(GearSlot::Boots).unwrap().itemstat_id, 101);
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn plate_partial_map_leaves_other_slots_at_profile_prefix() {
+        let db = empty_db_with_itemstats(vec![(101, "Berserker's"), (103, "Viper's")]);
+        let result = run_validate_slot_map(
+            "Berserker's",
+            [("weapon-set-2-main".to_string(), "Viper's".to_string())]
+                .into_iter()
+                .collect(),
+            &db,
+        );
+        assert_eq!(
+            result
+                .prefix_for(GearSlot::WeaponSet2Main)
+                .unwrap()
+                .itemstat_id,
+            103
+        );
+        for slot in [GearSlot::Helm, GearSlot::Amulet, GearSlot::WeaponSet1Main] {
+            assert_eq!(result.prefix_for(slot).unwrap().itemstat_id, 101);
+        }
+    }
+
+    #[test]
+    fn plate_unknown_prefix_falls_back_to_profile_and_warns_once() {
+        let db = empty_db_with_itemstats(vec![(101, "Berserker's")]);
+        let result = run_validate_slot_map(
+            "Berserker's",
+            [
+                ("helm".to_string(), "Nonexistentium".to_string()),
+                ("boots".to_string(), "Nonexistentium".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            &db,
+        );
+        // Both slots keep the profile prefix.
+        assert_eq!(result.prefix_for(GearSlot::Helm).unwrap().itemstat_id, 101);
+        assert_eq!(result.prefix_for(GearSlot::Boots).unwrap().itemstat_id, 101);
+        // One warning per unique failing name, not one per slot.
+        let warnings: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|w| w.contains("not found"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "{:?}", result.warnings);
+        assert!(warnings[0].contains("Nonexistentium"));
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn plate_unknown_slot_name_is_rejected_with_warning() {
+        let db = empty_db_with_itemstats(vec![(101, "Berserker's")]);
+        let result = run_validate_slot_map(
+            "Berserker's",
+            [
+                ("relic".to_string(), "Berserker's".to_string()),
+                ("helm ".to_string(), "Berserker's".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            &db,
+        );
+        assert_eq!(result.prefix_for(GearSlot::Helm).unwrap().itemstat_id, 101);
+        let rejected: Vec<_> = result
+            .warnings
+            .iter()
+            .filter(|w| w.contains("not a known equipment slot"))
+            .collect();
+        assert_eq!(rejected.len(), 1, "{:?}", result.warnings);
+        assert!(rejected[0].contains("'relic'"));
+        assert!(result.errors.is_empty());
     }
 
     #[test]

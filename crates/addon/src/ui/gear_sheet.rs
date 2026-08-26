@@ -9,6 +9,7 @@ use super::comparison::BuildSuggestion;
 use super::gear_diff::parse_suggestion_weapons;
 use super::theme;
 use super::{comparison, icons};
+use gw2_core::types::GearSlot;
 
 const ARMOR_SLOTS: [&str; 6] = ["Helm", "Shoulders", "Coat", "Gloves", "Leggings", "Boots"];
 const TRINKET_SLOTS: [&str; 6] = [
@@ -19,6 +20,50 @@ const TRINKET_SLOTS: [&str; 6] = [
     "Ring1",
     "Ring2",
 ];
+
+/// Resolved-build piece slot string → canonical gear slot (armor + trinkets).
+pub fn piece_gear_slot(slot: &str) -> Option<GearSlot> {
+    match slot {
+        "Helm" => Some(GearSlot::Helm),
+        "Shoulders" => Some(GearSlot::Shoulders),
+        "Coat" => Some(GearSlot::Coat),
+        "Gloves" => Some(GearSlot::Gloves),
+        "Leggings" => Some(GearSlot::Leggings),
+        "Boots" => Some(GearSlot::Boots),
+        "Backpack" => Some(GearSlot::Back),
+        "Accessory1" => Some(GearSlot::Accessory1),
+        "Accessory2" => Some(GearSlot::Accessory2),
+        "Amulet" => Some(GearSlot::Amulet),
+        "Ring1" => Some(GearSlot::Ring1),
+        "Ring2" => Some(GearSlot::Ring2),
+        _ => None,
+    }
+}
+
+/// The suggestion's prefix for one armor/trinket piece: its own slot entry on
+/// the map when present, else the profile-level prefix name.
+pub fn sug_prefix_for_piece<'a>(sug: &'a BuildSuggestion, piece_slot: &str) -> &'a str {
+    sug.slot_prefixes
+        .as_ref()
+        .zip(piece_gear_slot(piece_slot))
+        .and_then(|(map, gear_slot)| map.get(gear_slot))
+        .map(|p| p.name.as_str())
+        .unwrap_or(&sug.stat_prefix)
+}
+
+/// The suggestion's prefix for weapon set `set_idx` (0-based): the set's main
+/// hand entry, else the profile-level prefix name.
+pub fn sug_prefix_for_weapon(sug: &BuildSuggestion, set_idx: usize) -> &str {
+    let slot = match set_idx {
+        0 => GearSlot::WeaponSet1Main,
+        _ => GearSlot::WeaponSet2Main,
+    };
+    sug.slot_prefixes
+        .as_ref()
+        .and_then(|map| map.get(slot))
+        .map(|p| p.name.as_str())
+        .unwrap_or(&sug.stat_prefix)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GainTint {
@@ -127,7 +172,14 @@ fn render_resolved_sheet(
             .and_then(|r| icons::item_url(d, r.id))
             .or_else(|| icons::upgrade_url(d, rune_name))
     });
-    let sug_prefix = suggestion.map(|s| s.stat_prefix.as_str()).unwrap_or("");
+    // Per-piece suggested prefix: the suggestion's slot map entry for each
+    // piece, falling back to the profile-level name. Empty when no suggestion.
+    let sug_prefix = |piece_slot: &str| -> String {
+        suggestion
+            .map(|s| sug_prefix_for_piece(s, piece_slot))
+            .unwrap_or("")
+            .to_string()
+    };
     let sug_rune = suggestion.map(|s| s.rune.as_str()).unwrap_or("");
 
     gear_columns(
@@ -139,9 +191,11 @@ fn render_resolved_sheet(
                 let prefix = piece.map(|p| p.stat_prefix.as_str()).unwrap_or("");
                 let name = piece.map(|p| p.name.as_str()).unwrap_or("");
                 let url = db.and_then(|d| piece.and_then(|p| icons::item_url(d, p.id)));
+                let suggested = sug_prefix(slot);
                 let changed = suggestion.is_some()
-                    && (prefix != sug_prefix && !sug_prefix.is_empty() || rune_name != sug_rune);
-                let other = suggestion.map(|s| format!("{} {}", s.stat_prefix, slot_label(slot)));
+                    && (prefix != suggested && !suggested.is_empty() || rune_name != sug_rune);
+                let other =
+                    suggestion.map(|_| format!("{} {}", sug_prefix(slot), slot_label(slot)));
                 row(
                     ui,
                     db,
@@ -163,9 +217,10 @@ fn render_resolved_sheet(
                 let prefix = piece.map(|p| p.stat_prefix.as_str()).unwrap_or("");
                 let name = piece.map(|p| p.name.as_str()).unwrap_or("");
                 let url = db.and_then(|d| piece.and_then(|p| icons::item_url(d, p.id)));
-                let changed =
-                    suggestion.is_some() && prefix != sug_prefix && !sug_prefix.is_empty();
-                let other = suggestion.map(|s| format!("{} {}", s.stat_prefix, slot_label(slot)));
+                let suggested = sug_prefix(slot);
+                let changed = suggestion.is_some() && prefix != suggested && !suggested.is_empty();
+                let other =
+                    suggestion.map(|_| format!("{} {}", sug_prefix(slot), slot_label(slot)));
                 row(
                     ui,
                     db,
@@ -235,11 +290,14 @@ fn render_resolved_sheet(
                         })
                 });
                 let sigils: Vec<String> = set.sigils.iter().map(|s| s.name.clone()).collect();
+                let sug_weapon_prefix = suggestion
+                    .map(|s| sug_prefix_for_weapon(s, i))
+                    .unwrap_or(&set.stat_prefix);
                 weapon_row(
                     ui,
                     db,
                     url,
-                    &set.stat_prefix,
+                    sug_weapon_prefix,
                     &set.label,
                     &label,
                     &sigils,
@@ -275,6 +333,7 @@ fn render_suggestion_sheet(
             for slot in ARMOR_SLOTS {
                 let cur = current.armor.iter().find(|p| p.slot == slot);
                 let cur_prefix = cur.map(|p| p.stat_prefix.as_str()).unwrap_or("");
+                let suggested = sug_prefix_for_piece(sug, slot);
                 let other = cur.map(|p| {
                     format!(
                         "{} {}",
@@ -290,14 +349,14 @@ fn render_suggestion_sheet(
                     ui,
                     db,
                     db.and_then(|d| cur.and_then(|p| icons::item_url(d, p.id))),
-                    &sug.stat_prefix,
+                    suggested,
                     slot_label(slot),
                     cur.map(|p| p.name.as_str()).unwrap_or(""),
                     &sug.rune,
                     rune_url,
                     other.as_deref(),
                     slot_tint(
-                        cur_prefix != sug.stat_prefix && !sug.stat_prefix.is_empty(),
+                        cur_prefix != suggested && !suggested.is_empty(),
                         viewing_optimized,
                         gain,
                     ),
@@ -309,19 +368,20 @@ fn render_suggestion_sheet(
             for slot in TRINKET_SLOTS {
                 let cur = current.trinkets.iter().find(|p| p.slot == slot);
                 let cur_prefix = cur.map(|p| p.stat_prefix.as_str()).unwrap_or("");
+                let suggested = sug_prefix_for_piece(sug, slot);
                 let other = cur.map(|p| format!("{} {}", p.stat_prefix, slot_label(slot)));
                 row(
                     ui,
                     db,
                     db.and_then(|d| cur.and_then(|p| icons::item_url(d, p.id))),
-                    &sug.stat_prefix,
+                    suggested,
                     slot_label(slot),
                     cur.map(|p| p.name.as_str()).unwrap_or(""),
                     "",
                     None,
                     other.as_deref(),
                     slot_tint(
-                        cur_prefix != sug.stat_prefix && !sug.stat_prefix.is_empty(),
+                        cur_prefix != suggested && !suggested.is_empty(),
                         viewing_optimized,
                         gain,
                     ),
@@ -379,7 +439,7 @@ fn render_suggestion_sheet(
                     ui,
                     db,
                     url,
-                    &sug.stat_prefix,
+                    sug_prefix_for_weapon(sug, i),
                     label,
                     weapons,
                     &sigil_names,

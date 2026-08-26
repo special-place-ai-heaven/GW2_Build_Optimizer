@@ -186,6 +186,7 @@
   "section.trinkets": "ABALORIOS",
   "section.gear": "EQUIPO",
   "section.stats": "ESTADÍSTICAS",
+  "gear.no_prefix": "Sin prefijo equipado para bloquear",
   "section.locks": "BLOQUEOS DE ESPECIALIZACIÓN",
   "section.optimized_specs": "ESPECS Y TRAITS OPTIMIZADOS",
   "section.attributes": "ATRIBUTOS",

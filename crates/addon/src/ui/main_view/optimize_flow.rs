@@ -472,6 +472,8 @@ fn enrich_with_llm(
 
     if let Some(first) = suggestions.first_mut() {
         apply_gemini_response(first, &gemini_build);
+        // Validator-resolved per-slot prefixes are the authoritative gear data.
+        first.slot_prefixes = Some(validated.gear_slots.clone());
         // Run rotation simulation now that LLM has populated skills
         simulate_suggestion_rotation(first, db, balance_ctx);
     }

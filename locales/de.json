@@ -186,6 +186,7 @@
   "section.trinkets": "SCHMUCK",
   "section.gear": "AUSRÜSTUNG",
   "section.stats": "WERTE",
+  "gear.no_prefix": "Kein Präfix ausgerüstet zum Sperren",
   "section.locks": "SPEZ- & TRAIT-SPERREN",
   "section.optimized_specs": "OPTIMIERTE SPECS & TRAITS",
   "section.attributes": "ATTRIBUTE",

@@ -186,6 +186,7 @@
   "section.trinkets": "SIERADEN",
   "section.gear": "GEAR",
   "section.stats": "STATS",
+  "gear.no_prefix": "Geen voorvoegsel uitgerust om te vergrendelen",
   "section.locks": "SPEC- EN TRAITVERGRENDELING",
   "section.optimized_specs": "OPTIMIZED SPECS & TRAITS",
   "section.attributes": "ATTRIBUTES",

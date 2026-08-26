@@ -186,6 +186,7 @@
   "section.trinkets": "GIOIELLI",
   "section.gear": "GEAR",
   "section.stats": "STATISTICHE",
+  "gear.no_prefix": "Nessun prefisso equipaggiato da bloccare",
   "section.locks": "BLOCCHI SPEC E TRAIT",
   "section.optimized_specs": "OPTIMIZED SPECS & TRAITS",
   "section.attributes": "ATTRIBUTES",

@@ -653,6 +653,21 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
     render_ranch_table(ui, state, &rows);
 }
 
+/// The per-slot prefix record to persist for a suggestion: its own slot map
+/// when present, else the legacy expansion of the profile-level fields.
+fn suggestion_slot_prefixes(
+    suggestion: &crate::ui::comparison::BuildSuggestion,
+) -> gw2_core::types::GearSlots {
+    suggestion.slot_prefixes.clone().unwrap_or_else(|| {
+        // `from_legacy` falls back to the profile-level name for every empty
+        // group, so default groups expand to a uniform profile fill.
+        gw2_core::types::GearSlots::from_legacy(
+            &suggestion.stat_prefix,
+            &gw2_core::types::GearPrefixGroups::default(),
+        )
+    })
+}
+
 /// Convert a BuildSuggestion to a SavedBuild.
 fn suggestion_to_saved(
     name: &str,
@@ -678,11 +693,11 @@ fn suggestion_to_saved(
         engine_version: crate::VERSION.to_string(),
         balance_manifest_version: balance_manifest_version.map(|s| s.to_string()),
         label: suggestion.label.clone(),
-        // Legacy gear shape remains authoritative until per-slot save wiring
-        // lands; loaders expand these via GearSlots::from_legacy.
+        // Downgrade path keeps only the profile-level name; the slot map is
+        // the authoritative per-slot record from here on.
         stat_prefix: suggestion.stat_prefix.clone(),
-        gear_prefixes: suggestion.gear_prefixes.clone(),
-        slot_prefixes: None,
+        gear_prefixes: gw2_core::types::GearPrefixGroups::default(),
+        slot_prefixes: Some(suggestion_slot_prefixes(suggestion)),
         specializations: suggestion.specializations.clone(),
         weapons: suggestion.weapons.clone(),
         skills: suggestion.skills.clone(),
@@ -752,7 +767,9 @@ fn saved_to_suggestion(
         },
         build_summary: String::new(),
         stat_prefix: saved.stat_prefix.clone(),
-        gear_prefixes: saved.gear_prefixes.inherit_empty(&saved.stat_prefix),
+        slot_prefixes: Some(saved.slot_prefixes.clone().unwrap_or_else(|| {
+            gw2_core::types::GearSlots::from_legacy(&saved.stat_prefix, &saved.gear_prefixes)
+        })),
         specializations: saved.specializations.clone(),
         weapons: saved.weapons.clone(),
         skills: saved.skills.clone(),
@@ -1218,9 +1235,83 @@ mod tests {
         let saved = build_saved_for_modifier_reconstruction();
         assert!(saved.gear_prefixes.armor.is_empty());
         let suggestion = super::saved_to_suggestion(&saved, None);
-        assert_eq!(suggestion.gear_prefixes.armor, "Viper's");
-        assert_eq!(suggestion.gear_prefixes.trinkets, "Viper's");
-        assert_eq!(suggestion.gear_prefixes.weapons, "Viper's");
+        let slots = suggestion
+            .slot_prefixes
+            .expect("loaded builds always carry a slot map");
+        let prefix = slots
+            .get(gw2_core::types::GearSlot::Helm)
+            .expect("legacy expansion fills armor");
+        assert_eq!(prefix.name, "Viper's");
+        assert_eq!(
+            slots
+                .get(gw2_core::types::GearSlot::WeaponSet1Main)
+                .unwrap()
+                .name,
+            "Viper's"
+        );
+    }
+
+    #[test]
+    fn slot_prefixes_round_trip_through_saved_build() {
+        use gw2_core::types::{GearSlot, PrefixRef};
+
+        // A suggestion carrying a mixed per-slot map (as the optimizer emits).
+        let mut slots = gw2_core::types::GearSlots::default();
+        slots.set(
+            GearSlot::Helm,
+            PrefixRef {
+                itemstat_id: 1,
+                name: "Berserker's".into(),
+            },
+        );
+        slots.set(
+            GearSlot::Coat,
+            PrefixRef {
+                itemstat_id: 2,
+                name: "Cavalier's".into(),
+            },
+        );
+        slots.set(
+            GearSlot::WeaponSet1Main,
+            PrefixRef {
+                itemstat_id: 3,
+                name: "Sinister".into(),
+            },
+        );
+        let suggestion = crate::ui::comparison::BuildSuggestion {
+            label: "Round Trip".into(),
+            stat_prefix: "Berserker's".into(),
+            slot_prefixes: Some(slots.clone()),
+            ..Default::default()
+        };
+
+        let saved = super::suggestion_to_saved(
+            "rt",
+            "char",
+            "Warrior",
+            &Default::default(),
+            None,
+            &suggestion,
+        );
+        // The save carries the authoritative map and stops duplicating groups.
+        assert_eq!(saved.slot_prefixes.as_ref(), Some(&slots));
+        assert!(saved.gear_prefixes.armor.is_empty());
+
+        // JSON round-trip keeps the sparse map byte-identical.
+        let json = serde_json::to_string(&saved).unwrap();
+        let reloaded: gw2_core::types::SavedBuild = serde_json::from_str(&json).unwrap();
+        assert_eq!(reloaded.slot_prefixes.as_ref(), Some(&slots));
+
+        let back = super::saved_to_suggestion(&reloaded, None);
+        assert_eq!(back.slot_prefixes.as_ref(), Some(&slots));
+        assert_eq!(
+            back.slot_prefixes
+                .unwrap()
+                .get(GearSlot::Coat)
+                .unwrap()
+                .name,
+            "Cavalier's"
+        );
     }
 
     #[test]

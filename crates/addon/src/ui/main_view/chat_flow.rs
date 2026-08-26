@@ -322,6 +322,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     ..Default::default()
                                 };
                                 apply_gemini_response(&mut suggestion, &plated);
+                                // Validator-resolved per-slot prefixes are the
+                                // authoritative gear data for the sheet/locks.
+                                if let Some(v) = &validated {
+                                    suggestion.slot_prefixes = Some(v.gear_slots.clone());
+                                }
                                 if let Some(ref db) = live_db {
                                     attach_chat_stats(&mut suggestion, db, &profession, &live_mode);
                                     if let Some(v) = &validated {

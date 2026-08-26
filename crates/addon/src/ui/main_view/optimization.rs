@@ -229,10 +229,8 @@ pub(super) fn synergy_result_to_suggestion(
         }
     };
 
-    // Per-slot reads: uniform-validation builds render exactly like the old
-    // build-wide prefix; mixed maps show each category's representative slot
-    // (helm / amulet / set-1 main hand). Per-piece rendering lands with the
-    // gear-sheet rework.
+    // Summary keeps the three-category shape (helm / amulet / set-1 main hand
+    // as representatives); the per-piece rows read the full slot map.
     let fallback_prefix = v
         .primary_prefix()
         .map(|prefix| prefix.name.clone())
@@ -242,14 +240,11 @@ pub(super) fn synergy_result_to_suggestion(
             .map(|prefix| prefix.name.clone())
             .unwrap_or_else(|| fallback_prefix.clone())
     };
-    let gear_prefixes = gw2_core::types::GearPrefixGroups {
-        armor: category_prefix(GearSlot::Helm),
-        trinkets: category_prefix(GearSlot::Amulet),
-        weapons: category_prefix(GearSlot::WeaponSet1Main),
-    };
     let gear_summary = format!(
         "Armor: {} · Trinkets: {} · Weapons: {}",
-        gear_prefixes.armor, gear_prefixes.trinkets, gear_prefixes.weapons
+        category_prefix(GearSlot::Helm),
+        category_prefix(GearSlot::Amulet),
+        category_prefix(GearSlot::WeaponSet1Main),
     );
 
     let mut suggestion = BuildSuggestion {
@@ -259,7 +254,7 @@ pub(super) fn synergy_result_to_suggestion(
             .primary_prefix()
             .map(|p| p.name.clone())
             .unwrap_or_default(),
-        gear_prefixes,
+        slot_prefixes: Some(v.gear_slots.clone()),
         specializations,
         weapons,
         skills,
@@ -452,11 +447,7 @@ pub(super) fn candidate_to_suggestion(
         label: format!("Score: {:.2}", candidate.score),
         build_summary: format!("Gear: {}", candidate.gear.stat_prefix_name),
         stat_prefix: candidate.gear.stat_prefix_name.clone(),
-        gear_prefixes: gw2_core::types::GearPrefixGroups {
-            armor: candidate.gear.stat_prefix_name.clone(),
-            trinkets: candidate.gear.stat_prefix_name.clone(),
-            weapons: candidate.gear.stat_prefix_name.clone(),
-        },
+        slot_prefixes: Some(candidate.gear.gear_slots.clone()),
         specializations,
         weapons: Vec::new(),
         skills: Vec::new(),

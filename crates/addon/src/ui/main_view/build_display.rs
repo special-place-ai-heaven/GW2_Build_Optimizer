@@ -182,19 +182,33 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
 
     // ── Gear Card ──
     render_card_section(ui, &t("section.gear"), |ui| {
-        let groups = &suggestion.gear_prefixes;
-        if !groups.armor.is_empty() || !groups.trinkets.is_empty() || !groups.weapons.is_empty() {
-            if !groups.armor.is_empty() {
-                render_label_value(ui, "Armor", &groups.armor);
+        // Category representatives on the slot map (helm/amulet/set-1 main
+        // hand); the gear sheet renders the full per-piece breakdown.
+        let slot_name = |slot: gw2_core::types::GearSlot| -> Option<String> {
+            suggestion
+                .slot_prefixes
+                .as_ref()
+                .and_then(|m| m.get(slot))
+                .map(|p| p.name.clone())
+        };
+        let profile = (!suggestion.stat_prefix.is_empty()).then(|| suggestion.stat_prefix.clone());
+        let armor = slot_name(gw2_core::types::GearSlot::Helm).or_else(|| profile.clone());
+        let trinkets = slot_name(gw2_core::types::GearSlot::Amulet).or_else(|| armor.clone());
+        let weapons =
+            slot_name(gw2_core::types::GearSlot::WeaponSet1Main).or_else(|| armor.clone());
+        if let Some(a) = &armor {
+            render_label_value(ui, "Armor", a);
+        }
+        if let Some(tr) = &trinkets {
+            render_label_value(ui, "Trinkets", tr);
+        }
+        if let Some(w) = &weapons {
+            render_label_value(ui, "Weapons", w);
+        }
+        if armor.is_none() {
+            if let Some(p) = &profile {
+                render_label_value(ui, &t("slot.prefix"), p);
             }
-            if !groups.trinkets.is_empty() {
-                render_label_value(ui, "Trinkets", &groups.trinkets);
-            }
-            if !groups.weapons.is_empty() {
-                render_label_value(ui, "Weapons", &groups.weapons);
-            }
-        } else if !suggestion.stat_prefix.is_empty() {
-            render_label_value(ui, &t("slot.prefix"), &suggestion.stat_prefix);
         }
         if !suggestion.rune.is_empty() {
             render_label_value_colored(ui, &t("slot.rune"), &suggestion.rune, GEAR_COLOR);
