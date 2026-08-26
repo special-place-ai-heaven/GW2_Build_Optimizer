@@ -181,6 +181,8 @@ pub enum ApiError {
     RateLimited { retries: u32, url_path: String },
     #[error("Missing required API scopes: {0:?}")]
     MissingScopes(Vec<String>),
+    #[error("invalid endpoint: {0} — must be a relative API path")]
+    InvalidEndpoint(String),
     #[error("Cache error: {0}")]
     Cache(String),
     #[error("Internal error: {0}")]
@@ -257,6 +259,24 @@ impl Gw2Client {
         endpoint: &str,
         params: &[(&str, &str)],
     ) -> Result<T, ApiError> {
+        // `endpoint` is a relative API path by contract. This client carries
+        // the account API key — an absolute URL here would aim the
+        // authenticated request at an attacker-chosen host, so refuse all
+        // non-loopback absolute URLs. Loopback stays allowed for the
+        // mock-server tests.
+        if endpoint.starts_with("http")
+            && !endpoint
+                .strip_prefix("http://")
+                .or_else(|| endpoint.strip_prefix("https://"))
+                .map(|rest| {
+                    rest.starts_with("127.0.0.1")
+                        || rest.starts_with("localhost")
+                        || rest.starts_with("[::1]")
+                })
+                .unwrap_or(false)
+        {
+            return Err(ApiError::InvalidEndpoint(endpoint.to_string()));
+        }
         let base_url = if endpoint.starts_with("http") {
             endpoint.to_string()
         } else {

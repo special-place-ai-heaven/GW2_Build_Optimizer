@@ -40,11 +40,6 @@ pub fn build_gemini_context(config: &ContextConfig) -> String {
     sections.join("\n\n")
 }
 
-/// Approximate token count (chars / 4 is a reasonable estimate for English text).
-pub fn estimate_context_tokens(context: &str) -> usize {
-    context.len() / 4
-}
-
 // ---------------------------------------------------------------------------
 // Section builders
 // ---------------------------------------------------------------------------
@@ -701,11 +696,5 @@ mod tests {
             format_fact_text(&fact),
             Some("- Chance on Critical Hit: 33%".into())
         );
-    }
-
-    #[test]
-    fn test_estimate_tokens() {
-        let text = "a".repeat(4000);
-        assert_eq!(estimate_context_tokens(&text), 1000);
     }
 }

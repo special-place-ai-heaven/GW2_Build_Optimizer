@@ -265,13 +265,29 @@ fn push_unique(chips: &mut Vec<ChatChip>, chip: ChatChip) {
     }
 }
 
+/// Structural gate for a model-supplied chat code before it becomes a chip
+/// the user can paste into in-game chat: must decode, must be a `0x0D`
+/// build template with a profession byte and plausible length. Prompt
+/// injection through poisoned/compromised content could otherwise make the
+/// model emit arbitrary link bytes that render as whatever the declared
+/// type claims.
+fn is_plausible_build_code(code: &str) -> bool {
+    if code.len() > 512 {
+        return false;
+    }
+    let Some(bytes) = inner_b64(code).and_then(|s| B64.decode(s).ok()) else {
+        return false;
+    };
+    bytes.first() == Some(&0x0D) && bytes.len() >= 8
+}
+
 pub fn chips_from_plate(
     db: &GameDb,
     plated: &ValidatedBuild,
     build_code: Option<&str>,
 ) -> Vec<ChatChip> {
     let mut chips = Vec::new();
-    if let Some(code) = build_code.filter(|c| c.starts_with("[&")) {
+    if let Some(code) = build_code.filter(|c| is_plausible_build_code(c)) {
         push_unique(
             &mut chips,
             ChatChip {

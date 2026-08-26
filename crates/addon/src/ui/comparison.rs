@@ -12,8 +12,6 @@ use gw2_optimizer::ViabilityReport;
 
 use gw2_core::i18n::{t, tf};
 
-use super::gear_diff::{compute_build_diff, ChangeStatus, SlotDiff};
-
 /// A build suggestion from the optimizer + LLM.
 #[derive(Debug, Clone, Default)]
 pub struct BuildSuggestion {
@@ -790,129 +788,6 @@ fn truncate_ui_text(ui: &Ui, text: &str, width: f32) -> String {
         s = next;
     }
     s
-}
-
-/// Render gear comparison table: per-slot diff between current and optimized build.
-fn render_spec_diff(
-    ui: &Ui,
-    current: &ResolvedBuild,
-    suggestion: &BuildSuggestion,
-    db: Option<&GameDb>,
-) {
-    let diff = compute_build_diff(current, suggestion);
-    ui.columns(4, "##spec_diff", true);
-    diff_header(ui);
-    for (spec_diff, trait_diff) in &diff.specializations {
-        render_diff_row(ui, spec_diff, db);
-        render_diff_row(ui, trait_diff, db);
-    }
-    ui.columns(1, "##spec_diff_end", false);
-}
-
-fn render_skill_diff(
-    ui: &Ui,
-    current: &ResolvedBuild,
-    suggestion: &BuildSuggestion,
-    db: Option<&GameDb>,
-) {
-    let diff = compute_build_diff(current, suggestion);
-    ui.columns(4, "##skill_diff", true);
-    diff_header(ui);
-    for skill in &diff.skills {
-        render_diff_row(ui, skill, db);
-    }
-    ui.columns(1, "##skill_diff_end", false);
-}
-
-fn render_weapon_diff(
-    ui: &Ui,
-    current: &ResolvedBuild,
-    suggestion: &BuildSuggestion,
-    db: Option<&GameDb>,
-) {
-    let diff = compute_build_diff(current, suggestion);
-    ui.columns(4, "##weapon_diff", true);
-    diff_header(ui);
-    for (weapon_diff, sigil_diff) in &diff.weapon_sets {
-        render_diff_row(ui, weapon_diff, db);
-        render_diff_row(ui, sigil_diff, db);
-    }
-    ui.columns(1, "##weapon_diff_end", false);
-}
-
-fn render_upgrade_diff(
-    ui: &Ui,
-    current: &ResolvedBuild,
-    suggestion: &BuildSuggestion,
-    db: Option<&GameDb>,
-) {
-    let diff = compute_build_diff(current, suggestion);
-    ui.columns(4, "##upgrade_diff", true);
-    diff_header(ui);
-    render_diff_row(ui, &diff.gear_prefix, db);
-    render_diff_row(ui, &diff.rune, db);
-    render_diff_row(ui, &diff.relic, db);
-    ui.columns(1, "##upgrade_diff_end", false);
-}
-
-/// Render the 4-column header for diff tables.
-fn diff_header(ui: &Ui) {
-    ui.text_colored(crate::ui::theme::GOLD, t("table.slot"));
-    ui.next_column();
-    ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
-    ui.next_column();
-    ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
-    ui.next_column();
-    ui.text("");
-    ui.next_column();
-    ui.separator();
-}
-
-/// Render one row in a 4-column diff table.
-fn render_diff_row(ui: &Ui, diff: &SlotDiff, db: Option<&GameDb>) {
-    let (badge, badge_col, badge_fill) = match diff.status {
-        ChangeStatus::Unchanged => ("same", crate::ui::theme::MUTED, [0.14, 0.13, 0.11, 0.9]),
-        ChangeStatus::Changed => ("new", crate::ui::theme::GOLD, crate::ui::theme::GOLD_HOVER),
-    };
-
-    let (cur_color, opt_color) = match diff.status {
-        ChangeStatus::Unchanged => (crate::ui::theme::MUTED, crate::ui::theme::MUTED),
-        ChangeStatus::Changed => (crate::ui::theme::CURRENT, crate::ui::theme::GOLD),
-    };
-
-    let is_sub = diff.slot_label.starts_with("  ");
-    if is_sub {
-        ui.text_colored(crate::ui::theme::MUTED, &diff.slot_label);
-    } else {
-        ui.text_colored(crate::ui::theme::CREAM, &diff.slot_label);
-    }
-    ui.next_column();
-
-    ui.text_colored(cur_color, loc_name(db, &diff.current_value));
-    inspect_if_hovered(ui, &diff.current_value, db);
-    ui.next_column();
-
-    ui.text_colored(opt_color, loc_name(db, &diff.proposed_value));
-    inspect_if_hovered(ui, &diff.proposed_value, db);
-    ui.next_column();
-
-    let p = ui.cursor_screen_pos();
-    let tw = ui.calc_text_size(badge)[0] + 10.0;
-    let th = ui.text_line_height() + 2.0;
-    {
-        let dl = ui.get_window_draw_list();
-        dl.add_rect([p[0], p[1]], [p[0] + tw, p[1] + th], badge_fill)
-            .filled(true)
-            .rounding(th * 0.4)
-            .build();
-        dl.add_text(
-            [p[0] + 5.0, p[1] + 1.0],
-            crate::ui::color_u32(badge_col),
-            badge,
-        );
-    }
-    ui.dummy([tw, th]);
-    ui.next_column();
 }
 
 /// Render all 9 primary attributes in a comparison table.

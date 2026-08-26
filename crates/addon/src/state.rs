@@ -79,6 +79,9 @@ impl AddonState {
 pub struct MainState {
     pub characters: Vec<String>,
     pub characters_loading: bool,
+    /// Last failed auto-load attempt — gates the per-frame retry so an API
+    /// outage cannot spawn a loader thread every frame.
+    pub characters_retry_at: Option<std::time::Instant>,
     /// Rising-edge guard so opening the character combo refreshes once.
     pub char_combo_open: bool,
     pub selected_character: Option<usize>,
@@ -107,6 +110,9 @@ pub struct MainState {
     // GameDb (loaded once on main screen entry)
     pub game_db: Option<GameDb>,
     pub game_db_loading: bool,
+    /// Last failed auto-load attempt — gates the per-frame retry so a
+    /// persistently failing GameDb build cannot spawn a loader every frame.
+    pub game_db_retry_at: Option<std::time::Instant>,
     /// Overlay download for official API names (de/es/fr/zh).
     pub names_loading: bool,
     pub names_stage: String,

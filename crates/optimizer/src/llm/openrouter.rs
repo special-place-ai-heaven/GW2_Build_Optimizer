@@ -655,6 +655,12 @@ impl LlmClient for OpenRouterClient {
 
         {
             let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+            // Evict expired entries and cap size: prompts embed full game
+            // context, so an insert-only map grows for the life of the process.
+            cache.retain(|_, v| v.cached_at.elapsed().as_secs() < 1800);
+            if cache.len() >= 64 {
+                cache.clear();
+            }
             cache.insert(
                 key,
                 CachedResponse {

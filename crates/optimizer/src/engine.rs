@@ -463,8 +463,12 @@ fn optimize_pvp(
             // PvP stat block: base_stats + amulet stats + trait stats (no gear)
             let mut full_stats = stats::base_stats();
 
-            // Apply amulet stats (replaces gear stats)
-            for (attr, &value) in &amulet.attributes {
+            // Apply amulet stats (replaces gear stats). Sorted keys: f64
+            // addition is order-sensitive and HashMap order varies per
+            // process — same determinism rule as every other accumulation.
+            let mut attrs: Vec<_> = amulet.attributes.iter().collect();
+            attrs.sort();
+            for (attr, &value) in attrs {
                 full_stats.add(attr, value as f64);
             }
 
@@ -574,7 +578,10 @@ pub fn apply_optimized_gear_stats(
     };
     if ctx.game_mode == GameMode::PvP {
         if let Some(amulet) = match_pvp_amulet(db, &itemstat.name) {
-            for (attr, &value) in &amulet.attributes {
+            // Sorted keys — see the determinism note at the PvP candidate path.
+            let mut attrs: Vec<_> = amulet.attributes.iter().collect();
+            attrs.sort();
+            for (attr, &value) in attrs {
                 stats.add(attr, value as f64);
             }
             return;

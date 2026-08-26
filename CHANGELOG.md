@@ -2,6 +2,37 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.6.3 - 2026-08-26
+
+A hardening sweep: an adversarial multi-agent review of the whole codebase (correctness, security, performance, lock discipline) and every confirmed finding fixed in one pass.
+
+### Security
+
+- The build-site scraper (Snowcrows / Hardstuck / GuildJen benchmark sync) accepted **any TLS certificate**. A hostile network could serve forged pages whose gear prefixes, runes, sigils, relics, and trait lists are parsed into the persistent benchmark cache that feeds optimizer comparisons and LLM prompts. Certificate validation is restored.
+- The GuildJen scraper followed **absolute links from the index page verbatim**, so a crafted `href` could point the in-game process at an arbitrary https URL and persist whatever came back as a benchmark. Links are now pinned to `https://guildjen.com/` — only relative paths on the real host are followed.
+- Benchmark cache filenames were composed from **scraped URL text** without sanitization; on Windows a crafted path component containing `\` or `..` could write outside the addon's `benchmarks/` folder. Filename components now go through the same whitelist as saved builds.
+- Model-generated **build chat codes became clipboard chips on a bare `[&` prefix check**. A code now only becomes a chip if it base64-decodes to a `0x0D` build template with a profession byte and a sane length, so prompt-injected garbage cannot turn into a pasteable in-game link.
+- The GW2 API client carried the account key but accepted an **absolute URL as any endpoint**. It now rejects non-loopback absolute endpoints outright (loopback stays allowed for the test suite).
+- Scraper responses are capped at 2 MiB instead of slurping unbounded bodies into the game process.
+
+### Correctness
+
+- Four scraper text extractors sliced HTML at fixed byte offsets — a multi-byte UTF-8 character landing on the boundary **panicked the process**. All truncation now respects character boundaries.
+- The LLM context-trim budget counted **bytes ÷ 4**; CJK text runs ~1 token per character, so localized (Chinese/Japanese/Korean) conversations could blow past the context window and get requests rejected instead of trimmed. Estimation is now script-aware: ASCII ≈ 4 chars/token, everything else ≈ 1 token/char.
+- PvP amulet attributes were accumulated in **HashMap iteration order**, and f64 addition is order-sensitive — scores could diverge at the ULP level between runs, contradicting the optimizer's determinism guarantee. Accumulation is now key-sorted, matching every other accumulation site.
+- The buff-profile lookup is now **locally guaranteed to return exactly 3 profiles** (truncate + pad) instead of relying on a distant embedded-data validation, so five hot-path `[0]/[1]/[2]` index sites cannot panic if that validation ever relaxes.
+- During a GW2 API outage with an empty cache, the overlay **respawned the character and game-data loader threads every frame** with no cooldown. Retries are now gated to once per 30 s (characters) and 60 s (game data).
+- The LLM response caches in all four providers were insert-only: expired entries were never evicted and the maps grew without bound for the life of the process. Inserts now sweep expired entries and cap the map at 64 responses.
+
+### Maintenance
+
+- Removed ~30 dead items (an abandoned gear-diff rendering subsystem and its helpers — about 1,900 lines) that predated the comparison-tab rework. `cargo build` is now **warning-free across the workspace**.
+
+### Known follow-ups (not in this release)
+
+- A trait lock whose id no longer exists in the spec's trait column is still silently replaced by the archetype-best pick; surfacing that warning requires threading a warnings channel through the beam search.
+- The Gemini, OpenAI, and Anthropic providers remain non-streaming (the streaming/timeout class of fixes in 1.6.1 was OpenRouter-specific).
+
 ## 1.6.2 - 2026-08-26
 
 Choya's replies can no longer stall the frame loop. The v1.6.1 streaming fix made model answers arrive — and much richer ones, since reasoning models finally get to finish thinking — but the moment a reply landed, the background thread ran the whole serving pass (stat attachment, build-code encoding, rotation simulation, chip building) while holding the shared state mutex. ImGui draws only on the render thread, and the render callback shares that mutex, so a slow serving pass read to Windows as the entire game not responding. Every step of the serving pass now runs without the lock: the state mutex is taken once for a microsecond read (live game DB and game mode), released for the heavy work, and taken again only to append the finished reply and suggestion. A Clear pressed while a reply is still being prepared now correctly drops the result instead of resurrecting it.

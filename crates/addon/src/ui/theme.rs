@@ -685,7 +685,10 @@ fn mystic_coin_tex(metal: usize) -> Option<TextureId> {
 
 /// Ko-fi logomark (creator kit), used only for the coffee tile and header button.
 pub fn kofi_tex() -> Option<TextureId> {
-    embedded_tex("GW2BO_KOFI_CUP1", include_bytes!("../../assets/kofi_cup.png"))
+    embedded_tex(
+        "GW2BO_KOFI_CUP1",
+        include_bytes!("../../assets/kofi_cup.png"),
+    )
 }
 
 const CHOYA_SHEET_W: f32 = 1536.0;

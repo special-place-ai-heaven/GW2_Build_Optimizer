@@ -777,8 +777,14 @@ fn skill_dps_efficiency(
                 stacks,
                 duration_ms,
             } => {
-                total_damage_value +=
-                    estimate_buff_dps_value(buff, *stacks, *duration_ms, power, weapon_strength, mode);
+                total_damage_value += estimate_buff_dps_value(
+                    buff,
+                    *stacks,
+                    *duration_ms,
+                    power,
+                    weapon_strength,
+                    mode,
+                );
             }
             _ => {}
         }
@@ -1077,7 +1083,6 @@ mod tests {
             is_stunbreak: false,
             weapon_set: 0,
         };
-
 
         let dpct = skill_dps_efficiency(&condi_skill, 1000.0, 1500.0, 1100.0, &GameMode::PvE);
         assert!(dpct > 0.0, "Condition skill should have positive DPCT");
@@ -1464,8 +1469,15 @@ mod tests {
         let wvw = estimate_buff_dps_value("Fury", 1, 6000, 2000.0, 1100.0, &GameMode::WvW);
         let pvp = estimate_buff_dps_value("Fury", 1, 6000, 2000.0, 1100.0, &GameMode::PvP);
         assert!(pve > 0.0, "pve fury value should be positive: {pve}");
-        assert!(wvw < pve, "wvw fury ({wvw}) must be worth less than pve ({pve})");
+        assert!(
+            wvw < pve,
+            "wvw fury ({wvw}) must be worth less than pve ({pve})"
+        );
         assert!((wvw - pvp).abs() < f64::EPSILON, "pvp and wvw share 0.20");
-        assert!((wvw / pve - 0.8).abs() < 1e-9, "0.20/0.25 = 0.8, got {}", wvw / pve);
+        assert!(
+            (wvw / pve - 0.8).abs() < 1e-9,
+            "0.20/0.25 = 0.8, got {}",
+            wvw / pve
+        );
     }
 }
