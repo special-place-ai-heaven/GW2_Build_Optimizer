@@ -7,8 +7,6 @@ use crate::ui::chat_bar::ChatAction;
 use crate::ui::theme;
 use gw2_core::i18n::t;
 
-use super::optimization;
-
 const MASCOT: f32 = 132.0;
 
 const STARTERS: &[(&str, &str)] = &[
@@ -64,7 +62,9 @@ pub(in crate::ui::main_view) fn render_talk_tab(ui: &Ui, state: &mut AddonState)
         user_icon.as_deref(),
         user_letter,
     ) {
-        Some(ChatAction::Send(msg)) => optimization::send_chat_message(state, msg),
+        Some(ChatAction::Send(msg)) => {
+            crate::ui::main_view::chat_flow::send_chat_message(state, msg)
+        }
         Some(ChatAction::OpenBuild) => open_optimized_tab(state),
         None => {}
     }
@@ -190,7 +190,7 @@ fn render_starters(ui: &Ui, state: &mut AddonState) {
     }
     if let Some(prompt) = send {
         if let Some(msg) = crate::ui::chat_bar::queue_user_message(&mut state.main.chat, &prompt) {
-            optimization::send_chat_message(state, msg);
+            crate::ui::main_view::chat_flow::send_chat_message(state, msg);
         }
     }
 }

@@ -1,390 +1,12 @@
 use super::stats::{compute_3tier_combat, perf_to_combat_metrics};
-use crate::state::AddonState;
-use gw2_core::i18n::{t, tf};
+use gw2_core::i18n::t;
 use gw2_optimizer::balance::BalanceContext;
-use gw2_optimizer::scoring::OptimizationWeights;
-
-/// Start optimization in background thread (S11-T01, S11-T02, S11-T03)
-pub(super) fn start_optimization(state: &mut AddonState) {
-    // Guard against concurrent optimization
-    if state.main.optimizing {
-        return;
-    }
-
-    // Get profession from current build
-    let profession_name = state
-        .main
-        .current_build
-        .as_ref()
-        .map(|b| b.profession.clone())
-        .unwrap_or_default();
-
-    start_optimization_with_profession(state, &profession_name);
-}
-
-/// Start optimization with explicit profession name (avoids borrow conflicts).
-/// Uses `state.main.build_locks` for spec/trait lock constraints.
-pub(super) fn start_optimization_with_profession(state: &mut AddonState, profession_name: &str) {
-    if state.main.game_db.is_none() {
-        state.main.error = Some(t("err.no_gamedb"));
-        return;
-    }
-
-    if state.main.chat.waiting {
-        state.main.error = Some(t("err.chat_busy"));
-        return;
-    }
-
-    if profession_name.is_empty() {
-        state.main.error = Some(t("err.no_character"));
-        return;
-    }
-
-    let db = state.main.game_db.clone();
-    let profession_name = profession_name.to_string();
-    let config = state.config.clone();
-    let game_mode = state.main.game_mode.clone();
-    let game_mode_label = game_mode.label().to_string();
-    let balance_ctx = BalanceContext::new(game_mode.clone());
-    let current_build_summary = state
-        .main
-        .current_build
-        .as_ref()
-        .map(summarize_resolved_build);
-    let addon_dir = state.addon_dir.clone();
-    let token = state.cancel_token.clone();
-    let weights = state.main.weights.clone();
-    let selected_role = state.main.selected_role;
-    let build_locks = state.main.build_locks.clone();
-    let combat_tier = match game_mode {
-        gw2_core::types::GameMode::WvW => state.main.wvw_combat_tier,
-        gw2_core::types::GameMode::PvP => gw2_optimizer::scenario::CombatTier::Solo,
-        gw2_core::types::GameMode::PvE => gw2_optimizer::scenario::CombatTier::Party,
-    };
-    // Capture locked elite spec name for the Improve Build label.
-    let locked_spec_name: Option<String> =
-        build_locks.specs.get(2).and_then(|s| *s).and_then(|id| {
-            state
-                .main
-                .game_db
-                .as_ref()
-                .and_then(|db| db.spec(id))
-                .map(|s| s.name.clone())
-        });
-    // Capture selection snapshot so results can be discarded if the user switches
-    // character or build tab while optimization is running (TOCTOU guard).
-    let optimizing_for_char = state.main.selected_character;
-    let optimizing_for_build_tab = state.main.selected_build_tab;
-    let optimizing_for_equip_tab = state.main.selected_equipment_tab;
-
-    state.main.optimizing = true;
-    state.main.optimize_stage = t("status.starting");
-
-    // Log the weights and deterministic gear prefix for debugging
-    let gear_match = gw2_optimizer::scoring::select_gear_prefix(&weights);
-    let tier_label = combat_tier.label().to_string();
-    nexus::log::log(
-        nexus::log::LogLevel::Info,
-        "GW2BuildOpt",
-        format!(
-            "Optimizing {}/{}{}: weights P={:.2} C={:.2} B={:.2} H={:.2} S={:.2} Ctrl={:.2} ({}) -> gear: {} (sim={:.3})",
-            profession_name,
-            game_mode_label,
-            if tier_label.is_empty() { String::new() } else { format!(" [{}]", tier_label) },
-            weights.power, weights.condition, weights.boon_support, weights.healing, weights.sustain, weights.control,
-            weights.summary_label(),
-            gear_match.primary, gear_match.similarity,
-        ),
-    );
-    state.main.comparison.suggestions.clear();
-    state.main.comparison.loading = true;
-    state.main.comparison.error = None;
-
-    std::thread::spawn(move || {
-        let panic_token = token.clone();
-        let thread_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let result = (|| -> Result<Vec<crate::ui::comparison::BuildSuggestion>, String> {
-                if token.is_cancelled() {
-                    return Err("Cancelled".into());
-                }
-
-                let db = db.ok_or("GameDb not loaded")?;
-
-                // Build a mode + tier-aware scenario for the referee and optimize_v2.
-                let scenario = {
-                    use gw2_optimizer::scenario::{
-                        OptimizationTarget, ScenarioSpec, TargetProfile,
-                    };
-                    let combat_kind = selected_role
-                        .map(|r| r.combat_kind_for_weights(&weights))
-                        .unwrap_or_else(|| {
-                            if weights.condition > weights.power {
-                                gw2_optimizer::scenario::CombatKind::CondiRamp
-                            } else {
-                                gw2_optimizer::scenario::CombatKind::StrikeSpike
-                            }
-                        });
-                    ScenarioSpec {
-                        game_mode: balance_ctx.game_mode.clone(),
-                        combat_tier,
-                        combat_kind,
-                        target_profile: TargetProfile::Single,
-                        optimization_target: OptimizationTarget {
-                            label: balance_ctx.game_mode.label().to_string(),
-                        },
-                        patch_id: Some(balance_ctx.patch_id.clone()),
-                    }
-                };
-
-                // ═══ Primary: optimize_v2 — beam search over complete build states ═══
-                {
-                    let token_v2 = token.clone();
-                    // Create LLM client for the advisor pass (optional — errors silently skip).
-                    let llm_for_advisor: Option<Box<dyn gw2_optimizer::llm::LlmClient>> =
-                        gw2_optimizer::llm::create_client(&config, &addon_dir).ok();
-                    let llm_ref = llm_for_advisor.as_ref().map(|c| c.as_ref());
-                    match gw2_optimizer::engine::optimize_v2(
-                        &db,
-                        &profession_name,
-                        &weights,
-                        &balance_ctx,
-                        &scenario,
-                        &build_locks,
-                        llm_ref,
-                        &mut |progress: gw2_optimizer::engine::OptimizeProgress| {
-                            if token_v2.is_cancelled() {
-                                return;
-                            }
-                            crate::state::with_state(|s| {
-                                s.main.optimize_stage = progress.stage.clone();
-                            });
-                        },
-                        &|| token.is_cancelled(),
-                    ) {
-                        Ok(synergy_result) => {
-                            if token.is_cancelled() {
-                                return Err("Cancelled".into());
-                            }
-                            let suggestion = synergy_result_to_suggestion(
-                                &synergy_result,
-                                &db,
-                                &profession_name,
-                                &scenario,
-                                selected_role,
-                                locked_spec_name
-                                    .as_ref()
-                                    .map(|n| tf("fmt.improved", &[("name", n)])),
-                                &addon_dir,
-                                &weights,
-                            );
-                            return Ok(vec![suggestion]);
-                        }
-                        Err(e) => {
-                            nexus::log::log(
-                                nexus::log::LogLevel::Warning,
-                                "GW2 Build Optimizer",
-                                format!(
-                                    "optimize_v2 failed, falling back to synergy engine: {}",
-                                    e
-                                ),
-                            );
-                            // Fall through to legacy synergy engine
-                        }
-                    }
-                }
-
-                // ═══ Fallback 1: Deterministic synergy engine (no LLM for build selection) ═══
-                {
-                    let llm_client_opt: Option<Box<dyn gw2_optimizer::llm::LlmClient>> =
-                        gw2_optimizer::llm::create_client(&config, &addon_dir).ok();
-
-                    let token_det = token.clone();
-                    let llm_ref: Option<&dyn gw2_optimizer::llm::LlmClient> =
-                        llm_client_opt.as_ref().map(|c| c.as_ref());
-                    match gw2_optimizer::engine::optimize_deterministic(
-                        &db,
-                        &profession_name,
-                        &weights,
-                        &balance_ctx,
-                        llm_ref,
-                        current_build_summary.as_deref(),
-                        &build_locks,
-                        Some(&scenario),
-                        &mut |progress: gw2_optimizer::engine::OptimizeProgress| {
-                            if token_det.is_cancelled() {
-                                return;
-                            }
-                            crate::state::with_state(|s| {
-                                s.main.optimize_stage = progress.stage.clone();
-                            });
-                        },
-                    ) {
-                        Ok(synergy_result) => {
-                            if token.is_cancelled() {
-                                return Err("Cancelled".into());
-                            }
-                            let suggestion = synergy_result_to_suggestion(
-                                &synergy_result,
-                                &db,
-                                &profession_name,
-                                &scenario,
-                                selected_role,
-                                locked_spec_name
-                                    .as_ref()
-                                    .map(|n| tf("fmt.improved", &[("name", n)])),
-                                &addon_dir,
-                                &weights,
-                            );
-                            return Ok(vec![suggestion]);
-                        }
-                        Err(e) => {
-                            nexus::log::log(
-                                nexus::log::LogLevel::Warning,
-                                "GW2 Build Optimizer",
-                                format!(
-                                    "Deterministic engine failed, falling back to legacy: {}",
-                                    e
-                                ),
-                            );
-                        }
-                    }
-                }
-
-                // ═══ Fallback 2: Legacy pipeline (no LLM invent-a-build) ═══
-                let profession = db.profession(&profession_name).ok_or_else(|| {
-                    format!("Profession '{}' not found in GameDb", profession_name)
-                })?;
-
-                let token_progress = token.clone();
-                let candidates = gw2_optimizer::engine::optimize(
-                    profession,
-                    &weights,
-                    None,
-                    &db.items,
-                    &db.itemstats,
-                    &db.specializations,
-                    &db.traits,
-                    |progress| {
-                        if token_progress.is_cancelled() {
-                            return;
-                        }
-                        crate::state::with_state(|s| {
-                            s.main.optimize_stage = progress.stage.clone();
-                        });
-                    },
-                    5,
-                    &balance_ctx,
-                    &build_locks,
-                    &db.pvp_amulets,
-                )?;
-
-                if token.is_cancelled() {
-                    return Err("Cancelled".into());
-                }
-
-                let mut suggestions: Vec<crate::ui::comparison::BuildSuggestion> = candidates
-                    .iter()
-                    .map(|c| candidate_to_suggestion(c, &db, &balance_ctx))
-                    .collect();
-
-                // Enrich top suggestion with LLM reasoning (legacy path)
-                if config.has_active_llm_key() {
-                    if token.is_cancelled() {
-                        return Err("Cancelled".into());
-                    }
-
-                    crate::state::with_state(|s| {
-                        s.main.optimize_stage = t("status.consulting");
-                    });
-
-                    match enrich_with_llm(
-                        &config,
-                        &profession_name,
-                        &weights,
-                        &game_mode_label,
-                        &candidates,
-                        &db,
-                        current_build_summary.as_deref(),
-                        &mut suggestions,
-                        &addon_dir,
-                        &balance_ctx,
-                    ) {
-                        Ok(()) => {}
-                        Err(e) => {
-                            nexus::log::log(
-                                nexus::log::LogLevel::Warning,
-                                "GW2 Build Optimizer",
-                                format!("LLM enrichment skipped: {}", e),
-                            );
-                        }
-                    }
-                }
-
-                Ok(suggestions)
-            })();
-
-            if !token.is_cancelled() {
-                crate::state::with_state(|s| {
-                    s.main.optimizing = false;
-                    s.main.comparison.loading = false;
-                    // Discard results if the user switched character or build tab while
-                    // optimization was running — showing results for a different context
-                    // would silently corrupt the comparison panel.
-                    let context_changed = s.main.selected_character != optimizing_for_char
-                        || s.main.selected_build_tab != optimizing_for_build_tab
-                        || s.main.selected_equipment_tab != optimizing_for_equip_tab;
-                    if context_changed {
-                        return;
-                    }
-                    match result {
-                        Ok(suggestions) => {
-                            s.main.comparison.suggestions = suggestions;
-                            s.main.comparison.selected_suggestion = 0;
-                            s.main.comparison.show_optimized = true;
-                            s.main.tab_alert =
-                                Some(result_alert_tab(s.main.current_build.is_some()));
-                            s.main.provider_issue = None;
-                        }
-                        Err(e) => {
-                            s.main.comparison.error = Some(e);
-                        }
-                    }
-                });
-            } else {
-                // Cancelled mid-flight. Without resetting these flags the UI stays stuck
-                // on the "Optimizing…" spinner until another optimization completes.
-                crate::state::with_state(|s| {
-                    s.main.optimizing = false;
-                    s.main.comparison.loading = false;
-                });
-            }
-        }));
-
-        // If the thread panicked, recover and show error
-        if let Err(panic_info) = thread_result {
-            let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                tf("fmt.internal_panic", &[("msg", s)])
-            } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                tf("fmt.internal_panic", &[("msg", s)])
-            } else {
-                t("err.opt_panic")
-            };
-            if !panic_token.is_cancelled() {
-                crate::state::with_state(|s| {
-                    s.main.optimizing = false;
-                    s.main.comparison.loading = false;
-                    s.main.comparison.error = Some(msg);
-                });
-            }
-        }
-    });
-}
 
 /// Convert a SynergyResult from the new pipeline into a BuildSuggestion for display.
 // Display adapter; db, profession, scenario, role, and result are distinct
 // inputs threaded straight through — a params struct adds no clarity here.
 #[allow(clippy::too_many_arguments)]
-fn synergy_result_to_suggestion(
+pub(super) fn synergy_result_to_suggestion(
     result: &gw2_optimizer::engine::SynergyResult,
     db: &gw2_optimizer::gamedb::GameDb,
     profession_name: &str,
@@ -675,7 +297,7 @@ fn synergy_result_to_suggestion(
     suggestion
 }
 
-fn validated_build_to_chat_code(
+pub(super) fn validated_build_to_chat_code(
     build: &gw2_optimizer::validation::ValidatedBuild,
     profession_name: &str,
     db: &gw2_optimizer::gamedb::GameDb,
@@ -747,7 +369,7 @@ fn snapshot_ranger_pets() -> Option<gw2_api::models::PetSelection> {
     .flatten()
 }
 
-fn candidate_to_suggestion(
+pub(super) fn candidate_to_suggestion(
     candidate: &gw2_optimizer::engine::BuildCandidate,
     db: &gw2_optimizer::gamedb::GameDb,
     balance_ctx: &BalanceContext,
@@ -1314,7 +936,7 @@ fn pet_selection_from_suggestion(skills: &[String]) -> Option<gw2_api::models::P
 }
 
 /// Summarize a ResolvedBuild as text for LLM prompts.
-fn summarize_resolved_build(build: &gw2_core::types::ResolvedBuild) -> String {
+pub(super) fn summarize_resolved_build(build: &gw2_core::types::ResolvedBuild) -> String {
     let mut parts = Vec::new();
 
     parts.push(format!("Profession: {}", build.profession));
@@ -1375,7 +997,7 @@ fn summarize_resolved_build(build: &gw2_core::types::ResolvedBuild) -> String {
 }
 
 /// Apply Gemini's parsed response onto a BuildSuggestion.
-fn apply_gemini_response(
+pub(super) fn apply_gemini_response(
     suggestion: &mut crate::ui::comparison::BuildSuggestion,
     gemini: &gw2_optimizer::prompts::GeminiBuildResponse,
 ) {
@@ -1413,7 +1035,7 @@ fn apply_gemini_response(
     }
 }
 
-fn attach_chat_stats(
+pub(super) fn attach_chat_stats(
     suggestion: &mut crate::ui::comparison::BuildSuggestion,
     db: &gw2_optimizer::gamedb::GameDb,
     profession: &str,
@@ -1452,7 +1074,7 @@ fn attach_chat_stats(
 }
 
 /// Merge validator-resolved names onto the raw LLM tasting so the plate is edible.
-fn gemini_from_validated(
+pub(super) fn gemini_from_validated(
     mut raw: gw2_optimizer::prompts::GeminiBuildResponse,
     v: &gw2_optimizer::validation::ValidatedBuild,
 ) -> gw2_optimizer::prompts::GeminiBuildResponse {
@@ -1531,7 +1153,7 @@ fn gemini_from_validated(
     raw
 }
 
-fn keep_equipped_weapons(msg: &str) -> bool {
+pub(super) fn keep_equipped_weapons(msg: &str) -> bool {
     let m = msg.to_lowercase();
     if !m.contains("weapon") {
         return false;
@@ -1542,7 +1164,7 @@ fn keep_equipped_weapons(msg: &str) -> bool {
         || m.contains("dont change")
 }
 
-fn kitchen_brief(
+pub(super) fn kitchen_brief(
     game_mode: &str,
     scale: &str,
     role: &str,
@@ -1562,7 +1184,7 @@ fn kitchen_brief(
     )
 }
 
-fn apply_radar_prefix(
+pub(super) fn apply_radar_prefix(
     parsed: &mut gw2_optimizer::prompts::GeminiBuildResponse,
     _weights: &gw2_optimizer::scoring::OptimizationWeights,
     order: &str,
@@ -1574,7 +1196,7 @@ fn apply_radar_prefix(
     }
 }
 
-fn fill_holes_from_loadout(
+pub(super) fn fill_holes_from_loadout(
     parsed: &mut gw2_optimizer::prompts::GeminiBuildResponse,
     current: &gw2_core::types::ResolvedBuild,
 ) {
@@ -1656,7 +1278,11 @@ fn fill_holes_from_loadout(
     }
 }
 
-fn chat_display_text(explanation: &str, spec_count: usize, error_details: &[String]) -> String {
+pub(super) fn chat_display_text(
+    explanation: &str,
+    spec_count: usize,
+    error_details: &[String],
+) -> String {
     let mut display = if explanation.is_empty() {
         "I couldn't make a legal build from that.".to_string()
     } else {
@@ -1671,7 +1297,7 @@ fn chat_display_text(explanation: &str, spec_count: usize, error_details: &[Stri
     display
 }
 
-fn result_alert_tab(has_current: bool) -> crate::state::MainTab {
+pub(super) fn result_alert_tab(has_current: bool) -> crate::state::MainTab {
     if has_current {
         crate::state::MainTab::Improve
     } else {
@@ -1706,16 +1332,7 @@ pub(super) fn format_provider_issue(err: &str, provider: &str, model: &str) -> S
     format!("{provider} \u{00b7} {model}: {detail}")
 }
 
-fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -> bool {
-    // Weapon/prefix typos stay as warnings in the bubble. A complete kit still plates.
-    v.specializations.len() == 3
-        && v.specializations.iter().all(|s| s.trait_ids.len() == 3)
-        && v.skills.heal.is_some()
-        && v.skills.elite.is_some()
-        && v.skills.utilities.iter().filter(|u| u.is_some()).count() == 3
-}
-
-fn summarize_suggestion(s: &crate::ui::comparison::BuildSuggestion) -> String {
+pub(super) fn summarize_suggestion(s: &crate::ui::comparison::BuildSuggestion) -> String {
     let specs: String = s
         .specializations
         .iter()
@@ -1734,7 +1351,7 @@ fn summarize_suggestion(s: &crate::ui::comparison::BuildSuggestion) -> String {
 }
 
 /// Convert Gemini tool function names to human-readable descriptions.
-fn humanize_tool_names(tool_names: &[String]) -> String {
+pub(super) fn humanize_tool_names(tool_names: &[String]) -> String {
     let labels: Vec<&str> = tool_names
         .iter()
         .map(|n| match n.as_str() {
@@ -1769,503 +1386,12 @@ fn humanize_tool_names(tool_names: &[String]) -> String {
 // LLM enrichment call; config, profession, weights, mode, and candidates are
 // independent inputs — grouping them adds indirection without clarity.
 #[allow(clippy::too_many_arguments)]
-fn enrich_with_llm(
-    config: &gw2_core::config::AppConfig,
-    profession_name: &str,
-    weights: &OptimizationWeights,
-    game_mode: &str,
-    candidates: &[gw2_optimizer::engine::BuildCandidate],
-    db: &gw2_optimizer::gamedb::GameDb,
-    current_build_summary: Option<&str>,
-    suggestions: &mut [crate::ui::comparison::BuildSuggestion],
-    addon_dir: &std::path::Path,
-    balance_ctx: &BalanceContext,
-) -> Result<(), String> {
-    let client = gw2_optimizer::llm::create_client(config, addon_dir).map_err(|e| e.to_string())?;
-
-    // Build tool-aware prompt
-    let prompt = if current_build_summary.is_some() {
-        gw2_optimizer::prompts::improve_build_prompt_with_tools(profession_name, weights, game_mode)
-    } else {
-        gw2_optimizer::prompts::new_build_prompt_with_tools(profession_name, weights, game_mode)
-    };
-
-    let tools = gw2_optimizer::llm::tools::tool_definitions();
-    let build_summary_owned = current_build_summary.map(|s| s.to_string());
-    let ctx = gw2_optimizer::gemini_tools::ToolContext {
-        db,
-        profession_name,
-        candidates,
-        current_build_summary: build_summary_owned.as_deref(),
-        weights: weights.clone(),
-        balance_ctx,
-    };
-
-    let response = client
-        .generate_with_tools_progress(
-            &prompt,
-            &tools,
-            &mut |name: &str, args: &serde_json::Value| {
-                gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx)
-            },
-            8,
-            &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
-                let tools_str = humanize_tool_names(tool_names);
-                crate::state::with_state(|s| {
-                    s.main.optimize_stage = tf(
-                        "fmt.ai_thinking",
-                        &[
-                            ("turn", &turn.to_string()),
-                            ("max", &max_turns.to_string()),
-                            ("tools", &tools_str),
-                        ],
-                    );
-                });
-            },
-        )
-        .map_err(|e| e.to_string())?;
-
-    let gemini_build = gw2_optimizer::prompts::parse_gemini_build(&response)
-        .map_err(|e| format!("Parse failed: {}", e))?;
-
-    // Validate LLM's output against GameDb before applying
-    let validated =
-        gw2_optimizer::validation::validate_gemini_build(&gemini_build, db, profession_name);
-    if !validated.errors.is_empty() {
-        nexus::log::log(
-            nexus::log::LogLevel::Warning,
-            "GW2BuildOpt",
-            format!(
-                "Legacy enrichment validation errors: {}",
-                validated
-                    .errors
-                    .iter()
-                    .map(|e| e.detail.as_str())
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ),
-        );
-    }
-
-    crate::state::with_state(|s| {
-        s.main.optimize_stage = t("status.applying");
-    });
-
-    if let Some(first) = suggestions.first_mut() {
-        apply_gemini_response(first, &gemini_build);
-        // Run rotation simulation now that LLM has populated skills
-        simulate_suggestion_rotation(first, db, balance_ctx);
-    }
-
-    Ok(())
-}
-
-/// Send a chat order to the chef (active LLM) for a plated build.
-/// Uses function calling so the chef has the full pantry and every station.
-pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
-    let (display, inbound_chips, _chef_order) =
-        crate::chat_links::annotate_order(&message, state.main.game_db.as_ref());
-    crate::ui::chat_bar::attach_order_chips(
-        &mut state.main.chat,
-        display.clone(),
-        inbound_chips.clone(),
-    );
-
-    if !state.config.has_active_llm_key() {
-        crate::ui::chat_bar::add_ai_response(&mut state.main.chat, t("choya.need_key"));
-        return;
-    }
-    if state.main.optimizing {
-        crate::ui::chat_bar::add_ai_response(&mut state.main.chat, t("choya.optimize_running"));
-        return;
-    }
-    if state.main.game_db.is_none() {
-        crate::ui::chat_bar::add_ai_response(&mut state.main.chat, t("choya.data_loading"));
-        return;
-    }
-
-    let mut profession = state
-        .main
-        .current_build
-        .as_ref()
-        .map(|b| b.profession.clone())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown".into());
-    if let Some(db) = state.main.game_db.as_ref() {
-        if db.profession(&profession).is_none() {
-            if let Some(inferred) =
-                gw2_optimizer::validation::infer_profession_from_text(db, &display)
-            {
-                profession = inferred;
-            }
-        }
-    }
-
-    state.main.chat_epoch = state.main.chat_epoch.wrapping_add(1);
-    let epoch = state.main.chat_epoch;
-    state.main.chat.waiting = true;
-    state.main.provider_issue = None;
-    state.main.chat_wait_started = Some(std::time::Instant::now());
-    state.main.optimize_stage = t("choya.thinking");
-
-    let config = state.config.clone();
-    let character = state
-        .main
-        .current_build
-        .as_ref()
-        .map(summarize_resolved_build)
-        .unwrap_or_default();
-    let game_mode_label = state.main.game_mode.label().to_string();
-    let scale = if state.main.game_mode == gw2_core::types::GameMode::WvW {
-        state.main.wvw_combat_tier.label()
-    } else {
-        "n/a"
-    };
-    let role_label = state
-        .main
-        .selected_role
-        .map(|r| r.play_label())
-        .unwrap_or("unspecified");
-    let role_brief = state
-        .main
-        .selected_role
-        .map(|r| r.family_brief(&state.main.game_mode, state.main.wvw_combat_tier))
-        .unwrap_or("No role chip. Infer the job from the player's words.");
-    let keep_weapons = keep_equipped_weapons(&display);
-    let has_loadout = !character.is_empty();
-    let on_the_pass = state
-        .main
-        .comparison
-        .suggestions
-        .get(state.main.comparison.selected_suggestion)
-        .map(summarize_suggestion)
-        .unwrap_or_else(|| "(none yet — talk or run Optimize first)".into());
-    let mut kitchen = kitchen_brief(
-        &game_mode_label,
-        scale,
-        role_label,
-        role_brief,
-        &character,
-        &on_the_pass,
-        keep_weapons,
-    );
-    if !inbound_chips.is_empty() {
-        kitchen.push_str("\nPasted: ");
-        kitchen.push_str(
-            &inbound_chips
-                .iter()
-                .map(|c| format!("{} ({})", c.label, c.kind.as_str()))
-                .collect::<Vec<_>>()
-                .join("; "),
-        );
-    }
-    let transcript = crate::ui::chat_bar::recent_transcript(&state.main.chat.history, 8);
-    if !transcript.is_empty() {
-        kitchen.push_str("\nRecent chat:\n");
-        kitchen.push_str(&transcript);
-    }
-    let message = display;
-    let addon_dir = state.addon_dir.clone();
-    let token = state.cancel_token.clone();
-    let db_clone = state.main.game_db.clone();
-    let weights = state.main.weights.clone();
-    let loadout = state.main.current_build.clone();
-    let chat_balance_ctx = BalanceContext::new(state.main.game_mode.clone());
-
-    std::thread::spawn(move || {
-        let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            if token.is_cancelled() {
-                crate::state::with_state(|s| {
-                    if s.main.chat_epoch == epoch {
-                        s.main.chat.waiting = false;
-                    }
-                });
-                return;
-            }
-
-            let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
-                let client = gw2_optimizer::llm::create_client(&config, &addon_dir)
-                    .map_err(|e| e.to_string())?;
-
-                if token.is_cancelled() {
-                    return Err("Cancelled".into());
-                }
-
-                if let Some(ref db) = db_clone {
-                    let prompt = gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
-                        &profession,
-                        &game_mode_label,
-                        &message,
-                        &kitchen,
-                        gw2_core::i18n::choya_name_for(&config.ui_language),
-                    );
-                    let tools = gw2_optimizer::llm::tools::tool_definitions();
-                    let empty_candidates = vec![];
-                    let ctx = gw2_optimizer::gemini_tools::ToolContext {
-                        db,
-                        profession_name: &profession,
-                        candidates: &empty_candidates,
-                        current_build_summary: Some(kitchen.as_str()),
-                        weights: weights.clone(),
-                        balance_ctx: &chat_balance_ctx,
-                    };
-
-                    let response = if has_loadout {
-                        client.generate(&prompt).map_err(|e| e.to_string())?
-                    } else {
-                        client
-                            .generate_with_tools_progress(
-                                &prompt,
-                                &tools,
-                                &mut |name: &str, args: &serde_json::Value| {
-                                    let stale =
-                                        crate::state::with_state(|s| s.main.chat_epoch != epoch)
-                                            .unwrap_or(true);
-                                    if stale {
-                                        return serde_json::json!({"error": "cancelled"});
-                                    }
-                                    gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx)
-                                },
-                                3,
-                                &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
-                                    let tools_str = humanize_tool_names(tool_names);
-                                    crate::state::with_state(|s| {
-                                        if s.main.chat_epoch != epoch {
-                                            return;
-                                        }
-                                        s.main.optimize_stage = tf(
-                                            "fmt.choya_looking",
-                                            &[
-                                                ("turn", &turn.to_string()),
-                                                ("max", &max_turns.to_string()),
-                                                ("tools", &tools_str),
-                                            ],
-                                        );
-                                    });
-                                },
-                            )
-                            .map_err(|e| e.to_string())?
-                    };
-
-                    let mut parsed = match gw2_optimizer::prompts::parse_gemini_build(&response) {
-                        Ok(p) => p,
-                        Err(_) => {
-                            let explanation: String =
-                                response.chars().filter(|c| *c != '`').take(800).collect();
-                            let explanation = explanation.trim().to_string();
-                            if explanation.is_empty() {
-                                return Err("Empty reply".into());
-                            }
-                            gw2_optimizer::prompts::GeminiBuildResponse {
-                                explanation,
-                                ..Default::default()
-                            }
-                        }
-                    };
-                    if let Some(ref cur) = loadout {
-                        fill_holes_from_loadout(&mut parsed, cur);
-                    }
-                    apply_radar_prefix(&mut parsed, &weights, &message);
-                    Ok(parsed)
-                } else {
-                    Err("Game data not loaded".into())
-                }
-            })();
-
-            let mut profession = profession;
-            if let (Ok(parsed), Some(db)) = (result.as_ref(), db_clone.as_ref()) {
-                if let Some(inferred) = gw2_optimizer::validation::infer_profession_from_spec_names(
-                    db,
-                    parsed.specializations.iter().map(|(n, _)| n.as_str()),
-                ) {
-                    profession = inferred;
-                }
-            }
-
-            let validated = result.as_ref().ok().and_then(|gemini_build| {
-                db_clone.as_ref().map(|db| {
-                    let validated = gw2_optimizer::validation::validate_gemini_build(
-                        gemini_build,
-                        db,
-                        &profession,
-                    );
-                    if !validated.errors.is_empty() && !gemini_build.specializations.is_empty() {
-                        nexus::log::log(
-                            nexus::log::LogLevel::Warning,
-                            "GW2BuildOpt",
-                            format!(
-                                "Kitchen validation errors: {}",
-                                validated
-                                    .errors
-                                    .iter()
-                                    .map(|e| e.detail.as_str())
-                                    .collect::<Vec<_>>()
-                                    .join("; ")
-                            ),
-                        );
-                    }
-                    validated
-                })
-            });
-
-            if !token.is_cancelled() {
-                // Clear the stage and drop stale results before any work.
-                let stale = crate::state::with_state(|s| {
-                    if s.main.chat_epoch != epoch {
-                        return true;
-                    }
-                    s.main.optimize_stage.clear();
-                    false
-                })
-                .unwrap_or(true);
-
-                if !stale {
-                    match result {
-                        Ok(raw) => {
-                            if !validated.as_ref().is_some_and(plate_is_servable) {
-                                // Unservable plate: reply with the explanation text.
-                                crate::state::with_state(|s| {
-                                    if s.main.chat_epoch != epoch {
-                                        return;
-                                    }
-                                    let errors: Vec<String> = validated
-                                        .as_ref()
-                                        .map(|v| {
-                                            v.errors.iter().map(|e| e.detail.clone()).collect()
-                                        })
-                                        .unwrap_or_default();
-                                    crate::ui::chat_bar::add_ai_response(
-                                        &mut s.main.chat,
-                                        chat_display_text(
-                                            &raw.explanation,
-                                            raw.specializations.len(),
-                                            &errors,
-                                        ),
-                                    );
-                                });
-                            } else {
-                                // Heavy phase — runs WITHOUT the state lock. The
-                                // render callback shares this mutex and ImGui only
-                                // draws on the render thread, so a stalled frame
-                                // here reads as the whole game not responding.
-                                let Some((live_db, live_mode)) = crate::state::with_state(|s| {
-                                    (s.main.game_db.clone(), s.main.game_mode.clone())
-                                }) else {
-                                    return; // state gone — addon shutting down
-                                };
-                                let plated = match &validated {
-                                    Some(v) => gemini_from_validated(raw, v),
-                                    None => raw,
-                                };
-                                let errors: Vec<String> = validated
-                                    .as_ref()
-                                    .map(|v| v.errors.iter().map(|e| e.detail.clone()).collect())
-                                    .unwrap_or_default();
-                                let body = if plated.explanation.is_empty() {
-                                    t("choya.heres_a_build")
-                                } else {
-                                    plated.explanation.clone()
-                                };
-                                let display =
-                                    chat_display_text(&body, plated.specializations.len(), &errors);
-                                let mut suggestion = crate::ui::comparison::BuildSuggestion {
-                                    label: t("choya.pick"),
-                                    ..Default::default()
-                                };
-                                apply_gemini_response(&mut suggestion, &plated);
-                                if let Some(ref db) = live_db {
-                                    attach_chat_stats(&mut suggestion, db, &profession, &live_mode);
-                                    if let Some(v) = &validated {
-                                        suggestion.chat_code =
-                                            validated_build_to_chat_code(v, &profession, db);
-                                    }
-                                    if suggestion.chat_code.is_none() {
-                                        suggestion.chat_code =
-                                            suggestion_to_chat_code(&suggestion, db);
-                                    }
-                                    let balance_ctx = BalanceContext::new(live_mode.clone());
-                                    simulate_suggestion_rotation(&mut suggestion, db, &balance_ctx);
-                                }
-                                let chips = match (live_db.as_ref(), validated.as_ref()) {
-                                    (Some(db), Some(v)) => crate::chat_links::chips_from_plate(
-                                        db,
-                                        v,
-                                        suggestion.chat_code.as_deref(),
-                                    ),
-                                    _ => suggestion
-                                        .chat_code
-                                        .as_deref()
-                                        .filter(|c| c.starts_with("[&"))
-                                        .map(|c| vec![crate::chat_links::build_template_chip(c)])
-                                        .unwrap_or_default(),
-                                };
-                                // Apply phase — short lock, pure state mutation.
-                                crate::state::with_state(|s| {
-                                    if s.main.chat_epoch != epoch {
-                                        return;
-                                    }
-                                    crate::ui::chat_bar::add_plated_response(
-                                        &mut s.main.chat,
-                                        display,
-                                        chips,
-                                        true,
-                                    );
-                                    s.main.comparison.error = None;
-                                    s.main.comparison.suggestions.push(suggestion);
-                                    s.main.comparison.selected_suggestion =
-                                        s.main.comparison.suggestions.len() - 1;
-                                    s.main.comparison.show_optimized = true;
-                                    s.main.tab_alert =
-                                        Some(result_alert_tab(s.main.current_build.is_some()));
-                                    s.main.provider_issue = None;
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            crate::state::with_state(|s| {
-                                if s.main.chat_epoch != epoch {
-                                    return;
-                                }
-                                let msg = format_provider_issue(
-                                    &e,
-                                    s.config.active_provider.short_label(),
-                                    s.config.active_model_id(),
-                                );
-                                s.main.provider_issue = Some(msg.clone());
-                                crate::ui::chat_bar::add_ai_response(&mut s.main.chat, msg);
-                            });
-                        }
-                    }
-                }
-            } else {
-                crate::state::with_state(|s| {
-                    if s.main.chat_epoch == epoch {
-                        s.main.chat.waiting = false;
-                    }
-                });
-            }
-        }));
-        if panic_result.is_err() {
-            nexus::log::log(
-                nexus::log::LogLevel::Warning,
-                "GW2BuildOpt",
-                "bg thread panicked: send_chat_message",
-            );
-            crate::state::with_state(|s| {
-                if s.main.chat_epoch == epoch {
-                    s.main.chat.waiting = false;
-                }
-            });
-        }
-    });
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::chat_flow::plate_is_servable;
     use super::{
         apply_radar_prefix, chat_display_text, fill_holes_from_loadout, format_provider_issue,
-        gemini_from_validated, keep_equipped_weapons, kitchen_brief, plate_is_servable,
-        suggestion_to_chat_code,
+        gemini_from_validated, keep_equipped_weapons, kitchen_brief, suggestion_to_chat_code,
     };
     use crate::ui::comparison::BuildSuggestion;
     use base64::Engine as _;

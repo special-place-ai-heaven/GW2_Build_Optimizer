@@ -9,8 +9,10 @@ use gw2_optimizer::scoring::OptimizationWeights;
 
 pub(crate) mod build_display;
 mod character;
+mod chat_flow;
 pub mod lock_panel;
 mod optimization;
+mod optimize_flow;
 mod resolution;
 mod stats;
 mod tabs;
@@ -983,10 +985,10 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
                 .as_ref()
                 .map(|b| b.profession.clone());
             if let Some(ref prof_name) = profession_name {
-                optimization::start_optimization_with_profession(state, prof_name);
+                optimize_flow::start_optimization_with_profession(state, prof_name);
             }
         } else {
-            optimization::start_optimization(state);
+            optimize_flow::start_optimization(state);
         }
     }
 }
