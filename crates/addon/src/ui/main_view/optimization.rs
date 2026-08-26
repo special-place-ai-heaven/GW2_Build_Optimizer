@@ -1,5 +1,6 @@
 use super::stats::{compute_3tier_combat, perf_to_combat_metrics};
 use gw2_core::i18n::t;
+use gw2_core::types::GearSlot;
 use gw2_optimizer::balance::BalanceContext;
 
 /// Convert a SynergyResult from the new pipeline into a BuildSuggestion for display.
@@ -228,30 +229,23 @@ pub(super) fn synergy_result_to_suggestion(
         }
     };
 
+    // Per-slot reads: uniform-validation builds render exactly like the old
+    // build-wide prefix; mixed maps show each category's representative slot
+    // (helm / amulet / set-1 main hand). Per-piece rendering lands with the
+    // gear-sheet rework.
     let fallback_prefix = v
-        .gear_prefix
-        .as_ref()
+        .primary_prefix()
         .map(|prefix| prefix.name.clone())
         .unwrap_or_else(|| "Unknown".into());
+    let category_prefix = |slot: GearSlot| {
+        v.prefix_for(slot)
+            .map(|prefix| prefix.name.clone())
+            .unwrap_or_else(|| fallback_prefix.clone())
+    };
     let gear_prefixes = gw2_core::types::GearPrefixGroups {
-        armor: v
-            .gear_groups
-            .armor
-            .as_ref()
-            .map(|prefix| prefix.name.clone())
-            .unwrap_or_else(|| fallback_prefix.clone()),
-        trinkets: v
-            .gear_groups
-            .trinkets
-            .as_ref()
-            .map(|prefix| prefix.name.clone())
-            .unwrap_or_else(|| fallback_prefix.clone()),
-        weapons: v
-            .gear_groups
-            .weapons
-            .as_ref()
-            .map(|prefix| prefix.name.clone())
-            .unwrap_or_else(|| fallback_prefix.clone()),
+        armor: category_prefix(GearSlot::Helm),
+        trinkets: category_prefix(GearSlot::Amulet),
+        weapons: category_prefix(GearSlot::WeaponSet1Main),
     };
     let gear_summary = format!(
         "Armor: {} · Trinkets: {} · Weapons: {}",
@@ -262,8 +256,7 @@ pub(super) fn synergy_result_to_suggestion(
         label,
         build_summary: format!("Gear: {gear_summary}"),
         stat_prefix: v
-            .gear_prefix
-            .as_ref()
+            .primary_prefix()
             .map(|p| p.name.clone())
             .unwrap_or_default(),
         gear_prefixes,
@@ -1128,7 +1121,7 @@ pub(super) fn gemini_from_validated(
     if let Some(r) = &v.relic {
         raw.relic = r.name.clone();
     }
-    if let Some(p) = &v.gear_prefix {
+    if let Some(p) = v.primary_prefix() {
         raw.stat_prefix = p.name.clone();
     }
     if !v.explanation.is_empty() {

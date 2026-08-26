@@ -773,8 +773,8 @@ mod tests {
     use crate::scenario::{CombatTier, OptimizationTarget, ScenarioSpec, TargetProfile};
     use crate::scoring::OptimizationWeights;
     use crate::validation::{
-        RejectCode, ValidatedBuild, ValidatedGearPrefix, ValidatedSkills, ValidatedSpec,
-        ValidatedWeaponSet, ValidatedWeapons, ValidationReject,
+        RejectCode, ValidatedBuild, ValidatedSkills, ValidatedSpec, ValidatedWeaponSet,
+        ValidatedWeapons, ValidationReject,
     };
     use gw2_core::types::GameMode;
     use std::collections::HashMap;
@@ -1254,11 +1254,7 @@ mod tests {
             rune: None,
             sigils: vec![],
             relic: None,
-            gear_prefix: Some(ValidatedGearPrefix {
-                itemstat_id: 9999,
-                name: "Test".into(),
-            }),
-            gear_groups: Default::default(),
+            gear_slots: gw2_core::types::GearSlots::default(), // itemstat 9999 intentionally absent
             explanation: String::new(),
             synergy_explanation: String::new(),
             changes: vec![],

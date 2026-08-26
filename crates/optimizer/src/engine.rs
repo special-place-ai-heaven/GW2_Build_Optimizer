@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use gw2_api::models::{
     EquipmentTab, Item, ItemStat, Profession, PvpAmulet, Specialization, Trait as GW2Trait,
 };
-use gw2_core::types::GameMode;
+use gw2_core::types::{GameMode, GearSlot, PrefixRef};
 
 use gw2_api::models::Fact;
 
@@ -1511,22 +1511,45 @@ pub fn simulate_validated_rotation(
     Some(result)
 }
 
+/// Equipment-budget slot name → the GearSlot whose prefix pays for it.
+/// WeaponB1/B2 are inactive-set weapon slots — they never draw budgets.
+fn gear_slot_for_budget_slot(slot_name: &str) -> Option<GearSlot> {
+    Some(match slot_name {
+        "Helm" => GearSlot::Helm,
+        "Shoulders" => GearSlot::Shoulders,
+        "Coat" => GearSlot::Coat,
+        "Gloves" => GearSlot::Gloves,
+        "Leggings" => GearSlot::Leggings,
+        "Boots" => GearSlot::Boots,
+        "WeaponA1" => GearSlot::WeaponSet1Main,
+        "WeaponA2" => GearSlot::WeaponSet1Off,
+        "Backpack" => GearSlot::Back,
+        "Accessory1" => GearSlot::Accessory1,
+        "Accessory2" => GearSlot::Accessory2,
+        "Amulet" => GearSlot::Amulet,
+        "Ring1" => GearSlot::Ring1,
+        "Ring2" => GearSlot::Ring2,
+        _ => return None,
+    })
+}
+
 fn apply_validated_gear_stats(
     stats: &mut stats::StatBlock,
     db: &GameDb,
     validated: &ValidatedBuild,
     ctx: &BalanceContext,
 ) {
-    let fallback = validated
-        .gear_prefix
-        .as_ref()
-        .map(|prefix| prefix.itemstat_id);
-    let groups = &validated.gear_groups;
     if ctx.game_mode == GameMode::PvP {
+        // Amulets replace gear; match by the build's primary prefix name.
+        let fallback = validated.primary_prefix().map(|prefix| prefix.itemstat_id);
         apply_optimized_gear_stats(stats, db, fallback, ctx);
         return;
     }
 
+    // Per-slot reads replace the old `group.or(build-wide)` chain: every
+    // constructor expands its prefixes into slots (validate fills all 16
+    // uniformly, group overrides overwrite their members), so an unset slot
+    // means exactly what a missing group AND missing fallback meant before.
     let budgets = data::slot_budgets::slot_budgets();
     for &(slot_type, slot_name) in data::EQUIPMENT_SLOTS {
         let slot_type = if slot_name.starts_with("Weapon") {
@@ -1537,17 +1560,9 @@ fn apply_validated_gear_stats(
         } else {
             slot_type
         };
-        let group_prefix = if matches!(
-            slot_name,
-            "Helm" | "Shoulders" | "Coat" | "Gloves" | "Leggings" | "Boots"
-        ) {
-            groups.armor.as_ref()
-        } else if slot_name.starts_with("Weapon") {
-            groups.weapons.as_ref()
-        } else {
-            groups.trinkets.as_ref()
-        };
-        let Some(prefix_id) = group_prefix.map(|prefix| prefix.itemstat_id).or(fallback) else {
+        let Some(prefix_id) = gear_slot_for_budget_slot(slot_name)
+            .and_then(|slot| validated.gear_slots.prefix_id(slot))
+        else {
             continue;
         };
         let Some(itemstat) = db.itemstats.get(&prefix_id) else {
@@ -2147,8 +2162,7 @@ pub fn llm_advisor(
 ) -> crate::validation::ValidatedBuild {
     // Build a compact prompt asking for 3 specific swaps to try.
     let current_gear = current
-        .gear_prefix
-        .as_ref()
+        .primary_prefix()
         .map(|p| p.name.as_str())
         .unwrap_or("Unknown");
     let current_rune = current
@@ -2214,7 +2228,11 @@ pub fn llm_advisor(
             // shortest-fuzzy with id tiebreak). Previously this called
             // `to_lowercase()` on every itemstat in the loop.
             if let Some(item_stat) = db.itemstat_by_name(prefix_name) {
-                candidate.gear_prefix = Some(crate::validation::ValidatedGearPrefix {
+                // TODO(per-slot): the SWAP grammar has no slot dimension yet
+                // (plan HIGH 2, Task 4); for now a proposed prefix replaces
+                // every slot, matching pre-slot uniform behavior when groups
+                // are empty — the only state that reaches this advisor today.
+                candidate.fill_gear_slots(PrefixRef {
                     itemstat_id: item_stat.id,
                     name: item_stat.name.clone(),
                 });

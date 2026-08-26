@@ -678,8 +678,11 @@ fn suggestion_to_saved(
         engine_version: crate::VERSION.to_string(),
         balance_manifest_version: balance_manifest_version.map(|s| s.to_string()),
         label: suggestion.label.clone(),
+        // Legacy gear shape remains authoritative until per-slot save wiring
+        // lands; loaders expand these via GearSlots::from_legacy.
         stat_prefix: suggestion.stat_prefix.clone(),
         gear_prefixes: suggestion.gear_prefixes.clone(),
+        slot_prefixes: None,
         specializations: suggestion.specializations.clone(),
         weapons: suggestion.weapons.clone(),
         skills: suggestion.skills.clone(),
@@ -976,6 +979,7 @@ mod tests {
             label: "Test Build".into(),
             stat_prefix: "Viper's".into(),
             gear_prefixes: gw2_core::types::GearPrefixGroups::default(),
+            slot_prefixes: None,
             specializations: vec![("Test Spec".into(), vec!["Test Condition Trait".into()])],
             weapons: vec![],
             skills: vec![],
