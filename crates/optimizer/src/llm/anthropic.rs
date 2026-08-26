@@ -8,10 +8,8 @@
 //! - `max_tokens` is mandatory
 //! - Response content is an array of typed blocks (text, tool_use)
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -29,14 +27,9 @@ pub struct AnthropicClient {
     api_key: String,
     model: String,
     http: reqwest::blocking::Client,
-    cache: Mutex<HashMap<String, CachedResponse>>,
+    cache: crate::llm::response_cache::ResponseCache,
     rate: Mutex<RateTracker>,
     usage_path: Option<PathBuf>,
-}
-
-struct CachedResponse {
-    text: String,
-    cached_at: Instant,
 }
 
 // ─── Anthropic API Types ───
@@ -108,7 +101,7 @@ impl AnthropicClient {
             api_key: api_key.to_string(),
             model: model.to_string(),
             http,
-            cache: Mutex::new(HashMap::new()),
+            cache: crate::llm::response_cache::ResponseCache::new(1800, 64),
             rate: Mutex::new(RateTracker::new(RPM_LIMIT)),
             usage_path: None,
         })
@@ -140,7 +133,7 @@ impl AnthropicClient {
             api_key: api_key.to_string(),
             model: model.to_string(),
             http,
-            cache: Mutex::new(HashMap::new()),
+            cache: crate::llm::response_cache::ResponseCache::new(1800, 64),
             rate: Mutex::new(rate),
             usage_path: Some(usage_path),
         })
@@ -521,35 +514,12 @@ impl LlmClient for AnthropicClient {
     }
 
     fn generate_cached(&self, prompt: &str) -> Result<String, LlmError> {
-        let key = prompt.to_string();
-
-        {
-            let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(cached) = cache.get(&key) {
-                if cached.cached_at.elapsed().as_secs() < 1800 {
-                    return Ok(cached.text.clone());
-                }
-            }
+        if let Some(text) = self.cache.get(prompt) {
+            return Ok(text);
         }
 
         let text = self.generate(prompt)?;
-
-        {
-            let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-            // Evict expired entries and cap size: prompts embed full game
-            // context, so an insert-only map grows for the life of the process.
-            cache.retain(|_, v| v.cached_at.elapsed().as_secs() < 1800);
-            if cache.len() >= 64 {
-                cache.clear();
-            }
-            cache.insert(
-                key,
-                CachedResponse {
-                    text: text.clone(),
-                    cached_at: Instant::now(),
-                },
-            );
-        }
+        self.cache.insert(prompt, text.clone());
 
         Ok(text)
     }
@@ -685,9 +655,7 @@ impl LlmClient for AnthropicClient {
     }
 
     fn clear_cache(&self) {
-        if let Ok(mut cache) = self.cache.lock() {
-            cache.clear();
-        }
+        self.cache.clear();
     }
 }
 
