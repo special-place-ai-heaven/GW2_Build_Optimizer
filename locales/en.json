@@ -192,6 +192,7 @@
   "section.trinkets": "TRINKETS",
   "section.gear": "GEAR",
   "section.stats": "STATS",
+  "gear.no_prefix": "No prefix equipped to lock",
   "section.locks": "SPEC & TRAIT LOCKS",
   "section.optimized_specs": "OPTIMIZED SPECS & TRAITS",
   "section.attributes": "ATTRIBUTES",

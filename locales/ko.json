@@ -186,6 +186,7 @@
   "section.trinkets": "장신구",
   "section.gear": "GEAR",
   "section.stats": "스탯",
+  "gear.no_prefix": "잠글 장비 접두어 없음",
   "section.locks": "전문화/특성 잠금",
   "section.optimized_specs": "OPTIMIZED SPECS & TRAITS",
   "section.attributes": "ATTRIBUTES",

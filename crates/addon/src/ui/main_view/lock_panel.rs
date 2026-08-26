@@ -3,7 +3,7 @@
 //! Click to lock/unlock — locked items are preserved by the optimizer.
 
 use gw2_core::i18n::{t, tf};
-use gw2_core::types::BuildLocks;
+use gw2_core::types::{BuildLocks, GearSlot};
 use gw2_optimizer::gamedb::GameDb;
 use nexus::imgui::Ui;
 
@@ -185,7 +185,7 @@ fn brighten(color: [f32; 4], t: f32, amount: f32) -> [f32; 4] {
 /// Returns true if any lock state was modified.
 ///
 /// `hover_state` holds the single currently-animating element (if any). It persists
-/// across frames on `MainState` so hover glow smoothly lerps in instead of snapping.
+#[allow(clippy::too_many_arguments)]
 pub fn render_lock_panel(
     ui: &Ui,
     locks: &mut BuildLocks,
@@ -193,6 +193,7 @@ pub fn render_lock_panel(
     db: Option<&GameDb>,
     profession_name: &str,
     current_specs: &[(u32, Vec<u32>)], // (spec_id, selected_trait_ids) from current build
+    current_build: &gw2_core::types::ResolvedBuild,
     hover_state: &mut Option<(LockElementId, f32)>,
 ) -> bool {
     let mut modified = false;
@@ -697,10 +698,142 @@ pub fn render_lock_panel(
         ui.text_colored(LOCKED_COLOR, format!("  {lock_msg}"));
     }
 
+    // ── Gear section: per-slot current prefix + lock toggle ──
+    // A gear lock pins one `GearSlot` to an itemstat id. Locks are created
+    // from the currently equipped prefix (resolved against GameDb); slots
+    // with no resolvable prefix cannot be pinned.
+    let gear_names = resolved_gear_names(current_build);
+    ui.dummy([0.0, 8.0]);
+    {
+        let pos = ui.cursor_screen_pos();
+        let width = ui.content_region_avail()[0];
+        let draw_list = ui.get_window_draw_list();
+        draw_list
+            .add_rect(
+                [pos[0], pos[1]],
+                [pos[0] + width, pos[1] + 18.0],
+                [0.22, 0.19, 0.10, 0.9],
+            )
+            .filled(true)
+            .build();
+        let title = t("section.gear");
+        draw_list.add_text([pos[0] + 6.0, pos[1] + 2.0], HEADER_COLOR, &title);
+    }
+    ui.dummy([0.0, 20.0]);
+
+    for slot in GearSlot::ALL {
+        let label = gear_slot_label(slot);
+        let is_locked = locks.gear_locks.contains_key(&slot);
+        let prefix = gear_names[slot as usize].as_deref().unwrap_or("");
+        let resolved_id = db.itemstat_by_name(prefix).map(|is| is.id);
+
+        let row_text = if prefix.is_empty() {
+            format!("{label} —")
+        } else {
+            format!("{label} · {}", db.loc_prefix(prefix))
+        };
+        ui.text_colored(
+            if is_locked { LOCKED_COLOR } else { DIM_COLOR },
+            format!("  {}", if is_locked { "[x]" } else { "[ ]" }),
+        );
+        ui.same_line();
+        let clicked = crate::ui::theme::pill(ui, &row_text, false, &format!("##gear_{slot:?}"));
+        crate::ui::theme::wide_tooltip(ui, |tip| {
+            tip.text_colored(crate::ui::theme::GOLD, label.clone());
+            if is_locked {
+                tip.text_colored(LOCKED_COLOR, t("lock.locked"));
+                tip.text_colored(DIM_COLOR, t("lock.click_unlock"));
+            } else if prefix.is_empty() {
+                tip.text_colored(DIM_COLOR, t("gear.no_prefix"));
+            } else {
+                tip.text(db.loc_prefix(prefix));
+                tip.text_colored(DIM_COLOR, t("lock.click_lock"));
+            }
+        });
+        let right_clicked = ui.is_item_hovered() && right_clicked;
+        if clicked || right_clicked {
+            if is_locked {
+                locks.gear_locks.remove(&slot);
+                modified = true;
+            } else if let Some(id) = resolved_id {
+                locks.gear_locks.insert(slot, id);
+                modified = true;
+            }
+        }
+    }
+
     // Advance the hover animation for next frame.
     tick_hover(hover_state, hovered_now);
 
     modified
+}
+
+/// The equipped prefix name for each of the sixteen canonical gear slots, in
+/// `GearSlot::ALL` order. Resolved builds carry one prefix per weapon set, so
+/// both hands of a set share its name; empty slots stay `None`.
+fn resolved_gear_names(build: &gw2_core::types::ResolvedBuild) -> [Option<String>; 16] {
+    use crate::ui::gear_sheet::piece_gear_slot;
+
+    let mut names: [Option<String>; 16] = Default::default();
+    let mut put = |piece_slot: &str, piece: &gw2_core::types::ResolvedGearPiece| {
+        if let Some(slot) = piece_gear_slot(piece_slot) {
+            names[slot as usize] = Some(piece.stat_prefix.clone()).filter(|n| !n.is_empty());
+        }
+    };
+    for (slot, piece) in build.armor.iter().map(|p| (p.slot.as_str(), p)) {
+        put(slot, piece);
+    }
+    for p in &build.trinkets {
+        put(&p.slot, p);
+    }
+    for (i, set) in build.weapons.iter().enumerate() {
+        if set.main_hand.is_some() {
+            let slot = if i == 0 {
+                GearSlot::WeaponSet1Main
+            } else {
+                GearSlot::WeaponSet2Main
+            };
+            names[slot as usize] = (!set.stat_prefix.is_empty()).then(|| set.stat_prefix.clone());
+        }
+        if set.off_hand.is_some() {
+            let slot = if i == 0 {
+                GearSlot::WeaponSet1Off
+            } else {
+                GearSlot::WeaponSet2Off
+            };
+            names[slot as usize] = (!set.stat_prefix.is_empty()).then(|| set.stat_prefix.clone());
+        }
+    }
+    names
+}
+
+/// Human label for a gear slot, localized for armor/trinkets and composed for
+/// weapon hands (resolved weapon sets only know "Set 1"/"Set 2" today).
+fn gear_slot_label(slot: GearSlot) -> String {
+    match slot {
+        GearSlot::Helm => t("slot.helm"),
+        GearSlot::Shoulders => t("slot.shoulders"),
+        GearSlot::Coat => t("slot.chest"),
+        GearSlot::Gloves => t("slot.gloves"),
+        GearSlot::Leggings => t("slot.legs"),
+        GearSlot::Boots => t("slot.boots"),
+        GearSlot::Back => t("slot.back"),
+        GearSlot::Accessory1 | GearSlot::Accessory2 => format!(
+            "{} {}",
+            t("slot.accessory"),
+            if slot == GearSlot::Accessory1 { 1 } else { 2 }
+        ),
+        GearSlot::Amulet => t("slot.amulet"),
+        GearSlot::Ring1 | GearSlot::Ring2 => format!(
+            "{} {}",
+            t("slot.ring"),
+            if slot == GearSlot::Ring1 { 1 } else { 2 }
+        ),
+        GearSlot::WeaponSet1Main => "Set 1 Main".to_string(),
+        GearSlot::WeaponSet1Off => "Set 1 Off".to_string(),
+        GearSlot::WeaponSet2Main => "Set 2 Main".to_string(),
+        GearSlot::WeaponSet2Off => "Set 2 Off".to_string(),
+    }
 }
 
 /// Render the optimized build's specs & traits in the same visual style as the lock panel.
@@ -1064,5 +1197,75 @@ mod tests {
         let p1 = bezier4(a, c1, c2, b, 1.0);
         assert!((p0[0] - a[0]).abs() < 0.01 && (p0[1] - a[1]).abs() < 0.01);
         assert!((p1[0] - b[0]).abs() < 0.01 && (p1[1] - b[1]).abs() < 0.01);
+    }
+
+    #[test]
+    fn resolved_gear_names_map_pieces_to_their_slots() {
+        use gw2_core::types::{ResolvedBuild, ResolvedGearPiece, ResolvedWeaponSet, WeaponInfo};
+
+        let piece = |slot: &str, prefix: &str| ResolvedGearPiece {
+            slot: slot.to_string(),
+            name: format!("{slot} item"),
+            stat_prefix: prefix.to_string(),
+            ..Default::default()
+        };
+        let weapon = |name: &str| WeaponInfo {
+            name: name.to_string(),
+            ..Default::default()
+        };
+        let build = ResolvedBuild {
+            armor: vec![piece("Helm", "Berserker's"), piece("Boots", "Cavalier's")],
+            trinkets: vec![piece("Amulet", "Sinister")],
+            // Set 1 two-handed (main only), Set 2 dual-wield.
+            weapons: vec![
+                ResolvedWeaponSet {
+                    label: "Set 1".into(),
+                    stat_prefix: "Assassin's".into(),
+                    main_hand: Some(weapon("Greatsword")),
+                    off_hand: None,
+                    ..Default::default()
+                },
+                ResolvedWeaponSet {
+                    label: "Set 2".into(),
+                    stat_prefix: "Viper's".into(),
+                    main_hand: Some(weapon("Sword")),
+                    off_hand: Some(weapon("Dagger")),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let names = resolved_gear_names(&build);
+        assert_eq!(
+            names[GearSlot::Helm as usize].as_deref(),
+            Some("Berserker's")
+        );
+        assert_eq!(
+            names[GearSlot::Boots as usize].as_deref(),
+            Some("Cavalier's")
+        );
+        assert_eq!(
+            names[GearSlot::Shoulders as usize],
+            None,
+            "unequipped slots stay empty"
+        );
+        assert_eq!(
+            names[GearSlot::Amulet as usize].as_deref(),
+            Some("Sinister")
+        );
+        assert_eq!(
+            names[GearSlot::WeaponSet1Main as usize].as_deref(),
+            Some("Assassin's")
+        );
+        assert_eq!(names[GearSlot::WeaponSet1Off as usize], None);
+        assert_eq!(
+            names[GearSlot::WeaponSet2Main as usize].as_deref(),
+            Some("Viper's")
+        );
+        assert_eq!(
+            names[GearSlot::WeaponSet2Off as usize].as_deref(),
+            Some("Viper's")
+        );
     }
 }

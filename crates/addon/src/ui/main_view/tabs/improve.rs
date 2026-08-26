@@ -166,6 +166,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                                 db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
                                 &profession_name,
                                 &current_specs,
+                                &build,
                                 &mut state.main.locks_hover,
                             );
                         }
@@ -212,6 +213,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                             db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
                             &profession_name,
                             &current_specs,
+                            &build,
                             &mut state.main.locks_hover,
                         );
                     }

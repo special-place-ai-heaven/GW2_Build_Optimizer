@@ -186,6 +186,7 @@
   "section.trinkets": "BIJOUX",
   "section.gear": "ÉQUIPEMENT",
   "section.stats": "STATISTIQUES",
+  "gear.no_prefix": "Aucun préfixe équipé à verrouiller",
   "section.locks": "VERROUS SPÉ & TRAITS",
   "section.optimized_specs": "SPÉ & TRAITS OPTIMISÉS",
   "section.attributes": "ATTRIBUTS",

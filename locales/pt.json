@@ -186,6 +186,7 @@
   "section.trinkets": "BERLOQUES",
   "section.gear": "GEAR",
   "section.stats": "ATRIBUTOS",
+  "gear.no_prefix": "Sem prefixo equipado para bloquear",
   "section.locks": "BLOQUEIOS DE SPEC",
   "section.optimized_specs": "OPTIMIZED SPECS & TRAITS",
   "section.attributes": "ATTRIBUTES",

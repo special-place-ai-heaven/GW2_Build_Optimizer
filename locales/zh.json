@@ -186,6 +186,7 @@
   "section.trinkets": "饰品",
   "section.gear": "GEAR",
   "section.stats": "属性",
+  "gear.no_prefix": "未装备可锁定的前缀",
   "section.locks": "专精与特性锁定",
   "section.optimized_specs": "OPTIMIZED SPECS & TRAITS",
   "section.attributes": "ATTRIBUTES",

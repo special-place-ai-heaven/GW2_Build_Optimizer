@@ -1,7 +1,7 @@
 //! Report payload for the feedback server (contract v1). Pure builder: it only sees the plain
 //! inputs below, never `AppConfig` or `ResolvedBuild`, so keys and character names cannot leak.
 
-use crate::types::GearPrefixGroups;
+use crate::types::GearSlots;
 use serde::{Deserialize, Serialize};
 
 /// Wire schema version sent as `schema_version`.
@@ -34,7 +34,9 @@ pub struct ReportContext {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct BuildSnapshot {
     pub stat_prefix: String,
-    pub gear_prefixes: GearPrefixGroups,
+    /// Per-slot prefixes (kebab slot name → `{itemstat_id, name}`), as saved.
+    /// `None` when the client had no per-slot gear data.
+    pub slot_prefixes: Option<GearSlots>,
     /// `(specialization name, chosen trait names)` per spec line.
     pub specializations: Vec<(String, Vec<String>)>,
     pub weapons: Vec<String>,
@@ -110,7 +112,6 @@ fn to_compact<T: Serialize>(value: &T) -> String {
 mod tests {
     use super::*;
     use crate::feedback::taxonomy::FeedbackTaxonomy;
-    use crate::types::GearPrefixGroups;
     use serde_json::Value;
     use std::collections::BTreeSet;
 
@@ -145,13 +146,17 @@ mod tests {
     }
 
     fn sample_snapshot() -> BuildSnapshot {
+        let mut slots = GearSlots::default();
+        slots.set(
+            crate::types::GearSlot::Amulet,
+            crate::types::PrefixRef {
+                itemstat_id: 1,
+                name: "Berserker".into(),
+            },
+        );
         BuildSnapshot {
             stat_prefix: "Marauder".to_string(),
-            gear_prefixes: GearPrefixGroups {
-                armor: "Marauder".to_string(),
-                trinkets: "Berserker".to_string(),
-                weapons: "Marauder".to_string(),
-            },
+            slot_prefixes: Some(slots),
             specializations: vec![
                 (
                     "Skirmishing".to_string(),
@@ -320,7 +325,7 @@ mod tests {
             keys(&v),
             set(&[
                 "stat_prefix",
-                "gear_prefixes",
+                "slot_prefixes",
                 "specializations",
                 "weapons",
                 "sigils",

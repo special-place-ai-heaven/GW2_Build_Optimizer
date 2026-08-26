@@ -186,6 +186,7 @@
   "section.trinkets": "БИЖУТЕРИЯ",
   "section.gear": "GEAR",
   "section.stats": "ХАРАКТЕРИСТИКИ",
+  "gear.no_prefix": "Нет экипированного префикса для блокировки",
   "section.locks": "БЛОКИРОВКА СПЕКОВ И ТРЕЙТОВ",
   "section.optimized_specs": "OPTIMIZED SPECS & TRAITS",
   "section.attributes": "ATTRIBUTES",

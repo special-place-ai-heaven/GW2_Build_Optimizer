@@ -186,6 +186,7 @@
   "section.trinkets": "アクセサリー",
   "section.gear": "GEAR",
   "section.stats": "ステータス",
+  "gear.no_prefix": "ロックする接頭辞がない",
   "section.locks": "スペック／トレイトロック",
   "section.optimized_specs": "OPTIMIZED SPECS & TRAITS",
   "section.attributes": "ATTRIBUTES",

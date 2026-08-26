@@ -1047,8 +1047,12 @@ fn call_gemini_with_progress(
 }
 
 /// Stage 5 of the Gemini pipeline: parse the LLM response and apply the
-/// deterministic gear-prefix override. Gemini is unreliable at following gear
-/// constraints, so the cosine-similarity selection from Stage 1 is authoritative.
+/// deterministic profile-prefix override as the slot fallback. Per spec §12.3
+/// the profile selection stays authoritative (Gemini is unreliable at following
+/// gear constraints), but a per-slot `gear_slots` map on the plate is accepted:
+/// it flows through untouched and `validate_gear_slot_map` applies it with
+/// strict validation — resolved entries overwrite their slot, everything else
+/// keeps the profile prefix. The optimizer refines unlocked slots afterward.
 fn parse_and_override_gear_prefix(
     llm_response: &str,
     determined_prefix: &str,

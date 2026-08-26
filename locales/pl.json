@@ -186,6 +186,7 @@
   "section.trinkets": "DODATKI",
   "section.gear": "GEAR",
   "section.stats": "STATYSTYKI",
+  "gear.no_prefix": "Brak wyposażonego prefiksu do zablokowania",
   "section.locks": "BLOKADY SPEC I CECH",
   "section.optimized_specs": "OPTIMIZED SPECS & TRAITS",
   "section.attributes": "ATTRIBUTES",
