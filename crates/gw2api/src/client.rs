@@ -350,8 +350,6 @@ impl Gw2Client {
             let resp = match self.http.get(&url).headers(headers).send() {
                 Ok(resp) => resp,
                 Err(e) => {
-                    #[cfg(test)]
-                    eprintln!("FLAKE-DBG attempt={attempt} conn-error={e:?}");
                     last_error = Some(ApiError::Http(e));
                     continue; // retry on connection failure
                 }
