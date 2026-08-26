@@ -195,7 +195,11 @@ pub fn post_report(json: &str, addon_version: &str) -> TransportOutcome {
         Ok(resp) => {
             let code = resp.status().as_u16();
             let retry_after = parse_retry_after(resp.headers());
-            let body = resp.text().unwrap_or_default();
+            // Cap the body: a hostile or broken endpoint must not stream
+            // unbounded bytes into the game process.
+            let body = gw2_api::transport::read_body_capped(resp, 1024 * 1024)
+                .map(|b| String::from_utf8_lossy(&b).into_owned())
+                .unwrap_or_default();
             TransportOutcome::Status {
                 code,
                 retry_after,
@@ -245,7 +249,9 @@ pub fn fetch_taxonomy() -> Option<String> {
     if resp.status().as_u16() != 200 {
         return None;
     }
-    resp.text().ok()
+    gw2_api::transport::read_body_capped(resp, 1024 * 1024)
+        .ok()
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 #[cfg(test)]

@@ -377,7 +377,11 @@ impl Gw2Client {
                 continue;
             }
             if is_retryable_status(status) {
-                let body = resp.text().unwrap_or_default();
+                let body = {
+                    crate::transport::read_body_capped(resp, 8 * 1024 * 1024)
+                        .map(|b| String::from_utf8_lossy(&b).into_owned())
+                        .unwrap_or_default()
+                };
                 last_error = Some(ApiError::Api {
                     status,
                     url_path: url_path.clone(),
@@ -387,7 +391,11 @@ impl Gw2Client {
             }
 
             if !resp.status().is_success() {
-                let body = resp.text().unwrap_or_default();
+                let body = {
+                    crate::transport::read_body_capped(resp, 8 * 1024 * 1024)
+                        .map(|b| String::from_utf8_lossy(&b).into_owned())
+                        .unwrap_or_default()
+                };
                 return Err(ApiError::Api {
                     status,
                     url_path,
@@ -396,10 +404,10 @@ impl Gw2Client {
             }
 
             // Read body — connection can fail here too
-            let text = match resp.text() {
-                Ok(t) => t,
+            let text = match crate::transport::read_body_capped(resp, 8 * 1024 * 1024) {
+                Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
                 Err(e) => {
-                    last_error = Some(ApiError::Http(e));
+                    last_error = Some(ApiError::Internal(format!("body read failed: {e}")));
                     continue; // retry on read failure
                 }
             };
