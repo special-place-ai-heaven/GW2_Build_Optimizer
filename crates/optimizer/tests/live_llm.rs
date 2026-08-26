@@ -51,6 +51,10 @@ fn anthropic_key() -> String {
     std::env::var("ANTHROPIC_API_KEY").expect("Set ANTHROPIC_API_KEY env var to run this test")
 }
 
+fn openrouter_key() -> String {
+    std::env::var("OPENROUTER_API_KEY").expect("Set OPENROUTER_API_KEY env var to run this test")
+}
+
 /// A simple tool for testing tool-calling: takes a number, returns its square.
 fn test_tools() -> Vec<ToolDefinition> {
     vec![ToolDefinition {
@@ -282,6 +286,41 @@ fn test_anthropic_invalid_key() {
     .expect("Client construction should not fail");
     let result = client.validate_key();
     println!("Anthropic invalid key result: {:?}", result);
+    assert!(
+        matches!(
+            result,
+            Err(LlmError::InvalidKey) | Err(LlmError::Api { .. })
+        ),
+        "Expected InvalidKey or Api error for bad key, got: {:?}",
+        result
+    );
+}
+
+// ─── OpenRouter Tests ───
+
+#[test]
+#[ignore]
+fn test_openrouter_validate_and_generate() {
+    let key = openrouter_key();
+    let client = gw2_optimizer::llm::openrouter::OpenRouterClient::new(
+        &key,
+        "z-ai/glm-5.3-flash",
+    )
+    .expect("Failed to create OpenRouter client");
+    println!("\n=== OpenRouter Live Tests (streamed) ===");
+    run_provider_tests(&client);
+}
+
+#[test]
+#[ignore]
+fn test_openrouter_invalid_key() {
+    let client = gw2_optimizer::llm::openrouter::OpenRouterClient::new(
+        "sk-or-invalid-12345",
+        "z-ai/glm-5.3-flash",
+    )
+    .expect("Client construction should not fail");
+    let result = client.validate_key();
+    println!("OpenRouter invalid key result: {:?}", result);
     assert!(
         matches!(
             result,
