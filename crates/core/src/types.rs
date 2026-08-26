@@ -65,6 +65,11 @@ pub struct BuildLocks {
     /// Trait locks: spec_id → [Adept, Master, Grandmaster]. None = free, Some(id) = locked trait.
     #[serde(default)]
     pub trait_locks: HashMap<u32, [Option<u32>; 3]>,
+    /// Gear locks: slot → required itemstat id. A locked slot's prefix is
+    /// never mutated by any search operator or advisor pass. Serde default so
+    /// older lock JSON without this field still loads.
+    #[serde(default)]
+    pub gear_locks: HashMap<GearSlot, u32>,
 }
 
 impl BuildLocks {
@@ -80,6 +85,7 @@ impl BuildLocks {
                 .trait_locks
                 .values()
                 .any(|cols| cols.iter().any(|c| c.is_some()))
+            || !self.gear_locks.is_empty()
     }
 
     /// Get locked trait for a specific spec and column (0=Adept, 1=Master, 2=Grandmaster).
@@ -118,6 +124,20 @@ impl BuildLocks {
                     ));
                 }
             }
+        }
+        // Gear locks: emit in canonical slot order (not HashMap order) for the
+        // same determinism reasons as the trait locks above. Only ids are
+        // available here; prompt-facing callers with GameDb access resolve
+        // names themselves (`describe_lock_constraints`).
+        let mut gear_entries: Vec<(&GearSlot, &u32)> = self.gear_locks.iter().collect();
+        gear_entries.sort_by_key(|(slot, _)| {
+            GearSlot::ALL
+                .iter()
+                .position(|canonical| canonical == *slot)
+                .unwrap_or(usize::MAX)
+        });
+        for (slot, id) in gear_entries {
+            parts.push(format!("Gear {} locked to ID {}", slot_name(slot), id));
         }
         if parts.is_empty() {
             String::new()
@@ -401,6 +421,12 @@ impl GearSlot {
         GearSlot::WeaponSet2Off,
     ];
 
+    /// Canonical kebab-case slot name — the same string used for serde
+    /// encoding, saves, and search identity.
+    pub fn kebab_name(&self) -> &'static str {
+        slot_name(self)
+    }
+
     /// The equipment budget slot type this gear slot draws from (matches the
     /// kebab names used by the optimizer's slot-budget tables).
     pub fn budget_slot(&self) -> &'static str {
@@ -620,6 +646,49 @@ mod tests {
         assert_eq!(mixed.armor, "Strong");
         assert_eq!(mixed.trinkets, "Ritualist's");
         assert_eq!(mixed.weapons, "Strong");
+    }
+
+    #[test]
+    fn describe_constraints_gear_locked_renders_canonical_slot_order() {
+        // Insert out of canonical order to prove output is sorted by slot
+        // position, not HashMap iteration order.
+        let mut locks = BuildLocks::default();
+        locks.gear_locks.insert(GearSlot::Ring2, 7);
+        locks.gear_locks.insert(GearSlot::Helm, 99);
+        assert_eq!(
+            locks.describe_constraints(),
+            "Gear helm locked to ID 99; Gear ring-2 locked to ID 7",
+        );
+    }
+
+    #[test]
+    fn describe_constraints_specs_traits_and_gear_all_render() {
+        let mut locks = BuildLocks::default();
+        locks.specs[2] = Some(34);
+        locks.trait_locks.insert(34, [Some(1111), None, None]);
+        locks.gear_locks.insert(GearSlot::Coat, 584);
+        assert_eq!(
+                locks.describe_constraints(),
+                "Slot 3 spec locked to ID 34; Spec 34 Adept trait locked to ID 1111; Gear coat locked to ID 584",
+            );
+    }
+
+    #[test]
+    fn build_locks_json_without_gear_locks_still_loads() {
+        // Older lock JSON predates gear_locks; serde(default) must fill it in.
+        let json = r#"{"specs":[null,null,null],"trait_locks":{}}"#;
+        let locks: BuildLocks = serde_json::from_str(json).expect("legacy JSON must load");
+        assert!(locks.gear_locks.is_empty());
+        assert!(locks.trait_locks.is_empty());
+    }
+
+    #[test]
+    fn build_locks_gear_locks_round_trip_through_kebab_names() {
+        let mut locks = BuildLocks::default();
+        locks.gear_locks.insert(GearSlot::Ring1, 918);
+        let json = serde_json::to_string(&locks).expect("serialize");
+        let back: BuildLocks = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.gear_locks.get(&GearSlot::Ring1), Some(&918));
     }
 
     #[test]

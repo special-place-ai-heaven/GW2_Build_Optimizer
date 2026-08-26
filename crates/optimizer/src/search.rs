@@ -4,49 +4,63 @@
 use std::collections::HashMap;
 
 use gw2_api::models::{ItemStat, Specialization};
+use gw2_core::types::{GearSlot, GearSlots, PrefixRef};
 
 use crate::scoring::OptimizationWeights;
 
-/// A candidate gear configuration: stat prefix per slot.
+/// A candidate gear configuration: one stat prefix per slot.
 #[derive(Debug, Clone)]
 pub struct GearCandidate {
-    /// Maps slot name to itemstat ID.
-    pub slot_stats: HashMap<String, u32>,
+    /// Per-slot prefixes for every stat-bearing slot (`STAT_SLOTS`).
+    /// Weapon set 2 stays empty — the legacy projection only ever spent
+    /// the active land set's budgets.
+    pub gear_slots: GearSlots,
     /// The itemstat name used (for display, e.g., "Berserker's").
     pub stat_prefix_name: String,
     /// Score from the scoring function.
     pub score: f64,
 }
 
-/// PvE/WvW equipment slots that carry stats.
-pub const STAT_SLOTS: &[&str] = &[
-    "Helm",
-    "Shoulders",
-    "Coat",
-    "Gloves",
-    "Leggings",
-    "Boots",
-    "WeaponA1",
-    "WeaponA2",
-    "Backpack",
-    "Accessory1",
-    "Accessory2",
-    "Amulet",
-    "Ring1",
-    "Ring2",
+/// PvE/WvW equipment slots that carry stats: armor, active land weapon
+/// set, trinkets — exactly the 14 API-slot strings the candidate map used
+/// to carry, projected onto the per-slot enum (`WeaponA1` →
+/// `WeaponSet1Main`, `Backpack` → `Back`, …). Weapon set 2 is not part of
+/// the legacy projection.
+pub const STAT_SLOTS: [GearSlot; 14] = [
+    GearSlot::Helm,
+    GearSlot::Shoulders,
+    GearSlot::Coat,
+    GearSlot::Gloves,
+    GearSlot::Leggings,
+    GearSlot::Boots,
+    GearSlot::WeaponSet1Main,
+    GearSlot::WeaponSet1Off,
+    GearSlot::Back,
+    GearSlot::Accessory1,
+    GearSlot::Accessory2,
+    GearSlot::Amulet,
+    GearSlot::Ring1,
+    GearSlot::Ring2,
 ];
 
 /// Slot group definitions for mix strategies.
-const TRINKET_SLOTS: &[&str] = &[
-    "Backpack",
-    "Accessory1",
-    "Accessory2",
-    "Amulet",
-    "Ring1",
-    "Ring2",
+const TRINKET_SLOTS: &[GearSlot] = &[
+    GearSlot::Back,
+    GearSlot::Accessory1,
+    GearSlot::Accessory2,
+    GearSlot::Amulet,
+    GearSlot::Ring1,
+    GearSlot::Ring2,
 ];
-const WEAPON_SLOTS: &[&str] = &["WeaponA1", "WeaponA2"];
-const ARMOR_SLOTS: &[&str] = &["Helm", "Shoulders", "Coat", "Gloves", "Leggings", "Boots"];
+const WEAPON_SLOTS: &[GearSlot] = &[GearSlot::WeaponSet1Main, GearSlot::WeaponSet1Off];
+const ARMOR_SLOTS: &[GearSlot] = &[
+    GearSlot::Helm,
+    GearSlot::Shoulders,
+    GearSlot::Coat,
+    GearSlot::Gloves,
+    GearSlot::Leggings,
+    GearSlot::Boots,
+];
 
 /// Find gear prefix combinations using hierarchical tier selection.
 ///
@@ -82,12 +96,16 @@ pub fn search_gear_prefixes(
 
     // Strategy 1: Full set of single prefix
     for stat in &relevant_stats {
-        let mut slot_stats = HashMap::new();
-        for slot in STAT_SLOTS {
-            slot_stats.insert(slot.to_string(), stat.id);
+        let prefix = PrefixRef {
+            itemstat_id: stat.id,
+            name: stat.name.clone(),
+        };
+        let mut gear_slots = GearSlots::default();
+        for &slot in &STAT_SLOTS {
+            gear_slots.set(slot, prefix.clone());
         }
         candidates.push(GearCandidate {
-            slot_stats,
+            gear_slots,
             stat_prefix_name: stat.name.clone(),
             score: 0.0,
         });
@@ -104,7 +122,9 @@ pub fn search_gear_prefixes(
                 // Strategy 2: Secondary on trinkets (classic armor+weapon / trinket split)
                 candidates.push(build_mixed_candidate(
                     primary.id,
+                    &primary.name,
                     secondary.id,
+                    &secondary.name,
                     TRINKET_SLOTS,
                     &format!("{} / {}", primary.name, secondary.name),
                 ));
@@ -112,7 +132,9 @@ pub fn search_gear_prefixes(
                 // Strategy 3: Secondary on weapons
                 candidates.push(build_mixed_candidate(
                     primary.id,
+                    &primary.name,
                     secondary.id,
+                    &secondary.name,
                     WEAPON_SLOTS,
                     &format!("{} (wep: {})", primary.name, secondary.name),
                 ));
@@ -120,7 +142,9 @@ pub fn search_gear_prefixes(
                 // Strategy 4: Secondary on armor
                 candidates.push(build_mixed_candidate(
                     primary.id,
+                    &primary.name,
                     secondary.id,
+                    &secondary.name,
                     ARMOR_SLOTS,
                     &format!("{} (armor: {})", primary.name, secondary.name),
                 ));
@@ -134,21 +158,29 @@ pub fn search_gear_prefixes(
 /// Build a gear candidate with primary stat on most slots, secondary on specified slots.
 fn build_mixed_candidate(
     primary_id: u32,
+    primary_name: &str,
     secondary_id: u32,
-    secondary_slots: &[&str],
+    secondary_name: &str,
+    secondary_slots: &[GearSlot],
     label: &str,
 ) -> GearCandidate {
-    let mut slot_stats = HashMap::new();
-    for slot in STAT_SLOTS {
-        let stat_id = if secondary_slots.contains(slot) {
-            secondary_id
+    let mut gear_slots = GearSlots::default();
+    for &slot in &STAT_SLOTS {
+        let prefix = if secondary_slots.contains(&slot) {
+            PrefixRef {
+                itemstat_id: secondary_id,
+                name: secondary_name.to_string(),
+            }
         } else {
-            primary_id
+            PrefixRef {
+                itemstat_id: primary_id,
+                name: primary_name.to_string(),
+            }
         };
-        slot_stats.insert(slot.to_string(), stat_id);
+        gear_slots.set(slot, prefix);
     }
     GearCandidate {
-        slot_stats,
+        gear_slots,
         stat_prefix_name: label.to_string(),
         score: 0.0,
     }
@@ -322,22 +354,33 @@ mod tests {
             "Expected >=8 candidates, got {}",
             candidates.len()
         );
-        // All should fill every standing slot
+        // All should fill exactly the stat-bearing slots (set 2 stays empty)
         for c in &candidates {
-            assert_eq!(c.slot_stats.len(), STAT_SLOTS.len());
+            let populated = c.gear_slots.map.iter().flatten().count();
+            assert_eq!(populated, STAT_SLOTS.len());
+            assert!(c.gear_slots.map[STAT_SLOTS.len()..]
+                .iter()
+                .all(|cell| cell.is_none()));
         }
     }
 
     #[test]
     fn test_mixed_candidate_rings_only() {
-        let c = build_mixed_candidate(1, 2, &["Ring1", "Ring2"], "Primary (rings: Secondary)");
+        let c = build_mixed_candidate(
+            1,
+            "Primary",
+            2,
+            "Secondary",
+            &[GearSlot::Ring1, GearSlot::Ring2],
+            "Primary (rings: Secondary)",
+        );
         // Rings should use secondary stat
-        assert_eq!(c.slot_stats["Ring1"], 2);
-        assert_eq!(c.slot_stats["Ring2"], 2);
+        assert_eq!(c.gear_slots.prefix_id(GearSlot::Ring1), Some(2),);
+        assert_eq!(c.gear_slots.prefix_id(GearSlot::Ring2), Some(2),);
         // Everything else should use primary
-        assert_eq!(c.slot_stats["Coat"], 1);
-        assert_eq!(c.slot_stats["WeaponA1"], 1);
-        assert_eq!(c.slot_stats["Amulet"], 1);
+        assert_eq!(c.gear_slots.prefix_id(GearSlot::Coat), Some(1));
+        assert_eq!(c.gear_slots.prefix_id(GearSlot::WeaponSet1Main), Some(1));
+        assert_eq!(c.gear_slots.prefix_id(GearSlot::Amulet), Some(1));
     }
 
     #[test]

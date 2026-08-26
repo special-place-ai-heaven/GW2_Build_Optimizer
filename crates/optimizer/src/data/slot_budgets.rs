@@ -100,6 +100,31 @@ impl SlotType {
     }
 }
 
+/// Map an optimizer gear slot to the budget slot type it draws from.
+///
+/// Mirrors `SlotType::from_api_slot` over the legacy API names
+/// ("WeaponA1" → WeaponSet1Main etc.) so per-slot candidates score with the
+/// exact same budgets the string-keyed candidates did.
+pub fn slot_type_for_gear_slot(slot: gw2_core::types::GearSlot) -> SlotType {
+    use gw2_core::types::GearSlot;
+    match slot {
+        GearSlot::Helm => SlotType::Helm,
+        GearSlot::Shoulders => SlotType::Shoulders,
+        GearSlot::Coat => SlotType::Coat,
+        GearSlot::Gloves => SlotType::Gloves,
+        GearSlot::Leggings => SlotType::Leggings,
+        GearSlot::Boots => SlotType::Boots,
+        GearSlot::Back => SlotType::BackItem,
+        GearSlot::Accessory1 | GearSlot::Accessory2 => SlotType::Accessory,
+        GearSlot::Amulet => SlotType::Amulet,
+        GearSlot::Ring1 | GearSlot::Ring2 => SlotType::Ring,
+        // Main-hand could be two-handed; off-hand is always one-handed —
+        // identical to from_api_slot("WeaponA1"/"WeaponA2").
+        GearSlot::WeaponSet1Main | GearSlot::WeaponSet2Main => SlotType::WeaponTwoHand,
+        GearSlot::WeaponSet1Off | GearSlot::WeaponSet2Off => SlotType::WeaponOneHand,
+    }
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Hash)]
 pub enum StatShape {
     ThreeStat,

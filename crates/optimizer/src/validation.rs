@@ -131,6 +131,30 @@ impl ValidatedBuild {
         }
     }
 
+    /// Fill every unlocked slot with one prefix; slots present in `gear_locks`
+    /// keep their current value. Returns true when any slot value actually
+    /// changed, so callers can skip no-op proposals without cloning first.
+    pub fn fill_unlocked_gear_slots(
+        &mut self,
+        prefix: PrefixRef,
+        gear_locks: &HashMap<GearSlot, u32>,
+    ) -> bool {
+        let mut changed = false;
+        for (idx, cell) in self.gear_slots.map.iter_mut().enumerate() {
+            if gear_locks.contains_key(&GearSlot::ALL[idx]) {
+                continue;
+            }
+            match cell {
+                Some(existing) if *existing == prefix => {}
+                cell_ref => {
+                    *cell_ref = Some(prefix.clone());
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
     /// Resolve migration-produced zero itemstat ids (`GearSlots::from_legacy`
     /// stamps 0) against the game data using the shared deterministic
     /// lookup: exact name match wins (lower id tiebreak), else shortest fuzzy
