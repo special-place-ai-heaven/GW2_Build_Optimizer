@@ -340,6 +340,215 @@ impl GearPrefixGroups {
     }
 }
 
+// ─── Per-slot gear model ───
+
+/// Every equipment slot that carries a stat prefix. A two-handed weapon fills
+/// its set's Main slot; the Off slot stays `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GearSlot {
+    #[serde(rename = "helm")]
+    Helm,
+    #[serde(rename = "shoulders")]
+    Shoulders,
+    #[serde(rename = "coat")]
+    Coat,
+    #[serde(rename = "gloves")]
+    Gloves,
+    #[serde(rename = "leggings")]
+    Leggings,
+    #[serde(rename = "boots")]
+    Boots,
+    #[serde(rename = "back")]
+    Back,
+    #[serde(rename = "accessory-1")]
+    Accessory1,
+    #[serde(rename = "accessory-2")]
+    Accessory2,
+    #[serde(rename = "amulet")]
+    Amulet,
+    #[serde(rename = "ring-1")]
+    Ring1,
+    #[serde(rename = "ring-2")]
+    Ring2,
+    #[serde(rename = "weapon-set-1-main")]
+    WeaponSet1Main,
+    #[serde(rename = "weapon-set-1-off")]
+    WeaponSet1Off,
+    #[serde(rename = "weapon-set-2-main")]
+    WeaponSet2Main,
+    #[serde(rename = "weapon-set-2-off")]
+    WeaponSet2Off,
+}
+
+impl GearSlot {
+    /// Canonical order — array position == `GearSlots.map` position.
+    pub const ALL: [GearSlot; 16] = [
+        GearSlot::Helm,
+        GearSlot::Shoulders,
+        GearSlot::Coat,
+        GearSlot::Gloves,
+        GearSlot::Leggings,
+        GearSlot::Boots,
+        GearSlot::Back,
+        GearSlot::Accessory1,
+        GearSlot::Accessory2,
+        GearSlot::Amulet,
+        GearSlot::Ring1,
+        GearSlot::Ring2,
+        GearSlot::WeaponSet1Main,
+        GearSlot::WeaponSet1Off,
+        GearSlot::WeaponSet2Main,
+        GearSlot::WeaponSet2Off,
+    ];
+
+    /// The equipment budget slot type this gear slot draws from (matches the
+    /// kebab names used by the optimizer's slot-budget tables).
+    pub fn budget_slot(&self) -> &'static str {
+        match self {
+            GearSlot::Helm => "helm",
+            GearSlot::Shoulders => "shoulders",
+            GearSlot::Coat => "coat",
+            GearSlot::Gloves => "gloves",
+            GearSlot::Leggings => "leggings",
+            GearSlot::Boots => "boots",
+            GearSlot::Back => "back-item",
+            GearSlot::Accessory1 | GearSlot::Accessory2 => "accessory",
+            GearSlot::Amulet => "amulet",
+            GearSlot::Ring1 | GearSlot::Ring2 => "ring",
+            // Two-handed or one-handed budget selection needs weapon presence
+            // knowledge, so we expose the raw slot and let the caller decide.
+            GearSlot::WeaponSet1Main | GearSlot::WeaponSet2Main => "weapon-main",
+            GearSlot::WeaponSet1Off | GearSlot::WeaponSet2Off => "weapon-off",
+        }
+    }
+}
+
+/// A resolved stat prefix reference for one gear slot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrefixRef {
+    pub itemstat_id: u32,
+    pub name: String,
+}
+
+/// Per-slot gear prefixes, indexed by `GearSlot::ALL` position.
+///
+/// Serialization is a sparse map of populated slots (kebab-case slot name →
+/// prefix), so saves stay readable and two-hander off-hands simply don't
+/// appear.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GearSlots {
+    pub map: [Option<PrefixRef>; 16],
+}
+
+impl Serialize for GearSlots {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let populated: std::collections::BTreeMap<&str, &PrefixRef> = GearSlot::ALL
+            .iter()
+            .zip(self.map.iter())
+            .filter_map(|(slot, prefix)| prefix.as_ref().map(|prefix| (slot_name(slot), prefix)))
+            .collect();
+        populated.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for GearSlots {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw: std::collections::HashMap<String, PrefixRef> =
+            std::collections::HashMap::deserialize(deserializer)?;
+        let mut slots = GearSlots::default();
+        for slot in GearSlot::ALL {
+            if let Some(prefix) = raw.get(slot_name(&slot)) {
+                slots.map[slot as usize] = Some(prefix.clone());
+            }
+        }
+        Ok(slots)
+    }
+}
+
+fn slot_name(slot: &GearSlot) -> &'static str {
+    // Serialize/Deserialize on the enum uses the same kebab-case names.
+    match slot {
+        GearSlot::Helm => "helm",
+        GearSlot::Shoulders => "shoulders",
+        GearSlot::Coat => "coat",
+        GearSlot::Gloves => "gloves",
+        GearSlot::Leggings => "leggings",
+        GearSlot::Boots => "boots",
+        GearSlot::Back => "back",
+        GearSlot::Accessory1 => "accessory-1",
+        GearSlot::Accessory2 => "accessory-2",
+        GearSlot::Amulet => "amulet",
+        GearSlot::Ring1 => "ring-1",
+        GearSlot::Ring2 => "ring-2",
+        GearSlot::WeaponSet1Main => "weapon-set-1-main",
+        GearSlot::WeaponSet1Off => "weapon-set-1-off",
+        GearSlot::WeaponSet2Main => "weapon-set-2-main",
+        GearSlot::WeaponSet2Off => "weapon-set-2-off",
+    }
+}
+
+impl GearSlots {
+    pub fn get(&self, slot: GearSlot) -> Option<&PrefixRef> {
+        self.map[slot as usize].as_ref()
+    }
+
+    pub fn set(&mut self, slot: GearSlot, prefix: PrefixRef) {
+        self.map[slot as usize] = Some(prefix);
+    }
+
+    pub fn clear(&mut self, slot: GearSlot) {
+        self.map[slot as usize] = None;
+    }
+
+    pub fn prefix_id(&self, slot: GearSlot) -> Option<u32> {
+        self.get(slot).map(|prefix| prefix.itemstat_id)
+    }
+
+    /// Expand the legacy model (build-wide `stat_prefix` + armor/trinkets/
+    /// weapons groups) into the slot vector. Legacy saves carried no off-hand
+    /// concept, so weapons expand to Set1Main only — the active set — per the
+    /// red-team BLOCKER-1 finding (never double-count Set2).
+    pub fn from_legacy(stat_prefix: &str, groups: &GearPrefixGroups) -> Self {
+        let fallback = |value: &str| -> String {
+            if value.trim().is_empty() {
+                stat_prefix.to_string()
+            } else {
+                value.to_string()
+            }
+        };
+        let reference = |name: &str| PrefixRef {
+            itemstat_id: 0, // resolved to a real itemstat id by the optimizer's loader
+            name: name.to_string(),
+        };
+        let mut slots = GearSlots::default();
+        let armor = fallback(&groups.armor);
+        let trinkets = fallback(&groups.trinkets);
+        let weapons = fallback(&groups.weapons);
+        for slot in [
+            GearSlot::Helm,
+            GearSlot::Shoulders,
+            GearSlot::Coat,
+            GearSlot::Gloves,
+            GearSlot::Leggings,
+            GearSlot::Boots,
+        ] {
+            slots.set(slot, reference(&armor));
+        }
+        for slot in [
+            GearSlot::Back,
+            GearSlot::Accessory1,
+            GearSlot::Accessory2,
+            GearSlot::Amulet,
+            GearSlot::Ring1,
+            GearSlot::Ring2,
+        ] {
+            slots.set(slot, reference(&trinkets));
+        }
+        slots.set(GearSlot::WeaponSet1Main, reference(&weapons));
+        slots
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedBuild {
     pub name: String,
@@ -363,6 +572,10 @@ pub struct SavedBuild {
     /// `stat_prefix` when displayed.
     #[serde(default)]
     pub gear_prefixes: GearPrefixGroups,
+    /// Authoritative per-slot prefixes (v1.6.4+). `None` on legacy saves —
+    /// expand `stat_prefix`/`gear_prefixes` via `GearSlots::from_legacy`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot_prefixes: Option<GearSlots>,
     pub specializations: Vec<(String, Vec<String>)>,
     pub weapons: Vec<String>,
     pub skills: Vec<String>,
@@ -550,5 +763,49 @@ mod tests {
         s.precision = 895 + 21 * 500;
         s.compute_derived(0, 0);
         assert_eq!(s.crit_chance, 100.0);
+    }
+
+    #[test]
+    fn gear_slots_round_trip_sparse() {
+        let mut slots = GearSlots::default();
+        slots.set(
+            GearSlot::Helm,
+            PrefixRef {
+                itemstat_id: 7,
+                name: "Berserker's".into(),
+            },
+        );
+        let json = serde_json::to_string(&slots).unwrap();
+        assert!(json.contains("berserker") || json.contains("Berserker"));
+        let back: GearSlots = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.get(GearSlot::Helm).unwrap().itemstat_id, 7);
+        assert_eq!(back.get(GearSlot::Amulet), None);
+    }
+
+    #[test]
+    fn gear_slots_from_legacy_expands_groups_set1_only() {
+        let groups = GearPrefixGroups {
+            armor: "Ritualist's".into(),
+            trinkets: "".into(), // inherits stat_prefix
+            weapons: "Cavalier's".into(),
+        };
+        let slots = GearSlots::from_legacy("Viper's", &groups);
+        // armor group wins over stat_prefix
+        assert_eq!(slots.get(GearSlot::Helm).unwrap().name, "Ritualist's");
+        // blank trinket group inherits the build-wide prefix
+        assert_eq!(slots.get(GearSlot::Amulet).unwrap().name, "Viper's");
+        // weapons expand to Set1Main ONLY — never Set2 (red-team BLOCKER-1)
+        assert_eq!(
+            slots.get(GearSlot::WeaponSet1Main).unwrap().name,
+            "Cavalier's"
+        );
+        assert_eq!(slots.get(GearSlot::WeaponSet1Off), None);
+        assert_eq!(slots.get(GearSlot::WeaponSet2Main), None);
+    }
+
+    #[test]
+    fn gear_slots_covers_all_positions() {
+        let slots = GearSlots::default();
+        assert_eq!(slots.map.len(), GearSlot::ALL.len());
     }
 }
