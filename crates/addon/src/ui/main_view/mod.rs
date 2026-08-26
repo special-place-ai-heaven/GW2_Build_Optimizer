@@ -158,8 +158,15 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         });
 
     if state.main.chat.dirty {
-        crate::ui::chat_bar::save_history(&state.addon_dir, &state.main.chat.history);
+        // Snapshot under the lock, serialize + write on a background thread:
+        // must never stall the frame (the render callback is the only
+        // ImGui draw pass, so a slow frame reads as the game hanging).
+        let snapshot = state.main.chat.history.clone();
+        let addon_dir = state.addon_dir.clone();
         state.main.chat.dirty = false;
+        std::thread::spawn(move || {
+            crate::ui::chat_bar::save_history(&addon_dir, &snapshot);
+        });
     }
 }
 
