@@ -623,6 +623,40 @@ pub fn match_pvp_amulet<'a>(db: &'a GameDb, prefix_name: &str) -> Option<&'a Pvp
     best.map(|(a, _)| a)
 }
 
+/// A trait lock referencing an id that no longer exists in the spec's
+/// major-trait rows (stale after a game-data refresh) cannot be honored —
+/// surface it instead of silently overriding the user's constraint.
+fn stale_trait_lock_reasons(
+    locks: &gw2_core::types::BuildLocks,
+    db: &GameDb,
+    ctx: &BalanceContext,
+) -> Vec<data::DataQualityReason> {
+    let mut reasons = Vec::new();
+    let modes = vec![ctx.game_mode.label().to_string()];
+    for (spec_id, columns) in &locks.trait_locks {
+        let Some(spec) = db.specializations.get(spec_id) else {
+            continue; // unknown spec: rejected earlier by validation
+        };
+        for locked in columns.iter().flatten() {
+            if !spec.major_traits.contains(locked) {
+                let trait_name = db
+                    .traits
+                    .get(locked)
+                    .map(|t| t.name.as_str())
+                    .unwrap_or("unknown trait");
+                reasons.push(data::DataQualityReason {
+                    field: "trait_lock".into(),
+                    entity: format!("{} — trait {}", spec.name, trait_name),
+                    modes: modes.clone(),
+                    explanation: "The locked trait no longer exists in this                                   specialization's trait rows (stale lock after a                                   game-data refresh). The optimizer picked the best                                   available trait in that column instead."
+                        .into(),
+                });
+            }
+        }
+    }
+    reasons
+}
+
 pub fn quality_from_modifiers(
     modifiers: &DamageModifiers,
     warnings: &[String],
@@ -1240,6 +1274,7 @@ pub fn optimize_with_gemini(
             });
         }
     }
+    quality_reasons.extend(stale_trait_lock_reasons(locks, db, ctx));
     Ok(SynergyResult {
         validated,
         stats: full_stats,
@@ -2018,6 +2053,9 @@ pub fn optimize_deterministic(
         done: true,
     });
 
+    result
+        .quality_reasons
+        .extend(stale_trait_lock_reasons(locks, db, ctx));
     Ok(result)
 }
 
@@ -2085,13 +2123,12 @@ pub fn optimize_v2(
         stage: "Done".into(),
         done: true,
     });
-    Ok(synergy_result_from_validated(
-        best,
-        db,
-        profession_name,
-        ctx,
-        Some(scenario),
-    ))
+    let mut synergy_result =
+        synergy_result_from_validated(best, db, profession_name, ctx, Some(scenario));
+    synergy_result
+        .quality_reasons
+        .extend(stale_trait_lock_reasons(locks, db, ctx));
+    Ok(synergy_result)
 }
 
 /// Post-beam LLM advisor: ask the LLM for candidate mutations, evaluate each
@@ -2823,5 +2860,55 @@ mod tests {
         assert_eq!(weapon_swap_cooldown_for("Engineer", false), None);
         assert_eq!(weapon_swap_cooldown_for("Elementalist", false), None);
         assert_eq!(weapon_swap_cooldown_for("Warrior", true), None);
+    }
+
+    #[test]
+    fn stale_trait_lock_reasons_flags_only_missing_ids() {
+        let mut db = GameDb::empty_for_tests();
+        db.specializations.insert(
+            55,
+            gw2_api::models::Specialization {
+                id: 55,
+                name: "Druid".into(),
+                profession: "Ranger".into(),
+                elite: true,
+                minor_traits: Vec::new(),
+                major_traits: vec![10, 11, 12, 20, 21, 22, 30, 31, 32],
+                weapon_trait: None,
+                icon: None,
+                background: None,
+                profession_icon: None,
+                profession_icon_big: None,
+            },
+        );
+        db.traits.insert(
+            99,
+            gw2_api::models::Trait {
+                id: 99,
+                name: "Ghostwritten Legacy".into(),
+                icon: None,
+                description: None,
+                specialization: 55,
+                tier: 3,
+                order: 2,
+                slot: "Major".into(),
+                facts: Vec::new(),
+                traited_facts: Vec::new(),
+                skills: Vec::new(),
+            },
+        );
+
+        let ctx = BalanceContext::new(GameMode::PvE);
+        let mut locks = gw2_core::types::BuildLocks::default();
+        locks.trait_locks.insert(55, [Some(10), None, Some(99)]); // col0 valid, col2 stale
+        let reasons = stale_trait_lock_reasons(&locks, &db, &ctx);
+        assert_eq!(reasons.len(), 1, "only the stale lock warns");
+        assert_eq!(reasons[0].field, "trait_lock");
+        assert!(reasons[0].entity.contains("Druid"));
+        assert!(reasons[0].entity.contains("Ghostwritten Legacy"));
+
+        // A fully valid lock set produces nothing.
+        locks.trait_locks.insert(55, [Some(10), Some(21), Some(32)]);
+        assert!(stale_trait_lock_reasons(&locks, &db, &ctx).is_empty());
     }
 }
