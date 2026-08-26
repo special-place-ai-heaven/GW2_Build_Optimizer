@@ -2,6 +2,43 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.6.4 - 2026-08-26
+
+The foundational transport rework: **every provider now streams.** A shared LLM transport layer replaces four hand-rolled clients, the optimizer surfaces stale locks instead of silently overriding them, and the addon's largest file is split by responsibility. Twelve commits on top of the v1.6.3 hardening sweep, executed bedrock-up with per-layer verification gates.
+
+### All four providers stream
+
+- **OpenAI and OpenRouter** share one chat core (`llm::openai_compat`): identical wire types, one streaming implementation, one retry policy (408/504/529 retryable, `Retry-After` honored, rate-tracker handshake inside). The OpenAI provider picks up streaming and the 900-second budget — its old non-streaming client carried the exact false-timeout class v1.6.1 fixed for OpenRouter. Completion budget aligned to 16,384 tokens for both.
+- **Anthropic Messages** streams: `read_anthropic_stream` assembles content blocks from the event sequence — `text_delta` concatenation, `tool_use` `input_json_delta` fragments stitched and parsed to JSON, `message_delta` stop reason, and in-band `error` events mapped to typed errors (`overloaded_error` → 529).
+- **Gemini** streams via `streamGenerateContent?alt=sse`: text parts concatenate in arrival order, `functionCall` parts pass through whole, and `error` payloads map to typed errors.
+- Callers are unchanged everywhere — each stream still lands as the same response type the flows already consumed.
+
+### Shared transport bedrock
+
+- `llm::sse` — the streaming reader (keep-alive skipping, delta accumulation, fragmented parallel tool-call merging) is shared infrastructure with its own test suite, ready for any future provider.
+- `llm::response_cache::ResponseCache` — one TTL + size-cap cache replaces four inlined copies.
+- `gw2api::transport::read_body_capped` — response bodies are capped everywhere: scraper 2 MiB, GW2 API 8 MiB, feedback client 1 MiB, so no endpoint can stream unbounded bytes into the game process.
+
+### Optimizer
+
+- A trait lock whose id no longer exists in the spec's trait rows (stale after a game-data refresh) is now **reported** through the data-quality reasons that already render in the comparison panel, instead of being silently replaced by the archetype-best pick. Regression-tested: stale ids warn, valid locks stay silent.
+- Determinism sweep came back clean — the v1.6.3 amulet fix was the last map-fed float accumulation.
+
+### Addon
+
+- `optimization.rs` (2,645 lines, three responsibilities) is split: `chat_flow.rs` owns the Choya pipeline, `optimize_flow.rs` owns Optimize/Improve, and the shared suggestion vocabulary stays in `optimization.rs`. Pure moves.
+- Chat history is written on a background thread (snapshot under the lock, atomic temp+rename write) — disk latency can no longer stall the frame.
+- Clipboard copies retry three times against transient clipboard contention.
+
+### Verification
+
+- CI: `cargo fmt --check`, `cargo clippy -D warnings`, and the full workspace test suite run on every push to main and every PR (windows-latest). The workspace builds **warning-free**.
+- 1,397 tests passing, including streaming regression tests for all four providers; the OpenRouter path was additionally verified against the live API (validate, streamed generate, cache, streamed tool loop).
+
+### Install
+
+Download `gw2_build_optimizer.dll` below and drop it into your `Guild Wars 2/addons/` folder (replace the old DLL), then restart the game or reload Nexus. Verify the SHA-256 against `SHA256SUMS.txt` if you like.
+
 ## 1.6.3 - 2026-08-26
 
 A hardening sweep: an adversarial multi-agent review of the whole codebase (correctness, security, performance, lock discipline) and every confirmed finding fixed in one pass.
