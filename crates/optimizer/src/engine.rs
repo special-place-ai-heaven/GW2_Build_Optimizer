@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use gw2_api::models::{
     EquipmentTab, Item, ItemStat, Profession, PvpAmulet, Specialization, Trait as GW2Trait,
 };
-use gw2_core::types::{GameMode, GearSlot, PrefixRef};
+use gw2_core::types::{GameMode, GearSlot, GearSlots, PrefixRef};
 
 use gw2_api::models::Fact;
 
@@ -103,6 +103,18 @@ fn describe_lock_constraints(locks: &gw2_core::types::BuildLocks, db: &GameDb) -
                     }
                 }
             }
+        }
+    }
+    // Gear locks, in canonical slot order so identical inputs produce
+    // byte-identical prompts (HashMap order is unspecified).
+    for slot in gw2_core::types::GearSlot::ALL.iter() {
+        if let Some(id) = locks.gear_locks.get(slot) {
+            let name = db
+                .itemstats
+                .get(id)
+                .map(|is| is.name.as_str())
+                .unwrap_or("Unknown");
+            parts.push(format!("Gear {} LOCKED to \"{}\"", slot.kebab_name(), name));
         }
     }
     parts.join("\n")
@@ -393,7 +405,7 @@ fn optimize_pvp(
 
     // PvP: no gear search, use empty gear candidate
     let empty_gear = GearCandidate {
-        slot_stats: HashMap::new(),
+        gear_slots: GearSlots::default(),
         stat_prefix_name: "(PvP Amulet)".into(),
         score: 0.0,
     };
@@ -541,17 +553,15 @@ fn calculate_candidate_stats(
     let mut stats = stats::StatBlock::default();
     let budgets = data::slot_budgets::slot_budgets();
 
-    for (slot, &stat_id) in &candidate.slot_stats {
-        let Some(itemstat) = itemstats_cache.get(&stat_id) else {
+    // Deterministic order: the candidate map is zipped against `GearSlot::ALL`
+    // (canonical slot order). The pre-slot-vector version iterated a
+    // HashMap, whose order was unspecified.
+    for (slot, cell) in GearSlot::ALL.iter().zip(candidate.gear_slots.map.iter()) {
+        let Some(prefix) = cell else { continue };
+        let Some(itemstat) = itemstats_cache.get(&prefix.itemstat_id) else {
             continue;
         };
-
-        if matches!(slot.as_str(), "WeaponB1" | "WeaponB2") {
-            continue;
-        }
-        let Some(slot_type) = data::SlotType::from_api_slot(slot) else {
-            continue;
-        };
+        let slot_type = data::slot_budgets::slot_type_for_gear_slot(*slot);
         let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
         let Some(budget) = budgets.get(slot_type, shape) else {
             continue;
@@ -2127,7 +2137,16 @@ pub fn optimize_v2(
             stage: "LLM advisor: evaluating mutations...".into(),
             done: false,
         });
-        best = llm_advisor(best, db, profession_name, weights, ctx, scenario, client);
+        best = llm_advisor(
+            best,
+            db,
+            profession_name,
+            weights,
+            ctx,
+            scenario,
+            locks,
+            client,
+        );
     }
 
     if is_cancelled() {
@@ -2146,11 +2165,49 @@ pub fn optimize_v2(
     Ok(synergy_result)
 }
 
+/// Slot keywords accepted by the advisor gear grammar (`SWAP: gear <slot>
+/// <prefix>`). Keys are dash-free and lowercase so `ring-1`, `ring1`, and
+/// `Ring-1` all match after normalization.
+const GEAR_SLOT_KEYWORDS: &[(&str, GearSlot)] = &[
+    ("helm", GearSlot::Helm),
+    ("shoulders", GearSlot::Shoulders),
+    ("coat", GearSlot::Coat),
+    ("gloves", GearSlot::Gloves),
+    ("leggings", GearSlot::Leggings),
+    ("boots", GearSlot::Boots),
+    ("back", GearSlot::Back),
+    ("accessory1", GearSlot::Accessory1),
+    ("accessory2", GearSlot::Accessory2),
+    ("amulet", GearSlot::Amulet),
+    ("ring1", GearSlot::Ring1),
+    ("ring2", GearSlot::Ring2),
+    ("weaponset1main", GearSlot::WeaponSet1Main),
+    ("weaponset1off", GearSlot::WeaponSet1Off),
+    ("weaponset2main", GearSlot::WeaponSet2Main),
+    ("weaponset2off", GearSlot::WeaponSet2Off),
+];
+
+/// Split an advisor gear request into `(slot, prefix_text)` when its first
+/// token names a slot, else `None` (the whole body is one prefix name — bare
+/// uniform form). Dashes are ignored for the lookup because LLM responses
+/// freely mix "ring-1" with "ring1".
+fn parse_slot_qualifier(body: &str) -> Option<(GearSlot, &str)> {
+    let (token, rest) = body.split_once(char::is_whitespace)?;
+    let normalized = token.replace('-', "").to_ascii_lowercase();
+    GEAR_SLOT_KEYWORDS
+        .iter()
+        .find(|(keyword, _)| *keyword == normalized)
+        .map(|(_, slot)| (*slot, rest.trim()))
+}
+
 /// Post-beam LLM advisor: ask the LLM for candidate mutations, evaluate each
 /// through the referee, return the best improvement found (or original if none better).
 ///
 /// The LLM is a *search policy* — it proposes swaps. The referee decides winners.
 /// LLM errors are silently logged and the original build is returned unchanged.
+// Locks joined an already-wide advisory surface; every parameter is an
+// independent input — mirroring `optimize`'s allowance.
+#[allow(clippy::too_many_arguments)]
 pub fn llm_advisor(
     current: crate::validation::ValidatedBuild,
     db: &GameDb,
@@ -2158,6 +2215,7 @@ pub fn llm_advisor(
     weights: &OptimizationWeights,
     ctx: &BalanceContext,
     scenario: &crate::scenario::ScenarioSpec,
+    locks: &gw2_core::types::BuildLocks,
     llm_client: &dyn LlmClient,
 ) -> crate::validation::ValidatedBuild {
     // Build a compact prompt asking for 3 specific swaps to try.
@@ -2178,10 +2236,17 @@ pub fn llm_advisor(
          - Rune: {}\n\
          - Sigils: {}\n\n\
          Game mode: {}. Scoring priorities: Power={:.1}, Condition={:.1}, Sustain={:.1}, Control={:.1}\n\n\
-         Suggest exactly 3 alternative gear prefix or rune swaps to try that might score better \
-         given these priorities. Format each suggestion as:\n\
-         SWAP: gear_prefix=[name] OR rune=[name]\n\
-         Only suggest changes to gear_prefix or rune. Do not suggest spec changes.",
+         Suggest exactly 3 alternative swaps to try that might score better given these \
+         priorities. Format each suggestion as one of:\n\
+         SWAP: gear [slot] [prefix]\n\
+         SWAP: gear [prefix]\n\
+         SWAP: rune=[name]\n\
+         The first form changes only one equipment piece's stat prefix; the second changes \
+         every unlocked piece to one stat prefix.\n\
+         Slots: helm shoulders coat gloves leggings boots back accessory-1 accessory-2 amulet \
+         ring-1 ring-2 weapon-set-1-main weapon-set-1-off weapon-set-2-main weapon-set-2-off.\n\
+         Locked pieces are respected automatically — do not propose changing them.\n\
+         Only suggest gear or rune changes. Do not suggest spec changes.",
         profession_name,
         current_gear,
         current_rune,
@@ -2222,20 +2287,61 @@ pub fn llm_advisor(
 
         let mut candidate = current.clone();
 
-        if let Some(rest) = swap_part.strip_prefix("gear_prefix=") {
+        if let Some(rest) = swap_part.strip_prefix("gear ") {
+            // Slot-qualified or bare gear form:
+            //   SWAP: gear helm <prefix>  → change that one piece
+            //   SWAP: gear <prefix>       → uniform, every unlocked piece
+            let body = rest.trim().trim_matches('"').trim_matches('\'').trim();
+            match parse_slot_qualifier(body) {
+                Some((slot, prefix_text)) => {
+                    if locks.gear_locks.contains_key(&slot) {
+                        continue; // never touch a locked slot
+                    }
+                    let Some(item_stat) = db.itemstat_by_name(prefix_text) else {
+                        continue; // Skip if prefix not found in DB
+                    };
+                    if candidate.gear_slots.prefix_id(slot) == Some(item_stat.id) {
+                        continue; // no-op same-prefix swap
+                    }
+                    candidate.gear_slots.set(
+                        slot,
+                        PrefixRef {
+                            itemstat_id: item_stat.id,
+                            name: item_stat.name.clone(),
+                        },
+                    );
+                }
+                None => {
+                    // Bare form — uniform across all unlocked pieces.
+                    let Some(item_stat) = db.itemstat_by_name(body) else {
+                        continue; // Skip if prefix not found in DB
+                    };
+                    if !candidate.fill_unlocked_gear_slots(
+                        PrefixRef {
+                            itemstat_id: item_stat.id,
+                            name: item_stat.name.clone(),
+                        },
+                        &locks.gear_locks,
+                    ) {
+                        continue; // proposal would change nothing
+                    }
+                }
+            }
+        } else if let Some(rest) = swap_part.strip_prefix("gear_prefix=") {
+            // Legacy grammar (`SWAP: gear_prefix=[name]`) kept for backward
+            // compatibility with old prompts/models. Uniform across all
+            // unlocked pieces; locked slots keep their locked prefix.
             let prefix_name = rest.trim().trim_matches('"').trim_matches('\'');
-            // Use the centralized deterministic helper (exact match wins, else
-            // shortest-fuzzy with id tiebreak). Previously this called
-            // `to_lowercase()` on every itemstat in the loop.
             if let Some(item_stat) = db.itemstat_by_name(prefix_name) {
-                // TODO(per-slot): the SWAP grammar has no slot dimension yet
-                // (plan HIGH 2, Task 4); for now a proposed prefix replaces
-                // every slot, matching pre-slot uniform behavior when groups
-                // are empty — the only state that reaches this advisor today.
-                candidate.fill_gear_slots(PrefixRef {
-                    itemstat_id: item_stat.id,
-                    name: item_stat.name.clone(),
-                });
+                if !candidate.fill_unlocked_gear_slots(
+                    PrefixRef {
+                        itemstat_id: item_stat.id,
+                        name: item_stat.name.clone(),
+                    },
+                    &locks.gear_locks,
+                ) {
+                    continue; // proposal would change nothing
+                }
             } else {
                 continue; // Skip if prefix not found in DB
             }
@@ -2282,6 +2388,46 @@ pub fn llm_advisor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_slot_qualifier_recognises_kebab_compact_and_bare_forms() {
+        use gw2_core::types::GearSlot;
+
+        // Kebab and compact forms resolve to the same slot, prefix text follows.
+        assert_eq!(
+            parse_slot_qualifier("ring-1 marauder's"),
+            Some((GearSlot::Ring1, "marauder's"))
+        );
+        assert_eq!(
+            parse_slot_qualifier("RING2 Cavalier's"),
+            Some((GearSlot::Ring2, "Cavalier's"))
+        );
+        assert_eq!(
+            parse_slot_qualifier("weapon-set-2-main Zojja's Reaver"),
+            Some((GearSlot::WeaponSet2Main, "Zojja's Reaver"))
+        );
+        // A multi-word body without a leading slot keyword is bare/uniform —
+        // the whole text is the prefix name.
+        assert_eq!(parse_slot_qualifier("berserker's"), None);
+        // Two-hander slots are reachable too.
+        assert_eq!(
+            parse_slot_qualifier("weapon-set-1-off Sinister"),
+            Some((GearSlot::WeaponSet1Off, "Sinister"))
+        );
+    }
+
+    #[test]
+    fn parse_slot_qualifier_uniform_fallback_for_unknown_first_token() {
+        use gw2_core::types::GearSlot;
+
+        // First token not a slot → uniform proposal, even when it contains
+        // an inner space (multi-word prefix names).
+        assert_eq!(parse_slot_qualifier("superior stuff"), None);
+        // Sanity: a real keyword with the trailing prefix attached.
+        let (slot, rest) = parse_slot_qualifier("amulet valkyrie").unwrap();
+        assert_eq!(slot, GearSlot::Amulet);
+        assert_eq!(rest, "valkyrie");
+    }
 
     #[test]
     fn test_slot_budget_lookups() {

@@ -4,6 +4,7 @@
 //! `optimize_v2()`.  The search loop (T02) builds on top of the primitives
 //! defined here.
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::balance::BalanceContext;
@@ -19,7 +20,7 @@ use crate::validation::{
     WEAPON_SET1_SLOTS,
 };
 use gw2_api::models::{Profession, Specialization};
-use gw2_core::types::{BuildLocks, GearSlot, GearSlots, PrefixRef};
+use gw2_core::types::{BuildLocks, GearSlot, PrefixRef};
 
 // ─── Core types ──────────────────────────────────────────────────────────────
 
@@ -55,14 +56,17 @@ impl Default for SearchConfig {
 // ─── Mutation operators ───────────────────────────────────────────────────────
 
 /// Generate all immediate neighbours of `candidate` by applying each of the
-/// five atomic mutation operators in turn and collecting the results.
+/// six atomic mutation operators in turn and collecting the results.
 ///
 /// Each operator clones the current `ValidatedBuild`, changes exactly one
-/// slot, and appends the mutated build to the output.  Operators that find no
+/// aspect, and appends the mutated build to the output.  Operators that find no
 /// alternatives (e.g. because the DB is empty) simply contribute nothing to
 /// the output — the function never panics on an empty `GameDb`.
 ///
-/// Five original operators plus elite-spec and weapon jumps.
+/// Original operators plus the per-slot gear operator, elite-spec, and weapon
+/// jumps. All three gear operators respect `BuildLocks.gear_locks`: locked
+/// slots keep their locked prefix under every mutation.
+///
 /// Output is interleaved round-robin across operators rather than concatenated.
 /// `optimize_v2_search` caps evaluation per beam member at ~80 neighbors;
 /// concatenated order would burn the entire budget on `swap_gear_prefix`
@@ -84,8 +88,10 @@ pub fn generate_neighbors(
         ));
         groups.push(swap_relics_for_failed_gates(candidate, db));
     }
-    groups.push(swap_gear_prefix(candidate, db, weights));
-    groups.push(swap_gear_groups(candidate, db, weights));
+    let gear_locks = &locks.gear_locks;
+    groups.push(swap_gear_prefix(candidate, db, weights, gear_locks));
+    groups.push(swap_gear_groups(candidate, db, weights, gear_locks));
+    groups.push(swap_slot_prefix(candidate, db, weights, gear_locks));
     groups.push(swap_rune(candidate, db));
     groups.push(swap_sigil_slots(candidate, db));
     groups.push(swap_relic(candidate, db));
@@ -147,7 +153,7 @@ pub fn optimize_v2_search(
         stage: "Seeding from synergy pipeline...".into(),
         done: false,
     });
-    let seed_result = synergy_pipeline::optimize_synergy(
+    let mut seed_result = synergy_pipeline::optimize_synergy(
         db,
         profession_name,
         weights,
@@ -160,6 +166,38 @@ pub fn optimize_v2_search(
 
     if is_cancelled() {
         return Err("Cancelled".into());
+    }
+
+    // Gear locks are requirements, not just prohibitions: operators refuse to
+    // mutate a locked slot, but a lock targeting a slot the seed left empty
+    // (improve flow, lock-only users) must still end up carrying its
+    // required prefix. Pin each locked itemstat onto its slot once, before
+    // the seed is evaluated. Unknown itemstat ids stay unpinned (the lock
+    // still blocks mutation) rather than fabricating a name.
+    if !locks.gear_locks.is_empty() {
+        let mut validated = seed_result.validated;
+        let mut pins: Vec<(&GearSlot, &u32)> = locks.gear_locks.iter().collect();
+        // Canonical order → deterministic writes.
+        pins.sort_by_key(|(slot, _)| {
+            GearSlot::ALL
+                .iter()
+                .position(|canonical| *canonical == **slot)
+        });
+        for (slot, id) in pins {
+            if validated.gear_slots.prefix_id(*slot) == Some(*id) {
+                continue;
+            }
+            if let Some(itemstat) = db.itemstats.get(id) {
+                validated.gear_slots.set(
+                    *slot,
+                    PrefixRef {
+                        itemstat_id: *id,
+                        name: itemstat.name.clone(),
+                    },
+                );
+            }
+        }
+        seed_result.validated = validated;
     }
 
     // Step 3: evaluate seed.
@@ -293,33 +331,34 @@ fn swap_gear_prefix(
     candidate: &BeamCandidate,
     db: &GameDb,
     weights: &OptimizationWeights,
+    gear_locks: &HashMap<GearSlot, u32>,
 ) -> Vec<ValidatedBuild> {
     let itemstats = prioritized_itemstats(db, weights);
+    let slots = &candidate.validated.gear_slots.map;
     itemstats
         .into_iter()
         .filter(|itemstat| {
-            // The pre-slot model skipped builds whose build-wide prefix AND all
-            // three groups already carried this itemstat — i.e. a uniform map.
-            !is_uniform_at(&candidate.validated.gear_slots, itemstat.id)
+            // No-op when every unlocked slot already carries this prefix
+            // (locked slots never change, so they cannot make it a no-op).
+            // Mirrors exactly what `fill_unlocked_gear_slots` mutates below;
+            // empty unlocked slots count as changed (None → Some).
+            slots.iter().enumerate().any(|(idx, cell)| {
+                !gear_locks.contains_key(&GearSlot::ALL[idx])
+                    && cell.as_ref().is_none_or(|p| p.itemstat_id != itemstat.id)
+            })
         })
         .map(|is| {
             let mut b = candidate.validated.clone();
-            b.fill_gear_slots(PrefixRef {
-                itemstat_id: is.id,
-                name: is.name.clone(),
-            });
+            b.fill_unlocked_gear_slots(
+                PrefixRef {
+                    itemstat_id: is.id,
+                    name: is.name.clone(),
+                },
+                gear_locks,
+            );
             b
         })
         .collect()
-}
-
-/// True when every slot is populated with exactly `id`.
-fn is_uniform_at(slots: &GearSlots, id: u32) -> bool {
-    slots.map.iter().all(|prefix| {
-        prefix
-            .as_ref()
-            .is_some_and(|prefix| prefix.itemstat_id == id)
-    })
 }
 
 /// Mutate armor, trinkets, and weapons independently. Three groups capture the
@@ -329,6 +368,7 @@ fn swap_gear_groups(
     candidate: &BeamCandidate,
     db: &GameDb,
     weights: &OptimizationWeights,
+    gear_locks: &HashMap<GearSlot, u32>,
 ) -> Vec<ValidatedBuild> {
     let itemstats = prioritized_itemstats(db, weights);
     let mut out = Vec::with_capacity(itemstats.len() * 3);
@@ -340,20 +380,71 @@ fn swap_gear_groups(
             name: itemstat.name.clone(),
         };
         for slots in GROUPS {
-            // Category members always share one value (writers overwrite whole
-            // categories), so the first member represents the group.
-            if candidate
-                .validated
-                .gear_slots
-                .prefix_id(slots[0])
-                .is_some_and(|equipped| equipped == prefix.itemstat_id)
-            {
-                continue;
+            let mut build = candidate.validated.clone();
+            let mut changed = false;
+            for &slot in slots {
+                // Locked pieces keep their locked prefix; a group fill never
+                // touches them.
+                if gear_locks.contains_key(&slot) {
+                    continue;
+                }
+                if candidate.validated.gear_slots.prefix_id(slot) != Some(prefix.itemstat_id) {
+                    build.gear_slots.set(slot, prefix.clone());
+                    changed = true;
+                }
+            }
+            if changed {
+                out.push(build);
+            }
+        }
+    }
+    out
+}
+
+/// Operator 3 — per-slot prefix swap.
+///
+/// For each unlocked, non-empty slot and each of the top-4 radar-prioritized
+/// prefixes (skipping the no-op same-prefix swap), emit a clone with exactly
+/// that one slot changed. ALL combinations are emitted — no rotation. Spec
+/// §12.2: the round-robin interleave plus the ~80-neighbor per-member cap do
+/// the limiting; per-slot identity is finer than group identity, so this
+/// operator is what makes true hybrid mixes (Berserker's helm, Cavalier's
+/// coat) reachable at full granularity.
+///
+/// Ordering is `(slot_index, prefix_priority, itemstat_id)`: the outer loop
+/// walks `GearSlot::ALL` in canonical order and `prioritized_itemstats`
+/// returns prefixes already sorted by priority — the same determinism
+/// discipline as every other neighbor source.
+fn swap_slot_prefix(
+    candidate: &BeamCandidate,
+    db: &GameDb,
+    weights: &OptimizationWeights,
+    gear_locks: &HashMap<GearSlot, u32>,
+) -> Vec<ValidatedBuild> {
+    let itemstats = prioritized_itemstats(db, weights);
+    let top_prefixes: Vec<&gw2_api::models::ItemStat> = itemstats.iter().copied().take(4).collect();
+
+    let mut out = Vec::new();
+    for (idx, cell) in candidate.validated.gear_slots.map.iter().enumerate() {
+        let slot = GearSlot::ALL[idx];
+        if gear_locks.contains_key(&slot) {
+            continue;
+        }
+        let Some(current) = cell else {
+            continue; // two-hander off-hand etc. stays empty
+        };
+        for itemstat in &top_prefixes {
+            if current.itemstat_id == itemstat.id {
+                continue; // no-op same-prefix swap
             }
             let mut build = candidate.validated.clone();
-            for &slot in slots {
-                build.gear_slots.set(slot, prefix.clone());
-            }
+            build.gear_slots.set(
+                slot,
+                PrefixRef {
+                    itemstat_id: itemstat.id,
+                    name: itemstat.name.clone(),
+                },
+            );
             out.push(build);
         }
     }
@@ -1481,6 +1572,231 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn swap_slot_prefix_reaches_independent_slot_pair() {
+        let mut db = empty_db();
+        for (id, name) in [
+            (1, "Berserker's"),
+            (2, "Cavalier's"),
+            (3, "Marauder's"),
+            (4, "Soldier's"),
+        ] {
+            db.itemstats.insert(
+                id,
+                gw2_api::models::ItemStat {
+                    id,
+                    name: name.into(),
+                    attributes: Vec::new(),
+                },
+            );
+        }
+        // Seed uniform Berserker's — every slot carries its own prefix, so the
+        // slot operator must be able to flip one piece without touching others.
+        let mut validated = ValidatedBuild::default();
+        validated.fill_gear_slots(PrefixRef {
+            itemstat_id: 1,
+            name: "Berserker's".into(),
+        });
+        let candidate = make_candidate(validated);
+
+        let weights = OptimizationWeights::default();
+        let neighbors = swap_slot_prefix(&candidate, &db, &weights, &HashMap::new());
+
+        // The pair (helm=Berserker's AND coat=Cavalier's) is directly reachable.
+        assert!(neighbors.iter().any(|build| {
+            build
+                .gear_slots
+                .get(GearSlot::Helm)
+                .is_some_and(|p| p.itemstat_id == 1)
+                && build
+                    .gear_slots
+                    .get(GearSlot::Coat)
+                    .is_some_and(|p| p.name == "Cavalier's")
+        }));
+        // No-op same-prefix swaps are never emitted: exactly one slot differs
+        // from the seed in each neighbor, and none is identical to the seed.
+        for neighbor in &neighbors {
+            assert_ne!(
+                neighbor.gear_identity(),
+                candidate.validated.gear_identity()
+            );
+            let differing = GearSlot::ALL
+                .iter()
+                .filter(|slot| {
+                    neighbor.gear_slots.prefix_id(**slot)
+                        != candidate.validated.gear_slots.prefix_id(**slot)
+                })
+                .count();
+            assert_eq!(differing, 1, "per-slot op changes exactly one slot");
+        }
+        // The pair survives round-robin interleave + neighbor cap too.
+        let interleaved =
+            generate_neighbors(&candidate, &db, "Warrior", &BuildLocks::default(), &weights);
+        assert!(interleaved.iter().take(80).any(|build| {
+            build
+                .gear_slots
+                .get(GearSlot::Helm)
+                .is_some_and(|p| p.itemstat_id == 1)
+                && build
+                    .gear_slots
+                    .get(GearSlot::Coat)
+                    .is_some_and(|p| p.name == "Cavalier's")
+        }));
+    }
+
+    #[test]
+    fn gear_locked_slots_are_never_mutated_by_gear_operators() {
+        let mut db = empty_db();
+        for (id, name) in [
+            (1, "Berserker's"),
+            (2, "Cavalier's"),
+            (3, "Marauder's"),
+            (4, "Soldier's"),
+        ] {
+            db.itemstats.insert(
+                id,
+                gw2_api::models::ItemStat {
+                    id,
+                    name: name.into(),
+                    attributes: Vec::new(),
+                },
+            );
+        }
+        // Locked slots hold a DIFFERENT prefix than everything else so that a
+        // silent lock violation would show up as an identity change.
+        let mut validated = ValidatedBuild::default();
+        validated.fill_gear_slots(PrefixRef {
+            itemstat_id: 2,
+            name: "Cavalier's".into(),
+        });
+        validated.gear_slots.set(
+            GearSlot::Helm,
+            PrefixRef {
+                itemstat_id: 1,
+                name: "Berserker's".into(),
+            },
+        );
+        let candidate = make_candidate(validated);
+
+        let mut gear_locks = HashMap::new();
+        gear_locks.insert(GearSlot::Helm, 1u32);
+        gear_locks.insert(GearSlot::Ring2, 2u32);
+        let locks = BuildLocks {
+            gear_locks,
+            ..Default::default()
+        };
+
+        let weights = OptimizationWeights::default();
+        for neighbor in generate_neighbors(&candidate, &db, "Warrior", &locks, &weights) {
+            assert_eq!(
+                neighbor.gear_slots.prefix_id(GearSlot::Helm),
+                Some(1),
+                "locked helm must keep its prefix under any operator"
+            );
+            assert_eq!(
+                neighbor.gear_slots.prefix_id(GearSlot::Ring2),
+                Some(2),
+                "locked ring must keep its prefix under any operator"
+            );
+        }
+    }
+
+    #[test]
+    fn optimize_v2_search_is_deterministic_for_identical_inputs() {
+        use crate::synergy_pipeline::runtime_diagnostics_tests::make_diag_db;
+
+        let db = make_diag_db();
+        let weights = OptimizationWeights::default();
+        let ctx = crate::balance::BalanceContext::new(GameMode::PvE);
+        let scenario = ScenarioSpec {
+            game_mode: GameMode::PvE,
+            combat_tier: CombatTier::Solo,
+            combat_kind: crate::scenario::CombatKind::StrikeSpike,
+            target_profile: crate::scenario::TargetProfile::Single,
+            optimization_target: crate::scenario::OptimizationTarget {
+                label: String::new(),
+            },
+            patch_id: None,
+        };
+        let config = SearchConfig {
+            beam_width: 4,
+            eval_budget: 200,
+            time_limit_secs: 30,
+        };
+
+        let run = || {
+            optimize_v2_search(
+                &db,
+                "Warrior",
+                &weights,
+                &ctx,
+                &scenario,
+                &BuildLocks::default(),
+                &config,
+                &mut |_| {},
+                &|| false,
+            )
+            .expect("diag db should seed a searchable build")
+        };
+
+        let first = run();
+        let second = run();
+        assert_eq!(
+            first.gear_identity(),
+            second.gear_identity(),
+            "two runs with identical inputs must end on identical gear"
+        );
+        assert_eq!(
+            first.primary_prefix().map(|p| p.name.clone()),
+            second.primary_prefix().map(|p| p.name.clone())
+        );
+    }
+
+    #[test]
+    fn locked_helm_survives_optimize_v2_search() {
+        use crate::synergy_pipeline::runtime_diagnostics_tests::make_diag_db;
+
+        let db = make_diag_db();
+        let weights = OptimizationWeights::default();
+        let ctx = crate::balance::BalanceContext::new(GameMode::PvE);
+        let scenario = ScenarioSpec {
+            game_mode: GameMode::PvE,
+            combat_tier: CombatTier::Solo,
+            combat_kind: crate::scenario::CombatKind::StrikeSpike,
+            target_profile: crate::scenario::TargetProfile::Single,
+            optimization_target: crate::scenario::OptimizationTarget {
+                label: String::new(),
+            },
+            patch_id: None,
+        };
+        let mut locks = BuildLocks::default();
+        locks.gear_locks.insert(GearSlot::Helm, 584);
+        let config = SearchConfig {
+            beam_width: 4,
+            eval_budget: 200,
+            time_limit_secs: 30,
+        };
+
+        let best = optimize_v2_search(
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &locks,
+            &config,
+            &mut |_| {},
+            &|| false,
+        )
+        .expect("diag db should seed a searchable build");
+
+        assert_eq!(
+            best.gear_slots.prefix_id(GearSlot::Helm),
+            Some(584),
+            "final build helm prefix must equal the locked itemstat id"
+        );
+    }
+
     /// optimize_v2_search on an empty DB (no professions) must return Err and
     /// must not panic.
     #[test]
@@ -1649,6 +1965,7 @@ mod tests {
         let locked = BuildLocks {
             specs: [None, None, Some(27)],
             trait_locks: HashMap::new(),
+            gear_locks: HashMap::new(),
         };
         let none_locked = generate_neighbors(
             &candidate,

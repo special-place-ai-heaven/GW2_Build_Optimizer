@@ -1499,8 +1499,10 @@ fn build_synergy_result(
 }
 
 #[cfg(test)]
-mod runtime_diagnostics_tests {
+pub(crate) mod runtime_diagnostics_tests {
     use super::*;
+
+    use gw2_core::types::GearSlot;
 
     use gw2_api::models::{
         EquipmentPiece, EquipmentStats, EquipmentTab, Fact, Item, ItemDetails, ItemStat,
@@ -1643,7 +1645,7 @@ mod runtime_diagnostics_tests {
         }
     }
 
-    fn make_diag_db() -> GameDb {
+    pub(crate) fn make_diag_db() -> GameDb {
         let mut itemstats = HashMap::new();
         // Canonical berserker-like profile.
         itemstats.insert(
@@ -1854,12 +1856,35 @@ mod runtime_diagnostics_tests {
         out
     }
 
+    /// Legacy API equipment-slot names for `crate::search::STAT_SLOTS`,
+    /// matching the strings the GW2 API uses on equipped items.
+    fn api_slot_name(slot: GearSlot) -> &'static str {
+        match slot {
+            GearSlot::Helm => "Helm",
+            GearSlot::Shoulders => "Shoulders",
+            GearSlot::Coat => "Coat",
+            GearSlot::Gloves => "Gloves",
+            GearSlot::Leggings => "Leggings",
+            GearSlot::Boots => "Boots",
+            GearSlot::WeaponSet1Main => "WeaponA1",
+            GearSlot::WeaponSet1Off => "WeaponA2",
+            GearSlot::Back => "Backpack",
+            GearSlot::Accessory1 => "Accessory1",
+            GearSlot::Accessory2 => "Accessory2",
+            GearSlot::Amulet => "Amulet",
+            GearSlot::Ring1 => "Ring1",
+            GearSlot::Ring2 => "Ring2",
+            // Not part of the STAT_SLOTS projection.
+            GearSlot::WeaponSet2Main | GearSlot::WeaponSet2Off => "",
+        }
+    }
+
     fn loaded_equipment(itemstat_id: u32) -> EquipmentTab {
         let mut equipment = Vec::new();
-        for &slot in crate::search::STAT_SLOTS {
+        for slot in crate::search::STAT_SLOTS {
             equipment.push(EquipmentPiece {
                 id: 1000,
-                slot: slot.to_string(),
+                slot: api_slot_name(slot).to_string(),
                 location: Some("Equipped".into()),
                 skin: None,
                 upgrades: vec![],
