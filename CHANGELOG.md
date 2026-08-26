@@ -2,6 +2,16 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.7.0 - 2026-08-26
+
+**Per-slot gear prefixes — full hybrid builds.** Every weapon, armor piece, and trinket now carries its own single-stat prefix, individually chosen by the optimizer, lockable by you, and proposed by Choya. Berserker's weapons with a Cavalier's chest and Cleric's rings is now one optimize click.
+
+- 16-slot gear model (6 armor, back + 2 accessories + amulet + 2 rings, two weapon sets' main/off hands) replaces the build-wide and group prefixes; old saves load unchanged and migrate automatically.
+- The optimizer explores per-slot swaps alongside uniform and per-group moves, respecting per-piece gear locks (Locks panel, new Gear section).
+- Choya can plate per-slot gear mixes; unknown prefixes fall back to your profile prefix with a warning.
+- All four providers (OpenRouter, OpenAI, Anthropic, Gemini) now stream their responses.
+
+
 ## 1.6.4 - 2026-08-26
 
 The foundational transport rework: **every provider now streams.** A shared LLM transport layer replaces four hand-rolled clients, the optimizer surfaces stale locks instead of silently overriding them, and the addon's largest file is split by responsibility. Twelve commits on top of the v1.6.3 hardening sweep, executed bedrock-up with per-layer verification gates.
