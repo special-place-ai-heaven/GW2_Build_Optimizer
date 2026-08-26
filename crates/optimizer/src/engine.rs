@@ -2929,4 +2929,140 @@ mod tests {
         locks.trait_locks.insert(55, [Some(10), Some(21), Some(32)]);
         assert!(stale_trait_lock_reasons(&locks, &db, &ctx).is_empty());
     }
+
+    #[test]
+    fn per_slot_gear_mix_equals_independent_slot_math() {
+        use gw2_api::models::{ItemStat, StatAttribute};
+        use gw2_core::types::{GearSlot, PrefixRef};
+
+        let mut db = GameDb::empty_for_tests();
+        db.itemstats.insert(
+            1,
+            ItemStat {
+                id: 1,
+                name: "Berserker's".into(),
+                attributes: vec![
+                    StatAttribute {
+                        attribute: "Power".into(),
+                        multiplier: 1.0,
+                        value: 0,
+                    },
+                    StatAttribute {
+                        attribute: "Precision".into(),
+                        multiplier: 0.65,
+                        value: 0,
+                    },
+                ],
+            },
+        );
+        db.itemstats.insert(
+            2,
+            ItemStat {
+                id: 2,
+                name: "Cavalier's".into(),
+                attributes: vec![
+                    StatAttribute {
+                        attribute: "Toughness".into(),
+                        multiplier: 1.0,
+                        value: 0,
+                    },
+                    StatAttribute {
+                        attribute: "Power".into(),
+                        multiplier: 0.65,
+                        value: 0,
+                    },
+                ],
+            },
+        );
+        let ctx = BalanceContext::new(GameMode::PvE);
+
+        let build = |coat_cavaliers: bool| {
+            let mut validated = ValidatedBuild::default();
+            let bers = PrefixRef {
+                itemstat_id: 1,
+                name: "Berserker's".into(),
+            };
+            let cav = PrefixRef {
+                itemstat_id: 2,
+                name: "Cavalier's".into(),
+            };
+            for slot in [
+                GearSlot::Helm,
+                GearSlot::Shoulders,
+                GearSlot::Coat,
+                GearSlot::Gloves,
+                GearSlot::Leggings,
+                GearSlot::Boots,
+            ] {
+                let coat = slot == GearSlot::Coat && coat_cavaliers;
+                validated
+                    .gear_slots
+                    .set(slot, if coat { cav.clone() } else { bers.clone() });
+            }
+            validated
+        };
+
+        let all_bers = build(false);
+        let mixed = build(true);
+
+        let mut stats_all = stats::StatBlock::default();
+        apply_validated_gear_stats(&mut stats_all, &db, &all_bers, &ctx);
+        let mut stats_mixed = stats::StatBlock::default();
+        apply_validated_gear_stats(&mut stats_mixed, &db, &mixed, &ctx);
+
+        // Sanity: the mix must actually differ from the uniform build.
+        assert!((stats_all.toughness - stats_mixed.toughness).abs() > 1.0);
+
+        // Delta oracle: mixed == allBerserker + (Cavalier's coat − Berserker's
+        // coat), because per-slot contributions are independent.
+        let budgets = data::slot_budgets::slot_budgets();
+        let coat_budget = budgets
+            .get(data::SlotType::Coat, data::stat_shape_from_attr_count(2))
+            .expect("coat budget for 2-attr shape");
+        let bers = db.itemstats.get(&1).unwrap();
+        let cav = db.itemstats.get(&2).unwrap();
+        let mut expected = stats_all.clone();
+        let mut coat_bers = stats::StatBlock::default();
+        add_budget_stats_for_itemstat(&mut coat_bers, bers, coat_budget);
+        let mut coat_cav = stats::StatBlock::default();
+        add_budget_stats_for_itemstat(&mut coat_cav, cav, coat_budget);
+        expected.power += coat_cav.power - coat_bers.power;
+        expected.precision += coat_cav.precision - coat_bers.precision;
+        expected.toughness += coat_cav.toughness - coat_bers.toughness;
+        expected.vitality += coat_cav.vitality - coat_bers.vitality;
+        expected.condition_damage += coat_cav.condition_damage - coat_bers.condition_damage;
+        expected.expertise += coat_cav.expertise - coat_bers.expertise;
+        expected.concentration += coat_cav.concentration - coat_bers.concentration;
+        expected.ferocity += coat_cav.ferocity - coat_bers.ferocity;
+        expected.healing_power += coat_cav.healing_power - coat_bers.healing_power;
+
+        for (name, got, want) in [
+            ("power", stats_mixed.power, expected.power),
+            ("precision", stats_mixed.precision, expected.precision),
+            ("toughness", stats_mixed.toughness, expected.toughness),
+            ("vitality", stats_mixed.vitality, expected.vitality),
+            (
+                "condition_damage",
+                stats_mixed.condition_damage,
+                expected.condition_damage,
+            ),
+            ("expertise", stats_mixed.expertise, expected.expertise),
+            (
+                "concentration",
+                stats_mixed.concentration,
+                expected.concentration,
+            ),
+            ("ferocity", stats_mixed.ferocity, expected.ferocity),
+            (
+                "healing_power",
+                stats_mixed.healing_power,
+                expected.healing_power,
+            ),
+        ] {
+            assert!(
+                (got - want).abs() < 1e-9,
+                "{name}: mixed={got} expected={want}"
+            );
+        }
+    }
 }
