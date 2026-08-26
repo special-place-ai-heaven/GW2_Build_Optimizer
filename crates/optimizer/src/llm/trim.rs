@@ -7,10 +7,16 @@
 //! provider implements turn-aware trimming locally because message shapes
 //! differ.
 
-/// Rough token count: 1 token ≈ 4 characters. Good enough for budget
-/// guarding; not suitable for billing or exact context accounting.
+/// Rough token count. ASCII text ≈ 4 characters per token; non-ASCII
+/// scripts (CJK, Cyrillic, Hangul, …) run ≈ 1 token per character. Byte
+/// length alone under-counts CJK by 1.3-2x (3 bytes per char, but real
+/// cost ~1 token), which let oversized prompts reach the API and get
+/// rejected instead of trimmed. Slight over-estimates are safe — we trim
+/// early, never late.
 pub(crate) fn estimate_tokens(text: &str) -> usize {
-    text.len() / 4
+    let ascii = text.bytes().filter(|&b| b.is_ascii()).count();
+    let non_ascii = text.len() - ascii;
+    ascii / 4 + non_ascii
 }
 
 /// Conservative prompt budget in estimated tokens. Sized for OpenAI's 128K
@@ -24,6 +30,15 @@ mod tests {
     // Intentional invariant tripwires.
     #![allow(clippy::assertions_on_constants)]
     use super::*;
+
+    #[test]
+    fn estimate_tokens_counts_cjk_per_char_not_per_byte() {
+        // 10 CJK chars = 30 bytes. The old bytes/4 estimator said 7 tokens;
+        // the real cost is ~10. chars-based estimate must meet or beat it.
+        let cjk = "龘龘龘龘龘龘龘龘龘龘";
+        assert_eq!(cjk.len(), 30);
+        assert!(estimate_tokens(cjk) >= 10);
+    }
 
     #[test]
     fn estimate_tokens_divides_by_four() {

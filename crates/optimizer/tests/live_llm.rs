@@ -302,11 +302,8 @@ fn test_anthropic_invalid_key() {
 #[ignore]
 fn test_openrouter_validate_and_generate() {
     let key = openrouter_key();
-    let client = gw2_optimizer::llm::openrouter::OpenRouterClient::new(
-        &key,
-        "z-ai/glm-5.3-flash",
-    )
-    .expect("Failed to create OpenRouter client");
+    let client = gw2_optimizer::llm::openrouter::OpenRouterClient::new(&key, "z-ai/glm-5.3-flash")
+        .expect("Failed to create OpenRouter client");
     println!("\n=== OpenRouter Live Tests (streamed) ===");
     run_provider_tests(&client);
 }

@@ -40,12 +40,28 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         state.needs_character_reload = false;
         character::reload_from_api(state);
     } else if state.main.characters.is_empty() && !state.main.characters_loading {
-        character::load_characters(state);
+        // Retry at most every 30s: a persistent failure (API outage, bad
+        // key) must not spawn a loader thread every frame.
+        let cooled = state
+            .main
+            .characters_retry_at
+            .is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(30));
+        if cooled {
+            state.main.characters_retry_at = Some(std::time::Instant::now());
+            character::load_characters(state);
+        }
     }
 
     // Load GameDb once on first entry (S11-T06)
     if state.main.game_db.is_none() && !state.main.game_db_loading {
-        stats::load_game_db(state);
+        let cooled = state
+            .main
+            .game_db_retry_at
+            .is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(60));
+        if cooled {
+            state.main.game_db_retry_at = Some(std::time::Instant::now());
+            stats::load_game_db(state);
+        }
     }
     if state.main.game_db.is_some() {
         stats::ensure_localized_names(state);

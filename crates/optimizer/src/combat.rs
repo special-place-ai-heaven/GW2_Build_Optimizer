@@ -480,7 +480,7 @@ pub fn default_buff_profiles(ctx: &BalanceContext) -> Vec<BuffProfile> {
 pub fn buff_profiles_for_profession(profession: &str, ctx: &BalanceContext) -> Vec<BuffProfile> {
     let data = crate::data::rotation_profiles::rotation_profiles();
     let profile = data.lookup(profession, None, &ctx.game_mode);
-    match profile {
+    let mut profiles = match profile {
         Some(p) => p
             .scenarios
             .iter()
@@ -516,7 +516,24 @@ pub fn buff_profiles_for_profession(profession: &str, ctx: &BalanceContext) -> V
                 },
             ]
         }
+    };
+    // Call sites index [0]/[1]/[2] directly. The embedded-data validation
+    // requires >= 3 scenarios per profile, but make the guarantee local so a
+    // future loader relaxation degrades to a duplicated default instead of
+    // panicking in the optimizer hot path.
+    profiles.truncate(3);
+    while profiles.len() < 3 {
+        let clone = profiles.first().cloned().unwrap_or(BuffProfile {
+            might_stacks: 0,
+            fury: false,
+            protection: false,
+            resolution: false,
+            vulnerability_stacks: 0,
+            label: "Solo".into(),
+        });
+        profiles.push(clone);
     }
+    profiles
 }
 
 // ─── Damage Modifier Extraction ───

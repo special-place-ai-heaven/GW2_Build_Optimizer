@@ -2130,7 +2130,9 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     }
                                     let errors: Vec<String> = validated
                                         .as_ref()
-                                        .map(|v| v.errors.iter().map(|e| e.detail.clone()).collect())
+                                        .map(|v| {
+                                            v.errors.iter().map(|e| e.detail.clone()).collect()
+                                        })
                                         .unwrap_or_default();
                                     crate::ui::chat_bar::add_ai_response(
                                         &mut s.main.chat,
@@ -2146,11 +2148,9 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 // render callback shares this mutex and ImGui only
                                 // draws on the render thread, so a stalled frame
                                 // here reads as the whole game not responding.
-                                let Some((live_db, live_mode)) =
-                                    crate::state::with_state(|s| {
-                                        (s.main.game_db.clone(), s.main.game_mode.clone())
-                                    })
-                                else {
+                                let Some((live_db, live_mode)) = crate::state::with_state(|s| {
+                                    (s.main.game_db.clone(), s.main.game_mode.clone())
+                                }) else {
                                     return; // state gone — addon shutting down
                                 };
                                 let plated = match &validated {
@@ -2174,12 +2174,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 };
                                 apply_gemini_response(&mut suggestion, &plated);
                                 if let Some(ref db) = live_db {
-                                    attach_chat_stats(
-                                        &mut suggestion,
-                                        db,
-                                        &profession,
-                                        &live_mode,
-                                    );
+                                    attach_chat_stats(&mut suggestion, db, &profession, &live_mode);
                                     if let Some(v) = &validated {
                                         suggestion.chat_code =
                                             validated_build_to_chat_code(v, &profession, db);

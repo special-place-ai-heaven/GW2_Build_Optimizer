@@ -173,15 +173,6 @@ pub fn spec_url_by_name<'a>(db: &'a GameDb, name: &str) -> Option<&'a str> {
     )
 }
 
-pub fn trait_url_by_name<'a>(db: &'a GameDb, name: &str) -> Option<&'a str> {
-    lookup_name(
-        db.traits
-            .values()
-            .map(|t| (t.name.as_str(), t.icon.as_deref())),
-        name,
-    )
-}
-
 pub fn upgrade_url<'a>(db: &'a GameDb, name: &str) -> Option<&'a str> {
     if name.is_empty() {
         return None;

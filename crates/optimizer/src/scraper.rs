@@ -632,8 +632,13 @@ fn scrape_guildjen(
             if should_cancel() {
                 return Ok((builds, true));
             }
-            let url = if link.starts_with("http") {
+            // Pin to the real host: an index page (compromised, or MITM'd if
+            // TLS were ever bypassed) must not steer us to arbitrary absolute
+            // URLs — only relative paths on guildjen.com may be followed.
+            let url = if link.starts_with("https://guildjen.com/") {
                 link
+            } else if link.starts_with("http") {
+                continue;
             } else {
                 format!("https://guildjen.com{}", link)
             };
@@ -699,8 +704,15 @@ fn fetch_html(client: &reqwest::blocking::Client, url: &str) -> Result<String, S
         ));
     }
 
-    resp.text()
-        .map_err(|e| format!("UTF-8 error reading {}: {}", url, e))
+    // Cap the body: a hostile endpoint must not stream unbounded bytes into
+    // the game process. Build pages are well under 1 MiB.
+    use std::io::Read as _;
+    const MAX_HTML_BYTES: u64 = 2 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    resp.take(MAX_HTML_BYTES)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("error reading {}: {}", url, e))?;
+    String::from_utf8(bytes).map_err(|_| format!("UTF-8 error reading {}", url))
 }
 
 /// Heuristic: does this look like a network/security interstitial (block page,
@@ -914,14 +926,28 @@ fn extract_gear_prefix(html: &str) -> String {
     String::new()
 }
 
+/// Longest prefix of `s` of at most `max` bytes that ends on a char
+/// boundary. Slicing mid-UTF-8 panics, and build-site HTML is
+/// attacker-influenced content.
+fn take_chars_window(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut bound = max;
+    while !s.is_char_boundary(bound) {
+        bound -= 1;
+    }
+    &s[..bound]
+}
+
 /// Extract rune name from HTML.
 fn extract_rune(html: &str) -> String {
     // Rune names follow "Rune of" or "Superior Rune"
     for marker in &["Rune of the ", "Rune of ", "Superior Rune"] {
         if let Some(pos) = html.find(marker) {
             let after = &html[pos..];
-            // Take up to 40 chars and trim at next HTML tag or quote
-            let raw = &after[..after.len().min(60)];
+            // Take up to 60 bytes and trim at next HTML tag or quote
+            let raw = take_chars_window(after, 60);
             let end = raw.find(['<', '"', '\n']).unwrap_or(raw.len());
             let name = raw[..end].trim().to_string();
             if name.len() > 5 {
@@ -939,7 +965,7 @@ fn extract_sigils(html: &str) -> Vec<String> {
         let mut pos = 0;
         while let Some(idx) = html[pos..].find(marker) {
             let abs = pos + idx;
-            let after = &html[abs..abs.min(html.len() - 1) + 60.min(html.len() - abs)];
+            let after = take_chars_window(&html[abs..], 60);
             let end = after.find(['<', '"', '\n']).unwrap_or(after.len());
             let name = after[..end].trim().to_string();
             if name.len() > 5 && !sigils.contains(&name) {
@@ -959,7 +985,7 @@ fn extract_relic(html: &str) -> String {
     for marker in &["Relic of ", "Superior Relic"] {
         if let Some(pos) = html.find(marker) {
             let after = &html[pos..];
-            let raw = &after[..after.len().min(60)];
+            let raw = take_chars_window(after, 60);
             let end = raw.find(['<', '"', '\n']).unwrap_or(raw.len());
             let name = raw[..end].trim().to_string();
             if name.len() > 5 {
@@ -1026,19 +1052,20 @@ fn extract_traits(html: &str) -> Vec<String> {
 /// Extract skill names from HTML.
 fn extract_skills(html: &str) -> Vec<String> {
     // Common skill markers on build sites
-    let markers = [
-        "Heal:",
-        "Utility:",
-        "Elite:",
-        "utility-skill",
-        "heal-skill",
-        "elite-skill",
-    ];
+    let markers = ["Heal:", "Utility:", "Elite:", "utility-skill", "heal-skill"];
     let mut skills = Vec::new();
     for marker in &markers {
         if let Some(pos) = html.find(marker) {
             let after = &html[pos + marker.len()..];
-            let raw = &after[..after.len().min(80)];
+            // Truncate on a char boundary — slicing mid-UTF-8 panics, and
+            // build-site HTML is attacker-influenced content.
+            let bound = after
+                .char_indices()
+                .map(|(i, _)| i)
+                .take_while(|&i| i <= 80)
+                .last()
+                .unwrap_or(0);
+            let raw = &after[..bound];
             // Strip HTML tags
             let text = strip_tags(raw);
             let name = text.trim().trim_matches(':').trim().to_string();
@@ -1066,9 +1093,6 @@ fn strip_tags(s: &str) -> String {
     }
     result
 }
-
-// ─── Storage ──────────────────────────────────────────────────────────────────
-
 fn save_builds(builds: &[BenchmarkBuild], dir: &Path) {
     if builds.is_empty() {
         return;
@@ -1079,17 +1103,42 @@ fn save_builds(builds: &[BenchmarkBuild], dir: &Path) {
     for b in builds {
         let key = format!(
             "{}_{}_{}.json",
-            b.source,
-            b.profession.to_lowercase().replace(' ', "_"),
-            b.mode.to_lowercase()
+            sanitize_filename_component(&b.source),
+            sanitize_filename_component(&b.profession.to_lowercase().replace(' ', "_")),
+            sanitize_filename_component(&b.mode.to_lowercase())
         );
         groups.entry(key).or_default().push(b);
     }
     for (filename, group) in &groups {
-        let path = dir.join(filename);
+        // Filename components can carry scraped, attacker-influenced text
+        // (profession parsed from a URL path). Windows treats '\\' as a
+        // separator, so whitelist instead of trusting the URL splitter.
+        let path = dir.join(sanitize_filename_component(filename));
         if let Ok(json) = serde_json::to_string_pretty(group) {
             let _ = std::fs::write(path, json);
         }
+    }
+}
+
+/// Reduce a string to a safe single path component: keep alphanumerics,
+/// '-', '_', '.', ' ' — everything else (including '\\'/''/') becomes '_'.
+/// Mirrors the whitelist in crates/core/src/storage.rs.
+fn sanitize_filename_component(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ' ') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    // A component of only dots (e.g. "..") must not survive.
+    if cleaned.chars().all(|c| c == '.') {
+        "_".repeat(cleaned.len())
+    } else {
+        cleaned
     }
 }
 
@@ -1099,10 +1148,9 @@ fn build_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
     reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(std::time::Duration::from_secs(15))
-        // Accept invalid/untrusted certs — required on Windows where certain CA roots
-        // (e.g. Let's Encrypt R3 chain used by hardstuck.gg) may not be trusted in the
-        // Schannel TLS stack used inside the game process.
-        .danger_accept_invalid_certs(true)
+        // Certificates must validate (Schannel trust store). The old
+        // danger_accept_invalid_certs(true) here let any MITM poison the
+        // benchmark cache that feeds optimizer comparisons and LLM prompts.
         .build()
 }
 
