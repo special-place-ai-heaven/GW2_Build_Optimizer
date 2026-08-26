@@ -18,4 +18,4 @@ pub(super) mod new_build;
 pub(super) mod saveload;
 pub(super) mod settings;
 
-pub(super) use super::{build_display, lock_panel, optimization, render_optimization_progress};
+pub(super) use super::{build_display, lock_panel, render_optimization_progress};

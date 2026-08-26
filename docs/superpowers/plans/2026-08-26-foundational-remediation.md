@@ -41,7 +41,7 @@ L0 (verification bedrock)
 
 **Interfaces:** none (repo meta).
 
-- [ ] **Step 1:** Create `.gitattributes`:
+- [x] **Step 1:** Create `.gitattributes`:
 
 ```
 * text=auto
@@ -57,9 +57,9 @@ L0 (verification bedrock)
 *.dll binary
 ```
 
-- [ ] **Step 2:** Verify no mass renormalization leaks into the commit: `git add .gitattributes && git status --short` — expect only `.gitattributes` staged.
+- [x] **Step 2:** Verify no mass renormalization leaks into the commit: `git add .gitattributes && git status --short` — expect only `.gitattributes` staged.
 
-- [ ] **Step 3:** Commit: `git commit -m "chore: pin LF line endings via .gitattributes"`
+- [x] **Step 3:** Commit: `git commit -m "chore: pin LF line endings via .gitattributes"`
 
 ### Task L0.2: CI verification bedrock
 
@@ -68,7 +68,7 @@ L0 (verification bedrock)
 
 **Interfaces:** Produces the gate every later task relies on: fmt check, clippy `-D warnings`, `cargo test --workspace`.
 
-- [ ] **Step 1:** Create `.github/workflows/ci.yml`:
+- [x] **Step 1:** Create `.github/workflows/ci.yml`:
 
 ```yaml
 name: ci
@@ -91,9 +91,9 @@ jobs:
       - run: cargo test --workspace
 ```
 
-- [ ] **Step 2:** Make the gate pass locally before committing: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`. Fix whatever the gate flags (expected: 2 warnings in `crates/optimizer/tests/live_llm.rs`, 1 in `gw2-core`, 1 in `gw2-api`, 4 unused `render_build_*` functions in `crates/addon/src/ui/main_view/build_display.rs` if resurfaced by fmt — delete per the v1.6.3 dead-code rules).
+- [x] **Step 2:** Make the gate pass locally before committing: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`. Fix whatever the gate flags (expected: 2 warnings in `crates/optimizer/tests/live_llm.rs`, 1 in `gw2-core`, 1 in `gw2-api`, 4 unused `render_build_*` functions in `crates/addon/src/ui/main_view/build_display.rs` if resurfaced by fmt — delete per the v1.6.3 dead-code rules).
 
-- [ ] **Step 3:** Commit: `git commit -m "ci: fmt + clippy -D warnings + workspace tests on windows-latest"`
+- [x] **Step 3:** Commit: `git commit -m "ci: fmt + clippy -D warnings + workspace tests on windows-latest"`
 
 ### Task L1.1: Extract the SSE streaming module
 
@@ -106,10 +106,10 @@ jobs:
 - Produces: `sse::read_stream<R: std::io::Read>(reader: R) -> Result<sse::StreamedMessage, LlmError>`, `sse::StreamedMessage::{Message(Message), Empty(String)}`, `sse::apply_chunk`, `sse::StreamAccumulator` — byte-identical behavior to today's `openrouter.rs` implementations.
 - Consumes: `super::Message`, `ToolCallResponse`, `FunctionCallData`, `LlmError` from `llm/mod.rs`.
 
-- [ ] **Step 1:** Move `StreamChunk`, `StreamChoice`, `StreamDelta`, `StreamToolCallDelta`, `StreamFunctionDelta`, `StreamAccumulator`, `StreamToolCall`, `StreamedMessage`, `apply_chunk`, `StreamAccumulator::into_message`, `read_stream` and the five `read_stream` tests from `openrouter.rs` into `llm/sse.rs` unchanged.
-- [ ] **Step 2:** In `openrouter.rs` replace the moved block with `use super::sse::{read_stream, StreamedMessage};` and delete the moved tests (they live in `sse.rs` now).
-- [ ] **Step 3:** Verify: `cargo test -p gw2-optimizer llm::sse` — all moved tests pass; `cargo test -p gw2-optimizer` green.
-- [ ] **Step 4:** Commit: `git commit -m "refactor(llm): extract shared SSE streaming module from the OpenRouter client"`
+- [x] **Step 1:** Move `StreamChunk`, `StreamChoice`, `StreamDelta`, `StreamToolCallDelta`, `StreamFunctionDelta`, `StreamAccumulator`, `StreamToolCall`, `StreamedMessage`, `apply_chunk`, `StreamAccumulator::into_message`, `read_stream` and the five `read_stream` tests from `openrouter.rs` into `llm/sse.rs` unchanged.
+- [x] **Step 2:** In `openrouter.rs` replace the moved block with `use super::sse::{read_stream, StreamedMessage};` and delete the moved tests (they live in `sse.rs` now).
+- [x] **Step 3:** Verify: `cargo test -p gw2-optimizer llm::sse` — all moved tests pass; `cargo test -p gw2-optimizer` green.
+- [x] **Step 4:** Commit: `git commit -m "refactor(llm): extract shared SSE streaming module from the OpenRouter client"`
 
 ### Task L1.2: Shared response cache with eviction
 
@@ -122,10 +122,10 @@ jobs:
 - Produces: `response_cache::ResponseCache::new(ttl_secs: u64, cap: usize)`, `.get(prompt: &str) -> Option<String>`, `.insert(prompt: &str, text: String)` (evicts expired, then clears to cap when `len >= cap`).
 - Consumes: `std::time::Instant`.
 
-- [ ] **Step 1:** Implement `ResponseCache` (Mutex-internal, same 1800s/64 semantics the four providers inline today) plus unit tests: ttl expiry, cap clears, get-hit.
-- [ ] **Step 2:** Swap all four providers over; delete their inline eviction blocks and `CachedResponse` structs.
-- [ ] **Step 3:** Verify: `cargo test -p gw2-optimizer llm` green; `cargo build --workspace` warning-free.
-- [ ] **Step 4:** Commit: `git commit -m "refactor(llm): one ResponseCache with ttl+cap for all providers"`
+- [x] **Step 1:** Implement `ResponseCache` (Mutex-internal, same 1800s/64 semantics the four providers inline today) plus unit tests: ttl expiry, cap clears, get-hit.
+- [x] **Step 2:** Swap all four providers over; delete their inline eviction blocks and `CachedResponse` structs.
+- [x] **Step 3:** Verify: `cargo test -p gw2-optimizer llm` green; `cargo build --workspace` warning-free.
+- [x] **Step 4:** Commit: `git commit -m "refactor(llm): one ResponseCache with ttl+cap for all providers"`
 
 ### Task L1.3: Shared capped-body reader
 
@@ -137,10 +137,10 @@ jobs:
 - Produces: `transport::read_body_capped(resp: reqwest::blocking::Response, max_bytes: u64) -> Result<Vec<u8>, String>` (uses `std::io::Read::take`, maps io errors to strings).
 - Consumes: `reqwest::blocking::Response: Read`.
 
-- [ ] **Step 1:** Implement + unit-test with `std::io::Cursor` bodies (over-cap truncates at cap, under-cap passes through).
-- [ ] **Step 2:** Convert `fetch_html` (cap 2 MiB), gw2api `get_with_params` JSON reads (cap 8 MiB), feedback client text reads (cap 1 MiB).
-- [ ] **Step 3:** Verify: `cargo test -p gw2-optimizer -p gw2-api -p gw2-build-optimizer` green.
-- [ ] **Step 4:** Commit: `git commit -m "refactor: shared capped-body reader across scraper, gw2api, feedback"`
+- [x] **Step 1:** Implement + unit-test with `std::io::Cursor` bodies (over-cap truncates at cap, under-cap passes through).
+- [x] **Step 2:** Convert `fetch_html` (cap 2 MiB), gw2api `get_with_params` JSON reads (cap 8 MiB), feedback client text reads (cap 1 MiB).
+- [x] **Step 3:** Verify: `cargo test -p gw2-optimizer -p gw2-api -p gw2-build-optimizer` green.
+- [x] **Step 4:** Commit: `git commit -m "refactor: shared capped-body reader across scraper, gw2api, feedback"`
 
 ### Task L2.1: Unify OpenAI-compatible providers on one streaming core
 
@@ -152,10 +152,10 @@ jobs:
 - Produces: `openai_compat::ChatRequest`, `openai_compat::send_chat(client, key, base, extra_headers, model, messages, tools, stream: bool, reasoning: Option<ReasoningConfig>, provider_prefs: Option<ProviderPrefs>) -> Result<Message, LlmError>` — the retry/backoff/Retry-After loop lives here once.
 - Consumes: `sse::read_stream`, `transport::read_body_capped` (non-stream fallback paths), `LlmError`.
 
-- [ ] **Step 1:** Move `send_chat`'s body from `openrouter.rs` into `openai_compat::send_chat` with the parameterization above; keep status handling, rate-tracker reserve/undo at the wrapper level (wrappers own `RateTracker`).
-- [ ] **Step 2:** `OpenRouterClient::send_chat` = builds request extras (reasoning caps, provider prefs, referer headers) and delegates. `OpenAiClient::send_chat` = same core with `stream: true`, no reasoning/prefs — this is the intended behavior change: OpenAI chats stream now, killing its timeout class.
-- [ ] **Step 3:** Verify: `cargo test -p gw2-optimizer llm` (SSE + round-trip tests) green; live smoke: `OPENROUTER_API_KEY=… cargo test -p gw2-optimizer --test live_llm -- --ignored test_openrouter_validate` and, if a key exists, `test_openai_validate`.
-- [ ] **Step 4:** Commit: `git commit -m "refactor(llm): unify OpenAI + OpenRouter on one streaming chat core"`
+- [x] **Step 1:** Move `send_chat`'s body from `openrouter.rs` into `openai_compat::send_chat` with the parameterization above; keep status handling, rate-tracker reserve/undo at the wrapper level (wrappers own `RateTracker`).
+- [x] **Step 2:** `OpenRouterClient::send_chat` = builds request extras (reasoning caps, provider prefs, referer headers) and delegates. `OpenAiClient::send_chat` = same core with `stream: true`, no reasoning/prefs — this is the intended behavior change: OpenAI chats stream now, killing its timeout class.
+- [x] **Step 3:** Verify: `cargo test -p gw2-optimizer llm` (SSE + round-trip tests) green; live smoke: `OPENROUTER_API_KEY=… cargo test -p gw2-optimizer --test live_llm -- --ignored test_openrouter_validate` and, if a key exists, `test_openai_validate`.
+- [x] **Step 4:** Commit: `git commit -m "refactor(llm): unify OpenAI + OpenRouter on one streaming chat core"`
 
 ### Task L3.2: Determinism sweep
 
@@ -164,9 +164,9 @@ jobs:
 
 **Interfaces:** none new.
 
-- [ ] **Step 1:** Audit every `for (k, &v) in map` style accumulation feeding `stats.add`/score f64s; fix by sorted iteration; leave display-order maps alone.
-- [ ] **Step 2:** Verify: `cargo test -p gw2-optimizer` green; run the same optimize twice comparing serialized suggestions byte-for-byte if a fixture exists (`crates/optimizer/tests/`), else note in commit.
-- [ ] **Step 3:** Commit: `git commit -m "fix(optimizer): deterministic ordering for remaining map-fed f64 accumulations"`
+- [x] **Step 1:** Audit every `for (k, &v) in map` style accumulation feeding `stats.add`/score f64s; fix by sorted iteration; leave display-order maps alone.
+- [x] **Step 2:** Verify: `cargo test -p gw2-optimizer` green; run the same optimize twice comparing serialized suggestions byte-for-byte if a fixture exists (`crates/optimizer/tests/`), else note in commit.
+- [x] **Step 3:** Commit: `git commit -m "fix(optimizer): deterministic ordering for remaining map-fed f64 accumulations"`
 
 ### Task L4.2: Clipboard retry
 
@@ -175,9 +175,9 @@ jobs:
 
 **Interfaces:** same `copy_text(&str) -> bool`.
 
-- [ ] **Step 1:** Wrap OpenClipboard in up to 3 attempts spaced 20 ms (Windows clipboard contention is transient); keep returning bool.
-- [ ] **Step 2:** Verify: `cargo test -p gw2-build-optimizer clipboard` green.
-- [ ] **Step 3:** Commit: `git commit -m "fix(addon): retry clipboard open to survive transient contention"`
+- [x] **Step 1:** Wrap OpenClipboard in up to 3 attempts spaced 20 ms (Windows clipboard contention is transient); keep returning bool.
+- [x] **Step 2:** Verify: `cargo test -p gw2-build-optimizer clipboard` green.
+- [x] **Step 3:** Commit: `git commit -m "fix(addon): retry clipboard open to survive transient contention"`
 
 ### Deferred stages (each gets its own plan next session)
 
@@ -187,3 +187,12 @@ jobs:
 - **L3.3 Mock-server test flake**: `get_with_params_429_then_200_succeeds_with_retry_after` raced once (13 s suite run, retry sleeps overlap port reuse). Investigate binding strategy; estimate S.
 - **L4.1 Split `main_view/optimization.rs`** (2,645 lines) into `chat.rs`/`optimize.rs`/`suggestion_builders.rs` — pure moves. Estimate M.
 - **L4.3 Chat history save off the render thread** (dirty-gated flush at `main_view/mod.rs:144` → bg flush). Estimate S.
+
+## Status (2026-08-26)
+
+All tasks complete on branch `fix/foundations`. L2.2/L2.3 executed in this
+campaign (not deferred); L3.3 root-caused (mockito 1.7.2 accept-task
+scheduling race — RST 10054 on early connections under load, reproduces on
+unchanged code) with a readiness-probe gate as mitigation. Gates: clippy
+`-D warnings` clean workspace-wide, 1,397 tests passing, OpenRouter live
+suite verified the unified core end-to-end.
