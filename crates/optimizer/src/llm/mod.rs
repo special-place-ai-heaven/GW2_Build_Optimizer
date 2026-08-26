@@ -7,6 +7,7 @@ pub mod gemini;
 pub mod openai;
 pub mod openrouter;
 pub(crate) mod rate;
+pub(crate) mod response_cache;
 pub(crate) mod sse;
 pub mod tools;
 pub(crate) mod trim;
