@@ -19,7 +19,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
     if let Some(err) = state.main.comparison.error.clone() {
         ui.text_colored(theme::ERR, format!("[!] {}", err));
         ui.same_line();
-        if ui.small_button(&format!("{}##opt_err_improve", t("btn.dismiss"))) {
+        if ui.small_button(format!("{}##opt_err_improve", t("btn.dismiss"))) {
             state.main.comparison.error = None;
         }
         ui.spacing();
@@ -106,7 +106,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
             if let Some(spec_name) = locked_spec_name.as_deref() {
                 ui.text_colored(theme::OPTIMIZED, tf("fmt.locked", &[("name", spec_name)]));
                 ui.same_line();
-                if ui.small_button(&format!("{}##improve", t("btn.unlock"))) {
+                if ui.small_button(format!("{}##improve", t("btn.unlock"))) {
                     state.main.build_locks.specs[2] = None;
                 }
                 ui.same_line_with_spacing(0.0, 12.0);
@@ -235,7 +235,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
     if has_suggestion {
         super::saveload::render_save_build_ui(ui, state);
         ui.same_line();
-        if ui.small_button(&format!("{}##improve", t("btn.clear_results"))) {
+        if ui.small_button(format!("{}##improve", t("btn.clear_results"))) {
             state.main.comparison.suggestions.clear();
             state.main.comparison.error = None;
         }

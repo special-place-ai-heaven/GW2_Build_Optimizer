@@ -558,12 +558,9 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     }
     ui.text_colored(
         [0.5, 0.5, 0.5, 1.0],
-        format!(
-            "{}",
-            tf(
-                "fmt.usage_today",
-                &[("n", &state.main.settings_usage_today.to_string())]
-            )
+        tf(
+            "fmt.usage_today",
+            &[("n", state.main.settings_usage_today.to_string().as_str())],
         ),
     );
 }
@@ -720,7 +717,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     }
 
     ui.spacing();
-    if ui.small_button(&t("btn.reset_layout")) {
+    if ui.small_button(t("btn.reset_layout")) {
         state.config.left_panel_width = 360.0;
         state.config.panel_padding = 6.0;
         state.config.section_spacing = 4.0;

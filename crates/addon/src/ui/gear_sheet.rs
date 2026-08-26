@@ -414,7 +414,7 @@ fn section(ui: &Ui, title: &str) {
     ui.spacing();
     ui.text_colored(theme::GOLD, title);
 }
-
+#[allow(clippy::too_many_arguments)]
 fn row(
     ui: &Ui,
     db: Option<&GameDb>,
@@ -465,7 +465,7 @@ fn row(
         ui.unindent();
     }
 }
-
+#[allow(clippy::too_many_arguments)]
 fn weapon_row(
     ui: &Ui,
     db: Option<&GameDb>,

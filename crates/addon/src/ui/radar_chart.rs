@@ -299,7 +299,7 @@ pub fn render_presets(ui: &Ui) -> Option<OptimizationWeights> {
             "Celestial" => t("preset.celestial"),
             other => other.to_string(),
         };
-        if ui.button_with_size(&format!("{label}##preset_{i}"), [btn_width, 0.0]) {
+        if ui.button_with_size(format!("{label}##preset_{i}"), [btn_width, 0.0]) {
             result = Some(preset_fn());
         }
     }

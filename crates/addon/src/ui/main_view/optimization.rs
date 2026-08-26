@@ -2439,11 +2439,13 @@ mod tests {
             explanation: "A sharp plate.".into(),
             ..Default::default()
         };
-        let mut v = gw2_optimizer::validation::ValidatedBuild::default();
-        v.rune = Some(gw2_optimizer::validation::ValidatedItem {
-            id: 1,
-            name: "Scholar".into(),
-        });
+        let v = gw2_optimizer::validation::ValidatedBuild {
+            rune: Some(gw2_optimizer::validation::ValidatedItem {
+                id: 1,
+                name: "Scholar".into(),
+            }),
+            ..Default::default()
+        };
         let plated = gemini_from_validated(raw, &v);
         assert_eq!(plated.rune, "Scholar");
     }

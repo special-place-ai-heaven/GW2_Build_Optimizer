@@ -846,6 +846,8 @@ pub fn render_optimized_specs_panel(
                 let grid_y = row_start[1] + 2.0;
                 let mut selected_link: [Option<([f32; 2], [f32; 2])>; 3] = [None; 3];
 
+                // `col` drives the hex-grid geometry as well as the link slot.
+                #[allow(clippy::needless_range_loop)]
                 for col in 0..3_usize {
                     for row in 0..3_usize {
                         let trait_idx = col * 3 + row;

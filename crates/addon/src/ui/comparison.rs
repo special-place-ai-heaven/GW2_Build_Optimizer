@@ -686,7 +686,7 @@ pub fn render_chat_code_copy(
     let h = ui.frame_height().max(ui.text_line_height() + 6.0);
     let w = (remain - 4.0).max(80.0);
     let p = ui.cursor_screen_pos();
-    let clicked = ui.invisible_button(&format!("##chat_copy_{}", id_suffix), [w, h]);
+    let clicked = ui.invisible_button(format!("##chat_copy_{}", id_suffix), [w, h]);
     let hovered = ui.is_item_hovered();
     if clicked {
         if let Some(code) = chat_code {

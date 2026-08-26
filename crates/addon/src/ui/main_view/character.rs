@@ -474,8 +474,8 @@ fn encode_revenant_profession_bytes(
         .legends
         .iter()
         .flatten()
+        .filter(|&id| !id.is_empty())
         .cloned()
-        .filter(|id| !id.is_empty())
         .collect();
     if legends.is_empty() {
         legends = infer_revenant_legends(build, db, &spec_ids);
@@ -484,8 +484,8 @@ fn encode_revenant_profession_bytes(
         .aquatic_legends
         .iter()
         .flatten()
+        .filter(|&id| !id.is_empty())
         .cloned()
-        .filter(|id| !id.is_empty())
         .collect();
     if aquatic.is_empty() {
         aquatic = legends.clone();

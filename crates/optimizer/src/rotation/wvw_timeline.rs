@@ -391,6 +391,7 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
 }
 
 impl<'a> Timeline<'a> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         skills: &'a [RotationSkill],
         params: &'a SimParams,
@@ -893,11 +894,9 @@ impl<'a> Timeline<'a> {
                 return true;
             }
         }
-        if !unblockable {
-            if self.consume_defense(CoverKind::Blind) {
-                self.mark_charge_cover_consumed();
-                return true;
-            }
+        if !unblockable && self.consume_defense(CoverKind::Blind) {
+            self.mark_charge_cover_consumed();
+            return true;
         }
         false
     }
@@ -1051,11 +1050,17 @@ impl<'a> Timeline<'a> {
                 count_per_pulse,
                 interval_ms,
                 window_ms,
-            } => self.remove_enemy_boons(if *interval_ms == 0 {
-                *count_per_pulse
-            } else {
-                *count_per_pulse * ((*window_ms).max(*interval_ms) / *interval_ms)
-            }),
+            } => {
+                self.remove_enemy_boons(if *interval_ms == 0 {
+                    // Zero interval = one immediate pulse, not a division.
+                    *count_per_pulse
+                } else {
+                    *count_per_pulse
+                        * ((*window_ms).max(*interval_ms))
+                            .checked_div(*interval_ms)
+                            .unwrap_or(0)
+                })
+            }
             SkillEffect::CorruptBoons | SkillEffect::StealBoons => self.remove_enemy_boons(1),
             SkillEffect::ConvertConditions => {
                 let count = self.incoming_conditions.len() as u32;

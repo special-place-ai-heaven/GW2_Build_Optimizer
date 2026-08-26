@@ -365,7 +365,7 @@ fn stance_kit(
 
 // ponytail: one preview index for the visible skill bar (Improve never shows two).
 thread_local! {
-    static STANCE_PREVIEW: std::cell::Cell<usize> = std::cell::Cell::new(0);
+    static STANCE_PREVIEW: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Clickable stance pills. Returns that legend's kit when the db has it.
@@ -440,7 +440,7 @@ fn wrap_slot_lines(ui: &Ui, text: &str, max_w: f32) -> Vec<String> {
         vec![line1, truncate_to_width(ui, &rest, max_w)]
     }
 }
-
+#[allow(clippy::too_many_arguments)]
 fn render_skill_bar(
     ui: &Ui,
     db: Option<&gw2_optimizer::gamedb::GameDb>,
@@ -512,7 +512,7 @@ fn render_skill_bar(
             *rim
         };
         ui.set_cursor_screen_pos(p);
-        let _ = ui.invisible_button(&format!("##skill_slot_{id_suffix}_{i}"), [slot_w, slot_h]);
+        let _ = ui.invisible_button(format!("##skill_slot_{id_suffix}_{i}"), [slot_w, slot_h]);
         if !empty {
             crate::ui::comparison::inspect_if_hovered(ui, value, db);
         }

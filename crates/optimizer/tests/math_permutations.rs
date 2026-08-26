@@ -318,7 +318,7 @@ fn stack_cap_json_and_sim() {
     };
 
     let pve = simulate_with(
-        &[bleed_skill.clone()],
+        std::slice::from_ref(&bleed_skill),
         5_000,
         &SimParams::basic(0.0, 0.0, 1100.0),
         EnemyDummy::open(),

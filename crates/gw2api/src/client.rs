@@ -350,6 +350,8 @@ impl Gw2Client {
             let resp = match self.http.get(&url).headers(headers).send() {
                 Ok(resp) => resp,
                 Err(e) => {
+                    #[cfg(test)]
+                    eprintln!("FLAKE-DBG attempt={attempt} conn-error={e:?}");
                     last_error = Some(ApiError::Http(e));
                     continue; // retry on connection failure
                 }
@@ -357,8 +359,6 @@ impl Gw2Client {
 
             let status = resp.status().as_u16();
 
-            // Retry on rate limit and server errors (500/502/503/504).
-            // For 429, honor `Retry-After` when present; 5xx stays on exponential backoff.
             if status == 429 {
                 let retry_after = parse_retry_after(resp.headers());
                 if let Some(wait) = retry_after {
@@ -816,12 +816,34 @@ mod tests {
         ));
     }
 
+    /// mockito binds its listener on a background task and starts pumping the
+    /// accept loop a beat later; under load the first real requests can be
+    /// connection-reset before the server task is scheduled. Probe an
+    /// UNMOCKED path until the server answers with any HTTP response — a
+    /// plain TCP connect is not enough (the kernel accepts before the task
+    /// pumps, and the late connection gets reset).
+    fn wait_for_server_ready(url: &str) {
+        let probe = format!("{}/__server_ready", url.trim_end_matches('/'));
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .expect("probe client builds");
+        for _ in 0..250 {
+            match client.get(&probe).send() {
+                Ok(_) => return, // any HTTP answer means the task is pumping
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
+        }
+        panic!("mock server at {url} never became ready");
+    }
+
     #[test]
     fn get_with_params_429_then_200_succeeds_with_retry_after() {
         // Mock server: first GET /v2/mock returns 429 + Retry-After: 1, second returns 200.
         // We assert the retry path completes successfully, not precise timing — the
         // proactive token bucket and OS sleep granularity make timing assertions flaky.
         let mut server = mockito::Server::new();
+        wait_for_server_ready(&server.url());
         let m1 = server
             .mock("GET", "/mock")
             .with_status(429)
@@ -848,6 +870,7 @@ mod tests {
     #[test]
     fn get_with_params_429_over_cap_short_circuits_to_rate_limited() {
         let mut server = mockito::Server::new();
+        wait_for_server_ready(&server.url());
         let _m = server
             .mock("GET", "/mock")
             .with_status(429)
@@ -873,6 +896,7 @@ mod tests {
     #[test]
     fn fetch_by_ids_preserves_string_ids_for_legend_endpoints() {
         let mut server = mockito::Server::new();
+        wait_for_server_ready(&server.url());
         let m = server
             .mock("GET", "/legends")
             .match_query(mockito::Matcher::Exact("ids=Legend1,Legend2".into()))
