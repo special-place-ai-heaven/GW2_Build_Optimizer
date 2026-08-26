@@ -27,8 +27,16 @@ pub fn copy_text(text: &str) -> bool {
     wide.push(0);
     let bytes = wide.len() * 2;
     unsafe {
-        if OpenClipboard(std::ptr::null_mut()) == 0 {
-            return false;
+        // Another process briefly holding the clipboard (clipboard managers,
+        // remote-desktop sync) makes OpenClipboard fail transiently — retry
+        // instead of silently dropping the user's copy.
+        let mut opened = 0;
+        while OpenClipboard(std::ptr::null_mut()) == 0 {
+            opened += 1;
+            if opened >= 3 {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
         let _ = EmptyClipboard();
         let handle = GlobalAlloc(GMEM_MOVEABLE, bytes);
