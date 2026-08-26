@@ -532,11 +532,13 @@ mod tests {
 
     #[test]
     fn window_rect_clamps_tiny_saved_size() {
-        let mut config = AppConfig::default();
-        config.window_x = Some(120.0);
-        config.window_y = Some(40.0);
-        config.window_w = Some(80.0);
-        config.window_h = Some(20.0);
+        let config = AppConfig {
+            window_x: Some(120.0),
+            window_y: Some(40.0),
+            window_w: Some(80.0),
+            window_h: Some(20.0),
+            ..Default::default()
+        };
         let (pos, size) = config.window_rect();
         assert_eq!(pos, [120.0, 40.0]);
         assert_eq!(size, MIN_WINDOW_SIZE);

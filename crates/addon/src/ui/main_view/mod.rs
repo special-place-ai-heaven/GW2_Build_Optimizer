@@ -236,7 +236,7 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
                 ui.tooltip_text(t("tip.stale_cache"));
             }
             ui.same_line();
-            if theme::gold_button(ui, &format!("{}##stale_data", t("btn.refresh"))) {
+            if theme::gold_button(ui, format!("{}##stale_data", t("btn.refresh"))) {
                 stats::start_game_data_refresh(state);
             }
         }
@@ -287,7 +287,7 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
     if let Some(ref err) = state.main.error {
         ui.text_colored(theme::ERR, format!("  [!] {}", err));
         ui.same_line();
-        if ui.small_button(&format!("{}##err", t("btn.dismiss"))) {
+        if ui.small_button(format!("{}##err", t("btn.dismiss"))) {
             state.main.error = None;
         }
     }

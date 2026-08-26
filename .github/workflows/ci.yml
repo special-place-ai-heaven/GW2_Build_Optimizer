@@ -1,66 +1,18 @@
-name: CI
-
+name: ci
 on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
-
-# The gw2_addon crate (crates/addon/) contains tests that share a global
-# static Mutex<Option<AddonState>>.  Running those tests in parallel DEADLOCKS
-# the test binary.  The two-step split below keeps addon tests single-threaded
-# while all other crates continue to benefit from parallel test execution.
-#
-# Tests skip when the diff does not touch crates/ or data/ (version bumps,
-# changelog, workflow-only) or when the commit/PR title contains [skip tests].
 
 jobs:
-  test:
-    name: Check and Test
+  verify:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          fetch-depth: 0
-
-      - name: Decide whether tests are needed
-        id: tests
-        env:
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.sha }}
-        shell: pwsh
-        run: |
-          $skipMsg = "$env:COMMIT_MSG $env:PR_TITLE" -match '\[skip tests\]|\[skip ci\]'
-          $code = $true
-          if ($env:BASE_SHA -and $env:BASE_SHA -ne '0000000000000000000000000000000000000000') {
-            $code = [bool](git diff --name-only $env:BASE_SHA $env:HEAD_SHA |
-              Where-Object { $_ -match '^(crates/|data/)' })
-          }
-          $run = (-not $skipMsg) -and $code
-          "run=$($run.ToString().ToLower())" | Out-File -Append $env:GITHUB_OUTPUT
-          Write-Host "skipMsg=$skipMsg code=$code run=$run"
-
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Check (type-check, no codegen)
-        run: cargo check --workspace
-
-      - name: Test addon crate (single-threaded — global static STATE mutex)
-        if: steps.tests.outputs.run == 'true'
-        run: cargo test --package gw2-build-optimizer -- --test-threads=1
-        # gw2-build-optimizer tests share STATE: Mutex<Option<AddonState>>.
-        # Parallel threads deadlock on the mutex; --test-threads=1 is required.
-
-      - name: Test all other crates
-        if: steps.tests.outputs.run == 'true'
-        run: cargo test --workspace --exclude gw2-build-optimizer
-        # Live API tests are gated with #[ignore] and require real API keys.
-        # They are NOT run here. To run them manually:
-        #   cargo test --workspace -- --include-ignored
-        # See: crates/gw2api/tests/live_download.rs
-        #      crates/optimizer/tests/live_llm.rs
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace

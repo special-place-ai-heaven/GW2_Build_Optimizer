@@ -315,7 +315,7 @@ fn detect_os_language() -> &'static str {
             fn GetUserDefaultUILanguage() -> u16;
         }
         let langid = unsafe { GetUserDefaultUILanguage() };
-        return match langid & 0x3ff {
+        match langid & 0x3ff {
             0x0c => "fr",
             0x07 => "de",
             0x0a => "es",
@@ -328,7 +328,7 @@ fn detect_os_language() -> &'static str {
             0x11 => "ja",
             0x12 => "ko",
             _ => "en",
-        };
+        }
     }
     #[cfg(not(windows))]
     {

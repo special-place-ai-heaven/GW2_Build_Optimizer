@@ -483,12 +483,17 @@ mod tests {
     #[test]
     fn chips_from_plate_includes_build_rune_skill() {
         let db = GameDb::empty_for_tests();
-        let mut plated = ValidatedBuild::default();
-        plated.rune = Some(gw2_optimizer::validation::ValidatedItem {
-            id: 24836,
-            name: "Superior Rune of the Scholar".into(),
-        });
-        plated.skills.heal = Some((123, "Shelter".into()));
+        let plated = ValidatedBuild {
+            rune: Some(gw2_optimizer::validation::ValidatedItem {
+                id: 24836,
+                name: "Superior Rune of the Scholar".into(),
+            }),
+            skills: gw2_optimizer::validation::ValidatedSkills {
+                heal: Some((123, "Shelter".into())),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let chips = chips_from_plate(&db, &plated, Some("[&DQkAAAAAAAA=]"));
         assert_eq!(chips[0].kind, LinkKind::Build);
         assert_eq!(chips[1].label, "Rune of the Scholar");

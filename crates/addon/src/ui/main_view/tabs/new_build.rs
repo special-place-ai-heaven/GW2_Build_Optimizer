@@ -48,7 +48,7 @@ pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonS
     if let Some(err) = state.main.comparison.error.clone() {
         ui.text_colored(theme::ERR, format!("[!] {}", err));
         ui.same_line();
-        if ui.small_button(&format!("{}##opt_err", t("btn.dismiss"))) {
+        if ui.small_button(format!("{}##opt_err", t("btn.dismiss"))) {
             state.main.comparison.error = None;
         }
         ui.spacing();
@@ -84,7 +84,7 @@ pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonS
 
         super::saveload::render_save_build_ui(ui, state);
         ui.same_line();
-        if ui.small_button(&t("btn.clear_results")) {
+        if ui.small_button(t("btn.clear_results")) {
             state.main.comparison.suggestions.clear();
             state.main.comparison.error = None;
         }

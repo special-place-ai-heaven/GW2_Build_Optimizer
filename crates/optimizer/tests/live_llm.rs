@@ -103,7 +103,7 @@ fn run_provider_tests(client: &dyn LlmClient) {
             println!(
                 "OK ({:.1}s) — got '{}' (len={})",
                 start.elapsed().as_secs_f64(),
-                &response.chars().take(80).collect::<String>(),
+                response.chars().take(80).collect::<String>(),
                 response.len()
             );
             assert!(
@@ -180,7 +180,7 @@ fn run_provider_tests(client: &dyn LlmClient) {
                 "  OK ({:.1}s, {} tool turns) — '{}'",
                 start.elapsed().as_secs_f64(),
                 turns_seen,
-                &response.chars().take(120).collect::<String>()
+                response.chars().take(120).collect::<String>()
             );
             assert!(
                 response.contains("49"),

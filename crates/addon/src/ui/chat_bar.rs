@@ -245,12 +245,12 @@ pub fn render_chat_bar(
                         let mut copied = state.copied_code.as_deref() == Some(key.as_str())
                             && state.copied_frames > 0;
                         ui.set_cursor_screen_pos([copy_x, copy_y]);
-                        if ui.invisible_button(&format!("##copy_msg{i}"), [COPY, COPY]) {
-                            if crate::clipboard::copy_text(&text) {
-                                state.copied_code = Some(key);
-                                state.copied_frames = 120;
-                                copied = true;
-                            }
+                        if ui.invisible_button(format!("##copy_msg{i}"), [COPY, COPY])
+                            && crate::clipboard::copy_text(&text)
+                        {
+                            state.copied_code = Some(key);
+                            state.copied_frames = 120;
+                            copied = true;
                         }
                         if ui.is_item_hovered() {
                             ui.tooltip_text(if copied {
@@ -579,8 +579,10 @@ mod tests {
 
     #[test]
     fn queue_user_message_while_waiting_still_queues() {
-        let mut state = ChatBarState::default();
-        state.waiting = true;
+        let mut state = ChatBarState {
+            waiting: true,
+            ..Default::default()
+        };
         assert_eq!(queue_user_message(&mut state, "hi").as_deref(), Some("hi"));
         assert_eq!(state.history.len(), 1);
         assert!(state.history[0].from_user);
@@ -613,8 +615,10 @@ mod tests {
 
     #[test]
     fn add_ai_response_caps_utf8_without_panic() {
-        let mut state = ChatBarState::default();
-        state.waiting = true;
+        let mut state = ChatBarState {
+            waiting: true,
+            ..Default::default()
+        };
         let long: String = "é".repeat(700);
         add_ai_response(&mut state, long);
         assert!(!state.waiting);
@@ -626,8 +630,10 @@ mod tests {
 
     #[test]
     fn add_plated_response_keeps_chips() {
-        let mut state = ChatBarState::default();
-        state.waiting = true;
+        let mut state = ChatBarState {
+            waiting: true,
+            ..Default::default()
+        };
         add_plated_response(
             &mut state,
             "Scholar rune.".into(),
