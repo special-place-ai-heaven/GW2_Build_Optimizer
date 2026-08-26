@@ -175,3 +175,75 @@ Candidate identity/dedup: the slot map serializes into the candidate key
 5. UI: gear sheet, locks panel, comparison (+ addon tests).
 6. Legacy cleanup: delete `gear_prefix`/`gear_groups`/`GearPrefixGroups`
    construction paths, keep legacy save deserialization.
+
+
+## 12. Adversarial review addendum (red-team findings, incorporated)
+
+Two adversarial reviews (model-completeness + search-design) ran against this
+spec. All accepted findings are folded into the design below; the full consumer
+inventory (≈50 sites across three crates, with line numbers) lives in the
+implementation plan.
+
+### 12.1 Weapon-slot semantics (BLOCKER fixes)
+
+- **Migration must not double-count the inactive weapon set.** Legacy `.weapons`
+  expands to **Set1 slots only** (Set1Main + Set1Off when main+off; Set1Main only
+  when two-handed). Set2 stays empty unless the save records a second set.
+- **Three weapon-budget models coexist in the engine today** (A:
+  `calculate_candidate_stats` — A1=TwoHand/A2=OneHand unconditional; B:
+  `apply_optimized_gear_stats` — A1+A2 always counted; C:
+  `apply_validated_gear_stats` — active-set aware). The rewrite adopts **C's
+  per-set, active-aware semantics** as the single model and aligns A and B to
+  it in the same stage, because mixed-prefix scoring across ranking vs referee
+  must be internally consistent.
+
+### 12.2 Search (rotation deleted)
+
+- The per-member neighbor cap (~80) applies to the **round-robin-interleaved**
+  operator output, and the beam runs ~2 generations on default config. A
+  rotation scheme keyed on generations would leave slots unexplored.
+  **Rotation is deleted**: the per-slot operator emits **all unlocked non-empty
+  slots × top-4 radar-prioritized prefixes** and relies on the existing
+  round-robin interleave + cap. Simpler, full coverage, identical eval cost.
+- `gear_identity()` (currently the armor/trinkets/weapons id triple) becomes
+  the serialized slot map. Note: per-slot identity is *finer* than today's
+  (ring swaps no longer collapse) — dedup will keep more distinct candidates;
+  the beam width/time budget absorbs it (verified arithmetic).
+- The legacy `engine::optimize` path has its own gear candidate builder
+  (`search.rs::search_gear_prefixes` + `build_mixed_candidate`, which already
+  assembles per-slot maps keyed by API slot strings). It migrates to the slot
+  vector in the same stage as the search operators.
+
+### 12.3 Choya gear policy (explicit decision)
+
+`parse_and_override_gear_prefix` today **deliberately discards** the LLM's gear
+choice ("Gemini is unreliable at following gear constraints"). Policy for
+per-slot plates:
+
+- Per-slot maps are **accepted with strict validation**: every slot name must
+  be a known `GearSlot`; every prefix name must resolve via
+  `db.itemstat_by_name` (exact else shortest-fuzzy with id tiebreak) or the
+  slot falls back to the weight-profile prefix with a recorded warning.
+- The optimizer still refines all **unlocked** slots after applying a plate —
+  Choya proposes, the referee disposes. This preserves the original intent of
+  the discard while allowing deliberate hybrid asks.
+
+### 12.4 Additional accepted findings
+
+- **PvP amulet seeding**: after migration the Amulet slot is populated from the
+  legacy trinket-group prefix; plate flows without a trinket map seed it from
+  the profile prefix. PvP display parity asserted in tests.
+- **`llm_advisor` SWAP grammar** (engine.rs ~2139-2260, mutates
+  `gear_prefix` via prompt text) ports to slot-level SWAP operations in the
+  same stage as the search operators.
+- **Feedback wire schema** (`report.rs` BuildSnapshot stat_prefix/gear_prefixes)
+  migrates alongside SavedBuild; allowlist updated.
+- **Locks ripple**: `BuildLocks.gear_locks` extends `describe_constraints`
+  (prompt text), snapshot tests, and the locks panel — covered in the UI layer.
+- **Name resolution**: uses `db.itemstat_by_name` / `validate_gear_prefix`'s
+  matcher — NOT the scraper's HTML contains-list (spec §7 corrected).
+- **Entry-point honor rules**: New-build (synergy) applies the plate slot map
+  then refines unlocked slots; Improve locks existing gear; Chat plates follow
+  §12.3. Optimize ignores gear (searches freely).
+- **Fixtures**: no real old-save fixtures exist in-repo (verified) — §10's
+  migration tests create them from production-shaped JSON first.
