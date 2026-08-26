@@ -2,6 +2,12 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.6.2 - 2026-08-26
+
+Choya's replies can no longer stall the frame loop. The v1.6.1 streaming fix made model answers arrive — and much richer ones, since reasoning models finally get to finish thinking — but the moment a reply landed, the background thread ran the whole serving pass (stat attachment, build-code encoding, rotation simulation, chip building) while holding the shared state mutex. ImGui draws only on the render thread, and the render callback shares that mutex, so a slow serving pass read to Windows as the entire game not responding. Every step of the serving pass now runs without the lock: the state mutex is taken once for a microsecond read (live game DB and game mode), released for the heavy work, and taken again only to append the finished reply and suggestion. A Clear pressed while a reply is still being prepared now correctly drops the result instead of resurrecting it.
+
+The Gemini, OpenAI, and Anthropic providers are unchanged in this release.
+
 ## 1.6.1 - 2026-08-26
 
 Choya stopped going silent. Every OpenRouter request — chat, Optimize, and Improve — now streams its answer instead of waiting minutes for a single buffered payload, reasoning models get a dedicated thinking budget that cannot starve the actual reply, and transient gateway failures retry with backoff instead of killing the turn. If a model appeared to "stop responding entirely" — the request eventually failing with *Request timed out. Try a larger/faster model.* — that was this bug, and it is fixed.
