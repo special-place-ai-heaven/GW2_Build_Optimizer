@@ -15,10 +15,11 @@ use crate::scoring::{self, OptimizationWeights};
 use crate::synergy_pipeline;
 use crate::text_util::normalize_sigil_family;
 use crate::validation::{
-    ValidatedBuild, ValidatedGearPrefix, ValidatedItem, ValidatedSpec, ValidatedWeaponSet,
+    ValidatedBuild, ValidatedItem, ValidatedSpec, ValidatedWeaponSet, ARMOR_SLOTS, TRINKET_SLOTS,
+    WEAPON_SET1_SLOTS,
 };
 use gw2_api::models::{Profession, Specialization};
-use gw2_core::types::BuildLocks;
+use gw2_core::types::{BuildLocks, GearSlot, GearSlots, PrefixRef};
 
 // ─── Core types ──────────────────────────────────────────────────────────────
 
@@ -297,30 +298,28 @@ fn swap_gear_prefix(
     itemstats
         .into_iter()
         .filter(|itemstat| {
-            candidate
-                .validated
-                .gear_prefix
-                .as_ref()
-                .is_none_or(|current| {
-                    current.itemstat_id != itemstat.id
-                        || candidate.validated.gear_groups.armor.as_ref() != Some(current)
-                        || candidate.validated.gear_groups.trinkets.as_ref() != Some(current)
-                        || candidate.validated.gear_groups.weapons.as_ref() != Some(current)
-                })
+            // The pre-slot model skipped builds whose build-wide prefix AND all
+            // three groups already carried this itemstat — i.e. a uniform map.
+            !is_uniform_at(&candidate.validated.gear_slots, itemstat.id)
         })
         .map(|is| {
             let mut b = candidate.validated.clone();
-            let prefix = ValidatedGearPrefix {
+            b.fill_gear_slots(PrefixRef {
                 itemstat_id: is.id,
                 name: is.name.clone(),
-            };
-            b.gear_prefix = Some(prefix.clone());
-            b.gear_groups.armor = Some(prefix.clone());
-            b.gear_groups.trinkets = Some(prefix.clone());
-            b.gear_groups.weapons = Some(prefix);
+            });
             b
         })
         .collect()
+}
+
+/// True when every slot is populated with exactly `id`.
+fn is_uniform_at(slots: &GearSlots, id: u32) -> bool {
+    slots.map.iter().all(|prefix| {
+        prefix
+            .as_ref()
+            .is_some_and(|prefix| prefix.itemstat_id == id)
+    })
 }
 
 /// Mutate armor, trinkets, and weapons independently. Three groups capture the
@@ -333,25 +332,27 @@ fn swap_gear_groups(
 ) -> Vec<ValidatedBuild> {
     let itemstats = prioritized_itemstats(db, weights);
     let mut out = Vec::with_capacity(itemstats.len() * 3);
+    // Slot groups standing in for the old armor / trinkets / weapons categories.
+    const GROUPS: [&[GearSlot]; 3] = [&ARMOR_SLOTS, &TRINKET_SLOTS, &WEAPON_SET1_SLOTS];
     for itemstat in itemstats {
-        let prefix = ValidatedGearPrefix {
+        let prefix = PrefixRef {
             itemstat_id: itemstat.id,
             name: itemstat.name.clone(),
         };
-        for group in 0..3 {
-            let current = match group {
-                0 => candidate.validated.gear_groups.armor.as_ref(),
-                1 => candidate.validated.gear_groups.trinkets.as_ref(),
-                _ => candidate.validated.gear_groups.weapons.as_ref(),
-            };
-            if current.is_some_and(|equipped| equipped.itemstat_id == prefix.itemstat_id) {
+        for slots in GROUPS {
+            // Category members always share one value (writers overwrite whole
+            // categories), so the first member represents the group.
+            if candidate
+                .validated
+                .gear_slots
+                .prefix_id(slots[0])
+                .is_some_and(|equipped| equipped == prefix.itemstat_id)
+            {
                 continue;
             }
             let mut build = candidate.validated.clone();
-            match group {
-                0 => build.gear_groups.armor = Some(prefix.clone()),
-                1 => build.gear_groups.trinkets = Some(prefix.clone()),
-                _ => build.gear_groups.weapons = Some(prefix.clone()),
+            for &slot in slots {
+                build.gear_slots.set(slot, prefix.clone());
             }
             out.push(build);
         }
@@ -1423,7 +1424,7 @@ mod tests {
         // The first round now includes whole-build gear, grouped gear, and rune
         // mutations. The rune must still be reachable inside a small cap.
         assert!(
-            neighbors[0].gear_prefix.is_some(),
+            neighbors[0].primary_prefix().is_some(),
             "first neighbor should be a gear-prefix mutation"
         );
         assert!(
@@ -1468,16 +1469,14 @@ mod tests {
 
         assert_eq!(
             neighbors[0]
-                .gear_prefix
-                .as_ref()
+                .primary_prefix()
                 .map(|prefix| prefix.name.as_str()),
             Some("Plaguedoctor's")
         );
         assert!(neighbors.iter().take(12).any(|build| {
             build
-                .gear_groups
-                .armor
-                .as_ref()
+                .gear_slots
+                .get(GearSlot::Helm)
                 .is_some_and(|prefix| prefix.name == "Plaguedoctor's")
         }));
     }

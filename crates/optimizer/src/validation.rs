@@ -8,8 +8,34 @@ use std::collections::HashMap;
 
 use gw2_api::models::{Item, Skill, Specialization, Trait as GW2Trait};
 
+use gw2_core::types::{GearSlot, GearSlots, PrefixRef};
+
 use crate::gamedb::GameDb;
 use crate::prompts::GeminiBuildResponse;
+
+/// Slots fed by the old armor group (all six armor pieces).
+pub const ARMOR_SLOTS: [GearSlot; 6] = [
+    GearSlot::Helm,
+    GearSlot::Shoulders,
+    GearSlot::Coat,
+    GearSlot::Gloves,
+    GearSlot::Leggings,
+    GearSlot::Boots,
+];
+
+/// Slots fed by the old trinket group (back + accessories + amulet + rings).
+pub const TRINKET_SLOTS: [GearSlot; 6] = [
+    GearSlot::Back,
+    GearSlot::Accessory1,
+    GearSlot::Accessory2,
+    GearSlot::Amulet,
+    GearSlot::Ring1,
+    GearSlot::Ring2,
+];
+
+/// Weapon-set-1 slots whose budgets are consumed by stat application.
+/// Set 2 never draws slot budgets today (inactive-set invariant).
+pub const WEAPON_SET1_SLOTS: [GearSlot; 2] = [GearSlot::WeaponSet1Main, GearSlot::WeaponSet1Off];
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -32,10 +58,11 @@ pub struct ValidatedBuild {
     pub rune: Option<ValidatedItem>,
     pub sigils: Vec<ValidatedItem>,
     pub relic: Option<ValidatedItem>,
-    pub gear_prefix: Option<ValidatedGearPrefix>,
-    /// Optional mixed-stat allocation. A missing group inherits
-    /// `gear_prefix`; this keeps old single-prefix builds compatible.
-    pub gear_groups: ValidatedGearGroups,
+    /// Per-slot gear prefixes. Population policy (Task 2): every constructor
+    /// that used to write the build-wide `gear_prefix` now fills all sixteen
+    /// slots; category overrides (the old `gear_groups`) overwrite their own
+    /// members. There is no runtime inheritance any more.
+    pub gear_slots: GearSlots,
     pub explanation: String,
     pub synergy_explanation: String,
     pub changes: Vec<ChangeEntry>,
@@ -83,45 +110,52 @@ pub struct ValidatedItem {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ValidatedGearPrefix {
-    pub itemstat_id: u32,
-    pub name: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct ValidatedGearGroups {
-    pub armor: Option<ValidatedGearPrefix>,
-    pub trinkets: Option<ValidatedGearPrefix>,
-    pub weapons: Option<ValidatedGearPrefix>,
-}
-
 impl ValidatedBuild {
-    /// Prefix each group actually spends after inheriting `gear_prefix`.
-    pub fn effective_prefix_ids(&self) -> (Option<u32>, Option<u32>, Option<u32>) {
-        let inherit = self.gear_prefix.as_ref().map(|prefix| prefix.itemstat_id);
-        (
-            self.gear_groups
-                .armor
-                .as_ref()
-                .map(|prefix| prefix.itemstat_id)
-                .or(inherit),
-            self.gear_groups
-                .trinkets
-                .as_ref()
-                .map(|prefix| prefix.itemstat_id)
-                .or(inherit),
-            self.gear_groups
-                .weapons
-                .as_ref()
-                .map(|prefix| prefix.itemstat_id)
-                .or(inherit),
-        )
+    /// The prefix a specific slot actually spends.
+    pub fn prefix_for(&self, slot: GearSlot) -> Option<&PrefixRef> {
+        self.gear_slots.get(slot)
     }
 
-    /// Search identity is the spent prefix set. Empty groups inherit `gear_prefix`.
-    pub fn gear_identity(&self) -> (Option<u32>, Option<u32>, Option<u32>) {
-        self.effective_prefix_ids()
+    /// First populated slot in canonical order — the closest analogue of the
+    /// retired build-wide prefix for prompt text, PvP-amulet matching, and
+    /// single-prefix display reads.
+    pub fn primary_prefix(&self) -> Option<&PrefixRef> {
+        self.gear_slots.map.iter().flatten().next()
+    }
+
+    /// Fill every slot with one prefix. Per-slot encoding of the old
+    /// build-wide assignment (`validated.gear_prefix = Some(p)`).
+    pub fn fill_gear_slots(&mut self, prefix: PrefixRef) {
+        for slot in GearSlot::ALL {
+            self.gear_slots.set(slot, prefix.clone());
+        }
+    }
+
+    /// Resolve migration-produced zero itemstat ids (`GearSlots::from_legacy`
+    /// stamps 0) against the game data using the shared deterministic
+    /// lookup: exact name match wins (lower id tiebreak), else shortest fuzzy
+    /// match. Unresolvable names keep their zero id rather than inventing one.
+    // TODO(per-slot): from_legacy leaves WeaponSet1Off unpopulated for two-handed
+    // Set1 weapons; pre-slot builds spent an off-hand budget there via the
+    // build-wide fallback. No caller builds a ValidatedBuild from SavedBuild yet;
+    // Task 3 must settle the backfill when weapon presence is known.
+    pub fn resolve_slot_prefix_ids(&mut self, db: &GameDb) {
+        for prefix in self.gear_slots.map.iter_mut().flatten() {
+            if prefix.itemstat_id != 0 || prefix.name.is_empty() {
+                continue;
+            }
+            if let Some(itemstat) = db.itemstat_by_name(&prefix.name) {
+                prefix.itemstat_id = itemstat.id;
+                prefix.name = itemstat.name.clone();
+            }
+        }
+    }
+
+    /// Search identity is the serialized populated slot map. `GearSlots`
+    /// serializes as a sparse map keyed by canonical kebab slot names, so
+    /// equal maps always serialize to equal strings and empty ones to `{}`.
+    pub fn gear_identity(&self) -> String {
+        serde_json::to_string(&self.gear_slots).unwrap_or_else(|_| "{}".into())
     }
 }
 
@@ -811,59 +845,35 @@ fn validate_gear_prefix(response: &GeminiBuildResponse, db: &GameDb, result: &mu
         return;
     }
 
-    // Case-insensitive search in itemstats. HashMap::values() iteration order is
-    // unspecified, so we collect all candidates and pick deterministically:
-    //   1. Exact case-insensitive name match (id tiebreak if multiple).
-    //   2. Substring match — prefer the *shortest* name, then lowest id. This
-    //      makes "Berserker" pick "Berserker's" over "Marauder's Berserker..."
-    //      and survives HashMap reorders across runs.
-    let needle = response.stat_prefix.to_lowercase();
-
-    let mut exact: Vec<(u32, &str)> = Vec::new();
-    let mut fuzzy: Vec<(usize, u32, &str)> = Vec::new();
-    for is in db.itemstats.values() {
-        let lower = is.name.to_lowercase();
-        if lower == needle {
-            exact.push((is.id, is.name.as_str()));
-        } else if lower.contains(&needle) {
-            fuzzy.push((is.name.len(), is.id, is.name.as_str()));
-        }
-    }
-
-    let picked = if !exact.is_empty() {
-        exact.sort_by_key(|(id, _)| *id);
-        let (id, name) = exact[0];
-        Some((id, name.to_string(), true))
-    } else if !fuzzy.is_empty() {
-        fuzzy.sort_by_key(|(len, id, _)| (*len, *id));
-        let (_, id, name) = fuzzy[0];
-        Some((id, name.to_string(), false))
-    } else {
-        None
+    // Shared deterministic policy: exact case-insensitive match wins (lower id
+    // tiebreak), else shortest substring match (lower id tiebreak). "Berserker"
+    // picks "Berserker's" over "Marauder's Berserker Combo" and survives
+    // HashMap reorders across runs. The exact-vs-fuzzy classification below
+    // only decides whether to warn, mirroring the pre-slot validator.
+    let Some(itemstat) = db.itemstat_by_name(&response.stat_prefix) else {
+        result.errors.push(ValidationReject {
+            code: RejectCode::GearPrefixNotFound {
+                name: response.stat_prefix.clone(),
+            },
+            detail: format!("Gear prefix '{}' not found", response.stat_prefix),
+        });
+        return;
     };
 
-    match picked {
-        Some((id, name, is_exact)) => {
-            if !is_exact {
-                result.warnings.push(format!(
-                    "Gear prefix '{}' fuzzy-matched to '{}'",
-                    response.stat_prefix, name
-                ));
-            }
-            result.gear_prefix = Some(ValidatedGearPrefix {
-                itemstat_id: id,
-                name,
-            });
-        }
-        None => {
-            result.errors.push(ValidationReject {
-                code: RejectCode::GearPrefixNotFound {
-                    name: response.stat_prefix.clone(),
-                },
-                detail: format!("Gear prefix '{}' not found", response.stat_prefix),
-            });
-        }
+    let needle_lower = response.stat_prefix.to_lowercase();
+    let needle_key = gw2_core::i18n::alnum_key(&response.stat_prefix);
+    let is_exact = itemstat.name.to_lowercase() == needle_lower
+        || (!needle_key.is_empty() && gw2_core::i18n::alnum_key(&itemstat.name) == needle_key);
+    if !is_exact {
+        result.warnings.push(format!(
+            "Gear prefix '{}' fuzzy-matched to '{}'",
+            response.stat_prefix, itemstat.name
+        ));
     }
+    result.fill_gear_slots(PrefixRef {
+        itemstat_id: itemstat.id,
+        name: itemstat.name.clone(),
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1540,7 +1550,7 @@ mod tests {
             (101, "Berserker's"),
         ]);
         let result = run_validate_gear_prefix("Berserker's", &db);
-        let p = result.gear_prefix.expect("should match");
+        let p = result.primary_prefix().expect("should match");
         assert_eq!(p.itemstat_id, 101);
         assert_eq!(p.name, "Berserker's");
         assert!(
@@ -1561,7 +1571,7 @@ mod tests {
         ]);
         for _ in 0..10 {
             let result = run_validate_gear_prefix("Viper", &db);
-            let p = result.gear_prefix.expect("should fuzzy match");
+            let p = result.primary_prefix().expect("should fuzzy match");
             assert_eq!(p.itemstat_id, 201, "shortest name must always win");
             assert_eq!(p.name, "Viper's");
         }
@@ -1574,7 +1584,7 @@ mod tests {
         // Two equal-length names both contain needle. Lower id wins deterministically.
         let db = empty_db_with_itemstats(vec![(350, "Zerk Sample A"), (300, "Zerk Sample B")]);
         let result = run_validate_gear_prefix("Sample", &db);
-        let p = result.gear_prefix.expect("should match");
+        let p = result.primary_prefix().expect("should match");
         assert_eq!(p.itemstat_id, 300, "lower id must win equal-length tie");
     }
 
@@ -1582,12 +1592,60 @@ mod tests {
     fn test_validate_gear_prefix_not_found_emits_error() {
         let db = empty_db_with_itemstats(vec![(400, "Berserker's")]);
         let result = run_validate_gear_prefix("Nonexistent", &db);
-        assert!(result.gear_prefix.is_none());
+        assert!(result.primary_prefix().is_none());
         assert_eq!(result.errors.len(), 1);
         assert!(matches!(
             result.errors[0].code,
             RejectCode::GearPrefixNotFound { .. }
         ));
+    }
+
+    #[test]
+    fn test_validate_gear_prefix_populates_every_slot() {
+        let db = empty_db_with_itemstats(vec![(101, "Berserker's")]);
+        let result = run_validate_gear_prefix("Berserker's", &db);
+        for slot in GearSlot::ALL {
+            let p = result
+                .prefix_for(slot)
+                .unwrap_or_else(|| panic!("slot {:?} must be populated", slot));
+            assert_eq!(p.itemstat_id, 101);
+            assert_eq!(p.name, "Berserker's");
+        }
+    }
+
+    #[test]
+    fn test_resolve_slot_prefix_ids_replaces_migration_zeros() {
+        let db = empty_db_with_itemstats(vec![(201, "Viper's")]);
+        let groups = gw2_core::types::GearPrefixGroups {
+            armor: "Vipers".into(),
+            trinkets: String::new(),
+            weapons: "Unresolvable".into(),
+        };
+        // from_legacy stamps itemstat_id = 0 — the shape a legacy save loads with.
+        let mut build = ValidatedBuild::default();
+        build.gear_slots = GearSlots::from_legacy("Viper's", &groups);
+        assert_eq!(build.prefix_for(GearSlot::Helm).unwrap().itemstat_id, 0);
+
+        build.resolve_slot_prefix_ids(&db);
+
+        assert_eq!(
+            build.prefix_for(GearSlot::Coat).unwrap().itemstat_id,
+            201,
+            "exact alnum match resolves the zero id"
+        );
+        assert_eq!(
+            build.prefix_for(GearSlot::Amulet).unwrap().name,
+            "Viper's",
+            "blank group inherits the build-wide name and resolves too"
+        );
+        assert_eq!(
+            build.prefix_for(GearSlot::WeaponSet1Main).unwrap(),
+            &gw2_core::types::PrefixRef {
+                itemstat_id: 0,
+                name: "Unresolvable".into()
+            },
+            "unknown names keep the zero id instead of inventing one"
+        );
     }
 
     // ── find_skill_by_name() needle-length guard ─────────────────────────────
@@ -1883,7 +1941,7 @@ mod tests {
     fn test_validate_gear_prefix_empty_input_is_noop() {
         let db = empty_db_with_itemstats(vec![(500, "Berserker's")]);
         let result = run_validate_gear_prefix("", &db);
-        assert!(result.gear_prefix.is_none());
+        assert!(result.primary_prefix().is_none());
         assert!(result.errors.is_empty());
         assert!(result.warnings.is_empty());
     }

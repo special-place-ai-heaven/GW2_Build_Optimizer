@@ -31,12 +31,12 @@ use crate::text_util::{
     text_describes_stability,
 };
 use crate::validation::{
-    ValidatedBuild, ValidatedGearPrefix, ValidatedItem, ValidatedSkills, ValidatedSpec,
-    ValidatedWeaponSet, ValidatedWeapons,
+    ValidatedBuild, ValidatedItem, ValidatedSkills, ValidatedSpec, ValidatedWeaponSet,
+    ValidatedWeapons,
 };
 use gw2_api::models::facts::Fact;
 use gw2_api::models::{Profession, Skill, Specialization, Trait as GW2Trait};
-use gw2_core::types::GameMode;
+use gw2_core::types::{GameMode, PrefixRef};
 
 /// Internal candidate from the synergy pipeline.
 #[derive(Debug, Clone)]
@@ -1314,9 +1314,10 @@ fn build_synergy_result(
 
     // Gear prefix. `gear_prefix_name` is the cosine-selected canonical name
     // (e.g. "Berserker's"). Use the shared deterministic lookup so the same
-    // input always resolves to the same itemstat across runs.
+    // input always resolves to the same itemstat across runs. Every slot gets
+    // the prefix — the synergy path has no group overrides.
     if let Some(is) = db.itemstat_by_name(gear_prefix_name) {
-        validated.gear_prefix = Some(ValidatedGearPrefix {
+        validated.fill_gear_slots(PrefixRef {
             itemstat_id: is.id,
             name: is.name.clone(),
         });
@@ -1414,7 +1415,7 @@ fn build_synergy_result(
         done: false,
     });
 
-    let gear_prefix_id = validated.gear_prefix.as_ref().map(|p| p.itemstat_id);
+    let gear_prefix_id = validated.primary_prefix().map(|p| p.itemstat_id);
     let full_stats = compute_candidate_stats(&candidate, db, gear_prefix_id, ctx);
     let derived = stats::compute_derived(&full_stats, profession_name);
 
@@ -2242,8 +2243,7 @@ mod runtime_diagnostics_tests {
                 "validated gear prefix resolved in result: {:?}",
                 result
                     .validated
-                    .gear_prefix
-                    .as_ref()
+                    .primary_prefix()
                     .map(|p| (p.itemstat_id, p.name.clone()))
             );
 
@@ -2264,7 +2264,7 @@ mod runtime_diagnostics_tests {
             let selected_stats = compute_candidate_stats(
                 &selected,
                 &db,
-                result.validated.gear_prefix.as_ref().map(|p| p.itemstat_id),
+                result.validated.primary_prefix().map(|p| p.itemstat_id),
                 &ctx,
             );
             let selected_derived = crate::stats::compute_derived(&selected_stats, "Warrior");

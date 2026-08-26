@@ -19,9 +19,10 @@ use crate::scenario::{CombatKind, CombatTier, OptimizationTarget, ScenarioSpec, 
 use crate::scoring::{score_with_weights, OptimizationWeights};
 use crate::stats;
 use crate::validation::{
-    ValidatedBuild, ValidatedGearGroups, ValidatedGearPrefix, ValidatedItem, ValidatedSpec,
-    ValidatedWeaponSet, ValidatedWeapons,
+    ValidatedBuild, ValidatedItem, ValidatedSpec, ValidatedWeaponSet, ValidatedWeapons,
+    ARMOR_SLOTS, TRINKET_SLOTS, WEAPON_SET1_SLOTS,
 };
+use gw2_core::types::{GearSlot, PrefixRef};
 
 const STRONG_ID: u32 = 142;
 const RITUALIST_ID: u32 = 1549;
@@ -31,8 +32,16 @@ const LINGERING_MAGIC: u32 = 1059;
 const NATURAL_FORTITUDE: u32 = 2286;
 const PRECISE_STRIKE: u32 = 1011;
 
-fn prefix(id: u32, name: &str) -> ValidatedGearPrefix {
-    ValidatedGearPrefix {
+/// Uniform-apply group overrides on top of the build-wide slot fill.
+#[derive(Default)]
+struct Groups {
+    armor: Option<PrefixRef>,
+    trinkets: Option<PrefixRef>,
+    weapons: Option<PrefixRef>,
+}
+
+fn prefix(id: u32, name: &str) -> PrefixRef {
+    PrefixRef {
         itemstat_id: id,
         name: name.into(),
     }
@@ -215,10 +224,8 @@ fn sheet_db() -> GameDb {
     db
 }
 
-fn ranger_grouped(groups: ValidatedGearGroups, set1: ValidatedWeaponSet) -> ValidatedBuild {
-    ValidatedBuild {
-        gear_prefix: Some(prefix(STRONG_ID, "Strong")),
-        gear_groups: groups,
+fn ranger_grouped(groups: Groups, set1: ValidatedWeaponSet) -> ValidatedBuild {
+    let mut build = ValidatedBuild {
         rune: Some(ValidatedItem {
             id: INFILTRATION_RUNE,
             name: "Superior Rune of Infiltration".into(),
@@ -254,11 +261,30 @@ fn ranger_grouped(groups: ValidatedGearGroups, set1: ValidatedWeaponSet) -> Vali
             ],
         }],
         ..ValidatedBuild::default()
+    };
+    // Build-wide prefix first, then category overrides — the same expansion
+    // the pre-slot `group.or(build-wide)` chain performed at read time.
+    build.fill_gear_slots(prefix(STRONG_ID, "Strong"));
+    if let Some(p) = &groups.armor {
+        for &slot in &ARMOR_SLOTS {
+            build.gear_slots.set(slot, p.clone());
+        }
     }
+    if let Some(p) = &groups.trinkets {
+        for &slot in &TRINKET_SLOTS {
+            build.gear_slots.set(slot, p.clone());
+        }
+    }
+    if let Some(p) = &groups.weapons {
+        for &slot in &WEAPON_SET1_SLOTS {
+            build.gear_slots.set(slot, p.clone());
+        }
+    }
+    build
 }
 
-fn all_strong_groups() -> ValidatedGearGroups {
-    ValidatedGearGroups {
+fn all_strong_groups() -> Groups {
+    Groups {
         armor: Some(prefix(STRONG_ID, "Strong")),
         trinkets: Some(prefix(STRONG_ID, "Strong")),
         weapons: Some(prefix(STRONG_ID, "Strong")),
@@ -273,28 +299,23 @@ fn axe_axe() -> ValidatedWeaponSet {
 }
 
 fn display_groups(build: &ValidatedBuild) -> GearPrefixGroups {
+    // Category representatives on the slot map: helm for armor, amulet for
+    // trinkets, set-1 main hand for weapons.
     let fallback = build
-        .gear_prefix
-        .as_ref()
+        .primary_prefix()
         .map(|prefix| prefix.name.clone())
         .unwrap_or_else(|| "Unknown".into());
     GearPrefixGroups {
         armor: build
-            .gear_groups
-            .armor
-            .as_ref()
+            .prefix_for(GearSlot::Helm)
             .map(|prefix| prefix.name.clone())
             .unwrap_or_else(|| fallback.clone()),
         trinkets: build
-            .gear_groups
-            .trinkets
-            .as_ref()
+            .prefix_for(GearSlot::Amulet)
             .map(|prefix| prefix.name.clone())
             .unwrap_or_else(|| fallback.clone()),
         weapons: build
-            .gear_groups
-            .weapons
-            .as_ref()
+            .prefix_for(GearSlot::WeaponSet1Main)
             .map(|prefix| prefix.name.clone())
             .unwrap_or_else(|| fallback.clone()),
     }
@@ -420,7 +441,7 @@ fn inactive_weapon_set_does_not_inflate_grouped_sheet() {
 fn mixed_groups_spend_each_prefix_not_the_fallback() {
     let db = sheet_db();
     let mixed = ranger_grouped(
-        ValidatedGearGroups {
+        Groups {
             armor: Some(prefix(STRONG_ID, "Strong")),
             trinkets: Some(prefix(RITUALIST_ID, "Ritualist's")),
             weapons: Some(prefix(STRONG_ID, "Strong")),
@@ -443,16 +464,12 @@ fn mixed_groups_spend_each_prefix_not_the_fallback() {
 fn inherit_fallback_matches_explicit_group_and_search_identity() {
     let explicit = ranger_grouped(all_strong_groups(), axe_axe());
     let inherited = ranger_grouped(
-        ValidatedGearGroups {
+        Groups {
             armor: None,
             trinkets: Some(prefix(STRONG_ID, "Strong")),
             weapons: Some(prefix(STRONG_ID, "Strong")),
         },
         axe_axe(),
-    );
-    assert_eq!(
-        explicit.effective_prefix_ids(),
-        inherited.effective_prefix_ids()
     );
     assert_eq!(explicit.gear_identity(), inherited.gear_identity());
     assert_eq!(display_groups(&inherited).armor, "Strong");
@@ -463,7 +480,7 @@ fn inherit_fallback_matches_explicit_group_and_search_identity() {
     assert_eq!(a.power, b.power);
     assert_eq!(a.precision, b.precision);
 
-    let empty_groups = ranger_grouped(ValidatedGearGroups::default(), axe_axe());
+    let empty_groups = ranger_grouped(Groups::default(), axe_axe());
     assert_eq!(empty_groups.gear_identity(), explicit.gear_identity());
     let (empty_stats, _) =
         calculate_validated_stats(&empty_groups, &db, "Ranger", &BalanceContext::wvw());

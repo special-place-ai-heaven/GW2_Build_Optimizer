@@ -468,7 +468,7 @@ fn run_canonical_build_smoke(client: &dyn LlmClient, db: &GameDb) {
         "  [{}] OK — {} specs, stat_prefix={:?}, warnings={}",
         provider,
         validated.specializations.len(),
-        validated.gear_prefix.as_ref().map(|g| g.name.as_str()),
+        validated.primary_prefix().map(|g| g.name.as_str()),
         validated.warnings.len()
     );
 }
