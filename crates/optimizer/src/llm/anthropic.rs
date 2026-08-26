@@ -43,6 +43,10 @@ struct MessagesRequest {
     system: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<AnthropicTool>>,
+    /// Always streamed: reasoning models can think for minutes, and a
+    /// buffered response holds an idle connection the whole time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -84,17 +88,170 @@ struct AnthropicTool {
     input_schema: Value,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct MessagesResponse {
     content: Option<Vec<ContentBlock>>,
     #[allow(dead_code)]
     stop_reason: Option<String>,
 }
 
+// ─── SSE Streaming ───
+
+/// One Anthropic SSE `data:` payload. The `type` field selects the event;
+/// only the fields relevant per event are deserialized.
+#[derive(Deserialize)]
+struct StreamEvent {
+    #[serde(default)]
+    r#type: String,
+    #[serde(default)]
+    index: usize,
+    #[serde(default)]
+    delta: Option<StreamDelta>,
+    #[serde(default)]
+    content_block: Option<ContentBlock>,
+    /// Mid-stream failure: `{"type":"error","error":{"type":…,"message":…}}`.
+    #[serde(default)]
+    error: Option<Value>,
+}
+
+#[derive(Deserialize)]
+struct StreamDelta {
+    #[serde(default)]
+    r#type: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    partial_json: Option<String>,
+    #[serde(default)]
+    stop_reason: Option<String>,
+}
+
+/// A content block under assembly from ordered deltas.
+enum StreamBlock {
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input_json: String,
+    },
+}
+
+/// Reads an Anthropic Messages SSE body into a `MessagesResponse`.
+///
+/// Event sequence (Anthropic Messages streaming): `message_start`,
+/// `content_block_start`, `content_block_delta` (`text_delta` /
+/// `input_json_delta`), `content_block_stop`, `message_delta` (carries
+/// `stop_reason`), `message_stop`. An `error` event is the mid-stream
+/// failure channel — the HTTP status is already 200 by then.
+fn read_anthropic_stream<R: std::io::Read>(reader: R) -> Result<MessagesResponse, LlmError> {
+    use std::io::BufRead;
+
+    let mut blocks: Vec<Option<StreamBlock>> = Vec::new();
+    let mut stop_reason: Option<String> = None;
+
+    for line in std::io::BufReader::new(reader).lines() {
+        let line = line.map_err(|e| LlmError::Http(e.to_string()))?;
+        let line = line.trim();
+        if !line.starts_with("data: ") {
+            // `event:` name lines and blanks carry no payload of their own.
+            continue;
+        }
+        let data = &line["data: ".len()..];
+        let event: StreamEvent = match serde_json::from_str(data) {
+            Ok(event) => event,
+            Err(_) => continue,
+        };
+        match event.r#type.as_str() {
+            "content_block_start" => {
+                while blocks.len() <= event.index {
+                    blocks.push(None);
+                }
+                blocks[event.index] = match event.content_block {
+                    Some(ContentBlock::Text { .. }) => Some(StreamBlock::Text {
+                        text: String::new(),
+                    }),
+                    Some(ContentBlock::ToolUse { id, name, .. }) => Some(StreamBlock::ToolUse {
+                        id,
+                        name,
+                        input_json: String::new(),
+                    }),
+                    _ => None,
+                };
+            }
+            "content_block_delta" => {
+                let Some(Some(block)) = blocks.get_mut(event.index) else {
+                    continue;
+                };
+                if let Some(delta) = event.delta {
+                    match (delta.r#type.as_str(), block) {
+                        ("text_delta", StreamBlock::Text { text }) => {
+                            text.push_str(delta.text.as_deref().unwrap_or_default());
+                        }
+                        ("input_json_delta", StreamBlock::ToolUse { input_json, .. }) => {
+                            input_json.push_str(delta.partial_json.as_deref().unwrap_or_default());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "message_delta" => {
+                if let Some(delta) = event.delta {
+                    if delta.stop_reason.is_some() {
+                        stop_reason = delta.stop_reason;
+                    }
+                }
+            }
+            "error" => {
+                let err = event.error.unwrap_or(Value::Null);
+                let message = err
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Anthropic stream error")
+                    .to_string();
+                let overloaded = err
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|t| t.contains("overloaded"));
+                return Err(LlmError::Api {
+                    status: if overloaded { 529 } else { 502 },
+                    message,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    let content = blocks
+        .into_iter()
+        .flatten()
+        .map(|block| match block {
+            StreamBlock::Text { text } => ContentBlock::Text { text },
+            StreamBlock::ToolUse {
+                id,
+                name,
+                input_json,
+            } => ContentBlock::ToolUse {
+                id,
+                name,
+                input: serde_json::from_str(&input_json).unwrap_or_else(|_| serde_json::json!({})),
+            },
+        })
+        .collect::<Vec<_>>();
+    let content = (!content.is_empty()).then_some(content);
+
+    Ok(MessagesResponse {
+        content,
+        stop_reason,
+    })
+}
+
 impl AnthropicClient {
     pub fn new(api_key: &str, model: &str) -> Result<Self, LlmError> {
         let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(180))
+            .timeout(std::time::Duration::from_secs(900))
+            .connect_timeout(std::time::Duration::from_secs(15))
             .build()
             .map_err(|e| LlmError::Http(e.to_string()))?;
         Ok(Self {
@@ -113,7 +270,8 @@ impl AnthropicClient {
         usage_path: PathBuf,
     ) -> Result<Self, LlmError> {
         let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(180))
+            .timeout(std::time::Duration::from_secs(900))
+            .connect_timeout(std::time::Duration::from_secs(15))
             .build()
             .map_err(|e| LlmError::Http(e.to_string()))?;
 
@@ -169,15 +327,17 @@ impl AnthropicClient {
             messages: messages.to_vec(),
             system: system.map(|s| s.to_string()),
             tools: anthropic_tools,
+            stream: Some(true),
         };
 
         let url = format!("{}/messages", ANTHROPIC_API_BASE);
         let mut last_error: Option<LlmError> = None;
+        let mut next_delay = std::time::Duration::from_secs(5);
 
         for attempt in 0..MAX_RETRIES {
             if attempt > 0 {
-                let delay = std::time::Duration::from_secs(5 * (1 << (attempt - 1)));
-                std::thread::sleep(delay);
+                std::thread::sleep(next_delay);
+                next_delay *= 2;
             }
 
             let resp = match self
@@ -206,16 +366,7 @@ impl AnthropicClient {
             let status = resp.status().as_u16();
             match status {
                 200 => {
-                    let body: MessagesResponse = match resp.json() {
-                        Ok(b) => b,
-                        Err(e) => {
-                            self.rate
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .undo_reserve();
-                            return Err(LlmError::Http(e.to_string()));
-                        }
-                    };
+                    let body = read_anthropic_stream(resp)?;
 
                     // Persist usage
                     {
@@ -239,8 +390,17 @@ impl AnthropicClient {
                         .undo_reserve();
                     return Err(LlmError::RateLimited);
                 }
-                500 | 502 | 503 | 529 => {
-                    // 529 = Anthropic overloaded
+                // Retryable: server failures + 529 (Anthropic overloaded) +
+                // 408/504 (gateway "upstream didn't respond in time").
+                408 | 500 | 502 | 503 | 504 | 529 => {
+                    if let Some(secs) = resp
+                        .headers()
+                        .get("Retry-After")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok())
+                    {
+                        next_delay = std::time::Duration::from_secs(secs.min(60));
+                    }
                     let body = resp.text().unwrap_or_default();
                     last_error = Some(LlmError::Api {
                         status,
@@ -383,6 +543,7 @@ impl LlmClient for AnthropicClient {
             messages,
             system: None,
             tools: None,
+            stream: Some(true),
         };
 
         let url = format!("{}/messages", ANTHROPIC_API_BASE);
@@ -440,6 +601,7 @@ impl LlmClient for AnthropicClient {
             messages,
             system: None,
             tools: None,
+            stream: Some(true),
         };
 
         let url = format!("{}/messages", ANTHROPIC_API_BASE);
@@ -943,5 +1105,65 @@ mod tests {
         let wire = serde_json::to_value(&result_block).unwrap();
         assert_eq!(wire["type"], "tool_result");
         assert_eq!(wire["tool_use_id"], "toolu_01A8bL9Qrx");
+    }
+
+    #[test]
+    fn test_read_anthropic_stream_assembles_text_blocks() {
+        let sse = r#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_1"}}
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}
+event: message_stop
+data: {"type":"message_stop"}
+"#;
+        let body = read_anthropic_stream(sse.as_bytes()).expect("stream parses");
+        match body.content.as_deref() {
+            Some([ContentBlock::Text { text }]) => assert_eq!(text, "Hello"),
+            other => panic!("expected one text block, got {other:?}"),
+        }
+        assert_eq!(body.stop_reason.as_deref(), Some("end_turn"));
+    }
+
+    #[test]
+    fn test_read_anthropic_stream_assembles_tool_use_json() {
+        let sse = r#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"pick","input":{}}}
+event: content_block_delta
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"slot\":"}}
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"heal\"}"}}
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}
+"#;
+        let body = read_anthropic_stream(sse.as_bytes()).expect("stream parses");
+        match body.content.as_deref() {
+            Some([ContentBlock::ToolUse { id, name, input }]) => {
+                assert_eq!(id, "toolu_1");
+                assert_eq!(name, "pick");
+                assert_eq!(input["slot"], "heal");
+            }
+            other => panic!("expected one tool_use block, got {other:?}"),
+        }
+        assert_eq!(body.stop_reason.as_deref(), Some("tool_use"));
+    }
+
+    #[test]
+    fn test_read_anthropic_stream_error_event_maps_to_api_error() {
+        let sse = r#"event: error
+data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}
+"#;
+        match read_anthropic_stream(sse.as_bytes()) {
+            Err(LlmError::Api { status, message }) => {
+                assert_eq!(status, 529);
+                assert!(message.contains("Overloaded"));
+            }
+            _other => panic!("expected Api error"),
+        }
     }
 }
