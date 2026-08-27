@@ -3,9 +3,12 @@ use super::optimization::{
     simulate_suggestion_rotation, summarize_resolved_build, synergy_result_to_suggestion,
 };
 use crate::state::AddonState;
+use crate::ui::gear_sheet::piece_gear_slot;
 use gw2_core::i18n::{t, tf};
+use gw2_core::types::GearSlot;
 use gw2_optimizer::balance::BalanceContext;
 use gw2_optimizer::scoring::OptimizationWeights;
+use gw2_optimizer::ScenarioSpec;
 
 /// Start optimization in background thread (S11-T01, S11-T02, S11-T03)
 pub(super) fn start_optimization(state: &mut AddonState) {
@@ -54,6 +57,8 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
         .current_build
         .as_ref()
         .map(summarize_resolved_build);
+    // Current character build for the Improve always-better baseline gate.
+    let loadout = state.main.current_build.clone();
     let addon_dir = state.addon_dir.clone();
     let token = state.cancel_token.clone();
     let weights = state.main.weights.clone();
@@ -139,6 +144,18 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     }
                 };
 
+                // ═══ Improve always-better baseline (spec §12.4): rank the
+                // user's OWN current gear under this run's weights so a worse
+                // optimizer result is refused. New Build has no baseline.
+                let improve_baseline = capture_improve_baseline(
+                    loadout.as_ref(),
+                    &db,
+                    &profession_name,
+                    &weights,
+                    &balance_ctx,
+                    &scenario,
+                );
+
                 // ═══ Primary: optimize_v2 — beam search over complete build states ═══
                 {
                     let token_v2 = token.clone();
@@ -168,15 +185,30 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             if token.is_cancelled() {
                                 return Err("Cancelled".into());
                             }
+                            let (served, serves_baseline) = apply_improve_baseline_gate(
+                                synergy_result,
+                                improve_baseline.as_ref(),
+                                &db,
+                                &profession_name,
+                                &weights,
+                                &balance_ctx,
+                                &scenario,
+                            );
+                            // Serving the baseline means their build, not an improvement.
+                            let label_override = if serves_baseline {
+                                None
+                            } else {
+                                locked_spec_name
+                                    .as_ref()
+                                    .map(|n| tf("fmt.improved", &[("name", n)]))
+                            };
                             let suggestion = synergy_result_to_suggestion(
-                                &synergy_result,
+                                &served,
                                 &db,
                                 &profession_name,
                                 &scenario,
                                 selected_role,
-                                locked_spec_name
-                                    .as_ref()
-                                    .map(|n| tf("fmt.improved", &[("name", n)])),
+                                label_override,
                                 &addon_dir,
                                 &weights,
                             );
@@ -226,15 +258,30 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             if token.is_cancelled() {
                                 return Err("Cancelled".into());
                             }
+                            let (served, serves_baseline) = apply_improve_baseline_gate(
+                                synergy_result,
+                                improve_baseline.as_ref(),
+                                &db,
+                                &profession_name,
+                                &weights,
+                                &balance_ctx,
+                                &scenario,
+                            );
+                            // Serving the baseline means their build, not an improvement.
+                            let label_override = if serves_baseline {
+                                None
+                            } else {
+                                locked_spec_name
+                                    .as_ref()
+                                    .map(|n| tf("fmt.improved", &[("name", n)]))
+                            };
                             let suggestion = synergy_result_to_suggestion(
-                                &synergy_result,
+                                &served,
                                 &db,
                                 &profession_name,
                                 &scenario,
                                 selected_role,
-                                locked_spec_name
-                                    .as_ref()
-                                    .map(|n| tf("fmt.improved", &[("name", n)])),
+                                label_override,
                                 &addon_dir,
                                 &weights,
                             );
@@ -479,4 +526,477 @@ fn enrich_with_llm(
     }
 
     Ok(())
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Improve always-better baseline gate (spec §12.4: Improve locks existing gear)
+// ────────────────────────────────────────────────────────────────────────────
+
+/// The user's own current build, once evaluated under this run's weights.
+struct ImproveBaseline {
+    validated: gw2_optimizer::validation::ValidatedBuild,
+    report: gw2_optimizer::referee::RefereeReport,
+}
+
+/// Message shown when the optimizer could not beat the user's current gear.
+const BASELINE_KEPT_REASON: &str =
+    "Your current gear already outperforms every candidate for these weights — kept your build.";
+
+/// Capture and rank the user's current build for the Improve entry point.
+/// `None` without a loadout (New Build is ungated) or when the resolved names
+/// do not survive validation (`errors` non-empty → no comparable baseline).
+fn capture_improve_baseline(
+    loadout: Option<&gw2_core::types::ResolvedBuild>,
+    db: &gw2_optimizer::gamedb::GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+) -> Option<ImproveBaseline> {
+    let plate = baseline_plate_from_loadout(loadout?);
+    let validated = gw2_optimizer::validation::validate_gemini_build(&plate, db, profession_name);
+    if !validated.errors.is_empty() {
+        return None;
+    }
+    let report = gw2_optimizer::referee::evaluate_validated_build(
+        &validated,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+    );
+    Some(ImproveBaseline { validated, report })
+}
+
+/// Serve-time gate: whichever result outranks wins lexicographically; equality
+/// keeps the user's gear (no churn without a measurable win). Returns the
+/// SynergyResult to serve plus whether that is the user's own baseline.
+#[allow(clippy::too_many_arguments)]
+fn apply_improve_baseline_gate(
+    result: gw2_optimizer::engine::SynergyResult,
+    baseline: Option<&ImproveBaseline>,
+    db: &gw2_optimizer::gamedb::GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+) -> (gw2_optimizer::engine::SynergyResult, bool) {
+    let Some(baseline) = baseline else {
+        return (result, false);
+    };
+    let result_report = gw2_optimizer::referee::evaluate_validated_build(
+        &result.validated,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+    );
+    if beats_baseline(
+        &gw2_optimizer::referee::search_rank(&result_report),
+        &gw2_optimizer::referee::search_rank(&baseline.report),
+    ) {
+        let mut result = result;
+        result
+            .quality_reasons
+            .push(gw2_optimizer::data::quality::DataQualityReason {
+                field: "improve.baseline".into(),
+                entity: profession_name.into(),
+                modes: vec![ctx.game_mode.label().to_string()],
+                explanation: improve_quality_reason(
+                    result_report.user_intent_score,
+                    baseline.report.user_intent_score,
+                ),
+            });
+        (result, false)
+    } else {
+        nexus::log::log(
+            nexus::log::LogLevel::Info,
+            "GW2BuildOpt",
+            "Improve baseline gate: optimizer did not outrank the user's current gear; serving their build",
+        );
+        let mut kept = gw2_optimizer::engine::synergy_result_from_validated(
+            baseline.validated.clone(),
+            db,
+            profession_name,
+            ctx,
+            Some(scenario),
+        );
+        kept.quality_reasons
+            .push(gw2_optimizer::data::quality::DataQualityReason {
+                field: "improve.baseline".into(),
+                entity: profession_name.into(),
+                modes: vec![ctx.game_mode.label().to_string()],
+                explanation: BASELINE_KEPT_REASON.to_string(),
+            });
+        (kept, true)
+    }
+}
+
+/// Lexicographic strictly-greater comparison of referee ranks. Equal ranks
+/// mean the optimizer matched but did not beat the current gear.
+fn beats_baseline(result_rank: &[i64; 9], baseline_rank: &[i64; 9]) -> bool {
+    result_rank > baseline_rank
+}
+
+/// Quality-reason text for a result that beat the current gear.
+fn improve_quality_reason(result_intent: f64, baseline_intent: f64) -> String {
+    if baseline_intent > 0.0 && result_intent >= 0.0 {
+        format!(
+            "Improves on your current gear (intent {:+.0}% vs your current build)",
+            (result_intent - baseline_intent) / baseline_intent * 100.0
+        )
+    } else {
+        // Baseline carried no viable intent signal — skip the percentage.
+        "Improves on your current gear".into()
+    }
+}
+
+/// Encode the user's CURRENT character into a Gemini plate so
+/// [`gw2_optimizer::validation::validate_gemini_build`] can resolve it back
+/// into a validated build — the same converter Chat plates go through.
+/// Weapon sets follow `lock_panel::resolved_gear_names` indexing (set 0 →
+/// Set 1 slots, the rest → Set 2); pieces use the shared `piece_gear_slot`
+/// mapping. PvP has no gear pieces, so its amulet surfaces via `stat_prefix`.
+fn baseline_plate_from_loadout(
+    loadout: &gw2_core::types::ResolvedBuild,
+) -> gw2_optimizer::prompts::GeminiBuildResponse {
+    let set_label = |index: usize| if index == 0 { 1 } else { 2 };
+
+    let specializations: Vec<(String, Vec<String>)> = loadout
+        .specializations
+        .iter()
+        .map(|spec| (spec.name.clone(), selected_trait_names(spec)))
+        .collect();
+
+    // "Set N: Main / Off" strings — the validator re-parses this shape.
+    let mut weapons = Vec::new();
+    for (index, set) in loadout.weapons.iter().enumerate() {
+        let Some(main_hand) = set.main_hand.as_ref().map(|w| w.name.clone()) else {
+            continue;
+        };
+        match set.off_hand.as_ref().map(|w| w.name.as_str()) {
+            Some(off_hand) => weapons.push(format!(
+                "Set {}: {} / {}",
+                set_label(index),
+                main_hand,
+                off_hand
+            )),
+            None => weapons.push(format!("Set {}: {}", set_label(index), main_hand)),
+        }
+    }
+
+    let mut skills = Vec::new();
+    if let Some(skill) = &loadout.skills.heal {
+        skills.push(format!("Heal: {}", skill.name));
+    }
+    for skill in loadout.skills.utilities.iter().flatten() {
+        skills.push(format!("Utility: {}", skill.name));
+    }
+    if let Some(skill) = &loadout.skills.elite {
+        skills.push(format!("Elite: {}", skill.name));
+    }
+
+    // Sigils per position: [set1_main, set1_off, set2_main, set2_off].
+    let mut sigils_map = std::collections::HashMap::new();
+    for (index, set) in loadout.weapons.iter().enumerate() {
+        let keys = [
+            format!("set{}_main", set_label(index)),
+            format!("set{}_off", set_label(index)),
+        ];
+        for (key, sigil) in keys.iter().zip(set.sigils.iter()) {
+            sigils_map.insert(key.clone(), sigil.name.clone());
+        }
+    }
+
+    // Per-piece prefixes over armor, trinkets, and both weapon sets.
+    let mut gear_slots = std::collections::HashMap::new();
+    for piece in loadout.armor.iter().chain(loadout.trinkets.iter()) {
+        let prefix = piece.stat_prefix.trim();
+        if prefix.is_empty() {
+            continue;
+        }
+        if let Some(slot) = piece_gear_slot(&piece.slot) {
+            gear_slots.insert(slot.kebab_name().to_string(), prefix.to_string());
+        }
+    }
+    for (index, set) in loadout.weapons.iter().enumerate() {
+        let prefix = set.stat_prefix.trim();
+        if prefix.is_empty() || (set.main_hand.is_none() && set.off_hand.is_none()) {
+            continue;
+        }
+        let prefix = prefix.to_string();
+        let (main_slot, off_slot) = if index == 0 {
+            (GearSlot::WeaponSet1Main, GearSlot::WeaponSet1Off)
+        } else {
+            (GearSlot::WeaponSet2Main, GearSlot::WeaponSet2Off)
+        };
+        if set.main_hand.is_some() {
+            gear_slots.insert(main_slot.kebab_name().to_string(), prefix.clone());
+        }
+        if set.off_hand.is_some() {
+            gear_slots.insert(off_slot.kebab_name().to_string(), prefix.clone());
+        }
+    }
+
+    // Primary weapon-set prefix first, then any piece, then PvP amulet stem.
+    let stat_prefix = loadout
+        .weapons
+        .iter()
+        .map(|s| s.stat_prefix.as_str())
+        .chain(loadout.armor.iter().map(|p| p.stat_prefix.as_str()))
+        .chain(loadout.trinkets.iter().map(|p| p.stat_prefix.as_str()))
+        .map(str::trim)
+        .find(|prefix| !prefix.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            loadout
+                .pvp_amulet
+                .as_ref()
+                .map(|a| a.name.trim_end_matches(" Amulet").trim().to_string())
+        });
+
+    gw2_optimizer::prompts::GeminiBuildResponse {
+        specializations,
+        weapons,
+        skills,
+        rune: loadout
+            .rune
+            .as_ref()
+            .map(|r| r.name.clone())
+            .unwrap_or_default(),
+        relic: loadout
+            .relic
+            .as_ref()
+            .map(|r| r.name.clone())
+            .unwrap_or_default(),
+        stat_prefix: stat_prefix.unwrap_or_default(),
+        sigils_map: Some(sigils_map),
+        gear_slots: Some(gear_slots),
+        ..gw2_optimizer::prompts::GeminiBuildResponse::default()
+    }
+}
+
+/// The three selected major traits per column, falling back to any column
+/// option marked selected — same sourcing as Chat plates.
+fn selected_trait_names(spec: &gw2_core::types::ResolvedSpec) -> Vec<String> {
+    let mut traits: Vec<(usize, String)> = spec
+        .traits_selected
+        .iter()
+        .filter(|trait_| trait_.selected && trait_.column < 3)
+        .map(|trait_| (trait_.column, trait_.name.clone()))
+        .collect();
+    for (column, options) in spec.traits_available.iter().enumerate() {
+        if traits.iter().any(|(c, _)| *c == column) {
+            continue;
+        }
+        if let Some(option) = options.iter().find(|o| o.selected) {
+            traits.push((column, option.name.clone()));
+        }
+    }
+    traits.sort_by_key(|(column, _)| *column);
+    traits.into_iter().take(3).map(|(_, name)| name).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn equal_rank_keeps_user_gear() {
+        let rank = [
+            1i64, 6, 900_000, 400_000, 500_000, 200_000, 700, 1_000_000, 10,
+        ];
+        assert!(!beats_baseline(&rank, &rank));
+    }
+
+    #[test]
+    fn lower_rank_keeps_user_gear() {
+        // Losing on an early key is decisive regardless of later dominance.
+        assert!(!beats_baseline(
+            &[1, 5, 999_999, 999_999, 999_999, 999_999, 999_999, 999_999, 999],
+            &[1, 6, 0, 0, 0, 0, 0, 0, 0]
+        ));
+    }
+
+    #[test]
+    fn later_key_breaks_leading_tie() {
+        // WvW-shaped ranks: intent tied, raw direction decides.
+        assert!(beats_baseline(
+            &[1, 6, 1, 1, 500_000, 250_000, 700, 1_000_000, 10],
+            &[1, 6, 1, 1, 500_000, 240_000, 700, 1_000_000, 9]
+        ));
+    }
+
+    #[test]
+    fn earlier_key_wins_over_bigger_later_key() {
+        assert!(beats_baseline(
+            &[1, 6, 300_000, -50, 0, 100, 0, 0, -50],
+            &[1, 6, 299_000, 0, 0, 999_999, 0, 0, 999]
+        ));
+    }
+
+    #[test]
+    fn improve_reason_reports_percent_delta() {
+        assert_eq!(
+            improve_quality_reason(0.12, 0.10),
+            "Improves on your current gear (intent +20% vs your current build)"
+        );
+    }
+
+    #[test]
+    fn improve_reason_skips_percentage_without_baseline_signal() {
+        assert_eq!(
+            improve_quality_reason(-1.0, -1.0),
+            "Improves on your current gear"
+        );
+    }
+
+    #[test]
+    fn plate_encodes_loadout_for_validation() {
+        use gw2_core::types::{
+            ResolvedGearPiece, ResolvedSkills, ResolvedSpec, ResolvedTrait, ResolvedUpgrade,
+            ResolvedWeaponSet, SkillInfo, TraitOption, UpgradeInfo, WeaponInfo,
+        };
+
+        let mut spec = ResolvedSpec {
+            id: 52,
+            name: "Firebrand".into(),
+            elite: true,
+            ..Default::default()
+        };
+        spec.traits_selected = vec![
+            ResolvedTrait {
+                id: 11,
+                name: "Stalwart Might".into(),
+                column: 1,
+                selected: true,
+                ..Default::default()
+            },
+            ResolvedTrait {
+                id: 10,
+                name: "Unbroken Lines".into(),
+                column: 0,
+                selected: true,
+                ..Default::default()
+            },
+        ];
+        spec.traits_available = vec![
+            Vec::new(),
+            Vec::new(),
+            vec![TraitOption {
+                id: 12,
+                name: "Tome of Courage".into(),
+                selected: true,
+            }],
+        ];
+
+        let loadout = gw2_core::types::ResolvedBuild {
+            specializations: vec![spec],
+            skills: ResolvedSkills {
+                heal: Some(SkillInfo {
+                    id: 1,
+                    name: "Mantra of Flame".into(),
+                }),
+                utilities: vec![Some(SkillInfo {
+                    id: 2,
+                    name: "Purging Flames".into(),
+                })],
+                elite: None,
+            },
+            weapons: vec![ResolvedWeaponSet {
+                label: "Set 1".into(),
+                stat_prefix: "Berserker's".into(),
+                main_hand: Some(WeaponInfo {
+                    name: "Greatsword".into(),
+                    ..Default::default()
+                }),
+                off_hand: None,
+                sigils: vec![UpgradeInfo {
+                    id: 7,
+                    name: "Superior Sigil of Air".into(),
+                }],
+            }],
+            armor: vec![ResolvedGearPiece {
+                slot: "Helm".into(),
+                stat_prefix: "Valkyrie".into(),
+                ..Default::default()
+            }],
+            trinkets: vec![
+                ResolvedGearPiece {
+                    slot: "Amulet".into(),
+                    stat_prefix: "Marauder's".into(),
+                    ..Default::default()
+                },
+                ResolvedGearPiece {
+                    slot: "Ring1".into(),
+                    stat_prefix: String::new(),
+                    ..Default::default()
+                },
+            ],
+            rune: Some(ResolvedUpgrade {
+                id: 3,
+                name: "Superior Rune of the Thief".into(),
+            }),
+            ..Default::default()
+        };
+
+        let plate = baseline_plate_from_loadout(&loadout);
+
+        // Traits sorted by column with the availability fallback applied.
+        assert_eq!(
+            plate.specializations[0].0, "Firebrand",
+            "spec display name must pass through unchanged"
+        );
+        assert_eq!(
+            plate.specializations[0].1,
+            vec!["Unbroken Lines", "Stalwart Might", "Tome of Courage"]
+        );
+        assert_eq!(plate.weapons, vec!["Set 1: Greatsword"]);
+        assert_eq!(
+            plate.skills,
+            vec!["Heal: Mantra of Flame", "Utility: Purging Flames"]
+        );
+        assert_eq!(plate.rune, "Superior Rune of the Thief");
+        assert_eq!(plate.relic, "");
+        assert_eq!(plate.stat_prefix, "Berserker's");
+
+        let gear = plate.gear_slots.expect("per-slot map present");
+        assert_eq!(gear.get("helm").map(String::as_str), Some("Valkyrie"));
+        assert_eq!(gear.get("amulet").map(String::as_str), Some("Marauder's"));
+        assert_eq!(
+            gear.get("weapon-set-1-main").map(String::as_str),
+            Some("Berserker's")
+        );
+        assert!(
+            !gear.contains_key("ring-1"),
+            "empty prefix pieces are skipped"
+        );
+        assert!(!gear.contains_key("weapon-set-1-off"));
+
+        let sigils = plate.sigils_map.expect("sigil position map present");
+        assert_eq!(
+            sigils.get("set1_main").map(String::as_str),
+            Some("Superior Sigil of Air")
+        );
+    }
+
+    #[test]
+    fn pvp_amulet_seeds_stat_prefix_when_no_pieces() {
+        let loadout = gw2_core::types::ResolvedBuild {
+            pvp_amulet: Some(gw2_core::types::ResolvedPvpAmulet {
+                name: "Berserker Amulet".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let plate = baseline_plate_from_loadout(&loadout);
+
+        assert_eq!(plate.stat_prefix, "Berserker");
+        assert!(plate.specializations.is_empty());
+        assert_eq!(plate.weapons, Vec::<String>::new());
+        assert!(!plate.gear_slots.unwrap().contains_key("amulet"));
+    }
 }
