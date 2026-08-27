@@ -107,7 +107,7 @@ pub(crate) fn refine_piece_swaps(
             done: false,
         });
 
-        let mut best_move: Option<(ValidatedBuild, [i64; 8])> = None;
+        let mut best_move: Option<(ValidatedBuild, [i64; 9])> = None;
         for slot in GearSlot::ALL {
             // Gear locks pin a slot: never move it in any direction.
             if locks.gear_locks.contains_key(&slot) {
@@ -1351,6 +1351,7 @@ mod tests {
                 is_viable: true,
             },
             user_intent_score: 0.0,
+            raw_direction_score: -1.0,
             quality: DataQuality::Verified,
             quality_reasons: Vec::new(),
         }

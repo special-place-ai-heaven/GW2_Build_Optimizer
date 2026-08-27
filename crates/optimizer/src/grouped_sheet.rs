@@ -388,6 +388,7 @@ fn ranked_report(intent: f64, combat: CombatPerformance) -> RefereeReport {
             }],
         },
         user_intent_score: intent,
+        raw_direction_score: -1.0,
         quality: DataQuality::Verified,
         quality_reasons: Vec::new(),
     }
