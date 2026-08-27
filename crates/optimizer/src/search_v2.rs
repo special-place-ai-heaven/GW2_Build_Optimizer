@@ -63,6 +63,7 @@ impl Default for SearchConfig {
 /// (`min(1.0)`) are what make mixes win: when a heavily-weighted axis is
 /// already capped, trading its surplus for an unsaturated axis raises the
 /// weighted score.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn refine_piece_swaps(
     best: ValidatedBuild,
     db: &GameDb,
