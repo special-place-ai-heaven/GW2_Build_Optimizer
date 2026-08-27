@@ -104,6 +104,11 @@ impl OpenRouterClient {
             max_tokens: MAX_COMPLETION_TOKENS,
             reasoning_max_tokens: Some(REASONING_TOKEN_CAP),
             require_tool_endpoints: tools.is_some(),
+            // Interactive chat: fail loud and fast. Healthy streams are
+            // keep-alived, so this bounds a dead/silent request, not a
+            // slow generation.
+            request_timeout: std::time::Duration::from_secs(420),
+            max_retries: 2,
         };
         let message = send_chat(core, messages, tools)?;
         // Persist usage

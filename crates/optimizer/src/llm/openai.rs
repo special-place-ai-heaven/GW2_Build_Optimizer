@@ -87,6 +87,8 @@ impl OpenAiClient {
             max_tokens: MAX_COMPLETION_TOKENS,
             reasoning_max_tokens: None,
             require_tool_endpoints: tools.is_some(),
+            request_timeout: std::time::Duration::from_secs(420),
+            max_retries: 2,
         };
         let message = send_chat(core, messages, tools)?;
         // Persist usage

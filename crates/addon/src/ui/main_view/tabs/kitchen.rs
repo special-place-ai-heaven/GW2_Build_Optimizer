@@ -51,7 +51,19 @@ pub(in crate::ui::main_view) fn render_talk_tab(ui: &Ui, state: &mut AddonState)
         .unwrap_or('?');
 
     let cooking = if state.main.chat.waiting {
-        Some(state.main.optimize_stage.clone())
+        // Live elapsed timer: during provider slowness the user must see the
+        // request is alive (and how long they've waited), not a frozen bubble.
+        let elapsed = state
+            .main
+            .chat_wait_started
+            .map(|t| t.elapsed().as_secs())
+            .unwrap_or(0);
+        Some(format!(
+            "{} · {:02}:{:02}",
+            state.main.optimize_stage,
+            elapsed / 60,
+            elapsed % 60
+        ))
     } else {
         None
     };
