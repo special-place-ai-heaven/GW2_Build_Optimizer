@@ -486,6 +486,33 @@ impl ObjectiveScorer {
 /// reduced proportionally. This catches edge cases where a set sneaks
 /// through tier selection via a secondary axis but is fundamentally wrong
 /// for the user's primary intent.
+/// Uncapped weighted direction score: same axes as `score_with_weights`
+/// but WITHOUT the per-axis saturation caps. Radar weights are a direction
+/// indicator, not a goal — once a capped axis is satisfied, surplus piece
+/// swaps that keep it at cap and raise other wished stats must be visible.
+/// Used as the final tie-break level in `referee::search_rank`.
+pub fn raw_direction_score(perf: &CombatPerformance, weights: &OptimizationWeights) -> f64 {
+    let w = weights.clamped();
+    let total_w = w.total().max(0.01);
+    let power_score = perf.strike_dps_index / STRIKE_DPS_NORM;
+    let condition_score =
+        perf.condition_dps_index / CONDI_DPS_NORM + perf.condi_duration_pct / 100.0 * 0.15;
+    let sustain_score =
+        perf.effective_health / EFFECTIVE_HEALTH_NORM + perf.damage_reduction_pct / 100.0;
+    let healing_score = perf.healing_power_index / HEALING_NORM;
+    let boon_support_score = perf.boon_duration_pct / 100.0;
+    let control_score =
+        perf.condi_duration_pct / 100.0 * 0.6 + perf.boon_duration_pct / 100.0 * 0.4;
+
+    (w.power * power_score
+        + w.condition * condition_score
+        + w.boon_support * boon_support_score
+        + w.healing * healing_score
+        + w.sustain * sustain_score
+        + w.control * control_score)
+        / total_w
+}
+
 pub fn score_with_weights(perf: &CombatPerformance, weights: &OptimizationWeights) -> f64 {
     score_with_norms(
         perf,

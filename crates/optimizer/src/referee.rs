@@ -6,7 +6,7 @@ use crate::gamedb::GameDb;
 use crate::rotation;
 use crate::rotation::SimulationResult;
 use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
-use crate::scoring::{score_with_weights, OptimizationWeights};
+use crate::scoring::{raw_direction_score, score_with_weights, OptimizationWeights};
 use crate::stats;
 use crate::validation::ValidatedBuild;
 use gw2_core::types::GameMode;
@@ -129,7 +129,7 @@ pub(crate) fn is_roam_objective(scenario: &ScenarioSpec) -> bool {
 
 /// Higher is better. WvW first requires a viable, completed exchange, then
 /// honors the player's radar weights before ranking surplus role execution.
-pub fn search_rank(report: &RefereeReport) -> [i64; 8] {
+pub fn search_rank(report: &RefereeReport) -> [i64; 9] {
     let viable = i64::from(report.viability.is_viable);
     let gates = report.viability.gates.iter().filter(|g| g.passed).count() as i64;
     if is_roam_objective(&report.scenario) {
@@ -172,6 +172,7 @@ pub fn search_rank(report: &RefereeReport) -> [i64; 8] {
             })
             .unwrap_or(0) as i64;
         let intent = (report.user_intent_score * 1_000_000.0).round() as i64;
+        let raw = (report.raw_direction_score * 1_000_000.0).round() as i64;
         [
             viable,
             gates,
@@ -181,10 +182,12 @@ pub fn search_rank(report: &RefereeReport) -> [i64; 8] {
             execution,
             tempo,
             repeatable * 1_000_000 + sustain,
+            raw,
         ]
     } else {
         let score = (report.user_intent_score * 1_000_000.0) as i64;
-        [viable, gates, score, 0, 0, 0, 0, 0]
+        let raw = (report.raw_direction_score * 1_000_000.0) as i64;
+        [viable, gates, score, raw, 0, 0, 0, 0, 0]
     }
 }
 
@@ -630,6 +633,10 @@ pub struct RefereeReport {
     pub viability: ViabilityReport,
     /// Final score for ranking. Set to `-1.0` (sentinel) when `viability.is_viable` is false.
     pub user_intent_score: f64,
+    /// Uncapped radar-direction score — the final rank tie-break so
+    /// post-saturation piece swaps toward the user's wished stats win ties
+    /// that the capped `user_intent_score` cannot see.
+    pub raw_direction_score: f64,
     pub quality: DataQuality,
     pub quality_reasons: Vec<DataQualityReason>,
 }
@@ -686,10 +693,13 @@ pub fn evaluate_validated_build(
     // Run before score computation. Non-viable builds receive sentinel score -1.0.
     let mut viability = evaluate_viability_gates(rotation.as_ref(), &primary_combat, scenario);
     apply_offbar_stability(&mut viability, validated, db);
-    let user_intent_score = if viability.is_viable {
-        score_with_weights(&primary_combat, weights)
+    let (user_intent_score, raw_direction_score) = if viability.is_viable {
+        (
+            score_with_weights(&primary_combat, weights),
+            raw_direction_score(&primary_combat, weights),
+        )
     } else {
-        -1.0
+        (-1.0, -1.0)
     };
 
     let mut quality = DataQuality::Verified;
@@ -751,6 +761,7 @@ pub fn evaluate_validated_build(
         rotation,
         viability,
         user_intent_score,
+        raw_direction_score,
         quality,
         quality_reasons,
     }
@@ -866,6 +877,7 @@ mod tests {
                 is_viable: true,
             },
             user_intent_score: 0.0,
+            raw_direction_score: -1.0,
             quality: DataQuality::Verified,
             quality_reasons: Vec::new(),
         }
@@ -1682,5 +1694,34 @@ mod tests {
         let g = gate_by_kind(&report.gates, &ViabilityGate::MobilityOut).unwrap();
         assert!(!g.passed);
         assert!(!report.is_viable);
+    }
+
+    #[test]
+    fn raw_direction_breaks_capped_score_ties() {
+        // Two builds with identical capped intent but different uncapped raw
+        // direction: the radar direction must win the tie at the rank tail.
+        let mk = |raw: f64| {
+            let mut scenario = make_wvw_scenario();
+            scenario.combat_tier = CombatTier::Solo;
+            RefereeReport {
+                scenario,
+                stats: crate::stats::StatBlock::default(),
+                modifiers: crate::combat::DamageModifiers::default(),
+                combat_solo: CombatPerformance::default(),
+                combat_party: CombatPerformance::default(),
+                combat_squad: CombatPerformance::default(),
+                primary_combat: CombatPerformance::default(),
+                rotation: None,
+                viability: ViabilityReport {
+                    gates: Vec::new(),
+                    is_viable: true,
+                },
+                user_intent_score: 0.5,
+                raw_direction_score: raw,
+                quality: DataQuality::Verified,
+                quality_reasons: Vec::new(),
+            }
+        };
+        assert!(search_rank(&mk(0.7)) > search_rank(&mk(0.5)));
     }
 }
