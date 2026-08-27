@@ -130,6 +130,10 @@ pub(crate) struct ProviderCore<'a> {
     pub(crate) reasoning_max_tokens: Option<u32>,
     /// OpenRouter `provider.require_parameters` when tools are present.
     pub(crate) require_tool_endpoints: bool,
+    /// Per-request wall-clock cap. Streams are keep-alived by the provider,
+    /// so this bounds a dead/silent request, not a healthy generation.
+    pub(crate) request_timeout: std::time::Duration,
+    pub(crate) max_retries: u32,
 }
 
 /// One streamed chat completion with the shared retry policy.
@@ -141,8 +145,6 @@ pub(crate) fn send_chat(
     messages: &[Message],
     tools: Option<&[ToolDefinition]>,
 ) -> Result<Message, LlmError> {
-    const MAX_RETRIES: u32 = 3;
-
     core.rate
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -179,7 +181,7 @@ pub(crate) fn send_chat(
     let mut last_error: Option<LlmError> = None;
     let mut next_delay = std::time::Duration::from_secs(5);
 
-    for attempt in 0..MAX_RETRIES {
+    for attempt in 0..core.max_retries {
         if attempt > 0 {
             std::thread::sleep(next_delay);
             next_delay *= 2;
@@ -188,6 +190,7 @@ pub(crate) fn send_chat(
         let mut req = core
             .http
             .post(&url)
+            .timeout(core.request_timeout)
             .header("Authorization", format!("Bearer {}", core.api_key))
             .header("Content-Type", "application/json");
         for (name, value) in core.extra_headers {
@@ -197,7 +200,7 @@ pub(crate) fn send_chat(
         let resp = match req.json(&request).send() {
             Ok(r) => r,
             Err(e) => {
-                if attempt == MAX_RETRIES - 1 {
+                if attempt == core.max_retries - 1 {
                     core.rate
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
@@ -290,4 +293,72 @@ pub(crate) fn send_chat(
         status: 500,
         message: format!("{} server error after retries", core.label),
     }))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Live repro of the in-game Choya hang: the real chat prompt builder at
+    /// kitchen-brief scale, streamed with the production request shape.
+    /// Ignored by default; run with OPENROUTER_API_KEY set:
+    ///   cargo test -p gw2-optimizer live_hang_repro -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_hang_repro_big_prompt_streaming() {
+        use std::sync::Mutex;
+        use std::time::Instant;
+
+        let key = std::env::var("OPENROUTER_API_KEY").expect("set OPENROUTER_API_KEY");
+        let rate = Mutex::new(RateTracker::new(60));
+        let http = http_client().expect("client");
+
+        let mut kitchen = String::from(
+            "Mode: WvW \u{b7} Scale: Roam\nRole: Roamer \u{b7} Damage, Bruiser, Troll\nProfession: Druid\n\n",
+        );
+        for i in 0..200 {
+            kitchen.push_str(&format!(
+                "- Pantry item {i}: stat prefix notes, rune and sigil interactions,\n relic timing, trait synergy hints, rotation considerations.\n"
+            ));
+        }
+        kitchen.push_str("\nRecent chat:\n- player: hello\n");
+        let message = "I want to make a perfect druid roaming build which is a cross between a roamer and a troll build, prioritizing pure condition damage, lots of disable CC and great survivability/sustain.";
+        let prompt = crate::prompts::chat_refinement_prompt_with_tools(
+            "Druid", "WvW", message, &kitchen, "Choya",
+        );
+        println!("prompt bytes: {}", prompt.len());
+
+        let messages = vec![Message {
+            role: "user".into(),
+            content: Some(prompt),
+            tool_calls: None,
+            tool_call_id: None,
+        }];
+        let core = ProviderCore {
+            http: &http,
+            rate: &rate,
+            api_key: &key,
+            base_url: "https://openrouter.ai/api/v1",
+            model: "z-ai/glm-5.3-flash",
+            extra_headers: &[],
+            label: "OpenRouter",
+            max_tokens: MAX_COMPLETION_TOKENS,
+            reasoning_max_tokens: Some(REASONING_TOKEN_CAP),
+            require_tool_endpoints: false,
+            request_timeout: std::time::Duration::from_secs(420),
+            max_retries: 2,
+        };
+
+        let t0 = Instant::now();
+        match send_chat(core, &messages, None) {
+            Ok(msg) => println!(
+                "OK in {:.1}s — content {} chars",
+                t0.elapsed().as_secs_f64(),
+                msg.content.as_deref().map(str::len).unwrap_or(0)
+            ),
+            Err(e) => {
+                println!("ERR after {:.1}s: {e}", t0.elapsed().as_secs_f64());
+                println!("DEBUG chain: {e:?}");
+            }
+        }
+    }
 }
