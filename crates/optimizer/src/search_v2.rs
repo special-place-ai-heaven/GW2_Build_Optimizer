@@ -53,6 +53,122 @@ impl Default for SearchConfig {
     }
 }
 
+/// Post-beam nudge pass — the "replace 1–4 pieces" fine-tuner.
+///
+/// The beam runs ~2 generations on default config, so it reliably finds the
+/// best uniform prefix but rarely composes multi-piece stat nudges. This
+/// hill-climbs single-piece swaps (all 16 slots × top prefixes) against the
+/// full referee rank until no swap improves. Up to `MAX_ROUNDS` improving
+/// swaps compose into "replaced 1–4 pieces" results. Saturating axis scores
+/// (`min(1.0)`) are what make mixes win: when a heavily-weighted axis is
+/// already capped, trading its surplus for an unsaturated axis raises the
+/// weighted score.
+pub(crate) fn refine_piece_swaps(
+    best: ValidatedBuild,
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+    locks: &BuildLocks,
+    on_progress: &mut dyn FnMut(OptimizeProgress),
+    is_cancelled: &dyn Fn() -> bool,
+) -> ValidatedBuild {
+    const MAX_ROUNDS: usize = 4;
+
+    // Nudge candidates = the weight-aware tier pool (prefixes that actually
+    // serve the user's radar weights), intersected with the DB, radar
+    // primary first. Top-N-by-id ordering would silently exclude 15 of ~25
+    // prefixes and make the pass blind to the nudges that matter.
+    let tier_names = crate::scoring::select_prefixes_by_tiers(weights);
+    let mut itemstats: Vec<&gw2_api::models::ItemStat> = tier_names
+        .iter()
+        .filter_map(|name| db.itemstats.values().find(|is| is.name == *name))
+        .collect();
+    itemstats.extend(prioritized_itemstats(db, weights));
+    let mut current = best;
+    let current_report = crate::referee::evaluate_validated_build(
+        &current,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+    );
+    let mut current_rank = crate::referee::search_rank(&current_report);
+
+    for round in 1..=MAX_ROUNDS {
+        if is_cancelled() {
+            break;
+        }
+        on_progress(OptimizeProgress {
+            stage: format!("Fine-tuning piece swaps (pass {round}/{MAX_ROUNDS})..."),
+            done: false,
+        });
+
+        let mut best_move: Option<(ValidatedBuild, [i64; 8])> = None;
+        for slot in GearSlot::ALL {
+            // Gear locks pin a slot: never move it in any direction.
+            if locks.gear_locks.contains_key(&slot) {
+                continue;
+            }
+            let Some(current_prefix) = current.gear_slots.get(slot) else {
+                continue; // empty off-hand etc.
+            };
+            for itemstat in itemstats.iter() {
+                if itemstat.id == current_prefix.itemstat_id {
+                    continue; // no-op
+                }
+                if is_cancelled() {
+                    return current;
+                }
+                let mut build = current.clone();
+                build.gear_slots.set(
+                    slot,
+                    gw2_core::types::PrefixRef {
+                        itemstat_id: itemstat.id,
+                        name: itemstat.name.clone(),
+                    },
+                );
+                let report = crate::referee::evaluate_validated_build(
+                    &build,
+                    db,
+                    profession_name,
+                    weights,
+                    ctx,
+                    scenario,
+                );
+                let rank = crate::referee::search_rank(&report);
+                if rank > current_rank
+                    && best_move
+                        .as_ref()
+                        .is_none_or(|(_, best_rank)| rank > *best_rank)
+                {
+                    best_move = Some((build, rank));
+                }
+            }
+        }
+
+        match best_move {
+            Some((build, _)) => {
+                current = build;
+                let current_report = crate::referee::evaluate_validated_build(
+                    &current,
+                    db,
+                    profession_name,
+                    weights,
+                    ctx,
+                    scenario,
+                );
+                current_rank = crate::referee::search_rank(&current_report);
+            }
+            None => break, // converged: no single piece swap improves
+        }
+    }
+
+    current
+}
+
 // ─── Mutation operators ───────────────────────────────────────────────────────
 
 /// Generate all immediate neighbours of `candidate` by applying each of the

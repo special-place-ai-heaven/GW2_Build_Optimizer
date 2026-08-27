@@ -2157,6 +2157,29 @@ pub fn optimize_v2(
         return Err("Cancelled".into());
     }
 
+    // Post-beam nudge pass: hill-climb single-piece swaps so the result can
+    // "replace 1–4 pieces" and nudge stats when saturated axes make mixes
+    // strictly better than the best uniform prefix.
+    on_progress(OptimizeProgress {
+        stage: "Fine-tuning piece swaps...".into(),
+        done: false,
+    });
+    best = crate::search_v2::refine_piece_swaps(
+        best,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+        locks,
+        on_progress,
+        is_cancelled,
+    );
+
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
+
     on_progress(OptimizeProgress {
         stage: "Done".into(),
         done: true,
