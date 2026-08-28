@@ -4,6 +4,24 @@ use crate::state::{AddonState, DownloadState, KeyStatus, Screen, SetupStep};
 use crate::ui::theme;
 use gw2_core::i18n::{t, tf};
 
+thread_local! {
+    /// Per-field "reveal password" toggle for the setup wizard's API-key
+    /// inputs (GW2 key step, LLM key step). Transient UI-only state scoped to
+    /// the render thread — it must not survive a save/reload and does not
+    /// belong on `AddonState`, so it lives here rather than on `SetupState`.
+    static SHOW_GW2_KEY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static SHOW_LLM_KEY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether an API-key input field should mask its contents (ImGui's
+/// `InputTextFlags::PASSWORD`), given whether the user has toggled "reveal"
+/// on for that field. The GW2 and LLM key steps are the same screen a player
+/// might be streaming or screenshotting while pasting a live key, so both
+/// default to masked.
+fn key_field_is_masked(revealed: bool) -> bool {
+    !revealed
+}
+
 pub fn render_setup(ui: &Ui, state: &mut AddonState, step: SetupStep) {
     theme::header(ui, &t("setup.title"));
 
@@ -126,11 +144,21 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
     ui.bullet_text("unlocks (recommended)");
     ui.spacing();
 
-    // Key input
+    // Key input — masked by default. This step (and the LLM key step below)
+    // is a screen a player may be streaming or screenshotting while pasting a
+    // live API key, so the raw value must be hideable.
     ui.text(t("setup.paste_key"));
-    ui.set_next_item_width(-1.0);
+    let show_gw2_key = SHOW_GW2_KEY.with(|c| c.get());
+    let toggle_label = if show_gw2_key { "Hide" } else { "Show" };
+    let toggle_w = theme::gold_button_width(ui, toggle_label) + 8.0;
+    ui.set_next_item_width(-toggle_w);
     ui.input_text("##gw2_key", &mut state.setup.gw2_key_input)
+        .password(key_field_is_masked(show_gw2_key))
         .build();
+    ui.same_line();
+    if theme::gold_button_sized(ui, toggle_label, [toggle_w - 8.0, 0.0]) {
+        SHOW_GW2_KEY.with(|c| c.set(!show_gw2_key));
+    }
     ui.spacing();
 
     // Validate button
@@ -141,11 +169,10 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
         let key = state.setup.gw2_key_input.clone();
         state.setup.gw2_key_status = KeyStatus::Validating;
 
-        // Run validation in a background thread.
+        // Run validation in a tracked background worker.
         // Always populate scope table even if required scopes are missing.
         let tx_key = key.clone();
-        let token = state.cancel_token.clone();
-        std::thread::spawn(move || {
+        let spawned = state.spawn_worker("setup-gw2-key-validate", move |token| {
             let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 // Reset the Validating spinner on every exit path (including cancel).
                 // Without this, navigating away mid-validation pins the status text on
@@ -242,6 +269,9 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
                 });
             }
         });
+        if !spawned {
+            state.setup.gw2_key_status = KeyStatus::Invalid("could not start validation".into());
+        }
     }
 
     ui.same_line();
@@ -354,15 +384,23 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
     ui.text_wrapped(url_instructions);
     ui.spacing();
 
-    // Key input
+    // Key input — masked by default; see the GW2 key step for why.
     let provider_label = state.config.active_provider.label();
     ui.text(tf(
         "setup.paste_provider_key",
         &[("provider", provider_label)],
     ));
-    ui.set_next_item_width(-1.0);
+    let show_llm_key = SHOW_LLM_KEY.with(|c| c.get());
+    let toggle_label = if show_llm_key { "Hide" } else { "Show" };
+    let toggle_w = theme::gold_button_width(ui, toggle_label) + 8.0;
+    ui.set_next_item_width(-toggle_w);
     ui.input_text("##llm_key", &mut state.setup.llm_key_input)
+        .password(key_field_is_masked(show_llm_key))
         .build();
+    ui.same_line();
+    if theme::gold_button_sized(ui, toggle_label, [toggle_w - 8.0, 0.0]) {
+        SHOW_LLM_KEY.with(|c| c.set(!show_llm_key));
+    }
     ui.spacing();
 
     // Validate button
@@ -374,8 +412,7 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
         let provider = state.config.active_provider.clone();
         state.setup.llm_key_status = KeyStatus::Validating;
 
-        let token = state.cancel_token.clone();
-        std::thread::spawn(move || {
+        let spawned = state.spawn_worker("setup-llm-key-validate", move |token| {
             let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 // Reset the Validating spinner on every exit path. Without this,
                 // a cancellation mid-validation pins the status on "Validating…".
@@ -471,6 +508,9 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
                 });
             }
         });
+        if !spawned {
+            state.setup.llm_key_status = KeyStatus::Invalid("could not start validation".into());
+        }
     }
 
     ui.same_line();
@@ -513,7 +553,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
             if theme::gold_button_sized(ui, t("btn.start_download"), [160.0, 0.0]) {
                 state.setup.download_progress = Some(DownloadState {
                     current_step: 0,
-                    total_steps: 13,
+                    total_steps: 14,
                     step_name: t("status.starting"),
                     inner_done: 0,
                     inner_total: 0,
@@ -522,9 +562,8 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                 });
 
                 let cache_dir = state.addon_dir.join("cache");
-                let token = state.cancel_token.clone();
 
-                std::thread::spawn(move || {
+                let spawned = state.spawn_worker("setup-data-download", move |token| {
                     let panic_result =
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             // Drive the download in a single labelled block so every exit
@@ -635,6 +674,17 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
                         });
                     }
                 });
+                if !spawned {
+                    state.setup.download_progress = Some(DownloadState {
+                        current_step: 0,
+                        total_steps: 0,
+                        step_name: String::new(),
+                        inner_done: 0,
+                        inner_total: 0,
+                        done: true,
+                        error: Some("could not start download".into()),
+                    });
+                }
             }
         }
         Some(dl) => {
@@ -673,6 +723,38 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
             state.screen = Screen::Setup(SetupStep::LlmApiKey);
         }
     }
+
+    ui.dummy([0.0, 10.0]);
+    crate::news::kick(state, &[gw2_core::config::NewsSource::Official]);
+    let items = state
+        .news
+        .items(gw2_core::config::NewsSource::Official)
+        .to_vec();
+    if state.config.news.show_images {
+        let urls: Vec<String> = items.iter().filter_map(|i| i.image_url.clone()).collect();
+        crate::news::kick_art(state, &urls);
+    }
+    let loading = state.news.loading;
+    let empty = t("news.unavailable");
+    let scale = state.config.font_scale;
+    let show_images = state.config.news.show_images;
+    crate::ui::news_feed::scroll_area(ui, "##setup_news", scale, || {
+        ui.text_colored(theme::GOLD, t("setup.news_header"));
+        crate::ui::news_feed::render_workspace(
+            ui,
+            crate::ui::news_feed::Workspace {
+                items: &items,
+                selected: &mut state.news.expanded,
+                loading,
+                empty: &empty,
+                layout: gw2_core::config::NewsLayout::Desk,
+                show_images,
+                auto_select: true,
+                id: "setup",
+                still_zoom: &mut state.news.still_zoom,
+            },
+        );
+    });
 }
 
 fn render_complete_step(ui: &Ui, state: &mut AddonState) {
@@ -687,5 +769,45 @@ fn render_complete_step(ui: &Ui, state: &mut AddonState) {
 
     if theme::gold_button_sized(ui, t("btn.get_started"), [160.0, 0.0]) {
         state.screen = Screen::Main;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The GW2 key and LLM key steps share this screen with a player who may
+    /// be streaming or screenshotting the overlay while pasting a live key.
+    /// `key_field_is_masked` is the exact function both `.password(...)` call
+    /// sites use, and the reveal toggles must default to hidden.
+    #[test]
+    fn setup_key_fields_are_masked() {
+        assert!(
+            key_field_is_masked(false),
+            "an un-revealed key field must render with the PASSWORD flag set"
+        );
+        assert!(
+            !key_field_is_masked(true),
+            "toggling reveal on must unmask the field"
+        );
+
+        let gw2_default_revealed = SHOW_GW2_KEY.with(|c| c.get());
+        let llm_default_revealed = SHOW_LLM_KEY.with(|c| c.get());
+        assert!(
+            !gw2_default_revealed,
+            "the GW2 key reveal toggle must default to hidden"
+        );
+        assert!(
+            !llm_default_revealed,
+            "the LLM key reveal toggle must default to hidden"
+        );
+        assert!(
+            key_field_is_masked(gw2_default_revealed),
+            "the GW2 key field must be masked on first render"
+        );
+        assert!(
+            key_field_is_masked(llm_default_revealed),
+            "the LLM key field must be masked on first render"
+        );
     }
 }

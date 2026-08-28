@@ -2,6 +2,80 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.7.19 - 2026-08-29
+
+Choya's mailbag is one box: type, Enter for a new line, select text and press B or click Bold/a colour. The flipped B icon is a real B now, and the row of `?` faces is gone — overlay fonts could not draw them. Formatting still shows in Looks like; the box itself is plain ImGui text.
+
+## 1.7.18 - 2026-08-28
+
+Mailbag has a row of faces (the BMP symbols Segoe UI can actually draw — not colour emoji; Nexus owns the font atlas, so the ImGui FreeType colour-glyph flags do not apply). A reply from the developer opens Messages and expands that row; the About tab still pulses if you were elsewhere.
+
+## 1.7.17 - 2026-08-28
+
+Choya's mailbag is a notepad bar: normal, bold, five text colours, bullets, numbers, left/center/right. You type plain sentences; Enter starts the next paragraph. Hover an icon for its name. Overlay fonts still have no real bold face — the preview doubles the ink by a pixel.
+
+## 1.7.16 - 2026-08-28
+
+Detail news stills default to 3× the old 240px cap, with a zoom slider and Reset. Article bodies (patch notes included) keep headings, nested bullets, and numbered lists instead of one cream brick. Choya's mailbag has H1/H2/H3, list, and number buttons plus a preview — overlay fonts still cannot bold.
+
+## 1.7.15 - 2026-08-28
+
+News filters are square icon buttons (all / article / notes / video / book). Hover shows the name and what it includes. Layout is Compact, Card, or Detail — radios, not a second capsule bar.
+
+## 1.7.14 - 2026-08-28
+
+Settings News sits in one full-width band: Desk / Magazine / Reader and Show stills on a single row, then four source columns. Cache and Benchmarks sit side by side under that, so the tab no longer needs a long scroll. The News desk list takes most of the pane so titles fit; stills keep their aspect (letterboxed, not stretched). Benchmark sync stamps a date even when a site returns nothing, restores counts from disk on load, and shows live progress instead of a stuck Syncing… / Never synced pair.
+
+## 1.7.13 - 2026-08-28
+
+News is a reading desk, not a stack of teaser cards. Settings groups sources by type (articles, patch notes, video, guides) and keeps stills on or off. The News tab filters by type, searches, and switches Desk (list + reader), Magazine (cells), or Reader (full article). Previous / Next, copy link, and open in browser sit on the article. YouTube is a thumbnail plus description — the overlay cannot play video.
+
+## 1.7.12 - 2026-08-28
+
+Clicking a news card opens the full article text from the feed (lists, headings, paragraphs), not the two-line "Read More" teaser. Compact cards still show the short blurb.
+
+## 1.7.11 - 2026-08-28
+
+Settings News also lists official forum announcements. Cards use the short RSS description (not the HTML dump), and tracking junk is stripped from links.
+
+## 1.7.10 - 2026-08-28
+
+Setup game-data now fills the wait with official Guild Wars 2 RSS cards. Click a card to read it; the others shrink. Settings has a News checklist (official, patch notes, ArenaNet YouTube, GuildJen). Tick any source and a News tab appears so you can sort a timeline or group by source.
+
+## 1.7.9 - 2026-08-28
+
+What's new on the About tab uses the same text size as the rest of the overlay, gold version headings, and cream body text. The full changelog scrolls instead of the last five notes.
+
+## 1.7.8 - 2026-08-28
+
+Gear locks live on the ARMOR / TRINKETS / WEAPONS sheet. Click a piece to pin it (bright blue name, gold ring — same language as a selected trait) or click again to release (dim grey). The old checkbox list under Locks is gone. Lock All / Unlock All still covers gear.
+
+## 1.7.7 - 2026-08-28
+
+Pet portraits sit in a padded 256px canvas, so they looked half-size next to skill icons. They now crop-zoom to fill the same box as utilities.
+
+## 1.7.6 - 2026-08-28
+
+Pet skills take less leftover width (~30% narrower); that space goes to the utility skills.
+
+## 1.7.5 - 2026-08-28
+
+The SKILLS card title is gone. That header row is now three areas — PET SKILLS, UTILITY SKILLS, ELITE SKILL — each with its own gold tick. Slots sit directly under those titles.
+
+## 1.7.4 - 2026-08-28
+
+The skill bar is three groups — PET SKILLS, UTILITY SKILLS, ELITE SKILL — with centered headers. Utility and elite squeeze so ranger pets keep a full two-line name (Siege / Turtle) instead of cutting off. Skill names center in the box, or wrap to two lines when they are more than one word.
+
+## 1.7.3 - 2026-08-28
+
+Overlay fonts cannot draw colour emoji, so viability rows showed `?` instead of pass/fail and `?1` instead of `>= 1`. Those are now `OK`/`NO` and `>=`. Ranger pets sit on the skill row with skill-sized icons, utilities and elite squeeze to the right, and the SKILLS header uses the same gold-tick title as the other cards. Choya "some Plaguedoctor" no longer paints every slot (emits `gear_slots` for the mixed pieces).
+
+## 1.7.2 - 2026-08-28
+
+**Ranger pets are part of the build.** Current and Optimized now keep the equipped terrestrial pets, resolve `/v2/pets` names instead of `#66`, and show pet chips (icon + hover) on the skill bar. Refresh game data once so the pet catalog and icons land.
+
+Gear lock "Click to lock" tooltips only appear while the cursor is on that row, so they no longer follow the mouse off the overlay.
+
 ## 1.7.0 - 2026-08-26
 
 **Per-slot gear prefixes — full hybrid builds.** Every weapon, armor piece, and trinket now carries its own single-stat prefix, individually chosen by the optimizer, lockable by you, and proposed by Choya. Berserker's weapons with a Cavalier's chest and Cleric's rings is now one optimize click.

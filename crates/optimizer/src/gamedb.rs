@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use gw2_api::cache::DataCache;
 use gw2_api::models::{
-    Item, ItemStat, Legend, Profession, PvpAmulet, Skill, Specialization, Trait as GW2Trait,
+    Item, ItemStat, Legend, Pet, Profession, PvpAmulet, Skill, Specialization, Trait as GW2Trait,
 };
 
 /// In-memory indexed game database loaded from cache.
@@ -21,6 +21,8 @@ pub struct GameDb {
     pub professions: HashMap<String, Profession>,
     pub legends: HashMap<String, Legend>,
     pub pvp_amulets: HashMap<u32, PvpAmulet>,
+    /// Ranger pets. Empty until the cache has a `pets` download.
+    pub pets: HashMap<u32, Pet>,
 
     // Derived indexes for fast lookups
     pub skills_by_profession: HashMap<String, Vec<u32>>,
@@ -79,6 +81,10 @@ impl GameDb {
             .load("pvp_amulets")
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
+        let pets_vec: Vec<Pet> = cache
+            .load("pets")
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
 
         // Validate critical data is non-empty
         if professions_vec.is_empty() {
@@ -109,6 +115,7 @@ impl GameDb {
             legends_vec.into_iter().map(|l| (l.id.clone(), l)).collect();
         let pvp_amulets: HashMap<u32, PvpAmulet> =
             pvp_amulets_vec.into_iter().map(|a| (a.id, a)).collect();
+        let pets: HashMap<u32, Pet> = pets_vec.into_iter().map(|p| (p.id, p)).collect();
 
         // Build derived indexes
         let mut skills_by_profession: HashMap<String, Vec<u32>> = HashMap::new();
@@ -268,6 +275,7 @@ impl GameDb {
             professions,
             legends,
             pvp_amulets,
+            pets,
             skills_by_profession,
             traits_by_spec,
             items_by_type,
@@ -374,6 +382,15 @@ impl GameDb {
                 add(&a.name, loc);
             }
         }
+        for (id, loc) in &names.pets {
+            if let Some(p) = self.pets.get(id) {
+                add(&p.name, loc);
+                let compact = p.name.trim_start_matches("Juvenile ");
+                if compact != p.name {
+                    add(compact, loc);
+                }
+            }
+        }
         self.localized = Some(std::sync::Arc::new(names));
     }
 
@@ -407,6 +424,40 @@ impl GameDb {
             .and_then(|l| l.items.get(&id))
             .map(String::as_str)
             .unwrap_or(fallback)
+    }
+
+    pub fn loc_pet<'a>(&'a self, id: u32, fallback: &'a str) -> &'a str {
+        self.localized
+            .as_ref()
+            .and_then(|l| l.pets.get(&id))
+            .map(String::as_str)
+            .unwrap_or(fallback)
+    }
+
+    /// English display name for a ranger pet id, or `#id` when the catalog
+    /// has not been downloaded yet.
+    pub fn pet_display_name(&self, id: u32) -> String {
+        self.pets
+            .get(&id)
+            .map(|p| self.loc_pet(id, &p.name).to_string())
+            .unwrap_or_else(|| format!("#{id}"))
+    }
+
+    pub fn pet_by_name(&self, needle: &str) -> Option<&Pet> {
+        let needle = needle.trim();
+        if needle.is_empty() {
+            return None;
+        }
+        if let Some(id) = needle.strip_prefix('#').and_then(|s| s.parse::<u32>().ok()) {
+            return self.pets.get(&id);
+        }
+        let compact = needle.trim_start_matches("Juvenile ");
+        self.pets.values().find(|p| {
+            p.name.eq_ignore_ascii_case(needle)
+                || p.name
+                    .trim_start_matches("Juvenile ")
+                    .eq_ignore_ascii_case(compact)
+        })
     }
 
     pub fn loc_prefix<'a>(&'a self, english: &'a str) -> &'a str {
@@ -610,6 +661,7 @@ impl GameDb {
             professions: HashMap::new(),
             legends: HashMap::new(),
             pvp_amulets: HashMap::new(),
+            pets: HashMap::new(),
             skills_by_profession: HashMap::new(),
             traits_by_spec: HashMap::new(),
             items_by_type: HashMap::new(),
@@ -793,5 +845,24 @@ mod tests {
         db.attach_localized(names);
         assert_eq!(db.loc_skill(1, "Signet of Malice"), "Sceau de malice");
         assert_eq!(db.loc_name("Signet of Malice"), "Sceau de malice");
+    }
+
+    #[test]
+    fn pet_display_name_uses_catalog_or_hash_id() {
+        let mut db = GameDb::empty_for_tests();
+        assert_eq!(db.pet_display_name(66), "#66");
+        db.pets.insert(
+            66,
+            Pet {
+                id: 66,
+                name: "Juvenile Smokescale".into(),
+                description: None,
+                icon: None,
+                skills: vec![],
+            },
+        );
+        assert_eq!(db.pet_display_name(66), "Juvenile Smokescale");
+        assert_eq!(db.pet_by_name("Smokescale").map(|p| p.id), Some(66));
+        assert_eq!(db.pet_by_name("#66").map(|p| p.id), Some(66));
     }
 }

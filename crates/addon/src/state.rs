@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use crate::ui::chat_bar::ChatBarState;
 use crate::ui::comparison::ComparisonState;
@@ -36,6 +38,189 @@ impl CancellationToken {
     }
 }
 
+// ── Background workers ───────────────────────────────────────────────────────
+//
+// Every background thread the addon starts goes through `AddonState::spawn_worker`
+// so that unload has something to wait for. The rules the rest of the addon can
+// rely on:
+//
+//   * the worker gets its own `CancellationToken` clone and must poll it,
+//   * its `JoinHandle` is tracked here until it finishes,
+//   * a panic inside the worker is caught and logged, never unwound,
+//   * `on_unload` cancels, then waits `UNLOAD_JOIN_BUDGET` for the stragglers.
+
+/// How long unload waits for background workers before giving up on them.
+///
+/// Nexus calls `on_unload` on the game's main thread, so every millisecond spent
+/// waiting is a frozen game. A worker parked in a blocking HTTP read can take far
+/// longer than this to notice its cancel flag, so this is a budget, not a
+/// guarantee — see [`join_workers`].
+pub const UNLOAD_JOIN_BUDGET: Duration = Duration::from_millis(1500);
+
+/// How often [`join_bounded`] re-checks whether a worker has finished.
+const JOIN_POLL_INTERVAL: Duration = Duration::from_millis(2);
+
+/// Diagnostics from the worker plumbing.
+///
+/// `nexus::log::log` needs the Nexus API table, which unit tests do not have
+/// (same reason `lock_state` uses `eprintln!`), so test builds go to stderr.
+fn worker_log(message: String) {
+    #[cfg(test)]
+    eprintln!("[GW2BuildOpt] {}", message);
+    #[cfg(not(test))]
+    nexus::log::log(
+        nexus::log::LogLevel::Warning,
+        "GW2 Build Optimizer",
+        message,
+    );
+}
+
+/// One background worker, tracked so unload can wait for it.
+struct TrackedWorker {
+    /// Static label used for the OS thread name and for shutdown/panic logs.
+    name: &'static str,
+    handle: JoinHandle<()>,
+}
+
+impl TrackedWorker {
+    /// Join a worker that has **already finished** and report whether it died panicking.
+    ///
+    /// Callers check `JoinHandle::is_finished()` first, so this never blocks. In
+    /// practice the `Err` arm is unreachable: `spawn_worker` catches the worker
+    /// body's unwind itself, so only a panic in the logging path could get here.
+    fn reap(self) -> bool {
+        let name = self.name;
+        match self.handle.join() {
+            Ok(()) => false,
+            Err(_payload) => {
+                worker_log(format!("background worker unwound: {}", name));
+                true
+            }
+        }
+    }
+}
+
+/// Handles of the background workers this addon started.
+///
+/// A `Mutex` rather than a plain `Vec` because [`AddonState::spawn_worker`] takes
+/// `&self`: almost every call site runs inside `with_state(|s| …)` during a render
+/// frame, and some (the feedback tasks) hold only `&AddonState`.
+///
+/// Lock order is always STATE → registry, never the reverse: nothing inside these
+/// methods reaches back for `STATE`. Unload moves the handles *out* through
+/// [`WorkerRegistry::take_all`] and waits on them with STATE released, because
+/// workers publish their results through `with_state` and would otherwise be
+/// blocked on the very lock unload is holding.
+#[derive(Default)]
+struct WorkerRegistry {
+    live: Mutex<Vec<TrackedWorker>>,
+}
+
+impl WorkerRegistry {
+    /// Poison-tolerant lock: a worker that panicked must not take the registry
+    /// with it (matching `lock_state`'s recovery).
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<TrackedWorker>> {
+        self.live.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Track `handle`, first reaping workers that already finished.
+    ///
+    /// Without the reap a long session leaks a handle per spawn — the API-health
+    /// worker alone starts one a minute — and unload would then walk a list of
+    /// hundreds of corpses.
+    fn register(&self, name: &'static str, handle: JoinHandle<()>) {
+        let mut live = self.lock();
+        let mut kept = Vec::with_capacity(live.len() + 1);
+        for worker in std::mem::take(&mut *live) {
+            if worker.handle.is_finished() {
+                worker.reap();
+            } else {
+                kept.push(worker);
+            }
+        }
+        kept.push(TrackedWorker { name, handle });
+        *live = kept;
+    }
+
+    /// Move every tracked handle out, leaving the registry empty.
+    fn take_all(&self) -> Vec<TrackedWorker> {
+        std::mem::take(&mut *self.lock())
+    }
+
+    /// Tracked handles: live workers plus any that finished since the last spawn.
+    fn len(&self) -> usize {
+        self.lock().len()
+    }
+}
+
+/// What [`join_workers`] achieved inside its budget.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShutdownReport {
+    /// Workers that had finished and were joined.
+    pub joined: usize,
+    /// Of `joined`, how many unwound out of their own panic guard.
+    pub panicked: usize,
+    /// Workers still running when the budget expired. Their handles were dropped,
+    /// which detaches them: the threads keep running with the cancel flag set.
+    pub abandoned: Vec<&'static str>,
+    /// Wall-clock time actually spent waiting.
+    pub waited: Duration,
+}
+
+impl std::fmt::Display for ShutdownReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} worker(s) joined in {} ms",
+            self.joined,
+            self.waited.as_millis()
+        )?;
+        if self.panicked > 0 {
+            write!(f, ", {} panicked", self.panicked)?;
+        }
+        if !self.abandoned.is_empty() {
+            write!(f, ", still running: {}", self.abandoned.join(", "))?;
+        }
+        Ok(())
+    }
+}
+
+/// Wait up to `budget` for `pending` to finish, joining each worker as it does.
+///
+/// Never calls `join()` on a worker that is still running: a blocking join is
+/// exactly the unload hang this replaces. Polling `is_finished()` keeps the total
+/// wait inside the budget no matter how wedged a worker is.
+fn join_bounded(mut pending: Vec<TrackedWorker>, budget: Duration) -> ShutdownReport {
+    let started = Instant::now();
+    let mut report = ShutdownReport::default();
+    loop {
+        let mut still_running = Vec::with_capacity(pending.len());
+        for worker in pending {
+            if worker.handle.is_finished() {
+                report.joined += 1;
+                if worker.reap() {
+                    report.panicked += 1;
+                }
+            } else {
+                still_running.push(worker);
+            }
+        }
+        pending = still_running;
+        if pending.is_empty() || started.elapsed() >= budget {
+            break;
+        }
+        std::thread::sleep(JOIN_POLL_INTERVAL);
+    }
+    report.abandoned = pending.iter().map(|w| w.name).collect();
+    report.waited = started.elapsed();
+    // ponytail: dropping `pending` detaches those threads. They keep running with
+    // the cancel flag set, and if Nexus frees the DLL before one returns, the game
+    // crashes. Closing that window is WP0.2b/c/d's job (cancel-aware HTTP reads and
+    // retry sleeps, so workers observe the flag in milliseconds); raising the budget
+    // here would only trade a rare crash for a routine multi-second freeze.
+    report
+}
+
 pub struct AddonState {
     pub window_visible: bool,
     /// Set when the overlay opens; consumed on the next Main render.
@@ -51,16 +236,97 @@ pub struct AddonState {
     /// Cancellation token — cloned into every background thread.
     /// Cancelled on addon unload so threads exit early.
     pub cancel_token: CancellationToken,
+    /// Handles of the workers started by [`AddonState::spawn_worker`], so unload
+    /// can wait for them. Private on purpose: nothing outside this module may
+    /// start an untracked thread.
+    workers: WorkerRegistry,
     /// Next frame: pin the overlay to [80, 80] (off-screen imgui.ini / Reset button).
     pub force_window_pos: bool,
+    /// Official RSS (setup) + News tab feeds. Fetched on a worker, never on the download thread.
+    pub news: crate::news::NewsState,
 }
 
 impl AddonState {
+    /// Start a tracked background worker — the addon's only production thread launch.
+    ///
+    /// * `name` — short static label. Becomes the OS thread name (`gw2bo-<name>`)
+    ///   and identifies the worker in panic and shutdown logs.
+    /// * `work` — the worker body. It is handed its own [`CancellationToken`] clone
+    ///   and must poll [`CancellationToken::is_cancelled`] wherever it would
+    ///   otherwise keep going for a while: unload waits only [`UNLOAD_JOIN_BUDGET`]
+    ///   before abandoning it.
+    ///
+    /// Takes `&self`, not `&mut self`, because nearly every call site is already
+    /// inside `with_state(|s| …)` on the render thread and some hold only a shared
+    /// borrow. The helper never locks `STATE` itself — doing so would deadlock the
+    /// frame that is calling it.
+    ///
+    /// The body runs under `catch_unwind`: a panicking worker is logged and its
+    /// thread exits normally instead of unwinding into the runtime. A call site
+    /// therefore does not need its own guard for *containment* — only for the work
+    /// it must still do on the panic path, such as clearing a "loading" flag
+    /// through `with_state` so the UI does not spin forever.
+    ///
+    /// Returns `false` when the OS refused to create the thread, in which case the
+    /// work never started — a caller that set a "loading" flag first should clear it.
+    pub fn spawn_worker<F>(&self, name: &'static str, work: F) -> bool
+    where
+        F: FnOnce(CancellationToken) + Send + 'static,
+    {
+        let token = self.cancel_token.clone();
+        let spawned = std::thread::Builder::new()
+            .name(format!("gw2bo-{}", name))
+            .spawn(move || {
+                // Bind this worker's token to the LLM transports before the body
+                // runs. They cannot take a token in their signature — `LlmClient`
+                // is a `&self` trait shared across threads — so they poll a
+                // thread-local predicate between SSE lines, between retry-backoff
+                // slices, and between tool-loop turns. Without this bind that
+                // predicate is always false and a worker parked in a blocking
+                // socket read ignores cancellation entirely, outliving
+                // UNLOAD_JOIN_BUDGET no matter how diligently the body polls its
+                // own token. Thread-local, so cancelling one worker cannot abort
+                // an unrelated request on another thread; dropped with the thread.
+                let transport_token = token.clone();
+                let _transport_cancel = gw2_optimizer::llm::cancel::CancelScope::new(move || {
+                    transport_token.is_cancelled()
+                });
+                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || work(token)))
+                    .is_err()
+                {
+                    worker_log(format!("background worker panicked: {}", name));
+                }
+            });
+        match spawned {
+            Ok(handle) => {
+                self.workers.register(name, handle);
+                true
+            }
+            Err(err) => {
+                // `std::thread::spawn` panics on this path; a game overlay must not.
+                worker_log(format!(
+                    "could not start background worker {}: {}",
+                    name, err
+                ));
+                false
+            }
+        }
+    }
+
+    /// Tracked worker handles: still running, plus any that finished since the
+    /// last `spawn_worker` reaped the list.
+    pub fn worker_count(&self) -> usize {
+        self.workers.len()
+    }
+
     /// Reset persisted settings and transient UI state back to first-run setup.
     pub fn reset_to_first_run(&mut self) -> Result<(), std::io::Error> {
         let config = AppConfig::default();
         config.save(&self.config_path)?;
 
+        // Workers started before the reset keep the old token, which is cancelled
+        // here, so they wind down on their own. Their handles stay in the registry
+        // and unload still waits for them; only new workers get the fresh token.
         self.cancel_token.cancel();
         self.cancel_token = CancellationToken::new();
         self.config = config;
@@ -69,6 +335,7 @@ impl AddonState {
         let mut main = MainState::default();
         main.weights = OptimizationWeights::default_for_mode(main.game_mode.label());
         self.main = main;
+        self.news = crate::news::NewsState::default();
         self.screen = Screen::Setup(SetupStep::Language);
 
         Ok(())
@@ -107,8 +374,15 @@ pub struct MainState {
     pub comparison: ComparisonState,
     // Chat bar
     pub chat: ChatBarState,
-    // GameDb (loaded once on main screen entry)
-    pub game_db: Option<GameDb>,
+    /// Game database, loaded once on main-screen entry and shared from there on.
+    ///
+    /// `Arc` rather than a plain `GameDb`: every background worker needs its own
+    /// reference, and the database is tens of megabytes, so the old
+    /// `state.main.game_db.clone()` at each spawn site was a deep copy taken on the
+    /// render thread while holding STATE. Cloning the `Arc` is a refcount bump.
+    /// Publish a new one with [`MainState::set_game_db`] and mutate in place with
+    /// [`MainState::game_db_mut`].
+    pub game_db: Option<Arc<GameDb>>,
     pub game_db_loading: bool,
     /// Last failed auto-load attempt — gates the per-frame retry so a
     /// persistently failing GameDb build cannot spawn a loader every frame.
@@ -130,6 +404,10 @@ pub struct MainState {
     // Save/Load
     pub saved_builds: Vec<SavedBuild>,
     pub saved_builds_loaded: bool,
+    /// Basenames of `.json` files in the saves directory that failed to
+    /// parse on the last load, so the Save/Load tab can warn the player
+    /// instead of only logging (C29). Repopulated alongside `saved_builds`.
+    pub saved_builds_skipped: Vec<String>,
     pub save_name_input: String,
     pub save_status: Option<String>,
     pub save_status_err: bool,
@@ -166,7 +444,7 @@ pub struct MainState {
     pub note_drafts: std::collections::HashMap<String, String>,
     /// Generation for in-flight kitchen orders. Timeout and send bump it; late applies are ignored.
     pub chat_epoch: u64,
-    /// Wall-clock start of the current kitchen wait (90s, not frame-counted).
+    /// Wall-clock start of the current kitchen wait (120s, not frame-counted).
     pub chat_wait_started: Option<std::time::Instant>,
     /// Frame counter for "Copied!" tooltip feedback.
     pub copy_feedback_frames: u32,
@@ -222,6 +500,27 @@ pub struct MainState {
 }
 
 impl MainState {
+    /// Publish a freshly loaded game database.
+    ///
+    /// Workers still holding a clone of the previous `Arc` keep reading it until
+    /// they finish; only new clones see this one.
+    pub fn set_game_db(&mut self, db: GameDb) {
+        self.game_db = Some(Arc::new(db));
+    }
+
+    /// Mutable access to the loaded database, for in-place edits such as attaching
+    /// a localized name pack.
+    ///
+    /// Copy-on-write: if a background worker is holding a clone right now, this
+    /// deep-copies once so the worker's snapshot is not mutated underneath it.
+    // ponytail: that copy lands on the render thread. It only fires while a worker
+    // is mid-flight, and the alternative (`Arc::get_mut`) silently skips the edit
+    // instead. Publishing an already-localized database via `set_game_db` avoids
+    // both — worth doing when the localization call sites are next opened.
+    pub fn game_db_mut(&mut self) -> Option<&mut GameDb> {
+        self.game_db.as_mut().map(Arc::make_mut)
+    }
+
     /// Clear the currently resolved build view so the UI never shows stale data.
     pub fn clear_resolved_view(&mut self) {
         self.current_build = None;
@@ -229,6 +528,31 @@ impl MainState {
         self.comparison.current_combat_solo = None;
         self.comparison.current_combat_party = None;
         self.comparison.current_combat_squad = None;
+    }
+
+    fn hydrate_benchmarks_from_disk(&mut self, addon_dir: &std::path::Path) {
+        if self.benchmark_last_synced.is_some() {
+            return;
+        }
+        let builds = gw2_optimizer::scraper::load_benchmarks(addon_dir);
+        if builds.is_empty() {
+            return;
+        }
+        let mut counts = std::collections::HashMap::new();
+        for b in &builds {
+            *counts.entry(b.source.clone()).or_insert(0) += 1;
+        }
+        self.benchmark_counts = counts;
+        let stamp = std::fs::metadata(addon_dir.join("benchmarks"))
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .map(|t| {
+                chrono::DateTime::<chrono::Utc>::from(t)
+                    .format("%Y-%m-%d")
+                    .to_string()
+            })
+            .unwrap_or_else(|| "disk".into());
+        self.benchmark_last_synced = Some(stamp);
     }
 }
 
@@ -249,6 +573,7 @@ pub enum MainTab {
     Improve,
     Talk,
     SaveLoad,
+    News,
     Settings,
     About,
 }
@@ -390,6 +715,7 @@ pub fn init(addon_dir: PathBuf) {
     };
     main.weights = OptimizationWeights::default_for_mode(main.game_mode.label());
     main.chat.history = crate::ui::chat_bar::load_history(&addon_dir);
+    main.hydrate_benchmarks_from_disk(&addon_dir);
     crate::ui::icons::set_graphics_dir(addon_dir.join("cache").join("graphics"));
     *lock_state() = Some(AddonState {
         window_visible: config.window_visible,
@@ -401,7 +727,9 @@ pub fn init(addon_dir: PathBuf) {
         setup,
         main,
         cancel_token: CancellationToken::new(),
+        workers: WorkerRegistry::default(),
         force_window_pos: false,
+        news: crate::news::NewsState::default(),
     });
 }
 
@@ -430,9 +758,47 @@ pub fn is_window_visible() -> bool {
         .unwrap_or(false)
 }
 
+/// Ask every background worker to stop, and return immediately.
+///
+/// Unload calls this before it persists the window rect so the workers have that
+/// disk write worth of head start on their cancel checks; [`join_workers`] then
+/// does the waiting. Safe to call when the addon was never initialised.
+pub fn request_shutdown() {
+    if let Some(state) = lock_state().as_ref() {
+        state.cancel_token.cancel();
+    }
+}
+
+/// Cancel every tracked worker and wait up to `budget` for them to finish.
+///
+/// The STATE mutex is taken only long enough to flip the cancel flag and move the
+/// handles out; the wait itself happens with STATE **released**. Workers publish
+/// their results through `with_state`, so waiting while holding it would deadlock
+/// the game on unload — which is the whole reason this is a free function and not
+/// a method that runs under the caller's guard.
+///
+/// Workers that are still running when the budget expires are detached and named
+/// in the returned [`ShutdownReport`].
+pub fn join_workers(budget: Duration) -> ShutdownReport {
+    let pending = {
+        let mut guard = lock_state();
+        match guard.as_mut() {
+            Some(state) => {
+                state.cancel_token.cancel();
+                state.workers.take_all()
+            }
+            None => Vec::new(),
+        }
+    };
+    join_bounded(pending, budget)
+}
+
 /// Clear state on addon unload.
 /// Cancels the token first so background threads exit early,
 /// then drops the state to release all resources.
+///
+/// This does **not** wait: call [`join_workers`] before it. Any handle still
+/// tracked when the state drops is detached, not joined.
 pub fn clear() {
     let mut guard = lock_state();
     if let Some(ref state) = *guard {
@@ -868,6 +1234,364 @@ mod tests {
         assert!(
             with_state(|_s| ()).is_none(),
             "state must be None after clear"
+        );
+    }
+
+    // ── spawn_worker / join_workers ──────────────────────────────────────────
+    //
+    // These cover the unload contract: every worker is tracked, cancellation is
+    // what makes it stop, the wait is bounded, and a panicking worker cannot
+    // take the addon with it.
+
+    /// Fresh STATE rooted at a per-test temp dir.
+    fn init_worker_test(label: &str) {
+        reset_state();
+        let dir =
+            std::env::temp_dir().join(format!("gw2_state_test_{}_{}", std::process::id(), label));
+        std::fs::create_dir_all(&dir).unwrap();
+        init(dir);
+    }
+
+    /// Spin until `flag` is set or `limit` elapses. Returns whether it was set.
+    fn wait_for(flag: &Arc<AtomicBool>, limit: Duration) -> bool {
+        let start = Instant::now();
+        while !flag.load(Ordering::SeqCst) {
+            if start.elapsed() >= limit {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        true
+    }
+
+    /// G4 wiring, not plumbing: the LLM transports poll a *thread-local*
+    /// predicate because `LlmClient` takes `&self` and cannot carry a
+    /// per-request token. This proves `spawn_worker` binds that predicate to
+    /// the addon's own `CancellationToken`, so a worker body that never
+    /// mentions `llm::cancel` still gets its blocking HTTP reads and retry
+    /// backoffs cancelled by the same flag `on_unload` sets.
+    ///
+    /// The worker deliberately ignores the token it is handed — polling that
+    /// would only prove the closure works, which was never in doubt.
+    #[test]
+    fn spawn_worker_installs_cancel_scope() {
+        use gw2_optimizer::llm::cancel::is_cancelled as transport_cancelled;
+
+        let _serial = state_test_guard();
+        init_worker_test("cancel_scope");
+
+        // Nothing on this thread has a scope, so anything the worker observes
+        // can only have come from `spawn_worker`.
+        assert!(
+            !transport_cancelled(),
+            "the test thread must not carry a cancel scope of its own"
+        );
+
+        let started = Arc::new(AtomicBool::new(false));
+        let clear_before_cancel = Arc::new(AtomicBool::new(false));
+        let saw_transport_cancel = Arc::new(AtomicBool::new(false));
+        let (w_started, w_clear, w_saw) = (
+            started.clone(),
+            clear_before_cancel.clone(),
+            saw_transport_cancel.clone(),
+        );
+
+        let spawned = with_state(|s| {
+            s.spawn_worker("test-cancel-scope", move |_token| {
+                // A live scope reads false until the token is cancelled; this
+                // is what an in-flight LLM stream sees between lines.
+                w_clear.store(!transport_cancelled(), Ordering::SeqCst);
+                w_started.store(true, Ordering::SeqCst);
+                // Bounded so a broken bind fails the assertion instead of
+                // leaving a thread spinning for the rest of the run.
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !transport_cancelled() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                w_saw.store(transport_cancelled(), Ordering::SeqCst);
+            })
+        })
+        .expect("state must be initialised");
+        assert!(spawned, "spawn_worker must report that the thread started");
+
+        assert!(
+            wait_for(&started, Duration::from_secs(5)),
+            "worker body must actually run"
+        );
+        assert!(
+            clear_before_cancel.load(Ordering::SeqCst),
+            "the transport predicate must read false before cancellation"
+        );
+
+        // The production cancel path, byte for byte what `on_unload` calls
+        // first. Nothing here touches `llm::cancel` directly.
+        request_shutdown();
+
+        assert!(
+            wait_for(&saw_transport_cancel, Duration::from_secs(5)),
+            "the transport predicate must observe the addon's CancellationToken; \
+             without the bind in spawn_worker it stays false forever and a worker \
+             parked in a socket read never notices unload"
+        );
+
+        // Thread-local, not a process-wide flag: cancelling one worker must not
+        // abort an unrelated request on another thread.
+        assert!(
+            !transport_cancelled(),
+            "the worker's scope must not leak onto the render thread"
+        );
+
+        let report = join_workers(Duration::from_secs(5));
+        assert_eq!(report.joined, 1, "tracked worker must be joined: {report}");
+        assert!(
+            report.abandoned.is_empty(),
+            "worker must stop on cancel, not time out: {report}"
+        );
+
+        clear();
+    }
+
+    #[test]
+    fn spawn_worker_registers_handle() {
+        let _serial = state_test_guard();
+        init_worker_test("spawn_registers");
+
+        let started = Arc::new(AtomicBool::new(false));
+        let saw_cancel = Arc::new(AtomicBool::new(false));
+        // Escape hatch: if cancellation is broken, this releases the worker so a
+        // failing assertion does not leave a thread spinning for the whole run.
+        let release = Arc::new(AtomicBool::new(false));
+        let (w_started, w_saw_cancel, w_release) =
+            (started.clone(), saw_cancel.clone(), release.clone());
+
+        // Spawned from inside `with_state`, i.e. while holding the STATE mutex —
+        // exactly what a render frame does. If `spawn_worker` ever locked STATE
+        // itself, this line would deadlock instead of returning.
+        let spawned = with_state(|s| {
+            s.spawn_worker("test-registers", move |token| {
+                w_started.store(true, Ordering::SeqCst);
+                while !token.is_cancelled() && !w_release.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                w_saw_cancel.store(token.is_cancelled(), Ordering::SeqCst);
+            })
+        })
+        .expect("state must be initialised");
+        assert!(spawned, "spawn_worker must report that the thread started");
+
+        assert!(
+            wait_for(&started, Duration::from_secs(5)),
+            "worker body must actually run"
+        );
+        assert_eq!(
+            with_state(|s| s.worker_count()),
+            Some(1),
+            "the JoinHandle must be tracked while the worker is live"
+        );
+
+        // Nothing in this test holds a handle: a join can only come from
+        // `join_workers` walking the registry that `spawn_worker` filled in.
+        let report = join_workers(Duration::from_secs(5));
+        release.store(true, Ordering::SeqCst);
+
+        assert_eq!(report.joined, 1, "tracked worker must be joined: {report}");
+        assert_eq!(report.panicked, 0, "clean worker must not report a panic");
+        assert!(
+            report.abandoned.is_empty(),
+            "worker must stop on cancel, not time out: {report}"
+        );
+        assert!(
+            saw_cancel.load(Ordering::SeqCst),
+            "worker must exit because its own token clone was cancelled"
+        );
+        assert_eq!(
+            with_state(|s| s.worker_count()),
+            Some(0),
+            "join_workers must drain the registry"
+        );
+
+        clear();
+    }
+
+    #[test]
+    fn join_workers_is_bounded_when_worker_ignores_cancel() {
+        let _serial = state_test_guard();
+        init_worker_test("join_bounded");
+
+        let release = Arc::new(AtomicBool::new(false));
+        let started = Arc::new(AtomicBool::new(false));
+        let (w_release, w_started) = (release.clone(), started.clone());
+
+        with_state(|s| {
+            s.spawn_worker("test-wedged", move |_token| {
+                // Deliberately ignores the token: models a worker parked in a
+                // blocking HTTP read that cannot see the flag yet.
+                w_started.store(true, Ordering::SeqCst);
+                while !w_release.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            })
+        });
+        assert!(wait_for(&started, Duration::from_secs(5)));
+
+        let began = Instant::now();
+        let report = join_workers(Duration::from_millis(120));
+        let waited = began.elapsed();
+        release.store(true, Ordering::SeqCst);
+
+        assert_eq!(
+            report.abandoned,
+            vec!["test-wedged"],
+            "a wedged worker must be reported by name: {report}"
+        );
+        assert_eq!(report.joined, 0);
+        // A blocking `JoinHandle::join` would sit here until the worker returned.
+        // This bound is what keeps unload from freezing the game.
+        assert!(
+            waited < Duration::from_secs(2),
+            "join must respect its budget, waited {waited:?}"
+        );
+
+        clear();
+    }
+
+    #[test]
+    fn spawn_worker_contains_a_panicking_worker() {
+        let _serial = state_test_guard();
+        init_worker_test("spawn_panic");
+
+        // The panic message this prints to stderr is expected output.
+        with_state(|s| s.spawn_worker("test-panics", |_token| panic!("worker boom")));
+
+        let report = join_workers(Duration::from_secs(5));
+        assert_eq!(
+            report.joined, 1,
+            "panicking worker still gets joined: {report}"
+        );
+        assert_eq!(
+            report.panicked, 0,
+            "the worker's own guard must swallow the unwind before the thread ends"
+        );
+        assert!(report.abandoned.is_empty());
+        assert!(
+            with_state(|s| s.worker_count()).is_some(),
+            "a panicking worker must not poison STATE"
+        );
+
+        clear();
+    }
+
+    #[test]
+    fn spawn_worker_reaps_finished_handles() {
+        let _serial = state_test_guard();
+        init_worker_test("spawn_reap");
+
+        // Long sessions spawn constantly (the API-health check alone once a
+        // minute). Without reaping, the registry would grow one dead handle per
+        // spawn and unload would walk a list of hundreds of corpses.
+        for _ in 0..8 {
+            let done = Arc::new(AtomicBool::new(false));
+            let w_done = done.clone();
+            with_state(|s| {
+                s.spawn_worker("test-brief", move |_token| {
+                    w_done.store(true, Ordering::SeqCst)
+                })
+            });
+            assert!(wait_for(&done, Duration::from_secs(5)));
+            // The flag is set by the closure's last statement; give the thread
+            // time to actually exit so `is_finished()` is true at the next spawn.
+            std::thread::sleep(Duration::from_millis(25));
+        }
+
+        // Reaping happens on spawn, so the newest handle is always still tracked
+        // and a straggler may not have flipped `is_finished` yet. A registry that
+        // never reaped would sit at 8.
+        let tracked = with_state(|s| s.worker_count()).unwrap();
+        assert!(
+            tracked <= 2,
+            "finished handles must be reaped, {tracked} still tracked after 8 spawns"
+        );
+
+        let report = join_workers(Duration::from_secs(5));
+        assert!(report.abandoned.is_empty(), "{report}");
+        clear();
+    }
+
+    #[test]
+    fn request_shutdown_cancels_workers_without_dropping_state() {
+        let _serial = state_test_guard();
+        init_worker_test("request_shutdown");
+
+        let token = with_state(|s| s.cancel_token.clone()).unwrap();
+        request_shutdown();
+
+        assert!(token.is_cancelled(), "workers must see the cancel flag");
+        assert!(
+            with_state(|_s| ()).is_some(),
+            "request_shutdown must not drop the state — unload still has to persist and join"
+        );
+
+        clear();
+    }
+
+    #[test]
+    fn unload_sequence_joins_before_it_drops_the_state() {
+        let _serial = state_test_guard();
+        init_worker_test("unload_sequence");
+
+        // A worker that publishes through `with_state` on its way out, like every
+        // real one does. If unload dropped the state before waiting, this would
+        // find None; if unload waited while holding STATE, it would never return.
+        let published = Arc::new(AtomicBool::new(false));
+        let started = Arc::new(AtomicBool::new(false));
+        let (w_published, w_started) = (published.clone(), started.clone());
+        with_state(|s| {
+            s.spawn_worker("test-unload", move |token| {
+                w_started.store(true, Ordering::SeqCst);
+                while !token.is_cancelled() {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                let seen = with_state(|_s| ()).is_some();
+                w_published.store(seen, Ordering::SeqCst);
+            })
+        });
+        assert!(wait_for(&started, Duration::from_secs(5)));
+
+        // Mirror of `lib.rs::on_unload` — keep the two in step.
+        request_shutdown();
+        persist_window();
+        let report = join_workers(UNLOAD_JOIN_BUDGET);
+        clear();
+
+        assert_eq!(
+            report.joined, 1,
+            "unload must wait for the worker: {report}"
+        );
+        assert!(report.abandoned.is_empty(), "{report}");
+        assert!(
+            published.load(Ordering::SeqCst),
+            "the state must still be reachable while unload waits, so a worker \
+             finishing mid-shutdown can publish instead of hitting a dropped state"
+        );
+        assert!(
+            with_state(|_s| ()).is_none(),
+            "unload must drop the state once the wait is over"
+        );
+    }
+
+    #[test]
+    fn join_workers_is_a_noop_without_state() {
+        let _serial = state_test_guard();
+        reset_state();
+
+        let began = Instant::now();
+        let report = join_workers(Duration::from_secs(5));
+
+        assert_eq!(report.joined, 0);
+        assert!(report.abandoned.is_empty());
+        assert!(
+            began.elapsed() < Duration::from_secs(1),
+            "with no state there is nothing to wait for"
         );
     }
 

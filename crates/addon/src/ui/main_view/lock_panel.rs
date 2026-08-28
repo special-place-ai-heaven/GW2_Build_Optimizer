@@ -2,7 +2,7 @@
 //! Renders hexagons (specs) + 3×3 circle grids (traits) in the content area.
 //! Click to lock/unlock — locked items are preserved by the optimizer.
 
-use gw2_core::i18n::{t, tf};
+use gw2_core::i18n::{slavic_plural_form, t, tf, SlavicPluralForm};
 use gw2_core::types::{BuildLocks, GearSlot};
 use gw2_optimizer::gamedb::GameDb;
 use nexus::imgui::Ui;
@@ -177,6 +177,21 @@ fn brighten(color: [f32; 4], t: f32, amount: f32) -> [f32; 4] {
         color[2] + (1.0 - color[2]) * k,
         color[3],
     ]
+}
+
+/// Which `fmt.lock_*` catalog key the lock-count indicator selects for `n`
+/// locked items, per the CLDR Slavic plural rule (Polish/Russian need a
+/// distinct "few" form for 2-4; every other catalog has `fmt.lock_few` equal
+/// to `fmt.lock_many`, so applying the rule universally is correct for all
+/// twelve languages). Extracted so a regression to the old two-form
+/// English-shaped split (`n == 1` vs "everything else") is caught by a plain
+/// unit test instead of requiring a rendered `Ui` frame.
+fn lock_count_key(n: u64) -> &'static str {
+    match slavic_plural_form(n) {
+        SlavicPluralForm::One => "fmt.lock_one",
+        SlavicPluralForm::Few => "fmt.lock_few",
+        SlavicPluralForm::Many => "fmt.lock_many",
+    }
 }
 
 // ─── Main render function ───
@@ -672,12 +687,21 @@ pub fn render_lock_panel(
                 }
             }
         }
+        let gear_names = resolved_gear_names(current_build);
+        for slot in GearSlot::ALL {
+            if let Some(name) = gear_names[slot as usize].as_deref() {
+                if let Some(id) = db.itemstat_by_name(name).map(|is| is.id) {
+                    locks.gear_locks.insert(slot, id);
+                }
+            }
+        }
         modified = true;
     }
     ui.same_line();
     if crate::ui::theme::gold_button_sized(ui, t("btn.unlock_all"), [btn_width, 0.0]) {
         locks.specs = [None; 3];
         locks.trait_locks.clear();
+        locks.gear_locks.clear();
         modified = true;
     }
 
@@ -688,78 +712,14 @@ pub fn render_lock_panel(
             .values()
             .flat_map(|c| c.iter())
             .filter(|t| t.is_some())
-            .count();
+            .count()
+        + locks.gear_locks.len();
     if lock_count > 0 {
-        let lock_msg = if lock_count == 1 {
-            tf("fmt.lock_one", &[("n", "1")])
-        } else {
-            tf("fmt.lock_many", &[("n", &lock_count.to_string())])
-        };
-        ui.text_colored(LOCKED_COLOR, format!("  {lock_msg}"));
-    }
-
-    // ── Gear section: per-slot current prefix + lock toggle ──
-    // A gear lock pins one `GearSlot` to an itemstat id. Locks are created
-    // from the currently equipped prefix (resolved against GameDb); slots
-    // with no resolvable prefix cannot be pinned.
-    let gear_names = resolved_gear_names(current_build);
-    ui.dummy([0.0, 8.0]);
-    {
-        let pos = ui.cursor_screen_pos();
-        let width = ui.content_region_avail()[0];
-        let draw_list = ui.get_window_draw_list();
-        draw_list
-            .add_rect(
-                [pos[0], pos[1]],
-                [pos[0] + width, pos[1] + 18.0],
-                [0.22, 0.19, 0.10, 0.9],
-            )
-            .filled(true)
-            .build();
-        let title = t("section.gear");
-        draw_list.add_text([pos[0] + 6.0, pos[1] + 2.0], HEADER_COLOR, &title);
-    }
-    ui.dummy([0.0, 20.0]);
-
-    for slot in GearSlot::ALL {
-        let label = gear_slot_label(slot);
-        let is_locked = locks.gear_locks.contains_key(&slot);
-        let prefix = gear_names[slot as usize].as_deref().unwrap_or("");
-        let resolved_id = db.itemstat_by_name(prefix).map(|is| is.id);
-
-        let row_text = if prefix.is_empty() {
-            format!("{label} —")
-        } else {
-            format!("{label} · {}", db.loc_prefix(prefix))
-        };
-        ui.text_colored(
-            if is_locked { LOCKED_COLOR } else { DIM_COLOR },
-            format!("  {}", if is_locked { "[x]" } else { "[ ]" }),
+        let lock_msg = tf(
+            lock_count_key(lock_count as u64),
+            &[("n", &lock_count.to_string())],
         );
-        ui.same_line();
-        let clicked = crate::ui::theme::pill(ui, &row_text, false, &format!("##gear_{slot:?}"));
-        crate::ui::theme::wide_tooltip(ui, |tip| {
-            tip.text_colored(crate::ui::theme::GOLD, label.clone());
-            if is_locked {
-                tip.text_colored(LOCKED_COLOR, t("lock.locked"));
-                tip.text_colored(DIM_COLOR, t("lock.click_unlock"));
-            } else if prefix.is_empty() {
-                tip.text_colored(DIM_COLOR, t("gear.no_prefix"));
-            } else {
-                tip.text(db.loc_prefix(prefix));
-                tip.text_colored(DIM_COLOR, t("lock.click_lock"));
-            }
-        });
-        let right_clicked = ui.is_item_hovered() && right_clicked;
-        if clicked || right_clicked {
-            if is_locked {
-                locks.gear_locks.remove(&slot);
-                modified = true;
-            } else if let Some(id) = resolved_id {
-                locks.gear_locks.insert(slot, id);
-                modified = true;
-            }
-        }
+        ui.text_colored(LOCKED_COLOR, format!("  {lock_msg}"));
     }
 
     // Advance the hover animation for next frame.
@@ -807,35 +767,6 @@ fn resolved_gear_names(build: &gw2_core::types::ResolvedBuild) -> [Option<String
     names
 }
 
-/// Human label for a gear slot, localized for armor/trinkets and composed for
-/// weapon hands (resolved weapon sets only know "Set 1"/"Set 2" today).
-fn gear_slot_label(slot: GearSlot) -> String {
-    match slot {
-        GearSlot::Helm => t("slot.helm"),
-        GearSlot::Shoulders => t("slot.shoulders"),
-        GearSlot::Coat => t("slot.chest"),
-        GearSlot::Gloves => t("slot.gloves"),
-        GearSlot::Leggings => t("slot.legs"),
-        GearSlot::Boots => t("slot.boots"),
-        GearSlot::Back => t("slot.back"),
-        GearSlot::Accessory1 | GearSlot::Accessory2 => format!(
-            "{} {}",
-            t("slot.accessory"),
-            if slot == GearSlot::Accessory1 { 1 } else { 2 }
-        ),
-        GearSlot::Amulet => t("slot.amulet"),
-        GearSlot::Ring1 | GearSlot::Ring2 => format!(
-            "{} {}",
-            t("slot.ring"),
-            if slot == GearSlot::Ring1 { 1 } else { 2 }
-        ),
-        GearSlot::WeaponSet1Main => "Set 1 Main".to_string(),
-        GearSlot::WeaponSet1Off => "Set 1 Off".to_string(),
-        GearSlot::WeaponSet2Main => "Set 2 Main".to_string(),
-        GearSlot::WeaponSet2Off => "Set 2 Off".to_string(),
-    }
-}
-
 /// Render the optimized build's specs & traits in the same visual style as the lock panel.
 /// Read-only — no click interactions. Matches the lock panel layout for side-by-side comparison.
 pub fn render_optimized_specs_panel(
@@ -846,27 +777,31 @@ pub fn render_optimized_specs_panel(
 ) {
     let spacing = 4.0_f32;
 
-    // Header — matches lock panel header layout exactly (4px + 18px header + 2px)
+    // Header — same gold tick + vertically centered title as SKILLS / CHARACTER.
     ui.dummy([0.0, spacing]);
     {
         let pos = ui.cursor_screen_pos();
         let width = ui.content_region_avail()[0];
+        let bar_h = 22.0;
+        let th = ui.calc_text_size(title)[1];
+        let ty = pos[1] + ((bar_h - th) * 0.5).round();
         let draw_list = ui.get_window_draw_list();
         draw_list
             .add_rect(
                 [pos[0], pos[1]],
-                [pos[0] + width, pos[1] + 18.0],
+                [pos[0] + width, pos[1] + bar_h],
                 [0.10, 0.19, 0.12, 0.9],
             )
             .filled(true)
             .build();
+        crate::ui::theme::paint_header_accent(&draw_list, pos[0], pos[1], bar_h);
         draw_list.add_text(
-            [pos[0] + 6.0, pos[1] + 2.0],
+            [crate::ui::theme::header_title_x(pos[0]), ty],
             color_u32([0.3, 1.0, 0.5, 1.0]),
             title,
         );
     }
-    ui.dummy([ui.content_region_avail()[0], 18.0]);
+    ui.dummy([ui.content_region_avail()[0], 22.0]);
     ui.dummy([0.0, spacing * 0.5]);
 
     if suggestion_specs.is_empty() {
@@ -1266,6 +1201,81 @@ mod tests {
         assert_eq!(
             names[GearSlot::WeaponSet2Off as usize].as_deref(),
             Some("Viper's")
+        );
+    }
+
+    #[test]
+    fn lock_string_has_no_space_runs() {
+        // GLM F31: the stale-trait-lock explanation shown to the player used to
+        // be a multi-line string literal joined without re-wrapping, leaving
+        // literal 35-space runs in the rendered text. Any run of 2+ consecutive
+        // spaces means that bug (or one like it) is back.
+        let text = gw2_optimizer::engine::STALE_TRAIT_LOCK_EXPLANATION;
+        assert!(
+            !text.contains("  "),
+            "stale-trait-lock explanation has a run of consecutive spaces: {text:?}",
+        );
+    }
+
+    #[test]
+    fn lock_count_uses_slavic_plural_form() {
+        // Claude F13 (second half): the lock-count indicator used to be a
+        // Germanic/English two-form split (`n == 1` vs everything else),
+        // which is wrong for Polish/Russian -- 2 must take "few", not
+        // "many". This tests the *selection*, not any rendered catalog
+        // text, so it survives a translator rewording a catalog.
+        //
+        // The decisive case is 2: a reverted two-form split would put it in
+        // the "many" bucket alongside 5, 11, 25, etc.
+        for n in [2, 22, 23] {
+            assert_eq!(
+                lock_count_key(n),
+                "fmt.lock_few",
+                "n={n} must select the Slavic 'few' form, not 'many' -- a two-form \
+                 n==1 split would wrongly bucket it as many",
+            );
+        }
+        for n in [5, 11, 12, 13, 14, 25] {
+            assert_eq!(lock_count_key(n), "fmt.lock_many", "n={n} must be 'many'");
+        }
+        for n in [1, 21, 101] {
+            assert_eq!(lock_count_key(n), "fmt.lock_one", "n={n} must be 'one'");
+        }
+
+        // DECISION-29 (C31/G4): `lock_count_key` alone is not sufficient --
+        // it can stay green while `render_lock_panel`'s call site quietly
+        // reverts to a hand-rolled `if lock_count == 1 { ... }` branch with a
+        // hardcoded "1". Pin the actual render site by reading this file's
+        // own source (the two live side by side, so this is a same-file
+        // read, not a cross-file `include_str!` like the kitchen-timeout
+        // gate).
+        //
+        // `include_str!` reads the WHOLE file, including this very test. If
+        // the search ran over the whole thing, the two `.contains(..)`
+        // argument literals below would trivially match themselves -- the
+        // pin would pass even with the render site reverted, no matter what
+        // it actually does. Cut the file at its own `#[cfg(test)]` marker so
+        // only the real production code (everything above `mod tests`) is
+        // searched.
+        let src = include_str!("lock_panel.rs");
+        let production_src = src
+            .split("#[cfg(test)]")
+            .next()
+            .expect("lock_panel.rs must contain its own #[cfg(test)] marker");
+        assert!(
+            production_src.contains("lock_count_key(lock_count as u64)"),
+            "render_lock_panel's lock-count indicator must call \
+             lock_count_key(lock_count as u64) -- if this reverts to a \
+             hand-rolled `if lock_count == 1` branch, lock_count_key stays \
+             green while Polish/Russian players see the wrong plural form \
+             again",
+        );
+        assert!(
+            production_src.contains("&lock_count.to_string()"),
+            "render_lock_panel's lock-count indicator must interpolate the \
+             live lock_count via &lock_count.to_string(), not a hardcoded \
+             \"1\" -- a hardcoded literal renders the wrong number the \
+             moment 21, 31, or 101 select the One form under the CLDR rule",
         );
     }
 }

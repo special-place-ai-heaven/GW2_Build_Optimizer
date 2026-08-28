@@ -3,6 +3,8 @@
 //! plus shared types (`ToolDefinition`, `LlmError`) used across providers.
 
 pub mod anthropic;
+pub(crate) mod body;
+pub mod cancel;
 pub mod gemini;
 pub mod openai;
 pub(crate) mod openai_compat;
@@ -166,7 +168,14 @@ pub trait LlmClient: Send + Sync {
     /// Falls back to an empty list on error — callers should use hardcoded defaults.
     fn list_models(&self) -> Result<Vec<ModelInfo>, LlmError>;
 
-    /// Remaining daily API quota (requests or tokens, provider-specific).
+    /// Requests remaining today, provider-specific.
+    ///
+    /// Only Gemini reports a real vendor allowance. OpenAI, Anthropic and
+    /// OpenRouter have no hard daily cap, so they report against the addon's
+    /// own `DISPLAY_DAILY_BUDGET` — a soft budget, not a quota the provider
+    /// enforces. The Settings UI presents both through one field and reads
+    /// as fact for all four (GLM F22); relabelling it belongs to whoever owns
+    /// that widget, not to this trait.
     fn remaining_quota(&self) -> u32;
 
     /// Clear the response cache.

@@ -2,8 +2,9 @@
 
 use nexus::imgui::{ComboBox, Selectable, Ui};
 
-use crate::state::AddonState;
+use crate::state::{AddonState, CancellationToken};
 use crate::ui::theme;
+use gw2_core::config::{NewsKind, NewsLayout, NewsSource};
 use gw2_core::i18n::{t, tf};
 
 use super::super::{build_display, stats};
@@ -69,16 +70,22 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     build_display::render_card_header(ui, &t("settings.ui_prefs"), [1.0, 0.88, 0.35, 1.0]);
     render_theme_section(ui, state, col_w);
 
-    ui.dummy([0.0, 8.0]);
+    ui.unindent_by(gutter);
+    ui.columns(1, "##settings_split_end", false);
 
+    ui.dummy([0.0, 8.0]);
+    build_display::render_card_header(ui, &t("settings.news"), [1.0, 0.88, 0.35, 1.0]);
+    render_news_sources(ui, state);
+
+    ui.dummy([0.0, 8.0]);
+    ui.columns(2, "##settings_bottom", false);
+    ui.set_column_width(0, col_w);
     build_display::render_card_header(ui, &t("settings.cache"), [1.0, 0.88, 0.35, 1.0]);
     render_cache_section(ui, state);
-
-    ui.dummy([0.0, 8.0]);
-
+    ui.next_column();
+    ui.indent_by(gutter);
     build_display::render_card_header(ui, &t("settings.benchmarks"), [0.6, 0.8, 1.0, 1.0]);
     render_benchmark_section(ui, state);
-
     ui.unindent_by(gutter);
     ui.columns(1, "##settings_end", false);
 
@@ -98,6 +105,101 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
             ),
         ),
     );
+}
+
+/// Spawn a tracked background worker whose result always folds back into
+/// `AddonState` through `apply` — on success, on cooperative cancellation, and
+/// on a **panic**.
+///
+/// `AddonState::spawn_worker` already wraps the whole worker body in a
+/// containment `catch_unwind` so a panic can never reach the Nexus runtime,
+/// but that guard runs *around* this entire closure: if `risky` panics,
+/// nothing written after it in the same closure would run — including a
+/// caller's "still running" flag reset, which is exactly how a Settings-tab
+/// spinner gets stuck forever. Catching only `risky` here means `apply`
+/// always runs afterward, with the panic surfaced as `Err` instead of
+/// silently skipped.
+///
+/// Returns `false` when the OS refused to start the thread at all (`risky`
+/// never ran); callers that already flipped a "loading" flag before calling
+/// this must clear it themselves in that case.
+fn spawn_flag_guarded<T>(
+    state: &mut AddonState,
+    worker_name: &'static str,
+    risky: impl FnOnce(&CancellationToken) -> T + Send + 'static,
+    apply: impl FnOnce(&mut AddonState, std::thread::Result<T>) + Send + 'static,
+) -> bool
+where
+    T: Send + 'static,
+{
+    state.spawn_worker(worker_name, move |token| {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| risky(&token)));
+        crate::state::with_state(|s| apply(s, outcome));
+    })
+}
+
+/// Spawn the shared "validate the active provider's API key" worker used by
+/// both the Test and Save buttons. `on_failure_key` selects the "validation
+/// failed" translation key so the two flows can word the same failure
+/// differently ("Test failed…" vs "Saved, but validation failed…").
+fn spawn_key_validation(
+    state: &mut AddonState,
+    worker_name: &'static str,
+    on_failure_key: &'static str,
+) {
+    let addon_dir = state.addon_dir.clone();
+    let config_snapshot = state.config.clone();
+    let spawned = spawn_flag_guarded(
+        state,
+        worker_name,
+        move |token| {
+            if token.is_cancelled() {
+                None
+            } else {
+                let r = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
+                    .map(|c| c.validate_key_detailed());
+                if token.is_cancelled() {
+                    None
+                } else {
+                    Some(r)
+                }
+            }
+        },
+        move |s, outcome| {
+            s.main.settings_key_validating = false;
+            match outcome {
+                Ok(Some(Ok(v))) => {
+                    s.main.settings_key_valid = v.valid;
+                    s.main.settings_key_status = Some(v.message);
+                    s.main.settings_key_warning = v.warning;
+                }
+                Ok(Some(Err(e))) => {
+                    s.main.settings_key_valid = false;
+                    s.main.settings_key_status =
+                        Some(tf(on_failure_key, &[("err", &e.to_string())]));
+                    s.main.settings_key_warning = None;
+                }
+                Ok(None) => { /* cancelled — flag cleared above */ }
+                Err(_) => {
+                    nexus::log::log(
+                        nexus::log::LogLevel::Warning,
+                        "GW2BuildOpt",
+                        format!("bg thread panicked: {}", worker_name),
+                    );
+                    s.main.settings_key_valid = false;
+                    // Overwrite whatever "Testing…"/"Saved, validating…" status was
+                    // showing — leaving it in place would read as a red "Testing…"
+                    // once `settings_key_valid`/`settings_key_validating` both flip
+                    // false. Same literal `setup.rs` uses for its own panic paths.
+                    s.main.settings_key_status = Some("thread panicked".into());
+                    s.main.settings_key_warning = None;
+                }
+            }
+        },
+    );
+    if !spawned {
+        state.main.settings_key_validating = false;
+    }
 }
 
 fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
@@ -165,42 +267,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             state.main.settings_key_status = Some(t("btn.testing"));
             state.main.settings_key_valid = false;
             state.main.settings_key_warning = None;
-            let addon_dir = state.addon_dir.clone();
-            let config_snapshot = state.config.clone();
-            let token = state.cancel_token.clone();
-            std::thread::spawn(move || {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    // Always clear settings_key_validating on every exit path.
-                    let result = if token.is_cancelled() {
-                        None
-                    } else {
-                        let r = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
-                            .map(|c| c.validate_key_detailed());
-                        if token.is_cancelled() {
-                            None
-                        } else {
-                            Some(r)
-                        }
-                    };
-                    crate::state::with_state(|s| {
-                        s.main.settings_key_validating = false;
-                        match result {
-                            Some(Ok(v)) => {
-                                s.main.settings_key_valid = v.valid;
-                                s.main.settings_key_status = Some(v.message);
-                                s.main.settings_key_warning = v.warning;
-                            }
-                            Some(Err(e)) => {
-                                s.main.settings_key_valid = false;
-                                s.main.settings_key_status =
-                                    Some(tf("fmt.failed", &[("err", &e.to_string())]));
-                                s.main.settings_key_warning = None;
-                            }
-                            None => { /* cancelled — flag cleared */ }
-                        }
-                    });
-                }));
-            });
+            spawn_key_validation(state, "settings-test-key", "fmt.failed");
         }
     }
     ui.set_cursor_screen_pos([
@@ -248,44 +315,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             state.main.settings_key_status = Some(t("settings.saved_validating"));
             state.main.settings_key_valid = false;
             state.main.settings_key_validating = true;
-            let addon_dir = state.addon_dir.clone();
-            let config_snapshot = state.config.clone();
-            let token = state.cancel_token.clone();
-            std::thread::spawn(move || {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    // Always clear settings_key_validating on every exit path.
-                    let result = if token.is_cancelled() {
-                        None
-                    } else {
-                        let r = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
-                            .map(|c| c.validate_key_detailed());
-                        if token.is_cancelled() {
-                            None
-                        } else {
-                            Some(r)
-                        }
-                    };
-                    crate::state::with_state(|s| {
-                        s.main.settings_key_validating = false;
-                        match result {
-                            Some(Ok(v)) => {
-                                s.main.settings_key_valid = v.valid;
-                                s.main.settings_key_status = Some(v.message);
-                                s.main.settings_key_warning = v.warning;
-                            }
-                            Some(Err(e)) => {
-                                s.main.settings_key_valid = false;
-                                s.main.settings_key_status = Some(tf(
-                                    "fmt.saved_validation_failed",
-                                    &[("err", &e.to_string())],
-                                ));
-                                s.main.settings_key_warning = None;
-                            }
-                            None => { /* cancelled — flag cleared */ }
-                        }
-                    });
-                }));
-            });
+            spawn_key_validation(state, "settings-save-key", "fmt.saved_validation_failed");
         }
     }
     ui.set_cursor_screen_pos([
@@ -565,6 +595,74 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     );
 }
 
+fn render_news_sources(ui: &Ui, state: &mut AddonState) {
+    let desk = t("news.layout.desk");
+    let mag = t("news.layout.magazine");
+    let reader = t("news.layout.reader");
+    let labels = [desk.as_str(), mag.as_str(), reader.as_str()];
+    let selected = match state.config.news.layout {
+        NewsLayout::Desk => 0,
+        NewsLayout::Magazine => 1,
+        NewsLayout::Reader => 2,
+    };
+    let seg_w = theme::segment_row_min_width(ui, &labels) + 4.0;
+    let seg_h = theme::control_height(ui) + 6.0;
+    let seg_id = "##set_news_layout_row";
+    nexus::imgui::ChildWindow::new(seg_id)
+        .size([seg_w, seg_h])
+        .border(false)
+        .build(ui, || {
+            if let Some(i) = theme::segment_row(ui, &labels, selected, "##set_news_layout") {
+                state.config.news.layout = match i {
+                    1 => NewsLayout::Magazine,
+                    2 => NewsLayout::Reader,
+                    _ => NewsLayout::Desk,
+                };
+                let _ = state.config.save(&state.config_path);
+            }
+        });
+    ui.same_line_with_spacing(0.0, 12.0);
+    let mut images = state.config.news.show_images;
+    if ui.checkbox(
+        format!("{}##set_news_stills", t("news.images")),
+        &mut images,
+    ) {
+        state.config.news.show_images = images;
+        let _ = state.config.save(&state.config_path);
+    }
+    if ui.is_item_hovered() {
+        theme::wide_tooltip(ui, |ui| ui.text(t("settings.news_hint")));
+    }
+
+    ui.dummy([0.0, 6.0]);
+    ui.columns(4, "##news_kind_cols", false);
+    for (i, kind) in NewsKind::ALL.iter().enumerate() {
+        ui.text_colored(theme::GOLD, t(kind.settings_key()));
+        for &src in kind.sources() {
+            news_source_tick(ui, state, src);
+        }
+        if i + 1 < NewsKind::ALL.len() {
+            ui.next_column();
+        }
+    }
+    ui.columns(1, "##news_kind_cols_end", false);
+}
+
+fn news_source_tick(ui: &Ui, state: &mut AddonState, src: NewsSource) {
+    let mut on = state.config.news.get(src);
+    let label = format!("{}##news_src_{}", t(src.label_key()), src.index());
+    if ui.checkbox(label, &mut on) {
+        state.config.news.set(src, on);
+        let _ = state.config.save(&state.config_path);
+        if on {
+            crate::news::kick(state, &[src]);
+        }
+    }
+    if ui.is_item_hovered() {
+        theme::wide_tooltip(ui, |ui| ui.text(t(src.hint_key())));
+    }
+}
+
 fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let right_item_w = col_w - 12.0;
 
@@ -576,12 +674,13 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         .main
         .live_build_number
         .or(state.config.cache_build_number);
+    tick_pack_status_cache(build);
     let preview_code = if state.config.ui_language.eq_ignore_ascii_case("auto") {
         resolved
     } else {
         state.config.ui_language.as_str()
     };
-    let (preview_mark, _) = pack_mark(gw2_api::localize::pack_status(&cache, preview_code, build));
+    let (preview_mark, _) = pack_mark(cached_pack_status(&cache, preview_code, build));
     let auto_preview = format!(
         "{preview_mark} {} — {}",
         t("settings.language_auto"),
@@ -605,8 +704,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     {
         let auto_sel = state.config.ui_language.eq_ignore_ascii_case("auto");
         let auto_code = gw2_core::i18n::resolve("auto");
-        let (auto_mark, auto_color) =
-            pack_mark(gw2_api::localize::pack_status(&cache, auto_code, build));
+        let (auto_mark, auto_color) = pack_mark(cached_pack_status(&cache, auto_code, build));
         {
             let auto_label = format!("{auto_mark} {}", t("settings.language_auto"));
             let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, auto_color);
@@ -619,7 +717,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         }
         for lang in gw2_core::i18n::LANGUAGES {
             let sel = state.config.ui_language == lang.code;
-            let (mark, color) = pack_mark(gw2_api::localize::pack_status(&cache, lang.code, build));
+            let (mark, color) = pack_mark(cached_pack_status(&cache, lang.code, build));
             let label = format!("{mark} {}", lang.native_name);
             let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, color);
             if Selectable::new(&label).selected(sel).build(ui) && !sel {
@@ -740,6 +838,85 @@ fn pack_mark(status: gw2_api::localize::PackStatus) -> (&'static str, [f32; 4]) 
     }
 }
 
+/// Frame-throttled, memoized wrapper around `gw2_api::localize::pack_status`.
+///
+/// `pack_status` opens and fully deserializes the cached name-pack JSON just
+/// to read one `build` field — for the ~800 KB `de`/`es`/`fr`/`zh` packs that
+/// is a real parse, not a stat. `render_theme_section` called it once per
+/// frame for the current language, and once per language again while the
+/// picker combo was open (5-6 parses in the same frame). This cache
+/// recomputes at most once every `REFRESH_FRAMES` frames — same throttle
+/// shape as `settings_cache_size_frames` in `render_cache_section` — and can
+/// be forced early with `invalidate_pack_status_cache` right after an action
+/// that actually changes the packs on disk (cache clear, game-data refresh).
+///
+/// Lives in a `thread_local` instead of on `MainState`: the render thread is
+/// the only caller, this leaf's write set does not include `state.rs`, and
+/// nothing here needs to be persisted — it is pure UI-side memoization.
+struct PackStatusCache {
+    frames_left: u32,
+    build: Option<u32>,
+    statuses: std::collections::HashMap<String, gw2_api::localize::PackStatus>,
+}
+
+impl PackStatusCache {
+    /// ~1 second at 60 fps — matches `settings_cache_size_frames`'s throttle.
+    const REFRESH_FRAMES: u32 = 60;
+
+    fn new() -> Self {
+        Self {
+            frames_left: 0,
+            build: None,
+            statuses: std::collections::HashMap::new(),
+        }
+    }
+}
+
+thread_local! {
+    static PACK_STATUS_CACHE: std::cell::RefCell<PackStatusCache> =
+        std::cell::RefCell::new(PackStatusCache::new());
+}
+
+/// Call once per frame (at the top of `render_theme_section`) before reading
+/// `cached_pack_status`. Expires the cache when the throttle window elapses or
+/// `build` changes — e.g. the periodic API-health check picks up a new game
+/// patch mid-session, which can flip a pack from "Ready" to "Stale".
+fn tick_pack_status_cache(build: Option<u32>) {
+    PACK_STATUS_CACHE.with(|cell| {
+        let mut c = cell.borrow_mut();
+        if c.frames_left == 0 || c.build != build {
+            c.statuses.clear();
+            c.build = build;
+            c.frames_left = PackStatusCache::REFRESH_FRAMES;
+        } else {
+            c.frames_left -= 1;
+        }
+    });
+}
+
+/// Force the next frame's `tick_pack_status_cache` to recompute immediately
+/// instead of waiting out the throttle window. Call right after clearing the
+/// cache dir or kicking off a game-data refresh — both can change the on-disk
+/// packs `pack_status` reports on.
+fn invalidate_pack_status_cache() {
+    PACK_STATUS_CACHE.with(|c| c.borrow_mut().frames_left = 0);
+}
+
+/// Throttled, memoized `gw2_api::localize::pack_status`. See `PackStatusCache`
+/// and `tick_pack_status_cache`.
+fn cached_pack_status(
+    cache: &gw2_api::cache::DataCache,
+    lang: &str,
+    build: Option<u32>,
+) -> gw2_api::localize::PackStatus {
+    PACK_STATUS_CACHE.with(|cell| {
+        let mut c = cell.borrow_mut();
+        *c.statuses
+            .entry(lang.to_string())
+            .or_insert_with(|| gw2_api::localize::pack_status(cache, lang, build))
+    })
+}
+
 fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     if let Some(ref key) = state.config.gw2_api_key {
         let display = if key.chars().count() > 12 {
@@ -817,6 +994,11 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
             // Force the cached "Cache: …" label to recompute on the next frame
             // instead of waiting for the throttle to roll over.
             state.main.settings_cache_size_frames = 0;
+            // The cleared cache dir also wiped the lang-pack files `pack_status`
+            // reports on — force the language combo's Ready/Missing/Stale marks
+            // to recompute now instead of showing stale "Ready" for up to a
+            // second.
+            invalidate_pack_status_cache();
             stats::start_game_data_refresh(state);
         }
     }
@@ -861,6 +1043,7 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
             state.setup.download_progress = None;
             // Force the cached "Cache: …" label to recompute on the next frame.
             state.main.settings_cache_size_frames = 0;
+            invalidate_pack_status_cache();
             stats::start_game_data_refresh(state);
         }
     }
@@ -889,7 +1072,21 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
     ui.text_colored([0.7, 0.7, 0.7, 1.0], t("settings.sources"));
     ui.spacing();
-    if let Some(ref last) = state.main.benchmark_last_synced {
+    if state.main.benchmark_running {
+        let live = ["snowcrows", "hardstuck", "guildjen"]
+            .iter()
+            .filter_map(|k| state.main.benchmark_live.get(*k).map(|s| s.as_str()))
+            .collect::<Vec<_>>()
+            .join("  ·  ");
+        ui.text_colored(
+            theme::MUTED,
+            if live.is_empty() {
+                t("btn.syncing")
+            } else {
+                live
+            },
+        );
+    } else if let Some(ref last) = state.main.benchmark_last_synced {
         let sc = state
             .main
             .benchmark_counts
@@ -949,29 +1146,47 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         );
     } else if theme::gold_button_sized(ui, t("btn.sync"), [160.0, 0.0]) {
         let addon_dir = state.addon_dir.clone();
-        let token = state.cancel_token.clone();
         state.main.benchmark_running = true;
         state.main.benchmark_error = None;
-        std::thread::spawn(move || {
-            // Cancel-aware end-to-end. Previously, an entry-point or post-scrape cancel
-            // returned early, leaving `benchmark_running = true` and the button locked
-            // on "Syncing…". Now every exit path resets the flag.
-            let cancel_check = token.clone();
-            let results = if token.is_cancelled() {
-                None
-            } else {
-                let r =
-                    gw2_optimizer::scraper::scrape_all(&addon_dir, &|| cancel_check.is_cancelled());
+        // Cancel-aware end-to-end, same shape as before, but the scrape itself
+        // is now caught on its own (see `spawn_flag_guarded`) so a panic
+        // mid-scrape still resets `benchmark_running` instead of locking the
+        // button on "Syncing…" forever.
+        let spawned = spawn_flag_guarded(
+            state,
+            "settings-benchmark-sync",
+            move |token| {
                 if token.is_cancelled() {
                     None
                 } else {
-                    Some(r)
+                    let r = gw2_optimizer::scraper::scrape_all_with_progress(
+                        &addon_dir,
+                        &|| token.is_cancelled(),
+                        &|src, msg| {
+                            let src = src.to_string();
+                            let msg = msg.to_string();
+                            let _ = crate::state::with_state(|s| {
+                                s.main.benchmark_live.insert(src.clone(), msg.clone());
+                            });
+                        },
+                    );
+                    if token.is_cancelled() {
+                        None
+                    } else {
+                        Some(r)
+                    }
                 }
-            };
-            crate::state::with_state(|s| {
+            },
+            |s, outcome| {
                 s.main.benchmark_running = false;
-                let Some(results) = results else {
-                    return;
+                s.main.benchmark_live.clear();
+                let results = match outcome {
+                    Ok(Some(results)) => results,
+                    Ok(None) => return,
+                    Err(_) => {
+                        s.main.benchmark_error = Some("thread panicked".into());
+                        return;
+                    }
                 };
                 let mut counts = std::collections::HashMap::new();
                 let mut errors = Vec::new();
@@ -987,16 +1202,13 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
                 } else {
                     Some(errors.join(" | "))
                 };
-                let total: usize = results.iter().map(|r| r.builds.len()).sum();
-                if total > 0 {
-                    // Use chrono for the YYYY-MM-DD label. The previous manual calendar
-                    // arithmetic (1970 + days/365, days%365/30 + 1, …) ignored leap years
-                    // and assumed 30-day months, drifting ~14 days off the real date.
-                    s.main.benchmark_last_synced =
-                        Some(chrono::Utc::now().format("%Y-%m-%d").to_string());
-                }
-            });
-        });
+                s.main.benchmark_last_synced =
+                    Some(chrono::Utc::now().format("%Y-%m-%d").to_string());
+            },
+        );
+        if !spawned {
+            state.main.benchmark_running = false;
+        }
     }
 }
 
@@ -1017,5 +1229,118 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {
         format!("{} B", bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Fresh global `STATE` rooted at a per-test temp dir, mirroring
+    /// `state::tests::init_worker_test` (that helper is private to `state.rs`'s
+    /// own test module, so this leaf's tests need their own copy built from the
+    /// `pub` `init`/`clear` functions).
+    fn init_test_state(label: &str) {
+        crate::state::clear();
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_settings_test_{}_{}",
+            std::process::id(),
+            label
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::state::init(dir);
+    }
+
+    /// The exact bug this leaf fixes: a Settings-tab "in progress" flag (e.g.
+    /// `settings_key_validating`, `benchmark_running`) that never clears
+    /// because the risky call panicked before the code that resets it could
+    /// run. This spawns a real worker through the real `spawn_flag_guarded`
+    /// helper (the one every settings.rs call site uses) with a `risky`
+    /// closure that genuinely panics, then asserts the flag comes back clear.
+    #[test]
+    fn settings_spawn_clears_flags_on_panic() {
+        let _serial = crate::state::state_test_guard();
+        init_test_state("spawn_panic_clears_flag");
+
+        let apply_saw_panic = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let w_apply_saw_panic = apply_saw_panic.clone();
+
+        crate::state::with_state(|s| {
+            // Prime the flag exactly like a real Test/Save/Sync click would.
+            s.main.settings_key_validating = true;
+            spawn_flag_guarded(
+                s,
+                "test-settings-panic",
+                // Stands in for `create_client(...).map(|c| c.validate_key_detailed())`
+                // blowing up mid-call.
+                |_token| panic!("boom: simulated risky-closure panic"),
+                move |s, outcome: std::thread::Result<()>| {
+                    s.main.settings_key_validating = false;
+                    w_apply_saw_panic.store(outcome.is_err(), std::sync::atomic::Ordering::SeqCst);
+                },
+            );
+        });
+
+        let report = crate::state::join_workers(std::time::Duration::from_secs(5));
+        assert_eq!(
+            report.joined, 1,
+            "the panicking worker must still be joined: {report}"
+        );
+        assert_eq!(
+            report.panicked, 0,
+            "spawn_worker's own containment guard must swallow the unwind \
+             before the thread ends: {report}"
+        );
+        assert!(
+            apply_saw_panic.load(std::sync::atomic::Ordering::SeqCst),
+            "apply must observe the risky closure's panic as Err, not skip it"
+        );
+        assert_eq!(
+            crate::state::with_state(|s| s.main.settings_key_validating),
+            Some(false),
+            "settings_key_validating must be cleared even though the risky \
+             closure panicked — a stuck flag here is a spinner the user can \
+             never clear"
+        );
+
+        crate::state::clear();
+    }
+
+    /// `cached_pack_status` must serve repeated lookups for the same language
+    /// from its in-frame cache instead of hitting `pack_status` (and the ~800
+    /// KB pack file behind it) again — verified by counting real calls to the
+    /// underlying `gw2_api::localize::pack_status` indirectly: the cache
+    /// returns the *first* value for a language until `tick_pack_status_cache`
+    /// or `invalidate_pack_status_cache` next asks it to expire.
+    #[test]
+    fn cached_pack_status_reuses_value_within_a_frame() {
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_settings_test_{}_pack_status_cache",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache = gw2_api::cache::DataCache::new(&dir);
+
+        // "en" is not in `API_LANGS`, so `pack_status` always returns `None`
+        // cheaply — this test is about the cache plumbing, not disk I/O.
+        invalidate_pack_status_cache();
+        tick_pack_status_cache(Some(1));
+        let first = cached_pack_status(&cache, "en", Some(1));
+        let second = cached_pack_status(&cache, "en", Some(1));
+        assert_eq!(
+            first, second,
+            "two lookups in the same tick must agree (cache hit, not a fresh parse)"
+        );
+
+        // A build-number change (a new game patch landing mid-session) must
+        // still be observed on the very next tick rather than staying stuck
+        // on the old cached value for the rest of the throttle window.
+        tick_pack_status_cache(Some(2));
+        let after_build_change = cached_pack_status(&cache, "en", Some(2));
+        assert_eq!(
+            after_build_change,
+            gw2_api::localize::PackStatus::None,
+            "a build change must not desync the cache from what pack_status would say"
+        );
     }
 }

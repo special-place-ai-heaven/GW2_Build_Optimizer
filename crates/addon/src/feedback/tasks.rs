@@ -23,6 +23,10 @@ use gw2_core::types::GameMode;
 /// Category whose successful send shows the Thanks plate instead of the Sent plate.
 const PRAISE_CATEGORY: &str = "praise";
 
+/// `messages.json`. Saved from the frame loop whenever a send or a status
+/// refresh marks the log dirty, i.e. never on the render thread's own time.
+static MESSAGE_WRITES: crate::ui::SerialWriter = crate::ui::SerialWriter::new("messages-save");
+
 /// Stand-in with the exact length of a uuid v4 string, so `draft_request_bytes`
 /// measures the real request size before `client_id` has been minted.
 const CLIENT_ID_PLACEHOLDER: &str = "00000000-0000-4000-8000-000000000000";
@@ -88,6 +92,11 @@ pub fn context_summary(ctx: &ReportContext) -> String {
 }
 
 /// The per-install client id; minted and saved to config on first use.
+///
+/// The one config write in this file that stays synchronous. It happens once per
+/// install, on the click that sends the first report, and the id it persists is
+/// what every later status poll for that report is keyed on — so it is worth the
+/// millisecond to know it reached disk before the request goes out.
 pub fn ensure_client_id(state: &mut AddonState) -> String {
     if let Some(id) = &state.config.client_id {
         return id.clone();
@@ -162,8 +171,22 @@ pub fn draft_request_bytes(state: &AddonState) -> Option<usize> {
 /// Send the open draft: stage the row and lock the wizard, then post in the background.
 pub fn send_draft(state: &mut AddonState) {
     if let Some((report_id, json, is_praise)) = stage_send(state) {
-        spawn_send(state, report_id, json, is_praise);
+        if !spawn_send(state, report_id.clone(), json, is_praise) {
+            fail_unstarted_send(state, &report_id, is_praise);
+        }
     }
+}
+
+/// The post never started (the OS refused a thread). Undo the `Sending` row so the
+/// wizard unlocks and the payload is still there to resend, instead of a message that
+/// looks like it is on its way forever.
+fn fail_unstarted_send(state: &mut AddonState, report_id: &str, is_praise: bool) {
+    apply_send_result(
+        state,
+        report_id,
+        SendResult::Failed(FailReason::Interrupted),
+        is_praise,
+    );
 }
 
 /// Everything `send_draft` does except the background post: refuse while a request is
@@ -230,7 +253,9 @@ pub fn stage_send(state: &mut AddonState) -> Option<(String, String, bool)> {
 /// Replay a failed row's payload byte-for-byte.
 pub fn resend(state: &mut AddonState, report_id: &str) {
     if let Some((report_id, json, is_praise)) = stage_resend(state, report_id) {
-        spawn_send(state, report_id, json, is_praise);
+        if !spawn_send(state, report_id.clone(), json, is_praise) {
+            fail_unstarted_send(state, &report_id, is_praise);
+        }
     }
 }
 
@@ -330,9 +355,8 @@ pub fn lookup_account(state: &mut AddonState) {
         return;
     };
     feedback.account_looking_up = true;
-    let token = state.cancel_token.clone();
 
-    std::thread::spawn(move || {
+    let spawned = state.spawn_worker("lookup-account", move |token| {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             /// Only the `name` field of `/v2/account`; nothing else is deserialized.
             #[derive(serde::Deserialize)]
@@ -373,13 +397,24 @@ pub fn lookup_account(state: &mut AddonState) {
             });
         }
     });
+    if !spawned {
+        // The OS refused the thread (`spawn_worker` logged it). Nothing will
+        // answer, so settle the box the same way a failed lookup does instead
+        // of leaving it in "looking up" forever.
+        let feedback = &mut state.main.feedback;
+        feedback.account_looking_up = false;
+        account_failed(feedback);
+    }
 }
 
 /// Post `json` for `report_id` on a background thread and apply the outcome.
 /// A panic counts as a server failure so the row is never stuck in `Sending`.
-fn spawn_send(state: &AddonState, report_id: String, json: String, is_praise: bool) {
-    let token = state.cancel_token.clone();
-    std::thread::spawn(move || {
+///
+/// Returns false when the worker never started; the caller owns the `&mut` needed
+/// to unwind the staged row, so it does that (see `fail_unstarted_send`).
+#[must_use]
+fn spawn_send(state: &AddonState, report_id: String, json: String, is_praise: bool) -> bool {
+    state.spawn_worker("send-report", move |token| {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             if token.is_cancelled() {
                 return;
@@ -405,7 +440,7 @@ fn spawn_send(state: &AddonState, report_id: String, json: String, is_praise: bo
                 )
             });
         }
-    });
+    })
 }
 
 /// The lookup failed or cannot run: hide the box and untick it on any open draft.
@@ -473,14 +508,14 @@ fn status_from_server(word: &str) -> Option<MessageStatus> {
 
 /// Apply a successful status response to the rows that were polled: a returned row
 /// updates status, reply, `replied_at` and closing note; a polled id the server no
-/// longer has becomes `Unknown`. Rows outside `polled` are untouched. Returns true when
-/// some row flipped to `Answered`.
+/// longer has becomes `Unknown`. Rows outside `polled` are untouched. Returns the
+/// `report_id` of a row that just became `Answered`.
 pub fn apply_status_rows(
     messages: &mut [LocalMessage],
     polled: &[String],
     rows: &[StatusRow],
-) -> bool {
-    let mut flipped = false;
+) -> Option<String> {
+    let mut flipped = None;
     for m in messages.iter_mut() {
         let Some(id) = m.short_id.as_deref() else {
             continue;
@@ -491,8 +526,9 @@ pub fn apply_status_rows(
         match rows.iter().find(|r| r.id == id) {
             Some(row) => {
                 if let Some(status) = status_from_server(&row.status) {
-                    flipped |=
-                        status == MessageStatus::Answered && m.status != MessageStatus::Answered;
+                    if status == MessageStatus::Answered && m.status != MessageStatus::Answered {
+                        flipped = Some(m.report_id.clone());
+                    }
                     m.status = status;
                 }
                 m.reply = row.reply.clone();
@@ -524,8 +560,13 @@ pub fn apply_refresh_outcome(
     feedback.last_refresh_at = Some(Instant::now());
     feedback.last_refresh_ok = Some(true);
     feedback.dirty = true;
-    if flipped && state.main.active_tab != MainTab::About {
-        state.main.tab_alert = Some(MainTab::About);
+    if let Some(id) = flipped {
+        feedback.view = AboutView::Messages;
+        feedback.view_chosen = true;
+        feedback.expanded = Some(id);
+        if state.main.active_tab != MainTab::About {
+            state.main.tab_alert = Some(MainTab::About);
+        }
     }
 }
 
@@ -541,9 +582,8 @@ pub fn refresh_status(state: &mut AddonState) {
         return;
     };
     state.main.feedback.refreshing = true;
-    let token = state.cancel_token.clone();
 
-    std::thread::spawn(move || {
+    let spawned = state.spawn_worker("refresh-status", move |token| {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let result = if token.is_cancelled() {
                 None
@@ -573,6 +613,14 @@ pub fn refresh_status(state: &mut AddonState) {
             });
         }
     });
+    if !spawned {
+        // The OS refused the thread (`spawn_worker` logged it): release the
+        // in-flight latch, and record the refresh as failed rather than leaving
+        // the last result showing as if it were current.
+        let feedback = &mut state.main.feedback;
+        feedback.refreshing = false;
+        feedback.last_refresh_ok = Some(false);
+    }
 }
 
 /// Per-frame poll driver, called from `render_main` on every tab: loads the store once,
@@ -629,6 +677,10 @@ pub fn refresh_on_open(state: &mut AddonState) {
 /// Persist `messages.json` when a send, refresh, or row action marked the state dirty.
 /// Runs every frame from [`maybe_poll`] so a status that lands while another tab is
 /// active is saved without waiting for the About tab to render.
+///
+/// Snapshot here, write on a worker: this is the render thread holding `STATE`,
+/// and [`FeedbackStore::save`] stages through one `messages.json.tmp`, so the
+/// write must neither stall the frame nor overlap another save of the same file.
 pub fn flush_dirty(state: &mut AddonState) {
     if !state.main.feedback.dirty {
         return;
@@ -637,18 +689,19 @@ pub fn flush_dirty(state: &mut AddonState) {
         last_path: state.main.feedback.last_path.clone(),
         messages: state.main.feedback.messages.clone(),
     };
-    if let Err(e) = FeedbackStore::new(&state.addon_dir).save(&file) {
-        nexus::log::log(
-            nexus::log::LogLevel::Warning,
-            "GW2BuildOpt",
-            format!("messages.json save failed: {e}"),
-        );
-    }
+    let addon_dir = state.addon_dir.clone();
+    // Cleared before the write lands: `submit` never drops content, so the next
+    // change is what marks the file dirty again — not this one, twice.
     state.main.feedback.dirty = false;
+    MESSAGE_WRITES.submit(state, move || {
+        if let Err(e) = FeedbackStore::new(&addon_dir).save(&file) {
+            crate::ui::log_disk_error(format!("messages.json save failed: {e}"));
+        }
+    });
 }
 
 /// Fetch `/v1/taxonomy` on a background thread. A version newer than the one in use is
-/// cached on disk and offered to the state (applied now, or once the open draft closes).
+/// offered to the state (applied now, or once the open draft closes) and cached on disk.
 /// Anything else — transport failure, unparseable body, same or older version — changes
 /// nothing: the embedded/cached copy stays and no message is shown.
 pub fn fetch_taxonomy(state: &mut AddonState) {
@@ -656,9 +709,9 @@ pub fn fetch_taxonomy(state: &mut AddonState) {
         return;
     }
     state.main.feedback.taxonomy_fetching = true;
-    let token = state.cancel_token.clone();
+    let addon_dir = state.addon_dir.clone();
 
-    std::thread::spawn(move || {
+    let spawned = state.spawn_worker("fetch-taxonomy", move |token| {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let fetched = if token.is_cancelled() {
                 None
@@ -669,7 +722,14 @@ pub fn fetch_taxonomy(state: &mut AddonState) {
                 })
             };
             let fetched = if token.is_cancelled() { None } else { fetched };
-            crate::state::with_state(|s| apply_taxonomy_fetch(s, fetched));
+            let to_cache = crate::state::with_state(|s| apply_taxonomy_fetch(s, fetched));
+            // Outside `with_state` on purpose: caching the raw text is a disk
+            // write, and STATE is the render thread's lock.
+            if let Some(raw) = to_cache.flatten() {
+                if let Err(e) = FeedbackStore::new(&addon_dir).save_taxonomy(&raw) {
+                    crate::ui::log_disk_error(format!("feedback_taxonomy.json save failed: {e}"));
+                }
+            }
         }));
         if panic_result.is_err() {
             nexus::log::log(
@@ -680,27 +740,32 @@ pub fn fetch_taxonomy(state: &mut AddonState) {
             crate::state::with_state(|s| s.main.feedback.taxonomy_fetching = false);
         }
     });
+    if !spawned {
+        // The OS refused the thread (`spawn_worker` logged it): release the
+        // latch so the next About-tab open can try again.
+        state.main.feedback.taxonomy_fetching = false;
+    }
 }
 
-/// Take a fetched `(raw json, parsed)` taxonomy: when newer than the one in use, cache
-/// the raw text (so the next load starts from it) and offer it to the state. Pure over
-/// `state`; also the thread's write-back.
-pub fn apply_taxonomy_fetch(state: &mut AddonState, fetched: Option<(String, FeedbackTaxonomy)>) {
+/// Take a fetched `(raw json, parsed)` taxonomy: when newer than the one in use, offer
+/// it to the state and hand back the raw text to cache (so the next load starts from
+/// it). Anything else — nothing fetched, same or older version — returns `None` and
+/// changes nothing. Pure over `state`; also the thread's write-back.
+///
+/// Returns rather than writes because the caller holds `STATE` while this runs:
+/// [`fetch_taxonomy`] does the disk write once the lock is released.
+#[must_use = "the returned raw taxonomy still has to be cached, outside the STATE lock"]
+pub fn apply_taxonomy_fetch(
+    state: &mut AddonState,
+    fetched: Option<(String, FeedbackTaxonomy)>,
+) -> Option<String> {
     state.main.feedback.taxonomy_fetching = false;
-    let Some((raw, taxonomy)) = fetched else {
-        return;
-    };
+    let (raw, taxonomy) = fetched?;
     if taxonomy.taxonomy_version <= state.main.feedback.taxonomy.taxonomy_version {
-        return;
-    }
-    if let Err(e) = FeedbackStore::new(&state.addon_dir).save_taxonomy(&raw) {
-        nexus::log::log(
-            nexus::log::LogLevel::Warning,
-            "GW2BuildOpt",
-            format!("feedback_taxonomy.json save failed: {e}"),
-        );
+        return None;
     }
     state.main.feedback.offer_taxonomy(taxonomy);
+    Some(raw)
 }
 
 #[cfg(test)]
@@ -1347,7 +1412,7 @@ mod tests {
         let polled_ids = ids(&["A", "B"]);
         let rows = vec![status_row("A", "answered", Some("Fixed in 1.6.1"))];
 
-        assert!(apply_status_rows(&mut messages, &polled_ids, &rows));
+        assert!(apply_status_rows(&mut messages, &polled_ids, &rows).is_some());
         assert_eq!(messages[0].status, MessageStatus::Answered);
         assert_eq!(messages[0].reply.as_deref(), Some("Fixed in 1.6.1"));
         assert_eq!(
@@ -1359,7 +1424,7 @@ mod tests {
         assert_eq!(messages[2].reply, None);
 
         // Already answered → no second flip.
-        assert!(!apply_status_rows(&mut messages, &polled_ids, &rows));
+        assert!(apply_status_rows(&mut messages, &polled_ids, &rows).is_none());
         assert_eq!(messages[0].status, MessageStatus::Answered);
     }
 
@@ -1367,7 +1432,7 @@ mod tests {
     fn apply_status_rows_ignores_unknown_status_string() {
         let mut messages = vec![polled("A", MessageStatus::Received)];
         let rows = vec![status_row("A", "archived", Some("note"))];
-        assert!(!apply_status_rows(&mut messages, &ids(&["A"]), &rows));
+        assert!(apply_status_rows(&mut messages, &ids(&["A"]), &rows).is_none());
         assert_eq!(messages[0].status, MessageStatus::Received);
         assert_eq!(messages[0].reply.as_deref(), Some("note"));
     }
@@ -1435,6 +1500,8 @@ mod tests {
 
             assert_eq!(state.main.tab_alert, Some(MainTab::About));
             let feedback = &state.main.feedback;
+            assert_eq!(feedback.view, AboutView::Messages);
+            assert_eq!(feedback.expanded.as_deref(), Some("A"));
             assert_eq!(feedback.messages[0].status, MessageStatus::Answered);
             assert!(!feedback.refreshing);
             assert_eq!(feedback.last_refresh_ok, Some(true));
@@ -1464,6 +1531,11 @@ mod tests {
             assert_eq!(
                 state.main.feedback.messages[0].status,
                 MessageStatus::Answered
+            );
+            assert_eq!(state.main.feedback.view, AboutView::Messages);
+            assert_eq!(
+                state.main.feedback.expanded.as_deref(),
+                Some(state.main.feedback.messages[0].report_id.as_str())
             );
         });
     }
@@ -1502,27 +1574,41 @@ mod tests {
             state.main.feedback.taxonomy = current.clone();
             let store = FeedbackStore::new(&state.addon_dir);
 
-            // Same version → ignored, nothing cached.
+            // Same version → ignored, and nothing handed back to cache.
             state.main.feedback.taxonomy_fetching = true;
             let same_raw = serde_json::to_string(&current).unwrap();
-            apply_taxonomy_fetch(state, Some((same_raw, current.clone())));
+            assert_eq!(
+                apply_taxonomy_fetch(state, Some((same_raw, current.clone()))),
+                None
+            );
             assert!(!state.main.feedback.taxonomy_fetching);
             assert_eq!(state.main.feedback.taxonomy, current);
             assert_eq!(store.load_taxonomy(), None);
 
-            // Newer → cached on disk and in use.
+            // Newer → in use, and the raw text comes back for the caller to
+            // cache. It is deliberately *not* written here: this runs with STATE
+            // held, and `fetch_taxonomy` does the disk write once it is released.
             let mut newer = current.clone();
             newer.taxonomy_version += 1;
             let raw = serde_json::to_string(&newer).unwrap();
             state.main.feedback.taxonomy_fetching = true;
-            apply_taxonomy_fetch(state, Some((raw, newer.clone())));
+            let to_cache = apply_taxonomy_fetch(state, Some((raw.clone(), newer.clone())));
+            assert_eq!(to_cache.as_deref(), Some(raw.as_str()));
             assert!(!state.main.feedback.taxonomy_fetching);
             assert_eq!(state.main.feedback.taxonomy, newer);
+            assert_eq!(
+                store.load_taxonomy(),
+                None,
+                "the cache write belongs to the caller, outside the lock"
+            );
+
+            // What `fetch_taxonomy` then does with it, off the lock.
+            store.save_taxonomy(&to_cache.unwrap()).unwrap();
             assert_eq!(store.load_taxonomy(), Some(newer.clone()));
 
             // Nothing fetched → only the flag clears.
             state.main.feedback.taxonomy_fetching = true;
-            apply_taxonomy_fetch(state, None);
+            assert_eq!(apply_taxonomy_fetch(state, None), None);
             assert!(!state.main.feedback.taxonomy_fetching);
             assert_eq!(state.main.feedback.taxonomy, newer);
         });

@@ -330,7 +330,7 @@ fn extract_effects_for_context(
             } => {
                 let field = format!("status_duration_ms:{}", status.to_lowercase());
                 let duration_ms = sourced_skill_u32(ctx, skill_id, &field)
-                    .unwrap_or_else(|| duration.unwrap_or(0) * 1000);
+                    .unwrap_or_else(|| duration.unwrap_or(0).saturating_mul(1000));
                 push_status_effect(&mut effects, status, apply_count.unwrap_or(1), duration_ms);
             }
             Fact::PrefixedBuff {
@@ -341,7 +341,7 @@ fn extract_effects_for_context(
             } => {
                 let field = format!("status_duration_ms:{}", status.to_lowercase());
                 let duration_ms = sourced_skill_u32(ctx, skill_id, &field)
-                    .unwrap_or_else(|| duration.unwrap_or(0) * 1000);
+                    .unwrap_or_else(|| duration.unwrap_or(0).saturating_mul(1000));
                 push_status_effect(&mut effects, status, apply_count.unwrap_or(1), duration_ms);
             }
             Fact::ComboField {
@@ -806,6 +806,31 @@ mod tests {
     }
 
     #[test]
+    fn duration_saturating_mul() {
+        // A duration this large never comes from the live API — it exists to prove
+        // saturation, not to model real GW2 data. Before the fix, `duration.unwrap_or(0)
+        // * 1000` on a `Fact::Buff`/`Fact::PrefixedBuff` duration overflowed u32
+        // (panic in debug, silent wraparound in release) for any value over
+        // u32::MAX / 1000. `saturating_mul` must clamp to u32::MAX instead.
+        let facts = vec![Fact::Buff {
+            text: None,
+            icon: None,
+            status: Some("Might".into()),
+            duration: Some(u32::MAX),
+            apply_count: Some(1),
+            description: None,
+        }];
+        let effects = extract_effects(&facts, None);
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            SkillEffect::ApplyBuff { duration_ms, .. } => {
+                assert_eq!(*duration_ms, u32::MAX);
+            }
+            _ => panic!("Expected ApplyBuff"),
+        }
+    }
+
+    #[test]
     fn stun_is_lock_not_buff() {
         let facts = vec![Fact::Buff {
             text: None,
@@ -1203,6 +1228,7 @@ mod tests {
             professions: HashMap::new(),
             legends: HashMap::new(),
             pvp_amulets: HashMap::new(),
+            pets: HashMap::new(),
             skills_by_profession: HashMap::new(),
             traits_by_spec: HashMap::new(),
             items_by_type: HashMap::new(),

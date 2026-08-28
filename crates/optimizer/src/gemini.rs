@@ -2,6 +2,12 @@
 //! Uses Google AI Studio's REST API (generativelanguage.googleapis.com).
 //! API key is sent via x-goog-api-key header (not URL query) for security.
 //! Includes response caching to minimize quota usage.
+//!
+//! Transport policy is shared with the `LlmError`-based providers rather than
+//! re-derived here: same HTTP client (connect timeout included), same body
+//! ceilings, same backoff clamp, same reserve-and-release discipline. Gemini
+//! is the addon's default pipeline, so it had the most to lose from being the
+//! one client with its own rules.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -9,13 +15,28 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::llm::body::{body_capped, hit_body_cap, json_capped, read_body_capped, MAX_LLM_BODY};
+use crate::llm::openai_compat::{
+    doubled_backoff, http_client, retry_after_delay, CHAT_REQUEST_TIMEOUT, METADATA_TIMEOUT,
+};
+
 const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 const GEMINI_MODELS_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
 #[derive(Debug, thiserror::Error)]
 pub enum GeminiError {
+    /// Transport failure: no usable HTTP response, or the socket died while
+    /// the response body was still arriving.
+    ///
+    /// Carries a `String` rather than `reqwest::Error` because a mid-stream
+    /// failure surfaces as `std::io::Error`, which cannot be turned into a
+    /// `reqwest::Error`. Those were being reported as [`GeminiError::Parse`]
+    /// — "Parse error: stream read failed" told the user their model returned
+    /// garbage when the real event was a dropped connection (GLM F15).
+    /// Matches `LlmError::Http(String)`, which is what this maps to at the
+    /// trait boundary.
     #[error("HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(String),
     #[error("API error {status}: {message}")]
     Api { status: u16, message: String },
     #[error("Invalid API key")]
@@ -43,6 +64,34 @@ impl GeminiClient {
             "{}/{}:streamGenerateContent?alt=sse",
             GEMINI_API_BASE, self.model
         )
+    }
+
+    /// One streamed `generateContent` call, wall clock and auth attached.
+    ///
+    /// Built here rather than inline so the request shape is assertable
+    /// without a socket: `reqwest::blocking::Request::timeout` is readable
+    /// after `build()`, and `reqwest::blocking::Client` is not — its `Debug`
+    /// prints just `Client`.
+    ///
+    /// Auth is the `x-goog-api-key` header. Verified against the live API on
+    /// 2026-08-27: the header returns 200, `Authorization: Bearer` returns
+    /// 401. The key never goes in the URL, where it would land in logs.
+    fn stream_request(&self, request: &GenerateRequest) -> reqwest::blocking::RequestBuilder {
+        self.http
+            .post(self.stream_url())
+            .timeout(CHAT_REQUEST_TIMEOUT)
+            .header("x-goog-api-key", &self.api_key)
+            .json(request)
+    }
+
+    /// The `GET /v1beta/models` call shared by key validation and the model
+    /// catalog. Small and Settings-tab-blocking, so it gets the short
+    /// [`METADATA_TIMEOUT`], not a completion budget.
+    fn models_request(&self) -> reqwest::blocking::RequestBuilder {
+        self.http
+            .get(GEMINI_MODELS_URL)
+            .timeout(METADATA_TIMEOUT)
+            .header("x-goog-api-key", &self.api_key)
     }
 }
 
@@ -95,7 +144,10 @@ impl RateTracker {
     }
 
     /// Check rate limits and pre-reserve a slot (increment counters).
-    /// If the request later fails, call `undo_reserve()` to release the slot.
+    ///
+    /// The caller must wrap the reserved slot in a [`RateReserve`] so it is
+    /// returned on every failure path. Do not call [`Self::undo_reserve`]
+    /// directly: that is what missed the mid-stream failure (GLM F16).
     fn check_and_reserve(&mut self) -> Result<(), GeminiError> {
         // Reset daily counter if the day changed
         let today = current_epoch_day();
@@ -131,6 +183,14 @@ impl RateTracker {
         self.requests_today = self.requests_today.saturating_sub(1);
     }
 
+    /// Requests charged to the current minute window. Test-only: the
+    /// transport tests use it to prove the reserve/release handshake
+    /// balances instead of asserting on a socket.
+    #[cfg(test)]
+    fn requests_this_minute(&self) -> u32 {
+        self.requests_this_minute
+    }
+
     fn remaining_today(&self) -> u32 {
         250u32.saturating_sub(self.requests_today)
     }
@@ -139,6 +199,52 @@ impl RateTracker {
         PersistedUsage {
             day: self.current_day,
             requests_today: self.requests_today,
+        }
+    }
+}
+
+/// Holds the rate slot taken by [`RateTracker::check_and_reserve`] and gives
+/// it back on drop unless the request actually succeeded.
+///
+/// `send_request` used to repeat the undo by hand on each early return, and
+/// the one path it missed was the one that matters most: `read_gemini_stream`
+/// failing after a 200. A free-tier key is 10 requests per minute and 250 per
+/// day, so every leaked slot is a slot the user cannot spend (GLM F16). A
+/// guard cannot miss a return path.
+///
+/// This is a local twin of `llm::openai_compat::RateReserve`, not a reuse of
+/// it: that guard is typed on `llm::rate::RateTracker`, and Gemini
+/// deliberately keeps its own tracker because it enforces a hard *provider*
+/// daily cap and reports `GeminiError`. Sharing the type would make
+/// [`GeminiClient::remaining_quota`] report the other tracker's 10_000-request
+/// display budget — the fabricated number GLM F22 flagged.
+///
+// ponytail: two guards, one shape. Merging them needs a shared
+// `trait RateSlot { fn undo(&mut self); }` in `llm::rate`, which is another
+// leaf's file; a generic guard over one trait method is the upgrade path if a
+// fourth tracker ever appears.
+struct RateReserve<'a> {
+    rate: Option<&'a Mutex<RateTracker>>,
+}
+
+impl<'a> RateReserve<'a> {
+    /// Wrap a slot that `check_and_reserve` has already taken.
+    fn held(rate: &'a Mutex<RateTracker>) -> Self {
+        Self { rate: Some(rate) }
+    }
+
+    /// The request succeeded: the slot stays spent.
+    fn keep(&mut self) {
+        self.rate = None;
+    }
+}
+
+impl Drop for RateReserve<'_> {
+    fn drop(&mut self) {
+        if let Some(rate) = self.rate.take() {
+            rate.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .undo_reserve();
         }
     }
 }
@@ -245,15 +351,34 @@ struct StreamErrorPayload {
 /// concatenated in arrival order and function-call parts are passed through
 /// whole (Gemini emits a `functionCall` part complete in a single chunk).
 /// An `error` payload is the mid-stream failure channel.
+///
+/// The read is bounded by [`MAX_LLM_BODY`]. Timeouts bound *time*, not
+/// *bytes*: a fast endpoint can exhaust the game process's memory well inside
+/// the request deadline, and a single newline-free stream grew one `String`
+/// without limit here (GLM F6, Claude F17). `llm::gemini` already refuses an
+/// oversized body at the trait boundary, but that check runs after this
+/// function has finished allocating; this is where the peak actually is.
 fn read_gemini_stream<R: std::io::Read>(reader: R) -> Result<Content, GeminiError> {
     use std::io::BufRead;
 
     let mut role: Option<String> = None;
     let mut text = String::new();
     let mut parts: Vec<Part> = Vec::new();
+    // Recorded rather than returned in place: `hit_body_cap` needs `capped`
+    // back, and the line iterator borrows it for the whole loop. A truncated
+    // multi-byte codepoint at the ceiling arrives here as `InvalidData`, so
+    // the cap has to be ruled out before this is blamed on the wire.
+    let mut read_error: Option<std::io::Error> = None;
 
-    for line in std::io::BufReader::new(reader).lines() {
-        let line = line.map_err(|e| GeminiError::Parse(format!("stream read failed: {e}")))?;
+    let mut capped = body_capped(reader);
+    for line in std::io::BufReader::new(&mut capped).lines() {
+        let line = match line {
+            Ok(line) => line,
+            Err(e) => {
+                read_error = Some(e);
+                break;
+            }
+        };
         let line = line.trim();
         if !line.starts_with("data: ") {
             continue;
@@ -294,6 +419,16 @@ fn read_gemini_stream<R: std::io::Read>(reader: R) -> Result<Content, GeminiErro
         }
     }
 
+    // Reaching the ceiling means Gemini was still sending: whatever assembled
+    // so far is a fragment, not an answer. Checked before `read_error` because
+    // a cap landing mid-codepoint *is* the read error.
+    if hit_body_cap(&capped) {
+        return Err(body_cap_exceeded());
+    }
+    if let Some(e) = read_error {
+        return Err(GeminiError::Http(format!("Gemini stream read failed: {e}")));
+    }
+
     if !text.is_empty() {
         parts.insert(0, Part::text(text));
     }
@@ -304,6 +439,94 @@ fn read_gemini_stream<R: std::io::Read>(reader: R) -> Result<Content, GeminiErro
         role: role.or(Some("model".to_string())),
         parts,
     })
+}
+
+/// The error a Gemini body read returns once it reaches [`MAX_LLM_BODY`].
+///
+/// Wording matches `llm::body::body_cap_exceeded` and the adapter-side check
+/// in `llm::gemini` so the user sees one message whichever ceiling trips.
+fn body_cap_exceeded() -> GeminiError {
+    GeminiError::Api {
+        status: 502,
+        message: format!(
+            "Gemini response exceeded the {} MiB body cap and was dropped",
+            MAX_LLM_BODY / (1024 * 1024)
+        ),
+    }
+}
+
+/// What `send_request` does with one HTTP status from Gemini.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatusAction {
+    /// 200 — read the streamed body.
+    Read,
+    /// The key is rejected; no retry will help.
+    InvalidKey,
+    /// Quota exhausted.
+    RateLimited,
+    /// Transient — try again after a backoff.
+    Retry,
+    /// Anything else: report the status and body, once.
+    Fail,
+}
+
+/// Gemini's status policy, kept socket-free so the decision is testable
+/// without a live key or a mock server.
+///
+/// 429 is terminal here on purpose, and this is where Gemini diverges from
+/// `llm::openai_compat::is_retryable_status`, which retries it. Two reasons,
+/// both measured against the live API on 2026-08-27:
+///
+/// * Gemini reports quota exhaustion as a real HTTP 429 with a JSON error
+///   body. OpenRouter reports an upstream mid-stream failure as HTTP 200 with
+///   an unframed error inside an `text/event-stream` body, which is why that
+///   client has to be forgiving about a 429 it may have inferred.
+/// * A free-tier key is exhausted by roughly seven small requests, and a
+///   retry minutes later is still 429. Retrying would burn the user's
+///   remaining per-minute slots to re-learn the same answer.
+fn classify_status(status: u16) -> StatusAction {
+    match status {
+        200 => StatusAction::Read,
+        401 | 403 => StatusAction::InvalidKey,
+        429 => StatusAction::RateLimited,
+        // Server failures plus the gateway "upstream didn't answer" pair.
+        408 | 500 | 502 | 503 | 504 => StatusAction::Retry,
+        _ => StatusAction::Fail,
+    }
+}
+
+/// Turn a 200 response body into `Content`, keeping the reserved rate slot
+/// only if the body actually produced an answer.
+///
+/// The guard is taken **by value** so the compiler enforces the ordering:
+/// the only route to `keep()` runs through a successful read, and every other
+/// exit drops the guard, which releases the slot. That is the path the
+/// hand-written `undo_reserve()` calls missed — a stream that died after the
+/// 200 charged the user a slot for nothing (GLM F16). Split out of
+/// `send_request` so the handshake is provable from a fixture instead of a
+/// socket.
+fn consume_success_body<R: std::io::Read>(
+    mut reserve: RateReserve<'_>,
+    body: R,
+) -> Result<Content, GeminiError> {
+    let content = read_gemini_stream(body)?;
+    reserve.keep();
+    Ok(content)
+}
+
+/// The shared blocking HTTP client, including the `connect_timeout` the
+/// Gemini client was missing.
+///
+/// `GeminiClient` used to build its own client with a 180 s total timeout and
+/// no connect timeout, so a black-holed TCP handshake fell back to the OS
+/// default — minutes on Windows, with nothing in the addon bounding it. The
+/// 180 s was also the *shortest* completion budget of any provider, so the
+/// addon's default pipeline was the one most likely to abort a long answer
+/// mid-generation (GLM F15, Claude F32). One factory, one policy: 15 s to
+/// connect, [`CHAT_REQUEST_TIMEOUT`] per completion, [`METADATA_TIMEOUT`] per
+/// Settings-tab call.
+fn gemini_http_client() -> Result<reqwest::blocking::Client, GeminiError> {
+    http_client().map_err(|e| GeminiError::Http(e.to_string()))
 }
 
 // ─── Response Types ───
@@ -367,13 +590,10 @@ fn trim_contents(contents: &mut Vec<Content>, budget_tokens: usize) {
 
 impl GeminiClient {
     pub fn new(api_key: &str, model: &str) -> Result<Self, GeminiError> {
-        let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(180))
-            .build()?;
         Ok(Self {
             api_key: api_key.to_string(),
             model: model.to_string(),
-            http,
+            http: gemini_http_client()?,
             cache: crate::llm::response_cache::ResponseCache::new(1800, 64),
             rate: Mutex::new(RateTracker::new()),
             usage_path: None,
@@ -387,10 +607,6 @@ impl GeminiClient {
         model: &str,
         usage_path: PathBuf,
     ) -> Result<Self, GeminiError> {
-        let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(180))
-            .build()?;
-
         let rate = if usage_path.exists() {
             match std::fs::read_to_string(&usage_path)
                 .ok()
@@ -406,7 +622,7 @@ impl GeminiClient {
         Ok(Self {
             api_key: api_key.to_string(),
             model: model.to_string(),
-            http,
+            http: gemini_http_client()?,
             cache: crate::llm::response_cache::ResponseCache::new(1800, 64),
             rate: Mutex::new(rate),
             usage_path: Some(usage_path),
@@ -416,22 +632,21 @@ impl GeminiClient {
     /// Validate the API key using the models list endpoint (no quota consumed).
     pub fn validate_key(&self) -> Result<(), GeminiError> {
         let resp = self
-            .http
-            .get(GEMINI_MODELS_URL)
-            .header("x-goog-api-key", &self.api_key)
-            .send()?;
+            .models_request()
+            .send()
+            .map_err(|e| GeminiError::Http(e.to_string()))?;
 
-        match resp.status().as_u16() {
-            200 => Ok(()),
-            401 | 403 => Err(GeminiError::InvalidKey),
-            429 => Err(GeminiError::RateLimited),
-            status => {
-                let body = resp.text().unwrap_or_default();
-                Err(GeminiError::Api {
-                    status,
-                    message: body,
-                })
-            }
+        let status = resp.status().as_u16();
+        match classify_status(status) {
+            StatusAction::Read => Ok(()),
+            StatusAction::InvalidKey => Err(GeminiError::InvalidKey),
+            StatusAction::RateLimited => Err(GeminiError::RateLimited),
+            // Settings-tab validation is a single shot: a 5xx here is
+            // reported, not retried behind a spinner.
+            StatusAction::Retry | StatusAction::Fail => Err(GeminiError::Api {
+                status,
+                message: read_body_capped(resp),
+            }),
         }
     }
 
@@ -439,21 +654,20 @@ impl GeminiClient {
     /// Calls `GET /v1beta/models` and filters by `supportedGenerationMethods`.
     pub fn list_models(&self) -> Result<Vec<(String, String)>, GeminiError> {
         let resp = self
-            .http
-            .get(GEMINI_MODELS_URL)
-            .header("x-goog-api-key", &self.api_key)
-            .send()?;
+            .models_request()
+            .send()
+            .map_err(|e| GeminiError::Http(e.to_string()))?;
 
-        match resp.status().as_u16() {
-            200 => {}
-            401 | 403 => return Err(GeminiError::InvalidKey),
-            429 => return Err(GeminiError::RateLimited),
-            status => {
-                let body = resp.text().unwrap_or_default();
+        let status = resp.status().as_u16();
+        match classify_status(status) {
+            StatusAction::Read => {}
+            StatusAction::InvalidKey => return Err(GeminiError::InvalidKey),
+            StatusAction::RateLimited => return Err(GeminiError::RateLimited),
+            StatusAction::Retry | StatusAction::Fail => {
                 return Err(GeminiError::Api {
                     status,
-                    message: body,
-                });
+                    message: read_body_capped(resp),
+                })
             }
         }
 
@@ -469,7 +683,13 @@ impl GeminiClient {
             supported_generation_methods: Option<Vec<String>>,
         }
 
-        let body: ModelsResponse = resp.json().map_err(|e| GeminiError::Parse(e.to_string()))?;
+        // `resp.json()` reads to EOF; the catalog is small but the socket is
+        // not the addon's to trust. The kind is preserved on the way across:
+        // a catalog that died on the wire is not a malformed catalog.
+        let body: ModelsResponse = json_capped(resp).map_err(|e| match e {
+            crate::llm::LlmError::Http(msg) => GeminiError::Http(msg),
+            other => GeminiError::Parse(other.to_string()),
+        })?;
 
         let models = body.models.unwrap_or_default();
         let mut result: Vec<(String, String)> = models
@@ -629,7 +849,11 @@ impl GeminiClient {
     }
 
     /// Low-level: send a request and return the response Content.
-    /// Retries up to 2 times on transient server errors (500/503).
+    ///
+    /// Retries only what [`classify_status`] calls transient. The reserved
+    /// rate slot is held by a [`RateReserve`] for the whole call, so every
+    /// exit — including a stream that dies after the 200 — gives it back
+    /// unless an answer actually arrived.
     fn send_request(&self, request: &GenerateRequest) -> Result<Content, GeminiError> {
         const MAX_RETRIES: u32 = 3;
 
@@ -638,100 +862,61 @@ impl GeminiClient {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .check_and_reserve()?;
+        let reserve = RateReserve::held(&self.rate);
 
-        let url = self.stream_url();
         let mut last_error: Option<GeminiError> = None;
         let mut next_delay = std::time::Duration::from_secs(5);
 
         for attempt in 0..MAX_RETRIES {
             if attempt > 0 {
                 std::thread::sleep(next_delay);
-                next_delay *= 2;
+                next_delay = doubled_backoff(next_delay);
             }
 
-            let resp = match self
-                .http
-                .post(&url)
-                .header("x-goog-api-key", &self.api_key)
-                .json(request)
-                .send()
-            {
+            let resp = match self.stream_request(request).send() {
                 Ok(r) => r,
                 Err(e) => {
+                    let failure = GeminiError::Http(e.to_string());
                     if attempt == MAX_RETRIES - 1 {
-                        self.rate
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .undo_reserve();
-                        return Err(GeminiError::Http(e));
+                        return Err(failure);
                     }
-                    last_error = Some(GeminiError::Http(e));
+                    last_error = Some(failure);
                     continue;
                 }
             };
 
             let status = resp.status().as_u16();
-            match status {
-                200 => {
-                    let content = read_gemini_stream(resp)?;
-
-                    // Persist usage
-                    {
-                        let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
-                        self.persist_usage(&rate);
-                    }
-
+            match classify_status(status) {
+                StatusAction::Read => {
+                    // Moves the guard: on a mid-stream failure it drops here
+                    // and the slot goes back. Both continuations return, so
+                    // the loop never sees the moved value again.
+                    let content = consume_success_body(reserve, resp)?;
+                    let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
+                    self.persist_usage(&rate);
                     return Ok(content);
                 }
-                401 | 403 => {
-                    self.rate
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .undo_reserve();
-                    return Err(GeminiError::InvalidKey);
-                }
-                429 => {
-                    self.rate
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .undo_reserve();
-                    return Err(GeminiError::RateLimited);
-                }
-                // Retryable: server failures + 408/504 gateway timeouts.
-                408 | 500 | 502 | 503 | 504 => {
-                    if let Some(secs) = resp
-                        .headers()
-                        .get("Retry-After")
-                        .and_then(|v| v.to_str().ok())
-                        .and_then(|s| s.parse::<u64>().ok())
-                    {
-                        next_delay = std::time::Duration::from_secs(secs.min(60));
+                StatusAction::InvalidKey => return Err(GeminiError::InvalidKey),
+                StatusAction::RateLimited => return Err(GeminiError::RateLimited),
+                StatusAction::Retry => {
+                    if let Some(delay) = retry_after_delay(resp.headers()) {
+                        next_delay = delay;
                     }
-                    let body = resp.text().unwrap_or_default();
                     last_error = Some(GeminiError::Api {
                         status,
-                        message: body,
+                        message: read_body_capped(resp),
                     });
                     continue;
                 }
-                _ => {
-                    let body = resp.text().unwrap_or_default();
-                    self.rate
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .undo_reserve();
+                StatusAction::Fail => {
                     return Err(GeminiError::Api {
                         status,
-                        message: body,
-                    });
+                        message: read_body_capped(resp),
+                    })
                 }
             }
         }
         // All retries exhausted
-        self.rate
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .undo_reserve();
         Err(last_error.unwrap_or_else(|| GeminiError::Api {
             status: 500,
             message: "Gemini server error after retries".into(),
@@ -1011,5 +1196,329 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
             }
             _other => panic!("expected Api error"),
         }
+    }
+
+    // ─── Transport parity (leaf-1.1.6) ───
+
+    /// A newline-free body that reports exactly how many bytes were pulled
+    /// off it. The uncapped reader grew one `String` for the whole thing;
+    /// counting the pull is the only way to prove the ceiling actually
+    /// stopped the *read* rather than trimming afterwards.
+    struct CountingReader {
+        remaining: usize,
+        emitted: u64,
+    }
+
+    impl std::io::Read for CountingReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.remaining == 0 {
+                return Ok(0);
+            }
+            let n = buf.len().min(self.remaining);
+            buf[..n].fill(b'x');
+            self.remaining -= n;
+            self.emitted += n as u64;
+            Ok(n)
+        }
+    }
+
+    /// A body that delivers one complete SSE frame and then the socket dies.
+    struct DyingReader {
+        head: Vec<u8>,
+        pos: usize,
+    }
+
+    impl std::io::Read for DyingReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.pos < self.head.len() {
+                let n = buf.len().min(self.head.len() - self.pos);
+                buf[..n].copy_from_slice(&self.head[self.pos..self.pos + n]);
+                self.pos += n;
+                return Ok(n);
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "connection reset by peer",
+            ))
+        }
+    }
+
+    fn dying_after_one_frame() -> DyingReader {
+        DyingReader {
+            head: b"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}],\"role\":\"model\"}}]}\n"
+                .to_vec(),
+            pos: 0,
+        }
+    }
+
+    /// GLM F6 / Claude F17: the socket read itself is bounded.
+    ///
+    /// `llm::gemini` rejects an oversized body at the trait boundary, but that
+    /// check runs *after* this function has finished allocating. The peak
+    /// lives here, inside the game process.
+    #[test]
+    fn gemini_stream_body_is_capped() {
+        let slack: usize = 64 * 1024;
+        let mut hostile = CountingReader {
+            remaining: MAX_LLM_BODY as usize + slack,
+            emitted: 0,
+        };
+
+        let err = read_gemini_stream(&mut hostile).expect_err("oversized body must be rejected");
+        match err {
+            GeminiError::Api {
+                status,
+                ref message,
+            } => {
+                assert_eq!(status, 502, "a body cap is a bad-gateway condition");
+                assert!(
+                    message.contains("body cap"),
+                    "cap error must say so, got: {message}"
+                );
+            }
+            other => panic!("expected the body-cap error, got {other:?}"),
+        }
+
+        // The load-bearing assertion: the reader was stopped at the ceiling,
+        // not drained and then judged.
+        assert_eq!(
+            hostile.emitted, MAX_LLM_BODY,
+            "read must stop exactly at the ceiling"
+        );
+        assert_eq!(
+            hostile.remaining, slack,
+            "the tail past the ceiling must never be pulled"
+        );
+
+        // Headroom: a normal stream is nowhere near the cap and still parses.
+        let sse = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}],\"role\":\"model\"}}]}\n";
+        let content = read_gemini_stream(sse.as_bytes()).expect("normal stream still parses");
+        assert_eq!(content.parts[0].text.as_deref(), Some("ok"));
+    }
+
+    /// GLM F16: a request that dies after the 200 gives its rate slot back.
+    ///
+    /// Drives `consume_success_body`, the real production step, rather than
+    /// asserting on the guard in isolation — a guard that is never wired in
+    /// proves nothing. Socket-free by construction: the failure shapes are
+    /// fixtures.
+    ///
+    /// What keeps that honest: `consume_success_body` is private and
+    /// `send_request` is its only production caller, so unwiring it fails
+    /// `cargo clippy --all-targets -- -D warnings` with "function
+    /// `consume_success_body` is never used" (verified by bypassing the call
+    /// and running clippy). This test cannot see that on its own.
+    #[test]
+    fn gemini_rate_reservation_is_released_on_stream_failure() {
+        fn spent(rate: &Mutex<RateTracker>) -> (u32, u32) {
+            let t = rate.lock().expect("tracker");
+            (t.requests_this_minute(), 250 - t.remaining_today())
+        }
+
+        // 1. Gemini's own mid-stream failure channel: HTTP 200, error payload.
+        let rate = Mutex::new(RateTracker::new());
+        rate.lock()
+            .expect("tracker")
+            .check_and_reserve()
+            .expect("first slot");
+        assert_eq!(spent(&rate), (1, 1), "reserve charges one slot");
+
+        let sse = "data: {\"error\":{\"code\":503,\"message\":\"backend overloaded\"}}\n";
+        let err = consume_success_body(RateReserve::held(&rate), sse.as_bytes())
+            .expect_err("mid-stream error must fail the call");
+        assert!(matches!(err, GeminiError::Api { status: 503, .. }));
+        assert_eq!(
+            spent(&rate),
+            (0, 0),
+            "a mid-stream failure must not charge the user a slot"
+        );
+
+        // 2. The socket dies while the body is still arriving.
+        rate.lock()
+            .expect("tracker")
+            .check_and_reserve()
+            .expect("slot after release");
+        let err = consume_success_body(RateReserve::held(&rate), dying_after_one_frame())
+            .expect_err("a dead socket must fail the call");
+        assert!(matches!(err, GeminiError::Http(_)));
+        assert_eq!(spent(&rate), (0, 0), "a dead socket must not charge a slot");
+
+        // 3. An answer that actually arrived keeps the slot spent.
+        rate.lock()
+            .expect("tracker")
+            .check_and_reserve()
+            .expect("slot for the good call");
+        let good = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}],\"role\":\"model\"}}]}\n";
+        let content = consume_success_body(RateReserve::held(&rate), good.as_bytes())
+            .expect("a complete body succeeds");
+        assert_eq!(content.parts[0].text.as_deref(), Some("hi"));
+        assert_eq!(
+            spent(&rate),
+            (1, 1),
+            "a successful call must stay charged — releasing it would let the addon exceed the real quota"
+        );
+
+        // 4. The released slots are genuinely spendable again. On a free-tier
+        //    key (10 RPM) leaked slots are what lock the user out.
+        let rate = Mutex::new(RateTracker::new());
+        for _ in 0..12 {
+            rate.lock()
+                .expect("tracker")
+                .check_and_reserve()
+                .expect("a released slot is reusable");
+            let _ = consume_success_body(RateReserve::held(&rate), dying_after_one_frame());
+        }
+        assert_eq!(
+            spent(&rate),
+            (0, 0),
+            "twelve failed calls on a 10 RPM key must leave the budget untouched"
+        );
+    }
+
+    /// GLM F15 / Claude F32: transport timeouts and error classification.
+    ///
+    /// What this decides:
+    /// * every Gemini HTTP call takes its wall clock from the shared provider
+    ///   policy, and the client comes from the one factory that sets
+    ///   `connect_timeout` — Gemini no longer builds a private client with a
+    ///   180 s total and no connect bound;
+    /// * a stream that fails on the wire is reported as a transport error,
+    ///   not as `Parse` ("your model returned garbage");
+    /// * 429 is terminal on Gemini, unlike the OpenAI-compatible providers.
+    ///
+    /// What it cannot decide: the `connect_timeout` *value* baked into
+    /// `llm::openai_compat::http_client`. `reqwest::blocking::Client` has an
+    /// opaque `Debug` (verified: it prints just `Client`) and the only
+    /// behavioural probe is a real blackholed connect, which would be a live
+    /// network call in a unit test. That constant is leaf-1.1.1's gate; the
+    /// backstop for Gemini re-growing a private client is `cargo clippy
+    /// --all-targets -- -D warnings`, where the orphaned `http_client` import
+    /// is a hard error.
+    #[test]
+    fn gemini_transport_timeouts_and_error_kinds() {
+        use crate::llm::openai_compat::{CONNECT_TIMEOUT_SECS, REQUEST_TIMEOUT_SECS};
+        use std::time::Duration;
+
+        // ── Timeouts ──
+        gemini_http_client().expect("the shared client factory builds");
+        // Compile-time: a connect bound must exist at all. Without one the OS
+        // default applies, which on Windows is minutes of a frozen worker.
+        const { assert!(CONNECT_TIMEOUT_SECS > 0 && CONNECT_TIMEOUT_SECS <= 30) };
+        assert_eq!(
+            CHAT_REQUEST_TIMEOUT,
+            Duration::from_secs(420),
+            "one completion budget shared with every other provider"
+        );
+        assert!(
+            METADATA_TIMEOUT < CHAT_REQUEST_TIMEOUT,
+            "a Settings-tab call must not be able to hang for a completion budget"
+        );
+        assert!(
+            Duration::from_secs(REQUEST_TIMEOUT_SECS) >= CHAT_REQUEST_TIMEOUT,
+            "the client-level bound must not cut a per-request budget short"
+        );
+
+        // The budgets the client actually attaches to a request. `new` builds
+        // an HTTP client and nothing else — no key is contacted here.
+        let client = GeminiClient::new("test-key-not-a-real-one", "gemini-2.5-flash")
+            .expect("client builds offline");
+        let generate = GenerateRequest {
+            contents: vec![Content {
+                role: Some("user".into()),
+                parts: vec![Part::text("hi")],
+            }],
+            tools: None,
+        };
+
+        let streamed = client
+            .stream_request(&generate)
+            .build()
+            .expect("stream request builds");
+        assert_eq!(
+            streamed.timeout(),
+            Some(&CHAT_REQUEST_TIMEOUT),
+            "a completion must ride the shared budget, not Gemini's old private 180 s"
+        );
+        assert!(
+            streamed.timeout() != Some(&Duration::from_secs(180)),
+            "180 s was the shortest budget of any provider on the default pipeline"
+        );
+        // Live-verified 2026-08-27: this header returns 200 and
+        // `Authorization: Bearer` returns 401.
+        assert!(
+            streamed.headers().contains_key("x-goog-api-key"),
+            "Gemini authenticates by header"
+        );
+        assert!(
+            !streamed.headers().contains_key("authorization"),
+            "Bearer auth is a 401 on this API"
+        );
+        assert!(
+            !streamed.url().as_str().contains("test-key-not-a-real-one"),
+            "the key must never reach the URL, where it lands in logs"
+        );
+
+        let metadata = client
+            .models_request()
+            .build()
+            .expect("models request builds");
+        assert_eq!(
+            metadata.timeout(),
+            Some(&METADATA_TIMEOUT),
+            "a Settings-tab call gets the short budget"
+        );
+
+        // ── Stream-read errors are transport, not parse ──
+        let err = read_gemini_stream(dying_after_one_frame())
+            .expect_err("a reset socket must fail the read");
+        assert!(
+            matches!(err, GeminiError::Http(_)),
+            "a dead socket is a transport failure, not a parse failure: {err:?}"
+        );
+        assert!(err.to_string().contains("connection reset"));
+
+        // A genuinely contentless body is still a parse failure — the
+        // reclassification is targeted, not a blanket relabel.
+        let err = read_gemini_stream(&b": keep-alive\n\n"[..]).expect_err("no content");
+        assert!(
+            matches!(err, GeminiError::Parse(_)),
+            "an empty-but-healthy stream stays a parse failure: {err:?}"
+        );
+
+        // ── Status classification ──
+        assert_eq!(classify_status(200), StatusAction::Read);
+        assert_eq!(classify_status(401), StatusAction::InvalidKey);
+        assert_eq!(classify_status(403), StatusAction::InvalidKey);
+        assert_eq!(
+            classify_status(429),
+            StatusAction::RateLimited,
+            "Gemini reports quota exhaustion as a real 429 and a retry minutes \
+             later is still 429 — retrying would spend the user's remaining slots"
+        );
+        for transient in [408, 500, 502, 503, 504] {
+            assert_eq!(
+                classify_status(transient),
+                StatusAction::Retry,
+                "{transient} is worth another attempt"
+            );
+        }
+        for terminal in [400, 404, 413, 422] {
+            assert_eq!(
+                classify_status(terminal),
+                StatusAction::Fail,
+                "{terminal} is the caller's fault; retrying burns quota"
+            );
+        }
+
+        // The backoff a retry uses is the shared clamped one, so no Gemini
+        // retry ladder can grow past the shared ceiling.
+        let mut delay = Duration::from_secs(5);
+        for _ in 0..10 {
+            delay = doubled_backoff(delay);
+        }
+        assert!(
+            delay <= Duration::from_secs(60),
+            "backoff must stay clamped, got {delay:?}"
+        );
     }
 }

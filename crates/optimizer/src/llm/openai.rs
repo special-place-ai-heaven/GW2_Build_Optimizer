@@ -8,8 +8,13 @@ use std::sync::Mutex;
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::openai_compat::{http_client, send_chat, Message, ProviderCore, MAX_COMPLETION_TOKENS};
-use super::rate::{PersistedUsage, RateTracker};
+use super::body::{json_capped, read_body_capped};
+use super::openai_compat::{
+    http_client, send_chat, Message, ProviderCore, CHAT_REQUEST_TIMEOUT, MAX_COMPLETION_TOKENS,
+    METADATA_TIMEOUT,
+};
+use super::rate::{persist_usage, PersistedUsage, RateTracker};
+use super::trim::trim_openai_messages;
 use super::{KeyValidationResult, LlmClient, LlmError, ToolDefinition};
 
 /// OpenAI's conservative default requests-per-minute ceiling.
@@ -74,6 +79,7 @@ impl OpenAiClient {
         tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, LlmError> {
         let extra_headers: [(&str, String); 0] = [];
+        let is_cancelled = super::cancel::is_cancelled;
         let core = ProviderCore {
             http: &self.http,
             rate: &self.rate,
@@ -85,10 +91,15 @@ impl OpenAiClient {
             // Same ceiling as OpenRouter: reasoning models share this budget
             // between thinking and the answer.
             max_tokens: MAX_COMPLETION_TOKENS,
+            // `reasoning` and `provider` are OpenRouter extensions.
+            // `api.openai.com` rejects unknown top-level body arguments, so
+            // sending either here is a 400 on every request (Claude F8).
             reasoning_max_tokens: None,
+            supports_provider_prefs: false,
             require_tool_endpoints: tools.is_some(),
-            request_timeout: std::time::Duration::from_secs(420),
+            request_timeout: CHAT_REQUEST_TIMEOUT,
             max_retries: 2,
+            is_cancelled: &is_cancelled,
         };
         let message = send_chat(core, messages, tools)?;
         // Persist usage
@@ -100,17 +111,7 @@ impl OpenAiClient {
     }
 
     fn persist_usage(&self, rate: &RateTracker) {
-        if let Some(ref path) = self.usage_path {
-            let persisted = rate.to_persisted();
-            if let Ok(json) = serde_json::to_string(&persisted) {
-                let tmp = path.with_extension("tmp");
-                if std::fs::write(&tmp, &json).is_ok() {
-                    let _ = std::fs::rename(&tmp, path);
-                } else {
-                    let _ = std::fs::remove_file(&tmp);
-                }
-            }
-        }
+        persist_usage(self.usage_path.as_deref(), rate);
     }
 }
 
@@ -124,6 +125,7 @@ impl LlmClient for OpenAiClient {
         let resp = self
             .http
             .get(&url)
+            .timeout(METADATA_TIMEOUT)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .send()
             .map_err(|e| LlmError::Http(e.to_string()))?;
@@ -133,7 +135,7 @@ impl LlmClient for OpenAiClient {
             401 => Err(LlmError::InvalidKey),
             429 => Ok(()), // Rate limited means key is valid
             status => {
-                let body = resp.text().unwrap_or_default();
+                let body = read_body_capped(resp);
                 // Billing/quota errors mean the key is valid but account has issues
                 if body.contains("billing")
                     || body.contains("quota")
@@ -156,6 +158,7 @@ impl LlmClient for OpenAiClient {
         let resp = match self
             .http
             .get(&url)
+            .timeout(METADATA_TIMEOUT)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .send()
         {
@@ -170,7 +173,7 @@ impl LlmClient for OpenAiClient {
         };
 
         let status = resp.status().as_u16();
-        let body = resp.text().unwrap_or_default();
+        let body = read_body_capped(resp);
 
         match status {
             200 => KeyValidationResult {
@@ -256,7 +259,13 @@ impl LlmClient for OpenAiClient {
         let mut last_text: Option<String> = None;
 
         for turn in 0..max_turns {
-            trim_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
+            // Between turns as well as inside the stream: a tool loop is up to
+            // max_turns whole requests, so checking only inside one of them
+            // still leaves the worker running after the flag flips.
+            if super::cancel::is_cancelled() {
+                return Err(LlmError::Unavailable(super::cancel::CANCELLED.to_string()));
+            }
+            trim_openai_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
             let response = self.send_chat(&messages, Some(tools))?;
 
             // Capture text content
@@ -319,6 +328,7 @@ impl LlmClient for OpenAiClient {
         let resp = self
             .http
             .get(&url)
+            .timeout(METADATA_TIMEOUT)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .send()
             .map_err(|e| LlmError::Http(e.to_string()))?;
@@ -328,7 +338,7 @@ impl LlmClient for OpenAiClient {
             401 => return Err(LlmError::InvalidKey),
             429 => return Err(LlmError::RateLimited),
             status => {
-                let body = resp.text().unwrap_or_default();
+                let body = read_body_capped(resp);
                 return Err(LlmError::Api {
                     status,
                     message: body,
@@ -347,7 +357,7 @@ impl LlmClient for OpenAiClient {
             created: Option<u64>,
         }
 
-        let body: ModelsResponse = resp.json().map_err(|e| LlmError::Parse(e.to_string()))?;
+        let body: ModelsResponse = json_capped(resp)?;
 
         let entries = body.data.unwrap_or_default();
 
@@ -400,56 +410,6 @@ impl LlmClient for OpenAiClient {
     }
 }
 
-/// Drop oldest tool-call turn(s) when the conversation exceeds the token
-/// budget. A "turn" is one assistant message with `tool_calls` plus the
-/// tool-role messages that reference its ids; these must be dropped as an
-/// atomic unit so the remaining assistant/tool pairing stays valid. The
-/// initial user prompt (messages[0]) and the most recent turn are always
-/// preserved.
-fn trim_messages(messages: &mut Vec<Message>, budget_tokens: usize) {
-    use super::trim::estimate_tokens;
-
-    fn message_tokens(m: &Message) -> usize {
-        let content = m.content.as_deref().map(estimate_tokens).unwrap_or(0);
-        let tool_calls = m
-            .tool_calls
-            .as_ref()
-            .map(|tcs| {
-                tcs.iter()
-                    .map(|tc| estimate_tokens(&tc.function.arguments))
-                    .sum::<usize>()
-            })
-            .unwrap_or(0);
-        content + tool_calls
-    }
-
-    let mut total: usize = messages.iter().map(message_tokens).sum();
-    if total <= budget_tokens {
-        return;
-    }
-
-    loop {
-        let turn_starts: Vec<usize> = messages
-            .iter()
-            .enumerate()
-            .skip(1)
-            .filter(|(_, m)| m.role == "assistant" && m.tool_calls.is_some())
-            .map(|(i, _)| i)
-            .collect();
-
-        // Keep at least the initial prompt + the most recent turn.
-        if turn_starts.len() < 2 {
-            return;
-        }
-
-        messages.drain(turn_starts[0]..turn_starts[1]);
-        total = messages.iter().map(message_tokens).sum();
-        if total <= budget_tokens {
-            return;
-        }
-    }
-}
-
 /// Derive a human-readable display name from an OpenAI model ID.
 fn openai_display_name(id: &str) -> String {
     match id {
@@ -478,6 +438,112 @@ mod tests {
     fn test_provider_name() {
         let client = OpenAiClient::new("fake-key", "gpt-4o").unwrap();
         assert_eq!(client.provider_name(), "OpenAI");
+    }
+
+    /// Claude F37 — `llm::create_client` builds a brand new client for every
+    /// user action, so an in-memory-only minute window always started empty
+    /// and the RPM limit was never actually enforced. This drives the exact
+    /// production path: `with_persistence`, one usage file, a second client
+    /// over the same file, inside the same minute.
+    #[test]
+    fn rate_minute_window_survives_create_client() {
+        let path = std::env::temp_dir().join(format!(
+            "gw2bo_rate_window_{}_{:?}.json",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        // First client: spend the whole minute allowance and persist it the
+        // way a successful send does.
+        let first =
+            OpenAiClient::with_persistence("fake-key", "gpt-4o", path.clone()).expect("client");
+        {
+            let mut rate = first.rate.lock().expect("rate");
+            for _ in 0..RPM_LIMIT {
+                rate.check_and_reserve().expect("within the minute limit");
+            }
+            first.persist_usage(&rate);
+        }
+
+        // Second client — what the next Choya message or Optimize builds.
+        let second =
+            OpenAiClient::with_persistence("fake-key", "gpt-4o", path.clone()).expect("client");
+        let mut rate = second.rate.lock().expect("rate");
+        assert_eq!(
+            rate.requests_this_minute(),
+            RPM_LIMIT,
+            "a fresh client must inherit the minute window, not reset it"
+        );
+        assert!(
+            matches!(rate.check_and_reserve(), Err(LlmError::RateLimited)),
+            "the RPM limit must still bite after create_client"
+        );
+        drop(rate);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A cancelled worker must leave the tool loop without opening a socket.
+    /// Port 1 is unbound: any network attempt here would be a slow failure,
+    /// not the instant `Unavailable` a cancelled unload needs.
+    #[test]
+    fn tool_loop_stops_on_cancel_without_touching_the_network() {
+        let client = OpenAiClient::new("fake-key", "gpt-4o").expect("client");
+        let tools = [ToolDefinition {
+            name: "t".into(),
+            description: "d".into(),
+            parameters: serde_json::json!({"type": "object"}),
+        }];
+        let _scope = super::super::cancel::CancelScope::new(|| true);
+
+        let started = std::time::Instant::now();
+        let error = client
+            .generate_with_tools_progress(
+                "prompt",
+                &tools,
+                &mut |_, _| Value::Null,
+                8,
+                &mut |_, _, _| {},
+            )
+            .expect_err("cancelled loop must fail");
+
+        assert!(
+            matches!(error, LlmError::Unavailable(ref m) if m == super::super::cancel::CANCELLED),
+            "got: {error}"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "cancel must be observed before any connect attempt"
+        );
+    }
+
+    /// A usage file from before the minute window was persisted must still
+    /// load — losing the daily counter to a strict parse would be worse.
+    #[test]
+    fn legacy_usage_file_still_loads() {
+        let path = std::env::temp_dir().join(format!(
+            "gw2bo_rate_legacy_{}_{:?}.json",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"day\":{},\"requests_today\":3}}",
+                super::super::rate::current_epoch_day()
+            ),
+        )
+        .expect("write legacy usage");
+
+        let client =
+            OpenAiClient::with_persistence("fake-key", "gpt-4o", path.clone()).expect("client");
+        let mut rate = client.rate.lock().expect("rate");
+        assert_eq!(rate.requests_this_minute(), 0);
+        assert!(rate.check_and_reserve().is_ok());
+        drop(rate);
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -539,112 +605,6 @@ mod tests {
     }
 
     #[test]
-    fn test_trim_messages_drops_oldest_turn() {
-        fn user_msg(text: &str) -> Message {
-            Message {
-                role: "user".into(),
-                content: Some(text.into()),
-                tool_calls: None,
-                tool_call_id: None,
-            }
-        }
-        fn assistant_with_call(id: &str, args: &str) -> Message {
-            Message {
-                role: "assistant".into(),
-                content: None,
-                tool_calls: Some(vec![ToolCallResponse {
-                    id: id.into(),
-                    call_type: "function".into(),
-                    function: FunctionCallData {
-                        name: "get_trait_details".into(),
-                        arguments: args.into(),
-                    },
-                }]),
-                tool_call_id: None,
-            }
-        }
-        fn tool_result(id: &str, body: &str) -> Message {
-            Message {
-                role: "tool".into(),
-                content: Some(body.into()),
-                tool_calls: None,
-                tool_call_id: Some(id.into()),
-            }
-        }
-
-        // Big filler (~100 chars = ~25 tokens each)
-        let filler = "x".repeat(400);
-
-        let mut messages = vec![
-            user_msg("initial prompt"),
-            assistant_with_call("call_1", &format!(r#"{{"q":"{}"}}"#, filler)),
-            tool_result("call_1", &filler),
-            assistant_with_call("call_2", &format!(r#"{{"q":"{}"}}"#, filler)),
-            tool_result("call_2", &filler),
-            assistant_with_call("call_3", &format!(r#"{{"q":"{}"}}"#, filler)),
-            tool_result("call_3", &filler),
-        ];
-        let original_len = messages.len();
-
-        // Budget of 200 tokens = 800 chars. Each turn is >= 200 chars of tool args + 400 chars of result.
-        trim_messages(&mut messages, 200);
-
-        assert!(
-            messages.len() < original_len,
-            "expected trimming, got {} messages",
-            messages.len()
-        );
-        // Initial user prompt preserved.
-        assert_eq!(messages[0].role, "user");
-        assert_eq!(messages[0].content.as_deref(), Some("initial prompt"));
-        // Most recent turn preserved (the call_3 pair).
-        let last_assistant_idx = messages
-            .iter()
-            .rposition(|m| m.role == "assistant")
-            .expect("must retain an assistant message");
-        let last_tc = messages[last_assistant_idx]
-            .tool_calls
-            .as_ref()
-            .expect("assistant has tool_calls")
-            .first()
-            .unwrap();
-        assert_eq!(last_tc.id, "call_3");
-        // Every tool message still refers to a tool_call_id present on a preceding assistant.
-        for (i, m) in messages.iter().enumerate() {
-            if m.role == "tool" {
-                let id = m.tool_call_id.as_deref().unwrap();
-                let found = messages[..i].iter().any(|prev| {
-                    prev.tool_calls
-                        .as_ref()
-                        .is_some_and(|tcs| tcs.iter().any(|tc| tc.id == id))
-                });
-                assert!(found, "orphaned tool_call_id {}", id);
-            }
-        }
-    }
-
-    #[test]
-    fn test_trim_messages_noop_under_budget() {
-        let mut messages = vec![
-            Message {
-                role: "user".into(),
-                content: Some("short prompt".into()),
-                tool_calls: None,
-                tool_call_id: None,
-            },
-            Message {
-                role: "assistant".into(),
-                content: Some("short reply".into()),
-                tool_calls: None,
-                tool_call_id: None,
-            },
-        ];
-        let original_len = messages.len();
-        trim_messages(&mut messages, 10_000);
-        assert_eq!(messages.len(), original_len);
-    }
-
-    #[test]
     fn test_message_serialization() {
         // User message
         let msg = Message {
@@ -684,7 +644,7 @@ mod tests {
             "data: [DONE]\n",
         );
 
-        let assistant_msg = match read_stream(sse.as_bytes()).expect("stream parses") {
+        let assistant_msg = match read_stream(sse.as_bytes(), &|| false).expect("stream parses") {
             StreamedMessage::Message(m) => m,
             StreamedMessage::Empty(finish) => panic!("unexpected empty stream: {finish}"),
         };

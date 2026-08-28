@@ -12,6 +12,9 @@ fn test_config() -> Arc<Config> {
         database_url: String::new(), // pool is injected by sqlx::test
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         admin_token: "test-admin-token".into(),
+        admin_user: "admin".into(),
+        admin_password: "desk-pass".into(),
+        session_secret: "session-secret".into(),
         ip_salt: "test-salt".into(),
         min_addon_version: "1.6.0".into(),
     })
@@ -966,4 +969,183 @@ async fn post_enforces_the_build_snapshot_ceiling(pool: PgPool) {
         StatusCode::CREATED,
         "1 KB is well under the cap"
     );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_inbox_page_is_public_and_has_no_token(pool: PgPool) {
+    let res = router(state(pool).await)
+        .oneshot(
+            Request::builder()
+                .uri("/admin")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(html.contains("Choya's inbox"), "{html}");
+    assert!(html.contains("Log in"), "{html}");
+    assert!(!html.contains("Admin token"), "{html}");
+    assert!(!html.contains("test-admin-token"));
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_list_filters_by_category_and_search(pool: PgPool) {
+    let st = state(pool).await;
+    let mut praise = report_json("99999999-9999-4999-8999-999999999992");
+    praise["category"] = "praise".into();
+    praise["path"] = serde_json::json!(["everything"]);
+    praise["title"] = "Love the choya".into();
+    praise["body"] = "Fistbump.".into();
+    router(st.clone())
+        .oneshot(post_report(
+            report_json("99999999-9999-4999-8999-999999999993"),
+            "203.0.113.8",
+            "1.6.0",
+        ))
+        .await
+        .unwrap();
+    router(st.clone())
+        .oneshot(post_report(praise, "203.0.113.9", "1.6.0"))
+        .await
+        .unwrap();
+
+    let only_praise = json_body(
+        router(st.clone())
+            .oneshot(admin(
+                "GET",
+                "/v1/admin/reports?category=praise",
+                None,
+                "test-admin-token",
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let arr = only_praise.as_array().unwrap();
+    assert_eq!(arr.len(), 1, "{only_praise}");
+    assert_eq!(arr[0]["category"], "praise");
+
+    let search = json_body(
+        router(st)
+            .oneshot(admin(
+                "GET",
+                "/v1/admin/reports?q=Trident",
+                None,
+                "test-admin-token",
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let found = search.as_array().unwrap();
+    assert_eq!(found.len(), 1, "{search}");
+    assert_eq!(found.len(), 1, "{search}");
+    assert!(found[0]["title"].as_str().unwrap().contains("Trident"));
+}
+
+fn login_req(user: &str, password: &str, ip: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/admin/login")
+        .header("content-type", "application/json")
+        .header("x-forwarded-for", ip)
+        .body(Body::from(
+            serde_json::json!({ "user": user, "password": password }).to_string(),
+        ))
+        .unwrap()
+}
+
+fn session_pair(res: &axum::http::Response<axum::body::Body>) -> String {
+    res.headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(';').next())
+        .unwrap()
+        .to_string()
+}
+
+fn cookie_get(uri: &str, cookie: &str) -> Request<Body> {
+    Request::builder()
+        .uri(uri)
+        .header("cookie", cookie)
+        .body(Body::empty())
+        .unwrap()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_login_rejects_wrong_password(pool: PgPool) {
+    let res = router(state(pool).await)
+        .oneshot(login_req("admin", "nope", "203.0.113.40"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_me_requires_login(pool: PgPool) {
+    let res = router(state(pool).await)
+        .oneshot(cookie_get("/admin/me", "choya_session=nope"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_login_cookie_opens_the_desk(pool: PgPool) {
+    let st = state(pool).await;
+    router(st.clone())
+        .oneshot(post_report(
+            report_json("99999999-9999-4999-8999-999999999994"),
+            "203.0.113.41",
+            "1.6.0",
+        ))
+        .await
+        .unwrap();
+
+    let logged = router(st.clone())
+        .oneshot(login_req("admin", "desk-pass", "203.0.113.42"))
+        .await
+        .unwrap();
+    assert_eq!(logged.status(), StatusCode::NO_CONTENT);
+    let cookie = session_pair(&logged);
+    assert!(cookie.starts_with("choya_session="), "{cookie}");
+
+    let me = json_body(
+        router(st.clone())
+            .oneshot(cookie_get("/admin/me", &cookie))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(me["user"], "admin");
+
+    let list = json_body(
+        router(st)
+            .oneshot(cookie_get("/v1/admin/reports", &cookie))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(list.as_array().unwrap().len(), 1, "{list}");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_login_is_rate_limited(pool: PgPool) {
+    let st = state(pool).await;
+    let ip = "203.0.113.43";
+    for i in 0..8 {
+        let res = router(st.clone())
+            .oneshot(login_req("admin", "wrong", ip))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "try {i}");
+    }
+    let res = router(st)
+        .oneshot(login_req("admin", "wrong", ip))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
 }

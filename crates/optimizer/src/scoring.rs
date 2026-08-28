@@ -475,17 +475,6 @@ impl ObjectiveScorer {
     }
 }
 
-/// Score a build against user-specified 6-axis weights.
-/// Each CombatPerformance metric is normalized to [0, 1] using realistic
-/// Solo-profile maximums, then multiplied by the corresponding weight.
-/// All per-axis scores are hard-capped at 1.0 so no single axis can
-/// dominate regardless of how extreme the raw metric values are.
-///
-/// Includes a misalignment penalty: if the user weighted any axis >= 0.4
-/// but the build scores below 0.15 on that axis, the total score is
-/// reduced proportionally. This catches edge cases where a set sneaks
-/// through tier selection via a secondary axis but is fundamentally wrong
-/// for the user's primary intent.
 /// Uncapped weighted direction score: same axes as `score_with_weights`
 /// but WITHOUT the per-axis saturation caps. Radar weights are a direction
 /// indicator, not a goal — once a capped axis is satisfied, surplus piece
@@ -513,6 +502,17 @@ pub fn raw_direction_score(perf: &CombatPerformance, weights: &OptimizationWeigh
         / total_w
 }
 
+/// Score a build against user-specified 6-axis weights.
+/// Each CombatPerformance metric is normalized to [0, 1] using realistic
+/// Solo-profile maximums, then multiplied by the corresponding weight.
+/// All per-axis scores are hard-capped at 1.0 so no single axis can
+/// dominate regardless of how extreme the raw metric values are.
+///
+/// Includes a misalignment penalty: if the user weighted any axis >= 0.4
+/// but the build scores below 0.15 on that axis, the total score is
+/// reduced proportionally. This catches edge cases where a set sneaks
+/// through tier selection via a secondary axis but is fundamentally wrong
+/// for the user's primary intent.
 pub fn score_with_weights(perf: &CombatPerformance, weights: &OptimizationWeights) -> f64 {
     score_with_norms(
         perf,

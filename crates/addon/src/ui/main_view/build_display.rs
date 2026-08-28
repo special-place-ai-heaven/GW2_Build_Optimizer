@@ -36,7 +36,6 @@ fn stat_color(val: i32, compare: i32) -> [f32; 4] {
 
 const CARD_ROUNDING: f32 = 5.0;
 const CARD_PAD: f32 = 4.0;
-const TITLE_HEIGHT: f32 = 20.0;
 const CARD_GAP: f32 = 8.0;
 
 /// Render a prominent panel header (e.g. "CURRENT BUILD") with colored text.
@@ -75,7 +74,10 @@ fn render_card_section(ui: &Ui, title: &str, content: impl FnOnce(&Ui)) {
     let start = ui.cursor_screen_pos();
     let width = ui.content_region_avail()[0];
     let hdr_top = start[1];
-    let hdr_bottom = hdr_top + CARD_PAD + TITLE_HEIGHT;
+    let bar_h = 22.0;
+    let hdr_bottom = hdr_top + bar_h;
+    let th = ui.calc_text_size(title)[1];
+    let ty = hdr_top + ((bar_h - th) * 0.5).round();
 
     // ── Phase 1: Draw header background + title ──
     {
@@ -92,18 +94,15 @@ fn render_card_section(ui: &Ui, title: &str, content: impl FnOnce(&Ui)) {
             .round_bot_right(false)
             .build();
         draw_list.add_text(
-            [
-                crate::ui::theme::header_title_x(start[0]),
-                hdr_top + CARD_PAD,
-            ],
+            [crate::ui::theme::header_title_x(start[0]), ty],
             SECTION_TITLE_COLOR,
             title,
         );
-        crate::ui::theme::paint_header_accent(&draw_list, start[0], hdr_top, hdr_bottom - hdr_top);
+        crate::ui::theme::paint_header_accent(&draw_list, start[0], hdr_top, bar_h);
     } // DrawListMut dropped here
 
     // Reserve space for the header
-    ui.dummy([0.0, CARD_PAD + TITLE_HEIGHT + 2.0]);
+    ui.dummy([0.0, bar_h + 2.0]);
 
     // ── Phase 2: Render content (ImGui widgets) ──
     let body_top = ui.cursor_screen_pos()[1];
@@ -150,19 +149,17 @@ pub fn render_suggestion_card(ui: &Ui, suggestion: &super::super::comparison::Bu
     });
 
     // ── Skills Card ──
-    render_card_section(ui, &t("section.skills"), |ui| {
-        let parsed = crate::ui::gear_diff::parse_suggestion_skills(&suggestion.skills);
-        render_skill_bar(
-            ui,
-            None,
-            &parsed.stances,
-            &parsed.pets,
-            &parsed.heal,
-            &parsed.utilities,
-            &parsed.elite,
-            "sugcard",
-        );
-    });
+    let parsed = crate::ui::gear_diff::parse_suggestion_skills(&suggestion.skills);
+    render_skill_bar(
+        ui,
+        None,
+        &parsed.stances,
+        &parsed.pets,
+        &parsed.heal,
+        &parsed.utilities,
+        &parsed.elite,
+        "sugcard",
+    );
 
     // ── Weapons Card ──
     render_card_section(ui, &t("section.weapons"), |ui| {
@@ -315,34 +312,6 @@ fn truncate_to_width(ui: &Ui, text: &str, max_w: f32) -> String {
     s
 }
 
-fn render_slash_list(
-    ui: &Ui,
-    label: &str,
-    joined: &str,
-    db: Option<&gw2_optimizer::gamedb::GameDb>,
-) {
-    if joined.is_empty() {
-        return;
-    }
-    ui.text_colored(LABEL_COLOR, format!("  {label}"));
-    ui.same_line();
-    for (i, part) in joined.split(" / ").enumerate() {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        if i > 0 {
-            ui.same_line_with_spacing(0.0, 6.0);
-        }
-        crate::ui::theme::chip(
-            ui,
-            crate::ui::comparison::loc_name(db, part),
-            &format!("##{label}_chip_{i}"),
-        );
-        crate::ui::comparison::inspect_if_hovered(ui, part, db);
-    }
-}
-
 fn slash_parts(joined: &str) -> Vec<&str> {
     joined
         .split(" / ")
@@ -380,6 +349,27 @@ fn stance_kit(
 // ponytail: one preview index for the visible skill bar (Improve never shows two).
 thread_local! {
     static STANCE_PREVIEW: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn peek_stance_kit(
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+    joined: &str,
+) -> Option<(String, Vec<String>, String)> {
+    let names = slash_parts(joined);
+    if names.is_empty() {
+        return None;
+    }
+    let n = names.len();
+    let selected = STANCE_PREVIEW.with(|c| {
+        let v = c.get();
+        if v >= n {
+            c.set(0);
+            0
+        } else {
+            v
+        }
+    });
+    db.and_then(|d| stance_kit(d, names[selected]))
 }
 
 /// Clickable stance pills. Returns that legend's kit when the db has it.
@@ -425,6 +415,45 @@ fn render_stance_tabs(
     db.and_then(|d| stance_kit(d, names[selected]))
 }
 
+fn two_line_split(name: &str) -> Vec<String> {
+    let words: Vec<&str> = name.split_whitespace().filter(|w| !w.is_empty()).collect();
+    match words.len() {
+        0 => vec!["-".into()],
+        1 => vec![words[0].into()],
+        2 => vec![words[0].into(), words[1].into()],
+        n => vec![words[..n - 1].join(" "), words[n - 1].to_string()],
+    }
+}
+
+fn min_name_col_w(ui: &Ui, name: &str) -> f32 {
+    two_line_split(name)
+        .iter()
+        .map(|l| ui.calc_text_size(l)[0])
+        .fold(16.0_f32, f32::max)
+}
+
+fn paint_group_header(ui: &Ui, x: f32, y: f32, w: f32, h: f32, title: &str) {
+    let dl = ui.get_window_draw_list();
+    crate::ui::theme::paint_header_accent(&dl, x, y, h);
+    let [tw, th] = ui.calc_text_size(title);
+    let inner_left = x + crate::ui::theme::HEADER_ACCENT_W + 4.0;
+    let inner_w = (w - crate::ui::theme::HEADER_ACCENT_W - 8.0).max(1.0);
+    let tx = inner_left + ((inner_w - tw) * 0.5).max(0.0);
+    let ty = y + ((h - th) * 0.5).round();
+    dl.add_text([tx, ty], SECTION_TITLE_COLOR, title);
+}
+
+fn paint_vdiv(ui: &Ui, x: f32, y: f32, h: f32) {
+    ui.get_window_draw_list()
+        .add_line([x, y + 1.0], [x, y + h - 1.0], crate::ui::theme::GOLD_DIM)
+        .thickness(1.0)
+        .build();
+}
+
+fn slot_row_w(inner_w: f32, n: usize, gap: f32) -> f32 {
+    (inner_w - gap * n.saturating_sub(1) as f32) / n.max(1) as f32
+}
+
 fn wrap_slot_lines(ui: &Ui, text: &str, max_w: f32) -> Vec<String> {
     if ui.calc_text_size(text)[0] <= max_w {
         return vec![text.to_string()];
@@ -455,6 +484,81 @@ fn wrap_slot_lines(ui: &Ui, text: &str, max_w: f32) -> Vec<String> {
     }
 }
 #[allow(clippy::too_many_arguments)]
+fn paint_kit_slot(
+    ui: &Ui,
+    db: Option<&gw2_optimizer::gamedb::GameDb>,
+    p: [f32; 2],
+    slot_w: f32,
+    slot_h: f32,
+    pad: f32,
+    icon: f32,
+    icon_text_gap: f32,
+    line: f32,
+    id: &str,
+    value: &str,
+    rim: [f32; 4],
+    icon_url: Option<&str>,
+    inspect: &str,
+    icon_zoom: f32,
+) {
+    let empty = value.is_empty();
+    let fill = if empty {
+        crate::ui::theme::PLATE_EMPTY
+    } else {
+        crate::ui::theme::PLATE
+    };
+    let border = if empty { [0.28, 0.24, 0.14, 0.45] } else { rim };
+    ui.set_cursor_screen_pos(p);
+    let _ = ui.invisible_button(id, [slot_w, slot_h]);
+    if !empty && !inspect.is_empty() {
+        crate::ui::comparison::inspect_if_hovered(ui, inspect, db);
+    }
+    {
+        let dl = ui.get_window_draw_list();
+        dl.add_rect(p, [p[0] + slot_w, p[1] + slot_h], fill)
+            .filled(true)
+            .rounding(6.0)
+            .build();
+        dl.add_rect(p, [p[0] + slot_w, p[1] + slot_h], border)
+            .rounding(6.0)
+            .build();
+        let icon_p = [p[0] + pad, p[1] + ((slot_h - icon) * 0.5).round()];
+        crate::ui::icons::paint_on_zoomed(
+            &dl,
+            if empty { None } else { icon_url },
+            icon_p,
+            [icon_p[0] + icon, icon_p[1] + icon],
+            [1.0, 1.0, 1.0, 1.0],
+            icon_zoom,
+        );
+        let text_x = p[0] + pad + icon + icon_text_gap;
+        let text_w = (p[0] + slot_w - pad - text_x).max(16.0);
+        let shown = if empty {
+            "-"
+        } else {
+            crate::ui::comparison::loc_name(db, value)
+        };
+        let color = if empty {
+            crate::ui::theme::MUTED
+        } else {
+            crate::ui::theme::CREAM
+        };
+        let lines = wrap_slot_lines(ui, shown, text_w);
+        let block_h = lines.len() as f32 * line;
+        let name_y = p[1] + ((slot_h - block_h) * 0.5).round();
+        for (i, ln) in lines.iter().enumerate() {
+            let lw = ui.calc_text_size(ln)[0];
+            let tx = text_x + ((text_w - lw) * 0.5).max(0.0);
+            dl.add_text(
+                [tx, name_y + i as f32 * line],
+                crate::ui::color_u32(color),
+                ln,
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn render_skill_bar(
     ui: &Ui,
     db: Option<&gw2_optimizer::gamedb::GameDb>,
@@ -465,184 +569,314 @@ fn render_skill_bar(
     elite: &str,
     id_suffix: &str,
 ) {
-    let kit = render_stance_tabs(ui, db, stances, id_suffix);
-    render_slash_list(ui, &t("slot.pets"), pets, db);
-
-    let (heal, utilities, elite) = match kit {
+    let (heal, utilities, elite) = match peek_stance_kit(db, stances) {
         Some((h, u, e)) => (h, u, e),
         None => (heal.to_string(), utilities.to_vec(), elite.to_string()),
+    };
+    let pet_raw = slash_parts(pets);
+    let pet_shown: Vec<String> = pet_raw
+        .iter()
+        .map(|name| match db.and_then(|d| d.pet_by_name(name)) {
+            Some(p) => {
+                let loc = db
+                    .map(|d| d.loc_pet(p.id, &p.name))
+                    .unwrap_or(p.name.as_str());
+                crate::ui::comparison::compact_pet_name(loc)
+            }
+            None => {
+                crate::ui::comparison::compact_pet_name(crate::ui::comparison::loc_name(db, name))
+            }
+        })
+        .collect();
+    let loc = |s: &str| {
+        if s.is_empty() {
+            String::new()
+        } else {
+            crate::ui::comparison::loc_name(db, s).to_string()
+        }
+    };
+    let heal_s = loc(&heal);
+    let u1_s = loc(utilities.first().map(|s| s.as_str()).unwrap_or(""));
+    let u2_s = loc(utilities.get(1).map(|s| s.as_str()).unwrap_or(""));
+    let u3_s = loc(utilities.get(2).map(|s| s.as_str()).unwrap_or(""));
+    let elite_s = loc(&elite);
+    let g_pets = t("group.pet_skills");
+    let g_util = t("group.utility_skills");
+    let g_elite = t("group.elite_skill");
+
+    let avail = ui.content_region_avail()[0].max(1.0);
+    let gap = 4.0;
+    let group_pad = 4.0;
+    let div_w = 8.0;
+    let line = ui.text_line_height();
+    let pad = 4.0;
+    let icon = line * 2.0;
+    let icon_text_gap = 6.0;
+    let bar_h = 22.0;
+    let slot_h = pad + icon.max(line * 2.0) + pad;
+    let min_slot = |name: &str| {
+        let col = if name.is_empty() {
+            ui.calc_text_size("-")[0]
+        } else {
+            min_name_col_w(ui, name)
+        };
+        pad + icon + icon_text_gap + col + pad
+    };
+    let group_need = |title: &str, mins: &[f32]| {
+        if mins.is_empty() {
+            return 0.0;
+        }
+        let slots = mins.iter().sum::<f32>() + gap * mins.len().saturating_sub(1) as f32;
+        (slots + group_pad * 2.0)
+            .max(ui.calc_text_size(title)[0] + group_pad * 2.0 + crate::ui::theme::HEADER_ACCENT_W)
+    };
+
+    let pet_mins: Vec<f32> = pet_shown.iter().map(|n| min_slot(n)).collect();
+    let util_mins = [
+        min_slot(&heal_s),
+        min_slot(&u1_s),
+        min_slot(&u2_s),
+        min_slot(&u3_s),
+    ];
+    let elite_mins = [min_slot(&elite_s)];
+    let has_pets = !pet_mins.is_empty();
+    let n_div = if has_pets { 2.0 } else { 1.0 };
+    let pet_need = group_need(&g_pets, &pet_mins);
+    let util_need = group_need(&g_util, &util_mins);
+    let elite_need = group_need(&g_elite, &elite_mins);
+    let need = pet_need + util_need + elite_need + n_div * div_w;
+    let (pet_w, util_w, elite_w) = if need <= avail {
+        let extra = avail - need;
+        if has_pets {
+            (
+                pet_need + extra * 0.20,
+                util_need + extra * 0.70,
+                elite_need + extra * 0.10,
+            )
+        } else {
+            (0.0, util_need + extra * 0.75, elite_need + extra * 0.25)
+        }
+    } else {
+        let leftover = (avail - n_div * div_w - pet_need - elite_need).max(0.0);
+        if leftover >= util_need * 0.55 {
+            (pet_need, leftover, elite_need)
+        } else {
+            let scale = ((avail - n_div * div_w) / (pet_need + util_need + elite_need).max(1.0))
+                .clamp(0.4, 1.0);
+            (pet_need * scale, util_need * scale, elite_need * scale)
+        }
+    };
+
+    let start = ui.cursor_screen_pos();
+    let hdr_top = start[1];
+    let hdr_bottom = hdr_top + bar_h;
+    {
+        let dl = ui.get_window_draw_list();
+        dl.add_rect(
+            [start[0] - 1.0, hdr_top],
+            [start[0] + avail + 1.0, hdr_bottom],
+            SECTION_HEADER_BG,
+        )
+        .filled(true)
+        .rounding(CARD_ROUNDING)
+        .round_bot_left(false)
+        .round_bot_right(false)
+        .build();
+    }
+    let mut hx = start[0];
+    if has_pets {
+        paint_group_header(ui, hx, hdr_top, pet_w, bar_h, &g_pets);
+        hx += pet_w + div_w;
+    }
+    paint_group_header(ui, hx, hdr_top, util_w, bar_h, &g_util);
+    hx += util_w + div_w;
+    paint_group_header(ui, hx, hdr_top, elite_w, bar_h, &g_elite);
+
+    ui.dummy([0.0, bar_h + 2.0]);
+    let body_top = ui.cursor_screen_pos()[1];
+    ui.dummy([0.0, 2.0]);
+
+    let (heal, utilities, elite) = match render_stance_tabs(ui, db, stances, id_suffix) {
+        Some((h, u, e)) => (h, u, e),
+        None => (heal, utilities, elite),
     };
     let u1 = utilities.first().map(|s| s.as_str()).unwrap_or("");
     let u2 = utilities.get(1).map(|s| s.as_str()).unwrap_or("");
     let u3 = utilities.get(2).map(|s| s.as_str()).unwrap_or("");
-    let l_heal = t("slot.heal");
-    let l_u1 = t("slot.util1");
-    let l_u2 = t("slot.util2");
-    let l_u3 = t("slot.util3");
-    let l_elite = t("slot.elite");
-    let slots = [
-        (l_heal.as_str(), heal.as_str(), crate::ui::theme::HEAL_RIM),
-        (l_u1.as_str(), u1, crate::ui::theme::GOLD_DIM),
-        (l_u2.as_str(), u2, crate::ui::theme::GOLD_DIM),
-        (l_u3.as_str(), u3, crate::ui::theme::GOLD_DIM),
-        (
-            l_elite.as_str(),
+
+    let slot_y = ui.cursor_screen_pos()[1];
+    let mut x = start[0];
+    if has_pets {
+        let inner_x = x + group_pad;
+        let inner_w = (pet_w - group_pad * 2.0).max(1.0);
+        let n = pet_shown.len();
+        let sw = slot_row_w(inner_w, n, gap);
+        for (i, (name, shown)) in pet_raw.iter().zip(pet_shown.iter()).enumerate() {
+            paint_kit_slot(
+                ui,
+                db,
+                [inner_x + i as f32 * (sw + gap), slot_y],
+                sw,
+                slot_h,
+                pad,
+                icon,
+                icon_text_gap,
+                line,
+                &format!("##pet_slot_{id_suffix}_{i}"),
+                shown,
+                crate::ui::theme::GOLD_DIM,
+                db.and_then(|d| crate::ui::icons::pet_url(d, name)),
+                name,
+                crate::ui::icons::PET_ICON_ZOOM,
+            );
+        }
+        x += pet_w + div_w;
+    }
+
+    {
+        let inner_x = x + group_pad;
+        let inner_w = (util_w - group_pad * 2.0).max(1.0);
+        let sw = slot_row_w(inner_w, 4, gap);
+        let utils = [
+            (0usize, heal.as_str(), crate::ui::theme::HEAL_RIM),
+            (1, u1, crate::ui::theme::GOLD_DIM),
+            (2, u2, crate::ui::theme::GOLD_DIM),
+            (3, u3, crate::ui::theme::GOLD_DIM),
+        ];
+        for (i, value, rim) in utils {
+            paint_kit_slot(
+                ui,
+                db,
+                [inner_x + i as f32 * (sw + gap), slot_y],
+                sw,
+                slot_h,
+                pad,
+                icon,
+                icon_text_gap,
+                line,
+                &format!("##skill_slot_{id_suffix}_{i}"),
+                value,
+                rim,
+                db.and_then(|d| crate::ui::icons::skill_url_by_name(d, value)),
+                value,
+                1.0,
+            );
+        }
+        x += util_w + div_w;
+    }
+
+    {
+        let inner_x = x + group_pad;
+        let inner_w = (elite_w - group_pad * 2.0).max(1.0);
+        paint_kit_slot(
+            ui,
+            db,
+            [inner_x, slot_y],
+            inner_w,
+            slot_h,
+            pad,
+            icon,
+            icon_text_gap,
+            line,
+            &format!("##skill_slot_{id_suffix}_elite"),
             elite.as_str(),
             crate::ui::theme::ELITE_RIM,
-        ),
-    ];
-    let avail = ui.content_region_avail()[0].max(1.0);
-    let gap = 5.0;
-    let line = ui.text_line_height();
-    let pad = 4.0;
-    let icon = line * 2.0;
-    let icon_text_gap = 8.0;
-    let slot_h = icon + pad * 2.0;
-    let min_slot = pad + icon + icon_text_gap + 72.0 + pad;
-    let cols = if avail >= min_slot * 5.0 + gap * 4.0 {
-        5
-    } else if avail >= min_slot * 3.0 + gap * 2.0 {
-        3
-    } else {
-        1
-    };
-    let slot_w = (avail - gap * (cols as f32 - 1.0)) / cols as f32;
-    let start = ui.cursor_screen_pos();
-    for (i, (label, value, rim)) in slots.iter().enumerate() {
-        let col = i % cols;
-        let row = i / cols;
-        let x = start[0] + col as f32 * (slot_w + gap);
-        let y = start[1] + row as f32 * (slot_h + gap);
-        let p = [x, y];
-        let empty = value.is_empty();
-        let fill = if empty {
-            crate::ui::theme::PLATE_EMPTY
-        } else {
-            crate::ui::theme::PLATE
-        };
-        let border = if empty {
-            [0.28, 0.24, 0.14, 0.45]
-        } else {
-            *rim
-        };
-        ui.set_cursor_screen_pos(p);
-        let _ = ui.invisible_button(format!("##skill_slot_{id_suffix}_{i}"), [slot_w, slot_h]);
-        if !empty {
-            crate::ui::comparison::inspect_if_hovered(ui, value, db);
-        }
-        {
-            let dl = ui.get_window_draw_list();
-            dl.add_rect(p, [p[0] + slot_w, p[1] + slot_h], fill)
-                .filled(true)
-                .rounding(6.0)
-                .build();
-            dl.add_rect(p, [p[0] + slot_w, p[1] + slot_h], border)
-                .rounding(6.0)
-                .build();
-            let icon_p = [p[0] + pad, p[1] + pad];
-            let icon_url = if empty {
-                None
-            } else {
-                db.and_then(|d| crate::ui::icons::skill_url_by_name(d, value))
-            };
-            crate::ui::icons::paint_on(
-                &dl,
-                icon_url,
-                icon_p,
-                [icon_p[0] + icon, icon_p[1] + icon],
-                [1.0, 1.0, 1.0, 1.0],
-            );
-            let text_x = p[0] + pad + icon + icon_text_gap;
-            let text_w = (p[0] + slot_w - pad - text_x).max(16.0);
-            dl.add_text(
-                [text_x, p[1] + pad],
-                crate::ui::color_u32(crate::ui::theme::GOLD),
-                *label,
-            );
-            let shown = if empty {
-                "\u{2014}"
-            } else {
-                crate::ui::comparison::loc_name(db, value)
-            };
-            let color = if empty {
-                crate::ui::theme::MUTED
-            } else {
-                crate::ui::theme::CREAM
-            };
-            let lines = wrap_slot_lines(ui, shown, text_w);
-            if let Some(ln) = lines.first() {
-                dl.add_text([text_x, p[1] + pad + line], crate::ui::color_u32(color), ln);
-            }
-        }
+            db.and_then(|d| crate::ui::icons::skill_url_by_name(d, elite.as_str())),
+            elite.as_str(),
+            1.0,
+        );
     }
-    let rows = slots.len().div_ceil(cols);
-    ui.set_cursor_screen_pos([start[0], start[1] + rows as f32 * (slot_h + gap)]);
+
+    ui.set_cursor_screen_pos([start[0], slot_y + slot_h]);
     ui.dummy([avail, 0.0]);
+    ui.dummy([0.0, CARD_PAD]);
+    let body_bottom = ui.cursor_screen_pos()[1];
+    {
+        let dl = ui.get_window_draw_list();
+        dl.add_line(
+            [start[0] - 1.0, body_top],
+            [start[0] + avail + 1.0, body_top],
+            ACCENT_LINE_COLOR,
+        )
+        .thickness(1.0)
+        .build();
+        dl.add_rect(
+            [start[0] - 1.0, hdr_top],
+            [start[0] + avail + 1.0, body_bottom],
+            CARD_BORDER_COLOR,
+        )
+        .rounding(CARD_ROUNDING)
+        .build();
+    }
+    let card_h = body_bottom - hdr_top;
+    let mut vx = start[0];
+    if has_pets {
+        vx += pet_w;
+        paint_vdiv(ui, vx + div_w * 0.5, hdr_top, card_h);
+        vx += div_w;
+    }
+    vx += util_w;
+    paint_vdiv(ui, vx + div_w * 0.5, hdr_top, card_h);
+    ui.dummy([0.0, CARD_GAP]);
 }
 
 // ─── Individual section renderers (for column-aligned layouts) ───
 
-/// Render the SKILLS section for the current build.
 pub fn render_build_skills(
     ui: &Ui,
     build: &ResolvedBuild,
     db: Option<&gw2_optimizer::gamedb::GameDb>,
 ) {
-    render_card_section(ui, &t("section.skills"), |ui| {
-        let heal = build
-            .skills
-            .heal
-            .as_ref()
-            .map(|s| s.name.as_str())
-            .unwrap_or("");
-        let elite = build
-            .skills
-            .elite
-            .as_ref()
-            .map(|s| s.name.as_str())
-            .unwrap_or("");
-        let utils: Vec<String> = (0..3)
-            .map(|i| {
-                build
-                    .skills
-                    .utilities
-                    .get(i)
-                    .and_then(|u| u.as_ref().map(|s| s.name.clone()))
-                    .unwrap_or_default()
-            })
-            .collect();
-        render_skill_bar(
-            ui,
-            db,
-            &build.legends.join(" / "),
-            &build.pets.join(" / "),
-            heal,
-            &utils,
-            elite,
-            "cur",
-        );
-    });
+    let heal = build
+        .skills
+        .heal
+        .as_ref()
+        .map(|s| s.name.as_str())
+        .unwrap_or("");
+    let elite = build
+        .skills
+        .elite
+        .as_ref()
+        .map(|s| s.name.as_str())
+        .unwrap_or("");
+    let utils: Vec<String> = (0..3)
+        .map(|i| {
+            build
+                .skills
+                .utilities
+                .get(i)
+                .and_then(|u| u.as_ref().map(|s| s.name.clone()))
+                .unwrap_or_default()
+        })
+        .collect();
+    render_skill_bar(
+        ui,
+        db,
+        &build.legends.join(" / "),
+        &build.pets.join(" / "),
+        heal,
+        &utils,
+        elite,
+        "cur",
+    );
 }
 
-/// Render the SKILLS section for the suggestion.
 pub fn render_suggestion_skills(
     ui: &Ui,
     suggestion: &super::super::comparison::BuildSuggestion,
     db: Option<&gw2_optimizer::gamedb::GameDb>,
 ) {
-    render_card_section(ui, &t("section.skills"), |ui| {
-        let parsed = crate::ui::gear_diff::parse_suggestion_skills(&suggestion.skills);
-        render_skill_bar(
-            ui,
-            db,
-            &parsed.stances,
-            &parsed.pets,
-            &parsed.heal,
-            &parsed.utilities,
-            &parsed.elite,
-            "sug",
-        );
-    });
+    let parsed = crate::ui::gear_diff::parse_suggestion_skills(&suggestion.skills);
+    render_skill_bar(
+        ui,
+        db,
+        &parsed.stances,
+        &parsed.pets,
+        &parsed.heal,
+        &parsed.utilities,
+        &parsed.elite,
+        "sug",
+    );
 }
 
 /// Render the WEAPONS section for the suggestion.
@@ -736,7 +970,7 @@ pub fn render_suggestion_stats(
 
 #[cfg(test)]
 mod tests {
-    use super::stance_kit;
+    use super::{stance_kit, two_line_split};
     use gw2_api::models::Legend;
 
     fn skill(id: u32, name: &str) -> gw2_api::models::Skill {
@@ -779,5 +1013,18 @@ mod tests {
         let (heal, _, _) = stance_kit(&db, "Alliance").expect("alliance kit");
         assert_eq!(heal, "Selfish Spirit");
         assert!(stance_kit(&db, "Entity").is_none());
+    }
+
+    #[test]
+    fn two_line_split_puts_last_word_on_line_two() {
+        assert_eq!(
+            two_line_split("Siege Turtle"),
+            vec!["Siege".to_string(), "Turtle".to_string()]
+        );
+        assert_eq!(
+            two_line_split("Glyph of Equality"),
+            vec!["Glyph of".to_string(), "Equality".to_string()]
+        );
+        assert_eq!(two_line_split("Entangle"), vec!["Entangle".to_string()]);
     }
 }

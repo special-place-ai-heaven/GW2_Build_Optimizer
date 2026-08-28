@@ -1,11 +1,116 @@
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use super::resolution::resolve_selected_build_inner;
 use crate::state::AddonState;
 
+/// How long a name pack that could not be loaded is left alone before the next
+/// try. [`ensure_localized_names`] runs on every frame, and a pack that is
+/// missing, stale or corrupt costs a file probe — or, when it parses only
+/// partly, a multi-megabyte JSON parse — on every one of them without this.
+const LOCALE_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Which name pack was last asked for from disk, and when.
+struct LocaleAttempt {
+    /// API language plus the cache build number. A language switch or a game
+    /// patch is a *different* pack, not a retry, so it must not have to sit out
+    /// a cooldown that something else started.
+    key: (String, Option<u32>),
+    at: Instant,
+}
+
+/// Cooldown for [`ensure_localized_names`]. A static rather than `MainState`
+/// because it is cache-miss bookkeeping, not addon state: nothing renders it,
+/// nothing persists it, and it means the same thing across a state reset.
+static LOCALE_ATTEMPT: Mutex<Option<LocaleAttempt>> = Mutex::new(None);
+
+/// Record an attempt to load `key` and report whether it may go to disk now.
+///
+/// Pure over `slot` and `now`, so the frame loop is testable without a clock,
+/// a cache directory, or a thread.
+fn locale_attempt_allowed(
+    slot: &mut Option<LocaleAttempt>,
+    key: (&str, Option<u32>),
+    now: Instant,
+) -> bool {
+    let allowed = match slot {
+        Some(last) => {
+            last.key.0 != key.0
+                || last.key.1 != key.1
+                || now.saturating_duration_since(last.at) >= LOCALE_RETRY_INTERVAL
+        }
+        None => true,
+    };
+    if allowed {
+        *slot = Some(LocaleAttempt {
+            key: (key.0.to_string(), key.1),
+            at: now,
+        });
+    }
+    allowed
+}
+
+/// The last answer [`cached_pack_status`] got from disk.
+struct CachedPackStatus {
+    key: (String, Option<u32>),
+    at: Instant,
+    status: gw2_api::localize::PackStatus,
+}
+
+static PACK_STATUS: Mutex<Option<CachedPackStatus>> = Mutex::new(None);
+
+/// [`gw2_api::localize::pack_status`] for the status bar, re-read from disk at
+/// most every [`LOCALE_RETRY_INTERVAL`] — the same "how long a locale-pack disk
+/// answer stays good for" window the loader uses.
+///
+/// The bare call opens the cache entry and parses its header, and
+/// `DataCache::new` runs a `create_dir_all` on top. None of that belongs on the
+/// render thread 60 times a second to pick the colour of one label.
+pub(super) fn cached_pack_status(
+    addon_dir: &std::path::Path,
+    lang: &str,
+    build: Option<u32>,
+) -> gw2_api::localize::PackStatus {
+    let key = (lang.to_string(), build);
+    let now = Instant::now();
+    let mut slot = PACK_STATUS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(cached) = slot.as_ref() {
+        if cached.key == key && now.saturating_duration_since(cached.at) < LOCALE_RETRY_INTERVAL {
+            return cached.status;
+        }
+    }
+    let cache = gw2_api::cache::DataCache::new(addon_dir.join("cache"));
+    let status = gw2_api::localize::pack_status(&cache, lang, build);
+    *slot = Some(CachedPackStatus {
+        key,
+        at: now,
+        status,
+    });
+    status
+}
+
 /// Attach cached official API names for de/es/fr/zh. Never downloads — packs come from setup/refresh.
+///
+/// Called on every frame from `render_main`, so neither of the two costs may
+/// land there: the read and JSON parse happen on a worker rather than under
+/// `STATE`, and a pack that is missing or unreadable is retried every
+/// [`LOCALE_RETRY_INTERVAL`] instead of every frame.
 pub(super) fn ensure_localized_names(state: &mut AddonState) {
     let Some(lang) = gw2_core::i18n::api_lang(&state.config.ui_language) else {
-        if let Some(db) = state.main.game_db.as_mut() {
-            db.localized = None;
+        // Only reach for the database mutably when there is something to clear.
+        // `game_db_mut` is `Arc::make_mut`, so an unconditional call here would
+        // deep-copy the whole database on the render thread on every frame a
+        // worker happens to be holding a clone — and this is the branch every
+        // English player takes.
+        if state
+            .main
+            .game_db
+            .as_ref()
+            .is_some_and(|db| db.localized.is_some())
+        {
+            if let Some(db) = state.main.game_db_mut() {
+                db.localized = None;
+            }
         }
         state.main.names_loading = false;
         state.main.names_stage.clear();
@@ -24,16 +129,50 @@ pub(super) fn ensure_localized_names(state: &mut AddonState) {
     if state.main.game_db.is_none() {
         return;
     }
-    let cache = gw2_api::cache::DataCache::new(state.addon_dir.join("cache"));
-    if let Ok(Some(names)) = gw2_api::localize::load(&cache, lang, state.config.cache_build_number)
+    let build = state.config.cache_build_number;
     {
-        if let Some(db) = state.main.game_db.as_mut() {
-            db.attach_localized(names);
+        let mut slot = LOCALE_ATTEMPT.lock().unwrap_or_else(|e| e.into_inner());
+        if !locale_attempt_allowed(&mut slot, (lang, build), Instant::now()) {
+            return;
         }
-        state.main.names_lang = lang.to_string();
     }
-    state.main.names_loading = false;
-    state.main.names_stage.clear();
+
+    let cache_dir = state.addon_dir.join("cache");
+    let lang = lang.to_string();
+    // ponytail: the cooldown, not an in-flight flag, is what keeps this to one
+    // worker. A load that outlives `LOCALE_RETRY_INTERVAL` can be joined by a
+    // second one; both read the same file and attach the same names, so the
+    // cost is a duplicate parse, not a wrong result. Add a flag if packs ever
+    // grow big enough for that to be a real second of work.
+    state.spawn_worker("locale-pack", move |token| {
+        let cache = gw2_api::cache::DataCache::new(&cache_dir);
+        let loaded = gw2_api::localize::load(&cache, &lang, build);
+        if token.is_cancelled() {
+            return;
+        }
+        crate::state::with_state(|s| {
+            // The player can switch language while a pack loads, and a refresh
+            // can publish a different database — only attach to the one the UI
+            // is asking for right now.
+            if let Ok(Some(names)) = loaded {
+                if gw2_core::i18n::api_lang(&s.config.ui_language) == Some(lang.as_str()) {
+                    // ponytail: `game_db_mut` is `Arc::make_mut`, so this is an
+                    // in-place edit while nothing else holds the database — the
+                    // normal case — but a deep copy under STATE if an optimize
+                    // is mid-flight with its own clone. Closing that needs a way
+                    // to build `by_english` from `&GameDb` so the pack could be
+                    // attached before the lock is taken; `gamedb.rs` is not this
+                    // leaf's to change.
+                    if let Some(db) = s.main.game_db_mut() {
+                        db.attach_localized(names);
+                        s.main.names_lang = lang.clone();
+                    }
+                }
+            }
+            s.main.names_loading = false;
+            s.main.names_stage.clear();
+        });
+    });
 }
 /// Fetch available models from the active provider's API in a background thread.
 pub(super) fn start_fetch_models(state: &mut AddonState) {
@@ -41,8 +180,7 @@ pub(super) fn start_fetch_models(state: &mut AddonState) {
     state.main.models_error = None;
     let addon_dir = state.addon_dir.clone();
     let config_snapshot = state.config.clone();
-    let token = state.cancel_token.clone();
-    std::thread::spawn(move || {
+    let spawned = state.spawn_worker("fetch-models", move |token| {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // Always reset models_loading on every exit path. Without this, an early
             // cancellation (e.g. user closed the Settings tab) leaves the spinner
@@ -85,16 +223,20 @@ pub(super) fn start_fetch_models(state: &mut AddonState) {
             });
         }
     });
+    if !spawned {
+        // The OS refused the thread (`spawn_worker` logged it). Nothing will
+        // fetch, so clear the spinner this function turned on rather than
+        // leaving "Loading models…" up forever.
+        state.main.models_loading = false;
+    }
 }
 
 /// Re-download game data from the GW2 API, then reload GameDb.
 pub(super) fn start_game_data_refresh(state: &mut AddonState) {
     state.main.game_db_loading = true;
     let cache_dir = state.addon_dir.join("cache");
-    let config_path = state.config_path.clone();
-    let token = state.cancel_token.clone();
 
-    std::thread::spawn(move || {
+    let spawned = state.spawn_worker("game-data-refresh", move |token| {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // Drive the refresh in a single labelled block so every exit path falls
             // through to the unified state reset below. Previously the 4 early-return
@@ -154,16 +296,13 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                     Err(e) => break 'refresh Outcome::DownloadError(e.to_string()),
                 };
 
-                // Save new build number
+                // Publish the new build number, then hand the write to the
+                // config writer: this runs inside `with_state`, and an
+                // `AppConfig::save` here would hold STATE — and so the render
+                // thread — for the length of a disk write.
                 crate::state::with_state(|s| {
                     s.config.cache_build_number = Some(build_number);
-                    if let Err(e) = s.config.save(&config_path) {
-                        nexus::log::log(
-                            nexus::log::LogLevel::Warning,
-                            "GW2BuildOpt",
-                            format!("Config save failed: {}", e),
-                        );
-                    }
+                    crate::ui::save_config_detached(s);
                 });
 
                 if token.is_cancelled() {
@@ -196,7 +335,7 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
                                 "GW2 Build Optimizer",
                                 "Game data refreshed successfully",
                             );
-                            s.main.game_db = Some(db);
+                            s.main.set_game_db(db);
                             crate::ui::main_view::stats::ensure_localized_names(s);
                             if s.main.selected_build_tab.is_some()
                                 && s.main.selected_equipment_tab.is_some()
@@ -224,14 +363,19 @@ pub(super) fn start_game_data_refresh(state: &mut AddonState) {
             });
         }
     });
+    if !spawned {
+        // The OS refused the thread (`spawn_worker` logged it): clear the
+        // banner this function turned on instead of freezing on "Refreshing…".
+        state.main.game_db_loading = false;
+        state.main.game_refresh_stage = String::new();
+    }
 }
 
 /// Lightweight API health check: pings GET /v2/build (unauthenticated, returns a single integer).
 pub(super) fn check_api_health(state: &mut AddonState) {
     state.main.api_health_checking = true;
-    let token = state.cancel_token.clone();
 
-    std::thread::spawn(move || {
+    let spawned = state.spawn_worker("api-health", move |token| {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut live_build = None;
             let status: Option<crate::state::ApiStatus> = if token.is_cancelled() {
@@ -278,15 +422,19 @@ pub(super) fn check_api_health(state: &mut AddonState) {
             });
         }
     });
+    if !spawned {
+        // No thread, no ping: release the "checking" latch so the next frame
+        // that is due can try again.
+        state.main.api_health_checking = false;
+    }
 }
 
 /// Load GameDb once on main screen entry (S11-T06)
 pub(super) fn load_game_db(state: &mut AddonState) {
     state.main.game_db_loading = true;
     let cache_dir = state.addon_dir.join("cache");
-    let token = state.cancel_token.clone();
 
-    std::thread::spawn(move || {
+    let spawned = state.spawn_worker("load-game-db", move |token| {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // Always reset game_db_loading on every exit path. Early-return cancel
             // checks previously skipped the state write, leaving the main screen
@@ -312,7 +460,7 @@ pub(super) fn load_game_db(state: &mut AddonState) {
                             "GW2 Build Optimizer",
                             db.summary(),
                         );
-                        s.main.game_db = Some(db);
+                        s.main.set_game_db(db);
                         crate::ui::main_view::stats::ensure_localized_names(s);
                         // If build tabs were loaded before GameDb, trigger resolve now
                         if s.main.selected_build_tab.is_some()
@@ -339,6 +487,11 @@ pub(super) fn load_game_db(state: &mut AddonState) {
             });
         }
     });
+    if !spawned {
+        // The OS refused the thread (`spawn_worker` logged it). `game_db_retry_at`
+        // already spaces the next attempt out, so just drop the spinner.
+        state.main.game_db_loading = false;
+    }
 }
 
 /// Convert CombatPerformance to the display-friendly CombatMetrics bridge type.
@@ -395,4 +548,53 @@ pub(super) fn compute_3tier_combat(
         profiles.get(1).map(&compute),
         profiles.get(2).map(&compute),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{locale_attempt_allowed, LOCALE_RETRY_INTERVAL};
+    use std::time::{Duration, Instant};
+
+    /// `ensure_localized_names` runs on every frame. When the pack for the
+    /// selected language is missing, stale or corrupt there is nothing to
+    /// attach, so without a cooldown the overlay would go back to disk 60
+    /// times a second forever — and pay a full JSON parse each time whenever
+    /// the file exists but cannot be used.
+    #[test]
+    fn locale_pack_retry_is_throttled() {
+        let mut slot = None;
+        let t0 = Instant::now();
+
+        // 300 frames at 60 fps ≈ 4.8 s: a whole cooldown, minus a frame.
+        let attempts = (0..300u64)
+            .filter(|&frame| {
+                locale_attempt_allowed(
+                    &mut slot,
+                    ("de", Some(7)),
+                    t0 + Duration::from_millis(16 * frame),
+                )
+            })
+            .count();
+        assert_eq!(
+            attempts, 1,
+            "a missing pack must reach disk once per cooldown, not once per frame"
+        );
+
+        // The pack can appear at any time (a download just finished), so the
+        // first frame after the cooldown does try again.
+        let after = t0 + LOCALE_RETRY_INTERVAL + Duration::from_millis(1);
+        assert!(
+            locale_attempt_allowed(&mut slot, ("de", Some(7)), after),
+            "the cooldown must expire, not latch the pack off"
+        );
+
+        // A different pack is not a retry: switching language, or a game patch
+        // bumping the cache build number, must load now instead of sitting out
+        // a cooldown something else started.
+        assert!(locale_attempt_allowed(&mut slot, ("fr", Some(7)), after));
+        assert!(locale_attempt_allowed(&mut slot, ("fr", Some(8)), after));
+
+        // …and that pack then gets its own cooldown.
+        assert!(!locale_attempt_allowed(&mut slot, ("fr", Some(8)), after));
+    }
 }

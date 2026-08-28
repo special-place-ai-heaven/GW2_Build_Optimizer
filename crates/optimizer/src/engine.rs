@@ -12,17 +12,15 @@ use gw2_api::models::Fact;
 
 use crate::balance::BalanceContext;
 use crate::combat::{self, CombatPerformance, DamageModifiers};
-use crate::context::{self, ContextConfig};
 use crate::data;
 use crate::gamedb::GameDb;
-use crate::gemini_tools::{self, ToolContext};
 use crate::llm::LlmClient;
-use crate::prompts;
 use crate::rotation;
 use crate::scoring::{self, score_with_weights, OptimizationWeights, StatWeights};
 use crate::search::{search_gear_prefixes, search_spec_combos, GearCandidate};
 use crate::stats;
 use crate::validation::{self, ValidatedBuild};
+use crate::weapon_budget::{self, LandWeaponBudget};
 
 /// Selected PvP amulet in a build candidate (PvP mode only).
 #[derive(Debug, Clone)]
@@ -62,64 +60,6 @@ pub struct OptimizeProgress {
     pub done: bool,
 }
 
-/// Build a human-readable description of lock constraints using GameDb names.
-/// Used for LLM prompt generation so Gemini knows what to preserve.
-fn describe_lock_constraints(locks: &gw2_core::types::BuildLocks, db: &GameDb) -> String {
-    if !locks.has_any_locks() {
-        return String::new();
-    }
-    let mut parts = Vec::new();
-    for (slot, spec_id) in locks.specs.iter().enumerate() {
-        if let Some(id) = spec_id {
-            let name = db
-                .specializations
-                .get(id)
-                .map(|s| s.name.as_str())
-                .unwrap_or("Unknown");
-            let elite = db.specializations.get(id).is_some_and(|s| s.elite);
-            let elite_tag = if elite { " (Elite)" } else { "" };
-            parts.push(format!(
-                "Slot {} LOCKED to \"{}\"{}",
-                slot + 1,
-                name,
-                elite_tag
-            ));
-
-            // Trait locks for this spec
-            if let Some(trait_cols) = locks.trait_locks.get(id) {
-                for (col, trait_id) in trait_cols.iter().enumerate() {
-                    if let Some(tid) = trait_id {
-                        let tier = match col {
-                            0 => "Adept",
-                            1 => "Master",
-                            _ => "Grandmaster",
-                        };
-                        let tname = db
-                            .traits
-                            .get(tid)
-                            .map(|t| t.name.as_str())
-                            .unwrap_or("Unknown");
-                        parts.push(format!("  {} trait LOCKED to \"{}\"", tier, tname));
-                    }
-                }
-            }
-        }
-    }
-    // Gear locks, in canonical slot order so identical inputs produce
-    // byte-identical prompts (HashMap order is unspecified).
-    for slot in gw2_core::types::GearSlot::ALL.iter() {
-        if let Some(id) = locks.gear_locks.get(slot) {
-            let name = db
-                .itemstats
-                .get(id)
-                .map(|is| is.name.as_str())
-                .unwrap_or("Unknown");
-            parts.push(format!("Gear {} LOCKED to \"{}\"", slot.kebab_name(), name));
-        }
-    }
-    parts.join("\n")
-}
-
 /// Run the optimization pipeline for a given profession and archetype.
 /// Returns top N candidates ranked by score, or an error describing why none were found.
 /// For PvP, skips gear search (stats come from amulet) and only evaluates spec/trait combos.
@@ -127,8 +67,56 @@ fn describe_lock_constraints(locks: &gw2_core::types::BuildLocks, db: &GameDb) -
 // Core optimization entry point; the caches, weights, progress callback, and
 // top-N are distinct concerns — bundling them into a params struct adds
 // indirection without clarifying the call site.
+/// Legacy tier-3 optimizer, without a cancellation probe.
+///
+/// Equivalent to [`optimize_cancellable`] with a probe that never fires. Kept
+/// because the addon's fallback-2 call site lives in
+/// `crates/addon/src/ui/main_view/optimize_flow.rs`, which this change does not
+/// own; **that call site must move to `optimize_cancellable`** so that
+/// cancelling an optimization which has fallen through to tier 3 actually stops
+/// it instead of letting the worker run to completion and write its result
+/// back over a cancelled request.
 #[allow(clippy::too_many_arguments)]
 pub fn optimize(
+    profession: &Profession,
+    weights: &OptimizationWeights,
+    current_equipment: Option<&EquipmentTab>,
+    items_cache: &HashMap<u32, Item>,
+    itemstats_cache: &HashMap<u32, ItemStat>,
+    specs_cache: &HashMap<u32, Specialization>,
+    traits_cache: &HashMap<u32, GW2Trait>,
+    on_progress: impl FnMut(OptimizeProgress),
+    top_n: usize,
+    ctx: &BalanceContext,
+    locks: &gw2_core::types::BuildLocks,
+    pvp_amulets: &HashMap<u32, PvpAmulet>,
+) -> Result<Vec<BuildCandidate>, String> {
+    optimize_cancellable(
+        profession,
+        weights,
+        current_equipment,
+        items_cache,
+        itemstats_cache,
+        specs_cache,
+        traits_cache,
+        on_progress,
+        top_n,
+        ctx,
+        locks,
+        pvp_amulets,
+        &|| false,
+    )
+}
+
+/// Legacy tier-3 optimizer.
+///
+/// `is_cancelled` is polled at every stage boundary and once per gear candidate
+/// in the combine loop — the loop is `gear_candidates × spec_combos` full combat
+/// evaluations, which is where a cancelled run used to keep burning CPU inside
+/// the game process. A cancelled run returns `Err("Cancelled")`; it never
+/// returns a partial candidate list that a caller could mistake for a result.
+#[allow(clippy::too_many_arguments)]
+pub fn optimize_cancellable(
     profession: &Profession,
     weights: &OptimizationWeights,
     _current_equipment: Option<&EquipmentTab>,
@@ -141,7 +129,11 @@ pub fn optimize(
     ctx: &BalanceContext,
     locks: &gw2_core::types::BuildLocks,
     pvp_amulets: &HashMap<u32, PvpAmulet>,
+    is_cancelled: &dyn Fn() -> bool,
 ) -> Result<Vec<BuildCandidate>, String> {
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     if ctx.game_mode == GameMode::PvP {
         return optimize_pvp(
             profession,
@@ -153,6 +145,7 @@ pub fn optimize(
             locks,
             ctx,
             pvp_amulets,
+            is_cancelled,
         )
         .and_then(|v| {
             if v.is_empty() {
@@ -211,6 +204,9 @@ pub fn optimize(
     });
     gear_candidates.truncate(top_n * 3); // keep extra — traits can shift rankings significantly
 
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     on_progress(OptimizeProgress {
         stage: "Evaluating specialization combinations...".into(),
         done: false,
@@ -300,6 +296,11 @@ pub fn optimize(
         .collect();
 
     for gear in &gear_candidates {
+        // Once per gear, not once per (gear, spec): the inner loop is cheap
+        // relative to the probe, and the outer one is what makes this pass long.
+        if is_cancelled() {
+            return Err("Cancelled".into());
+        }
         // gear_stats is spec-invariant — compute once per gear.
         let gear_stats = calculate_candidate_stats(gear, itemstats_cache);
 
@@ -342,6 +343,9 @@ pub fn optimize(
         }
     }
 
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     on_progress(OptimizeProgress {
         stage: "Ranking candidates...".into(),
         done: false,
@@ -390,6 +394,7 @@ fn optimize_pvp(
     locks: &gw2_core::types::BuildLocks,
     ctx: &BalanceContext,
     pvp_amulets: &HashMap<u32, PvpAmulet>,
+    is_cancelled: &dyn Fn() -> bool,
 ) -> Result<Vec<BuildCandidate>, String> {
     if pvp_amulets.is_empty() {
         return Err("No PvP amulet data available. Download game data first.".to_string());
@@ -471,6 +476,9 @@ fn optimize_pvp(
         .collect();
 
     for amulet in amulets_sorted {
+        if is_cancelled() {
+            return Err("Cancelled".into());
+        }
         for spec in &precomputed_specs {
             // PvP stat block: base_stats + amulet stats + trait stats (no gear)
             let mut full_stats = stats::base_stats();
@@ -544,14 +552,26 @@ fn optimize_pvp(
     Ok(all_candidates)
 }
 
-/// Calculate approximate stats for a gear candidate using slot budget data.
-/// Looks up per-slot budget values from loaded `SlotBudgets` data.
+/// Approximate stats for a legacy gear candidate from slot budget data.
+///
+/// A [`GearCandidate`] carries prefixes but no weapon *types*, so the land
+/// weapon budget is read off slot occupancy: `search.rs` writes both set-1
+/// hands when it means a one-handed pair, and only the main hand when it means
+/// a two-hander. Weapon set 2 is not part of the legacy projection and is
+/// skipped explicitly rather than left to happen to be empty — the old code
+/// mapped both `WeaponSet1Main` *and* `WeaponSet2Main` to the two-hand budget,
+/// so a filled 16-slot map billed the inactive set as well.
 fn calculate_candidate_stats(
     candidate: &GearCandidate,
     itemstats_cache: &HashMap<u32, ItemStat>,
 ) -> stats::StatBlock {
     let mut stats = stats::StatBlock::default();
     let budgets = data::slot_budgets::slot_budgets();
+    let held = |slot| candidate.gear_slots.get(slot).is_some();
+    let weapons = land_budget_from_occupancy(
+        held(GearSlot::WeaponSet1Main),
+        held(GearSlot::WeaponSet1Off),
+    );
 
     // Deterministic order: the candidate map is zipped against `GearSlot::ALL`
     // (canonical slot order). The pre-slot-vector version iterated a
@@ -561,7 +581,21 @@ fn calculate_candidate_stats(
         let Some(itemstat) = itemstats_cache.get(&prefix.itemstat_id) else {
             continue;
         };
-        let slot_type = data::slot_budgets::slot_type_for_gear_slot(*slot);
+        let slot_type = match slot {
+            GearSlot::WeaponSet2Main | GearSlot::WeaponSet2Off => continue,
+            GearSlot::WeaponSet1Main | GearSlot::WeaponSet1Off => {
+                let budget_slot = if *slot == GearSlot::WeaponSet1Main {
+                    "WeaponA1"
+                } else {
+                    "WeaponA2"
+                };
+                match land_weapon_slot_type_from_occupancy(budget_slot, weapons) {
+                    Some(kind) => kind,
+                    None => continue,
+                }
+            }
+            other => data::slot_budgets::slot_type_for_gear_slot(*other),
+        };
         let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
         let Some(budget) = budgets.get(slot_type, shape) else {
             continue;
@@ -573,19 +607,73 @@ fn calculate_candidate_stats(
     stats
 }
 
-/// PvE/WvW: armor, trinkets, and the active land weapon set. PvP: matching amulet only.
+/// The land weapon budget implied by slot-map occupancy alone.
+///
+/// [`weapon_budget::land_weapon_budget`] reads the weapon *type*, which is the
+/// right answer whenever a build names its weapons. Legacy candidates and
+/// uniform-prefix estimates name none, so occupancy is the only signal there
+/// is: a filled main hand beside an empty off-hand is the two-hander the legacy
+/// projection meant, and two filled hands are a one-hand pair. Never both
+/// budgets at once, which is the 376-point bug this replaces.
+fn land_budget_from_occupancy(main_hand: bool, off_hand: bool) -> LandWeaponBudget {
+    match (main_hand, off_hand) {
+        (true, true) => LandWeaponBudget::OneHandPair,
+        (true, false) => LandWeaponBudget::TwoHand,
+        (false, true) => LandWeaponBudget::OneHand,
+        (false, false) => LandWeaponBudget::Empty,
+    }
+}
+
+/// Occupancy-only sibling of [`land_weapon_slot_type`], for candidates that
+/// carry no weapon names to hand it a [`validation::ValidatedWeaponSet`].
+fn land_weapon_slot_type_from_occupancy(
+    slot_name: &str,
+    budget: LandWeaponBudget,
+) -> Option<data::SlotType> {
+    match (slot_name, budget) {
+        ("WeaponA1", LandWeaponBudget::TwoHand) => Some(data::SlotType::WeaponTwoHand),
+        ("WeaponA1", LandWeaponBudget::OneHandPair) => Some(data::SlotType::WeaponOneHand),
+        ("WeaponA2", LandWeaponBudget::OneHandPair) | ("WeaponA2", LandWeaponBudget::OneHand) => {
+            Some(data::SlotType::WeaponOneHand)
+        }
+        _ => None,
+    }
+}
+
+/// One uniform prefix over a whole kit. PvE/WvW: armour, trinkets, and **one**
+/// land weapon set. PvP: the matching amulet, or nothing at all.
+///
+/// Returns the reason the kit could not be priced, when there is one. `None`
+/// means the stats are complete, not merely that nothing went wrong loudly.
+///
+/// **PvP is terminal on a miss.** An amulet replaces gear entirely — a legal
+/// sPvP amulet is 3000 attribute points — and 53 of the 66 live named prefixes
+/// (Celestial, Viper's, Trailblazer's, Minstrel's, Harrier's, …) have no amulet
+/// counterpart. Falling through to the land budget handed those prefixes 3607
+/// (ThreeStat) or 3944 (FourStat) points, so the *amulet-less* prefixes
+/// systematically outscored every legal one and PvP optimization converged on
+/// builds that cannot be equipped in PvP. A miss now leaves the block at zero
+/// and says why.
+///
+/// **One weapon set, not two.** The static `EQUIPMENT_SLOTS` table lists
+/// WeaponA1 as a two-hand budget *and* WeaponA2 as a one-hand budget, so
+/// walking it billed 251 + 125 = 376 points for weapons a character can never
+/// hold at once. This estimator has no weapon *types* to read — it is handed a
+/// prefix id and nothing else — so it bills the shape the caller's kit
+/// describes: a filled main hand and a filled off-hand, i.e. one
+/// [`LandWeaponBudget::OneHandPair`] (125 + 125 = 250 ThreeStat). That is
+/// within one point of the two-hander's 251 either way, where the old model was
+/// 126 points over. Callers that *do* know the weapons —
+/// [`apply_validated_gear_stats`], the synergy candidate scorer — take the
+/// type-aware [`weapon_budget::land_weapon_budget`] path instead of this one.
 pub fn apply_optimized_gear_stats(
     stats: &mut stats::StatBlock,
     db: &GameDb,
     prefix_id: Option<u32>,
     ctx: &BalanceContext,
-) {
-    let Some(id) = prefix_id else {
-        return;
-    };
-    let Some(itemstat) = db.itemstats.get(&id) else {
-        return;
-    };
+) -> Option<data::DataQualityReason> {
+    let id = prefix_id?;
+    let itemstat = db.itemstats.get(&id)?;
     if ctx.game_mode == GameMode::PvP {
         if let Some(amulet) = match_pvp_amulet(db, &itemstat.name) {
             // Sorted keys — see the determinism note at the PvP candidate path.
@@ -594,18 +682,76 @@ pub fn apply_optimized_gear_stats(
             for (attr, &value) in attrs {
                 stats.add(attr, value as f64);
             }
-            return;
+            return None;
+        } else {
+            return Some(pvp_amulet_missing_reason(&itemstat.name, ctx));
         }
     }
     let budgets = data::slot_budgets::slot_budgets();
     let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
+    let mut priced = true;
     for &(slot_type, slot_name) in data::EQUIPMENT_SLOTS {
-        if matches!(slot_name, "WeaponB1" | "WeaponB2") {
+        // Weapon budgets come from the land model below, never from the static
+        // table: the table lists A1 as a two-hand budget *and* A2 as a one-hand
+        // budget, which bills both hands of a single set.
+        if matches!(slot_name, "WeaponA1" | "WeaponA2" | "WeaponB1" | "WeaponB2") {
             continue;
         }
         if let Some(budget) = budgets.get(slot_type, shape) {
-            add_budget_stats_for_itemstat(stats, itemstat, budget);
+            priced &= add_budget_stats_for_itemstat(stats, itemstat, budget);
         }
+    }
+    for &slot_type in LandWeaponBudget::OneHandPair.slots() {
+        if let Some(budget) = budgets.get(slot_type, shape) {
+            priced &= add_budget_stats_for_itemstat(stats, itemstat, budget);
+        }
+    }
+    if priced {
+        None
+    } else {
+        Some(unpriceable_prefix_reason(&itemstat.name, id, ctx))
+    }
+}
+
+/// Why a PvP build carries no gear stats: its prefix has no amulet.
+fn pvp_amulet_missing_reason(prefix_name: &str, ctx: &BalanceContext) -> data::DataQualityReason {
+    data::DataQualityReason {
+        field: "pvp_amulet".into(),
+        entity: prefix_name.to_string(),
+        modes: vec![ctx.game_mode.label().to_string()],
+        explanation: format!(
+            "'{prefix_name}' has no PvP amulet, so this build has no gear stats in PvP. \
+             Scoring it against land-gear budgets would credit it with stats no amulet \
+             can provide; pick a prefix that exists as an amulet instead."
+        ),
+    }
+}
+
+/// Why a kit carries no gear stats: the game data cannot price its prefix.
+///
+/// Covers both an itemstat row the slot-budget model cannot read (no positive
+/// multiplier) and, at the per-slot appliers, an id that does not resolve at all
+/// — including the `itemstat_id: 0` that legacy save migration stamps. The old
+/// behaviour was a silent `continue`, which shipped a zeroed slot as if it were
+/// a real one.
+fn unpriceable_prefix_reason(
+    prefix_name: &str,
+    prefix_id: u32,
+    ctx: &BalanceContext,
+) -> data::DataQualityReason {
+    data::DataQualityReason {
+        field: "itemstat".into(),
+        entity: if prefix_name.is_empty() {
+            format!("itemstat {prefix_id}")
+        } else {
+            prefix_name.to_string()
+        },
+        modes: vec![ctx.game_mode.label().to_string()],
+        explanation: format!(
+            "Itemstat {prefix_id} ('{prefix_name}') carries no positive attribute multiplier, \
+             so the slot-budget model cannot price it. Those rows are flat-value item stat \
+             blocks, not gear prefixes; the affected slots contribute nothing."
+        ),
     }
 }
 
@@ -633,6 +779,15 @@ pub fn match_pvp_amulet<'a>(db: &'a GameDb, prefix_name: &str) -> Option<&'a Pvp
     best.map(|(a, _)| a)
 }
 
+/// User-facing text for a stale trait lock (GLM F31): a `pub const` instead
+/// of an inline literal so an addon-side regression test can assert it never
+/// regresses into the multi-line-literal-joined-without-rewrapping bug that
+/// produced 35-space runs in the rendered explanation.
+pub const STALE_TRAIT_LOCK_EXPLANATION: &str = "The locked trait no longer \
+    exists in this specialization's trait rows (stale lock after a \
+    game-data refresh). The optimizer picked the best available trait in \
+    that column instead.";
+
 /// A trait lock referencing an id that no longer exists in the spec's
 /// major-trait rows (stale after a game-data refresh) cannot be honored —
 /// surface it instead of silently overriding the user's constraint.
@@ -658,8 +813,7 @@ fn stale_trait_lock_reasons(
                     field: "trait_lock".into(),
                     entity: format!("{} — trait {}", spec.name, trait_name),
                     modes: modes.clone(),
-                    explanation: "The locked trait no longer exists in this                                   specialization's trait rows (stale lock after a                                   game-data refresh). The optimizer picked the best                                   available trait in that column instead."
-                        .into(),
+                    explanation: STALE_TRAIT_LOCK_EXPLANATION.into(),
                 });
             }
         }
@@ -718,25 +872,42 @@ pub fn quality_from_modifiers(
 }
 
 /// Add stat values from a slot budget entry, classifying each itemstat
-/// attribute as major or minor based on its multiplier relative to the
-/// highest multiplier in the set.
+/// attribute as major or minor by its multiplier relative to the highest
+/// *positive* multiplier in the set.
+///
+/// Returns `true` when the row was priced. A row the budget model cannot price
+/// contributes nothing and says so, so a caller that can report data quality
+/// does not have to re-derive the reason.
+///
+/// "Highest positive" is the whole fix. The old reading took the plain maximum,
+/// which for the legacy 1041-1052 band is `0.0` — and then every attribute
+/// satisfied `(m - max).abs() < 0.001` and every attribute was paid the
+/// **major** rate. Berserker's #1046 came out at 1507/1507/1507 = 4521 points
+/// against the real #161's 1507/1050/1050 = 3607, strictly dominating on every
+/// axis, so a search that could see it had to prefer it — and then served a
+/// build labelled "Berserker's" whose sheet the player can never equip.
+///
+/// Those rows are not prefixes at all: their multipliers are `0.0` and their
+/// numbers live in the flat `value` field, i.e. a fixed item-level stat block
+/// rather than a share of a slot budget. Paying `value` here instead would be
+/// just as wrong, because `value` is one item's contribution and this function
+/// is called once per equipment slot. So the honest answer is to price nothing
+/// and let [`crate::itemstat_pool::canonical_itemstats`] keep such rows out of
+/// the prefix pool in the first place.
+///
+/// For CelestialLike rows every multiplier is equal *and positive*, so all
+/// attributes are majors — and major == minor in that budget anyway.
 pub fn add_budget_stats_for_itemstat(
     stats: &mut stats::StatBlock,
     itemstat: &ItemStat,
     budget: &data::slot_budgets::SlotBudgetEntry,
-) {
-    if itemstat.attributes.is_empty() {
-        return;
-    }
-    let max_mult = itemstat
-        .attributes
-        .iter()
-        .map(|a| a.multiplier)
-        .fold(f64::NEG_INFINITY, f64::max);
+) -> bool {
+    let Some(max_mult) = crate::itemstat_pool::max_positive_multiplier(itemstat) else {
+        return false;
+    };
     for attr in &itemstat.attributes {
-        // An attribute is "major" if its multiplier is the highest (or within
-        // a small tolerance to handle floating-point). For CelestialLike,
-        // all multipliers are equal, and major == minor in the budget.
+        // "Major" is the highest multiplier, within a tolerance that absorbs
+        // the float noise in the published table (0.35 vs 0.3500000001).
         let value = if (attr.multiplier - max_mult).abs() < 0.001 {
             budget.major as f64
         } else {
@@ -744,6 +915,7 @@ pub fn add_budget_stats_for_itemstat(
         };
         stats.add(&attr.attribute, value);
     }
+    true
 }
 
 /// Select the best major trait from each column (Adept/Master/Grandmaster) for an archetype.
@@ -926,397 +1098,38 @@ pub struct SynergyResult {
     pub quality_reasons: Vec<data::DataQualityReason>,
 }
 
-/// Stage 1 of the Gemini pipeline: deterministic gear-prefix selection.
-/// Returns the authoritative primary prefix (which overrides any Gemini choice)
-/// and the tier-based pool of candidates shown to Gemini as context.
-fn select_gemini_gear_prefixes(weights: &OptimizationWeights) -> (&'static str, Vec<&'static str>) {
-    let gear_match = scoring::select_gear_prefix(weights);
-    let tier_prefixes = scoring::select_prefixes_by_tiers(weights);
-    let gear_prefixes: Vec<&str> = tier_prefixes.to_vec();
-    (gear_match.primary, gear_prefixes)
-}
-
-/// Stage 2 of the Gemini pipeline: build the pre-computed profession context
-/// string fed into the prompt.
-fn build_pre_computed_gemini_context<'a>(
-    db: &'a GameDb,
-    profession_name: &'a str,
-    weights: &'a OptimizationWeights,
-    mode_str: &'a str,
-    gear_prefixes: Vec<&'a str>,
-    determined_prefix: &'a str,
-    current_build_summary: Option<&'a str>,
-) -> String {
-    let context_config = ContextConfig {
-        db,
-        profession_name,
-        weights,
-        game_mode: mode_str,
-        gear_prefixes,
-        current_build_summary,
-        determined_prefix: Some(determined_prefix),
-    };
-    context::build_gemini_context(&context_config)
-}
-
 /// Stage 3 of the Gemini pipeline: assemble the final synergy prompt
 /// (applies user-imposed spec/trait lock constraints).
 // Prompt-assembly stage; each argument is independent prompt input, grouping
 // them into a struct would only rename fields, not reduce coupling.
-#[allow(clippy::too_many_arguments)]
-fn build_gemini_synergy_prompt(
-    db: &GameDb,
-    profession_name: &str,
-    weights: &OptimizationWeights,
-    mode_str: &str,
-    pre_computed_context: &str,
-    current_build_summary: Option<&str>,
-    determined_prefix: &str,
-    locks: &gw2_core::types::BuildLocks,
-) -> String {
-    let lock_constraints = describe_lock_constraints(locks, db);
-    let lock_constraint_ref = if lock_constraints.is_empty() {
-        None
-    } else {
-        Some(lock_constraints.as_str())
-    };
-    prompts::synergy_build_prompt(
-        profession_name,
-        weights,
-        mode_str,
-        pre_computed_context,
-        current_build_summary,
-        Some(determined_prefix),
-        lock_constraint_ref,
-    )
-}
-
 /// Stage 4 of the Gemini pipeline: call the LLM with tool definitions and
 /// multi-turn progress reporting. Tool candidates are empty — the LLM is
 /// choosing the build, not ranking candidates.
 // LLM-call stage; the client, context, db, and progress callback are distinct
 // dependencies passed straight through — a params struct adds no clarity.
-#[allow(clippy::too_many_arguments)]
-fn call_gemini_with_progress(
-    db: &GameDb,
-    profession_name: &str,
-    weights: &OptimizationWeights,
-    ctx: &BalanceContext,
-    llm_client: &dyn LlmClient,
-    prompt: &str,
-    current_build_summary: Option<&str>,
-    on_progress: &mut dyn FnMut(OptimizeProgress),
-) -> Result<String, String> {
-    let tools = crate::llm::tools::tool_definitions();
-    let tool_ctx = ToolContext {
-        db,
-        profession_name,
-        candidates: &[],
-        current_build_summary,
-        weights: weights.clone(),
-        balance_ctx: ctx,
-    };
-    let provider_name = llm_client.provider_name().to_string();
-    llm_client
-        .generate_with_tools_progress(
-            prompt,
-            &tools,
-            &mut |name: &str, args: &serde_json::Value| {
-                gemini_tools::execute_tool(name, args, &tool_ctx)
-            },
-            5,
-            &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
-                let tool_list = if tool_names.is_empty() {
-                    String::new()
-                } else {
-                    format!(" ({})", tool_names.join(", "))
-                };
-                on_progress(OptimizeProgress {
-                    stage: format!(
-                        "{} reasoning [{}/{}]{}...",
-                        provider_name,
-                        turn + 1,
-                        max_turns,
-                        tool_list
-                    ),
-                    done: false,
-                });
-            },
-        )
-        .map_err(|e| format!("LLM call failed: {}", e))
-}
-
-/// Stage 5 of the Gemini pipeline: parse the LLM response and apply the
-/// deterministic profile-prefix override as the slot fallback. Per spec §12.3
-/// the profile selection stays authoritative (Gemini is unreliable at following
-/// gear constraints), but a per-slot `gear_slots` map on the plate is accepted:
-/// it flows through untouched and `validate_gear_slot_map` applies it with
-/// strict validation — resolved entries overwrite their slot, everything else
-/// keeps the profile prefix. The optimizer refines unlocked slots afterward.
-fn parse_and_override_gear_prefix(
-    llm_response: &str,
-    determined_prefix: &str,
-) -> Result<prompts::GeminiBuildResponse, String> {
-    let mut parsed = prompts::parse_gemini_build(llm_response)
-        .map_err(|e| format!("Failed to parse Gemini response: {}", e))?;
-    parsed.stat_prefix = determined_prefix.to_string();
-    Ok(parsed)
-}
-
-/// Stage 6 of the Gemini pipeline: validate the parsed response against the
-/// GameDb and reject builds with no specializations or any hard error.
-fn validate_gemini_response(
-    parsed: &prompts::GeminiBuildResponse,
-    db: &GameDb,
-    profession_name: &str,
-) -> Result<ValidatedBuild, String> {
-    let validated = validation::validate_gemini_build(parsed, db, profession_name);
-    let joined_errors = || {
-        validated
-            .errors
-            .iter()
-            .map(|e| e.detail.as_str())
-            .collect::<Vec<_>>()
-            .join("; ")
-    };
-    if validated.specializations.is_empty() {
-        return Err(format!(
-            "Validation failed — no specializations resolved. Errors: {}",
-            joined_errors()
-        ));
-    }
-    if !validated.errors.is_empty() {
-        return Err(format!(
-            "Validation failed — build has hard errors: {}",
-            joined_errors()
-        ));
-    }
-    Ok(validated)
-}
-
-/// Stage 8 of the Gemini pipeline: compute combat performance at all three
-/// buff tiers (solo / party / squad) for the validated build.
-fn compute_three_tier_combat(
-    full_stats: &stats::StatBlock,
-    derived: &stats::DerivedStats,
-    modifiers: &DamageModifiers,
-    profession_name: &str,
-    ctx: &BalanceContext,
-) -> (CombatPerformance, CombatPerformance, CombatPerformance) {
-    let buff_profiles = combat::buff_profiles_for_profession(profession_name, ctx);
-    let cw = combat::condition_weights_for_profession(profession_name, ctx);
-    let solo = combat::calculate_combat_performance(
-        full_stats,
-        derived,
-        modifiers,
-        &buff_profiles[0],
-        &cw,
-        profession_name,
-        ctx,
-    );
-    let party = combat::calculate_combat_performance(
-        full_stats,
-        derived,
-        modifiers,
-        &buff_profiles[1],
-        &cw,
-        profession_name,
-        ctx,
-    );
-    let squad = combat::calculate_combat_performance(
-        full_stats,
-        derived,
-        modifiers,
-        &buff_profiles[2],
-        &cw,
-        profession_name,
-        ctx,
-    );
-    (solo, party, squad)
-}
 /// Run the synergy-driven optimization pipeline.
 /// Sends ALL profession data to Gemini in a single prompt for holistic synergy reasoning.
 /// Returns a fully validated build with combat metrics at 3 buff tiers.
 // Gemini pipeline entry point; arguments are the db, weights, balance context,
 // LLM client, and callbacks — grouping them adds indirection without clarity.
-#[allow(clippy::too_many_arguments)]
-pub fn optimize_with_gemini(
-    db: &GameDb,
-    profession_name: &str,
-    weights: &OptimizationWeights,
-    ctx: &BalanceContext,
-    llm_client: &dyn LlmClient,
-    current_build_summary: Option<&str>,
-    locks: &gw2_core::types::BuildLocks,
-    scenario: Option<&crate::scenario::ScenarioSpec>,
-    on_progress: &mut dyn FnMut(OptimizeProgress),
-) -> Result<SynergyResult, String> {
-    // 1. Authoritative gear-prefix selection (Gemini cannot override this).
-    on_progress(OptimizeProgress {
-        stage: "Selecting gear prefix...".into(),
-        done: false,
-    });
-    let (determined_prefix, gear_prefixes) = select_gemini_gear_prefixes(weights);
-
-    // 2. Pre-computed profession context.
-    on_progress(OptimizeProgress {
-        stage: "Building profession context...".into(),
-        done: false,
-    });
-    let mode_str = match ctx.game_mode {
-        GameMode::PvE => "PvE",
-        GameMode::PvP => "PvP",
-        GameMode::WvW => "WvW",
-    };
-    let pre_computed_context = build_pre_computed_gemini_context(
-        db,
-        profession_name,
-        weights,
-        mode_str,
-        gear_prefixes,
-        determined_prefix,
-        current_build_summary,
-    );
-
-    // 3. Synergy prompt with lock constraints.
-    on_progress(OptimizeProgress {
-        stage: "Preparing Gemini prompt...".into(),
-        done: false,
-    });
-    let prompt = build_gemini_synergy_prompt(
-        db,
-        profession_name,
-        weights,
-        mode_str,
-        &pre_computed_context,
-        current_build_summary,
-        determined_prefix,
-        locks,
-    );
-
-    // 4. LLM call (multi-turn tool-use progress emitted inside the helper).
-    on_progress(OptimizeProgress {
-        stage: format!(
-            "{} reasoning about synergies...",
-            llm_client.provider_name()
-        ),
-        done: false,
-    });
-    let llm_response = call_gemini_with_progress(
-        db,
-        profession_name,
-        weights,
-        ctx,
-        llm_client,
-        &prompt,
-        current_build_summary,
-        on_progress,
-    )?;
-
-    // 5. Parse + deterministic gear-prefix override.
-    on_progress(OptimizeProgress {
-        stage: "Parsing Gemini build...".into(),
-        done: false,
-    });
-    let parsed = parse_and_override_gear_prefix(&llm_response, determined_prefix)?;
-
-    // 6. Validate against GameDb.
-    on_progress(OptimizeProgress {
-        stage: "Validating build...".into(),
-        done: false,
-    });
-    let validated = validate_gemini_response(&parsed, db, profession_name)?;
-
-    // 7. Stats from validated gear prefix + trait modifiers.
-    on_progress(OptimizeProgress {
-        stage: "Calculating stats...".into(),
-        done: false,
-    });
-    let (full_stats, modifiers) = calculate_validated_stats(&validated, db, profession_name, ctx);
-    let derived = stats::compute_derived(&full_stats, profession_name);
-
-    // 8. 3-tier combat performance.
-    on_progress(OptimizeProgress {
-        stage: "Computing combat performance...".into(),
-        done: false,
-    });
-    let (combat_solo, combat_party, combat_squad) =
-        compute_three_tier_combat(&full_stats, &derived, &modifiers, profession_name, ctx);
-
-    // 9. Rotation simulation from validated skills.
-    on_progress(OptimizeProgress {
-        stage: "Simulating rotation...".into(),
-        done: false,
-    });
-    let rotation_result = simulate_validated_rotation(&validated, db, &full_stats, scenario);
-
-    on_progress(OptimizeProgress {
-        stage: "Done".into(),
-        done: true,
-    });
-
-    let (mut data_quality, mut quality_reasons) = quality_from_modifiers(
-        &modifiers,
-        &validated.warnings,
-        !validated.errors.is_empty(),
-        ctx.game_mode.label(),
-    );
-    if let Some(fight) = rotation_result
-        .as_ref()
-        .and_then(|result| result.wvw.as_ref())
-    {
-        if fight.unmodeled_effect_sources > 0 {
-            data_quality = data_quality.merge(&data::DataQuality::Provisional);
-            quality_reasons.push(data::DataQualityReason {
-                field: "wvw_timeline.effects".into(),
-                entity: profession_name.into(),
-                modes: vec![ctx.game_mode.label().to_string()],
-                explanation: format!(
-                    "{} equipped or triggered effect sources are not yet represented by timed rules",
-                    fight.unmodeled_effect_sources
-                ),
-            });
-        }
-        if !fight.resource_model_complete {
-            data_quality = data_quality.merge(&data::DataQuality::Provisional);
-            quality_reasons.push(data::DataQualityReason {
-                field: "wvw_timeline.resources".into(),
-                entity: profession_name.into(),
-                modes: vec![ctx.game_mode.label().to_string()],
-                explanation:
-                    "The active profession mechanic is outside the bounded resource ledger".into(),
-            });
-        }
-    }
-    quality_reasons.extend(stale_trait_lock_reasons(locks, db, ctx));
-    Ok(SynergyResult {
-        validated,
-        stats: full_stats,
-        combat_solo,
-        combat_party,
-        combat_squad,
-        modifiers,
-        rotation: rotation_result,
-        data_quality,
-        quality_reasons,
-    })
-}
-
 /// Calculate stats from a validated build: gear prefix + trait bonuses + conversions.
 pub fn calculate_validated_stats(
     validated: &ValidatedBuild,
     db: &GameDb,
-    _profession_name: &str,
+    profession_name: &str,
     ctx: &BalanceContext,
 ) -> (stats::StatBlock, DamageModifiers) {
     let mut full_stats = stats::base_stats();
 
-    apply_validated_gear_stats(&mut full_stats, db, validated, ctx);
+    // Reasons are dropped here on purpose — the signature is fixed by callers
+    // outside this module. `gear_quality_reasons` re-runs the same applier for
+    // the paths that report them.
+    apply_validated_gear_stats(&mut full_stats, db, validated, profession_name, ctx);
 
     // Rune and sigil flat stat bonuses (permanent stats only).
     let rune_id = validated.rune.as_ref().map(|r| r.id);
-    let sigil_ids: Vec<u32> = validated.sigils.iter().map(|s| s.id).collect();
-    let active_sigil_ids = &sigil_ids[..sigil_ids.len().min(2)];
+    let active_sigil_ids = validated.active_sigil_ids();
+    let active_sigil_ids = &active_sigil_ids[..];
     let rune_stats = stats::calculate_rune_stats(rune_id, &db.items);
     full_stats += &rune_stats;
     let sigil_stats = stats::calculate_sigil_stats(active_sigil_ids, &db.items);
@@ -1547,64 +1360,128 @@ fn gear_slot_for_budget_slot(slot_name: &str) -> Option<GearSlot> {
     })
 }
 
+/// Per-slot gear stats for a validated build. Returns every reason a slot could
+/// not be priced — an empty Vec means the sheet is complete.
 fn apply_validated_gear_stats(
     stats: &mut stats::StatBlock,
     db: &GameDb,
     validated: &ValidatedBuild,
+    profession_name: &str,
     ctx: &BalanceContext,
-) {
+) -> Vec<data::DataQualityReason> {
     if ctx.game_mode == GameMode::PvP {
         // Amulets replace gear; match by the build's primary prefix name.
         let fallback = validated.primary_prefix().map(|prefix| prefix.itemstat_id);
-        apply_optimized_gear_stats(stats, db, fallback, ctx);
-        return;
+        return apply_optimized_gear_stats(stats, db, fallback, ctx)
+            .into_iter()
+            .collect();
     }
 
     // Per-slot reads replace the old `group.or(build-wide)` chain: every
-    // constructor expands its prefixes into slots (validate fills all 16
-    // uniformly, group overrides overwrite their members), so an unset slot
-    // means exactly what a missing group AND missing fallback meant before.
+    // constructor expands its prefixes into the slots the build actually wears
+    // (`fill_worn_gear_slots`; group overrides overwrite their own members), so
+    // an unset slot means exactly what a missing group AND missing fallback
+    // meant before — plus, now, a hand that holds no weapon.
+    let mut reasons = Vec::new();
     let budgets = data::slot_budgets::slot_budgets();
+    let set1 = &validated.weapons.set1;
+    let weapons = weapon_budget::land_weapon_budget(
+        set1.main_hand.as_deref(),
+        set1.off_hand.as_deref(),
+        db.profession(profession_name),
+    );
     for &(slot_type, slot_name) in data::EQUIPMENT_SLOTS {
         let slot_type = if slot_name.starts_with("Weapon") {
-            match active_land_weapon_budget(slot_name, &validated.weapons.set1) {
+            match land_weapon_slot_type(slot_name, set1, weapons) {
                 Some(kind) => kind,
                 None => continue,
             }
         } else {
             slot_type
         };
-        let Some(prefix_id) = gear_slot_for_budget_slot(slot_name)
-            .and_then(|slot| validated.gear_slots.prefix_id(slot))
-        else {
+        let Some(slot) = gear_slot_for_budget_slot(slot_name) else {
             continue;
         };
-        let Some(itemstat) = db.itemstats.get(&prefix_id) else {
+        let Some(prefix) = validated.gear_slots.get(slot) else {
+            continue;
+        };
+        let Some(itemstat) = db.itemstats.get(&prefix.itemstat_id) else {
+            // An id that resolves to nothing used to be a silent `continue`,
+            // which shipped a zeroed slot as if it were a real one. The
+            // `itemstat_id: 0` that `GearSlots::from_legacy` stamps lands here.
+            reasons.push(unpriceable_prefix_reason(
+                &prefix.name,
+                prefix.itemstat_id,
+                ctx,
+            ));
             continue;
         };
         let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
         if let Some(budget) = budgets.get(slot_type, shape) {
-            add_budget_stats_for_itemstat(stats, itemstat, budget);
+            if !add_budget_stats_for_itemstat(stats, itemstat, budget) {
+                reasons.push(unpriceable_prefix_reason(&itemstat.name, itemstat.id, ctx));
+            }
         }
     }
+    reasons.dedup_by(|a, b| a.entity == b.entity && a.field == b.field);
+    reasons
 }
 
-/// Active land set only. Two-hand when MH is present and OH is empty;
-/// one-hand per filled hand otherwise. The inactive set never enters the sheet.
-fn active_land_weapon_budget(
+/// Gear-only stats for a validated build (no base attributes, no traits, no
+/// rune or sigil), plus every reason a slot could not be priced.
+///
+/// The one place outside [`calculate_validated_stats`] that is allowed to price
+/// gear. Callers that need a *whole* sheet want `calculate_validated_stats`;
+/// this exists for the seed ranker, which adds its own base and trait blocks.
+pub fn validated_gear_stats(
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    profession_name: &str,
+    ctx: &BalanceContext,
+) -> (stats::StatBlock, Vec<data::DataQualityReason>) {
+    let mut gear = stats::StatBlock::default();
+    let reasons = apply_validated_gear_stats(&mut gear, db, validated, profession_name, ctx);
+    (gear, reasons)
+}
+
+/// Re-run the gear appliers purely to collect their data quality reasons.
+///
+/// [`calculate_validated_stats`] returns stats and modifiers, and its shape is
+/// fixed by callers outside this module (`referee.rs`, `grouped_sheet.rs`).
+/// Rather than duplicate the "what could not be priced" predicate at the
+/// reporting sites, run the one applier that owns it and throw the numbers
+/// away — a few dozen HashMap lookups, once per result.
+pub fn gear_quality_reasons(
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    profession_name: &str,
+    ctx: &BalanceContext,
+) -> Vec<data::DataQualityReason> {
+    validated_gear_stats(validated, db, profession_name, ctx).1
+}
+
+/// Which budget slot an equipment-table weapon slot draws.
+///
+/// Set 2 draws nothing — it is carried, not worn — and neither does a hand the
+/// active set leaves empty. A two-hander bills its single `WeaponTwoHand`
+/// budget at A1 and nothing at A2 even if an off-hand weapon is recorded there,
+/// because a weapon beside a Greatsword is stale data, not a second budget
+/// (same rule as [`weapon_budget::land_weapon_budget`], which produced
+/// `budget`). A lone off-hand bills its one-hand budget at A2, where it
+/// actually sits — reading the set's slot list positionally would have billed
+/// it at A1 and then found A1's gear slot empty, silently zeroing it.
+fn land_weapon_slot_type(
     slot_name: &str,
-    set: &crate::validation::ValidatedWeaponSet,
+    set: &validation::ValidatedWeaponSet,
+    budget: LandWeaponBudget,
 ) -> Option<data::SlotType> {
+    let held = |hand: &Option<String>| hand.as_deref().is_some_and(|w| !w.trim().is_empty());
     match slot_name {
-        "WeaponA1" => match (&set.main_hand, &set.off_hand) {
-            (Some(_), None) => Some(data::SlotType::WeaponTwoHand),
-            (Some(_), Some(_)) => Some(data::SlotType::WeaponOneHand),
-            _ => None,
-        },
-        "WeaponA2" => match (&set.main_hand, &set.off_hand) {
-            (Some(_), Some(_)) | (None, Some(_)) => Some(data::SlotType::WeaponOneHand),
-            _ => None,
-        },
+        "WeaponA1" if budget.is_two_handed() => Some(data::SlotType::WeaponTwoHand),
+        "WeaponA1" if held(&set.main_hand) => Some(data::SlotType::WeaponOneHand),
+        "WeaponA2" if !budget.is_two_handed() && held(&set.off_hand) => {
+            Some(data::SlotType::WeaponOneHand)
+        }
         _ => None,
     }
 }
@@ -1628,8 +1505,11 @@ fn active_normalized_effects(
         rotation_skills.iter().map(|skill| skill.skill_id).collect();
     let rune_ids: std::collections::HashSet<u32> =
         validated.rune.iter().map(|item| item.id).collect();
+    // Worn set only. A sigil in the weapon set you are not holding grants
+    // nothing in GW2, so crediting its timed effect to the fight is the same
+    // stowed-set error `calculate_validated_stats` used to make on stats.
     let sigil_ids: std::collections::HashSet<u32> =
-        validated.sigils.iter().map(|item| item.id).collect();
+        validated.active_sigil_ids().into_iter().collect();
     let relic_ids: std::collections::HashSet<u32> =
         validated.relic.iter().map(|item| item.id).collect();
 
@@ -1865,6 +1745,14 @@ pub fn synergy_result_from_validated(
         !validated.errors.is_empty(),
         ctx.game_mode.label(),
     );
+    // A build whose gear could not be priced — a PvP prefix with no amulet, an
+    // unresolved legacy itemstat id — is not a build with unlucky stats. Say so
+    // instead of shipping a zeroed sheet that reads as a bad recommendation.
+    let gear_reasons = gear_quality_reasons(&validated, db, profession_name, ctx);
+    if !gear_reasons.is_empty() {
+        data_quality = data_quality.merge(&data::DataQuality::Provisional);
+        quality_reasons.extend(gear_reasons);
+    }
     if let Some(fight) = rotation.as_ref().and_then(|result| result.wvw.as_ref()) {
         if fight.unmodeled_effect_sources > 0 {
             data_quality = data_quality.merge(&data::DataQuality::Provisional);
@@ -1907,8 +1795,42 @@ pub fn synergy_result_from_validated(
 /// Optional Gemini client is used only for explanation generation (not build selection).
 // Deterministic pipeline entry point; the db, weights, context, optional LLM
 // client, and callbacks are distinct concerns — a params struct adds no clarity.
+/// [`optimize_deterministic_cancellable`] with a probe that never fires.
+///
+/// Kept because the addon's fallback-1 call site lives in
+/// `crates/addon/src/ui/main_view/optimize_flow.rs`, which this change does not
+/// own; **that call site must move to `optimize_deterministic_cancellable`.**
 #[allow(clippy::too_many_arguments)]
 pub fn optimize_deterministic(
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    llm_client: Option<&dyn LlmClient>,
+    current_build_summary: Option<&str>,
+    locks: &gw2_core::types::BuildLocks,
+    scenario: Option<&crate::scenario::ScenarioSpec>,
+    on_progress: &mut dyn FnMut(OptimizeProgress),
+) -> Result<SynergyResult, String> {
+    optimize_deterministic_cancellable(
+        db,
+        profession_name,
+        weights,
+        ctx,
+        llm_client,
+        current_build_summary,
+        locks,
+        scenario,
+        on_progress,
+        &|| false,
+    )
+}
+
+/// Tier-2 optimizer: deterministic prefix + the full synergy pipeline, with an
+/// optional LLM explanation pass. Polls `is_cancelled` at every stage boundary
+/// and before the LLM call, which is the longest single wait on this path.
+#[allow(clippy::too_many_arguments)]
+pub fn optimize_deterministic_cancellable(
     db: &GameDb,
     profession_name: &str,
     weights: &OptimizationWeights,
@@ -1918,7 +1840,11 @@ pub fn optimize_deterministic(
     locks: &gw2_core::types::BuildLocks,
     scenario: Option<&crate::scenario::ScenarioSpec>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
+    is_cancelled: &dyn Fn() -> bool,
 ) -> Result<SynergyResult, String> {
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     // 1. DETERMINISTIC gear prefix selection (reuse existing)
     on_progress(OptimizeProgress {
         stage: "Selecting gear prefix...".into(),
@@ -1928,7 +1854,7 @@ pub fn optimize_deterministic(
     let determined_prefix = gear_match.primary;
 
     // 2. Run the full synergy pipeline
-    let mut result = crate::synergy_pipeline::optimize_synergy(
+    let mut result = crate::synergy_pipeline::optimize_synergy_cancellable(
         db,
         profession_name,
         weights,
@@ -1937,9 +1863,13 @@ pub fn optimize_deterministic(
         locks,
         scenario,
         on_progress,
+        is_cancelled,
     )?;
 
     // 3. Optional: LLM explanation pass
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     if let Some(client) = llm_client {
         on_progress(OptimizeProgress {
             stage: "Generating build explanation...".into(),
@@ -2235,6 +2165,42 @@ fn parse_slot_qualifier(body: &str) -> Option<(GearSlot, &str)> {
 // Locks joined an already-wide advisory surface; every parameter is an
 // independent input — mirroring `optimize`'s allowance.
 #[allow(clippy::too_many_arguments)]
+/// Resolve the right-hand side of an advisor `SWAP: rune=<name>` line.
+///
+/// Two rules, both about not inventing a choice:
+///
+/// * **An empty needle is not a wildcard.** `"anything".contains("")` is true,
+///   so a bare `SWAP: rune=` used to match every rune in the game and equip
+///   whichever one `db.runes` yielded first. `db.runes` is built from
+///   `items.values()`, so "first" was a different rune from run to run and the
+///   referee gate — which a rune-less build passes with almost any rune —
+///   happily accepted it. Nothing to match is nothing to swap.
+/// * **The match is order-independent.** Among the runes whose name contains
+///   the needle, take the shortest name and then the lowest id: the same
+///   shortest-match discipline `GameDb::itemstat_by_name` uses, and the same
+///   answer on every machine.
+fn advisor_rune_pick(db: &GameDb, raw_name: &str) -> Option<crate::validation::ValidatedItem> {
+    let needle = raw_name
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .to_lowercase();
+    if needle.is_empty() {
+        return None;
+    }
+    db.runes
+        .iter()
+        .filter_map(|id| db.items.get(id))
+        .filter(|item| item.name.to_lowercase().contains(&needle))
+        .min_by_key(|item| (item.name.len(), item.id))
+        .map(|item| crate::validation::ValidatedItem {
+            id: item.id,
+            name: item.name.clone(),
+        })
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn llm_advisor(
     current: crate::validation::ValidatedBuild,
     db: &GameDb,
@@ -2373,20 +2339,7 @@ pub fn llm_advisor(
                 continue; // Skip if prefix not found in DB
             }
         } else if let Some(rest) = swap_part.strip_prefix("rune=") {
-            let rune_name = rest.trim().trim_matches('"').trim_matches('\'');
-            // Hoist the needle lowercase once so we don't re-allocate it on
-            // every item probed.
-            let rune_needle = rune_name.to_lowercase();
-            let found_rune = db.runes.iter().find_map(|&id| {
-                db.items
-                    .get(&id)
-                    .filter(|item| item.name.to_lowercase().contains(&rune_needle))
-                    .map(|item| crate::validation::ValidatedItem {
-                        id: item.id,
-                        name: item.name.clone(),
-                    })
-            });
-            match found_rune {
+            match advisor_rune_pick(db, rest) {
                 Some(r) => candidate.rune = Some(r),
                 None => continue,
             }
@@ -2415,6 +2368,527 @@ pub fn llm_advisor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── C16 / C17 / C18: unpriceable prefixes, PvP amulet misses, advisor ──
+
+    /// The live `/v2/itemstats` cache holds ten rows (1041-1044, 1046-1048,
+    /// 1050-1052) whose every multiplier is `0.0`, with the real numbers in the
+    /// flat `value` field. The budget classifier used to take the plain maximum
+    /// multiplier — `0.0` for those rows — and then *every* attribute matched
+    /// the maximum and was paid the **major** rate.
+    #[test]
+    fn degenerate_itemstat_is_not_all_major() {
+        use gw2_api::models::{ItemStat, StatAttribute};
+
+        let attr = |attribute: &str, multiplier: f64, value: i32| StatAttribute {
+            attribute: attribute.into(),
+            multiplier,
+            value,
+        };
+        // The real Berserker's: Power major, Precision and Ferocity minor.
+        let healthy = ItemStat {
+            id: 161,
+            name: "Berserker's".into(),
+            attributes: vec![
+                attr("Power", 0.35, 0),
+                attr("Precision", 0.25, 0),
+                attr("CritDamage", 0.25, 0),
+            ],
+        };
+        // #1046: same name, same three attributes, every multiplier 0.0.
+        let degenerate = ItemStat {
+            id: 1046,
+            name: "Berserker's".into(),
+            attributes: vec![
+                attr("Power", 0.0, 32),
+                attr("Precision", 0.0, 18),
+                attr("CritDamage", 0.0, 18),
+            ],
+        };
+
+        let budgets = data::slot_budgets::slot_budgets();
+        let coat = budgets
+            .get(data::SlotType::Coat, data::StatShape::ThreeStat)
+            .expect("coat ThreeStat budget");
+        assert!(
+            coat.major > coat.minor,
+            "fixture is not discriminating: major {} minor {}",
+            coat.major,
+            coat.minor
+        );
+
+        // Healthy row: one major, two minors — priced.
+        let mut healthy_stats = stats::StatBlock::default();
+        assert!(add_budget_stats_for_itemstat(
+            &mut healthy_stats,
+            &healthy,
+            coat
+        ));
+        assert_eq!(healthy_stats.power, coat.major as f64);
+        assert_eq!(healthy_stats.precision, coat.minor as f64);
+        assert_eq!(healthy_stats.ferocity, coat.minor as f64);
+
+        // Degenerate row: reported unpriced, and contributes nothing. The
+        // failure this guards is "all three at the major rate", so assert that
+        // shape explicitly rather than only that the block is empty.
+        let mut degenerate_stats = stats::StatBlock::default();
+        let priced = add_budget_stats_for_itemstat(&mut degenerate_stats, &degenerate, coat);
+        // The defect first, so a regression reports what actually went wrong.
+        assert_ne!(
+            (
+                degenerate_stats.power,
+                degenerate_stats.precision,
+                degenerate_stats.ferocity
+            ),
+            (coat.major as f64, coat.major as f64, coat.major as f64),
+            "every attribute was paid the major rate"
+        );
+        assert!(
+            !priced,
+            "a row with no positive multiplier reported itself as priced"
+        );
+        assert_eq!(degenerate_stats.power, 0.0);
+        assert_eq!(degenerate_stats.precision, 0.0);
+        assert_eq!(degenerate_stats.ferocity, 0.0);
+
+        // And the whole-kit view: the degenerate row must not out-total the
+        // real prefix on any axis. Totals are measured from the appliers here,
+        // never copied from a number in the review.
+        let mut db = GameDb::empty_for_tests();
+        db.itemstats.insert(161, healthy.clone());
+        db.itemstats.insert(1046, degenerate.clone());
+        let ctx = BalanceContext::pve();
+
+        let mut healthy_kit = stats::StatBlock::default();
+        assert!(apply_optimized_gear_stats(&mut healthy_kit, &db, Some(161), &ctx).is_none());
+        let mut degenerate_kit = stats::StatBlock::default();
+        assert!(
+            apply_optimized_gear_stats(&mut degenerate_kit, &db, Some(1046), &ctx).is_some(),
+            "an unpriceable kit reported no data quality problem"
+        );
+        assert!(
+            healthy_kit.power > 0.0,
+            "control kit priced nothing; the comparison below would prove nothing"
+        );
+        for (axis, healthy_axis, degenerate_axis) in [
+            ("power", healthy_kit.power, degenerate_kit.power),
+            ("precision", healthy_kit.precision, degenerate_kit.precision),
+            ("ferocity", healthy_kit.ferocity, degenerate_kit.ferocity),
+        ] {
+            assert!(
+                degenerate_axis <= healthy_axis,
+                "{axis}: the flat-value row scored {degenerate_axis} against the real prefix {healthy_axis}"
+            );
+        }
+
+        // The pool is the other half of the rule, and the half that has to be
+        // tested on a row identity dedup would KEEP. #1046 above shares its
+        // display name with #161 and loses the group to the lower id, so its
+        // absence from the pool re-proves `canonical_itemstats_one_id_per_name`
+        // and nothing else. The case C16 exists for is a degenerate row whose
+        // display name is unique: nothing to lose a tie-break to, so it reaches
+        // the pool on identity alone and is then priced as all-major.
+        let orphan = ItemStat {
+            id: 1049,
+            name: "Settler's".into(),
+            attributes: vec![
+                attr("ConditionDamage", 0.0, 32),
+                attr("Toughness", 0.0, 18),
+                attr("HealingPower", 0.0, 18),
+            ],
+        };
+        db.itemstats.insert(1049, orphan.clone());
+        // Nothing else is named "Settler's" — state that as a precondition, so
+        // the assertion below cannot pass for the dedup's reason.
+        assert_eq!(
+            db.itemstats
+                .values()
+                .filter(|stat| stat.name == "Settler's")
+                .count(),
+            1,
+            "the orphan is no longer an orphan; this test would re-prove dedup"
+        );
+        let pool_ids: Vec<u32> = crate::itemstat_pool::canonical_itemstats(&db)
+            .iter()
+            .map(|stat| stat.id)
+            .collect();
+        assert_eq!(
+            pool_ids,
+            vec![161],
+            "a uniquely-named flat-value row reached the prefix pool"
+        );
+
+        // And the reason it must not: priced as a kit it is all-major on three
+        // axes, which is what the old classifier did to it.
+        let mut orphan_stats = stats::StatBlock::default();
+        assert!(!add_budget_stats_for_itemstat(
+            &mut orphan_stats,
+            &orphan,
+            coat
+        ));
+        assert_ne!(
+            (
+                orphan_stats.condition_damage,
+                orphan_stats.toughness,
+                orphan_stats.healing_power
+            ),
+            (coat.major as f64, coat.major as f64, coat.major as f64)
+        );
+    }
+
+    /// 53 of the 66 live named prefixes have no PvP amulet. Falling through to
+    /// the land budget gave them 3607+ points where a legal amulet is 3000, so
+    /// the unbuildable prefixes systematically outscored every legal one.
+    #[test]
+    fn pvp_unmatched_amulet_is_zero() {
+        use gw2_api::models::{ItemStat, PvpAmulet, StatAttribute};
+
+        let mut db = GameDb::empty_for_tests();
+        let three_stat = |id: u32, name: &str| ItemStat {
+            id,
+            name: name.into(),
+            attributes: vec![
+                StatAttribute {
+                    attribute: "Power".into(),
+                    multiplier: 0.35,
+                    value: 0,
+                },
+                StatAttribute {
+                    attribute: "Precision".into(),
+                    multiplier: 0.25,
+                    value: 0,
+                },
+                StatAttribute {
+                    attribute: "CritDamage".into(),
+                    multiplier: 0.25,
+                    value: 0,
+                },
+            ],
+        };
+        db.itemstats.insert(161, three_stat(161, "Berserker's"));
+        // Viper's is one of the real amulet-less prefixes.
+        db.itemstats.insert(1114, three_stat(1114, "Viper's"));
+
+        let mut attrs = HashMap::new();
+        attrs.insert("Power".to_string(), 1200);
+        attrs.insert("Precision".to_string(), 900);
+        attrs.insert("CritDamage".to_string(), 900);
+        db.pvp_amulets.insert(
+            4,
+            PvpAmulet {
+                id: 4,
+                name: "Berserker Amulet".into(),
+                icon: None,
+                attributes: attrs,
+            },
+        );
+        assert!(match_pvp_amulet(&db, "Viper's").is_none(), "fixture error");
+
+        let pvp = BalanceContext::pvp();
+
+        // Control: the matched prefix gets exactly its amulet.
+        let mut matched = stats::StatBlock::default();
+        assert!(apply_optimized_gear_stats(&mut matched, &db, Some(161), &pvp).is_none());
+        assert_eq!(matched.power, 1200.0);
+        assert_eq!(matched.precision, 900.0);
+        assert_eq!(matched.ferocity, 900.0);
+
+        // The defect: an unmatched prefix must score zero, not a land kit.
+        let mut unmatched = stats::StatBlock::default();
+        let reason = apply_optimized_gear_stats(&mut unmatched, &db, Some(1114), &pvp);
+        // Stats first: the damage of this bug is the inflated block, and a
+        // regression should say so rather than complain about a missing reason.
+        assert_eq!(
+            unmatched.power, 0.0,
+            "PvP fell through to land budgets: {} power on a prefix with no amulet",
+            unmatched.power
+        );
+        assert_eq!(unmatched.precision, 0.0);
+        assert_eq!(unmatched.ferocity, 0.0);
+        let reason = reason.expect("an unpriceable PvP kit must report why");
+        assert_eq!(reason.entity, "Viper's");
+        assert_eq!(reason.field, "pvp_amulet");
+        assert_eq!(reason.modes, vec!["PvP".to_string()]);
+
+        // The same prefix in PvE *does* draw land budgets — so the zero above
+        // is the PvP rule firing, not an itemstat that prices to nothing.
+        let mut pve = stats::StatBlock::default();
+        assert!(
+            apply_optimized_gear_stats(&mut pve, &db, Some(1114), &BalanceContext::pve()).is_none()
+        );
+        assert!(
+            pve.power > matched.power,
+            "PvE land kit ({}) should exceed the amulet ({}); otherwise this test cannot \
+             distinguish terminal from nothing-to-apply",
+            pve.power,
+            matched.power
+        );
+
+        // End to end through the validated applier: a whole PvP build on an
+        // amulet-less prefix carries no gear stats and says why.
+        let mut build = ValidatedBuild {
+            weapons: validation::ValidatedWeapons {
+                set1: validation::ValidatedWeaponSet {
+                    main_hand: Some("Greatsword".into()),
+                    off_hand: None,
+                },
+                set2: Default::default(),
+            },
+            ..ValidatedBuild::default()
+        };
+        build.fill_worn_gear_slots(PrefixRef {
+            itemstat_id: 1114,
+            name: "Viper's".into(),
+        });
+        let (gear, reasons) = validated_gear_stats(&build, &db, "Necromancer", &pvp);
+        assert_eq!(gear.power, 0.0);
+        assert_eq!(gear.condition_damage, 0.0);
+        assert_eq!(reasons.len(), 1, "{reasons:?}");
+        assert_eq!(reasons[0].field, "pvp_amulet");
+    }
+
+    /// `SWAP: rune=` with nothing after the `=` used to make `contains("")`
+    /// true for every rune, so whichever rune `db.runes` yielded first — a
+    /// HashMap-ordered, run-dependent choice — got equipped.
+    #[test]
+    fn swap_rune_empty_is_not_wildcard() {
+        use gw2_api::models::Item;
+
+        let mut db = GameDb::empty_for_tests();
+        for (id, name) in [
+            (1u32, "Superior Rune of the Scholar"),
+            (2, "Superior Rune of the Traveler"),
+            (3, "Superior Rune of Balthazar"),
+        ] {
+            db.items.insert(
+                id,
+                Item {
+                    id,
+                    name: name.into(),
+                    description: None,
+                    icon: None,
+                    item_type: "UpgradeComponent".into(),
+                    rarity: "Exotic".into(),
+                    level: 80,
+                    vendor_value: None,
+                    chat_link: None,
+                    default_skin: None,
+                    flags: Vec::new(),
+                    game_types: Vec::new(),
+                    restrictions: Vec::new(),
+                    details: None,
+                },
+            );
+            db.runes.push(id);
+        }
+
+        // Empty needle: no rune. Not "the first rune", not "a random rune".
+        for empty in ["", "   ", "\"\"", "''"] {
+            assert!(
+                advisor_rune_pick(&db, empty).is_none(),
+                "bare `rune={empty}` equipped something"
+            );
+        }
+
+        // A real needle still resolves, and resolves to the *shortest* match so
+        // the answer does not depend on `db.runes` iteration order. Reversing
+        // the pool must not change the pick.
+        let pick =
+            advisor_rune_pick(&db, "Superior Rune of the").expect("a real needle must still match");
+        assert_eq!(pick.name, "Superior Rune of the Scholar");
+        db.runes.reverse();
+        assert_eq!(
+            advisor_rune_pick(&db, "Superior Rune of the").map(|r| r.id),
+            Some(pick.id),
+            "the pick depended on pool order"
+        );
+    }
+
+    /// Tier 3 must stop when the user cancels.
+    ///
+    /// Only `optimize_v2` ever saw the cancellation token, so cancelling a run
+    /// that had already fallen through to the legacy pipeline did nothing: the
+    /// worker ran the whole `gear_candidates × spec_combos` combat sweep to
+    /// completion and then wrote its result back over a request the user had
+    /// abandoned — inside the game process, on a thread `on_unload` has to join.
+    #[test]
+    fn legacy_optimize_observes_cancel() {
+        use gw2_api::models::{ItemStat, Specialization, StatAttribute};
+        use std::cell::Cell;
+
+        let mut itemstats: HashMap<u32, ItemStat> = HashMap::new();
+        for (id, name) in [
+            (161u32, "Berserker's"),
+            (1099, "Cavalier's"),
+            (1128, "Marauder's"),
+        ] {
+            itemstats.insert(
+                id,
+                ItemStat {
+                    id,
+                    name: name.into(),
+                    attributes: vec![
+                        StatAttribute {
+                            attribute: "Power".into(),
+                            multiplier: 0.35,
+                            value: 0,
+                        },
+                        StatAttribute {
+                            attribute: "Precision".into(),
+                            multiplier: 0.25,
+                            value: 0,
+                        },
+                        StatAttribute {
+                            attribute: "CritDamage".into(),
+                            multiplier: 0.25,
+                            value: 0,
+                        },
+                    ],
+                },
+            );
+        }
+
+        let mut specs: HashMap<u32, Specialization> = HashMap::new();
+        for id in 1u32..=4 {
+            specs.insert(
+                id,
+                Specialization {
+                    id,
+                    name: format!("Spec {id}"),
+                    profession: "Warrior".into(),
+                    elite: id == 4,
+                    minor_traits: vec![],
+                    major_traits: vec![],
+                    weapon_trait: None,
+                    icon: None,
+                    background: None,
+                    profession_icon: None,
+                    profession_icon_big: None,
+                },
+            );
+        }
+
+        let profession = Profession {
+            id: "Warrior".into(),
+            name: "Warrior".into(),
+            code: None,
+            specializations: vec![1, 2, 3, 4],
+            weapons: HashMap::new(),
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+
+        let traits: HashMap<u32, GW2Trait> = HashMap::new();
+        let items: HashMap<u32, Item> = HashMap::new();
+        let weights = OptimizationWeights::default();
+        let ctx = BalanceContext::pve();
+        let locks = gw2_core::types::BuildLocks::default();
+        let amulets: HashMap<u32, PvpAmulet> = HashMap::new();
+
+        let run = |is_cancelled: &dyn Fn() -> bool| {
+            optimize_cancellable(
+                &profession,
+                &weights,
+                None,
+                &items,
+                &itemstats,
+                &specs,
+                &traits,
+                |_| {},
+                3,
+                &ctx,
+                &locks,
+                &amulets,
+                is_cancelled,
+            )
+        };
+
+        // Control: the same inputs with no cancellation produce a real result.
+        // Without this, "Cancelled" could just mean "this fixture never works".
+        let ok = run(&|| false).expect("uncancelled run must produce candidates");
+        assert!(!ok.is_empty(), "control run produced no candidates");
+
+        // Cancelled from the very first probe.
+        assert_eq!(run(&|| true).unwrap_err(), "Cancelled");
+
+        // Cancelled part-way: the probe fires only after it has been asked a
+        // few times, so the run is genuinely under way. It must still abandon,
+        // and it must never return a partial candidate list that a caller could
+        // mistake for a result.
+        for trip_after in [1usize, 2, 3, 4] {
+            let asked = Cell::new(0usize);
+            let probe = || {
+                asked.set(asked.get() + 1);
+                asked.get() > trip_after
+            };
+            assert_eq!(
+                run(&probe).unwrap_err(),
+                "Cancelled",
+                "trip_after {trip_after} ran to completion"
+            );
+            assert!(
+                asked.get() > trip_after,
+                "the probe was never asked enough times to fire"
+            );
+        }
+
+        // PvP takes a different branch inside the same function; it observes
+        // cancellation too.
+        let mut pvp_amulets: HashMap<u32, PvpAmulet> = HashMap::new();
+        pvp_amulets.insert(
+            4,
+            PvpAmulet {
+                id: 4,
+                name: "Berserker Amulet".into(),
+                icon: None,
+                attributes: HashMap::from([("Power".to_string(), 1200)]),
+            },
+        );
+        let pvp_ctx = BalanceContext::pvp();
+        let pvp_run = |is_cancelled: &dyn Fn() -> bool| {
+            optimize_cancellable(
+                &profession,
+                &weights,
+                None,
+                &items,
+                &itemstats,
+                &specs,
+                &traits,
+                |_| {},
+                3,
+                &pvp_ctx,
+                &locks,
+                &pvp_amulets,
+                is_cancelled,
+            )
+        };
+        assert!(
+            pvp_run(&|| false).is_ok(),
+            "PvP control run must produce candidates"
+        );
+        assert_eq!(pvp_run(&|| true).unwrap_err(), "Cancelled");
+
+        // `optimize` is the uncancellable wrapper the addon still calls; it must
+        // behave exactly like a never-cancelled `optimize_cancellable`.
+        let via_wrapper = optimize(
+            &profession,
+            &weights,
+            None,
+            &items,
+            &itemstats,
+            &specs,
+            &traits,
+            |_| {},
+            3,
+            &ctx,
+            &locks,
+            &amulets,
+        )
+        .expect("wrapper must still work");
+        assert_eq!(via_wrapper.len(), ok.len());
+    }
 
     #[test]
     fn parse_slot_qualifier_recognises_kebab_compact_and_bare_forms() {
@@ -3014,6 +3488,7 @@ mod tests {
             professions: HashMap::new(),
             legends: HashMap::new(),
             pvp_amulets: HashMap::new(),
+            pets: HashMap::new(),
             skills_by_profession: HashMap::new(),
             traits_by_spec: HashMap::new(),
             items_by_type: HashMap::new(),
@@ -3179,9 +3654,9 @@ mod tests {
         let mixed = build(true);
 
         let mut stats_all = stats::StatBlock::default();
-        apply_validated_gear_stats(&mut stats_all, &db, &all_bers, &ctx);
+        apply_validated_gear_stats(&mut stats_all, &db, &all_bers, "Guardian", &ctx);
         let mut stats_mixed = stats::StatBlock::default();
-        apply_validated_gear_stats(&mut stats_mixed, &db, &mixed, &ctx);
+        apply_validated_gear_stats(&mut stats_mixed, &db, &mixed, "Guardian", &ctx);
 
         // Sanity: the mix must actually differ from the uniform build.
         assert!((stats_all.toughness - stats_mixed.toughness).abs() > 1.0);

@@ -21,6 +21,10 @@ mod tabs;
 const HEADER_BG: [f32; 4] = [0.18, 0.16, 0.10, 0.95];
 const ACCENT_COLOR: [f32; 4] = [0.7, 0.55, 0.15, 0.6];
 
+/// `kitchen.json` (chat history). Saved from the frame loop whenever the chat
+/// is dirty, which can be many frames in a row while a reply streams in.
+static KITCHEN_WRITES: crate::ui::SerialWriter = crate::ui::SerialWriter::new("kitchen-save");
+
 pub fn render_main(ui: &Ui, state: &mut AddonState) {
     // Apply global UI scale (text + element sizing)
     let scale = state.config.font_scale;
@@ -160,13 +164,16 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
         });
 
     if state.main.chat.dirty {
-        // Snapshot under the lock, serialize + write on a background thread:
-        // must never stall the frame (the render callback is the only
-        // ImGui draw pass, so a slow frame reads as the game hanging).
+        // Snapshot under the lock, serialize + write on a worker: must never
+        // stall the frame (the render callback is the only ImGui draw pass, so
+        // a slow frame reads as the game hanging). One saver at a time —
+        // `save_history` stages through a single `kitchen.json.tmp`, and two
+        // overlapping savers would race over that one path; this also stops a
+        // chat that stays dirty from spawning a thread on every frame.
         let snapshot = state.main.chat.history.clone();
         let addon_dir = state.addon_dir.clone();
         state.main.chat.dirty = false;
-        std::thread::spawn(move || {
+        KITCHEN_WRITES.submit(state, move || {
             crate::ui::chat_bar::save_history(&addon_dir, &snapshot);
         });
     }
@@ -253,12 +260,11 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
 
     if !state.main.game_db_loading {
         if let Some(lang) = gw2_core::i18n::api_lang(&state.config.ui_language) {
-            let cache = gw2_api::cache::DataCache::new(state.addon_dir.join("cache"));
             let build = state
                 .main
                 .live_build_number
                 .or(state.config.cache_build_number);
-            match gw2_api::localize::pack_status(&cache, lang, build) {
+            match stats::cached_pack_status(&state.addon_dir, lang, build) {
                 gw2_api::localize::PackStatus::Missing | gw2_api::localize::PackStatus::Stale => {
                     ui.same_line();
                     ui.text_colored(theme::WARN, t("status.names_english"));
@@ -486,13 +492,21 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
 
     ui.same_line_with_spacing(0.0, 28.0);
     let saves = t("tab.saves");
+    let news = t("tab.news");
     let settings = t("tab.settings");
     let about = t("tab.about");
-    for (tab, label, id) in [
-        (MainTab::SaveLoad, saves.as_str(), "##main_tab_saves"),
-        (MainTab::Settings, settings.as_str(), "##main_tab_settings"),
-        (MainTab::About, about.as_str(), "##main_tab_about"),
-    ] {
+    let show_news = state.config.news.any_enabled();
+    if !show_news && state.main.active_tab == MainTab::News {
+        state.main.active_tab = MainTab::Settings;
+    }
+    let mut utility: Vec<(MainTab, &str, &str)> =
+        vec![(MainTab::SaveLoad, saves.as_str(), "##main_tab_saves")];
+    if show_news {
+        utility.push((MainTab::News, news.as_str(), "##main_tab_news"));
+    }
+    utility.push((MainTab::Settings, settings.as_str(), "##main_tab_settings"));
+    utility.push((MainTab::About, about.as_str(), "##main_tab_about"));
+    for (tab, label, id) in utility {
         let is_active = state.main.active_tab == tab;
         let pulse = if state.main.tab_alert.as_ref() == Some(&tab) && !is_active {
             0.18 + 0.55 * (ui.frame_count() as f32 * 0.0175).sin().abs()
@@ -514,7 +528,10 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
 /// Dynamic left panel: content varies by active tab.
 fn render_left_panel(ui: &Ui, state: &mut AddonState) {
     // ── Character section (always visible except Settings) ──
-    if !matches!(state.main.active_tab, MainTab::Settings | MainTab::About) {
+    if !matches!(
+        state.main.active_tab,
+        MainTab::Settings | MainTab::About | MainTab::News
+    ) {
         render_left_character_section(ui, state);
     }
 
@@ -523,7 +540,7 @@ fn render_left_panel(ui: &Ui, state: &mut AddonState) {
             render_left_build_controls(ui, state);
         }
         MainTab::SaveLoad => {}
-        MainTab::Settings | MainTab::About => {
+        MainTab::Settings | MainTab::About | MainTab::News => {
             // Settings info
             render_left_section_header(ui, &t("section.info"), state.config.section_spacing);
             ui.text_colored(theme::MUTED, format!("  {}", t("info.product")));
@@ -1009,6 +1026,9 @@ fn render_main_content(ui: &Ui, state: &mut AddonState) {
         }
         MainTab::Settings => {
             tabs::settings::render_settings_tab(ui, state);
+        }
+        MainTab::News => {
+            tabs::news::render_news_tab(ui, state);
         }
         MainTab::About => {
             tabs::about::render_about_tab(ui, state);

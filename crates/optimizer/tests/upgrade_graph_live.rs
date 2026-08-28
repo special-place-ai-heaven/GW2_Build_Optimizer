@@ -1,5 +1,9 @@
 //! Live-catalog proof: graph ranking vs the on-disk GW2 items cache.
 //! Snapshot fixtures in `upgrade_graph` tests always run; this catches API drift.
+//!
+//! This test reads a live, in-game cache directory — it is `#[ignore]`d by
+//! default so CI (which has no such cache) never runs it. Run explicitly with
+//! `cargo test -p gw2-optimizer --test upgrade_graph_live -- --ignored`.
 
 use std::path::Path;
 
@@ -38,6 +42,7 @@ fn try_live_graph() -> Option<UpgradeGraph> {
 }
 
 #[test]
+#[ignore] // Requires the in-game addon's live items cache (see LIVE_CACHE)
 fn live_catalog_search_is_not_alphabetical() {
     let Some(g) = try_live_graph() else {
         eprintln!("skip: live items cache not present");

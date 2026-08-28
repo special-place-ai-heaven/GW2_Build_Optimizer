@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cache::DataCache;
 use crate::client::{ApiError, Gw2Client};
-use crate::models::{Item, Profession, PvpAmulet, Skill, Specialization, Trait};
+use crate::models::{Item, Pet, Profession, PvpAmulet, Skill, Specialization, Trait};
 
 const RENDER_HOSTS: &[&str] = &[
     "https://render.guildwars2.com",
@@ -30,12 +30,32 @@ pub fn parse_render_url(url: &str) -> Option<(&'static str, &str)> {
 }
 
 /// `12345.png` from `/file/<hash>/12345.png`.
+///
+/// The result is joined onto the graphics directory by `local_path`, so it must
+/// be a single, ordinary filename. Anything that could redirect the join —
+/// a `..` parent segment, an embedded separator, or a Windows drive/UNC prefix
+/// (`Path::join` *replaces* the base when the joined path has a root or
+/// prefix) — is rejected. Icon URLs come from the GW2 API today, but the cache
+/// path must not depend on that staying true.
 pub fn png_filename(endpoint: &str) -> Option<String> {
     let name = endpoint.rsplit('/').next()?;
-    if name.ends_with(".png") && name.len() > 4 {
-        Some(name.to_string())
-    } else {
-        None
+    if !name.ends_with(".png") || name.len() <= 4 {
+        return None;
+    }
+    // `:` is not a separator on Unix but is one on Windows (`C:x.png` is
+    // drive-relative, `a:b` is an alternate data stream); reject it on every
+    // platform so the check does not depend on the build target.
+    if name.contains(['/', '\\', ':']) || name.starts_with('.') {
+        return None;
+    }
+    // Must parse to exactly one ordinary component — this is what rejects
+    // `..`, roots, and prefixes structurally rather than by blocklist.
+    let mut parts = Path::new(name).components();
+    match (parts.next(), parts.next()) {
+        (Some(std::path::Component::Normal(only)), None) if only == std::ffi::OsStr::new(name) => {
+            Some(name.to_string())
+        }
+        _ => None,
     }
 }
 
@@ -102,6 +122,11 @@ pub fn collect_from_cache(cache: &DataCache) -> Vec<String> {
     );
     push_icons(
         &mut urls,
+        cache.load::<Vec<Pet>>("pets").ok().flatten(),
+        |p| p.icon.as_deref(),
+    );
+    push_icons(
+        &mut urls,
         cache.load::<Vec<Item>>("items").ok().flatten(),
         |i| i.icon.as_deref(),
     );
@@ -119,8 +144,10 @@ fn push_icons<T>(urls: &mut Vec<String>, rows: Option<Vec<T>>, icon: impl Fn(&T)
     }
 }
 
-/// Download missing PNGs. Existing files are left alone. Failures are skipped
-/// so a bad icon never aborts a game-data refresh.
+/// Download missing PNGs. Existing files are left alone. Per-icon failures are
+/// skipped so a bad icon never aborts a game-data refresh — but a cancelled
+/// `client` stops the workers and returns `ApiError::Cancelled`, which is the
+/// one condition the caller must not treat as "some icons were missing".
 pub fn download_missing(
     client: &Gw2Client,
     graphics_dir: &Path,
@@ -147,6 +174,11 @@ pub fn download_missing(
             let done = &done;
             scope.spawn(move || {
                 for (url, path) in chunk {
+                    if client.is_cancelled() {
+                        // Leave `done` short of `total`; the progress loop
+                        // below watches the same flag and stops with us.
+                        return;
+                    }
                     if let Ok(bytes) = client.fetch_bytes(url) {
                         if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
                             let tmp = path.with_extension("tmp");
@@ -159,12 +191,17 @@ pub fn download_missing(
                 }
             });
         }
-        // Progress from this thread while workers run.
-        while done.load(std::sync::atomic::Ordering::Relaxed) < total {
+        // Progress from this thread while workers run. Cancelled workers stop
+        // short of `total`, so this loop must watch the flag too or it would
+        // spin until the scope join that never comes.
+        while done.load(std::sync::atomic::Ordering::Relaxed) < total && !client.is_cancelled() {
             on_progress(done.load(std::sync::atomic::Ordering::Relaxed), total);
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
     });
+    if client.is_cancelled() {
+        return Err(ApiError::Cancelled);
+    }
     on_progress(total, total);
     Ok((total as u32, skipped))
 }
@@ -185,6 +222,44 @@ mod tests {
             "/file/943538394A94A491C8632FBEF6203C2013443555/102478.png"
         );
         assert_eq!(png_filename(path).as_deref(), Some("102478.png"));
+    }
+
+    #[test]
+    fn png_filename_rejects_parent_and_rooted_segments() {
+        // The one shape the render service actually produces.
+        assert_eq!(
+            png_filename("/file/AAA/102478.png").as_deref(),
+            Some("102478.png")
+        );
+        // A `..` in an earlier segment is harmless — only the last segment is
+        // ever joined onto the graphics dir.
+        assert_eq!(
+            png_filename("/file/../102478.png").as_deref(),
+            Some("102478.png")
+        );
+        for hostile in [
+            "/file/AAA/..\\..\\evil.png",       // Windows parent traversal
+            "/file/AAA/../evil.png/..",         // last segment is `..`
+            "/file/AAA/C:evil.png",             // drive-relative: join() replaces the base
+            "/file/AAA/\\\\host\\c$\\evil.png", // UNC root
+            "/file/AAA/.png",                   // no stem
+            "/file/AAA/..png",                  // dot-leading
+            "/file/AAA/evil.exe",               // not a png
+        ] {
+            assert!(
+                png_filename(hostile).is_none(),
+                "{hostile} must not become a cache filename"
+            );
+        }
+    }
+
+    #[test]
+    fn local_path_stays_inside_the_graphics_dir() {
+        let dir = std::env::temp_dir().join("gw2_gfx_escape_probe");
+        let ok = local_path(&dir, "/file/AAA/1.png").expect("plain icon resolves");
+        assert!(ok.starts_with(&dir));
+        assert!(local_path(&dir, "/file/AAA/..\\..\\evil.png").is_none());
+        assert!(local_path(&dir, "/file/AAA/C:evil.png").is_none());
     }
 
     #[test]

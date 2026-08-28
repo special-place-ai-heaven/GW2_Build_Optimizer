@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Choya's inbox</title>
+<style>
+:root{--bg:#14110c;--ink:#ede6d2;--muted:#938a76;--gold:#ffd561;--plate:#1f1a12;--line:#3a3220;--err:#ff6147}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 Segoe UI,system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line);background:#1a160f}
+h1{margin:0;font-size:18px;color:var(--gold);font-weight:600}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+input,select,textarea,button{background:#0e0c09;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:7px 10px;font:inherit}
+button{background:#c9a227;color:#1a1408;font-weight:600;cursor:pointer;border-color:#c9a227}
+button.ghost{background:transparent;color:var(--gold);border-color:var(--line)}
+button:disabled{opacity:.4;cursor:not-allowed}
+#user,#pass{min-width:12rem}
+main{display:grid;grid-template-columns:minmax(280px,1fr) minmax(320px,1.4fr);min-height:calc(100vh - 58px)}
+@media(max-width:860px){main{grid-template-columns:1fr}}
+#list{border-right:1px solid var(--line);overflow:auto;max-height:calc(100vh - 58px)}
+article{padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+article:hover{background:#221c12}
+article.on{background:#2a2214;outline:1px solid var(--gold)}
+article .k{color:var(--muted);font-size:12px}
+article h2{margin:4px 0 0;font-size:15px;font-weight:600}
+#detail{padding:18px 20px;overflow:auto}
+.meta{color:var(--muted);font-size:13px;margin:0 0 12px}
+.body p,.body li{margin:0 0 8px}
+.body .b{font-weight:700}
+.err{color:var(--err)}
+.empty{color:var(--muted);padding:24px}
+#who{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Choya's inbox</h1>
+  <div class="row" id="gate">
+    <input id="user" placeholder="Username" autocomplete="username" name="username">
+    <input id="pass" type="password" placeholder="Password" autocomplete="current-password" name="password">
+    <button id="go" type="button">Log in</button>
+  </div>
+  <div class="row" id="tools" hidden>
+    <select id="status">
+      <option value="">All status</option>
+      <option value="received">Received</option>
+      <option value="read">Read</option>
+      <option value="answered">Answered</option>
+      <option value="closed">Closed</option>
+    </select>
+    <select id="category">
+      <option value="">All kinds</option>
+      <option value="bug">Bug</option>
+      <option value="wrong_build">Wrong build</option>
+      <option value="wish">Wish</option>
+      <option value="question">Question</option>
+      <option value="praise">Praise</option>
+      <option value="coffee">Coffee</option>
+    </select>
+    <input id="q" placeholder="Search title, body, id, account">
+    <button id="reload" type="button">Reload</button>
+    <span id="who"></span>
+    <button id="out" class="ghost" type="button">Log out</button>
+  </div>
+</header>
+<main>
+  <div id="list"><p class="empty">Log in to read and reply. Players pick up replies in About → Messages.</p></div>
+  <div id="detail"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const COLORS = {0:'#ede6d2',1:'#ffd561',2:'#938a76',3:'#ffb848',4:'#ff6147'};
+
+function renderBody(raw) {
+  if (!raw) return '<p class="empty">(no body)</p>';
+  return raw.split(/\n/).map(line => {
+    const m = line.match(/^%([BN])([LCR])([0-4])([PUO])\|(.*)$/);
+    let text = line, bold=false, align='left', color='#ede6d2', list='';
+    if (m) {
+      bold = m[1]==='B'; align = {L:'left',C:'center',R:'right'}[m[2]];
+      color = COLORS[m[3]]||COLORS[0];
+      list = m[4]==='U'?'• ':m[4]==='O'?'# ':'';
+      text = m[5];
+    } else if (line.startsWith('# ')) { bold=true; color=COLORS[1]; text=line.slice(2); }
+    else if (line.startsWith('- ')) { list='• '; text=line.slice(2); }
+    const cls = bold?'b':'';
+    return `<p class="${cls}" style="text-align:${align};color:${color}">${esc(list+text)}</p>`;
+  }).join('');
+}
+
+let rows = [];
+let current = null;
+
+function lock(msg) {
+  $('gate').hidden = false;
+  $('tools').hidden = true;
+  $('who').textContent = '';
+  $('detail').innerHTML = '';
+  current = null;
+  $('list').innerHTML = '<p class="empty">'+(msg||'Log in to read and reply. Players pick up replies in About → Messages.')+'</p>';
+}
+
+function unlockUi(user) {
+  $('gate').hidden = true;
+  $('tools').hidden = false;
+  $('who').textContent = user||'';
+}
+
+async function api(path, opt) {
+  const r = await fetch(path, Object.assign({
+    credentials: 'include',
+    headers: {'content-type':'application/json'}
+  }, opt));
+  if (r.status===401) throw new Error('unauthorized');
+  if (!r.ok) throw new Error('HTTP '+r.status);
+  if (r.status===204) return {};
+  return r.json().catch(()=>({}));
+}
+
+function query() {
+  const p = new URLSearchParams();
+  if ($('status').value) p.set('status', $('status').value);
+  if ($('category').value) p.set('category', $('category').value);
+  if ($('q').value.trim()) p.set('q', $('q').value.trim());
+  p.set('limit','200');
+  return '/v1/admin/reports?'+p;
+}
+
+function paintList() {
+  if (!rows.length) { $('list').innerHTML = '<p class="empty">No reports match.</p>'; return; }
+  $('list').innerHTML = rows.map(r => `<article data-id="${esc(r.id)}" class="${current&&current.id===r.id?'on':''}">
+    <div class="k">${esc(r.id)} · ${esc(r.status)} · ${esc(r.category)} · ${esc((r.received_at||'').slice(0,16).replace('T',' '))}</div>
+    <h2>${esc(r.title||'(untitled)')}</h2>
+  </article>`).join('');
+  $('list').querySelectorAll('article').forEach(el => el.onclick = () => open(el.dataset.id));
+}
+
+function open(id) {
+  current = rows.find(r => r.id===id);
+  if (!current) return;
+  paintList();
+  const r = current;
+  const snap = r.payload && r.payload.context ? r.payload.context : {};
+  $('detail').innerHTML = `
+    <p class="meta">${esc(r.id)} · ${esc(r.status)} · v${esc(r.addon_version)}
+      ${r.account? ' · '+esc(r.account):''}
+      ${r.contact? ' · '+esc(r.contact):''}
+      ${snap.profession? ' · '+esc(snap.profession):''}
+      ${r.unvalidated? ' · unvalidated':''}</p>
+    <h2>${esc(r.title)}</h2>
+    <div class="body">${renderBody(r.body)}</div>
+    ${r.reply? '<p class="meta">Your last reply</p><div class="body">'+renderBody(r.reply)+'</div>':''}
+    <p class="meta">Reply — they see this in About → Messages → View</p>
+    <textarea id="reply" rows="6" style="width:100%">${esc(r.reply||'')}</textarea>
+    <div class="row" style="margin-top:10px">
+      <button id="ans" type="button">Send reply</button>
+      <button id="cls" class="ghost" type="button">Close without reply</button>
+    </div>
+    <p class="err" id="derr"></p>`;
+  $('ans').onclick = () => reply(r.id, $('reply').value, 'answered');
+  $('cls').onclick = () => reply(r.id, $('reply').value, 'closed');
+}
+
+async function reply(id, text, status) {
+  $('derr').textContent = '';
+  try {
+    if (status==='answered' && !text.trim()) { $('derr').textContent = 'Type a reply first.'; return; }
+    await api('/v1/admin/reports/'+id+'/reply', {method:'POST', body: JSON.stringify({reply:text, status})});
+    await load();
+    open(id);
+  } catch(e) {
+    if (e.message==='unauthorized') lock('Session expired. Log in again.');
+    else $('derr').textContent = e.message;
+  }
+}
+
+async function load() {
+  const data = await api(query());
+  rows = Array.isArray(data)? data : [];
+  paintList();
+  if (current) {
+    const still = rows.find(r => r.id===current.id);
+    if (still) open(still.id); else { current=null; $('detail').innerHTML=''; }
+  }
+}
+
+async function doLogin() {
+  const user = $('user').value.trim();
+  const password = $('pass').value;
+  $('list').innerHTML = '';
+  try {
+    const r = await fetch('/admin/login', {
+      method:'POST', credentials:'include',
+      headers:{'content-type':'application/json'},
+      body: JSON.stringify({user, password})
+    });
+    if (r.status===401) throw new Error('Wrong username or password.');
+    if (r.status===429) throw new Error('Too many tries. Wait a few minutes.');
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    $('pass').value = '';
+    unlockUi(user);
+    await load();
+  } catch(e) {
+    lock(e.message);
+  }
+}
+
+async function doLogout() {
+  await fetch('/admin/logout', {method:'POST', credentials:'include'}).catch(()=>{});
+  $('user').value = '';
+  $('pass').value = '';
+  lock();
+}
+
+async function restore() {
+  try {
+    const me = await api('/admin/me');
+    unlockUi(me.user);
+    await load();
+  } catch(e) {
+    lock();
+  }
+}
+
+$('go').onclick = doLogin;
+$('pass').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
+$('user').addEventListener('keydown', e => { if (e.key==='Enter') $('pass').focus(); });
+$('out').onclick = doLogout;
+$('reload').onclick = () => load().catch(e => { if (e.message==='unauthorized') lock('Session expired. Log in again.'); else $('list').innerHTML = '<p class="err">'+esc(e.message)+'</p>'; });
+['status','category'].forEach(id => $(id).onchange = () => load().catch(console.error));
+$('q').addEventListener('keydown', e => { if (e.key==='Enter') load().catch(console.error); });
+restore();
+</script>
+</body>
+</html>

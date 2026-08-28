@@ -7,6 +7,7 @@ use crate::ui::comparison::ResultPane;
 use crate::ui::theme;
 use gw2_core::i18n::{t, tf};
 
+use super::super::optimize_flow::ImproveOutcome;
 use super::{build_display, lock_panel, render_optimization_progress};
 
 pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonState) {
@@ -103,6 +104,23 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 ui.spacing();
             }
 
+            // ── Gate outcome banner ──
+            // "We could not beat this" is a state of the Improve tab, not a
+            // line buried in the quality footnotes: the player waited through a
+            // full optimization and is now looking at their own gear. Show it
+            // above the panes, before anything that reads like a result.
+            let selected = state
+                .main
+                .comparison
+                .selected_suggestion
+                .min(state.main.comparison.suggestions.len() - 1);
+            let outcome =
+                ImproveOutcome::from_label(&state.main.comparison.suggestions[selected].label);
+            if let Some(headline) = outcome.and_then(ImproveOutcome::headline) {
+                theme::wrapped(ui, theme::WARN, headline);
+                ui.spacing();
+            }
+
             if let Some(spec_name) = locked_spec_name.as_deref() {
                 ui.text_colored(theme::OPTIMIZED, tf("fmt.locked", &[("name", spec_name)]));
                 ui.same_line();
@@ -133,7 +151,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 .min(state.main.comparison.suggestions.len() - 1);
             let suggestion = state.main.comparison.suggestions[idx].clone();
             let pane = state.main.comparison.result_pane;
-            let db_ref = state.main.game_db.as_ref();
+            let db_ref = state.main.game_db.as_deref();
             let gain = crate::ui::gear_sheet::combat_gain(
                 state.main.comparison.current_combat_solo.as_ref(),
                 suggestion.combat_solo.as_ref(),
@@ -178,6 +196,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                             db_ref,
                             viewing,
                             gain,
+                            Some(&mut state.main.build_locks),
                         );
                     }
                     ResultPane::Stats => {
@@ -202,9 +221,9 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                         &t("section.current_build"),
                         theme::CURRENT,
                     );
-                    build_display::render_build_skills(ui, &build, state.main.game_db.as_ref());
+                    build_display::render_build_skills(ui, &build, state.main.game_db.as_deref());
                     {
-                        let db_ref = state.main.game_db.as_ref();
+                        let db_ref = state.main.game_db.as_deref();
                         let mut specs_open = true;
                         lock_panel::render_lock_panel(
                             ui,
@@ -221,9 +240,10 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                         ui,
                         &build,
                         None,
-                        state.main.game_db.as_ref(),
+                        state.main.game_db.as_deref(),
                         false,
                         0,
+                        Some(&mut state.main.build_locks),
                     );
                 });
         }

@@ -307,6 +307,34 @@ pub fn tf(key: &str, args: &[(&str, &str)]) -> String {
     s
 }
 
+/// CLDR plural category for the Slavic pluralization pattern (Polish,
+/// Russian, and related languages). The Germanic/English two-form rule
+/// (`n == 1` vs everything else) is wrong for these locales: 2, 3, and 4
+/// take a distinct "few" form, separate from both "one" and "many".
+///
+/// Rule (CLDR, integers): `one` when `n % 10 == 1 && n % 100 != 11`;
+/// `few` when `n % 10` is 2..=4 and `n % 100` is not 12..=14; otherwise
+/// `many` (covers 0, 5..=20, and the rest).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlavicPluralForm {
+    One,
+    Few,
+    Many,
+}
+
+/// Classify `n` into the CLDR plural category used by Polish and Russian.
+pub fn slavic_plural_form(n: u64) -> SlavicPluralForm {
+    let mod10 = n % 10;
+    let mod100 = n % 100;
+    if mod10 == 1 && mod100 != 11 {
+        SlavicPluralForm::One
+    } else if (2..=4).contains(&mod10) && !(12..=14).contains(&mod100) {
+        SlavicPluralForm::Few
+    } else {
+        SlavicPluralForm::Many
+    }
+}
+
 fn detect_os_language() -> &'static str {
     #[cfg(windows)]
     {
@@ -435,6 +463,25 @@ mod tests {
             assert!(s.contains("12"));
             assert!(s.to_lowercase().contains("request"));
         });
+    }
+
+    #[test]
+    fn polish_plural_two_uses_few_form() {
+        // Germanic two-form pluralization (n == 1 ? one : many) would bucket
+        // 2 together with 5, 11, and 25. Polish (and Russian) need a third
+        // "few" bucket for 2-4, excluding 12-14.
+        assert_eq!(slavic_plural_form(2), SlavicPluralForm::Few);
+        assert_eq!(slavic_plural_form(3), SlavicPluralForm::Few);
+        assert_eq!(slavic_plural_form(4), SlavicPluralForm::Few);
+        assert_eq!(slavic_plural_form(22), SlavicPluralForm::Few);
+        assert_eq!(slavic_plural_form(1), SlavicPluralForm::One);
+        assert_eq!(slavic_plural_form(21), SlavicPluralForm::One);
+        assert_eq!(slavic_plural_form(0), SlavicPluralForm::Many);
+        assert_eq!(slavic_plural_form(5), SlavicPluralForm::Many);
+        assert_eq!(slavic_plural_form(11), SlavicPluralForm::Many);
+        assert_eq!(slavic_plural_form(12), SlavicPluralForm::Many);
+        // The two-form English rule would put 2 and 5 in the same bucket.
+        assert_ne!(slavic_plural_form(2), slavic_plural_form(5));
     }
 
     #[test]

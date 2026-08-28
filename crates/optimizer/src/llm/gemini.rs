@@ -4,8 +4,33 @@
 
 use serde_json::Value;
 
+use super::body::MAX_LLM_BODY;
 use super::{KeyValidationResult, LlmClient, LlmError, ToolDefinition};
 use crate::gemini::{self, GeminiClient as RawGeminiClient, GeminiError};
+
+/// Reject a response larger than [`MAX_LLM_BODY`] at the trait boundary.
+///
+/// The socket read itself lives in `crate::gemini::read_gemini_stream`, which
+/// is outside this module's ownership, so the peak allocation there is not
+/// bounded by this check. What it does bound is everything downstream: a
+/// runaway body is not cloned into the response cache, the prompt pipeline,
+/// or the chat history.
+///
+/// ponytail: this is the adapter half of the cap. The real fix is
+/// `body_capped` around the reader in `crates/optimizer/src/gemini.rs`
+/// (handed off — see leaf-1.1.1's report).
+fn body_capped(text: String) -> Result<String, LlmError> {
+    if text.len() as u64 > MAX_LLM_BODY {
+        return Err(LlmError::Api {
+            status: 502,
+            message: format!(
+                "Gemini response exceeded the {} MiB body cap and was dropped",
+                MAX_LLM_BODY / (1024 * 1024)
+            ),
+        });
+    }
+    Ok(text)
+}
 
 /// Convert Gemini-specific errors to provider-neutral `LlmError`.
 impl From<GeminiError> for LlmError {
@@ -51,6 +76,16 @@ impl GeminiLlmClient {
 }
 
 /// Convert provider-neutral `ToolDefinition` to Gemini-specific wire format.
+///
+/// Gemini validates the tool schema *before* generation and hard-400s the
+/// whole request on a keyword it does not know — measured 2026-08-27:
+/// `Unknown name "additionalProperties" at
+/// 'tools[0].function_declarations[0].parameters'`. `$schema` is rejected the
+/// same way; `enum`, `anyOf`, `oneOf`, `minimum` and `maximum` are accepted.
+/// Today's definitions come from `gemini_tools::tool_declarations()` and
+/// carry neither, but a `ToolDefinition` is provider-neutral by contract, so
+/// an OpenAI-shaped schema reaching here would take the addon's primary
+/// pipeline down at request time. Strip them on the way in.
 fn to_gemini_tools(tools: &[ToolDefinition]) -> Vec<gemini::Tool> {
     vec![gemini::Tool {
         function_declarations: tools
@@ -58,10 +93,34 @@ fn to_gemini_tools(tools: &[ToolDefinition]) -> Vec<gemini::Tool> {
             .map(|td| gemini::FunctionDeclaration {
                 name: td.name.clone(),
                 description: td.description.clone(),
-                parameters: td.parameters.clone(),
+                parameters: strip_unsupported_schema_keywords(td.parameters.clone()),
             })
             .collect(),
     }]
+}
+
+/// JSON Schema keywords Gemini's tool validator rejects outright.
+const GEMINI_REJECTED_SCHEMA_KEYS: [&str; 2] = ["additionalProperties", "$schema"];
+
+/// Recursively drop [`GEMINI_REJECTED_SCHEMA_KEYS`] from a JSON Schema.
+fn strip_unsupported_schema_keywords(mut schema: Value) -> Value {
+    match &mut schema {
+        Value::Object(map) => {
+            for key in GEMINI_REJECTED_SCHEMA_KEYS {
+                map.remove(key);
+            }
+            for value in map.values_mut() {
+                *value = strip_unsupported_schema_keywords(value.take());
+            }
+        }
+        Value::Array(items) => {
+            for item in items.iter_mut() {
+                *item = strip_unsupported_schema_keywords(item.take());
+            }
+        }
+        _ => {}
+    }
+    schema
 }
 
 impl LlmClient for GeminiLlmClient {
@@ -119,11 +178,17 @@ impl LlmClient for GeminiLlmClient {
     }
 
     fn generate(&self, prompt: &str) -> Result<String, LlmError> {
-        self.inner.generate(prompt).map_err(LlmError::from)
+        self.inner
+            .generate(prompt)
+            .map_err(LlmError::from)
+            .and_then(body_capped)
     }
 
     fn generate_cached(&self, prompt: &str) -> Result<String, LlmError> {
-        self.inner.generate_cached(prompt).map_err(LlmError::from)
+        self.inner
+            .generate_cached(prompt)
+            .map_err(LlmError::from)
+            .and_then(body_capped)
     }
 
     fn generate_with_tools_progress(
@@ -144,6 +209,7 @@ impl LlmClient for GeminiLlmClient {
                 on_progress,
             )
             .map_err(LlmError::from)
+            .and_then(body_capped)
     }
 
     fn list_models(&self) -> Result<Vec<super::ModelInfo>, LlmError> {
@@ -223,6 +289,56 @@ mod tests {
     fn test_provider_name() {
         let client = GeminiLlmClient::new("fake-key", "gemini-2.5-flash").unwrap();
         assert_eq!(client.provider_name(), "Gemini");
+    }
+
+    #[test]
+    fn strips_schema_keywords_gemini_rejects() {
+        let defs = vec![ToolDefinition {
+            name: "t".into(),
+            description: "d".into(),
+            parameters: serde_json::json!({
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "nested": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": { "leaf": { "type": "string", "enum": ["a", "b"] } }
+                    },
+                    "list": {
+                        "type": "array",
+                        "items": { "type": "object", "additionalProperties": false }
+                    }
+                }
+            }),
+        }];
+
+        let params = &to_gemini_tools(&defs)[0].function_declarations[0].parameters;
+        let rendered = params.to_string();
+        assert!(
+            !rendered.contains("additionalProperties"),
+            "Gemini 400s on this keyword: {rendered}"
+        );
+        assert!(!rendered.contains("$schema"), "{rendered}");
+        // Everything Gemini does accept must survive untouched.
+        assert_eq!(params["type"], serde_json::json!("object"));
+        assert_eq!(
+            params["properties"]["nested"]["properties"]["leaf"]["enum"],
+            serde_json::json!(["a", "b"])
+        );
+        assert_eq!(
+            params["properties"]["list"]["items"]["type"],
+            serde_json::json!("object")
+        );
+    }
+
+    #[test]
+    fn body_cap_rejects_an_oversized_response() {
+        let ok = "x".repeat(1024);
+        assert_eq!(body_capped(ok.clone()).expect("under cap"), ok);
+        let huge = "x".repeat(MAX_LLM_BODY as usize + 1);
+        assert!(body_capped(huge).is_err());
     }
 
     #[test]

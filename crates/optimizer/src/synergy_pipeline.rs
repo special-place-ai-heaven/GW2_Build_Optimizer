@@ -81,6 +81,12 @@ struct SynergyCandidate {
 
 /// Run the full deterministic synergy pipeline.
 /// Returns a SynergyResult with a fully determined build.
+/// [`optimize_synergy_cancellable`] with a probe that never fires.
+///
+/// Kept for `search_v2::optimize_v2_search`, which seeds from this pipeline and
+/// already holds an `is_cancelled` of its own; **that call site should move to
+/// `optimize_synergy_cancellable`** so a cancel lands inside the seed rather
+/// than only after it.
 #[allow(clippy::too_many_arguments)]
 pub fn optimize_synergy(
     db: &GameDb,
@@ -92,11 +98,44 @@ pub fn optimize_synergy(
     scenario: Option<&ScenarioSpec>,
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
+    optimize_synergy_cancellable(
+        db,
+        profession_name,
+        weights,
+        ctx,
+        gear_prefix_name,
+        locks,
+        scenario,
+        on_progress,
+        &|| false,
+    )
+}
+
+/// Run the full deterministic synergy pipeline, polling `is_cancelled` at every
+/// stage boundary.
+///
+/// Returns `Err("Cancelled")` on a cancelled run — never a partial build, which
+/// a caller could not tell apart from a real result.
+#[allow(clippy::too_many_arguments)]
+pub fn optimize_synergy_cancellable(
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    gear_prefix_name: &str,
+    locks: &gw2_core::types::BuildLocks,
+    scenario: Option<&ScenarioSpec>,
+    on_progress: &mut dyn FnMut(OptimizeProgress),
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<SynergyResult, String> {
     let profession = db
         .profession(profession_name)
         .ok_or_else(|| format!("Profession '{}' not found", profession_name))?;
 
     // Stage 2: Specs + Traits
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     on_progress(OptimizeProgress {
         stage: "Evaluating specializations and traits...".into(),
         done: false,
@@ -112,6 +151,9 @@ pub fn optimize_synergy(
     }
 
     // Stage 3: Rune
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     on_progress(OptimizeProgress {
         stage: "Selecting optimal rune...".into(),
         done: false,
@@ -119,6 +161,9 @@ pub fn optimize_synergy(
     select_rune(&mut candidates, db, weights);
 
     // Stage 4: Sigils
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     on_progress(OptimizeProgress {
         stage: "Selecting optimal sigils...".into(),
         done: false,
@@ -126,6 +171,9 @@ pub fn optimize_synergy(
     select_sigils(&mut candidates, db, weights, ctx);
 
     // Stage 5: Relic
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     on_progress(OptimizeProgress {
         stage: "Selecting optimal relic...".into(),
         done: false,
@@ -133,6 +181,9 @@ pub fn optimize_synergy(
     select_relic(&mut candidates, db, weights);
 
     // Stage 6: Weapons
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     on_progress(OptimizeProgress {
         stage: "Selecting optimal weapons...".into(),
         done: false,
@@ -140,6 +191,9 @@ pub fn optimize_synergy(
     select_weapons(&mut candidates, profession, db, weights);
 
     // Stage 7: Skills
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     on_progress(OptimizeProgress {
         stage: "Selecting optimal skills...".into(),
         done: false,
@@ -147,6 +201,9 @@ pub fn optimize_synergy(
     select_skills(&mut candidates, db, profession_name, weights, ctx);
 
     // Stage 8: Final ranking with full combat performance
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     on_progress(OptimizeProgress {
         stage: "Computing final combat metrics...".into(),
         done: false,
@@ -163,6 +220,9 @@ pub fn optimize_synergy(
     )?;
 
     // Convert to SynergyResult
+    if is_cancelled() {
+        return Err("Cancelled".into());
+    }
     on_progress(OptimizeProgress {
         stage: "Building validated result...".into(),
         done: false,
@@ -1224,7 +1284,7 @@ fn rank_and_select(
         .max(1.0);
 
     for (idx, candidate) in candidates.iter().enumerate() {
-        let stats = compute_candidate_stats(candidate, db, gear_prefix_id, ctx);
+        let stats = compute_candidate_stats(candidate, db, profession_name, gear_prefix_id, ctx);
         let derived = stats::compute_derived(&stats, profession_name);
 
         let modifiers = combat::extract_damage_modifiers(
@@ -1264,15 +1324,47 @@ fn rank_and_select(
     Ok(candidates[scored[0].0].clone())
 }
 
+/// Approximate stats for a seed candidate, used only to rank candidates against
+/// each other before one is turned into a `ValidatedBuild`.
+///
+/// Deliberately cheaper than [`engine::calculate_validated_stats`]: there is no
+/// validated build to price yet. It is *not* cheaper about weapons — the
+/// candidate names its weapon types, so the land budget is the same
+/// occupancy-and-type-aware model the referee uses. Ranking seeds under an
+/// inflated 376-point weapon budget chose a different prefix than the one that
+/// would win under the real sheet.
 fn compute_candidate_stats(
     candidate: &SynergyCandidate,
     db: &GameDb,
+    profession_name: &str,
     gear_prefix_id: Option<u32>,
     ctx: &BalanceContext,
 ) -> stats::StatBlock {
     let mut full_stats = stats::base_stats();
 
-    crate::engine::apply_optimized_gear_stats(&mut full_stats, db, gear_prefix_id, ctx);
+    let mut gear = ValidatedBuild {
+        weapons: ValidatedWeapons {
+            set1: ValidatedWeaponSet {
+                main_hand: candidate.weapons.0.clone(),
+                off_hand: candidate.weapons.1.clone(),
+            },
+            set2: ValidatedWeaponSet {
+                main_hand: candidate.weapons.2.clone(),
+                off_hand: candidate.weapons.3.clone(),
+            },
+        },
+        ..ValidatedBuild::default()
+    };
+    if let Some(id) = gear_prefix_id {
+        if let Some(itemstat) = db.itemstats.get(&id) {
+            gear.fill_worn_gear_slots(PrefixRef {
+                itemstat_id: id,
+                name: itemstat.name.clone(),
+            });
+        }
+    }
+    let (gear_stats, _) = engine::validated_gear_stats(&gear, db, profession_name, ctx);
+    full_stats += &gear_stats;
 
     // Include trait flat stat bonuses (AttributeAdjust facts) so that estimated stats
     // use the same calculation as calculate_full_stats() on the current build.
@@ -1310,14 +1402,30 @@ fn build_synergy_result(
     on_progress: &mut dyn FnMut(OptimizeProgress),
 ) -> Result<SynergyResult, String> {
     // Build ValidatedBuild
-    let mut validated = ValidatedBuild::default();
+    //
+    // Weapons FIRST, in the initializer: the gear fill below asks the build
+    // which hands it is holding, and a build that has not been told its weapons
+    // yet is holding none. This ordering is load-bearing, not cosmetic.
+    let mut validated = ValidatedBuild {
+        weapons: ValidatedWeapons {
+            set1: ValidatedWeaponSet {
+                main_hand: candidate.weapons.0.clone(),
+                off_hand: candidate.weapons.1.clone(),
+            },
+            set2: ValidatedWeaponSet {
+                main_hand: candidate.weapons.2.clone(),
+                off_hand: candidate.weapons.3.clone(),
+            },
+        },
+        ..ValidatedBuild::default()
+    };
 
     // Gear prefix. `gear_prefix_name` is the cosine-selected canonical name
     // (e.g. "Berserker's"). Use the shared deterministic lookup so the same
-    // input always resolves to the same itemstat across runs. Every slot gets
-    // the prefix — the synergy path has no group overrides.
+    // input always resolves to the same itemstat across runs. Every worn slot
+    // gets the prefix — the synergy path has no group overrides.
     if let Some(is) = db.itemstat_by_name(gear_prefix_name) {
-        validated.fill_gear_slots(PrefixRef {
+        validated.fill_worn_gear_slots(PrefixRef {
             itemstat_id: is.id,
             name: is.name.clone(),
         });
@@ -1350,18 +1458,6 @@ fn build_synergy_result(
             });
         }
     }
-
-    // Weapons
-    validated.weapons = ValidatedWeapons {
-        set1: ValidatedWeaponSet {
-            main_hand: candidate.weapons.0.clone(),
-            off_hand: candidate.weapons.1.clone(),
-        },
-        set2: ValidatedWeaponSet {
-            main_hand: candidate.weapons.2.clone(),
-            off_hand: candidate.weapons.3.clone(),
-        },
-    };
 
     // Skills
     validated.skills = ValidatedSkills {
@@ -1415,25 +1511,18 @@ fn build_synergy_result(
         done: false,
     });
 
-    let gear_prefix_id = validated.primary_prefix().map(|p| p.itemstat_id);
-    let full_stats = compute_candidate_stats(&candidate, db, gear_prefix_id, ctx);
+    // One stat model for the whole optimizer. This used to run its own
+    // uniform-prefix estimate, which billed a two-hand *and* a one-hand weapon
+    // budget (376 points instead of 250-251) and omitted rune and sigil flat
+    // stats entirely — so the same build had two different stat sheets
+    // depending on which tier produced it, and the tier-1 sheet was the one the
+    // user was shown. `calculate_validated_stats` is what `referee.rs` ranks
+    // with, so tier 1 and the referee now agree by construction, and the
+    // damage modifiers come from the same call rather than a parallel one that
+    // counted weapon set 2's sigils as active.
+    let (full_stats, modifiers) =
+        engine::calculate_validated_stats(&validated, db, profession_name, ctx);
     let derived = stats::compute_derived(&full_stats, profession_name);
-
-    // Extract damage modifiers from traits/rune/sigils/relic, but cap to prevent
-    // inflation from conditional/proc Fact::Percent values being treated as permanent.
-    let modifiers = combat::extract_damage_modifiers(
-        &candidate.all_trait_ids,
-        candidate.rune.as_ref().map(|(id, _)| *id),
-        &candidate
-            .sigils
-            .iter()
-            .map(|(id, _)| *id)
-            .collect::<Vec<_>>(),
-        candidate.relic.as_ref().map(|(id, _)| *id),
-        &db.traits,
-        &db.items,
-        ctx,
-    );
 
     // 3-tier combat using profession-specific rotation profiles
     let buff_profiles = combat::buff_profiles_for_profession(profession_name, ctx);
@@ -1479,12 +1568,19 @@ fn build_synergy_result(
         done: true,
     });
 
-    let (data_quality, quality_reasons) = engine::quality_from_modifiers(
+    let (mut data_quality, mut quality_reasons) = engine::quality_from_modifiers(
         &modifiers,
         &validated.warnings,
         !validated.errors.is_empty(),
         ctx.game_mode.label(),
     );
+    // Same rule as `engine::synergy_result_from_validated`: an unpriceable kit
+    // is a data problem, not a weak build.
+    let gear_reasons = engine::gear_quality_reasons(&validated, db, profession_name, ctx);
+    if !gear_reasons.is_empty() {
+        data_quality = data_quality.merge(&crate::data::DataQuality::Provisional);
+        quality_reasons.extend(gear_reasons);
+    }
     Ok(SynergyResult {
         validated,
         stats: full_stats,
@@ -1825,6 +1921,7 @@ pub(crate) mod runtime_diagnostics_tests {
             professions,
             legends: HashMap::new(),
             pvp_amulets: HashMap::new(),
+            pets: HashMap::new(),
             skills_by_profession: HashMap::new(),
             traits_by_spec,
             items_by_type: HashMap::new(),
@@ -2191,7 +2288,7 @@ pub(crate) mod runtime_diagnostics_tests {
                 .max(1.0);
             let mut ranked_preview: Vec<(usize, f64, f64, f64, Vec<u32>)> = Vec::new();
             for (idx, c) in candidates.iter().enumerate() {
-                let stats = compute_candidate_stats(c, &db, gear_prefix_id, &ctx);
+                let stats = compute_candidate_stats(c, &db, "Warrior", gear_prefix_id, &ctx);
                 let derived = crate::stats::compute_derived(&stats, "Warrior");
                 let modifiers = crate::combat::extract_damage_modifiers(
                     &c.all_trait_ids,
@@ -2289,6 +2386,7 @@ pub(crate) mod runtime_diagnostics_tests {
             let selected_stats = compute_candidate_stats(
                 &selected,
                 &db,
+                "Warrior",
                 result.validated.primary_prefix().map(|p| p.itemstat_id),
                 &ctx,
             );
