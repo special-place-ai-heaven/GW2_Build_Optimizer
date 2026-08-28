@@ -10,7 +10,6 @@ use gw2_api::models::{Fact, ItemStat, Trait as GW2Trait};
 
 use crate::balance::BalanceContext;
 use crate::combat::{self, CombatPerformance, DamageModifiers};
-use crate::data;
 use crate::engine::BuildCandidate;
 use crate::gamedb::GameDb;
 use crate::gemini::{FunctionDeclaration, Tool};
@@ -814,10 +813,18 @@ fn exec_upgrade_synergies(args: &Value, ctx: &ToolContext) -> Value {
 fn exec_calculate_stats(args: &Value, ctx: &ToolContext) -> Value {
     let gear_prefix = args["gear_prefix"].as_str().unwrap_or("");
 
+    // The chat's own balance context, so a PvP question is answered with the
+    // amulet the build would actually wear rather than a land kit's budgets.
     let Some((prefix_name, full_stats, derived)) =
-        estimate_prefix_stats(ctx.db, gear_prefix, ctx.profession_name)
+        estimate_prefix_stats_in(ctx.db, gear_prefix, ctx.profession_name, ctx.balance_ctx)
     else {
-        return json!({ "error": format!("Stat prefix '{}' not found", gear_prefix) });
+        return json!({
+            "error": format!(
+                "No stat sheet for '{}' in {}: the prefix is unknown, or it has no PvP amulet.",
+                gear_prefix,
+                ctx.balance_ctx.game_mode.label()
+            )
+        });
     };
 
     json!({
@@ -852,7 +859,15 @@ fn exec_simulate_combat(args: &Value, ctx: &ToolContext) -> Value {
         return json!({ "error": format!("Stat prefix '{}' not found", gear_prefix) });
     };
 
-    let gear_stats = calculate_full_set_stats(itemstat);
+    let Some(gear_stats) = calculate_full_set_stats(ctx.db, itemstat, ctx.balance_ctx) else {
+        return json!({
+            "error": format!(
+                "No stat sheet for '{}' in {}: the prefix has no budget the game mode can price.",
+                gear_prefix,
+                ctx.balance_ctx.game_mode.label()
+            )
+        });
+    };
     let mut full_stats = stats::base_stats();
     full_stats += &gear_stats;
     let derived = stats::compute_derived(&full_stats, ctx.profession_name);
@@ -916,7 +931,15 @@ fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
         return json!({ "error": format!("Stat prefix '{}' not found", gear_prefix) });
     };
 
-    let gear_stats = calculate_full_set_stats(itemstat);
+    let Some(gear_stats) = calculate_full_set_stats(ctx.db, itemstat, ctx.balance_ctx) else {
+        return json!({
+            "error": format!(
+                "No stat sheet for '{}' in {}: the prefix has no budget the game mode can price.",
+                gear_prefix,
+                ctx.balance_ctx.game_mode.label()
+            )
+        });
+    };
     let mut full_stats = stats::base_stats();
     full_stats += &gear_stats;
     let derived = stats::compute_derived(&full_stats, ctx.profession_name);
@@ -953,9 +976,14 @@ fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
 
 fn exec_get_current_build(ctx: &ToolContext) -> Value {
     match ctx.current_build_summary {
+        // Run the exact sanitizer `chat_refinement_prompt_with_tools` applies to
+        // this same string before embedding it in the prompt. Without this, a
+        // tool call mid-conversation hands the model a richer/rawer kitchen than
+        // the one the prompt already committed to — two different worlds for the
+        // same "current build".
         Some(summary) => json!({
             "has_build": true,
-            "summary": summary
+            "summary": crate::prompts::sanitize_build_summary(summary)
         }),
         None => json!({
             "has_build": false,
@@ -1422,6 +1450,28 @@ fn exec_get_build_synergy_report(args: &Value, ctx: &ToolContext) -> Value {
     })
 }
 
+/// Upper bound on `simulate_rotation`'s `duration_seconds` tool argument.
+///
+/// `rotation::simulator::SimState::run` advances one scheduled action at a
+/// time for the full requested duration — there is no early-exit budget like
+/// the search beam's deadline/eval cap. Ten minutes of simulated combat is far
+/// beyond any real rotation-planning need; it exists to keep a malformed or
+/// adversarial tool call from turning into a multi-hour compute loop on the
+/// chat/optimize worker thread (the same thread `AddonState::spawn_worker`'s
+/// `UNLOAD_JOIN_BUDGET` is trying to bound).
+const MAX_ROTATION_DURATION_SECONDS: u32 = 600;
+
+/// Clamp a `duration_seconds` tool argument into `1..=MAX_ROTATION_DURATION_SECONDS`.
+///
+/// Clamps the `u64` *before* narrowing to `u32` — a bare `as u32` on an
+/// oversized LLM-supplied value (e.g. `u64::MAX`) wraps instead of erroring,
+/// and `duration_s * 1000` on the wrapped result can itself overflow `u32`.
+/// Missing/unparseable input keeps the documented default of 30 seconds.
+fn clamp_rotation_duration(raw: Option<u64>) -> u32 {
+    raw.map(|n| n.clamp(1, MAX_ROTATION_DURATION_SECONDS as u64) as u32)
+        .unwrap_or(30)
+}
+
 fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
     use crate::rotation;
 
@@ -1439,10 +1489,7 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
         return json!({ "error": "No skill IDs provided" });
     }
 
-    let duration_s = args
-        .get("duration_seconds")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(30) as u32;
+    let duration_s = clamp_rotation_duration(args.get("duration_seconds").and_then(|v| v.as_u64()));
 
     // Get stats from gear prefix (or use sensible defaults)
     let gear_prefix = args
@@ -1452,16 +1499,17 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
     // Use the deterministic, case-insensitive lookup so LLM-supplied prefixes
     // like "berserker's" don't silently fall through to hardcoded defaults
     // and run the simulation against the wrong stats.
-    let (power, condition_damage, weapon_strength) =
-        if let Some(istat) = find_itemstat_by_name(ctx.db, gear_prefix) {
-            let gear_stats = calculate_full_set_stats(istat);
-            let base = stats::base_stats();
-            let power = base.power + gear_stats.power;
-            let condition_damage = base.condition_damage + gear_stats.condition_damage;
-            (power, condition_damage, 1100.0)
-        } else {
-            (2000.0, 1000.0, 1100.0) // fallback defaults
-        };
+    let (power, condition_damage, weapon_strength) = if let Some(gear_stats) =
+        find_itemstat_by_name(ctx.db, gear_prefix)
+            .and_then(|istat| calculate_full_set_stats(ctx.db, istat, ctx.balance_ctx))
+    {
+        let base = stats::base_stats();
+        let power = base.power + gear_stats.power;
+        let condition_damage = base.condition_damage + gear_stats.condition_damage;
+        (power, condition_damage, 1100.0)
+    } else {
+        (2000.0, 1000.0, 1100.0) // fallback defaults
+    };
 
     // Build rotation skills from the provided IDs
     let rotation_skills =
@@ -1540,29 +1588,59 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
 
 // ─── Helpers ───
 
-/// Calculate gear stats for a full set of one prefix using slot budget data.
-/// Iterates all 16 equipment slots and applies budget-based major/minor values.
-fn calculate_full_set_stats(itemstat: &ItemStat) -> stats::StatBlock {
+/// A full kit of one prefix, priced the same way the optimizer prices one.
+///
+/// Walking the raw `EQUIPMENT_SLOTS` table counted **all sixteen** entries,
+/// including the inactive weapon set, and billed the active set's main hand a
+/// two-hand budget *and* its off-hand a one-hand budget. A ThreeStat major came
+/// out at 1883 instead of 1507, so Choya's plated build showed ~2883 Power for
+/// the same prefix Optimize showed ~2507 on, and the LLM reasoned over the
+/// inflated block through `calculate_stats` / `simulate_combat` / `score_build`.
+/// [`crate::engine::apply_optimized_gear_stats`] is the one model now — same
+/// armour, same trinkets, one land weapon set — so the two panels agree.
+fn calculate_full_set_stats(
+    db: &GameDb,
+    itemstat: &ItemStat,
+    ctx: &BalanceContext,
+) -> Option<stats::StatBlock> {
     let mut gear_stats = stats::StatBlock::default();
-    let budgets = data::slot_budgets::slot_budgets();
-    let shape = data::stat_shape_from_attr_count(itemstat.attributes.len());
-    for &(slot_type, _) in data::EQUIPMENT_SLOTS {
-        if let Some(budget) = budgets.get(slot_type, shape) {
-            crate::engine::add_budget_stats_for_itemstat(&mut gear_stats, itemstat, budget);
-        }
+    match crate::engine::apply_optimized_gear_stats(&mut gear_stats, db, Some(itemstat.id), ctx) {
+        // Unpriceable prefix (no PvP amulet, or a flat-value legacy row): a
+        // zeroed stat sheet is not an estimate, so say there is none.
+        Some(_) => None,
+        None => Some(gear_stats),
     }
-    gear_stats
 }
 
-/// Gear + base + derived stats for a named prefix. Used by the calculate_stats
-/// tool and by Choya plating so the Stats tab is not a column of zeros.
+/// Gear + base + derived stats for a named prefix, as a land PvE kit.
+///
+/// Used by the `calculate_stats` tool and by Choya plating so the Stats tab is
+/// not a column of zeros. Prefer [`estimate_prefix_stats_in`] wherever the game
+/// mode is known — in PvP a prefix is worth its amulet or nothing at all, and
+/// pricing it as land gear is the exact inflation that made amulet-less
+/// prefixes look best.
 pub fn estimate_prefix_stats(
     db: &GameDb,
     prefix: &str,
     profession: &str,
 ) -> Option<(String, stats::StatBlock, stats::DerivedStats)> {
+    estimate_prefix_stats_in(db, prefix, profession, &BalanceContext::pve())
+}
+
+/// [`estimate_prefix_stats`] for a specific game mode.
+///
+/// `None` when the prefix does not resolve, and also when the mode cannot price
+/// it — a PvP prefix with no amulet has no stat sheet, and returning zeros
+/// would read as "this build is terrible" rather than "ask for a different
+/// prefix".
+pub fn estimate_prefix_stats_in(
+    db: &GameDb,
+    prefix: &str,
+    profession: &str,
+    ctx: &BalanceContext,
+) -> Option<(String, stats::StatBlock, stats::DerivedStats)> {
     let itemstat = db.itemstat_by_name(prefix)?;
-    let gear = calculate_full_set_stats(itemstat);
+    let gear = calculate_full_set_stats(db, itemstat, ctx)?;
     let mut full = stats::base_stats();
     full += &gear;
     let derived = stats::compute_derived(&full, profession);
@@ -2161,6 +2239,7 @@ mod tests {
             professions: HashMap::new(),
             legends: HashMap::new(),
             pvp_amulets: HashMap::new(),
+            pets: HashMap::new(),
             skills_by_profession: HashMap::new(),
             traits_by_spec: HashMap::new(),
             items_by_type: HashMap::new(),
@@ -2310,5 +2389,137 @@ mod tests {
 
         let bonuses = extract_stat_bonuses(&facts);
         assert!(bonuses.is_empty());
+    }
+
+    // ── C23: tools see the same sanitized kitchen as the prompt ──────────────
+
+    #[test]
+    fn get_current_build_is_sanitized() {
+        // A payload with prompt-fence and injection-ish characters, plus a
+        // unique marker so a substring match against the real prompt output
+        // cannot be a template coincidence.
+        let raw_summary =
+            "UNIQUE_MARKER_7f3c <script>alert(1)</script> ```inject``` Mode: PvE".to_string();
+
+        // Independent proof: build the SAME prompt `send_chat_message` builds,
+        // from the SAME raw string, through `chat_refinement_prompt_with_tools`'s
+        // own sanitizer. The tool's answer must be byte-for-byte the text that
+        // ended up in that prompt — not a second, differently-sanitized (or
+        // unsanitized) copy handed to the model mid-conversation.
+        let prompt = crate::prompts::chat_refinement_prompt_with_tools(
+            "Guardian",
+            "PvE",
+            "give me a build",
+            &raw_summary,
+            "en",
+        );
+
+        let db = db_with_itemstats(vec![]);
+        let empty_candidates: Vec<BuildCandidate> = vec![];
+        let balance_ctx = BalanceContext::new(gw2_core::types::GameMode::PvE);
+        let ctx = ToolContext {
+            db: &db,
+            profession_name: "Guardian",
+            candidates: &empty_candidates,
+            current_build_summary: Some(raw_summary.as_str()),
+            weights: OptimizationWeights::default(),
+            balance_ctx: &balance_ctx,
+        };
+
+        let result = exec_get_current_build(&ctx);
+        let summary = result["summary"]
+            .as_str()
+            .expect("summary field must be a string");
+
+        assert!(
+            !summary.contains('`') && !summary.contains('<') && !summary.contains('>'),
+            "tool must strip the same fence/injection characters the prompt sanitizer \
+             strips: {summary:?}"
+        );
+        assert!(
+            prompt.contains(summary),
+            "tool's sanitized summary must be the exact text the prompt embedded, not a \
+             richer/rawer view; summary={summary:?} was not found verbatim in the prompt"
+        );
+    }
+
+    // ── C23: simulate_rotation's duration_seconds cannot run forever ─────────
+
+    #[test]
+    fn duration_seconds_is_clamped() {
+        // Below the ceiling: passes through unchanged.
+        assert_eq!(clamp_rotation_duration(Some(45)), 45);
+        // At/above the ceiling: pinned to MAX_ROTATION_DURATION_SECONDS, not
+        // wrapped by a bare u64->u32 cast (u64::MAX as u32 == u32::MAX, which the
+        // old unclamped code fed straight into `duration_s * 1000` — u32
+        // overflow).
+        assert_eq!(
+            clamp_rotation_duration(Some(u64::MAX)),
+            MAX_ROTATION_DURATION_SECONDS
+        );
+        assert_eq!(
+            clamp_rotation_duration(Some(1_000_000)),
+            MAX_ROTATION_DURATION_SECONDS
+        );
+        // Zero floors to 1 rather than silently reaching the simulator's
+        // internal "0 means default" convention — the tool's reported duration
+        // must match what it actually asked the simulator to run.
+        assert_eq!(clamp_rotation_duration(Some(0)), 1);
+        // Missing argument keeps the documented default.
+        assert_eq!(clamp_rotation_duration(None), 30);
+
+        // Independent proof through the real tool entry point: an absurd
+        // duration_seconds must come back clamped in the tool's own JSON answer,
+        // and the call must return promptly — a hang here would mean the clamp
+        // never reached `rotation::simulator::simulate`.
+        let mut db = db_with_itemstats(vec![]);
+        db.skills.insert(
+            999,
+            gw2_api::models::Skill {
+                id: 999,
+                name: "Test Strike".into(),
+                description: None,
+                icon: None,
+                chat_link: None,
+                skill_type: None,
+                weapon_type: None,
+                professions: vec![],
+                slot: None,
+                facts: vec![],
+                traited_facts: vec![],
+                categories: vec![],
+                attunement: None,
+                cost: None,
+                dual_wield: None,
+                flip_skill: None,
+                initiative: None,
+                next_chain: None,
+                prev_chain: None,
+                transform_skills: vec![],
+                bundle_skills: vec![],
+                toolbelt_skill: None,
+                flags: vec![],
+                specialization: None,
+            },
+        );
+        let empty_candidates: Vec<BuildCandidate> = vec![];
+        let balance_ctx = BalanceContext::new(gw2_core::types::GameMode::PvE);
+        let ctx = ToolContext {
+            db: &db,
+            profession_name: "Guardian",
+            candidates: &empty_candidates,
+            current_build_summary: None,
+            weights: OptimizationWeights::default(),
+            balance_ctx: &balance_ctx,
+        };
+        let args = json!({ "skill_ids": [999], "duration_seconds": u64::MAX });
+        let result = exec_simulate_rotation(&args, &ctx);
+        let reported = result["duration_s"]
+            .as_u64()
+            .expect("a valid skill list must produce a duration_s in the response");
+        assert_eq!(
+            reported, MAX_ROTATION_DURATION_SECONDS as u64,
+            "tool must clamp an absurd duration_seconds, not run (or report) it unbounded"
+        );
     }
 }

@@ -75,7 +75,7 @@ pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonS
                         &build,
                         stats.as_ref(),
                         &mut state.main.comparison,
-                        state.main.game_db.as_ref(),
+                        state.main.game_db.as_deref(),
                     );
                 } else {
                     ui.text_colored(theme::WARN, t("cmp.wait_build"));

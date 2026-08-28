@@ -121,6 +121,10 @@ pub(crate) fn compact_stance_name(name: &str) -> String {
         .to_string()
 }
 
+pub(crate) fn compact_pet_name(name: &str) -> String {
+    name.trim_start_matches("Juvenile ").to_string()
+}
+
 fn fact_line(fact: &gw2_api::models::facts::Fact) -> Option<String> {
     use gw2_api::models::facts::Fact;
     match fact {
@@ -287,8 +291,28 @@ fn find_upgrade_item<'a>(db: &'a GameDb, name: &str) -> Option<&'a gw2_api::mode
     None
 }
 
+fn format_inspect_pet(db: &GameDb, pet: &gw2_api::models::Pet) -> String {
+    let title = db.loc_pet(pet.id, &pet.name);
+    let mut lines = vec![title.to_string()];
+    if let Some(d) = pet.description.as_deref().filter(|d| !d.is_empty()) {
+        lines.push(d.to_string());
+    }
+    let skills: Vec<&str> = pet
+        .skills
+        .iter()
+        .filter_map(|s| db.skills.get(&s.id).map(|sk| db.loc_skill(s.id, &sk.name)))
+        .collect();
+    if !skills.is_empty() {
+        lines.push(format!("Skills: {}", skills.join(" / ")));
+    }
+    lines.join("\n")
+}
+
 fn inspect_one(name: &str, db: &GameDb) -> Option<String> {
     let lookup = name.strip_suffix(" [E]").unwrap_or(name);
+    if let Some(pet) = db.pet_by_name(lookup) {
+        return Some(format_inspect_pet(db, pet));
+    }
     let mut candidates = vec![lookup.to_string()];
     for prefix in ["Superior ", "Minor "] {
         if let Some(rest) = lookup.strip_prefix(prefix) {
@@ -510,6 +534,7 @@ pub fn render_comparison(
                 db,
                 viewing,
                 gain,
+                None,
             );
             let explanation_text = if !suggestion.synergy_explanation.is_empty() {
                 &suggestion.synergy_explanation
@@ -823,193 +848,6 @@ fn render_primary_stats(ui: &Ui, current: Option<&StatBlock>, suggested: Option<
     render_stat_table(ui, "##primary_stats", &stats);
 }
 
-/// Legacy synthetic combat metrics retained for internal diagnostics only.
-/// Player-facing build comparisons use observable Hero-panel attributes and
-/// the explicitly labelled rotation report instead.
-#[allow(dead_code)]
-fn render_combat_performance(ui: &Ui, comparison: &ComparisonState, suggestion: &BuildSuggestion) {
-    let solo = t("tier.solo");
-    let party = t("tier.party");
-    let squad = t("tier.squad");
-    let ep = t("stat.effective_power");
-    let crit = t("stat.crit");
-    let strike = t("stat.strike_dps");
-    let condi = t("stat.condi_dps");
-    let total = t("stat.total_dps");
-    let heal = t("stat.heal_index");
-    let incoming = t("stat.incoming_strike");
-    let not_computed = t("note.not_computed");
-    let tiers = [
-        (
-            solo.as_str(),
-            [0.7, 0.85, 1.0, 1.0],
-            comparison.current_combat_solo.as_ref(),
-            suggestion.combat_solo.as_ref(),
-            "solo",
-        ),
-        (
-            party.as_str(),
-            [1.0, 0.85, 0.4, 1.0],
-            comparison.current_combat_party.as_ref(),
-            suggestion.combat_party.as_ref(),
-            "party",
-        ),
-        (
-            squad.as_str(),
-            [0.3, 1.0, 0.3, 1.0],
-            comparison.current_combat_squad.as_ref(),
-            suggestion.combat_squad.as_ref(),
-            "squad",
-        ),
-    ];
-
-    for (label, color, cur_combat, sug_combat, id) in &tiers {
-        ui.text_colored(*color, *label);
-
-        if let Some(sug) = sug_combat {
-            ui.columns(4, format!("##{id}_cols"), true);
-            bonus_header(ui);
-
-            let cur = *cur_combat;
-            render_int_row_opt(ui, &ep, cur.map(|c| c.effective_power), sug.effective_power);
-            render_pct_row_opt(ui, &crit, cur.map(|c| c.crit_chance), sug.crit_chance);
-            render_int_row_opt(
-                ui,
-                &strike,
-                cur.map(|c| c.strike_dps_index),
-                sug.strike_dps_index,
-            );
-            render_int_row_opt(
-                ui,
-                &condi,
-                cur.map(|c| c.condition_dps_index),
-                sug.condition_dps_index,
-            );
-            render_int_row_opt(
-                ui,
-                &total,
-                cur.map(|c| c.total_dps_index),
-                sug.total_dps_index,
-            );
-            if sug.healing_index > 0 || cur.is_some_and(|c| c.healing_index > 0) {
-                render_int_row_opt(ui, &heal, cur.map(|c| c.healing_index), sug.healing_index);
-            }
-            render_pct_row_opt(
-                ui,
-                &incoming,
-                cur.map(|c| c.damage_reduction_pct),
-                sug.damage_reduction_pct,
-            );
-
-            ui.columns(1, format!("##{id}_end"), false);
-        } else {
-            ui.text_colored(crate::ui::theme::MUTED, format!("  {not_computed}"));
-        }
-
-        ui.spacing();
-    }
-
-    if let Some(sug) = suggestion.combat_solo.as_ref() {
-        let cur = comparison.current_combat_solo.as_ref();
-        let per_stack = t("info.per_stack");
-        let stationary = t("info.stationary");
-        let on_skill = t("info.on_skill");
-        let ticks = [
-            (
-                "Bleeding",
-                cur.map_or(0, |c| c.bleeding_tick),
-                sug.bleeding_tick,
-                per_stack.as_str(),
-            ),
-            (
-                "Burning",
-                cur.map_or(0, |c| c.burning_tick),
-                sug.burning_tick,
-                per_stack.as_str(),
-            ),
-            (
-                "Poison",
-                cur.map_or(0, |c| c.poison_tick),
-                sug.poison_tick,
-                per_stack.as_str(),
-            ),
-            (
-                "Torment",
-                cur.map_or(0, |c| c.torment_tick),
-                sug.torment_tick,
-                stationary.as_str(),
-            ),
-            (
-                "Confusion",
-                cur.map_or(0, |c| c.confusion_tick),
-                sug.confusion_tick,
-                on_skill.as_str(),
-            ),
-        ];
-        let ticks_to_show: Vec<_> = ticks
-            .iter()
-            .filter(|(_, cur_v, sug_v, _)| *cur_v > 0 || *sug_v > 0)
-            .collect();
-
-        if !ticks_to_show.is_empty() {
-            ui.text_colored([0.9, 0.6, 0.2, 1.0], t("note.condi_ticks"));
-            ui.columns(4, "##condi_ticks", true);
-
-            ui.text_colored(crate::ui::theme::GOLD, t("table.condition"));
-            ui.next_column();
-            ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
-            ui.next_column();
-            ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
-            ui.next_column();
-            ui.text(t("table.info"));
-            ui.next_column();
-            ui.separator();
-
-            for (name, cur_val, sug_val, info) in &ticks_to_show {
-                ui.text(*name);
-                ui.next_column();
-                if *cur_val > 0 {
-                    ui.text(format!("{}", cur_val));
-                } else {
-                    ui.text_colored(crate::ui::theme::MUTED, "-");
-                }
-                ui.next_column();
-                let diff = *sug_val - *cur_val;
-                ui.text(format!("{}", sug_val));
-                if *cur_val > 0 && diff != 0 {
-                    ui.same_line();
-                    let color = if diff > 0 {
-                        [0.0, 1.0, 0.0, 1.0]
-                    } else {
-                        [1.0, 0.0, 0.0, 1.0]
-                    };
-                    ui.text_colored(
-                        color,
-                        format!("({}{})", if diff > 0 { "+" } else { "" }, diff),
-                    );
-                }
-                ui.next_column();
-                ui.text_colored(crate::ui::theme::MUTED, *info);
-                ui.next_column();
-            }
-
-            ui.columns(1, "##condi_ticks_end", false);
-        }
-    }
-}
-
-fn bonus_header(ui: &Ui) {
-    ui.text_colored(crate::ui::theme::GOLD, t("table.metric"));
-    ui.next_column();
-    ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
-    ui.next_column();
-    ui.text_colored(crate::ui::theme::OPTIMIZED, t("label.optimized"));
-    ui.next_column();
-    ui.text(t("table.diff"));
-    ui.next_column();
-    ui.separator();
-}
-
 /// Render defenses: Health and Armor (static stats that don't change with buff profile).
 /// Effective HP and Damage Reduction are shown per-tier in Combat Performance.
 fn render_defenses(
@@ -1057,52 +895,6 @@ fn render_int_row(ui: &Ui, name: &str, cur: i32, sug: i32) {
     let color = diff_color(diff as f64);
     let sign = if diff > 0 { "+" } else { "" };
     ui.text_colored(color, format!("{}{}", sign, diff));
-    ui.next_column();
-}
-
-/// Render an integer row where the current value may be absent (shows "—" for current and diff).
-fn render_int_row_opt(ui: &Ui, name: &str, cur: Option<i32>, sug: i32) {
-    ui.text(name);
-    ui.next_column();
-    if let Some(c) = cur {
-        ui.text(format!("{}", c));
-        ui.next_column();
-        ui.text(format!("{}", sug));
-        ui.next_column();
-        let diff = sug - c;
-        let color = diff_color(diff as f64);
-        let sign = if diff > 0 { "+" } else { "" };
-        ui.text_colored(color, format!("{}{}", sign, diff));
-    } else {
-        ui.text_colored(crate::ui::theme::MUTED, "\u{2014}"); // em-dash
-        ui.next_column();
-        ui.text(format!("{}", sug));
-        ui.next_column();
-        ui.text_colored(crate::ui::theme::MUTED, "\u{2014}");
-    }
-    ui.next_column();
-}
-
-/// Render a percentage row where the current value may be absent.
-fn render_pct_row_opt(ui: &Ui, name: &str, cur: Option<f64>, sug: f64) {
-    ui.text(name);
-    ui.next_column();
-    if let Some(c) = cur {
-        ui.text(format!("{:.1}%", c));
-        ui.next_column();
-        ui.text(format!("{:.1}%", sug));
-        ui.next_column();
-        let diff = sug - c;
-        let color = diff_color(diff);
-        let sign = if diff > 0.0 { "+" } else { "" };
-        ui.text_colored(color, format!("{}{:.1}%", sign, diff));
-    } else {
-        ui.text_colored(crate::ui::theme::MUTED, "\u{2014}");
-        ui.next_column();
-        ui.text(format!("{:.1}%", sug));
-        ui.next_column();
-        ui.text_colored(crate::ui::theme::MUTED, "\u{2014}");
-    }
     ui.next_column();
 }
 
@@ -1326,13 +1118,14 @@ fn render_viability_report(ui: &Ui, report: &ViabilityReport) {
         );
         ui.spacing();
         for gate in &report.gates {
+            // Overlay fonts have no colour emoji; ✅/❌ become "?".
             let (icon, col): (&str, [f32; 4]) = if gate.passed {
-                ("\u{2705}", [0.4, 0.9, 0.4, 1.0])
+                ("OK", [0.4, 0.9, 0.4, 1.0])
             } else {
-                ("\u{274C}", [1.0, 0.3, 0.2, 1.0])
+                ("NO", [1.0, 0.3, 0.2, 1.0])
             };
             let gate_name = format!("{:?}", gate.gate);
-            ui.text_colored(col, format!("  {} {} — {}", icon, gate_name, gate.note));
+            ui.text_colored(col, format!("  {} {} -- {}", icon, gate_name, gate.note));
         }
         if !report.is_viable {
             ui.spacing();
@@ -1342,99 +1135,6 @@ fn render_viability_report(ui: &Ui, report: &ViabilityReport) {
 }
 
 /// Legacy synthetic tradeoff report retained for internal diagnostics only.
-#[allow(dead_code)]
-fn render_tradeoff_analysis(ui: &Ui, comparison: &ComparisonState, suggestion: &BuildSuggestion) {
-    let Some(ref new_metrics) = suggestion.combat_solo else {
-        return;
-    };
-    let Some(ref cur_metrics) = comparison.current_combat_solo else {
-        // No current build data — show absolute metrics only
-        if ui.collapsing_header(t("tradeoff.estimate"), TreeNodeFlags::empty()) {
-            ui.text_colored(
-                [0.8, 0.8, 0.8, 1.0],
-                format!("  {}", t("tradeoff.no_current")),
-            );
-            ui.text(format!(
-                "  {}",
-                tf(
-                    "fmt.strike_idx",
-                    &[("n", &format!("{:.0}", new_metrics.strike_dps_index))],
-                )
-            ));
-            ui.text(format!(
-                "  {}",
-                tf(
-                    "fmt.condi_idx",
-                    &[("n", &format!("{:.0}", new_metrics.condition_dps_index))],
-                )
-            ));
-            ui.text(format!(
-                "  {}",
-                tf(
-                    "fmt.ehp",
-                    &[("n", &format!("{:.0}", new_metrics.effective_health))],
-                )
-            ));
-        }
-        return;
-    };
-
-    if ui.collapsing_header(t("tradeoff.header"), TreeNodeFlags::DEFAULT_OPEN) {
-        ui.text_colored([0.8, 0.8, 0.5, 1.0], format!("  {}", t("tradeoff.vs")));
-        ui.spacing();
-
-        let strike = t("stat.strike_dps");
-        let condi = t("stat.condi_dps");
-        let ehp = t("stat.effective_hp");
-        let heal = t("stat.heal_index");
-        let tradeoffs = [
-            (
-                strike.as_str(),
-                cur_metrics.strike_dps_index as f64,
-                new_metrics.strike_dps_index as f64,
-            ),
-            (
-                condi.as_str(),
-                cur_metrics.condition_dps_index as f64,
-                new_metrics.condition_dps_index as f64,
-            ),
-            (
-                ehp.as_str(),
-                cur_metrics.effective_health as f64,
-                new_metrics.effective_health as f64,
-            ),
-            (
-                heal.as_str(),
-                cur_metrics.healing_index as f64,
-                new_metrics.healing_index as f64,
-            ),
-        ];
-
-        for (label, old_val, new_val) in &tradeoffs {
-            if *old_val < 0.01 && *new_val < 0.01 {
-                continue; // Skip zero/negligible axes
-            }
-            let delta = new_val - old_val;
-            let pct = if *old_val > 0.01 {
-                delta / old_val * 100.0
-            } else {
-                0.0
-            };
-            let (arrow, col): (&str, [f32; 4]) = if delta > old_val * 0.02 {
-                ("\u{2191}", [0.3, 0.9, 0.3, 1.0]) // ↑ green
-            } else if delta < -old_val * 0.02 {
-                ("\u{2193}", [1.0, 0.4, 0.3, 1.0]) // ↓ red
-            } else {
-                ("\u{2194}", [0.7, 0.7, 0.7, 1.0]) // ↔ neutral
-            };
-            ui.text_colored(
-                col,
-                format!("  {} {:14} {:+.0}  ({:+.1}%)", arrow, label, delta, pct),
-            );
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1538,6 +1238,33 @@ mod tests {
         let tip = inspect_text("Rune of the Scholar", &db).expect("rune lookup");
         assert!(tip.contains("Superior Rune of the Scholar"), "{tip}");
         assert!(tip.contains("+5% Strike Damage"), "{tip}");
+    }
+
+    #[test]
+    fn compact_pet_name_strips_juvenile() {
+        assert_eq!(compact_pet_name("Juvenile Smokescale"), "Smokescale");
+        assert_eq!(compact_pet_name("#66"), "#66");
+    }
+
+    #[test]
+    fn inspect_text_finds_pet_by_compact_or_hash_id() {
+        let mut db = inspect_db_with_skill();
+        db.pets.insert(
+            66,
+            gw2_api::models::Pet {
+                id: 66,
+                name: "Juvenile Smokescale".into(),
+                description: Some("Breathes smoke.".into()),
+                icon: None,
+                skills: vec![gw2_api::models::PetSkill { id: 1 }],
+            },
+        );
+        let tip = inspect_text("Smokescale", &db).expect("compact name");
+        assert!(tip.contains("Juvenile Smokescale"), "{tip}");
+        assert!(tip.contains("Breathes smoke."), "{tip}");
+        assert!(tip.contains("Legendary Assassin Stance"), "{tip}");
+        let by_id = inspect_text("#66", &db).expect("hash id");
+        assert!(by_id.contains("Juvenile Smokescale"), "{by_id}");
     }
 
     #[test]

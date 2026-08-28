@@ -6,9 +6,12 @@ mod gear_diff;
 mod gear_sheet;
 pub(crate) mod icons;
 pub mod main_view;
+pub(crate) mod news_feed;
 pub mod radar_chart;
 mod setup;
 pub(crate) mod theme;
+
+use std::sync::Mutex;
 
 use nexus::imgui::{
     Condition, MouseButton, MouseCursor, Ui, Window, WindowFlags, WindowHoveredFlags,
@@ -25,7 +28,150 @@ pub(crate) fn color_u32(c: [f32; 4]) -> u32 {
     (a << 24) | (b << 16) | (g << 8) | r
 }
 
-use crate::state::{self, Screen};
+use crate::state::{self, AddonState, Screen};
+
+// ── Off-lock disk writes ─────────────────────────────────────────────────────
+
+/// Diagnostics from the write plumbing.
+///
+/// `nexus::log::log` needs the Nexus API table, which unit tests do not have
+/// (same reason `state::worker_log` exists), so test builds go to stderr.
+pub(crate) fn log_disk_error(message: String) {
+    #[cfg(test)]
+    eprintln!("[GW2BuildOpt] {}", message);
+    #[cfg(not(test))]
+    nexus::log::log(nexus::log::LogLevel::Warning, "GW2BuildOpt", message);
+}
+
+/// An already-serialized write, owning everything it needs.
+type WriteJob = Box<dyn FnOnce() + Send + 'static>;
+
+/// One file that the overlay rewrites whole, saved by a background worker
+/// instead of on the render thread.
+///
+/// Two reasons this exists. The render callback is the game's only draw pass
+/// and it runs with `STATE` held, so an `fs::write` there stalls the frame
+/// *and* every background worker queued to publish a result behind that lock.
+/// And every saver in this addon publishes through one fixed `<name>.tmp` plus
+/// a rename, so two savers of the same file at the same moment would fight
+/// over that single staging path.
+///
+/// So: at most one worker per file, always writing the newest content. A save
+/// requested while one is running replaces the queued content instead of
+/// racing it — these are whole-file writes, so last-one-wins is the correct
+/// merge, and the caller can clear its dirty flag the moment it submits.
+pub(crate) struct SerialWriter {
+    /// Worker name (also the label in write-failure logs).
+    label: &'static str,
+    queue: Mutex<WriteQueue>,
+}
+
+#[derive(Default)]
+struct WriteQueue {
+    /// Newest content not yet written. Replaced, never appended to.
+    pending: Option<WriteJob>,
+    /// True while a worker is draining `pending`. Read and written only under
+    /// the queue mutex, so the drain loop and [`SerialWriter::submit`] can
+    /// never disagree about whether someone will pick a queued job up.
+    draining: bool,
+}
+
+impl SerialWriter {
+    pub(crate) const fn new(label: &'static str) -> Self {
+        Self {
+            label,
+            queue: Mutex::new(WriteQueue {
+                pending: None,
+                draining: false,
+            }),
+        }
+    }
+
+    /// Poison-tolerant lock: a job that panicked runs outside this guard, but a
+    /// poisoned mutex must not silently stop saving for the rest of the session.
+    fn lock(&self) -> std::sync::MutexGuard<'_, WriteQueue> {
+        self.queue.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Queue `job` and make sure exactly one worker is draining this file.
+    ///
+    /// Never blocks on disk and never touches `STATE`, so it is safe to call
+    /// from inside `with_state` during a frame — which is where every call site
+    /// is. Lock order stays STATE → queue → worker registry.
+    pub(crate) fn submit(&'static self, state: &AddonState, job: impl FnOnce() + Send + 'static) {
+        let start_worker = {
+            let mut queue = self.lock();
+            queue.pending = Some(Box::new(job));
+            let idle = !queue.draining;
+            queue.draining = true;
+            idle
+        };
+        if !start_worker {
+            return;
+        }
+        if !state.spawn_worker(self.label, move |_token| self.drain()) {
+            // The OS refused a thread. Losing the player's settings is worse
+            // than one stalled frame, so write on this thread instead.
+            self.drain();
+        }
+    }
+
+    /// Write queued content until nothing is left, then hand the file back.
+    ///
+    /// Deliberately ignores the cancellation token: these are the player's own
+    /// settings, chat history and message log, and each job is one small file
+    /// write. Unload cancels and then waits, so dropping the write to save a
+    /// few milliseconds would just lose data the player can see.
+    fn drain(&self) {
+        loop {
+            let job = {
+                let mut queue = self.lock();
+                match queue.pending.take() {
+                    Some(job) => job,
+                    None => {
+                        // Cleared under the same lock `submit` takes, so a job
+                        // queued from here on starts a fresh worker rather than
+                        // waiting on one that is already on its way out.
+                        queue.draining = false;
+                        return;
+                    }
+                }
+            };
+            // Outside the lock: the write is the slow part. The guard is for the
+            // flag, not for containment — a panicking job must not leave
+            // `draining` stuck true and swallow every later save in silence.
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).is_err() {
+                log_disk_error(format!("disk write panicked: {}", self.label));
+            }
+        }
+    }
+}
+
+/// `config.json`. Written from several places — window move, close, snap, a
+/// finished data refresh — none of which should queue behind another's disk
+/// write, and only the newest of which is worth writing.
+static CONFIG_WRITES: SerialWriter = SerialWriter::new("config-save");
+
+/// Persist the current config without holding `STATE`.
+///
+/// Callers are on the render thread inside `with_state`; this snapshots the
+/// config and hands the write to a tracked worker, so the frame never waits on
+/// disk and no background worker waits on the frame.
+///
+/// This is the only config save that runs with `STATE` released — Settings,
+/// setup and the keybind handler still save synchronously — so it is the reason
+/// `AppConfig::save` stages through a private per-save file rather than one
+/// shared `config.tmp`. Two of these can now overlap safely: the rename is the
+/// only step they share, and it is atomic.
+pub(crate) fn save_config_detached(state: &AddonState) {
+    let config = state.config.clone();
+    let path = state.config_path.clone();
+    CONFIG_WRITES.submit(state, move || {
+        if let Err(e) = config.save(&path) {
+            log_disk_error(format!("config save failed: {e}"));
+        }
+    });
+}
 
 /// True when the overlay has little usable area on the game framebuffer
 /// (imgui.ini parked it past the right edge, or it was stretched wider than
@@ -46,6 +192,10 @@ pub(crate) fn window_needs_snap(pos: [f32; 2], size: [f32; 2], display: [f32; 2]
 }
 
 pub fn render(ui: &Ui) {
+    // Before the visibility check and outside `with_state`: a copy that lost the
+    // race for the clipboard must still land if the player closed the overlay
+    // right after clicking, and the retry must never run under the state lock.
+    crate::clipboard::pump();
     if !state::is_window_visible() {
         return;
     }
@@ -58,7 +208,7 @@ pub fn render(ui: &Ui) {
                 gw2_core::config::DEFAULT_WINDOW_POS,
                 gw2_core::config::DEFAULT_WINDOW_SIZE,
             );
-            let _ = s.config.save(&s.config_path);
+            save_config_detached(s);
         }
         let (pos, size) = s.config.window_rect();
         (
@@ -117,7 +267,7 @@ pub fn render(ui: &Ui) {
                             || (sz[1] - old_sz[1]).abs() > 0.5
                         {
                             s.config.set_window_rect(p, sz);
-                            let _ = s.config.save(&s.config_path);
+                            save_config_detached(s);
                         }
                     }
                     gw2_core::i18n::set_language(&s.config.ui_language);
@@ -143,7 +293,7 @@ pub fn render(ui: &Ui) {
             state::with_state(|s| {
                 s.window_visible = false;
                 s.config.window_visible = false;
-                let _ = s.config.save(&s.config_path);
+                save_config_detached(s);
             });
         }
     }));
@@ -159,6 +309,68 @@ pub fn render(ui: &Ui) {
 #[cfg(test)]
 mod tests {
     use super::window_needs_snap;
+
+    /// The window rect, "overlay closed", and the build number a finished data
+    /// refresh writes are all saved from inside `with_state`, on the render
+    /// thread. This proves the write actually leaves that thread: a tracked
+    /// worker is started, and `config.json` lands on disk **while the STATE
+    /// mutex is still held**. An `AppConfig::save` under the lock would give
+    /// `worker_count() == 0`; a worker that published through `with_state`
+    /// would block on the very lock this test is holding and never write.
+    #[test]
+    fn config_save_not_under_lock() {
+        use gw2_core::config::AppConfig;
+        use std::time::{Duration, Instant};
+
+        let _serial = crate::state::state_test_guard();
+        let dir = std::env::temp_dir().join(format!("gw2_ui_config_save_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = AppConfig::config_path(&dir);
+
+        crate::state::clear();
+        crate::state::init(dir.clone());
+        assert!(
+            !path.exists(),
+            "the test must start with no config.json, so its appearance is the proof"
+        );
+
+        let (workers, landed) = crate::state::with_state(|s| {
+            // Not the default, so a file left by another test cannot pass this.
+            s.config.window_opacity = 0.42;
+            super::save_config_detached(s);
+            // Everything below still runs inside the closure: STATE is held.
+            let workers = s.worker_count();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut landed = false;
+            while Instant::now() < deadline {
+                if path.exists() {
+                    landed = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            (workers, landed)
+        })
+        .expect("state must be initialised");
+
+        assert!(
+            workers >= 1,
+            "the save must run on a tracked worker, not inline on the render thread"
+        );
+        assert!(
+            landed,
+            "config.json must be written while the render thread still holds STATE"
+        );
+
+        let saved = std::fs::read_to_string(&path).expect("config.json is readable");
+        assert!(
+            saved.contains("0.42"),
+            "the submitted snapshot is what landed, got: {saved}"
+        );
+
+        crate::state::clear();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn parked_at_right_edge_of_1080p_needs_snap() {

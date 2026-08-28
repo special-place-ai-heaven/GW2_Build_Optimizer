@@ -53,16 +53,118 @@ impl Default for SearchConfig {
     }
 }
 
+/// Referee evaluations the nudge pass may spend.
+///
+/// Derived from the shape of the pass rather than picked: `MAX_ROUNDS` (4)
+/// rounds × the fourteen stat-bearing slots × the canonical pool, which is 66
+/// named prefixes on the live cache — about 3,700. Rounded up to 4,000 so a
+/// complete pass on real game data never hits the cap, and a pool that grows
+/// past what the model was measured on does.
+const NUDGE_EVAL_BUDGET: usize = 4_000;
+
+/// Wall-clock ceiling on the nudge pass, in seconds.
+///
+/// The eval cap alone does not bound the pass, because per-evaluation cost is
+/// not a constant: a full referee evaluation runs a combat *and* a rotation
+/// simulation, and rotation-heavy professions on slow machines cost multiples
+/// of the measured average. Four full rounds measured ~1.2 s on live data in a
+/// release build, so ten seconds is roughly eight times the measured cost — a
+/// ceiling, not a schedule.
+const NUDGE_TIME_LIMIT_SECS: u64 = 10;
+
+/// What the post-beam nudge is allowed to spend.
+///
+/// The beam runs inside `SearchConfig`'s 1,500 evaluations and 45 seconds. The
+/// nudge runs *after* that, and used to have nothing bounding it but the
+/// user's Cancel button: four rounds over sixteen slots against the entire
+/// 191-row itemstat map, every entry a full referee evaluation. That bound was
+/// structural, not enforced. This makes it enforced, so the promise
+/// `SearchConfig` documents — the caller always gets a result inside a known
+/// time — covers the whole optimize and not just its first half.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NudgeBudget {
+    evals_left: usize,
+    deadline: Instant,
+}
+
+impl NudgeBudget {
+    /// The production budget: [`NUDGE_EVAL_BUDGET`] evaluations inside
+    /// [`NUDGE_TIME_LIMIT_SECS`].
+    pub(crate) fn standard() -> Self {
+        Self::new(
+            NUDGE_EVAL_BUDGET,
+            Duration::from_secs(NUDGE_TIME_LIMIT_SECS),
+        )
+    }
+
+    /// A budget of `evals` referee evaluations, expiring `limit` from now.
+    pub(crate) fn new(evals: usize, limit: Duration) -> Self {
+        Self {
+            evals_left: evals,
+            deadline: Instant::now() + limit,
+        }
+    }
+
+    /// Claim one referee evaluation, or report that the budget is spent.
+    ///
+    /// Both limits are checked on every claim: an evaluation is only worth
+    /// starting if there is both an allowance and time left for it.
+    fn claim(&mut self) -> bool {
+        if self.evals_left == 0 || Instant::now() >= self.deadline {
+            return false;
+        }
+        self.evals_left -= 1;
+        true
+    }
+}
+
+/// The nudge's candidate prefixes, in the order it should try them.
+///
+/// [`prioritized_itemstats`] supplies the pool: canonical (one id per display
+/// name, unpriceable rows dropped) and radar-primary first. On top of that the
+/// weight-aware tier prefixes float ahead of the rest, so if the budget does
+/// run out it runs out on prefixes that never served the user's radar weights.
+///
+/// What this replaced was `select_prefixes_by_tiers` **plus** the whole
+/// `db.itemstats` map, concatenated. The tier names were a subset of the map,
+/// so every tier prefix was evaluated twice; and the tier half resolved each
+/// name with `db.itemstats.values().find(...)`, so which of Berserker's five
+/// ids the nudge tried was decided by `HashMap` iteration order and was not
+/// stable between runs on one machine, let alone between machines.
+///
+/// Tier names are matched through [`normalized_prefix_name`], not string
+/// equality: the tier tables spell four prefixes without their possessive
+/// ("Marauder", "Valkyrie"), and an exact match silently dropped those from
+/// the weight-aware half of the pool.
+fn nudge_pool<'a>(
+    db: &'a GameDb,
+    weights: &OptimizationWeights,
+) -> Vec<&'a gw2_api::models::ItemStat> {
+    let tier_names: Vec<String> = scoring::select_prefixes_by_tiers(weights)
+        .into_iter()
+        .map(normalized_prefix_name)
+        .collect();
+    let mut pool = prioritized_itemstats(db, weights);
+    // Stable sort on "is not a tier prefix": tier prefixes keep their priority
+    // order and move to the front, everything else keeps its order behind them.
+    pool.sort_by_cached_key(|itemstat| {
+        !tier_names.contains(&normalized_prefix_name(&itemstat.name))
+    });
+    pool
+}
+
 /// Post-beam nudge pass — the "replace 1–4 pieces" fine-tuner.
 ///
 /// The beam runs ~2 generations on default config, so it reliably finds the
 /// best uniform prefix but rarely composes multi-piece stat nudges. This
-/// hill-climbs single-piece swaps (all 16 slots × top prefixes) against the
-/// full referee rank until no swap improves. Up to `MAX_ROUNDS` improving
-/// swaps compose into "replaced 1–4 pieces" results. Saturating axis scores
-/// (`min(1.0)`) are what make mixes win: when a heavily-weighted axis is
-/// already capped, trading its surplus for an unsaturated axis raises the
-/// weighted score.
+/// hill-climbs single-piece swaps (every stat-bearing slot × the canonical
+/// prefix pool) against the full referee rank until no swap improves. Up to
+/// `MAX_ROUNDS` improving swaps compose into "replaced 1–4 pieces" results.
+/// Saturating axis scores (`min(1.0)`) are what make mixes win: when a heavily
+/// weighted axis is already capped, trading its surplus for an unsaturated
+/// axis raises the weighted score.
+///
+/// Spends at most a [`NudgeBudget::standard`].
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn refine_piece_swaps(
     best: ValidatedBuild,
@@ -75,28 +177,47 @@ pub(crate) fn refine_piece_swaps(
     on_progress: &mut dyn FnMut(OptimizeProgress),
     is_cancelled: &dyn Fn() -> bool,
 ) -> ValidatedBuild {
-    const MAX_ROUNDS: usize = 4;
-
-    // Nudge candidates = the weight-aware tier pool (prefixes that actually
-    // serve the user's radar weights), intersected with the DB, radar
-    // primary first. Top-N-by-id ordering would silently exclude 15 of ~25
-    // prefixes and make the pass blind to the nudges that matter.
-    let tier_names = crate::scoring::select_prefixes_by_tiers(weights);
-    let mut itemstats: Vec<&gw2_api::models::ItemStat> = tier_names
-        .iter()
-        .filter_map(|name| db.itemstats.values().find(|is| is.name == *name))
-        .collect();
-    itemstats.extend(prioritized_itemstats(db, weights));
-    let mut current = best;
-    let current_report = crate::referee::evaluate_validated_build(
-        &current,
+    refine_piece_swaps_within(
+        best,
         db,
         profession_name,
         weights,
         ctx,
         scenario,
-    );
-    let mut current_rank = crate::referee::search_rank(&current_report);
+        locks,
+        on_progress,
+        is_cancelled,
+        NudgeBudget::standard(),
+    )
+}
+
+/// [`refine_piece_swaps`] with the budget supplied by the caller.
+///
+/// Separate from the production entry point purely so the budget is
+/// observable: a bound nothing can exercise is a comment, not a bound.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn refine_piece_swaps_within(
+    best: ValidatedBuild,
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+    locks: &BuildLocks,
+    on_progress: &mut dyn FnMut(OptimizeProgress),
+    is_cancelled: &dyn Fn() -> bool,
+    mut budget: NudgeBudget,
+) -> ValidatedBuild {
+    const MAX_ROUNDS: usize = 4;
+
+    let itemstats = nudge_pool(db, weights);
+    let mut current = best;
+    if !budget.claim() {
+        return current;
+    }
+    let current_report =
+        referee::evaluate_validated_build(&current, db, profession_name, weights, ctx, scenario);
+    let mut current_rank = referee::search_rank(&current_report);
 
     for round in 1..=MAX_ROUNDS {
         if is_cancelled() {
@@ -107,15 +228,12 @@ pub(crate) fn refine_piece_swaps(
             done: false,
         });
 
+        // Recomputed each round: an improving move changes what the slots hold,
+        // and a lock or an empty hand is a property of the build, not the pass.
+        let movable = movable_slot_prefixes(&current, &locks.gear_locks);
         let mut best_move: Option<(ValidatedBuild, [i64; 9])> = None;
-        for slot in GearSlot::ALL {
-            // Gear locks pin a slot: never move it in any direction.
-            if locks.gear_locks.contains_key(&slot) {
-                continue;
-            }
-            let Some(current_prefix) = current.gear_slots.get(slot) else {
-                continue; // empty off-hand etc.
-            };
+        let mut spent = false;
+        'slots: for (slot, current_prefix) in &movable {
             for itemstat in itemstats.iter() {
                 if itemstat.id == current_prefix.itemstat_id {
                     continue; // no-op
@@ -123,15 +241,19 @@ pub(crate) fn refine_piece_swaps(
                 if is_cancelled() {
                     return current;
                 }
+                if !budget.claim() {
+                    spent = true;
+                    break 'slots;
+                }
                 let mut build = current.clone();
                 build.gear_slots.set(
-                    slot,
-                    gw2_core::types::PrefixRef {
+                    *slot,
+                    PrefixRef {
                         itemstat_id: itemstat.id,
                         name: itemstat.name.clone(),
                     },
                 );
-                let report = crate::referee::evaluate_validated_build(
+                let report = referee::evaluate_validated_build(
                     &build,
                     db,
                     profession_name,
@@ -139,7 +261,7 @@ pub(crate) fn refine_piece_swaps(
                     ctx,
                     scenario,
                 );
-                let rank = crate::referee::search_rank(&report);
+                let rank = referee::search_rank(&report);
                 if rank > current_rank
                     && best_move
                         .as_ref()
@@ -151,19 +273,21 @@ pub(crate) fn refine_piece_swaps(
         }
 
         match best_move {
-            Some((build, _)) => {
+            // The winning move's rank was measured when the move was found;
+            // re-evaluating the same build against the same inputs returns the
+            // same report, so the old re-evaluation here bought nothing and
+            // cost one full combat + rotation simulation per round.
+            Some((build, rank)) => {
                 current = build;
-                let current_report = crate::referee::evaluate_validated_build(
-                    &current,
-                    db,
-                    profession_name,
-                    weights,
-                    ctx,
-                    scenario,
-                );
-                current_rank = crate::referee::search_rank(&current_report);
+                current_rank = rank;
             }
             None => break, // converged: no single piece swap improves
+        }
+
+        if spent {
+            // Budget gone. The improving move above was fully paid for and is
+            // kept; there is nothing left to look for another one with.
+            break;
         }
     }
 
@@ -185,10 +309,16 @@ pub(crate) fn refine_piece_swaps(
 /// slots keep their locked prefix under every mutation.
 ///
 /// Output is interleaved round-robin across operators rather than concatenated.
-/// `optimize_v2_search` caps evaluation per beam member at ~80 neighbors;
-/// concatenated order would burn the entire budget on `swap_gear_prefix`
-/// (which produces ~50 neighbors and appears first), and the search would
-/// never explore rune/sigil/relic/utility mutations at all.
+/// `optimize_v2_search` caps evaluation per beam member at ~80 neighbours, so
+/// each operator here gets roughly a twelfth of that — six or seven. Two
+/// consequences, and both matter:
+///
+/// * Concatenated order would burn the whole cap on `swap_gear_prefix` (one
+///   neighbour per canonical prefix, 66 on live data, and it comes first), and
+///   the search would never reach rune/sigil/relic/utility mutations at all.
+/// * Each operator's *own* order decides what its six or seven evaluations
+///   land on. That is why `swap_slot_prefix` emits prefix-major: slot-major
+///   spent every one of them on the first two slots in `STAT_SLOTS`.
 pub fn generate_neighbors(
     candidate: &BeamCandidate,
     db: &GameDb,
@@ -270,7 +400,11 @@ pub fn optimize_v2_search(
         stage: "Seeding from synergy pipeline...".into(),
         done: false,
     });
-    let mut seed_result = synergy_pipeline::optimize_synergy(
+    // Seeding is not instant — it walks spec/trait combos and evaluates each —
+    // so it takes the same cancel token as the beam it feeds. The
+    // non-cancellable entry point ignored a Cancel pressed during seeding and
+    // only noticed it once the whole seed had finished.
+    let mut seed_result = synergy_pipeline::optimize_synergy_cancellable(
         db,
         profession_name,
         weights,
@@ -279,6 +413,7 @@ pub fn optimize_v2_search(
         locks,
         Some(scenario),
         &mut |_| {},
+        is_cancelled,
     )?;
 
     if is_cancelled() {
@@ -435,52 +570,82 @@ fn finish_search(beam: Vec<BeamCandidate>) -> Result<ValidatedBuild, String> {
 
 // ─── Individual mutation operators (private helpers) ─────────────────────────
 
-/// Operator 1 — swap gear prefix.
+/// May a gear operator move this slot?
 ///
-/// For every `ItemStat` in the DB, produce a clone of the current build with
-/// `gear_prefix` set to that stat.  This covers all available gear prefixes
-/// (Berserker's, Viper's, …).
+/// Three rules, each a domain fact rather than a search-tuning knob:
 ///
-/// Iterates by id so beam-search neighbor ordering — and therefore the
-/// tie-break behavior in the downstream `sort_by + dedup_by + truncate`
-/// pipeline — is stable across runs.
+/// * A gear lock pins the slot. The user asked for that prefix; no operator
+///   overrides it.
+/// * Only the fourteen stat-bearing slots count ([`crate::search::STAT_SLOTS`]).
+///   Weapon set 2 is *carried*, not worn: it draws no slot budget and its
+///   sigils are inactive, so a set-2 prefix swap is a guaranteed zero-stat
+///   neighbour — and because it still changes `gear_identity`, the beam's
+///   dedup cannot collapse it either. It costs a full referee evaluation to
+///   learn nothing.
+/// * The build must actually wear the slot. A two-hander has no off-hand, and
+///   a half-built draft has whatever it has.
+fn mutable_gear_slot(
+    build: &ValidatedBuild,
+    slot: GearSlot,
+    gear_locks: &HashMap<GearSlot, u32>,
+) -> bool {
+    !gear_locks.contains_key(&slot)
+        && crate::search::STAT_SLOTS.contains(&slot)
+        && build.wears(slot)
+}
+
+/// Operator 1 — swap the whole build to one gear prefix.
+///
+/// For every prefix in the canonical pool, produce a clone of the current
+/// build with every unlocked worn slot set to that prefix. "Worn" is
+/// [`ValidatedBuild::fill_unlocked_gear_slots`]'s definition, which is wider
+/// than [`mutable_gear_slot`]'s: a weapon set 2 that holds weapons counts as
+/// worn there, so a whole-build fill does restamp those two cells. That costs
+/// no extra evaluation — this operator emits one neighbour per prefix either
+/// way — but it does leave a set-2 prefix in the saved slot map that nothing
+/// scored.
+///
+/// The mutation is its own no-op test: `fill_unlocked_gear_slots` reports
+/// whether it changed anything, so the neighbour is kept only when it does.
+/// The hand-written predicate this replaced tried to mirror that rule and got
+/// it wrong in one direction — it counted an unlocked *empty* cell as "would
+/// change", and a two-hander's off-hand is permanently empty, so the prefix
+/// the build already wore on every slot still produced one identical
+/// neighbour per call. Deriving the answer from the mutation cannot drift
+/// from it.
+///
+/// Iterates the pool in its priority order so beam-search neighbour ordering —
+/// and therefore the tie-break behaviour in the downstream
+/// `sort_by + dedup_by + truncate` pipeline — is stable across runs.
 fn swap_gear_prefix(
     candidate: &BeamCandidate,
     db: &GameDb,
     weights: &OptimizationWeights,
     gear_locks: &HashMap<GearSlot, u32>,
 ) -> Vec<ValidatedBuild> {
-    let itemstats = prioritized_itemstats(db, weights);
-    let slots = &candidate.validated.gear_slots.map;
-    itemstats
+    prioritized_itemstats(db, weights)
         .into_iter()
-        .filter(|itemstat| {
-            // No-op when every unlocked slot already carries this prefix
-            // (locked slots never change, so they cannot make it a no-op).
-            // Mirrors exactly what `fill_unlocked_gear_slots` mutates below;
-            // empty unlocked slots count as changed (None → Some).
-            slots.iter().enumerate().any(|(idx, cell)| {
-                !gear_locks.contains_key(&GearSlot::ALL[idx])
-                    && cell.as_ref().is_none_or(|p| p.itemstat_id != itemstat.id)
-            })
-        })
-        .map(|is| {
-            let mut b = candidate.validated.clone();
-            b.fill_unlocked_gear_slots(
+        .filter_map(|itemstat| {
+            let mut build = candidate.validated.clone();
+            let changed = build.fill_unlocked_gear_slots(
                 PrefixRef {
-                    itemstat_id: is.id,
-                    name: is.name.clone(),
+                    itemstat_id: itemstat.id,
+                    name: itemstat.name.clone(),
                 },
                 gear_locks,
             );
-            b
+            changed.then_some(build)
         })
         .collect()
 }
 
-/// Mutate armor, trinkets, and weapons independently. Three groups capture the
-/// common WvW Marauder/Berserker/Demolisher mixes without exploding the search
-/// into sixteen independent slot dimensions.
+/// Operator 2 — mutate armour, trinkets, and weapons independently.
+///
+/// Three groups capture the common WvW Marauder/Berserker/Demolisher mixes
+/// without exploding the search into sixteen independent slot dimensions. The
+/// groups already name weapon *set 1* only, so set 2 is out of reach here; the
+/// per-slot `wears` test is what keeps a two-hander's empty off-hand empty
+/// instead of stamping a prefix into a hand that holds nothing.
 fn swap_gear_groups(
     candidate: &BeamCandidate,
     db: &GameDb,
@@ -500,9 +665,9 @@ fn swap_gear_groups(
             let mut build = candidate.validated.clone();
             let mut changed = false;
             for &slot in slots {
-                // Locked pieces keep their locked prefix; a group fill never
-                // touches them.
-                if gear_locks.contains_key(&slot) {
+                // Locked pieces keep their locked prefix and unworn hands stay
+                // empty; a group fill never touches either.
+                if !mutable_gear_slot(&candidate.validated, slot, gear_locks) {
                     continue;
                 }
                 if candidate.validated.gear_slots.prefix_id(slot) != Some(prefix.itemstat_id) {
@@ -518,20 +683,34 @@ fn swap_gear_groups(
     out
 }
 
+/// How many of the canonical pool's leading prefixes the per-slot operator
+/// offers each slot. Four is enough to reach a genuine hybrid (radar primary,
+/// radar secondary, and two neighbours in id order) without multiplying the
+/// slot count by the whole pool.
+const SLOT_PREFIX_CANDIDATES: usize = 4;
+
 /// Operator 3 — per-slot prefix swap.
 ///
-/// For each unlocked, non-empty slot and each of the top-4 radar-prioritized
-/// prefixes (skipping the no-op same-prefix swap), emit a clone with exactly
-/// that one slot changed. ALL combinations are emitted — no rotation. Spec
-/// §12.2: the round-robin interleave plus the ~80-neighbor per-member cap do
-/// the limiting; per-slot identity is finer than group identity, so this
-/// operator is what makes true hybrid mixes (Berserker's helm, Cavalier's
-/// coat) reachable at full granularity.
+/// For each movable slot and each of the leading `SLOT_PREFIX_CANDIDATES`
+/// canonical prefixes (skipping the no-op same-prefix swap), emit a clone with
+/// exactly that one slot changed. This is the operator that makes true hybrid
+/// mixes — Berserker's helm, Cavalier's coat — reachable at full granularity.
 ///
-/// Ordering is `(slot_index, prefix_priority, itemstat_id)`: the outer loop
-/// walks `GearSlot::ALL` in canonical order and `prioritized_itemstats`
-/// returns prefixes already sorted by priority — the same determinism
-/// discipline as every other neighbor source.
+/// **Output is prefix-major, so consecutive neighbours land on different
+/// slots.** That ordering is the whole point. `generate_neighbors` interleaves
+/// operators round-robin and `optimize_v2_search` then takes at most
+/// ~80 neighbours per beam member, which leaves this operator roughly its
+/// twelfth: about six or seven evaluations. Emitting slot-major — every
+/// prefix for the helm, then every prefix for the shoulders — spent all of
+/// them on the first two slots in `GearSlot::ALL`, so rings, amulet, and
+/// weapons never received a single per-slot evaluation in the beam. Walking
+/// prefixes on the outside gives every slot its first candidate before any
+/// slot gets its second.
+///
+/// Ordering is `(prefix_priority, itemstat_id, slot_index)`: the pool arrives
+/// already sorted by priority and `STAT_SLOTS` is a fixed canonical order, so
+/// the emitted sequence is identical on every run — the same determinism
+/// discipline as every other neighbour source.
 fn swap_slot_prefix(
     candidate: &BeamCandidate,
     db: &GameDb,
@@ -539,24 +718,24 @@ fn swap_slot_prefix(
     gear_locks: &HashMap<GearSlot, u32>,
 ) -> Vec<ValidatedBuild> {
     let itemstats = prioritized_itemstats(db, weights);
-    let top_prefixes: Vec<&gw2_api::models::ItemStat> = itemstats.iter().copied().take(4).collect();
+    let top_prefixes: Vec<&gw2_api::models::ItemStat> = itemstats
+        .iter()
+        .copied()
+        .take(SLOT_PREFIX_CANDIDATES)
+        .collect();
 
-    let mut out = Vec::new();
-    for (idx, cell) in candidate.validated.gear_slots.map.iter().enumerate() {
-        let slot = GearSlot::ALL[idx];
-        if gear_locks.contains_key(&slot) {
-            continue;
-        }
-        let Some(current) = cell else {
-            continue; // two-hander off-hand etc. stays empty
-        };
-        for itemstat in &top_prefixes {
+    let movable: Vec<(GearSlot, PrefixRef)> =
+        movable_slot_prefixes(&candidate.validated, gear_locks);
+
+    let mut out = Vec::with_capacity(movable.len() * top_prefixes.len());
+    for itemstat in &top_prefixes {
+        for (slot, current) in &movable {
             if current.itemstat_id == itemstat.id {
                 continue; // no-op same-prefix swap
             }
             let mut build = candidate.validated.clone();
             build.gear_slots.set(
-                slot,
+                *slot,
                 PrefixRef {
                     itemstat_id: itemstat.id,
                     name: itemstat.name.clone(),
@@ -568,9 +747,45 @@ fn swap_slot_prefix(
     out
 }
 
-/// Put the two prefixes selected from the user's radar weights before the
-/// deterministic ID order. The beam evaluates at most 80 neighbors per member,
-/// so ID-only ordering made relevant condition/sustain mixes unreachable.
+/// Every slot a per-slot operator may move, paired with the prefix it carries
+/// today, in `STAT_SLOTS` order.
+///
+/// A slot with no prefix is not listed: an empty cell stays empty (that is the
+/// occupancy rule the whole stat fabric rests on), and there is nothing to
+/// swap *from*.
+fn movable_slot_prefixes(
+    build: &ValidatedBuild,
+    gear_locks: &HashMap<GearSlot, u32>,
+) -> Vec<(GearSlot, PrefixRef)> {
+    crate::search::STAT_SLOTS
+        .iter()
+        .copied()
+        .filter(|slot| mutable_gear_slot(build, *slot, gear_locks))
+        .filter_map(|slot| {
+            build
+                .gear_slots
+                .get(slot)
+                .cloned()
+                .map(|prefix| (slot, prefix))
+        })
+        .collect()
+}
+
+/// The canonical prefix pool in search order: the user's radar primary first,
+/// its secondary next, then the rest by ascending id.
+///
+/// The rows come from [`crate::itemstat_pool::canonical_itemstats`], which is
+/// the only pool a prefix enumerator may draw from. `db.itemstats` is a table
+/// of stat *templates*, not of prefixes: on live data its 191 rows resolve to
+/// 66 named prefixes, 43 names carry two to nine ids, and the 1041-1052 band
+/// carries no positive multiplier at all. Enumerating it raw is how the "top
+/// four prefixes" for a power build became four Berserker's ids and how a
+/// search could settle on an id that the name-keyed appliers never resolve
+/// back to.
+///
+/// The ordering is the second half of the job. The beam evaluates at most ~80
+/// neighbours per member, so id-only ordering put the condition/sustain mixes
+/// the user actually asked for behind sixty prefixes they did not.
 fn prioritized_itemstats<'a>(
     db: &'a GameDb,
     weights: &OptimizationWeights,
@@ -578,7 +793,7 @@ fn prioritized_itemstats<'a>(
     let preferred = scoring::select_gear_prefix(weights);
     let primary = normalized_prefix_name(preferred.primary);
     let secondary = preferred.secondary.map(normalized_prefix_name);
-    let mut itemstats: Vec<&gw2_api::models::ItemStat> = db.itemstats.values().collect();
+    let mut itemstats = crate::itemstat_pool::canonical_itemstats(db);
     itemstats.sort_by_key(|itemstat| {
         let name = normalized_prefix_name(&itemstat.name);
         let preference = if name == primary {
@@ -1310,6 +1525,7 @@ mod tests {
             professions: HashMap::new(),
             legends: HashMap::new(),
             pvp_amulets: HashMap::new(),
+            pets: HashMap::new(),
             skills_by_profession: HashMap::new(),
             traits_by_spec: HashMap::new(),
             items_by_type: HashMap::new(),
@@ -1760,6 +1976,376 @@ mod tests {
                     .get(GearSlot::Coat)
                     .is_some_and(|p| p.name == "Cavalier's")
         }));
+    }
+
+    /// Grok F7: the whole-build operator must not offer the prefix the build
+    /// already wears.
+    ///
+    /// Its no-op filter used to be hand-written, and it read an unlocked *empty*
+    /// cell as "this prefix would change something". A two-hander's off-hand is
+    /// permanently empty, so the filter never rejected anything and the current
+    /// prefix came back as a neighbour identical to the candidate — one referee
+    /// evaluation per beam member per generation that could not move a number.
+    #[test]
+    fn swap_gear_prefix_skips_the_prefix_already_worn() {
+        let mut db = empty_db();
+        for (id, name) in [(1, "Berserker's"), (2, "Cavalier's")] {
+            db.itemstats.insert(
+                id,
+                gw2_api::models::ItemStat {
+                    id,
+                    name: name.into(),
+                    attributes: Vec::new(),
+                },
+            );
+        }
+
+        let mut validated = ValidatedBuild {
+            weapons: crate::validation::ValidatedWeapons {
+                set1: ValidatedWeaponSet {
+                    main_hand: Some("Greatsword".into()),
+                    off_hand: None,
+                },
+                set2: ValidatedWeaponSet::default(),
+            },
+            ..ValidatedBuild::default()
+        };
+        let worn = PrefixRef {
+            itemstat_id: 1,
+            name: "Berserker's".into(),
+        };
+        validated.fill_worn_gear_slots(worn.clone());
+        let candidate = make_candidate(validated);
+
+        let neighbors = swap_gear_prefix(
+            &candidate,
+            &db,
+            &OptimizationWeights::default(),
+            &HashMap::new(),
+        );
+
+        for neighbor in &neighbors {
+            assert_ne!(
+                neighbor.gear_identity(),
+                candidate.validated.gear_identity(),
+                "a neighbour identical to the candidate is a wasted referee evaluation"
+            );
+        }
+        // Two prefixes in the pool, one of them already worn everywhere: exactly
+        // one whole-build swap is available.
+        assert_eq!(neighbors.len(), 1, "expected only the Cavalier's fill");
+        assert_eq!(
+            neighbors[0].gear_slots.get(GearSlot::WeaponSet1Off),
+            None,
+            "a greatsword's off-hand stays empty under a whole-build fill"
+        );
+    }
+
+    /// C19 / Grok F2: the per-slot operator must not spend its whole share of the
+    /// beam's neighbour cap on the first entries of `STAT_SLOTS`.
+    ///
+    /// `generate_neighbors` interleaves a dozen operators and `optimize_v2_search`
+    /// then takes at most ~80 neighbours per beam member, so this operator gets
+    /// roughly six or seven evaluations. Slot-major output — every prefix for the
+    /// helm, then every prefix for the shoulders — spent all of them on the first
+    /// two slots, and rings, amulet, and weapons never received a single per-slot
+    /// evaluation in the beam. That is the hybrid-mix search v1.7 added this
+    /// operator for.
+    #[test]
+    fn swap_slot_prefix_round_robins_slots() {
+        let mut db = empty_db();
+        for (id, name) in [
+            (1, "Berserker's"),
+            (2, "Cavalier's"),
+            (3, "Marauder's"),
+            (4, "Soldier's"),
+            (5, "Celestial"),
+        ] {
+            db.itemstats.insert(
+                id,
+                gw2_api::models::ItemStat {
+                    id,
+                    name: name.into(),
+                    attributes: Vec::new(),
+                },
+            );
+        }
+
+        // A greatsword build: main hand worn, off hand empty, set 2 bare.
+        // `fill_gear_slots` stamps a prefix into all sixteen cells anyway —
+        // including the off-hand this build does not wear and both carried set-2
+        // hands — so the operator has to decide eligibility from the build, not
+        // from "the cell is populated".
+        let mut validated = ValidatedBuild {
+            weapons: crate::validation::ValidatedWeapons {
+                set1: ValidatedWeaponSet {
+                    main_hand: Some("Greatsword".into()),
+                    off_hand: None,
+                },
+                set2: ValidatedWeaponSet::default(),
+            },
+            ..ValidatedBuild::default()
+        };
+        validated.fill_gear_slots(PrefixRef {
+            itemstat_id: 1,
+            name: "Berserker's".into(),
+        });
+        let candidate = make_candidate(validated);
+
+        let weights = OptimizationWeights::default();
+        let neighbors = swap_slot_prefix(&candidate, &db, &weights, &HashMap::new());
+
+        let changed_slot = |build: &ValidatedBuild| -> GearSlot {
+            let mut differing = GearSlot::ALL.iter().copied().filter(|slot| {
+                build.gear_slots.prefix_id(*slot) != candidate.validated.gear_slots.prefix_id(*slot)
+            });
+            let slot = differing
+                .next()
+                .expect("a per-slot neighbour changes one slot");
+            assert!(
+                differing.next().is_none(),
+                "a per-slot neighbour changes exactly one slot"
+            );
+            slot
+        };
+
+        // Measured from the operator's own output rather than asserted from a
+        // literal: however many slots it considers movable, its first that-many
+        // neighbours have to land on that many *different* slots.
+        let touched: Vec<GearSlot> = neighbors.iter().map(changed_slot).collect();
+        let distinct: std::collections::HashSet<GearSlot> = touched.iter().copied().collect();
+        assert!(
+            distinct.len() > 1,
+            "fixture must offer more than one movable slot"
+        );
+        assert!(
+            touched.len() >= distinct.len(),
+            "every movable slot gets at least one candidate prefix"
+        );
+        let first_pass: std::collections::HashSet<GearSlot> =
+            touched.iter().copied().take(distinct.len()).collect();
+        assert_eq!(
+            first_pass.len(),
+            distinct.len(),
+            "the first {} neighbours must cover every movable slot exactly once, got {:?}",
+            distinct.len(),
+            &touched[..distinct.len()]
+        );
+
+        // Dead slots are not movable. Weapon set 2 is carried, not worn — it draws
+        // no slot budget — and a greatsword has no off-hand, even though
+        // `fill_gear_slots` left a prefix in all three of those cells.
+        for dead in [
+            GearSlot::WeaponSet1Off,
+            GearSlot::WeaponSet2Main,
+            GearSlot::WeaponSet2Off,
+        ] {
+            assert!(
+                !distinct.contains(&dead),
+                "{dead:?} carries no stats; swapping it is a referee evaluation that cannot change a number"
+            );
+        }
+        assert!(
+            distinct.contains(&GearSlot::WeaponSet1Main),
+            "the worn main hand is stat-bearing and must be reachable"
+        );
+
+        // Same inputs, same sequence: the pool is id-ordered, not HashMap-ordered.
+        let again = swap_slot_prefix(&candidate, &db, &weights, &HashMap::new());
+        assert_eq!(
+            again
+                .iter()
+                .map(|build| build.gear_identity())
+                .collect::<Vec<_>>(),
+            neighbors
+                .iter()
+                .map(|build| build.gear_identity())
+                .collect::<Vec<_>>(),
+            "neighbour order must be reproducible"
+        );
+    }
+
+    /// C19 / Claude F16 + F20, Grok F1, GLM F7: the nudge draws from the canonical
+    /// prefix pool, and it stops when its budget is gone.
+    #[test]
+    fn nudge_uses_canonical_pool_and_budget() {
+        // ── the pool ────────────────────────────────────────────────────────────
+        let mut db = empty_db();
+        let power = |id: u32, name: &str, multiplier: f64| gw2_api::models::ItemStat {
+            id,
+            name: name.into(),
+            attributes: vec![gw2_api::models::StatAttribute {
+                attribute: "Power".into(),
+                multiplier,
+                value: 0,
+            }],
+        };
+        // Two ids for one displayed prefix: 43 names look like this on live data,
+        // and "Berserker's" alone carries five.
+        db.itemstats.insert(161, power(161, "Berserker's", 0.35));
+        db.itemstats.insert(1077, power(1077, "Berserker's", 0.35));
+        // A legacy all-zero-multiplier row whose display name nothing else shares.
+        // The slot-budget model cannot price it, so it is not a prefix at all —
+        // and with a unique name the one-id-per-name rule has nothing to prefer
+        // over it.
+        db.itemstats
+            .insert(1049, power(1049, "Legacy Ossified", 0.0));
+        db.itemstats.insert(1015, power(1015, "Marauder's", 0.30));
+
+        let weights = OptimizationWeights::default();
+        let pool = nudge_pool(&db, &weights);
+
+        let ids: Vec<u32> = pool.iter().map(|stat| stat.id).collect();
+        let unique_ids: std::collections::HashSet<u32> = ids.iter().copied().collect();
+        assert_eq!(
+            ids.len(),
+            unique_ids.len(),
+            "no id may appear twice; the pool this replaced concatenated the tier \
+             names onto the whole itemstat map, so every tier prefix was evaluated \
+             twice: {ids:?}"
+        );
+        let names: Vec<String> = pool
+            .iter()
+            .map(|stat| normalized_prefix_name(&stat.name))
+            .collect();
+        let unique_names: std::collections::HashSet<&String> = names.iter().collect();
+        assert_eq!(
+            names.len(),
+            unique_names.len(),
+            "one id per displayed prefix; a 'top four' of four Berserker's ids \
+             searches one prefix four times: {names:?}"
+        );
+        assert!(
+            !ids.contains(&1049),
+            "an unpriceable row is not a prefix a search may choose: {ids:?}"
+        );
+        assert!(
+            ids.contains(&1015),
+            "a healthy uniquely-named prefix must survive: {ids:?}"
+        );
+        // Every pooled row is the row name resolution hands back for the same
+        // name, so the prefix that wins a search is the prefix that gets applied.
+        for stat in &pool {
+            assert_eq!(
+                db.itemstat_by_name(&stat.name).map(|hit| hit.id),
+                Some(stat.id),
+                "pool entry {} ({}) is not what itemstat_by_name resolves",
+                stat.id,
+                stat.name
+            );
+        }
+
+        // ── the budget ──────────────────────────────────────────────────────────
+        use crate::synergy_pipeline::runtime_diagnostics_tests::make_diag_db;
+
+        let diag = make_diag_db();
+        let ctx = crate::balance::BalanceContext::new(GameMode::PvE);
+        let scenario = ScenarioSpec {
+            game_mode: GameMode::PvE,
+            combat_tier: CombatTier::Solo,
+            combat_kind: crate::scenario::CombatKind::StrikeSpike,
+            target_profile: crate::scenario::TargetProfile::Single,
+            optimization_target: crate::scenario::OptimizationTarget {
+                label: String::new(),
+            },
+            patch_id: None,
+        };
+        let seed = optimize_v2_search(
+            &diag,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &BuildLocks::default(),
+            &SearchConfig {
+                beam_width: 2,
+                eval_budget: 40,
+                time_limit_secs: 30,
+            },
+            &mut |_| {},
+            &|| false,
+        )
+        .expect("diag db should seed a searchable build");
+
+        // Start uniform on the id the diag fixture's referee ranks *lower*, so the
+        // pass has a real single-piece improvement to find. Which of the two the
+        // referee prefers is its business — this test asserts that the nudge finds
+        // whatever the referee prefers, and that the budget stops it from looking.
+        let mut uniform = seed;
+        uniform.fill_worn_gear_slots(PrefixRef {
+            itemstat_id: 584,
+            name: "Berserker's".into(),
+        });
+
+        let run = |budget: NudgeBudget| {
+            let mut rounds = 0usize;
+            let out = refine_piece_swaps_within(
+                uniform.clone(),
+                &diag,
+                "Warrior",
+                &weights,
+                &ctx,
+                &scenario,
+                &BuildLocks::default(),
+                &mut |_| rounds += 1,
+                &|| false,
+                budget,
+            );
+            (out, rounds)
+        };
+
+        // Positive control: with the production budget the pass does real work.
+        let (improved, full_rounds) = run(NudgeBudget::standard());
+        assert!(full_rounds >= 1, "the pass must open at least one round");
+        assert_ne!(
+            improved.gear_identity(),
+            uniform.gear_identity(),
+            "an unstarved pass must find the improving single-piece swap"
+        );
+        // Whatever it moved, it moved to a prefix from the canonical pool — the
+        // nudge cannot introduce an id the appliers can never resolve back.
+        let diag_pool: std::collections::HashSet<u32> = nudge_pool(&diag, &weights)
+            .iter()
+            .map(|stat| stat.id)
+            .collect();
+        for slot in GearSlot::ALL {
+            if let Some(id) = improved.gear_slots.prefix_id(slot) {
+                assert!(
+                    diag_pool.contains(&id),
+                    "{slot:?} ended on itemstat {id}, which is not in the canonical pool"
+                );
+            }
+        }
+
+        // One allowance buys exactly the baseline evaluation: the pass opens a
+        // round and then cannot afford a single swap. The difference between this
+        // and the zero case below is the evaluation counter, measured rather than
+        // asserted from a constant.
+        let (starved, starved_rounds) = run(NudgeBudget::new(1, Duration::from_secs(60)));
+        assert_eq!(
+            starved_rounds, 1,
+            "one allowance opens one round and buys nothing more"
+        );
+        assert_eq!(
+            starved.gear_identity(),
+            uniform.gear_identity(),
+            "a starved pass must return the build it was given, unimproved"
+        );
+
+        // No allowance at all: not even the baseline evaluation, so no round opens.
+        let (untouched, no_rounds) = run(NudgeBudget::new(0, Duration::from_secs(60)));
+        assert_eq!(no_rounds, 0);
+        assert_eq!(untouched.gear_identity(), uniform.gear_identity());
+
+        // The wall clock bounds the pass on its own, whatever the eval count says:
+        // per-evaluation cost is not a constant, and a rotation-heavy profession on
+        // a slow machine is exactly the case the eval cap cannot see.
+        let (expired, expired_rounds) = run(NudgeBudget::new(usize::MAX, Duration::ZERO));
+        assert_eq!(
+            expired_rounds, 0,
+            "an expired deadline stops the pass before it evaluates anything"
+        );
+        assert_eq!(expired.gear_identity(), uniform.gear_identity());
     }
 
     #[test]

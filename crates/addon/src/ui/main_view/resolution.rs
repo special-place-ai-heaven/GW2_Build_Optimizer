@@ -357,7 +357,7 @@ fn resolve_profession_extras(
     let mut pets = Vec::new();
     if let Some(ref p) = build.pets {
         for id in p.terrestrial.iter().flatten() {
-            pets.push(format!("#{id}"));
+            pets.push(db.pet_display_name(*id));
         }
     }
     (legends, pets)

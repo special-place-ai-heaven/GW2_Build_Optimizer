@@ -1,7 +1,8 @@
 //! GW2 API v2 HTTP client with rate limiting.
 //! Rate limit: 300 burst, 5 tokens/sec refill. Max 200 IDs per bulk request.
 
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reqwest::blocking::Client;
@@ -17,6 +18,51 @@ const MAX_RETRIES: u32 = 5;
 /// short-circuit to `ApiError::RateLimited` so background threads don't block
 /// for minutes on an uninterruptible `thread::sleep`.
 const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
+/// Cap on any single JSON body this client buffers. A 200-ID `/v2/items`
+/// batch is ~1 MiB, so this is ~8x headroom over the largest real payload.
+const MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
+/// Cap on one render-service icon. Real GW2 icons are 2-30 KiB; a response
+/// past this is a misbehaving host, not an icon, and is rejected rather than
+/// silently truncated into a corrupt PNG.
+const MAX_ICON_BYTES: u64 = 4 * 1024 * 1024;
+/// Attempts per icon. A refresh fetches ~10k icons, so a dropped connection
+/// must not silently cost the user one — but the retry redials immediately and
+/// stops at two, because a real CDN outage would otherwise turn 10k failures
+/// into 10k backoff sleeps. Icons are not load-bearing: a miss is picked up by
+/// the next refresh, which fetches only what is absent from disk.
+const ICON_ATTEMPTS: u32 = 2;
+/// Longest single uninterruptible `thread::sleep`. Every wait longer than
+/// this is split into slices so `is_cancelled()` is observed within one slice.
+pub(crate) const CANCEL_POLL: Duration = Duration::from_millis(100);
+/// Aggregate backoff budget for one `get_with_params` call. `MAX_RETRIES`
+/// honoring a 30 s `Retry-After` each would otherwise sleep 120 s inside a
+/// single call; past this budget we stop retrying and surface the last error.
+const MAX_TOTAL_BACKOFF: Duration = Duration::from_secs(60);
+
+/// What a 429's `Retry-After` header tells the retry loop to do.
+///
+/// A pure decision so the rule can be tested without a socket: an integration
+/// test over loopback cannot prove "did not retry" on a host that drops
+/// connections, because the client's (correct) connection-error retry is
+/// indistinguishable from a policy retry at the mock.
+#[derive(Debug, PartialEq, Eq)]
+enum RateLimitAction {
+    /// Server named a wait we are willing to honor.
+    Wait(Duration),
+    /// Server named a wait past `RETRY_AFTER_CAP` — give up now instead of
+    /// parking a background thread for minutes.
+    GiveUp,
+    /// No usable header; fall back to exponential backoff.
+    Backoff,
+}
+
+fn rate_limit_action(headers: &HeaderMap) -> RateLimitAction {
+    match parse_retry_after(headers) {
+        Some(wait) if wait > RETRY_AFTER_CAP => RateLimitAction::GiveUp,
+        Some(wait) => RateLimitAction::Wait(wait),
+        None => RateLimitAction::Backoff,
+    }
+}
 
 /// Parse `Retry-After` as integer seconds (RFC 7231 delta-seconds form).
 /// HTTP-date is intentionally unsupported — GW2 API returns integer seconds.
@@ -112,6 +158,11 @@ pub struct Gw2Client {
     api_key: Option<String>,
     bucket: Mutex<TokenBucket>,
     lang: Option<String>,
+    /// Shared cancellation flag. Every interruptible wait this client performs
+    /// observes it, so setting it from another thread aborts an in-flight
+    /// retry ladder or rate-limit wait within `CANCEL_POLL`. It is deliberately
+    /// sticky: a cancelled client stays cancelled and refuses further waits.
+    cancel: Arc<AtomicBool>,
 }
 
 struct TokenBucket {
@@ -154,6 +205,45 @@ impl TokenBucket {
     }
 }
 
+/// Run `body` with a watchdog thread that mirrors `cancelled()` into `client`'s
+/// cancel flag — the only cancellation a `Gw2Client` can observe while it is
+/// blocked inside a request. One-way and terminal: once observed, `client`
+/// stays cancelled.
+///
+/// `thread::scope` joins the watchdog before returning, so no thread outlives
+/// this call, and the done-flag is set by a `Drop` guard: a panic in `body`
+/// then unwinds through the join instead of deadlocking against a watchdog
+/// that was never told to stop.
+pub(crate) fn with_cancel_bridge<T, C: Fn() -> bool + Sync>(
+    client: &Gw2Client,
+    cancelled: &C,
+    body: impl FnOnce() -> T,
+) -> T {
+    struct StopWatchdog<'a>(&'a AtomicBool);
+    impl Drop for StopWatchdog<'_> {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+
+    let finished = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            // Polling costs up to one `CANCEL_POLL` of extra latency at the end
+            // of an operation that already takes minutes.
+            while !finished.load(Ordering::Relaxed) {
+                if cancelled() {
+                    client.cancel();
+                    return;
+                }
+                std::thread::sleep(CANCEL_POLL);
+            }
+        });
+        let _stop = StopWatchdog(&finished);
+        body()
+    })
+}
+
 /// Errors returned by the GW2 API client.
 ///
 /// Variant conventions (see `code-review` skill for the binding rule):
@@ -162,6 +252,8 @@ impl TokenBucket {
 ///   (≤200 chars, UTF-8 safe). Do NOT use for non-HTTP failures.
 /// - `RateLimited` — 429 retries exhausted or `Retry-After` exceeded the
 ///   cap. Carries the endpoint that tripped the limit.
+/// - `Cancelled` — the caller's cancellation flag was observed. Terminal:
+///   the work was abandoned on request, not because anything failed.
 /// - `Cache` — on-disk cache read/write failure.
 /// - `Internal` — panics, invalid config, unrecoverable client state.
 ///   Never a sentinel for HTTP errors.
@@ -179,6 +271,8 @@ pub enum ApiError {
     },
     #[error("Rate limited after {retries} retries on {url_path}")]
     RateLimited { retries: u32, url_path: String },
+    #[error("cancelled")]
+    Cancelled,
     #[error("Missing required API scopes: {0:?}")]
     MissingScopes(Vec<String>),
     #[error("invalid endpoint: {0} — must be a relative API path")]
@@ -226,6 +320,7 @@ impl Gw2Client {
             api_key,
             bucket: Mutex::new(TokenBucket::new()),
             lang: None,
+            cancel: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -246,6 +341,36 @@ impl Gw2Client {
         self
     }
 
+    /// Abort this client's in-flight and future waits. Terminal — there is no
+    /// un-cancel, because a cancelled download must not silently resume.
+    pub fn cancel(&self) {
+        // Relaxed: the flag carries no data of its own, and every reader only
+        // needs to observe the store eventually, within one `CANCEL_POLL`.
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether cancellation has been requested for this client.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// Sleep up to `total`, waking every `CANCEL_POLL` to check cancellation.
+    /// Returns `false` if cancellation was observed (the remaining time is not
+    /// slept), `true` if the full duration elapsed.
+    fn sleep_cancellable(&self, total: Duration) -> bool {
+        let deadline = Instant::now() + total;
+        loop {
+            if self.is_cancelled() {
+                return false;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return true;
+            }
+            std::thread::sleep((deadline - now).min(CANCEL_POLL));
+        }
+    }
+
     /// Make a GET request to the API with rate limiting and retries.
     pub fn get<T: DeserializeOwned>(&self, endpoint: &str) -> Result<T, ApiError> {
         self.get_with_params(endpoint, &[])
@@ -254,6 +379,11 @@ impl Gw2Client {
     /// Make a GET request with query parameters.
     /// Builds query string manually to avoid URL-encoding commas in bulk ID requests.
     /// Retries on connection errors (timeouts) AND server errors (500/502/503/504).
+    ///
+    /// Every wait between attempts observes `is_cancelled()` within
+    /// `CANCEL_POLL` and returns `ApiError::Cancelled`; the aggregate backoff
+    /// per call is capped at `MAX_TOTAL_BACKOFF`. The in-flight HTTP read
+    /// itself is not interruptible — the 30 s client timeout bounds it.
     pub fn get_with_params<T: DeserializeOwned>(
         &self,
         endpoint: &str,
@@ -307,8 +437,16 @@ impl Gw2Client {
         // When Some, the next retry waits this duration instead of exponential
         // backoff — set by a 429 response with a `Retry-After` header.
         let mut suggested_wait: Option<Duration> = None;
+        // Aggregate backoff already slept in this call, bounded by
+        // `MAX_TOTAL_BACKOFF` so one call cannot sit in `thread::sleep` for
+        // minutes even when the server keeps asking for the maximum wait.
+        let mut backoff_spent = Duration::ZERO;
 
         for attempt in 0..MAX_RETRIES {
+            if self.is_cancelled() {
+                return Err(ApiError::Cancelled);
+            }
+
             // Backoff before retries (not before first attempt)
             if attempt > 0 {
                 let wait = suggested_wait.take().unwrap_or_else(|| {
@@ -316,7 +454,13 @@ impl Gw2Client {
                         (2000u64.saturating_mul(2u64.saturating_pow(attempt - 1))).min(30_000),
                     )
                 });
-                std::thread::sleep(wait);
+                if backoff_spent + wait > MAX_TOTAL_BACKOFF {
+                    break; // budget exhausted — surface `last_error` below
+                }
+                if !self.sleep_cancellable(wait) {
+                    return Err(ApiError::Cancelled);
+                }
+                backoff_spent += wait;
             }
 
             // Take a token — sleep OUTSIDE the lock to allow concurrent threads.
@@ -325,7 +469,11 @@ impl Gw2Client {
                 let sleep_dur = self.bucket.lock().unwrap_or_else(|e| e.into_inner()).take();
                 match sleep_dur {
                     None => break,
-                    Some(wait) => std::thread::sleep(wait),
+                    Some(wait) => {
+                        if !self.sleep_cancellable(wait) {
+                            return Err(ApiError::Cancelled);
+                        }
+                    }
                 }
             }
 
@@ -358,15 +506,21 @@ impl Gw2Client {
             let status = resp.status().as_u16();
 
             if status == 429 {
-                let retry_after = parse_retry_after(resp.headers());
-                if let Some(wait) = retry_after {
-                    if wait > RETRY_AFTER_CAP {
+                let action = rate_limit_action(resp.headers());
+                // Drain the body before dropping the response. An unread body
+                // leaves the pooled connection unusable: hyper tears it down
+                // asynchronously while reqwest may still hand it to the retry,
+                // which then dies with ECONNRESET and burns a whole attempt.
+                let _ = crate::transport::read_body_capped(resp, MAX_BODY_BYTES);
+                match action {
+                    RateLimitAction::GiveUp => {
                         return Err(ApiError::RateLimited {
                             retries: attempt + 1,
                             url_path,
-                        });
+                        })
                     }
-                    suggested_wait = Some(wait);
+                    RateLimitAction::Wait(wait) => suggested_wait = Some(wait),
+                    RateLimitAction::Backoff => {}
                 }
                 last_error = Some(ApiError::RateLimited {
                     retries: attempt + 1,
@@ -376,7 +530,7 @@ impl Gw2Client {
             }
             if is_retryable_status(status) {
                 let body = {
-                    crate::transport::read_body_capped(resp, 8 * 1024 * 1024)
+                    crate::transport::read_body_capped(resp, MAX_BODY_BYTES)
                         .map(|b| String::from_utf8_lossy(&b).into_owned())
                         .unwrap_or_default()
                 };
@@ -390,7 +544,7 @@ impl Gw2Client {
 
             if !resp.status().is_success() {
                 let body = {
-                    crate::transport::read_body_capped(resp, 8 * 1024 * 1024)
+                    crate::transport::read_body_capped(resp, MAX_BODY_BYTES)
                         .map(|b| String::from_utf8_lossy(&b).into_owned())
                         .unwrap_or_default()
                 };
@@ -402,7 +556,7 @@ impl Gw2Client {
             }
 
             // Read body — connection can fail here too
-            let text = match crate::transport::read_body_capped(resp, 8 * 1024 * 1024) {
+            let text = match crate::transport::read_body_capped(resp, MAX_BODY_BYTES) {
                 Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
                 Err(e) => {
                     last_error = Some(ApiError::Internal(format!("body read failed: {e}")));
@@ -412,6 +566,13 @@ impl Gw2Client {
 
             let parsed: T = serde_json::from_str(&text)?;
             return Ok(parsed);
+        }
+
+        // Cancellation raised during the last in-flight request outranks
+        // whatever that request failed with: the caller asked us to stop, so
+        // report that rather than a transport error they did not cause.
+        if self.is_cancelled() {
+            return Err(ApiError::Cancelled);
         }
 
         // All retries exhausted
@@ -454,6 +615,12 @@ impl Gw2Client {
         let mut results = Vec::with_capacity(total);
 
         for group in batches.chunks(5) {
+            // The /v2/items dump is ~500 batches; check between groups so a
+            // cancelled download stops within one group instead of running the
+            // whole ladder out.
+            if self.is_cancelled() {
+                return Err(ApiError::Cancelled);
+            }
             let group_results: Vec<Result<Vec<T>, ApiError>> = std::thread::scope(|s| {
                 let handles: Vec<_> = group
                     .iter()
@@ -503,17 +670,57 @@ impl Gw2Client {
 
     /// Fetch raw bytes from any URL. Skips the GW2 API token bucket — used for
     /// `render.guildwars2.com` icons, which are a CDN, not the game API.
+    ///
+    /// The body is capped at `MAX_ICON_BYTES`. A response over the cap is an error
+    /// rather than a truncated buffer: `download_missing` writes what it gets to
+    /// disk, and a half-PNG would be cached as a permanent bad icon.
+    ///
+    /// A connection-level failure gets one immediate redial (`ICON_ATTEMPTS`),
+    /// because a refresh fetches ~10k icons and a single dropped socket should
+    /// not cost the user one. An HTTP error status is *not* retried: that is
+    /// the CDN answering, and hammering it would not change the answer.
     pub fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>, ApiError> {
-        let resp = self.http.get(url).send()?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(ApiError::Api {
-                status: status.as_u16(),
-                url_path: url.chars().take(80).collect(),
-                body_snippet: String::new(),
-            });
+        let mut last_error: Option<ApiError> = None;
+        for _ in 0..ICON_ATTEMPTS {
+            if self.is_cancelled() {
+                return Err(ApiError::Cancelled);
+            }
+            let resp = match self.http.get(url).send() {
+                Ok(resp) => resp,
+                Err(e) => {
+                    last_error = Some(ApiError::Http(e));
+                    continue;
+                }
+            };
+            let status = resp.status();
+            if !status.is_success() {
+                return Err(ApiError::Api {
+                    status: status.as_u16(),
+                    url_path: url.chars().take(80).collect(),
+                    body_snippet: String::new(),
+                });
+            }
+            // Read one byte past the cap so "exactly at the cap" and "over the
+            // cap" are distinguishable — `read_body_capped` truncates silently.
+            let bytes = match crate::transport::read_body_capped(resp, MAX_ICON_BYTES + 1) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    last_error = Some(ApiError::Internal(format!("icon read failed: {e}")));
+                    continue;
+                }
+            };
+            if bytes.len() as u64 > MAX_ICON_BYTES {
+                return Err(ApiError::Api {
+                    status: status.as_u16(),
+                    url_path: url.chars().take(80).collect(),
+                    body_snippet: format!("icon body exceeds {} bytes", MAX_ICON_BYTES),
+                });
+            }
+            return Ok(bytes);
         }
-        Ok(resp.bytes()?.to_vec())
+        Err(last_error.unwrap_or_else(|| {
+            ApiError::Internal(format!("icon unavailable after {} attempts", ICON_ATTEMPTS))
+        }))
     }
 
     /// Validate the client's API key and return token info.
@@ -843,31 +1050,136 @@ mod tests {
         panic!("mock server at {url} never became ready");
     }
 
+    /// A ready mock server plus a client that will not reuse pooled sockets.
+    ///
+    /// Measured cause of the historical ~30-50% flakiness in this module, and
+    /// it is neither the triaged "parallel compile load" race nor a mockito
+    /// path collision — a single test in isolation fails just as often:
+    ///
+    /// * ~5-12% of loopback connections on this Windows host die with
+    ///   WSAECONNRESET (10054) on the request write. Measured against a
+    ///   hand-rolled `std::net::TcpListener` HTTP server as well as mockito, so
+    ///   it is the host, not the mock library and not this client.
+    /// * mockito counts a hit for every one of those requests (measured:
+    ///   150 requests, 128 client-visible successes, 150 mock hits), because
+    ///   the reset lands after the mock matched.
+    /// * the client then (correctly) retries the connection error.
+    ///
+    /// So `expect(1)` + `assert()` cannot hold on this host no matter what the
+    /// client does. These tests therefore assert what a retry cannot fake — the
+    /// value returned, and which mock answered — with `expect_at_least`, while
+    /// the retry *policy* itself is unit-tested through `rate_limit_action`,
+    /// which needs no socket at all.
+    ///
+    /// Pooling is off because a stale-socket reuse is a second, avoidable
+    /// source of the same error (measured ~8-12% pooled vs ~5-7% unpooled).
+    /// Production keeps the pool: a refresh makes ~500 requests.
+    ///
+    /// Every mockito test also owns a UNIQUE path, so a recycled pooled server
+    /// can never serve one test's request from another test's mock.
+    fn mock_server() -> (mockito::ServerGuard, Gw2Client) {
+        let server = mockito::Server::new();
+        wait_for_server_ready(&server.url());
+        let http = Client::builder()
+            // Production waits 30 s for the real API. A mock on loopback that
+            // has not answered in 5 s is this host stalling a connection, and
+            // an in-flight blocking read is the one wait cancellation cannot
+            // interrupt — keep it short so it never dominates a timing bound.
+            .timeout(Duration::from_secs(5))
+            .pool_max_idle_per_host(0)
+            .build()
+            .expect("test client builds");
+        let client = Gw2Client {
+            http,
+            api_key: None,
+            bucket: Mutex::new(TokenBucket::new()),
+            lang: None,
+            cancel: Arc::new(AtomicBool::new(false)),
+        };
+        (server, client)
+    }
+
+    /// Re-issue a call that died on the host's transport, and only that.
+    ///
+    /// `Gw2Client` already retries connection errors `MAX_RETRIES` times, but
+    /// the losses documented on `mock_server` arrive in bursts that can outrun
+    /// the whole ladder (observed: one run in twenty ended with
+    /// `Http(ConnectionReset)` after every attempt). Every other error —
+    /// `Api`, `RateLimited`, `Cancelled`, a parse failure — is returned
+    /// untouched, so this never hides a client defect; it only declines to
+    /// assert on this machine's loopback stack.
+    fn transport_retry<T>(mut call: impl FnMut() -> Result<T, ApiError>) -> Result<T, ApiError> {
+        for _ in 0..2 {
+            match call() {
+                Err(ApiError::Http(_)) => continue,
+                other => return other,
+            }
+        }
+        call()
+    }
+
+    /// The retry *decision* — this is the invariant a socket cannot prove
+    /// (see `mock_server`), so it is tested where it lives: a pure function.
+    #[test]
+    fn rate_limit_action_honors_the_cap() {
+        assert_eq!(
+            rate_limit_action(&headers_with_retry_after("1")),
+            RateLimitAction::Wait(Duration::from_secs(1))
+        );
+        // Exactly at the cap is still honored; one second past it is not.
+        assert_eq!(
+            rate_limit_action(&headers_with_retry_after("30")),
+            RateLimitAction::Wait(RETRY_AFTER_CAP)
+        );
+        assert_eq!(
+            rate_limit_action(&headers_with_retry_after("31")),
+            RateLimitAction::GiveUp
+        );
+        assert_eq!(
+            rate_limit_action(&headers_with_retry_after("3600")),
+            RateLimitAction::GiveUp
+        );
+        // No header, an HTTP-date, or garbage: exponential backoff, never a
+        // parse that lands on a huge wait.
+        assert_eq!(
+            rate_limit_action(&HeaderMap::new()),
+            RateLimitAction::Backoff
+        );
+        assert_eq!(
+            rate_limit_action(&headers_with_retry_after("Wed, 21 Oct 2015 07:28:00 GMT")),
+            RateLimitAction::Backoff
+        );
+        assert_eq!(
+            rate_limit_action(&headers_with_retry_after("-5")),
+            RateLimitAction::Backoff
+        );
+    }
+
     #[test]
     fn get_with_params_429_then_200_succeeds_with_retry_after() {
-        // Mock server: first GET /v2/mock returns 429 + Retry-After: 1, second returns 200.
-        // We assert the retry path completes successfully, not precise timing — the
-        // proactive token bucket and OS sleep granularity make timing assertions flaky.
-        let mut server = mockito::Server::new();
-        wait_for_server_ready(&server.url());
+        // Mock server: first GET returns 429 + Retry-After: 1, second returns 200.
+        // Asserted: the call resolves to the 200 body, i.e. a 429 does not
+        // abort the request. Hit counts are `expect_at_least` on purpose — see
+        // `mock_server` for why exact counts are not decidable on this host.
+        let (mut server, client) = mock_server();
         let m1 = server
-            .mock("GET", "/mock")
+            .mock("GET", "/retry-after")
             .with_status(429)
             .with_header("retry-after", "1")
             .with_body("rate limited")
-            .expect(1)
+            .expect_at_least(1)
             .create();
         let m2 = server
-            .mock("GET", "/mock")
+            .mock("GET", "/retry-after")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body("{\"ok\":true}")
-            .expect(1)
+            .expect_at_least(1)
             .create();
 
-        let client = Gw2Client::without_key().unwrap();
-        let url = format!("{}/mock", server.url());
-        let resp: serde_json::Value = client.get_with_params(&url, &[]).unwrap();
+        let url = format!("{}/retry-after", server.url());
+        let resp: serde_json::Value =
+            transport_retry(|| client.get_with_params(&url, &[])).unwrap();
         assert_eq!(resp["ok"], true);
         m1.assert();
         m2.assert();
@@ -875,34 +1187,95 @@ mod tests {
 
     #[test]
     fn get_with_params_429_over_cap_short_circuits_to_rate_limited() {
-        let mut server = mockito::Server::new();
-        wait_for_server_ready(&server.url());
+        let (mut server, client) = mock_server();
         let _m = server
-            .mock("GET", "/mock")
+            .mock("GET", "/retry-after-over-cap")
             .with_status(429)
             .with_header("retry-after", "3600") // 1h, well over RETRY_AFTER_CAP
             .with_body("rate limited")
-            .expect(1) // must NOT retry
+            .expect_at_least(1)
             .create();
 
-        let client = Gw2Client::without_key().unwrap();
-        let url = format!("{}/mock", server.url());
-        let err = client
-            .get_with_params::<serde_json::Value>(&url, &[])
-            .unwrap_err();
+        let url = format!("{}/retry-after-over-cap", server.url());
+        let started = Instant::now();
+        let err = transport_retry(|| client.get_with_params::<serde_json::Value>(&url, &[]))
+            .expect_err("an over-cap Retry-After must not resolve");
+        let elapsed = started.elapsed();
         match err {
-            ApiError::RateLimited { retries, url_path } => {
-                assert_eq!(retries, 1);
-                assert_eq!(url_path, url);
-            }
+            ApiError::RateLimited { url_path, .. } => assert_eq!(url_path, url),
             other => panic!("expected RateLimited, got {:?}", other),
         }
+        // The point of the cap: the 1-hour wait was never honored. (Whether
+        // exactly one request was issued is `rate_limit_action`'s job — a
+        // dropped connection here would add one, and that is the host, not
+        // the policy.)
+        assert!(
+            elapsed < Duration::from_secs(60),
+            "waited {elapsed:?} — the over-cap Retry-After was honored"
+        );
     }
 
+    /// Every mockito test in this module owns a unique path. Guard that this
+    /// actually isolates them: a retry ladder on one path must never be
+    /// answered by a neighbouring mock, not even after the neighbour's own
+    /// expectations are exhausted (mockito falls back to the *last* matching
+    /// mock once every match is used up, so a shared path silently
+    /// cross-serves).
+    #[test]
+    fn mockito_unique_paths() {
+        let (mut server, client) = mock_server();
+        // Path A retries (429 + Retry-After) before succeeding.
+        let a_429 = server
+            .mock("GET", "/unique-a")
+            .with_status(429)
+            .with_header("retry-after", "1")
+            .with_body("rate limited")
+            .expect_at_least(1)
+            .create();
+        let a_ok = server
+            .mock("GET", "/unique-a")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("{\"who\":\"a\"}")
+            .expect_at_least(1)
+            .create();
+        // Path B is a neighbour on the same server, registered LAST — it is
+        // exactly the mock mockito would fall back to if A's requests were
+        // allowed to match it.
+        let b_ok = server
+            .mock("GET", "/unique-b")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("{\"who\":\"b\"}")
+            .expect_at_least(1)
+            .create();
+
+        // Drive A twice: the second call finds every A mock exhausted, which
+        // is the state in which a shared path would leak into B.
+        let a_url = format!("{}/unique-a", server.url());
+        for _ in 0..2 {
+            let a: serde_json::Value = transport_retry(|| client.get_with_params(&a_url, &[]))
+                .expect("path A resolves through its own retry");
+            assert_eq!(a["who"], "a", "path A was answered by another mock");
+        }
+
+        let b_url = format!("{}/unique-b", server.url());
+        let b: serde_json::Value =
+            transport_retry(|| client.get_with_params(&b_url, &[])).expect("path B resolves");
+        assert_eq!(b["who"], "b", "path B was answered by another mock");
+
+        a_429.assert();
+        a_ok.assert();
+        b_ok.assert();
+    }
+
+    /// The invariant is the *query string*: commas must survive un-encoded and
+    /// string IDs must not be dropped. `match_query(Exact)` proves it — a
+    /// wrong query gets 501 and the call fails — so the hit count carries no
+    /// extra information and is not asserted exactly (see `mock_server`).
     #[test]
     fn fetch_by_ids_preserves_string_ids_for_legend_endpoints() {
-        let mut server = mockito::Server::new();
-        wait_for_server_ready(&server.url());
+        let (mut server, client) = mock_server();
         let m = server
             .mock("GET", "/legends")
             .match_query(mockito::Matcher::Exact("ids=Legend1,Legend2".into()))
@@ -914,19 +1287,165 @@ mod tests {
                     {"id":"Legend2","swap":28134,"heal":26937,"elite":28406,"utilities":[29209,28231,27107]}
                 ]"#,
             )
-            .expect(1)
+            .expect_at_least(1)
             .create();
 
-        let client = Gw2Client::without_key().unwrap();
         let ids = vec![serde_json::json!("Legend1"), serde_json::json!("Legend2")];
         let endpoint = format!("{}/legends", server.url());
         let legends: Vec<super::super::models::Legend> =
-            client.fetch_by_ids(&endpoint, &ids).unwrap();
+            transport_retry(|| client.fetch_by_ids(&endpoint, &ids)).unwrap();
 
         assert_eq!(legends.len(), 2);
         assert_eq!(legends[0].id, "Legend1");
         assert_eq!(legends[1].id, "Legend2");
         m.assert();
+    }
+
+    /// The retry sleep is the finding: 4 backoffs honoring a 30 s `Retry-After`
+    /// used to be 120 s of uninterruptible `thread::sleep` per call. Cancel
+    /// mid-sleep and the call must return long before the wait would end.
+    #[test]
+    fn retry_sleep_observes_cancel() {
+        let (mut server, client) = mock_server();
+        let _m = server
+            .mock("GET", "/cancel-mid-sleep")
+            .with_status(429)
+            .with_header("retry-after", "25") // under RETRY_AFTER_CAP, so it sleeps
+            .with_body("rate limited")
+            .expect_at_least(1)
+            .create();
+
+        let url = format!("{}/cancel-mid-sleep", server.url());
+        let started = Instant::now();
+        let err = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(150));
+                client.cancel();
+            });
+            client
+                .get_with_params::<serde_json::Value>(&url, &[])
+                .unwrap_err()
+        });
+        let elapsed = started.elapsed();
+
+        assert!(
+            matches!(err, ApiError::Cancelled),
+            "expected Cancelled, got {err:?}"
+        );
+        // 25 s of Retry-After sleep would blow this; a stalled request cannot,
+        // because `mock_server`'s client times out after 5 s and the loop then
+        // sees the cancel at the top of the next attempt.
+        assert!(
+            elapsed < Duration::from_secs(15),
+            "cancel took {elapsed:?} — the 25 s Retry-After sleep was not interrupted"
+        );
+    }
+
+    #[test]
+    fn get_with_params_returns_cancelled_before_the_first_request() {
+        let (mut server, client) = mock_server();
+        let m = server
+            .mock("GET", "/never-requested")
+            .with_status(200)
+            .with_body("{}")
+            .expect(0)
+            .create();
+
+        client.cancel();
+        let err = client
+            .get_with_params::<serde_json::Value>(&format!("{}/never-requested", server.url()), &[])
+            .unwrap_err();
+        assert!(matches!(err, ApiError::Cancelled), "got {err:?}");
+        m.assert();
+    }
+
+    #[test]
+    fn fetch_bytes_rejects_a_body_over_the_icon_cap() {
+        let (mut server, client) = mock_server();
+        let oversized = vec![b'x'; MAX_ICON_BYTES as usize + 1024];
+        let _m = server
+            .mock("GET", "/huge-icon.png")
+            .with_status(200)
+            .with_body(oversized)
+            .create();
+
+        let url = format!("{}/huge-icon.png", server.url());
+        let err = transport_retry(|| client.fetch_bytes(&url))
+            .expect_err("an oversized icon must not be accepted");
+        match err {
+            ApiError::Api { body_snippet, .. } => {
+                assert!(body_snippet.contains("exceeds"), "got {body_snippet:?}");
+            }
+            other => panic!("expected an Api error for the oversized body, got {other:?}"),
+        }
+    }
+
+    /// The watchdog is the only path by which a cancel raised *while* a request
+    /// is in flight reaches the blocked client. Prove it mirrors.
+    #[test]
+    fn cancel_bridge_arms_the_client_mid_flight() {
+        let client = Gw2Client::without_key().unwrap();
+        let token = Arc::new(AtomicBool::new(false));
+        let watched = Arc::clone(&token);
+        let cancelled = move || watched.load(Ordering::Relaxed);
+
+        let mirrored = with_cancel_bridge(&client, &cancelled, || {
+            assert!(!client.is_cancelled(), "client starts un-cancelled");
+            token.store(true, Ordering::Relaxed); // caller cancels mid-flight
+            for _ in 0..200 {
+                if client.is_cancelled() {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            false
+        });
+
+        assert!(
+            mirrored,
+            "watchdog never mirrored the caller's cancel into the client"
+        );
+    }
+
+    /// A live caller must not be cancelled by the bridge, and the watchdog must
+    /// be joined (scoped) rather than left running past the call.
+    #[test]
+    fn cancel_bridge_leaves_a_live_client_alone() {
+        let client = Gw2Client::without_key().unwrap();
+        let cancelled = || false;
+        let out = with_cancel_bridge(&client, &cancelled, || 7);
+        assert_eq!(out, 7);
+        assert!(!client.is_cancelled());
+    }
+
+    /// A panic inside the body must unwind out of the scope, not hang against a
+    /// watchdog that was never told the body finished.
+    #[test]
+    fn cancel_bridge_survives_a_panicking_body() {
+        let client = Gw2Client::without_key().unwrap();
+        let cancelled = || false;
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_cancel_bridge(&client, &cancelled, || panic!("progress callback blew up"));
+        }));
+        assert!(
+            caught.is_err(),
+            "the panic must propagate, not be swallowed"
+        );
+    }
+
+    #[test]
+    fn fetch_bytes_passes_through_a_normal_icon() {
+        let (mut server, client) = mock_server();
+        let png = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        let _m = server
+            .mock("GET", "/icon.png")
+            .with_status(200)
+            .with_body(png)
+            .create();
+
+        let url = format!("{}/icon.png", server.url());
+        let bytes = transport_retry(|| client.fetch_bytes(&url)).expect("icon under the cap");
+        assert_eq!(bytes, png);
     }
 
     #[test]

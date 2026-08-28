@@ -56,6 +56,7 @@ async fn get_taxonomy(State(s): State<AppState>) -> Json<serde_json::Value> {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .merge(admin::page_routes())
         .route("/v1/taxonomy", get(get_taxonomy))
         .route("/v1/reports", post(reports::create))
         .route("/v1/reports/status", get(reports::status))

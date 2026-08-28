@@ -70,13 +70,13 @@ pub(super) fn synergy_result_to_suggestion(
         skills.push(format!("Stances: {}", names.join(" / ")));
     }
     if let Some((t1, t2, _, _)) = v.pets {
-        let ids: Vec<String> = [t1, t2]
+        let names: Vec<String> = [t1, t2]
             .into_iter()
             .flatten()
-            .map(|id| format!("#{id}"))
+            .map(|id| db.pet_display_name(id))
             .collect();
-        if !ids.is_empty() {
-            skills.push(format!("Pets: {}", ids.join(" / ")));
+        if !names.is_empty() {
+            skills.push(format!("Pets: {}", names.join(" / ")));
         }
     }
     if let Some((_, name)) = &v.skills.heal {
@@ -306,7 +306,11 @@ pub(super) fn validated_build_to_chat_code(
             terrestrial: vec![t1, t2],
             aquatic: vec![a1, a2],
         }),
-        None if profession_name == "Ranger" => snapshot_ranger_pets(),
+        // The `with_state` is here, at the call site, and not inside
+        // `snapshot_ranger_pets`: see that function's note.
+        None if profession_name == "Ranger" => {
+            crate::state::with_state(snapshot_ranger_pets).flatten()
+        }
         None => None,
     };
     let api_build = gw2_api::models::Build {
@@ -348,13 +352,24 @@ pub(super) fn validated_build_to_chat_code(
     super::character::generate_build_chat_code(&api_build, db, &weapons)
 }
 
-fn snapshot_ranger_pets() -> Option<gw2_api::models::PetSelection> {
-    crate::state::with_state(|s| {
-        s.main
-            .selected_build_tab
-            .and_then(|i| s.main.build_tabs.get(i).and_then(|t| t.build.pets.clone()))
-    })
-    .flatten()
+/// Pets from the player's selected build tab.
+///
+/// Takes the state it reads instead of reaching for the global `STATE` itself.
+/// `STATE` is a plain `std::sync::Mutex`, so the previous `with_state` call
+/// buried in this function deadlocked outright — not "contended", deadlocked —
+/// the moment any caller of [`validated_build_to_chat_code`] ran inside a
+/// `with_state` closure, which is the normal shape of every render-thread call
+/// site in this crate. A hidden lock in a display adapter is a trap; an
+/// argument is not.
+fn snapshot_ranger_pets(
+    state: &mut crate::state::AddonState,
+) -> Option<gw2_api::models::PetSelection> {
+    let index = state.main.selected_build_tab?;
+    state
+        .main
+        .build_tabs
+        .get(index)
+        .and_then(|tab| tab.build.pets.clone())
 }
 
 pub(super) fn candidate_to_suggestion(
@@ -953,6 +968,9 @@ pub(super) fn summarize_resolved_build(build: &gw2_core::types::ResolvedBuild) -
     if let Some(ref e) = build.skills.elite {
         parts.push(format!("Elite: {}", e.name));
     }
+    if !build.pets.is_empty() {
+        parts.push(format!("Pets: {}", build.pets.join(" / ")));
+    }
 
     for set in &build.weapons {
         let mut w = Vec::new();
@@ -1173,11 +1191,146 @@ pub(super) fn apply_radar_prefix(
     _weights: &gw2_optimizer::scoring::OptimizationWeights,
     order: &str,
 ) {
-    // Choya is a conversation. Named prefix in the order wins; otherwise keep the LLM's pick.
-    // Radar is a starting prior for Optimize, not a cage for chat.
+    // Choya is a conversation. A prefix the player ASKED for wins; otherwise keep
+    // the LLM's pick. Radar is a starting prior for Optimize, not a cage for chat.
+    //
+    // `prefix_named_in_text` only inspects the single word before the stem and
+    // knows four negations, so it still reports an affirmative match for
+    // "don't use minstrel" or "stop suggesting minstrel". Re-check the mention
+    // here: a prefix the player is pushing away must not be forced onto them.
+    // "add SOME plaguedoctor in there" is not "make it all plaguedoctor".
+    // Forcing `stat_prefix` here paints every worn slot (`fill_worn_gear_slots`),
+    // so a partial request must leave the model's base prefix alone and let the
+    // named one land only where `gear_slots` puts it.
     if let Some(named) = gw2_optimizer::scoring::prefix_named_in_text(order) {
-        parsed.stat_prefix = named.to_string();
+        if prefix_request_is_affirmative(order, named) && !prefix_request_is_partial(order, named) {
+            parsed.stat_prefix = named.to_string();
+        }
     }
+}
+
+/// Words that only carry a request along, and never flip its sense. Walked
+/// over backwards from the prefix mention so a rejection cue a few words
+/// earlier ("don't *give me* minstrel") is still seen, while a cue belonging to
+/// a *different* prefix ("not celestial, minstrel please") is not.
+const REQUEST_FILLERS: &str = "a an any at for gear give giving go going in it me more my need nt      of on our please prefix put recommend recommending run running some stat stats suggest      suggesting t take taking that the this to us use using want wanting with";
+
+/// Words that turn a prefix mention into a rejection. Wider than the four
+/// `scoring::prefix_named_in_text` knows, which is why that function still
+/// reports "don't use minstrel" as an affirmative Minstrel's.
+const REQUEST_NEGATIONS: &str = "anti avoid avoiding cannot cant doesn doesnt don dont drop      exclude excluding except forget hate instead never no not skip stop than unless without";
+
+/// Words that mark a request as PARTIAL — the named prefix goes on SOME pieces,
+/// not painted over the whole kit. `some` is also a REQUEST_FILLER, and that is
+/// deliberate: it must keep carrying the request along for the affirmative walk
+/// ("add some plaguedoctor" is still a request FOR plaguedoctor), while
+/// separately marking it as a mix. Reading it only as a filler is what turned
+/// "add some plaguedoctor stats in there" into sixteen Plaguedoctor slots.
+const REQUEST_MIX_CUES: &str = "bit blend couple few hybrid little mix mixed mixing partial \
+     partially piece pieces several some splash sprinkle sprinkling touch";
+
+/// Whitespace-separated word list membership.
+fn listed(list: &str, word: &str) -> bool {
+    list.split_whitespace().any(|entry| entry == word)
+}
+
+/// Lowercased alphanumeric words of `text`; every other character is a break.
+/// Shared by the affirmative and partial checks so they cannot disagree about
+/// where a mention is.
+fn request_words(text: &str) -> Vec<String> {
+    text.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .map(str::to_string)
+        .collect()
+}
+
+/// The singular and plural forms a prefix mention can take, normalised the same
+/// way [`request_words`] normalises the order.
+fn prefix_stems(prefix: &str) -> (String, String) {
+    let stem = request_words(prefix.trim_end_matches("'s")).join(" ");
+    let plural = format!("{stem}s");
+    (stem, plural)
+}
+
+/// Is `prefix` something the player asked FOR in `order`, rather than something
+/// they pushed away?
+///
+/// True when at least one mention of the prefix is affirmative — "not celestial,
+/// give me minstrel" is a minstrel request. Matches the same normalisation
+/// `gw2_optimizer::scoring::prefix_named_in_text` uses (ASCII alphanumerics
+/// only, lowercased, space padded) so the two agree on where a mention is.
+// ponytail: `scoring::GEAR_PROFILES` is private, so this can only re-check the
+// one name `prefix_named_in_text` returned. "don't use minstrel, give me
+// celestial" therefore falls back to the model's pick instead of promoting
+// Celestial. Export the profile list and scan all names when `scoring.rs` is
+// next open.
+fn prefix_request_is_affirmative(order: &str, prefix: &str) -> bool {
+    let words = request_words(order);
+    let (stem, plural) = prefix_stems(prefix);
+    let stem = stem.as_str();
+
+    for (index, word) in words.iter().enumerate() {
+        if word != stem && word != &plural {
+            continue;
+        }
+        // Walk back over carrier words; the first word with meaning decides.
+        let decisive = words[..index]
+            .iter()
+            .rev()
+            .find(|w| !listed(REQUEST_FILLERS, w));
+        match decisive {
+            Some(word) if listed(REQUEST_NEGATIONS, word) => continue,
+            _ => return true,
+        }
+    }
+    // Every mention was a rejection — or the two normalisations disagreed on
+    // where the mention is, in which case the model's own pick is the safer
+    // answer than a forced overwrite.
+    false
+}
+
+/// Did the player ask for the prefix on SOME pieces rather than the whole kit?
+///
+/// Same backwards walk as [`prefix_request_is_affirmative`], looking for a mix
+/// cue instead of a negation: carrier words are stepped over, and a cue found in
+/// that run marks the request partial. "add some plaguedoctor in there" is
+/// partial; "make it plaguedoctor" is not.
+///
+/// A partial request is still affirmative — the player does want that prefix.
+/// It only stops `apply_radar_prefix` force-setting `stat_prefix`, because that
+/// is what paints all sixteen worn slots. Where the prefix actually lands is
+/// then up to the `gear_slots` map, which `validate_gear_slot_map` already
+/// applies on top of the base prefix.
+fn prefix_request_is_partial(order: &str, prefix: &str) -> bool {
+    let words = request_words(order);
+    let (stem, plural) = prefix_stems(prefix);
+    let stem = stem.as_str();
+
+    for (index, word) in words.iter().enumerate() {
+        if word != stem && word != &plural {
+            continue;
+        }
+        // Walk back over carrier words only. A cue that belongs to a different
+        // clause ("some celestial, then plaguedoctor") sits behind a
+        // non-carrier word and is correctly not seen.
+        for candidate in words[..index].iter().rev() {
+            if listed(REQUEST_MIX_CUES, candidate) {
+                return true;
+            }
+            if !listed(REQUEST_FILLERS, candidate) {
+                break;
+            }
+        }
+    }
+    false
 }
 
 pub(super) fn fill_holes_from_loadout(
@@ -1228,6 +1381,16 @@ pub(super) fn fill_holes_from_loadout(
     if !parsed
         .skills
         .iter()
+        .any(|s| s.get(..6).is_some_and(|h| h.eq_ignore_ascii_case("Pets: ")))
+        && !current.pets.is_empty()
+    {
+        parsed
+            .skills
+            .insert(0, format!("Pets: {}", current.pets.join(" / ")));
+    }
+    if !parsed
+        .skills
+        .iter()
         .any(|s| s.get(..5).is_some_and(|h| h.eq_ignore_ascii_case("Heal:")))
     {
         if let Some(h) = &current.skills.heal {
@@ -1260,6 +1423,27 @@ pub(super) fn fill_holes_from_loadout(
             parsed.stat_prefix = prefix.to_string();
         }
     }
+}
+
+/// Keep the ranger's equipped pets on a plated suggestion. Search never
+/// picks pets; dropping the row made Optimized look pet-less.
+pub(super) fn keep_loadout_pets(
+    suggestion: &mut crate::ui::comparison::BuildSuggestion,
+    pets: &[String],
+) {
+    if pets.is_empty() {
+        return;
+    }
+    if suggestion
+        .skills
+        .iter()
+        .any(|s| s.get(..6).is_some_and(|h| h.eq_ignore_ascii_case("Pets: ")))
+    {
+        return;
+    }
+    suggestion
+        .skills
+        .insert(0, format!("Pets: {}", pets.join(" / ")));
 }
 
 pub(super) fn chat_display_text(
@@ -1375,7 +1559,8 @@ mod tests {
     use super::super::chat_flow::plate_is_servable;
     use super::{
         apply_radar_prefix, chat_display_text, fill_holes_from_loadout, format_provider_issue,
-        gemini_from_validated, keep_equipped_weapons, kitchen_brief, suggestion_to_chat_code,
+        gemini_from_validated, keep_equipped_weapons, keep_loadout_pets, kitchen_brief,
+        snapshot_ranger_pets, suggestion_to_chat_code,
     };
     use crate::ui::comparison::BuildSuggestion;
     use base64::Engine as _;
@@ -1602,6 +1787,60 @@ mod tests {
     }
 
     #[test]
+    fn mix_request_does_not_repaint_every_slot() {
+        // The live G8 report: "Add some plaguedoctor stats in there" came back
+        // as sixteen Plaguedoctor slots. `some` is a REQUEST_FILLER, so the
+        // mention read as a bare affirmative, `stat_prefix` was force-set, and
+        // `fill_worn_gear_slots` painted the whole kit.
+        let weights = gw2_optimizer::scoring::OptimizationWeights::preset_power_dps();
+        let base = "Viper's";
+
+        for order in [
+            "Add some plaguedoctor stats in there",
+            "give me a few plaguedoctor pieces",
+            "mix in plaguedoctor",
+            "a splash of plaguedoctor please",
+        ] {
+            let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
+                stat_prefix: base.into(),
+                ..Default::default()
+            };
+            apply_radar_prefix(&mut parsed, &weights, order);
+            assert_eq!(
+                parsed.stat_prefix, base,
+                "{order:?} is a partial request; forcing stat_prefix repaints \
+                 every worn slot with it"
+            );
+        }
+
+        // A whole-kit request must still win, or the fix has simply broken the
+        // affirmative path instead of narrowing it.
+        for order in [
+            "make it all plaguedoctor",
+            "I want plaguedoctor gear",
+            "plaguedoctor please",
+        ] {
+            let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
+                stat_prefix: base.into(),
+                ..Default::default()
+            };
+            apply_radar_prefix(&mut parsed, &weights, order);
+            assert_eq!(
+                parsed.stat_prefix, "Plaguedoctor's",
+                "{order:?} asks for the whole kit and must still override"
+            );
+        }
+
+        // A rejection stays a rejection, partial cue or not.
+        let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
+            stat_prefix: base.into(),
+            ..Default::default()
+        };
+        apply_radar_prefix(&mut parsed, &weights, "don't give me some plaguedoctor");
+        assert_eq!(parsed.stat_prefix, base);
+    }
+
+    #[test]
     fn apply_radar_prefix_honors_celestial_in_order() {
         let weights = gw2_optimizer::scoring::OptimizationWeights::preset_power_dps();
         let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
@@ -1630,16 +1869,115 @@ mod tests {
     #[test]
     fn apply_radar_prefix_skips_negated_minstrel() {
         let weights = gw2_optimizer::scoring::OptimizationWeights::preset_power_dps();
-        let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
-            stat_prefix: "Harrier's".into(),
-            ..Default::default()
+        let apply = |order: &str| {
+            let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
+                stat_prefix: "Harrier's".into(),
+                ..Default::default()
+            };
+            apply_radar_prefix(&mut parsed, &weights, order);
+            parsed.stat_prefix
         };
-        apply_radar_prefix(
-            &mut parsed,
-            &weights,
-            "I said CELESTIAL support, not minstrel",
+
+        // An affirmative prefix elsewhere in the order still wins.
+        assert_eq!(apply("I said CELESTIAL support, not minstrel"), "Celestial");
+
+        // Rejections the caller's own negation check misses: it only looks at
+        // the single word before the stem, and only knows four cues. Every one
+        // of these must leave the model's pick ("Harrier's") alone.
+        for order in [
+            "don't use minstrel",
+            "stop suggesting minstrel",
+            "please avoid minstrel gear",
+            "anything other than minstrel",
+            "give me something instead of minstrel",
+            "I do not want minstrel stats",
+        ] {
+            assert_eq!(
+                apply(order),
+                "Harrier's",
+                "a rejected prefix was forced onto the build: {order:?}"
+            );
+        }
+
+        // …and a genuine request still lands, including right after a
+        // rejection of a DIFFERENT prefix.
+        for order in [
+            "give me minstrel",
+            "not celestial, minstrel please",
+            "use minstrel stats",
+        ] {
+            assert_eq!(
+                apply(order),
+                "Minstrel's",
+                "an affirmative request was dropped: {order:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_ranger_pets_takes_mut_state() {
+        use gw2_api::models::{Build, BuildTab, PetSelection};
+
+        let build_with_pets = |first: u32, second: u32| Build {
+            name: None,
+            profession: Some("Ranger".into()),
+            specializations: vec![],
+            skills: None,
+            aquatic_skills: None,
+            legends: vec![],
+            aquatic_legends: vec![],
+            pets: Some(PetSelection {
+                terrestrial: vec![Some(first), Some(second)],
+                aquatic: vec![],
+            }),
+        };
+
+        let _serial = crate::state::state_test_guard();
+        let dir =
+            std::env::temp_dir().join(format!("gw2_snapshot_ranger_pets_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        crate::state::clear();
+        crate::state::init(dir.clone());
+
+        // Called from INSIDE a `with_state` closure — the exact shape that
+        // deadlocked when this function reached for the global `STATE` itself.
+        let observed = crate::state::with_state(|s| {
+            s.main.build_tabs = vec![
+                BuildTab {
+                    tab: 1,
+                    is_active: false,
+                    build: build_with_pets(10, 11),
+                },
+                BuildTab {
+                    tab: 2,
+                    is_active: true,
+                    build: build_with_pets(20, 21),
+                },
+            ];
+
+            s.main.selected_build_tab = Some(1);
+            let selected = snapshot_ranger_pets(s);
+            s.main.selected_build_tab = Some(9);
+            let out_of_range = snapshot_ranger_pets(s);
+            s.main.selected_build_tab = None;
+            let unselected = snapshot_ranger_pets(s);
+            (selected, out_of_range, unselected)
+        })
+        .expect("state initialised");
+
+        crate::state::clear();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(
+            observed.0.map(|p| p.terrestrial),
+            Some(vec![Some(20), Some(21)]),
+            "pets must come from the SELECTED build tab"
         );
-        assert_eq!(parsed.stat_prefix, "Celestial");
+        assert!(
+            observed.1.is_none(),
+            "a build-tab index past the end has no pets"
+        );
+        assert!(observed.2.is_none(), "no selected build tab means no pets");
     }
 
     #[test]
@@ -1719,6 +2057,53 @@ mod tests {
             .iter()
             .any(|t| t == "Arcane Precision"));
         assert!(parsed.skills.iter().any(|s| s.contains("Arcane Blast")));
+    }
+
+    #[test]
+    fn fill_holes_from_loadout_copies_pets() {
+        let current = gw2_core::types::ResolvedBuild {
+            specializations: vec![gw2_core::types::ResolvedSpec {
+                id: 5,
+                name: "Skirmishing".into(),
+                elite: false,
+                traits_selected: vec![],
+                traits_available: vec![],
+            }],
+            pets: vec!["Juvenile Smokescale".into(), "Juvenile Rock Gazelle".into()],
+            ..Default::default()
+        };
+        let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
+            specializations: vec![(
+                "Skirmishing".into(),
+                vec!["a".into(), "b".into(), "c".into()],
+            )],
+            skills: vec!["Heal: Troll Unguent".into()],
+            ..Default::default()
+        };
+        fill_holes_from_loadout(&mut parsed, &current);
+        assert!(
+            parsed
+                .skills
+                .iter()
+                .any(|s| s == "Pets: Juvenile Smokescale / Juvenile Rock Gazelle"),
+            "{:?}",
+            parsed.skills
+        );
+    }
+
+    #[test]
+    fn keep_loadout_pets_inserts_once() {
+        let mut suggestion = BuildSuggestion::default();
+        keep_loadout_pets(
+            &mut suggestion,
+            &["Juvenile Smokescale".into(), "Juvenile Rock Gazelle".into()],
+        );
+        assert_eq!(
+            suggestion.skills,
+            vec!["Pets: Juvenile Smokescale / Juvenile Rock Gazelle".to_string()]
+        );
+        keep_loadout_pets(&mut suggestion, &["Juvenile Brown Bear".into()]);
+        assert_eq!(suggestion.skills.len(), 1);
     }
 
     #[test]

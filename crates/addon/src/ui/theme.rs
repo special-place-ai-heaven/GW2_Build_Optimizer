@@ -408,25 +408,102 @@ pub fn wrapped(ui: &Ui, color: [f32; 4], text: &str) {
     wrap.pop(ui);
 }
 
-/// Small name chip (stances / pets). `id` must be unique per row.
-pub fn chip(ui: &Ui, text: &str, id: &str) {
-    let pad = 6.0;
-    let sz = ui.calc_text_size(text);
-    let w = sz[0] + pad * 2.0;
-    let h = sz[1] + 4.0;
-    let p = ui.cursor_screen_pos();
-    let _ = ui.invisible_button(id, [w, h]);
-    {
-        let dl = ui.get_window_draw_list();
-        dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], PLATE)
-            .filled(true)
-            .rounding(h * 0.4)
-            .build();
-        dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], GOLD_DIM)
-            .rounding(h * 0.4)
-            .build();
-        dl.add_text([p[0] + pad, p[1] + 2.0], color_u32(CREAM), text);
+/// Headings, nested lists, numbered lists, paragraphs. Overlay fonts have no bold.
+pub fn prose(ui: &Ui, text: &str) {
+    if text.is_empty() {
+        return;
     }
+    let lines: Vec<&str> = text.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed_end = line.trim_end();
+        if trimmed_end.trim().is_empty() {
+            ui.dummy([0.0, 8.0]);
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        let depth = indent / 2;
+        let t = line.trim_start();
+        if let Some((level, rest)) = heading(t) {
+            heading_line(ui, level, rest);
+            continue;
+        }
+        if t == "---" {
+            ui.dummy([0.0, 6.0]);
+            continue;
+        }
+        if let Some((mark, rest)) = list_mark(t) {
+            let pad = 12.0 + depth as f32 * 16.0;
+            ui.indent_by(pad);
+            wrapped(ui, CREAM, &format!("{mark} {rest}"));
+            ui.unindent_by(pad);
+            ui.dummy([0.0, 2.0]);
+            continue;
+        }
+        if plain_section(t) && next_nonempty(&lines, i + 1).is_some_and(|n| list_mark(n).is_some())
+        {
+            heading_line(ui, 2, t);
+            continue;
+        }
+        wrapped(ui, CREAM, t);
+        ui.dummy([0.0, 6.0]);
+    }
+}
+
+fn heading_line(ui: &Ui, level: u8, rest: &str) {
+    let before = match level {
+        1 => 10.0,
+        2 => 8.0,
+        _ => 6.0,
+    };
+    ui.dummy([0.0, before]);
+    wrapped(ui, GOLD, rest);
+    ui.dummy([0.0, 4.0]);
+}
+
+fn next_nonempty<'a>(lines: &'a [&str], from: usize) -> Option<&'a str> {
+    lines
+        .get(from..)?
+        .iter()
+        .map(|l| l.trim_start())
+        .find(|l| !l.is_empty())
+}
+
+fn heading(line: &str) -> Option<(u8, &str)> {
+    if let Some(rest) = line.strip_prefix("### ") {
+        Some((3, rest))
+    } else if let Some(rest) = line.strip_prefix("## ") {
+        Some((2, rest))
+    } else {
+        line.strip_prefix("# ").map(|rest| (1, rest))
+    }
+}
+
+fn plain_section(line: &str) -> bool {
+    let n = line.chars().count();
+    if !(2..=56).contains(&n) {
+        return false;
+    }
+    !matches!(line.chars().last(), Some('.' | '!' | '?' | ',' | ';'))
+}
+
+fn list_mark(line: &str) -> Option<(String, &str)> {
+    for p in ["- ", "* ", "o "] {
+        if let Some(rest) = line.strip_prefix(p) {
+            return Some(("•".into(), rest));
+        }
+    }
+    if let Some(rest) = line.strip_prefix('•') {
+        return Some(("•".into(), rest.strip_prefix(' ').unwrap_or(rest)));
+    }
+    let mut n = 0usize;
+    let bytes = line.as_bytes();
+    while n < bytes.len() && bytes[n].is_ascii_digit() {
+        n += 1;
+    }
+    if n > 0 && bytes.get(n) == Some(&b'.') && bytes.get(n + 1) == Some(&b' ') {
+        return Some((format!("{}.", &line[..n]), &line[n + 2..]));
+    }
+    None
 }
 
 /// Gold-tick section header — same plate as build cards, used on Setup/Settings too.
@@ -1250,5 +1327,21 @@ mod tests {
             Some(t0),
             t0 + Duration::from_secs(4)
         ));
+    }
+
+    #[test]
+    fn prose_classifies_headings_and_lists() {
+        assert_eq!(super::heading("## Open World"), Some((2, "Open World")));
+        assert_eq!(super::heading("# Patch"), Some((1, "Patch")));
+        assert_eq!(super::heading("Hello"), None);
+        assert_eq!(
+            super::list_mark("- Black Lion"),
+            Some(("•".into(), "Black Lion"))
+        );
+        assert_eq!(super::list_mark("2. Second"), Some(("2.".into(), "Second")));
+        assert_eq!(super::list_mark("• Already"), Some(("•".into(), "Already")));
+        assert_eq!(super::list_mark("plain"), None);
+        assert!(super::plain_section("Open World"));
+        assert!(!super::plain_section("See below for details."));
     }
 }

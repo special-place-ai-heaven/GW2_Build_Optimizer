@@ -39,7 +39,7 @@ pub(in crate::ui::main_view) fn render_talk_tab(ui: &Ui, state: &mut AddonState)
     ui.spacing();
 
     let user_icon = state.main.current_build.as_ref().and_then(|b| {
-        state.main.game_db.as_ref().and_then(|db| {
+        state.main.game_db.as_deref().and_then(|db| {
             crate::ui::icons::profession_icon_url(db, &b.profession).map(str::to_string)
         })
     });
@@ -233,4 +233,73 @@ fn talk_context(state: &AddonState) -> String {
         state.main.game_mode.label(),
         role
     )
+}
+
+#[cfg(test)]
+mod tests {
+    /// Pull the number out of a `from_secs(N)` call on the given line.
+    fn parse_from_secs(line: &str) -> Option<u64> {
+        let after = line.split("from_secs(").nth(1)?;
+        after.split(')').next()?.trim().parse().ok()
+    }
+
+    /// Pull the first run of ASCII digits out of a line.
+    fn parse_leading_number(line: &str) -> Option<u64> {
+        let digits: String = line
+            .chars()
+            .skip_while(|c| !c.is_ascii_digit())
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        digits.parse().ok()
+    }
+
+    #[test]
+    fn parse_from_secs_extracts_the_value() {
+        assert_eq!(
+            parse_from_secs("    const KITCHEN_TIMEOUT: Duration = Duration::from_secs(120);"),
+            Some(120),
+        );
+    }
+
+    #[test]
+    fn parse_leading_number_extracts_first_digit_run() {
+        assert_eq!(
+            parse_leading_number(
+                "    /// Wall-clock start of the current kitchen wait (90s, not frame-counted)."
+            ),
+            Some(90),
+        );
+    }
+
+    #[test]
+    fn kitchen_timeout_comment_matches_constant() {
+        // GLM F30: `state.rs`'s `chat_wait_started` doc comment must state
+        // the same wait duration as the real `KITCHEN_TIMEOUT` constant in
+        // `ui/main_view/mod.rs`'s `render_main`. Both numbers are parsed
+        // straight out of the live source files (not duplicated here) so
+        // this test cannot pass by accident and fails again the moment
+        // either one drifts from the other.
+        let mod_src = include_str!("../mod.rs");
+        let timeout_line = mod_src
+            .lines()
+            .find(|l| l.contains("const KITCHEN_TIMEOUT"))
+            .expect("KITCHEN_TIMEOUT constant must exist in ui/main_view/mod.rs");
+        let constant_secs = parse_from_secs(timeout_line)
+            .expect("could not parse KITCHEN_TIMEOUT's from_secs(..) value");
+
+        let state_src = include_str!("../../../state.rs");
+        let comment_line = state_src
+            .lines()
+            .find(|l| l.contains("Wall-clock start of the current kitchen wait"))
+            .expect("chat_wait_started doc comment must exist in state.rs");
+        let commented_secs = parse_leading_number(comment_line)
+            .expect("doc comment must state the wait duration in seconds, e.g. `(120s, ...)`");
+
+        assert_eq!(
+            commented_secs, constant_secs,
+            "state.rs's chat_wait_started doc comment says {commented_secs}s but \
+             KITCHEN_TIMEOUT in ui/main_view/mod.rs is {constant_secs}s -- fix the \
+             comment so it states the real timeout",
+        );
+    }
 }

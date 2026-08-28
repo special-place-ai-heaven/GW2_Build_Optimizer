@@ -1,5 +1,5 @@
 use super::optimization::{
-    apply_gemini_response, candidate_to_suggestion, humanize_tool_names, result_alert_tab,
+    apply_gemini_response, candidate_to_suggestion, humanize_tool_names, keep_loadout_pets,
     simulate_suggestion_rotation, summarize_resolved_build, synergy_result_to_suggestion,
 };
 use crate::state::AddonState;
@@ -10,14 +10,43 @@ use gw2_optimizer::balance::BalanceContext;
 use gw2_optimizer::scoring::OptimizationWeights;
 use gw2_optimizer::ScenarioSpec;
 
-/// Start optimization in background thread (S11-T01, S11-T02, S11-T03)
-pub(super) fn start_optimization(state: &mut AddonState) {
-    // Guard against concurrent optimization
-    if state.main.optimizing {
-        return;
+/// Which button started this run.
+///
+/// Carried explicitly from the entry point down to the worker instead of being
+/// inferred from `state.main.current_build`. The old inference gated New Build
+/// runs against whatever gear the character happened to be wearing, which is
+/// exactly what the player did *not* ask for when they pressed "Create build".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum OptimizeEntry {
+    /// "Create build" — no baseline, nothing to beat.
+    NewBuild,
+    /// "Improve build" — the player's current gear is the bar to clear.
+    Improve,
+}
+
+impl OptimizeEntry {
+    /// Tab to blink when this run's result lands.
+    fn result_tab(self) -> crate::state::MainTab {
+        match self {
+            OptimizeEntry::NewBuild => crate::state::MainTab::NewBuild,
+            OptimizeEntry::Improve => crate::state::MainTab::Improve,
+        }
     }
 
-    // Get profession from current build
+    /// Whether this entry point wants the always-better baseline gate at all.
+    fn wants_baseline(self) -> bool {
+        matches!(self, OptimizeEntry::Improve)
+    }
+}
+
+/// New Build entry point (S11-T01, S11-T02, S11-T03).
+///
+/// The only caller is the left-panel action button in `main_view::mod.rs`, on
+/// the branch where the Improve tab is *not* active. The entry point is bound
+/// here, not derived from state further down.
+pub(super) fn start_optimization(state: &mut AddonState) {
+    // Profession still comes from the resolved character — a new build is built
+    // for whoever is selected. That is a profession lookup, not a baseline.
     let profession_name = state
         .main
         .current_build
@@ -25,12 +54,27 @@ pub(super) fn start_optimization(state: &mut AddonState) {
         .map(|b| b.profession.clone())
         .unwrap_or_default();
 
-    start_optimization_with_profession(state, &profession_name);
+    start_optimization_inner(state, &profession_name, OptimizeEntry::NewBuild);
 }
 
-/// Start optimization with explicit profession name (avoids borrow conflicts).
-/// Uses `state.main.build_locks` for spec/trait lock constraints.
+/// Improve entry point: start with an explicit profession name (avoids borrow
+/// conflicts). Uses `state.main.build_locks` for spec/trait lock constraints.
+///
+/// The only caller is the left-panel action button in `main_view::mod.rs`, on
+/// the Improve branch. The historical name is kept because `mod.rs` is not in
+/// this leaf's write set.
+// ponytail: rename to `start_improve_optimization` when `main_view/mod.rs` is
+// next open — the name predates the explicit entry flag.
 pub(super) fn start_optimization_with_profession(state: &mut AddonState, profession_name: &str) {
+    start_optimization_inner(state, profession_name, OptimizeEntry::Improve);
+}
+
+fn start_optimization_inner(state: &mut AddonState, profession_name: &str, entry: OptimizeEntry) {
+    // Guard against concurrent optimization.
+    if state.main.optimizing {
+        return;
+    }
+
     if state.main.game_db.is_none() {
         state.main.error = Some(t("err.no_gamedb"));
         return;
@@ -58,9 +102,21 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
         .as_ref()
         .map(summarize_resolved_build);
     // Current character build for the Improve always-better baseline gate.
-    let loadout = state.main.current_build.clone();
+    // Cloned only when this run is actually gated: a New Build run has no
+    // baseline, so carrying the loadout into the worker would just tempt the
+    // next reader into inferring the entry point from it again.
+    let loadout = if entry.wants_baseline() {
+        state.main.current_build.clone()
+    } else {
+        None
+    };
+    let current_pets = state
+        .main
+        .current_build
+        .as_ref()
+        .map(|b| b.pets.clone())
+        .unwrap_or_default();
     let addon_dir = state.addon_dir.clone();
-    let token = state.cancel_token.clone();
     let weights = state.main.weights.clone();
     let selected_role = state.main.selected_role;
     let build_locks = state.main.build_locks.clone();
@@ -108,7 +164,11 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
     state.main.comparison.loading = true;
     state.main.comparison.error = None;
 
-    std::thread::spawn(move || {
+    // `spawn_worker` is the addon's only production thread launch: it names the
+    // thread, registers the `JoinHandle` so `on_unload` can wait for it, binds
+    // the LLM transports to this run's cancel token, and hands the body its own
+    // token clone.
+    let started = state.spawn_worker("optimize", move |token| {
         let panic_token = token.clone();
         let thread_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let result = (|| -> Result<Vec<crate::ui::comparison::BuildSuggestion>, String> {
@@ -148,6 +208,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                 // user's OWN current gear under this run's weights so a worse
                 // optimizer result is refused. New Build has no baseline.
                 let improve_baseline = capture_improve_baseline(
+                    entry,
                     loadout.as_ref(),
                     &db,
                     &profession_name,
@@ -185,33 +246,26 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             if token.is_cancelled() {
                                 return Err("Cancelled".into());
                             }
-                            let (served, serves_baseline) = apply_improve_baseline_gate(
+                            let (served, outcome) = apply_improve_baseline_gate(
                                 synergy_result,
-                                improve_baseline.as_ref(),
+                                &improve_baseline,
                                 &db,
                                 &profession_name,
                                 &weights,
                                 &balance_ctx,
                                 &scenario,
                             );
-                            // Serving the baseline means their build, not an improvement.
-                            let label_override = if serves_baseline {
-                                None
-                            } else {
-                                locked_spec_name
-                                    .as_ref()
-                                    .map(|n| tf("fmt.improved", &[("name", n)]))
-                            };
-                            let suggestion = synergy_result_to_suggestion(
+                            let mut suggestion = synergy_result_to_suggestion(
                                 &served,
                                 &db,
                                 &profession_name,
                                 &scenario,
                                 selected_role,
-                                label_override,
+                                improve_label_override(outcome, locked_spec_name.as_deref()),
                                 &addon_dir,
                                 &weights,
                             );
+                            keep_loadout_pets(&mut suggestion, &current_pets);
                             return Ok(vec![suggestion]);
                         }
                         Err(e) => {
@@ -236,7 +290,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     let token_det = token.clone();
                     let llm_ref: Option<&dyn gw2_optimizer::llm::LlmClient> =
                         llm_client_opt.as_ref().map(|c| c.as_ref());
-                    match gw2_optimizer::engine::optimize_deterministic(
+                    match run_deterministic_tier(
                         &db,
                         &profession_name,
                         &weights,
@@ -244,7 +298,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                         llm_ref,
                         current_build_summary.as_deref(),
                         &build_locks,
-                        Some(&scenario),
+                        &scenario,
                         &mut |progress: gw2_optimizer::engine::OptimizeProgress| {
                             if token_det.is_cancelled() {
                                 return;
@@ -253,38 +307,32 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                                 s.main.optimize_stage = progress.stage.clone();
                             });
                         },
+                        &|| token.is_cancelled(),
                     ) {
                         Ok(synergy_result) => {
                             if token.is_cancelled() {
                                 return Err("Cancelled".into());
                             }
-                            let (served, serves_baseline) = apply_improve_baseline_gate(
+                            let (served, outcome) = apply_improve_baseline_gate(
                                 synergy_result,
-                                improve_baseline.as_ref(),
+                                &improve_baseline,
                                 &db,
                                 &profession_name,
                                 &weights,
                                 &balance_ctx,
                                 &scenario,
                             );
-                            // Serving the baseline means their build, not an improvement.
-                            let label_override = if serves_baseline {
-                                None
-                            } else {
-                                locked_spec_name
-                                    .as_ref()
-                                    .map(|n| tf("fmt.improved", &[("name", n)]))
-                            };
-                            let suggestion = synergy_result_to_suggestion(
+                            let mut suggestion = synergy_result_to_suggestion(
                                 &served,
                                 &db,
                                 &profession_name,
                                 &scenario,
                                 selected_role,
-                                label_override,
+                                improve_label_override(outcome, locked_spec_name.as_deref()),
                                 &addon_dir,
                                 &weights,
                             );
+                            keep_loadout_pets(&mut suggestion, &current_pets);
                             return Ok(vec![suggestion]);
                         }
                         Err(e) => {
@@ -301,20 +349,57 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                 }
 
                 // ═══ Fallback 2: Legacy pipeline (no LLM invent-a-build) ═══
+                //
+                // Tier 3 returns `BuildCandidate`s, which the referee never
+                // ranks, so this tier cannot show that it beat the player's own
+                // gear. When the Improve gate is armed we therefore do not run
+                // it at all: an unranked legacy build served under an "improved"
+                // banner is exactly the silent ungate this gate exists to stop.
+                // (New Build, and an Improve run whose baseline could not be
+                // captured, still fall through — the latter loudly.)
+                let legacy = improve_baseline.legacy_tier();
+                if let LegacyTier::ServeBaseline(baseline) = legacy {
+                    gate_log(
+                        nexus::log::LogLevel::Warning,
+                        "Improve: optimize_v2 and the deterministic engine both failed; the legacy tier cannot be ranked against your gear, serving your current build".to_string(),
+                    );
+                    let kept = kept_baseline_result(
+                        baseline,
+                        &db,
+                        &profession_name,
+                        &balance_ctx,
+                        &scenario,
+                    );
+                    let mut suggestion = synergy_result_to_suggestion(
+                        &kept,
+                        &db,
+                        &profession_name,
+                        &scenario,
+                        selected_role,
+                        improve_label_override(
+                            ImproveOutcome::KeptCurrentGear,
+                            locked_spec_name.as_deref(),
+                        ),
+                        &addon_dir,
+                        &weights,
+                    );
+                    keep_loadout_pets(&mut suggestion, &current_pets);
+                    return Ok(vec![suggestion]);
+                }
+
                 let profession = db.profession(&profession_name).ok_or_else(|| {
                     format!("Profession '{}' not found in GameDb", profession_name)
                 })?;
 
                 let token_progress = token.clone();
-                let candidates = gw2_optimizer::engine::optimize(
+                let candidates = run_legacy_tier(
+                    &db,
                     profession,
                     &weights,
-                    None,
-                    &db.items,
-                    &db.itemstats,
-                    &db.specializations,
-                    &db.traits,
-                    |progress| {
+                    &balance_ctx,
+                    &build_locks,
+                    5,
+                    &mut |progress| {
                         if token_progress.is_cancelled() {
                             return;
                         }
@@ -322,10 +407,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             s.main.optimize_stage = progress.stage.clone();
                         });
                     },
-                    5,
-                    &balance_ctx,
-                    &build_locks,
-                    &db.pvp_amulets,
+                    &|| token.is_cancelled(),
                 )?;
 
                 if token.is_cancelled() {
@@ -336,6 +418,18 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     .iter()
                     .map(|c| candidate_to_suggestion(c, &db, &balance_ctx))
                     .collect();
+                for suggestion in suggestions.iter_mut() {
+                    keep_loadout_pets(suggestion, &current_pets);
+                }
+
+                // An Improve run only reaches here with no comparable baseline.
+                // Say so on the result instead of letting the always-better
+                // promise quietly lapse.
+                if let LegacyTier::RunUngated(why) = legacy {
+                    for suggestion in suggestions.iter_mut() {
+                        suggestion.quality_reasons.push(why.to_string());
+                    }
+                }
 
                 // Enrich top suggestion with LLM reasoning (legacy path)
                 if config.has_active_llm_key() {
@@ -348,6 +442,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                     });
 
                     match enrich_with_llm(
+                        entry,
                         &config,
                         &profession_name,
                         &weights,
@@ -391,8 +486,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
                             s.main.comparison.suggestions = suggestions;
                             s.main.comparison.selected_suggestion = 0;
                             s.main.comparison.show_optimized = true;
-                            s.main.tab_alert =
-                                Some(result_alert_tab(s.main.current_build.is_some()));
+                            s.main.tab_alert = Some(entry.result_tab());
                             s.main.provider_issue = None;
                         }
                         Err(e) => {
@@ -428,6 +522,88 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
             }
         }
     });
+
+    // The OS refused the thread: the work never started, so clear the flags we
+    // set above or the overlay spins on "Optimizing…" forever.
+    if !started {
+        state.main.optimizing = false;
+        state.main.comparison.loading = false;
+        // Not `err.opt_panic`: nothing panicked, the thread never existed.
+        // ponytail: English, like BASELINE_KEPT_REASON below — needs a
+        // catalogue key in `locales/`, which is not in this leaf's write set.
+        state.main.comparison.error = Some(WORKER_REFUSED_ERROR.to_string());
+    }
+}
+
+/// Shown when the OS refuses to create the optimizer thread.
+const WORKER_REFUSED_ERROR: &str =
+    "Could not start the optimizer thread - the system refused it. Try again.";
+
+/// Tier 2 — the deterministic synergy engine.
+///
+/// Split out of the worker body so a test can prove the call site really hands
+/// the engine a live cancellation probe. `optimize_deterministic_cancellable`
+/// returns `Err("Cancelled")` the moment the probe fires; the non-cancellable
+/// twin drops the probe on the floor and runs to completion, which is what made
+/// production tier 2 uncancellable.
+#[allow(clippy::too_many_arguments)]
+fn run_deterministic_tier(
+    db: &gw2_optimizer::gamedb::GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    llm_client: Option<&dyn gw2_optimizer::llm::LlmClient>,
+    current_build_summary: Option<&str>,
+    locks: &gw2_core::types::BuildLocks,
+    scenario: &ScenarioSpec,
+    on_progress: &mut dyn FnMut(gw2_optimizer::engine::OptimizeProgress),
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<gw2_optimizer::engine::SynergyResult, String> {
+    gw2_optimizer::engine::optimize_deterministic_cancellable(
+        db,
+        profession_name,
+        weights,
+        ctx,
+        llm_client,
+        current_build_summary,
+        locks,
+        Some(scenario),
+        on_progress,
+        is_cancelled,
+    )
+}
+
+/// Tier 3 — the legacy gear + spec search.
+///
+/// Same seam as [`run_deterministic_tier`]: the cancellable engine entry point
+/// is the only one this flow may call, and a test pins that by driving this
+/// wrapper with a probe that is already firing.
+#[allow(clippy::too_many_arguments)]
+fn run_legacy_tier(
+    db: &gw2_optimizer::gamedb::GameDb,
+    profession: &gw2_api::models::Profession,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    locks: &gw2_core::types::BuildLocks,
+    top_n: usize,
+    on_progress: &mut dyn FnMut(gw2_optimizer::engine::OptimizeProgress),
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<gw2_optimizer::engine::BuildCandidate>, String> {
+    gw2_optimizer::engine::optimize_cancellable(
+        profession,
+        weights,
+        None,
+        &db.items,
+        &db.itemstats,
+        &db.specializations,
+        &db.traits,
+        on_progress,
+        top_n,
+        ctx,
+        locks,
+        &db.pvp_amulets,
+        is_cancelled,
+    )
 }
 
 /// Call the active LLM provider to enrich the top optimizer suggestion with AI reasoning.
@@ -436,6 +612,7 @@ pub(super) fn start_optimization_with_profession(state: &mut AddonState, profess
 // independent inputs — grouping them adds indirection without clarity.
 #[allow(clippy::too_many_arguments)]
 fn enrich_with_llm(
+    entry: OptimizeEntry,
     config: &gw2_core::config::AppConfig,
     profession_name: &str,
     weights: &OptimizationWeights,
@@ -449,11 +626,18 @@ fn enrich_with_llm(
 ) -> Result<(), String> {
     let client = gw2_optimizer::llm::create_client(config, addon_dir).map_err(|e| e.to_string())?;
 
-    // Build tool-aware prompt
-    let prompt = if current_build_summary.is_some() {
-        gw2_optimizer::prompts::improve_build_prompt_with_tools(profession_name, weights, game_mode)
-    } else {
-        gw2_optimizer::prompts::new_build_prompt_with_tools(profession_name, weights, game_mode)
+    // Build tool-aware prompt. Which prompt to use is the entry point's call,
+    // not something to re-derive from whether a build summary happens to be
+    // non-empty: a New Build run on a geared character has a summary too.
+    let prompt = match entry {
+        OptimizeEntry::Improve => gw2_optimizer::prompts::improve_build_prompt_with_tools(
+            profession_name,
+            weights,
+            game_mode,
+        ),
+        OptimizeEntry::NewBuild => {
+            gw2_optimizer::prompts::new_build_prompt_with_tools(profession_name, weights, game_mode)
+        }
     };
 
     let tools = gw2_optimizer::llm::tools::tool_definitions();
@@ -532,31 +716,199 @@ fn enrich_with_llm(
 // Improve always-better baseline gate (spec §12.4: Improve locks existing gear)
 // ────────────────────────────────────────────────────────────────────────────
 
+/// Diagnostics from the always-better gate.
+///
+/// `nexus::log::log` needs the Nexus API table, which unit tests do not have
+/// (same reason `state::worker_log` exists), and the gate is unit-tested, so
+/// test builds go to stderr.
+fn gate_log(level: nexus::log::LogLevel, message: String) {
+    #[cfg(test)]
+    {
+        let _ = level;
+        eprintln!("[GW2BuildOpt] {}", message);
+    }
+    #[cfg(not(test))]
+    nexus::log::log(level, "GW2BuildOpt", message);
+}
+
 /// The user's own current build, once evaluated under this run's weights.
+#[derive(Debug)]
 struct ImproveBaseline {
     validated: gw2_optimizer::validation::ValidatedBuild,
     report: gw2_optimizer::referee::RefereeReport,
+}
+
+/// What the always-better gate found. Three states, not `Option`: "New Build,
+/// no baseline wanted" and "Improve, baseline wanted but not obtainable" have
+/// to be told apart, because only the second one owes the player an
+/// explanation. Collapsing them into `None` is how the always-better promise
+/// used to lapse in silence on any character with an unresolvable piece.
+enum BaselineCapture {
+    /// New Build — nothing to beat, by design.
+    NotRequested,
+    /// Improve — the player's gear ranked and ready to gate against.
+    Ranked(Box<ImproveBaseline>),
+    /// Improve — the gear could not be ranked. The run is ungated and the
+    /// carried reason says so on the served result.
+    Unavailable(gw2_optimizer::data::quality::DataQualityReason),
+}
+
+/// What the legacy tier is allowed to do on this run.
+///
+/// Tier 3 returns `BuildCandidate`s the referee never ranks, so it cannot show
+/// it beat the player's gear. An armed gate therefore means "do not serve tier
+/// 3 at all" rather than "serve it and hope".
+#[derive(Debug, Clone, Copy)]
+enum LegacyTier<'a> {
+    /// New Build — run it, nothing to be better than.
+    Run,
+    /// Improve with no rankable baseline — run it, but the always-better
+    /// promise does not cover the result and the reason must be shown.
+    RunUngated(&'a gw2_optimizer::data::quality::DataQualityReason),
+    /// Improve with a ranked baseline — skip tier 3 and serve that baseline.
+    ServeBaseline(&'a ImproveBaseline),
+}
+
+impl BaselineCapture {
+    fn legacy_tier(&self) -> LegacyTier<'_> {
+        match self {
+            BaselineCapture::NotRequested => LegacyTier::Run,
+            BaselineCapture::Unavailable(reason) => LegacyTier::RunUngated(reason),
+            BaselineCapture::Ranked(baseline) => LegacyTier::ServeBaseline(baseline),
+        }
+    }
+}
+
+/// Outcome of the always-better gate for the result being served.
+///
+/// This is the Improve tab's headline state, not a footnote: `KeptCurrentGear`
+/// means the player is looking at their own gear because nothing beat it.
+///
+/// It reaches the UI through [`crate::ui::comparison::BuildSuggestion::label`]
+/// (see [`ImproveOutcome::headline`] / [`ImproveOutcome::from_label`]), which
+/// is the one field of that struct this flow writes.
+// ponytail: the real shape is an `outcome: ImproveOutcome` field on
+// `BuildSuggestion`. `ui/comparison.rs` is not in this leaf's write set; add
+// the field and drop `from_label` when that file is next open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ImproveOutcome {
+    /// No gate ran: New Build, or an Improve run with no rankable baseline.
+    Ungated,
+    /// The optimizer outranked the player's current gear.
+    Improved,
+    /// The gate refused the optimizer result and served the player's gear back.
+    KeptCurrentGear,
+}
+
+/// Headline the gate stamps when it refuses the optimizer result.
+///
+/// A plain English constant, matching `BASELINE_KEPT_REASON` below and the
+/// `"Optimized Build"` fallback in `optimization.rs`: adding a catalogue key
+/// needs `locales/`, which is not in this leaf's write set.
+// ponytail: move behind `t("improve.kept")` when `locales/` is next open, and
+// switch `from_label` to read the outcome off the suggestion instead of its
+// rendered text.
+const KEPT_GEAR_HEADLINE: &str = "Kept your gear - nothing beat it";
+
+impl ImproveOutcome {
+    /// The headline this outcome owns, or `None` when the ordinary build label
+    /// already says everything there is to say.
+    pub(super) fn headline(self) -> Option<&'static str> {
+        match self {
+            ImproveOutcome::Ungated | ImproveOutcome::Improved => None,
+            ImproveOutcome::KeptCurrentGear => Some(KEPT_GEAR_HEADLINE),
+        }
+    }
+
+    /// Recover the gate outcome a served label encodes. `None` means the label
+    /// is an ordinary build label the gate does not own.
+    pub(super) fn from_label(label: &str) -> Option<Self> {
+        (label == KEPT_GEAR_HEADLINE).then_some(ImproveOutcome::KeptCurrentGear)
+    }
+}
+
+/// Label to stamp on the served suggestion.
+///
+/// `KeptCurrentGear` wins over the locked-elite-spec label: "Improved:
+/// Firebrand" on the player's own unchanged gear is a lie, and blanking the
+/// label (the previous behaviour) left the refusal invisible.
+fn improve_label_override(outcome: ImproveOutcome, locked_spec: Option<&str>) -> Option<String> {
+    match outcome {
+        ImproveOutcome::KeptCurrentGear => outcome.headline().map(str::to_string),
+        ImproveOutcome::Improved | ImproveOutcome::Ungated => {
+            locked_spec.map(|name| tf("fmt.improved", &[("name", name)]))
+        }
+    }
 }
 
 /// Message shown when the optimizer could not beat the user's current gear.
 const BASELINE_KEPT_REASON: &str =
     "Your current gear already outperforms every candidate for these weights — kept your build.";
 
+/// Why an Improve run could not be gated.
+fn baseline_unavailable_reason(
+    profession_name: &str,
+    ctx: &BalanceContext,
+    detail: &str,
+) -> gw2_optimizer::data::quality::DataQualityReason {
+    gw2_optimizer::data::quality::DataQualityReason {
+        field: "improve.baseline".into(),
+        entity: profession_name.into(),
+        modes: vec![ctx.game_mode.label().to_string()],
+        explanation: format!(
+            "Could not rank your current gear, so this result is NOT guaranteed to beat it: {}",
+            detail
+        ),
+    }
+}
+
 /// Capture and rank the user's current build for the Improve entry point.
-/// `None` without a loadout (New Build is ungated) or when the resolved names
-/// do not survive validation (`errors` non-empty → no comparable baseline).
+///
+/// The entry point is passed in, never inferred: a New Build run is
+/// [`BaselineCapture::NotRequested`] even when the character is wearing a full
+/// kit. An Improve run that cannot be validated is
+/// [`BaselineCapture::Unavailable`] — logged, and carried to the player — never
+/// a silent ungate.
+#[allow(clippy::too_many_arguments)]
 fn capture_improve_baseline(
+    entry: OptimizeEntry,
     loadout: Option<&gw2_core::types::ResolvedBuild>,
     db: &gw2_optimizer::gamedb::GameDb,
     profession_name: &str,
     weights: &OptimizationWeights,
     ctx: &BalanceContext,
     scenario: &ScenarioSpec,
-) -> Option<ImproveBaseline> {
-    let plate = baseline_plate_from_loadout(loadout?);
+) -> BaselineCapture {
+    if !entry.wants_baseline() {
+        return BaselineCapture::NotRequested;
+    }
+    let Some(loadout) = loadout else {
+        let reason = baseline_unavailable_reason(
+            profession_name,
+            ctx,
+            "your current build has not been resolved yet",
+        );
+        gate_log(
+            nexus::log::LogLevel::Warning,
+            format!("Improve baseline gate disabled: {}", reason.explanation),
+        );
+        return BaselineCapture::Unavailable(reason);
+    };
+    let plate = baseline_plate_from_loadout(loadout);
     let validated = gw2_optimizer::validation::validate_gemini_build(&plate, db, profession_name);
     if !validated.errors.is_empty() {
-        return None;
+        let detail = validated
+            .errors
+            .iter()
+            .map(|e| e.detail.as_str())
+            .collect::<Vec<_>>()
+            .join("; ");
+        let reason = baseline_unavailable_reason(profession_name, ctx, &detail);
+        gate_log(
+            nexus::log::LogLevel::Warning,
+            format!("Improve baseline gate disabled: {}", reason.explanation),
+        );
+        return BaselineCapture::Unavailable(reason);
     }
     let report = gw2_optimizer::referee::evaluate_validated_build(
         &validated,
@@ -566,24 +918,55 @@ fn capture_improve_baseline(
         ctx,
         scenario,
     );
-    Some(ImproveBaseline { validated, report })
+    BaselineCapture::Ranked(Box::new(ImproveBaseline { validated, report }))
+}
+
+/// Re-materialise the player's own ranked build as something servable.
+fn kept_baseline_result(
+    baseline: &ImproveBaseline,
+    db: &gw2_optimizer::gamedb::GameDb,
+    profession_name: &str,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+) -> gw2_optimizer::engine::SynergyResult {
+    let mut kept = gw2_optimizer::engine::synergy_result_from_validated(
+        baseline.validated.clone(),
+        db,
+        profession_name,
+        ctx,
+        Some(scenario),
+    );
+    kept.quality_reasons
+        .push(gw2_optimizer::data::quality::DataQualityReason {
+            field: "improve.baseline".into(),
+            entity: profession_name.into(),
+            modes: vec![ctx.game_mode.label().to_string()],
+            explanation: BASELINE_KEPT_REASON.to_string(),
+        });
+    kept
 }
 
 /// Serve-time gate: whichever result outranks wins lexicographically; equality
 /// keeps the user's gear (no churn without a measurable win). Returns the
-/// SynergyResult to serve plus whether that is the user's own baseline.
+/// SynergyResult to serve plus the outcome the UI has to show for it.
 #[allow(clippy::too_many_arguments)]
 fn apply_improve_baseline_gate(
     result: gw2_optimizer::engine::SynergyResult,
-    baseline: Option<&ImproveBaseline>,
+    baseline: &BaselineCapture,
     db: &gw2_optimizer::gamedb::GameDb,
     profession_name: &str,
     weights: &OptimizationWeights,
     ctx: &BalanceContext,
     scenario: &ScenarioSpec,
-) -> (gw2_optimizer::engine::SynergyResult, bool) {
-    let Some(baseline) = baseline else {
-        return (result, false);
+) -> (gw2_optimizer::engine::SynergyResult, ImproveOutcome) {
+    let baseline = match baseline {
+        BaselineCapture::NotRequested => return (result, ImproveOutcome::Ungated),
+        BaselineCapture::Unavailable(reason) => {
+            let mut result = result;
+            result.quality_reasons.push(reason.clone());
+            return (result, ImproveOutcome::Ungated);
+        }
+        BaselineCapture::Ranked(baseline) => baseline.as_ref(),
     };
     let result_report = gw2_optimizer::referee::evaluate_validated_build(
         &result.validated,
@@ -609,28 +992,14 @@ fn apply_improve_baseline_gate(
                     baseline.report.user_intent_score,
                 ),
             });
-        (result, false)
+        (result, ImproveOutcome::Improved)
     } else {
-        nexus::log::log(
+        gate_log(
             nexus::log::LogLevel::Info,
-            "GW2BuildOpt",
-            "Improve baseline gate: optimizer did not outrank the user's current gear; serving their build",
+            "Improve baseline gate: optimizer did not outrank the user's current gear; serving their build".to_string(),
         );
-        let mut kept = gw2_optimizer::engine::synergy_result_from_validated(
-            baseline.validated.clone(),
-            db,
-            profession_name,
-            ctx,
-            Some(scenario),
-        );
-        kept.quality_reasons
-            .push(gw2_optimizer::data::quality::DataQualityReason {
-                field: "improve.baseline".into(),
-                entity: profession_name.into(),
-                modes: vec![ctx.game_mode.label().to_string()],
-                explanation: BASELINE_KEPT_REASON.to_string(),
-            });
-        (kept, true)
+        let kept = kept_baseline_result(baseline, db, profession_name, ctx, scenario);
+        (kept, ImproveOutcome::KeptCurrentGear)
     }
 }
 
@@ -688,6 +1057,9 @@ fn baseline_plate_from_loadout(
     }
 
     let mut skills = Vec::new();
+    if !loadout.pets.is_empty() {
+        skills.push(format!("Pets: {}", loadout.pets.join(" / ")));
+    }
     if let Some(skill) = &loadout.skills.heal {
         skills.push(format!("Heal: {}", skill.name));
     }
@@ -802,6 +1174,368 @@ fn selected_trait_names(spec: &gw2_core::types::ResolvedSpec) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_scenario() -> ScenarioSpec {
+        use gw2_optimizer::scenario::{CombatKind, CombatTier, OptimizationTarget, TargetProfile};
+        ScenarioSpec {
+            game_mode: gw2_core::types::GameMode::PvE,
+            combat_tier: CombatTier::Party,
+            combat_kind: CombatKind::StrikeSpike,
+            target_profile: TargetProfile::Single,
+            optimization_target: OptimizationTarget {
+                label: "PvE".to_string(),
+            },
+            patch_id: None,
+        }
+    }
+
+    fn test_ctx() -> BalanceContext {
+        BalanceContext::new(gw2_core::types::GameMode::PvE)
+    }
+
+    /// A loadout with enough shape for `baseline_plate_from_loadout`, but no
+    /// names the empty test GameDb can resolve — the "incomplete plate" case
+    /// that used to ungate Improve in silence.
+    fn unresolvable_loadout() -> gw2_core::types::ResolvedBuild {
+        use gw2_core::types::{ResolvedBuild, ResolvedGearPiece};
+        ResolvedBuild {
+            profession: "Guardian".into(),
+            armor: vec![ResolvedGearPiece {
+                slot: "Helm".into(),
+                stat_prefix: "Berserker's".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// The player's own gear, ranked. `RefereeReport` has no public
+    /// constructor, so it comes from the real referee over an empty build.
+    fn ranked_baseline(
+        db: &gw2_optimizer::gamedb::GameDb,
+        ctx: &BalanceContext,
+        scenario: &ScenarioSpec,
+    ) -> BaselineCapture {
+        let validated = gw2_optimizer::validation::ValidatedBuild::default();
+        let report = gw2_optimizer::referee::evaluate_validated_build(
+            &validated,
+            db,
+            "Guardian",
+            &OptimizationWeights::preset_power_dps(),
+            ctx,
+            scenario,
+        );
+        BaselineCapture::Ranked(Box::new(ImproveBaseline { validated, report }))
+    }
+
+    fn empty_synergy_result(
+        db: &gw2_optimizer::gamedb::GameDb,
+        ctx: &BalanceContext,
+        scenario: &ScenarioSpec,
+    ) -> gw2_optimizer::engine::SynergyResult {
+        gw2_optimizer::engine::synergy_result_from_validated(
+            gw2_optimizer::validation::ValidatedBuild::default(),
+            db,
+            "Guardian",
+            ctx,
+            Some(scenario),
+        )
+    }
+
+    #[test]
+    fn improve_entry_is_explicit() {
+        let db = gw2_optimizer::gamedb::GameDb::empty_for_tests();
+        let ctx = test_ctx();
+        let scenario = test_scenario();
+        let weights = OptimizationWeights::preset_power_dps();
+        let loadout = unresolvable_loadout();
+
+        // The character IS wearing gear. New Build must still refuse the
+        // baseline: the entry point decides, not `current_build`.
+        assert!(
+            matches!(
+                capture_improve_baseline(
+                    OptimizeEntry::NewBuild,
+                    Some(&loadout),
+                    &db,
+                    "Guardian",
+                    &weights,
+                    &ctx,
+                    &scenario,
+                ),
+                BaselineCapture::NotRequested
+            ),
+            "New Build must not be gated against the character's current gear"
+        );
+
+        // Same inputs, Improve entry: the gate is asked for.
+        assert!(
+            !matches!(
+                capture_improve_baseline(
+                    OptimizeEntry::Improve,
+                    Some(&loadout),
+                    &db,
+                    "Guardian",
+                    &weights,
+                    &ctx,
+                    &scenario,
+                ),
+                BaselineCapture::NotRequested
+            ),
+            "Improve must ask for a baseline"
+        );
+
+        // The result alert follows the entry point too, not the loadout.
+        assert_eq!(
+            OptimizeEntry::NewBuild.result_tab(),
+            crate::state::MainTab::NewBuild
+        );
+        assert_eq!(
+            OptimizeEntry::Improve.result_tab(),
+            crate::state::MainTab::Improve
+        );
+    }
+
+    #[test]
+    fn failed_baseline_is_visible() {
+        let db = gw2_optimizer::gamedb::GameDb::empty_for_tests();
+        let ctx = test_ctx();
+        let scenario = test_scenario();
+        let weights = OptimizationWeights::preset_power_dps();
+
+        // An Improve run whose gear cannot be validated.
+        let capture = capture_improve_baseline(
+            OptimizeEntry::Improve,
+            Some(&unresolvable_loadout()),
+            &db,
+            "Guardian",
+            &weights,
+            &ctx,
+            &scenario,
+        );
+        let BaselineCapture::Unavailable(reason) = &capture else {
+            panic!("an unresolvable loadout must report Unavailable, not vanish");
+        };
+        assert_eq!(reason.field, "improve.baseline");
+        assert!(
+            reason.explanation.contains("NOT guaranteed"),
+            "the player has to be told the guarantee lapsed: {}",
+            reason.explanation
+        );
+
+        // …and that reason has to ride along on whatever gets served.
+        let (served, outcome) = apply_improve_baseline_gate(
+            empty_synergy_result(&db, &ctx, &scenario),
+            &capture,
+            &db,
+            "Guardian",
+            &weights,
+            &ctx,
+            &scenario,
+        );
+        assert_eq!(outcome, ImproveOutcome::Ungated);
+        assert!(
+            served
+                .quality_reasons
+                .iter()
+                .any(|r| r.field == "improve.baseline"),
+            "served result carries no improve.baseline reason: {:?}",
+            served.quality_reasons
+        );
+
+        // A New Build run has nothing to explain and must stay quiet.
+        let (clean, clean_outcome) = apply_improve_baseline_gate(
+            empty_synergy_result(&db, &ctx, &scenario),
+            &BaselineCapture::NotRequested,
+            &db,
+            "Guardian",
+            &weights,
+            &ctx,
+            &scenario,
+        );
+        assert_eq!(clean_outcome, ImproveOutcome::Ungated);
+        assert!(
+            !clean
+                .quality_reasons
+                .iter()
+                .any(|r| r.field == "improve.baseline"),
+            "New Build must not be told its baseline failed"
+        );
+    }
+
+    #[test]
+    fn legacy_optimize_is_gated() {
+        let db = gw2_optimizer::gamedb::GameDb::empty_for_tests();
+        let ctx = test_ctx();
+        let scenario = test_scenario();
+
+        // New Build: tier 3 runs, nothing to be better than.
+        assert!(matches!(
+            BaselineCapture::NotRequested.legacy_tier(),
+            LegacyTier::Run
+        ));
+
+        // Improve with a ranked baseline: tier 3 has no referee ranking of its
+        // own, so it must NOT be served — this is the ungated escape hatch.
+        assert!(
+            matches!(
+                ranked_baseline(&db, &ctx, &scenario).legacy_tier(),
+                LegacyTier::ServeBaseline(_)
+            ),
+            "a gated Improve run must not fall through to an unranked legacy result"
+        );
+
+        // Improve whose baseline failed: tier 3 runs, but loudly.
+        let unavailable = BaselineCapture::Unavailable(baseline_unavailable_reason(
+            "Guardian",
+            &ctx,
+            "test detail",
+        ));
+        let LegacyTier::RunUngated(reason) = unavailable.legacy_tier() else {
+            panic!("an unavailable baseline must still run tier 3, with a reason attached");
+        };
+        assert_eq!(reason.field, "improve.baseline");
+    }
+
+    #[test]
+    fn kept_gear_is_first_class_state() {
+        let db = gw2_optimizer::gamedb::GameDb::empty_for_tests();
+        let ctx = test_ctx();
+        let scenario = test_scenario();
+        let weights = OptimizationWeights::preset_power_dps();
+
+        // Baseline and result are the same empty build, so the result ties and
+        // the gate keeps the player's gear (equality is not a win).
+        let (kept, outcome) = apply_improve_baseline_gate(
+            empty_synergy_result(&db, &ctx, &scenario),
+            &ranked_baseline(&db, &ctx, &scenario),
+            &db,
+            "Guardian",
+            &weights,
+            &ctx,
+            &scenario,
+        );
+        assert_eq!(
+            outcome,
+            ImproveOutcome::KeptCurrentGear,
+            "a tie must keep the player's gear"
+        );
+
+        // The outcome is a state the UI can render, not only a footnote: it
+        // owns a headline, that headline is what the served suggestion is
+        // labelled with, and the label decodes back to the same state.
+        let headline = outcome
+            .headline()
+            .expect("the refusal has to say something");
+        assert!(!headline.trim().is_empty());
+        let label = improve_label_override(outcome, Some("Firebrand"))
+            .expect("kept gear must not be served with a blank label");
+        assert_eq!(
+            label, headline,
+            "kept gear must not be relabelled 'Improved: Firebrand'"
+        );
+        assert_eq!(
+            ImproveOutcome::from_label(&label),
+            Some(ImproveOutcome::KeptCurrentGear)
+        );
+        // An ordinary build label is not the gate's business.
+        assert_eq!(ImproveOutcome::from_label("Optimized Build"), None);
+        assert_eq!(ImproveOutcome::from_label(""), None);
+
+        // The footnote is still there — it is just no longer the only signal.
+        assert!(kept
+            .quality_reasons
+            .iter()
+            .any(|r| r.explanation == BASELINE_KEPT_REASON));
+    }
+
+    #[test]
+    fn optimize_flow_calls_cancellable_entry_points() {
+        let db = gw2_optimizer::gamedb::GameDb::empty_for_tests();
+        let ctx = test_ctx();
+        let scenario = test_scenario();
+        let weights = OptimizationWeights::preset_power_dps();
+        let locks = gw2_core::types::BuildLocks::default();
+        let cancelled = || true;
+        let mut progress = |_: gw2_optimizer::engine::OptimizeProgress| {};
+
+        // Tier 2: a probe that is already firing must come straight back out.
+        // The non-cancellable twin ignores the probe and runs the pipeline,
+        // which on this empty GameDb fails with a different message.
+        assert_eq!(
+            run_deterministic_tier(
+                &db,
+                "Guardian",
+                &weights,
+                &ctx,
+                None,
+                None,
+                &locks,
+                &scenario,
+                &mut progress,
+                &cancelled,
+            )
+            .err(),
+            Some("Cancelled".to_string()),
+            "tier 2 does not observe cancellation"
+        );
+
+        // Tier 3: same.
+        let profession = gw2_api::models::Profession {
+            id: "Guardian".into(),
+            name: "Guardian".into(),
+            code: Some(1),
+            specializations: vec![],
+            weapons: std::collections::HashMap::new(),
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        assert_eq!(
+            run_legacy_tier(
+                &db,
+                &profession,
+                &weights,
+                &ctx,
+                &locks,
+                5,
+                &mut progress,
+                &cancelled,
+            )
+            .err(),
+            Some("Cancelled".to_string()),
+            "tier 3 does not observe cancellation"
+        );
+
+        // The worker body must reach the engine through those wrappers. Cut the
+        // test module off the haystack first: the literals in THIS assertion
+        // live in the same file, and a whole-file search would match them and
+        // green the gate on reverted production code.
+        let src = include_str!("optimize_flow.rs");
+        let production = src
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("split always yields a first chunk");
+        assert!(
+            !production.contains("engine::optimize_deterministic("),
+            "tier 2 call site reverted to the non-cancellable entry point"
+        );
+        assert!(
+            !production.contains("engine::optimize("),
+            "tier 3 call site reverted to the non-cancellable entry point"
+        );
+        // The `match `/`= ` prefixes pin the CALL SITES: the wrapper
+        // definitions further up would satisfy a bare name search on their own.
+        assert!(
+            production.contains("match run_deterministic_tier("),
+            "the tier 2 call site no longer goes through the cancellable wrapper"
+        );
+        assert!(
+            production.contains("= run_legacy_tier("),
+            "the tier 3 call site no longer goes through the cancellable wrapper"
+        );
+    }
 
     #[test]
     fn equal_rank_keeps_user_gear() {

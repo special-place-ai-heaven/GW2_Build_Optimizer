@@ -5,6 +5,9 @@ pub struct Config {
     pub database_url: String,
     pub bind_addr: SocketAddr,
     pub admin_token: String,
+    pub admin_user: String,
+    pub admin_password: String,
+    pub session_secret: String,
     pub ip_salt: String,
     pub min_addon_version: String,
 }
@@ -14,13 +17,19 @@ impl Config {
         fn need(k: &str) -> Result<String, String> {
             std::env::var(k).map_err(|_| format!("missing env {k}"))
         }
+        let admin_token = need("FEEDBACK_ADMIN_TOKEN")?;
         Ok(Self {
             database_url: need("DATABASE_URL")?,
             bind_addr: std::env::var("BIND_ADDR")
                 .unwrap_or_else(|_| "0.0.0.0:8080".into())
                 .parse()
                 .map_err(|e| format!("BIND_ADDR: {e}"))?,
-            admin_token: need("FEEDBACK_ADMIN_TOKEN")?,
+            admin_user: std::env::var("FEEDBACK_ADMIN_USER").unwrap_or_else(|_| "admin".into()),
+            admin_password: std::env::var("FEEDBACK_ADMIN_PASSWORD")
+                .unwrap_or_else(|_| admin_token.clone()),
+            session_secret: std::env::var("FEEDBACK_SESSION_SECRET")
+                .unwrap_or_else(|_| admin_token.clone()),
+            admin_token,
             ip_salt: need("FEEDBACK_IP_SALT")?,
             min_addon_version: std::env::var("MIN_ADDON_VERSION")
                 .unwrap_or_else(|_| "1.6.0".into()),

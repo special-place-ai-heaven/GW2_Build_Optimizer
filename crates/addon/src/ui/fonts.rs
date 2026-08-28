@@ -22,7 +22,7 @@ const ID_KO: &str = "GW2BO_FONT_KO";
 
 /// Inclusive pairs, 0-terminated. Latin-1 + Ext-A (Polish) + Cyrillic + dashes/ellipsis.
 const LATIN_RANGES: &[ImWchar] = &[
-    0x0020, 0x00FF, 0x0100, 0x017F, 0x0400, 0x04FF, 0x2010, 0x2027, 0,
+    0x0020, 0x00FF, 0x0100, 0x017F, 0x0400, 0x04FF, 0x2010, 0x2027, 0x2600, 0x27BF, 0,
 ];
 
 static STARTED: AtomicBool = AtomicBool::new(false);

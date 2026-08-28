@@ -53,10 +53,9 @@ pub(super) fn load_characters(state: &mut AddonState) {
 
     // Phase 2: background refresh from API
     let key = key.clone();
-    let token = state.cancel_token.clone();
     let had_cache = !state.main.characters.is_empty();
 
-    std::thread::spawn(move || {
+    let spawned = state.spawn_worker("load-characters", move |token| {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // Always reset characters_loading on every exit path. Early-return cancels
             // previously left the spinner stuck if the user navigated away mid-fetch.
@@ -72,18 +71,23 @@ pub(super) fn load_characters(state: &mut AddonState) {
                 }
             };
 
+            // Update the cache *before* taking STATE. That mutex is the render
+            // thread's: holding it across a disk write stalls the frame, which
+            // in an overlay reads as the game hanging.
+            let cache_error = match &result {
+                Some(Ok(fresh_chars)) => gw2_api::cache::DataCache::new(&cache_dir)
+                    .save_characters(fresh_chars)
+                    .err()
+                    .map(|e| format!("Loaded characters, but failed to update cache: {}", e)),
+                _ => None,
+            };
+
             crate::state::with_state(|s| {
                 s.main.characters_loading = false;
                 match result {
                     Some(Ok(fresh_chars)) => {
-                        // Save to cache for next time
-                        let cache_dir = s.addon_dir.join("cache");
-                        let cache = gw2_api::cache::DataCache::new(&cache_dir);
-                        if let Err(e) = cache.save_characters(&fresh_chars) {
-                            report_cache_write_error(
-                                s,
-                                format!("Loaded characters, but failed to update cache: {}", e),
-                            );
+                        if let Some(message) = cache_error {
+                            report_cache_write_error(s, message);
                         }
 
                         // Only update UI if data changed
@@ -120,6 +124,12 @@ pub(super) fn load_characters(state: &mut AddonState) {
             });
         }
     });
+    if !spawned {
+        // The OS refused the thread (`spawn_worker` logged it). Whatever came
+        // from the cache stays on screen; drop the spinner so `render_main`'s
+        // 30 s retry can try again instead of waiting on a load that never began.
+        state.main.characters_loading = false;
+    }
 }
 
 /// Apply fetched tabs to state: auto-select active tabs, generate chat code, resolve build.
@@ -180,9 +190,8 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
 
     // Phase 2: background refresh from API
     let expected_char = character_name.clone();
-    let token = state.cancel_token.clone();
 
-    std::thread::spawn(move || {
+    let spawned = state.spawn_worker("load-character-tabs", move |token| {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // Always reset build_loading on every exit path. Early-return cancels
             // previously left the spinner stuck if the user switched character mid-fetch.
@@ -213,6 +222,41 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
                 }
             };
 
+            // Update the cache *before* taking STATE, for the same reason as
+            // `load_characters`: that mutex belongs to the render thread and a
+            // worker must not hold it across a disk write. Keyed by character,
+            // so this is worth writing even if the player has since switched
+            // away and the UI below discards the result.
+            let cache_errors: Vec<String> = match &result {
+                Some(Ok((fresh_bt, fresh_et))) => {
+                    let cache = gw2_api::cache::DataCache::new(&cache_dir);
+                    [
+                        cache
+                            .save_character(&expected_char, "buildtabs", fresh_bt)
+                            .err()
+                            .map(|e| {
+                                format!(
+                                    "Loaded build tabs, but failed to update cache for {}: {}",
+                                    expected_char, e
+                                )
+                            }),
+                        cache
+                            .save_character(&expected_char, "equiptabs", fresh_et)
+                            .err()
+                            .map(|e| {
+                                format!(
+                                    "Loaded equipment tabs, but failed to update cache for {}: {}",
+                                    expected_char, e
+                                )
+                            }),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect()
+                }
+                _ => Vec::new(),
+            };
+
             crate::state::with_state(|s| {
                 // Always clear the loading flag — covers cancellation and the case where
                 // the user switched character (skipping the apply branch below) which
@@ -230,30 +274,8 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
                 {
                     match result {
                         Ok((fresh_bt, fresh_et)) => {
-                            // Save to cache
-                            let cache_dir = s.addon_dir.join("cache");
-                            let cache = gw2_api::cache::DataCache::new(&cache_dir);
-                            if let Err(e) =
-                                cache.save_character(&expected_char, "buildtabs", &fresh_bt)
-                            {
-                                report_cache_write_error(
-                                    s,
-                                    format!(
-                                        "Loaded build tabs, but failed to update cache for {}: {}",
-                                        expected_char, e
-                                    ),
-                                );
-                            }
-                            if let Err(e) =
-                                cache.save_character(&expected_char, "equiptabs", &fresh_et)
-                            {
-                                report_cache_write_error(
-                                    s,
-                                    format!(
-                                        "Loaded equipment tabs, but failed to update cache for {}: {}",
-                                        expected_char, e
-                                    ),
-                                );
+                            for message in cache_errors {
+                                report_cache_write_error(s, message);
                             }
 
                             // Compare: only update UI if data actually changed
@@ -288,6 +310,12 @@ pub(super) fn load_character_tabs(state: &mut AddonState, character_name: String
             });
         }
     });
+    if !spawned {
+        // The OS refused the thread (`spawn_worker` logged it). Cached tabs, if
+        // there were any, are already applied; drop the spinner so the UI is not
+        // stuck waiting on a refresh that never started.
+        state.main.build_loading = false;
+    }
 }
 
 /// Update build chat code from currently selected build tab.

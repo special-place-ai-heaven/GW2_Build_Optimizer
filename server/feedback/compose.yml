@@ -1,10 +1,6 @@
-name: feedback
-
 services:
   feedback:
-    # Built on the dev machine and shipped with `docker save | ssh docker load`.
-    # No `build:` block: the repo is not checked out on the VPS, so a relative
-    # build context would resolve to /docker and fail. See deploy/README.md.
+    # Prebuilt tag. Build from the repo root (embeds data/feedback_taxonomy.json).
     image: gw2bo-feedback:latest
     restart: unless-stopped
     env_file: .env

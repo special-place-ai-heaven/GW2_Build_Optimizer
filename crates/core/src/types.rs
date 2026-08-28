@@ -513,10 +513,25 @@ impl GearSlots {
     }
 
     /// Expand the legacy model (build-wide `stat_prefix` + armor/trinkets/
-    /// weapons groups) into the slot vector. Legacy saves carried no off-hand
-    /// concept, so weapons expand to Set1Main only — the active set — per the
-    /// red-team BLOCKER-1 finding (never double-count Set2).
-    pub fn from_legacy(stat_prefix: &str, groups: &GearPrefixGroups) -> Self {
+    /// weapons groups) into the slot vector, resolving each prefix name to a
+    /// real itemstat id through `resolve`.
+    ///
+    /// `resolve` takes a prefix name and returns `(itemstat id, canonical
+    /// name)`. The optimizer passes `GameDb::itemstat_by_name`; callers with no
+    /// game data on hand pass `|_| None` via [`GearSlots::from_legacy`] and get
+    /// the old placeholder id back.
+    ///
+    /// Legacy saves carried no off-hand concept, so weapons expand to Set1Main
+    /// only — the active set — per the red-team BLOCKER-1 finding (never
+    /// double-count Set2). There is nothing in a legacy save to back-fill an
+    /// off-hand from: the group holds one prefix and no weapon names. A
+    /// migrated build is therefore priced from the weapons it actually
+    /// declares, not from a guess about the hand it might have held.
+    pub fn from_legacy_with(
+        stat_prefix: &str,
+        groups: &GearPrefixGroups,
+        mut resolve: impl FnMut(&str) -> Option<(u32, String)>,
+    ) -> Self {
         let fallback = |value: &str| -> String {
             if value.trim().is_empty() {
                 stat_prefix.to_string()
@@ -524,14 +539,23 @@ impl GearSlots {
                 value.to_string()
             }
         };
-        let reference = |name: &str| PrefixRef {
-            itemstat_id: 0, // resolved to a real itemstat id by the optimizer's loader
-            name: name.to_string(),
+        let mut reference = |name: &str| match resolve(name) {
+            Some((itemstat_id, canonical)) => PrefixRef {
+                itemstat_id,
+                name: canonical,
+            },
+            // Unresolvable: keep the name and stamp 0. A zero id is not a real
+            // itemstat and never prices a slot — the stat appliers report it as
+            // a data quality reason rather than silently contributing nothing.
+            None => PrefixRef {
+                itemstat_id: 0,
+                name: name.to_string(),
+            },
         };
         let mut slots = GearSlots::default();
-        let armor = fallback(&groups.armor);
-        let trinkets = fallback(&groups.trinkets);
-        let weapons = fallback(&groups.weapons);
+        let armor = reference(&fallback(&groups.armor));
+        let trinkets = reference(&fallback(&groups.trinkets));
+        let weapons = reference(&fallback(&groups.weapons));
         for slot in [
             GearSlot::Helm,
             GearSlot::Shoulders,
@@ -540,7 +564,7 @@ impl GearSlots {
             GearSlot::Leggings,
             GearSlot::Boots,
         ] {
-            slots.set(slot, reference(&armor));
+            slots.set(slot, armor.clone());
         }
         for slot in [
             GearSlot::Back,
@@ -550,10 +574,22 @@ impl GearSlots {
             GearSlot::Ring1,
             GearSlot::Ring2,
         ] {
-            slots.set(slot, reference(&trinkets));
+            slots.set(slot, trinkets.clone());
         }
-        slots.set(GearSlot::WeaponSet1Main, reference(&weapons));
+        slots.set(GearSlot::WeaponSet1Main, weapons);
         slots
+    }
+
+    /// [`GearSlots::from_legacy_with`] with no game data to resolve against:
+    /// every slot keeps its legacy prefix *name* and an `itemstat_id` of 0.
+    ///
+    /// Correct only for consumers that read names — display, chat codes,
+    /// feedback — and read stats from the save's own `estimated_stats`. Any
+    /// path that turns the result into a scored build must resolve the ids
+    /// first, either by calling `from_legacy_with` instead or by running
+    /// `ValidatedBuild::resolve_slot_prefix_ids`.
+    pub fn from_legacy(stat_prefix: &str, groups: &GearPrefixGroups) -> Self {
+        Self::from_legacy_with(stat_prefix, groups, |_| None)
     }
 }
 
@@ -607,11 +643,12 @@ mod tests {
     use super::*;
 
     /// These tests snapshot the exact string format produced by
-    /// `BuildLocks::describe_constraints`. The output is consumed verbatim by the
-    /// LLM prompts in `crates/optimizer/src/prompts.rs` (e.g.
-    /// `new_build_prompt_with_tools`, `synergy_build_prompt`). If you change the
-    /// format intentionally, update both the prompt callers and these snapshots
-    /// in the same change.
+    /// `BuildLocks::describe_constraints`. Its former consumer,
+    /// `crates/optimizer/src/prompts.rs::synergy_build_prompt`, was dead code
+    /// (zero production callers) and was deleted; `describe_constraints`
+    /// currently has no production caller either. If a prompt builder starts
+    /// consuming this format again, update both the caller and these
+    /// snapshots in the same change.
 
     #[test]
     fn describe_constraints_gear_locked_renders_canonical_slot_order() {
@@ -841,5 +878,92 @@ mod tests {
     fn gear_slots_covers_all_positions() {
         let slots = GearSlots::default();
         assert_eq!(slots.map.len(), GearSlot::ALL.len());
+    }
+
+    /// Legacy migration must not hand the stat appliers an `itemstat_id` of 0.
+    ///
+    /// A zero id resolves to no itemstat, and the appliers used to skip it
+    /// without a word — so a loaded legacy save could be scored as a build
+    /// wearing nothing while its names all read correctly on screen.
+    #[test]
+    fn from_legacy_resolves_ids() {
+        let groups = GearPrefixGroups {
+            armor: "Berserkers".into(),
+            trinkets: String::new(),
+            weapons: "Marauder's".into(),
+        };
+
+        // The resolver stands in for `GameDb::itemstat_by_name`: it canonicalises
+        // the name as well as supplying the id, so a save written with a
+        // different spelling comes back on the game's own terms.
+        let mut asked: Vec<String> = Vec::new();
+        let slots = GearSlots::from_legacy_with("Cleric's", &groups, |name| {
+            asked.push(name.to_string());
+            match name {
+                "Berserkers" => Some((161, "Berserker's".to_string())),
+                "Marauder's" => Some((1128, "Marauder's".to_string())),
+                "Cleric's" => Some((1039, "Cleric's".to_string())),
+                _ => None,
+            }
+        });
+
+        // Every populated slot carries a real id, and the id matches the name.
+        let expected = |slot: GearSlot| -> (u32, &'static str) {
+            match slot {
+                GearSlot::Helm
+                | GearSlot::Shoulders
+                | GearSlot::Coat
+                | GearSlot::Gloves
+                | GearSlot::Leggings
+                | GearSlot::Boots => (161, "Berserker's"),
+                GearSlot::WeaponSet1Main => (1128, "Marauder's"),
+                // Empty trinket group falls back to the build-wide prefix.
+                _ => (1039, "Cleric's"),
+            }
+        };
+        let mut populated = 0;
+        for slot in GearSlot::ALL {
+            let Some(prefix) = slots.get(slot) else {
+                continue;
+            };
+            populated += 1;
+            let (id, name) = expected(slot);
+            assert_eq!(
+                (prefix.itemstat_id, prefix.name.as_str()),
+                (id, name),
+                "slot {slot:?} migrated to the wrong prefix"
+            );
+        }
+        // 6 armour + 6 trinkets + main hand. Counted, not asserted from a
+        // constant lifted out of the implementation.
+        assert_eq!(populated, 13);
+
+        // The off-hand and both of set 2 stay empty: a legacy save records one
+        // weapons-group prefix and no hands, so there is nothing to back-fill
+        // an off-hand from, and inventing one would spend a budget the build
+        // may never have had.
+        for empty in [
+            GearSlot::WeaponSet1Off,
+            GearSlot::WeaponSet2Main,
+            GearSlot::WeaponSet2Off,
+        ] {
+            assert!(slots.get(empty).is_none(), "{empty:?} was invented");
+        }
+
+        // One lookup per group, not one per slot.
+        asked.sort();
+        assert_eq!(asked, vec!["Berserkers", "Cleric's", "Marauder's"]);
+
+        // Names the game data does not know keep their zero id rather than
+        // being pointed at some other prefix.
+        let unknown = GearSlots::from_legacy_with("Nonesuch", &groups, |_| None);
+        assert_eq!(unknown.prefix_id(GearSlot::Helm), Some(0));
+        assert_eq!(
+            unknown.get(GearSlot::Helm).map(|p| p.name.as_str()),
+            Some("Berserkers")
+        );
+
+        // And the no-resolver door is exactly that call.
+        assert_eq!(GearSlots::from_legacy("Nonesuch", &groups), unknown);
     }
 }

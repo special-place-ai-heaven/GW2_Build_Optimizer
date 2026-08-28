@@ -232,7 +232,7 @@ pub fn evaluate_viability_gates(
                     gate: ViabilityGate::StunbreakCount,
                     passed,
                     note: format!(
-                        "stunbreak_count={} (required ≥{})",
+                        "stunbreak_count={} (required >={})",
                         rot.stunbreak_count, MIN_STUNBREAKS
                     ),
                 }
@@ -294,7 +294,7 @@ pub fn evaluate_viability_gates(
                     gate: ViabilityGate::CleanseRate,
                     passed,
                     note: format!(
-                        "cleanse_count={}, rate={:.1}/20s (required count ≥{}, rate ≥{required_rate:.1}/20s)",
+                        "cleanse_count={}, rate={:.1}/20s (required count >={}, rate >={required_rate:.1}/20s)",
                         rot.cleanse_count, rot.cleanse_rate_per_20s, MIN_CLEANSE_COUNT
                     ),
                 }
@@ -502,7 +502,7 @@ pub fn evaluate_viability_gates(
         gate: ViabilityGate::EffectiveHealth,
         passed,
         note: format!(
-            "effective_health={:.0} (required ≥{:.0})",
+            "effective_health={:.0} (required >={:.0})",
             combat_perf.effective_health, ehp_floor
         ),
     });
@@ -1200,6 +1200,7 @@ mod tests {
             professions: Default::default(),
             legends: Default::default(),
             pvp_amulets: Default::default(),
+            pets: Default::default(),
             skills_by_profession: Default::default(),
             traits_by_spec: Default::default(),
             items_by_type: Default::default(),
@@ -1265,6 +1266,7 @@ mod tests {
             pets: None,
             rune: None,
             sigils: vec![],
+            sigil_seats: Default::default(),
             relic: None,
             gear_slots: gw2_core::types::GearSlots::default(), // itemstat 9999 intentionally absent
             explanation: String::new(),

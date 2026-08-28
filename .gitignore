@@ -31,3 +31,9 @@ tmp/
 /Guild Wars 2 Asset Kit/
 /.symforge/
 /.review/
+.unlazy/
+scripts/v17/
+REVIEW-*.md
+REVIEW-BRIEF*.md
+REVIEW-CONSOLIDATION*.md
+REVIEW-FINDINGS*.md

@@ -157,6 +157,20 @@ pub fn itemstat_value(attribute_adjustment: f64, multiplier: f64, value: i32) ->
     (attribute_adjustment * multiplier + value as f64).round()
 }
 
+/// Does an equipment-tab slot contribute to the land character sheet?
+///
+/// `Relic` carries no attributes; the `*Aquatic*` slots are the underwater
+/// kit; and `WeaponB1`/`WeaponB2` are the **inactive** land set. A character
+/// carries two weapon sets and wears one, so summing both is worth a free
+/// weapon set — 125 to 251 attribute points depending on shape — on the very
+/// block the Improve gate treats as "your current gear".
+fn slot_is_worn_on_land(slot: &str) -> bool {
+    !matches!(
+        slot,
+        "Relic" | "HelmAquatic" | "WeaponAquaticA" | "WeaponAquaticB" | "WeaponB1" | "WeaponB2"
+    )
+}
+
 /// Calculate stats from equipped gear using the itemstat formula.
 /// For each equipment piece: look up its attribute_adjustment and the stat prefix,
 /// then apply `attribute_adjustment * multiplier + value` for each stat.
@@ -168,12 +182,7 @@ pub fn calculate_gear_stats(
     let mut stats = StatBlock::default();
 
     for piece in equipment {
-        let slot = piece.slot.as_str();
-        // Skip non-stat slots
-        if matches!(
-            slot,
-            "Relic" | "HelmAquatic" | "WeaponAquaticA" | "WeaponAquaticB"
-        ) {
+        if !slot_is_worn_on_land(&piece.slot) {
             continue;
         }
 
@@ -314,6 +323,11 @@ pub fn calculate_infusion_stats(
     let mut stats = StatBlock::default();
 
     for piece in equipment {
+        // An infusion in the weapon set you are not holding is not on your
+        // character — same rule as `calculate_gear_stats`.
+        if !slot_is_worn_on_land(&piece.slot) {
+            continue;
+        }
         for &infusion_id in &piece.infusions {
             let Some(infusion) = items_cache.get(&infusion_id) else {
                 continue;

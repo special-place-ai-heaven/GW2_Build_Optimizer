@@ -1087,8 +1087,11 @@ const UPGRADE_BUFF_S: f64 = 6.0;
 /// Seconds printed next to "recharge" (Fireworks: weapon skill recharge ≥20s).
 fn recharge_seconds(t: &str) -> Option<f64> {
     let idx = t.find("recharge")?;
-    let start = idx.saturating_sub(48);
-    let end = (idx + 48).min(t.len());
+    // Snap both ends to char boundaries: `t` is skill fact text, which carries
+    // whatever the API's `lang=` returned, and slicing a byte offset that lands
+    // mid-codepoint panics inside the game process.
+    let start = snap_char_boundary(t, idx.saturating_sub(48), false);
+    let end = snap_char_boundary(t, (idx + 48).min(t.len()), true);
     let window = &t[start..end];
     let mut best: Option<f64> = None;
     let mut i = 0;
@@ -1111,6 +1114,19 @@ fn recharge_seconds(t: &str) -> Option<f64> {
         }
     }
     best
+}
+
+/// Move `offset` to the nearest char boundary — outward (`up = true` walks
+/// forward, otherwise backward), so the window can only ever grow.
+fn snap_char_boundary(text: &str, mut offset: usize, up: bool) -> usize {
+    while offset < text.len() && !text.is_char_boundary(offset) {
+        if up {
+            offset += 1;
+        } else {
+            offset -= 1;
+        }
+    }
+    offset.min(text.len())
 }
 
 /// How much a build can rely on this upgrade: passive / rotation / long CD / kill luck.
@@ -1291,6 +1307,62 @@ fn parse_relic_modifier(mods: &mut DamageModifiers, relic: &Item) {
 mod tests {
     use super::*;
     use crate::balance::BalanceContext;
+
+    /// `recharge_seconds` slices a 48-byte window either side of "recharge".
+    /// Skill fact text carries whatever the API's `lang=` returned, so those
+    /// offsets can land mid-codepoint — and slicing a `&str` there panics
+    /// inside the game process.
+    ///
+    /// Finding a straddling offset takes care: 48 is divisible by 2, 3 and 4,
+    /// so a prefix of *uniform*-width codepoints always lands the window back
+    /// on a boundary and would exercise nothing. The fixture below mixes
+    /// 1/2/3/4-byte codepoints and then **asserts** it found real non-boundary
+    /// offsets, so the test cannot quietly decay into an ASCII case that passes
+    /// without the fix.
+    #[test]
+    fn recharge_seconds_char_boundary() {
+        // 1 + 2 + 3 + 4 = 10 bytes per group, so boundaries fall irregularly.
+        const MIXED: &str = "aé€𝄞";
+
+        let mut straddled_start = 0usize;
+        let mut straddled_end = 0usize;
+
+        for pad in 1..=40usize {
+            let prefix: String = MIXED.repeat(pad).chars().take(pad).collect();
+            let suffix: String = MIXED.repeat(pad).chars().take(pad).collect();
+            let text = format!("{prefix}recharge 30 seconds{suffix}");
+            let idx = text.find("recharge").expect("needle");
+
+            let start = idx.saturating_sub(48);
+            let end = (idx + 48).min(text.len());
+            if !text.is_char_boundary(start) {
+                straddled_start += 1;
+            }
+            if !text.is_char_boundary(end) {
+                straddled_end += 1;
+            }
+
+            // Must not panic, and must still read the number out of the window.
+            assert_eq!(recharge_seconds(&text), Some(30.0), "pad {pad}");
+        }
+
+        assert!(
+            straddled_start > 0,
+            "no fixture put the window START inside a codepoint; the guard is untested"
+        );
+        assert!(
+            straddled_end > 0,
+            "no fixture put the window END inside a codepoint; the guard is untested"
+        );
+
+        // Plain ASCII behaviour is unchanged.
+        assert_eq!(recharge_seconds("Skill recharge: 20 seconds"), Some(20.0));
+        assert_eq!(recharge_seconds("no needle here"), None);
+        // Out-of-range values are still rejected (window logic intact).
+        assert_eq!(recharge_seconds("recharge 3 seconds"), None);
+        // Largest in-range number in the window wins.
+        assert_eq!(recharge_seconds("recharge 20 or 45 seconds"), Some(45.0));
+    }
 
     #[test]
     fn test_condition_tick_formulas() {

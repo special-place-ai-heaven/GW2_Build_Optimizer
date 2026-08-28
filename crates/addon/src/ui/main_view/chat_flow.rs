@@ -5,15 +5,30 @@ use super::optimization::{
     suggestion_to_chat_code, summarize_resolved_build, summarize_suggestion,
     validated_build_to_chat_code,
 };
+use std::sync::Arc;
+
 use crate::state::AddonState;
 use gw2_core::i18n::{t, tf};
 use gw2_optimizer::balance::BalanceContext;
+use gw2_optimizer::gamedb::GameDb;
+
+/// Hand a background worker its own reference to the shared game database.
+///
+/// `GameDb` is loaded once and can be tens of megabytes; a chat worker needs
+/// it for the lifetime of its (possibly multi-turn) LLM call, so the addon
+/// shares one instance via `Arc` (see `AddonState::game_db`'s doc comment)
+/// instead of copying it per spawn. Routing every clone through this one
+/// named function — rather than trusting each `.clone()` call site — gives
+/// the "never a deep copy" invariant a single place to hold and test.
+fn clone_game_db_for_worker(db: &Option<Arc<GameDb>>) -> Option<Arc<GameDb>> {
+    db.clone()
+}
 
 /// Send a chat order to the chef (active LLM) for a plated build.
 /// Uses function calling so the chef has the full pantry and every station.
 pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     let (display, inbound_chips, _chef_order) =
-        crate::chat_links::annotate_order(&message, state.main.game_db.as_ref());
+        crate::chat_links::annotate_order(&message, state.main.game_db.as_deref());
     crate::ui::chat_bar::attach_order_chips(
         &mut state.main.chat,
         display.clone(),
@@ -115,13 +130,12 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     }
     let message = display;
     let addon_dir = state.addon_dir.clone();
-    let token = state.cancel_token.clone();
-    let db_clone = state.main.game_db.clone();
+    let db_clone = clone_game_db_for_worker(&state.main.game_db);
     let weights = state.main.weights.clone();
     let loadout = state.main.current_build.clone();
     let chat_balance_ctx = BalanceContext::new(state.main.game_mode.clone());
 
-    std::thread::spawn(move || {
+    let spawned = state.spawn_worker("chat-message", move |token| {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             if token.is_cancelled() {
                 crate::state::with_state(|s| {
@@ -298,7 +312,10 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 // draws on the render thread, so a stalled frame
                                 // here reads as the whole game not responding.
                                 let Some((live_db, live_mode)) = crate::state::with_state(|s| {
-                                    (s.main.game_db.clone(), s.main.game_mode.clone())
+                                    (
+                                        clone_game_db_for_worker(&s.main.game_db),
+                                        s.main.game_mode.clone(),
+                                    )
                                 }) else {
                                     return; // state gone — addon shutting down
                                 };
@@ -412,6 +429,13 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
             });
         }
     });
+    if !spawned {
+        // The OS refused the thread (`spawn_worker` logged it): nothing ran,
+        // so nothing else will clear the "thinking" spinner this function
+        // turned on above.
+        state.main.chat.waiting = false;
+        state.main.optimize_stage.clear();
+    }
 }
 
 pub(super) fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -> bool {
@@ -466,5 +490,51 @@ mod tests {
         );
         v.specializations[1].trait_ids.pop();
         assert!(!plate_is_servable(&v));
+    }
+}
+
+#[cfg(test)]
+mod arc_gamedb_tests {
+    use super::clone_game_db_for_worker;
+    use gw2_optimizer::gamedb::GameDb;
+    use std::sync::Arc;
+
+    /// C23: the chat worker must clone the `Arc<GameDb>` handle, never the
+    /// `GameDb` itself. Proven independently of `clone_game_db_for_worker`'s
+    /// own body: `Arc::strong_count` and `Arc::ptr_eq` observe the allocation
+    /// from the outside, so a deep copy (which would still satisfy "returns
+    /// an `Option<Arc<GameDb>>`") cannot pass this test by accident.
+    #[test]
+    fn chat_clones_arc_gamedb() {
+        let db = Arc::new(GameDb::empty_for_tests());
+        let slot: Option<Arc<GameDb>> = Some(db.clone());
+        assert_eq!(
+            Arc::strong_count(&db),
+            2,
+            "setup sanity check: db + slot should hold 2 references"
+        );
+
+        let handed_to_worker = clone_game_db_for_worker(&slot);
+
+        assert_eq!(
+            Arc::strong_count(&db),
+            3,
+            "clone_game_db_for_worker must bump the Arc refcount (a cheap \
+             handle clone), not allocate a new GameDb — a strong_count that \
+             does not move confirms nothing new was allocated"
+        );
+        let worker_db = handed_to_worker.expect("Some(db) input must produce Some(db) output");
+        assert!(
+            Arc::ptr_eq(&db, &worker_db),
+            "clone_game_db_for_worker must point at the SAME GameDb allocation \
+             as the original — a deep clone would produce a different address \
+             and fail this even though both sides still deref to equal data"
+        );
+
+        // Dropping the worker's handle must release exactly one reference,
+        // proving `worker_db` really is a second owner of the same
+        // allocation rather than, say, a `&'static` alias of some kind.
+        drop(worker_db);
+        assert_eq!(Arc::strong_count(&db), 2);
     }
 }

@@ -12,6 +12,7 @@ use gw2_core::types::{GearSlot, GearSlots, PrefixRef};
 
 use crate::gamedb::GameDb;
 use crate::prompts::GeminiBuildResponse;
+use crate::sigil_slots::{SigilSlot, SigilSlots, SIGIL_SLOT_COUNT};
 
 /// Slots fed by the old armor group (all six armor pieces).
 pub const ARMOR_SLOTS: [GearSlot; 6] = [
@@ -56,7 +57,24 @@ pub struct ValidatedBuild {
     /// Ranger pet IDs: terrestrial[2] then aquatic[2].
     pub pets: Option<ValidatedPets>,
     pub rune: Option<ValidatedItem>,
+    /// Every resolved sigil, in canonical seat order, holes removed.
+    ///
+    /// Dense on purpose: display, saves, chat links and the beam's sigil
+    /// operator all index it, and a `Vec<Option<_>>` here would ripple into
+    /// every one of them. What the density costs is *which seat* each sigil
+    /// came from — [`ValidatedBuild::sigil_seats`] keeps that, and
+    /// [`ValidatedBuild::active_sigil_ids`] is the only supported way to ask
+    /// "which sigils are on the character".
     pub sigils: Vec<ValidatedItem>,
+    /// The four sigil seats — `[set 1 main, set 1 off, set 2 main, set 2 off]`
+    /// — holes included, when the constructor knew them.
+    ///
+    /// Empty means "seats not recorded", not "no sigils": the synergy seeder
+    /// and the beam build dense, hole-free sigil lists where position already
+    /// *is* seat order, and recording seats for them would let the beam's
+    /// in-place `sigils[i] = …` swap drift out of sync with the seats and stop
+    /// registering in the stat sheet.
+    pub sigil_seats: SigilSlots,
     pub relic: Option<ValidatedItem>,
     /// Per-slot gear prefixes. Population policy (Task 2): every constructor
     /// that used to write the build-wide `gear_prefix` now fills all sixteen
@@ -116,32 +134,160 @@ impl ValidatedBuild {
         self.gear_slots.get(slot)
     }
 
-    /// First populated slot in canonical order — the closest analogue of the
-    /// retired build-wide prefix for prompt text, PvP-amulet matching, and
-    /// single-prefix display reads.
+    /// The prefix that best represents the build: the one worn in the most
+    /// slots, ties broken by canonical slot order.
+    ///
+    /// This is the closest analogue of the retired build-wide prefix, and it
+    /// feeds the PvP amulet match, the displayed label, and the LLM prompt.
+    /// Taking the *first* populated slot instead — which is `Helm` — meant
+    /// that after the nudge pass produced a genuinely mixed build, one helm
+    /// swap renamed the whole build and chose its PvP amulet. Modal is what a
+    /// player means by "a Berserker's build with two Cavalier's trinkets".
     pub fn primary_prefix(&self) -> Option<&PrefixRef> {
-        self.gear_slots.map.iter().flatten().next()
+        let mut counts: HashMap<u32, usize> = HashMap::new();
+        for prefix in self.gear_slots.map.iter().flatten() {
+            *counts.entry(prefix.itemstat_id).or_default() += 1;
+        }
+        self.gear_slots
+            .map
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, cell)| cell.as_ref().map(|prefix| (idx, prefix)))
+            // `max_by_key` keeps the *last* maximum, so reversing the slot
+            // index makes the earliest slot in canonical order win a tie — the
+            // same answer on every run, and the same one the old first-slot
+            // reading gave for a uniform build.
+            .max_by_key(|(idx, prefix)| {
+                (
+                    counts.get(&prefix.itemstat_id).copied().unwrap_or(0),
+                    std::cmp::Reverse(*idx),
+                )
+            })
+            .map(|(_, prefix)| prefix)
     }
 
     /// Fill every slot with one prefix. Per-slot encoding of the old
     /// build-wide assignment (`validated.gear_prefix = Some(p)`).
+    ///
+    /// Unconditional: this is the fixture/legacy expansion, and it writes an
+    /// off-hand prefix onto a Greatsword. Production constructors want
+    /// [`ValidatedBuild::fill_worn_gear_slots`], which asks the build what it
+    /// is actually wearing.
     pub fn fill_gear_slots(&mut self, prefix: PrefixRef) {
         for slot in GearSlot::ALL {
             self.gear_slots.set(slot, prefix.clone());
         }
     }
 
-    /// Fill every unlocked slot with one prefix; slots present in `gear_locks`
-    /// keep their current value. Returns true when any slot value actually
-    /// changed, so callers can skip no-op proposals without cloning first.
+    /// Fill one prefix into every slot the build actually wears.
+    ///
+    /// Weapon slots are wearable only when that hand holds a weapon: a
+    /// two-hander has no off-hand, weapon set 2 is carried rather than worn,
+    /// and a half-built draft has whatever it has. Writing a prefix into those
+    /// cells anyway is not harmless bookkeeping — it churns
+    /// [`ValidatedBuild::gear_identity`], so two builds with identical combat
+    /// stats dedup as different candidates and each spends beam budget; it puts
+    /// a stat prefix on an empty off-hand in the gear sheet; and it is the
+    /// shape the Improve baseline is compared against.
+    ///
+    /// Armour and trinkets are always wearable — every level-80 character has
+    /// six of each — so a *missing piece* on someone's live loadout is a
+    /// different question, answered by whoever built the plate, not here.
+    ///
+    /// Call **after** the build's weapons are set. A build with no weapons at
+    /// all wears no weapons, and gets no weapon prefixes.
+    pub fn fill_worn_gear_slots(&mut self, prefix: PrefixRef) {
+        for slot in GearSlot::ALL {
+            if !self.wears(slot) {
+                self.gear_slots.clear(slot);
+                continue;
+            }
+            self.gear_slots.set(slot, prefix.clone());
+        }
+    }
+
+    /// Does this build wear the given slot?
+    ///
+    /// True for all armour and trinkets; for a weapon slot, true exactly when
+    /// that hand of that set holds a weapon.
+    pub fn wears(&self, slot: GearSlot) -> bool {
+        let held = |hand: &Option<String>| hand.as_deref().is_some_and(|w| !w.trim().is_empty());
+        match slot {
+            GearSlot::WeaponSet1Main => held(&self.weapons.set1.main_hand),
+            GearSlot::WeaponSet1Off => held(&self.weapons.set1.off_hand),
+            GearSlot::WeaponSet2Main => held(&self.weapons.set2.main_hand),
+            GearSlot::WeaponSet2Off => held(&self.weapons.set2.off_hand),
+            _ => true,
+        }
+    }
+
+    /// Record the four sigil seats and the dense list together.
+    ///
+    /// The only supported way to set a build's sigils when the seats are known:
+    /// it is what keeps [`ValidatedBuild::sigils`] and
+    /// [`ValidatedBuild::sigil_seats`] describing the same build.
+    pub fn set_sigil_seats(&mut self, seats: [Option<ValidatedItem>; SIGIL_SLOT_COUNT]) {
+        let mut slots = SigilSlots::default();
+        self.sigils.clear();
+        for (seat, item) in SigilSlot::ALL.into_iter().zip(seats) {
+            if let Some(item) = item {
+                slots.set(seat, Some(item.id));
+                self.sigils.push(item);
+            }
+        }
+        self.sigil_seats = slots;
+    }
+
+    /// The sigils actually on the character: weapon set 1's two seats.
+    ///
+    /// When seats were recorded, read them — that is the whole point of
+    /// recording them. Otherwise fall back to the leading entries of the dense
+    /// list, which is exactly right for the constructors that do not record
+    /// seats (synergy seed, beam neighbours) because they never produce holes,
+    /// so dense order *is* seat order there.
+    ///
+    /// The old code always took `sigils[..2]`. A plate with an empty set-1 main
+    /// hand, Force in the off-hand and Air on set 2 compacted to `[Force, Air]`
+    /// — and the stat sheet then counted a **carried** sigil as worn and
+    /// credited Force to the wrong hand.
+    pub fn active_sigil_ids(&self) -> Vec<u32> {
+        if !self.sigil_seats.is_empty() {
+            return self
+                .sigil_seats
+                .active_set()
+                .into_iter()
+                .flatten()
+                .collect();
+        }
+        self.sigils
+            .iter()
+            .take(2)
+            .map(|sigil| sigil.id)
+            .collect::<Vec<u32>>()
+    }
+
+    /// Fill every unlocked **worn** slot with one prefix; slots present in
+    /// `gear_locks` keep their current value. Returns true when any slot value
+    /// actually changed, so callers can skip no-op proposals without cloning
+    /// first.
+    ///
+    /// Skips slots the build does not wear, for the reasons in
+    /// [`ValidatedBuild::fill_worn_gear_slots`]. A search operator that fills a
+    /// two-hander's off-hand and both of set 2 spends four evaluations per
+    /// prefix on cells that cannot change a single stat.
     pub fn fill_unlocked_gear_slots(
         &mut self,
         prefix: PrefixRef,
         gear_locks: &HashMap<GearSlot, u32>,
     ) -> bool {
+        let worn: [bool; 16] = std::array::from_fn(|idx| self.wears(GearSlot::ALL[idx]));
         let mut changed = false;
         for (idx, cell) in self.gear_slots.map.iter_mut().enumerate() {
             if gear_locks.contains_key(&GearSlot::ALL[idx]) {
+                continue;
+            }
+            if !worn[idx] {
+                changed |= cell.take().is_some();
                 continue;
             }
             match cell {
@@ -163,6 +309,26 @@ impl ValidatedBuild {
     // Set1 weapons; pre-slot builds spent an off-hand budget there via the
     // build-wide fallback. No caller builds a ValidatedBuild from SavedBuild yet;
     // Task 3 must settle the backfill when weapon presence is known.
+    /// Resolve migration-produced zero itemstat ids (`GearSlots::from_legacy`
+    /// stamps 0 when it is given no resolver) against the game data using the
+    /// shared deterministic lookup: exact name match wins (lower id tiebreak),
+    /// else shortest fuzzy match. Unresolvable names keep their zero id rather
+    /// than inventing one — and a zero id that reaches
+    /// [`crate::engine::calculate_validated_stats`] is now reported as a data
+    /// quality reason instead of being skipped in silence.
+    ///
+    /// Call this on any path that turns a `SavedBuild` into a `ValidatedBuild`.
+    /// `gw2_core::types::GearSlots::from_legacy_with` is the better door — it
+    /// resolves at construction, so the zero-id state never exists — but this
+    /// stays for a map that has already been built.
+    ///
+    /// Weapons: `from_legacy` populates `WeaponSet1Main` only, because a legacy
+    /// save records one weapons-group prefix and no hands. There is nothing to
+    /// back-fill an off-hand *from*; inventing one would hand a migrated build
+    /// a second one-hand budget it may never have had. The build's weapons
+    /// decide the budget now (see `engine::land_weapon_slot_type`), so a
+    /// migrated save that names no weapons is priced at zero weapon points
+    /// rather than at a guess.
     pub fn resolve_slot_prefix_ids(&mut self, db: &GameDb) {
         for prefix in self.gear_slots.map.iter_mut().flatten() {
             if prefix.itemstat_id != 0 || prefix.name.is_empty() {
@@ -832,7 +998,7 @@ fn validate_sigils(response: &GeminiBuildResponse, db: &GameDb, result: &mut Val
         resolved.push(find_item_by_name(name, &sigils_list, "Sigil", result));
     }
 
-    if positional && resolved.len() == 4 {
+    if positional && resolved.len() == SIGIL_SLOT_COUNT {
         // Set 1 = indices 0,1 | Set 2 = indices 2,3
         for (set_label, a, b) in [("Set 1", 0usize, 1usize), ("Set 2", 2usize, 3usize)] {
             if let (Some(left), Some(right)) = (&resolved[a], &resolved[b]) {
@@ -846,9 +1012,31 @@ fn validate_sigils(response: &GeminiBuildResponse, db: &GameDb, result: &mut Val
                 }
             }
         }
+
+        // Publish the seats, holes and all. Compacting the array away — which
+        // is what publishing only its `Some` values did — destroyed slot
+        // identity: a plate with a bare set-1 main hand, Force in the off-hand
+        // and Air on set 2 became `[Force, Air]`, and
+        // `calculate_validated_stats` — which reads the leading pair as the
+        // worn set — then scored a **carried** sigil as if it were equipped and
+        // put Force in the wrong hand.
+        let mut seats: [Option<ValidatedItem>; SIGIL_SLOT_COUNT] = Default::default();
+        for (seat, item) in seats.iter_mut().zip(resolved) {
+            *seat = item;
+        }
+        result.set_sigil_seats(seats);
+        return;
     }
 
-    for item in resolved.into_iter().flatten() {
+    // Legacy flat list: no slot identity to preserve, so the dense list is all
+    // there is. Seats stay unrecorded, and `active_sigil_ids` reads the leading
+    // pair — which is what "the first two sigils listed" meant on this path
+    // before and still means now.
+    //
+    // Written as an explicit `let … else` so the compacting iterator adaptor
+    // this function must never reach for does not appear in it at all.
+    for item in resolved {
+        let Some(item) = item else { continue };
         result.sigils.push(item);
     }
 }
@@ -887,15 +1075,28 @@ fn validate_gear_prefix(response: &GeminiBuildResponse, db: &GameDb, result: &mu
 
     let needle_lower = response.stat_prefix.to_lowercase();
     let needle_key = gw2_core::i18n::alnum_key(&response.stat_prefix);
-    let is_exact = itemstat.name.to_lowercase() == needle_lower
-        || (!needle_key.is_empty() && gw2_core::i18n::alnum_key(&itemstat.name) == needle_key);
-    if !is_exact {
+    let is_literal_exact = itemstat.name.to_lowercase() == needle_lower;
+    let is_alnum_exact =
+        !needle_key.is_empty() && gw2_core::i18n::alnum_key(&itemstat.name) == needle_key;
+    if !is_literal_exact && !is_alnum_exact {
         result.warnings.push(format!(
             "Gear prefix '{}' fuzzy-matched to '{}'",
             response.stat_prefix, itemstat.name
         ));
+    } else if is_alnum_exact && !is_literal_exact {
+        // Alphanumeric-only comparison treats "Knight's" and "Knights" (or any
+        // punctuation/spacing variant) as the same prefix by design — rejecting
+        // it would be a wrong "not found" for a name that is usually right.
+        // Still warn so the player notices the display strings differ.
+        result.warnings.push(format!(
+            "Gear prefix '{}' matched '{}' (punctuation/spacing differs)",
+            response.stat_prefix, itemstat.name
+        ));
     }
-    result.fill_gear_slots(PrefixRef {
+    // Worn slots only: `validate_weapons` has already run, so the build knows
+    // whether it is holding a Greatsword (no off-hand) or a sword/focus, and a
+    // prefix on a hand that holds nothing is not a gear choice.
+    result.fill_worn_gear_slots(PrefixRef {
         itemstat_id: itemstat.id,
         name: itemstat.name.clone(),
     });
@@ -932,6 +1133,7 @@ fn validate_gear_slot_map(
     entries.sort_unstable();
 
     let mut rejected_slots: Vec<&str> = Vec::new();
+    let mut unworn_slots: Vec<&str> = Vec::new();
     let mut fallback_names: Vec<&str> = Vec::new();
     let mut fuzzy_matches: Vec<(&str, String)> = Vec::new();
 
@@ -947,6 +1149,16 @@ fn validate_gear_slot_map(
             }
             continue;
         };
+        // A plate may name a hand the validated weapons leave empty — an
+        // off-hand prefix beside a Greatsword, or set 2 on a build that has
+        // only one set. Recording it would put a stat prefix on a slot the
+        // character does not wear.
+        if !result.wears(slot) {
+            if !unworn_slots.contains(&raw_slot) {
+                unworn_slots.push(raw_slot);
+            }
+            continue;
+        }
         let Some(itemstat) = db.itemstat_by_name(raw_prefix) else {
             // Fallback per spec §9: the slot keeps the weight-profile prefix
             // filled by validate_gear_prefix; warn once per unique name.
@@ -973,6 +1185,11 @@ fn validate_gear_slot_map(
     for slot in rejected_slots {
         result.warnings.push(format!(
             "Plate gear slot '{slot}' is not a known equipment slot; entry ignored"
+        ));
+    }
+    for slot in unworn_slots {
+        result.warnings.push(format!(
+            "Plate gear slot '{slot}' holds no weapon in this build; entry ignored"
         ));
     }
     for name in fallback_names {
@@ -1406,6 +1623,303 @@ mod tests {
     #![allow(clippy::field_reassign_with_default)]
     use super::*;
 
+    // ── C17: occupancy stays honest ─────────────────────────────────────────
+
+    /// A prefix on a hand that holds nothing is not a gear choice.
+    ///
+    /// The build-wide fill wrote all sixteen slots unconditionally, so a
+    /// two-hander carried a stat prefix on its non-existent off-hand and both
+    /// of weapon set 2 — which then churned `gear_identity` (two builds with
+    /// identical combat stats dedup as different candidates, each spending beam
+    /// budget), showed a prefix on an empty off-hand in the gear sheet, and
+    /// shaped the plate the Improve gate compares against.
+    #[test]
+    fn fill_gear_slots_skips_empty() {
+        let prefix = PrefixRef {
+            itemstat_id: 161,
+            name: "Berserker's".into(),
+        };
+        let armour_and_trinkets = [
+            GearSlot::Helm,
+            GearSlot::Shoulders,
+            GearSlot::Coat,
+            GearSlot::Gloves,
+            GearSlot::Leggings,
+            GearSlot::Boots,
+            GearSlot::Back,
+            GearSlot::Accessory1,
+            GearSlot::Accessory2,
+            GearSlot::Amulet,
+            GearSlot::Ring1,
+            GearSlot::Ring2,
+        ];
+
+        // A greatsword: main hand only, no off-hand, no second set.
+        let mut two_hander = ValidatedBuild {
+            weapons: ValidatedWeapons {
+                set1: ValidatedWeaponSet {
+                    main_hand: Some("Greatsword".into()),
+                    off_hand: None,
+                },
+                set2: ValidatedWeaponSet::default(),
+            },
+            ..ValidatedBuild::default()
+        };
+        two_hander.fill_worn_gear_slots(prefix.clone());
+
+        for slot in armour_and_trinkets {
+            assert!(
+                two_hander.prefix_for(slot).is_some(),
+                "{slot:?} is always worn and must carry the prefix"
+            );
+        }
+        assert!(two_hander.prefix_for(GearSlot::WeaponSet1Main).is_some());
+        for empty in [
+            GearSlot::WeaponSet1Off,
+            GearSlot::WeaponSet2Main,
+            GearSlot::WeaponSet2Off,
+        ] {
+            assert!(
+                two_hander.prefix_for(empty).is_none(),
+                "{empty:?} holds no weapon but was given a stat prefix"
+            );
+        }
+        // Counted, not asserted from a constant: 12 armour/trinket + 1 hand.
+        let populated = GearSlot::ALL
+            .iter()
+            .filter(|slot| two_hander.prefix_for(**slot).is_some())
+            .count();
+        assert_eq!(populated, 13);
+
+        // Dual wield on both sets: every hand is worn, so every slot fills.
+        let mut dual = ValidatedBuild {
+            weapons: ValidatedWeapons {
+                set1: ValidatedWeaponSet {
+                    main_hand: Some("Sword".into()),
+                    off_hand: Some("Focus".into()),
+                },
+                set2: ValidatedWeaponSet {
+                    main_hand: Some("Scepter".into()),
+                    off_hand: Some("Torch".into()),
+                },
+            },
+            ..ValidatedBuild::default()
+        };
+        dual.fill_worn_gear_slots(prefix.clone());
+        assert_eq!(
+            GearSlot::ALL
+                .iter()
+                .filter(|slot| dual.prefix_for(**slot).is_some())
+                .count(),
+            16,
+            "a fully armed build must still fill every slot"
+        );
+
+        // A blank string is an empty hand, not a weapon called "".
+        let mut blank = ValidatedBuild {
+            weapons: ValidatedWeapons {
+                set1: ValidatedWeaponSet {
+                    main_hand: Some("Sword".into()),
+                    off_hand: Some("   ".into()),
+                },
+                set2: ValidatedWeaponSet::default(),
+            },
+            ..ValidatedBuild::default()
+        };
+        blank.fill_worn_gear_slots(prefix.clone());
+        assert!(blank.prefix_for(GearSlot::WeaponSet1Off).is_none());
+
+        // The search operator's filler follows the same rule, and clears a dead
+        // cell that an earlier pass had filled — otherwise a build that started
+        // life fully filled would keep its ghost off-hand prefix forever.
+        let mut stale = ValidatedBuild {
+            weapons: ValidatedWeapons {
+                set1: ValidatedWeaponSet {
+                    main_hand: Some("Greatsword".into()),
+                    off_hand: None,
+                },
+                set2: ValidatedWeaponSet::default(),
+            },
+            ..ValidatedBuild::default()
+        };
+        stale.fill_gear_slots(prefix.clone()); // the unconditional legacy fill
+        assert!(stale.prefix_for(GearSlot::WeaponSet1Off).is_some());
+        let changed = stale.fill_unlocked_gear_slots(prefix.clone(), &HashMap::new());
+        assert!(changed, "clearing a dead cell is a change");
+        assert!(stale.prefix_for(GearSlot::WeaponSet1Off).is_none());
+
+        // Locks still win over occupancy: a locked slot is never touched.
+        let mut locked = ValidatedBuild {
+            weapons: ValidatedWeapons {
+                set1: ValidatedWeaponSet {
+                    main_hand: Some("Greatsword".into()),
+                    off_hand: None,
+                },
+                set2: ValidatedWeaponSet::default(),
+            },
+            ..ValidatedBuild::default()
+        };
+        locked.gear_slots.set(
+            GearSlot::WeaponSet1Off,
+            PrefixRef {
+                itemstat_id: 999,
+                name: "Locked".into(),
+            },
+        );
+        let mut gear_locks = HashMap::new();
+        gear_locks.insert(GearSlot::WeaponSet1Off, 999u32);
+        locked.fill_unlocked_gear_slots(prefix, &gear_locks);
+        assert_eq!(
+            locked
+                .prefix_for(GearSlot::WeaponSet1Off)
+                .map(|p| p.itemstat_id),
+            Some(999),
+            "a locked slot was cleared by the occupancy rule"
+        );
+    }
+
+    /// The positional sigil map must keep its holes. `[None, Force, Air, None]`
+    /// compacted to `[Force, Air]`, and the stat sheet — which reads the leading
+    /// pair as the worn set — then scored a carried set-2 sigil as equipped.
+    #[test]
+    fn sigil_seats_keep_their_holes() {
+        let db = sigil_db();
+        let mut response = GeminiBuildResponse::default();
+        response.sigils_map = Some(
+            [
+                (
+                    "set1_off".to_string(),
+                    "Superior Sigil of Force".to_string(),
+                ),
+                ("set2_main".to_string(), "Superior Sigil of Air".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let mut result = ValidatedBuild::default();
+        validate_sigils(&response, &db, &mut result);
+
+        // Dense list still carries both, in seat order, for display and saves.
+        assert_eq!(
+            result.sigils.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec![10, 20]
+        );
+        // But the worn set is only the off-hand sigil: seat 0 is empty.
+        assert_eq!(result.sigil_seats.get(SigilSlot::Set1Main), None);
+        assert_eq!(result.sigil_seats.get(SigilSlot::Set1Off), Some(10));
+        assert_eq!(result.sigil_seats.get(SigilSlot::Set2Main), Some(20));
+        assert_eq!(
+            result.active_sigil_ids(),
+            vec![10],
+            "a weapon-set-2 sigil was counted as worn"
+        );
+
+        // A build that never recorded seats keeps the old dense reading, which
+        // is correct for it: the synergy seeder and the beam build hole-free
+        // lists where position already is seat order.
+        let mut dense = ValidatedBuild::default();
+        dense.sigils = vec![
+            ValidatedItem {
+                id: 10,
+                name: "Superior Sigil of Force".into(),
+            },
+            ValidatedItem {
+                id: 20,
+                name: "Superior Sigil of Air".into(),
+            },
+            ValidatedItem {
+                id: 30,
+                name: "Superior Sigil of Bloodlust".into(),
+            },
+        ];
+        assert_eq!(dense.active_sigil_ids(), vec![10, 20]);
+    }
+
+    fn sigil_db() -> GameDb {
+        let mut db = GameDb::empty_for_tests();
+        for (id, name) in [
+            (10u32, "Superior Sigil of Force"),
+            (20, "Superior Sigil of Air"),
+        ] {
+            db.items.insert(
+                id,
+                Item {
+                    id,
+                    name: name.into(),
+                    description: None,
+                    icon: None,
+                    item_type: "UpgradeComponent".into(),
+                    rarity: "Exotic".into(),
+                    level: 80,
+                    vendor_value: None,
+                    chat_link: None,
+                    default_skin: None,
+                    flags: Vec::new(),
+                    game_types: Vec::new(),
+                    restrictions: Vec::new(),
+                    details: None,
+                },
+            );
+            db.sigils.push(id);
+        }
+        db
+    }
+
+    /// The modal prefix names the build, not whatever landed on the helm.
+    #[test]
+    fn primary_prefix_is_modal_not_first_slot() {
+        let mut build = ValidatedBuild {
+            weapons: ValidatedWeapons {
+                set1: ValidatedWeaponSet {
+                    main_hand: Some("Staff".into()),
+                    off_hand: None,
+                },
+                set2: ValidatedWeaponSet::default(),
+            },
+            ..ValidatedBuild::default()
+        };
+        build.fill_worn_gear_slots(PrefixRef {
+            itemstat_id: 161,
+            name: "Berserker's".into(),
+        });
+        // One nudged piece, and it is the first slot in canonical order.
+        build.gear_slots.set(
+            GearSlot::Helm,
+            PrefixRef {
+                itemstat_id: 1099,
+                name: "Cavalier's".into(),
+            },
+        );
+
+        assert_eq!(
+            build.primary_prefix().map(|p| p.itemstat_id),
+            Some(161),
+            "one helm swap renamed the whole build"
+        );
+
+        // Ties resolve by canonical slot order, deterministically.
+        let mut split = ValidatedBuild::default();
+        for slot in [GearSlot::Helm, GearSlot::Shoulders] {
+            split.gear_slots.set(
+                slot,
+                PrefixRef {
+                    itemstat_id: 1,
+                    name: "A".into(),
+                },
+            );
+        }
+        for slot in [GearSlot::Coat, GearSlot::Gloves] {
+            split.gear_slots.set(
+                slot,
+                PrefixRef {
+                    itemstat_id: 2,
+                    name: "B".into(),
+                },
+            );
+        }
+        assert_eq!(split.primary_prefix().map(|p| p.itemstat_id), Some(1));
+    }
+
     #[test]
     fn test_parse_weapon_sets_from_response() {
         let mut response = GeminiBuildResponse::default();
@@ -1629,6 +2143,7 @@ mod tests {
             professions: std::collections::HashMap::new(),
             legends: std::collections::HashMap::new(),
             pvp_amulets: std::collections::HashMap::new(),
+            pets: std::collections::HashMap::new(),
             skills_by_profession: std::collections::HashMap::new(),
             traits_by_spec: std::collections::HashMap::new(),
             items_by_type: std::collections::HashMap::new(),
@@ -1645,10 +2160,30 @@ mod tests {
         }
     }
 
+    /// A build holding a one-handed weapon in every hand of both sets, so all
+    /// sixteen slots are worn. `validate_weapons` runs before the gear
+    /// validators in `validate_gemini_build`, so this is the state they see.
+    fn dual_wielding_both_sets() -> ValidatedBuild {
+        let hand = |name: &str| Some(name.to_string());
+        ValidatedBuild {
+            weapons: ValidatedWeapons {
+                set1: ValidatedWeaponSet {
+                    main_hand: hand("Sword"),
+                    off_hand: hand("Focus"),
+                },
+                set2: ValidatedWeaponSet {
+                    main_hand: hand("Scepter"),
+                    off_hand: hand("Torch"),
+                },
+            },
+            ..ValidatedBuild::default()
+        }
+    }
+
     fn run_validate_gear_prefix(prefix: &str, db: &GameDb) -> ValidatedBuild {
         let mut response = GeminiBuildResponse::default();
         response.stat_prefix = prefix.into();
-        let mut result = ValidatedBuild::default();
+        let mut result = dual_wielding_both_sets();
         validate_gear_prefix(&response, db, &mut result);
         result
     }
@@ -1668,6 +2203,27 @@ mod tests {
             result.warnings.is_empty(),
             "exact match must not emit fuzzy warning"
         );
+    }
+
+    #[test]
+    fn alnum_exact_warns_on_display_mismatch() {
+        // "Knight's" and "Knights" share the same alphanumeric key (alnum_key
+        // strips punctuation/spacing), so itemstat_by_name resolves this
+        // deterministically rather than falling through to "not found". The
+        // display strings still differ, so validate_gear_prefix must warn even
+        // though this is an alnum-exact match, not a substring fuzzy match.
+        let db = empty_db_with_itemstats(vec![(500, "Knight's")]);
+        let result = run_validate_gear_prefix("Knights", &db);
+        let p = result.primary_prefix().expect("should match via alnum key");
+        assert_eq!(p.itemstat_id, 500);
+        assert_eq!(p.name, "Knight's");
+        assert_eq!(
+            result.warnings.len(),
+            1,
+            "alnum-exact match with a differing display string must warn"
+        );
+        assert!(result.warnings[0].contains("Knights"));
+        assert!(result.warnings[0].contains("Knight's"));
     }
 
     #[test]
@@ -1715,6 +2271,7 @@ mod tests {
     fn test_validate_gear_prefix_populates_every_slot() {
         let db = empty_db_with_itemstats(vec![(101, "Berserker's")]);
         let result = run_validate_gear_prefix("Berserker's", &db);
+        // Every hand of both sets holds a weapon here, so every slot is worn.
         for slot in GearSlot::ALL {
             let p = result
                 .prefix_for(slot)
@@ -1734,7 +2291,7 @@ mod tests {
         let mut response = GeminiBuildResponse::default();
         response.stat_prefix = stat_prefix.into();
         response.gear_slots = Some(gear_slots);
-        let mut result = ValidatedBuild::default();
+        let mut result = dual_wielding_both_sets();
         validate_gear_prefix(&response, db, &mut result);
         validate_gear_slot_map(&response, db, &mut result);
         result

@@ -419,7 +419,7 @@ fn load_named(state: &mut AddonState, name: &str) {
     else {
         return;
     };
-    let db_ref = state.main.game_db.as_ref();
+    let db_ref = state.main.game_db.as_deref();
     let mut suggestion = saved_to_suggestion(&saved, db_ref);
     let balance_ctx = gw2_optimizer::balance::BalanceContext::new(state.main.game_mode.clone());
     if let Some(ref db) = state.main.game_db {
@@ -623,15 +623,16 @@ fn render_ranch_table(ui: &Ui, state: &mut AddonState, rows: &[usize]) {
 /// Render the Save/Load tab.
 pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonState) {
     if !state.main.saved_builds_loaded {
-        let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
-        state.main.saved_builds = storage.list();
-        for b in &state.main.saved_builds {
+        let (builds, skipped) = load_saved_builds(&state.addon_dir);
+        for b in &builds {
             state
                 .main
                 .note_drafts
                 .entry(b.name.clone())
                 .or_insert_with(|| b.notes.clone());
         }
+        state.main.saved_builds = builds;
+        state.main.saved_builds_skipped = skipped;
         state.main.saved_builds_loaded = true;
     }
 
@@ -641,6 +642,9 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
     let total = state.main.saved_builds.len();
 
     render_ranch_hero(ui, char_name.as_deref(), shown, total);
+    if !state.main.saved_builds_skipped.is_empty() {
+        render_skipped_saves_warning(ui, &state.main.saved_builds_skipped);
+    }
     ui.dummy([0.0, 10.0]);
     render_corral_bar(ui, state);
     ui.dummy([0.0, 14.0]);
@@ -651,6 +655,30 @@ pub(in crate::ui::main_view) fn render_saveload_tab(ui: &Ui, state: &mut AddonSt
     }
 
     render_ranch_table(ui, state, &rows);
+}
+
+/// Load saved builds plus the basenames of any corrupt `.json` files skipped
+/// alongside them, in the single directory scan `BuildStorage::list_with_skipped`
+/// performs. Standalone (no `AddonState`) so the skip-surfacing behavior is
+/// unit-testable without a live overlay — see
+/// `tests::skipped_corrupt_saves_are_listed`.
+fn load_saved_builds(
+    addon_dir: &std::path::Path,
+) -> (Vec<gw2_core::types::SavedBuild>, Vec<String>) {
+    gw2_core::storage::BuildStorage::new(addon_dir).list_with_skipped()
+}
+
+/// Warn the player that one or more saves could not be read, instead of
+/// letting them silently vanish behind the storage layer's `eprintln!` (C29).
+fn render_skipped_saves_warning(ui: &Ui, skipped: &[String]) {
+    ui.text_colored(
+        theme::ERR,
+        format!(
+            "{} corrupt save file(s) skipped: {}",
+            skipped.len(),
+            skipped.join(", "),
+        ),
+    );
 }
 
 /// The per-slot prefix record to persist for a suggestion: its own slot map
@@ -1159,6 +1187,7 @@ mod tests {
             professions: std::collections::HashMap::new(),
             legends: std::collections::HashMap::new(),
             pvp_amulets: std::collections::HashMap::new(),
+            pets: std::collections::HashMap::new(),
             skills_by_profession: std::collections::HashMap::new(),
             traits_by_spec,
             items_by_type: std::collections::HashMap::new(),
@@ -1325,5 +1354,39 @@ mod tests {
         let builds = vec![a, b];
         assert_eq!(super::ranch_indices(&builds, Some("Darth")), vec![0]);
         assert_eq!(super::ranch_indices(&builds, None), vec![0, 1]);
+    }
+
+    #[test]
+    fn skipped_corrupt_saves_are_listed() {
+        // C29: a corrupt save file must not just vanish behind
+        // `BuildStorage`'s `eprintln!` — its basename must come back from the
+        // exact load path `render_saveload_tab` uses, so the Save/Load tab can
+        // warn the player instead of the save silently disappearing.
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_saveload_skipped_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let saves_dir = dir.join("saves");
+        std::fs::create_dir_all(&saves_dir).unwrap();
+
+        let good = build_saved_for_modifier_reconstruction();
+        let storage = gw2_core::storage::BuildStorage::new(&dir);
+        storage.save_new(&good).unwrap();
+        std::fs::write(saves_dir.join("corrupt.json"), "{ not json }").unwrap();
+
+        let (builds, skipped) = super::load_saved_builds(&dir);
+        assert_eq!(builds.len(), 1, "the one good build should survive");
+        assert_eq!(
+            skipped,
+            vec!["corrupt.json".to_string()],
+            "the corrupt save's basename must be surfaced, not just eprintln!-ed",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::cache::DataCache;
-use crate::client::{ApiError, Gw2Client};
+use crate::client::{with_cancel_bridge, ApiError, Gw2Client};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LocalizedNames {
@@ -29,6 +29,8 @@ pub struct LocalizedNames {
     pub legends: HashMap<String, String>,
     #[serde(default)]
     pub pvp_amulets: HashMap<u32, String>,
+    #[serde(default)]
+    pub pets: HashMap<u32, String>,
     /// Lowercase English name → localized name. Built when attached to GameDb.
     #[serde(skip)]
     pub by_english: HashMap<String, String>,
@@ -96,21 +98,37 @@ pub fn load(
 }
 
 /// Fetch id+name maps for the English cache's IDs, persist, return.
+///
+/// This builds its own client, so it also installs its own cancel bridge —
+/// otherwise a cancel raised during the items pass would only be seen between
+/// endpoints, never inside the retry ladder of the request in flight.
 pub fn download(
     cache: &DataCache,
     lang: &str,
-    cancelled: impl Fn() -> bool,
-    mut on_progress: impl FnMut(&str),
+    cancelled: impl Fn() -> bool + Sync,
+    on_progress: impl FnMut(&str),
 ) -> Result<LocalizedNames, ApiError> {
     if !matches!(lang, "de" | "es" | "fr" | "zh") {
         return Err(ApiError::Internal(format!("unsupported API lang {lang}")));
     }
     let client = Gw2Client::without_key()?.with_lang(Some(lang));
+    with_cancel_bridge(&client, &cancelled, || {
+        download_pack(&client, cache, lang, &cancelled, on_progress)
+    })
+}
+
+fn download_pack(
+    client: &Gw2Client,
+    cache: &DataCache,
+    lang: &str,
+    cancelled: &impl Fn() -> bool,
+    mut on_progress: impl FnMut(&str),
+) -> Result<LocalizedNames, ApiError> {
     let build = client.get_build_number()?;
 
     let check = || {
         if cancelled() {
-            Err(ApiError::Internal("cancelled".into()))
+            Err(ApiError::Cancelled)
         } else {
             Ok(())
         }
@@ -118,28 +136,31 @@ pub fn download(
 
     on_progress("itemstats");
     check()?;
-    let itemstats = fetch_u32(&client, cache, "itemstats", "itemstats")?;
+    let itemstats = fetch_u32(client, cache, "itemstats", "itemstats")?;
     on_progress("specializations");
     check()?;
-    let specs = fetch_u32(&client, cache, "specializations", "specializations")?;
+    let specs = fetch_u32(client, cache, "specializations", "specializations")?;
     on_progress("traits");
     check()?;
-    let traits = fetch_u32(&client, cache, "traits", "traits")?;
+    let traits = fetch_u32(client, cache, "traits", "traits")?;
     on_progress("skills");
     check()?;
-    let skills = fetch_u32(&client, cache, "skills", "skills")?;
+    let skills = fetch_u32(client, cache, "skills", "skills")?;
     on_progress("professions");
     check()?;
-    let professions = fetch_str(&client, cache, "professions", "professions")?;
+    let professions = fetch_str(client, cache, "professions", "professions")?;
     on_progress("legends");
     check()?;
-    let legends = fetch_str(&client, cache, "legends", "legends")?;
+    let legends = fetch_str(client, cache, "legends", "legends")?;
     on_progress("pvp amulets");
     check()?;
-    let pvp_amulets = fetch_u32(&client, cache, "pvp/amulets", "pvp_amulets")?;
+    let pvp_amulets = fetch_u32(client, cache, "pvp/amulets", "pvp_amulets")?;
+    on_progress("pets");
+    check()?;
+    let pets = fetch_u32(client, cache, "pets", "pets")?;
     on_progress("items");
     check()?;
-    let items = fetch_u32_progress(&client, cache, "items", "items", &mut on_progress)?;
+    let items = fetch_u32_progress(client, cache, "items", "items", &mut on_progress)?;
 
     let names = LocalizedNames {
         lang: lang.to_string(),
@@ -151,6 +172,7 @@ pub fn download(
         professions,
         legends,
         pvp_amulets,
+        pets,
         by_english: HashMap::new(),
     };
     cache

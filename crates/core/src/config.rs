@@ -45,6 +45,225 @@ impl LlmProvider {
     }
 }
 
+/// Whether the config held in memory may be written back over `config.json`.
+///
+/// Only [`AppConfig::load`] ever selects [`SavePolicy::RefuseUnreadFileOnDisk`],
+/// and the field carrying it is deliberately not serialized: it describes what
+/// this run knows about the file, never anything stored inside it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SavePolicy {
+    /// Nothing on disk is unaccounted for — this value came from a successful
+    /// load, from a file that was read but could not be parsed, or from
+    /// [`AppConfig::default`].
+    #[default]
+    Writable,
+    /// `config.json` exists and could not be read, so the user's real settings
+    /// — API keys included — are still inside it and are *not* in this value.
+    /// Writing this value out would destroy them, so [`AppConfig::save`]
+    /// refuses. Recovery is a reload (restart the addon once the file is
+    /// readable again) or an explicit `reset_to_first_run`, which builds a
+    /// fresh [`AppConfig::default`] and is therefore `Writable`.
+    RefuseUnreadFileOnDisk,
+}
+
+/// What a feed can paint in the overlay (text + stills, never playback).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NewsKind {
+    Articles,
+    Notes,
+    Video,
+    Guides,
+}
+
+impl NewsKind {
+    pub const ALL: [NewsKind; 4] = [
+        NewsKind::Articles,
+        NewsKind::Notes,
+        NewsKind::Video,
+        NewsKind::Guides,
+    ];
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            NewsKind::Articles => "news.kind.articles",
+            NewsKind::Notes => "news.kind.notes",
+            NewsKind::Video => "news.kind.video",
+            NewsKind::Guides => "news.kind.guides",
+        }
+    }
+
+    pub fn settings_key(self) -> &'static str {
+        match self {
+            NewsKind::Articles => "settings.news_articles",
+            NewsKind::Notes => "settings.news_notes",
+            NewsKind::Video => "settings.news_video",
+            NewsKind::Guides => "settings.news_guides",
+        }
+    }
+
+    pub fn sources(self) -> &'static [NewsSource] {
+        match self {
+            NewsKind::Articles => &[NewsSource::Official, NewsSource::ForumNews],
+            NewsKind::Notes => &[NewsSource::PatchNotes],
+            NewsKind::Video => &[NewsSource::Youtube],
+            NewsKind::Guides => &[NewsSource::GuildJen],
+        }
+    }
+}
+
+/// Which public feeds the News tab can show. Setup always uses [`NewsSource::Official`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NewsSource {
+    Official,
+    ForumNews,
+    PatchNotes,
+    Youtube,
+    GuildJen,
+}
+
+impl NewsSource {
+    pub const ALL: [NewsSource; 5] = [
+        NewsSource::Official,
+        NewsSource::ForumNews,
+        NewsSource::PatchNotes,
+        NewsSource::Youtube,
+        NewsSource::GuildJen,
+    ];
+
+    pub fn index(self) -> usize {
+        match self {
+            NewsSource::Official => 0,
+            NewsSource::ForumNews => 1,
+            NewsSource::PatchNotes => 2,
+            NewsSource::Youtube => 3,
+            NewsSource::GuildJen => 4,
+        }
+    }
+
+    pub fn kind(self) -> NewsKind {
+        match self {
+            NewsSource::Official | NewsSource::ForumNews => NewsKind::Articles,
+            NewsSource::PatchNotes => NewsKind::Notes,
+            NewsSource::Youtube => NewsKind::Video,
+            NewsSource::GuildJen => NewsKind::Guides,
+        }
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            NewsSource::Official => "news.source.official",
+            NewsSource::ForumNews => "news.source.forum",
+            NewsSource::PatchNotes => "news.source.patch_notes",
+            NewsSource::Youtube => "news.source.youtube",
+            NewsSource::GuildJen => "news.source.guildjen",
+        }
+    }
+
+    pub fn hint_key(self) -> &'static str {
+        match self {
+            NewsSource::Official => "news.source.official.hint",
+            NewsSource::ForumNews => "news.source.forum.hint",
+            NewsSource::PatchNotes => "news.source.patch_notes.hint",
+            NewsSource::Youtube => "news.source.youtube.hint",
+            NewsSource::GuildJen => "news.source.guildjen.hint",
+        }
+    }
+}
+
+/// How the News tab is laid out. Old configs used `timeline` / `by_source`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NewsLayout {
+    #[default]
+    #[serde(alias = "timeline")]
+    Desk,
+    #[serde(alias = "by_source")]
+    Magazine,
+    Reader,
+}
+
+impl NewsLayout {
+    pub fn label_key(self) -> &'static str {
+        match self {
+            NewsLayout::Desk => "news.layout.desk",
+            NewsLayout::Magazine => "news.layout.magazine",
+            NewsLayout::Reader => "news.layout.reader",
+        }
+    }
+}
+
+fn default_show_images() -> bool {
+    true
+}
+
+/// Ticked sources + reading tools. All sources off until the player opts in —
+/// that is what hides the News tab. Setup still paints official GW2 headlines.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewsPreferences {
+    #[serde(default)]
+    pub official: bool,
+    #[serde(default)]
+    pub forum_news: bool,
+    #[serde(default)]
+    pub patch_notes: bool,
+    #[serde(default)]
+    pub youtube: bool,
+    #[serde(default)]
+    pub guildjen: bool,
+    #[serde(default)]
+    pub layout: NewsLayout,
+    #[serde(default = "default_show_images")]
+    pub show_images: bool,
+}
+
+impl Default for NewsPreferences {
+    fn default() -> Self {
+        Self {
+            official: false,
+            forum_news: false,
+            patch_notes: false,
+            youtube: false,
+            guildjen: false,
+            layout: NewsLayout::Desk,
+            show_images: true,
+        }
+    }
+}
+
+impl NewsPreferences {
+    pub fn get(&self, src: NewsSource) -> bool {
+        match src {
+            NewsSource::Official => self.official,
+            NewsSource::ForumNews => self.forum_news,
+            NewsSource::PatchNotes => self.patch_notes,
+            NewsSource::Youtube => self.youtube,
+            NewsSource::GuildJen => self.guildjen,
+        }
+    }
+
+    pub fn set(&mut self, src: NewsSource, on: bool) {
+        match src {
+            NewsSource::Official => self.official = on,
+            NewsSource::ForumNews => self.forum_news = on,
+            NewsSource::PatchNotes => self.patch_notes = on,
+            NewsSource::Youtube => self.youtube = on,
+            NewsSource::GuildJen => self.guildjen = on,
+        }
+    }
+
+    pub fn any_enabled(&self) -> bool {
+        NewsSource::ALL.iter().any(|&s| self.get(s))
+    }
+
+    pub fn enabled_sources(&self) -> Vec<NewsSource> {
+        NewsSource::ALL
+            .into_iter()
+            .filter(|&s| self.get(s))
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub gw2_api_key: Option<String>,
@@ -136,9 +355,20 @@ pub struct AppConfig {
     #[serde(default = "default_ui_font")]
     pub ui_font: String,
 
+    /// News tab sources. Omitted on old configs; defaults all-off (tab hidden).
+    #[serde(default)]
+    pub news: NewsPreferences,
+
     /// Random id minted once per install for the feedback server (never an account id).
     #[serde(default)]
     pub client_id: Option<String>,
+
+    /// Never persisted. Set by [`AppConfig::load`] when an existing
+    /// `config.json` could not be read, so [`AppConfig::save`] will not write
+    /// these defaults over settings this run never saw. `#[serde(skip)]` keeps
+    /// the on-disk shape byte-for-byte unchanged for existing installs.
+    #[serde(skip)]
+    pub save_policy: SavePolicy,
 }
 
 impl Default for AppConfig {
@@ -170,7 +400,9 @@ impl Default for AppConfig {
             auto_refresh_cache: false,
             ui_language: "auto".into(),
             ui_font: "auto".into(),
+            news: NewsPreferences::default(),
             client_id: None,
+            save_policy: SavePolicy::Writable,
         }
     }
 }
@@ -200,6 +432,16 @@ fn default_ui_language() -> String {
 
 fn default_ui_font() -> String {
     "auto".into()
+}
+
+/// User-facing message for a `config.json` whose contents were readable but
+/// unusable. Shared by the JSON-parse and non-UTF-8 arms of [`AppConfig::load`]
+/// so both report the same outcome: the stored settings are gone.
+fn settings_reset_message(cause: &dyn std::fmt::Display) -> String {
+    format!(
+        "config.json could not be parsed ({}). All settings reset to defaults.",
+        cause
+    )
 }
 
 pub const DEFAULT_WINDOW_POS: [f32; 2] = [80.0, 80.0];
@@ -330,34 +572,87 @@ impl AppConfig {
         }
     }
 
-    /// Load config from disk. Returns `(config, error_message)` where
-    /// `error_message` is Some if the file existed but could not be parsed.
-    /// Callers should surface parse errors to the user — settings were reset.
+    /// Load config from disk. Returns `(config, error_message)`; the message is
+    /// `Some` whenever a file is on disk whose settings could not be recovered,
+    /// and callers surface it to the user.
+    ///
+    /// The three failure shapes are deliberately not collapsed, because each
+    /// one calls for something different:
+    ///
+    /// * **No file** — an ordinary first run. Silent defaults, saving is normal.
+    /// * **Unreadable file** — a sharing violation from antivirus or cloud
+    ///   sync, a permission change, a failing disk. The user's keys are still
+    ///   in that file and are *not* in the value returned here, so the returned
+    ///   config carries [`SavePolicy::RefuseUnreadFileOnDisk`] and cannot be
+    ///   written back over them.
+    /// * **Unparseable file** — the stored settings are already unrecoverable,
+    ///   so defaults are returned and saving stays enabled; otherwise the user
+    ///   could never repair it from the UI.
     pub fn load(path: &Path) -> (Self, Option<String>) {
-        match std::fs::read_to_string(path) {
-            Err(_) => (Self::default(), None),
-            Ok(s) => match serde_json::from_str::<Self>(&s) {
-                Ok(cfg) => (cfg, None),
-                Err(e) => {
-                    let msg = format!(
-                        "config.json could not be parsed ({}). All settings reset to defaults.",
-                        e
-                    );
-                    (Self::default(), Some(msg))
-                }
-            },
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            // First run. Nothing to lose, nothing to report.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Self::default(), None),
+            // Readable bytes, unusable content. Same class as a parse failure:
+            // treating it as "unread user data" would block saves forever.
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                return (Self::default(), Some(settings_reset_message(&e)))
+            }
+            Err(e) => {
+                let guarded = Self {
+                    save_policy: SavePolicy::RefuseUnreadFileOnDisk,
+                    ..Self::default()
+                };
+                // Kept short on purpose: this lands in the one-line, unwrapped
+                // status bar, and anything longer pushes its Dismiss button off
+                // the window.
+                let msg = format!(
+                    "config.json could not be read ({}). Your saved settings are safe but \
+                     locked — close what is holding the file and restart the addon.",
+                    e
+                );
+                return (guarded, Some(msg));
+            }
+        };
+
+        match serde_json::from_str::<Self>(&text) {
+            Ok(cfg) => (cfg, None),
+            Err(e) => (Self::default(), Some(settings_reset_message(&e))),
         }
     }
 
+    /// Persist to `path` by writing a private staging file and renaming it over
+    /// the target, so a failed or partial write can never truncate the file that
+    /// is already there, and two saves running at once cannot land in one
+    /// another's bytes. See `AppConfig::staging_path`.
+    ///
+    /// Refuses outright when this value came from a config file that could not
+    /// be read — writing defaults over a file that still holds the user's API
+    /// keys is the one outcome this must never produce. See [`SavePolicy`].
+    ///
+    /// ponytail: no `fsync` before the rename, so the publish is atomic and
+    /// survives a process crash but not a power cut mid-write. Most callers run
+    /// on the overlay's render thread, where an fsync is a visible frame hitch;
+    /// revisit if config saves ever move off that thread.
     pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
+        // Matched, not compared, so a future policy has to be triaged here
+        // rather than silently defaulting to "go ahead and overwrite".
+        match self.save_policy {
+            SavePolicy::Writable => {}
+            SavePolicy::RefuseUnreadFileOnDisk => {
+                return Err(std::io::Error::other(
+                    "refusing to overwrite config.json: it could not be read when the addon \
+                     started and still holds your saved settings",
+                ))
+            }
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        let tmp_path = path.with_extension("tmp");
-        // Crash-safe: write to .tmp then atomic rename. Clean up the orphan
-        // .tmp on either failure so it doesn't accumulate after repeated
-        // failed saves (e.g. disk full, antivirus interruption).
+        let tmp_path = Self::staging_path(path);
+        // Clean up the orphan .tmp on either failure so it doesn't accumulate
+        // after repeated failed saves (e.g. disk full, antivirus interruption).
         if let Err(e) = std::fs::write(&tmp_path, &json) {
             let _ = std::fs::remove_file(&tmp_path);
             return Err(e);
@@ -367,6 +662,48 @@ impl AppConfig {
             return Err(e);
         }
         Ok(())
+    }
+
+    /// A private, unique staging destination for one in-progress [`save`].
+    ///
+    /// Unique because nothing serialises `save` any more. Config writes used to
+    /// happen only with the addon's `STATE` mutex held, which made them one at a
+    /// time by accident; the overlay now hands them to a background worker, so a
+    /// save can be in flight while the render thread starts another one.
+    ///
+    /// Sharing one `config.tmp` between those two is not merely a lost write.
+    /// Both `fs::write` calls open the same path and write from offset zero, so
+    /// the bytes interleave — and **both calls can still return `Ok`**, which is
+    /// why no amount of retrying on error covers it. Whichever rename runs first
+    /// then publishes that mixture as `config.json`, [`AppConfig::load`] reads it
+    /// as a parse failure, hands back defaults that are `Writable`, and the next
+    /// save writes those defaults over the user's API keys.
+    ///
+    /// Process id plus a per-process counter gives every in-flight save its own
+    /// file, so the only step two saves still share is the rename, which is
+    /// atomic: the published config is always exactly one of them, whole. Same
+    /// shape as `storage.rs`'s `staging_path`, for the same reason.
+    ///
+    /// The name keeps the target's stem, sits in the target's directory (so the
+    /// rename stays on one volume), and ends in `.tmp`, never `.json`. A process
+    /// killed mid-save can leave one behind — `save` removes its own on both
+    /// failure paths, and an orphan is inert because nothing ever reads `*.tmp`.
+    ///
+    /// [`save`]: AppConfig::save
+    fn staging_path(path: &Path) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        // `OsString`, not `format!`, so a non-UTF-8 path is not mangled on the
+        // way through. `file_stem` is `None` only for a path with no file name,
+        // which `save` could not have written to anyway.
+        let mut name = path.file_stem().unwrap_or(path.as_os_str()).to_os_string();
+        name.push(format!(".{}-{}.tmp", std::process::id(), seq));
+        match path.parent() {
+            Some(dir) => dir.join(name),
+            None => PathBuf::from(name),
+        }
     }
 
     pub fn has_gw2_key(&self) -> bool {
@@ -418,6 +755,143 @@ mod tests {
     use super::*;
     use std::env;
 
+    /// Two saves of the same config file must never stage into one path.
+    ///
+    /// Config writes used to be serialised by the addon's `STATE` mutex; the
+    /// overlay now hands them to a background worker, so a save can be in flight
+    /// while the render thread starts another one. With the old shared
+    /// `config.tmp` both `fs::write` calls landed in one file, both could still
+    /// return `Ok`, and the first rename published the mixture — which `load`
+    /// reads as a parse failure, replaces with `Writable` defaults, and the next
+    /// save writes over the user's API keys with.
+    ///
+    /// Built deterministically rather than as a race this has to win: part 2 is
+    /// the part that fails outright on the shared name.
+    #[test]
+    fn config_save_uses_unique_staging() {
+        let dir = env::temp_dir().join(format!("gw2_config_staging_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+
+        // 1. Every staging path is private: different on each call, never the
+        //    target, always beside it, and carrying this process id so a second
+        //    process saving the same file cannot choose the same name either.
+        let first = AppConfig::staging_path(&path);
+        let second = AppConfig::staging_path(&path);
+        assert_ne!(first, second, "two saves must not stage into the same file");
+        assert_ne!(first, path, "staging must not be the published file");
+        assert_eq!(
+            first.parent(),
+            path.parent(),
+            "rename must stay on one volume"
+        );
+        assert_eq!(first.extension().and_then(|e| e.to_str()), Some("tmp"));
+        let pid = std::process::id().to_string();
+        for staged in [&first, &second] {
+            let name = staged.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(
+                name.contains(&pid),
+                "staging name must be process-private, got {name}"
+            );
+        }
+
+        // 2. Another writer's staging file is left completely alone. The old code
+        //    wrote straight through `config.tmp` and renamed it away, so this is
+        //    the assertion that fails on the shared name every single time.
+        let foreign = dir.join("config.tmp");
+        let foreign_bytes: &[u8] = b"{ another writer was here";
+        std::fs::write(&foreign, foreign_bytes).unwrap();
+
+        let config = AppConfig {
+            client_id: Some("staging-probe".into()),
+            ..Default::default()
+        };
+        config.save(&path).unwrap();
+
+        assert!(
+            foreign.exists(),
+            "save consumed another writer's staging file instead of using its own"
+        );
+        assert_eq!(
+            std::fs::read(&foreign).unwrap(),
+            foreign_bytes,
+            "save wrote through another writer's staging file"
+        );
+        let (loaded, err) = AppConfig::load(&path);
+        assert!(err.is_none(), "published config must parse: {err:?}");
+        assert_eq!(loaded.client_id.as_deref(), Some("staging-probe"));
+
+        // 3. Saves that really do overlap publish whole files. With private
+        //    staging the only shared step left is the rename, which is atomic, so
+        //    `config.json` ends up as exactly one writer's config and never a
+        //    blend of several.
+        std::fs::remove_file(&foreign).unwrap();
+        const WRITERS: usize = 8;
+        // Deliberately different lengths: a byte-wise mixture of two of these
+        // cannot pass for either one.
+        let ids: Vec<String> = (0..WRITERS)
+            .map(|i| format!("writer-{}{}", i, "x".repeat(i * 64)))
+            .collect();
+        let results: Vec<std::io::Result<()>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = ids
+                .iter()
+                .map(|id| {
+                    let path = path.clone();
+                    scope.spawn(move || {
+                        AppConfig {
+                            client_id: Some(id.clone()),
+                            ..Default::default()
+                        }
+                        .save(&path)
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+
+        for (i, result) in results.iter().enumerate() {
+            if let Err(e) = result {
+                // A `NotFound` on the rename is exactly the shared-staging
+                // symptom: someone else renamed this save's staging file away.
+                // Anything else here is host noise (a scanner holding the
+                // published file), not the property under test.
+                assert_ne!(
+                    e.kind(),
+                    std::io::ErrorKind::NotFound,
+                    "writer {i} lost its staging file to another save: {e}"
+                );
+            }
+        }
+        assert!(
+            results.iter().any(|r| r.is_ok()),
+            "at least one concurrent save must publish, else this proves nothing"
+        );
+
+        let (loaded, err) = AppConfig::load(&path);
+        assert!(
+            err.is_none(),
+            "concurrent saves published an unparseable config: {err:?}"
+        );
+        let published = loaded
+            .client_id
+            .expect("published config kept its client_id");
+        assert!(
+            ids.contains(&published),
+            "published config is a blend of writers, not one of them: {published}"
+        );
+
+        let leaked: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
+        assert!(leaked.is_empty(), "staging files must not leak: {leaked:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn test_default_config() {
         let config = AppConfig::default();
@@ -468,6 +942,8 @@ mod tests {
         assert!(!config.auto_refresh_cache);
         assert_eq!(config.ui_language, "auto");
         assert_eq!(config.ui_font, "auto");
+        assert_eq!(config.news, NewsPreferences::default());
+        assert!(!config.news.any_enabled());
         assert!(config.is_setup_complete());
         assert!(config.window_visible);
         assert_eq!(
@@ -491,6 +967,7 @@ mod tests {
         assert!(config.window_visible);
         assert_eq!(config.ui_language, "auto");
         assert_eq!(config.ui_font, "auto");
+        assert_eq!(config.news, NewsPreferences::default());
         assert!(config.client_id.is_none());
         assert_eq!(
             config.window_rect(),
@@ -612,6 +1089,128 @@ mod tests {
     }
 
     #[test]
+    fn config_io_error_does_not_wipe() {
+        // An unreadable config.json — a sharing violation from an antivirus
+        // scan or cloud sync, a permission change, a failing disk — used to be
+        // indistinguishable from a first run: load() handed back silent
+        // defaults, the addon routed to the setup wizard because
+        // is_setup_complete() was false, and the next save() flushed those
+        // defaults over the file that still held the player's API keys.
+        let dir = env::temp_dir().join(format!("gw2_config_io_err_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // The file a set-up player has on disk.
+        let good_path = dir.join("config.json");
+        let stored = AppConfig {
+            gw2_api_key: Some("stored-gw2-key".into()),
+            gemini_api_key: Some("stored-gemini-key".into()),
+            cache_build_number: Some(12345),
+            ..Default::default()
+        };
+        stored.save(&good_path).unwrap();
+        let bytes_before = std::fs::read_to_string(&good_path).unwrap();
+        assert!(
+            !bytes_before.contains("save_policy"),
+            "the load guard is this run's knowledge, not stored state — it must never \
+             reach config.json and change the on-disk shape: {}",
+            bytes_before,
+        );
+
+        // 1. A genuinely missing file is still the silent first-run path, and
+        //    the defaults it returns must remain saveable.
+        let (fresh, err) = AppConfig::load(&dir.join("never-written.json"));
+        assert!(err.is_none(), "a missing config must not raise: {:?}", err);
+        assert_eq!(fresh.save_policy, SavePolicy::Writable);
+        fresh
+            .save(&dir.join("first-run.json"))
+            .expect("first run must still be able to save");
+
+        // 2. An unreadable path is not a missing one. Pointing at a directory
+        //    fails with a non-NotFound io::Error on every platform, the same
+        //    class of failure as a Windows sharing violation.
+        let blocked = dir.join("blocked-config.json");
+        std::fs::create_dir_all(&blocked).unwrap();
+        let (guarded, err) = AppConfig::load(&blocked);
+        let msg = err.expect("an unreadable config must be reported, not silently defaulted");
+        assert!(
+            msg.contains("could not be read"),
+            "message must say the file was unreadable, got: {}",
+            msg,
+        );
+        assert_eq!(guarded.save_policy, SavePolicy::RefuseUnreadFileOnDisk);
+
+        // 3. The whole point: those in-memory defaults must not reach disk.
+        //    Aim them at a path that is definitely writable, so the refusal —
+        //    not the filesystem — is what protects the stored keys.
+        assert!(
+            guarded.save(&good_path).is_err(),
+            "saving a config we failed to read must be refused",
+        );
+        assert_eq!(
+            std::fs::read_to_string(&good_path).unwrap(),
+            bytes_before,
+            "stored config.json must be byte-identical after a refused save",
+        );
+        let (reloaded, err) = AppConfig::load(&good_path);
+        assert!(err.is_none(), "unexpected error reloading: {:?}", err);
+        assert_eq!(reloaded.gw2_api_key.as_deref(), Some("stored-gw2-key"));
+        assert_eq!(
+            reloaded.gemini_api_key.as_deref(),
+            Some("stored-gemini-key")
+        );
+        assert!(
+            reloaded.is_setup_complete(),
+            "the player's setup must survive a run that could not read the config",
+        );
+
+        // 4. The reported failure itself: another process holds config.json
+        //    with no sharing flags while the addon starts.
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let lock = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0) // deny all sharing, like an AV scanner mid-scan
+                .open(&good_path)
+                .expect("exclusive open of the good config");
+
+            let (locked, err) = AppConfig::load(&good_path);
+            assert!(err.is_some(), "a locked config.json must be reported");
+            assert_eq!(locked.save_policy, SavePolicy::RefuseUnreadFileOnDisk);
+            assert!(
+                locked.gw2_api_key.is_none(),
+                "nothing was read, so nothing is known"
+            );
+            assert!(
+                locked.save(&good_path).is_err(),
+                "the locked file must not be overwritten with defaults",
+            );
+
+            drop(lock);
+            assert_eq!(
+                std::fs::read_to_string(&good_path).unwrap(),
+                bytes_before,
+                "stored config.json must survive the lock window intact",
+            );
+        }
+
+        // 5. A file that was read but not parsed is a different case: its
+        //    settings are already unrecoverable, so saving must stay enabled or
+        //    the user can never repair it from the UI.
+        let corrupt_path = dir.join("corrupt.json");
+        std::fs::write(&corrupt_path, "{ not valid json").unwrap();
+        let (after_parse_error, err) = AppConfig::load(&corrupt_path);
+        assert!(err.unwrap().contains("could not be parsed"));
+        assert_eq!(after_parse_error.save_policy, SavePolicy::Writable);
+        after_parse_error
+            .save(&corrupt_path)
+            .expect("a corrupt config must still be replaceable");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn test_active_routing_matches_provider() {
         // active_api_key / active_model_id must route to the field matching
         // active_provider, not to whichever key happens to be set. Populate
@@ -651,5 +1250,25 @@ mod tests {
         };
         assert_eq!(empty.active_api_key(), None);
         assert_eq!(empty.active_model_id(), DEFAULT_ANTHROPIC_MODEL);
+    }
+
+    #[test]
+    fn news_prefs_opt_in_and_old_config_stays_off() {
+        let mut p = NewsPreferences::default();
+        assert!(!p.any_enabled());
+        p.set(NewsSource::Youtube, true);
+        assert_eq!(p.enabled_sources(), vec![NewsSource::Youtube]);
+        let json = r#"{"gw2_api_key":"k","gemini_api_key":"g","cache_build_number":1}"#;
+        let config: AppConfig = serde_json::from_str(json).unwrap();
+        assert!(!config.news.any_enabled());
+        assert_eq!(config.news.layout, NewsLayout::Desk);
+        assert!(config.news.show_images);
+        let old_layout: NewsPreferences =
+            serde_json::from_str(r#"{"youtube":true,"layout":"timeline"}"#).unwrap();
+        assert_eq!(old_layout.layout, NewsLayout::Desk);
+        assert!(old_layout.youtube);
+        assert!(old_layout.show_images);
+        assert_eq!(NewsSource::Youtube.kind(), NewsKind::Video);
+        assert_eq!(NewsSource::Official.kind(), NewsKind::Articles);
     }
 }

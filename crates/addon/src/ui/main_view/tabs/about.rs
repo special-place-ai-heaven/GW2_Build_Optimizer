@@ -15,9 +15,6 @@ use gw2_core::feedback::message::{now_unix, FailReason, LocalMessage, MessageSta
 use gw2_core::feedback::taxonomy::FeedbackTaxonomy;
 use gw2_core::i18n::{t, tf};
 
-/// How many changelog releases the What's new view shows.
-const CHANGELOG_SHOWN: usize = 5;
-
 /// Rows that went to the server (everything that is not `Local`).
 fn sent_count(messages: &[LocalMessage]) -> usize {
     messages.iter().filter(|m| !m.is_local()).count()
@@ -30,11 +27,9 @@ fn answered_count(messages: &[LocalMessage]) -> usize {
         .count()
 }
 
-/// The newest [`CHANGELOG_SHOWN`] releases bundled into the DLL.
+/// Every release bundled into the DLL, newest first.
 fn changelog_entries() -> Vec<ChangelogEntry> {
-    let mut entries = changelog::parse(changelog::EMBEDDED);
-    entries.truncate(CHANGELOG_SHOWN);
-    entries
+    changelog::parse(changelog::EMBEDDED)
 }
 
 fn render_about_hero(ui: &Ui, state: &AddonState) {
@@ -146,23 +141,37 @@ fn render_view_toggle(ui: &Ui, state: &mut AddonState) {
     }
 }
 
+fn changelog_body(ui: &Ui, text: &str) {
+    theme::prose(ui, text);
+}
+
 fn render_whats_new(ui: &Ui, state: &AddonState) {
-    let base = state.config.font_scale;
+    let scale = state.config.font_scale;
     let entries = changelog_entries();
     let scroll_h = (ui.content_region_avail()[1] - 4.0).max(64.0);
     ChildWindow::new("##about_changelog")
         .size([0.0, scroll_h])
         .build(ui, || {
+            // Nested children start at scale 1.0; match the overlay slider.
+            ui.set_window_font_scale(scale);
             if entries.is_empty() {
                 ui.text_colored(theme::MUTED, t("about.no_changelog"));
                 return;
             }
+            let _sp = ui.push_style_var(StyleVar::ItemSpacing([10.0 * scale, 8.0 * scale]));
+            ui.dummy([0.0, 4.0]);
             for e in &entries {
-                ui.text_colored(theme::CREAM, format!("{}  ·  {}", e.version, e.date));
-                ui.set_window_font_scale(base * 0.85);
-                theme::wrapped(ui, theme::MUTED, &e.body);
-                ui.set_window_font_scale(base);
-                ui.dummy([0.0, 10.0]);
+                let heading = if e.date.is_empty() {
+                    e.version.clone()
+                } else {
+                    format!("{}  ·  {}", e.version, e.date)
+                };
+                ui.set_window_font_scale(scale * 1.2);
+                ui.text_colored(theme::GOLD, heading);
+                ui.set_window_font_scale(scale);
+                ui.dummy([0.0, 6.0]);
+                changelog_body(ui, &e.body);
+                ui.dummy([0.0, 22.0]);
             }
         });
 }
@@ -486,7 +495,11 @@ fn expanded_block(ui: &Ui, row: &RowView, x: f32, y: f32, wrap_w: f32, draw: boo
     };
 
     let mut cy = y;
-    wrapped(&mut cy, theme::CREAM, &row.body);
+    if draw {
+        ui.set_cursor_screen_pos([x, cy]);
+        wizard::paint_mail(ui, &row.body, wrap_w);
+    }
+    cy += wizard::mail_height(ui, &row.body, wrap_w).max(lh);
     if !row.context.is_empty() {
         cy += GAP;
         let attached = format!("{}  ·  {}", t("about.attached"), row.context);
@@ -865,12 +878,17 @@ mod tests {
     }
 
     #[test]
-    fn changelog_entries_are_the_first_five() {
+    fn changelog_entries_are_the_bundled_changelog() {
         let entries = changelog_entries();
-        assert_eq!(entries.len(), 5);
         let all = gw2_core::feedback::changelog::parse(gw2_core::feedback::changelog::EMBEDDED);
-        assert_eq!(entries[0], all[0]);
-        assert!(entries.iter().all(|e| !e.version.is_empty()));
+        assert_eq!(entries, all);
+        assert!(
+            entries.len() >= 5,
+            "What's new should have enough history to scroll"
+        );
+        assert!(entries
+            .iter()
+            .all(|e| !e.version.is_empty() && !e.body.is_empty()));
     }
 
     #[test]

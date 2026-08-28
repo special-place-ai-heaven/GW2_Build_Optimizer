@@ -14,7 +14,14 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::rate::{PersistedUsage, RateTracker};
+use super::body::{body_cap_exceeded, body_capped, hit_body_cap, json_capped, read_body_capped};
+use super::cancel::{sleep_observing, CANCELLED};
+use super::openai_compat::{
+    as_transport_error, doubled_backoff, http_client, is_retryable_status, retry_after_delay,
+    RateReserve, CHAT_REQUEST_TIMEOUT, METADATA_TIMEOUT,
+};
+use super::rate::{persist_usage, PersistedUsage, RateTracker};
+use super::sse::{slot_index_rejected, MAX_TOOL_CALL_INDEX};
 use super::{KeyValidationResult, LlmClient, LlmError, ToolDefinition};
 
 /// Anthropic's conservative default requests-per-minute ceiling.
@@ -22,6 +29,15 @@ const RPM_LIMIT: u32 = 50;
 
 const ANTHROPIC_API_BASE: &str = "https://api.anthropic.com/v1";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+/// Completion ceiling for both the plain and the tool-loop path.
+///
+/// Deliberately not the openai-compat family's 16_384: Anthropic enforces a
+/// per-model `max_tokens` ceiling and 400s a request above it, and the older
+/// Claude 3 models top out at 8192/4096. What is fixed here is the
+/// undocumented *halving* — the tool loop used to send 4096 while plain
+/// generation sent 8192, so tool answers got a quarter of the budget every
+/// other provider gives them (GLM F24).
+const ANTHROPIC_MAX_TOKENS: u32 = 8192;
 
 pub struct AnthropicClient {
     api_key: String,
@@ -145,29 +161,40 @@ enum StreamBlock {
 /// `input_json_delta`), `content_block_stop`, `message_delta` (carries
 /// `stop_reason`), `message_stop`. An `error` event is the mid-stream
 /// failure channel — the HTTP status is already 200 by then.
-fn read_anthropic_stream<R: std::io::Read>(reader: R) -> Result<MessagesResponse, LlmError> {
+fn read_anthropic_stream<R: std::io::Read>(
+    reader: R,
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<MessagesResponse, LlmError> {
     use std::io::BufRead;
 
     let mut blocks: Vec<Option<StreamBlock>> = Vec::new();
     let mut stop_reason: Option<String> = None;
 
-    for line in std::io::BufReader::new(reader).lines() {
+    let mut capped = body_capped(reader);
+    for line in std::io::BufReader::new(&mut capped).lines() {
+        if is_cancelled() {
+            return Err(LlmError::Unavailable(CANCELLED.to_string()));
+        }
         let line = line.map_err(|e| LlmError::Http(e.to_string()))?;
         let line = line.trim();
-        if !line.starts_with("data: ") {
-            // `event:` name lines and blanks carry no payload of their own.
+        // `event:` name lines, comments and blanks carry no payload of their
+        // own. Anthropic always frames its JSON with `data:`, unlike
+        // OpenRouter (see `sse::stream_payload`).
+        let Some(data) = line.strip_prefix("data:").map(str::trim_start) else {
             continue;
-        }
-        let data = &line["data: ".len()..];
+        };
         let event: StreamEvent = match serde_json::from_str(data) {
             Ok(event) => event,
             Err(_) => continue,
         };
         match event.r#type.as_str() {
             "content_block_start" => {
-                while blocks.len() <= event.index {
-                    blocks.push(None);
+                // Bound the wire-supplied index before it can size the Vec.
+                if event.index > MAX_TOOL_CALL_INDEX {
+                    return Err(slot_index_rejected(event.index));
                 }
+                // At most MAX_TOOL_CALL_INDEX + 1 slots, guaranteed above.
+                blocks.resize_with(blocks.len().max(event.index + 1), || None);
                 blocks[event.index] = match event.content_block {
                     Some(ContentBlock::Text { .. }) => Some(StreamBlock::Text {
                         text: String::new(),
@@ -223,6 +250,10 @@ fn read_anthropic_stream<R: std::io::Read>(reader: R) -> Result<MessagesResponse
         }
     }
 
+    if hit_body_cap(&capped) {
+        return Err(body_cap_exceeded("Anthropic message"));
+    }
+
     let content = blocks
         .into_iter()
         .flatten()
@@ -249,11 +280,7 @@ fn read_anthropic_stream<R: std::io::Read>(reader: R) -> Result<MessagesResponse
 
 impl AnthropicClient {
     pub fn new(api_key: &str, model: &str) -> Result<Self, LlmError> {
-        let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(900))
-            .connect_timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| LlmError::Http(e.to_string()))?;
+        let http = http_client()?;
         Ok(Self {
             api_key: api_key.to_string(),
             model: model.to_string(),
@@ -269,11 +296,7 @@ impl AnthropicClient {
         model: &str,
         usage_path: PathBuf,
     ) -> Result<Self, LlmError> {
-        let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(900))
-            .connect_timeout(std::time::Duration::from_secs(15))
-            .build()
-            .map_err(|e| LlmError::Http(e.to_string()))?;
+        let http = http_client()?;
 
         let rate = if usage_path.exists() {
             match std::fs::read_to_string(&usage_path)
@@ -306,10 +329,15 @@ impl AnthropicClient {
     ) -> Result<MessagesResponse, LlmError> {
         const MAX_RETRIES: u32 = 3;
 
+        let is_cancelled = super::cancel::is_cancelled;
+
         self.rate
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .check_and_reserve()?;
+        // Released on drop unless `keep()` runs: the hand-written undo on
+        // each early return missed the mid-stream failure path (GLM F16).
+        let mut reserve = RateReserve::held(&self.rate);
 
         let anthropic_tools = tools.map(|defs| {
             defs.iter()
@@ -335,14 +363,20 @@ impl AnthropicClient {
         let mut next_delay = std::time::Duration::from_secs(5);
 
         for attempt in 0..MAX_RETRIES {
+            if is_cancelled() {
+                return Err(LlmError::Unavailable(CANCELLED.to_string()));
+            }
+            if attempt > 0 && !sleep_observing(next_delay, &is_cancelled) {
+                return Err(LlmError::Unavailable(CANCELLED.to_string()));
+            }
             if attempt > 0 {
-                std::thread::sleep(next_delay);
-                next_delay *= 2;
+                next_delay = doubled_backoff(next_delay);
             }
 
             let resp = match self
                 .http
                 .post(&url)
+                .timeout(CHAT_REQUEST_TIMEOUT)
                 .header("x-api-key", &self.api_key)
                 .header("anthropic-version", ANTHROPIC_VERSION)
                 .header("Content-Type", "application/json")
@@ -352,10 +386,6 @@ impl AnthropicClient {
                 Ok(r) => r,
                 Err(e) => {
                     if attempt == MAX_RETRIES - 1 {
-                        self.rate
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .undo_reserve();
                         return Err(LlmError::Http(e.to_string()));
                     }
                     last_error = Some(LlmError::Http(e.to_string()));
@@ -365,67 +395,40 @@ impl AnthropicClient {
 
             let status = resp.status().as_u16();
             match status {
-                200 => {
-                    let body = read_anthropic_stream(resp)?;
-
-                    // Persist usage
-                    {
+                200 => match read_anthropic_stream(resp, &is_cancelled) {
+                    Ok(body) => {
+                        reserve.keep();
                         let rate = self.rate.lock().unwrap_or_else(|e| e.into_inner());
                         self.persist_usage(&rate);
+                        return Ok(body);
                     }
-
-                    return Ok(body);
-                }
-                401 => {
-                    self.rate
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .undo_reserve();
-                    return Err(LlmError::InvalidKey);
-                }
-                429 => {
-                    self.rate
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .undo_reserve();
-                    return Err(LlmError::RateLimited);
-                }
-                // Retryable: server failures + 529 (Anthropic overloaded) +
-                // 408/504 (gateway "upstream didn't respond in time").
-                408 | 500 | 502 | 503 | 504 | 529 => {
-                    if let Some(secs) = resp
-                        .headers()
-                        .get("Retry-After")
-                        .and_then(|v| v.to_str().ok())
-                        .and_then(|s| s.parse::<u64>().ok())
+                    // Anthropic ships `overloaded_error` in-band on a 200,
+                    // the same class of trap as OpenRouter's in-band 429.
+                    Err(LlmError::Api { status, message })
+                        if is_retryable_status(status) && attempt + 1 < MAX_RETRIES =>
                     {
-                        next_delay = std::time::Duration::from_secs(secs.min(60));
+                        last_error = Some(as_transport_error(status, message));
+                        continue;
                     }
-                    let body = resp.text().unwrap_or_default();
-                    last_error = Some(LlmError::Api {
-                        status,
-                        message: body,
-                    });
+                    Err(e) => return Err(e),
+                },
+                401 => return Err(LlmError::InvalidKey),
+                status if is_retryable_status(status) => {
+                    if let Some(delay) = retry_after_delay(resp.headers()) {
+                        next_delay = delay;
+                    }
+                    last_error = Some(as_transport_error(status, read_body_capped(resp)));
                     continue;
                 }
                 _ => {
-                    let body = resp.text().unwrap_or_default();
-                    self.rate
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .undo_reserve();
                     return Err(LlmError::Api {
                         status,
-                        message: body,
-                    });
+                        message: read_body_capped(resp),
+                    })
                 }
             }
         }
 
-        self.rate
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .undo_reserve();
         Err(last_error.unwrap_or_else(|| LlmError::Api {
             status: 500,
             message: "Anthropic server error after retries".into(),
@@ -433,17 +436,7 @@ impl AnthropicClient {
     }
 
     fn persist_usage(&self, rate: &RateTracker) {
-        if let Some(ref path) = self.usage_path {
-            let persisted = rate.to_persisted();
-            if let Ok(json) = serde_json::to_string(&persisted) {
-                let tmp = path.with_extension("tmp");
-                if std::fs::write(&tmp, &json).is_ok() {
-                    let _ = std::fs::rename(&tmp, path);
-                } else {
-                    let _ = std::fs::remove_file(&tmp);
-                }
-            }
-        }
+        persist_usage(self.usage_path.as_deref(), rate);
     }
 }
 
@@ -550,6 +543,7 @@ impl LlmClient for AnthropicClient {
         let resp = self
             .http
             .post(&url)
+            .timeout(METADATA_TIMEOUT)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
             .header("Content-Type", "application/json")
@@ -564,7 +558,7 @@ impl LlmClient for AnthropicClient {
             // 403 means key is valid but account is disabled/restricted.
             // Accept these as valid keys — billing is a separate concern.
             400 | 403 => {
-                let body = resp.text().unwrap_or_default();
+                let body = read_body_capped(resp);
                 if body.contains("credit balance")
                     || body.contains("billing")
                     || body.contains("disabled")
@@ -580,7 +574,7 @@ impl LlmClient for AnthropicClient {
             }
             429 => Ok(()), // Rate limited means key is valid
             status => {
-                let body = resp.text().unwrap_or_default();
+                let body = read_body_capped(resp);
                 Err(LlmError::Api {
                     status,
                     message: body,
@@ -608,6 +602,7 @@ impl LlmClient for AnthropicClient {
         let resp = match self
             .http
             .post(&url)
+            .timeout(METADATA_TIMEOUT)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
             .header("Content-Type", "application/json")
@@ -626,7 +621,7 @@ impl LlmClient for AnthropicClient {
         };
 
         let status = resp.status().as_u16();
-        let body = resp.text().unwrap_or_default();
+        let body = read_body_capped(resp);
 
         match status {
             200 => KeyValidationResult {
@@ -668,7 +663,7 @@ impl LlmClient for AnthropicClient {
             content: AnthropicContent::Text(prompt.to_string()),
         }];
 
-        let response = self.send_messages(&messages, None, None, 8192)?;
+        let response = self.send_messages(&messages, None, None, ANTHROPIC_MAX_TOKENS)?;
         let blocks = response
             .content
             .ok_or_else(|| LlmError::Parse("No content from Anthropic".into()))?;
@@ -702,8 +697,15 @@ impl LlmClient for AnthropicClient {
         let mut last_text: Option<String> = None;
 
         for turn in 0..max_turns {
+            // Between turns as well as inside the stream: a tool loop is up to
+            // max_turns whole requests, so checking only inside one of them
+            // still leaves the worker running after the flag flips.
+            if super::cancel::is_cancelled() {
+                return Err(LlmError::Unavailable(CANCELLED.to_string()));
+            }
             trim_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
-            let response = self.send_messages(&messages, None, Some(tools), 4096)?;
+            let response =
+                self.send_messages(&messages, None, Some(tools), ANTHROPIC_MAX_TOKENS)?;
 
             let blocks = response.content.unwrap_or_default();
 
@@ -763,6 +765,7 @@ impl LlmClient for AnthropicClient {
         let resp = self
             .http
             .get(&url)
+            .timeout(METADATA_TIMEOUT)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
             .send()
@@ -773,7 +776,7 @@ impl LlmClient for AnthropicClient {
             401 => return Err(LlmError::InvalidKey),
             429 => return Err(LlmError::RateLimited),
             status => {
-                let body = resp.text().unwrap_or_default();
+                let body = read_body_capped(resp);
                 return Err(LlmError::Api {
                     status,
                     message: body,
@@ -791,7 +794,7 @@ impl LlmClient for AnthropicClient {
             display_name: Option<String>,
         }
 
-        let body: ModelsResponse = resp.json().map_err(|e| LlmError::Parse(e.to_string()))?;
+        let body: ModelsResponse = json_capped(resp)?;
 
         let entries = body.data.unwrap_or_default();
 
@@ -1107,6 +1110,70 @@ mod tests {
         assert_eq!(wire["tool_use_id"], "toolu_01A8bL9Qrx");
     }
 
+    /// GLM F3 / Claude F18 — the Anthropic half of the index cap.
+    ///
+    /// `StreamEvent.index` is a `usize` taken verbatim from the wire and used
+    /// as a `Vec` position. The old `while blocks.len() <= event.index {
+    /// blocks.push(None) }` grew the vector to an attacker-chosen length one
+    /// element at a time: at `usize::MAX` that is an OOM abort, which does not
+    /// unwind, so the `catch_unwind` around the optimize worker cannot save
+    /// the game process. The guard has to reject the index *before* any
+    /// allocation, which is why this asserts on elapsed time as well as on the
+    /// error — a cap that allocated first would not return instantly.
+    #[test]
+    fn anthropic_content_block_index_cap() {
+        fn block_start(index: &str, kind: &str) -> String {
+            match kind {
+                "tool_use" => format!(
+                    "data: {{\"type\":\"content_block_start\",\"index\":{index},\"content_block\":{{\"type\":\"tool_use\",\"id\":\"tu_1\",\"name\":\"get_trait_details\",\"input\":{{}}}}}}\n"
+                ),
+                _ => format!(
+                    "data: {{\"type\":\"content_block_start\",\"index\":{index},\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n"
+                ),
+            }
+        }
+
+        // One past the cap: rejected, with the status and wording the SSE half
+        // uses so the two paths report identically.
+        let over = block_start(&(MAX_TOOL_CALL_INDEX + 1).to_string(), "text");
+        match read_anthropic_stream(over.as_bytes(), &|| false)
+            .expect_err("out-of-range index must fail")
+        {
+            LlmError::Api { status, message } => {
+                assert_eq!(status, 502);
+                assert!(message.contains("exceeds"), "got: {message}");
+            }
+            other => panic!("expected Api error, got: {other}"),
+        }
+
+        // The shape that aborts the process, on both block kinds. Timed: the
+        // guard must fire before the allocation, not after it.
+        for kind in ["text", "tool_use"] {
+            let hostile = block_start(&usize::MAX.to_string(), kind);
+            let started = std::time::Instant::now();
+            assert!(
+                read_anthropic_stream(hostile.as_bytes(), &|| false).is_err(),
+                "usize::MAX index must be rejected ({kind})"
+            );
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(1),
+                "the cap must reject before allocating, not after ({kind})"
+            );
+        }
+
+        // The last legal slot still assembles, so the cap is not off by one.
+        let last = MAX_TOOL_CALL_INDEX.to_string();
+        let ok = format!(
+            "{}data: {{\"type\":\"content_block_delta\",\"index\":{last},\"delta\":{{\"type\":\"text_delta\",\"text\":\"hi\"}}}}\ndata: {{\"type\":\"message_stop\"}}\n",
+            block_start(&last, "text")
+        );
+        let body =
+            read_anthropic_stream(ok.as_bytes(), &|| false).expect("in-range index must parse");
+        let blocks = body.content.expect("content");
+        assert_eq!(blocks.len(), 1, "sparse slots must not become blocks");
+        assert_eq!(extract_text(&blocks).as_deref(), Some("hi"));
+    }
+
     #[test]
     fn test_read_anthropic_stream_assembles_text_blocks() {
         let sse = r#"event: message_start
@@ -1123,7 +1190,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}
 event: message_stop
 data: {"type":"message_stop"}
 "#;
-        let body = read_anthropic_stream(sse.as_bytes()).expect("stream parses");
+        let body = read_anthropic_stream(sse.as_bytes(), &|| false).expect("stream parses");
         match body.content.as_deref() {
             Some([ContentBlock::Text { text }]) => assert_eq!(text, "Hello"),
             other => panic!("expected one text block, got {other:?}"),
@@ -1141,7 +1208,7 @@ event: content_block_delta
 event: message_delta
 data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}
 "#;
-        let body = read_anthropic_stream(sse.as_bytes()).expect("stream parses");
+        let body = read_anthropic_stream(sse.as_bytes(), &|| false).expect("stream parses");
         match body.content.as_deref() {
             Some([ContentBlock::ToolUse { id, name, input }]) => {
                 assert_eq!(id, "toolu_1");
@@ -1158,7 +1225,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}
         let sse = r#"event: error
 data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}
 "#;
-        match read_anthropic_stream(sse.as_bytes()) {
+        match read_anthropic_stream(sse.as_bytes(), &|| false) {
             Err(LlmError::Api { status, message }) => {
                 assert_eq!(status, 529);
                 assert!(message.contains("Overloaded"));

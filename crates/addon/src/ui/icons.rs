@@ -77,6 +77,18 @@ pub fn paint_at(ui: &Ui, url: Option<&str>, p: [f32; 2], size: f32, tint: [f32; 
     paint_on(&dl, url, p, [p[0] + size, p[1] + size], tint);
 }
 
+/// Pet portraits sit in a padded 256px canvas; skill icons fill 128px.
+pub const PET_ICON_ZOOM: f32 = 1.7;
+
+fn icon_uv(zoom: f32) -> ([f32; 2], [f32; 2]) {
+    if zoom <= 1.0 {
+        ([0.0, 0.0], [1.0, 1.0])
+    } else {
+        let inset = (0.5 - 0.5 / zoom).clamp(0.0, 0.45);
+        ([inset, inset], [1.0 - inset, 1.0 - inset])
+    }
+}
+
 pub fn paint_on(
     draw_list: &DrawListMut<'_>,
     url: Option<&str>,
@@ -84,10 +96,24 @@ pub fn paint_on(
     p_max: [f32; 2],
     tint: [f32; 4],
 ) {
+    paint_on_zoomed(draw_list, url, p_min, p_max, tint, 1.0);
+}
+
+pub fn paint_on_zoomed(
+    draw_list: &DrawListMut<'_>,
+    url: Option<&str>,
+    p_min: [f32; 2],
+    p_max: [f32; 2],
+    tint: [f32; 4],
+    zoom: f32,
+) {
     let rounding = theme::ICON_ROUNDING;
     if let Some(tid) = url.and_then(ensure_texture) {
+        let (uv0, uv1) = icon_uv(zoom);
         draw_list
             .add_image_rounded(tid, p_min, p_max, rounding)
+            .uv_min(uv0)
+            .uv_max(uv1)
             .col(tint)
             .build();
     } else {
@@ -153,6 +179,13 @@ pub fn trait_url(db: &GameDb, id: u32) -> Option<&str> {
 
 pub fn spec_url(db: &GameDb, id: u32) -> Option<&str> {
     db.specializations.get(&id).and_then(|s| s.icon.as_deref())
+}
+
+pub fn pet_url<'a>(db: &'a GameDb, name: &str) -> Option<&'a str> {
+    db.pet_by_name(name)?
+        .icon
+        .as_deref()
+        .filter(|s| !s.is_empty())
 }
 
 pub fn skill_url_by_name<'a>(db: &'a GameDb, name: &str) -> Option<&'a str> {
@@ -232,4 +265,21 @@ fn lookup_name<'a>(
         }
     }
     best.map(|(_, u)| u)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{icon_uv, PET_ICON_ZOOM};
+
+    #[test]
+    fn icon_uv_unzoomed_is_full_quad() {
+        assert_eq!(icon_uv(1.0), ([0.0, 0.0], [1.0, 1.0]));
+    }
+
+    #[test]
+    fn pet_icon_zoom_crops_the_padded_canvas() {
+        let (uv0, uv1) = icon_uv(PET_ICON_ZOOM);
+        assert!(uv0[0] > 0.15 && uv0[0] < 0.25, "{uv0:?}");
+        assert!((uv0[0] - (1.0 - uv1[0])).abs() < f32::EPSILON);
+    }
 }
