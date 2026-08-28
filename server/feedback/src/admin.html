@@ -32,6 +32,9 @@ article h2{margin:4px 0 0;font-size:15px;font-weight:600}
 .empty{color:var(--muted);padding:24px}
 #who{color:var(--muted);font-size:13px}
 [hidden]{display:none!important}
+.bar button{min-width:2rem;padding:6px 8px}
+.swatch{width:22px;height:22px;border-radius:4px;padding:0;border:1px solid var(--line);cursor:pointer}
+.looks{margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--plate)}
 </style>
 </head>
 <body>
@@ -129,6 +132,47 @@ function query() {
   return '/v1/admin/reports?'+p;
 }
 
+function parseLine(line) {
+  const m = String(line).match(/^%([BN])([LCR])([0-4])([PUO])\|(.*)$/);
+  if (m) return {bold:m[1]==='B', align:m[2], color:+m[3], list:m[4], text:m[5]};
+  return {bold:false, align:'L', color:0, list:'P', text:String(line)};
+}
+function packLine(p) {
+  return '%'+ (p.bold?'B':'N') + p.align + p.color + p.list + '|' + p.text;
+}
+function lineIndex(value, pos) {
+  let n = 0, i = 0;
+  while (true) {
+    const nl = value.indexOf('\n', i);
+    if (nl < 0 || nl >= pos) return n;
+    n++; i = nl+1;
+  }
+}
+function applyFmt(patch) {
+  const ta = $('reply');
+  if (!ta) return;
+  const v = ta.value;
+  const a = Math.min(ta.selectionStart, ta.selectionEnd);
+  const b = Math.max(ta.selectionStart, ta.selectionEnd);
+  const lines = v.split('\n');
+  const lo = lineIndex(v, a);
+  const hi = lineIndex(v, Math.max(b-1, a));
+  for (let i = lo; i <= hi; i++) {
+    const p = parseLine(lines[i]||'');
+    Object.assign(p, patch);
+    lines[i] = packLine(p);
+  }
+  ta.value = lines.join('\n');
+  paintLooks();
+  ta.focus();
+}
+function paintLooks() {
+  const ta = $('reply');
+  const el = $('looks');
+  if (!ta || !el) return;
+  el.innerHTML = renderBody(ta.value);
+}
+
 function paintList() {
   if (!rows.length) { $('list').innerHTML = '<p class="empty">No reports match.</p>'; return; }
   $('list').innerHTML = rows.map(r => `<article data-id="${esc(r.id)}" class="${current&&current.id===r.id?'on':''}">
@@ -153,8 +197,20 @@ function open(id) {
     <h2>${esc(r.title)}</h2>
     <div class="body">${renderBody(r.body)}</div>
     ${r.reply? '<p class="meta">Your last reply</p><div class="body">'+renderBody(r.reply)+'</div>':''}
-    <p class="meta">Reply — they see this in About → Messages → View</p>
+    <p class="meta">Reply — they see this in About → Messages → View. Select lines, then a tool. Ctrl+B toggles bold.</p>
+    <div class="row bar" id="fmt">
+      <button type="button" class="ghost" data-fmt="bold" title="Bold">B</button>
+      <button type="button" class="ghost" data-fmt="normal" title="Normal">N</button>
+      <button type="button" class="ghost" data-fmt="bullet" title="Bullets">•</button>
+      <button type="button" class="ghost" data-fmt="number" title="Numbers">1.</button>
+      <button type="button" class="ghost" data-fmt="L" title="Left">L</button>
+      <button type="button" class="ghost" data-fmt="C" title="Center">C</button>
+      <button type="button" class="ghost" data-fmt="R" title="Right">R</button>
+      ${[0,1,2,3,4].map(i => `<button type="button" class="swatch" data-color="${i}" title="Colour ${i}" style="background:${COLORS[i]}"></button>`).join('')}
+    </div>
     <textarea id="reply" rows="6" style="width:100%">${esc(r.reply||'')}</textarea>
+    <p class="meta">Looks like</p>
+    <div class="looks body" id="looks">${renderBody(r.reply||'')}</div>
     <div class="row" style="margin-top:10px">
       <button id="ans" type="button">Send reply</button>
       <button id="cls" class="ghost" type="button">Close without reply</button>
@@ -162,6 +218,20 @@ function open(id) {
     <p class="err" id="derr"></p>`;
   $('ans').onclick = () => reply(r.id, $('reply').value, 'answered');
   $('cls').onclick = () => reply(r.id, $('reply').value, 'closed');
+  $('reply').addEventListener('input', paintLooks);
+  $('reply').addEventListener('keydown', e => {
+    if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='b') { e.preventDefault(); applyFmt({bold:true}); }
+  });
+  $('fmt').onclick = e => {
+    const t = e.target;
+    if (!(t instanceof HTMLElement)) return;
+    if (t.dataset.fmt==='bold') applyFmt({bold:true});
+    else if (t.dataset.fmt==='normal') applyFmt({bold:false, align:'L', color:0, list:'P'});
+    else if (t.dataset.fmt==='bullet') applyFmt({list:'U'});
+    else if (t.dataset.fmt==='number') applyFmt({list:'O'});
+    else if (t.dataset.fmt==='L'||t.dataset.fmt==='C'||t.dataset.fmt==='R') applyFmt({align:t.dataset.fmt});
+    else if (t.dataset.color!=null) applyFmt({color:+t.dataset.color});
+  };
 }
 
 async function reply(id, text, status) {
