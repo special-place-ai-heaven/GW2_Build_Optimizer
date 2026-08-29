@@ -2701,6 +2701,62 @@ mod tests {
     }
 
     #[test]
+    fn one_locked_major_does_not_lock_other_columns() {
+        let mut db = empty_db();
+        db.specializations.insert(1, spec_line(1, "Zeal", false));
+        for id in 1..=9u32 {
+            db.traits.insert(
+                id,
+                gw2_api::models::Trait {
+                    id,
+                    name: format!("T{id}"),
+                    icon: None,
+                    description: None,
+                    specialization: 1,
+                    tier: ((id - 1) / 3) + 1,
+                    order: (id - 1) % 3,
+                    slot: "Major".into(),
+                    facts: vec![],
+                    traited_facts: vec![],
+                    skills: vec![],
+                },
+            );
+        }
+        let build = ValidatedBuild {
+            specializations: vec![ValidatedSpec {
+                spec_id: 1,
+                name: "Zeal".into(),
+                elite: false,
+                trait_ids: vec![1, 4, 7],
+                trait_names: vec!["T1".into(), "T4".into(), "T7".into()],
+                all_trait_ids: vec![1, 4, 7],
+            }],
+            ..ValidatedBuild::default()
+        };
+        let mut locks = BuildLocks::default();
+        locks.trait_locks.insert(1, [Some(1), None, None]);
+        let neighbors = swap_major_traits(&make_candidate(build), &db, &locks);
+        assert!(
+            neighbors
+                .iter()
+                .all(|b| b.specializations[0].trait_ids[0] == 1),
+            "locked adept must stay"
+        );
+        assert!(
+            neighbors
+                .iter()
+                .any(|b| b.specializations[0].trait_ids[1] != 4),
+            "unlocked master must still swap"
+        );
+        assert!(
+            neighbors
+                .iter()
+                .any(|b| b.specializations[0].trait_ids[2] != 7),
+            "unlocked grandmaster must still swap"
+        );
+    }
+
+    #[test]
     fn swap_weapons_emits_other_land_set() {
         let mut db = empty_db();
         let mut weapons = HashMap::new();

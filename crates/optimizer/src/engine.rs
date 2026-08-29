@@ -1684,6 +1684,8 @@ fn weapon_swap_cooldown_for(profession_name: &str, bladesworn: bool) -> Option<u
 }
 
 /// Add weapon skill IDs for a given weapon type from the profession's weapon data.
+/// Land bar: skip the underwater palette. Weapon `Aquatic` marks that palette,
+/// not a land reject — Land Spear stays, its NoUnderwater skills stay.
 fn add_weapon_skill_ids(
     skill_ids: &mut Vec<u32>,
     profession: &Profession,
@@ -1693,10 +1695,18 @@ fn add_weapon_skill_ids(
 ) {
     if let Some(weapon_info) = profession.weapons.get(weapon_type) {
         for skill_ref in &weapon_info.skills {
-            let id = skill_ref.id;
-            if db.skills.contains_key(&id) {
-                skill_ids.push(id);
+            let Some(skill) = db.skills.get(&skill_ref.id) else {
+                continue;
+            };
+            if weapon_info.is_aquatic()
+                && !skill
+                    .flags
+                    .iter()
+                    .any(|f| f.eq_ignore_ascii_case("NoUnderwater"))
+            {
+                continue;
             }
+            skill_ids.push(skill_ref.id);
         }
     }
 }
@@ -3520,6 +3530,101 @@ mod tests {
         assert!(
             rotation.cleanse_rate_per_20s > 0.0,
             "cleanse fact should contribute to cleanse rate"
+        );
+    }
+
+    #[test]
+    fn land_bar_skips_aquatic_palette_keeps_land_spear() {
+        let land = gw2_api::models::Skill {
+            id: 1,
+            name: "Barbed Spear".into(),
+            description: None,
+            icon: None,
+            chat_link: None,
+            skill_type: None,
+            weapon_type: Some("Spear".into()),
+            professions: vec!["Guardian".into()],
+            slot: Some("Weapon_1".into()),
+            facts: vec![],
+            traited_facts: vec![],
+            categories: vec![],
+            attunement: None,
+            cost: None,
+            dual_wield: None,
+            flip_skill: None,
+            initiative: None,
+            next_chain: None,
+            prev_chain: None,
+            transform_skills: vec![],
+            bundle_skills: vec![],
+            toolbelt_skill: None,
+            flags: vec!["NoUnderwater".into()],
+            specialization: None,
+        };
+        let aquatic = gw2_api::models::Skill {
+            id: 2,
+            name: "Water Spear".into(),
+            description: None,
+            icon: None,
+            chat_link: None,
+            skill_type: None,
+            weapon_type: Some("Spear".into()),
+            professions: vec!["Guardian".into()],
+            slot: Some("Weapon_1".into()),
+            facts: vec![],
+            traited_facts: vec![],
+            categories: vec![],
+            attunement: None,
+            cost: None,
+            dual_wield: None,
+            flip_skill: None,
+            initiative: None,
+            next_chain: None,
+            prev_chain: None,
+            transform_skills: vec![],
+            bundle_skills: vec![],
+            toolbelt_skill: None,
+            flags: vec![],
+            specialization: None,
+        };
+        let mut db = GameDb::empty_for_tests();
+        db.skills.insert(1, land);
+        db.skills.insert(2, aquatic);
+        let mut weapons = HashMap::new();
+        weapons.insert(
+            "Spear".into(),
+            gw2_api::models::WeaponInfo {
+                specialization: None,
+                flags: vec!["TwoHand".into(), "Aquatic".into()],
+                skills: vec![
+                    gw2_api::models::WeaponSkillRef {
+                        id: 1,
+                        slot: "Weapon_1".into(),
+                    },
+                    gw2_api::models::WeaponSkillRef {
+                        id: 2,
+                        slot: "Weapon_1".into(),
+                    },
+                ],
+            },
+        );
+        let profession = Profession {
+            id: "Guardian".into(),
+            name: "Guardian".into(),
+            code: None,
+            specializations: vec![],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        let mut ids = Vec::new();
+        add_weapon_skill_ids(&mut ids, &profession, "Spear", &db, 1);
+        assert_eq!(
+            ids,
+            vec![1],
+            "aquatic palette must stay off the land bar; got {ids:?}"
         );
     }
 
