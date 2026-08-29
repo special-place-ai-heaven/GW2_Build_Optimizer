@@ -458,6 +458,19 @@ const HS_PROFESSIONS: &[&str] = &[
     "revenant",
 ];
 
+/// Pin a Hardstuck listing href to `https://hardstuck.gg`.
+///
+/// Rejects `http://` and off-origin absolute URLs (same pin as GuildJen).
+fn pin_hardstuck_href(link: &str) -> Option<String> {
+    if link.starts_with("https://hardstuck.gg/") {
+        Some(link.to_string())
+    } else if link.starts_with("http") {
+        None
+    } else {
+        Some(format!("https://hardstuck.gg{}", link))
+    }
+}
+
 /// Scrape Hardstuck (multi-mode builds).
 ///
 /// `should_cancel` is consulted before every outer (per-profession) and inner
@@ -491,10 +504,11 @@ fn scrape_hardstuck(
             let parts: Vec<&str> = link.trim_matches('/').split('/').collect();
             // /gw2/builds/{profession}/{slug} = exactly 4 segments
             if parts.len() == 4 && !parts[3].is_empty() && !parts[3].contains('?') {
-                let full = if link.starts_with("http") {
-                    link
-                } else {
-                    format!("https://hardstuck.gg{}", link)
+                // Pin to the real host: an index page (compromised, or MITM'd if
+                // TLS were ever bypassed) must not steer us to arbitrary absolute
+                // URLs — only https://hardstuck.gg and relative paths may be followed.
+                let Some(full) = pin_hardstuck_href(&link) else {
+                    continue;
                 };
                 if !all_links.contains(&full) {
                     all_links.push(full);
@@ -1235,6 +1249,28 @@ mod tests {
         let links = extract_build_links(html, "/builds/", 10);
         assert_eq!(links.len(), 1);
         assert_eq!(links[0], "/builds/guardian/firebrand");
+    }
+
+    #[test]
+    fn pin_hardstuck_href_rejects_off_origin_http() {
+        assert_eq!(pin_hardstuck_href("http://evil.example/build"), None);
+        assert_eq!(
+            pin_hardstuck_href("https://evil.example/gw2/builds/necromancer/x/"),
+            None
+        );
+        assert_eq!(
+            pin_hardstuck_href("http://hardstuck.gg/gw2/builds/necromancer/x/"),
+            None
+        );
+        assert_eq!(
+            pin_hardstuck_href("/gw2/builds/necromancer/blood-harbinger/").as_deref(),
+            Some("https://hardstuck.gg/gw2/builds/necromancer/blood-harbinger/")
+        );
+        assert_eq!(
+            pin_hardstuck_href("https://hardstuck.gg/gw2/builds/necromancer/blood-harbinger/")
+                .as_deref(),
+            Some("https://hardstuck.gg/gw2/builds/necromancer/blood-harbinger/")
+        );
     }
 
     #[test]
