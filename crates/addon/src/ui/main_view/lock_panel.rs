@@ -767,6 +767,12 @@ fn resolved_gear_names(build: &gw2_core::types::ResolvedBuild) -> [Option<String
     names
 }
 
+/// Suggestion trait names are English API names. Localized display must not
+/// be the match key (de/es/fr/zh pack attached).
+fn optimized_trait_selected(selected: &[String], english_name: &str) -> bool {
+    selected.iter().any(|n| n == english_name)
+}
+
 /// Render the optimized build's specs & traits in the same visual style as the lock panel.
 /// Read-only — no click interactions. Matches the lock panel layout for side-by-side comparison.
 pub fn render_optimized_specs_panel(
@@ -932,7 +938,9 @@ pub fn render_optimized_specs_panel(
                         let cy = grid_y + row as f32 * row_height + row_height / 2.0;
 
                         // Check if this trait was selected by the optimizer
-                        let is_selected = trait_names.iter().any(|tn| tn == trait_name);
+                        let is_selected = trait_info
+                            .map(|t| optimized_trait_selected(trait_names, &t.name))
+                            .unwrap_or(false);
                         if is_selected {
                             let text_end =
                                 cx + circle_radius + 8.0 + ui.calc_text_size(trait_name)[0];
@@ -1276,6 +1284,16 @@ mod tests {
              live lock_count via &lock_count.to_string(), not a hardcoded \
              \"1\" -- a hardcoded literal renders the wrong number the \
              moment 21, 31, or 101 select the One form under the CLDR rule",
+        );
+    }
+
+    #[test]
+    fn optimized_spec_panel_matches_english_not_localized() {
+        let selected = vec!["Lingering Curse".to_string()];
+        assert!(optimized_trait_selected(&selected, "Lingering Curse"));
+        assert!(
+            !optimized_trait_selected(&selected, "Fluch der Verweilenden"),
+            "de display name must not be the selection key"
         );
     }
 }

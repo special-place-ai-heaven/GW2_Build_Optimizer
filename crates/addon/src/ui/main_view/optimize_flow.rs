@@ -465,6 +465,13 @@ fn start_optimization_inner(state: &mut AddonState, profession_name: &str, entry
                     }
                 }
 
+                if suggestions
+                    .iter()
+                    .all(|s| s.weapons.is_empty() && s.skills.is_empty())
+                {
+                    return Err("legacy leftover kit is empty".into());
+                }
+
                 Ok(suggestions)
             })();
 
@@ -1534,6 +1541,19 @@ mod tests {
         assert!(
             between.contains("return Ok(())") || between.contains("return Err("),
             "non-empty validated.errors must return before apply_gemini_response; keep the engine candidate"
+        );
+    }
+
+    #[test]
+    fn leftover_empty_kit_is_not_served() {
+        let src = include_str!("optimize_flow.rs");
+        let production = src
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("split always yields a first chunk");
+        assert!(
+            production.contains("legacy leftover kit is empty"),
+            "New Build leftover must not serve an empty Verified kit"
         );
     }
 

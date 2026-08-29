@@ -64,6 +64,7 @@ impl NewsState {
                 self.official_lang.clear();
             }
         }
+        crate::news_art::clear_failed();
     }
 
     pub fn needs(&self, src: NewsSource, lang: &str) -> bool {

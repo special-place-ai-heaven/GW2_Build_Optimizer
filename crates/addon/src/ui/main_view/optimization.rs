@@ -480,11 +480,20 @@ pub(super) fn candidate_to_suggestion(
         rotation: None,
         viability: Some(legacy_viability),
         benchmark_delta: None,
-        data_quality: gw2_optimizer::data::DataQuality::Verified,
-        quality_reasons: vec![],
+        data_quality: leftover_plate_quality(true),
+        quality_reasons: vec!["legacy leftover kit has no weapons or skills".into()],
     };
     suggestion.chat_code = suggestion_to_chat_code(&suggestion, db);
     suggestion
+}
+
+/// Leftover `BuildCandidate` plates never carry weapons/skills. Do not stamp Verified.
+fn leftover_plate_quality(empty_kit: bool) -> gw2_optimizer::data::DataQuality {
+    if empty_kit {
+        gw2_optimizer::data::DataQuality::Blocked
+    } else {
+        gw2_optimizer::data::DataQuality::Verified
+    }
 }
 
 /// Run rotation simulation for a suggestion's skills and attach the results.
@@ -1583,7 +1592,7 @@ mod tests {
     use super::{
         apply_radar_prefix, chat_display_text, fill_holes_from_loadout, format_provider_issue,
         gemini_from_validated, keep_equipped_weapons, keep_loadout_pets, kitchen_brief,
-        snapshot_ranger_pets, suggestion_to_chat_code,
+        leftover_plate_quality, snapshot_ranger_pets, suggestion_to_chat_code,
     };
     use crate::ui::comparison::BuildSuggestion;
     use base64::Engine as _;
@@ -2257,5 +2266,17 @@ mod tests {
         assert!(t.contains("API key rejected"));
         let t = format_provider_issue("credit balance too low", "OpenAI", "gpt-4o");
         assert!(t.contains("Billing"));
+    }
+
+    #[test]
+    fn leftover_empty_kit_is_blocked_not_verified() {
+        assert_eq!(
+            leftover_plate_quality(true),
+            gw2_optimizer::data::DataQuality::Blocked
+        );
+        assert_eq!(
+            leftover_plate_quality(false),
+            gw2_optimizer::data::DataQuality::Verified
+        );
     }
 }

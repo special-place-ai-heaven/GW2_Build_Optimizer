@@ -1286,10 +1286,6 @@ pub fn simulate_validated_rotation(
     let healing_power = stats.get("HealingPower");
     let weapon_strength = 1100.0;
     let derived = stats::compute_derived(stats, profession_name);
-    let condition_duration_bonus =
-        (expertise / 15.0 + mods.total_condi_duration_bonus()).clamp(0.0, 100.0);
-    let boon_duration_bonus =
-        (concentration / 15.0 + mods.total_boon_duration_bonus()).clamp(0.0, 100.0);
     let params = rotation::simulator::SimParams {
         power,
         condition_damage,
@@ -1302,8 +1298,10 @@ pub fn simulate_validated_rotation(
             * 100.0,
         strike_mult: mods.total_strike_mult(),
         condition_mult: mods.total_condi_mult(),
-        condition_duration_mult: 1.0 + condition_duration_bonus / 100.0,
-        boon_duration_mult: 1.0 + boon_duration_bonus / 100.0,
+        condition_duration_mult: combat::outgoing_condition_duration_mult(
+            expertise, &mods, &sim_ctx,
+        ),
+        boon_duration_mult: combat::outgoing_boon_duration_mult(concentration, &mods, &sim_ctx),
         healing_power,
         healing_mult: mods.total_healing_mult(),
         max_health: derived.health,

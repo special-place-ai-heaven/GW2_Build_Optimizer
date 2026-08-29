@@ -107,6 +107,12 @@ pub fn mark_failed(url: &str) {
     slots().insert(url.to_string(), Slot::Failed);
 }
 
+/// Drop Failed slots so Refresh can queue the URL again. Pending stays skipped.
+pub fn clear_failed() {
+    slots().retain(|_, slot| !matches!(slot, Slot::Failed));
+}
+
+
 pub fn release_pending(urls: &[String]) {
     let mut map = slots();
     for url in urls {
@@ -259,6 +265,20 @@ mod tests {
         assert!(!url_ok("https://127.0.0.1/x.jpg"));
         assert!(!url_ok("javascript:alert(1)"));
     }
+
+    #[test]
+    fn refresh_clears_failed_so_take_batch_retries() {
+        let url = "https://i.ytimg.com/vi/retry-failed-still/hqdefault.jpg";
+        mark_failed(url);
+        assert!(
+            take_batch(&[url.to_string()], 1).is_empty(),
+            "Failed must skip within one wave"
+        );
+        clear_failed();
+        assert_eq!(take_batch(&[url.to_string()], 1), vec![url.to_string()]);
+        release_pending(&[url.to_string()]);
+    }
+
 
     #[test]
     fn sniff_jpeg_and_png_magic() {

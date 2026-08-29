@@ -466,8 +466,8 @@ enum StatusAction {
     Read,
     /// The key is rejected; no retry will help.
     InvalidKey,
-    /// Quota exhausted.
-    RateLimited,
+    /// 403/429 — read the body so billing/quota is not reported as a bad key.
+    Denied,
     /// Transient — try again after a backoff.
     Retry,
     /// Anything else: report the status and body, once.
@@ -491,13 +491,31 @@ enum StatusAction {
 fn classify_status(status: u16) -> StatusAction {
     match status {
         200 => StatusAction::Read,
-        401 | 403 => StatusAction::InvalidKey,
-        429 => StatusAction::RateLimited,
+        401 => StatusAction::InvalidKey,
+        403 | 429 => StatusAction::Denied,
         // Server failures plus the gateway "upstream didn't answer" pair.
         408 | 500 | 502 | 503 | 504 => StatusAction::Retry,
         _ => StatusAction::Fail,
     }
 }
+
+fn denied_from_body(status: u16, body: &str) -> GeminiError {
+    if crate::llm::has_billing_keyword(body) {
+        return GeminiError::Api {
+            status,
+            message: body.to_string(),
+        };
+    }
+    match status {
+        403 => GeminiError::InvalidKey,
+        429 => GeminiError::RateLimited,
+        _ => GeminiError::Api {
+            status,
+            message: body.to_string(),
+        },
+    }
+}
+
 
 /// Turn a 200 response body into `Content`, keeping the reserved rate slot
 /// only if the body actually produced an answer.
@@ -644,7 +662,7 @@ impl GeminiClient {
         match classify_status(status) {
             StatusAction::Read => Ok(()),
             StatusAction::InvalidKey => Err(GeminiError::InvalidKey),
-            StatusAction::RateLimited => Err(GeminiError::RateLimited),
+            StatusAction::Denied => Err(denied_from_body(status, &read_body_capped(resp))),
             // Settings-tab validation is a single shot: a 5xx here is
             // reported, not retried behind a spinner.
             StatusAction::Retry | StatusAction::Fail => Err(GeminiError::Api {
@@ -666,7 +684,7 @@ impl GeminiClient {
         match classify_status(status) {
             StatusAction::Read => {}
             StatusAction::InvalidKey => return Err(GeminiError::InvalidKey),
-            StatusAction::RateLimited => return Err(GeminiError::RateLimited),
+            StatusAction::Denied => return Err(denied_from_body(status, &read_body_capped(resp))),
             StatusAction::Retry | StatusAction::Fail => {
                 return Err(GeminiError::Api {
                     status,
@@ -912,7 +930,9 @@ impl GeminiClient {
                     return Ok(content);
                 }
                 StatusAction::InvalidKey => return Err(GeminiError::InvalidKey),
-                StatusAction::RateLimited => return Err(GeminiError::RateLimited),
+                StatusAction::Denied => {
+                    return Err(denied_from_body(status, &read_body_capped(resp)))
+                }
                 StatusAction::Retry => {
                     if let Some(delay) = retry_after_delay(resp.headers()) {
                         next_delay = delay;
@@ -1503,13 +1523,28 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         // ── Status classification ──
         assert_eq!(classify_status(200), StatusAction::Read);
         assert_eq!(classify_status(401), StatusAction::InvalidKey);
-        assert_eq!(classify_status(403), StatusAction::InvalidKey);
+        assert_eq!(classify_status(403), StatusAction::Denied);
         assert_eq!(
             classify_status(429),
-            StatusAction::RateLimited,
-            "Gemini reports quota exhaustion as a real 429 and a retry minutes \
-             later is still 429 — retrying would spend the user's remaining slots"
+            StatusAction::Denied,
+            "403/429 read the body; billing keywords are not InvalidKey"
         );
+        assert!(matches!(
+            denied_from_body(403, ""),
+            GeminiError::InvalidKey
+        ));
+        assert!(matches!(
+            denied_from_body(403, "RESOURCE_EXHAUSTED quota exceeded"),
+            GeminiError::Api { status: 403, .. }
+        ));
+        assert!(matches!(
+            denied_from_body(429, ""),
+            GeminiError::RateLimited
+        ));
+        assert!(matches!(
+            denied_from_body(429, "RESOURCE_EXHAUSTED"),
+            GeminiError::Api { status: 429, .. }
+        ));
         for transient in [408, 500, 502, 503, 504] {
             assert_eq!(
                 classify_status(transient),
