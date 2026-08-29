@@ -263,12 +263,11 @@ impl SimState {
             self.tick_conditions(condition_damage);
             self.tick_buffs();
 
-            // Alacrity: skills recharge 33% faster → 100ms wall = 133ms CD.
-            let cd_tick = if self.buffs.iter().any(|b| b.buff == "Alacrity") {
-                TICK_MS + TICK_MS / 3
-            } else {
-                TICK_MS
-            };
+            // Alacrity: +25% recharge (wiki 2018). 100ms wall = 125ms CD. 10s → 8s.
+            let cd_tick = alacrity_cd_advance_ms(
+                TICK_MS,
+                self.buffs.iter().any(|b| b.buff == "Alacrity"),
+            );
             for state in &mut self.skill_states {
                 state.cooldown_remaining_ms = state.cooldown_remaining_ms.saturating_sub(cd_tick);
             }
@@ -549,10 +548,7 @@ impl SimState {
     /// Tick all active conditions — apply damage for each stack, remove expired.
     fn tick_conditions(&mut self, condition_damage: f64) {
         // Only tick on 1-second boundaries
-        if !self
-            .current_time_ms
-            .is_multiple_of(CONDITION_TICK_INTERVAL_MS)
-        {
+        if self.current_time_ms % CONDITION_TICK_INTERVAL_MS != 0 {
             return;
         }
 
@@ -869,8 +865,8 @@ pub(crate) fn condition_stack_cap(condition: &str, mode: &GameMode) -> usize {
     }
 }
 
-/// Condition tick damage formula (GW2 level 80, per tick).
-/// Torment uses stationary baseline; Confusion uses on_skill_use baseline.
+/// Condition tick damage formula (GW2 level 80, per 1s pulse).
+/// Torment uses stationary baseline; Confusion uses over-time, not on-skill-use.
 pub(super) fn condition_tick_damage(
     condition: &str,
     condition_damage: f64,
@@ -880,8 +876,29 @@ pub(super) fn condition_tick_damage(
     let mode = mode.clone();
     match condition {
         "Torment" => conds.torment_tick(condition_damage, mode, false),
-        "Confusion" => conds.confusion_tick(condition_damage, mode, true),
+        "Confusion" => conds.confusion_tick(condition_damage, mode, false),
         _ => conds.tick_damage(condition, condition_damage, mode),
+    }
+}
+
+/// Cooldown consumed per wall-clock tick. Wiki Alacrity: +25% recharge
+/// (skills recharge in 80% of original time). 100ms wall → 125ms CD.
+/// Time Marches On (50%) is not modeled.
+pub(super) fn alacrity_cd_advance_ms(tick_ms: u32, has_alacrity: bool) -> u32 {
+    if has_alacrity {
+        tick_ms + tick_ms / 4
+    } else {
+        tick_ms
+    }
+}
+
+/// Remaining recharge when Alacrity covers the whole cooldown (cast-time apply).
+/// Wiki: a 10s skill recharges in 8s. Integer: cooldown * 4 / 5.
+pub(super) fn alacrity_recharge_ms(cooldown_ms: u32, has_alacrity: bool) -> u32 {
+    if has_alacrity {
+        cooldown_ms * 4 / 5
+    } else {
+        cooldown_ms
     }
 }
 
@@ -1008,8 +1025,12 @@ mod tests {
         assert!((condition_tick_damage("Poison", cd, &pve) - 93.5).abs() < 0.1);
         // Torment PvE stationary: 0.09*1000 + 31.8 = 121.8 (L2 verified)
         assert!((condition_tick_damage("Torment", cd, &pve) - 121.8).abs() < 0.1);
-        // Confusion PvE on-skill-use: 0.0325*1000 + 16.24 = 48.74 (L3 verified)
-        assert!((condition_tick_damage("Confusion", cd, &pve) - 48.74).abs() < 0.1);
+        // Confusion 1s pulse is PvE over-time, not on-skill-use.
+        // Wiki Confusion (2026-08-29): (0.05 * CD) + 18.25 at L80 → 68.25.
+        // On-skill-use remains (0.0325 * CD) + 16.24 = 48.74 and is not the pulse.
+        assert!((condition_tick_damage("Confusion", cd, &pve) - 68.25).abs() < 0.1);
+        let on_use = crate::data::conditions().confusion_tick(cd, pve.clone(), true);
+        assert!((on_use - 48.74).abs() < 0.1);
         assert_eq!(condition_tick_damage("Vulnerability", cd, &pve), 0.0);
     }
 
@@ -1478,6 +1499,44 @@ mod tests {
             (wvw / pve - 0.8).abs() < 1e-9,
             "0.20/0.25 = 0.8, got {}",
             wvw / pve
+        );
+    }
+
+    #[test]
+    fn alacrity_recharges_a_ten_second_skill_in_eight() {
+        // Wiki Alacrity (2026-08-29): +25% recharge, 10s CD → 8s while Alacrity lasts.
+        // 33% (TICK_MS/3) recasts a third time inside 15.5s; 25% does not.
+        let skill = RotationSkill {
+            skill_id: 9,
+            name: "Alacrity Skill".into(),
+            slot: SkillSlot::Utility,
+            cast_time_ms: 100,
+            cooldown_ms: 10_000,
+            effects: vec![
+                SkillEffect::ApplyBuff {
+                    buff: "Alacrity".into(),
+                    stacks: 1,
+                    duration_ms: 30_000,
+                },
+                SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: 1.0,
+                },
+            ],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+        };
+        let result = simulate(&[skill], 15_500, 2000.0, 0.0, 1100.0);
+        let casts = result
+            .skill_usage
+            .iter()
+            .find(|u| u.name == "Alacrity Skill")
+            .map(|u| u.cast_count)
+            .unwrap_or(0);
+        assert_eq!(
+            casts, 2,
+            "10s CD with Alacrity 25% is two casts in 15.5s; 33% sneaks a third (got {casts})"
         );
     }
 }
