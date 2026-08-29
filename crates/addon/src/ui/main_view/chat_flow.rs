@@ -1,9 +1,9 @@
 use super::optimization::{
     apply_gemini_response, apply_radar_prefix, attach_chat_stats, chat_display_text,
     fill_holes_from_loadout, format_provider_issue, gemini_from_validated, humanize_tool_names,
-    keep_equipped_weapons, kitchen_brief, result_alert_tab, simulate_suggestion_rotation,
-    suggestion_to_chat_code, summarize_resolved_build, summarize_suggestion,
-    validated_build_to_chat_code,
+    keep_equipped_weapons, keep_loadout_pets, kitchen_brief, result_alert_tab,
+    simulate_suggestion_rotation, suggestion_to_chat_code, summarize_resolved_build,
+    summarize_suggestion, validated_build_to_chat_code,
 };
 use std::sync::Arc;
 
@@ -339,6 +339,12 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     ..Default::default()
                                 };
                                 apply_gemini_response(&mut suggestion, &plated);
+                                // Same as the optimize worker: keep Ranger pets
+                                // on the plated suggestion. gemini_from_validated
+                                // also keeps the row; this covers a missed rebuild.
+                                if let Some(ref cur) = loadout {
+                                    keep_loadout_pets(&mut suggestion, &cur.pets);
+                                }
                                 // Validator-resolved per-slot prefixes are the
                                 // authoritative gear data for the sheet/locks.
                                 if let Some(v) = &validated {
@@ -490,6 +496,32 @@ mod tests {
         );
         v.specializations[1].trait_ids.pop();
         assert!(!plate_is_servable(&v));
+    }
+
+    #[test]
+    fn chat_plated_path_keeps_loadout_pets() {
+        // A18-4: servable chat must call keep_loadout_pets after plating,
+        // same as the optimize worker. gemini_from_validated keeps the row;
+        // this is the belt if the rebuild still misses.
+        let src = include_str!("chat_flow.rs");
+        let production = src
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("split always yields a first chunk");
+        let apply_at = production
+            .find("apply_gemini_response(&mut suggestion")
+            .expect("apply_gemini_response gone");
+        let keep_at = production
+            .find("keep_loadout_pets(&mut suggestion")
+            .expect("chat plated path must call keep_loadout_pets");
+        assert!(
+            keep_at > apply_at,
+            "keep_loadout_pets must run after apply_gemini_response"
+        );
+        assert!(
+            production.contains("gemini_from_validated"),
+            "chat still plates through gemini_from_validated"
+        );
     }
 }
 
