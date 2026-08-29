@@ -98,6 +98,15 @@ impl GameDb {
         if itemstats_vec.is_empty() {
             return Err("No item stats found in cache — game data may not be downloaded".into());
         }
+        if skills_vec.is_empty() {
+            return Err("No skills found in cache — game data may not be downloaded".into());
+        }
+        if traits_vec.is_empty() {
+            return Err("No traits found in cache — game data may not be downloaded".into());
+        }
+        if items_vec.is_empty() {
+            return Err("No items found in cache — game data may not be downloaded".into());
+        }
 
         // Build primary indexes (ID → data)
         let items: HashMap<u32, Item> = items_vec.into_iter().map(|i| (i.id, i)).collect();
@@ -779,6 +788,61 @@ mod tests {
         assert_eq!(db.itemstat_by_name("Knights").unwrap().name, "Knight's");
         assert_eq!(db.itemstat_by_name("Knight's").unwrap().name, "Knight's");
     }
+
+    #[test]
+    fn load_rejects_empty_skills_traits_or_items() {
+        let dir = std::env::temp_dir().join(format!(
+            "gw2bo-hollow-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let cache = gw2_api::cache::DataCache::new(&dir);
+        let prof = gw2_api::models::Profession {
+            id: "Guardian".into(),
+            name: "Guardian".into(),
+            code: Some(1),
+            specializations: vec![],
+            weapons: std::collections::HashMap::new(),
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        let spec = gw2_api::models::Specialization {
+            id: 1,
+            name: "Zeal".into(),
+            profession: "Guardian".into(),
+            elite: false,
+            minor_traits: vec![],
+            major_traits: vec![],
+            weapon_trait: None,
+            icon: None,
+            background: None,
+            profession_icon: None,
+            profession_icon_big: None,
+        };
+        let stat = gw2_api::models::ItemStat {
+            id: 161,
+            name: "Berserker's".into(),
+            attributes: vec![],
+        };
+        cache.save("professions", &vec![prof], 1).expect("save professions");
+        cache.save("specializations", &vec![spec], 1).expect("save specs");
+        cache.save("itemstats", &vec![stat], 1).expect("save itemstats");
+        let err = match GameDb::load(&cache) {
+            Ok(_) => panic!("hollow skills must fail"),
+            Err(e) => e,
+        };
+        assert!(
+            err.contains("skills"),
+            "expected skills fail-closed, got {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
 
     /// Live `/v2/itemstats` ships several Giver's multiplier shapes under one
     /// English name. Lowest-id exact match is Toughness-only 627; wiki L80

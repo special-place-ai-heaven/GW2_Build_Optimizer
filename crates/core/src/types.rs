@@ -286,7 +286,7 @@ impl StatBlock {
 /// Combat performance metrics for UI display.
 /// Calculated from the optimizer's CombatPerformance struct,
 /// rounded to display-friendly values.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CombatMetrics {
     pub effective_power: i32,
     pub strike_dps_index: i32,

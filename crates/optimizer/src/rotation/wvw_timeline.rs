@@ -15,7 +15,7 @@ use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
 
 use super::combat_model::EnemyDummy;
 use super::simulator::{
-    alacrity_recharge_ms, condition_tick_damage, reference_armor, strike_crit_factor_with_bonus,
+    alacrity_cd_advance_ms, condition_tick_damage, reference_armor, strike_crit_factor_with_bonus,
     SimParams,
 };
 use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect, SkillSlot};
@@ -547,6 +547,24 @@ impl<'a> Timeline<'a> {
             }
 
             self.now_ms += TIMELINE_TICK_MS;
+            self.tick_alacrity_recharge();
+        }
+    }
+
+    /// Dummy clock: 100ms wall consumes 125ms CD. Apply *4/5 at set is the leftover snapshot.
+    fn tick_alacrity_recharge(&mut self) {
+        if !self.now_ms.is_multiple_of(100) {
+            return;
+        }
+        let extra =
+            alacrity_cd_advance_ms(100, self.has_buff("Alacrity")).saturating_sub(100);
+        if extra == 0 {
+            return;
+        }
+        for ready in &mut self.cooldown_ready_ms {
+            if *ready > self.now_ms {
+                *ready = ready.saturating_sub(extra);
+            }
         }
     }
 
@@ -1354,7 +1372,6 @@ impl<'a> Timeline<'a> {
     /// The game tracks recharge by skill, not by rendered bar position. The
     /// same skill equipped in both weapon sets therefore shares one timer.
     fn set_skill_cooldown(&mut self, skill_id: u32, cooldown_ms: u32) {
-        let cooldown_ms = alacrity_recharge_ms(cooldown_ms, self.has_buff("Alacrity"));
         let ready_ms = self.now_ms + cooldown_ms;
         for (idx, skill) in self.skills.iter().enumerate() {
             if skill.skill_id == skill_id {
@@ -2747,7 +2764,61 @@ mod tests {
         );
         timeline.apply_buff("Alacrity", 1, 30_000, false);
         timeline.set_skill_cooldown(1, 10_000);
-        assert_eq!(timeline.cooldown_ready_ms[0], 8_000);
+        assert_eq!(
+            timeline.cooldown_ready_ms[0],
+            10_000,
+            "store full CD; dummy clock consumes 1.25x per 100ms wall"
+        );
+        for _ in 0..160 {
+            timeline.now_ms += TIMELINE_TICK_MS;
+            timeline.tick_alacrity_recharge();
+        }
+        assert!(
+            timeline.cooldown_ready_ms[0] <= timeline.now_ms,
+            "10s CD ready after 8s wall with Alacrity, ready={} now={}",
+            timeline.cooldown_ready_ms[0],
+            timeline.now_ms
+        );
+    }
+
+    #[test]
+    fn alacrity_mid_cooldown_still_uses_dummy_clock() {
+        let skills = [skill(
+            1,
+            SkillSlot::Utility,
+            200,
+            10_000,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        )];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(20_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.set_skill_cooldown(1, 10_000);
+        for _ in 0..40 {
+            timeline.now_ms += TIMELINE_TICK_MS;
+            timeline.tick_alacrity_recharge();
+        }
+        assert_eq!(timeline.cooldown_ready_ms[0], 10_000);
+        timeline.apply_buff("Alacrity", 1, 30_000, false);
+        for _ in 0..128 {
+            timeline.now_ms += TIMELINE_TICK_MS;
+            timeline.tick_alacrity_recharge();
+        }
+        assert!(
+            timeline.cooldown_ready_ms[0] <= timeline.now_ms,
+            "Alacrity after 2s must still eat the remaining 8s in 6.4s wall"
+        );
     }
 
     #[test]

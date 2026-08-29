@@ -196,22 +196,27 @@ fn finish_source(
         Ok((builds, cancelled)) => {
             // Cancel mid-source must not overwrite last-good on-disk groups
             // with a partial scrape. Keep the in-memory vec for this session.
-            if !cancelled {
-                save_builds(&builds, dir);
-            }
             if cancelled {
                 on_progress(source, "cancelled");
-            } else {
-                on_progress(source, &format!("done {}", builds.len()));
+                return ScrapeResult {
+                    source: source.into(),
+                    builds,
+                    error: Some(CANCELLED_ERROR.into()),
+                };
             }
+            if let Err(e) = save_builds(&builds, dir) {
+                on_progress(source, &format!("save failed: {e}"));
+                return ScrapeResult {
+                    source: source.into(),
+                    builds,
+                    error: Some(e),
+                };
+            }
+            on_progress(source, &format!("done {}", builds.len()));
             ScrapeResult {
                 source: source.into(),
                 builds,
-                error: if cancelled {
-                    Some(CANCELLED_ERROR.into())
-                } else {
-                    None
-                },
+                error: None,
             }
         }
         Err(e) => {
@@ -1093,9 +1098,9 @@ fn strip_tags(s: &str) -> String {
     }
     result
 }
-fn save_builds(builds: &[BenchmarkBuild], dir: &Path) {
+fn save_builds(builds: &[BenchmarkBuild], dir: &Path) -> Result<(), String> {
     if builds.is_empty() {
-        return;
+        return Ok(());
     }
     // Group by (source, profession, mode)
     let mut groups: std::collections::HashMap<String, Vec<&BenchmarkBuild>> =
@@ -1114,10 +1119,10 @@ fn save_builds(builds: &[BenchmarkBuild], dir: &Path) {
         // (profession parsed from a URL path). Windows treats '\\' as a
         // separator, so whitelist instead of trusting the URL splitter.
         let path = dir.join(sanitize_filename_component(filename));
-        if let Ok(json) = serde_json::to_string_pretty(group) {
-            let _ = std::fs::write(path, json);
-        }
+        let json = serde_json::to_string_pretty(group).map_err(|e| e.to_string())?;
+        std::fs::write(&path, json).map_err(|e| format!("write {}: {e}", path.display()))?;
     }
+    Ok(())
 }
 
 /// Reduce a string to a safe single path component: keep alphanumerics,
@@ -1666,5 +1671,33 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn save_builds_reports_write_failure() {
+        let missing = std::env::temp_dir().join(format!(
+            "gw2bo-no-dir-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let err = save_builds(&[sample_guardian_pve("x")], &missing).expect_err("hollow dir");
+        assert!(
+            err.contains("write"),
+            "write failure must surface, got {err}"
+        );
+        let result = finish_source(
+            "snowcrows",
+            Ok((vec![sample_guardian_pve("x")], false)),
+            &missing,
+            &|_, _| {},
+        );
+        assert!(
+            result.error.as_ref().is_some_and(|e| e.contains("write")),
+            "finish_source must not report done on silent write, got {:?}",
+            result.error
+        );
     }
 }

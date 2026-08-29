@@ -892,16 +892,6 @@ pub(super) fn alacrity_cd_advance_ms(tick_ms: u32, has_alacrity: bool) -> u32 {
     }
 }
 
-/// Remaining recharge when Alacrity covers the whole cooldown (cast-time apply).
-/// Wiki: a 10s skill recharges in 8s. Integer: cooldown * 4 / 5.
-pub(super) fn alacrity_recharge_ms(cooldown_ms: u32, has_alacrity: bool) -> u32 {
-    if has_alacrity {
-        cooldown_ms * 4 / 5
-    } else {
-        cooldown_ms
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

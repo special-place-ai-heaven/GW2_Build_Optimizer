@@ -328,6 +328,34 @@ pub fn boon_duration_multiplied(
     base_duration * (1.0 + trait_duration_bonus) * (1.0 + bonus)
 }
 
+/// Rotation / sim duration multiplier: `(1+trait) * (1+min(cap, attr+rune))`.
+/// Specific per-condition trait duration is not in the global sim path.
+pub fn outgoing_condition_duration_mult(
+    expertise: f64,
+    mods: &DamageModifiers,
+    ctx: &BalanceContext,
+) -> f64 {
+    let f = crate::data::universal_formulas::formulas();
+    let global: f64 = mods.condi_duration_pct.iter().sum();
+    let trait_g: f64 = mods.trait_condi_duration_pct.iter().sum();
+    let capped = condition_duration_bonus(expertise, global, 0.0, f.condition_duration_cap, ctx);
+    (1.0 + trait_g) * (1.0 + capped)
+}
+
+/// Same wiki product for boon duration in the rotation sim.
+pub fn outgoing_boon_duration_mult(
+    concentration: f64,
+    mods: &DamageModifiers,
+    ctx: &BalanceContext,
+) -> f64 {
+    let f = crate::data::universal_formulas::formulas();
+    let global: f64 = mods.boon_duration_pct.iter().sum();
+    let trait_g: f64 = mods.trait_boon_duration_pct.iter().sum();
+    let capped = boon_duration_bonus(concentration, global, f.boon_duration_cap, ctx);
+    (1.0 + trait_g) * (1.0 + capped)
+}
+
+
 // ─── Combat Performance Calculation ───
 
 /// Reference weapon strength (Ascended greatsword average).
@@ -393,8 +421,9 @@ pub fn calculate_combat_performance(
         f.condition_duration_cap,
         ctx,
     );
-    // CombatPerformance.condi_duration_pct is the capped hero-panel value (0-100).
-    let total_condi_duration = total_condi_bonus * 100.0;
+    // Panel % is outgoing increase: (1+trait)*(1+capped) - 1. Cap is 100, trait sits outside.
+    let total_condi_duration =
+        ((1.0 + trait_condi_ratio) * (1.0 + total_condi_bonus) - 1.0) * 100.0;
 
     // Per-condition duration: (1+trait) * (1+min(cap, expertise+rune+specific))
     let condi_dur_for = |condition: &str| -> f64 {
@@ -437,12 +466,14 @@ pub fn calculate_combat_performance(
 
     // Boon duration from Concentration + rune/sigil (inside cap). Trait is outside.
     let global_boon_ratio: f64 = modifiers.boon_duration_pct.iter().sum();
-    let boon_duration_pct = boon_duration_bonus(
+    let trait_boon_ratio: f64 = modifiers.trait_boon_duration_pct.iter().sum();
+    let boon_capped = boon_duration_bonus(
         stats.concentration,
         global_boon_ratio,
         f.boon_duration_cap,
         ctx,
-    ) * 100.0;
+    );
+    let boon_duration_pct = ((1.0 + trait_boon_ratio) * (1.0 + boon_capped) - 1.0) * 100.0;
 
     // Survivability
     // Source: https://wiki.guildwars2.com/wiki/Health
@@ -2743,6 +2774,71 @@ mod tests {
             traited_facts: vec![],
             skills: vec![],
         }
+    }
+
+
+    #[test]
+    fn panel_duration_pct_includes_trait_outside_the_cap() {
+        let ctx = BalanceContext::pve();
+        let stats = StatBlock {
+            expertise: 1500.0,
+            concentration: 1500.0,
+            vitality: 1000.0,
+            toughness: 1000.0,
+            ..Default::default()
+        };
+        let derived = stats::compute_derived(&stats, "Necromancer");
+        let mut mods = DamageModifiers::default();
+        mods.trait_condi_duration_pct.push(0.50);
+        mods.trait_boon_duration_pct.push(0.50);
+        let solo = default_buff_profiles(&ctx)
+            .into_iter()
+            .find(|b| b.label == "Solo")
+            .unwrap();
+        let perf = calculate_combat_performance(
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &ConditionWeights::default_pve(),
+            "Necromancer",
+            &ctx,
+        );
+        assert!(
+            (perf.condi_duration_pct - 200.0).abs() < 0.1,
+            "panel condi must be 200% at cap + 50% trait, got {}",
+            perf.condi_duration_pct
+        );
+        assert!(
+            (perf.boon_duration_pct - 200.0).abs() < 0.1,
+            "panel boon must be 200% at cap + 50% trait, got {}",
+            perf.boon_duration_pct
+        );
+    }
+
+    #[test]
+    fn rotation_duration_mult_keeps_trait_outside_the_cap() {
+        let ctx = BalanceContext::pve();
+        let mut mods = DamageModifiers::default();
+        mods.trait_condi_duration_pct.push(0.50);
+        mods.trait_boon_duration_pct.push(0.50);
+        let condi = outgoing_condition_duration_mult(1500.0, &mods, &ctx);
+        let boon = outgoing_boon_duration_mult(1500.0, &mods, &ctx);
+        assert!(
+            (condi - 3.0).abs() < 0.001,
+            "rotation condi must be 3x at cap + 50% trait, got {condi}"
+        );
+        assert!(
+            (boon - 3.0).abs() < 0.001,
+            "rotation boon must be 3x at cap + 50% trait, got {boon}"
+        );
+        let mut rune_only = DamageModifiers::default();
+        rune_only.condi_duration_pct.push(0.30);
+        let capped = outgoing_condition_duration_mult(1500.0, &rune_only, &ctx);
+        assert!(
+            (capped - 2.0).abs() < 0.001,
+            "rune still inside cap, got {capped}"
+        );
     }
 
 

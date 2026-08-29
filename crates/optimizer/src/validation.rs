@@ -665,6 +665,7 @@ fn validate_specializations(
         let mut resolved_trait_ids = Vec::new();
         let mut resolved_trait_names = Vec::new();
         let mut used_tiers: HashMap<u32, String> = HashMap::new();
+        let mut unknown_trait = false;
 
         for trait_name in trait_names {
             if let Some(t) = find_trait_by_name(trait_name, &major_traits) {
@@ -683,6 +684,7 @@ fn validate_specializations(
                 resolved_trait_ids.push(t.id);
                 resolved_trait_names.push(t.name.clone());
             } else {
+                unknown_trait = true;
                 result.warnings.push(format!(
                     "Trait '{}' not found in spec '{}'",
                     trait_name, spec.name
@@ -690,14 +692,17 @@ fn validate_specializations(
             }
         }
 
-        complete_major_trait_columns(
-            &major_traits,
-            &mut resolved_trait_ids,
-            &mut resolved_trait_names,
-            &mut used_tiers,
-            &spec.name,
-            &mut result.warnings,
-        );
+        // Omitted columns may fill. Garbage names must not become a legal spec.
+        if !unknown_trait {
+            complete_major_trait_columns(
+                &major_traits,
+                &mut resolved_trait_ids,
+                &mut resolved_trait_names,
+                &mut used_tiers,
+                &spec.name,
+                &mut result.warnings,
+            );
+        }
 
         // Collect minor traits (always active)
         let minor_ids: Vec<u32> = spec.minor_traits.clone();
@@ -2181,6 +2186,48 @@ mod tests {
             .warnings
             .iter()
             .any(|w| w.contains("Arcane Precision")));
+    }
+
+    #[test]
+    fn validate_gemini_build_does_not_fill_after_garbage_trait_name() {
+        let db = arcane_ele_db();
+        let response = GeminiBuildResponse {
+            specializations: vec![(
+                "Arcane".into(),
+                vec!["DefinitelyNotATrait".into()],
+            )],
+            ..Default::default()
+        };
+        let result = validate_gemini_build(&response, &db, "Elementalist");
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("DefinitelyNotATrait")),
+            "garbage name must warn, got {:?}",
+            result.warnings
+        );
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|w| w.contains("filled")),
+            "garbage must not autofill a legal column: {:?}",
+            result.warnings
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| matches!(e.code, RejectCode::IncompleteSpecTraits { .. })),
+            "garbage plate must stay incomplete: {:?}",
+            result.errors
+        );
+        assert_ne!(
+            result.specializations[0].trait_ids,
+            vec![1, 2, 3],
+            "must not complete into Arcane Precision / Resurrection / Evasive Arcana"
+        );
     }
 
     // ── validate_gear_prefix() determinism + tie-break ───────────────────────

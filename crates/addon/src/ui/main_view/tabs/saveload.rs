@@ -1487,7 +1487,10 @@ mod tests {
     #[test]
     fn ranch_load_click_handler_spawns_worker_instead_of_inline_cpu() {
         let src = include_str!("saveload.rs");
-        let production = src.split("\n#[cfg(test)]")[0];
+        let production = src
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("production source");
 
         fn fn_body<'a>(production: &'a str, name: &'a str) -> &'a str {
             let needle = format!("fn {name}(");
@@ -1555,7 +1558,10 @@ mod tests {
     #[test]
     fn ranch_load_click_handler_does_not_persist_notes_on_click_frame() {
         let src = include_str!("saveload.rs");
-        let production = src.split("\n#[cfg(test)]")[0];
+        let production = src
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("production source");
 
         fn fn_body<'a>(production: &'a str, name: &'a str) -> &'a str {
             let needle = format!("fn {name}(");

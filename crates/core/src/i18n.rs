@@ -407,6 +407,25 @@ mod tests {
     }
 
     #[test]
+    fn spanish_and_dutch_translate_leftover_chrome() {
+        with_lang("es", || {
+            assert_ne!(
+                t("note.attributes"),
+                "Power and Condition Damage are damage flavors — not DPS."
+            );
+            assert_ne!(t("btn.sync"), "Sync Benchmarks");
+            assert_ne!(t("label.stacks"), "Application (avg stacks)");
+            assert_eq!(t("btn.sync"), "Sincronizar benchmarks");
+        });
+        with_lang("nl", || {
+            assert_eq!(t("section.armor"), "RUSTING");
+            assert_eq!(t("section.stats"), "STATISTIEKEN");
+            assert_eq!(t("section.modifiers"), "MODIFICATOREN");
+            assert_eq!(t("section.boons"), "ZEGENINGEN");
+        });
+    }
+
+    #[test]
     fn missing_key_falls_back_to_english() {
         with_lang("en", || {
             let missing = t("this.key.does.not.exist");
