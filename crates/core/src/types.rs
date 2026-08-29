@@ -446,29 +446,36 @@ pub struct PrefixRef {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GearSlots {
     pub map: [Option<PrefixRef>; 16],
+    /// Unknown kebab-case slot keys, preserved so a future slot is not
+    /// deleted on round-trip. Known names in [`GearSlot::ALL`] never land here.
+    extras: std::collections::BTreeMap<String, PrefixRef>,
 }
 
 impl Serialize for GearSlots {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let populated: std::collections::BTreeMap<&str, &PrefixRef> = GearSlot::ALL
+        let mut populated: std::collections::BTreeMap<&str, &PrefixRef> = GearSlot::ALL
             .iter()
             .zip(self.map.iter())
             .filter_map(|(slot, prefix)| prefix.as_ref().map(|prefix| (slot_name(slot), prefix)))
             .collect();
+        for (key, prefix) in &self.extras {
+            populated.insert(key.as_str(), prefix);
+        }
         populated.serialize(serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for GearSlots {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let raw: std::collections::HashMap<String, PrefixRef> =
+        let mut raw: std::collections::HashMap<String, PrefixRef> =
             std::collections::HashMap::deserialize(deserializer)?;
         let mut slots = GearSlots::default();
         for slot in GearSlot::ALL {
-            if let Some(prefix) = raw.get(slot_name(&slot)) {
-                slots.map[slot as usize] = Some(prefix.clone());
+            if let Some(prefix) = raw.remove(slot_name(&slot)) {
+                slots.map[slot as usize] = Some(prefix);
             }
         }
+        slots.extras = raw.into_iter().collect();
         Ok(slots)
     }
 }
@@ -851,6 +858,18 @@ mod tests {
         let back: GearSlots = serde_json::from_str(&json).unwrap();
         assert_eq!(back.get(GearSlot::Helm).unwrap().itemstat_id, 7);
         assert_eq!(back.get(GearSlot::Amulet), None);
+    }
+
+    #[test]
+    fn gear_slots_unknown_key_round_trips() {
+        let json = r#"{"helm":{"itemstat_id":7,"name":"Berserker's"},"relic":{"itemstat_id":99,"name":"Future Slot"}}"#;
+        let slots: GearSlots = serde_json::from_str(json).unwrap();
+        assert_eq!(slots.get(GearSlot::Helm).unwrap().itemstat_id, 7);
+        let back = serde_json::to_string(&slots).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&back).unwrap();
+        assert_eq!(v["relic"]["itemstat_id"], 99);
+        assert_eq!(v["relic"]["name"], "Future Slot");
+        assert_eq!(v["helm"]["itemstat_id"], 7);
     }
 
     #[test]

@@ -79,10 +79,9 @@ pub struct NormalizationConstants {
 
 /// Viability floor thresholds for a build archetype.
 ///
-/// Each field is optional: `Some` activates its gate, `None` skips it.
-/// Consumed by `referee::evaluate_viability_gates` when the caller supplies
-/// an `ObjectiveProfile`. Missing/empty `viability_gates` blocks fall back
-/// to the hardcoded per-mode defaults in `referee.rs`.
+/// Consumed by `referee::evaluate_viability_gates_for` when the caller supplies
+/// an `ObjectiveProfile`. A set `ehp_floor` overrides the hardcoded mode/tier
+/// constant; unset fields keep those defaults (they do not skip the gate).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ViabilityGateConfig {
     /// Minimum effective health required for this role.
@@ -122,9 +121,9 @@ pub struct ObjectiveProfile {
     ///        converts_condition_to_boon, transfers_condition.
     #[serde(default)]
     pub interaction_priorities: HashMap<String, f64>,
-    /// Role-specific viability floors consumed by `referee::evaluate_viability_gates`.
-    /// When present, these thresholds override the mode-based hardcoded fallbacks:
-    /// each set field activates its gate, each unset field means "skip that gate".
+    /// Role-specific viability floors consumed by `referee::evaluate_viability_gates_for`.
+    /// A set `ehp_floor` overrides the hardcoded mode/tier constant; unset fields
+    /// keep those defaults.
     #[serde(default)]
     pub viability_gates: ViabilityGateConfig,
     /// Exactly one profile per mode must be true.
