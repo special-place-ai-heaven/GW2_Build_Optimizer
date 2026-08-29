@@ -194,6 +194,16 @@ fn lock_count_key(n: u64) -> &'static str {
     }
 }
 
+/// Catalog key when the lock grid cannot paint — missing data or no character.
+fn lock_empty_state_key(db: Option<&GameDb>, profession_name: &str) -> Option<&'static str> {
+    match db {
+        None => Some("lock.need_data"),
+        Some(_) if profession_name.is_empty() => Some("lock.need_character"),
+        Some(db) if !db.professions.contains_key(profession_name) => Some("lock.need_data"),
+        Some(_) => None,
+    }
+}
+
 // ─── Main render function ───
 
 /// Render the spec & trait lock panel in the left menu.
@@ -252,22 +262,11 @@ pub fn render_lock_panel(
         return modified;
     }
 
-    let Some(db) = db else {
-        ui.text_colored(DIM_COLOR, format!("  {}", t("lock.need_data")));
-        return modified;
-    };
-
-    if profession_name.is_empty() {
-        ui.text_colored(DIM_COLOR, format!("  {}", t("lock.need_character")));
+    if let Some(key) = lock_empty_state_key(db, profession_name) {
+        ui.text_colored(DIM_COLOR, format!("  {}", t(key)));
         return modified;
     }
-
-    // Bail if the profession isn't in the DB — we can't render the panel
-    // without spec metadata, and the rest of the function would silently
-    // produce an empty view.
-    if !db.professions.contains_key(profession_name) {
-        return modified;
-    }
+    let db = db.expect("lock_empty_state_key is None only when db and profession exist");
 
     // (Spec-picker scaffolding was here. Removed because the two Vecs were
     // computed every render frame and never read. Re-introduce alongside the
@@ -1294,6 +1293,35 @@ mod tests {
         assert!(
             !optimized_trait_selected(&selected, "Fluch der Verweilenden"),
             "de display name must not be the selection key"
+        );
+    }
+
+    #[test]
+    fn lock_empty_state_uses_need_keys() {
+        assert_eq!(
+            lock_empty_state_key(None, "Guardian"),
+            Some("lock.need_data")
+        );
+        assert_eq!(lock_empty_state_key(None, ""), Some("lock.need_data"));
+        let db = GameDb::empty_for_tests();
+        assert_eq!(
+            lock_empty_state_key(Some(&db), ""),
+            Some("lock.need_character")
+        );
+        assert_eq!(
+            lock_empty_state_key(Some(&db), "Guardian"),
+            Some("lock.need_data"),
+            "profession missing from db must not paint a blank grid"
+        );
+
+        let src = include_str!("lock_panel.rs");
+        let production_src = src
+            .split("#[cfg(test)]")
+            .next()
+            .expect("lock_panel.rs must contain its own #[cfg(test)] marker");
+        assert!(
+            production_src.contains("lock_empty_state_key(db, profession_name)"),
+            "render_lock_panel must show lock.need_data / lock.need_character, not a silent return"
         );
     }
 }

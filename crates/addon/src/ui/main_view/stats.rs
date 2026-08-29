@@ -98,10 +98,9 @@ pub(super) fn cached_pack_status(
 pub(super) fn ensure_localized_names(state: &mut AddonState) {
     let Some(lang) = gw2_core::i18n::api_lang(&state.config.ui_language) else {
         // Only reach for the database mutably when there is something to clear.
-        // `game_db_mut` is `Arc::make_mut`, so an unconditional call here would
-        // deep-copy the whole database on the render thread on every frame a
-        // worker happens to be holding a clone — and this is the branch every
-        // English player takes.
+        // `game_db_mut` is skip-when-shared (`Arc::get_mut`), so an unconditional
+        // call here is a no-op while a worker holds a clone — still skip it on
+        // the English path so we do not even take the unique-owner write.
         if state
             .main
             .game_db
@@ -156,13 +155,9 @@ pub(super) fn ensure_localized_names(state: &mut AddonState) {
             // is asking for right now.
             if let Ok(Some(names)) = loaded {
                 if gw2_core::i18n::api_lang(&s.config.ui_language) == Some(lang.as_str()) {
-                    // ponytail: `game_db_mut` is `Arc::make_mut`, so this is an
-                    // in-place edit while nothing else holds the database — the
-                    // normal case — but a deep copy under STATE if an optimize
-                    // is mid-flight with its own clone. Closing that needs a way
-                    // to build `by_english` from `&GameDb` so the pack could be
-                    // attached before the lock is taken; `gamedb.rs` is not this
-                    // leaf's to change.
+                    // `game_db_mut` is skip-when-shared (`Arc::get_mut`): attach
+                    // in place when unique, skip rather than clone GameDb under
+                    // STATE if an optimize is mid-flight with its own clone.
                     if let Some(db) = s.main.game_db_mut() {
                         db.attach_localized(names);
                         s.main.names_lang = lang.clone();
@@ -596,5 +591,26 @@ mod tests {
 
         // …and that pack then gets its own cooldown.
         assert!(!locale_attempt_allowed(&mut slot, ("fr", Some(8)), after));
+    }
+
+    #[test]
+    fn ensure_localized_names_does_not_make_mut() {
+        let src = include_str!("stats.rs");
+        let production = src
+            .split("#[cfg(test)]")
+            .next()
+            .expect("stats.rs must contain its own #[cfg(test)] marker");
+        assert!(
+            !production.contains("Arc::make_mut"),
+            "locale attach must not Arc::make_mut a shared GameDb"
+        );
+        assert!(
+            production.contains("game_db_mut"),
+            "locale attach goes through skip-when-shared game_db_mut"
+        );
+        assert!(
+            production.contains("attach_localized"),
+            "locale attach still calls attach_localized on a unique db"
+        );
     }
 }
