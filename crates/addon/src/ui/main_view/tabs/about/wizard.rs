@@ -843,6 +843,21 @@ pub(super) fn fail_text(r: &FailReason) -> String {
     }
 }
 
+/// Rate-limit copy uses remaining minutes from the matching row; other reasons
+/// stay on [`fail_text`].
+fn fail_copy(r: &FailReason, draft: &Draft, feedback: &FeedbackState, now: u64) -> String {
+    if matches!(r, FailReason::RateLimited { .. }) {
+        if let Some(m) = feedback
+            .messages
+            .iter()
+            .find(|m| m.report_id == draft.report_id)
+        {
+            return super::rate_fail_text(m, now);
+        }
+    }
+    fail_text(r)
+}
+
 // ── rendering ────────────────────────────────────────────────────────────────
 
 /// What the player did this frame; applied after every widget has rendered so
@@ -869,10 +884,9 @@ fn fade(c: [f32; 4], alpha: f32) -> [f32; 4] {
 }
 
 /// `text_wrapped` pinned to an absolute right edge (the plate's inner edge).
-/// `PushTextWrapPos` takes a window-local x (ImGui adds `window.Pos.x - Scroll.x`
-/// back in `CalcWrapWidthForPos`), so the screen-space edge is converted first.
+/// `PushTextWrapPos` is window-local, so the screen-space edge is converted first.
 fn wrapped_to(ui: &Ui, color: [f32; 4], text: &str, right_x: f32) {
-    let local = right_x - ui.window_pos()[0] + ui.scroll_x();
+    let local = super::wrap_pos_local(right_x, ui.window_pos()[0], ui.scroll_x());
     let wrap = ui.push_text_wrap_pos_with_pos(local);
     ui.text_colored(color, text);
     wrap.pop(ui);
@@ -1211,10 +1225,10 @@ fn render_summary(
     }
     ui.set_cursor_screen_pos([p[0] + 22.0, p[1]]);
     ui.text_colored(theme::CREAM, path_text(draft));
-    let body = draft.body();
-    if !body.is_empty() {
+    let encoded = draft.encoded_body();
+    if !encoded.is_empty() {
         let w = (right_x - ui.cursor_screen_pos()[0]).max(40.0);
-        paint_mail(ui, &body, w);
+        paint_mail(ui, &encoded, w);
     }
 
     ui.dummy([0.0, 4.0]);
@@ -1281,7 +1295,12 @@ fn render_summary(
 
     if let Some(err) = &draft.error {
         ui.dummy([0.0, 4.0]);
-        wrapped_to(ui, theme::ERR, &fail_text(err), right_x);
+        wrapped_to(
+            ui,
+            theme::ERR,
+            &fail_copy(err, draft, feedback, now_unix()),
+            right_x,
+        );
     }
 
     ui.dummy([0.0, 6.0]);
@@ -1745,6 +1764,47 @@ mod tests {
                 assert_eq!(text, expected, "{reason:?}");
                 assert!(!text.contains("msg.fail."), "{reason:?} leaked its key");
             }
+        });
+    }
+
+    #[test]
+    fn wizard_rate_copy_uses_minutes_left() {
+        with_en(|| {
+            let mut draft = Draft::new(FeedbackTaxonomy::embedded());
+            draft.pick("bug");
+            let reason = FailReason::RateLimited {
+                retry_after_secs: 90,
+            };
+            draft.error = Some(reason.clone());
+            let row = LocalMessage {
+                report_id: draft.report_id.clone(),
+                short_id: None,
+                sent_at: 0,
+                category: "bug".into(),
+                path: vec![],
+                title: "t".into(),
+                body: "b".into(),
+                status: MessageStatus::Failed,
+                reply: None,
+                replied_at: None,
+                closing_note: None,
+                last_error: Some(reason.clone()),
+                failed_at: Some(1_000),
+                failed_payload: None,
+                context_summary: String::new(),
+            };
+            let feedback = FeedbackState {
+                messages: vec![row],
+                ..FeedbackState::default()
+            };
+            assert_eq!(
+                fail_copy(&reason, &draft, &feedback, 1_000),
+                "Slow down — try again in 2 min."
+            );
+            assert_eq!(
+                fail_copy(&reason, &draft, &feedback, 1_030),
+                "Slow down — try again in 1 min."
+            );
         });
     }
 }
