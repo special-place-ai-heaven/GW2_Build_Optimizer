@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use gw2_core::feedback::message::{FailReason, LastPath, LocalMessage, MessageStatus};
-use gw2_core::feedback::report::{snapshot_bytes, BuildSnapshot, MAX_SNAPSHOT_BYTES};
+use gw2_core::feedback::report::{
+    snapshot_bytes, strip_wizard_markup, BuildSnapshot, MAX_SNAPSHOT_BYTES,
+};
 use gw2_core::feedback::taxonomy::{Category, FeedbackTaxonomy};
 
 /// Which list the About tab shows under the hero.
@@ -289,8 +291,8 @@ impl Draft {
             .collect()
     }
 
-    /// The text of the first text step that has something typed, else empty.
-    pub fn body(&self) -> String {
+    /// First non-empty text step, as stored (wizard encode prefixes intact).
+    pub(crate) fn encoded_body(&self) -> String {
         self.step_ids()
             .iter()
             .filter(|id| self.taxonomy.step(id).is_some_and(|s| s.text.is_some()))
@@ -298,6 +300,11 @@ impl Draft {
             .find(|text| !text.is_empty())
             .cloned()
             .unwrap_or_default()
+    }
+
+    /// First non-empty text step as plaintext (wizard `%NL0P|` markup stripped).
+    pub fn body(&self) -> String {
+        strip_wizard_markup(&self.encoded_body())
     }
 
     /// Index (in step order) of the first step that carries a text rule.
@@ -644,6 +651,16 @@ mod tests {
         assert!(praise.path().is_empty());
         praise.set_text("note_optional", "nice".to_string());
         assert_eq!(praise.body(), "nice");
+    }
+
+    #[test]
+    fn body_strips_wizard_encode_markup() {
+        let mut draft = bug_draft();
+        let encoded = "%NL0P|The optimizer picked a trident on land.";
+        draft.set_text("describe", encoded.to_string());
+        assert_eq!(draft.encoded_body(), encoded);
+        assert_eq!(draft.body(), "The optimizer picked a trident on land.");
+        assert!(!draft.body().contains("%NL0P|"));
     }
 
     #[test]
