@@ -2201,6 +2201,7 @@ pub(crate) mod runtime_diagnostics_tests {
                 &db.items,
                 &db.itemstats,
                 &db.traits,
+                &ctx.game_mode,
             );
             let baseline_mods = crate::combat::extract_damage_modifiers(
                 &loaded_trait_ids,
