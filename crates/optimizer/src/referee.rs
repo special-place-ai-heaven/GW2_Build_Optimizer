@@ -219,6 +219,17 @@ pub fn evaluate_viability_gates(
     combat_perf: &CombatPerformance,
     scenario: &ScenarioSpec,
 ) -> ViabilityReport {
+    evaluate_viability_gates_for(rotation, combat_perf, scenario, None)
+}
+
+/// Same as [`evaluate_viability_gates`], applying `profile.viability_gates`
+/// floors when present. Unset fields keep the hardcoded mode/tier defaults.
+pub fn evaluate_viability_gates_for(
+    rotation: Option<&SimulationResult>,
+    combat_perf: &CombatPerformance,
+    scenario: &ScenarioSpec,
+    profile: Option<&crate::data::ObjectiveProfile>,
+) -> ViabilityReport {
     let mut gates: Vec<GateResult> = Vec::new();
 
     let requires_pvp_gates = matches!(scenario.game_mode, GameMode::WvW | GameMode::PvP);
@@ -480,7 +491,7 @@ pub fn evaluate_viability_gates(
     // WvW floor varies by combat tier: Roamers need more personal sustain than Zerg players.
     // PvP uses its own (lower) floor — amulet-based gear has a smaller stat budget than
     // ascended WvW, so reusing WvW floors here would non-viably score most real PvP builds.
-    let ehp_floor = if scenario.combat_kind == CombatKind::Staller {
+    let default_ehp_floor = if scenario.combat_kind == CombatKind::Staller {
         match scenario.game_mode {
             GameMode::WvW => EHP_FLOOR_WVW_ROAM,
             GameMode::PvP => EHP_FLOOR_PVP,
@@ -497,6 +508,9 @@ pub fn evaluate_viability_gates(
             GameMode::PvE => EHP_FLOOR_PVE,
         }
     };
+    let ehp_floor = profile
+        .and_then(|p| p.viability_gates.ehp_floor)
+        .unwrap_or(default_ehp_floor);
     let passed = combat_perf.effective_health >= ehp_floor;
     gates.push(GateResult {
         gate: ViabilityGate::EffectiveHealth,
@@ -772,9 +786,9 @@ mod tests {
     // Intentional invariant tripwires.
     #![allow(clippy::assertions_on_constants)]
     use super::{
-        evaluate_validated_build, evaluate_viability_gates, search_rank, GateResult, RefereeReport,
-        ViabilityGate, ViabilityReport, EHP_FLOOR_PVE, EHP_FLOOR_PVP, EHP_FLOOR_WVW_HAVOC,
-        EHP_FLOOR_WVW_ROAM, EHP_FLOOR_WVW_ZERG,
+        evaluate_validated_build, evaluate_viability_gates, evaluate_viability_gates_for,
+        search_rank, GateResult, RefereeReport, ViabilityGate, ViabilityReport, EHP_FLOOR_PVE,
+        EHP_FLOOR_PVP, EHP_FLOOR_WVW_HAVOC, EHP_FLOOR_WVW_ROAM, EHP_FLOOR_WVW_ZERG,
     };
     use crate::balance::BalanceContext;
     use crate::combat::CombatPerformance;
@@ -1119,6 +1133,37 @@ mod tests {
         assert!(gate_by_kind(&report.gates, &ViabilityGate::StunbreakCount).is_none());
         assert!(gate_by_kind(&report.gates, &ViabilityGate::StabilityAccess).is_none());
         assert!(gate_by_kind(&report.gates, &ViabilityGate::CleanseRate).is_none());
+    }
+
+    #[test]
+    fn profile_ehp_floors_change_gate_outcome() {
+        let combat = CombatPerformance {
+            effective_health: 20_000.0,
+            ..Default::default()
+        };
+        let scenario = make_pve_scenario();
+        let mut low = crate::data::objective_profiles::objective_profiles()
+            .default_for_mode("PvE")
+            .expect("embedded PvE default")
+            .clone();
+        low.viability_gates.ehp_floor = Some(15_000.0);
+        let mut high = low.clone();
+        high.viability_gates.ehp_floor = Some(25_000.0);
+
+        let pass = evaluate_viability_gates_for(None, &combat, &scenario, Some(&low));
+        let fail = evaluate_viability_gates_for(None, &combat, &scenario, Some(&high));
+        assert!(
+            pass.is_viable,
+            "20k EHP should pass a 15k floor: {:?}",
+            pass.gates
+        );
+        assert!(
+            !fail.is_viable,
+            "20k EHP should fail a 25k floor: {:?}",
+            fail.gates
+        );
+        assert_eq!(pass.gates[0].gate, ViabilityGate::EffectiveHealth);
+        assert_eq!(fail.gates[0].gate, ViabilityGate::EffectiveHealth);
     }
 
     /// WvW build with `rotation = None` → rotation-dependent gates fail with "rotation unavailable".
