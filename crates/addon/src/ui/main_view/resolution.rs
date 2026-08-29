@@ -221,6 +221,7 @@ fn calculate_current_stats_from_db(
         &db.items,
         &db.itemstats,
         &db.traits,
+        game_mode,
     );
 
     let relic_id = equipment
