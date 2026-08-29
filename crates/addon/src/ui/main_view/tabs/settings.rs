@@ -9,6 +9,22 @@ use gw2_core::i18n::{t, tf};
 
 use super::super::{build_display, stats};
 
+thread_local! {
+    /// Per-field "reveal password" toggle for the Settings tab LLM API-key
+    /// input. Transient UI-only state scoped to the render thread — it must not
+    /// survive a save/reload and does not belong on `AddonState`.
+    static SHOW_LLM_KEY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the Settings LLM API-key input should mask its contents (ImGui's
+/// `InputTextFlags::PASSWORD`), given whether the user has toggled "reveal"
+/// on. Same helper Setup uses: Settings is the same overlay a player might be
+/// streaming or screenshotting while pasting a live key, so it defaults to
+/// masked.
+fn key_field_is_masked(revealed: bool) -> bool {
+    !revealed
+}
+
 pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     let avail_w = ui.content_region_avail()[0];
     let scale = state.config.font_scale.max(0.5);
@@ -279,14 +295,23 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let gap = 8.0;
     let save_origin = ui.cursor_screen_pos();
     let btn_w = theme::gold_button_width(ui, save_label.as_str());
-    let input_w = (row_w - btn_w - gap).max(40.0);
+    // Key input — masked by default; see Setup's LLM key step for why.
+    let show_llm_key = SHOW_LLM_KEY.with(|c| c.get());
+    let toggle_label = if show_llm_key { "Hide" } else { "Show" };
+    let toggle_w = theme::gold_button_width(ui, toggle_label) + 8.0;
+    let input_w = (row_w - btn_w - toggle_w - gap).max(40.0);
     ui.set_next_item_width(input_w);
     ui.input_text(
         &format!("##{}_key", provider_label),
         &mut state.main.settings_key_input,
     )
     .hint(&t("settings.enter_key"))
+    .password(key_field_is_masked(show_llm_key))
     .build();
+    ui.same_line();
+    if theme::gold_button_sized(ui, toggle_label, [toggle_w - 8.0, 0.0]) {
+        SHOW_LLM_KEY.with(|c| c.set(!show_llm_key));
+    }
     ui.set_cursor_screen_pos([save_origin[0] + row_w - btn_w, save_origin[1]]);
     let validating = state.main.settings_key_validating;
     if validating {
@@ -1341,6 +1366,32 @@ mod tests {
             after_build_change,
             gw2_api::localize::PackStatus::None,
             "a build change must not desync the cache from what pack_status would say"
+        );
+    }
+
+    /// Settings LLM key InputText is the same overlay a player may stream or
+    /// screenshot. `key_field_is_masked` is the exact function the
+    /// `.password(...)` call site uses, and the reveal toggle must default to
+    /// hidden — same contract as Setup's `setup_key_fields_are_masked`.
+    #[test]
+    fn settings_llm_key_field_is_masked() {
+        assert!(
+            key_field_is_masked(false),
+            "an un-revealed key field must render with the PASSWORD flag set"
+        );
+        assert!(
+            !key_field_is_masked(true),
+            "toggling reveal on must unmask the field"
+        );
+
+        let llm_default_revealed = SHOW_LLM_KEY.with(|c| c.get());
+        assert!(
+            !llm_default_revealed,
+            "the Settings LLM key reveal toggle must default to hidden"
+        );
+        assert!(
+            key_field_is_masked(llm_default_revealed),
+            "the Settings LLM key field must be masked on first render"
         );
     }
 }
