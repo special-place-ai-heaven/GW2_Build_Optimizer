@@ -194,7 +194,11 @@ fn finish_source(
 ) -> ScrapeResult {
     match result {
         Ok((builds, cancelled)) => {
-            save_builds(&builds, dir);
+            // Cancel mid-source must not overwrite last-good on-disk groups
+            // with a partial scrape. Keep the in-memory vec for this session.
+            if !cancelled {
+                save_builds(&builds, dir);
+            }
             if cancelled {
                 on_progress(source, "cancelled");
             } else {
@@ -1584,5 +1588,83 @@ mod tests {
             calls.load(Ordering::Relaxed) >= 1,
             "predicate must be invoked at least once at inner loop entry"
         );
+    }
+
+    fn sample_guardian_pve(notes: &str) -> BenchmarkBuild {
+        BenchmarkBuild {
+            source: "snowcrows".into(),
+            profession: "Guardian".into(),
+            spec_name: "Firebrand".into(),
+            mode: "PvE".into(),
+            role: "Power DPS".into(),
+            build_code: None,
+            gear_prefix: "Berserker's".into(),
+            rune: "Scholar".into(),
+            sigils: vec!["Force".into(), "Accuracy".into()],
+            relic: "Fireworks".into(),
+            traits: vec!["Radiance".into(), "Honor".into(), "Firebrand".into()],
+            skills: vec![],
+            source_url: "https://snowcrows.com/builds/raids/guardian/firebrand".into(),
+            scraped_at: "2026-08-01".into(),
+            notes: notes.into(),
+        }
+    }
+
+    /// Mid-source cancel must not overwrite a previously good
+    /// `{source}_{profession}_{mode}.json`. Inject a non-empty partial
+    /// into `finish_source` with `cancelled=true` (the same Ok branch
+    /// snowcrows/hardstuck/guildjen take after collecting at least one
+    /// inner build). Seeded file bytes must stay unchanged when error
+    /// is `CANCELLED_ERROR`.
+    #[test]
+    fn finish_source_cancel_does_not_overwrite_seeded_benchmark_file() {
+        let tmp = std::env::temp_dir().join(format!(
+            "gw2_scraper_cancel_partial_save_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("temp benchmarks dir");
+
+        let seeded_path = tmp.join("snowcrows_guardian_pve.json");
+        let seeded = serde_json::to_string_pretty(&vec![sample_guardian_pve("LAST_GOOD_SEED")])
+            .expect("seed json");
+        std::fs::write(&seeded_path, &seeded).expect("seed last-good file");
+        let before = std::fs::read(&seeded_path).expect("read seed");
+
+        let partial = sample_guardian_pve("SHOULD_NOT_LAND_ON_DISK");
+        let result = finish_source(
+            "snowcrows",
+            Ok((vec![partial], true)),
+            &tmp,
+            &|_, _| {},
+        );
+
+        assert_eq!(
+            result.error.as_deref(),
+            Some(CANCELLED_ERROR),
+            "cancelled finish_source must tag CANCELLED_ERROR"
+        );
+        assert_eq!(
+            result.builds.len(),
+            1,
+            "in-memory partial stays on ScrapeResult"
+        );
+
+        let after = std::fs::read(&seeded_path).expect("read after cancel");
+        assert_eq!(
+            after, before,
+            "cancelled finish_source must not overwrite last-good snowcrows_guardian_pve.json"
+        );
+        let on_disk = std::fs::read_to_string(&seeded_path).unwrap();
+        assert!(
+            on_disk.contains("LAST_GOOD_SEED"),
+            "seeded last-good content must remain"
+        );
+        assert!(
+            !on_disk.contains("SHOULD_NOT_LAND_ON_DISK"),
+            "partial notes must not replace the last-good file"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
