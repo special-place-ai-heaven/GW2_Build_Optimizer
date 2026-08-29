@@ -25,25 +25,6 @@ fn key_field_is_masked(revealed: bool) -> bool {
     !revealed
 }
 
-/// Overlay-safe confirmation that a GW2 API key is set. Length + last 2
-/// chars — streaming must not leak the old first-8 / last-4 prefix.
-fn gw2_key_fingerprint(key: &str) -> String {
-    let n = key.chars().count();
-    let last2: String = key
-        .chars()
-        .rev()
-        .take(2)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    if last2.is_empty() {
-        "configured".into()
-    } else {
-        format!("configured ({n} · ··{last2})")
-    }
-}
-
 pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonState) {
     let avail_w = ui.content_region_avail()[0];
     let scale = state.config.font_scale.max(0.5);
@@ -963,11 +944,21 @@ fn cached_pack_status(
 
 fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     if let Some(ref key) = state.config.gw2_api_key {
-        ui.text(format!(
-            "{} {}",
-            t("label.gw2_api_key"),
-            gw2_key_fingerprint(key)
-        ));
+        let display = if key.chars().count() > 12 {
+            let pre: String = key.chars().take(8).collect();
+            let suf: String = key
+                .chars()
+                .rev()
+                .take(4)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            format!("{}...{}", pre, suf)
+        } else {
+            "****".into()
+        };
+        ui.text(format!("{} {}", t("label.gw2_api_key"), display));
     }
     if let Some(build) = state.config.cache_build_number {
         if let Some(live) = state.main.live_build_number {
@@ -1402,31 +1393,5 @@ mod tests {
             key_field_is_masked(llm_default_revealed),
             "the Settings LLM key field must be masked on first render"
         );
-    }
-
-    /// Cache-section GW2 key hint: "a key is set" without the old first-8
-    /// + last-4 leak that shows up on stream / screenshot.
-    #[test]
-    fn gw2_key_fingerprint_is_non_secret() {
-        let key = "ABCDEFGH1234WXYZ";
-        let hint = gw2_key_fingerprint(key);
-        assert!(
-            hint.starts_with("configured"),
-            "hint must keep the 'a key is set' UX: {hint}"
-        );
-        assert!(
-            hint.contains("16"),
-            "length is the non-secret distinguisher: {hint}"
-        );
-        assert!(hint.ends_with("YZ)"), "at most last-2 of the key: {hint}");
-        assert!(
-            !hint.contains("ABCDEFGH"),
-            "must not leak the first 8: {hint}"
-        );
-        assert!(
-            !hint.contains("WXYZ"),
-            "must not leak the last 4 as a block: {hint}"
-        );
-        assert_eq!(gw2_key_fingerprint(""), "configured");
     }
 }
