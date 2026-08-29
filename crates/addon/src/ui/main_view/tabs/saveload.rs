@@ -408,6 +408,32 @@ fn overwrite_named(state: &mut AddonState, name: &str) {
     }
 }
 
+/// SavedBuild to suggestion with rotation sim, 3-tier combat, and chat-code.
+/// Ranch Load runs this on a `spawn_worker` thread, not the draw pass.
+fn suggestion_from_saved_build(
+    saved: &gw2_core::types::SavedBuild,
+    game_db: Option<&gw2_optimizer::gamedb::GameDb>,
+    game_mode: &gw2_core::types::GameMode,
+) -> crate::ui::comparison::BuildSuggestion {
+    let mut suggestion = saved_to_suggestion(saved, game_db);
+    let balance_ctx = gw2_optimizer::balance::BalanceContext::new(game_mode.clone());
+    if let Some(db) = game_db {
+        optimization::simulate_suggestion_rotation(&mut suggestion, db, &balance_ctx);
+    }
+    suggestion
+}
+
+fn apply_loaded_suggestion(
+    state: &mut AddonState,
+    suggestion: crate::ui::comparison::BuildSuggestion,
+) {
+    state.main.comparison.suggestions = vec![suggestion];
+    state.main.comparison.selected_suggestion = 0;
+    state.main.comparison.show_optimized = true;
+    state.main.comparison.error = None;
+    state.main.active_tab = MainTab::NewBuild;
+}
+
 fn load_named(state: &mut AddonState, name: &str) {
     persist_notes(state, name);
     let Some(saved) = state
@@ -419,17 +445,25 @@ fn load_named(state: &mut AddonState, name: &str) {
     else {
         return;
     };
-    let db_ref = state.main.game_db.as_deref();
-    let mut suggestion = saved_to_suggestion(&saved, db_ref);
-    let balance_ctx = gw2_optimizer::balance::BalanceContext::new(state.main.game_mode.clone());
-    if let Some(ref db) = state.main.game_db {
-        optimization::simulate_suggestion_rotation(&mut suggestion, db, &balance_ctx);
+    // Snapshot only. Rotation sim, 3-tier combat, and chat-code run in the worker.
+    let game_db = state.main.game_db.clone();
+    let game_mode = state.main.game_mode.clone();
+    let spawned = state.spawn_worker("ranch-load", move |token| {
+        if token.is_cancelled() {
+            return;
+        }
+        let suggestion = suggestion_from_saved_build(&saved, game_db.as_deref(), &game_mode);
+        if token.is_cancelled() {
+            return;
+        }
+        crate::state::with_state(|s| apply_loaded_suggestion(s, suggestion));
+    });
+    if !spawned {
+        // OS refused the thread; work never started. Do not fall back to inline CPU.
+        state.main.comparison.error = Some(
+            "Could not start the load thread - the system refused it. Try again.".into(),
+        );
     }
-    state.main.comparison.suggestions = vec![suggestion];
-    state.main.comparison.selected_suggestion = 0;
-    state.main.comparison.show_optimized = true;
-    state.main.comparison.error = None;
-    state.main.active_tab = MainTab::NewBuild;
 }
 
 fn delete_named(state: &mut AddonState, name: &str) {
@@ -1388,5 +1422,89 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ranch_load_worker_body_matches_saved_to_suggestion_without_db() {
+        let saved = build_saved_for_modifier_reconstruction();
+        let via_worker = super::suggestion_from_saved_build(&saved, None, &saved.game_mode);
+        let via_convert = super::saved_to_suggestion(&saved, None);
+        assert_eq!(via_worker.label, via_convert.label);
+        assert_eq!(via_worker.combat_solo, via_convert.combat_solo);
+        assert_eq!(via_worker.combat_party, via_convert.combat_party);
+        assert_eq!(via_worker.combat_squad, via_convert.combat_squad);
+        assert_eq!(via_worker.chat_code, via_convert.chat_code);
+        assert!(
+            via_worker.rotation.is_none(),
+            "without GameDb the worker must not invent a rotation"
+        );
+    }
+
+    #[test]
+    fn ranch_load_click_handler_spawns_worker_instead_of_inline_cpu() {
+        let src = include_str!("saveload.rs");
+        let production = src.split("\n#[cfg(test)]")[0];
+
+        fn fn_body<'a>(production: &'a str, name: &'a str) -> &'a str {
+            let needle = format!("fn {name}(");
+            let start = production
+                .find(&needle)
+                .unwrap_or_else(|| panic!("{name} missing from production source"));
+            let after = &production[start..];
+            let nxt = after[1..].find("\nfn ").unwrap_or(after.len() - 1);
+            &after[..nxt + 1]
+        }
+
+        let click = fn_body(production, "load_named");
+        assert!(
+            click.contains("spawn_worker"),
+            "load_named must call spawn_worker on the Load click/draw pass"
+        );
+        for forbidden in [
+            "simulate_suggestion_rotation",
+            "suggestion_to_chat_code",
+            "compute_3tier_combat",
+            "saved_to_suggestion",
+        ] {
+            assert!(
+                !click.contains(forbidden),
+                "load_named must not run {forbidden} synchronously"
+            );
+        }
+
+        let worker = fn_body(production, "suggestion_from_saved_build");
+        assert!(
+            worker.contains("saved_to_suggestion"),
+            "worker body must call saved_to_suggestion"
+        );
+        assert!(
+            worker.contains("simulate_suggestion_rotation"),
+            "worker body must call simulate_suggestion_rotation"
+        );
+
+        let convert = fn_body(production, "saved_to_suggestion");
+        assert!(
+            convert.contains("compute_3tier_combat"),
+            "3-tier combat stays inside saved_to_suggestion (worker-only path)"
+        );
+        assert!(
+            convert.contains("suggestion_to_chat_code"),
+            "chat-code stays inside saved_to_suggestion (worker-only path)"
+        );
+
+        let apply = fn_body(production, "apply_loaded_suggestion");
+        assert!(apply.contains("suggestions"));
+        assert!(
+            !apply.contains("simulate_suggestion_rotation"),
+            "completion must not run rotation sim"
+        );
+        assert!(
+            !apply.contains("suggestion_to_chat_code"),
+            "completion must not run chat-code"
+        );
+        assert!(
+            !apply.contains("compute_3tier_combat"),
+            "completion must not run 3-tier combat"
+        );
     }
 }
