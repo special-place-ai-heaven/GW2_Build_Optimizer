@@ -275,7 +275,8 @@ pub fn optimize_cancellable(
                 }
             }
 
-            let trait_stats = stats::calculate_trait_stats_for_mode(&trait_ids, traits_cache, &ctx.game_mode);
+            let trait_stats =
+                stats::calculate_trait_stats_for_mode(&trait_ids, traits_cache, &ctx.game_mode);
             let modifiers = combat::extract_damage_modifiers(
                 &trait_ids,
                 None,
@@ -455,7 +456,8 @@ fn optimize_pvp(
                     trait_ids.extend(best);
                 }
             }
-            let trait_stats = stats::calculate_trait_stats_for_mode(&trait_ids, traits_cache, &ctx.game_mode);
+            let trait_stats =
+                stats::calculate_trait_stats_for_mode(&trait_ids, traits_cache, &ctx.game_mode);
             let modifiers = combat::extract_damage_modifiers(
                 &trait_ids,
                 None,
@@ -1272,7 +1274,11 @@ pub fn simulate_validated_rotation(
 
     let enemy = scenario
         .map(|s| {
-            crate::rotation::combat_model::EnemyDummy::for_scenario(s.combat_tier, s.combat_kind)
+            crate::rotation::combat_model::EnemyDummy::for_scenario(
+                &s.game_mode,
+                s.combat_tier,
+                s.combat_kind,
+            )
         })
         .unwrap_or_default();
 
@@ -3734,5 +3740,4 @@ mod tests {
             "PvE leftover and PvP leftover must both pass ctx.game_mode, got {for_mode_with_ctx}"
         );
     }
-
 }

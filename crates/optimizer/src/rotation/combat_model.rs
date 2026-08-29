@@ -261,9 +261,13 @@ impl EnemyDummy {
         Self::default()
     }
 
-    /// Zerg/havoc blobs and roam harasser targets are assumed booned; naked roam DPS is not.
-    pub fn for_scenario(tier: CombatTier, kind: CombatKind) -> Self {
+    /// Zerg/havoc blobs and roam harasser targets are assumed booned in WvW;
+    /// PvE/PvP never inherit that prot+stab cover. Naked roam DPS is not booned.
+    pub fn for_scenario(mode: &GameMode, tier: CombatTier, kind: CombatKind) -> Self {
         let hp = dummy_hp(tier, kind);
+        if *mode != GameMode::WvW {
+            return Self { hp, ..Self::open() };
+        }
         match (tier, kind) {
             (CombatTier::Solo, CombatKind::Harasser | CombatKind::Disabler) => Self {
                 protection: true,
@@ -493,20 +497,22 @@ mod tests {
 
     #[test]
     fn zerg_dummy_starts_booned_roam_dps_does_not() {
-        let zerg = EnemyDummy::for_scenario(CombatTier::Squad, CombatKind::StrikeSpike);
+        let wvw = GameMode::WvW;
+        let zerg = EnemyDummy::for_scenario(&wvw, CombatTier::Squad, CombatKind::StrikeSpike);
         assert!(zerg.protection && zerg.stability);
         assert!(zerg.hp.is_none());
-        let roam_dps = EnemyDummy::for_scenario(CombatTier::Solo, CombatKind::StrikeSpike);
+        let roam_dps = EnemyDummy::for_scenario(&wvw, CombatTier::Solo, CombatKind::StrikeSpike);
         assert!(!roam_dps.protection && !roam_dps.stability);
         assert_eq!(roam_dps.hp, Some(13_000.0));
-        let roam_pick = EnemyDummy::for_scenario(CombatTier::Solo, CombatKind::Harasser);
+        let roam_pick = EnemyDummy::for_scenario(&wvw, CombatTier::Solo, CombatKind::Harasser);
         assert!(roam_pick.protection && roam_pick.stability);
         assert_eq!(roam_pick.hp, Some(13_000.0));
-        let havoc = EnemyDummy::for_scenario(CombatTier::Party, CombatKind::StrikeSpike);
+        let havoc = EnemyDummy::for_scenario(&wvw, CombatTier::Party, CombatKind::StrikeSpike);
         assert_eq!(havoc.hp, Some(20_000.0));
-        let support = EnemyDummy::for_scenario(CombatTier::Solo, CombatKind::Support);
+        assert!(havoc.protection && havoc.stability);
+        let support = EnemyDummy::for_scenario(&wvw, CombatTier::Solo, CombatKind::Support);
         assert!(support.hp.is_none());
-        let troll = EnemyDummy::for_scenario(CombatTier::Squad, CombatKind::Staller);
+        let troll = EnemyDummy::for_scenario(&wvw, CombatTier::Squad, CombatKind::Staller);
         assert!(troll.hp.is_none());
         assert_eq!(
             simulation_window_ms(CombatTier::Solo, CombatKind::Staller),
@@ -516,6 +522,23 @@ mod tests {
             simulation_window_ms(CombatTier::Squad, CombatKind::Staller),
             20_000
         );
+    }
+
+    #[test]
+    fn pve_party_squad_do_not_inherit_wvw_prot_stab() {
+        for tier in [CombatTier::Party, CombatTier::Squad] {
+            let dummy = EnemyDummy::for_scenario(&GameMode::PvE, tier, CombatKind::StrikeSpike);
+            assert!(
+                !dummy.protection && !dummy.stability,
+                "PvE {tier:?} must not inherit WvW prot+stab"
+            );
+        }
+        let pvp =
+            EnemyDummy::for_scenario(&GameMode::PvP, CombatTier::Squad, CombatKind::StrikeSpike);
+        assert!(!pvp.protection && !pvp.stability);
+        let wvw =
+            EnemyDummy::for_scenario(&GameMode::WvW, CombatTier::Squad, CombatKind::StrikeSpike);
+        assert!(wvw.protection && wvw.stability);
     }
 
     #[test]

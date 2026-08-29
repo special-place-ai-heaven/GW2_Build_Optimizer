@@ -264,10 +264,8 @@ impl SimState {
             self.tick_buffs();
 
             // Alacrity: +25% recharge (wiki 2018). 100ms wall = 125ms CD. 10s → 8s.
-            let cd_tick = alacrity_cd_advance_ms(
-                TICK_MS,
-                self.buffs.iter().any(|b| b.buff == "Alacrity"),
-            );
+            let cd_tick =
+                alacrity_cd_advance_ms(TICK_MS, self.buffs.iter().any(|b| b.buff == "Alacrity"));
             for state in &mut self.skill_states {
                 state.cooldown_remaining_ms = state.cooldown_remaining_ms.saturating_sub(cd_tick);
             }
@@ -850,18 +848,16 @@ pub(super) fn strike_crit_factor_with_bonus(
     1.0 + chance * (crit_mult - 1.0)
 }
 
-/// Intensity-stack cap from conditions.json, with competitive 100-stack ceiling.
-/// Vulnerability is 25 in every mode. Duration conditions cap at 1.
+/// Intensity-stack cap from `data/formulas/conditions.json` `max_stacks`.
+/// Wiki Condition (2026-08-29): intensity shares a 1500 cap in every mode;
+/// Vulnerability is 25. No sourced competitive 100-stack ceiling — do not
+/// clamp PvP/WvW below the JSON row.
 pub(crate) fn condition_stack_cap(condition: &str, mode: &GameMode) -> usize {
     let conds = crate::data::conditions();
     let canonical = crate::data::boon_condition_formulas::canonical_condition_name(condition);
-    let pve_cap = conds.max_stacks(canonical).unwrap_or(1500) as usize;
-    if canonical.eq_ignore_ascii_case("Vulnerability") {
-        return pve_cap.min(25);
-    }
+    let cap = conds.max_stacks(canonical).unwrap_or(1500) as usize;
     match mode {
-        GameMode::PvE => pve_cap,
-        GameMode::PvP | GameMode::WvW => pve_cap.min(100),
+        GameMode::PvE | GameMode::PvP | GameMode::WvW => cap,
     }
 }
 
@@ -1027,11 +1023,11 @@ mod tests {
     #[test]
     fn test_condition_stack_caps() {
         assert_eq!(condition_stack_cap("Bleeding", &GameMode::PvE), 1500);
-        assert_eq!(condition_stack_cap("Bleeding", &GameMode::PvP), 100);
-        assert_eq!(condition_stack_cap("Bleeding", &GameMode::WvW), 100);
+        assert_eq!(condition_stack_cap("Bleeding", &GameMode::PvP), 1500);
+        assert_eq!(condition_stack_cap("Bleeding", &GameMode::WvW), 1500);
         assert_eq!(condition_stack_cap("Vulnerability", &GameMode::PvE), 25);
         assert_eq!(condition_stack_cap("Vulnerability", &GameMode::PvP), 25);
-        assert_eq!(condition_stack_cap("Burning", &GameMode::PvP), 100);
+        assert_eq!(condition_stack_cap("Burning", &GameMode::PvP), 1500);
     }
 
     #[test]
