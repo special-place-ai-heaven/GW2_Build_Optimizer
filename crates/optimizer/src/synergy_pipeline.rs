@@ -1370,7 +1370,7 @@ fn compute_candidate_stats(
     // use the same calculation as calculate_full_stats() on the current build.
     // Both sides of the comparison now include trait stat bonuses, making them
     // apples-to-apples. The same function is used for current build stats display.
-    let trait_stats = stats::calculate_trait_stats(&candidate.all_trait_ids, &db.traits);
+    let trait_stats = stats::calculate_trait_stats_for_mode(&candidate.all_trait_ids, &db.traits, &ctx.game_mode);
     full_stats.power += trait_stats.power;
     full_stats.precision += trait_stats.precision;
     full_stats.toughness += trait_stats.toughness;
@@ -2660,5 +2660,122 @@ mod land_weapon_tests {
         for w in [s1m, s1o, s2m, s2o].into_iter().flatten() {
             assert_ne!(w.as_str(), "Trident");
         }
+    }
+}
+
+
+#[cfg(test)]
+mod leftover_wrapper_tests {
+    use super::*;
+    use crate::balance::BalanceContext;
+    use crate::gamedb::GameDb;
+    use gw2_api::models::{Fact, Trait as GW2Trait};
+    use gw2_core::types::GameMode;
+
+    fn empty_candidate() -> SynergyCandidate {
+        SynergyCandidate {
+            spec_ids: vec![],
+            elite_spec: None,
+            selected_major_traits: Vec::new(),
+            all_trait_ids: Vec::new(),
+            accumulated: Vec::new(),
+            score: 0.0,
+            rune: None,
+            sigils: Vec::new(),
+            relic: None,
+            weapons: (None, None, None, None),
+            heal: None,
+            utilities: Vec::new(),
+            elite_skill: None,
+            legends: Vec::new(),
+            aquatic_legends: Vec::new(),
+            synergy_links: Vec::new(),
+        }
+    }
+
+    fn lingering_magic() -> GW2Trait {
+        GW2Trait {
+            id: 1059,
+            name: "Lingering Magic".into(),
+            icon: None,
+            description: None,
+            specialization: 0,
+            tier: 0,
+            order: 0,
+            slot: "Minor".into(),
+            facts: vec![
+                Fact::AttributeAdjust {
+                    text: None,
+                    icon: None,
+                    value: Some(240),
+                    target: Some("BoonDuration".into()),
+                },
+                Fact::AttributeAdjust {
+                    text: None,
+                    icon: None,
+                    value: Some(120),
+                    target: Some("BoonDuration".into()),
+                },
+            ],
+            traited_facts: vec![],
+            skills: vec![],
+        }
+    }
+
+    #[test]
+    fn wvw_candidate_stats_do_not_use_pve_lingering_magic() {
+        // A8 leftover wrapper: competitive leftover must not get PvE 240.
+        let mut db = GameDb::empty_for_tests();
+        db.traits.insert(1059, lingering_magic());
+        let mut candidate = empty_candidate();
+        candidate.all_trait_ids = vec![1059];
+        let ctx = BalanceContext::new(GameMode::WvW);
+        let stats = compute_candidate_stats(&candidate, &db, "Mesmer", None, &ctx);
+        assert_ne!(
+            stats.concentration, 240.0,
+            "PvE leftover wrapper leaked 240 Concentration into WvW candidate stats"
+        );
+        assert_eq!(stats.concentration, 120.0);
+        let pve = compute_candidate_stats(
+            &candidate,
+            &db,
+            "Mesmer",
+            None,
+            &BalanceContext::new(GameMode::PvE),
+        );
+        assert_eq!(pve.concentration, 240.0);
+    }
+
+    #[test]
+    fn compute_candidate_stats_calls_trait_stats_for_mode() {
+        let src = include_str!("synergy_pipeline.rs");
+        let production = src
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("split always yields a first chunk");
+        let start = production
+            .find("fn compute_candidate_stats(")
+            .expect("compute_candidate_stats gone");
+        let after = &production[start..];
+        let end = after[1..]
+            .find("\nfn ")
+            .map(|i| i + 1)
+            .expect("compute_candidate_stats has no following fn");
+        let body = &after[..end];
+        assert!(
+            body.contains("calculate_trait_stats_for_mode"),
+            "compute_candidate_stats must call calculate_trait_stats_for_mode"
+        );
+        assert!(
+            body.contains("&ctx.game_mode"),
+            "compute_candidate_stats must pass ctx.game_mode"
+        );
+        let stats_at = body.find("let trait_stats").expect("trait_stats gone");
+        let add_at = body.find("full_stats.power +=").expect("trait add gone");
+        let chunk = &body[stats_at..add_at];
+        assert!(
+            !chunk.contains("calculate_trait_stats(&"),
+            "PvE wrapper still used in compute_candidate_stats: {chunk}"
+        );
     }
 }
