@@ -133,21 +133,24 @@ fn is_retryable_api(err: &ApiError) -> bool {
     matches!(err, ApiError::Api { status, .. } if is_retryable_status(*status))
 }
 
-/// Fetch `ids` in one bulk call. On a 5xx, split the set (or skip a single rotten ID)
-/// so one bad item cannot abort an entire `/v2/items` dump.
+/// Fetch `ids` in one bulk call. On a 5xx, split the set. A singleton
+/// retryable 5xx is skip-listed (not `Ok([])`) so a dump can record the
+/// hole instead of writing it as success.
 fn merge_bulk_fetch<T>(
     ids: &[serde_json::Value],
     fetch: &mut impl FnMut(&[serde_json::Value]) -> Result<Vec<T>, ApiError>,
-) -> Result<Vec<T>, ApiError> {
+) -> Result<(Vec<T>, Vec<serde_json::Value>), ApiError> {
     match fetch(ids) {
-        Ok(v) => Ok(v),
+        Ok(v) => Ok((v, Vec::new())),
         Err(e) if ids.len() > 1 && is_retryable_api(&e) => {
             let mid = ids.len() / 2;
-            let mut left = merge_bulk_fetch(&ids[..mid], fetch)?;
-            left.extend(merge_bulk_fetch(&ids[mid..], fetch)?);
-            Ok(left)
+            let (mut left, mut skip_l) = merge_bulk_fetch(&ids[..mid], fetch)?;
+            let (right, skip_r) = merge_bulk_fetch(&ids[mid..], fetch)?;
+            left.extend(right);
+            skip_l.extend(skip_r);
+            Ok((left, skip_l))
         }
-        Err(e) if ids.len() == 1 && is_retryable_api(&e) => Ok(Vec::new()),
+        Err(e) if ids.len() == 1 && is_retryable_api(&e) => Ok((Vec::new(), vec![ids[0].clone()])),
         Err(e) => Err(e),
     }
 }
@@ -558,6 +561,11 @@ impl Gw2Client {
             // Read body — connection can fail here too
             let text = match crate::transport::read_body_capped(resp, MAX_BODY_BYTES) {
                 Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                    return Err(ApiError::Internal(format!(
+                        "JSON body exceeds {MAX_BODY_BYTES} bytes on {url_path}"
+                    )));
+                }
                 Err(e) => {
                     last_error = Some(ApiError::Internal(format!("body read failed: {e}")));
                     continue; // retry on read failure
@@ -608,11 +616,36 @@ impl Gw2Client {
         &self,
         endpoint: &str,
         ids: &[serde_json::Value],
-        mut on_progress: impl FnMut(usize, usize),
+        on_progress: impl FnMut(usize, usize),
     ) -> Result<Vec<T>, ApiError> {
+        let (items, skipped) = self.fetch_by_ids_with_skips(endpoint, ids, on_progress)?;
+        if skipped.is_empty() {
+            Ok(items)
+        } else {
+            Err(ApiError::Internal(format!(
+                "bulk 5xx skipped id(s) on {endpoint}: {}",
+                skipped
+                    .iter()
+                    .filter_map(value_to_bulk_id)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )))
+        }
+    }
+
+    /// Like `fetch_by_ids_with_progress`, but a singleton retryable 5xx is
+    /// collected into `skipped` so an items dump can skip-list the hole
+    /// instead of aborting the whole `/v2/items` walk.
+    pub(crate) fn fetch_by_ids_with_skips<T: DeserializeOwned + Send>(
+        &self,
+        endpoint: &str,
+        ids: &[serde_json::Value],
+        mut on_progress: impl FnMut(usize, usize),
+    ) -> Result<(Vec<T>, Vec<serde_json::Value>), ApiError> {
         let batches: Vec<&[serde_json::Value]> = ids.chunks(MAX_BULK_IDS).collect();
         let total = ids.len();
         let mut results = Vec::with_capacity(total);
+        let mut skipped = Vec::new();
 
         for group in batches.chunks(5) {
             // The /v2/items dump is ~500 batches; check between groups so a
@@ -621,45 +654,48 @@ impl Gw2Client {
             if self.is_cancelled() {
                 return Err(ApiError::Cancelled);
             }
-            let group_results: Vec<Result<Vec<T>, ApiError>> = std::thread::scope(|s| {
-                let handles: Vec<_> = group
-                    .iter()
-                    .map(|chunk| {
-                        s.spawn(|| {
-                            merge_bulk_fetch(chunk, &mut |part| {
-                                let ids: Vec<String> =
-                                    part.iter().filter_map(value_to_bulk_id).collect();
-                                if ids.is_empty() {
-                                    return Ok(Vec::new());
-                                }
-                                let joined = build_bulk_ids_query(&ids);
-                                self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
+            let group_results: Vec<Result<(Vec<T>, Vec<serde_json::Value>), ApiError>> =
+                std::thread::scope(|s| {
+                    let handles: Vec<_> = group
+                        .iter()
+                        .map(|chunk| {
+                            s.spawn(|| {
+                                merge_bulk_fetch(chunk, &mut |part| {
+                                    let ids: Vec<String> =
+                                        part.iter().filter_map(value_to_bulk_id).collect();
+                                    if ids.is_empty() {
+                                        return Ok(Vec::new());
+                                    }
+                                    let joined = build_bulk_ids_query(&ids);
+                                    self.get_with_params::<Vec<T>>(endpoint, &[("ids", &joined)])
+                                })
                             })
                         })
-                    })
-                    .collect();
+                        .collect();
 
-                handles
-                    .into_iter()
-                    .map(|h| {
-                        h.join().unwrap_or_else(|_| {
-                            Err(ApiError::Internal(format!(
-                                "Batch fetch thread panicked on {}",
-                                endpoint
-                            )))
+                    handles
+                        .into_iter()
+                        .map(|h| {
+                            h.join().unwrap_or_else(|_| {
+                                Err(ApiError::Internal(format!(
+                                    "Batch fetch thread panicked on {}",
+                                    endpoint
+                                )))
+                            })
                         })
-                    })
-                    .collect()
-            });
+                        .collect()
+                });
 
             for batch_result in group_results {
-                results.extend(batch_result?);
+                let (items, skips) = batch_result?;
+                results.extend(items);
+                skipped.extend(skips);
             }
 
             on_progress(results.len(), total);
         }
 
-        Ok(results)
+        Ok((results, skipped))
     }
 
     /// Get the current game build number (used for cache invalidation).
@@ -700,22 +736,20 @@ impl Gw2Client {
                     body_snippet: String::new(),
                 });
             }
-            // Read one byte past the cap so "exactly at the cap" and "over the
-            // cap" are distinguishable — `read_body_capped` truncates silently.
-            let bytes = match crate::transport::read_body_capped(resp, MAX_ICON_BYTES + 1) {
+            let bytes = match crate::transport::read_body_capped(resp, MAX_ICON_BYTES) {
                 Ok(bytes) => bytes,
+                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                    return Err(ApiError::Api {
+                        status: status.as_u16(),
+                        url_path: url.chars().take(80).collect(),
+                        body_snippet: format!("icon body exceeds {} bytes", MAX_ICON_BYTES),
+                    });
+                }
                 Err(e) => {
                     last_error = Some(ApiError::Internal(format!("icon read failed: {e}")));
                     continue;
                 }
             };
-            if bytes.len() as u64 > MAX_ICON_BYTES {
-                return Err(ApiError::Api {
-                    status: status.as_u16(),
-                    url_path: url.chars().take(80).collect(),
-                    body_snippet: format!("icon body exceeds {} bytes", MAX_ICON_BYTES),
-                });
-            }
             return Ok(bytes);
         }
         Err(last_error.unwrap_or_else(|| {
@@ -1013,8 +1047,24 @@ mod tests {
             }
             Ok(vec![id])
         };
-        let got = merge_bulk_fetch(&ids, &mut fetch).unwrap();
+        let (got, skipped) = merge_bulk_fetch(&ids, &mut fetch).unwrap();
         assert_eq!(got, vec![1, 3]);
+        assert_eq!(skipped, vec![serde_json::json!(2)]);
+    }
+
+    #[test]
+    fn merge_bulk_fetch_singleton_5xx_is_not_ok_empty() {
+        let ids = vec![serde_json::json!(2)];
+        let mut fetch =
+            |_part: &[serde_json::Value]| -> Result<Vec<u32>, ApiError> { Err(api_500()) };
+        let result = merge_bulk_fetch(&ids, &mut fetch);
+        assert!(
+            !matches!(&result, Ok((items, skipped)) if items.is_empty() && skipped.is_empty()),
+            "singleton 5xx must not be Ok([])"
+        );
+        let (items, skipped) = result.unwrap();
+        assert!(items.is_empty());
+        assert_eq!(skipped, vec![serde_json::json!(2)]);
     }
 
     #[test]
