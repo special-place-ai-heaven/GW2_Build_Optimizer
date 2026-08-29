@@ -79,7 +79,7 @@ where
                 Some(prev) if prev.rec_id() <= r.rec_id() => {}
                 _ => exact = Some(r),
             }
-        } else if lower.contains(&needle_lower) {
+        } else if needle_lower.len() >= 5 && lower.contains(&needle_lower) {
             let key = (r.rec_name().len(), r.rec_id());
             match fuzzy {
                 Some((plen, pid, _)) if (plen, pid) <= key => {}
@@ -703,7 +703,10 @@ fn exec_get_trait_details(args: &Value, ctx: &ToolContext) -> Value {
 }
 
 fn exec_get_skill_info(args: &Value, ctx: &ToolContext) -> Value {
-    let skill_name = args["skill_name"].as_str().unwrap_or("");
+    let skill_name = args["skill_name"].as_str().unwrap_or("").trim();
+    if skill_name.is_empty() {
+        return json!({ "error": "Skill name is empty" });
+    }
 
     // Find matching skills, preferring profession match
     let mut matches: Vec<_> = ctx
@@ -2288,10 +2291,69 @@ mod tests {
     }
 
     #[test]
+    fn get_skill_info_empty_needle_is_empty() {
+        let mut db = GameDb::empty_for_tests();
+        db.skills.insert(
+            1,
+            gw2_api::models::Skill {
+                id: 1,
+                name: "Healing Spring".into(),
+                description: None,
+                icon: None,
+                chat_link: None,
+                skill_type: None,
+                weapon_type: None,
+                professions: vec!["Ranger".into()],
+                slot: Some("Heal".into()),
+                facts: vec![],
+                traited_facts: vec![],
+                categories: vec![],
+                attunement: None,
+                cost: None,
+                dual_wield: None,
+                flip_skill: None,
+                initiative: None,
+                next_chain: None,
+                prev_chain: None,
+                transform_skills: vec![],
+                bundle_skills: vec![],
+                toolbelt_skill: None,
+                flags: vec![],
+                specialization: None,
+            },
+        );
+        let bal = BalanceContext::pve();
+        let ctx = ToolContext {
+            db: &db,
+            profession_name: "Ranger",
+            candidates: &[],
+            current_build_summary: None,
+            weights: OptimizationWeights::default(),
+            balance_ctx: &bal,
+        };
+        let v = execute_tool("get_skill_info", &json!({ "skill_name": "" }), &ctx);
+        assert!(
+            v.get("id").is_none(),
+            "empty needle must not dump a skill: {v}"
+        );
+        assert!(v.get("error").is_some(), "empty needle must error, got {v}");
+        let spec = execute_tool("get_spec_traits", &json!({ "spec_name": "" }), &ctx);
+        assert!(
+            spec.get("error").is_some(),
+            "empty spec needle must error: {spec}"
+        );
+        let tr = execute_tool("get_trait_details", &json!({ "trait_name": "" }), &ctx);
+        assert!(
+            tr.get("error").is_some(),
+            "empty trait needle must error: {tr}"
+        );
+    }
+
+    #[test]
     fn test_find_itemstat_id_tiebreak_when_lengths_equal() {
-        let db = db_with_itemstats(vec![(50, "Foo Alpha Bar"), (40, "Foo Beta Baz")]);
-        // Both length 13, both contain "Foo". Lower id (40) must win.
-        let is = find_itemstat_by_name(&db, "Foo").expect("match");
+        let db = db_with_itemstats(vec![(50, "Foobar Alpha"), (40, "Foobar Betas")]);
+        // Both length 12, both contain "Foobar" (>=5). Lower id (40) must win.
+        let is = find_itemstat_by_name(&db, "Foobar").expect("match");
         assert_eq!(is.id, 40);
     }
 

@@ -541,7 +541,6 @@ fn select_sigils(
         // but the same sigil family (e.g. "Sigil of Force") IS allowed in both sets
         // independently. We select 2 sigils per set with separate dedup sets.
         for set_idx in 0..2usize {
-            let _ = set_idx; // slot identity only used for ordering; sets are symmetric
             let mut set_ids: Vec<u32> = Vec::new();
             let mut set_families: Vec<String> = Vec::new();
 
@@ -588,12 +587,15 @@ fn select_sigils(
                 if let Some(sigil) = best_sigil {
                     set_ids.push(sigil.0);
                     set_families.push(normalize_sigil_family(&sigil.1));
-                    candidate.synergy_links.extend(best_links);
-                    candidate
-                        .accumulated
-                        .push((ComponentId::Sigil(sigil.0), best_effects));
+                    // Set 2 is carried, not worn — same as combat prefixes skip set 2.
+                    if set_idx == 0 {
+                        candidate.synergy_links.extend(best_links);
+                        candidate
+                            .accumulated
+                            .push((ComponentId::Sigil(sigil.0), best_effects));
+                        candidate.score += best_score;
+                    }
                     candidate.sigils.push(sigil);
-                    candidate.score += best_score;
                 }
             }
         }
@@ -1370,7 +1372,8 @@ fn compute_candidate_stats(
     // use the same calculation as calculate_full_stats() on the current build.
     // Both sides of the comparison now include trait stat bonuses, making them
     // apples-to-apples. The same function is used for current build stats display.
-    let trait_stats = stats::calculate_trait_stats_for_mode(&candidate.all_trait_ids, &db.traits, &ctx.game_mode);
+    let trait_stats =
+        stats::calculate_trait_stats_for_mode(&candidate.all_trait_ids, &db.traits, &ctx.game_mode);
     full_stats.power += trait_stats.power;
     full_stats.precision += trait_stats.precision;
     full_stats.toughness += trait_stats.toughness;
@@ -2661,8 +2664,63 @@ mod land_weapon_tests {
             assert_ne!(w.as_str(), "Trident");
         }
     }
-}
 
+    fn upgrade_sigil(id: u32, name: &str) -> gw2_api::models::Item {
+        gw2_api::models::Item {
+            id,
+            name: name.into(),
+            description: None,
+            icon: None,
+            item_type: "UpgradeComponent".into(),
+            rarity: "Exotic".into(),
+            level: 80,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec![],
+            restrictions: vec![],
+            details: None,
+        }
+    }
+
+    #[test]
+    fn set2_only_sigil_change_does_not_move_synergy_seed_score() {
+        let mut db = GameDb::empty_for_tests();
+        for (id, name) in [
+            (1u32, "Superior Sigil of Force"),
+            (2, "Superior Sigil of Bursting"),
+        ] {
+            db.items.insert(id, upgrade_sigil(id, name));
+            db.sigils.push(id);
+        }
+        let weights = OptimizationWeights::preset_power_dps();
+        let ctx = crate::balance::BalanceContext::pve();
+        let mut candidates = [empty_candidate()];
+        select_sigils(&mut candidates, &db, &weights, &ctx);
+        let billed = candidates[0].score;
+        assert_eq!(candidates[0].sigils.len(), 4, "set 2 is still selected");
+        let mut expected = 0.0;
+        let mut acc = Vec::new();
+        for (id, _) in &candidates[0].sigils[..2] {
+            let item = db.items.get(id).expect("set-1 sigil");
+            let effects = extract_sigil_effects(item, &ctx);
+            let base: f64 = effects
+                .iter()
+                .map(|e| score_normalized_effect(e, &weights))
+                .sum();
+            let (syn, _) =
+                compute_marginal_synergy(&effects, &acc, &weights, Some(&ComponentId::Sigil(*id)));
+            expected += base + syn;
+            acc.push((ComponentId::Sigil(*id), effects));
+        }
+        assert!(
+            (billed - expected).abs() < 1e-9,
+            "set-2 sigils must not bill the synergy seed half: billed={billed} set1={expected}"
+        );
+        assert!(billed > 0.0, "set-1 Force/Bursting must still score");
+    }
+}
 
 #[cfg(test)]
 mod leftover_wrapper_tests {
