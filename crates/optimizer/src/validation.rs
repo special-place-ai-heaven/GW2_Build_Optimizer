@@ -549,13 +549,25 @@ pub fn validate_gemini_build(
                 });
             }
         }
+    }
+    if profession_name == "Revenant" {
+        fill_revenant_legends(response, &mut result, db);
+    }
+    if !response.specializations.is_empty() {
         let utils = result
             .skills
             .utilities
             .iter()
             .filter(|u| u.is_some())
             .count();
-        if result.skills.heal.is_none() || result.skills.elite.is_none() || utils != 3 {
+        if result.skills.heal.is_some() && result.skills.elite.is_some() && utils == 3 {
+            result.errors.retain(|e| {
+                !matches!(
+                    e.code,
+                    RejectCode::IncompleteSkillBar { .. } | RejectCode::SkillNotFound { .. }
+                )
+            });
+        } else {
             result.errors.push(ValidationReject {
                 code: RejectCode::IncompleteSkillBar {
                     heal: result.skills.heal.is_some(),
@@ -570,9 +582,6 @@ pub fn validate_gemini_build(
                 ),
             });
         }
-    }
-    if profession_name == "Revenant" {
-        fill_revenant_legends(response, &mut result, db);
     }
     validate_rune(response, db, &mut result);
     validate_sigils(response, db, &mut result);
@@ -3035,6 +3044,92 @@ mod tests {
             !result.warnings.iter().any(|w| w.contains("inferred")),
             "explicit legend should not warn as inferred: {:?}",
             result.warnings
+        );
+    }
+
+    /// RED: IncompleteSkillBar / SkillNotFound recorded before legend fill
+    /// must not survive on a plate the fill just made legal.
+    #[test]
+    fn revenant_legend_fill_clears_stale_skill_bar_errors() {
+        let mut db = legend_fixture_db();
+        db.professions.insert(
+            "Revenant".into(),
+            gw2_api::models::Profession {
+                id: "Revenant".into(),
+                name: "Revenant".into(),
+                code: None,
+                specializations: vec![9],
+                weapons: std::collections::HashMap::new(),
+                training: vec![],
+                skills_by_palette: vec![],
+                icon: None,
+                icon_big: None,
+            },
+        );
+        db.specializations.insert(
+            9,
+            Specialization {
+                id: 9,
+                name: "Corruption".into(),
+                profession: "Revenant".into(),
+                elite: false,
+                minor_traits: vec![],
+                major_traits: vec![1, 2, 3],
+                weapon_trait: None,
+                icon: None,
+                background: None,
+                profession_icon: None,
+                profession_icon_big: None,
+            },
+        );
+        db.traits.insert(1, make_trait(1, "Opportunist"));
+        db.traits.insert(2, make_trait(2, "Unholy Fervor"));
+        db.traits.insert(3, make_trait(3, "Demonic Defiance"));
+        db.traits_by_spec.insert(9, vec![1, 2, 3]);
+
+        let response = GeminiBuildResponse {
+            specializations: vec![(
+                "Corruption".into(),
+                vec![
+                    "Opportunist".into(),
+                    "Unholy Fervor".into(),
+                    "Demonic Defiance".into(),
+                ],
+            )],
+            skills: vec![
+                "Heal: NotARealHeal".into(),
+                "Utils: GarbageA, GarbageB, GarbageC".into(),
+                "Elite: NopeElite".into(),
+            ],
+            ..Default::default()
+        };
+        let result = validate_gemini_build(&response, &db, "Revenant");
+        assert_eq!(result.skills.heal.as_ref().map(|h| h.0), Some(10));
+        assert_eq!(
+            result
+                .skills
+                .utilities
+                .iter()
+                .filter_map(|u| u.as_ref().map(|p| p.0))
+                .collect::<Vec<_>>(),
+            vec![11, 12, 13]
+        );
+        assert_eq!(result.skills.elite.as_ref().map(|e| e.0), Some(19));
+        assert!(
+            !result
+                .errors
+                .iter()
+                .any(|e| matches!(e.code, RejectCode::IncompleteSkillBar { .. })),
+            "filled legend bar must not keep IncompleteSkillBar: {:?}",
+            result.errors
+        );
+        assert!(
+            !result
+                .errors
+                .iter()
+                .any(|e| matches!(e.code, RejectCode::SkillNotFound { .. })),
+            "filled legend bar must not keep SkillNotFound: {:?}",
+            result.errors
         );
     }
 }
