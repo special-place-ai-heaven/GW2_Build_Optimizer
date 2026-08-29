@@ -2418,11 +2418,12 @@ mod tests {
     #[test]
     fn test_find_named_trait_fuzzy_id_tiebreak() {
         // Equal-length names containing needle → lower id wins.
+        // Needle must be ≥5 (A15-4); "Big" is too short to fuzzy.
         let traits = vec![
             make_trait(200, "Big Trait Alpha"),
             make_trait(100, "Big Trait Bravo"),
         ];
-        let t = find_named(&traits, "Big").expect("match");
+        let t = find_named(&traits, "Trait").expect("match");
         assert_eq!(t.id, 100);
     }
 
