@@ -572,7 +572,7 @@ pub fn validate_gemini_build(
         }
     }
     if profession_name == "Revenant" {
-        fill_revenant_legends(&mut result, db);
+        fill_revenant_legends(response, &mut result, db);
     }
     validate_rune(response, db, &mut result);
     validate_sigils(response, db, &mut result);
@@ -930,17 +930,46 @@ fn validate_pets(response: &GeminiBuildResponse, db: &GameDb, result: &mut Valid
 /// Revenant heal/utilities/elite are a legend bundle, not a free mix.
 /// `/v2/legends` plus the swap skill's `specialization` gate which stances
 /// are legal; the template byte is `Legend.code`.
-fn fill_revenant_legends(result: &mut ValidatedBuild, db: &GameDb) {
+fn legend_ids_from_plate(response: &GeminiBuildResponse, db: &GameDb) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut consider = |s: &str| {
+        for token in s.split(|c: char| !c.is_ascii_alphanumeric()) {
+            if db.legends.contains_key(token) && !ids.iter().any(|id| id == token) {
+                ids.push(token.to_string());
+            }
+        }
+    };
+    for line in &response.skills {
+        consider(line);
+    }
+    for line in &response.changes_made {
+        consider(line);
+    }
+    ids
+}
+
+fn fill_revenant_legends(
+    response: &GeminiBuildResponse,
+    result: &mut ValidatedBuild,
+    db: &GameDb,
+) {
     if db.legends.is_empty() {
         return;
     }
     let spec_ids: Vec<u32> = result.specializations.iter().map(|s| s.spec_id).collect();
-    let mut ids = Vec::new();
-    if let Some((heal_id, _)) = &result.skills.heal {
-        if let Some(id) = db.legends.iter().find_map(|(id, l)| {
-            (l.heal == *heal_id && db.legend_available(id, &spec_ids)).then(|| id.clone())
-        }) {
-            ids.push(id);
+    let explicit: Vec<String> = legend_ids_from_plate(response, db)
+        .into_iter()
+        .filter(|id| db.legend_available(id, &spec_ids))
+        .collect();
+    let inferred = explicit.is_empty();
+    let mut ids = explicit;
+    if ids.is_empty() {
+        if let Some((heal_id, _)) = &result.skills.heal {
+            if let Some(id) = db.legends.iter().find_map(|(id, l)| {
+                (l.heal == *heal_id && db.legend_available(id, &spec_ids)).then(|| id.clone())
+            }) {
+                ids.push(id);
+            }
         }
     }
     let mut rest: Vec<(u8, String)> = db
@@ -966,14 +995,34 @@ fn fill_revenant_legends(result: &mut ValidatedBuild, db: &GameDb) {
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| format!("Skill {id}"))
         };
-        result.skills.heal = Some((legend.heal, name_of(legend.heal)));
-        result.skills.utilities = legend
+        let new_utilities: Vec<Option<(u32, String)>> = legend
             .utilities
             .iter()
             .take(3)
             .map(|&id| Some((id, name_of(id))))
             .collect();
-        result.skills.elite = Some((legend.elite, name_of(legend.elite)));
+        let new_elite = Some((legend.elite, name_of(legend.elite)));
+        let old_utility_ids: Vec<u32> = result
+            .skills
+            .utilities
+            .iter()
+            .filter_map(|u| u.as_ref().map(|p| p.0))
+            .collect();
+        let new_utility_ids: Vec<u32> = new_utilities
+            .iter()
+            .filter_map(|u| u.as_ref().map(|p| p.0))
+            .collect();
+        let utilities_changed = old_utility_ids != new_utility_ids;
+        let elite_changed = result.skills.elite.as_ref().map(|e| e.0) != Some(legend.elite);
+        result.skills.heal = Some((legend.heal, name_of(legend.heal)));
+        result.skills.utilities = new_utilities;
+        result.skills.elite = new_elite;
+        if inferred && (utilities_changed || elite_changed) {
+            result.warnings.push(format!(
+                "Revenant utilities/elite were replaced from legend {} inferred from heal",
+                ids[0]
+            ));
+        }
     }
     result.legends = ids.clone();
     result.aquatic_legends = ids;
@@ -2901,5 +2950,91 @@ mod tests {
             result.errors
         );
         assert_eq!(result.pets, Some((None, None, None, None)));
+    }
+
+    fn legend_fixture_db() -> GameDb {
+        let mut db = GameDb::empty_for_tests();
+        let mk = |id: &str, code: u32, heal: u32, elite: u32, utilities: [u32; 3], swap: u32| {
+            gw2_api::models::Legend {
+                id: id.into(),
+                code: Some(code),
+                swap,
+                heal,
+                elite,
+                utilities: utilities.to_vec(),
+            }
+        };
+        db.legends.insert(
+            "Legend1".into(),
+            mk("Legend1", 1, 10, 19, [11, 12, 13], 18),
+        );
+        db.legends.insert(
+            "Legend2".into(),
+            mk("Legend2", 2, 20, 29, [21, 22, 23], 28),
+        );
+        for (id, name) in [
+            (10u32, "Heal One"),
+            (11, "Util A"),
+            (12, "Util B"),
+            (13, "Util C"),
+            (19, "Elite One"),
+            (20, "Heal Two"),
+            (21, "Util X"),
+            (22, "Util Y"),
+            (23, "Util Z"),
+            (29, "Elite Two"),
+        ] {
+            db.skills.insert(id, make_skill(id, name));
+        }
+        db
+    }
+
+    /// RED: infer-from-heal replaced plate utilities/elite with no warning.
+    #[test]
+    fn revenant_infer_from_heal_warns_when_replacing_utilities() {
+        let db = legend_fixture_db();
+        let mut result = ValidatedBuild::default();
+        result.skills.heal = Some((10, "Heal One".into()));
+        result.skills.utilities = vec![
+            Some((21, "Util X".into())),
+            Some((22, "Util Y".into())),
+            Some((23, "Util Z".into())),
+        ];
+        result.skills.elite = Some((29, "Elite Two".into()));
+        fill_revenant_legends(&GeminiBuildResponse::default(), &mut result, &db);
+        assert_eq!(result.legends.first().map(String::as_str), Some("Legend1"));
+        assert_eq!(
+            result.skills.utilities.iter().filter_map(|u| u.as_ref().map(|p| p.0)).collect::<Vec<_>>(),
+            vec![11, 12, 13]
+        );
+        assert_eq!(result.skills.elite.as_ref().map(|e| e.0), Some(19));
+        assert!(
+            result.warnings.iter().any(|w| w.contains("replaced") && w.contains("Legend1")),
+            "silent overwrite: {:?}",
+            result.warnings
+        );
+    }
+
+    /// RED: plate Legend2 must win over heal-inferred Legend1.
+    #[test]
+    fn revenant_plate_legend_ids_are_honored() {
+        let db = legend_fixture_db();
+        let mut response = GeminiBuildResponse::default();
+        response.skills = vec!["Legend2".into()];
+        let mut result = ValidatedBuild::default();
+        result.skills.heal = Some((10, "Heal One".into()));
+        fill_revenant_legends(&response, &mut result, &db);
+        assert_eq!(result.legends.first().map(String::as_str), Some("Legend2"));
+        assert_eq!(result.skills.heal.as_ref().map(|h| h.0), Some(20));
+        assert_eq!(
+            result.skills.utilities.iter().filter_map(|u| u.as_ref().map(|p| p.0)).collect::<Vec<_>>(),
+            vec![21, 22, 23]
+        );
+        assert_eq!(result.skills.elite.as_ref().map(|e| e.0), Some(29));
+        assert!(
+            !result.warnings.iter().any(|w| w.contains("inferred")),
+            "explicit legend should not warn as inferred: {:?}",
+            result.warnings
+        );
     }
 }
