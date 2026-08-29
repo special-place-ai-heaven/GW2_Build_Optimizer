@@ -275,7 +275,7 @@ pub fn optimize_cancellable(
                 }
             }
 
-            let trait_stats = stats::calculate_trait_stats(&trait_ids, traits_cache);
+            let trait_stats = stats::calculate_trait_stats_for_mode(&trait_ids, traits_cache, &ctx.game_mode);
             let modifiers = combat::extract_damage_modifiers(
                 &trait_ids,
                 None,
@@ -455,7 +455,7 @@ fn optimize_pvp(
                     trait_ids.extend(best);
                 }
             }
-            let trait_stats = stats::calculate_trait_stats(&trait_ids, traits_cache);
+            let trait_stats = stats::calculate_trait_stats_for_mode(&trait_ids, traits_cache, &ctx.game_mode);
             let modifiers = combat::extract_damage_modifiers(
                 &trait_ids,
                 None,
@@ -3713,4 +3713,28 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn spec_precompute_passes_game_mode_to_trait_stats() {
+        // A8 leftover wrapper: optimize + optimize_pvp spec precompute had a
+        // game_mode (ctx) and still called the PvE wrapper. Competitive leftover
+        // must not get Lingering Magic 240.
+        let src = include_str!("engine.rs");
+        let production = src
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("split always yields a first chunk");
+        assert!(
+            !production.contains("stats::calculate_trait_stats(&"),
+            "legacy PvE wrapper still used in engine spec precompute"
+        );
+        let for_mode_with_ctx = production
+            .matches("calculate_trait_stats_for_mode(&trait_ids, traits_cache, &ctx.game_mode)")
+            .count();
+        assert_eq!(
+            for_mode_with_ctx, 2,
+            "PvE leftover and PvP leftover must both pass ctx.game_mode, got {for_mode_with_ctx}"
+        );
+    }
+
 }
