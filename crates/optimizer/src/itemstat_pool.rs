@@ -10,14 +10,16 @@
 //! Berserker's rows, and how a search settles on an id that the name-keyed
 //! appliers can never resolve back to. [`canonical_itemstats`] is the one pool
 //! every prefix enumerator is meant to draw from: exactly one id per display
-//! name, and that id is the one [`GameDb::itemstat_by_name`] returns for the
-//! same name — so the prefix that wins a search is the prefix that gets
-//! applied, on every path.
+//! name. For most names that id is the lowest, matching
+//! [`GameDb::itemstat_by_name`]. Giver's is the live exception: the wiki
+//! three-stat template wins the group so a search does not kit every slot as
+//! Toughness-only 627.
 //!
 //! The pool answers one question — *which rows are prefixes a search may
 //! choose* — and it answers it with two rules: a row must be **priceable** by
 //! the slot-budget model (a positive multiplier somewhere), and a display name
-//! gets exactly **one id** (the lowest). The legacy 1041-1052 band fails the
+//! gets exactly **one id** (the lowest, except Giver's — see
+//! [`canonical_itemstats`]). The legacy 1041-1052 band fails the
 //! first rule: `multiplier: 0.0` everywhere with the real numbers in the flat
 //! `value` field. On live data each of those ten rows also loses its name group
 //! to a lower healthy id, so the identity rule alone hides the problem — until
@@ -95,12 +97,49 @@ pub fn max_positive_multiplier(stat: &ItemStat) -> Option<f64> {
         })
 }
 
+/// Sorted names of attributes that carry a positive multiplier.
+///
+/// The trinket `value` field is ignored: 628 and 1430 are the same Giver's
+/// template, one without flats and one with them.
+fn multiplier_attribute_set(stat: &ItemStat) -> Vec<&str> {
+    let mut names: Vec<&str> = stat
+        .attributes
+        .iter()
+        .filter(|attr| attr.multiplier > 0.0)
+        .map(|attr| attr.attribute.as_str())
+        .collect();
+    names.sort_unstable();
+    names
+}
+
+/// Wiki main-table Giver's: Toughness / Healing Power / Concentration.
+/// `/v2/itemstats` spells those `Healing` and `BoonDuration`.
+fn is_wiki_givers_three_stat(stat: &ItemStat) -> bool {
+    display_name_key(&stat.name).as_deref() == Some("givers")
+        && multiplier_attribute_set(stat) == ["BoonDuration", "Healing", "Toughness"]
+}
+
+/// True when `stat` should replace `incumbent` in a display-name group.
+fn outranks(stat: &ItemStat, incumbent: &ItemStat) -> bool {
+    match (
+        is_wiki_givers_three_stat(stat),
+        is_wiki_givers_three_stat(incumbent),
+    ) {
+        (true, false) => true,
+        (false, true) => false,
+        _ => stat.id < incumbent.id,
+    }
+}
+
 /// The canonical prefix pool: one [`ItemStat`] per display name, ordered by id.
 ///
-/// For each display name the lowest id wins, which is the tie-break
-/// [`GameDb::itemstat_by_name`] already applies. That makes the pool and name
-/// resolution the same function viewed from two directions:
-/// `db.itemstat_by_name(&s.name)` returns `s` for every `s` in the pool.
+/// For each display name the lowest id wins, matching
+/// [`GameDb::itemstat_by_name`] — except Giver's. Live `/v2/itemstats` ships
+/// several Giver's multiplier shapes under one name; the lowest id (627) is
+/// Toughness only. The wiki main table is Toughness / Healing Power /
+/// Concentration (`Healing` + `BoonDuration` in the API). That three-stat
+/// template wins the group so a search does not kit every slot as 627. Name
+/// lookup is a different function and is not changed here.
 ///
 /// Two rules, in this order:
 ///
@@ -118,7 +157,10 @@ pub fn max_positive_multiplier(stat: &ItemStat) -> Option<f64> {
 ///    name-resolvable prefix, and dropping it would delete whole name groups
 ///    from a db that simply has not loaded attributes.
 /// 2. **One id per display name.** Nameless rows are dropped; among the rest
-///    the lowest surviving id wins.
+///    the lowest surviving id wins, unless the name is Giver's and a wiki
+///    three-stat row (Toughness / Healing / BoonDuration, ignoring trinket
+///    flats) is in the group — that row wins, lowest id among those that
+///    match. 628 beats 1070 and 1430; 627 / 629 / 630 / 631 lose.
 ///
 /// The returned order is id-ascending and therefore independent of
 /// `HashMap` iteration order — the same db yields the same pool on every run
@@ -137,8 +179,7 @@ pub fn canonical_itemstats(db: &GameDb) -> Vec<&ItemStat> {
             continue;
         };
         match canonical.get(&key) {
-            // Lowest id wins, matching `itemstat_by_name`'s tie-break.
-            Some(incumbent) if incumbent.id <= stat.id => {}
+            Some(incumbent) if !outranks(stat, incumbent) => {}
             _ => {
                 canonical.insert(key, stat);
             }
@@ -233,11 +274,61 @@ mod tests {
             named(657, "Knight's"),
             named(662, "Knight's"),
             named(1051, "Knight's"),
-            // Giver's: nine live ids with genuinely different attribute sets
-            // (the weapon variant carries one attribute, armour carries three).
-            named(627, "Giver's"),
-            named(628, "Giver's"),
-            named(631, "Giver's"),
+            // Giver's: nine live /v2/itemstats ids, five multiplier shapes.
+            // 627 is Toughness only; 628/1070/1430 are the wiki main-table
+            // three-stat (Toughness / Healing / BoonDuration); 1430 carries
+            // the trinket flats. Empty-attribute stubs hid the collapse.
+            with_attrs(627, "Giver's", vec![attr("Toughness", 0.35, 0)]),
+            with_attrs(
+                628,
+                "Giver's",
+                vec![
+                    attr("Toughness", 0.35, 0),
+                    attr("Healing", 0.25, 0),
+                    attr("BoonDuration", 0.25, 0),
+                ],
+            ),
+            with_attrs(
+                629,
+                "Giver's",
+                vec![attr("Toughness", 0.35, 0), attr("Healing", 0.25, 0)],
+            ),
+            with_attrs(
+                630,
+                "Giver's",
+                vec![
+                    attr("Vitality", 0.25, 0),
+                    attr("ConditionDuration", 0.35, 0),
+                ],
+            ),
+            with_attrs(631, "Giver's", vec![attr("ConditionDuration", 0.35, 0)]),
+            with_attrs(
+                1030,
+                "Giver's",
+                vec![
+                    attr("Vitality", 0.25, 0),
+                    attr("ConditionDuration", 0.35, 0),
+                ],
+            ),
+            with_attrs(1031, "Giver's", vec![attr("ConditionDuration", 0.35, 0)]),
+            with_attrs(
+                1070,
+                "Giver's",
+                vec![
+                    attr("Toughness", 0.35, 0),
+                    attr("Healing", 0.25, 0),
+                    attr("BoonDuration", 0.25, 0),
+                ],
+            ),
+            with_attrs(
+                1430,
+                "Giver's",
+                vec![
+                    attr("Toughness", 0.35, 32),
+                    attr("Healing", 0.25, 18),
+                    attr("BoonDuration", 0.25, 18),
+                ],
+            ),
             // Celestial: 1052 is all-zero.
             named(559, "Celestial"),
             named(588, "Celestial"),
@@ -282,12 +373,13 @@ mod tests {
         );
 
         // 2. The exact survivors, by ground truth from the live cache: the
-        //    lowest id of each name group, and nothing else.
+        //    lowest id of each name group, except Giver's which is the wiki
+        //    three-stat template (628), not Toughness-only 627.
         let ids: Vec<u32> = pool.iter().map(|stat| stat.id).collect();
         assert_eq!(
             ids,
-            vec![158, 161, 559, 627, 1345, 1826],
-            "wrong survivors (expected the lowest id of each display name)"
+            vec![158, 161, 559, 628, 1345, 1826],
+            "wrong survivors (expected the lowest id of each display name, Giver's 628)"
         );
 
         // 3. The all-zero-multiplier legacy band never wins a name group,
@@ -299,9 +391,16 @@ mod tests {
             );
         }
 
-        // 4. The pool and name resolution are the same function: whatever the
-        //    search picks is what the name-keyed appliers apply.
+        // 4. For every prefix whose healthy rows share one multiplier shape,
+        //    the pool and name resolution are the same function. Giver's is
+        //    the live exception: several shapes, wiki three-stat survivor
+        //    628, while name lookup still returns the lowest id and is not
+        //    this function.
         for stat in &pool {
+            if independent_name_key(&stat.name) == "givers" {
+                assert_eq!(stat.id, 628);
+                continue;
+            }
             let resolved = db
                 .itemstat_by_name(&stat.name)
                 .unwrap_or_else(|| panic!("pool entry {:?} does not resolve by name", stat.name));
@@ -327,6 +426,69 @@ mod tests {
                 stat.id
             );
         }
+    }
+
+    /// Live Giver's is not one prefix. The wiki main table is Toughness /
+    /// Healing Power / Concentration (API: Toughness / Healing / BoonDuration,
+    /// id 628). Lowest-id grouping keeps 627's one-stat Toughness vector and
+    /// a search then kits every slot as that row.
+    #[test]
+    fn givers_survivor_is_not_the_one_stat_toughness_row() {
+        let db = live_shaped_db();
+        let pool = canonical_itemstats(&db);
+        let givers: Vec<&ItemStat> = pool
+            .iter()
+            .copied()
+            .filter(|stat| independent_name_key(&stat.name) == "givers")
+            .collect();
+        assert!(
+            !givers.is_empty(),
+            "Giver's vanished from the prefix pool"
+        );
+
+        for stat in &givers {
+            let mut attrs: Vec<&str> = stat
+                .attributes
+                .iter()
+                .filter(|a| a.multiplier > 0.0)
+                .map(|a| a.attribute.as_str())
+                .collect();
+            attrs.sort_unstable();
+            assert_ne!(
+                stat.id, 627,
+                "Giver's survivor is Toughness-only id 627"
+            );
+            assert_ne!(
+                attrs.as_slice(),
+                ["Toughness"].as_slice(),
+                "Giver's survivor {} is 627's one-stat vector: {attrs:?}",
+                stat.id
+            );
+        }
+
+        assert_eq!(
+            givers.len(),
+            1,
+            "Giver's must remain one search prefix, the wiki three-stat shape"
+        );
+        let survivor = givers[0];
+        let mut attrs: Vec<&str> = survivor
+            .attributes
+            .iter()
+            .filter(|a| a.multiplier > 0.0)
+            .map(|a| a.attribute.as_str())
+            .collect();
+        attrs.sort_unstable();
+        assert_eq!(
+            attrs.as_slice(),
+            ["BoonDuration", "Healing", "Toughness"].as_slice(),
+            "Giver's survivor {} is not the wiki three-stat vector",
+            survivor.id
+        );
+        assert_eq!(survivor.id, 628);
+        // Trinket flats must not mint a second prefix: 1430 shares 628's
+        // multipliers and must lose to the lower id.
+        assert!(!pool.iter().any(|stat| stat.id == 1430));
     }
 
     #[test]
