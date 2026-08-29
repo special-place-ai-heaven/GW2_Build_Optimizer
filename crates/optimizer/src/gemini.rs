@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -96,6 +96,9 @@ impl GeminiClient {
     }
 }
 
+/// Length of the per-minute window.
+const MINUTE: Duration = Duration::from_secs(60);
+
 struct RateTracker {
     requests_this_minute: u32,
     minute_start: Instant,
@@ -109,14 +112,26 @@ struct RateTracker {
 struct PersistedUsage {
     day: u64,
     requests_today: u32,
+    /// Wall-clock epoch second the current minute window opened.
+    ///
+    /// `#[serde(default)]` on both minute fields: a usage file written by an
+    /// older build has neither, and losing the daily counter to a strict
+    /// parse would be a worse bug than starting the minute window fresh.
+    #[serde(default)]
+    minute_start_epoch: u64,
+    #[serde(default)]
+    requests_this_minute: u32,
 }
 
-fn current_epoch_day() -> u64 {
+fn current_epoch_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-        / 86400
+}
+
+fn current_epoch_day() -> u64 {
+    current_epoch_secs() / 86400
 }
 
 impl RateTracker {
@@ -136,9 +151,25 @@ impl RateTracker {
         } else {
             0 // new day, reset counter
         };
+
+        let now = Instant::now();
+        // Age of the persisted minute window. `checked_sub` is the clock-went-
+        // backwards guard: a saturating subtraction would read as "zero
+        // seconds old" and pin a user at the limit until wall clock caught up.
+        let age = current_epoch_secs().checked_sub(persisted.minute_start_epoch);
+        let (requests_this_minute, minute_start) = match age {
+            Some(age) if age < MINUTE.as_secs() && persisted.minute_start_epoch > 0 => (
+                persisted.requests_this_minute,
+                // Re-anchor the monotonic clock so the window expires when it
+                // would have, not 60 s from now.
+                now.checked_sub(Duration::from_secs(age)).unwrap_or(now),
+            ),
+            _ => (0, now),
+        };
+
         Self {
-            requests_this_minute: 0,
-            minute_start: Instant::now(),
+            requests_this_minute,
+            minute_start,
             requests_today,
             current_day: today,
         }
@@ -158,7 +189,7 @@ impl RateTracker {
         }
 
         let now = Instant::now();
-        if now.duration_since(self.minute_start).as_secs() >= 60 {
+        if now.duration_since(self.minute_start) >= MINUTE {
             self.requests_this_minute = 0;
             self.minute_start = now;
         }
@@ -192,14 +223,26 @@ impl RateTracker {
         self.requests_this_minute
     }
 
+    /// Slots left in the current 10-RPM window. Test-only: two clients
+    /// built from the same usage file must agree on this number.
+    #[cfg(test)]
+    fn remaining_rpm(&self) -> u32 {
+        10u32.saturating_sub(self.requests_this_minute)
+    }
+
     fn remaining_today(&self) -> u32 {
         250u32.saturating_sub(self.requests_today)
     }
 
     fn to_persisted(&self) -> PersistedUsage {
+        // Convert the monotonic anchor back to wall clock only here, at the
+        // serialization boundary.
+        let age = self.minute_start.elapsed().as_secs();
         PersistedUsage {
             day: self.current_day,
             requests_today: self.requests_today,
+            minute_start_epoch: current_epoch_secs().saturating_sub(age),
+            requests_this_minute: self.requests_this_minute,
         }
     }
 }
@@ -515,7 +558,6 @@ fn denied_from_body(status: u16, body: &str) -> GeminiError {
         },
     }
 }
-
 
 /// Turn a 200 response body into `Content`, keeping the reserved rate slot
 /// only if the body actually produced an answer.
@@ -986,6 +1028,15 @@ impl GeminiClient {
             .remaining_today()
     }
 
+    /// Slots left in the current 10-RPM window.
+    #[cfg(test)]
+    fn remaining_rpm(&self) -> u32 {
+        self.rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remaining_rpm()
+    }
+
     /// Clear the response cache.
     pub fn clear_cache(&self) {
         self.cache.clear();
@@ -1026,7 +1077,8 @@ mod tests {
         let reloaded = RateTracker::from_persisted(persisted);
 
         assert_eq!(reloaded.requests_today, 5);
-        assert_eq!(reloaded.requests_this_minute, 0);
+        assert_eq!(reloaded.requests_this_minute, 5);
+        assert_eq!(reloaded.remaining_rpm(), 5);
     }
 
     #[test]
@@ -1035,6 +1087,8 @@ mod tests {
         let persisted = PersistedUsage {
             day: yesterday,
             requests_today: 200,
+            minute_start_epoch: 0,
+            requests_this_minute: 0,
         };
         let reloaded = RateTracker::from_persisted(persisted);
 
@@ -1066,6 +1120,8 @@ mod tests {
         let persisted = PersistedUsage {
             day: current_epoch_day(),
             requests_today: 240,
+            minute_start_epoch: 0,
+            requests_this_minute: 0,
         };
         let mut reloaded = RateTracker::from_persisted(persisted);
         assert_eq!(reloaded.requests_today, 240);
@@ -1076,6 +1132,62 @@ mod tests {
     fn test_remaining_quota() {
         let client = GeminiClient::new("fake-key", "gemini-2.5-flash").unwrap();
         assert_eq!(client.remaining_quota(), 250);
+    }
+
+    /// A14-2 — `create_client` builds a fresh Gemini client per Improve click.
+    /// Daily 240 already survived the reload; the 10-RPM window did not.
+    #[test]
+    fn gemini_rpm_window_survives_create_client() {
+        let path = std::env::temp_dir().join(format!(
+            "gw2bo_gemini_rpm_{}_{:?}.json",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let first = GeminiClient::with_persistence("fake-key", "gemini-2.5-flash", path.clone())
+            .expect("client");
+        {
+            let mut rate = first.rate.lock().expect("rate");
+            for _ in 0..3 {
+                rate.check_and_reserve().expect("within the minute limit");
+            }
+            first.persist_usage(&rate);
+            assert_eq!(rate.remaining_rpm(), 7);
+        }
+
+        let second = GeminiClient::with_persistence("fake-key", "gemini-2.5-flash", path.clone())
+            .expect("client");
+        assert_eq!(
+            second.remaining_rpm(),
+            7,
+            "a fresh client must inherit the minute window, not reset it to 10"
+        );
+        {
+            let mut rate = second.rate.lock().expect("rate");
+            assert_eq!(rate.requests_this_minute(), 3);
+            for _ in 0..7 {
+                rate.check_and_reserve().expect("remaining slots");
+            }
+            assert!(
+                rate.check_and_reserve().is_err(),
+                "the 10 RPM limit must still bite after create_client"
+            );
+        }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A usage file written before the minute window was persisted must still
+    /// load, and must keep the daily counter it does carry.
+    #[test]
+    fn legacy_usage_file_without_minute_fields_still_parses() {
+        let legacy = format!("{{\"day\":{},\"requests_today\":7}}", current_epoch_day());
+        let persisted: PersistedUsage = serde_json::from_str(&legacy).expect("legacy parses");
+        let reloaded = RateTracker::from_persisted(persisted);
+        assert_eq!(reloaded.requests_today, 7);
+        assert_eq!(reloaded.requests_this_minute, 0);
+        assert_eq!(reloaded.remaining_rpm(), 10);
     }
 
     #[test]
@@ -1529,10 +1641,7 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
             StatusAction::Denied,
             "403/429 read the body; billing keywords are not InvalidKey"
         );
-        assert!(matches!(
-            denied_from_body(403, ""),
-            GeminiError::InvalidKey
-        ));
+        assert!(matches!(denied_from_body(403, ""), GeminiError::InvalidKey));
         assert!(matches!(
             denied_from_body(403, "RESOURCE_EXHAUSTED quota exceeded"),
             GeminiError::Api { status: 403, .. }
@@ -1592,7 +1701,9 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         let _scope = crate::llm::cancel::CancelScope::new(|| true);
 
         let started = std::time::Instant::now();
-        let error = client.generate("hi").expect_err("cancelled generate must fail");
+        let error = client
+            .generate("hi")
+            .expect_err("cancelled generate must fail");
 
         assert!(
             matches!(error, GeminiError::Unavailable(ref m) if m == crate::llm::cancel::CANCELLED),

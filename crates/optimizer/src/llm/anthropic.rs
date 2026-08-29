@@ -291,6 +291,16 @@ impl AnthropicClient {
         })
     }
 
+    /// `GET /v1/models` — shared by key validation and the model catalog.
+    /// Does not spend a Messages token.
+    fn models_request(&self) -> reqwest::blocking::RequestBuilder {
+        self.http
+            .get(format!("{}/models", ANTHROPIC_API_BASE))
+            .timeout(METADATA_TIMEOUT)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+    }
+
     pub fn with_persistence(
         api_key: &str,
         model: &str,
@@ -522,32 +532,12 @@ impl LlmClient for AnthropicClient {
         "Anthropic"
     }
 
+    /// Validate the API key via `GET /v1/models`.
+    ///
+    /// Same path as [`Self::list_models`]; does not spend a Messages token.
     fn validate_key(&self) -> Result<(), LlmError> {
-        // Anthropic doesn't have a models list endpoint like OpenAI/Gemini.
-        // Use a minimal messages call with max_tokens=1 to validate the key.
-        let messages = vec![AnthropicMessage {
-            role: "user".to_string(),
-            content: AnthropicContent::Text("Hi".to_string()),
-        }];
-
-        let request = MessagesRequest {
-            model: self.model.clone(),
-            max_tokens: 1,
-            messages,
-            system: None,
-            tools: None,
-            stream: Some(true),
-        };
-
-        let url = format!("{}/messages", ANTHROPIC_API_BASE);
         let resp = self
-            .http
-            .post(&url)
-            .timeout(METADATA_TIMEOUT)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("Content-Type", "application/json")
-            .json(&request)
+            .models_request()
             .send()
             .map_err(|e| LlmError::Http(e.to_string()))?;
 
@@ -583,32 +573,9 @@ impl LlmClient for AnthropicClient {
         }
     }
 
+    /// Validate the API key via `GET /v1/models` (no Messages token spent).
     fn validate_key_detailed(&self) -> KeyValidationResult {
-        let messages = vec![AnthropicMessage {
-            role: "user".to_string(),
-            content: AnthropicContent::Text("Hi".to_string()),
-        }];
-
-        let request = MessagesRequest {
-            model: self.model.clone(),
-            max_tokens: 1,
-            messages,
-            system: None,
-            tools: None,
-            stream: Some(true),
-        };
-
-        let url = format!("{}/messages", ANTHROPIC_API_BASE);
-        let resp = match self
-            .http
-            .post(&url)
-            .timeout(METADATA_TIMEOUT)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
-        {
+        let resp = match self.models_request().send() {
             Ok(r) => r,
             Err(e) => {
                 return KeyValidationResult {
@@ -761,13 +728,8 @@ impl LlmClient for AnthropicClient {
     }
 
     fn list_models(&self) -> Result<Vec<super::ModelInfo>, LlmError> {
-        let url = format!("{}/models", ANTHROPIC_API_BASE);
         let resp = self
-            .http
-            .get(&url)
-            .timeout(METADATA_TIMEOUT)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
+            .models_request()
             .send()
             .map_err(|e| LlmError::Http(e.to_string()))?;
 
@@ -827,6 +789,53 @@ impl LlmClient for AnthropicClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A14-3 — key check must not spend a Messages token. Pin both
+    /// validate_key entry points to GET /v1/models.
+    #[test]
+    fn validate_key_does_not_post_messages() {
+        let src = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/llm/anthropic.rs"));
+        let production = src
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("split always yields a first chunk");
+
+        let validate_key = production
+            .split("fn validate_key(")
+            .nth(1)
+            .and_then(|s| s.split("fn validate_key_detailed").next())
+            .expect("validate_key body");
+        assert!(
+            !validate_key.contains("/messages"),
+            "validate_key must not POST /v1/messages"
+        );
+        assert!(
+            validate_key.contains("models_request"),
+            "validate_key must use GET /v1/models"
+        );
+        assert!(
+            !validate_key.contains(".post("),
+            "validate_key must not POST"
+        );
+
+        let detailed = production
+            .split("fn validate_key_detailed")
+            .nth(1)
+            .and_then(|s| s.split("fn generate(").next())
+            .expect("validate_key_detailed body");
+        assert!(
+            !detailed.contains("/messages"),
+            "validate_key_detailed must not POST /v1/messages"
+        );
+        assert!(
+            detailed.contains("models_request"),
+            "validate_key_detailed must use GET /v1/models"
+        );
+        assert!(
+            !detailed.contains(".post("),
+            "validate_key_detailed must not POST"
+        );
+    }
 
     #[test]
     fn test_provider_name() {
