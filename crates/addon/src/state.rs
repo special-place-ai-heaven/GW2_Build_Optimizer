@@ -1753,9 +1753,33 @@ mod tests {
         assert!(main.game_db_mut().is_some());
     }
 
+    #[test]
+    fn attach_localized_ui_path_does_not_make_mut() {
+        let stats = include_str!("ui/main_view/stats.rs");
+        let production = stats
+            .split("#[cfg(test)]")
+            .next()
+            .expect("stats.rs must contain its own #[cfg(test)] marker");
+        assert!(
+            !production.contains("Arc::make_mut"),
+            "ensure_localized_names must not make_mut GameDb to attach names"
+        );
+        assert!(production.contains("attach_localized"));
+        assert!(production.contains("game_db_mut"));
+
+        let gamedb = include_str!("../../optimizer/src/gamedb.rs");
+        let body = pin_fn(gamedb, "attach_localized");
+        assert!(
+            !body.contains("Arc::make_mut"),
+            "attach_localized must not clone the world to write names"
+        );
+    }
+
     fn pin_fn<'a>(src: &'a str, name: &str) -> &'a str {
         let marker = format!("fn {name}(");
-        let idx = src.find(&marker).unwrap_or_else(|| panic!("missing fn {name}"));
+        let idx = src
+            .find(&marker)
+            .unwrap_or_else(|| panic!("missing fn {name}"));
         let brace = src[idx..].find('{').expect("fn body") + idx;
         let mut depth = 0usize;
         for (i, c) in src[brace..].char_indices() {
@@ -1774,7 +1798,9 @@ mod tests {
     }
 
     fn brace_depth_at(body: &str, needle: &str) -> usize {
-        let at = body.find(needle).unwrap_or_else(|| panic!("missing {needle}"));
+        let at = body
+            .find(needle)
+            .unwrap_or_else(|| panic!("missing {needle}"));
         body[..at].bytes().filter(|b| *b == b'{').count()
             - body[..at].bytes().filter(|b| *b == b'}').count()
     }
