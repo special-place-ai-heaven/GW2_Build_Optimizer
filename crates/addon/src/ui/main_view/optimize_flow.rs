@@ -695,6 +695,10 @@ fn enrich_with_llm(
                     .join("; ")
             ),
         );
+        // Keep the engine candidate. Chat plates already sit behind
+        // plate_is_servable; this leftover path must not stamp a raw
+        // invalid plate onto a ranked suggestion.
+        return Ok(());
     }
 
     crate::state::with_state(|s| {
@@ -832,12 +836,17 @@ impl ImproveOutcome {
 /// `KeptCurrentGear` wins over the locked-elite-spec label: "Improved:
 /// Firebrand" on the player's own unchanged gear is a lie, and blanking the
 /// label (the previous behaviour) left the refusal invisible.
+///
+/// `Ungated` also refuses `fmt.improved`: the always-better gate did not
+/// rank this result, so "Improved: {name}" would be a lie even when an
+/// elite spec is locked. The ordinary build label stays.
 fn improve_label_override(outcome: ImproveOutcome, locked_spec: Option<&str>) -> Option<String> {
     match outcome {
         ImproveOutcome::KeptCurrentGear => outcome.headline().map(str::to_string),
-        ImproveOutcome::Improved | ImproveOutcome::Ungated => {
+        ImproveOutcome::Improved => {
             locked_spec.map(|name| tf("fmt.improved", &[("name", name)]))
         }
+        ImproveOutcome::Ungated => None,
     }
 }
 
@@ -1447,6 +1456,85 @@ mod tests {
             .quality_reasons
             .iter()
             .any(|r| r.explanation == BASELINE_KEPT_REASON));
+    }
+
+    #[test]
+    fn ungated_elite_lock_does_not_stamp_improved() {
+        // A18-1: Improve/Ungated + elite lock must not claim the kit was
+        // improved. The gate did not rank this result; "Improved: Firebrand"
+        // is the same lie KeptCurrentGear already refuses.
+        assert_eq!(
+            improve_label_override(ImproveOutcome::Ungated, Some("Firebrand")),
+            None,
+            "Ungated + lock must not stamp fmt.improved"
+        );
+        assert_eq!(
+            improve_label_override(ImproveOutcome::Ungated, None),
+            None
+        );
+
+        // Improved + lock remains the honest use of fmt.improved. Pin the
+        // production arm so dropping the stamp cannot hide behind Ungated.
+        let src = include_str!("optimize_flow.rs");
+        let production = src
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("split always yields a first chunk");
+        let start = production
+            .find("fn improve_label_override(")
+            .expect("improve_label_override gone");
+        let after = &production[start..];
+        let end = after[1..]
+            .find("\nfn ")
+            .map(|i| i + 1)
+            .expect("improve_label_override has no following fn");
+        let body = &after[..end];
+        assert!(
+            body.contains("fmt.improved"),
+            "Improved + lock must still stamp fmt.improved"
+        );
+        assert!(
+            !body.contains("ImproveOutcome::Improved | ImproveOutcome::Ungated")
+                && !body.contains("ImproveOutcome::Ungated | ImproveOutcome::Improved"),
+            "Ungated must not share the fmt.improved arm"
+        );
+    }
+
+    #[test]
+    fn leftover_enrich_skips_apply_when_validation_has_errors() {
+        // A18-2: leftover enrich_with_llm must not apply_gemini_response on
+        // the raw plate when validate_gemini_build reported errors. Keep the
+        // engine candidate. Chat already sits behind plate_is_servable; this
+        // path does not.
+        let src = include_str!("optimize_flow.rs");
+        let production = src
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("split always yields a first chunk");
+        let start = production
+            .find("fn enrich_with_llm(")
+            .expect("enrich_with_llm gone");
+        let after = &production[start..];
+        let end = after[1..]
+            .find("\nfn ")
+            .map(|i| i + 1)
+            .expect("enrich_with_llm has no following fn");
+        let body = &after[..end];
+        let errors_at = body
+            .find("validated.errors")
+            .expect("enrich_with_llm no longer checks validated.errors");
+        let apply_at = body
+            .find("apply_gemini_response")
+            .expect("enrich_with_llm no longer applies a plate");
+        assert!(
+            errors_at < apply_at,
+            "errors check must precede apply_gemini_response"
+        );
+        let between = &body[errors_at..apply_at];
+        assert!(
+            between.contains("return Ok(())") || between.contains("return Err("),
+            "non-empty validated.errors must return before apply_gemini_response; keep the engine candidate"
+        );
     }
 
     #[test]
