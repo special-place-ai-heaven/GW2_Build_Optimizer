@@ -298,8 +298,10 @@ impl GameDb {
     }
 
     /// Deterministic itemstat lookup by name (case-insensitive). Returns the
-    /// exact-name match if any (lower id wins ties), otherwise the shortest
-    /// substring match (lower id wins ties).
+    /// exact-name match if any, otherwise the shortest substring match
+    /// (lower id wins ties). Exact ties do not lowest-id across distinct
+    /// multiplier shapes: wiki three-stat Giver's (Toughness / Healing /
+    /// BoonDuration) outranks other Giver's templates, then lower id.
     ///
     /// Centralizes the policy used by validation, Gemini tool execs, and
     /// LLM-context builders — a raw `itemstats.values().find(contains)` is
@@ -320,7 +322,7 @@ impl GameDb {
                 !needle_key.is_empty() && gw2_core::i18n::alnum_key(&is.name) == needle_key;
             if lower == needle_lower || alnum_hit {
                 match exact {
-                    Some(prev) if prev.id <= is.id => {}
+                    Some(prev) if !Self::exact_name_outranks(is, prev) => {}
                     _ => exact = Some(is),
                 }
             } else if lower.contains(&needle_lower) {
@@ -332,6 +334,36 @@ impl GameDb {
             }
         }
         exact.or(fuzzy.map(|(_, _, is)| is))
+    }
+
+    /// Wiki main-table Giver's: Toughness / Healing Power / Concentration.
+    /// `/v2/itemstats` spells those `Healing` and `BoonDuration`. Trinket
+    /// flats on 1430 are ignored so 628/1070/1430 share one shape.
+    fn wiki_givers_three_stat(stat: &ItemStat) -> bool {
+        if gw2_core::i18n::alnum_key(&stat.name) != "givers" {
+            return false;
+        }
+        let mut attrs: Vec<&str> = stat
+            .attributes
+            .iter()
+            .filter(|a| a.multiplier > 0.0)
+            .map(|a| a.attribute.as_str())
+            .collect();
+        attrs.sort_unstable();
+        attrs == ["BoonDuration", "Healing", "Toughness"]
+    }
+
+    /// Exact-name ties: wiki three-stat Giver's outranks other multiplier
+    /// shapes of that English name; otherwise lower id wins.
+    fn exact_name_outranks(candidate: &ItemStat, incumbent: &ItemStat) -> bool {
+        match (
+            Self::wiki_givers_three_stat(candidate),
+            Self::wiki_givers_three_stat(incumbent),
+        ) {
+            (true, false) => true,
+            (false, true) => false,
+            _ => candidate.id < incumbent.id,
+        }
     }
 
     pub fn attach_localized(&mut self, mut names: gw2_api::localize::LocalizedNames) {
@@ -746,6 +778,93 @@ mod tests {
         );
         assert_eq!(db.itemstat_by_name("Knights").unwrap().name, "Knight's");
         assert_eq!(db.itemstat_by_name("Knight's").unwrap().name, "Knight's");
+    }
+
+    /// Live `/v2/itemstats` ships several Giver's multiplier shapes under one
+    /// English name. Lowest-id exact match is Toughness-only 627; wiki L80
+    /// Giver's (Attribute combinations, retrieved 2026-08-29) is Toughness /
+    /// Healing Power / Concentration (API: Healing, BoonDuration) at
+    /// 628/1070/1430. Math must resolve the three-stat template.
+    #[test]
+    fn itemstat_by_name_givers_prefers_three_stat_not_lowest_id() {
+        let mut db = GameDb::empty_for_tests();
+        let attr = |attribute: &str, multiplier: f64, value: i32| {
+            gw2_api::models::itemstats::StatAttribute {
+                attribute: attribute.into(),
+                multiplier,
+                value,
+            }
+        };
+        let row = |id: u32, attributes: Vec<gw2_api::models::itemstats::StatAttribute>| {
+            gw2_api::models::ItemStat {
+                id,
+                name: "Giver's".into(),
+                attributes,
+            }
+        };
+        db.itemstats
+            .insert(627, row(627, vec![attr("Toughness", 0.35, 0)]));
+        db.itemstats.insert(
+            628,
+            row(
+                628,
+                vec![
+                    attr("Toughness", 0.35, 0),
+                    attr("Healing", 0.25, 0),
+                    attr("BoonDuration", 0.25, 0),
+                ],
+            ),
+        );
+        db.itemstats.insert(
+            629,
+            row(
+                629,
+                vec![attr("Toughness", 0.35, 0), attr("Healing", 0.25, 0)],
+            ),
+        );
+        db.itemstats.insert(
+            1070,
+            row(
+                1070,
+                vec![
+                    attr("Toughness", 0.35, 0),
+                    attr("Healing", 0.25, 0),
+                    attr("BoonDuration", 0.25, 0),
+                ],
+            ),
+        );
+        db.itemstats.insert(
+            1430,
+            row(
+                1430,
+                vec![
+                    attr("Toughness", 0.35, 32),
+                    attr("Healing", 0.25, 18),
+                    attr("BoonDuration", 0.25, 18),
+                ],
+            ),
+        );
+
+        let got = db
+            .itemstat_by_name("Giver's")
+            .expect("Giver's must resolve");
+        assert_ne!(
+            got.id, 627,
+            "Giver's must not resolve to Toughness-only 627"
+        );
+        assert_eq!(got.id, 628, "lowest wiki three-stat Giver's id");
+        let mut attrs: Vec<&str> = got
+            .attributes
+            .iter()
+            .filter(|a| a.multiplier > 0.0)
+            .map(|a| a.attribute.as_str())
+            .collect();
+        attrs.sort_unstable();
+        assert_eq!(
+            attrs.as_slice(),
+            ["BoonDuration", "Healing", "Toughness"].as_slice()
+        );
+        assert_eq!(db.itemstat_by_name("Givers").map(|s| s.id), Some(628));
     }
 
     #[test]
