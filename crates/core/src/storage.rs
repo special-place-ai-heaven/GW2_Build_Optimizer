@@ -111,18 +111,19 @@ impl BuildStorage {
         let json = serde_json::to_string_pretty(build)
             .map_err(|e| format!("Failed to serialize: {}", e))?;
 
-        // Complete content first, then one atomic rename over the old build.
+        // Complete content first, then replace the old build (POSIX rename,
+        // or Win32 rename / remove+rename — see `replace_file`).
         let tmp_path = path.with_extension("tmp");
         if let Err(e) = write_durably(&tmp_path, &json) {
             let _ = std::fs::remove_file(&tmp_path); // best-effort cleanup
             return Err(format!("Failed to write {}: {}", tmp_path.display(), e));
         }
-        std::fs::rename(&tmp_path, &path).map_err(|e| {
+        replace_file(&tmp_path, &path).map_err(|e| {
             let _ = std::fs::remove_file(&tmp_path); // best-effort cleanup
             format!(
-                "Failed to rename {} → {}: {}",
-                tmp_path.display(),
+                "Failed to replace {} with {}: {}",
                 path.display(),
+                tmp_path.display(),
                 e
             )
         })
@@ -272,6 +273,31 @@ fn write_durably(path: &Path, contents: &str) -> std::io::Result<()> {
     let mut file = std::fs::File::create(path)?;
     file.write_all(contents.as_bytes())?;
     file.sync_all()
+}
+
+/// Publish a complete `from` over `to`.
+///
+/// POSIX `rename` replaces atomically. Win32 `rename` is not a guaranteed
+/// replace (`ERROR_ALREADY_EXISTS` on some volumes / rustc versions). Closest
+/// without extra crates: try rename first, then drop dest and rename the
+/// complete tmp into place. A crash between remove and rename leaves dest gone
+/// and tmp intact (caller already flushed tmp). Upgrade path: `ReplaceFileW`.
+pub(crate) fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        match std::fs::rename(from, to) {
+            Ok(()) => Ok(()),
+            Err(_) if to.exists() => {
+                std::fs::remove_file(to)?;
+                std::fs::rename(from, to)
+            }
+            Err(e) => Err(e),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(from, to)
+    }
 }
 
 /// Sanitize a build name for use as a filename.
@@ -780,6 +806,28 @@ mod tests {
         // .tmp must not remain
         let tmp_path = dir.join("saves").join("Overwrite Me.tmp");
         assert!(!tmp_path.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_save_overwrite_twice_keeps_second_payload() {
+        let dir = temp_dir("overwrite_twice");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let storage = BuildStorage::new(&dir);
+        let mut build = test_build("Twice");
+        storage.save_new(&build).unwrap();
+
+        build.stat_prefix = "Viper's".into();
+        storage.save_overwrite(&build).unwrap();
+        build.stat_prefix = "Trailblazer's".into();
+        storage.save_overwrite(&build).unwrap();
+
+        let list = storage.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].stat_prefix, "Trailblazer's");
+        assert!(!dir.join("saves").join("Twice.tmp").exists());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

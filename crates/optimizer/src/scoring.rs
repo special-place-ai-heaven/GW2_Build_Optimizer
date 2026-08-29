@@ -503,8 +503,10 @@ pub fn raw_direction_score(perf: &CombatPerformance, weights: &OptimizationWeigh
 }
 
 /// Score a build against user-specified 6-axis weights.
-/// Each CombatPerformance metric is normalized to [0, 1] using realistic
-/// Solo-profile maximums, then multiplied by the corresponding weight.
+///
+/// Live rank (`referee`) calls this function. Normalization uses the module
+/// constants (`STRIKE_DPS_NORM` and siblings), not JSON `normalization_constants`.
+/// Axis weights still move the score; profile JSON norms do not.
 /// All per-axis scores are hard-capped at 1.0 so no single axis can
 /// dominate regardless of how extreme the raw metric values are.
 ///
@@ -525,8 +527,9 @@ pub fn score_with_weights(perf: &CombatPerformance, weights: &OptimizationWeight
 }
 
 /// Inner scoring function with explicit normalization divisors.
-/// Called by both `score_with_weights` (module-level defaults) and
-/// `ObjectiveScorer::score()` (profile-loaded norms).
+/// `score_with_weights` (live rank) always passes module-level defaults.
+/// `ObjectiveScorer::score()` may pass profile-loaded JSON norms; that path
+/// is not the referee live rank.
 fn score_with_norms(
     perf: &CombatPerformance,
     weights: &OptimizationWeights,
@@ -1682,8 +1685,35 @@ mod tests {
         assert_ne!(pve, wvw, "PvE and WvW defaults should differ");
     }
 
-    /// ObjectiveScorer::score() uses profile-loaded norms, not module-level defaults.
-    /// Two scorers with different profiles produce different scores for the same build.
+    #[test]
+    fn score_with_weights_ignores_json_norms() {
+        let weights = OptimizationWeights::preset_power_dps();
+        let perf = CombatPerformance {
+            strike_dps_index: 1500.0,
+            effective_health: 20_000.0,
+            ..Default::default()
+        };
+        let live = score_with_weights(&perf, &weights);
+        let mut profile = objective_profiles::objective_profiles()
+            .default_for_mode("PvE")
+            .expect("embedded PvE default")
+            .clone();
+        profile.normalization_constants.strike_dps_norm = 1.0;
+        let scorer = ObjectiveScorer::from_profile(weights.clone(), &profile);
+        assert_ne!(
+            scorer.score(&perf),
+            live,
+            "ObjectiveScorer::score may honor JSON norms; that is not live rank"
+        );
+        assert_eq!(
+            score_with_weights(&perf, &weights),
+            live,
+            "score_with_weights must ignore profile JSON norms"
+        );
+    }
+
+    /// Mode scorers differ because axis *weights* differ, not because JSON *norms*
+    /// move live rank. `score_with_weights` (referee) uses module consts.
     #[test]
     fn test_objective_scorer_uses_profile_norms() {
         use crate::balance::BalanceContext;
@@ -1711,7 +1741,7 @@ mod tests {
 
         // PvE Power DPS scorer
         let pve_scorer = ObjectiveScorer::from_mode(OptimizationWeights::preset_power_dps(), "PvE");
-        // WvW Roamer scorer (has different normalization constants + weights)
+        // WvW Roamer scorer (different axis weights; JSON norms do not move live rank)
         let wvw_scorer =
             ObjectiveScorer::from_mode(OptimizationWeights::default_for_mode("WvW"), "WvW");
 
