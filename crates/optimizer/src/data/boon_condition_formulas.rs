@@ -446,13 +446,13 @@ impl ConditionFormulas {
         };
         match cond.formulas.get(mode_key) {
             Some(ModeFormula::Simple(f)) => f.calculate(condition_damage),
-            // Multi-state: use default state (stationary for Torment,
-            // on_skill_use for Confusion)
+            // Multi-state: use the per-second tick (stationary for Torment,
+            // over_time for Confusion). On-skill-use is per activation, not a tick.
             Some(ModeFormula::TormentState { stationary, .. }) => {
                 stationary.calculate(condition_damage)
             }
-            Some(ModeFormula::ConfusionState { on_skill_use, .. }) => {
-                on_skill_use.calculate(condition_damage)
+            Some(ModeFormula::ConfusionState { over_time, .. }) => {
+                over_time.calculate(condition_damage)
             }
             _ => 0.0,
         }
@@ -487,8 +487,22 @@ impl ConditionFormulas {
         }
     }
 
+    /// Confusion DPS per stack per second: wiki over-time tick plus
+    /// on-skill-use damage times `skill_uses_per_second`.
+    /// Source: https://wiki.guildwars2.com/wiki/Confusion
+    pub fn confusion_dps_per_stack(
+        &self,
+        condition_damage: f64,
+        mode: GameMode,
+        skill_uses_per_second: f64,
+    ) -> f64 {
+        let over_time = self.confusion_tick(condition_damage, mode.clone(), false);
+        let on_use = self.confusion_tick(condition_damage, mode, true);
+        over_time + on_use * skill_uses_per_second.max(0.0)
+    }
+
     /// Confusion tick damage with explicit mode and trigger state.
-    /// `on_skill_use`: true = activation damage, false = passive over-time.
+    /// `on_skill_use`: true = per-activation damage, false = passive over-time (per second).
     pub fn confusion_tick(&self, condition_damage: f64, mode: GameMode, on_skill_use: bool) -> f64 {
         let mode_key = mode_to_key(&mode);
         let cond = match self.map.get("Confusion") {
@@ -984,6 +998,33 @@ mod tests {
         assert!(
             (over_time - on_skill_use).abs() > 1.0,
             "Confusion over-time and on-skill-use should differ"
+        );
+    }
+
+    #[test]
+    fn test_confusion_dps_per_stack_is_not_a_16_24_tick() {
+        // Source: https://wiki.guildwars2.com/wiki/Confusion
+        let c = conditions();
+        let cd = 0.0;
+        let over = c.confusion_tick(cd, GameMode::PvE, false);
+        let on_use = c.confusion_tick(cd, GameMode::PvE, true);
+        assert!((over - 18.25).abs() < 0.01);
+        assert!((on_use - 16.24).abs() < 0.01);
+        let dps_zero_rate = c.confusion_dps_per_stack(cd, GameMode::PvE, 0.0);
+        assert!(
+            (dps_zero_rate - 18.25).abs() < 0.01,
+            "rate 0 must be over-time only, got {}",
+            dps_zero_rate
+        );
+        let dps = c.confusion_dps_per_stack(cd, GameMode::PvE, 0.3);
+        assert!(
+            (dps - (18.25 + 16.24 * 0.3)).abs() < 0.01,
+            "expected 23.122, got {}",
+            dps
+        );
+        assert!(
+            (dps - 16.24).abs() > 1.0,
+            "combat index must not equal the on-skill-use base"
         );
     }
 

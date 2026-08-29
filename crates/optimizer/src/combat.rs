@@ -150,8 +150,9 @@ pub struct CombatPerformance {
 ///
 /// Simple conditions (Bleeding, Burning, Poison) are mode-aware but currently
 /// same across all modes. Torment uses stationary as the conservative baseline
-/// (movement_fraction weighting is P3-14 scope). Confusion uses on_skill_use
-/// as the default (trigger frequency is P3-14 scope).
+/// (movement_fraction weighting is P3-14 scope). Confusion DPS per stack is
+/// wiki over-time (per second) plus on-skill-use times Generic
+/// `skill_use_frequency_per_second` for this mode. 16.24 is per activation.
 pub fn calculate_condition_ticks(
     condition_damage: f64,
     modifiers: &DamageModifiers,
@@ -159,6 +160,10 @@ pub fn calculate_condition_ticks(
 ) -> ConditionTicks {
     let conds = crate::data::conditions();
     let mode = ctx.game_mode.clone();
+    let skill_uses = crate::data::rotation_profiles::rotation_profiles()
+        .lookup("Generic", None, &mode)
+        .map(|p| p.target_behavior.skill_use_frequency_per_second)
+        .unwrap_or(0.3);
     ConditionTicks {
         bleeding: conds.tick_damage("Bleeding", condition_damage, mode.clone())
             * modifiers.total_condi_mult_for("Bleeding"),
@@ -169,9 +174,7 @@ pub fn calculate_condition_ticks(
         // Torment: stationary baseline (conservative). Movement weighting is P3-14 scope.
         torment: conds.torment_tick(condition_damage, mode.clone(), false)
             * modifiers.total_condi_mult_for("Torment"),
-        // Confusion: on_skill_use baseline (matches historical behavior).
-        // Trigger frequency weighting is P3-14 scope.
-        confusion: conds.confusion_tick(condition_damage, mode, true)
+        confusion: conds.confusion_dps_per_stack(condition_damage, mode, skill_uses)
             * modifiers.total_condi_mult_for("Confusion"),
     }
 }
@@ -1377,8 +1380,10 @@ mod tests {
         assert!((ticks.poison - 33.5).abs() < 0.1);
         // Torment PvE stationary: 0.09*0 + 31.8 = 31.8 (L2 verified)
         assert!((ticks.torment - 31.8).abs() < 0.1);
-        // Confusion PvE on-skill-use: 0.0325*0 + 16.24 = 16.24 (L3 verified)
-        assert!((ticks.confusion - 16.24).abs() < 0.1);
+        // Confusion DPS/stack/s = over_time + on_skill_use * Generic PvE 0.3/s
+        // Source: https://wiki.guildwars2.com/wiki/Confusion (16.24 is per activation, not a tick)
+        // 18.25 + 16.24 * 0.3 = 23.122
+        assert!((ticks.confusion - 23.122).abs() < 0.1);
     }
 
     #[test]
@@ -1396,8 +1401,8 @@ mod tests {
         assert!((ticks.poison - 153.5).abs() < 0.1);
         // Torment PvE stationary: 0.09 * 2000 + 31.8 = 211.8 (L2 verified)
         assert!((ticks.torment - 211.8).abs() < 0.1);
-        // Confusion PvE on-skill-use: 0.0325 * 2000 + 16.24 = 81.24 (L3 verified)
-        assert!((ticks.confusion - 81.24).abs() < 0.1);
+        // Confusion: (0.05*2000+18.25) + (0.0325*2000+16.24)*0.3 = 118.25 + 24.372 = 142.622
+        assert!((ticks.confusion - 142.622).abs() < 0.1);
     }
 
     #[test]
@@ -1440,17 +1445,17 @@ mod tests {
 
     #[test]
     fn test_confusion_mode_dispatch_in_combat() {
-        // PvE vs PvP Confusion on-skill-use should differ
+        // PvE vs PvP Confusion DPS index (over_time + on_skill_use * Generic rate)
         // Source: https://wiki.guildwars2.com/wiki/Confusion
         let mods = DamageModifiers::default();
         let ctx_pve = BalanceContext::pve();
         let ctx_pvp = BalanceContext::pvp();
         let ticks_pve = calculate_condition_ticks(1000.0, &mods, &ctx_pve);
         let ticks_pvp = calculate_condition_ticks(1000.0, &mods, &ctx_pvp);
-        // PvE on-skill-use: 0.0325 * 1000 + 16.24 = 48.74
-        assert!((ticks_pve.confusion - 48.74).abs() < 0.1);
-        // PvP on-skill-use: 0.0975 * 1000 + 49.5 = 147.0
-        assert!((ticks_pvp.confusion - 147.0).abs() < 0.1);
+        // PvE: (0.05*1000+18.25) + (0.0325*1000+16.24)*0.3 = 68.25 + 14.622 = 82.872
+        assert!((ticks_pve.confusion - 82.872).abs() < 0.1);
+        // PvP: 10 + (0.0975*1000+49.5)*0.8 = 10 + 117.6 = 127.6
+        assert!((ticks_pvp.confusion - 127.6).abs() < 0.1);
         assert!(
             (ticks_pve.confusion - ticks_pvp.confusion).abs() > 1.0,
             "Confusion should differ between PvE and PvP"
