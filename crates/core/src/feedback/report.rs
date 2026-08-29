@@ -63,11 +63,43 @@ pub struct Report {
     pub build_snapshot: Option<BuildSnapshot>,
 }
 
+/// Drop wizard rich-line prefixes (`%NL0P|`, `%BC1U|`, …) so titles and POST
+/// bodies are plaintext. Plain lines and unknown prefixes pass through.
+pub fn strip_wizard_markup(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    let mut out = String::with_capacity(s.len());
+    for (i, line) in s.lines().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(strip_wizard_line(line));
+    }
+    out
+}
+
+fn strip_wizard_line(raw: &str) -> &str {
+    let b = raw.as_bytes();
+    // `%` + bold + align + color + list + `|` — six ASCII bytes.
+    if b.len() >= 6 && b[0] == b'%' && b[5] == b'|' {
+        let ok = matches!(b[1], b'B' | b'N')
+            && matches!(b[2], b'L' | b'C' | b'R')
+            && matches!(b[3], b'0'..=b'4')
+            && matches!(b[4], b'P' | b'U' | b'O');
+        if ok {
+            return &raw[6..];
+        }
+    }
+    raw
+}
+
 /// Title shown in the server admin list: the first `MAX_TITLE_CHARS` chars of a body that is
 /// at least 20 chars long, otherwise the choice labels joined with ` › `, otherwise the short
 /// body itself, otherwise `(no title)`. Never empty, never longer than `MAX_TITLE_CHARS` chars.
 pub fn title_for(body: &str, choice_labels: &[String]) -> String {
     // One line: newlines and runs of whitespace collapse to a single space.
+    let body = strip_wizard_markup(body);
     let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
     let cap = |s: &str| -> String {
         s.chars()
@@ -193,6 +225,25 @@ mod tests {
     fn title_is_choice_labels_when_body_short() {
         let labels = vec!["Bug".to_string(), "Optimize".to_string()];
         assert_eq!(title_for("ok", &labels), "Bug › Optimize");
+    }
+
+    #[test]
+    fn title_for_strips_wizard_encode_markup() {
+        let body = "%NL0P|The optimizer picked a trident on land.";
+        let title = title_for(body, &[]);
+        assert!(!title.contains("%NL0P|"), "{title}");
+        assert_eq!(title, "The optimizer picked a trident on land.");
+        // Prefix must not inflate a short note past the 20-char title threshold.
+        let short = format!("%NL0P|{}", "x".repeat(14));
+        assert_eq!(short.chars().count(), 20);
+        assert_eq!(title_for(&short, &["Bug".to_string()]), "Bug");
+    }
+
+    #[test]
+    fn strip_wizard_markup_keeps_plain_and_multiline() {
+        assert_eq!(strip_wizard_markup("plain"), "plain");
+        assert_eq!(strip_wizard_markup("%BC1U|Hello"), "Hello");
+        assert_eq!(strip_wizard_markup("%NL0P|a\n%NL0P|\n%NL0P|b"), "a\n\nb");
     }
 
     #[test]

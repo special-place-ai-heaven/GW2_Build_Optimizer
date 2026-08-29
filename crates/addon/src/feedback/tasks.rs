@@ -1044,6 +1044,20 @@ mod tests {
     }
 
     #[test]
+    fn post_body_and_title_strip_wizard_markup() {
+        with_fresh_state("markup", |state| {
+            let encoded = "%NL0P|The optimizer picked a trident on land.";
+            state.main.feedback.draft = Some(summary_draft("bug", encoded));
+            let (report, json) = build_report(state).expect("report");
+            assert_eq!(report.body, "The optimizer picked a trident on land.");
+            assert_eq!(report.title, report.body);
+            assert!(!report.body.contains("%NL0P|"), "{}", report.body);
+            assert!(!report.title.contains("%NL0P|"), "{}", report.title);
+            assert!(!json.contains("%NL0P|"), "{json}");
+        });
+    }
+
+    #[test]
     fn apply_send_result_created_updates_row_draft_and_last_path() {
         with_fresh_state("created", |state| {
             let draft = summary_draft("bug", "The optimizer picked a trident on land.");
