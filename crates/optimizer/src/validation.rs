@@ -400,6 +400,8 @@ pub enum RejectCode {
         utilities: usize,
         elite: bool,
     },
+    /// Heal/utility/elite name did not resolve (exact / alnum_key only).
+    SkillNotFound { name: String },
 }
 
 /// Structured validator rejection. `detail` mirrors the prior flat string
@@ -1309,32 +1311,17 @@ fn complete_major_trait_columns(
 }
 
 /// Find a skill by name (case-insensitive) and validate its slot type.
+/// Resolve is `names_eq` only (exact ignore-ascii-case or alnum_key). A
+/// substring of another skill does not apply; the slot stays empty.
 fn find_skill_by_name(
     name: &str,
     prof_skills: &[&Skill],
     expected_slot: Option<&str>,
     result: &mut ValidatedBuild,
 ) -> Option<(u32, String)> {
-    let needle = name.to_lowercase();
-
-    // Exact match first. Fall back to substring contains, but only when the
-    // needle is at least 5 chars long — otherwise short LLM hallucinations like
-    // "heal" or "fire" would over-match skills they never named (e.g. "heal"
-    // matching the first heal-tagged skill alphabetically). Matches the same
-    // guard used by `find_trait_by_name`.
-    let exact_match = prof_skills.iter().find(|s| names_eq(&s.name, name));
-    let found = if exact_match.is_some() {
-        exact_match
-    } else if needle.len() >= 5 {
-        prof_skills
-            .iter()
-            .find(|s| s.name.to_lowercase().contains(&needle))
-    } else {
-        None
-    };
+    let found = prof_skills.iter().find(|s| names_eq(&s.name, name));
 
     if let Some(skill) = found {
-        // Validate slot type
         if let Some(expected) = expected_slot {
             if let Some(ref slot) = skill.slot {
                 if !slot.eq_ignore_ascii_case(expected) {
@@ -1345,20 +1332,14 @@ fn find_skill_by_name(
                 }
             }
         }
-
-        let exact = names_eq(&skill.name, name);
-        if !exact {
-            result.warnings.push(format!(
-                "Skill '{}' fuzzy-matched to '{}'",
-                name, skill.name
-            ));
-        }
-
         Some((skill.id, skill.name.clone()))
     } else {
-        result
-            .warnings
-            .push(format!("Skill '{}' not found for this profession", name));
+        result.errors.push(ValidationReject {
+            code: RejectCode::SkillNotFound {
+                name: name.to_string(),
+            },
+            detail: format!("Skill '{}' not found for this profession", name),
+        });
         None
     }
 }
@@ -2473,13 +2454,44 @@ mod tests {
     }
 
     #[test]
-    fn test_find_skill_ge5_needle_contains_match() {
-        // needle "heali" (5 chars) is a substring of "Healing Spring".
+    fn five_char_substring_does_not_apply_a_different_skill() {
+        // "heali" is a 5-char substring of "Healing Spring". Contains used to
+        // apply that other skill. Applied id must stay empty (names_eq only).
         let s = make_skill(2, "Healing Spring");
         let skills = vec![&s];
         let mut result = ValidatedBuild::default();
         let found = find_skill_by_name("heali", &skills, None, &mut result);
+        assert!(
+            found.is_none(),
+            "5+ char substring must not apply a different skill, got {found:?}"
+        );
+        assert!(
+            result.errors.iter().any(|e| matches!(
+                &e.code,
+                RejectCode::SkillNotFound { name } if name == "heali"
+            )),
+            "not-found must be SkillNotFound, not a warning that still fills; got {:?}",
+            result.errors
+        );
+        assert!(
+            result.warnings.iter().all(|w| !w.contains("fuzzy-matched")),
+            "substring must not fuzzy-apply: {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn names_eq_still_applies_the_named_skill() {
+        let s = make_skill(2, "Healing Spring");
+        let skills = vec![&s];
+        let mut result = ValidatedBuild::default();
+        let found = find_skill_by_name("healing spring", &skills, None, &mut result);
         assert_eq!(found.map(|(id, _)| id), Some(2));
+        assert!(
+            result.errors.is_empty(),
+            "names_eq hit must not SkillNotFound: {:?}",
+            result.errors
+        );
     }
 
     fn make_prof_with_elite_axe() -> gw2_api::models::Profession {
