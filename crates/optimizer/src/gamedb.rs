@@ -337,7 +337,7 @@ impl GameDb {
                     Some(prev) if !Self::exact_name_outranks(is, prev) => {}
                     _ => exact = Some(is),
                 }
-            } else if lower.contains(&needle_lower) {
+            } else if needle_lower.len() >= 5 && lower.contains(&needle_lower) {
                 let key = (is.name.len(), is.id);
                 match fuzzy {
                     Some((plen, pid, _)) if (plen, pid) <= key => {}
@@ -797,6 +797,22 @@ mod tests {
     }
 
     #[test]
+    fn itemstat_short_needle_does_not_fuzzy() {
+        let mut db = GameDb::empty_for_tests();
+        db.itemstats.insert(
+            1,
+            gw2_api::models::ItemStat {
+                id: 1,
+                name: "Berserker's".into(),
+                attributes: vec![],
+            },
+        );
+        assert!(db.itemstat_by_name("a").is_none());
+        assert!(db.itemstat_by_name("sig").is_none());
+        assert_eq!(db.itemstat_by_name("Berserker's").map(|s| s.id), Some(1));
+    }
+
+    #[test]
     fn load_rejects_empty_skills_traits_or_items() {
         let dir = std::env::temp_dir().join(format!(
             "gw2bo-hollow-{}-{}",
@@ -836,9 +852,15 @@ mod tests {
             name: "Berserker's".into(),
             attributes: vec![],
         };
-        cache.save("professions", &vec![prof], 1).expect("save professions");
-        cache.save("specializations", &vec![spec], 1).expect("save specs");
-        cache.save("itemstats", &vec![stat], 1).expect("save itemstats");
+        cache
+            .save("professions", &vec![prof], 1)
+            .expect("save professions");
+        cache
+            .save("specializations", &vec![spec], 1)
+            .expect("save specs");
+        cache
+            .save("itemstats", &vec![stat], 1)
+            .expect("save itemstats");
         let err = match GameDb::load(&cache) {
             Ok(_) => panic!("hollow skills must fail"),
             Err(e) => e,
@@ -849,7 +871,6 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
-
 
     /// Live `/v2/itemstats` ships several Giver's multiplier shapes under one
     /// English name. Lowest-id exact match is Toughness-only 627; wiki L80
