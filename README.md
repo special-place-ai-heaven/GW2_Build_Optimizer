@@ -25,11 +25,22 @@ then let the optimizer search for a stronger version around those constraints.
 
 ![Improve Build view](docs/screenshots/improve.png)
 
-**Settings** configures the AI provider and model, interface language and scale,
-and local game-data cache. The refresh panel shows live download progress, while
-benchmark sync supplies additional build knowledge.
+**Settings** configures the AI provider and model, overlay language and scale,
+News sources, benchmark sync, and the local game-data cache.
 
 ![Settings view](docs/screenshots/settings.png)
+
+**First-time game data** downloads the catalog (items, skills, pets, official
+names). The wait is filled with official Guild Wars 2 news: read an article,
+open it in the browser, or copy the link.
+
+![Game-data download](docs/screenshots/loading.png)
+
+**News** (Tyria Dispatch) lists official RSS, patch notes, forums, GuildJen, and
+ArenaNet YouTube. Compact, Card, or Detail; stills on or off. YouTube is a
+thumbnail — **Open in browser** to watch.
+
+![News desk](docs/screenshots/news.png)
 
 **Stats** compares Current and Optimized passive Hero-panel attributes and
 defenses using profession, armor weight, gear, upgrades, traits, and the selected
@@ -48,6 +59,11 @@ to the selected build; it parses the response into a plated build, flags names
 it cannot resolve in game data, and can open the result directly in Improve.
 
 ![Choya build assistant](docs/screenshots/ai_choya.png)
+
+**About** is Choya's mailbag: message the developer, report a bug, or send a
+fistbump. Replies land under Messages.
+
+![About / mailbag](docs/screenshots/about.png)
 
 ## Download
 
