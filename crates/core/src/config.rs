@@ -657,7 +657,7 @@ impl AppConfig {
             let _ = std::fs::remove_file(&tmp_path);
             return Err(e);
         }
-        if let Err(e) = std::fs::rename(&tmp_path, path) {
+        if let Err(e) = crate::storage::replace_file(&tmp_path, path) {
             let _ = std::fs::remove_file(&tmp_path);
             return Err(e);
         }
