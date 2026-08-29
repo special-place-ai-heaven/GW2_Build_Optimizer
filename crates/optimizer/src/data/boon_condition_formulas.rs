@@ -78,17 +78,18 @@ pub fn try_load_condition_formulas() -> Result<ConditionFormulas, Vec<DataLoadEr
 // the one used in `data/formulas/conditions.json` (noun/adjective form), since
 // that is the lookup table all damage and metadata queries hit.
 //
-// 5 entries today; if the list grows materially, promote to a data file.
+// 6 entries today; if the list grows materially, promote to a data file.
 const CONDITION_ALIAS_TABLE: &[(&str, &str)] = &[
     ("Blind", "Blinded"),
     ("Poison", "Poisoned"),
     ("Immobilize", "Immobile"),
+    ("Immobilized", "Immobile"),
     ("Chill", "Chilled"),
     ("Cripple", "Crippled"),
 ];
 
 /// Returns the canonical condition name for `name`, mapping verb-form aliases
-/// (Blind, Poison, Immobilize) to the status-effect form used as keys in
+/// (Blind, Poison, Immobilize, Immobilized) to the status-effect form used as keys in
 /// `data/formulas/conditions.json` (Blinded, Poisoned, Immobile). Returns the
 /// input unchanged if it is already canonical or not a recognized alias.
 pub fn canonical_condition_name(name: &str) -> &str {
@@ -103,11 +104,9 @@ pub fn canonical_condition_name(name: &str) -> &str {
 /// Returns `true` if `status` names a GW2 condition (damaging or non-damaging).
 ///
 /// Accepts either verb-form aliases (Blind, Poison, Chill, Cripple,
-/// Immobilize) or canonical status-effect form (Blinded, Poisoned, Chilled,
-/// …) — the input is normalized via `canonical_condition_name` before
-/// matching, so the arms only list canonical forms. `Immobilized` stays as an
-/// explicit arm: the alias resolver only knows `Immobilize→Immobile`, not the
-/// past-tense `Immobilized`.
+/// Immobilize, Immobilized) or canonical status-effect form (Blinded, Poisoned,
+/// Chilled, …) — the input is normalized via `canonical_condition_name` before
+/// matching, so the arms only list canonical forms.
 pub(crate) fn is_condition(status: &str) -> bool {
     let canonical = canonical_condition_name(status);
     matches!(
@@ -124,7 +123,6 @@ pub(crate) fn is_condition(status: &str) -> bool {
             | "Crippled"
             | "Fear"
             | "Immobile"
-            | "Immobilized"
             | "Slow"
             | "Taunt"
     )
@@ -1141,6 +1139,7 @@ mod tests {
         ("Blind", "Blinded"),
         ("Poison", "Poisoned"),
         ("Immobilize", "Immobile"),
+        ("Immobilized", "Immobile"),
         ("Chill", "Chilled"),
         ("Cripple", "Crippled"),
         ("Burning", "Burning"),
@@ -1169,13 +1168,32 @@ mod tests {
     }
 
     #[test]
+    fn immobilized_resolves_to_immobile_formula() {
+        let c = conditions();
+        assert!(
+            c.get("Immobile").is_some(),
+            "Immobile is the real condition"
+        );
+        assert!(
+            c.get("Immobilized").is_none(),
+            "do not invent Immobilized as a separate condition"
+        );
+        assert_eq!(canonical_condition_name("Immobilized"), "Immobile");
+        assert_eq!(canonical_condition_name("Immobilize"), "Immobile");
+        assert_eq!(canonical_condition_name("Immobile"), "Immobile");
+        assert_eq!(
+            c.tick_damage("Immobilized", 1000.0, GameMode::PvE),
+            c.tick_damage("Immobile", 1000.0, GameMode::PvE),
+        );
+    }
+
+    #[test]
     fn test_canonical_condition_name_passthrough_for_unknown_input() {
         // Unknown input is returned verbatim (identity) — preserves behavior
         // for non-condition strings and any 4th-spelling alias not yet in
         // the table.
         assert_eq!(canonical_condition_name("Vulnerability"), "Vulnerability");
         assert_eq!(canonical_condition_name("Slow"), "Slow");
-        assert_eq!(canonical_condition_name("Immobilized"), "Immobilized");
         assert_eq!(canonical_condition_name("NotACondition"), "NotACondition");
         assert_eq!(canonical_condition_name(""), "");
     }
