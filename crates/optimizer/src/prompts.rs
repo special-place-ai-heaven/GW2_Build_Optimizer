@@ -483,6 +483,9 @@ pub struct GeminiBuildResponse {
     /// without it keep today's profile-prefix behavior. Names are resolved
     /// against GameDb by `validation::validate_gemini_build`.
     pub gear_slots: Option<std::collections::HashMap<String, String>>,
+    /// Ranger pet names from the plate: terrestrial[2] then aquatic[2].
+    /// Missing or empty slots are None. Unresolved until validate.
+    pub pets: Option<[Option<String>; 4]>,
 }
 
 /// Parse a Gemini response into a typed build suggestion.
@@ -610,7 +613,53 @@ pub fn parse_gemini_build(response: &str) -> Result<GeminiBuildResponse, String>
         }
     }
 
+    result.pets = parse_pets_field(json.get("pets"));
+
     Ok(result)
+}
+
+fn pet_slot_name(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("null") {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        serde_json::Value::Number(n) => n.as_u64().map(|id| format!("#{id}")),
+        serde_json::Value::Null => None,
+        _ => None,
+    }
+}
+
+fn two_pet_slots(arr: Option<&Vec<serde_json::Value>>) -> [Option<String>; 2] {
+    let empty: Vec<serde_json::Value> = Vec::new();
+    let items = arr.unwrap_or(&empty);
+    [
+        items.first().and_then(pet_slot_name),
+        items.get(1).and_then(pet_slot_name),
+    ]
+}
+
+/// Plate pets: `{terrestrial, aquatic}` arrays, or a flat 4-name list.
+fn parse_pets_field(value: Option<&serde_json::Value>) -> Option<[Option<String>; 4]> {
+    let value = value?;
+    if let Some(obj) = value.as_object() {
+        let land = two_pet_slots(obj.get("terrestrial").and_then(|v| v.as_array()));
+        let water = two_pet_slots(obj.get("aquatic").and_then(|v| v.as_array()));
+        return Some([land[0].clone(), land[1].clone(), water[0].clone(), water[1].clone()]);
+    }
+    if let Some(arr) = value.as_array() {
+        return Some([
+            arr.first().and_then(pet_slot_name),
+            arr.get(1).and_then(pet_slot_name),
+            arr.get(2).and_then(pet_slot_name),
+            arr.get(3).and_then(pet_slot_name),
+        ]);
+    }
+    None
 }
 
 #[cfg(test)]
@@ -738,6 +787,24 @@ mod tests {
         let response = r#"{"stat_prefix": "Viper's", "explanation": "Condi"}"#;
         let parsed = parse_gemini_build(response).unwrap();
         assert!(parsed.gear_slots.is_none());
+        assert!(parsed.pets.is_none());
+    }
+
+    /// RED: plate pets were dropped. Object form is terrestrial[2] then aquatic[2].
+    #[test]
+    fn parse_gemini_build_parses_ranger_pets() {
+        let response = r#"{
+            "pets": {
+                "terrestrial": ["Jungle Stalker", "Brown Bear"],
+                "aquatic": ["Shark", null]
+            }
+        }"#;
+        let parsed = parse_gemini_build(response).unwrap();
+        let pets = parsed.pets.expect("pets must parse");
+        assert_eq!(pets[0].as_deref(), Some("Jungle Stalker"));
+        assert_eq!(pets[1].as_deref(), Some("Brown Bear"));
+        assert_eq!(pets[2].as_deref(), Some("Shark"));
+        assert_eq!(pets[3], None);
     }
 
     #[test]

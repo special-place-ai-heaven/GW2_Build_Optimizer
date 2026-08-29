@@ -402,6 +402,8 @@ pub enum RejectCode {
     },
     /// Heal/utility/elite name did not resolve (exact / alnum_key only).
     SkillNotFound { name: String },
+    /// Ranger pet name did not resolve against GameDb.pets.
+    PetNotFound { name: String },
 }
 
 /// Structured validator rejection. `detail` mirrors the prior flat string
@@ -530,6 +532,7 @@ pub fn validate_gemini_build(
     }
     validate_weapons(response, db, profession_name, &mut result);
     validate_skills(response, db, profession_name, &mut result);
+    validate_pets(response, db, &mut result);
     if !response.specializations.is_empty() {
         for spec in &result.specializations {
             if spec.trait_ids.len() != 3 {
@@ -902,6 +905,26 @@ fn validate_skills(
     if let Some(name) = &elite_name {
         result.skills.elite = find_skill_by_name(name, &prof_skills, Some("Elite"), result);
     }
+}
+
+fn validate_pets(response: &GeminiBuildResponse, db: &GameDb, result: &mut ValidatedBuild) {
+    let Some(names) = &response.pets else {
+        return;
+    };
+    let mut ids = [None; 4];
+    for (i, slot) in names.iter().enumerate() {
+        let Some(name) = slot else {
+            continue;
+        };
+        match db.pet_by_name(name) {
+            Some(pet) => ids[i] = Some(pet.id),
+            None => result.errors.push(ValidationReject {
+                code: RejectCode::PetNotFound { name: name.clone() },
+                detail: format!("Pet '{}' not found", name),
+            }),
+        }
+    }
+    result.pets = Some((ids[0], ids[1], ids[2], ids[3]));
 }
 
 /// Revenant heal/utilities/elite are a legend bundle, not a free mix.
@@ -2822,5 +2845,61 @@ mod tests {
             !result.errors.iter().any(|e| e.detail.contains("unknown")),
             "{result:?}"
         );
+    }
+
+    fn ranger_pet_db() -> GameDb {
+        let mut db = GameDb::empty_for_tests();
+        for (id, name) in [
+            (1u32, "Juvenile Jungle Stalker"),
+            (2, "Juvenile Brown Bear"),
+            (3, "Juvenile Shark"),
+        ] {
+            db.pets.insert(
+                id,
+                gw2_api::models::Pet {
+                    id,
+                    name: name.into(),
+                    description: None,
+                    icon: None,
+                    skills: vec![],
+                },
+            );
+        }
+        db
+    }
+
+    /// RED: validate never wrote ValidatedBuild.pets.
+    #[test]
+    fn validate_writes_resolved_pets() {
+        let db = ranger_pet_db();
+        let mut response = GeminiBuildResponse::default();
+        response.pets = Some([
+            Some("Jungle Stalker".into()),
+            Some("Brown Bear".into()),
+            Some("Shark".into()),
+            None,
+        ]);
+        let result = validate_gemini_build(&response, &db, "Ranger");
+        assert_eq!(result.pets, Some((Some(1), Some(2), Some(3), None)));
+        assert!(
+            !result.errors.iter().any(|e| e.detail.to_lowercase().contains("pet")),
+            "{:?}",
+            result.errors
+        );
+    }
+
+    /// RED: unknown pet name must error, not silently drop.
+    #[test]
+    fn validate_pets_errors_on_unknown_name() {
+        let db = ranger_pet_db();
+        let mut response = GeminiBuildResponse::default();
+        response.pets = Some([Some("Warg".into()), None, None, None]);
+        let result = validate_gemini_build(&response, &db, "Ranger");
+        assert!(
+            result.errors.iter().any(|e| e.detail.contains("Warg")),
+            "miss must error: {:?}",
+            result.errors
+        );
+        assert_eq!(result.pets, Some((None, None, None, None)));
     }
 }
