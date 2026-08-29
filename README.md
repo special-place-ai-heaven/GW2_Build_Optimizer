@@ -19,6 +19,11 @@ typing while Choya is thinking; a new send cancels the in-flight reply.
 
 ## Screenshots
 
+**Open the overlay** from the Nexus Quick Access icon, or press **Ctrl+Shift+O**.
+Hover the icon and the tooltip names both.
+
+![Quick Access icon and hotkey](docs/screenshots/icon.png)
+
 **Improve Build** starts from the selected character's equipped skills, traits,
 and gear. Lock anything that must stay, choose the WvW/PvP/PvE role profile,
 then let the optimizer search for a stronger version around those constraints.
