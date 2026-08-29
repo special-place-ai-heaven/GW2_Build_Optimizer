@@ -172,6 +172,7 @@ After gathering data, respond with ONLY a JSON build object:
   "rune": "RuneName",
   "sigils": ["Sigil1", "Sigil2", "Sigil3", "Sigil4"],
   "relic": "RelicName",
+  "pets": {{"terrestrial": ["PetName", "PetName"], "aquatic": ["PetName", "PetName"]}},
   "stat_prefix": "PrefixName",
   "explanation": "2-3 sentences explaining the build's synergies and rotation."
 }}
@@ -231,6 +232,7 @@ After gathering data, respond with ONLY a JSON build object:
   "rune": "...",
   "sigils": [...],
   "relic": "...",
+  "pets": {{"terrestrial": [...], "aquatic": [...]}},
   "stat_prefix": "...",
   "changes_made": ["Change 1 description", "Change 2 description"],
   "explanation": "2-3 sentences explaining improvements."
@@ -267,7 +269,7 @@ Named gear prefix in the player's message wins (including Celestial). Ignore a p
 If they greet you, ask a question, or are just chatting — no build. Reply with JSON:
 {{"explanation": "<your spoken reply>", "specializations": []}}
 
-If they want a build, a loadout, an improve, or anything to equip: reply with the FULL JSON build object (specializations, weapons, skills, rune, sigils, relic, stat_prefix). Never explanation-only. Weapon type names match the API: Shortbow, Longbow, Greatsword (no spaces). If Context already lists an equipped Character loadout, do not call tools; edit that loadout. Copy weapons unchanged only if they asked to keep them. explanation: 2-4 sentences in {reply_language}.
+If they want a build, a loadout, an improve, or anything to equip: reply with the FULL JSON build object (specializations, weapons, skills, rune, sigils, relic, pets, stat_prefix). Never explanation-only. Weapon type names match the API: Shortbow, Longbow, Greatsword (no spaces). If Context already lists an equipped Character loadout, do not call tools; edit that loadout. Copy weapons unchanged only if they asked to keep them. explanation: 2-4 sentences in {reply_language}.
 
 If they want a new build and Context has no Character loadout: use at most two tool rounds, then reply with the full JSON build object. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: 2-4 sentences in {reply_language}.
 
@@ -309,6 +311,7 @@ Prefer search_upgrades / upgrade_synergies over list_* dumps. When plating a bui
     "set2_off": "Full Sigil Name"
   }},
   "relic": "Full Relic Name",
+  "pets": {{"terrestrial": ["PetName", "PetName"], "aquatic": ["PetName", "PetName"]}},
   "stat_prefix": "PrefixName",
   "gear_slots": {{"amulet": "PrefixName", "ring-1": "PrefixName"}},
   "changes_made": ["..."],
@@ -687,6 +690,31 @@ mod tests {
             prompt.contains("stat_prefix") && prompt.contains("overrides only the slots it names"),
             "the prompt must say gear_slots overrides on top of the base stat_prefix"
         );
+        // RED TMP-P9-A15-1: parse accepts pets, but the examples the model is
+        // shown omit the key, so Ranger plates never send one.
+        let schema = prompt
+            .split_once("```json")
+            .expect("the prompt must show a JSON example")
+            .1
+            .split_once("```")
+            .expect("the JSON example must close")
+            .0;
+        assert!(
+            schema.contains("\"pets\""),
+            "the documented schema must include pets, or Ranger plates drop them"
+        );
+        assert!(
+            prompt.contains("FULL JSON build object")
+                && prompt
+                    .split_once("FULL JSON build object")
+                    .expect("FULL JSON key list")
+                    .1
+                    .split_once(')')
+                    .expect("key list closes")
+                    .0
+                    .contains("pets"),
+            "the FULL JSON key list must mention pets"
+        );
         // Slot keys are matched against GearSlot::kebab_name(); a documented key
         // the validator would reject is worse than no documentation, because
         // the model would emit it and the slot would be silently dropped.
@@ -963,6 +991,7 @@ After gathering data, respond with ONLY a JSON build object:
   "rune": "RuneName",
   "sigils": ["Sigil1", "Sigil2", "Sigil3", "Sigil4"],
   "relic": "RelicName",
+  "pets": {"terrestrial": ["PetName", "PetName"], "aquatic": ["PetName", "PetName"]},
   "stat_prefix": "PrefixName",
   "explanation": "2-3 sentences explaining the build's synergies and rotation."
 }
@@ -1019,6 +1048,7 @@ After gathering data, respond with ONLY a JSON build object:
   "rune": "...",
   "sigils": [...],
   "relic": "...",
+  "pets": {"terrestrial": [...], "aquatic": [...]},
   "stat_prefix": "...",
   "changes_made": ["Change 1 description", "Change 2 description"],
   "explanation": "2-3 sentences explaining improvements."
