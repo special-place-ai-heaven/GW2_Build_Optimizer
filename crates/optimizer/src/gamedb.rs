@@ -207,7 +207,10 @@ impl GameDb {
                 } = fact
                 {
                     if is_condition(s) {
-                        traits_by_condition.entry(s.clone()).or_default().push(t.id);
+                        traits_by_condition
+                            .entry(condition_index_key(s).to_string())
+                            .or_default()
+                            .push(t.id);
                     } else if is_boon(s) {
                         traits_by_buff.entry(s.clone()).or_default().push(t.id);
                     }
@@ -225,7 +228,7 @@ impl GameDb {
                 {
                     if is_condition(s) {
                         skills_by_condition
-                            .entry(s.clone())
+                            .entry(condition_index_key(s).to_string())
                             .or_default()
                             .push(skill.id);
                     } else if is_boon(s) {
@@ -645,7 +648,7 @@ impl GameDb {
     /// Get trait IDs that apply a specific condition.
     pub fn traits_applying_condition(&self, condition: &str) -> Vec<&GW2Trait> {
         self.traits_by_condition
-            .get(condition)
+            .get(condition_index_key(condition))
             .map(|ids| ids.iter().filter_map(|id| self.traits.get(id)).collect())
             .unwrap_or_default()
     }
@@ -653,7 +656,7 @@ impl GameDb {
     /// Get skill IDs that apply a specific condition.
     pub fn skills_applying_condition(&self, condition: &str) -> Vec<&Skill> {
         self.skills_by_condition
-            .get(condition)
+            .get(condition_index_key(condition))
             .map(|ids| ids.iter().filter_map(|id| self.skills.get(id)).collect())
             .unwrap_or_default()
     }
@@ -721,6 +724,10 @@ impl GameDb {
 }
 
 use crate::data::boon_condition_formulas::is_condition;
+
+fn condition_index_key(status: &str) -> &str {
+    crate::data::boon_condition_formulas::canonical_condition_name(status)
+}
 
 /// GW2 boons.
 fn is_boon(status: &str) -> bool {
@@ -1047,5 +1054,22 @@ mod tests {
         assert_eq!(db.pet_display_name(66), "Juvenile Smokescale");
         assert_eq!(db.pet_by_name("Smokescale").map(|p| p.id), Some(66));
         assert_eq!(db.pet_by_name("#66").map(|p| p.id), Some(66));
+    }
+
+    #[test]
+    fn immobilized_aliases_hit_immobile_index() {
+        let mut db = GameDb::empty_for_tests();
+        let skill: Skill = serde_json::from_value(serde_json::json!({
+            "id": 7,
+            "name": "Test Immobilize"
+        }))
+        .unwrap();
+        db.skills.insert(7, skill);
+        db.skills_by_condition.insert("Immobile".into(), vec![7]);
+        for name in ["Immobilized", "Immobilize", "Immobile"] {
+            let hits = db.skills_applying_condition(name);
+            assert_eq!(hits.len(), 1, "{name}");
+            assert_eq!(hits[0].id, 7, "{name}");
+        }
     }
 }
