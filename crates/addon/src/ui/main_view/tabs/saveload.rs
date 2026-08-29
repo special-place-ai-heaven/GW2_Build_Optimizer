@@ -434,8 +434,38 @@ fn apply_loaded_suggestion(
     state.main.active_tab = MainTab::NewBuild;
 }
 
+/// Apply a dirty note draft in memory and return a disk snapshot.
+/// Load click must not `save_overwrite` on the draw frame; the ranch-load
+/// worker writes this snapshot before rotation sim.
+fn pending_note_snapshot(
+    state: &mut AddonState,
+    name: &str,
+) -> Option<gw2_core::types::SavedBuild> {
+    let draft = state
+        .main
+        .note_drafts
+        .get(name)
+        .cloned()
+        .unwrap_or_default();
+    let saved = state.main.saved_builds.iter_mut().find(|b| b.name == name)?;
+    if saved.notes == draft {
+        return None;
+    }
+    saved.notes = draft;
+    Some(saved.clone())
+}
+
+fn write_note_snapshot(addon_dir: &std::path::Path, snapshot: &gw2_core::types::SavedBuild) {
+    let storage = gw2_core::storage::BuildStorage::new(addon_dir);
+    if let Err(e) = storage.save_overwrite(snapshot) {
+        crate::state::with_state(|s| {
+            s.main.error = Some(tf("fmt.save_failed", &[("err", &e.to_string())]));
+        });
+    }
+}
+
 fn load_named(state: &mut AddonState, name: &str) {
-    persist_notes(state, name);
+    let notes_snapshot = pending_note_snapshot(state, name);
     let Some(saved) = state
         .main
         .saved_builds
@@ -446,9 +476,17 @@ fn load_named(state: &mut AddonState, name: &str) {
         return;
     };
     // Snapshot only. Rotation sim, 3-tier combat, and chat-code run in the worker.
+    // Dirty notes overwrite also runs in this worker, before sim, so a cancel
+    // before CPU does not drop the draft.
     let game_db = state.main.game_db.clone();
     let game_mode = state.main.game_mode.clone();
+    let addon_dir = state.addon_dir.clone();
+    let notes_retry = notes_snapshot.clone();
+    let addon_dir_retry = addon_dir.clone();
     let spawned = state.spawn_worker("ranch-load", move |token| {
+        if let Some(snapshot) = notes_snapshot {
+            write_note_snapshot(&addon_dir, &snapshot);
+        }
         if token.is_cancelled() {
             return;
         }
@@ -463,6 +501,12 @@ fn load_named(state: &mut AddonState, name: &str) {
         state.main.comparison.error = Some(
             "Could not start the load thread - the system refused it. Try again.".into(),
         );
+        // Notes still have to land eventually; not on this click frame.
+        if let Some(snapshot) = notes_retry {
+            let _ = state.spawn_worker("ranch-notes", move |_token| {
+                write_note_snapshot(&addon_dir_retry, &snapshot);
+            });
+        }
     }
 }
 
@@ -1505,6 +1549,81 @@ mod tests {
         assert!(
             !apply.contains("compute_3tier_combat"),
             "completion must not run 3-tier combat"
+        );
+    }
+
+    #[test]
+    fn ranch_load_click_handler_does_not_persist_notes_on_click_frame() {
+        let src = include_str!("saveload.rs");
+        let production = src.split("\n#[cfg(test)]")[0];
+
+        fn fn_body<'a>(production: &'a str, name: &'a str) -> &'a str {
+            let needle = format!("fn {name}(");
+            let start = production
+                .find(&needle)
+                .unwrap_or_else(|| panic!("{name} missing from production source"));
+            let after = &production[start..];
+            let nxt = after[1..].find("\nfn ").unwrap_or(after.len() - 1);
+            &after[..nxt + 1]
+        }
+
+        let click = fn_body(production, "load_named");
+        assert!(
+            click.contains("spawn_worker"),
+            "A23-2: load_named must still spawn ranch-load"
+        );
+        assert!(
+            click.contains("ranch-load"),
+            "A23-2: spawn_worker(\"ranch-load\") must remain"
+        );
+        assert!(
+            !click.contains("persist_notes"),
+            "load_named must not call persist_notes on the Load click/draw frame"
+        );
+        assert!(
+            !click.contains("save_overwrite"),
+            "load_named must not save_overwrite on the Load click/draw frame"
+        );
+        for forbidden in [
+            "simulate_suggestion_rotation",
+            "suggestion_to_chat_code",
+            "compute_3tier_combat",
+            "saved_to_suggestion",
+        ] {
+            assert!(
+                !click.contains(forbidden),
+                "A23-2 preserved: load_named must not run {forbidden} synchronously"
+            );
+        }
+        assert!(
+            click.contains("write_note_snapshot"),
+            "dirty notes must still be handed to the ranch-load worker"
+        );
+        let write_at = click
+            .find("write_note_snapshot")
+            .expect("write_note_snapshot in load_named");
+        let cpu_at = click
+            .find("suggestion_from_saved_build")
+            .expect("suggestion_from_saved_build in load_named");
+        assert!(
+            write_at < cpu_at,
+            "notes overwrite must run in the worker before rotation/combat CPU"
+        );
+
+        let writer = fn_body(production, "write_note_snapshot");
+        assert!(
+            writer.contains("save_overwrite"),
+            "notes disk write lives in write_note_snapshot, off the click frame"
+        );
+        assert!(
+            !writer.contains("simulate_suggestion_rotation"),
+            "notes writer must not run rotation sim"
+        );
+
+        let persist = fn_body(production, "persist_notes");
+        assert!(
+            persist.contains("save_overwrite"),
+            "persist_notes stays for non-Load paths (notes field / delete confirm)"
         );
     }
 }
