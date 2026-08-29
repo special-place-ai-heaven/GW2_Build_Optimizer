@@ -320,9 +320,12 @@ impl AddonState {
     }
 
     /// Reset persisted settings and transient UI state back to first-run setup.
+    ///
+    /// In-memory reset runs under the caller's STATE guard; the disk write is
+    /// handed to [`crate::ui::save_config_detached`] so this method never writes
+    /// `config.json` while STATE is held. Write errors are logged by that worker.
     pub fn reset_to_first_run(&mut self) -> Result<(), std::io::Error> {
         let config = AppConfig::default();
-        config.save(&self.config_path)?;
 
         // Workers started before the reset keep the old token, which is cancelled
         // here, so they wind down on their own. Their handles stay in the registry
@@ -338,6 +341,7 @@ impl AddonState {
         self.news = crate::news::NewsState::default();
         self.screen = Screen::Setup(SetupStep::Language);
 
+        crate::ui::save_config_detached(self);
         Ok(())
     }
 }
@@ -380,8 +384,8 @@ pub struct MainState {
     /// reference, and the database is tens of megabytes, so the old
     /// `state.main.game_db.clone()` at each spawn site was a deep copy taken on the
     /// render thread while holding STATE. Cloning the `Arc` is a refcount bump.
-    /// Publish a new one with [`MainState::set_game_db`] and mutate in place with
-    /// [`MainState::game_db_mut`].
+    /// Publish a new one with [`MainState::set_game_db`]. In-place edits go through
+    /// [`MainState::game_db_mut`], which skips when a worker still holds a clone.
     pub game_db: Option<Arc<GameDb>>,
     pub game_db_loading: bool,
     /// Last failed auto-load attempt — gates the per-frame retry so a
@@ -511,14 +515,12 @@ impl MainState {
     /// Mutable access to the loaded database, for in-place edits such as attaching
     /// a localized name pack.
     ///
-    /// Copy-on-write: if a background worker is holding a clone right now, this
-    /// deep-copies once so the worker's snapshot is not mutated underneath it.
-    // ponytail: that copy lands on the render thread. It only fires while a worker
-    // is mid-flight, and the alternative (`Arc::get_mut`) silently skips the edit
-    // instead. Publishing an already-localized database via `set_game_db` avoids
-    // both — worth doing when the localization call sites are next opened.
+    /// If a background worker still holds a clone, this returns `None` rather than
+    /// deep-copying tens of megabytes on the thread that holds STATE. Callers that
+    /// can build a localized copy off-lock should publish it with
+    /// [`MainState::set_game_db`].
     pub fn game_db_mut(&mut self) -> Option<&mut GameDb> {
-        self.game_db.as_mut().map(Arc::make_mut)
+        self.game_db.as_mut().and_then(Arc::get_mut)
     }
 
     /// Clear the currently resolved build view so the UI never shows stale data.
@@ -734,21 +736,31 @@ pub fn init(addon_dir: PathBuf) {
 }
 
 pub fn toggle_window() {
-    if let Some(state) = lock_state().as_mut() {
+    let snapshot = {
+        let mut guard = lock_state();
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
         state.window_visible = !state.window_visible;
         state.config.window_visible = state.window_visible;
         if state.window_visible {
             state.needs_character_reload = true;
         }
-        let _ = state.config.save(&state.config_path);
-    }
+        (state.config.clone(), state.config_path.clone())
+    };
+    let _ = snapshot.0.save(&snapshot.1);
 }
 
 pub fn persist_window() {
-    if let Some(state) = lock_state().as_mut() {
+    let snapshot = {
+        let mut guard = lock_state();
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
         state.config.window_visible = state.window_visible;
-        let _ = state.config.save(&state.config_path);
-    }
+        (state.config.clone(), state.config_path.clone())
+    };
+    let _ = snapshot.0.save(&snapshot.1);
 }
 
 pub fn is_window_visible() -> bool {
@@ -1663,11 +1675,108 @@ mod tests {
         assert_eq!(cache_build, None);
         assert!(locks_cleared);
 
+        // Disk write is detached; wait with STATE released so the worker can finish.
+        let report = join_workers(Duration::from_secs(5));
+        assert!(
+            report.abandoned.is_empty(),
+            "reset detached config write must finish: {report}"
+        );
+
         let (saved_config, err) = AppConfig::load(&AppConfig::config_path(&dir));
         assert!(err.is_none());
         assert!(!saved_config.has_gw2_key());
         assert!(!saved_config.has_active_llm_key());
         assert_eq!(saved_config.cache_build_number, None);
+    }
+
+    /// Source pin: toggle/persist snapshot then write after the STATE guard
+    /// drops; reset queues the write through save_config_detached.
+    #[test]
+    fn toggle_persist_reset_do_not_save_under_state() {
+        let src = include_str!("state.rs");
+        let toggle = pin_fn(src, "toggle_window");
+        let persist = pin_fn(src, "persist_window");
+        let reset = pin_fn(src, "reset_to_first_run");
+
+        assert!(
+            !toggle.contains("state.config.save"),
+            "toggle_window must not save through the locked AddonState"
+        );
+        assert!(
+            brace_depth_at(toggle, ".save(") < brace_depth_at(toggle, "lock_state()"),
+            "toggle_window must drop the STATE guard before writing config.json"
+        );
+        assert!(
+            !persist.contains("state.config.save"),
+            "persist_window must not save through the locked AddonState"
+        );
+        assert!(
+            brace_depth_at(persist, ".save(") < brace_depth_at(persist, "lock_state()"),
+            "persist_window must drop the STATE guard before writing config.json"
+        );
+        assert!(
+            reset.contains("save_config_detached"),
+            "reset_to_first_run must queue the write off the STATE guard"
+        );
+        assert!(
+            !reset.contains(".save("),
+            "reset_to_first_run must not write config.json on this thread"
+        );
+    }
+
+    /// Source pin + behaviour: skip the edit when a worker holds a clone.
+    #[test]
+    fn game_db_mut_skips_when_shared() {
+        let src = include_str!("state.rs");
+        let body = pin_fn(src, "game_db_mut");
+        assert!(
+            !body.contains("Arc::make_mut"),
+            "game_db_mut must not deep-copy GameDb under STATE"
+        );
+        assert!(
+            body.contains("Arc::get_mut"),
+            "game_db_mut must skip when the Arc is shared"
+        );
+
+        let mut main = MainState::default();
+        main.set_game_db(GameDb::empty_for_tests());
+        assert!(
+            main.game_db_mut().is_some(),
+            "unique owner can edit in place"
+        );
+        let held = main.game_db.clone();
+        assert!(
+            main.game_db_mut().is_none(),
+            "must skip rather than copy while a clone is live"
+        );
+        drop(held);
+        assert!(main.game_db_mut().is_some());
+    }
+
+    fn pin_fn<'a>(src: &'a str, name: &str) -> &'a str {
+        let marker = format!("fn {name}(");
+        let idx = src.find(&marker).unwrap_or_else(|| panic!("missing fn {name}"));
+        let brace = src[idx..].find('{').expect("fn body") + idx;
+        let mut depth = 0usize;
+        for (i, c) in src[brace..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &src[idx..=brace + i];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("unclosed fn {name}");
+    }
+
+    fn brace_depth_at(body: &str, needle: &str) -> usize {
+        let at = body.find(needle).unwrap_or_else(|| panic!("missing {needle}"));
+        body[..at].bytes().filter(|b| *b == b'{').count()
+            - body[..at].bytes().filter(|b| *b == b'}').count()
     }
 
     // ── catch_unwind panic-recovery tests ─────────────────────────────────────
