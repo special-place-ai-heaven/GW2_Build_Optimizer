@@ -970,14 +970,15 @@ fn fill_revenant_legends(
         .into_iter()
         .filter(|id| db.legend_available(id, &spec_ids))
         .collect();
-    let inferred = explicit.is_empty();
     let mut ids = explicit;
+    let mut inferred_from_heal = false;
     if ids.is_empty() {
         if let Some((heal_id, _)) = &result.skills.heal {
             if let Some(id) = db.legends.iter().find_map(|(id, l)| {
                 (l.heal == *heal_id && db.legend_available(id, &spec_ids)).then(|| id.clone())
             }) {
                 ids.push(id);
+                inferred_from_heal = true;
             }
         }
     }
@@ -1026,7 +1027,7 @@ fn fill_revenant_legends(
         result.skills.heal = Some((legend.heal, name_of(legend.heal)));
         result.skills.utilities = new_utilities;
         result.skills.elite = new_elite;
-        if inferred && (utilities_changed || elite_changed) {
+        if inferred_from_heal && (utilities_changed || elite_changed) {
             result.warnings.push(format!(
                 "Revenant utilities/elite were replaced from legend {} inferred from heal",
                 ids[0]
@@ -3130,6 +3131,40 @@ mod tests {
                 .any(|e| matches!(e.code, RejectCode::SkillNotFound { .. })),
             "filled legend bar must not keep SkillNotFound: {:?}",
             result.errors
+        );
+    }
+
+    /// RED: rest-pad (no heal, no Legend* tokens) must not claim inferred-from-heal.
+    #[test]
+    fn revenant_rest_pad_does_not_warn_inferred_from_heal() {
+        let db = legend_fixture_db();
+        let mut result = ValidatedBuild::default();
+        result.skills.utilities = vec![
+            Some((21, "Util X".into())),
+            Some((22, "Util Y".into())),
+            Some((23, "Util Z".into())),
+        ];
+        result.skills.elite = Some((29, "Elite Two".into()));
+        fill_revenant_legends(&GeminiBuildResponse::default(), &mut result, &db);
+        assert_eq!(result.legends.first().map(String::as_str), Some("Legend1"));
+        assert_eq!(result.skills.heal.as_ref().map(|h| h.0), Some(10));
+        assert_eq!(
+            result
+                .skills
+                .utilities
+                .iter()
+                .filter_map(|u| u.as_ref().map(|p| p.0))
+                .collect::<Vec<_>>(),
+            vec![11, 12, 13]
+        );
+        assert_eq!(result.skills.elite.as_ref().map(|e| e.0), Some(19));
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|w| w.contains("inferred from heal")),
+            "rest-pad must not claim inferred from heal: {:?}",
+            result.warnings
         );
     }
 }
