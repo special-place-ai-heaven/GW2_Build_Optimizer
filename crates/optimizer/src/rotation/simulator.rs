@@ -56,6 +56,8 @@ pub(super) fn reference_armor() -> f64 {
 struct ConditionStack {
     condition: String,
     remaining_ms: u32,
+    /// Per-application pulse clock (apply + 1s, then +1s). Not a global wall pulse.
+    next_tick_ms: u32,
 }
 
 /// Active buff being tracked.
@@ -206,7 +208,7 @@ struct SimState {
     total_condition_damage: f64,
     skill_casts: HashMap<u32, u32>,        // skill_id → cast count
     skill_damage: HashMap<u32, f64>,       // skill_id → total damage
-    condition_ticks: HashMap<String, u32>, // condition → total ticks
+    condition_ticks: HashMap<String, f64>, // condition → paid tick units (fractional last pulse)
     buff_active_ms: HashMap<String, u32>,  // buff → total ms active
     params: SimParams,
 }
@@ -294,6 +296,11 @@ impl SimState {
     /// Availability means: off cooldown AND (weapon_set==0 OR weapon_set==active_set).
     /// Auto-attack (Weapon1 with cooldown 0) is used as filler when nothing else is ready.
     fn pick_skill(&self, power: f64, condition_damage: f64, weapon_strength: f64) -> Option<usize> {
+        let fury_active = self
+            .buffs
+            .iter()
+            .any(|buff| buff.buff.eq_ignore_ascii_case("Fury"));
+        let live_might = self.live_might_stacks();
         let mut best_idx = None;
         let mut best_dpct = 0.0f64;
         let mut filler_idx = None;
@@ -331,7 +338,9 @@ impl SimState {
                 power,
                 condition_damage,
                 weapon_strength,
-                &self.params.mode,
+                &self.params,
+                live_might,
+                fury_active,
             );
             if dpct > best_dpct {
                 best_dpct = dpct;
@@ -393,6 +402,12 @@ impl SimState {
             return false; // still have skills to use on current set
         }
 
+        let fury_active = self
+            .buffs
+            .iter()
+            .any(|buff| buff.buff.eq_ignore_ascii_case("Fury"));
+        let live_might = self.live_might_stacks();
+
         // Check: does the other set have off-cooldown skills with DPCT > 0?
         self.skills.iter().enumerate().any(|(i, s)| {
             s.weapon_set == other_set
@@ -403,7 +418,9 @@ impl SimState {
                     power,
                     condition_damage,
                     weapon_strength,
-                    &self.params.mode,
+                    &self.params,
+                    live_might,
+                    fury_active,
                 ) > 0.0
         })
     }
@@ -478,6 +495,9 @@ impl SimState {
                             remaining_ms: (*duration_ms as f64
                                 * self.params.condition_duration_mult)
                                 .round() as u32,
+                            next_tick_ms: self
+                                .current_time_ms
+                                .saturating_add(CONDITION_TICK_INTERVAL_MS),
                         });
                     }
                 }
@@ -546,12 +566,11 @@ impl SimState {
     }
 
     /// Tick all active conditions — apply damage for each stack, remove expired.
+    ///
+    /// Wiki Condition: full seconds tick normally; the leftover fraction of a
+    /// second pays that fraction of one tick. Per-application `next_tick_ms`,
+    /// not a global `t % 1000` pulse.
     fn tick_conditions(&mut self, condition_damage: f64) {
-        // Only tick on 1-second boundaries
-        if self.current_time_ms % CONDITION_TICK_INTERVAL_MS != 0 {
-            return;
-        }
-
         // Wiki Might: +condition_damage_per_stack (boons.json, 30 at L80) and
         // "Current conditions are still affected by might." Same fold as
         // wvw_timeline::tick_conditions. Dummy stays unbooned; this is the
@@ -560,30 +579,50 @@ impl SimState {
             + self.live_might_stacks()
                 * crate::data::boon_condition_formulas::boons().might_condi_per_stack();
 
+        let now = self.current_time_ms;
         let mut tick_total = 0.0;
         for stack in &mut self.conditions {
-            if stack.remaining_ms > 0 {
-                let tick_dmg =
-                    condition_tick_damage(&stack.condition, condition_damage, &self.params.mode)
-                        * self.params.condition_mult;
+            let tick_dmg =
+                condition_tick_damage(&stack.condition, condition_damage, &self.params.mode)
+                    * self.params.condition_mult;
+
+            while stack.next_tick_ms <= now && stack.remaining_ms >= CONDITION_TICK_INTERVAL_MS {
                 self.total_condition_damage += tick_dmg;
                 tick_total += tick_dmg;
-                // Skip the per-tick `stack.condition.clone()` once the key is
-                // already present in the map. Hash + lookup is cheaper than
-                // String allocation across thousands of ticks per sim.
                 if let Some(count) = self.condition_ticks.get_mut(&stack.condition) {
-                    *count += 1;
+                    *count += 1.0;
                 } else {
-                    self.condition_ticks.insert(stack.condition.clone(), 1);
+                    self.condition_ticks.insert(stack.condition.clone(), 1.0);
                 }
-                stack.remaining_ms = stack
-                    .remaining_ms
-                    .saturating_sub(CONDITION_TICK_INTERVAL_MS);
+                stack.remaining_ms -= CONDITION_TICK_INTERVAL_MS;
+                stack.next_tick_ms = stack
+                    .next_tick_ms
+                    .saturating_add(CONDITION_TICK_INTERVAL_MS);
+            }
+
+            // Expiry: leftover < 1s pays (remaining_ms/1000)*tick, not a full pulse.
+            let last_boundary = stack
+                .next_tick_ms
+                .saturating_sub(CONDITION_TICK_INTERVAL_MS);
+            let expires_at = last_boundary.saturating_add(stack.remaining_ms);
+            if stack.remaining_ms > 0
+                && stack.remaining_ms < CONDITION_TICK_INTERVAL_MS
+                && now >= expires_at
+            {
+                let frac = stack.remaining_ms as f64 / CONDITION_TICK_INTERVAL_MS as f64;
+                let frac_dmg = tick_dmg * frac;
+                self.total_condition_damage += frac_dmg;
+                tick_total += frac_dmg;
+                if let Some(count) = self.condition_ticks.get_mut(&stack.condition) {
+                    *count += frac;
+                } else {
+                    self.condition_ticks.insert(stack.condition.clone(), frac);
+                }
+                stack.remaining_ms = 0;
             }
         }
         self.apply_dummy_damage(tick_total);
 
-        // Remove expired
         self.conditions.retain(|s| s.remaining_ms > 0);
     }
 
@@ -633,7 +672,7 @@ impl SimState {
         let condition_uptime: HashMap<String, f64> = self
             .condition_ticks
             .iter()
-            .map(|(name, ticks)| (name.clone(), *ticks as f64 / duration_secs))
+            .map(|(name, ticks)| (name.clone(), ticks / duration_secs))
             .collect();
 
         // Buff uptime as fraction of total duration
@@ -739,7 +778,8 @@ impl SimState {
 /// highest DPCT should always be used first when multiple are off cooldown.
 ///
 /// Accounts for:
-/// - **Strike damage**: direct weapon damage per hit
+/// - **Strike damage**: same expected strike as `use_skill` (Might power,
+///   Fury crit bonus, `strike_crit_factor_with_bonus`, `strike_mult`)
 /// - **Condition damage**: total tick damage over the condition's full duration
 /// - **Buff value**: estimated DPS increase from Might, Fury, Quickness
 fn skill_dps_efficiency(
@@ -747,7 +787,9 @@ fn skill_dps_efficiency(
     power: f64,
     condition_damage: f64,
     weapon_strength: f64,
-    mode: &GameMode,
+    params: &SimParams,
+    live_might_stacks: f64,
+    fury_active: bool,
 ) -> f64 {
     let cast_time_s = (skill.cast_time_ms + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS) as f64 / 1000.0;
     if cast_time_s <= 0.0 {
@@ -762,9 +804,22 @@ fn skill_dps_efficiency(
                 hit_count,
                 dmg_multiplier,
             } => {
-                total_damage_value += weapon_strength * power / reference_armor()
+                // Same power / crit / strike_mult fold as `use_skill`.
+                let effective_power = power + live_might_stacks * 30.0;
+                let fury_bonus = if fury_active {
+                    params.fury_crit_chance_bonus
+                } else {
+                    0.0
+                };
+                total_damage_value += weapon_strength * effective_power / reference_armor()
                     * dmg_multiplier
-                    * (*hit_count as f64);
+                    * (*hit_count as f64)
+                    * strike_crit_factor_with_bonus(
+                        params.precision,
+                        params.ferocity,
+                        params.crit_chance_bonus + fury_bonus,
+                    )
+                    * params.strike_mult;
             }
             SkillEffect::ApplyCondition {
                 condition,
@@ -772,7 +827,7 @@ fn skill_dps_efficiency(
                 duration_ms,
             } => {
                 // Total condition damage over the full duration of all stacks
-                let tick_dmg = condition_tick_damage(condition, condition_damage, mode);
+                let tick_dmg = condition_tick_damage(condition, condition_damage, &params.mode);
                 let duration_s = *duration_ms as f64 / 1000.0;
                 total_damage_value += tick_dmg * (*stacks as f64) * duration_s;
             }
@@ -787,7 +842,7 @@ fn skill_dps_efficiency(
                     *duration_ms,
                     power,
                     weapon_strength,
-                    mode,
+                    &params.mode,
                 );
             }
             _ => {}
@@ -962,6 +1017,18 @@ mod tests {
         }
     }
 
+    fn dpct(skill: &RotationSkill, power: f64, condition_damage: f64, weapon_strength: f64) -> f64 {
+        skill_dps_efficiency(
+            skill,
+            power,
+            condition_damage,
+            weapon_strength,
+            &SimParams::basic(power, condition_damage, weapon_strength),
+            0.0,
+            false,
+        )
+    }
+
     #[test]
     fn test_simulate_auto_attack_only() {
         let skills = vec![auto_attack()];
@@ -1115,8 +1182,8 @@ mod tests {
             weapon_set: 0,
         };
 
-        let high_dpct = skill_dps_efficiency(&high_dmg, 2000.0, 0.0, 1100.0, &GameMode::PvE);
-        let low_dpct = skill_dps_efficiency(&low_dmg, 2000.0, 0.0, 1100.0, &GameMode::PvE);
+        let high_dpct = dpct(&high_dmg, 2000.0, 0.0, 1100.0);
+        let low_dpct = dpct(&low_dmg, 2000.0, 0.0, 1100.0);
         assert!(
             high_dpct > low_dpct,
             "High-damage skill ({:.1}) should have higher DPCT than slow weak skill ({:.1})",
@@ -1144,7 +1211,7 @@ mod tests {
             weapon_set: 0,
         };
 
-        let dpct = skill_dps_efficiency(&condi_skill, 1000.0, 1500.0, 1100.0, &GameMode::PvE);
+        let dpct = dpct(&condi_skill, 1000.0, 1500.0, 1100.0);
         assert!(dpct > 0.0, "Condition skill should have positive DPCT");
 
         // Burning at 1500 CD = 0.155*1500+131 = 363.5 per tick
@@ -1176,7 +1243,7 @@ mod tests {
             weapon_set: 0,
         };
 
-        let dpct = skill_dps_efficiency(&buff, 2000.0, 0.0, 1100.0, &GameMode::PvE);
+        let dpct = dpct(&buff, 2000.0, 0.0, 1100.0);
         assert!(dpct > 0.0, "Might buff should have positive DPCT value");
     }
 
@@ -1576,6 +1643,181 @@ mod tests {
         assert_eq!(
             casts, 2,
             "10s CD with Alacrity 25% is two casts in 15.5s; 33% sneaks a third (got {casts})"
+        );
+    }
+
+    fn paid_bleed_ticks(remaining_ms: u32, window_ms: u32) -> (f64, f64) {
+        let params = SimParams::basic(1_000.0, 1_000.0, 1_100.0);
+        let mut sim = SimState::new(&[], window_ms, EnemyDummy::open(), params);
+        sim.conditions.push(ConditionStack {
+            condition: "Bleeding".into(),
+            remaining_ms,
+            next_tick_ms: CONDITION_TICK_INTERVAL_MS,
+        });
+        while sim.current_time_ms < window_ms {
+            sim.tick_conditions(1_000.0);
+            sim.current_time_ms += TICK_MS;
+        }
+        let ticks = sim.condition_ticks.get("Bleeding").copied().unwrap_or(0.0);
+        (sim.total_condition_damage, ticks)
+    }
+
+    #[test]
+    fn fractional_tick_500ms_is_half_not_full() {
+        // Wiki Condition: leftover fraction of a second pays that fraction.
+        // Old wall-clock pulse paid a full 1s tick whenever remaining_ms > 0.
+        let window_ms = 2_500;
+        let (damage, ticks) = paid_bleed_ticks(500, window_ms);
+        let tick = condition_tick_damage("Bleeding", 1_000.0, &GameMode::PvE);
+        assert!(
+            (ticks - 0.5).abs() < 1e-9,
+            "500ms must pay 0.5 ticks, got {ticks}"
+        );
+        assert!(
+            (damage - 0.5 * tick).abs() < 1e-6,
+            "500ms damage {damage} != 0.5*{tick}"
+        );
+        assert!(
+            (ticks - 1.0).abs() > 0.1,
+            "500ms must not pay a full 1s tick"
+        );
+    }
+
+    #[test]
+    fn fractional_tick_1500ms_is_one_and_a_half_not_two() {
+        // 1500ms = 1 full + 0.5 leftover. Window includes t=2000 so the old
+        // boundary clock would have paid a second full tick.
+        let window_ms = 2_500;
+        let (damage, ticks) = paid_bleed_ticks(1_500, window_ms);
+        let tick = condition_tick_damage("Bleeding", 1_000.0, &GameMode::PvE);
+        assert!(
+            (ticks - 1.5).abs() < 1e-9,
+            "1500ms must pay 1.5 ticks, got {ticks}"
+        );
+        assert!(
+            (damage - 1.5 * tick).abs() < 1e-6,
+            "1500ms damage {damage} != 1.5*{tick}"
+        );
+        assert!(
+            (ticks - 2.0).abs() > 0.1,
+            "1500ms must not pay 2 full ticks"
+        );
+    }
+
+    fn strike_skill() -> RotationSkill {
+        RotationSkill {
+            skill_id: 60,
+            name: "Power Hit".into(),
+            slot: SkillSlot::Weapon2,
+            cast_time_ms: 500,
+            cooldown_ms: 20_000,
+            effects: vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+        }
+    }
+
+    fn bleed_skill(duration_ms: u32) -> RotationSkill {
+        RotationSkill {
+            skill_id: 61,
+            name: "Bleed Hit".into(),
+            slot: SkillSlot::Weapon3,
+            cast_time_ms: 500,
+            cooldown_ms: 20_000,
+            effects: vec![SkillEffect::ApplyCondition {
+                condition: "Bleeding".into(),
+                stacks: 1,
+                duration_ms,
+            }],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+        }
+    }
+
+    #[test]
+    fn high_crit_params_flip_strike_vs_condi_pick() {
+        let power = 2_000.0;
+        let condition_damage = 1_000.0;
+        let weapon_strength = 1_100.0;
+        let old_strike = weapon_strength * power / reference_armor();
+        let tick = condition_tick_damage("Bleeding", condition_damage, &GameMode::PvE);
+        // One extra second so the old (no-crit) strike term loses to condi.
+        let bleed_ms = ((old_strike / tick).ceil() as u32 + 1) * 1_000;
+        let strike = strike_skill();
+        let condi = bleed_skill(bleed_ms);
+        let old_condi = tick * (bleed_ms as f64 / 1_000.0);
+        assert!(
+            old_condi > old_strike,
+            "old formula must prefer condi ({old_condi} > {old_strike})"
+        );
+
+        let no_crit = SimParams::basic(power, condition_damage, weapon_strength);
+        let no_crit_strike = skill_dps_efficiency(
+            &strike,
+            power,
+            condition_damage,
+            weapon_strength,
+            &no_crit,
+            0.0,
+            false,
+        );
+        let no_crit_condi = skill_dps_efficiency(
+            &condi,
+            power,
+            condition_damage,
+            weapon_strength,
+            &no_crit,
+            0.0,
+            false,
+        );
+        assert!(
+            no_crit_condi > no_crit_strike,
+            "precision=0 must match old formula (condi wins)"
+        );
+
+        let mut high_crit = no_crit.clone();
+        high_crit.precision = 2_500.0;
+        high_crit.ferocity = 2_000.0;
+        let high_strike = skill_dps_efficiency(
+            &strike,
+            power,
+            condition_damage,
+            weapon_strength,
+            &high_crit,
+            0.0,
+            false,
+        );
+        let high_condi = skill_dps_efficiency(
+            &condi,
+            power,
+            condition_damage,
+            weapon_strength,
+            &high_crit,
+            0.0,
+            false,
+        );
+        assert!(
+            high_strike > high_condi,
+            "high crit must flip DPCT to strike ({high_strike} vs {high_condi})"
+        );
+
+        let skills = vec![strike, condi];
+        let sim_old = SimState::new(&skills, 5_000, EnemyDummy::open(), no_crit);
+        assert_eq!(
+            sim_old.pick_skill(power, condition_damage, weapon_strength),
+            Some(1),
+            "old formula / no-crit params pick condi"
+        );
+        let sim_new = SimState::new(&skills, 5_000, EnemyDummy::open(), high_crit);
+        assert_eq!(
+            sim_new.pick_skill(power, condition_damage, weapon_strength),
+            Some(0),
+            "high-crit params pick strike"
         );
     }
 }

@@ -348,29 +348,12 @@ impl GameDb {
         exact.or(fuzzy.map(|(_, _, is)| is))
     }
 
-    /// Wiki main-table Giver's: Toughness / Healing Power / Concentration.
-    /// `/v2/itemstats` spells those `Healing` and `BoonDuration`. Trinket
-    /// flats on 1430 are ignored so 628/1070/1430 share one shape.
-    fn wiki_givers_three_stat(stat: &ItemStat) -> bool {
-        if gw2_core::i18n::alnum_key(&stat.name) != "givers" {
-            return false;
-        }
-        let mut attrs: Vec<&str> = stat
-            .attributes
-            .iter()
-            .filter(|a| a.multiplier > 0.0)
-            .map(|a| a.attribute.as_str())
-            .collect();
-        attrs.sort_unstable();
-        attrs == ["BoonDuration", "Healing", "Toughness"]
-    }
-
     /// Exact-name ties: wiki three-stat Giver's outranks other multiplier
     /// shapes of that English name; otherwise lower id wins.
     fn exact_name_outranks(candidate: &ItemStat, incumbent: &ItemStat) -> bool {
         match (
-            Self::wiki_givers_three_stat(candidate),
-            Self::wiki_givers_three_stat(incumbent),
+            crate::itemstat_pool::is_wiki_givers_three_stat(candidate),
+            crate::itemstat_pool::is_wiki_givers_three_stat(incumbent),
         ) {
             (true, false) => true,
             (false, true) => false,

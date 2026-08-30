@@ -409,14 +409,25 @@ mod tests {
 
     #[test]
     fn news_count_key_uses_slavic_plural_form() {
-        for n in [1, 21, 101] {
-            assert_eq!(news_count_key(n), "fmt.news_one", "n={n}");
+            gw2_core::i18n::set_language("en");
+            assert_eq!(news_count_key(1), "fmt.news_one");
+            for n in [0, 2, 21, 22, 101] {
+                assert_eq!(news_count_key(n), "fmt.news_many", "en n={n}");
+            }
+
+            gw2_core::i18n::set_language("pl");
+            assert_eq!(news_count_key(1), "fmt.news_one");
+            assert_eq!(news_count_key(21), "fmt.news_many");
+            assert_eq!(news_count_key(2), "fmt.news_few");
+
+            gw2_core::i18n::set_language("ru");
+            assert_eq!(news_count_key(21), "fmt.news_one");
+            assert_eq!(news_count_key(2), "fmt.news_few");
+
+            gw2_core::i18n::set_language("fr");
+            assert_eq!(news_count_key(0), "fmt.news_one");
+            assert_eq!(news_count_key(2), "fmt.news_many");
+
+            gw2_core::i18n::set_language("en");
         }
-        for n in [2, 3, 4, 22, 23] {
-            assert_eq!(news_count_key(n), "fmt.news_few", "n={n}");
-        }
-        for n in [0, 5, 11, 12, 14, 25] {
-            assert_eq!(news_count_key(n), "fmt.news_many", "n={n}");
-        }
-    }
 }

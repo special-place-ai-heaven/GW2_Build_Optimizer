@@ -180,12 +180,8 @@ fn brighten(color: [f32; 4], t: f32, amount: f32) -> [f32; 4] {
 }
 
 /// Which `fmt.lock_*` catalog key the lock-count indicator selects for `n`
-/// locked items, per the CLDR Slavic plural rule (Polish/Russian need a
-/// distinct "few" form for 2-4; every other catalog has `fmt.lock_few` equal
-/// to `fmt.lock_many`, so applying the rule universally is correct for all
-/// twelve languages). Extracted so a regression to the old two-form
-/// English-shaped split (`n == 1` vs "everything else") is caught by a plain
-/// unit test instead of requiring a rendered `Ui` frame.
+/// locked items. Delegates to [`slavic_plural_form`], which applies the
+/// active locale's CLDR rule via `current()` — callers stay language-blind.
 fn lock_count_key(n: u64) -> &'static str {
     match slavic_plural_form(n) {
         SlavicPluralForm::One => "fmt.lock_one",
@@ -1226,28 +1222,29 @@ mod tests {
 
     #[test]
     fn lock_count_uses_slavic_plural_form() {
-        // Claude F13 (second half): the lock-count indicator used to be a
-        // Germanic/English two-form split (`n == 1` vs everything else),
-        // which is wrong for Polish/Russian -- 2 must take "few", not
-        // "many". This tests the *selection*, not any rendered catalog
-        // text, so it survives a translator rewording a catalog.
-        //
-        // The decisive case is 2: a reverted two-form split would put it in
-        // the "many" bucket alongside 5, 11, 25, etc.
-        for n in [2, 22, 23] {
-            assert_eq!(
-                lock_count_key(n),
-                "fmt.lock_few",
-                "n={n} must select the Slavic 'few' form, not 'many' -- a two-form \
-                 n==1 split would wrongly bucket it as many",
-            );
+        // Selection follows the active locale (set here so a parallel addon
+        // test cannot leave us on ru/pl). Per-language CLDR tables live in
+        // gw2-core i18n; this pins the lock-panel key picker + render site.
+        gw2_core::i18n::set_language("en");
+        assert_eq!(lock_count_key(1), "fmt.lock_one");
+        for n in [0, 2, 21, 22, 101] {
+            assert_eq!(lock_count_key(n), "fmt.lock_many", "en n={n}");
         }
-        for n in [5, 11, 12, 13, 14, 25] {
-            assert_eq!(lock_count_key(n), "fmt.lock_many", "n={n} must be 'many'");
-        }
-        for n in [1, 21, 101] {
-            assert_eq!(lock_count_key(n), "fmt.lock_one", "n={n} must be 'one'");
-        }
+
+        gw2_core::i18n::set_language("pl");
+        assert_eq!(lock_count_key(1), "fmt.lock_one");
+        assert_eq!(lock_count_key(21), "fmt.lock_many");
+        assert_eq!(lock_count_key(2), "fmt.lock_few");
+
+        gw2_core::i18n::set_language("ru");
+        assert_eq!(lock_count_key(21), "fmt.lock_one");
+        assert_eq!(lock_count_key(2), "fmt.lock_few");
+
+        gw2_core::i18n::set_language("fr");
+        assert_eq!(lock_count_key(0), "fmt.lock_one");
+        assert_eq!(lock_count_key(2), "fmt.lock_many");
+
+        gw2_core::i18n::set_language("en");
 
         // DECISION-29 (C31/G4): `lock_count_key` alone is not sufficient --
         // it can stay green while `render_lock_panel`'s call site quietly
@@ -1272,17 +1269,17 @@ mod tests {
         assert!(
             production_src.contains("lock_count_key(lock_count as u64)"),
             "render_lock_panel's lock-count indicator must call \
-             lock_count_key(lock_count as u64) -- if this reverts to a \
-             hand-rolled `if lock_count == 1` branch, lock_count_key stays \
-             green while Polish/Russian players see the wrong plural form \
-             again",
+                 lock_count_key(lock_count as u64) -- if this reverts to a \
+                 hand-rolled `if lock_count == 1` branch, lock_count_key stays \
+                 green while Polish/Russian players see the wrong plural form \
+                 again",
         );
         assert!(
             production_src.contains("&lock_count.to_string()"),
             "render_lock_panel's lock-count indicator must interpolate the \
-             live lock_count via &lock_count.to_string(), not a hardcoded \
-             \"1\" -- a hardcoded literal renders the wrong number the \
-             moment 21, 31, or 101 select the One form under the CLDR rule",
+                 live lock_count via &lock_count.to_string(), not a hardcoded \
+                 \"1\" -- a hardcoded literal renders the wrong number the \
+                 moment 21, 31, or 101 select the One form under the CLDR rule",
         );
     }
 

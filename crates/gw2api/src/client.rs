@@ -315,6 +315,25 @@ fn apply_lang_query(url: &mut String, params: &[(&str, &str)], lang: Option<&str
     url.push_str(lang);
 }
 
+/// Absolute HTTP(S) endpoints are allowed only when the parsed host is
+/// exactly loopback. A prefix check is not enough: `127.0.0.1.evil.com`
+/// and `127.0.0.1@evil.com` (userinfo) both start with a loopback literal
+/// but resolve off-host. Relative GW2 paths do not parse as absolute URLs
+/// and pass through for `BASE_URL` joining.
+fn reject_non_loopback_absolute(endpoint: &str) -> Result<(), ApiError> {
+    let Ok(url) = reqwest::Url::parse(endpoint) else {
+        return Ok(());
+    };
+    if url.scheme() != "http" && url.scheme() != "https" {
+        return Ok(());
+    }
+    match url.host_str() {
+        // host_str() keeps IPv6 brackets (`[::1]`); `::1` is the parsed equivalent.
+        Some("127.0.0.1" | "localhost" | "::1" | "[::1]") => Ok(()),
+        _ => Err(ApiError::InvalidEndpoint(endpoint.to_string())),
+    }
+}
+
 impl Gw2Client {
     pub fn new(api_key: Option<String>) -> Result<Self, ApiError> {
         let http = Client::builder().timeout(Duration::from_secs(30)).build()?;
@@ -392,24 +411,9 @@ impl Gw2Client {
         endpoint: &str,
         params: &[(&str, &str)],
     ) -> Result<T, ApiError> {
-        // `endpoint` is a relative API path by contract. This client carries
-        // the account API key — an absolute URL here would aim the
-        // authenticated request at an attacker-chosen host, so refuse all
-        // non-loopback absolute URLs. Loopback stays allowed for the
-        // mock-server tests.
-        if endpoint.starts_with("http")
-            && !endpoint
-                .strip_prefix("http://")
-                .or_else(|| endpoint.strip_prefix("https://"))
-                .map(|rest| {
-                    rest.starts_with("127.0.0.1")
-                        || rest.starts_with("localhost")
-                        || rest.starts_with("[::1]")
-                })
-                .unwrap_or(false)
-        {
-            return Err(ApiError::InvalidEndpoint(endpoint.to_string()));
-        }
+        // Relative path by contract. Absolute URLs are parsed and allowed
+        // only for loopback (mock-server tests); a prefix check is bypassable.
+        reject_non_loopback_absolute(endpoint)?;
         let base_url = if endpoint.starts_with("http") {
             endpoint.to_string()
         } else {
@@ -828,6 +832,34 @@ mod tests {
         let mut url = "https://api.guildwars2.com/v2/skills?ids=1".to_string();
         apply_lang_query(&mut url, &[("ids", "1"), ("lang", "es")], Some("fr"));
         assert_eq!(url, "https://api.guildwars2.com/v2/skills?ids=1");
+    }
+
+    #[test]
+    fn absolute_endpoint_allows_loopback_and_relative_paths() {
+        assert!(reject_non_loopback_absolute("http://127.0.0.1/x").is_ok());
+        assert!(reject_non_loopback_absolute("http://127.0.0.1:9/x").is_ok());
+        assert!(reject_non_loopback_absolute("https://localhost/x").is_ok());
+        assert!(reject_non_loopback_absolute("http://[::1]/x").is_ok());
+        assert!(reject_non_loopback_absolute("items").is_ok());
+        assert!(reject_non_loopback_absolute("characters/Foo%20Bar/core").is_ok());
+    }
+
+    #[test]
+    fn absolute_endpoint_rejects_dotted_suffix_and_userinfo() {
+        let client = Gw2Client::without_key().unwrap();
+        for bad in [
+            "http://127.0.0.1.evil.com/x",
+            "http://127.0.0.1@evil.com/x",
+            "http://localhost.evil.com/x",
+        ] {
+            let err = client
+                .get_with_params::<serde_json::Value>(bad, &[])
+                .expect_err(bad);
+            assert!(
+                matches!(err, ApiError::InvalidEndpoint(ref e) if e == bad),
+                "{bad}: {err:?}"
+            );
+        }
     }
 
     #[test]

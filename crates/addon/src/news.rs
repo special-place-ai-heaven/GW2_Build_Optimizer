@@ -13,6 +13,8 @@ const MAX_ITEMS: usize = 20;
 const MAX_BODY_CHARS: usize = 12000;
 const TTL: Duration = Duration::from_secs(30 * 60);
 
+const FAIL_BACKOFF: Duration = Duration::from_secs(45);
+
 #[derive(Debug, Clone)]
 pub struct NewsItem {
     pub source: NewsSource,
@@ -33,6 +35,7 @@ pub struct NewsState {
     feeds: [Option<Vec<NewsItem>>; 5],
     pub loading: bool,
     pub fetched_at: Option<Instant>,
+    failed_at: [Option<Instant>; 5],
     official_lang: String,
     /// URL of the story in the reader, if any.
     pub expanded: Option<String>,
@@ -51,15 +54,21 @@ impl NewsState {
 
     pub fn set_feed(&mut self, src: NewsSource, lang: &str, items: Vec<NewsItem>) {
         self.feeds[src.index()] = Some(items);
+        self.failed_at[src.index()] = None;
         if src == NewsSource::Official {
             self.official_lang = lang.to_string();
         }
         self.fetched_at = Some(Instant::now());
     }
 
+    fn note_fetch_failure(&mut self, src: NewsSource) {
+        self.failed_at[src.index()] = Some(Instant::now());
+    }
+
     pub fn invalidate(&mut self, sources: &[NewsSource]) {
         for src in sources {
             self.feeds[src.index()] = None;
+            self.failed_at[src.index()] = None;
             if *src == NewsSource::Official {
                 self.official_lang.clear();
             }
@@ -68,6 +77,9 @@ impl NewsState {
     }
 
     pub fn needs(&self, src: NewsSource, lang: &str) -> bool {
+        if self.failed_at[src.index()].is_some_and(|t| t.elapsed() < FAIL_BACKOFF) {
+            return false;
+        }
         if src == NewsSource::Official && self.official_lang != lang {
             return true;
         }
@@ -132,16 +144,16 @@ pub fn kick(state: &mut AddonState, sources: &[NewsSource]) {
                 break;
             }
             let url = feed_url(src, &lang);
-            let items = match fetch_body(&url, &token, &version) {
-                Some(body) => parse_feed(src, &body),
-                None => Vec::new(),
-            };
+            let items = fetch_body(&url, &token, &version).map(|body| parse_feed(src, &body));
             results.push((src, items));
         }
         let _ = with_state(|s| {
             s.news.loading = false;
             for (src, items) in results {
-                s.news.set_feed(src, &lang, items);
+                match items {
+                    Some(items) => s.news.set_feed(src, &lang, items),
+                    None => s.news.note_fetch_failure(src),
+                }
             }
         });
     });
@@ -685,18 +697,24 @@ fn skip_close(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, name: &str) 
 }
 
 fn take_entity(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
-    let mut ent = String::new();
-    while let Some(&x) = chars.peek() {
-        if x == ';' || ent.len() > 10 {
-            break;
+    let mut look = chars.clone();
+    let mut name = String::new();
+    loop {
+        match look.peek().copied() {
+            None => return "&".into(),
+            Some(';') => {
+                look.next();
+                break;
+            }
+            Some(c) if c.is_whitespace() || name.len() > 10 => return "&".into(),
+            Some(c) => {
+                name.push(c);
+                look.next();
+            }
         }
-        ent.push(x);
-        chars.next();
     }
-    if chars.peek() == Some(&';') {
-        chars.next();
-    }
-    entity(&ent)
+    *chars = look;
+    entity(&name)
 }
 
 fn decode_entities(s: &str) -> String {
@@ -753,7 +771,7 @@ fn entity(name: &str) -> String {
         "ldquo" | "#8220" => "\"".into(),
         "rdquo" | "#8221" => "\"".into(),
         _ if name.starts_with('#') => numeric_entity(name),
-        _ => String::new(),
+        _ => format!("&{name};"),
     }
 }
 
@@ -769,7 +787,7 @@ fn numeric_entity(name: &str) -> String {
     };
     n.and_then(char::from_u32)
         .map(|c| c.to_string())
-        .unwrap_or_default()
+        .unwrap_or_else(|| format!("&{name};"))
 }
 
 fn parse_date(s: &str) -> Option<i64> {
@@ -1049,5 +1067,92 @@ mod tests {
         );
         crate::news_art::release_pending(&[leftover.to_string()]);
         crate::news_art::clear_failed();
+    }
+
+    fn sample_item(src: NewsSource) -> NewsItem {
+        NewsItem {
+            source: src,
+            title: "T".into(),
+            url: "https://www.guildwars2.com/en/news/x/".into(),
+            published: String::new(),
+            published_ts: 1,
+            snippet: String::new(),
+            body: String::new(),
+            image_url: None,
+        }
+    }
+
+    #[test]
+    fn bare_ampersand_and_unknown_entities_do_not_eat_text() {
+        assert_eq!(
+            decode_entities("Rock & Roll Hall of Fame"),
+            "Rock & Roll Hall of Fame",
+        );
+        assert_eq!(decode_entities("Tom & Jerry"), "Tom & Jerry");
+        assert_eq!(decode_entities("a &copy; b"), "a &copy; b");
+        assert_eq!(decode_entities("Fish &amp; Chips"), "Fish & Chips");
+        assert_eq!(
+            decode_entities("hi &#999999999; there"),
+            "hi &#999999999; there",
+        );
+        assert_eq!(
+            strip_html("Rock & Roll Hall of Fame"),
+            "Rock & Roll Hall of Fame",
+        );
+        let xml = r#"<rss><channel><item>
+      <title><![CDATA[Rock & Roll Hall of Fame]]></title>
+      <link>https://www.guildwars2.com/en/news/x/</link>
+      <description><![CDATA[Tom & Jerry and a &copy; b]]></description>
+    </item></channel></rss>"#;
+        let items = parse_feed(NewsSource::Official, xml);
+        assert_eq!(items[0].title, "Rock & Roll Hall of Fame");
+        assert_eq!(items[0].body, "Tom & Jerry and a &copy; b");
+    }
+
+    #[test]
+    fn fetch_failure_keeps_last_good_and_uses_short_backoff() {
+        let _lock = crate::news_art::slots_test_guard();
+        let mut n = NewsState::default();
+        n.set_feed(
+            NewsSource::Official,
+            "en",
+            vec![sample_item(NewsSource::Official)],
+        );
+        assert!(!n.needs(NewsSource::Official, "en"));
+        n.note_fetch_failure(NewsSource::Official);
+        assert_eq!(n.items(NewsSource::Official).len(), 1);
+        assert!(
+            !n.needs(NewsSource::Official, "en"),
+            "failure must not start a 30-min empty lockout"
+        );
+        n.invalidate(&[NewsSource::Official]);
+        assert!(
+            n.needs(NewsSource::Official, "en"),
+            "manual refresh clears the failure back-off"
+        );
+    }
+
+    #[test]
+    fn fetch_failure_does_not_cache_empty_feed() {
+        let _lock = crate::news_art::slots_test_guard();
+        let mut n = NewsState::default();
+        assert!(n.needs(NewsSource::Youtube, "en"));
+        n.note_fetch_failure(NewsSource::Youtube);
+        assert!(n.feeds[NewsSource::Youtube.index()].is_none());
+        assert!(
+            !n.needs(NewsSource::Youtube, "en"),
+            "short back-off after first failure"
+        );
+        assert!(
+            n.needs(NewsSource::Official, "en"),
+            "failure back-off is per-source"
+        );
+        n.note_fetch_failure(NewsSource::Official);
+        assert!(
+            !n.needs(NewsSource::Official, "en"),
+            "Official lang mismatch must not bypass fail back-off"
+        );
+        n.invalidate(&[NewsSource::Youtube]);
+        assert!(n.needs(NewsSource::Youtube, "en"));
     }
 }
