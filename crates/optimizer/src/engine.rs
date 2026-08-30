@@ -2214,6 +2214,29 @@ fn advisor_rune_pick(db: &GameDb, raw_name: &str) -> Option<crate::validation::V
         })
 }
 
+/// A11-1 SWAP accept gate: every populated gear slot must be one the build
+/// actually wears.
+///
+/// Mirrors the plate rule in `validate_gear_slot_map` (validation.rs): a plate
+/// entry naming a slot the build does not wear is ignored, because "a prefix
+/// on a hand that holds nothing is not a gear choice". The SWAP parser already
+/// guarantees a known slot (`parse_slot_qualifier`) and a resolved prefix
+/// (`db.itemstat_by_name`), but the slot-qualified form wrote the prefix
+/// without asking [`ValidatedBuild::wears`], so `SWAP: gear weapon-set-1-off …`
+/// on a Greatsword build recorded a prefix no plate build can carry. The
+/// referee prices that phantom slot to nothing, so the rank comparison cannot
+/// be trusted to keep the invalid state out — this gate can.
+///
+/// A shared `pub(crate)` helper in validation.rs would be the cleaner home
+/// for this rule; that file is owned elsewhere, so the check reuses the
+/// existing pub `ValidatedBuild::wears` here instead.
+fn advisor_candidate_slots_legal(candidate: &ValidatedBuild) -> bool {
+    GearSlot::ALL
+        .iter()
+        .zip(candidate.gear_slots.map.iter())
+        .all(|(slot, cell)| cell.is_none() || candidate.wears(*slot))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn llm_advisor(
     current: crate::validation::ValidatedBuild,
@@ -2362,6 +2385,11 @@ pub fn llm_advisor(
         }
 
         // Evaluate the mutation through the referee.
+        // A candidate that fails the plate slot rules is never evaluated at
+        // all — rank cannot rescue it (A11-1).
+        if !advisor_candidate_slots_legal(&candidate) {
+            continue;
+        }
         let report = crate::referee::evaluate_validated_build(
             &candidate,
             db,
@@ -2716,6 +2744,271 @@ mod tests {
             Some(pick.id),
             "the pick depended on pool order"
         );
+    }
+    // ── A11-1: SWAP candidates must pass the plate slot rules before they can
+    // win ───────────────────────────────────────────────────────────────────
+
+    /// Scripted LLM client: always answers with the same SWAP lines.
+    struct StubAdvisor {
+        response: &'static str,
+    }
+
+    impl LlmClient for StubAdvisor {
+        fn provider_name(&self) -> &str {
+            "stub"
+        }
+
+        fn validate_key(&self) -> Result<(), crate::llm::LlmError> {
+            Ok(())
+        }
+
+        fn generate(&self, _prompt: &str) -> Result<String, crate::llm::LlmError> {
+            Ok(self.response.to_string())
+        }
+
+        fn generate_cached(&self, prompt: &str) -> Result<String, crate::llm::LlmError> {
+            self.generate(prompt)
+        }
+
+        fn generate_with_tools_progress(
+            &self,
+            prompt: &str,
+            _tools: &[crate::llm::ToolDefinition],
+            _execute_tool: &mut dyn FnMut(&str, &serde_json::Value) -> serde_json::Value,
+            _max_turns: usize,
+            _on_progress: &mut dyn FnMut(usize, usize, &[String]),
+        ) -> Result<String, crate::llm::LlmError> {
+            self.generate(prompt)
+        }
+
+        fn list_models(&self) -> Result<Vec<crate::llm::ModelInfo>, crate::llm::LlmError> {
+            Ok(Vec::new())
+        }
+
+        fn remaining_quota(&self) -> u32 {
+            0
+        }
+
+        fn clear_cache(&self) {}
+    }
+
+    /// Two priceable three-stat prefixes: Berserker's (glass) and Soldier's
+    /// (tanky). Nothing else — no runes, sigils, traits, or skills.
+    fn advisor_gate_db() -> GameDb {
+        use gw2_api::models::StatAttribute;
+
+        let attr = |attribute: &str, multiplier: f64| StatAttribute {
+            attribute: attribute.into(),
+            multiplier,
+            value: 0,
+        };
+        let mut db = GameDb::empty_for_tests();
+        db.itemstats.insert(
+            1,
+            ItemStat {
+                id: 1,
+                name: "Berserker's".into(),
+                attributes: vec![
+                    attr("Power", 0.35),
+                    attr("Precision", 0.25),
+                    attr("CritDamage", 0.25),
+                ],
+            },
+        );
+        db.itemstats.insert(
+            2,
+            ItemStat {
+                id: 2,
+                name: "Soldier's".into(),
+                attributes: vec![
+                    attr("Power", 0.35),
+                    attr("Toughness", 0.25),
+                    attr("Vitality", 0.25),
+                ],
+            },
+        );
+        db
+    }
+
+    /// Warrior in a Greatsword, Berserker's on every worn slot. The off-hand
+    /// holds nothing, so `wears(WeaponSet1Off)` is false — the slot an invalid
+    /// proposal would write to.
+    fn advisor_gate_build() -> ValidatedBuild {
+        let mut build = ValidatedBuild::default();
+        build.weapons.set1.main_hand = Some("Greatsword".into());
+        build.fill_worn_gear_slots(PrefixRef {
+            itemstat_id: 1,
+            name: "Berserker's".into(),
+        });
+        build
+    }
+
+    /// PvE solo scenario (only the EHP viability gate runs) with sustain as
+    /// the only scoring axis, so the tankier prefix is the better build.
+    fn advisor_gate_inputs() -> (
+        BalanceContext,
+        crate::scenario::ScenarioSpec,
+        OptimizationWeights,
+        gw2_core::types::BuildLocks,
+    ) {
+        let ctx = BalanceContext::new(GameMode::PvE);
+        let scenario = crate::scenario::ScenarioSpec::from_balance_context(&ctx);
+        let weights = OptimizationWeights {
+            power: 0.0,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 1.0,
+            control: 0.0,
+        };
+        (ctx, scenario, weights, gw2_core::types::BuildLocks::default())
+    }
+
+    /// A SWAP onto a slot the build does not wear (the off-hand beside a
+    /// Greatsword) is exactly what `validate_gear_slot_map` ignores on a
+    /// plate. The phantom prefix is referee-neutral — the stat path prices it
+    /// to nothing — so the rank comparison alone cannot keep the invalid
+    /// candidate out; the A11-1 gate must, and does.
+    #[test]
+    fn advisor_swap_onto_unworn_slot_cannot_win() {
+        let db = advisor_gate_db();
+        let current = advisor_gate_build();
+        let (ctx, scenario, weights, locks) = advisor_gate_inputs();
+        assert!(
+            !current.wears(GearSlot::WeaponSet1Off),
+            "fixture must hold a two-hander"
+        );
+
+        // The invalid candidate evaluates to the *same* rank as the current
+        // build: nothing in the referee rejects it. That is why the gate
+        // exists — and why this assertion doubles as proof that only the gate
+        // keeps the phantom prefix out of the returned build.
+        let mut phantom = current.clone();
+        phantom.gear_slots.set(
+            GearSlot::WeaponSet1Off,
+            PrefixRef {
+                itemstat_id: 2,
+                name: "Soldier's".into(),
+            },
+        );
+        let rank_of = |build: &ValidatedBuild| {
+            crate::referee::search_rank(&crate::referee::evaluate_validated_build(
+                build, &db, "Warrior", &weights, &ctx, &scenario,
+            ))
+        };
+        assert_eq!(
+            rank_of(&phantom),
+            rank_of(&current),
+            "fixture drift: the phantom prefix should be referee-neutral"
+        );
+
+        let advisor = StubAdvisor {
+            response: "SWAP: gear weapon-set-1-off Soldier's",
+        };
+        let result = llm_advisor(
+            current.clone(),
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &locks,
+            &advisor,
+        );
+        assert!(
+            result
+                .gear_slots
+                .prefix_id(GearSlot::WeaponSet1Off)
+                .is_none(),
+            "a prefix on a hand that holds nothing must never be accepted"
+        );
+        assert_eq!(
+            result.gear_identity(),
+            current.gear_identity(),
+            "with no legal proposal on the table the build must come back unchanged"
+        );
+    }
+
+    /// The gate is a floor, not a wall: a legal uniform swap that out-ranks
+    /// the current build still wins exactly as before.
+    #[test]
+    fn advisor_legal_uniform_swap_still_wins() {
+        let db = advisor_gate_db();
+        let current = advisor_gate_build();
+        let (ctx, scenario, weights, locks) = advisor_gate_inputs();
+
+        let advisor = StubAdvisor {
+            response: "SWAP: gear Soldier's",
+        };
+        let result = llm_advisor(
+            current.clone(),
+            &db,
+            "Warrior",
+            &weights,
+            &ctx,
+            &scenario,
+            &locks,
+            &advisor,
+        );
+        assert_eq!(
+            result.gear_slots.prefix_id(GearSlot::Helm),
+            Some(2),
+            "the better legal prefix must win"
+        );
+        assert_eq!(
+            result.primary_prefix().map(|p| p.name.as_str()),
+            Some("Soldier's")
+        );
+        assert!(
+            result
+                .gear_slots
+                .prefix_id(GearSlot::WeaponSet1Off)
+                .is_none(),
+            "the uniform fill never dresses an empty hand"
+        );
+        assert_ne!(
+            result.gear_identity(),
+            current.gear_identity(),
+            "a winning swap changes the build"
+        );
+    }
+
+    /// The gate predicate itself: clean builds pass; any populated slot the
+    /// build does not wear fails — including the carried second weapon set.
+    #[test]
+    fn advisor_candidate_slots_legal_rejects_unworn_slots() {
+        let clean = advisor_gate_build();
+        assert!(advisor_candidate_slots_legal(&clean));
+
+        for slot in [
+            GearSlot::WeaponSet1Off,
+            GearSlot::WeaponSet2Main,
+            GearSlot::WeaponSet2Off,
+        ] {
+            let mut dirty = clean.clone();
+            dirty.gear_slots.set(
+                slot,
+                PrefixRef {
+                    itemstat_id: 2,
+                    name: "Soldier's".into(),
+                },
+            );
+            assert!(
+                !advisor_candidate_slots_legal(&dirty),
+                "a prefix on unworn {slot:?} must fail the gate"
+            );
+        }
+
+        // A prefix on a worn slot (the two-hander's main hand) stays legal.
+        let mut legal = clean.clone();
+        legal.gear_slots.set(
+            GearSlot::WeaponSet1Main,
+            PrefixRef {
+                itemstat_id: 2,
+                name: "Soldier's".into(),
+            },
+        );
+        assert!(advisor_candidate_slots_legal(&legal));
     }
 
     /// Tier 3 must stop when the user cancels.
