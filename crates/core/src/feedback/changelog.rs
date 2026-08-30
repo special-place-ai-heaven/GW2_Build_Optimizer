@@ -5,7 +5,7 @@
 pub const EMBEDDED: &str = include_str!("../../../../CHANGELOG.md");
 
 /// Longest body kept per entry, counted in `chars()`; longer bodies end in `…`.
-pub const MAX_BODY_CHARS: usize = 1200;
+pub const MAX_BODY_CHARS: usize = 8000;
 
 /// One `## <version> - <date>` section of the changelog with its cleaned body.
 #[derive(Debug, Clone, PartialEq)]
@@ -177,8 +177,8 @@ Body three.
     }
 
     #[test]
-    fn caps_body_at_1200_chars_with_ellipsis() {
-        let body = "é".repeat(1500);
+    fn caps_body_at_max_chars_with_ellipsis() {
+        let body = "é".repeat(MAX_BODY_CHARS + 300);
         let text = format!("## 1.0.0 - 2020-01-01\n{body}\n");
         let entries = parse(&text);
         assert_eq!(entries[0].body.chars().count(), MAX_BODY_CHARS + 1);

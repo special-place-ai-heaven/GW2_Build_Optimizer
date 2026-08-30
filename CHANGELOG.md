@@ -4,11 +4,62 @@ All notable changes to GW2 Build Optimizer are documented here.
 
 ## 1.7.20 - 2026-08-30
 
-Load panic no longer takes the game with it; unload keeps the DLL mapped until workers finish. Settings LLM keys stay masked on paste. Copy says Copied only after Windows has the text. Ranch Load runs off the draw pass. Weapon lock on Current keeps the equipped prefix. Ungated Improve does not stamp Improved. Empty leftover kits stay Blocked. No game data or character shows a lock hint. Missing combat reads (not computed), not 0/0/0. Spanish leftover chrome and Dutch titles are translated.
+### Overlay
 
-Alacrity is +25% recharge (10s to 8s). Confusion pulse is over-time; on-skill-use fires on activation. Live Might raises dummy condition ticks. Trait duration sits outside the Expertise/Concentration cap. Intensity caps at 1500 in every mode. Set-2 sigils copy set 1. Land bars drop the aquatic palette. Giver's prefers three-stat 628. Ranger pets and Revenant legends stay on plates. Short or garbage names do not autofill (fuzzy needs 5+ letters). Gemini billing 403/429 is not a bad key. Cancel stops a Gemini stream. Failed stills retry.
+- Load panic no longer takes the game down. Unload keeps the DLL mapped until workers finish.
+- Settings LLM keys stay masked on paste. Show/Hide still works.
+- Copy says Copied only after Windows has the text.
+- Ranch Load runs off the draw pass and does not persist notes on the click frame.
+- Weapon lock on Current keeps the equipped prefix. Improve with a weapon lock keeps that prefix.
+- Ungated Improve does not stamp Improved.
+- Empty leftover kits stay Blocked, not Verified.
+- No game data: lock panel says (Load game data first). No character: (Select a character first).
+- Missing combat metrics read (not computed), not 0/0/0. Viability gates use readable names.
+- Condi/boon duration on the panel includes trait duration, not only Expertise/Concentration.
+- Optimized spec panel majors match English trait names when the overlay is de/fr.
+- Spanish leftover chrome is translated. Dutch titles: ARMOR to RUSTING, STATS to STATISTIEKEN, BOONS to ZEGENINGEN.
 
-News bodies are capped; stills stay on the allowlisted host. Mailbag strips leftover encode tokens. Saves surface write errors. Hollow game data fails closed.
+### Improve, Choya, plates
+
+- Alacrity is +25% recharge (10s to 8s), not the old 33%.
+- Confusion 1s pulse is over-time; on-skill-use fires on activation.
+- Live Might raises dummy condition ticks (player Might; dummy stays unbooned).
+- Trait duration percent sits outside the Expertise/Concentration cap; skill-specific trait duration stays inside the Expertise cap.
+- Dummy prot+stab cover is WvW only.
+- Intensity stack cap is 1500 in every mode (no old PvP 100 bleed clamp).
+- Set-2 sigils are copied from set 1. Land bars drop the aquatic palette. Land Spear stays a terrestrial two-hander.
+- Giver's prefers three-stat itemstat 628, not 627.
+- Ranger pets stay on chat plates. Revenant legends parse and win on the plate.
+- Infer-from-heal warns on overwrite; rest-pad does not warn inferred-from-heal.
+- Spec/item/prefix apply is exact or fuzzy only if the needle is 5+ characters. Skill resolve is full-name equal, not substring. Garbage trait names do not autofill.
+- Gemini 403/429 with billing language is a billing issue, not a bad key. Gemini RPM persists across client create. Anthropic key check uses GET /v1/models and should not spend Messages quota. Cancel during a Gemini stream actually stops.
+- Cancel a scrape: last-good benchmarks stay. Failed stills retry on Refresh. Dire is a word, not a substring of directly. Immobilized aliases to Immobile.
+- Improve stamps the role profile id for viability gates, but JSON still has no ehp_floor numbers — live rank does not jump from EHP this build.
+
+### News, About, mail
+
+- Article bodies are capped. Stills only load from the allowlisted host.
+- If an art worker dies mid-flight, leftover Pending URLs are released.
+- Slavic languages get proper one/few/many story counts.
+- Mailbag titles and POST bodies strip leftover encode tokens.
+- Rate-limit row and wizard copy talk in remaining minutes.
+- About wrap uses window-local X.
+- Status poll bodies are capped at 1 MiB.
+
+### Saves and data
+
+- Save-build write errors surface. Windows overwrite uses ReplaceFileW.
+- Unknown GearSlots keys survive a save/load round-trip.
+- Hollow game-data (empty skills/items/traits) fails closed.
+- Bulk GW2 5xx skips the rotten id. Oversize JSON bodies fail closed.
+
+### Already on the feedback site
+
+Admin GET list is read-only; marking read is a POST. Empty admin password or session secret fails closed.
+
+### Not in this build
+
+GW2 API key first-8/last-4 hint was reverted. Scraper heal/Luminary patches were reverted. Dummy Torment moving vs stationary and movement_fraction are not wired.
 
 ## 1.7.19 - 2026-08-29
 
