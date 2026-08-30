@@ -67,17 +67,14 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
         [0.3, 0.9, 0.3, 1.0],
         format!("* {}", t("settings.verified")),
     );
-    ui.same_line();
-    ui.text_colored([0.6, 0.6, 0.6, 1.0], t("settings.verified_note"));
+    theme::wrapped(ui, [0.6, 0.6, 0.6, 1.0], &t("settings.verified_note"));
     ui.text_colored(
         [0.95, 0.75, 0.15, 1.0],
         format!("* {}", t("settings.provisional")),
     );
-    ui.same_line();
-    ui.text_colored([0.6, 0.6, 0.6, 1.0], t("settings.provisional_note"));
+    theme::wrapped(ui, [0.6, 0.6, 0.6, 1.0], &t("settings.provisional_note"));
     ui.text_colored([1.0, 0.3, 0.2, 1.0], format!("* {}", t("settings.blocked")));
-    ui.same_line();
-    ui.text_colored([0.6, 0.6, 0.6, 1.0], t("settings.blocked_note"));
+    theme::wrapped(ui, [0.6, 0.6, 0.6, 1.0], &t("settings.blocked_note"));
 
     // ── RIGHT COLUMN ────────────────────────────────────────────────
     ui.next_column();
@@ -753,7 +750,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             }
         }
     }
-    ui.text_colored(theme::MUTED, t("settings.lang_pack_legend"));
+    theme::wrapped(ui, theme::MUTED, &t("settings.lang_pack_legend"));
     ui.spacing();
 
     ui.text(t("settings.opacity"));
@@ -795,7 +792,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             }
         }
     }
-    ui.text_colored(theme::MUTED, t("settings.font_hint"));
+    theme::wrapped(ui, theme::MUTED, &t("settings.font_hint"));
 
     ui.spacing();
     ui.text_colored([0.7, 0.7, 0.75, 1.0], t("settings.layout"));

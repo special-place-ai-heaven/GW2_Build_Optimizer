@@ -470,8 +470,28 @@ fn settings_reset_message(cause: &dyn std::fmt::Display, backed_up: bool) -> Str
 }
 
 pub const DEFAULT_WINDOW_POS: [f32; 2] = [80.0, 80.0];
-pub const DEFAULT_WINDOW_SIZE: [f32; 2] = [800.0, 600.0];
+/// Fallback when the display size is unknown. First-run / reset uses
+/// [`initial_window_size`] (~80% of the monitor, width capped at 1920).
+pub const DEFAULT_WINDOW_SIZE: [f32; 2] = [1536.0, 864.0];
 pub const MIN_WINDOW_SIZE: [f32; 2] = [640.0, 400.0];
+/// First-run size before 1.7.22. Reset / missing size no longer uses this.
+pub const LEGACY_FIRST_WINDOW_SIZE: [f32; 2] = [800.0, 600.0];
+
+/// First-run and "Reset layout" size: 80% of the monitor. Ultrawide
+/// (`width/height > 2`) is sized as 1920-wide so the overlay does not
+/// stretch across the whole desk. Unknown / tiny display → [`DEFAULT_WINDOW_SIZE`].
+pub fn initial_window_size(display: [f32; 2]) -> [f32; 2] {
+    let dw = display[0];
+    let dh = display[1];
+    if dw < MIN_WINDOW_SIZE[0] || dh < MIN_WINDOW_SIZE[1] {
+        return DEFAULT_WINDOW_SIZE;
+    }
+    let usable_w = if dw / dh > 2.0 { 1920.0_f32.min(dw) } else { dw };
+    let margin = DEFAULT_WINDOW_POS[0];
+    let w = (usable_w * 0.8).min(dw - margin).max(MIN_WINDOW_SIZE[0]);
+    let h = (dh * 0.8).min(dh - margin).max(MIN_WINDOW_SIZE[1]);
+    [w, h]
+}
 
 /// Known Gemini models — fallback shown when list_models() API call fails.
 /// The Settings tab populates this list dynamically from the API at runtime.
@@ -524,7 +544,9 @@ pub const DEFAULT_OPENROUTER_MODEL: &str = "anthropic/claude-sonnet-4-5";
 pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-6";
 
 impl AppConfig {
-    /// Restored overlay rect. Missing or tiny saved sizes fall back to 800x600.
+    /// Restored overlay rect. Missing size falls back to [`DEFAULT_WINDOW_SIZE`]
+    /// (1080p 80%). Tiny saved sizes clamp to [`MIN_WINDOW_SIZE`]. First-run
+    /// paint uses [`initial_window_size`] so the overlay matches the monitor.
     pub fn window_rect(&self) -> ([f32; 2], [f32; 2]) {
         let pos = [
             self.window_x.unwrap_or(DEFAULT_WINDOW_POS[0]),
@@ -1040,6 +1062,26 @@ mod tests {
         assert_eq!(loaded.client_id, config.client_id);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn initial_window_size_is_80pct_on_1080p() {
+        assert_eq!(initial_window_size([1920.0, 1080.0]), [1536.0, 864.0]);
+    }
+
+    #[test]
+    fn initial_window_size_does_not_span_ultrawide() {
+        let sz = initial_window_size([3440.0, 1440.0]);
+        assert!((sz[0] - 1536.0).abs() < 0.5, "width {}", sz[0]);
+        assert!((sz[1] - 1152.0).abs() < 0.5, "height {}", sz[1]);
+    }
+
+    #[test]
+    fn initial_window_size_fits_laptop() {
+        let sz = initial_window_size([1366.0, 768.0]);
+        assert!(sz[0] < 1366.0 - 80.0, "width {}", sz[0]);
+        assert!(sz[1] < 768.0 - 80.0, "height {}", sz[1]);
+        assert!(sz[0] >= MIN_WINDOW_SIZE[0] && sz[1] >= MIN_WINDOW_SIZE[1]);
     }
 
     #[test]
