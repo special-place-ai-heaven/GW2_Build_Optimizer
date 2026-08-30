@@ -2,6 +2,17 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.7.22 - 2026-08-30
+
+### Changed
+
+- Optimizer: Torment tick now blends stationary/moving by the Generic rotation profile's `movement_fraction` (PvE f=0.2, PvP f=0.5, WvW f=0.6). Condi scores on moving-target modes drop accordingly — PvE Torment @1000 condi: 121.8 → 113.84. No build ranking logic changed.
+
+### Tests
+
+- Referee: new pin `unset_viability_gates_pin_hardcoded_ehp_floors` locks the six hardcoded EHP floors (PvE 11000, PvP 8000, WvW Roam 15000, Havoc 13000, Zerg 10000, Staller 15000) for profiles with no `viability_gates` key; extended override test asserts gate notes show profile floors.
+- Combat: Torment blend endpoint pins (f=0 stationary, f=1 moving) and updated PvE/PvP mode-dispatch expectations.
+
 ## 1.7.21 - 2026-08-30
 
 ### Overlay
