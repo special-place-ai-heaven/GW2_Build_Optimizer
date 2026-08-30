@@ -112,7 +112,7 @@ impl BuildStorage {
             .map_err(|e| format!("Failed to serialize: {}", e))?;
 
         // Complete content first, then replace the old build (POSIX rename,
-        // or Win32 rename / remove+rename — see `replace_file`).
+        // or Win32 rename / ReplaceFileW — see `replace_file`).
         let tmp_path = path.with_extension("tmp");
         if let Err(e) = write_durably(&tmp_path, &json) {
             let _ = std::fs::remove_file(&tmp_path); // best-effort cleanup
@@ -278,25 +278,74 @@ fn write_durably(path: &Path, contents: &str) -> std::io::Result<()> {
 /// Publish a complete `from` over `to`.
 ///
 /// POSIX `rename` replaces atomically. Win32 `rename` is not a guaranteed
-/// replace (`ERROR_ALREADY_EXISTS` on some volumes / rustc versions). Closest
-/// without extra crates: try rename first, then drop dest and rename the
-/// complete tmp into place. A crash between remove and rename leaves dest gone
-/// and tmp intact (caller already flushed tmp). Upgrade path: `ReplaceFileW`.
+/// replace (`ERROR_ALREADY_EXISTS` on some volumes / rustc versions). Try
+/// rename first (covers a missing dest on first save). When dest exists and
+/// rename fails, `ReplaceFileW` commits tmp over dest — dest stays until that
+/// commit, so a crash cannot leave dest gone while tmp is still intact.
+/// `ReplaceFileW` failure is returned as `Err`; there is no remove-then-rename
+/// fallback.
 pub(crate) fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
         match std::fs::rename(from, to) {
             Ok(()) => Ok(()),
-            Err(_) if to.exists() => {
-                std::fs::remove_file(to)?;
-                std::fs::rename(from, to)
-            }
+            Err(_) if to.exists() => replace_file_w(from, to),
             Err(e) => Err(e),
         }
     }
     #[cfg(not(windows))]
     {
         std::fs::rename(from, to)
+    }
+}
+
+/// Commit `from` over an existing `to` via `ReplaceFileW` (kernel32).
+///
+/// Raw `extern "system"` declaration, no `windows-sys` / `winapi` — same
+/// precedent as `GetUserDefaultUILanguage` in `i18n.rs`.
+#[cfg(windows)]
+fn replace_file_w(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn ReplaceFileW(
+            lp_replaced_file_name: *const u16,
+            lp_replacement_file_name: *const u16,
+            lp_backup_file_name: *const u16,
+            dw_replace_flags: u32,
+            lp_exclude: *mut core::ffi::c_void,
+            lp_reserved: *mut core::ffi::c_void,
+        ) -> i32;
+    }
+
+    /// NUL-terminated UTF-16 for the Win32 W-API.
+    fn wide_path(path: &Path) -> Vec<u16> {
+        path.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+
+    let dest = wide_path(to);
+    let tmp = wide_path(from);
+    // SAFETY: both buffers are NUL-terminated and outlive the call;
+    // backup/exclude/reserved are documented-nullable. ReplaceFileW does
+    // not retain the pointers.
+    let ok = unsafe {
+        ReplaceFileW(
+            dest.as_ptr(),
+            tmp.as_ptr(),
+            core::ptr::null(),
+            0,
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        )
+    };
+    if ok != 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
     }
 }
 
