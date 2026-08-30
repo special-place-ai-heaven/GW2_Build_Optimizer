@@ -236,7 +236,16 @@ pub fn fetch_status(
     if resp.status().as_u16() != 200 {
         return Err(());
     }
-    resp.json::<Vec<StatusRow>>().map_err(|_| ())
+    // Cap then parse: `Response::json` buffers to EOF. Neighbours
+    // (`post_report`, `fetch_taxonomy`) already use the 1 MiB reader.
+    status_rows_from_reader(resp)
+}
+
+/// Cap a status-poll body at 1 MiB, then deserialize. Extracted so the
+/// cap+parse path can be unit-tested without an HTTP hook.
+fn status_rows_from_reader(reader: impl std::io::Read) -> Result<Vec<StatusRow>, ()> {
+    let bytes = gw2_api::transport::read_body_capped(reader, 1024 * 1024).map_err(|_| ())?;
+    serde_json::from_slice(&bytes).map_err(|_| ())
 }
 
 /// `GET /v1/taxonomy` → raw JSON on 200, else `None`.
@@ -450,6 +459,18 @@ mod tests {
         let bare: StatusRow =
             serde_json::from_str(r#"{"id":"B","status":"received"}"#).expect("bare row parses");
         assert_eq!(bare.reply, None);
+    }
+
+    #[test]
+    fn status_rows_from_reader_caps_then_parses() {
+        let ok = br#"[{"id":"A3F9K2QD","status":"received"}]"#;
+        let rows = status_rows_from_reader(std::io::Cursor::new(ok.to_vec())).expect("row");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "A3F9K2QD");
+        assert!(status_rows_from_reader(std::io::Cursor::new(b"not-json")).is_err());
+        // Over the 1 MiB cap: reject, do not parse a truncated slice.
+        let oversized = vec![b'x'; 1024 * 1024 + 1];
+        assert!(status_rows_from_reader(std::io::Cursor::new(oversized)).is_err());
     }
 
     #[test]

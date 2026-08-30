@@ -194,20 +194,29 @@ fn finish_source(
 ) -> ScrapeResult {
     match result {
         Ok((builds, cancelled)) => {
-            save_builds(&builds, dir);
+            // Cancel mid-source must not overwrite last-good on-disk groups
+            // with a partial scrape. Keep the in-memory vec for this session.
             if cancelled {
                 on_progress(source, "cancelled");
-            } else {
-                on_progress(source, &format!("done {}", builds.len()));
+                return ScrapeResult {
+                    source: source.into(),
+                    builds,
+                    error: Some(CANCELLED_ERROR.into()),
+                };
             }
+            if let Err(e) = save_builds(&builds, dir) {
+                on_progress(source, &format!("save failed: {e}"));
+                return ScrapeResult {
+                    source: source.into(),
+                    builds,
+                    error: Some(e),
+                };
+            }
+            on_progress(source, &format!("done {}", builds.len()));
             ScrapeResult {
                 source: source.into(),
                 builds,
-                error: if cancelled {
-                    Some(CANCELLED_ERROR.into())
-                } else {
-                    None
-                },
+                error: None,
             }
         }
         Err(e) => {
@@ -449,6 +458,19 @@ const HS_PROFESSIONS: &[&str] = &[
     "revenant",
 ];
 
+/// Pin a Hardstuck listing href to `https://hardstuck.gg`.
+///
+/// Rejects `http://` and off-origin absolute URLs (same pin as GuildJen).
+fn pin_hardstuck_href(link: &str) -> Option<String> {
+    if link.starts_with("https://hardstuck.gg/") {
+        Some(link.to_string())
+    } else if link.starts_with("http") {
+        None
+    } else {
+        Some(format!("https://hardstuck.gg{}", link))
+    }
+}
+
 /// Scrape Hardstuck (multi-mode builds).
 ///
 /// `should_cancel` is consulted before every outer (per-profession) and inner
@@ -482,10 +504,11 @@ fn scrape_hardstuck(
             let parts: Vec<&str> = link.trim_matches('/').split('/').collect();
             // /gw2/builds/{profession}/{slug} = exactly 4 segments
             if parts.len() == 4 && !parts[3].is_empty() && !parts[3].contains('?') {
-                let full = if link.starts_with("http") {
-                    link
-                } else {
-                    format!("https://hardstuck.gg{}", link)
+                // Pin to the real host: an index page (compromised, or MITM'd if
+                // TLS were ever bypassed) must not steer us to arbitrary absolute
+                // URLs — only https://hardstuck.gg and relative paths may be followed.
+                let Some(full) = pin_hardstuck_href(&link) else {
+                    continue;
                 };
                 if !all_links.contains(&full) {
                     all_links.push(full);
@@ -881,6 +904,22 @@ fn extract_build_code(html: &str) -> Option<String> {
     }
 }
 
+/// Space-padded alnum words — same boundary idea as `prefix_named_in_text`.
+fn padded_alnum_words(text: &str) -> String {
+    format!(
+        " {} ",
+        text.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    ' '
+                }
+            })
+            .collect::<String>()
+    )
+}
+
 /// Extract gear stat prefix from HTML text.
 ///
 /// Case-insensitive — scraped sites vary in casing (e.g. "viper's", "VIPER'S"),
@@ -913,9 +952,10 @@ fn extract_gear_prefix(html: &str) -> String {
         "Magi's",
         "Cleric's",
     ];
-    let html_lower = html.to_lowercase();
+    let hay = padded_alnum_words(html);
     for p in &prefixes {
-        if html_lower.contains(&p.to_lowercase()) {
+        let stem = p.trim_end_matches("'s").to_ascii_lowercase();
+        if hay.contains(&format!(" {stem} ")) || hay.contains(&format!(" {stem}s ")) {
             return p.to_string();
         }
     }
@@ -1089,9 +1129,9 @@ fn strip_tags(s: &str) -> String {
     }
     result
 }
-fn save_builds(builds: &[BenchmarkBuild], dir: &Path) {
+fn save_builds(builds: &[BenchmarkBuild], dir: &Path) -> Result<(), String> {
     if builds.is_empty() {
-        return;
+        return Ok(());
     }
     // Group by (source, profession, mode)
     let mut groups: std::collections::HashMap<String, Vec<&BenchmarkBuild>> =
@@ -1110,10 +1150,10 @@ fn save_builds(builds: &[BenchmarkBuild], dir: &Path) {
         // (profession parsed from a URL path). Windows treats '\\' as a
         // separator, so whitelist instead of trusting the URL splitter.
         let path = dir.join(sanitize_filename_component(filename));
-        if let Ok(json) = serde_json::to_string_pretty(group) {
-            let _ = std::fs::write(path, json);
-        }
+        let json = serde_json::to_string_pretty(group).map_err(|e| e.to_string())?;
+        std::fs::write(&path, json).map_err(|e| format!("write {}: {e}", path.display()))?;
     }
+    Ok(())
 }
 
 /// Reduce a string to a safe single path component: keep alphanumerics,
@@ -1229,6 +1269,28 @@ mod tests {
     }
 
     #[test]
+    fn pin_hardstuck_href_rejects_off_origin_http() {
+        assert_eq!(pin_hardstuck_href("http://evil.example/build"), None);
+        assert_eq!(
+            pin_hardstuck_href("https://evil.example/gw2/builds/necromancer/x/"),
+            None
+        );
+        assert_eq!(
+            pin_hardstuck_href("http://hardstuck.gg/gw2/builds/necromancer/x/"),
+            None
+        );
+        assert_eq!(
+            pin_hardstuck_href("/gw2/builds/necromancer/blood-harbinger/").as_deref(),
+            Some("https://hardstuck.gg/gw2/builds/necromancer/blood-harbinger/")
+        );
+        assert_eq!(
+            pin_hardstuck_href("https://hardstuck.gg/gw2/builds/necromancer/blood-harbinger/")
+                .as_deref(),
+            Some("https://hardstuck.gg/gw2/builds/necromancer/blood-harbinger/")
+        );
+    }
+
+    #[test]
     fn test_looks_like_blocked_page_detects_unifi_block() {
         // Markers taken from the observed UniFi/Ubiquiti block page.
         let html = r#"<html><head><title>Blocked</title></head><body>
@@ -1293,6 +1355,15 @@ mod tests {
         let code = extract_build_code(html);
         assert!(code.is_some());
         assert!(code.unwrap().starts_with("[&"));
+    }
+
+    #[test]
+    fn extract_gear_prefix_directly_is_not_dire() {
+        assert_eq!(extract_gear_prefix("Boons apply directly to allies."), "");
+        assert_eq!(
+            extract_gear_prefix("Use Dire gear for condition sustain."),
+            "Dire"
+        );
     }
 
     #[test]
@@ -1583,6 +1654,112 @@ mod tests {
         assert!(
             calls.load(Ordering::Relaxed) >= 1,
             "predicate must be invoked at least once at inner loop entry"
+        );
+    }
+
+    fn sample_guardian_pve(notes: &str) -> BenchmarkBuild {
+        BenchmarkBuild {
+            source: "snowcrows".into(),
+            profession: "Guardian".into(),
+            spec_name: "Firebrand".into(),
+            mode: "PvE".into(),
+            role: "Power DPS".into(),
+            build_code: None,
+            gear_prefix: "Berserker's".into(),
+            rune: "Scholar".into(),
+            sigils: vec!["Force".into(), "Accuracy".into()],
+            relic: "Fireworks".into(),
+            traits: vec!["Radiance".into(), "Honor".into(), "Firebrand".into()],
+            skills: vec![],
+            source_url: "https://snowcrows.com/builds/raids/guardian/firebrand".into(),
+            scraped_at: "2026-08-01".into(),
+            notes: notes.into(),
+        }
+    }
+
+    /// Mid-source cancel must not overwrite a previously good
+    /// `{source}_{profession}_{mode}.json`. Inject a non-empty partial
+    /// into `finish_source` with `cancelled=true` (the same Ok branch
+    /// snowcrows/hardstuck/guildjen take after collecting at least one
+    /// inner build). Seeded file bytes must stay unchanged when error
+    /// is `CANCELLED_ERROR`.
+    #[test]
+    fn finish_source_cancel_does_not_overwrite_seeded_benchmark_file() {
+        let tmp = std::env::temp_dir().join(format!(
+            "gw2_scraper_cancel_partial_save_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("temp benchmarks dir");
+
+        let seeded_path = tmp.join("snowcrows_guardian_pve.json");
+        let seeded = serde_json::to_string_pretty(&vec![sample_guardian_pve("LAST_GOOD_SEED")])
+            .expect("seed json");
+        std::fs::write(&seeded_path, &seeded).expect("seed last-good file");
+        let before = std::fs::read(&seeded_path).expect("read seed");
+
+        let partial = sample_guardian_pve("SHOULD_NOT_LAND_ON_DISK");
+        let result = finish_source(
+            "snowcrows",
+            Ok((vec![partial], true)),
+            &tmp,
+            &|_, _| {},
+        );
+
+        assert_eq!(
+            result.error.as_deref(),
+            Some(CANCELLED_ERROR),
+            "cancelled finish_source must tag CANCELLED_ERROR"
+        );
+        assert_eq!(
+            result.builds.len(),
+            1,
+            "in-memory partial stays on ScrapeResult"
+        );
+
+        let after = std::fs::read(&seeded_path).expect("read after cancel");
+        assert_eq!(
+            after, before,
+            "cancelled finish_source must not overwrite last-good snowcrows_guardian_pve.json"
+        );
+        let on_disk = std::fs::read_to_string(&seeded_path).unwrap();
+        assert!(
+            on_disk.contains("LAST_GOOD_SEED"),
+            "seeded last-good content must remain"
+        );
+        assert!(
+            !on_disk.contains("SHOULD_NOT_LAND_ON_DISK"),
+            "partial notes must not replace the last-good file"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn save_builds_reports_write_failure() {
+        let missing = std::env::temp_dir().join(format!(
+            "gw2bo-no-dir-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let err = save_builds(&[sample_guardian_pve("x")], &missing).expect_err("hollow dir");
+        assert!(
+            err.contains("write"),
+            "write failure must surface, got {err}"
+        );
+        let result = finish_source(
+            "snowcrows",
+            Ok((vec![sample_guardian_pve("x")], false)),
+            &missing,
+            &|_, _| {},
+        );
+        assert!(
+            result.error.as_ref().is_some_and(|e| e.contains("write")),
+            "finish_source must not report done on silent write, got {:?}",
+            result.error
         );
     }
 }

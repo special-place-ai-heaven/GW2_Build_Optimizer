@@ -17,6 +17,7 @@ fn test_config() -> Arc<Config> {
         session_secret: "session-secret".into(),
         ip_salt: "test-salt".into(),
         min_addon_version: "1.6.0".into(),
+        trust_xff: true,
     })
 }
 
@@ -475,6 +476,30 @@ async fn admin_list_marks_read_and_reply_marks_answered(pool: PgPool) {
     )
     .await;
     assert_eq!(list.as_array().unwrap().len(), 1);
+    assert_eq!(list[0]["status"], "received");
+
+    let st_after_get = json_body(
+        router(st.clone())
+            .oneshot(status_req(&id, CLIENT, "203.0.113.5"))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        st_after_get[0]["status"], "received",
+        "GET list must not mark read"
+    );
+
+    let res = router(st.clone())
+        .oneshot(admin(
+            "POST",
+            "/v1/admin/reports/read",
+            Some(serde_json::json!({ "ids": [id] })),
+            "test-admin-token",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
 
     let st_after = json_body(
         router(st.clone())
@@ -485,7 +510,7 @@ async fn admin_list_marks_read_and_reply_marks_answered(pool: PgPool) {
     .await;
     assert_eq!(
         st_after[0]["status"], "read",
-        "listing through admin marks it read"
+        "POST /v1/admin/reports/read marks it read"
     );
 
     let res = router(st.clone())
@@ -542,10 +567,7 @@ async fn admin_get_one_returns_full_row_and_marks_read(pool: PgPool) {
     assert_eq!(row["category"], "bug");
     assert_eq!(row["title"], "Optimize picks Trident on land");
     assert_eq!(row["unvalidated"], false);
-    assert_eq!(
-        row["status"], "read",
-        "the response must show the status the fetch just wrote, not the one it replaced"
-    );
+    assert_eq!(row["status"], "received", "GET one must not mark read");
 
     let st_after = json_body(
         router(st.clone())
@@ -555,8 +577,8 @@ async fn admin_get_one_returns_full_row_and_marks_read(pool: PgPool) {
     )
     .await;
     assert_eq!(
-        st_after[0]["status"], "read",
-        "fetching a single row through admin marks it read too"
+        st_after[0]["status"], "received",
+        "GET one must leave the row received"
     );
 
     let res = router(st)
@@ -688,10 +710,15 @@ fn client_ip_takes_the_rightmost_forwarded_entry() {
     use gw2bo_feedback::reports::client_ip;
     let mut h = HeaderMap::new();
     h.insert("x-forwarded-for", "1.1.1.1, 203.0.113.5".parse().unwrap());
-    assert_eq!(client_ip(&h, None), "203.0.113.5");
+    assert_eq!(client_ip(&h, None, true), "203.0.113.5");
+    assert_eq!(
+        client_ip(&h, None, false),
+        "0.0.0.0",
+        "XFF is ignored unless trust_xff"
+    );
     let d = chrono::NaiveDate::from_ymd_opt(2026, 8, 24).unwrap();
     assert_eq!(
-        ip_hash(&client_ip(&h, None), "salt", d),
+        ip_hash(&client_ip(&h, None, true), "salt", d),
         ip_hash("203.0.113.5", "salt", d),
         "the proxy-appended entry is what gets hashed"
     );
@@ -819,6 +846,8 @@ async fn admin_list_without_a_status_filter_returns_newest_first_and_marks_read(
     assert_eq!(arr.len(), 2, "no filter means every row");
     assert_eq!(arr[0]["id"], ids[1], "newest first");
     assert_eq!(arr[1]["id"], ids[0]);
+    assert_eq!(arr[0]["status"], "received");
+    assert_eq!(arr[1]["status"], "received");
 
     for id in &ids {
         let seen = json_body(
@@ -828,7 +857,32 @@ async fn admin_list_without_a_status_filter_returns_newest_first_and_marks_read(
                 .unwrap(),
         )
         .await;
-        assert_eq!(seen[0]["status"], "read", "listing marks every row read");
+        assert_eq!(
+            seen[0]["status"], "received",
+            "GET list must leave every row received"
+        );
+    }
+
+    let res = router(st.clone())
+        .oneshot(admin(
+            "POST",
+            "/v1/admin/reports/read",
+            Some(serde_json::json!({ "ids": ids })),
+            "test-admin-token",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    for id in &ids {
+        let seen = json_body(
+            router(st.clone())
+                .oneshot(status_req(id, CLIENT, "203.0.113.5"))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(seen[0]["status"], "read", "POST /read marks every row read");
     }
 }
 

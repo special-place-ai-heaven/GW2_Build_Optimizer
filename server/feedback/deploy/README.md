@@ -25,6 +25,8 @@ Do not recreate `db` or delete the `pgdata` volume.
 `GET /admin` is a login page. Set `FEEDBACK_ADMIN_USER`,
 `FEEDBACK_ADMIN_PASSWORD`, and `FEEDBACK_SESSION_SECRET`.
 `Authorization: Bearer $FEEDBACK_ADMIN_TOKEN` still works on `/v1/admin/*`.
+Set `FEEDBACK_TRUST_XFF=1` when Traefik sits in front so login and report
+rate limits use the proxy-appended client IP.
 
 ## Verify
 

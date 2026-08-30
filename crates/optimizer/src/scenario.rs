@@ -13,6 +13,8 @@ pub struct ScenarioSpec {
     pub target_profile: TargetProfile,
     pub optimization_target: OptimizationTarget,
     pub patch_id: Option<String>,
+    /// Role profile id for viability floors. `None` keeps hardcoded mode/tier defaults.
+    pub objective_profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -85,6 +87,7 @@ impl ScenarioSpec {
                 label: ctx.game_mode.label().to_string(),
             },
             patch_id: Some(ctx.patch_id.clone()),
+            objective_profile_id: None,
         }
     }
 
@@ -364,6 +367,7 @@ mod tests {
         assert_eq!(scenario.combat_tier, CombatTier::Solo);
         assert_eq!(scenario.target_profile, TargetProfile::Single);
         assert_eq!(scenario.patch_id.as_deref(), Some(ctx.patch_id.as_str()));
+        assert_eq!(scenario.objective_profile_id, None);
         assert_eq!(scenario.optimization_target.label, "WvW");
     }
 

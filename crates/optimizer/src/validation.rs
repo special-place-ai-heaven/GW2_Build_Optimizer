@@ -400,6 +400,10 @@ pub enum RejectCode {
         utilities: usize,
         elite: bool,
     },
+    /// Heal/utility/elite name did not resolve (exact / alnum_key only).
+    SkillNotFound { name: String },
+    /// Ranger pet name did not resolve against GameDb.pets.
+    PetNotFound { name: String },
 }
 
 /// Structured validator rejection. `detail` mirrors the prior flat string
@@ -528,6 +532,7 @@ pub fn validate_gemini_build(
     }
     validate_weapons(response, db, profession_name, &mut result);
     validate_skills(response, db, profession_name, &mut result);
+    validate_pets(response, db, &mut result);
     if !response.specializations.is_empty() {
         for spec in &result.specializations {
             if spec.trait_ids.len() != 3 {
@@ -544,13 +549,25 @@ pub fn validate_gemini_build(
                 });
             }
         }
+    }
+    if profession_name == "Revenant" {
+        fill_revenant_legends(response, &mut result, db);
+    }
+    if !response.specializations.is_empty() {
         let utils = result
             .skills
             .utilities
             .iter()
             .filter(|u| u.is_some())
             .count();
-        if result.skills.heal.is_none() || result.skills.elite.is_none() || utils != 3 {
+        if result.skills.heal.is_some() && result.skills.elite.is_some() && utils == 3 {
+            result.errors.retain(|e| {
+                !matches!(
+                    e.code,
+                    RejectCode::IncompleteSkillBar { .. } | RejectCode::SkillNotFound { .. }
+                )
+            });
+        } else {
             result.errors.push(ValidationReject {
                 code: RejectCode::IncompleteSkillBar {
                     heal: result.skills.heal.is_some(),
@@ -565,9 +582,6 @@ pub fn validate_gemini_build(
                 ),
             });
         }
-    }
-    if profession_name == "Revenant" {
-        fill_revenant_legends(&mut result, db);
     }
     validate_rune(response, db, &mut result);
     validate_sigils(response, db, &mut result);
@@ -596,7 +610,7 @@ fn validate_specializations(
     for (spec_name, trait_names) in &response.specializations {
         // Strip display-only " [E]" suffix that the LLM or UI may include for elite specs
         let spec_name_clean = spec_name.trim_end_matches(" [E]");
-        let spec = find_spec_by_name(db, spec_name_clean, &prof_spec_ids);
+        let spec = find_spec_by_name(db, spec_name_clean, &prof_spec_ids, result);
 
         let Some(spec) = spec else {
             result.errors.push(ValidationReject {
@@ -651,6 +665,7 @@ fn validate_specializations(
         let mut resolved_trait_ids = Vec::new();
         let mut resolved_trait_names = Vec::new();
         let mut used_tiers: HashMap<u32, String> = HashMap::new();
+        let mut unknown_trait = false;
 
         for trait_name in trait_names {
             if let Some(t) = find_trait_by_name(trait_name, &major_traits) {
@@ -669,6 +684,7 @@ fn validate_specializations(
                 resolved_trait_ids.push(t.id);
                 resolved_trait_names.push(t.name.clone());
             } else {
+                unknown_trait = true;
                 result.warnings.push(format!(
                     "Trait '{}' not found in spec '{}'",
                     trait_name, spec.name
@@ -676,14 +692,17 @@ fn validate_specializations(
             }
         }
 
-        complete_major_trait_columns(
-            &major_traits,
-            &mut resolved_trait_ids,
-            &mut resolved_trait_names,
-            &mut used_tiers,
-            &spec.name,
-            &mut result.warnings,
-        );
+        // Omitted columns may fill. Garbage names must not become a legal spec.
+        if !unknown_trait {
+            complete_major_trait_columns(
+                &major_traits,
+                &mut resolved_trait_ids,
+                &mut resolved_trait_names,
+                &mut used_tiers,
+                &spec.name,
+                &mut result.warnings,
+            );
+        }
 
         // Collect minor traits (always active)
         let minor_ids: Vec<u32> = spec.minor_traits.clone();
@@ -902,20 +921,66 @@ fn validate_skills(
     }
 }
 
+fn validate_pets(response: &GeminiBuildResponse, db: &GameDb, result: &mut ValidatedBuild) {
+    let Some(names) = &response.pets else {
+        return;
+    };
+    let mut ids = [None; 4];
+    for (i, slot) in names.iter().enumerate() {
+        let Some(name) = slot else {
+            continue;
+        };
+        match db.pet_by_name(name) {
+            Some(pet) => ids[i] = Some(pet.id),
+            None => result.errors.push(ValidationReject {
+                code: RejectCode::PetNotFound { name: name.clone() },
+                detail: format!("Pet '{}' not found", name),
+            }),
+        }
+    }
+    result.pets = Some((ids[0], ids[1], ids[2], ids[3]));
+}
+
 /// Revenant heal/utilities/elite are a legend bundle, not a free mix.
 /// `/v2/legends` plus the swap skill's `specialization` gate which stances
 /// are legal; the template byte is `Legend.code`.
-fn fill_revenant_legends(result: &mut ValidatedBuild, db: &GameDb) {
+fn legend_ids_from_plate(response: &GeminiBuildResponse, db: &GameDb) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut consider = |s: &str| {
+        for token in s.split(|c: char| !c.is_ascii_alphanumeric()) {
+            if db.legends.contains_key(token) && !ids.iter().any(|id| id == token) {
+                ids.push(token.to_string());
+            }
+        }
+    };
+    for line in &response.skills {
+        consider(line);
+    }
+    for line in &response.changes_made {
+        consider(line);
+    }
+    ids
+}
+
+fn fill_revenant_legends(response: &GeminiBuildResponse, result: &mut ValidatedBuild, db: &GameDb) {
     if db.legends.is_empty() {
         return;
     }
     let spec_ids: Vec<u32> = result.specializations.iter().map(|s| s.spec_id).collect();
-    let mut ids = Vec::new();
-    if let Some((heal_id, _)) = &result.skills.heal {
-        if let Some(id) = db.legends.iter().find_map(|(id, l)| {
-            (l.heal == *heal_id && db.legend_available(id, &spec_ids)).then(|| id.clone())
-        }) {
-            ids.push(id);
+    let explicit: Vec<String> = legend_ids_from_plate(response, db)
+        .into_iter()
+        .filter(|id| db.legend_available(id, &spec_ids))
+        .collect();
+    let mut ids = explicit;
+    let mut inferred_from_heal = false;
+    if ids.is_empty() {
+        if let Some((heal_id, _)) = &result.skills.heal {
+            if let Some(id) = db.legends.iter().find_map(|(id, l)| {
+                (l.heal == *heal_id && db.legend_available(id, &spec_ids)).then(|| id.clone())
+            }) {
+                ids.push(id);
+                inferred_from_heal = true;
+            }
         }
     }
     let mut rest: Vec<(u8, String)> = db
@@ -941,14 +1006,34 @@ fn fill_revenant_legends(result: &mut ValidatedBuild, db: &GameDb) {
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| format!("Skill {id}"))
         };
-        result.skills.heal = Some((legend.heal, name_of(legend.heal)));
-        result.skills.utilities = legend
+        let new_utilities: Vec<Option<(u32, String)>> = legend
             .utilities
             .iter()
             .take(3)
             .map(|&id| Some((id, name_of(id))))
             .collect();
-        result.skills.elite = Some((legend.elite, name_of(legend.elite)));
+        let new_elite = Some((legend.elite, name_of(legend.elite)));
+        let old_utility_ids: Vec<u32> = result
+            .skills
+            .utilities
+            .iter()
+            .filter_map(|u| u.as_ref().map(|p| p.0))
+            .collect();
+        let new_utility_ids: Vec<u32> = new_utilities
+            .iter()
+            .filter_map(|u| u.as_ref().map(|p| p.0))
+            .collect();
+        let utilities_changed = old_utility_ids != new_utility_ids;
+        let elite_changed = result.skills.elite.as_ref().map(|e| e.0) != Some(legend.elite);
+        result.skills.heal = Some((legend.heal, name_of(legend.heal)));
+        result.skills.utilities = new_utilities;
+        result.skills.elite = new_elite;
+        if inferred_from_heal && (utilities_changed || elite_changed) {
+            result.warnings.push(format!(
+                "Revenant utilities/elite were replaced from legend {} inferred from heal",
+                ids[0]
+            ));
+        }
     }
     result.legends = ids.clone();
     result.aquatic_legends = ids;
@@ -1209,32 +1294,36 @@ fn validate_gear_slot_map(
 // ---------------------------------------------------------------------------
 
 /// Find a specialization by name (case-insensitive) within a profession's spec list.
+/// Apply is `names_eq` only. A substring of another spec (e.g. "Fire" → Firebrand)
+/// is a warning, not an apply.
 fn find_spec_by_name<'a>(
     db: &'a GameDb,
     name: &str,
     prof_spec_ids: &[u32],
+    result: &mut ValidatedBuild,
 ) -> Option<&'a Specialization> {
+    for id in prof_spec_ids {
+        if let Some(spec) = db.spec(*id) {
+            if names_eq(&spec.name, name) {
+                return Some(spec);
+            }
+        }
+    }
+
     let needle = name.to_lowercase();
-
-    // Prefer exact match within profession
-    for id in prof_spec_ids {
-        if let Some(spec) = db.spec(*id) {
-            if spec.name.to_lowercase() == needle {
-                return Some(spec);
+    if !needle.is_empty() {
+        for id in prof_spec_ids {
+            if let Some(spec) = db.spec(*id) {
+                if spec.name.to_lowercase().contains(&needle) {
+                    result.warnings.push(format!(
+                        "Specialization '{}' is a substring of '{}' — not applied",
+                        name, spec.name
+                    ));
+                    break;
+                }
             }
         }
     }
-
-    // Fallback: case-insensitive contains (spec name contains search string only).
-    // Do NOT check the reverse direction — prevents "Ber" matching "Berserker".
-    for id in prof_spec_ids {
-        if let Some(spec) = db.spec(*id) {
-            if spec.name.to_lowercase().contains(&needle) {
-                return Some(spec);
-            }
-        }
-    }
-
     None
 }
 
@@ -1309,32 +1398,29 @@ fn complete_major_trait_columns(
 }
 
 /// Find a skill by name (case-insensitive) and validate its slot type.
+/// Resolve is `names_eq` only (exact ignore-ascii-case or alnum_key). A
+/// substring of another skill does not apply; the slot stays empty.
 fn find_skill_by_name(
     name: &str,
     prof_skills: &[&Skill],
     expected_slot: Option<&str>,
     result: &mut ValidatedBuild,
 ) -> Option<(u32, String)> {
-    let needle = name.to_lowercase();
-
-    // Exact match first. Fall back to substring contains, but only when the
-    // needle is at least 5 chars long — otherwise short LLM hallucinations like
-    // "heal" or "fire" would over-match skills they never named (e.g. "heal"
-    // matching the first heal-tagged skill alphabetically). Matches the same
-    // guard used by `find_trait_by_name`.
-    let exact_match = prof_skills.iter().find(|s| names_eq(&s.name, name));
-    let found = if exact_match.is_some() {
-        exact_match
-    } else if needle.len() >= 5 {
-        prof_skills
-            .iter()
-            .find(|s| s.name.to_lowercase().contains(&needle))
-    } else {
-        None
-    };
+    let found = prof_skills.iter().find(|s| names_eq(&s.name, name));
 
     if let Some(skill) = found {
-        // Validate slot type
+        if skill_is_aquatic_only(skill) {
+            result.errors.push(ValidationReject {
+                code: RejectCode::SkillNotFound {
+                    name: name.to_string(),
+                },
+                detail: format!(
+                    "Skill '{}' is aquatic-only and cannot be used on a land bar",
+                    name
+                ),
+            });
+            return None;
+        }
         if let Some(expected) = expected_slot {
             if let Some(ref slot) = skill.slot {
                 if !slot.eq_ignore_ascii_case(expected) {
@@ -1345,20 +1431,14 @@ fn find_skill_by_name(
                 }
             }
         }
-
-        let exact = names_eq(&skill.name, name);
-        if !exact {
-            result.warnings.push(format!(
-                "Skill '{}' fuzzy-matched to '{}'",
-                name, skill.name
-            ));
-        }
-
         Some((skill.id, skill.name.clone()))
     } else {
-        result
-            .warnings
-            .push(format!("Skill '{}' not found for this profession", name));
+        result.errors.push(ValidationReject {
+            code: RejectCode::SkillNotFound {
+                name: name.to_string(),
+            },
+            detail: format!("Skill '{}' not found for this profession", name),
+        });
         None
     }
 }
@@ -1369,6 +1449,17 @@ fn names_eq(a: &str, b: &str) -> bool {
     }
     let ka = gw2_core::i18n::alnum_key(a);
     !ka.is_empty() && ka == gw2_core::i18n::alnum_key(b)
+}
+
+fn skill_is_aquatic_only(skill: &Skill) -> bool {
+    skill
+        .flags
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case("Aquatic"))
+        && !skill
+            .flags
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case("NoUnderwater"))
 }
 
 /// Find an item (rune/sigil/relic) by name (case-insensitive).
@@ -1388,6 +1479,19 @@ fn find_item_by_name(
             id: item.id,
             name: item.name.clone(),
         });
+    }
+
+    // Same min-length gate as trait fuzzy (>=5). Short needles ("a", "sig")
+    // must not steal a different item.
+    if needle.len() < 5 {
+        result.errors.push(ValidationReject {
+            code: RejectCode::ItemNotFound {
+                item_type: item_type.to_string(),
+                name: name.to_string(),
+            },
+            detail: format!("{} '{}' not found in game data", item_type, name),
+        });
+        return None;
     }
 
     // Item name contains search string
@@ -1440,18 +1544,20 @@ fn find_item_by_name(
 
     if let Some(short) = stripped {
         let short_lower = short.to_lowercase();
-        let found = items
-            .iter()
-            .find(|i| i.name.to_lowercase().contains(&short_lower));
-        if let Some(item) = found {
-            result.warnings.push(format!(
-                "{} '{}' fuzzy-matched to '{}'",
-                item_type, name, item.name
-            ));
-            return Some(ValidatedItem {
-                id: item.id,
-                name: item.name.clone(),
-            });
+        if short_lower.len() >= 5 {
+            let found = items
+                .iter()
+                .find(|i| i.name.to_lowercase().contains(&short_lower));
+            if let Some(item) = found {
+                result.warnings.push(format!(
+                    "{} '{}' fuzzy-matched to '{}'",
+                    item_type, name, item.name
+                ));
+                return Some(ValidatedItem {
+                    id: item.id,
+                    name: item.name.clone(),
+                });
+            }
         }
     }
 
@@ -2120,6 +2226,42 @@ mod tests {
             .any(|w| w.contains("Arcane Precision")));
     }
 
+    #[test]
+    fn validate_gemini_build_does_not_fill_after_garbage_trait_name() {
+        let db = arcane_ele_db();
+        let response = GeminiBuildResponse {
+            specializations: vec![("Arcane".into(), vec!["DefinitelyNotATrait".into()])],
+            ..Default::default()
+        };
+        let result = validate_gemini_build(&response, &db, "Elementalist");
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("DefinitelyNotATrait")),
+            "garbage name must warn, got {:?}",
+            result.warnings
+        );
+        assert!(
+            !result.warnings.iter().any(|w| w.contains("filled")),
+            "garbage must not autofill a legal column: {:?}",
+            result.warnings
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| matches!(e.code, RejectCode::IncompleteSpecTraits { .. })),
+            "garbage plate must stay incomplete: {:?}",
+            result.errors
+        );
+        assert_ne!(
+            result.specializations[0].trait_ids,
+            vec![1, 2, 3],
+            "must not complete into Arcane Precision / Resurrection / Evasive Arcana"
+        );
+    }
+
     // ── validate_gear_prefix() determinism + tie-break ───────────────────────
 
     fn empty_db_with_itemstats(stats: Vec<(u32, &str)>) -> GameDb {
@@ -2473,13 +2615,189 @@ mod tests {
     }
 
     #[test]
-    fn test_find_skill_ge5_needle_contains_match() {
-        // needle "heali" (5 chars) is a substring of "Healing Spring".
+    fn five_char_substring_does_not_apply_a_different_skill() {
+        // "heali" is a 5-char substring of "Healing Spring". Contains used to
+        // apply that other skill. Applied id must stay empty (names_eq only).
         let s = make_skill(2, "Healing Spring");
         let skills = vec![&s];
         let mut result = ValidatedBuild::default();
         let found = find_skill_by_name("heali", &skills, None, &mut result);
+        assert!(
+            found.is_none(),
+            "5+ char substring must not apply a different skill, got {found:?}"
+        );
+        assert!(
+            result.errors.iter().any(|e| matches!(
+                &e.code,
+                RejectCode::SkillNotFound { name } if name == "heali"
+            )),
+            "not-found must be SkillNotFound, not a warning that still fills; got {:?}",
+            result.errors
+        );
+        assert!(
+            result.warnings.iter().all(|w| !w.contains("fuzzy-matched")),
+            "substring must not fuzzy-apply: {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn names_eq_still_applies_the_named_skill() {
+        let s = make_skill(2, "Healing Spring");
+        let skills = vec![&s];
+        let mut result = ValidatedBuild::default();
+        let found = find_skill_by_name("healing spring", &skills, None, &mut result);
         assert_eq!(found.map(|(id, _)| id), Some(2));
+        assert!(
+            result.errors.is_empty(),
+            "names_eq hit must not SkillNotFound: {:?}",
+            result.errors
+        );
+    }
+
+    fn firebrand_guardian_db() -> GameDb {
+        let mut db = GameDb::empty_for_tests();
+        db.professions.insert(
+            "Guardian".into(),
+            gw2_api::models::Profession {
+                id: "Guardian".into(),
+                name: "Guardian".into(),
+                code: None,
+                specializations: vec![62],
+                weapons: std::collections::HashMap::new(),
+                training: vec![],
+                skills_by_palette: vec![],
+                icon: None,
+                icon_big: None,
+            },
+        );
+        db.specializations.insert(
+            62,
+            Specialization {
+                id: 62,
+                name: "Firebrand".into(),
+                profession: "Guardian".into(),
+                elite: true,
+                minor_traits: vec![],
+                major_traits: vec![],
+                weapon_trait: None,
+                icon: None,
+                background: None,
+                profession_icon: None,
+                profession_icon_big: None,
+            },
+        );
+        db
+    }
+
+    #[test]
+    fn fire_substring_does_not_apply_firebrand() {
+        let db = firebrand_guardian_db();
+        let mut result = ValidatedBuild::default();
+        let found = find_spec_by_name(&db, "Fire", &[62], &mut result);
+        assert!(
+            found.is_none(),
+            "Fire must not apply Firebrand, got {found:?}"
+        );
+        assert!(
+            result.specializations.is_empty(),
+            "substring must not apply a spec"
+        );
+        assert!(
+            result.warnings.iter().any(|w| w.contains("Firebrand")),
+            "substring must warn, got {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn exact_firebrand_still_applies() {
+        let db = firebrand_guardian_db();
+        let mut result = ValidatedBuild::default();
+        let found = find_spec_by_name(&db, "Firebrand", &[62], &mut result);
+        assert_eq!(found.map(|s| s.id), Some(62));
+        assert!(
+            result.warnings.is_empty(),
+            "exact must not warn: {:?}",
+            result.warnings
+        );
+    }
+
+    fn upgrade_item(id: u32, name: &str) -> Item {
+        Item {
+            id,
+            name: name.into(),
+            description: None,
+            icon: None,
+            item_type: "UpgradeComponent".into(),
+            rarity: "Exotic".into(),
+            level: 80,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: Vec::new(),
+            game_types: Vec::new(),
+            restrictions: Vec::new(),
+            details: None,
+        }
+    }
+
+    #[test]
+    fn short_item_needle_does_not_steal() {
+        let force = upgrade_item(10, "Superior Sigil of Force");
+        let items = vec![&force];
+        for needle in ["a", "sig"] {
+            let mut result = ValidatedBuild::default();
+            let found = find_item_by_name(needle, &items, "Sigil", &mut result);
+            assert!(
+                found.is_none(),
+                "{needle} must not steal a sigil, got {found:?}"
+            );
+            assert!(
+                result.errors.iter().any(|e| matches!(
+                    &e.code,
+                    RejectCode::ItemNotFound { name, .. } if name == needle
+                )),
+                "short needle must ItemNotFound, got {:?}",
+                result.errors
+            );
+        }
+        let mut ok = ValidatedBuild::default();
+        let found = find_item_by_name("Superior Sigil of Force", &items, "Sigil", &mut ok);
+        assert_eq!(found.map(|i| i.id), Some(10));
+    }
+
+    #[test]
+    fn aquatic_only_skill_rejected_on_land() {
+        let mut aquatic = make_skill(30, "Tidal Surge");
+        aquatic.flags = vec!["Aquatic".into()];
+        let skills = vec![&aquatic];
+        let mut result = ValidatedBuild::default();
+        let found = find_skill_by_name("Tidal Surge", &skills, None, &mut result);
+        assert!(found.is_none(), "aquatic-only skill must not apply on land");
+        assert!(
+            result.errors.iter().any(|e| matches!(
+                &e.code,
+                RejectCode::SkillNotFound { name } if name == "Tidal Surge"
+            )),
+            "expected SkillNotFound, got {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn land_spear_skill_not_rejected_for_aquatic_weapon_flag() {
+        let mut land = make_skill(31, "Barbed Spear");
+        land.flags = vec!["NoUnderwater".into()];
+        let skills = vec![&land];
+        let mut result = ValidatedBuild::default();
+        let found = find_skill_by_name("Barbed Spear", &skills, None, &mut result);
+        assert_eq!(found.map(|(id, _)| id), Some(31));
+        assert!(
+            result.errors.is_empty(),
+            "NoUnderwater land skill must apply: {:?}",
+            result.errors
+        );
     }
 
     fn make_prof_with_elite_axe() -> gw2_api::models::Profession {
@@ -2809,6 +3127,280 @@ mod tests {
         assert!(
             !result.errors.iter().any(|e| e.detail.contains("unknown")),
             "{result:?}"
+        );
+    }
+
+    fn ranger_pet_db() -> GameDb {
+        let mut db = GameDb::empty_for_tests();
+        for (id, name) in [
+            (1u32, "Juvenile Jungle Stalker"),
+            (2, "Juvenile Brown Bear"),
+            (3, "Juvenile Shark"),
+        ] {
+            db.pets.insert(
+                id,
+                gw2_api::models::Pet {
+                    id,
+                    name: name.into(),
+                    description: None,
+                    icon: None,
+                    skills: vec![],
+                },
+            );
+        }
+        db
+    }
+
+    /// RED: validate never wrote ValidatedBuild.pets.
+    #[test]
+    fn validate_writes_resolved_pets() {
+        let db = ranger_pet_db();
+        let mut response = GeminiBuildResponse::default();
+        response.pets = Some([
+            Some("Jungle Stalker".into()),
+            Some("Brown Bear".into()),
+            Some("Shark".into()),
+            None,
+        ]);
+        let result = validate_gemini_build(&response, &db, "Ranger");
+        assert_eq!(result.pets, Some((Some(1), Some(2), Some(3), None)));
+        assert!(
+            !result
+                .errors
+                .iter()
+                .any(|e| e.detail.to_lowercase().contains("pet")),
+            "{:?}",
+            result.errors
+        );
+    }
+
+    /// RED: unknown pet name must error, not silently drop.
+    #[test]
+    fn validate_pets_errors_on_unknown_name() {
+        let db = ranger_pet_db();
+        let mut response = GeminiBuildResponse::default();
+        response.pets = Some([Some("Warg".into()), None, None, None]);
+        let result = validate_gemini_build(&response, &db, "Ranger");
+        assert!(
+            result.errors.iter().any(|e| e.detail.contains("Warg")),
+            "miss must error: {:?}",
+            result.errors
+        );
+        assert_eq!(result.pets, Some((None, None, None, None)));
+    }
+
+    fn legend_fixture_db() -> GameDb {
+        let mut db = GameDb::empty_for_tests();
+        let mk = |id: &str, code: u32, heal: u32, elite: u32, utilities: [u32; 3], swap: u32| {
+            gw2_api::models::Legend {
+                id: id.into(),
+                code: Some(code),
+                swap,
+                heal,
+                elite,
+                utilities: utilities.to_vec(),
+            }
+        };
+        db.legends
+            .insert("Legend1".into(), mk("Legend1", 1, 10, 19, [11, 12, 13], 18));
+        db.legends
+            .insert("Legend2".into(), mk("Legend2", 2, 20, 29, [21, 22, 23], 28));
+        for (id, name) in [
+            (10u32, "Heal One"),
+            (11, "Util A"),
+            (12, "Util B"),
+            (13, "Util C"),
+            (19, "Elite One"),
+            (20, "Heal Two"),
+            (21, "Util X"),
+            (22, "Util Y"),
+            (23, "Util Z"),
+            (29, "Elite Two"),
+        ] {
+            db.skills.insert(id, make_skill(id, name));
+        }
+        db
+    }
+
+    /// RED: infer-from-heal replaced plate utilities/elite with no warning.
+    #[test]
+    fn revenant_infer_from_heal_warns_when_replacing_utilities() {
+        let db = legend_fixture_db();
+        let mut result = ValidatedBuild::default();
+        result.skills.heal = Some((10, "Heal One".into()));
+        result.skills.utilities = vec![
+            Some((21, "Util X".into())),
+            Some((22, "Util Y".into())),
+            Some((23, "Util Z".into())),
+        ];
+        result.skills.elite = Some((29, "Elite Two".into()));
+        fill_revenant_legends(&GeminiBuildResponse::default(), &mut result, &db);
+        assert_eq!(result.legends.first().map(String::as_str), Some("Legend1"));
+        assert_eq!(
+            result
+                .skills
+                .utilities
+                .iter()
+                .filter_map(|u| u.as_ref().map(|p| p.0))
+                .collect::<Vec<_>>(),
+            vec![11, 12, 13]
+        );
+        assert_eq!(result.skills.elite.as_ref().map(|e| e.0), Some(19));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("replaced") && w.contains("Legend1")),
+            "silent overwrite: {:?}",
+            result.warnings
+        );
+    }
+
+    /// RED: plate Legend2 must win over heal-inferred Legend1.
+    #[test]
+    fn revenant_plate_legend_ids_are_honored() {
+        let db = legend_fixture_db();
+        let mut response = GeminiBuildResponse::default();
+        response.skills = vec!["Legend2".into()];
+        let mut result = ValidatedBuild::default();
+        result.skills.heal = Some((10, "Heal One".into()));
+        fill_revenant_legends(&response, &mut result, &db);
+        assert_eq!(result.legends.first().map(String::as_str), Some("Legend2"));
+        assert_eq!(result.skills.heal.as_ref().map(|h| h.0), Some(20));
+        assert_eq!(
+            result
+                .skills
+                .utilities
+                .iter()
+                .filter_map(|u| u.as_ref().map(|p| p.0))
+                .collect::<Vec<_>>(),
+            vec![21, 22, 23]
+        );
+        assert_eq!(result.skills.elite.as_ref().map(|e| e.0), Some(29));
+        assert!(
+            !result.warnings.iter().any(|w| w.contains("inferred")),
+            "explicit legend should not warn as inferred: {:?}",
+            result.warnings
+        );
+    }
+
+    /// RED: IncompleteSkillBar / SkillNotFound recorded before legend fill
+    /// must not survive on a plate the fill just made legal.
+    #[test]
+    fn revenant_legend_fill_clears_stale_skill_bar_errors() {
+        let mut db = legend_fixture_db();
+        db.professions.insert(
+            "Revenant".into(),
+            gw2_api::models::Profession {
+                id: "Revenant".into(),
+                name: "Revenant".into(),
+                code: None,
+                specializations: vec![9],
+                weapons: std::collections::HashMap::new(),
+                training: vec![],
+                skills_by_palette: vec![],
+                icon: None,
+                icon_big: None,
+            },
+        );
+        db.specializations.insert(
+            9,
+            Specialization {
+                id: 9,
+                name: "Corruption".into(),
+                profession: "Revenant".into(),
+                elite: false,
+                minor_traits: vec![],
+                major_traits: vec![1, 2, 3],
+                weapon_trait: None,
+                icon: None,
+                background: None,
+                profession_icon: None,
+                profession_icon_big: None,
+            },
+        );
+        db.traits.insert(1, make_trait(1, "Opportunist"));
+        db.traits.insert(2, make_trait(2, "Unholy Fervor"));
+        db.traits.insert(3, make_trait(3, "Demonic Defiance"));
+        db.traits_by_spec.insert(9, vec![1, 2, 3]);
+
+        let response = GeminiBuildResponse {
+            specializations: vec![(
+                "Corruption".into(),
+                vec![
+                    "Opportunist".into(),
+                    "Unholy Fervor".into(),
+                    "Demonic Defiance".into(),
+                ],
+            )],
+            skills: vec![
+                "Heal: NotARealHeal".into(),
+                "Utils: GarbageA, GarbageB, GarbageC".into(),
+                "Elite: NopeElite".into(),
+            ],
+            ..Default::default()
+        };
+        let result = validate_gemini_build(&response, &db, "Revenant");
+        assert_eq!(result.skills.heal.as_ref().map(|h| h.0), Some(10));
+        assert_eq!(
+            result
+                .skills
+                .utilities
+                .iter()
+                .filter_map(|u| u.as_ref().map(|p| p.0))
+                .collect::<Vec<_>>(),
+            vec![11, 12, 13]
+        );
+        assert_eq!(result.skills.elite.as_ref().map(|e| e.0), Some(19));
+        assert!(
+            !result
+                .errors
+                .iter()
+                .any(|e| matches!(e.code, RejectCode::IncompleteSkillBar { .. })),
+            "filled legend bar must not keep IncompleteSkillBar: {:?}",
+            result.errors
+        );
+        assert!(
+            !result
+                .errors
+                .iter()
+                .any(|e| matches!(e.code, RejectCode::SkillNotFound { .. })),
+            "filled legend bar must not keep SkillNotFound: {:?}",
+            result.errors
+        );
+    }
+
+    /// RED: rest-pad (no heal, no Legend* tokens) must not claim inferred-from-heal.
+    #[test]
+    fn revenant_rest_pad_does_not_warn_inferred_from_heal() {
+        let db = legend_fixture_db();
+        let mut result = ValidatedBuild::default();
+        result.skills.utilities = vec![
+            Some((21, "Util X".into())),
+            Some((22, "Util Y".into())),
+            Some((23, "Util Z".into())),
+        ];
+        result.skills.elite = Some((29, "Elite Two".into()));
+        fill_revenant_legends(&GeminiBuildResponse::default(), &mut result, &db);
+        assert_eq!(result.legends.first().map(String::as_str), Some("Legend1"));
+        assert_eq!(result.skills.heal.as_ref().map(|h| h.0), Some(10));
+        assert_eq!(
+            result
+                .skills
+                .utilities
+                .iter()
+                .filter_map(|u| u.as_ref().map(|p| p.0))
+                .collect::<Vec<_>>(),
+            vec![11, 12, 13]
+        );
+        assert_eq!(result.skills.elite.as_ref().map(|e| e.0), Some(19));
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|w| w.contains("inferred from heal")),
+            "rest-pad must not claim inferred from heal: {:?}",
+            result.warnings
         );
     }
 }

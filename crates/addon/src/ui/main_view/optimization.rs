@@ -480,11 +480,20 @@ pub(super) fn candidate_to_suggestion(
         rotation: None,
         viability: Some(legacy_viability),
         benchmark_delta: None,
-        data_quality: gw2_optimizer::data::DataQuality::Verified,
-        quality_reasons: vec![],
+        data_quality: leftover_plate_quality(true),
+        quality_reasons: vec!["legacy leftover kit has no weapons or skills".into()],
     };
     suggestion.chat_code = suggestion_to_chat_code(&suggestion, db);
     suggestion
+}
+
+/// Leftover `BuildCandidate` plates never carry weapons/skills. Do not stamp Verified.
+fn leftover_plate_quality(empty_kit: bool) -> gw2_optimizer::data::DataQuality {
+    if empty_kit {
+        gw2_optimizer::data::DataQuality::Blocked
+    } else {
+        gw2_optimizer::data::DataQuality::Verified
+    }
 }
 
 /// Run rotation simulation for a suggestion's skills and attach the results.
@@ -1109,6 +1118,29 @@ pub(super) fn gemini_from_validated(
     if !v.legends.is_empty() {
         skills.push(format!("Stances: {}", v.legends.join(" / ")));
     }
+    // Same contract as keep_loadout_pets: a Ranger plate must not lose Pets.
+    // Chat fill_holes_from_loadout inserts the row; this rebuild used to drop it.
+    if let Some(row) = raw
+        .skills
+        .iter()
+        .find(|s| s.get(..6).is_some_and(|h| h.eq_ignore_ascii_case("Pets: ")))
+    {
+        skills.push(row.clone());
+    } else if let Some(slots) = &raw.pets {
+        let names: Vec<String> = slots.iter().flatten().cloned().collect();
+        if !names.is_empty() {
+            skills.push(format!("Pets: {}", names.join(" / ")));
+        }
+    } else if let Some((t1, t2, _, _)) = v.pets {
+        let ids: Vec<String> = [t1, t2]
+            .into_iter()
+            .flatten()
+            .map(|id| format!("#{id}"))
+            .collect();
+        if !ids.is_empty() {
+            skills.push(format!("Pets: {}", ids.join(" / ")));
+        }
+    }
     if let Some((_, name)) = &v.skills.heal {
         skills.push(format!("Heal: {}", name));
     }
@@ -1560,7 +1592,7 @@ mod tests {
     use super::{
         apply_radar_prefix, chat_display_text, fill_holes_from_loadout, format_provider_issue,
         gemini_from_validated, keep_equipped_weapons, keep_loadout_pets, kitchen_brief,
-        snapshot_ranger_pets, suggestion_to_chat_code,
+        leftover_plate_quality, snapshot_ranger_pets, suggestion_to_chat_code,
     };
     use crate::ui::comparison::BuildSuggestion;
     use base64::Engine as _;
@@ -1743,6 +1775,107 @@ mod tests {
         };
         let plated = gemini_from_validated(raw, &v);
         assert_eq!(plated.rune, "Scholar");
+    }
+
+    #[test]
+    fn gemini_from_validated_keeps_pets() {
+        // A18-4: servable rebuild (heal+utils+elite) used to drop the Pets:
+        // row fill_holes_from_loadout just inserted. Chat then plated pet-less.
+        let raw = gw2_optimizer::prompts::GeminiBuildResponse {
+            skills: vec![
+                "Pets: Juvenile Smokescale / Juvenile Rock Gazelle".into(),
+                "Heal: Troll Unguent".into(),
+                "Utility: Lightning Reflexes".into(),
+                "Utility: Sharpening Stone".into(),
+                "Utility: Signet of Stone".into(),
+                "Elite: Entangle".into(),
+            ],
+            ..Default::default()
+        };
+        let mut v = gw2_optimizer::validation::ValidatedBuild::default();
+        v.skills.heal = Some((1, "Troll Unguent".into()));
+        v.skills.elite = Some((9, "Entangle".into()));
+        v.skills.utilities = vec![
+            Some((2, "Lightning Reflexes".into())),
+            Some((3, "Sharpening Stone".into())),
+            Some((4, "Signet of Stone".into())),
+        ];
+        let plated = gemini_from_validated(raw, &v);
+        assert!(
+            plated
+                .skills
+                .iter()
+                .any(|s| s == "Pets: Juvenile Smokescale / Juvenile Rock Gazelle"),
+            "gemini_from_validated must keep the Pets row: {:?}",
+            plated.skills
+        );
+        assert!(
+            plated.skills.iter().any(|s| s.contains("Troll Unguent")),
+            "{:?}",
+            plated.skills
+        );
+
+        // Parsed plate pets (A15-6 field) also land on the rebuilt list.
+        let raw_field = gw2_optimizer::prompts::GeminiBuildResponse {
+            skills: vec!["Heal: Troll Unguent".into()],
+            pets: Some([
+                Some("Juvenile Smokescale".into()),
+                Some("Juvenile Rock Gazelle".into()),
+                None,
+                None,
+            ]),
+            ..Default::default()
+        };
+        let mut v_field = gw2_optimizer::validation::ValidatedBuild::default();
+        v_field.skills.heal = Some((1, "Troll Unguent".into()));
+        let plated_field = gemini_from_validated(raw_field, &v_field);
+        assert!(
+            plated_field
+                .skills
+                .iter()
+                .any(|s| s == "Pets: Juvenile Smokescale / Juvenile Rock Gazelle"),
+            "{:?}",
+            plated_field.skills
+        );
+
+        // Validated pet IDs also emit a Pets row when raw had none.
+        let raw_no_pets = gw2_optimizer::prompts::GeminiBuildResponse {
+            skills: vec!["Heal: Troll Unguent".into()],
+            ..Default::default()
+        };
+        let mut v2 = gw2_optimizer::validation::ValidatedBuild::default();
+        v2.skills.heal = Some((1, "Troll Unguent".into()));
+        v2.pets = Some((Some(1), Some(2), None, None));
+        let plated2 = gemini_from_validated(raw_no_pets, &v2);
+        assert!(
+            plated2.skills.iter().any(|s| s.starts_with("Pets:")),
+            "{:?}",
+            plated2.skills
+        );
+
+        let src = include_str!("optimization.rs");
+        let production = src
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("split always yields a first chunk");
+        let start = production
+            .find("fn gemini_from_validated(")
+            .expect("gemini_from_validated gone");
+        let after = &production[start..];
+        let end = after[1..]
+            .find("\nfn ")
+            .map(|i| i + 1)
+            .expect("gemini_from_validated has no following fn");
+        let body = &after[..end];
+        let skills_at = body.find("let mut skills").expect("skills rebuild gone");
+        let assign_at = body
+            .find("raw.skills = skills")
+            .expect("skills assign gone");
+        let chunk = &body[skills_at..assign_at];
+        assert!(
+            chunk.contains("Pets:") || chunk.contains("v.pets"),
+            "skills rebuild must keep pets from v.pets / raw Pets: row"
+        );
     }
 
     #[test]
@@ -2133,5 +2266,17 @@ mod tests {
         assert!(t.contains("API key rejected"));
         let t = format_provider_issue("credit balance too low", "OpenAI", "gpt-4o");
         assert!(t.contains("Billing"));
+    }
+
+    #[test]
+    fn leftover_empty_kit_is_blocked_not_verified() {
+        assert_eq!(
+            leftover_plate_quality(true),
+            gw2_optimizer::data::DataQuality::Blocked
+        );
+        assert_eq!(
+            leftover_plate_quality(false),
+            gw2_optimizer::data::DataQuality::Verified
+        );
     }
 }

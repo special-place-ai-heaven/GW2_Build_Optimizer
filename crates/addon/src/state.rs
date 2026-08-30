@@ -47,7 +47,9 @@ impl CancellationToken {
 //   * the worker gets its own `CancellationToken` clone and must poll it,
 //   * its `JoinHandle` is tracked here until it finishes,
 //   * a panic inside the worker is caught and logged, never unwound,
-//   * `on_unload` cancels, then waits `UNLOAD_JOIN_BUDGET` for the stragglers.
+//   * `on_unload` cancels, then waits `UNLOAD_JOIN_BUDGET` for the stragglers,
+//   * on Windows the addon image is pinned before spawn returns so Nexus
+//     `FreeLibrary` cannot unmap `.text` under a detached worker.
 
 /// How long unload waits for background workers before giving up on them.
 ///
@@ -73,6 +75,114 @@ fn worker_log(message: String) {
         "GW2 Build Optimizer",
         message,
     );
+}
+
+/// Opaque `HMODULE`. Copied into the worker; never dereferenced as a pointer.
+#[derive(Clone, Copy)]
+struct ModuleHandle(usize);
+
+#[cfg(windows)]
+impl ModuleHandle {
+    fn from_raw(handle: *mut core::ffi::c_void) -> Self {
+        Self(handle as usize)
+    }
+
+    fn as_raw(self) -> *mut core::ffi::c_void {
+        self.0 as *mut core::ffi::c_void
+    }
+}
+
+/// Address taken by [`pin_addon_module`]; must live in this crate's image.
+#[inline(never)]
+fn addon_image_anchor() {}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetModuleHandleExW(
+        flags: u32,
+        name_or_address: *const u16,
+        module: *mut *mut core::ffi::c_void,
+    ) -> i32;
+    fn GetModuleHandleW(name: *const u16) -> *mut core::ffi::c_void;
+    fn FreeLibrary(module: *mut core::ffi::c_void) -> i32;
+    fn FreeLibraryAndExitThread(module: *mut core::ffi::c_void, exit_code: u32);
+}
+
+/// Increment this DLL's load count so Nexus `FreeLibrary` cannot unmap `.text`
+/// while a detached worker is still inside it.
+///
+/// Uses **only** `GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS` (0x4). Do not add
+/// `GET_MODULE_HANDLE_EX_FLAG_PIN` (0x1): that blocks hot-reload forever.
+///
+/// Returns `None` when this crate is linked into the process image (`cargo test`)
+/// or when the API fails (logged; the worker still starts). On `None`, the
+/// worker returns normally so existing join tests keep working.
+fn pin_addon_module() -> Option<ModuleHandle> {
+    #[cfg(not(windows))]
+    {
+        None
+    }
+    #[cfg(windows)]
+    {
+        // GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS only — not PIN, not UNCHANGED_REFCOUNT.
+        const GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS: u32 = 0x0000_0004;
+
+        let mut handle = core::ptr::null_mut();
+        // SAFETY: FROM_ADDRESS treats the second parameter as a code address, not
+        // a string. `addon_image_anchor` lives in this crate. `handle` is a local
+        // out-parameter. Success increments the module's load count.
+        let obtained = unsafe {
+            GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                addon_image_anchor as *const u16,
+                &mut handle,
+            )
+        };
+        if obtained == 0 || handle.is_null() {
+            worker_log(
+                "could not pin addon module (GetModuleHandleExW failed); \
+                 a detached worker may crash if Nexus unmaps the DLL"
+                    .into(),
+            );
+            return None;
+        }
+        // SAFETY: a null name returns the process executable; no increment.
+        let process = unsafe { GetModuleHandleW(core::ptr::null()) };
+        if handle == process {
+            // Undo the increment. Never FreeLibraryAndExitThread the test exe.
+            // SAFETY: we own the increment from GetModuleHandleExW.
+            let _ = unsafe { FreeLibrary(handle) };
+            return None;
+        }
+        Some(ModuleHandle::from_raw(handle))
+    }
+}
+
+/// Worker finished. Decrement the pin and exit this thread (never returns).
+fn exit_pinned_worker(handle: ModuleHandle) {
+    #[cfg(windows)]
+    {
+        // SAFETY: `handle` is the increment taken on the parent before spawn
+        // returned. This is the matching decrement; the thread must not run
+        // addon `.text` after it.
+        unsafe { FreeLibraryAndExitThread(handle.as_raw(), 0) }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = handle;
+    }
+}
+
+/// `Builder::spawn` failed after a successful pin: undo the increment here.
+fn undo_module_pin(pin: Option<ModuleHandle>) {
+    #[cfg(windows)]
+    if let Some(handle) = pin {
+        // SAFETY: the worker never started, so this thread still owns the increment.
+        let _ = unsafe { FreeLibrary(handle.as_raw()) };
+    }
+    #[cfg(not(windows))]
+    let _ = pin;
 }
 
 /// One background worker, tracked so unload can wait for it.
@@ -214,10 +324,11 @@ fn join_bounded(mut pending: Vec<TrackedWorker>, budget: Duration) -> ShutdownRe
     report.abandoned = pending.iter().map(|w| w.name).collect();
     report.waited = started.elapsed();
     // ponytail: dropping `pending` detaches those threads. They keep running with
-    // the cancel flag set, and if Nexus frees the DLL before one returns, the game
-    // crashes. Closing that window is WP0.2b/c/d's job (cancel-aware HTTP reads and
-    // retry sleeps, so workers observe the flag in milliseconds); raising the budget
-    // here would only trade a rare crash for a routine multi-second freeze.
+    // the cancel flag set. The unmap window is closed by [`pin_addon_module`] —
+    // each worker holds an extra load-count so Nexus `FreeLibrary` cannot unmap
+    // `.text` while that thread is still in `reqwest::blocking`. Cancel-aware
+    // HTTP is nice-to-have for faster joins, not the unload-safety story. Do not
+    // raise [`UNLOAD_JOIN_BUDGET`]: Nexus calls `on_unload` on the game main thread.
     report
 }
 
@@ -267,13 +378,23 @@ impl AddonState {
     /// it must still do on the panic path, such as clearing a "loading" flag
     /// through `with_state` so the UI does not spin forever.
     ///
+    /// On Windows the addon module is pinned on **this** thread before
+    /// `Builder::spawn` returns, so unload cannot race the child's first
+    /// instruction. After the body (and its panic guard) the worker calls
+    /// `FreeLibraryAndExitThread` when the pin is `Some`. A `None` pin is the
+    /// `cargo test` / process-image path: the thread returns so join tests work.
+    ///
     /// Returns `false` when the OS refused to create the thread, in which case the
     /// work never started — a caller that set a "loading" flag first should clear it.
+    /// A failed pin still spawns (old crash window) rather than refusing the worker.
     pub fn spawn_worker<F>(&self, name: &'static str, work: F) -> bool
     where
         F: FnOnce(CancellationToken) + Send + 'static,
     {
         let token = self.cancel_token.clone();
+        // Pin before spawn returns: `HMODULE` is Copy, so the child and the
+        // spawn-fail undo both see the same increment.
+        let pin = pin_addon_module();
         let spawned = std::thread::Builder::new()
             .name(format!("gw2bo-{}", name))
             .spawn(move || {
@@ -296,6 +417,9 @@ impl AddonState {
                 {
                     worker_log(format!("background worker panicked: {}", name));
                 }
+                if let Some(handle) = pin {
+                    exit_pinned_worker(handle);
+                }
             });
         match spawned {
             Ok(handle) => {
@@ -303,6 +427,7 @@ impl AddonState {
                 true
             }
             Err(err) => {
+                undo_module_pin(pin);
                 // `std::thread::spawn` panics on this path; a game overlay must not.
                 worker_log(format!(
                     "could not start background worker {}: {}",
@@ -320,9 +445,12 @@ impl AddonState {
     }
 
     /// Reset persisted settings and transient UI state back to first-run setup.
+    ///
+    /// In-memory reset runs under the caller's STATE guard; the disk write is
+    /// handed to [`crate::ui::save_config_detached`] so this method never writes
+    /// `config.json` while STATE is held. Write errors are logged by that worker.
     pub fn reset_to_first_run(&mut self) -> Result<(), std::io::Error> {
         let config = AppConfig::default();
-        config.save(&self.config_path)?;
 
         // Workers started before the reset keep the old token, which is cancelled
         // here, so they wind down on their own. Their handles stay in the registry
@@ -338,6 +466,7 @@ impl AddonState {
         self.news = crate::news::NewsState::default();
         self.screen = Screen::Setup(SetupStep::Language);
 
+        crate::ui::save_config_detached(self);
         Ok(())
     }
 }
@@ -380,8 +509,8 @@ pub struct MainState {
     /// reference, and the database is tens of megabytes, so the old
     /// `state.main.game_db.clone()` at each spawn site was a deep copy taken on the
     /// render thread while holding STATE. Cloning the `Arc` is a refcount bump.
-    /// Publish a new one with [`MainState::set_game_db`] and mutate in place with
-    /// [`MainState::game_db_mut`].
+    /// Publish a new one with [`MainState::set_game_db`]. In-place edits go through
+    /// [`MainState::game_db_mut`], which skips when a worker still holds a clone.
     pub game_db: Option<Arc<GameDb>>,
     pub game_db_loading: bool,
     /// Last failed auto-load attempt — gates the per-frame retry so a
@@ -511,14 +640,12 @@ impl MainState {
     /// Mutable access to the loaded database, for in-place edits such as attaching
     /// a localized name pack.
     ///
-    /// Copy-on-write: if a background worker is holding a clone right now, this
-    /// deep-copies once so the worker's snapshot is not mutated underneath it.
-    // ponytail: that copy lands on the render thread. It only fires while a worker
-    // is mid-flight, and the alternative (`Arc::get_mut`) silently skips the edit
-    // instead. Publishing an already-localized database via `set_game_db` avoids
-    // both — worth doing when the localization call sites are next opened.
+    /// If a background worker still holds a clone, this returns `None` rather than
+    /// deep-copying tens of megabytes on the thread that holds STATE. Callers that
+    /// can build a localized copy off-lock should publish it with
+    /// [`MainState::set_game_db`].
     pub fn game_db_mut(&mut self) -> Option<&mut GameDb> {
-        self.game_db.as_mut().map(Arc::make_mut)
+        self.game_db.as_mut().and_then(Arc::get_mut)
     }
 
     /// Clear the currently resolved build view so the UI never shows stale data.
@@ -734,21 +861,31 @@ pub fn init(addon_dir: PathBuf) {
 }
 
 pub fn toggle_window() {
-    if let Some(state) = lock_state().as_mut() {
+    let snapshot = {
+        let mut guard = lock_state();
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
         state.window_visible = !state.window_visible;
         state.config.window_visible = state.window_visible;
         if state.window_visible {
             state.needs_character_reload = true;
         }
-        let _ = state.config.save(&state.config_path);
-    }
+        (state.config.clone(), state.config_path.clone())
+    };
+    let _ = snapshot.0.save(&snapshot.1);
 }
 
 pub fn persist_window() {
-    if let Some(state) = lock_state().as_mut() {
+    let snapshot = {
+        let mut guard = lock_state();
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
         state.config.window_visible = state.window_visible;
-        let _ = state.config.save(&state.config_path);
-    }
+        (state.config.clone(), state.config_path.clone())
+    };
+    let _ = snapshot.0.save(&snapshot.1);
 }
 
 pub fn is_window_visible() -> bool {
@@ -1580,6 +1717,15 @@ mod tests {
     }
 
     #[test]
+    fn pin_addon_module_is_none_in_the_test_process_image() {
+        assert!(
+            pin_addon_module().is_none(),
+            "cargo test links this crate into the process exe; a Some pin would \
+             FreeLibraryAndExitThread the test runner"
+        );
+    }
+
+    #[test]
     fn join_workers_is_a_noop_without_state() {
         let _serial = state_test_guard();
         reset_state();
@@ -1663,11 +1809,134 @@ mod tests {
         assert_eq!(cache_build, None);
         assert!(locks_cleared);
 
+        // Disk write is detached; wait with STATE released so the worker can finish.
+        let report = join_workers(Duration::from_secs(5));
+        assert!(
+            report.abandoned.is_empty(),
+            "reset detached config write must finish: {report}"
+        );
+
         let (saved_config, err) = AppConfig::load(&AppConfig::config_path(&dir));
         assert!(err.is_none());
         assert!(!saved_config.has_gw2_key());
         assert!(!saved_config.has_active_llm_key());
         assert_eq!(saved_config.cache_build_number, None);
+    }
+
+    /// Source pin: toggle/persist snapshot then write after the STATE guard
+    /// drops; reset queues the write through save_config_detached.
+    #[test]
+    fn toggle_persist_reset_do_not_save_under_state() {
+        let src = include_str!("state.rs");
+        let toggle = pin_fn(src, "toggle_window");
+        let persist = pin_fn(src, "persist_window");
+        let reset = pin_fn(src, "reset_to_first_run");
+
+        assert!(
+            !toggle.contains("state.config.save"),
+            "toggle_window must not save through the locked AddonState"
+        );
+        assert!(
+            brace_depth_at(toggle, ".save(") < brace_depth_at(toggle, "lock_state()"),
+            "toggle_window must drop the STATE guard before writing config.json"
+        );
+        assert!(
+            !persist.contains("state.config.save"),
+            "persist_window must not save through the locked AddonState"
+        );
+        assert!(
+            brace_depth_at(persist, ".save(") < brace_depth_at(persist, "lock_state()"),
+            "persist_window must drop the STATE guard before writing config.json"
+        );
+        assert!(
+            reset.contains("save_config_detached"),
+            "reset_to_first_run must queue the write off the STATE guard"
+        );
+        assert!(
+            !reset.contains(".save("),
+            "reset_to_first_run must not write config.json on this thread"
+        );
+    }
+
+    /// Source pin + behaviour: skip the edit when a worker holds a clone.
+    #[test]
+    fn game_db_mut_skips_when_shared() {
+        let src = include_str!("state.rs");
+        let body = pin_fn(src, "game_db_mut");
+        assert!(
+            !body.contains("Arc::make_mut"),
+            "game_db_mut must not deep-copy GameDb under STATE"
+        );
+        assert!(
+            body.contains("Arc::get_mut"),
+            "game_db_mut must skip when the Arc is shared"
+        );
+
+        let mut main = MainState::default();
+        main.set_game_db(GameDb::empty_for_tests());
+        assert!(
+            main.game_db_mut().is_some(),
+            "unique owner can edit in place"
+        );
+        let held = main.game_db.clone();
+        assert!(
+            main.game_db_mut().is_none(),
+            "must skip rather than copy while a clone is live"
+        );
+        drop(held);
+        assert!(main.game_db_mut().is_some());
+    }
+
+    #[test]
+    fn attach_localized_ui_path_does_not_make_mut() {
+        let stats = include_str!("ui/main_view/stats.rs");
+        let production = stats
+            .split("#[cfg(test)]")
+            .next()
+            .expect("stats.rs must contain its own #[cfg(test)] marker");
+        assert!(
+            !production.contains("Arc::make_mut"),
+            "ensure_localized_names must not make_mut GameDb to attach names"
+        );
+        assert!(production.contains("attach_localized"));
+        assert!(production.contains("game_db_mut"));
+
+        let gamedb = include_str!("../../optimizer/src/gamedb.rs");
+        let body = pin_fn(gamedb, "attach_localized");
+        assert!(
+            !body.contains("Arc::make_mut"),
+            "attach_localized must not clone the world to write names"
+        );
+    }
+
+    fn pin_fn<'a>(src: &'a str, name: &str) -> &'a str {
+        let marker = format!("fn {name}(");
+        let idx = src
+            .find(&marker)
+            .unwrap_or_else(|| panic!("missing fn {name}"));
+        let brace = src[idx..].find('{').expect("fn body") + idx;
+        let mut depth = 0usize;
+        for (i, c) in src[brace..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &src[idx..=brace + i];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("unclosed fn {name}");
+    }
+
+    fn brace_depth_at(body: &str, needle: &str) -> usize {
+        let at = body
+            .find(needle)
+            .unwrap_or_else(|| panic!("missing {needle}"));
+        body[..at].bytes().filter(|b| *b == b'{').count()
+            - body[..at].bytes().filter(|b| *b == b'}').count()
     }
 
     // ── catch_unwind panic-recovery tests ─────────────────────────────────────

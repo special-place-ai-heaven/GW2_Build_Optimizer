@@ -343,47 +343,21 @@ pub fn calculate_infusion_stats(
     stats
 }
 
-/// Calculate stat modifiers from equipped traits.
-/// Looks for `AttributeAdjust` facts which give flat stat bonuses.
-/// Also processes `traited_facts` — conditional bonuses that activate when
-/// the required trait is also equipped (overriding or supplementing base facts).
+/// Calculate unbuffed Hero-panel trait attributes.
+///
+/// Leftover callers (legacy spec precompute) have no game mode. Those rows
+/// must not be summed: the API flattens PvE and competitive `AttributeAdjust`
+/// onto one trait (Lingering Magic 240+120=360). This wrapper uses PvE
+/// [`calculate_trait_stats_for_mode`]. Pass a mode when you have one.
 pub fn calculate_trait_stats(
     equipped_trait_ids: &[u32],
     traits_cache: &HashMap<u32, Trait>,
 ) -> StatBlock {
-    let mut stats = StatBlock::default();
-    let equipped_set: std::collections::HashSet<u32> = equipped_trait_ids.iter().copied().collect();
-
-    for &trait_id in equipped_trait_ids {
-        let Some(t) = traits_cache.get(&trait_id) else {
-            continue;
-        };
-
-        // Collect indices of base facts overridden by active traited_facts
-        let overridden: std::collections::HashSet<u32> = t
-            .traited_facts
-            .iter()
-            .filter(|tf| equipped_set.contains(&tf.requires_trait))
-            .filter_map(|tf| tf.overrides)
-            .collect();
-
-        // Process base facts (skip overridden ones)
-        for (idx, fact) in t.facts.iter().enumerate() {
-            if overridden.contains(&(idx as u32)) {
-                continue;
-            }
-            apply_attribute_adjust(&mut stats, fact);
-        }
-
-        // Process active traited_facts
-        for tf in &t.traited_facts {
-            if equipped_set.contains(&tf.requires_trait) {
-                apply_attribute_adjust(&mut stats, &tf.fact);
-            }
-        }
-    }
-
-    stats
+    calculate_trait_stats_for_mode(
+        equipped_trait_ids,
+        traits_cache,
+        &gw2_core::types::GameMode::PvE,
+    )
 }
 
 /// Calculate the unbuffed Hero-panel trait attributes for one game mode.
@@ -512,25 +486,6 @@ pub fn is_permanent_stat_adjust(text: Option<&str>) -> bool {
     text.is_none()
 }
 
-/// Apply an AttributeAdjust fact to a stat block.
-///
-/// The API reuses this fact type for tooltip coefficients and conditional stat
-/// bonuses. Only `text == None` belongs in the unbuffed Hero-panel total.
-fn apply_attribute_adjust(stats: &mut StatBlock, fact: &Fact) {
-    if let Fact::AttributeAdjust {
-        value: Some(val),
-        target: Some(ref target),
-        text,
-        ..
-    } = fact
-    {
-        if !is_permanent_stat_adjust(text.as_deref()) {
-            return;
-        }
-        stats.add(target, *val as f64);
-    }
-}
-
 /// Calculate stat conversions from traits (BuffConversion facts).
 /// E.g., "10% of Precision becomes Ferocity".
 /// Uses a snapshot of stats before any conversions so all conversions
@@ -637,6 +592,7 @@ pub fn calculate_full_stats(
     items_cache: &HashMap<u32, Item>,
     itemstats_cache: &HashMap<u32, ItemStat>,
     traits_cache: &HashMap<u32, Trait>,
+    mode: &gw2_core::types::GameMode,
 ) -> (StatBlock, DerivedStats) {
     let mut stats = base_stats();
 
@@ -664,8 +620,8 @@ pub fn calculate_full_stats(
     let infusion_stats = calculate_infusion_stats(&equipment.equipment, items_cache);
     add_block(&mut stats, &infusion_stats);
 
-    // Trait flat bonuses
-    let trait_stats = calculate_trait_stats(equipped_trait_ids, traits_cache);
+    // Trait flat bonuses — mode-split AttributeAdjust, never the summed API rows.
+    let trait_stats = calculate_trait_stats_for_mode(equipped_trait_ids, traits_cache, mode);
     add_block(&mut stats, &trait_stats);
 
     // Trait conversions (applied after all flat bonuses)
@@ -1101,6 +1057,78 @@ mod tests {
             calculate_trait_stats_for_mode(&[1849, 1016], &cache, &gw2_core::types::GameMode::WvW);
         assert_eq!(stats.power, 0.0);
         assert_eq!(stats.precision, 0.0);
+    }
+
+    fn empty_equipment_tab() -> EquipmentTab {
+        EquipmentTab {
+            tab: 0,
+            name: None,
+            is_active: true,
+            equipment: Vec::new(),
+            equipment_pvp: None,
+        }
+    }
+
+    fn lingering_magic_cache() -> HashMap<u32, Trait> {
+        let mut cache = HashMap::new();
+        cache.insert(
+            1059,
+            trait_with_facts(
+                1059,
+                vec![
+                    attr("BoonDuration", 240, None),
+                    attr("BoonDuration", 120, None),
+                ],
+            ),
+        );
+        cache
+    }
+
+    /// RED: leftover calculate_full_stats summed both Lingering Magic
+    /// AttributeAdjust rows (240+120=360). Wiki PvE is +240 Concentration.
+    #[test]
+    fn full_stats_does_not_sum_mode_split_attribute_adjust() {
+        let traits_cache = lingering_magic_cache();
+        let items = HashMap::new();
+        let itemstats = HashMap::new();
+        let (pve, _) = calculate_full_stats(
+            &empty_equipment_tab(),
+            &[1059],
+            None,
+            &[],
+            "Ranger",
+            &items,
+            &itemstats,
+            &traits_cache,
+            &gw2_core::types::GameMode::PvE,
+        );
+        let (wvw, _) = calculate_full_stats(
+            &empty_equipment_tab(),
+            &[1059],
+            None,
+            &[],
+            "Ranger",
+            &items,
+            &itemstats,
+            &traits_cache,
+            &gw2_core::types::GameMode::WvW,
+        );
+        assert_ne!(
+            pve.concentration, 360.0,
+            "summed PvE+WvW AttributeAdjust leaked into leftover full stats"
+        );
+        assert_eq!(pve.concentration, 240.0);
+        assert_eq!(wvw.concentration, 120.0);
+    }
+
+    /// Leftover spec precompute still calls calculate_trait_stats.
+    /// It must pick a mode, not sum.
+    #[test]
+    fn leftover_trait_stats_does_not_sum_mode_split_attribute_adjust() {
+        let cache = lingering_magic_cache();
+        let stats = calculate_trait_stats(&[1059], &cache);
+        assert_ne!(stats.concentration, 360.0);
+        assert_eq!(stats.concentration, 240.0);
     }
 
     // Helper constructors for test data

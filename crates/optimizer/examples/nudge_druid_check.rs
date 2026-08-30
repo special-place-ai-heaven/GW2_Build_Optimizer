@@ -52,6 +52,7 @@ fn main() {
             label: "WvW".into(),
         },
         patch_id: None,
+        objective_profile_id: None,
     };
 
     let on_progress = |p: gw2_optimizer::engine::OptimizeProgress| {

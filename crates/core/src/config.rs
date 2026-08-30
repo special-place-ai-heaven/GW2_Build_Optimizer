@@ -434,14 +434,39 @@ fn default_ui_font() -> String {
     "auto".into()
 }
 
+/// Sibling backup path: `config.json` → `config.json.bak`.
+///
+/// ponytail: one slot, overwrite previous; timestamp rotation if history is needed.
+fn sibling_bak(path: &Path) -> PathBuf {
+    let mut bak = path.as_os_str().to_owned();
+    bak.push(".bak");
+    PathBuf::from(bak)
+}
+
+/// Copy the on-disk bytes to [`sibling_bak`] before returning Writable defaults.
+/// Uses `fs::copy` so InvalidData (no Rust `String`) still preserves exact bytes.
+/// Best-effort: a copy failure must not block the reset banner.
+fn backup_unparseable_config(path: &Path) -> bool {
+    std::fs::copy(path, sibling_bak(path)).is_ok()
+}
+
 /// User-facing message for a `config.json` whose contents were readable but
-/// unusable. Shared by the JSON-parse and non-UTF-8 arms of [`AppConfig::load`]
-/// so both report the same outcome: the stored settings are gone.
-fn settings_reset_message(cause: &dyn std::fmt::Display) -> String {
-    format!(
-        "config.json could not be parsed ({}). All settings reset to defaults.",
-        cause
-    )
+/// unusable. Shared by the JSON-parse and non-UTF-8 arms of [`AppConfig::load`].
+/// Saving stays enabled so Settings can repair the file; a sibling `.bak`
+/// holds the previous bytes when the copy succeeded.
+fn settings_reset_message(cause: &dyn std::fmt::Display, backed_up: bool) -> String {
+    if backed_up {
+        format!(
+            "config.json could not be parsed ({}). All settings reset to defaults. \
+             Previous file saved as config.json.bak.",
+            cause
+        )
+    } else {
+        format!(
+            "config.json could not be parsed ({}). All settings reset to defaults.",
+            cause
+        )
+    }
 }
 
 pub const DEFAULT_WINDOW_POS: [f32; 2] = [80.0, 80.0];
@@ -573,21 +598,27 @@ impl AppConfig {
     }
 
     /// Load config from disk. Returns `(config, error_message)`; the message is
-    /// `Some` whenever a file is on disk whose settings could not be recovered,
-    /// and callers surface it to the user.
+    /// `Some` whenever a file is on disk whose settings could not be recovered
+    /// into this value, and callers surface it to the user.
     ///
     /// The three failure shapes are deliberately not collapsed, because each
     /// one calls for something different:
     ///
     /// * **No file** — an ordinary first run. Silent defaults, saving is normal.
+    ///   No backup is written.
     /// * **Unreadable file** — a sharing violation from antivirus or cloud
     ///   sync, a permission change, a failing disk. The user's keys are still
     ///   in that file and are *not* in the value returned here, so the returned
     ///   config carries [`SavePolicy::RefuseUnreadFileOnDisk`] and cannot be
-    ///   written back over them.
-    /// * **Unparseable file** — the stored settings are already unrecoverable,
-    ///   so defaults are returned and saving stays enabled; otherwise the user
-    ///   could never repair it from the UI.
+    ///   written back over them. No backup is written — the original file is
+    ///   the recovery.
+    /// * **Unparseable file** — readable bytes that serde or UTF-8 could not
+    ///   accept (missing field, bad enum, Notepad UTF-16). Keys may still be
+    ///   in those bytes, so a sibling `.bak` is written (best-effort) before
+    ///   defaults are returned. Saving stays [`SavePolicy::Writable`] so the
+    ///   user can repair from the UI; the previous file remains at
+    ///   `<filename>.bak`. Parse failure must not use
+    ///   [`SavePolicy::RefuseUnreadFileOnDisk`] — that traps Settings forever.
     pub fn load(path: &Path) -> (Self, Option<String>) {
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
@@ -596,7 +627,8 @@ impl AppConfig {
             // Readable bytes, unusable content. Same class as a parse failure:
             // treating it as "unread user data" would block saves forever.
             Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-                return (Self::default(), Some(settings_reset_message(&e)))
+                let backed_up = backup_unparseable_config(path);
+                return (Self::default(), Some(settings_reset_message(&e, backed_up)));
             }
             Err(e) => {
                 let guarded = Self {
@@ -617,7 +649,10 @@ impl AppConfig {
 
         match serde_json::from_str::<Self>(&text) {
             Ok(cfg) => (cfg, None),
-            Err(e) => (Self::default(), Some(settings_reset_message(&e))),
+            Err(e) => {
+                let backed_up = backup_unparseable_config(path);
+                (Self::default(), Some(settings_reset_message(&e, backed_up)))
+            }
         }
     }
 
@@ -657,7 +692,7 @@ impl AppConfig {
             let _ = std::fs::remove_file(&tmp_path);
             return Err(e);
         }
-        if let Err(e) = std::fs::rename(&tmp_path, path) {
+        if let Err(e) = crate::storage::replace_file(&tmp_path, path) {
             let _ = std::fs::remove_file(&tmp_path);
             return Err(e);
         }
@@ -1064,20 +1099,28 @@ mod tests {
     fn test_load_parse_error_resets_to_defaults() {
         // A config file that exists but contains invalid JSON must surface
         // the parse error and fall back to defaults — this is the
-        // user-visible "settings reset" path and callers rely on the
-        // Some(msg) signal to tell the user their settings were dropped.
+        // user-visible "settings reset" path. Callers rely on Some(msg);
+        // the previous bytes stay in a sibling .bak.
         let dir = env::temp_dir().join(format!("gw2_config_parse_err_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.json");
-        std::fs::write(&path, "{ not valid json").unwrap();
+        let corrupt = b"{ not valid json";
+        std::fs::write(&path, corrupt).unwrap();
 
         let (loaded, err) = AppConfig::load(&path);
         assert!(err.is_some(), "expected Some(parse-error message)");
+        let msg = err.as_deref().unwrap();
         assert!(
-            err.as_deref().unwrap().contains("could not be parsed"),
+            msg.contains("could not be parsed"),
             "error should mention parse failure, got: {:?}",
-            err,
+            msg,
         );
+        assert!(
+            msg.contains("config.json.bak"),
+            "successful backup must be mentioned, got: {:?}",
+            msg,
+        );
+        assert_eq!(std::fs::read(sibling_bak(&path)).unwrap(), corrupt);
         // Must be the exact default — no partial/lenient recovery.
         let defaults = AppConfig::default();
         assert_eq!(loaded.active_provider, defaults.active_provider);
@@ -1118,10 +1161,16 @@ mod tests {
         );
 
         // 1. A genuinely missing file is still the silent first-run path, and
-        //    the defaults it returns must remain saveable.
-        let (fresh, err) = AppConfig::load(&dir.join("never-written.json"));
+        //    the defaults it returns must remain saveable. No .bak — there is
+        //    nothing to copy.
+        let missing = dir.join("never-written.json");
+        let (fresh, err) = AppConfig::load(&missing);
         assert!(err.is_none(), "a missing config must not raise: {:?}", err);
         assert_eq!(fresh.save_policy, SavePolicy::Writable);
+        assert!(
+            !sibling_bak(&missing).exists(),
+            "NotFound must not invent a backup"
+        );
         fresh
             .save(&dir.join("first-run.json"))
             .expect("first run must still be able to save");
@@ -1139,6 +1188,10 @@ mod tests {
             msg,
         );
         assert_eq!(guarded.save_policy, SavePolicy::RefuseUnreadFileOnDisk);
+        assert!(
+            !sibling_bak(&blocked).exists(),
+            "unread/RefuseUnreadFileOnDisk must not write a .bak"
+        );
 
         // 3. The whole point: those in-memory defaults must not reach disk.
         //    Aim them at a path that is definitely writable, so the refusal —
@@ -1179,6 +1232,10 @@ mod tests {
             assert!(err.is_some(), "a locked config.json must be reported");
             assert_eq!(locked.save_policy, SavePolicy::RefuseUnreadFileOnDisk);
             assert!(
+                !sibling_bak(&good_path).exists(),
+                "a sharing-locked file must not be copied to .bak"
+            );
+            assert!(
                 locked.gw2_api_key.is_none(),
                 "nothing was read, so nothing is known"
             );
@@ -1195,17 +1252,79 @@ mod tests {
             );
         }
 
-        // 5. A file that was read but not parsed is a different case: its
-        //    settings are already unrecoverable, so saving must stay enabled or
-        //    the user can never repair it from the UI.
+        // 5. A file that was read but not parsed is a different case: saving
+        //    must stay enabled so the user can repair it from the UI. The
+        //    unreadable-to-serde bytes are copied to a sibling .bak first, so
+        //    a later save does not destroy the only copy.
         let corrupt_path = dir.join("corrupt.json");
-        std::fs::write(&corrupt_path, "{ not valid json").unwrap();
+        let corrupt_bytes = b"{ not valid json";
+        std::fs::write(&corrupt_path, corrupt_bytes).unwrap();
         let (after_parse_error, err) = AppConfig::load(&corrupt_path);
-        assert!(err.unwrap().contains("could not be parsed"));
+        let parse_msg = err.unwrap();
+        assert!(parse_msg.contains("could not be parsed"));
+        assert!(
+            parse_msg.contains("config.json.bak"),
+            "successful backup must be mentioned, got: {}",
+            parse_msg,
+        );
         assert_eq!(after_parse_error.save_policy, SavePolicy::Writable);
+        let bak_path = sibling_bak(&corrupt_path);
+        assert_eq!(
+            std::fs::read(&bak_path).unwrap(),
+            corrupt_bytes,
+            "parse failure must copy the original bytes to a sibling .bak",
+        );
         after_parse_error
             .save(&corrupt_path)
             .expect("a corrupt config must still be replaceable");
+        assert_ne!(
+            std::fs::read(&corrupt_path).unwrap(),
+            corrupt_bytes.as_slice(),
+            "save must replace the corrupt config.json",
+        );
+        assert_eq!(
+            std::fs::read(&bak_path).unwrap(),
+            corrupt_bytes,
+            "save must leave the .bak intact",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_invalid_utf8_backs_up_then_stays_writable() {
+        // Notepad UTF-16 (or any InvalidData from read_to_string) never
+        // produced a Rust String, but the keys are still in the bytes.
+        let dir = env::temp_dir().join(format!("gw2_config_utf16_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        // UTF-16 LE BOM + "{}" — read_to_string fails with InvalidData.
+        let bytes = [0xFFu8, 0xFE, 0x7B, 0x00, 0x7D, 0x00];
+        std::fs::write(&path, bytes).unwrap();
+
+        let (loaded, err) = AppConfig::load(&path);
+        let msg = err.expect("InvalidData must be reported");
+        assert!(
+            msg.contains("could not be parsed"),
+            "InvalidData shares the parse-failure banner, got: {}",
+            msg,
+        );
+        assert!(
+            msg.contains("config.json.bak"),
+            "successful backup must be mentioned, got: {}",
+            msg,
+        );
+        assert_eq!(loaded.save_policy, SavePolicy::Writable);
+        assert_eq!(std::fs::read(sibling_bak(&path)).unwrap(), bytes);
+
+        loaded.save(&path).expect("must stay replaceable");
+        assert_ne!(std::fs::read(&path).unwrap(), bytes.as_slice());
+        assert_eq!(
+            std::fs::read(sibling_bak(&path)).unwrap(),
+            bytes,
+            "save must leave the .bak intact",
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

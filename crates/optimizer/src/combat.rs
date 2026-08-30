@@ -23,12 +23,18 @@ pub struct DamageModifiers {
     pub specific_condi: HashMap<String, Vec<f64>>,
     /// Additive crit damage bonus percentages (added to base 150% + ferocity)
     pub crit_damage_pct: Vec<f64>,
-    /// Global condition duration increase percentages (added to Expertise-based)
+    /// Global condition duration from runes/sigils (inside min(cap) with Expertise)
     pub condi_duration_pct: Vec<f64>,
-    /// Per-condition type duration increase
+    /// Per-condition duration from runes/sigils (inside min(cap) with Expertise)
     pub specific_condi_duration: HashMap<String, Vec<f64>>,
-    /// Global boon duration increase percentages (added to Concentration-based)
+    /// Trait condition duration (outside min(cap); wiki (1+[trait]) factor)
+    pub trait_condi_duration_pct: Vec<f64>,
+    /// Trait per-condition duration (inside min(cap); wiki [specific modifier])
+    pub trait_specific_condi_duration: HashMap<String, Vec<f64>>,
+    /// Global boon duration from runes/sigils (inside min(cap) with Concentration)
     pub boon_duration_pct: Vec<f64>,
+    /// Trait boon duration (outside min(cap); wiki (1+[trait]) factor)
+    pub trait_boon_duration_pct: Vec<f64>,
     /// Outgoing healing increase percentages
     pub healing_pct: Vec<f64>,
     /// Additive crit chance bonus (percentage points, e.g. 7.0 for +7%).
@@ -150,8 +156,9 @@ pub struct CombatPerformance {
 ///
 /// Simple conditions (Bleeding, Burning, Poison) are mode-aware but currently
 /// same across all modes. Torment uses stationary as the conservative baseline
-/// (movement_fraction weighting is P3-14 scope). Confusion uses on_skill_use
-/// as the default (trigger frequency is P3-14 scope).
+/// (movement_fraction weighting is P3-14 scope). Confusion DPS per stack is
+/// wiki over-time (per second) plus on-skill-use times Generic
+/// `skill_use_frequency_per_second` for this mode. 16.24 is per activation.
 pub fn calculate_condition_ticks(
     condition_damage: f64,
     modifiers: &DamageModifiers,
@@ -159,6 +166,10 @@ pub fn calculate_condition_ticks(
 ) -> ConditionTicks {
     let conds = crate::data::conditions();
     let mode = ctx.game_mode.clone();
+    let skill_uses = crate::data::rotation_profiles::rotation_profiles()
+        .lookup("Generic", None, &mode)
+        .map(|p| p.target_behavior.skill_use_frequency_per_second)
+        .unwrap_or(0.3);
     ConditionTicks {
         bleeding: conds.tick_damage("Bleeding", condition_damage, mode.clone())
             * modifiers.total_condi_mult_for("Bleeding"),
@@ -169,9 +180,7 @@ pub fn calculate_condition_ticks(
         // Torment: stationary baseline (conservative). Movement weighting is P3-14 scope.
         torment: conds.torment_tick(condition_damage, mode.clone(), false)
             * modifiers.total_condi_mult_for("Torment"),
-        // Confusion: on_skill_use baseline (matches historical behavior).
-        // Trigger frequency weighting is P3-14 scope.
-        confusion: conds.confusion_tick(condition_damage, mode, true)
+        confusion: conds.confusion_dps_per_stack(condition_damage, mode, skill_uses)
             * modifiers.total_condi_mult_for("Confusion"),
     }
 }
@@ -255,14 +264,15 @@ pub fn condition_duration_bonus(
 
 /// Compute the outgoing condition duration after applying the duration bonus.
 ///
-/// Formula: `base_duration * (1.0 + capped_bonus)`
+/// Formula: `base * (1 + trait) * (1 + min(cap, expertise + global + specific))`
 ///
-/// Source: https://wiki.guildwars2.com/wiki/Expertise
+/// Source: https://wiki.guildwars2.com/wiki/Condition_Duration
 pub fn condition_duration_multiplied(
     base_duration: f64,
     expertise: f64,
     global_condi_bonus: f64,
     specific_condi_bonus: f64,
+    trait_duration_bonus: f64,
     cap: f64,
     ctx: &BalanceContext,
 ) -> f64 {
@@ -273,7 +283,9 @@ pub fn condition_duration_multiplied(
         cap,
         ctx,
     );
-    base_duration * (1.0 + bonus)
+    // Wiki: [outgoing] = [base] * (1+[trait]) * (1+MIN{1, specific+CD}).
+    // Expertise + rune/sigil specific stay inside min(cap). Trait is outside.
+    base_duration * (1.0 + trait_duration_bonus) * (1.0 + bonus)
 }
 
 /// Compute the capped boon duration bonus as a ratio (0.0–1.0).
@@ -300,18 +312,80 @@ pub fn boon_duration_bonus(
 
 /// Compute the outgoing boon duration after applying the duration bonus.
 ///
-/// Formula: `base_duration * (1.0 + capped_bonus)`
+/// Formula: `base * (1 + trait) * (1 + min(cap, concentration + global))`
 ///
 /// Source: https://wiki.guildwars2.com/wiki/Boon_Duration
 pub fn boon_duration_multiplied(
     base_duration: f64,
     concentration: f64,
     global_boon_bonus: f64,
+    trait_duration_bonus: f64,
     cap: f64,
     ctx: &BalanceContext,
 ) -> f64 {
     let bonus = boon_duration_bonus(concentration, global_boon_bonus, cap, ctx);
-    base_duration * (1.0 + bonus)
+    // Wiki: [outgoing] = [base] * (1+[trait]) * (1+MIN{1, specific+Boon Duration}).
+    base_duration * (1.0 + trait_duration_bonus) * (1.0 + bonus)
+}
+
+/// Separate trait duration %s stack as product(1+each), matching strike/condi mods.
+fn trait_duration_factor(percents: &[f64]) -> f64 {
+    percents.iter().fold(1.0, |acc, &p| acc * (1.0 + p))
+}
+
+/// Wiki Condition Duration: product(1+global trait) * (1+MIN{1, specific+CD}).
+/// Trait-specific per-condition duration sits inside MIN with Expertise/rune.
+fn condition_outgoing_mult(
+    expertise: f64,
+    mods: &DamageModifiers,
+    condition: Option<&str>,
+    ctx: &BalanceContext,
+) -> f64 {
+    let f = crate::data::universal_formulas::formulas();
+    let global: f64 = mods.condi_duration_pct.iter().sum();
+    let (specific, trait_specific) = match condition {
+        Some(name) => (
+            mods.specific_condi_duration
+                .get(name)
+                .map(|v| v.iter().sum())
+                .unwrap_or(0.0),
+            mods.trait_specific_condi_duration
+                .get(name)
+                .map(|v| v.iter().sum())
+                .unwrap_or(0.0),
+        ),
+        None => (0.0, 0.0),
+    };
+    let capped = condition_duration_bonus(
+        expertise,
+        global,
+        specific + trait_specific,
+        f.condition_duration_cap,
+        ctx,
+    );
+    trait_duration_factor(&mods.trait_condi_duration_pct) * (1.0 + capped)
+}
+
+/// Rotation / sim duration multiplier: `product(1+trait) * (1+min(cap, attr+rune))`.
+/// Per-condition trait duration is not in the global sim path.
+pub fn outgoing_condition_duration_mult(
+    expertise: f64,
+    mods: &DamageModifiers,
+    ctx: &BalanceContext,
+) -> f64 {
+    condition_outgoing_mult(expertise, mods, None, ctx)
+}
+
+/// Same wiki product for boon duration in the rotation sim.
+pub fn outgoing_boon_duration_mult(
+    concentration: f64,
+    mods: &DamageModifiers,
+    ctx: &BalanceContext,
+) -> f64 {
+    let f = crate::data::universal_formulas::formulas();
+    let global: f64 = mods.boon_duration_pct.iter().sum();
+    let capped = boon_duration_bonus(concentration, global, f.boon_duration_cap, ctx);
+    trait_duration_factor(&mods.trait_boon_duration_pct) * (1.0 + capped)
 }
 
 // ─── Combat Performance Calculation ───
@@ -368,35 +442,13 @@ pub fn calculate_combat_performance(
     // Condition ticks (with modifiers applied)
     let condition_ticks = calculate_condition_ticks(total_condition_damage, modifiers, ctx);
 
-    // Condition duration from Expertise + modifiers
-    // Global condi duration bonus as ratio (e.g. 0.10 for 10%)
-    let global_condi_ratio: f64 = modifiers.condi_duration_pct.iter().sum();
-    let total_condi_bonus = condition_duration_bonus(
-        stats.expertise,
-        global_condi_ratio,
-        0.0,
-        f.condition_duration_cap,
-        ctx,
-    );
-    // CombatPerformance.condi_duration_pct is percentage points (0-100)
-    let total_condi_duration = total_condi_bonus * 100.0;
+    // Panel % is outgoing increase: product(1+trait)*(1+capped) - 1.
+    // Global trait sits outside the cap; per-condition trait sits inside MIN.
+    let total_condi_duration =
+        (condition_outgoing_mult(stats.expertise, modifiers, None, ctx) - 1.0) * 100.0;
 
-    // Condition DPS index: weighted sum of ticks * per-condition duration multiplier * vuln
-    // Weights represent typical condition application rates in a rotation
-    // Per-condition duration multiplier: 1 + capped(expertise_bonus + global + specific)
     let condi_dur_for = |condition: &str| -> f64 {
-        let specific: f64 = modifiers
-            .specific_condi_duration
-            .get(condition)
-            .map(|v| v.iter().sum())
-            .unwrap_or(0.0);
-        1.0 + condition_duration_bonus(
-            stats.expertise,
-            global_condi_ratio,
-            specific,
-            f.condition_duration_cap,
-            ctx,
-        )
+        condition_outgoing_mult(stats.expertise, modifiers, Some(condition), ctx)
     };
     let bleed_dur = condi_dur_for("Bleeding");
     let burn_dur = condi_dur_for("Burning");
@@ -416,14 +468,9 @@ pub fn calculate_combat_performance(
     // Healing power index
     let healing_power_index = stats.healing_power * modifiers.total_healing_mult();
 
-    // Boon duration from Concentration + modifiers
-    let global_boon_ratio: f64 = modifiers.boon_duration_pct.iter().sum();
-    let boon_duration_pct = boon_duration_bonus(
-        stats.concentration,
-        global_boon_ratio,
-        f.boon_duration_cap,
-        ctx,
-    ) * 100.0;
+    // Boon duration: product(1+trait) * (1+capped). Global trait sits outside the cap.
+    let boon_duration_pct =
+        (outgoing_boon_duration_mult(stats.concentration, modifiers, ctx) - 1.0) * 100.0;
 
     // Survivability
     // Source: https://wiki.guildwars2.com/wiki/Health
@@ -578,8 +625,18 @@ pub fn extract_damage_modifiers(
             competitive,
         );
         absorb_pair(
+            &mut dst.trait_condi_duration_pct,
+            src.trait_condi_duration_pct,
+            competitive,
+        );
+        absorb_pair(
             &mut dst.boon_duration_pct,
             src.boon_duration_pct,
+            competitive,
+        );
+        absorb_pair(
+            &mut dst.trait_boon_duration_pct,
+            src.trait_boon_duration_pct,
             competitive,
         );
         absorb_pair(&mut dst.healing_pct, src.healing_pct, competitive);
@@ -588,6 +645,11 @@ pub fn extract_damage_modifiers(
         absorb_map(
             &mut dst.specific_condi_duration,
             src.specific_condi_duration,
+            competitive,
+        );
+        absorb_map(
+            &mut dst.trait_specific_condi_duration,
+            src.trait_specific_condi_duration,
             competitive,
         );
         dst.unparsed.extend(src.unparsed);
@@ -683,7 +745,7 @@ fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
             let uptime = if text_lower_has_90hp(text) { 0.9 } else { 1.0 };
             let points = *pct * uptime;
             let decimal = points / 100.0;
-            if !apply_percent_category(mods, text, points, decimal) {
+            if !apply_percent_category(mods, text, points, decimal, true) {
                 mods.unparsed.push(text.clone());
             }
         }
@@ -822,6 +884,7 @@ fn apply_percent_category(
     hay: &str,
     points: f64,
     decimal: f64,
+    from_trait: bool,
 ) -> bool {
     match classify_percent_text(hay, points) {
         Some(PercentClass::Ignore) => true,
@@ -844,18 +907,33 @@ fn apply_percent_category(
             true
         }
         Some(PercentClass::CondiDuration) => {
-            mods.condi_duration_pct.push(decimal);
+            if from_trait {
+                mods.trait_condi_duration_pct.push(decimal);
+            } else {
+                mods.condi_duration_pct.push(decimal);
+            }
             true
         }
         Some(PercentClass::BoonDuration) => {
-            mods.boon_duration_pct.push(decimal);
+            if from_trait {
+                mods.trait_boon_duration_pct.push(decimal);
+            } else {
+                mods.boon_duration_pct.push(decimal);
+            }
             true
         }
         Some(PercentClass::SpecificCondiDuration(key)) => {
-            mods.specific_condi_duration
-                .entry(key)
-                .or_default()
-                .push(decimal);
+            if from_trait {
+                mods.trait_specific_condi_duration
+                    .entry(key)
+                    .or_default()
+                    .push(decimal);
+            } else {
+                mods.specific_condi_duration
+                    .entry(key)
+                    .or_default()
+                    .push(decimal);
+            }
             true
         }
         Some(PercentClass::Strike) => {
@@ -926,13 +1004,17 @@ pub(crate) mod tests_consistency_shim {
         if !mods.healing_pct.is_empty() {
             out.push(FactClass::Healing);
         }
-        if !mods.condi_duration_pct.is_empty() {
+        if !mods.condi_duration_pct.is_empty() || !mods.trait_condi_duration_pct.is_empty() {
             out.push(FactClass::AllConditionDuration);
         }
-        if !mods.boon_duration_pct.is_empty() {
+        if !mods.boon_duration_pct.is_empty() || !mods.trait_boon_duration_pct.is_empty() {
             out.push(FactClass::AllBoonDuration);
         }
-        for key in mods.specific_condi_duration.keys() {
+        for key in mods
+            .specific_condi_duration
+            .keys()
+            .chain(mods.trait_specific_condi_duration.keys())
+        {
             out.push(FactClass::SpecificConditionDuration(key.clone()));
         }
         for key in mods.specific_condi.keys() {
@@ -999,7 +1081,7 @@ pub(crate) fn parse_percent_clauses(mods: &mut DamageModifiers, text: &str) -> b
         let uptime = upgrade_uptime(&s);
         let scaled = value * stacks * uptime;
         let decimal = scaled / 100.0;
-        if apply_percent_category(mods, &hay, scaled, decimal) {
+        if apply_percent_category(mods, &hay, scaled, decimal, false) {
             any = true;
         } else {
             mods.unparsed.push(text.to_string());
@@ -1377,8 +1459,10 @@ mod tests {
         assert!((ticks.poison - 33.5).abs() < 0.1);
         // Torment PvE stationary: 0.09*0 + 31.8 = 31.8 (L2 verified)
         assert!((ticks.torment - 31.8).abs() < 0.1);
-        // Confusion PvE on-skill-use: 0.0325*0 + 16.24 = 16.24 (L3 verified)
-        assert!((ticks.confusion - 16.24).abs() < 0.1);
+        // Confusion DPS/stack/s = over_time + on_skill_use * Generic PvE 0.3/s
+        // Source: https://wiki.guildwars2.com/wiki/Confusion (16.24 is per activation, not a tick)
+        // 18.25 + 16.24 * 0.3 = 23.122
+        assert!((ticks.confusion - 23.122).abs() < 0.1);
     }
 
     #[test]
@@ -1396,8 +1480,8 @@ mod tests {
         assert!((ticks.poison - 153.5).abs() < 0.1);
         // Torment PvE stationary: 0.09 * 2000 + 31.8 = 211.8 (L2 verified)
         assert!((ticks.torment - 211.8).abs() < 0.1);
-        // Confusion PvE on-skill-use: 0.0325 * 2000 + 16.24 = 81.24 (L3 verified)
-        assert!((ticks.confusion - 81.24).abs() < 0.1);
+        // Confusion: (0.05*2000+18.25) + (0.0325*2000+16.24)*0.3 = 118.25 + 24.372 = 142.622
+        assert!((ticks.confusion - 142.622).abs() < 0.1);
     }
 
     #[test]
@@ -1440,17 +1524,17 @@ mod tests {
 
     #[test]
     fn test_confusion_mode_dispatch_in_combat() {
-        // PvE vs PvP Confusion on-skill-use should differ
+        // PvE vs PvP Confusion DPS index (over_time + on_skill_use * Generic rate)
         // Source: https://wiki.guildwars2.com/wiki/Confusion
         let mods = DamageModifiers::default();
         let ctx_pve = BalanceContext::pve();
         let ctx_pvp = BalanceContext::pvp();
         let ticks_pve = calculate_condition_ticks(1000.0, &mods, &ctx_pve);
         let ticks_pvp = calculate_condition_ticks(1000.0, &mods, &ctx_pvp);
-        // PvE on-skill-use: 0.0325 * 1000 + 16.24 = 48.74
-        assert!((ticks_pve.confusion - 48.74).abs() < 0.1);
-        // PvP on-skill-use: 0.0975 * 1000 + 49.5 = 147.0
-        assert!((ticks_pvp.confusion - 147.0).abs() < 0.1);
+        // PvE: (0.05*1000+18.25) + (0.0325*1000+16.24)*0.3 = 68.25 + 14.622 = 82.872
+        assert!((ticks_pve.confusion - 82.872).abs() < 0.1);
+        // PvP: 10 + (0.0975*1000+49.5)*0.8 = 10 + 117.6 = 127.6
+        assert!((ticks_pvp.confusion - 127.6).abs() < 0.1);
         assert!(
             (ticks_pve.confusion - ticks_pvp.confusion).abs() > 1.0,
             "Confusion should differ between PvE and PvP"
@@ -1816,6 +1900,7 @@ mod tests {
             "condition damage: +10%",
             10.0,
             0.10,
+            false,
         ));
         assert_eq!(mods.condition_pct.len(), 1);
         assert!((mods.condition_pct[0] - 0.10).abs() < 0.001);
@@ -1830,6 +1915,7 @@ mod tests {
             "damage increased by 7%",
             7.0,
             0.07,
+            false,
         ));
         assert_eq!(mods.strike_pct.len(), 1);
         assert!(mods.condition_pct.is_empty());
@@ -1855,6 +1941,7 @@ mod tests {
             "damage reduced",
             33.0,
             0.33,
+            false,
         ));
         assert!(mods.strike_pct.is_empty());
         assert!(mods.condition_pct.is_empty());
@@ -2500,7 +2587,7 @@ mod tests {
         // result = 3.0 * (1 + 0.50) = 3.0 * 1.50 = 4.5s
         // Source: https://wiki.guildwars2.com/wiki/Expertise
         let ctx = BalanceContext::pve();
-        let result = condition_duration_multiplied(3.0, 450.0, 0.0, 0.20, 1.0, &ctx);
+        let result = condition_duration_multiplied(3.0, 450.0, 0.0, 0.20, 0.0, 1.0, &ctx);
         assert!((result - 4.5).abs() < 0.001, "Expected 4.5, got {result}",);
     }
 
@@ -2510,7 +2597,7 @@ mod tests {
         // result = 5.0 * (1 + 0.40) = 5.0 * 1.40 = 7.0s
         // Source: https://wiki.guildwars2.com/wiki/Boon_Duration
         let ctx = BalanceContext::pve();
-        let result = boon_duration_multiplied(5.0, 600.0, 0.0, 1.0, &ctx);
+        let result = boon_duration_multiplied(5.0, 600.0, 0.0, 0.0, 1.0, &ctx);
         assert!((result - 7.0).abs() < 0.001, "Expected 7.0, got {result}",);
     }
 
@@ -2520,7 +2607,7 @@ mod tests {
         // result = 3.0 * (1 + 1.0) = 6.0s
         // Source: https://wiki.guildwars2.com/wiki/Condition_Duration ("maximum 100%")
         let ctx = BalanceContext::pve();
-        let result = condition_duration_multiplied(3.0, 1800.0, 0.0, 0.30, 1.0, &ctx);
+        let result = condition_duration_multiplied(3.0, 1800.0, 0.0, 0.30, 0.0, 1.0, &ctx);
         assert!(
             (result - 6.0).abs() < 0.001,
             "Expected 6.0 (capped), got {result}",
@@ -2533,7 +2620,7 @@ mod tests {
         // result = 5.0 * (1 + 1.0) = 10.0s
         // Source: https://wiki.guildwars2.com/wiki/Boon_Duration ("maximum 100%")
         let ctx = BalanceContext::pve();
-        let result = boon_duration_multiplied(5.0, 2000.0, 0.0, 1.0, &ctx);
+        let result = boon_duration_multiplied(5.0, 2000.0, 0.0, 0.0, 1.0, &ctx);
         assert!(
             (result - 10.0).abs() < 0.001,
             "Expected 10.0 (capped), got {result}",
@@ -2547,7 +2634,7 @@ mod tests {
         // result = 4.0 * (1 + 0.50) = 4.0 * 1.50 = 6.0s
         // Source: https://wiki.guildwars2.com/wiki/Expertise
         let ctx = BalanceContext::pve();
-        let result = condition_duration_multiplied(4.0, 300.0, 0.10, 0.20, 1.0, &ctx);
+        let result = condition_duration_multiplied(4.0, 300.0, 0.10, 0.20, 0.0, 1.0, &ctx);
         assert!((result - 6.0).abs() < 0.001, "Expected 6.0, got {result}",);
     }
 
@@ -2557,10 +2644,10 @@ mod tests {
         // result = base * 1.0 = base
         // Source: https://wiki.guildwars2.com/wiki/Expertise
         let ctx = BalanceContext::pve();
-        let result = condition_duration_multiplied(5.0, 0.0, 0.0, 0.0, 1.0, &ctx);
+        let result = condition_duration_multiplied(5.0, 0.0, 0.0, 0.0, 0.0, 1.0, &ctx);
         assert!((result - 5.0).abs() < 0.001, "Expected 5.0, got {result}",);
 
-        let boon_result = boon_duration_multiplied(5.0, 0.0, 0.0, 1.0, &ctx);
+        let boon_result = boon_duration_multiplied(5.0, 0.0, 0.0, 0.0, 1.0, &ctx);
         assert!(
             (boon_result - 5.0).abs() < 0.001,
             "Expected 5.0, got {boon_result}",
@@ -2684,6 +2771,191 @@ mod tests {
             traited_facts: vec![],
             skills: vec![],
         }
+    }
+
+    #[test]
+    fn panel_duration_pct_includes_trait_outside_the_cap() {
+        let ctx = BalanceContext::pve();
+        let stats = StatBlock {
+            expertise: 1500.0,
+            concentration: 1500.0,
+            vitality: 1000.0,
+            toughness: 1000.0,
+            ..Default::default()
+        };
+        let derived = stats::compute_derived(&stats, "Necromancer");
+        let mut mods = DamageModifiers::default();
+        mods.trait_condi_duration_pct.push(0.50);
+        mods.trait_boon_duration_pct.push(0.50);
+        let solo = default_buff_profiles(&ctx)
+            .into_iter()
+            .find(|b| b.label == "Solo")
+            .unwrap();
+        let perf = calculate_combat_performance(
+            &stats,
+            &derived,
+            &mods,
+            &solo,
+            &ConditionWeights::default_pve(),
+            "Necromancer",
+            &ctx,
+        );
+        assert!(
+            (perf.condi_duration_pct - 200.0).abs() < 0.1,
+            "panel condi must be 200% at cap + 50% trait, got {}",
+            perf.condi_duration_pct
+        );
+        assert!(
+            (perf.boon_duration_pct - 200.0).abs() < 0.1,
+            "panel boon must be 200% at cap + 50% trait, got {}",
+            perf.boon_duration_pct
+        );
+    }
+
+    #[test]
+    fn rotation_duration_mult_keeps_trait_outside_the_cap() {
+        let ctx = BalanceContext::pve();
+        let mut mods = DamageModifiers::default();
+        mods.trait_condi_duration_pct.push(0.50);
+        mods.trait_boon_duration_pct.push(0.50);
+        let condi = outgoing_condition_duration_mult(1500.0, &mods, &ctx);
+        let boon = outgoing_boon_duration_mult(1500.0, &mods, &ctx);
+        assert!(
+            (condi - 3.0).abs() < 0.001,
+            "rotation condi must be 3x at cap + 50% trait, got {condi}"
+        );
+        assert!(
+            (boon - 3.0).abs() < 0.001,
+            "rotation boon must be 3x at cap + 50% trait, got {boon}"
+        );
+        let mut rune_only = DamageModifiers::default();
+        rune_only.condi_duration_pct.push(0.30);
+        let capped = outgoing_condition_duration_mult(1500.0, &rune_only, &ctx);
+        assert!(
+            (capped - 2.0).abs() < 0.001,
+            "rune still inside cap, got {capped}"
+        );
+    }
+
+    #[test]
+    fn two_trait_duration_percents_multiply() {
+        // Wiki stacks separate trait modifiers as product(1+each), not (1+sum).
+        let ctx = BalanceContext::pve();
+        let mut mods = DamageModifiers::default();
+        mods.trait_condi_duration_pct.push(0.50);
+        mods.trait_condi_duration_pct.push(0.50);
+        mods.trait_boon_duration_pct.push(0.50);
+        mods.trait_boon_duration_pct.push(0.50);
+        let condi = outgoing_condition_duration_mult(0.0, &mods, &ctx);
+        let boon = outgoing_boon_duration_mult(0.0, &mods, &ctx);
+        assert!(
+            (condi - 2.25).abs() < 0.001,
+            "two +50% trait Percents must be 1.5*1.5=2.25, got {condi}"
+        );
+        assert!(
+            (boon - 2.25).abs() < 0.001,
+            "two +50% boon trait Percents must be 1.5*1.5=2.25, got {boon}"
+        );
+    }
+
+    #[test]
+    fn trait_specific_condition_duration_stays_inside_the_cap() {
+        // Wiki [specific modifier] sits inside MIN{1, specific+CD}.
+        // 1500 Expertise + 30% trait-specific Burning = 2x, not 2.6x.
+        // Global +50% trait stays outside: 3x.
+        let ctx = BalanceContext::pve();
+        let mut mods = DamageModifiers::default();
+        mods.trait_specific_condi_duration
+            .entry("Burning".into())
+            .or_default()
+            .push(0.30);
+        let burn = condition_outgoing_mult(1500.0, &mods, Some("Burning"), &ctx);
+        assert!(
+            (burn - 2.0).abs() < 0.001,
+            "trait-specific Burning must stay inside cap, got {burn}"
+        );
+        mods.trait_condi_duration_pct.push(0.50);
+        let burn = condition_outgoing_mult(1500.0, &mods, Some("Burning"), &ctx);
+        assert!(
+            (burn - 3.0).abs() < 0.001,
+            "global +50% trait still 3x, got {burn}"
+        );
+    }
+
+    #[test]
+    fn trait_condition_duration_applies_outside_the_cap() {
+        // Wiki Condition Duration: [outgoing] = [base] * (1+[trait]) * (1+MIN{1, specific+CD}).
+        // 1500 Expertise = 100% CD, already at cap. +50% trait must still apply:
+        // 10 * 1.5 * 2.0 = 30. Folding trait into min(cap) yields 20.
+        let ctx = BalanceContext::pve();
+        let at_cap = condition_duration_multiplied(10.0, 1500.0, 0.0, 0.0, 0.0, 1.0, &ctx);
+        assert!(
+            (at_cap - 20.0).abs() < 0.001,
+            "Expected 20 at cap, got {at_cap}"
+        );
+        let with_trait = condition_duration_multiplied(10.0, 1500.0, 0.0, 0.0, 0.50, 1.0, &ctx);
+        assert_ne!(
+            with_trait, at_cap,
+            "trait duration swallowed by min(cap): {with_trait}"
+        );
+        assert!(
+            (with_trait - 30.0).abs() < 0.001,
+            "Expected 30 (100% CD * 50% trait), got {with_trait}"
+        );
+    }
+
+    #[test]
+    fn trait_boon_duration_applies_outside_the_cap() {
+        // Wiki Boon Duration: same (1+[trait]) outside MIN{1, specific+Boon Duration}.
+        let ctx = BalanceContext::pve();
+        let at_cap = boon_duration_multiplied(10.0, 1500.0, 0.0, 0.0, 1.0, &ctx);
+        assert!(
+            (at_cap - 20.0).abs() < 0.001,
+            "Expected 20 at cap, got {at_cap}"
+        );
+        let with_trait = boon_duration_multiplied(10.0, 1500.0, 0.0, 0.50, 1.0, &ctx);
+        assert_ne!(
+            with_trait, at_cap,
+            "trait duration swallowed by min(cap): {with_trait}"
+        );
+        assert!(
+            (with_trait - 30.0).abs() < 0.001,
+            "Expected 30 (100% BD * 50% trait), got {with_trait}"
+        );
+    }
+
+    #[test]
+    fn rune_specific_duration_stays_inside_the_cap() {
+        // Expertise/Concentration + rune/sigil specific stay inside min(cap).
+        // 1500 Expertise + 30% rune specific = still 2x, not 2.6x.
+        let ctx = BalanceContext::pve();
+        let result = condition_duration_multiplied(10.0, 1500.0, 0.0, 0.30, 0.0, 1.0, &ctx);
+        assert!(
+            (result - 20.0).abs() < 0.001,
+            "rune/sigil specific must stay inside cap, got {result}"
+        );
+    }
+
+    #[test]
+    fn trait_condition_duration_does_not_enter_rune_bucket() {
+        let t = percent_trait(1, "Lingering Curse", &[("Condition Duration", 50.0)]);
+        let cache: HashMap<u32, Trait> = [(1u32, t)].into_iter().collect();
+        let mods = extract_damage_modifiers(
+            &[1],
+            None,
+            &[],
+            None,
+            &cache,
+            &HashMap::new(),
+            &BalanceContext::pve(),
+        );
+        assert!(
+            mods.condi_duration_pct.is_empty(),
+            "trait duration must not share the rune/sigil cap bucket: {:?}",
+            mods.condi_duration_pct
+        );
+        assert_eq!(mods.trait_condi_duration_pct.len(), 1);
+        assert!((mods.trait_condi_duration_pct[0] - 0.50).abs() < 0.001);
     }
 
     #[test]
