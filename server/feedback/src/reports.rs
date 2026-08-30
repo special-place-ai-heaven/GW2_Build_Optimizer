@@ -40,16 +40,24 @@ pub struct Created {
     pub status: String,
 }
 
-pub fn client_ip(headers: &HeaderMap, addr: Option<SocketAddr>) -> String {
+pub fn client_ip(headers: &HeaderMap, addr: Option<SocketAddr>, trust_xff: bool) -> String {
     // Rightmost, not leftmost: Traefik strips a client-supplied X-Forwarded-For by
     // default and appends exactly one element, so the last entry is the only one the
     // client cannot choose — and with no proxy in front there is no header at all.
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next_back())
-        .map(|s| s.trim().to_string())
-        .or_else(|| addr.map(|a| a.ip().to_string()))
+    // Opt-in: a client can send X-Forwarded-For when we are not behind a trusted
+    // proxy, so ignore it unless FEEDBACK_TRUST_XFF is set.
+    if trust_xff {
+        if let Some(ip) = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next_back())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return ip.to_string();
+        }
+    }
+    addr.map(|a| a.ip().to_string())
         .unwrap_or_else(|| "0.0.0.0".into())
 }
 
@@ -94,7 +102,11 @@ pub async fn create(
     check_addon_version(&headers, &s.config.min_addon_version)?;
     // Both buckets are charged before any field is validated, so a flood of
     // rejectable requests costs the sender the same as a flood of good ones.
-    let ip = client_ip(&headers, addr.map(|Extension(ConnectInfo(a))| a));
+    let ip = client_ip(
+        &headers,
+        addr.map(|Extension(ConnectInfo(a))| a),
+        s.config.trust_xff,
+    );
     let hash = ip_hash(&ip, &s.config.ip_salt, chrono::Utc::now().date_naive());
     s.limiter
         .check(&format!("ip:{hash}"), 10, Duration::from_secs(60))
@@ -199,7 +211,11 @@ pub async fn status(
     // Deliberately no X-Addon-Version gate here: an addon too old to file a report
     // can still poll the ids it already owns, and refusing that would strand replies.
     let Query(q) = q.map_err(|r| ApiError::BadRequest(r.body_text()))?;
-    let ip = client_ip(&headers, addr.map(|Extension(ConnectInfo(a))| a));
+    let ip = client_ip(
+        &headers,
+        addr.map(|Extension(ConnectInfo(a))| a),
+        s.config.trust_xff,
+    );
     let hash = ip_hash(&ip, &s.config.ip_salt, chrono::Utc::now().date_naive());
     s.limiter
         .check(&format!("ip:{hash}"), 10, Duration::from_secs(60))
@@ -255,5 +271,43 @@ impl<'a> From<&'a NewReport> for RawEcho<'a> {
             context: &r.context,
             build_snapshot: &r.build_snapshot,
         }
+    }
+}
+
+#[cfg(test)]
+mod client_ip_tests {
+    use super::client_ip;
+    use axum::http::HeaderMap;
+    use std::net::SocketAddr;
+
+    fn addr() -> SocketAddr {
+        "198.51.100.9:443".parse().unwrap()
+    }
+
+    #[test]
+    fn trust_xff_uses_rightmost() {
+        let mut h = HeaderMap::new();
+        h.insert("x-forwarded-for", "1.1.1.1, 203.0.113.5".parse().unwrap());
+        assert_eq!(client_ip(&h, Some(addr()), true), "203.0.113.5");
+    }
+
+    #[test]
+    fn untrusted_xff_uses_connect_info() {
+        let mut h = HeaderMap::new();
+        h.insert("x-forwarded-for", "1.1.1.1, 203.0.113.5".parse().unwrap());
+        assert_eq!(client_ip(&h, Some(addr()), false), "198.51.100.9");
+    }
+
+    #[test]
+    fn untrusted_without_addr_is_unspecified() {
+        let mut h = HeaderMap::new();
+        h.insert("x-forwarded-for", "203.0.113.5".parse().unwrap());
+        assert_eq!(client_ip(&h, None, false), "0.0.0.0");
+    }
+
+    #[test]
+    fn trusted_without_header_falls_back_to_addr() {
+        let h = HeaderMap::new();
+        assert_eq!(client_ip(&h, Some(addr()), true), "198.51.100.9");
     }
 }

@@ -2,6 +2,7 @@
 # Nightly logical backup of the feedback database. Keeps 30 days.
 # Cron (root on the VPS):  15 3 * * * /docker/feedback/deploy/backup.sh
 set -euo pipefail
+umask 077
 COMPOSE=/docker/feedback/compose.yml
 DIR=/docker/feedback/backups
 mkdir -p "$DIR"
