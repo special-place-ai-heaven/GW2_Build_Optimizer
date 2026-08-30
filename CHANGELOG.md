@@ -2,6 +2,13 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.7.23 - 2026-08-30
+
+### Overlay
+
+- News, What's new, and other prose wrap to the pane instead of clipping at the right edge.
+- First run and Reset layout open at ~80% of the monitor. Ultrawide uses a 1920-wide box so the overlay does not span the desk.
+
 ## 1.7.22 - 2026-08-30
 
 ### Changed

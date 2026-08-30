@@ -200,19 +200,29 @@ pub fn render(ui: &Ui) {
         return;
     }
 
+    let display = ui.io().display_size;
     let (snap, pos, size, opacity, ui_font, ui_lang) = state::with_state(|s| {
         let snap = s.force_window_pos;
         s.force_window_pos = false;
-        if snap {
-            s.config.set_window_rect(
-                gw2_core::config::DEFAULT_WINDOW_POS,
-                gw2_core::config::DEFAULT_WINDOW_SIZE,
-            );
+        let unset = s.config.window_w.is_none() || s.config.window_h.is_none();
+        let legacy = {
+            let (_, sz) = s.config.window_rect();
+            sz == gw2_core::config::LEGACY_FIRST_WINDOW_SIZE
+        };
+        let apply = snap || unset || legacy;
+        if apply {
+            let size = gw2_core::config::initial_window_size(display);
+            let pos = if snap {
+                gw2_core::config::DEFAULT_WINDOW_POS
+            } else {
+                s.config.window_rect().0
+            };
+            s.config.set_window_rect(pos, size);
             save_config_detached(s);
         }
         let (pos, size) = s.config.window_rect();
         (
-            snap,
+            apply,
             pos,
             size,
             s.config.window_opacity,

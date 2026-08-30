@@ -397,10 +397,18 @@ pub fn segment_row(ui: &Ui, labels: &[&str], selected: usize, id_prefix: &str) -
     clicked.filter(|&i| i != selected)
 }
 
+/// Screen-space right edge → ImGui window-local wrap X (`PushTextWrapPos`).
+pub(crate) fn wrap_pos_local(right_x: f32, window_x: f32, scroll_x: f32) -> f32 {
+    right_x - window_x + scroll_x
+}
+
 /// Wrap to the current content edge. `text_colored` never wraps, so it clips.
+/// `PushTextWrapPos` is window-local — passing a screen X leaves wrap past the
+/// clip rect and the line is cut at the pane edge (News / What's new / Settings).
 pub fn wrapped(ui: &Ui, color: [f32; 4], text: &str) {
-    let wrap_x = ui.cursor_screen_pos()[0] + ui.content_region_avail()[0].max(8.0);
-    let wrap = ui.push_text_wrap_pos_with_pos(wrap_x);
+    let right = ui.cursor_screen_pos()[0] + ui.content_region_avail()[0].max(8.0);
+    let local = wrap_pos_local(right, ui.window_pos()[0], ui.scroll_x());
+    let wrap = ui.push_text_wrap_pos_with_pos(local);
     {
         let _c = ui.push_style_color(StyleColor::Text, color);
         ui.text_wrapped(text);
@@ -1233,6 +1241,12 @@ fn draw_mystic_coin(
 mod tests {
     use super::choya_gap_ms;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn wrap_pos_local_converts_screen_x_to_window_local() {
+        assert_eq!(super::wrap_pos_local(200.0, 50.0, 0.0), 150.0);
+        assert_eq!(super::wrap_pos_local(200.0, 50.0, 10.0), 160.0);
+    }
 
     #[test]
     fn choya_gap_is_one_to_five_seconds() {
