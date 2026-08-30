@@ -655,6 +655,18 @@ pub struct RefereeReport {
     pub quality_reasons: Vec<DataQualityReason>,
 }
 
+/// Look up the objective profile named on `scenario`, if any.
+/// Unset or unknown ids resolve to `None` and keep hardcoded gate floors.
+fn objective_profile_for<'a>(
+    scenario: &ScenarioSpec,
+    catalog: &'a crate::data::ObjectiveProfileData,
+) -> Option<&'a crate::data::ObjectiveProfile> {
+    scenario
+        .objective_profile_id
+        .as_deref()
+        .and_then(|id| catalog.profile_by_id(id))
+}
+
 pub fn evaluate_validated_build(
     validated: &ValidatedBuild,
     db: &GameDb,
@@ -705,7 +717,15 @@ pub fn evaluate_validated_build(
 
     // ── Viability gating ──────────────────────────────────────────────────────
     // Run before score computation. Non-viable builds receive sentinel score -1.0.
-    let mut viability = evaluate_viability_gates(rotation.as_ref(), &primary_combat, scenario);
+    let mut viability = evaluate_viability_gates_for(
+        rotation.as_ref(),
+        &primary_combat,
+        scenario,
+        objective_profile_for(
+            scenario,
+            crate::data::objective_profiles::objective_profiles(),
+        ),
+    );
     apply_offbar_stability(&mut viability, validated, db);
     let (user_intent_score, raw_direction_score) = if viability.is_viable {
         (
@@ -967,6 +987,7 @@ mod tests {
                 label: "WvW".into(),
             },
             patch_id: None,
+            objective_profile_id: None,
         }
     }
 
@@ -980,6 +1001,7 @@ mod tests {
                 label: "PvE".into(),
             },
             patch_id: None,
+            objective_profile_id: None,
         }
     }
 
@@ -1164,6 +1186,58 @@ mod tests {
         );
         assert_eq!(pass.gates[0].gate, ViabilityGate::EffectiveHealth);
         assert_eq!(fail.gates[0].gate, ViabilityGate::EffectiveHealth);
+    }
+
+    #[test]
+    fn evaluate_validated_build_uses_scenario_profile_ehp_floor() {
+        let combat = CombatPerformance {
+            effective_health: 20_000.0,
+            ..Default::default()
+        };
+
+        let mut high = crate::data::objective_profiles::objective_profiles()
+            .default_for_mode("PvE")
+            .expect("embedded PvE default")
+            .clone();
+        high.objective_profile_id = "test_high_ehp".into();
+        high.viability_gates.ehp_floor = Some(25_000.0);
+        let catalog = crate::data::ObjectiveProfileData {
+            files: HashMap::from([(
+                "PvE".into(),
+                crate::data::ObjectiveProfileFile {
+                    mode: "PvE".into(),
+                    profiles: vec![high],
+                },
+            )]),
+        };
+
+        let mut named = make_pve_scenario();
+        named.objective_profile_id = Some("test_high_ehp".into());
+        let fail = evaluate_viability_gates_for(
+            None,
+            &combat,
+            &named,
+            super::objective_profile_for(&named, &catalog),
+        );
+        assert!(
+            !fail.is_viable,
+            "20k EHP should fail the scenario profile's 25k floor: {:?}",
+            fail.gates
+        );
+
+        let mut none = make_pve_scenario();
+        none.objective_profile_id = None;
+        let pass = evaluate_viability_gates_for(
+            None,
+            &combat,
+            &none,
+            super::objective_profile_for(&none, &catalog),
+        );
+        assert!(
+            pass.is_viable,
+            "20k EHP should pass hardcoded PvE floor when profile id is unset: {:?}",
+            pass.gates
+        );
     }
 
     /// WvW build with `rotation = None` → rotation-dependent gates fail with "rotation unavailable".
@@ -1455,6 +1529,7 @@ mod tests {
                 label: "WvW".into(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let report_squad = evaluate_viability_gates(Some(&rot), &combat, &squad_scenario);
         let ehp_squad = gate_by_kind(&report_squad.gates, &ViabilityGate::EffectiveHealth).unwrap();
@@ -1474,6 +1549,7 @@ mod tests {
                 label: "WvW".into(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let report_solo = evaluate_viability_gates(Some(&rot), &combat, &solo_scenario);
         let ehp_solo = gate_by_kind(&report_solo.gates, &ViabilityGate::EffectiveHealth).unwrap();
@@ -1501,6 +1577,7 @@ mod tests {
                 label: "WvW".into(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let report = evaluate_viability_gates(Some(&rot), &combat, &solo_scenario);
         assert!(
@@ -1558,6 +1635,7 @@ mod tests {
                 label: "PvP".to_string(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let report = evaluate_viability_gates(Some(&rot), &combat, &pvp_scenario);
         let ehp = gate_by_kind(&report.gates, &ViabilityGate::EffectiveHealth).expect("gate");
@@ -1585,6 +1663,7 @@ mod tests {
                 label: "PvP".to_string(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let report = evaluate_viability_gates(Some(&rot), &combat, &pvp_scenario);
         let ehp = gate_by_kind(&report.gates, &ViabilityGate::EffectiveHealth).expect("gate");

@@ -331,6 +331,7 @@ fn wvw_roam() -> ScenarioSpec {
             label: "Roam".into(),
         },
         patch_id: None,
+        objective_profile_id: None,
     }
 }
 
