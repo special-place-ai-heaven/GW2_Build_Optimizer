@@ -47,7 +47,9 @@ impl CancellationToken {
 //   * the worker gets its own `CancellationToken` clone and must poll it,
 //   * its `JoinHandle` is tracked here until it finishes,
 //   * a panic inside the worker is caught and logged, never unwound,
-//   * `on_unload` cancels, then waits `UNLOAD_JOIN_BUDGET` for the stragglers.
+//   * `on_unload` cancels, then waits `UNLOAD_JOIN_BUDGET` for the stragglers,
+//   * on Windows the addon image is pinned before spawn returns so Nexus
+//     `FreeLibrary` cannot unmap `.text` under a detached worker.
 
 /// How long unload waits for background workers before giving up on them.
 ///
@@ -73,6 +75,114 @@ fn worker_log(message: String) {
         "GW2 Build Optimizer",
         message,
     );
+}
+
+/// Opaque `HMODULE`. Copied into the worker; never dereferenced as a pointer.
+#[derive(Clone, Copy)]
+struct ModuleHandle(usize);
+
+#[cfg(windows)]
+impl ModuleHandle {
+    fn from_raw(handle: *mut core::ffi::c_void) -> Self {
+        Self(handle as usize)
+    }
+
+    fn as_raw(self) -> *mut core::ffi::c_void {
+        self.0 as *mut core::ffi::c_void
+    }
+}
+
+/// Address taken by [`pin_addon_module`]; must live in this crate's image.
+#[inline(never)]
+fn addon_image_anchor() {}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetModuleHandleExW(
+        flags: u32,
+        name_or_address: *const u16,
+        module: *mut *mut core::ffi::c_void,
+    ) -> i32;
+    fn GetModuleHandleW(name: *const u16) -> *mut core::ffi::c_void;
+    fn FreeLibrary(module: *mut core::ffi::c_void) -> i32;
+    fn FreeLibraryAndExitThread(module: *mut core::ffi::c_void, exit_code: u32);
+}
+
+/// Increment this DLL's load count so Nexus `FreeLibrary` cannot unmap `.text`
+/// while a detached worker is still inside it.
+///
+/// Uses **only** `GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS` (0x4). Do not add
+/// `GET_MODULE_HANDLE_EX_FLAG_PIN` (0x1): that blocks hot-reload forever.
+///
+/// Returns `None` when this crate is linked into the process image (`cargo test`)
+/// or when the API fails (logged; the worker still starts). On `None`, the
+/// worker returns normally so existing join tests keep working.
+fn pin_addon_module() -> Option<ModuleHandle> {
+    #[cfg(not(windows))]
+    {
+        None
+    }
+    #[cfg(windows)]
+    {
+        // GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS only — not PIN, not UNCHANGED_REFCOUNT.
+        const GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS: u32 = 0x0000_0004;
+
+        let mut handle = core::ptr::null_mut();
+        // SAFETY: FROM_ADDRESS treats the second parameter as a code address, not
+        // a string. `addon_image_anchor` lives in this crate. `handle` is a local
+        // out-parameter. Success increments the module's load count.
+        let obtained = unsafe {
+            GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                addon_image_anchor as *const u16,
+                &mut handle,
+            )
+        };
+        if obtained == 0 || handle.is_null() {
+            worker_log(
+                "could not pin addon module (GetModuleHandleExW failed); \
+                 a detached worker may crash if Nexus unmaps the DLL"
+                    .into(),
+            );
+            return None;
+        }
+        // SAFETY: a null name returns the process executable; no increment.
+        let process = unsafe { GetModuleHandleW(core::ptr::null()) };
+        if handle == process {
+            // Undo the increment. Never FreeLibraryAndExitThread the test exe.
+            // SAFETY: we own the increment from GetModuleHandleExW.
+            let _ = unsafe { FreeLibrary(handle) };
+            return None;
+        }
+        Some(ModuleHandle::from_raw(handle))
+    }
+}
+
+/// Worker finished. Decrement the pin and exit this thread (never returns).
+fn exit_pinned_worker(handle: ModuleHandle) {
+    #[cfg(windows)]
+    {
+        // SAFETY: `handle` is the increment taken on the parent before spawn
+        // returned. This is the matching decrement; the thread must not run
+        // addon `.text` after it.
+        unsafe { FreeLibraryAndExitThread(handle.as_raw(), 0) }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = handle;
+    }
+}
+
+/// `Builder::spawn` failed after a successful pin: undo the increment here.
+fn undo_module_pin(pin: Option<ModuleHandle>) {
+    #[cfg(windows)]
+    if let Some(handle) = pin {
+        // SAFETY: the worker never started, so this thread still owns the increment.
+        let _ = unsafe { FreeLibrary(handle.as_raw()) };
+    }
+    #[cfg(not(windows))]
+    let _ = pin;
 }
 
 /// One background worker, tracked so unload can wait for it.
@@ -214,10 +324,11 @@ fn join_bounded(mut pending: Vec<TrackedWorker>, budget: Duration) -> ShutdownRe
     report.abandoned = pending.iter().map(|w| w.name).collect();
     report.waited = started.elapsed();
     // ponytail: dropping `pending` detaches those threads. They keep running with
-    // the cancel flag set, and if Nexus frees the DLL before one returns, the game
-    // crashes. Closing that window is WP0.2b/c/d's job (cancel-aware HTTP reads and
-    // retry sleeps, so workers observe the flag in milliseconds); raising the budget
-    // here would only trade a rare crash for a routine multi-second freeze.
+    // the cancel flag set. The unmap window is closed by [`pin_addon_module`] —
+    // each worker holds an extra load-count so Nexus `FreeLibrary` cannot unmap
+    // `.text` while that thread is still in `reqwest::blocking`. Cancel-aware
+    // HTTP is nice-to-have for faster joins, not the unload-safety story. Do not
+    // raise [`UNLOAD_JOIN_BUDGET`]: Nexus calls `on_unload` on the game main thread.
     report
 }
 
@@ -267,13 +378,23 @@ impl AddonState {
     /// it must still do on the panic path, such as clearing a "loading" flag
     /// through `with_state` so the UI does not spin forever.
     ///
+    /// On Windows the addon module is pinned on **this** thread before
+    /// `Builder::spawn` returns, so unload cannot race the child's first
+    /// instruction. After the body (and its panic guard) the worker calls
+    /// `FreeLibraryAndExitThread` when the pin is `Some`. A `None` pin is the
+    /// `cargo test` / process-image path: the thread returns so join tests work.
+    ///
     /// Returns `false` when the OS refused to create the thread, in which case the
     /// work never started — a caller that set a "loading" flag first should clear it.
+    /// A failed pin still spawns (old crash window) rather than refusing the worker.
     pub fn spawn_worker<F>(&self, name: &'static str, work: F) -> bool
     where
         F: FnOnce(CancellationToken) + Send + 'static,
     {
         let token = self.cancel_token.clone();
+        // Pin before spawn returns: `HMODULE` is Copy, so the child and the
+        // spawn-fail undo both see the same increment.
+        let pin = pin_addon_module();
         let spawned = std::thread::Builder::new()
             .name(format!("gw2bo-{}", name))
             .spawn(move || {
@@ -296,6 +417,9 @@ impl AddonState {
                 {
                     worker_log(format!("background worker panicked: {}", name));
                 }
+                if let Some(handle) = pin {
+                    exit_pinned_worker(handle);
+                }
             });
         match spawned {
             Ok(handle) => {
@@ -303,6 +427,7 @@ impl AddonState {
                 true
             }
             Err(err) => {
+                undo_module_pin(pin);
                 // `std::thread::spawn` panics on this path; a game overlay must not.
                 worker_log(format!(
                     "could not start background worker {}: {}",
@@ -1588,6 +1713,15 @@ mod tests {
         assert!(
             with_state(|_s| ()).is_none(),
             "unload must drop the state once the wait is over"
+        );
+    }
+
+    #[test]
+    fn pin_addon_module_is_none_in_the_test_process_image() {
+        assert!(
+            pin_addon_module().is_none(),
+            "cargo test links this crate into the process exe; a Some pin would \
+             FreeLibraryAndExitThread the test runner"
         );
     }
 
