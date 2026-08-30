@@ -610,5 +610,8 @@
   "news.images": "정지 화면 표시",
   "news.video_note": "이 오버레이는 영상을 재생할 수 없습니다. 브라우저에서 여세요.",
   "news.no_match": "일치하는 이야기가 없습니다.",
-  "fmt.news_count": "{n}개"
+  "fmt.news_count": "{n}개",
+  "fmt.news_one": "{n}개",
+  "fmt.news_few": "{n}개",
+  "fmt.news_many": "{n}개"
 }

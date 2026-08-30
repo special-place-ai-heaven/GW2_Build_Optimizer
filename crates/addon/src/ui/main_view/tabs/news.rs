@@ -6,7 +6,7 @@ use crate::news;
 use crate::state::AddonState;
 use crate::ui::{news_feed, theme};
 use gw2_core::config::{NewsKind, NewsLayout};
-use gw2_core::i18n::{t, tf};
+use gw2_core::i18n::{slavic_plural_form, t, tf, SlavicPluralForm};
 
 pub(in crate::ui::main_view) fn render_news_tab(ui: &Ui, state: &mut AddonState) {
     let sources = state.config.news.enabled_sources();
@@ -58,13 +58,22 @@ pub(in crate::ui::main_view) fn render_news_tab(ui: &Ui, state: &mut AddonState)
     });
 }
 
+/// Same CLDR one/few/many split as lock chrome (`lock_count_key`).
+fn news_count_key(n: u64) -> &'static str {
+    match slavic_plural_form(n) {
+        SlavicPluralForm::One => "fmt.news_one",
+        SlavicPluralForm::Few => "fmt.news_few",
+        SlavicPluralForm::Many => "fmt.news_many",
+    }
+}
+
 fn masthead(ui: &Ui, state: &AddonState) {
     let title = t("news.desk.title");
     let n = state
         .news
         .collected(&state.config.news.enabled_sources())
         .len();
-    let count = tf("fmt.news_count", &[("n", n.to_string().as_str())]);
+    let count = tf(news_count_key(n as u64), &[("n", n.to_string().as_str())]);
     let start = ui.cursor_screen_pos();
     let width = ui.content_region_avail()[0];
     let h = 26.0;
@@ -391,5 +400,23 @@ fn layout_and_find(ui: &Ui, state: &mut AddonState) {
         let sources = state.config.news.enabled_sources();
         state.news.invalidate(&sources);
         news::kick(state, &sources);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn news_count_key_uses_slavic_plural_form() {
+        for n in [1, 21, 101] {
+            assert_eq!(news_count_key(n), "fmt.news_one", "n={n}");
+        }
+        for n in [2, 3, 4, 22, 23] {
+            assert_eq!(news_count_key(n), "fmt.news_few", "n={n}");
+        }
+        for n in [0, 5, 11, 12, 14, 25] {
+            assert_eq!(news_count_key(n), "fmt.news_many", "n={n}");
+        }
     }
 }

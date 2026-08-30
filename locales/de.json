@@ -610,5 +610,8 @@
   "news.images": "Bilder zeigen",
   "news.video_note": "Dieses Overlay spielt kein Video ab. Zum Ansehen im Browser öffnen.",
   "news.no_match": "Keine passenden Beiträge.",
-  "fmt.news_count": "{n} Beiträge"
+  "fmt.news_count": "{n} Beiträge",
+  "fmt.news_one": "{n} Beitrag",
+  "fmt.news_few": "{n} Beiträge",
+  "fmt.news_many": "{n} Beiträge"
 }
