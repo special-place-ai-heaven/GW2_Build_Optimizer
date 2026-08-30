@@ -708,12 +708,21 @@ fn exec_get_skill_info(args: &Value, ctx: &ToolContext) -> Value {
         return json!({ "error": "Skill name is empty" });
     }
 
-    // Find matching skills, preferring profession match
+    // Find matching skills, preferring profession match.
+    // Same name-matching gate as the shared `find_named` helper: an exact
+    // (case-insensitive) name match always resolves; a substring ("fuzzy")
+    // match requires a needle of at least 5 chars so a 2-char needle like
+    // "zi" can't resolve to an arbitrary skill.
+    let needle_lower = skill_name.to_lowercase();
+    let allow_fuzzy = needle_lower.len() >= 5;
     let mut matches: Vec<_> = ctx
         .db
         .skills
         .values()
-        .filter(|s| s.name.to_lowercase().contains(&skill_name.to_lowercase()))
+        .filter(|s| {
+            let name_lower = s.name.to_lowercase();
+            name_lower == needle_lower || (allow_fuzzy && name_lower.contains(&needle_lower))
+        })
         .collect();
 
     // Sort: profession-specific first, then by name length (shorter = more exact),
@@ -731,6 +740,12 @@ fn exec_get_skill_info(args: &Value, ctx: &ToolContext) -> Value {
     });
 
     let Some(skill) = matches.first() else {
+        if !allow_fuzzy {
+            return json!({ "error": format!(
+                "Skill name '{}' too short for fuzzy match (min 5 chars); use the exact skill name",
+                skill_name
+            ) });
+        }
         return json!({ "error": format!("Skill '{}' not found", skill_name) });
     };
 
@@ -2346,6 +2361,100 @@ mod tests {
         assert!(
             tr.get("error").is_some(),
             "empty trait needle must error: {tr}"
+        );
+    }
+
+    // ── exec_get_skill_info() fuzzy-match gate (mirrors find_named's ≥5 rule) ──
+
+    fn make_skill(id: u32, name: &str) -> gw2_api::models::Skill {
+        gw2_api::models::Skill {
+            id,
+            name: name.into(),
+            description: None,
+            icon: None,
+            chat_link: None,
+            skill_type: None,
+            weapon_type: None,
+            professions: vec![],
+            slot: None,
+            facts: vec![],
+            traited_facts: vec![],
+            categories: vec![],
+            attunement: None,
+            cost: None,
+            dual_wield: None,
+            flip_skill: None,
+            initiative: None,
+            next_chain: None,
+            prev_chain: None,
+            transform_skills: vec![],
+            bundle_skills: vec![],
+            toolbelt_skill: None,
+            flags: vec![],
+            specialization: None,
+        }
+    }
+
+    fn skill_ctx<'a>(db: &'a GameDb, bal: &'a BalanceContext) -> ToolContext<'a> {
+        ToolContext {
+            db,
+            profession_name: "Guardian",
+            candidates: &[],
+            current_build_summary: None,
+            weights: OptimizationWeights::default(),
+            balance_ctx: bal,
+        }
+    }
+
+    #[test]
+    fn get_skill_info_short_needle_never_fuzzy_matches() {
+        let mut db = GameDb::empty_for_tests();
+        db.skills.insert(1, make_skill(1, "Blazing Frenzy")); // contains "zi"
+        let bal = BalanceContext::pve();
+        let ctx = skill_ctx(&db, &bal);
+
+        for needle in ["a", "zi"] {
+            let v = execute_tool("get_skill_info", &json!({ "skill_name": needle }), &ctx);
+            assert!(v.get("id").is_none(), "'{needle}' must not resolve: {v}");
+            let err = v["error"].as_str().expect("short needle must error");
+            assert!(
+                err.contains("too short for fuzzy match"),
+                "'{needle}' must report the min-length gate, got: {err}"
+            );
+        }
+
+        // Empty name stays rejected with its own message.
+        let v = execute_tool("get_skill_info", &json!({ "skill_name": "" }), &ctx);
+        assert!(v.get("id").is_none(), "empty needle must not resolve: {v}");
+        assert!(v.get("error").is_some(), "empty needle must error: {v}");
+    }
+
+    #[test]
+    fn get_skill_info_exact_short_name_still_resolves() {
+        let mut db = GameDb::empty_for_tests();
+        db.skills.insert(7, make_skill(7, "Zap"));
+        db.skills.insert(9, make_skill(9, "Zephyr Strike"));
+        let bal = BalanceContext::pve();
+        let ctx = skill_ctx(&db, &bal);
+
+        // Case-insensitive exact match is always allowed, even under 5 chars.
+        let v = execute_tool("get_skill_info", &json!({ "skill_name": "zAp" }), &ctx);
+        assert_eq!(v["id"].as_u64(), Some(7), "exact short name must resolve: {v}");
+        assert_eq!(v["name"].as_str(), Some("Zap"));
+    }
+
+    #[test]
+    fn get_skill_info_long_needle_still_fuzzy_matches() {
+        let mut db = GameDb::empty_for_tests();
+        db.skills.insert(1, make_skill(1, "Blazing Frenzy"));
+        let bal = BalanceContext::pve();
+        let ctx = skill_ctx(&db, &bal);
+
+        let v = execute_tool("get_skill_info", &json!({ "skill_name": "blazi" }), &ctx);
+        assert_eq!(
+            v["id"].as_u64(),
+            Some(1),
+            "a >=5-char substring needle must still fuzzy-match: {v}"
         );
     }
 
