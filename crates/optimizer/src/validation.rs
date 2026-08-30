@@ -376,6 +376,8 @@ pub enum RejectCode {
     },
     /// More than one elite spec in the 3-slot list.
     MultipleEliteSpecs { spec: String },
+    /// The same specialization id was selected twice.
+    DuplicateSpec { spec: String },
     /// Weapon not available for the profession.
     WeaponNotAvailable {
         slot: String,
@@ -638,6 +640,17 @@ fn validate_specializations(
                     "Specialization '{}' belongs to {}, not {}",
                     spec.name, spec.profession, profession_name
                 ),
+            });
+            continue;
+        }
+
+        // Reject a spec already accepted in this build (duplicate slot).
+        if result.specializations.iter().any(|s| s.spec_id == spec.id) {
+            result.errors.push(ValidationReject {
+                code: RejectCode::DuplicateSpec {
+                    spec: spec.name.clone(),
+                },
+                detail: format!("Specialization '{}' appears twice", spec.name),
             });
             continue;
         }
@@ -2260,6 +2273,134 @@ mod tests {
             vec![1, 2, 3],
             "must not complete into Arcane Precision / Resurrection / Evasive Arcana"
         );
+    }
+
+    /// Three distinct Elementalist specs: two core (Arcane, Fire) and one
+    /// elite (Tempest), each with a full major-trait column so empty trait
+    /// lists autofill legally.
+    fn three_spec_ele_db() -> GameDb {
+        let mut db = empty_db_with_itemstats(vec![]);
+        db.professions.insert(
+            "Elementalist".into(),
+            gw2_api::models::Profession {
+                id: "Elementalist".into(),
+                name: "Elementalist".into(),
+                code: None,
+                specializations: vec![41, 42, 43],
+                weapons: std::collections::HashMap::new(),
+                training: vec![],
+                skills_by_palette: vec![],
+                icon: None,
+                icon_big: None,
+            },
+        );
+        for (spec_id, name, elite, trait_ids) in [
+            (41, "Arcane", false, [1, 2, 3]),
+            (42, "Fire", false, [4, 5, 6]),
+            (43, "Tempest", true, [7, 8, 9]),
+        ] {
+            db.specializations.insert(
+                spec_id,
+                Specialization {
+                    id: spec_id,
+                    name: name.into(),
+                    profession: "Elementalist".into(),
+                    elite,
+                    minor_traits: vec![],
+                    major_traits: trait_ids.to_vec(),
+                    weapon_trait: None,
+                    icon: None,
+                    background: None,
+                    profession_icon: None,
+                    profession_icon_big: None,
+                },
+            );
+            for (i, trait_id) in trait_ids.iter().enumerate() {
+                let mut t = make_trait(*trait_id, &format!("{} Trait {}", name, i + 1));
+                t.tier = (i + 1) as u32;
+                t.specialization = spec_id;
+                db.traits.insert(*trait_id, t);
+            }
+            db.traits_by_spec.insert(spec_id, trait_ids.to_vec());
+        }
+        db
+    }
+
+    #[test]
+    fn duplicate_spec_id_rejected() {
+        let db = three_spec_ele_db();
+        let response = GeminiBuildResponse {
+            specializations: vec![("Arcane".into(), vec![]), ("Arcane".into(), vec![])],
+            ..Default::default()
+        };
+        let result = validate_gemini_build(&response, &db, "Elementalist");
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| matches!(e.code, RejectCode::DuplicateSpec { .. })),
+            "duplicate spec must reject: {:?}",
+            result.errors
+        );
+        assert_eq!(
+            result.specializations.len(),
+            1,
+            "duplicate must not produce a second spec row: {:?}",
+            result.specializations
+        );
+    }
+
+    #[test]
+    fn duplicate_elite_spec_id_errors_once() {
+        // Two identical elite specs: rejected exactly once (DuplicateSpec wins
+        // because the dup check runs before the elite check), never both.
+        let db = three_spec_ele_db();
+        let response = GeminiBuildResponse {
+            specializations: vec![("Tempest".into(), vec![]), ("Tempest".into(), vec![])],
+            ..Default::default()
+        };
+        let result = validate_gemini_build(&response, &db, "Elementalist");
+        let spec_rejections = result
+            .errors
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.code,
+                    RejectCode::DuplicateSpec { .. } | RejectCode::MultipleEliteSpecs { .. }
+                )
+            })
+            .count();
+        assert_eq!(
+            spec_rejections, 1,
+            "duplicate elite must error exactly once: {:?}",
+            result.errors
+        );
+        assert_eq!(result.specializations.len(), 1);
+    }
+
+    #[test]
+    fn three_distinct_specs_still_valid() {
+        let db = three_spec_ele_db();
+        let response = GeminiBuildResponse {
+            specializations: vec![
+                ("Arcane".into(), vec![]),
+                ("Fire".into(), vec![]),
+                ("Tempest".into(), vec![]),
+            ],
+            ..Default::default()
+        };
+        let result = validate_gemini_build(&response, &db, "Elementalist");
+        assert!(
+            !result.errors.iter().any(|e| matches!(
+                e.code,
+                RejectCode::DuplicateSpec { .. }
+                    | RejectCode::MultipleEliteSpecs { .. }
+                    | RejectCode::WrongSpecCount { .. }
+            )),
+            "three distinct specs must not reject: {:?}",
+            result.errors
+        );
+        assert_eq!(result.specializations.len(), 3);
     }
 
     // ── validate_gear_prefix() determinism + tie-break ───────────────────────
