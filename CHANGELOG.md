@@ -2,6 +2,18 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.7.24 - 2026-08-30
+
+### Fixed
+
+- Duplicate specialization selections are now rejected (two of the same spec no longer validate as a build).
+- LLM advisor gear swaps can no longer write a prefix onto a slot the build does not wear (e.g. an off-hand prefix on a Greatsword build).
+- `get_skill_info` tool no longer fuzzy-matches needles shorter than 5 characters — exact names still resolve.
+
+### Removed
+
+- Dead suggestion-card rendering code and an unused API model.
+
 ## 1.7.23 - 2026-08-30
 
 ### Overlay
