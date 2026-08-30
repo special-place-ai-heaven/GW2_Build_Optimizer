@@ -537,68 +537,67 @@ fn select_sigils(
         .collect();
 
     for candidate in candidates.iter_mut() {
-        // GW2 sigil rule: duplicates are forbidden *within* a weapon set (Set 1 or Set 2),
-        // but the same sigil family (e.g. "Sigil of Force") IS allowed in both sets
-        // independently. We select 2 sigils per set with separate dedup sets.
-        for set_idx in 0..2usize {
-            let mut set_ids: Vec<u32> = Vec::new();
-            let mut set_families: Vec<String> = Vec::new();
+        // GW2 sigil rule: duplicates are forbidden *within* a weapon set,
+        // but the same sigil family (e.g. "Sigil of Force") IS allowed in both
+        // sets. Set 2 is carried, not worn — same as combat prefixes skip set 2.
+        // Search set 1 only, then copy those two (id, name) so the kit still
+        // has 4 sigils for search_v2. Do not score or accumulate the copy.
+        let mut set_ids: Vec<u32> = Vec::new();
+        let mut set_families: Vec<String> = Vec::new();
 
-            for _slot in 0..2 {
-                let mut best_score = f64::NEG_INFINITY;
-                let mut best_sigil: Option<(u32, String)> = None;
-                let mut best_effects: Vec<NormalizedEffect> = Vec::new();
-                let mut best_links: Vec<SynergyLink> = Vec::new();
+        for _slot in 0..2 {
+            let mut best_score = f64::NEG_INFINITY;
+            let mut best_sigil: Option<(u32, String)> = None;
+            let mut best_effects: Vec<NormalizedEffect> = Vec::new();
+            let mut best_links: Vec<SynergyLink> = Vec::new();
 
-                for &&sigil in &superior_sigils {
-                    // Prevent duplicates within a weapon set. Some sigils exist as
-                    // multiple items with the same display name (e.g. PvE/PvP versions),
-                    // so we dedupe by a normalized "family" key rather than raw ID.
-                    if set_ids.contains(&sigil.id) {
-                        continue;
-                    }
-                    let family = normalize_sigil_family(&sigil.name);
-                    if set_families.iter().any(|f| f == &family) {
-                        continue;
-                    }
-
-                    let effects = extract_sigil_effects(sigil, ctx);
-                    let base: f64 = effects
-                        .iter()
-                        .map(|e| score_normalized_effect(e, weights))
-                        .sum();
-                    let new_id = ComponentId::Sigil(sigil.id);
-                    let (syn, links) = compute_marginal_synergy(
-                        &effects,
-                        &candidate.accumulated,
-                        weights,
-                        Some(&new_id),
-                    );
-
-                    let total = base + syn;
-                    if total > best_score {
-                        best_score = total;
-                        best_sigil = Some((sigil.id, sigil.name.clone()));
-                        best_effects = effects;
-                        best_links = links;
-                    }
+            for &&sigil in &superior_sigils {
+                // Prevent duplicates within a weapon set. Some sigils exist as
+                // multiple items with the same display name (e.g. PvE/PvP versions),
+                // so we dedupe by a normalized "family" key rather than raw ID.
+                if set_ids.contains(&sigil.id) {
+                    continue;
+                }
+                let family = normalize_sigil_family(&sigil.name);
+                if set_families.iter().any(|f| f == &family) {
+                    continue;
                 }
 
-                if let Some(sigil) = best_sigil {
-                    set_ids.push(sigil.0);
-                    set_families.push(normalize_sigil_family(&sigil.1));
-                    // Set 2 is carried, not worn — same as combat prefixes skip set 2.
-                    if set_idx == 0 {
-                        candidate.synergy_links.extend(best_links);
-                        candidate
-                            .accumulated
-                            .push((ComponentId::Sigil(sigil.0), best_effects));
-                        candidate.score += best_score;
-                    }
-                    candidate.sigils.push(sigil);
+                let effects = extract_sigil_effects(sigil, ctx);
+                let base: f64 = effects
+                    .iter()
+                    .map(|e| score_normalized_effect(e, weights))
+                    .sum();
+                let new_id = ComponentId::Sigil(sigil.id);
+                let (syn, links) = compute_marginal_synergy(
+                    &effects,
+                    &candidate.accumulated,
+                    weights,
+                    Some(&new_id),
+                );
+
+                let total = base + syn;
+                if total > best_score {
+                    best_score = total;
+                    best_sigil = Some((sigil.id, sigil.name.clone()));
+                    best_effects = effects;
+                    best_links = links;
                 }
             }
+
+            if let Some(sigil) = best_sigil {
+                set_ids.push(sigil.0);
+                set_families.push(normalize_sigil_family(&sigil.1));
+                candidate.synergy_links.extend(best_links);
+                candidate
+                    .accumulated
+                    .push((ComponentId::Sigil(sigil.0), best_effects));
+                candidate.score += best_score;
+                candidate.sigils.push(sigil);
+            }
         }
+        let set1_len = candidate.sigils.len();
+        candidate.sigils.extend_from_within(..set1_len);
     }
 }
 
@@ -2699,7 +2698,12 @@ mod land_weapon_tests {
         let mut candidates = [empty_candidate()];
         select_sigils(&mut candidates, &db, &weights, &ctx);
         let billed = candidates[0].score;
-        assert_eq!(candidates[0].sigils.len(), 4, "set 2 is still selected");
+        assert_eq!(candidates[0].sigils.len(), 4, "kit still has 4 sigils");
+        assert_eq!(
+            &candidates[0].sigils[2..],
+            &candidates[0].sigils[..2],
+            "set 2 copies set 1; same family is legal across sets"
+        );
         let mut expected = 0.0;
         let mut acc = Vec::new();
         for (id, _) in &candidates[0].sigils[..2] {
