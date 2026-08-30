@@ -6,7 +6,8 @@ All notable changes to GW2 Build Optimizer are documented here.
 
 ### Overlay
 
-- Overlay chrome (textures, quick access, ImGui draw) waits for a Nexus PostRender after a 2s settle so ArcDPS can hook D3D11 first. That race was taking the game down on launch (heap 0xC0000374) with the overlay still closed. English/`auto` still does not load CJK faces.
+- The ImGui draw hook stays registered on load, same as 1.7.20. Registering it from a PostRender callback mutates Nexus's render list while that list is being walked and takes the game down (heap 0xC0000374).
+- Quick-access icon textures wait for a PostRender after a 2s settle. English/`auto` still does not load CJK faces.
 
 ## 1.7.20 - 2026-08-30
 
