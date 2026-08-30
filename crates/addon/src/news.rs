@@ -225,6 +225,33 @@ pub fn matches(item: &NewsItem, kind: Option<NewsKind>, q: &str) -> bool {
         || item.body.to_lowercase().contains(&q)
 }
 
+/// `kick_art` worker: leftover Pending + `art_loading`. Drop (success, cancel,
+/// unwind) releases leftover so they are not stuck forever, then clears the
+/// flag. `finish` after ready/failed — those must survive. If cancel already
+/// released, leftover is empty; `release_pending` is also a no-op on
+/// missing/Ready/Failed.
+struct ArtWorkerGuard {
+    leftover: Vec<String>,
+}
+
+impl ArtWorkerGuard {
+    fn new(batch: Vec<String>) -> Self {
+        Self { leftover: batch }
+    }
+
+    fn finish(&mut self, url: &str) {
+        self.leftover.retain(|u| u != url);
+    }
+}
+
+impl Drop for ArtWorkerGuard {
+    fn drop(&mut self) {
+        crate::news_art::release_pending(&self.leftover);
+        self.leftover.clear();
+        let _ = with_state(|s| s.news.art_loading = false);
+    }
+}
+
 /// Start still-image downloads for URLs that are not cached yet. Never blocks.
 pub fn kick_art(state: &mut AddonState, urls: &[String]) {
     if state.news.art_loading {
@@ -239,24 +266,16 @@ pub fn kick_art(state: &mut AddonState, urls: &[String]) {
     let version = crate::VERSION.to_string();
     let queued = batch.clone();
     let spawned = state.spawn_worker("fetch-news-art", move |token| {
-        struct Done;
-        impl Drop for Done {
-            fn drop(&mut self) {
-                let _ = with_state(|s| s.news.art_loading = false);
-            }
-        }
-        let _done = Done;
-        let mut leftover = batch.clone();
+        let mut guard = ArtWorkerGuard::new(batch.clone());
         for url in &batch {
             if token.is_cancelled() {
-                crate::news_art::release_pending(&leftover);
                 return;
             }
-            leftover.retain(|u| u != url);
             match crate::news_art::download(url, &dir, &token, &version) {
                 Some((path, aspect)) => crate::news_art::mark_ready(url, path, aspect),
                 None => crate::news_art::mark_failed(url),
             }
+            guard.finish(url);
         }
     });
     if !spawned {
@@ -985,5 +1004,50 @@ mod tests {
         assert!(crate::news_art::url_ok(
             "https://img.youtube.com/vi/x/mqdefault.jpg"
         ));
+    }
+
+    #[test]
+    fn art_worker_guard_releases_leftover_pending_keeps_failed() {
+        // kick_art: take_batch marks Pending. Drop releases leftover so a
+        // panic/early return cannot leave URLs skipped forever. finish() after
+        // failed so that slot survives; a second release (cancel-then-Drop) is
+        // a no-op on missing/Failed.
+        let _lock = crate::news_art::slots_test_guard();
+        let leftover = "https://www.guildwars2.com/news/art-guard-leftover.jpg";
+        let failed = "https://www.guildwars2.com/news/art-guard-failed.jpg";
+        let batch = crate::news_art::take_batch(&[leftover.to_string(), failed.to_string()], 2);
+        assert_eq!(batch.len(), 2);
+
+        {
+            let mut guard = ArtWorkerGuard::new(batch);
+            crate::news_art::mark_failed(failed);
+            guard.finish(failed);
+        }
+        assert_eq!(
+            crate::news_art::take_batch(&[leftover.to_string()], 1),
+            vec![leftover.to_string()]
+        );
+        assert!(
+            crate::news_art::take_batch(&[failed.to_string()], 1).is_empty(),
+            "Failed must survive guard Drop"
+        );
+
+        let again = crate::news_art::take_batch(&[leftover.to_string()], 1);
+        {
+            let guard = ArtWorkerGuard::new(again);
+            crate::news_art::release_pending(&[leftover.to_string()]);
+            drop(guard);
+        }
+        assert_eq!(
+            crate::news_art::take_batch(&[leftover.to_string()], 1),
+            vec![leftover.to_string()],
+            "already-released leftover must stay retryable"
+        );
+        assert!(
+            crate::news_art::take_batch(&[failed.to_string()], 1).is_empty(),
+            "Failed must survive a second Drop"
+        );
+        crate::news_art::release_pending(&[leftover.to_string()]);
+        crate::news_art::clear_failed();
     }
 }
