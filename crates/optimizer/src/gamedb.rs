@@ -98,6 +98,15 @@ impl GameDb {
         if itemstats_vec.is_empty() {
             return Err("No item stats found in cache — game data may not be downloaded".into());
         }
+        if skills_vec.is_empty() {
+            return Err("No skills found in cache — game data may not be downloaded".into());
+        }
+        if traits_vec.is_empty() {
+            return Err("No traits found in cache — game data may not be downloaded".into());
+        }
+        if items_vec.is_empty() {
+            return Err("No items found in cache — game data may not be downloaded".into());
+        }
 
         // Build primary indexes (ID → data)
         let items: HashMap<u32, Item> = items_vec.into_iter().map(|i| (i.id, i)).collect();
@@ -198,7 +207,10 @@ impl GameDb {
                 } = fact
                 {
                     if is_condition(s) {
-                        traits_by_condition.entry(s.clone()).or_default().push(t.id);
+                        traits_by_condition
+                            .entry(condition_index_key(s).to_string())
+                            .or_default()
+                            .push(t.id);
                     } else if is_boon(s) {
                         traits_by_buff.entry(s.clone()).or_default().push(t.id);
                     }
@@ -216,7 +228,7 @@ impl GameDb {
                 {
                     if is_condition(s) {
                         skills_by_condition
-                            .entry(s.clone())
+                            .entry(condition_index_key(s).to_string())
                             .or_default()
                             .push(skill.id);
                     } else if is_boon(s) {
@@ -298,8 +310,10 @@ impl GameDb {
     }
 
     /// Deterministic itemstat lookup by name (case-insensitive). Returns the
-    /// exact-name match if any (lower id wins ties), otherwise the shortest
-    /// substring match (lower id wins ties).
+    /// exact-name match if any, otherwise the shortest substring match
+    /// (lower id wins ties). Exact ties do not lowest-id across distinct
+    /// multiplier shapes: wiki three-stat Giver's (Toughness / Healing /
+    /// BoonDuration) outranks other Giver's templates, then lower id.
     ///
     /// Centralizes the policy used by validation, Gemini tool execs, and
     /// LLM-context builders — a raw `itemstats.values().find(contains)` is
@@ -320,10 +334,10 @@ impl GameDb {
                 !needle_key.is_empty() && gw2_core::i18n::alnum_key(&is.name) == needle_key;
             if lower == needle_lower || alnum_hit {
                 match exact {
-                    Some(prev) if prev.id <= is.id => {}
+                    Some(prev) if !Self::exact_name_outranks(is, prev) => {}
                     _ => exact = Some(is),
                 }
-            } else if lower.contains(&needle_lower) {
+            } else if needle_lower.len() >= 5 && lower.contains(&needle_lower) {
                 let key = (is.name.len(), is.id);
                 match fuzzy {
                     Some((plen, pid, _)) if (plen, pid) <= key => {}
@@ -332,6 +346,36 @@ impl GameDb {
             }
         }
         exact.or(fuzzy.map(|(_, _, is)| is))
+    }
+
+    /// Wiki main-table Giver's: Toughness / Healing Power / Concentration.
+    /// `/v2/itemstats` spells those `Healing` and `BoonDuration`. Trinket
+    /// flats on 1430 are ignored so 628/1070/1430 share one shape.
+    fn wiki_givers_three_stat(stat: &ItemStat) -> bool {
+        if gw2_core::i18n::alnum_key(&stat.name) != "givers" {
+            return false;
+        }
+        let mut attrs: Vec<&str> = stat
+            .attributes
+            .iter()
+            .filter(|a| a.multiplier > 0.0)
+            .map(|a| a.attribute.as_str())
+            .collect();
+        attrs.sort_unstable();
+        attrs == ["BoonDuration", "Healing", "Toughness"]
+    }
+
+    /// Exact-name ties: wiki three-stat Giver's outranks other multiplier
+    /// shapes of that English name; otherwise lower id wins.
+    fn exact_name_outranks(candidate: &ItemStat, incumbent: &ItemStat) -> bool {
+        match (
+            Self::wiki_givers_three_stat(candidate),
+            Self::wiki_givers_three_stat(incumbent),
+        ) {
+            (true, false) => true,
+            (false, true) => false,
+            _ => candidate.id < incumbent.id,
+        }
     }
 
     pub fn attach_localized(&mut self, mut names: gw2_api::localize::LocalizedNames) {
@@ -604,7 +648,7 @@ impl GameDb {
     /// Get trait IDs that apply a specific condition.
     pub fn traits_applying_condition(&self, condition: &str) -> Vec<&GW2Trait> {
         self.traits_by_condition
-            .get(condition)
+            .get(condition_index_key(condition))
             .map(|ids| ids.iter().filter_map(|id| self.traits.get(id)).collect())
             .unwrap_or_default()
     }
@@ -612,7 +656,7 @@ impl GameDb {
     /// Get skill IDs that apply a specific condition.
     pub fn skills_applying_condition(&self, condition: &str) -> Vec<&Skill> {
         self.skills_by_condition
-            .get(condition)
+            .get(condition_index_key(condition))
             .map(|ids| ids.iter().filter_map(|id| self.skills.get(id)).collect())
             .unwrap_or_default()
     }
@@ -681,6 +725,10 @@ impl GameDb {
 
 use crate::data::boon_condition_formulas::is_condition;
 
+fn condition_index_key(status: &str) -> &str {
+    crate::data::boon_condition_formulas::canonical_condition_name(status)
+}
+
 /// GW2 boons.
 fn is_boon(status: &str) -> bool {
     matches!(
@@ -746,6 +794,169 @@ mod tests {
         );
         assert_eq!(db.itemstat_by_name("Knights").unwrap().name, "Knight's");
         assert_eq!(db.itemstat_by_name("Knight's").unwrap().name, "Knight's");
+    }
+
+    #[test]
+    fn itemstat_short_needle_does_not_fuzzy() {
+        let mut db = GameDb::empty_for_tests();
+        db.itemstats.insert(
+            1,
+            gw2_api::models::ItemStat {
+                id: 1,
+                name: "Berserker's".into(),
+                attributes: vec![],
+            },
+        );
+        assert!(db.itemstat_by_name("a").is_none());
+        assert!(db.itemstat_by_name("sig").is_none());
+        assert_eq!(db.itemstat_by_name("Berserker's").map(|s| s.id), Some(1));
+    }
+
+    #[test]
+    fn load_rejects_empty_skills_traits_or_items() {
+        let dir = std::env::temp_dir().join(format!(
+            "gw2bo-hollow-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let cache = gw2_api::cache::DataCache::new(&dir);
+        let prof = gw2_api::models::Profession {
+            id: "Guardian".into(),
+            name: "Guardian".into(),
+            code: Some(1),
+            specializations: vec![],
+            weapons: std::collections::HashMap::new(),
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        let spec = gw2_api::models::Specialization {
+            id: 1,
+            name: "Zeal".into(),
+            profession: "Guardian".into(),
+            elite: false,
+            minor_traits: vec![],
+            major_traits: vec![],
+            weapon_trait: None,
+            icon: None,
+            background: None,
+            profession_icon: None,
+            profession_icon_big: None,
+        };
+        let stat = gw2_api::models::ItemStat {
+            id: 161,
+            name: "Berserker's".into(),
+            attributes: vec![],
+        };
+        cache
+            .save("professions", &vec![prof], 1)
+            .expect("save professions");
+        cache
+            .save("specializations", &vec![spec], 1)
+            .expect("save specs");
+        cache
+            .save("itemstats", &vec![stat], 1)
+            .expect("save itemstats");
+        let err = match GameDb::load(&cache) {
+            Ok(_) => panic!("hollow skills must fail"),
+            Err(e) => e,
+        };
+        assert!(
+            err.contains("skills"),
+            "expected skills fail-closed, got {err}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Live `/v2/itemstats` ships several Giver's multiplier shapes under one
+    /// English name. Lowest-id exact match is Toughness-only 627; wiki L80
+    /// Giver's (Attribute combinations, retrieved 2026-08-29) is Toughness /
+    /// Healing Power / Concentration (API: Healing, BoonDuration) at
+    /// 628/1070/1430. Math must resolve the three-stat template.
+    #[test]
+    fn itemstat_by_name_givers_prefers_three_stat_not_lowest_id() {
+        let mut db = GameDb::empty_for_tests();
+        let attr = |attribute: &str, multiplier: f64, value: i32| {
+            gw2_api::models::itemstats::StatAttribute {
+                attribute: attribute.into(),
+                multiplier,
+                value,
+            }
+        };
+        let row = |id: u32, attributes: Vec<gw2_api::models::itemstats::StatAttribute>| {
+            gw2_api::models::ItemStat {
+                id,
+                name: "Giver's".into(),
+                attributes,
+            }
+        };
+        db.itemstats
+            .insert(627, row(627, vec![attr("Toughness", 0.35, 0)]));
+        db.itemstats.insert(
+            628,
+            row(
+                628,
+                vec![
+                    attr("Toughness", 0.35, 0),
+                    attr("Healing", 0.25, 0),
+                    attr("BoonDuration", 0.25, 0),
+                ],
+            ),
+        );
+        db.itemstats.insert(
+            629,
+            row(
+                629,
+                vec![attr("Toughness", 0.35, 0), attr("Healing", 0.25, 0)],
+            ),
+        );
+        db.itemstats.insert(
+            1070,
+            row(
+                1070,
+                vec![
+                    attr("Toughness", 0.35, 0),
+                    attr("Healing", 0.25, 0),
+                    attr("BoonDuration", 0.25, 0),
+                ],
+            ),
+        );
+        db.itemstats.insert(
+            1430,
+            row(
+                1430,
+                vec![
+                    attr("Toughness", 0.35, 32),
+                    attr("Healing", 0.25, 18),
+                    attr("BoonDuration", 0.25, 18),
+                ],
+            ),
+        );
+
+        let got = db
+            .itemstat_by_name("Giver's")
+            .expect("Giver's must resolve");
+        assert_ne!(
+            got.id, 627,
+            "Giver's must not resolve to Toughness-only 627"
+        );
+        assert_eq!(got.id, 628, "lowest wiki three-stat Giver's id");
+        let mut attrs: Vec<&str> = got
+            .attributes
+            .iter()
+            .filter(|a| a.multiplier > 0.0)
+            .map(|a| a.attribute.as_str())
+            .collect();
+        attrs.sort_unstable();
+        assert_eq!(
+            attrs.as_slice(),
+            ["BoonDuration", "Healing", "Toughness"].as_slice()
+        );
+        assert_eq!(db.itemstat_by_name("Givers").map(|s| s.id), Some(628));
     }
 
     #[test]
@@ -864,5 +1075,22 @@ mod tests {
         assert_eq!(db.pet_display_name(66), "Juvenile Smokescale");
         assert_eq!(db.pet_by_name("Smokescale").map(|p| p.id), Some(66));
         assert_eq!(db.pet_by_name("#66").map(|p| p.id), Some(66));
+    }
+
+    #[test]
+    fn immobilized_aliases_hit_immobile_index() {
+        let mut db = GameDb::empty_for_tests();
+        let skill: Skill = serde_json::from_value(serde_json::json!({
+            "id": 7,
+            "name": "Test Immobilize"
+        }))
+        .unwrap();
+        db.skills.insert(7, skill);
+        db.skills_by_condition.insert("Immobile".into(), vec![7]);
+        for name in ["Immobilized", "Immobilize", "Immobile"] {
+            let hits = db.skills_applying_condition(name);
+            assert_eq!(hits.len(), 1, "{name}");
+            assert_eq!(hits[0].id, 7, "{name}");
+        }
     }
 }

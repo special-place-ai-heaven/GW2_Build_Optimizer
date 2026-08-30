@@ -172,6 +172,8 @@ After gathering data, respond with ONLY a JSON build object:
   "rune": "RuneName",
   "sigils": ["Sigil1", "Sigil2", "Sigil3", "Sigil4"],
   "relic": "RelicName",
+  "pets": {{"terrestrial": ["PetName", "PetName"], "aquatic": ["PetName", "PetName"]}},
+  "legends": ["Legend1", "Legend2"],
   "stat_prefix": "PrefixName",
   "explanation": "2-3 sentences explaining the build's synergies and rotation."
 }}
@@ -231,6 +233,8 @@ After gathering data, respond with ONLY a JSON build object:
   "rune": "...",
   "sigils": [...],
   "relic": "...",
+  "pets": {{"terrestrial": [...], "aquatic": [...]}},
+  "legends": ["Legend1", "Legend2"],
   "stat_prefix": "...",
   "changes_made": ["Change 1 description", "Change 2 description"],
   "explanation": "2-3 sentences explaining improvements."
@@ -267,7 +271,7 @@ Named gear prefix in the player's message wins (including Celestial). Ignore a p
 If they greet you, ask a question, or are just chatting — no build. Reply with JSON:
 {{"explanation": "<your spoken reply>", "specializations": []}}
 
-If they want a build, a loadout, an improve, or anything to equip: reply with the FULL JSON build object (specializations, weapons, skills, rune, sigils, relic, stat_prefix). Never explanation-only. Weapon type names match the API: Shortbow, Longbow, Greatsword (no spaces). If Context already lists an equipped Character loadout, do not call tools; edit that loadout. Copy weapons unchanged only if they asked to keep them. explanation: 2-4 sentences in {reply_language}.
+If they want a build, a loadout, an improve, or anything to equip: reply with the FULL JSON build object (specializations, weapons, skills, rune, sigils, relic, pets, legends, stat_prefix). Never explanation-only. Weapon type names match the API: Shortbow, Longbow, Greatsword (no spaces). If Context already lists an equipped Character loadout, do not call tools; edit that loadout. Copy weapons unchanged only if they asked to keep them. explanation: 2-4 sentences in {reply_language}.
 
 If they want a new build and Context has no Character loadout: use at most two tool rounds, then reply with the full JSON build object. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: 2-4 sentences in {reply_language}.
 
@@ -309,6 +313,8 @@ Prefer search_upgrades / upgrade_synergies over list_* dumps. When plating a bui
     "set2_off": "Full Sigil Name"
   }},
   "relic": "Full Relic Name",
+  "pets": {{"terrestrial": ["PetName", "PetName"], "aquatic": ["PetName", "PetName"]}},
+  "legends": ["Legend1", "Legend2"],
   "stat_prefix": "PrefixName",
   "gear_slots": {{"amulet": "PrefixName", "ring-1": "PrefixName"}},
   "changes_made": ["..."],
@@ -483,6 +489,9 @@ pub struct GeminiBuildResponse {
     /// without it keep today's profile-prefix behavior. Names are resolved
     /// against GameDb by `validation::validate_gemini_build`.
     pub gear_slots: Option<std::collections::HashMap<String, String>>,
+    /// Ranger pet names from the plate: terrestrial[2] then aquatic[2].
+    /// Missing or empty slots are None. Unresolved until validate.
+    pub pets: Option<[Option<String>; 4]>,
 }
 
 /// Parse a Gemini response into a typed build suggestion.
@@ -610,7 +619,91 @@ pub fn parse_gemini_build(response: &str) -> Result<GeminiBuildResponse, String>
         }
     }
 
+    result.pets = parse_pets_field(json.get("pets"));
+    // Validator already tokenizes GeminiBuildResponse.skills for Legend*
+    // ids (legend_ids_from_plate). Fold the plate legends field onto
+    // skills, active first, so fill_revenant_legends takes the explicit-win
+    // path without a new response field.
+    let legends = parse_legends_field(json.get("legends"));
+    if !legends.is_empty() {
+        let mut prefixed = legends;
+        prefixed.extend(std::mem::take(&mut result.skills));
+        result.skills = prefixed;
+    }
+
     Ok(result)
+}
+
+fn pet_slot_name(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("null") {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        serde_json::Value::Number(n) => n.as_u64().map(|id| format!("#{id}")),
+        serde_json::Value::Null => None,
+        _ => None,
+    }
+}
+
+fn two_pet_slots(arr: Option<&Vec<serde_json::Value>>) -> [Option<String>; 2] {
+    let empty: Vec<serde_json::Value> = Vec::new();
+    let items = arr.unwrap_or(&empty);
+    [
+        items.first().and_then(pet_slot_name),
+        items.get(1).and_then(pet_slot_name),
+    ]
+}
+
+/// Plate pets: `{terrestrial, aquatic}` arrays, or a flat 4-name list.
+fn parse_pets_field(value: Option<&serde_json::Value>) -> Option<[Option<String>; 4]> {
+    let value = value?;
+    if let Some(obj) = value.as_object() {
+        let land = two_pet_slots(obj.get("terrestrial").and_then(|v| v.as_array()));
+        let water = two_pet_slots(obj.get("aquatic").and_then(|v| v.as_array()));
+        return Some([land[0].clone(), land[1].clone(), water[0].clone(), water[1].clone()]);
+    }
+    if let Some(arr) = value.as_array() {
+        return Some([
+            arr.first().and_then(pet_slot_name),
+            arr.get(1).and_then(pet_slot_name),
+            arr.get(2).and_then(pet_slot_name),
+            arr.get(3).and_then(pet_slot_name),
+        ]);
+    }
+    None
+}
+
+/// Plate legends: `["Legend2", "Legend1"]` (active first). Also a lone string.
+/// Empty / null entries are skipped. Returned ids are folded onto `skills`.
+fn parse_legends_field(value: Option<&serde_json::Value>) -> Vec<String> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    let mut ids = Vec::new();
+    let mut push = |s: &str| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("null") {
+            return;
+        }
+        if !ids.iter().any(|id| id == trimmed) {
+            ids.push(trimmed.to_string());
+        }
+    };
+    if let Some(arr) = value.as_array() {
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                push(s);
+            }
+        }
+    } else if let Some(s) = value.as_str() {
+        push(s);
+    }
+    ids
 }
 
 #[cfg(test)]
@@ -637,6 +730,31 @@ mod tests {
         assert!(
             prompt.contains("stat_prefix") && prompt.contains("overrides only the slots it names"),
             "the prompt must say gear_slots overrides on top of the base stat_prefix"
+        );
+        // RED TMP-P9-A15-1: parse accepts pets, but the examples the model is
+        // shown omit the key, so Ranger plates never send one.
+        let schema = prompt
+            .split_once("```json")
+            .expect("the prompt must show a JSON example")
+            .1
+            .split_once("```")
+            .expect("the JSON example must close")
+            .0;
+        assert!(
+            schema.contains("\"pets\""),
+            "the documented schema must include pets, or Ranger plates drop them"
+        );
+        assert!(
+            prompt.contains("FULL JSON build object")
+                && prompt
+                    .split_once("FULL JSON build object")
+                    .expect("FULL JSON key list")
+                    .1
+                    .split_once(')')
+                    .expect("key list closes")
+                    .0
+                    .contains("pets"),
+            "the FULL JSON key list must mention pets"
         );
         // Slot keys are matched against GearSlot::kebab_name(); a documented key
         // the validator would reject is worse than no documentation, because
@@ -738,6 +856,113 @@ mod tests {
         let response = r#"{"stat_prefix": "Viper's", "explanation": "Condi"}"#;
         let parsed = parse_gemini_build(response).unwrap();
         assert!(parsed.gear_slots.is_none());
+        assert!(parsed.pets.is_none());
+    }
+
+    /// RED: plate pets were dropped. Object form is terrestrial[2] then aquatic[2].
+    #[test]
+    fn parse_gemini_build_parses_ranger_pets() {
+        let response = r#"{
+            "pets": {
+                "terrestrial": ["Jungle Stalker", "Brown Bear"],
+                "aquatic": ["Shark", null]
+            }
+        }"#;
+        let parsed = parse_gemini_build(response).unwrap();
+        let pets = parsed.pets.expect("pets must parse");
+        assert_eq!(pets[0].as_deref(), Some("Jungle Stalker"));
+        assert_eq!(pets[1].as_deref(), Some("Brown Bear"));
+        assert_eq!(pets[2].as_deref(), Some("Shark"));
+        assert_eq!(pets[3], None);
+    }
+
+    /// RED TMP-P9-A15-5-2: plate legends were dropped. Validator already
+    /// honors Legend* tokens on GeminiBuildResponse.skills (see
+    /// legend_ids_from_plate). Parse must surface a legends field there so
+    /// fill_revenant_legends takes the explicit-win path.
+    #[test]
+    fn parse_gemini_build_parses_revenant_legends() {
+        let response = r#"{
+            "skills": {"heal": "Enchanting Lullaby"},
+            "legends": ["Legend2", "Legend1"]
+        }"#;
+        let parsed = parse_gemini_build(response).unwrap();
+        assert!(
+            parsed
+                .skills
+                .iter()
+                .any(|line| line.split(|c: char| !c.is_ascii_alphanumeric()).any(|t| t == "Legend2")),
+            "Legend2 must land on skills so legend_ids_from_plate can see it: {:?}",
+            parsed.skills
+        );
+        assert!(
+            parsed
+                .skills
+                .iter()
+                .any(|line| line.split(|c: char| !c.is_ascii_alphanumeric()).any(|t| t == "Legend1")),
+            "Legend1 must land on skills: {:?}",
+            parsed.skills
+        );
+        let skills_joined = parsed.skills.join("\n");
+        let l2 = skills_joined.find("Legend2").expect("Legend2");
+        let l1 = skills_joined.find("Legend1").expect("Legend1");
+        assert!(
+            l2 < l1,
+            "active legend first, same order as the plate: {:?}",
+            parsed.skills
+        );
+    }
+
+    /// RED TMP-P9-A15-5-2: parse is useless if the examples the model is
+    /// shown omit legends, so Revenant plates never send one.
+    #[test]
+    fn prompt_examples_document_revenant_legends() {
+        let new_build = new_build_prompt_with_tools(
+            "Revenant",
+            &OptimizationWeights::preset_power_dps(),
+            "PvE",
+        );
+        let improve = improve_build_prompt_with_tools(
+            "Revenant",
+            &OptimizationWeights::preset_power_dps(),
+            "PvE",
+        );
+        let chat = chat_refinement_prompt_with_tools(
+            "Revenant",
+            "PvE",
+            "power revan",
+            "",
+            "English",
+        );
+        for (name, prompt) in [
+            ("new_build", new_build.as_str()),
+            ("improve", improve.as_str()),
+            ("chat", chat.as_str()),
+        ] {
+            let schema = prompt
+                .split_once("```json")
+                .unwrap_or_else(|| panic!("{name} must show a JSON example"))
+                .1
+                .split_once("```")
+                .unwrap_or_else(|| panic!("{name} JSON example must close"))
+                .0;
+            assert!(
+                schema.contains("\"legends\""),
+                "{name} documented schema must include legends, or Revenant plates drop them"
+            );
+        }
+        assert!(
+            chat.contains("FULL JSON build object")
+                && chat
+                    .split_once("FULL JSON build object")
+                    .expect("FULL JSON key list")
+                    .1
+                    .split_once(')')
+                    .expect("key list closes")
+                    .0
+                    .contains("legends"),
+            "the FULL JSON key list must mention legends"
+        );
     }
 
     #[test]
@@ -896,6 +1121,8 @@ After gathering data, respond with ONLY a JSON build object:
   "rune": "RuneName",
   "sigils": ["Sigil1", "Sigil2", "Sigil3", "Sigil4"],
   "relic": "RelicName",
+  "pets": {"terrestrial": ["PetName", "PetName"], "aquatic": ["PetName", "PetName"]},
+  "legends": ["Legend1", "Legend2"],
   "stat_prefix": "PrefixName",
   "explanation": "2-3 sentences explaining the build's synergies and rotation."
 }
@@ -952,6 +1179,8 @@ After gathering data, respond with ONLY a JSON build object:
   "rune": "...",
   "sigils": [...],
   "relic": "...",
+  "pets": {"terrestrial": [...], "aquatic": [...]},
+  "legends": ["Legend1", "Legend2"],
   "stat_prefix": "...",
   "changes_made": ["Change 1 description", "Change 2 description"],
   "explanation": "2-3 sentences explaining improvements."

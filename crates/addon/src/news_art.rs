@@ -30,6 +30,18 @@ fn slots() -> std::sync::MutexGuard<'static, HashMap<String, Slot>> {
         .unwrap_or_else(|e| e.into_inner())
 }
 
+/// Feed hosts from `news::feed_url` plus the YouTube still CDNs that
+/// `prefer_youtube_still` already rewrites to. Any other https host is a
+/// still the overlay must not fetch.
+const STILL_HOSTS: &[&str] = &[
+    "www.guildwars2.com",
+    "en-forum.guildwars2.com",
+    "www.youtube.com",
+    "www.guildjen.com",
+    "i.ytimg.com",
+    "img.youtube.com",
+];
+
 pub fn url_ok(url: &str) -> bool {
     let Ok(u) = reqwest::Url::parse(url) else {
         return false;
@@ -37,11 +49,35 @@ pub fn url_ok(url: &str) -> bool {
     if u.scheme() != "https" {
         return false;
     }
-    match u.host_str() {
-        Some("localhost") | Some("127.0.0.1") | Some("::1") => false,
-        Some(_) => true,
-        None => false,
+    let Some(host) = u.host_str() else {
+        return false;
+    };
+    if reserved_still_host(host) {
+        return false;
     }
+    STILL_HOSTS.iter().any(|ok| host.eq_ignore_ascii_case(ok))
+}
+
+fn reserved_still_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(v)) => {
+            v.is_loopback() || v.is_private() || v.is_link_local() || v.is_unspecified()
+        }
+        Ok(std::net::IpAddr::V6(v)) => {
+            v.is_loopback() || v.is_unspecified() || ipv6_unique_local_or_link_local(v)
+        }
+        Err(_) => false,
+    }
+}
+
+/// `Ipv6Addr::is_unique_local` / `is_unicast_link_local` need a newer rustc
+/// than this workspace pins; the prefix checks are the same RFCs.
+fn ipv6_unique_local_or_link_local(v: std::net::Ipv6Addr) -> bool {
+    let o = v.octets();
+    (o[0] & 0xfe) == 0xfc || (o[0] == 0xfe && (o[1] & 0xc0) == 0x80)
 }
 
 fn cache_id(url: &str) -> String {
@@ -107,6 +143,11 @@ pub fn mark_failed(url: &str) {
     slots().insert(url.to_string(), Slot::Failed);
 }
 
+/// Drop Failed slots so Refresh can queue the URL again. Pending stays skipped.
+pub fn clear_failed() {
+    slots().retain(|_, slot| !matches!(slot, Slot::Failed));
+}
+
 pub fn release_pending(urls: &[String]) {
     let mut map = slots();
     for url in urls {
@@ -135,13 +176,10 @@ pub fn download(
         headers.insert(reqwest::header::USER_AGENT, v);
     }
     let resp = client.get(url).headers(headers).send().ok()?;
-    if !resp.status().is_success() || resp.url().scheme() != "https" {
+    if !resp.status().is_success() || !url_ok(resp.url().as_str()) {
         return None;
     }
-    let bytes = resp.bytes().ok()?;
-    if bytes.len() > MAX_BYTES {
-        return None;
-    }
+    let bytes = gw2_api::transport::read_body_capped(resp, MAX_BYTES as u64).ok()?;
     let ext = sniff(&bytes)?;
     let (pw, ph) = pixel_size(&bytes).unwrap_or((16, 9));
     let aspect = pw as f32 / ph as f32;
@@ -248,16 +286,79 @@ pub fn texture(url: &str) -> Option<TextureId> {
 }
 
 #[cfg(test)]
+static SLOTS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn slots_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    SLOTS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn only_https_public_hosts() {
+    fn only_https_feed_hosts() {
         assert!(url_ok("https://i.ytimg.com/vi/x/hqdefault.jpg"));
+        assert!(url_ok("https://www.guildwars2.com/wp-content/x.jpg"));
+        assert!(url_ok("https://img.youtube.com/vi/x/mqdefault.jpg"));
         assert!(!url_ok("http://i.ytimg.com/vi/x/hqdefault.jpg"));
         assert!(!url_ok("https://localhost/x.jpg"));
         assert!(!url_ok("https://127.0.0.1/x.jpg"));
+        assert!(!url_ok("https://[::1]/x.jpg"));
+        assert!(!url_ok("https://10.0.0.1/x.jpg"));
+        assert!(!url_ok("https://192.168.1.8/x.jpg"));
+        assert!(!url_ok("https://172.16.0.1/x.jpg"));
+        assert!(!url_ok("https://169.254.169.254/latest/meta-data"));
+        assert!(!url_ok("https://[fe80::1]/x.jpg"));
+        assert!(!url_ok("https://[fd00::1]/x.jpg"));
+        assert!(!url_ok("https://evil.example/x.jpg"));
         assert!(!url_ok("javascript:alert(1)"));
+    }
+
+    #[test]
+    fn refresh_clears_failed_so_take_batch_retries() {
+        let _lock = slots_test_guard();
+        let url = "https://i.ytimg.com/vi/retry-failed-still/hqdefault.jpg";
+        mark_failed(url);
+        assert!(
+            take_batch(&[url.to_string()], 1).is_empty(),
+            "Failed must skip within one wave"
+        );
+        clear_failed();
+        assert_eq!(take_batch(&[url.to_string()], 1), vec![url.to_string()]);
+        release_pending(&[url.to_string()]);
+    }
+
+    #[test]
+    fn release_pending_retries_stuck_pending_keeps_failed() {
+        let _lock = slots_test_guard();
+        let stuck = "https://i.ytimg.com/vi/release-stuck-pending/hqdefault.jpg";
+        let failed = "https://i.ytimg.com/vi/release-keeps-failed/hqdefault.jpg";
+        assert_eq!(take_batch(&[stuck.to_string()], 1), vec![stuck.to_string()]);
+        mark_failed(failed);
+        release_pending(&[stuck.to_string(), failed.to_string()]);
+        assert_eq!(
+            take_batch(&[stuck.to_string()], 1),
+            vec![stuck.to_string()],
+            "stuck Pending must be retryable after release"
+        );
+        assert!(
+            take_batch(&[failed.to_string()], 1).is_empty(),
+            "Failed must survive release_pending"
+        );
+        release_pending(&[stuck.to_string()]);
+        clear_failed();
+    }
+
+    #[test]
+    fn still_over_cap_is_rejected() {
+        let err = gw2_api::transport::read_body_capped(
+            std::io::Cursor::new(vec![0u8; MAX_BYTES + 1]),
+            MAX_BYTES as u64,
+        )
+        .expect_err("over-cap must fail closed");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[test]

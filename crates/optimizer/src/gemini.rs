@@ -11,11 +11,12 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 use crate::llm::body::{body_capped, hit_body_cap, json_capped, read_body_capped, MAX_LLM_BODY};
+use crate::llm::cancel::{is_cancelled, sleep_observing, CANCELLED};
 use crate::llm::openai_compat::{
     doubled_backoff, http_client, retry_after_delay, CHAT_REQUEST_TIMEOUT, METADATA_TIMEOUT,
 };
@@ -95,6 +96,9 @@ impl GeminiClient {
     }
 }
 
+/// Length of the per-minute window.
+const MINUTE: Duration = Duration::from_secs(60);
+
 struct RateTracker {
     requests_this_minute: u32,
     minute_start: Instant,
@@ -108,14 +112,26 @@ struct RateTracker {
 struct PersistedUsage {
     day: u64,
     requests_today: u32,
+    /// Wall-clock epoch second the current minute window opened.
+    ///
+    /// `#[serde(default)]` on both minute fields: a usage file written by an
+    /// older build has neither, and losing the daily counter to a strict
+    /// parse would be a worse bug than starting the minute window fresh.
+    #[serde(default)]
+    minute_start_epoch: u64,
+    #[serde(default)]
+    requests_this_minute: u32,
 }
 
-fn current_epoch_day() -> u64 {
+fn current_epoch_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-        / 86400
+}
+
+fn current_epoch_day() -> u64 {
+    current_epoch_secs() / 86400
 }
 
 impl RateTracker {
@@ -135,9 +151,25 @@ impl RateTracker {
         } else {
             0 // new day, reset counter
         };
+
+        let now = Instant::now();
+        // Age of the persisted minute window. `checked_sub` is the clock-went-
+        // backwards guard: a saturating subtraction would read as "zero
+        // seconds old" and pin a user at the limit until wall clock caught up.
+        let age = current_epoch_secs().checked_sub(persisted.minute_start_epoch);
+        let (requests_this_minute, minute_start) = match age {
+            Some(age) if age < MINUTE.as_secs() && persisted.minute_start_epoch > 0 => (
+                persisted.requests_this_minute,
+                // Re-anchor the monotonic clock so the window expires when it
+                // would have, not 60 s from now.
+                now.checked_sub(Duration::from_secs(age)).unwrap_or(now),
+            ),
+            _ => (0, now),
+        };
+
         Self {
-            requests_this_minute: 0,
-            minute_start: Instant::now(),
+            requests_this_minute,
+            minute_start,
             requests_today,
             current_day: today,
         }
@@ -157,7 +189,7 @@ impl RateTracker {
         }
 
         let now = Instant::now();
-        if now.duration_since(self.minute_start).as_secs() >= 60 {
+        if now.duration_since(self.minute_start) >= MINUTE {
             self.requests_this_minute = 0;
             self.minute_start = now;
         }
@@ -191,14 +223,26 @@ impl RateTracker {
         self.requests_this_minute
     }
 
+    /// Slots left in the current 10-RPM window. Test-only: two clients
+    /// built from the same usage file must agree on this number.
+    #[cfg(test)]
+    fn remaining_rpm(&self) -> u32 {
+        10u32.saturating_sub(self.requests_this_minute)
+    }
+
     fn remaining_today(&self) -> u32 {
         250u32.saturating_sub(self.requests_today)
     }
 
     fn to_persisted(&self) -> PersistedUsage {
+        // Convert the monotonic anchor back to wall clock only here, at the
+        // serialization boundary.
+        let age = self.minute_start.elapsed().as_secs();
         PersistedUsage {
             day: self.current_day,
             requests_today: self.requests_today,
+            minute_start_epoch: current_epoch_secs().saturating_sub(age),
+            requests_this_minute: self.requests_this_minute,
         }
     }
 }
@@ -372,6 +416,9 @@ fn read_gemini_stream<R: std::io::Read>(reader: R) -> Result<Content, GeminiErro
 
     let mut capped = body_capped(reader);
     for line in std::io::BufReader::new(&mut capped).lines() {
+        if is_cancelled() {
+            return Err(GeminiError::Unavailable(CANCELLED.to_string()));
+        }
         let line = match line {
             Ok(line) => line,
             Err(e) => {
@@ -462,8 +509,8 @@ enum StatusAction {
     Read,
     /// The key is rejected; no retry will help.
     InvalidKey,
-    /// Quota exhausted.
-    RateLimited,
+    /// 403/429 — read the body so billing/quota is not reported as a bad key.
+    Denied,
     /// Transient — try again after a backoff.
     Retry,
     /// Anything else: report the status and body, once.
@@ -487,11 +534,28 @@ enum StatusAction {
 fn classify_status(status: u16) -> StatusAction {
     match status {
         200 => StatusAction::Read,
-        401 | 403 => StatusAction::InvalidKey,
-        429 => StatusAction::RateLimited,
+        401 => StatusAction::InvalidKey,
+        403 | 429 => StatusAction::Denied,
         // Server failures plus the gateway "upstream didn't answer" pair.
         408 | 500 | 502 | 503 | 504 => StatusAction::Retry,
         _ => StatusAction::Fail,
+    }
+}
+
+fn denied_from_body(status: u16, body: &str) -> GeminiError {
+    if crate::llm::has_billing_keyword(body) {
+        return GeminiError::Api {
+            status,
+            message: body.to_string(),
+        };
+    }
+    match status {
+        403 => GeminiError::InvalidKey,
+        429 => GeminiError::RateLimited,
+        _ => GeminiError::Api {
+            status,
+            message: body.to_string(),
+        },
     }
 }
 
@@ -640,7 +704,7 @@ impl GeminiClient {
         match classify_status(status) {
             StatusAction::Read => Ok(()),
             StatusAction::InvalidKey => Err(GeminiError::InvalidKey),
-            StatusAction::RateLimited => Err(GeminiError::RateLimited),
+            StatusAction::Denied => Err(denied_from_body(status, &read_body_capped(resp))),
             // Settings-tab validation is a single shot: a 5xx here is
             // reported, not retried behind a spinner.
             StatusAction::Retry | StatusAction::Fail => Err(GeminiError::Api {
@@ -662,7 +726,7 @@ impl GeminiClient {
         match classify_status(status) {
             StatusAction::Read => {}
             StatusAction::InvalidKey => return Err(GeminiError::InvalidKey),
-            StatusAction::RateLimited => return Err(GeminiError::RateLimited),
+            StatusAction::Denied => return Err(denied_from_body(status, &read_body_capped(resp))),
             StatusAction::Retry | StatusAction::Fail => {
                 return Err(GeminiError::Api {
                     status,
@@ -792,6 +856,12 @@ impl GeminiClient {
         let mut last_text: Option<String> = None;
 
         for turn in 0..max_turns {
+            // Between turns as well as inside the stream: a tool loop is up to
+            // max_turns whole requests, so checking only inside one of them
+            // still leaves the worker running after the flag flips.
+            if is_cancelled() {
+                return Err(GeminiError::Unavailable(CANCELLED.to_string()));
+            }
             trim_contents(&mut contents, crate::llm::trim::SAFE_PROMPT_BUDGET_TOKENS);
             let request = GenerateRequest {
                 contents: contents.clone(),
@@ -868,8 +938,13 @@ impl GeminiClient {
         let mut next_delay = std::time::Duration::from_secs(5);
 
         for attempt in 0..MAX_RETRIES {
+            if is_cancelled() {
+                return Err(GeminiError::Unavailable(CANCELLED.to_string()));
+            }
+            if attempt > 0 && !sleep_observing(next_delay, &is_cancelled) {
+                return Err(GeminiError::Unavailable(CANCELLED.to_string()));
+            }
             if attempt > 0 {
-                std::thread::sleep(next_delay);
                 next_delay = doubled_backoff(next_delay);
             }
 
@@ -897,7 +972,9 @@ impl GeminiClient {
                     return Ok(content);
                 }
                 StatusAction::InvalidKey => return Err(GeminiError::InvalidKey),
-                StatusAction::RateLimited => return Err(GeminiError::RateLimited),
+                StatusAction::Denied => {
+                    return Err(denied_from_body(status, &read_body_capped(resp)))
+                }
                 StatusAction::Retry => {
                     if let Some(delay) = retry_after_delay(resp.headers()) {
                         next_delay = delay;
@@ -951,6 +1028,15 @@ impl GeminiClient {
             .remaining_today()
     }
 
+    /// Slots left in the current 10-RPM window.
+    #[cfg(test)]
+    fn remaining_rpm(&self) -> u32 {
+        self.rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remaining_rpm()
+    }
+
     /// Clear the response cache.
     pub fn clear_cache(&self) {
         self.cache.clear();
@@ -991,7 +1077,8 @@ mod tests {
         let reloaded = RateTracker::from_persisted(persisted);
 
         assert_eq!(reloaded.requests_today, 5);
-        assert_eq!(reloaded.requests_this_minute, 0);
+        assert_eq!(reloaded.requests_this_minute, 5);
+        assert_eq!(reloaded.remaining_rpm(), 5);
     }
 
     #[test]
@@ -1000,6 +1087,8 @@ mod tests {
         let persisted = PersistedUsage {
             day: yesterday,
             requests_today: 200,
+            minute_start_epoch: 0,
+            requests_this_minute: 0,
         };
         let reloaded = RateTracker::from_persisted(persisted);
 
@@ -1031,6 +1120,8 @@ mod tests {
         let persisted = PersistedUsage {
             day: current_epoch_day(),
             requests_today: 240,
+            minute_start_epoch: 0,
+            requests_this_minute: 0,
         };
         let mut reloaded = RateTracker::from_persisted(persisted);
         assert_eq!(reloaded.requests_today, 240);
@@ -1041,6 +1132,62 @@ mod tests {
     fn test_remaining_quota() {
         let client = GeminiClient::new("fake-key", "gemini-2.5-flash").unwrap();
         assert_eq!(client.remaining_quota(), 250);
+    }
+
+    /// A14-2 — `create_client` builds a fresh Gemini client per Improve click.
+    /// Daily 240 already survived the reload; the 10-RPM window did not.
+    #[test]
+    fn gemini_rpm_window_survives_create_client() {
+        let path = std::env::temp_dir().join(format!(
+            "gw2bo_gemini_rpm_{}_{:?}.json",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let first = GeminiClient::with_persistence("fake-key", "gemini-2.5-flash", path.clone())
+            .expect("client");
+        {
+            let mut rate = first.rate.lock().expect("rate");
+            for _ in 0..3 {
+                rate.check_and_reserve().expect("within the minute limit");
+            }
+            first.persist_usage(&rate);
+            assert_eq!(rate.remaining_rpm(), 7);
+        }
+
+        let second = GeminiClient::with_persistence("fake-key", "gemini-2.5-flash", path.clone())
+            .expect("client");
+        assert_eq!(
+            second.remaining_rpm(),
+            7,
+            "a fresh client must inherit the minute window, not reset it to 10"
+        );
+        {
+            let mut rate = second.rate.lock().expect("rate");
+            assert_eq!(rate.requests_this_minute(), 3);
+            for _ in 0..7 {
+                rate.check_and_reserve().expect("remaining slots");
+            }
+            assert!(
+                rate.check_and_reserve().is_err(),
+                "the 10 RPM limit must still bite after create_client"
+            );
+        }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A usage file written before the minute window was persisted must still
+    /// load, and must keep the daily counter it does carry.
+    #[test]
+    fn legacy_usage_file_without_minute_fields_still_parses() {
+        let legacy = format!("{{\"day\":{},\"requests_today\":7}}", current_epoch_day());
+        let persisted: PersistedUsage = serde_json::from_str(&legacy).expect("legacy parses");
+        let reloaded = RateTracker::from_persisted(persisted);
+        assert_eq!(reloaded.requests_today, 7);
+        assert_eq!(reloaded.requests_this_minute, 0);
+        assert_eq!(reloaded.remaining_rpm(), 10);
     }
 
     #[test]
@@ -1488,13 +1635,25 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         // ── Status classification ──
         assert_eq!(classify_status(200), StatusAction::Read);
         assert_eq!(classify_status(401), StatusAction::InvalidKey);
-        assert_eq!(classify_status(403), StatusAction::InvalidKey);
+        assert_eq!(classify_status(403), StatusAction::Denied);
         assert_eq!(
             classify_status(429),
-            StatusAction::RateLimited,
-            "Gemini reports quota exhaustion as a real 429 and a retry minutes \
-             later is still 429 — retrying would spend the user's remaining slots"
+            StatusAction::Denied,
+            "403/429 read the body; billing keywords are not InvalidKey"
         );
+        assert!(matches!(denied_from_body(403, ""), GeminiError::InvalidKey));
+        assert!(matches!(
+            denied_from_body(403, "RESOURCE_EXHAUSTED quota exceeded"),
+            GeminiError::Api { status: 403, .. }
+        ));
+        assert!(matches!(
+            denied_from_body(429, ""),
+            GeminiError::RateLimited
+        ));
+        assert!(matches!(
+            denied_from_body(429, "RESOURCE_EXHAUSTED"),
+            GeminiError::Api { status: 429, .. }
+        ));
         for transient in [408, 500, 502, 503, 504] {
             assert_eq!(
                 classify_status(transient),
@@ -1519,6 +1678,133 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         assert!(
             delay <= Duration::from_secs(60),
             "backoff must stay clamped, got {delay:?}"
+        );
+    }
+    /// Cancel/unload must not wait out the 420s request timeout. Poll
+    /// CancelScope between SSE lines the way `llm::sse::read_stream` does.
+    #[test]
+    fn read_gemini_stream_stops_on_cancel() {
+        let sse = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}],\"role\":\"model\"}}]}\n";
+        let _scope = crate::llm::cancel::CancelScope::new(|| true);
+        match read_gemini_stream(sse.as_bytes()).expect_err("cancel must fail the read") {
+            GeminiError::Unavailable(msg) => assert_eq!(msg, crate::llm::cancel::CANCELLED),
+            other => panic!("expected Unavailable, got: {other}"),
+        }
+    }
+
+    /// A cancelled worker must leave `send_request` without opening a socket.
+    /// Gemini's live URL is not unbound: any network attempt here waits on
+    /// connect/timeout, not the instant `Unavailable` a cancelled unload needs.
+    #[test]
+    fn send_request_stops_on_cancel_without_touching_the_network() {
+        let client = GeminiClient::new("fake-key", "gemini-2.5-flash").expect("client");
+        let _scope = crate::llm::cancel::CancelScope::new(|| true);
+
+        let started = std::time::Instant::now();
+        let error = client
+            .generate("hi")
+            .expect_err("cancelled generate must fail");
+
+        assert!(
+            matches!(error, GeminiError::Unavailable(ref m) if m == crate::llm::cancel::CANCELLED),
+            "got: {error}"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "cancel must be observed before any connect attempt"
+        );
+        assert_eq!(
+            client.remaining_quota(),
+            250,
+            "a cancelled request must give its rate slot back"
+        );
+    }
+
+    /// A cancelled worker must leave the tool loop without opening a socket.
+    /// Between turns as well as inside one request: a tool loop is up to
+    /// max_turns whole requests, so checking only inside one of them still
+    /// leaves the worker running after the flag flips.
+    #[test]
+    fn tool_loop_stops_on_cancel_without_touching_the_network() {
+        let client = GeminiClient::new("fake-key", "gemini-2.5-flash").expect("client");
+        let tools = vec![Tool {
+            function_declarations: vec![FunctionDeclaration {
+                name: "t".into(),
+                description: "d".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            }],
+        }];
+        let _scope = crate::llm::cancel::CancelScope::new(|| true);
+
+        let started = std::time::Instant::now();
+        let error = client
+            .generate_with_tools_progress(
+                "prompt",
+                tools,
+                &mut |_, _| serde_json::Value::Null,
+                8,
+                &mut |_, _, _| {},
+            )
+            .expect_err("cancelled loop must fail");
+
+        assert!(
+            matches!(error, GeminiError::Unavailable(ref m) if m == crate::llm::cancel::CANCELLED),
+            "got: {error}"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "cancel must be observed before any connect attempt"
+        );
+        assert_eq!(
+            client.remaining_quota(),
+            250,
+            "a cancelled request must give its rate slot back"
+        );
+    }
+
+    /// Retry backoff cannot be driven without a 5xx HTTP fixture. Pin the
+    /// three poll sites so a freeze that restores `thread::sleep` or drops
+    /// a loop check fails this test.
+    #[test]
+    fn gemini_polls_cancelscope_at_stream_retry_and_tool_loop() {
+        let src = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/gemini.rs"));
+
+        let stream = src
+            .split("fn read_gemini_stream")
+            .nth(1)
+            .and_then(|s| s.split("fn body_cap_exceeded").next())
+            .expect("read_gemini_stream body");
+        assert!(
+            stream.contains("is_cancelled()"),
+            "read_gemini_stream must poll is_cancelled between SSE lines"
+        );
+
+        let retry = src
+            .split("fn send_request")
+            .nth(1)
+            .and_then(|s| s.split("fn persist_usage").next())
+            .expect("send_request body");
+        assert!(
+            retry.contains("is_cancelled()"),
+            "send_request must poll is_cancelled before each attempt"
+        );
+        assert!(
+            retry.contains("sleep_observing(next_delay"),
+            "retry backoff must sleep in cancel-observing slices"
+        );
+        assert!(
+            !retry.contains("std::thread::sleep(next_delay)"),
+            "retry backoff must not be an uninterruptible sleep"
+        );
+
+        let tool_loop = src
+            .split("pub fn generate_with_tools_progress")
+            .nth(1)
+            .and_then(|s| s.split("fn send_request").next())
+            .expect("tool loop body");
+        assert!(
+            tool_loop.contains("is_cancelled()"),
+            "tool loop must poll is_cancelled between turns"
         );
     }
 }

@@ -1554,6 +1554,7 @@ mod tests {
                     label: String::new(),
                 },
                 patch_id: None,
+                objective_profile_id: None,
             },
             stats: StatBlock::default(),
             modifiers: DamageModifiers::default(),
@@ -2249,6 +2250,7 @@ mod tests {
                 label: String::new(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let seed = optimize_v2_search(
             &diag,
@@ -2421,6 +2423,7 @@ mod tests {
                 label: String::new(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let config = SearchConfig {
             beam_width: 4,
@@ -2472,6 +2475,7 @@ mod tests {
                 label: String::new(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let mut locks = BuildLocks::default();
         locks.gear_locks.insert(GearSlot::Helm, 584);
@@ -2520,6 +2524,7 @@ mod tests {
                 label: String::new(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let locks = BuildLocks::default();
         let config = SearchConfig::default();
@@ -2697,6 +2702,62 @@ mod tests {
                 .iter()
                 .any(|b| b.specializations.iter().any(|s| s.elite && s.spec_id == 62)),
             "free elite must jump to Firebrand"
+        );
+    }
+
+    #[test]
+    fn one_locked_major_does_not_lock_other_columns() {
+        let mut db = empty_db();
+        db.specializations.insert(1, spec_line(1, "Zeal", false));
+        for id in 1..=9u32 {
+            db.traits.insert(
+                id,
+                gw2_api::models::Trait {
+                    id,
+                    name: format!("T{id}"),
+                    icon: None,
+                    description: None,
+                    specialization: 1,
+                    tier: ((id - 1) / 3) + 1,
+                    order: (id - 1) % 3,
+                    slot: "Major".into(),
+                    facts: vec![],
+                    traited_facts: vec![],
+                    skills: vec![],
+                },
+            );
+        }
+        let build = ValidatedBuild {
+            specializations: vec![ValidatedSpec {
+                spec_id: 1,
+                name: "Zeal".into(),
+                elite: false,
+                trait_ids: vec![1, 4, 7],
+                trait_names: vec!["T1".into(), "T4".into(), "T7".into()],
+                all_trait_ids: vec![1, 4, 7],
+            }],
+            ..ValidatedBuild::default()
+        };
+        let mut locks = BuildLocks::default();
+        locks.trait_locks.insert(1, [Some(1), None, None]);
+        let neighbors = swap_major_traits(&make_candidate(build), &db, &locks);
+        assert!(
+            neighbors
+                .iter()
+                .all(|b| b.specializations[0].trait_ids[0] == 1),
+            "locked adept must stay"
+        );
+        assert!(
+            neighbors
+                .iter()
+                .any(|b| b.specializations[0].trait_ids[1] != 4),
+            "unlocked master must still swap"
+        );
+        assert!(
+            neighbors
+                .iter()
+                .any(|b| b.specializations[0].trait_ids[2] != 7),
+            "unlocked grandmaster must still swap"
         );
     }
 

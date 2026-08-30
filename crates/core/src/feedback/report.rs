@@ -63,11 +63,46 @@ pub struct Report {
     pub build_snapshot: Option<BuildSnapshot>,
 }
 
+/// Drop wizard encode tokens (`%NL0P|`, `%BC1U|`, …) wherever they appear
+/// so titles and POST bodies are plaintext. Unknown `%…|` runs pass through.
+pub fn strip_wizard_markup(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if is_wizard_encode_token(&bytes[i..]) {
+            i += 6;
+            continue;
+        }
+        let Some(ch) = s[i..].chars().next() else {
+            break;
+        };
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// `%` + bold + align + color + list + `|` — six ASCII bytes.
+fn is_wizard_encode_token(b: &[u8]) -> bool {
+    b.len() >= 6
+        && b[0] == b'%'
+        && b[5] == b'|'
+        && matches!(b[1], b'B' | b'N')
+        && matches!(b[2], b'L' | b'C' | b'R')
+        && matches!(b[3], b'0'..=b'4')
+        && matches!(b[4], b'P' | b'U' | b'O')
+}
+
 /// Title shown in the server admin list: the first `MAX_TITLE_CHARS` chars of a body that is
 /// at least 20 chars long, otherwise the choice labels joined with ` › `, otherwise the short
 /// body itself, otherwise `(no title)`. Never empty, never longer than `MAX_TITLE_CHARS` chars.
 pub fn title_for(body: &str, choice_labels: &[String]) -> String {
     // One line: newlines and runs of whitespace collapse to a single space.
+    let body = strip_wizard_markup(body);
     let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
     let cap = |s: &str| -> String {
         s.chars()
@@ -193,6 +228,42 @@ mod tests {
     fn title_is_choice_labels_when_body_short() {
         let labels = vec!["Bug".to_string(), "Optimize".to_string()];
         assert_eq!(title_for("ok", &labels), "Bug › Optimize");
+    }
+
+    #[test]
+    fn title_for_strips_wizard_encode_markup() {
+        let body = "%NL0P|The optimizer picked a trident on land.";
+        let title = title_for(body, &[]);
+        assert!(!title.contains("%NL0P|"), "{title}");
+        assert_eq!(title, "The optimizer picked a trident on land.");
+        // Prefix must not inflate a short note past the 20-char title threshold.
+        let short = format!("%NL0P|{}", "x".repeat(14));
+        assert_eq!(short.chars().count(), 20);
+        assert_eq!(title_for(&short, &["Bug".to_string()]), "Bug");
+    }
+
+    #[test]
+    fn title_for_strips_leftover_flattened_encode_tokens() {
+        // Stored pre-A21 title: flatten ran before strip.
+        let leftover = "%NL0P|aaa %NL0P|bbb";
+        assert_eq!(strip_wizard_markup(leftover), "aaa bbb");
+        assert_eq!(title_for(leftover, &[]), "aaa bbb");
+        let long = "%NL0P|The optimizer picked a trident %NL0P|on land.";
+        assert_eq!(
+            title_for(long, &[]),
+            "The optimizer picked a trident on land."
+        );
+    }
+
+    #[test]
+    fn strip_wizard_markup_keeps_plain_and_multiline() {
+        assert_eq!(strip_wizard_markup("plain"), "plain");
+        assert_eq!(strip_wizard_markup("%BC1U|Hello"), "Hello");
+        assert_eq!(strip_wizard_markup("%NL0P|a\n%NL0P|\n%NL0P|b"), "a\n\nb");
+        // Pre-A21 title_for flattened encoded lines; tokens sit mid-string.
+        assert_eq!(strip_wizard_markup("%NL0P|aaa %NL0P|bbb"), "aaa bbb");
+        assert_eq!(strip_wizard_markup("café %NL0P|naïve"), "café naïve");
+        assert_eq!(strip_wizard_markup("%text|kept"), "%text|kept");
     }
 
     #[test]

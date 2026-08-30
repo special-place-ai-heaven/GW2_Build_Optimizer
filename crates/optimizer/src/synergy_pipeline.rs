@@ -537,66 +537,67 @@ fn select_sigils(
         .collect();
 
     for candidate in candidates.iter_mut() {
-        // GW2 sigil rule: duplicates are forbidden *within* a weapon set (Set 1 or Set 2),
-        // but the same sigil family (e.g. "Sigil of Force") IS allowed in both sets
-        // independently. We select 2 sigils per set with separate dedup sets.
-        for set_idx in 0..2usize {
-            let _ = set_idx; // slot identity only used for ordering; sets are symmetric
-            let mut set_ids: Vec<u32> = Vec::new();
-            let mut set_families: Vec<String> = Vec::new();
+        // GW2 sigil rule: duplicates are forbidden *within* a weapon set,
+        // but the same sigil family (e.g. "Sigil of Force") IS allowed in both
+        // sets. Set 2 is carried, not worn — same as combat prefixes skip set 2.
+        // Search set 1 only, then copy those two (id, name) so the kit still
+        // has 4 sigils for search_v2. Do not score or accumulate the copy.
+        let mut set_ids: Vec<u32> = Vec::new();
+        let mut set_families: Vec<String> = Vec::new();
 
-            for _slot in 0..2 {
-                let mut best_score = f64::NEG_INFINITY;
-                let mut best_sigil: Option<(u32, String)> = None;
-                let mut best_effects: Vec<NormalizedEffect> = Vec::new();
-                let mut best_links: Vec<SynergyLink> = Vec::new();
+        for _slot in 0..2 {
+            let mut best_score = f64::NEG_INFINITY;
+            let mut best_sigil: Option<(u32, String)> = None;
+            let mut best_effects: Vec<NormalizedEffect> = Vec::new();
+            let mut best_links: Vec<SynergyLink> = Vec::new();
 
-                for &&sigil in &superior_sigils {
-                    // Prevent duplicates within a weapon set. Some sigils exist as
-                    // multiple items with the same display name (e.g. PvE/PvP versions),
-                    // so we dedupe by a normalized "family" key rather than raw ID.
-                    if set_ids.contains(&sigil.id) {
-                        continue;
-                    }
-                    let family = normalize_sigil_family(&sigil.name);
-                    if set_families.iter().any(|f| f == &family) {
-                        continue;
-                    }
-
-                    let effects = extract_sigil_effects(sigil, ctx);
-                    let base: f64 = effects
-                        .iter()
-                        .map(|e| score_normalized_effect(e, weights))
-                        .sum();
-                    let new_id = ComponentId::Sigil(sigil.id);
-                    let (syn, links) = compute_marginal_synergy(
-                        &effects,
-                        &candidate.accumulated,
-                        weights,
-                        Some(&new_id),
-                    );
-
-                    let total = base + syn;
-                    if total > best_score {
-                        best_score = total;
-                        best_sigil = Some((sigil.id, sigil.name.clone()));
-                        best_effects = effects;
-                        best_links = links;
-                    }
+            for &&sigil in &superior_sigils {
+                // Prevent duplicates within a weapon set. Some sigils exist as
+                // multiple items with the same display name (e.g. PvE/PvP versions),
+                // so we dedupe by a normalized "family" key rather than raw ID.
+                if set_ids.contains(&sigil.id) {
+                    continue;
+                }
+                let family = normalize_sigil_family(&sigil.name);
+                if set_families.iter().any(|f| f == &family) {
+                    continue;
                 }
 
-                if let Some(sigil) = best_sigil {
-                    set_ids.push(sigil.0);
-                    set_families.push(normalize_sigil_family(&sigil.1));
-                    candidate.synergy_links.extend(best_links);
-                    candidate
-                        .accumulated
-                        .push((ComponentId::Sigil(sigil.0), best_effects));
-                    candidate.sigils.push(sigil);
-                    candidate.score += best_score;
+                let effects = extract_sigil_effects(sigil, ctx);
+                let base: f64 = effects
+                    .iter()
+                    .map(|e| score_normalized_effect(e, weights))
+                    .sum();
+                let new_id = ComponentId::Sigil(sigil.id);
+                let (syn, links) = compute_marginal_synergy(
+                    &effects,
+                    &candidate.accumulated,
+                    weights,
+                    Some(&new_id),
+                );
+
+                let total = base + syn;
+                if total > best_score {
+                    best_score = total;
+                    best_sigil = Some((sigil.id, sigil.name.clone()));
+                    best_effects = effects;
+                    best_links = links;
                 }
             }
+
+            if let Some(sigil) = best_sigil {
+                set_ids.push(sigil.0);
+                set_families.push(normalize_sigil_family(&sigil.1));
+                candidate.synergy_links.extend(best_links);
+                candidate
+                    .accumulated
+                    .push((ComponentId::Sigil(sigil.0), best_effects));
+                candidate.score += best_score;
+                candidate.sigils.push(sigil);
+            }
         }
+        let set1_len = candidate.sigils.len();
+        candidate.sigils.extend_from_within(..set1_len);
     }
 }
 
@@ -1370,7 +1371,8 @@ fn compute_candidate_stats(
     // use the same calculation as calculate_full_stats() on the current build.
     // Both sides of the comparison now include trait stat bonuses, making them
     // apples-to-apples. The same function is used for current build stats display.
-    let trait_stats = stats::calculate_trait_stats(&candidate.all_trait_ids, &db.traits);
+    let trait_stats =
+        stats::calculate_trait_stats_for_mode(&candidate.all_trait_ids, &db.traits, &ctx.game_mode);
     full_stats.power += trait_stats.power;
     full_stats.precision += trait_stats.precision;
     full_stats.toughness += trait_stats.toughness;
@@ -2201,6 +2203,7 @@ pub(crate) mod runtime_diagnostics_tests {
                 &db.items,
                 &db.itemstats,
                 &db.traits,
+                &ctx.game_mode,
             );
             let baseline_mods = crate::combat::extract_damage_modifiers(
                 &loaded_trait_ids,
@@ -2659,5 +2662,182 @@ mod land_weapon_tests {
         for w in [s1m, s1o, s2m, s2o].into_iter().flatten() {
             assert_ne!(w.as_str(), "Trident");
         }
+    }
+
+    fn upgrade_sigil(id: u32, name: &str) -> gw2_api::models::Item {
+        gw2_api::models::Item {
+            id,
+            name: name.into(),
+            description: None,
+            icon: None,
+            item_type: "UpgradeComponent".into(),
+            rarity: "Exotic".into(),
+            level: 80,
+            vendor_value: None,
+            chat_link: None,
+            default_skin: None,
+            flags: vec![],
+            game_types: vec![],
+            restrictions: vec![],
+            details: None,
+        }
+    }
+
+    #[test]
+    fn set2_only_sigil_change_does_not_move_synergy_seed_score() {
+        let mut db = GameDb::empty_for_tests();
+        for (id, name) in [
+            (1u32, "Superior Sigil of Force"),
+            (2, "Superior Sigil of Bursting"),
+        ] {
+            db.items.insert(id, upgrade_sigil(id, name));
+            db.sigils.push(id);
+        }
+        let weights = OptimizationWeights::preset_power_dps();
+        let ctx = crate::balance::BalanceContext::pve();
+        let mut candidates = [empty_candidate()];
+        select_sigils(&mut candidates, &db, &weights, &ctx);
+        let billed = candidates[0].score;
+        assert_eq!(candidates[0].sigils.len(), 4, "kit still has 4 sigils");
+        assert_eq!(
+            &candidates[0].sigils[2..],
+            &candidates[0].sigils[..2],
+            "set 2 copies set 1; same family is legal across sets"
+        );
+        let mut expected = 0.0;
+        let mut acc = Vec::new();
+        for (id, _) in &candidates[0].sigils[..2] {
+            let item = db.items.get(id).expect("set-1 sigil");
+            let effects = extract_sigil_effects(item, &ctx);
+            let base: f64 = effects
+                .iter()
+                .map(|e| score_normalized_effect(e, &weights))
+                .sum();
+            let (syn, _) =
+                compute_marginal_synergy(&effects, &acc, &weights, Some(&ComponentId::Sigil(*id)));
+            expected += base + syn;
+            acc.push((ComponentId::Sigil(*id), effects));
+        }
+        assert!(
+            (billed - expected).abs() < 1e-9,
+            "set-2 sigils must not bill the synergy seed half: billed={billed} set1={expected}"
+        );
+        assert!(billed > 0.0, "set-1 Force/Bursting must still score");
+    }
+}
+
+#[cfg(test)]
+mod leftover_wrapper_tests {
+    use super::*;
+    use crate::balance::BalanceContext;
+    use crate::gamedb::GameDb;
+    use gw2_api::models::{Fact, Trait as GW2Trait};
+    use gw2_core::types::GameMode;
+
+    fn empty_candidate() -> SynergyCandidate {
+        SynergyCandidate {
+            spec_ids: vec![],
+            elite_spec: None,
+            selected_major_traits: Vec::new(),
+            all_trait_ids: Vec::new(),
+            accumulated: Vec::new(),
+            score: 0.0,
+            rune: None,
+            sigils: Vec::new(),
+            relic: None,
+            weapons: (None, None, None, None),
+            heal: None,
+            utilities: Vec::new(),
+            elite_skill: None,
+            legends: Vec::new(),
+            aquatic_legends: Vec::new(),
+            synergy_links: Vec::new(),
+        }
+    }
+
+    fn lingering_magic() -> GW2Trait {
+        GW2Trait {
+            id: 1059,
+            name: "Lingering Magic".into(),
+            icon: None,
+            description: None,
+            specialization: 0,
+            tier: 0,
+            order: 0,
+            slot: "Minor".into(),
+            facts: vec![
+                Fact::AttributeAdjust {
+                    text: None,
+                    icon: None,
+                    value: Some(240),
+                    target: Some("BoonDuration".into()),
+                },
+                Fact::AttributeAdjust {
+                    text: None,
+                    icon: None,
+                    value: Some(120),
+                    target: Some("BoonDuration".into()),
+                },
+            ],
+            traited_facts: vec![],
+            skills: vec![],
+        }
+    }
+
+    #[test]
+    fn wvw_candidate_stats_do_not_use_pve_lingering_magic() {
+        // A8 leftover wrapper: competitive leftover must not get PvE 240.
+        let mut db = GameDb::empty_for_tests();
+        db.traits.insert(1059, lingering_magic());
+        let mut candidate = empty_candidate();
+        candidate.all_trait_ids = vec![1059];
+        let ctx = BalanceContext::new(GameMode::WvW);
+        let stats = compute_candidate_stats(&candidate, &db, "Mesmer", None, &ctx);
+        assert_ne!(
+            stats.concentration, 240.0,
+            "PvE leftover wrapper leaked 240 Concentration into WvW candidate stats"
+        );
+        assert_eq!(stats.concentration, 120.0);
+        let pve = compute_candidate_stats(
+            &candidate,
+            &db,
+            "Mesmer",
+            None,
+            &BalanceContext::new(GameMode::PvE),
+        );
+        assert_eq!(pve.concentration, 240.0);
+    }
+
+    #[test]
+    fn compute_candidate_stats_calls_trait_stats_for_mode() {
+        let src = include_str!("synergy_pipeline.rs");
+        let production = src
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("split always yields a first chunk");
+        let start = production
+            .find("fn compute_candidate_stats(")
+            .expect("compute_candidate_stats gone");
+        let after = &production[start..];
+        let end = after[1..]
+            .find("\nfn ")
+            .map(|i| i + 1)
+            .expect("compute_candidate_stats has no following fn");
+        let body = &after[..end];
+        assert!(
+            body.contains("calculate_trait_stats_for_mode"),
+            "compute_candidate_stats must call calculate_trait_stats_for_mode"
+        );
+        assert!(
+            body.contains("&ctx.game_mode"),
+            "compute_candidate_stats must pass ctx.game_mode"
+        );
+        let stats_at = body.find("let trait_stats").expect("trait_stats gone");
+        let add_at = body.find("full_stats.power +=").expect("trait add gone");
+        let chunk = &body[stats_at..add_at];
+        assert!(
+            !chunk.contains("calculate_trait_stats(&"),
+            "PvE wrapper still used in compute_candidate_stats: {chunk}"
+        );
     }
 }

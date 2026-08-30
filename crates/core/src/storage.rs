@@ -111,18 +111,19 @@ impl BuildStorage {
         let json = serde_json::to_string_pretty(build)
             .map_err(|e| format!("Failed to serialize: {}", e))?;
 
-        // Complete content first, then one atomic rename over the old build.
+        // Complete content first, then replace the old build (POSIX rename,
+        // or Win32 rename / ReplaceFileW — see `replace_file`).
         let tmp_path = path.with_extension("tmp");
         if let Err(e) = write_durably(&tmp_path, &json) {
             let _ = std::fs::remove_file(&tmp_path); // best-effort cleanup
             return Err(format!("Failed to write {}: {}", tmp_path.display(), e));
         }
-        std::fs::rename(&tmp_path, &path).map_err(|e| {
+        replace_file(&tmp_path, &path).map_err(|e| {
             let _ = std::fs::remove_file(&tmp_path); // best-effort cleanup
             format!(
-                "Failed to rename {} → {}: {}",
-                tmp_path.display(),
+                "Failed to replace {} with {}: {}",
                 path.display(),
+                tmp_path.display(),
                 e
             )
         })
@@ -272,6 +273,80 @@ fn write_durably(path: &Path, contents: &str) -> std::io::Result<()> {
     let mut file = std::fs::File::create(path)?;
     file.write_all(contents.as_bytes())?;
     file.sync_all()
+}
+
+/// Publish a complete `from` over `to`.
+///
+/// POSIX `rename` replaces atomically. Win32 `rename` is not a guaranteed
+/// replace (`ERROR_ALREADY_EXISTS` on some volumes / rustc versions). Try
+/// rename first (covers a missing dest on first save). When dest exists and
+/// rename fails, `ReplaceFileW` commits tmp over dest — dest stays until that
+/// commit, so a crash cannot leave dest gone while tmp is still intact.
+/// `ReplaceFileW` failure is returned as `Err`; there is no remove-then-rename
+/// fallback.
+pub(crate) fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        match std::fs::rename(from, to) {
+            Ok(()) => Ok(()),
+            Err(_) if to.exists() => replace_file_w(from, to),
+            Err(e) => Err(e),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(from, to)
+    }
+}
+
+/// Commit `from` over an existing `to` via `ReplaceFileW` (kernel32).
+///
+/// Raw `extern "system"` declaration, no `windows-sys` / `winapi` — same
+/// precedent as `GetUserDefaultUILanguage` in `i18n.rs`.
+#[cfg(windows)]
+fn replace_file_w(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn ReplaceFileW(
+            lp_replaced_file_name: *const u16,
+            lp_replacement_file_name: *const u16,
+            lp_backup_file_name: *const u16,
+            dw_replace_flags: u32,
+            lp_exclude: *mut core::ffi::c_void,
+            lp_reserved: *mut core::ffi::c_void,
+        ) -> i32;
+    }
+
+    /// NUL-terminated UTF-16 for the Win32 W-API.
+    fn wide_path(path: &Path) -> Vec<u16> {
+        path.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+
+    let dest = wide_path(to);
+    let tmp = wide_path(from);
+    // SAFETY: both buffers are NUL-terminated and outlive the call;
+    // backup/exclude/reserved are documented-nullable. ReplaceFileW does
+    // not retain the pointers.
+    let ok = unsafe {
+        ReplaceFileW(
+            dest.as_ptr(),
+            tmp.as_ptr(),
+            core::ptr::null(),
+            0,
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        )
+    };
+    if ok != 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
 }
 
 /// Sanitize a build name for use as a filename.
@@ -780,6 +855,28 @@ mod tests {
         // .tmp must not remain
         let tmp_path = dir.join("saves").join("Overwrite Me.tmp");
         assert!(!tmp_path.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_save_overwrite_twice_keeps_second_payload() {
+        let dir = temp_dir("overwrite_twice");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let storage = BuildStorage::new(&dir);
+        let mut build = test_build("Twice");
+        storage.save_new(&build).unwrap();
+
+        build.stat_prefix = "Viper's".into();
+        storage.save_overwrite(&build).unwrap();
+        build.stat_prefix = "Trailblazer's".into();
+        storage.save_overwrite(&build).unwrap();
+
+        let list = storage.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].stat_prefix, "Trailblazer's");
+        assert!(!dir.join("saves").join("Twice.tmp").exists());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

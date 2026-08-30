@@ -133,31 +133,37 @@
       "PvE": {
         "over_time": {
           "base_per_tick": 18.25,
-          "condition_damage_coeff": 0.05
+          "condition_damage_coeff": 0.05,
+          "delivery": "per_second"
         },
         "on_skill_use": {
           "base_per_tick": 16.24,
-          "condition_damage_coeff": 0.0325
+          "condition_damage_coeff": 0.0325,
+          "delivery": "per_activation"
         }
       },
       "PvP": {
         "over_time": {
           "base_per_tick": 10.0,
-          "condition_damage_coeff": 0.0
+          "condition_damage_coeff": 0.0,
+          "delivery": "per_second"
         },
         "on_skill_use": {
           "base_per_tick": 49.5,
-          "condition_damage_coeff": 0.0975
+          "condition_damage_coeff": 0.0975,
+          "delivery": "per_activation"
         }
       },
       "WvW": {
         "over_time": {
           "base_per_tick": 10.0,
-          "condition_damage_coeff": 0.0
+          "condition_damage_coeff": 0.0,
+          "delivery": "per_second"
         },
         "on_skill_use": {
           "base_per_tick": 49.5,
-          "condition_damage_coeff": 0.0975
+          "condition_damage_coeff": 0.0975,
+          "delivery": "per_activation"
         }
       }
     },

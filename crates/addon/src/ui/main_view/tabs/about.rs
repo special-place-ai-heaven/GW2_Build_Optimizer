@@ -12,6 +12,7 @@ use crate::state::AddonState;
 use crate::ui::theme;
 use gw2_core::feedback::changelog::{self, ChangelogEntry};
 use gw2_core::feedback::message::{now_unix, FailReason, LocalMessage, MessageStatus};
+use gw2_core::feedback::report::strip_wizard_markup;
 use gw2_core::feedback::taxonomy::FeedbackTaxonomy;
 use gw2_core::i18n::{t, tf};
 
@@ -296,7 +297,7 @@ fn row_actions(m: &LocalMessage, now: u64) -> RowActions {
 
 /// Status column text and color (design §6a). `Sending` reports `MUTED`; the
 /// renderer blends that toward `CREAM` with the frame pulse.
-fn status_view(m: &LocalMessage) -> (String, [f32; 4]) {
+fn status_view(m: &LocalMessage, now: u64) -> (String, [f32; 4]) {
     match m.status {
         MessageStatus::Sending => (t("msg.status.sending"), theme::MUTED),
         MessageStatus::Received => (
@@ -311,6 +312,7 @@ fn status_view(m: &LocalMessage) -> (String, [f32; 4]) {
         MessageStatus::Closed => (t("msg.status.closed"), theme::MUTED),
         MessageStatus::Failed => {
             let reason = match &m.last_error {
+                Some(FailReason::RateLimited { .. }) => rate_fail_text(m, now),
                 Some(r) => wizard::fail_text(r),
                 None => t("msg.fail.interrupted"),
             };
@@ -370,11 +372,11 @@ fn row_view(feedback: &FeedbackState, m: &LocalMessage, now: u64) -> RowView {
         || ("dot".to_string(), theme::MUTED),
         |c| (c.icon.clone(), glyphs::category_color(&c.color)),
     );
-    let (status, status_color) = status_view(m);
+    let (status, status_color) = status_view(m, now);
     let answered = matches!(m.status, MessageStatus::Answered | MessageStatus::Closed);
     RowView {
         report_id: m.report_id.clone(),
-        title: m.title.clone(),
+        title: strip_wizard_markup(&m.title),
         path: row_path_text(&feedback.taxonomy, m),
         icon,
         color,
@@ -466,9 +468,24 @@ fn dimmed_warn(ui: &Ui, label: impl AsRef<str>, size: [f32; 2], tip: &str) {
     }
 }
 
+/// Screen-space right edge → ImGui window-local wrap X (`PushTextWrapPos`).
+pub(super) fn wrap_pos_local(right_x: f32, window_x: f32, scroll_x: f32) -> f32 {
+    right_x - window_x + scroll_x
+}
+
+/// Rate-limit copy with remaining minutes, not the original `retry_after`.
+pub(super) fn rate_fail_text(m: &LocalMessage, now: u64) -> String {
+    tf(
+        "msg.fail.rate",
+        &[("n", &crate::feedback::minutes_left(m, now).to_string())],
+    )
+}
+
 /// `text_colored` pinned to an absolute right edge (the plate's inner edge).
+/// `PushTextWrapPos` is window-local, so the screen-space edge is converted first.
 fn wrapped_to(ui: &Ui, color: [f32; 4], text: &str, right_x: f32) {
-    let wrap = ui.push_text_wrap_pos_with_pos(right_x);
+    let local = wrap_pos_local(right_x, ui.window_pos()[0], ui.scroll_x());
+    let wrap = ui.push_text_wrap_pos_with_pos(local);
     ui.text_colored(color, text);
     wrap.pop(ui);
 }
@@ -939,7 +956,7 @@ mod tests {
     fn status_text_and_color_per_status() {
         with_en(|| {
             assert_eq!(
-                status_view(&msg(MessageStatus::Sending)),
+                status_view(&msg(MessageStatus::Sending), 0),
                 ("Sending…".to_string(), theme::MUTED)
             );
             let received = LocalMessage {
@@ -947,37 +964,78 @@ mod tests {
                 ..msg(MessageStatus::Received)
             };
             assert_eq!(
-                status_view(&received),
+                status_view(&received, 0),
                 ("Received  ·  #a3f9".to_string(), theme::MUTED)
             );
             assert_eq!(
-                status_view(&msg(MessageStatus::Read)),
+                status_view(&msg(MessageStatus::Read), 0),
                 ("Read".to_string(), theme::MUTED)
             );
             assert_eq!(
-                status_view(&msg(MessageStatus::Answered)),
+                status_view(&msg(MessageStatus::Answered), 0),
                 ("Answered".to_string(), theme::GOLD)
             );
             assert_eq!(
-                status_view(&msg(MessageStatus::Closed)),
+                status_view(&msg(MessageStatus::Closed), 0),
                 ("Closed".to_string(), theme::MUTED)
             );
             assert_eq!(
-                status_view(&failed(Some(FailReason::Network), Some(0))),
+                status_view(&failed(Some(FailReason::Network), Some(0)), 0),
                 (
                     "Not sent — Couldn't reach Choya. Check your connection.".to_string(),
                     theme::WARN
                 )
             );
             assert_eq!(
-                status_view(&msg(MessageStatus::Local)),
+                status_view(&msg(MessageStatus::Local), 0),
                 ("Local".to_string(), theme::MUTED)
             );
             assert_eq!(
-                status_view(&msg(MessageStatus::Unknown)),
+                status_view(&msg(MessageStatus::Unknown), 0),
                 ("No longer on server".to_string(), theme::MUTED)
             );
         });
+    }
+
+    #[test]
+    fn rate_limit_status_uses_minutes_left() {
+        with_en(|| {
+            let m = failed(
+                Some(FailReason::RateLimited {
+                    retry_after_secs: 90,
+                }),
+                Some(1_000),
+            );
+            assert_eq!(
+                status_view(&m, 1_000).0,
+                "Not sent — Slow down — try again in 2 min."
+            );
+            assert_eq!(
+                status_view(&m, 1_030).0,
+                "Not sent — Slow down — try again in 1 min."
+            );
+        });
+    }
+
+    #[test]
+    fn compact_row_title_strips_wizard_markup() {
+        let feedback = FeedbackState {
+            taxonomy: FeedbackTaxonomy::embedded(),
+            ..FeedbackState::default()
+        };
+        let m = LocalMessage {
+            title: "%NL0P|The optimizer picked a trident on land.".into(),
+            ..msg(MessageStatus::Received)
+        };
+        let row = row_view(&feedback, &m, 0);
+        assert!(!row.title.contains("%NL0P|"), "{}", row.title);
+        assert_eq!(row.title, "The optimizer picked a trident on land.");
+    }
+
+    #[test]
+    fn wrap_pos_local_converts_screen_x_to_window_local() {
+        assert_eq!(wrap_pos_local(200.0, 50.0, 0.0), 150.0);
+        assert_eq!(wrap_pos_local(200.0, 50.0, 10.0), 160.0);
     }
 
     #[test]

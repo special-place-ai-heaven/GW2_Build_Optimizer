@@ -610,5 +610,8 @@
   "news.images": "Pokaż zdjęcia",
   "news.video_note": "Ta nakładka nie odtwarza wideo. Otwórz w przeglądarce, by obejrzeć.",
   "news.no_match": "Brak pasujących relacji.",
-  "fmt.news_count": "{n} relacji"
+  "fmt.news_count": "{n} relacji",
+  "fmt.news_one": "{n} relacja",
+  "fmt.news_few": "{n} relacje",
+  "fmt.news_many": "{n} relacji"
 }

@@ -15,7 +15,8 @@ use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
 
 use super::combat_model::EnemyDummy;
 use super::simulator::{
-    condition_tick_damage, reference_armor, strike_crit_factor_with_bonus, SimParams,
+    alacrity_cd_advance_ms, condition_tick_damage, reference_armor, strike_crit_factor_with_bonus,
+    SimParams,
 };
 use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect, SkillSlot};
 
@@ -546,6 +547,23 @@ impl<'a> Timeline<'a> {
             }
 
             self.now_ms += TIMELINE_TICK_MS;
+            self.tick_alacrity_recharge();
+        }
+    }
+
+    /// Dummy clock: 100ms wall consumes 125ms CD. Apply *4/5 at set is the leftover snapshot.
+    fn tick_alacrity_recharge(&mut self) {
+        if !self.now_ms.is_multiple_of(100) {
+            return;
+        }
+        let extra = alacrity_cd_advance_ms(100, self.has_buff("Alacrity")).saturating_sub(100);
+        if extra == 0 {
+            return;
+        }
+        for ready in &mut self.cooldown_ready_ms {
+            if *ready > self.now_ms {
+                *ready = ready.saturating_sub(extra);
+            }
         }
     }
 
@@ -602,6 +620,7 @@ impl<'a> Timeline<'a> {
         let skill = &self.skills[skill_idx];
         self.pay_resource(skill.skill_id);
         self.resource_blocked_skills.remove(&skill.skill_id);
+        self.apply_incoming_confusion_on_skill_use();
         let quickness = self.has_buff("Quickness");
         let cast_ms = if quickness {
             (skill.cast_time_ms * 2 + 1) / 3
@@ -906,6 +925,21 @@ impl<'a> Timeline<'a> {
         if let Some(pending) = self.pending.as_mut() {
             pending.saved_by_charge = true;
         }
+    }
+
+    fn apply_incoming_confusion_on_skill_use(&mut self) {
+        let stacks: u32 = self
+            .incoming_conditions
+            .iter()
+            .filter(|c| c.name.eq_ignore_ascii_case("Confusion") && c.expires_at_ms > self.now_ms)
+            .map(|c| c.stacks)
+            .sum();
+        if stacks == 0 {
+            return;
+        }
+        let dmg = crate::data::conditions().confusion_tick(1_800.0, self.params.mode.clone(), true)
+            * stacks as f64;
+        self.absorb_damage(dmg * self.incoming_condition_mult);
     }
 
     fn absorb_damage(&mut self, damage: f64) {
@@ -2154,6 +2188,7 @@ mod tests {
                 label: label.into(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let viability = evaluate_viability_gates(Some(&rotation), &combat, &scenario);
         assert!(
@@ -2698,5 +2733,131 @@ mod tests {
 
         timeline.apply_skill_effect(1, &skills[0].effects[0], true);
         assert!(!timeline.has_defense(CoverKind::Stealth));
+    }
+
+    #[test]
+    fn alacrity_shortens_recharge_to_eighty_percent() {
+        // Wiki Alacrity (2026-08-29): 10s CD recharges in 8s while Alacrity is up.
+        let skills = [skill(
+            1,
+            SkillSlot::Utility,
+            200,
+            10_000,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        )];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(20_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.apply_buff("Alacrity", 1, 30_000, false);
+        timeline.set_skill_cooldown(1, 10_000);
+        assert_eq!(
+            timeline.cooldown_ready_ms[0], 10_000,
+            "store full CD; dummy clock consumes 1.25x per 100ms wall"
+        );
+        for _ in 0..160 {
+            timeline.now_ms += TIMELINE_TICK_MS;
+            timeline.tick_alacrity_recharge();
+        }
+        assert!(
+            timeline.cooldown_ready_ms[0] <= timeline.now_ms,
+            "10s CD ready after 8s wall with Alacrity, ready={} now={}",
+            timeline.cooldown_ready_ms[0],
+            timeline.now_ms
+        );
+    }
+
+    #[test]
+    fn alacrity_mid_cooldown_still_uses_dummy_clock() {
+        let skills = [skill(
+            1,
+            SkillSlot::Utility,
+            200,
+            10_000,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        )];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(20_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.set_skill_cooldown(1, 10_000);
+        for _ in 0..40 {
+            timeline.now_ms += TIMELINE_TICK_MS;
+            timeline.tick_alacrity_recharge();
+        }
+        assert_eq!(timeline.cooldown_ready_ms[0], 10_000);
+        timeline.apply_buff("Alacrity", 1, 30_000, false);
+        for _ in 0..128 {
+            timeline.now_ms += TIMELINE_TICK_MS;
+            timeline.tick_alacrity_recharge();
+        }
+        assert!(
+            timeline.cooldown_ready_ms[0] <= timeline.now_ms,
+            "Alacrity after 2s must still eat the remaining 8s in 6.4s wall"
+        );
+    }
+
+    #[test]
+    fn confusion_on_skill_use_is_not_the_one_second_pulse() {
+        // Wiki Confusion (2026-08-29): DoT each second AND extra on skill activation.
+        let skills = [skill(
+            1,
+            SkillSlot::Weapon2,
+            200,
+            5_000,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        )];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(4_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.receive_condition("Confusion".into(), 1, 10_000);
+        let before = timeline.incoming_damage;
+        timeline.start_cast(0);
+        let on_use = crate::data::conditions().confusion_tick(1_800.0, GameMode::WvW, true);
+        assert!(
+            (timeline.incoming_damage - before - on_use).abs() < 0.01,
+            "start_cast must apply on-skill-use Confusion, expected {on_use}, got {}",
+            timeline.incoming_damage - before
+        );
+        let after_cast = timeline.incoming_damage;
+        timeline.now_ms = 1_000;
+        timeline.tick_conditions();
+        let pulse = timeline.incoming_damage - after_cast;
+        let dot = crate::data::conditions().confusion_tick(1_800.0, GameMode::WvW, false);
+        assert!(
+            (pulse - dot).abs() < 0.01,
+            "1s pulse must be DoT {dot}, not on-skill-use {on_use}; got {pulse}"
+        );
     }
 }

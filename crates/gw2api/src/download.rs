@@ -195,9 +195,10 @@ fn download_steps(
         });
         let ids: Vec<serde_json::Value> = client.get("items")?;
 
-        // Fetch all items as raw JSON values with live progress updates
-        let raw_items: Vec<serde_json::Value> =
-            client.fetch_by_ids_with_progress("items", &ids, |fetched, total| {
+        // Fetch all items as raw JSON values with live progress updates.
+        // Singleton 5xx ids are skip-listed so a hole is not written as success.
+        let (raw_items, skipped): (Vec<serde_json::Value>, Vec<serde_json::Value>) = client
+            .fetch_by_ids_with_skips("items", &ids, |fetched, total| {
                 on_progress(DownloadProgress {
                     current_step: step,
                     total_steps: TOTAL_STEPS,
@@ -226,6 +227,9 @@ fn download_steps(
 
         cache
             .save("items", &equipment_items, build)
+            .map_err(|e| ApiError::Cache(e.to_string()))?;
+        cache
+            .save("items.skipped", &skipped, build)
             .map_err(|e| ApiError::Cache(e.to_string()))?;
     }
     report(&mut on_progress, &mut step, "Items (equipment)", None);

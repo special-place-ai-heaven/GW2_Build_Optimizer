@@ -145,7 +145,11 @@ async fn login(
     addr: Option<Extension<ConnectInfo<SocketAddr>>>,
     body: Result<Json<LoginBody>, JsonRejection>,
 ) -> Result<Response, ApiError> {
-    let ip = client_ip(&headers, addr.map(|Extension(ConnectInfo(a))| a));
+    let ip = client_ip(
+        &headers,
+        addr.map(|Extension(ConnectInfo(a))| a),
+        s.config.trust_xff,
+    );
     s.limiter
         .check(&format!("login:{ip}"), 8, Duration::from_secs(15 * 60))
         .map_err(|retry_after_secs| ApiError::RateLimited { retry_after_secs })?;
@@ -163,9 +167,11 @@ async fn login(
     Ok(res)
 }
 
-async fn logout() -> Response {
+async fn logout(State(s): State<AppState>, headers: HeaderMap) -> Response {
     let mut res = StatusCode::NO_CONTENT.into_response();
-    res.headers_mut().insert(SET_COOKIE, set_cookie("", 0));
+    if session_ok(&headers, &s.config) {
+        res.headers_mut().insert(SET_COOKIE, set_cookie("", 0));
+    }
     res
 }
 
@@ -218,7 +224,7 @@ async fn list(
     let like =
         q.q.filter(|s| !s.trim().is_empty())
             .map(|s| format!("%{}%", s.trim()));
-    let mut rows = sqlx::query_as::<_, AdminRow>(&format!(
+    let rows = sqlx::query_as::<_, AdminRow>(&format!(
         "select {ADMIN_COLS} from reports
          where ($1::text is null or status = $1)
            and ($2::text is null or category = $2)
@@ -233,8 +239,6 @@ async fn list(
     .bind(limit)
     .fetch_all(&s.pool)
     .await?;
-    mark_read(&s, rows.iter().map(|r| r.id.clone()).collect()).await?;
-    reflect_read(&mut rows);
     Ok(Json(rows))
 }
 
@@ -242,27 +246,14 @@ async fn get_one(
     State(s): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<AdminRow>, ApiError> {
-    let mut row = sqlx::query_as::<_, AdminRow>(&format!(
+    let row = sqlx::query_as::<_, AdminRow>(&format!(
         "select {ADMIN_COLS} from reports where short_id = $1"
     ))
     .bind(id.to_uppercase())
     .fetch_optional(&s.pool)
     .await?
     .ok_or(ApiError::NotFound)?;
-    mark_read(&s, vec![row.id.clone()]).await?;
-    reflect_read(std::slice::from_mut(&mut row));
     Ok(Json(row))
-}
-
-/// Rows are selected before `mark_read` runs, so a row that was `received` at
-/// select time already says `read` in the database by the time it is serialised.
-/// Flip it here too — the admin must never be shown a status the DB no longer holds.
-fn reflect_read(rows: &mut [AdminRow]) {
-    for row in rows {
-        if row.status == "received" {
-            row.status = "read".into();
-        }
-    }
 }
 
 async fn mark_read(s: &AppState, ids: Vec<String>) -> Result<(), ApiError> {
@@ -276,6 +267,20 @@ async fn mark_read(s: &AppState, ids: Vec<String>) -> Result<(), ApiError> {
     .execute(&s.pool)
     .await?;
     Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct ReadBody {
+    pub ids: Vec<String>,
+}
+
+async fn mark_read_ids(
+    State(s): State<AppState>,
+    Json(b): Json<ReadBody>,
+) -> Result<StatusCode, ApiError> {
+    let ids: Vec<String> = b.ids.into_iter().map(|id| id.to_uppercase()).collect();
+    mark_read(&s, ids).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -377,6 +382,7 @@ pub fn page_routes() -> Router<AppState> {
 pub fn routes(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/reports", get(list))
+        .route("/reports/read", post(mark_read_ids))
         .route("/reports/{id}", get(get_one))
         .route("/reports/{id}/reply", post(reply))
         .route("/reports/{id}/status", post(set_status))
@@ -399,6 +405,7 @@ mod session_tests {
             session_secret: "secret".into(),
             ip_salt: "salt".into(),
             min_addon_version: "1.6.0".into(),
+            trust_xff: false,
         }
     }
 
@@ -433,5 +440,112 @@ mod session_tests {
         let mut h = HeaderMap::new();
         h.insert("authorization", HeaderValue::from_static("Bearer tok"));
         assert!(authorized(&h, &cfg));
+    }
+
+    fn test_state() -> AppState {
+        AppState {
+            pool: sqlx::PgPool::connect_lazy("postgres://u:p@127.0.0.1:1/db").expect("lazy pool"),
+            config: std::sync::Arc::new(cfg()),
+            taxonomy: std::sync::Arc::new(tokio::sync::RwLock::new(
+                crate::taxonomy::Taxonomy::embedded(),
+            )),
+            limiter: std::sync::Arc::new(crate::ratelimit::RateLimiter::new()),
+        }
+    }
+
+    async fn post(app: axum::Router, uri: &str, headers: &[(&str, &str)], body: &str) -> Response {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+        let mut b = Request::builder().method("POST").uri(uri);
+        for (k, v) in headers {
+            b = b.header(*k, *v);
+        }
+        app.oneshot(b.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn logout_without_session_is_204_without_set_cookie() {
+        let res = post(
+            page_routes().with_state(test_state()),
+            "/admin/logout",
+            &[],
+            "",
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        assert!(res.headers().get(SET_COOKIE).is_none());
+    }
+
+    #[tokio::test]
+    async fn logout_with_garbage_cookie_does_not_set_cookie() {
+        let res = post(
+            page_routes().with_state(test_state()),
+            "/admin/logout",
+            &[("cookie", "choya_session=v1.1.dead")],
+            "",
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        assert!(res.headers().get(SET_COOKIE).is_none());
+    }
+
+    #[tokio::test]
+    async fn logout_with_bearer_only_does_not_set_cookie() {
+        let res = post(
+            page_routes().with_state(test_state()),
+            "/admin/logout",
+            &[("authorization", "Bearer tok")],
+            "",
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        assert!(res.headers().get(SET_COOKIE).is_none());
+    }
+
+    #[tokio::test]
+    async fn logout_with_session_clears_cookie() {
+        let value = mint_session(&cfg());
+        let cookie = format!("{SESSION_COOKIE}={value}");
+        let res = post(
+            page_routes().with_state(test_state()),
+            "/admin/logout",
+            &[("cookie", &cookie)],
+            "",
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        let set = res.headers().get(SET_COOKIE).unwrap().to_str().unwrap();
+        assert!(set.contains("Max-Age=0"), "{set}");
+        assert!(set.contains(SESSION_COOKIE), "{set}");
+    }
+
+    #[tokio::test]
+    async fn mark_read_requires_admin() {
+        let res = post(
+            crate::app::router(test_state()),
+            "/v1/admin/reports/read",
+            &[("content-type", "application/json")],
+            r#"{"ids":[]}"#,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn mark_read_empty_ids_is_204() {
+        let res = post(
+            crate::app::router(test_state()),
+            "/v1/admin/reports/read",
+            &[
+                ("authorization", "Bearer tok"),
+                ("content-type", "application/json"),
+            ],
+            r#"{"ids":[]}"#,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
     }
 }

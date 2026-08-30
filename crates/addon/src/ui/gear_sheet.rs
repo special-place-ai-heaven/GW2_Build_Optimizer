@@ -387,15 +387,12 @@ fn render_resolved_sheet(
                     })
             });
             let sigils: Vec<String> = set.sigils.iter().map(|s| s.name.clone()).collect();
-            let sug_weapon_prefix = suggestion
-                .map(|s| sug_prefix_for_weapon(s, i))
-                .unwrap_or(&set.stat_prefix);
             let wslots = weapon_lock_slots(i, set.main_hand.is_some(), set.off_hand.is_some());
             weapon_row(
                 ui,
                 db,
                 url,
-                sug_weapon_prefix,
+                &set.stat_prefix,
                 &set.label,
                 &label,
                 &sigils,
@@ -912,6 +909,44 @@ mod tests {
         assert_eq!(
             weapon_lock_slots(1, true, true),
             vec![GearSlot::WeaponSet2Main, GearSlot::WeaponSet2Off]
+        );
+    }
+
+    /// Pin: Current-view (`render_resolved_sheet`) paints and locks the
+    /// equipped prefix (`set.stat_prefix`). `sug_prefix_for_weapon` is the
+    /// Optimized sheet only. Freeze SHA passed `sug_weapon_prefix` into
+    /// `weapon_row` whenever a suggestion was present, so Improve Current +
+    /// lock wrote the suggestion itemstat id.
+    ///
+    /// Source pin, not a live imgui render: this crate is a Windows cdylib
+    /// (`arcdps-imgui-sys` needs `c++`) and cannot compile on this Linux host.
+    #[test]
+    fn current_weapon_row_uses_equipped_prefix_not_suggestion() {
+        let src = include_str!("gear_sheet.rs");
+        let start = src
+            .find("\nfn render_resolved_sheet(")
+            .expect("render_resolved_sheet must exist");
+        let rest = &src[start..];
+        let end = rest[1..]
+            .find("\nfn ")
+            .map(|i| i + 1)
+            .unwrap_or(rest.len());
+        let body = &rest[..end];
+        assert!(
+            !body.contains("sug_prefix_for_weapon"),
+            "Current sheet must not read sug_prefix_for_weapon for lock/display prefix"
+        );
+        let wr = body
+            .find("weapon_row(")
+            .expect("render_resolved_sheet must call weapon_row");
+        let call = &body[wr..];
+        let close = call
+            .find(");")
+            .expect("weapon_row call must close");
+        let args = &call[..close];
+        assert!(
+            args.contains("&set.stat_prefix"),
+            "weapon_row must receive the equipped set.stat_prefix"
         );
     }
 }

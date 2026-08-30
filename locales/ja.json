@@ -610,5 +610,8 @@
   "news.images": "静止画を表示",
   "news.video_note": "このオーバーレイでは動画を再生できません。ブラウザで開いて視聴してください。",
   "news.no_match": "一致する記事がありません。",
-  "fmt.news_count": "{n} 件"
+  "fmt.news_count": "{n} 件",
+  "fmt.news_one": "{n} 件",
+  "fmt.news_few": "{n} 件",
+  "fmt.news_many": "{n} 件"
 }

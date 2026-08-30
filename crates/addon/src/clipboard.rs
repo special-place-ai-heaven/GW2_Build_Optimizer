@@ -58,11 +58,11 @@ fn pending() -> std::sync::MutexGuard<'static, Option<Pending>> {
 
 /// Put `text` on the Windows clipboard.
 ///
-/// Returns true when the text is on the clipboard **or** queued for the next
-/// frames — another process (clipboard manager, remote-desktop sync) can hold
-/// the clipboard for a few milliseconds, and the caller's "Copied!" feedback
-/// would be wrong to call that a failure. False means the copy cannot happen
-/// at all.
+/// Returns true only when this call landed the buffer (`SetClipboardData`).
+/// Callers arm "Copied!" from this bool, so a Busy queue must not look like
+/// success: the player would paste whatever was already on the clipboard.
+/// Busy still queues for [`pump`] on later frames; those retries do not
+/// retroactively flip this return. False is Busy (queued) or Failed.
 ///
 /// Never sleeps: every call site is on the render thread, which is the game's
 /// only draw pass, so the retry rides later frames instead — see [`pump`].
@@ -70,14 +70,19 @@ pub fn copy_text(text: &str) -> bool {
     let mut wide: Vec<u16> = text.encode_utf16().collect();
     wide.push(0);
     // SAFETY: `wide` is a live, NUL-terminated UTF-16 buffer for the whole call.
-    match unsafe { set_clipboard(&wide) } {
+    reports_copied(unsafe { set_clipboard(&wide) }, wide)
+}
+
+/// True only after the OS clipboard holds our buffer this call.
+fn reports_copied(attempt: Attempt, wide: Vec<u16>) -> bool {
+    match attempt {
         Attempt::Copied => {
             *pending() = None;
             true
         }
         Attempt::Busy => {
             *pending() = Some(Pending { wide, tries: 1 });
-            true
+            false
         }
         Attempt::Failed => {
             *pending() = None;
@@ -93,14 +98,19 @@ pub fn pump() {
         return;
     };
     // SAFETY: same contract as `copy_text` — `queued.wide` is NUL-terminated.
-    if let Attempt::Busy = unsafe { set_clipboard(&queued.wide) } {
-        queued.tries += 1;
-        if queued.tries < MAX_TRIES {
-            // A copy queued while this frame was retrying is newer: keep it.
-            let mut slot = pending();
-            if slot.is_none() {
-                *slot = Some(queued);
+    match unsafe { set_clipboard(&queued.wide) } {
+        Attempt::Copied | Attempt::Failed => {}
+        Attempt::Busy => {
+            queued.tries += 1;
+            if queued.tries < MAX_TRIES {
+                // A copy queued while this frame was retrying is newer: keep it.
+                let mut slot = pending();
+                if slot.is_none() {
+                    *slot = Some(queued);
+                }
             }
+            // Last Busy: drop. copy_text already returned false, so Copied UI
+            // never armed. Exhaust stays silent to callers (`pump` is `()`).
         }
     }
 }
@@ -138,5 +148,24 @@ unsafe fn set_clipboard(wide: &[u16]) -> Attempt {
         Attempt::Copied
     } else {
         Attempt::Failed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copy_text_busy_is_not_copied() {
+        assert!(reports_copied(Attempt::Copied, vec![0]));
+        assert!(pending().is_none());
+        assert!(!reports_copied(Attempt::Failed, vec![0]));
+        assert!(pending().is_none());
+        assert!(!reports_copied(Attempt::Busy, vec![b'x' as u16, 0]));
+        assert!(
+            pending().is_some(),
+            "Busy still queues for pump; it just does not report Copied"
+        );
+        *pending() = None;
     }
 }

@@ -576,6 +576,12 @@ pub(crate) fn render_stats_pane(
     ui.spacing();
     render_primary_stats(ui, current_stats, suggestion.estimated_stats.as_ref());
     ui.spacing();
+    ui.text_colored(crate::ui::theme::GOLD, t("section.combat"));
+    ui.text_colored(
+        crate::ui::theme::MUTED,
+        format_combat_live(suggestion.combat_solo.as_ref()),
+    );
+    ui.spacing();
     render_defenses(ui, comparison, current_stats, suggestion);
 
     ui.spacing();
@@ -1091,6 +1097,34 @@ fn title_case(s: &str) -> String {
     }
 }
 
+/// Live combat dump, or the not-computed note when metrics were never produced.
+fn format_combat_live(metrics: Option<&CombatMetrics>) -> String {
+    match metrics {
+        None => t("note.not_computed"),
+        Some(m) => format!(
+            "{}/{}/{}",
+            m.total_dps_index, m.healing_index, m.effective_health
+        ),
+    }
+}
+
+fn viability_gate_label(gate: &gw2_optimizer::ViabilityGate) -> &'static str {
+    use gw2_optimizer::ViabilityGate::*;
+    match gate {
+        StunbreakCount => "Stunbreaks",
+        StabilityAccess => "Stability",
+        CleanseRate => "Cleanse",
+        EffectiveHealth => "Effective health",
+        MobilityOut => "Disengage",
+        HarasserStrip => "Boon strip",
+        EncounterOutcome => "Encounter",
+        SecureCompletion => "Secure",
+        ProtectedExecution => "Protected execution",
+        SustainRecovery => "Sustain",
+        ResourceLegality => "Resources",
+    }
+}
+
 /// Render the viability gate breakdown: pass/fail per gate with notes.
 fn render_viability_report(ui: &Ui, report: &ViabilityReport) {
     let header_col = if report.is_viable {
@@ -1124,7 +1158,7 @@ fn render_viability_report(ui: &Ui, report: &ViabilityReport) {
             } else {
                 ("NO", [1.0, 0.3, 0.2, 1.0])
             };
-            let gate_name = format!("{:?}", gate.gate);
+            let gate_name = viability_gate_label(&gate.gate);
             ui.text_colored(col, format!("  {} {} -- {}", icon, gate_name, gate.note));
         }
         if !report.is_viable {
@@ -1279,6 +1313,62 @@ mod tests {
         assert_eq!(
             fact_line(&fact).as_deref(),
             Some("Life Siphon Damage: 3517")
+        );
+    }
+
+    #[test]
+    fn missing_combat_is_not_computed_not_zeros() {
+        let s = BuildSuggestion::default();
+        assert!(s.combat_solo.is_none());
+        let shown = format_combat_live(s.combat_solo.as_ref());
+        assert_eq!(shown, t("note.not_computed"));
+        assert_ne!(
+            shown,
+            format_combat_live(Some(&CombatMetrics::default())),
+            "None must not format as a live 0/0/0 dump"
+        );
+        assert!(
+            !shown.chars().any(|c| c.is_ascii_digit()),
+            "not-computed note must not look like live stats: {shown}"
+        );
+    }
+
+    #[test]
+    fn viability_gate_label_is_not_debug() {
+        use gw2_optimizer::ViabilityGate::*;
+        for gate in [
+            StunbreakCount,
+            StabilityAccess,
+            CleanseRate,
+            EffectiveHealth,
+            MobilityOut,
+            HarasserStrip,
+            EncounterOutcome,
+            SecureCompletion,
+            ProtectedExecution,
+            SustainRecovery,
+            ResourceLegality,
+        ] {
+            let shown = viability_gate_label(&gate);
+            assert!(
+                !shown.contains("ViabilityGate"),
+                "gate label must not dump the enum type: {shown}"
+            );
+            assert_ne!(
+                shown,
+                format!("{gate:?}"),
+                "gate label must not be Rust Debug"
+            );
+        }
+
+        let src = include_str!("comparison.rs");
+        let production = src
+            .split("#[cfg(test)]")
+            .next()
+            .expect("comparison.rs must contain its own #[cfg(test)] marker");
+        assert!(
+            !production.contains("format!(\"{:?}\", gate.gate)"),
+            "render_viability_report must not Debug-dump gate names"
         );
     }
 }
