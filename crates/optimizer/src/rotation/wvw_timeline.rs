@@ -556,8 +556,7 @@ impl<'a> Timeline<'a> {
         if !self.now_ms.is_multiple_of(100) {
             return;
         }
-        let extra =
-            alacrity_cd_advance_ms(100, self.has_buff("Alacrity")).saturating_sub(100);
+        let extra = alacrity_cd_advance_ms(100, self.has_buff("Alacrity")).saturating_sub(100);
         if extra == 0 {
             return;
         }
@@ -938,11 +937,8 @@ impl<'a> Timeline<'a> {
         if stacks == 0 {
             return;
         }
-        let dmg = crate::data::conditions().confusion_tick(
-            1_800.0,
-            self.params.mode.clone(),
-            true,
-        ) * stacks as f64;
+        let dmg = crate::data::conditions().confusion_tick(1_800.0, self.params.mode.clone(), true)
+            * stacks as f64;
         self.absorb_damage(dmg * self.incoming_condition_mult);
     }
 
@@ -2192,6 +2188,7 @@ mod tests {
                 label: label.into(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let viability = evaluate_viability_gates(Some(&rotation), &combat, &scenario);
         assert!(
@@ -2765,8 +2762,7 @@ mod tests {
         timeline.apply_buff("Alacrity", 1, 30_000, false);
         timeline.set_skill_cooldown(1, 10_000);
         assert_eq!(
-            timeline.cooldown_ready_ms[0],
-            10_000,
+            timeline.cooldown_ready_ms[0], 10_000,
             "store full CD; dummy clock consumes 1.25x per 100ms wall"
         );
         for _ in 0..160 {

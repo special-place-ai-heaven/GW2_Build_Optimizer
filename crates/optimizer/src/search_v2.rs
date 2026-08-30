@@ -1554,6 +1554,7 @@ mod tests {
                     label: String::new(),
                 },
                 patch_id: None,
+                objective_profile_id: None,
             },
             stats: StatBlock::default(),
             modifiers: DamageModifiers::default(),
@@ -2249,6 +2250,7 @@ mod tests {
                 label: String::new(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let seed = optimize_v2_search(
             &diag,
@@ -2421,6 +2423,7 @@ mod tests {
                 label: String::new(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let config = SearchConfig {
             beam_width: 4,
@@ -2472,6 +2475,7 @@ mod tests {
                 label: String::new(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let mut locks = BuildLocks::default();
         locks.gear_locks.insert(GearSlot::Helm, 584);
@@ -2520,6 +2524,7 @@ mod tests {
                 label: String::new(),
             },
             patch_id: None,
+            objective_profile_id: None,
         };
         let locks = BuildLocks::default();
         let config = SearchConfig::default();
