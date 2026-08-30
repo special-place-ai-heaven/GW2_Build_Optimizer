@@ -904,6 +904,22 @@ fn extract_build_code(html: &str) -> Option<String> {
     }
 }
 
+/// Space-padded alnum words — same boundary idea as `prefix_named_in_text`.
+fn padded_alnum_words(text: &str) -> String {
+    format!(
+        " {} ",
+        text.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    ' '
+                }
+            })
+            .collect::<String>()
+    )
+}
+
 /// Extract gear stat prefix from HTML text.
 ///
 /// Case-insensitive — scraped sites vary in casing (e.g. "viper's", "VIPER'S"),
@@ -936,9 +952,10 @@ fn extract_gear_prefix(html: &str) -> String {
         "Magi's",
         "Cleric's",
     ];
-    let html_lower = html.to_lowercase();
+    let hay = padded_alnum_words(html);
     for p in &prefixes {
-        if html_lower.contains(&p.to_lowercase()) {
+        let stem = p.trim_end_matches("'s").to_ascii_lowercase();
+        if hay.contains(&format!(" {stem} ")) || hay.contains(&format!(" {stem}s ")) {
             return p.to_string();
         }
     }
@@ -1338,6 +1355,15 @@ mod tests {
         let code = extract_build_code(html);
         assert!(code.is_some());
         assert!(code.unwrap().starts_with("[&"));
+    }
+
+    #[test]
+    fn extract_gear_prefix_directly_is_not_dire() {
+        assert_eq!(extract_gear_prefix("Boons apply directly to allies."), "");
+        assert_eq!(
+            extract_gear_prefix("Use Dire gear for condition sustain."),
+            "Dire"
+        );
     }
 
     #[test]
