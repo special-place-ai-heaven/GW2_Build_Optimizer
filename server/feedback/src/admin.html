@@ -250,6 +250,11 @@ async function reply(id, text, status) {
 async function load() {
   const data = await api(query());
   rows = Array.isArray(data)? data : [];
+  const unread = rows.filter(r => r.status === 'received').map(r => r.id);
+  if (unread.length) {
+    await api('/v1/admin/reports/read', {method:'POST', body: JSON.stringify({ids: unread})});
+    rows.forEach(r => { if (r.status === 'received') r.status = 'read'; });
+  }
   paintList();
   if (current) {
     const still = rows.find(r => r.id===current.id);
