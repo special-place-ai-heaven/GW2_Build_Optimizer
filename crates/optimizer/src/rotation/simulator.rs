@@ -434,13 +434,7 @@ impl SimState {
                     hit_count,
                     dmg_multiplier,
                 } => {
-                    let might_stacks = self
-                        .buffs
-                        .iter()
-                        .filter(|buff| buff.buff.eq_ignore_ascii_case("Might"))
-                        .count()
-                        .min(25) as f64;
-                    let effective_power = power + might_stacks * 30.0;
+                    let effective_power = power + self.live_might_stacks() * 30.0;
                     let fury_bonus = if self
                         .buffs
                         .iter()
@@ -543,12 +537,28 @@ impl SimState {
             self.current_time_ms + effective_cast + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS;
     }
 
+    fn live_might_stacks(&self) -> f64 {
+        self.buffs
+            .iter()
+            .filter(|buff| buff.buff.eq_ignore_ascii_case("Might"))
+            .count()
+            .min(25) as f64
+    }
+
     /// Tick all active conditions — apply damage for each stack, remove expired.
     fn tick_conditions(&mut self, condition_damage: f64) {
         // Only tick on 1-second boundaries
         if self.current_time_ms % CONDITION_TICK_INTERVAL_MS != 0 {
             return;
         }
+
+        // Wiki Might: +condition_damage_per_stack (boons.json, 30 at L80) and
+        // "Current conditions are still affected by might." Same fold as
+        // wvw_timeline::tick_conditions. Dummy stays unbooned; this is the
+        // player's live Might, not EnemyDummy cover.
+        let condition_damage = condition_damage
+            + self.live_might_stacks()
+                * crate::data::boon_condition_formulas::boons().might_condi_per_stack();
 
         let mut tick_total = 0.0;
         for stack in &mut self.conditions {
@@ -1018,6 +1028,49 @@ mod tests {
         let on_use = crate::data::conditions().confusion_tick(cd, pve.clone(), true);
         assert!((on_use - 48.74).abs() < 0.1);
         assert_eq!(condition_tick_damage("Vulnerability", cd, &pve), 0.0);
+    }
+
+    #[test]
+    fn test_live_might_raises_condition_ticks() {
+        // Wiki Might: +30 Condition Damage/stack; already-applied conditions scale.
+        fn bleed_only() -> RotationSkill {
+            RotationSkill {
+                skill_id: 40,
+                name: "Bleed".into(),
+                slot: SkillSlot::Weapon2,
+                cast_time_ms: 100,
+                cooldown_ms: 30_000,
+                effects: vec![SkillEffect::ApplyCondition {
+                    condition: "Bleeding".into(),
+                    stacks: 1,
+                    duration_ms: 10_000,
+                }],
+                next_chain: None,
+                is_stunbreak: false,
+                weapon_set: 0,
+            }
+        }
+        let mut with_might = bleed_only();
+        with_might.skill_id = 41;
+        with_might.effects.push(SkillEffect::ApplyBuff {
+            buff: "Might".into(),
+            stacks: 10,
+            duration_ms: 20_000,
+        });
+
+        let bare = simulate(&[bleed_only()], 2_000, 1_000.0, 1_000.0, 1_100.0);
+        let boosted = simulate(&[with_might], 2_000, 1_000.0, 1_000.0, 1_100.0);
+        let tick_bare = condition_tick_damage("Bleeding", 1_000.0, &GameMode::PvE);
+        let tick_boosted = condition_tick_damage(
+            "Bleeding",
+            1_000.0 + 10.0 * crate::data::boon_condition_formulas::boons().might_condi_per_stack(),
+            &GameMode::PvE,
+        );
+        assert!((tick_bare - 82.0).abs() < 0.1);
+        assert!((tick_boosted - 100.0).abs() < 0.1);
+        // One 1s pulse after the t=0 apply in a 2s window.
+        assert!((bare.condition_dps - tick_bare / 2.0).abs() < 0.1);
+        assert!((boosted.condition_dps - tick_boosted / 2.0).abs() < 0.1);
     }
 
     #[test]
