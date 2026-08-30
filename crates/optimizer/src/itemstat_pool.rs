@@ -114,7 +114,7 @@ fn multiplier_attribute_set(stat: &ItemStat) -> Vec<&str> {
 
 /// Wiki main-table Giver's: Toughness / Healing Power / Concentration.
 /// `/v2/itemstats` spells those `Healing` and `BoonDuration`.
-fn is_wiki_givers_three_stat(stat: &ItemStat) -> bool {
+pub(crate) fn is_wiki_givers_three_stat(stat: &ItemStat) -> bool {
     display_name_key(&stat.name).as_deref() == Some("givers")
         && multiplier_attribute_set(stat) == ["BoonDuration", "Healing", "Toughness"]
 }
@@ -441,10 +441,7 @@ mod tests {
             .copied()
             .filter(|stat| independent_name_key(&stat.name) == "givers")
             .collect();
-        assert!(
-            !givers.is_empty(),
-            "Giver's vanished from the prefix pool"
-        );
+        assert!(!givers.is_empty(), "Giver's vanished from the prefix pool");
 
         for stat in &givers {
             let mut attrs: Vec<&str> = stat
@@ -454,10 +451,7 @@ mod tests {
                 .map(|a| a.attribute.as_str())
                 .collect();
             attrs.sort_unstable();
-            assert_ne!(
-                stat.id, 627,
-                "Giver's survivor is Toughness-only id 627"
-            );
+            assert_ne!(stat.id, 627, "Giver's survivor is Toughness-only id 627");
             assert_ne!(
                 attrs.as_slice(),
                 ["Toughness"].as_slice(),

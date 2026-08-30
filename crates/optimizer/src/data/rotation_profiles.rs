@@ -438,22 +438,6 @@ impl ConditionWeightsFromProfile {
             .expect("Guardian PvE rotation profile missing");
         Self::from_profile(profile)
     }
-
-    /// Harbinger-specific condition weights from rotation profile data.
-    /// Falls back to Necromancer profile since Harbinger is an elite spec.
-    pub fn harbinger_preset() -> Self {
-        let data = rotation_profiles();
-        // Try Harbinger elite spec first, fall back to Necromancer core
-        let profile = data
-            .lookup(
-                "Necromancer",
-                Some("Harbinger"),
-                &gw2_core::types::GameMode::PvE,
-            )
-            .or_else(|| data.lookup("Necromancer", None, &gw2_core::types::GameMode::PvE))
-            .expect("Necromancer PvE rotation profile missing");
-        Self::from_profile(profile)
-    }
 }
 
 /// Convert a ScenarioProfile into a legacy-compatible BuffProfile-like struct.
@@ -487,97 +471,6 @@ impl BuffProfileFromScenario {
             label: scenario.label.clone(),
         }
     }
-}
-
-// ─── Heuristic Uptime Population ───
-
-/// Update NormalizedEffect entries with Unknown uptime to Estimated where applicable,
-/// using rotation profile data to inform the estimates.
-///
-/// For trigger-based effects (OnCrit, OnHit, OnSkillUse), estimates an uptime
-/// fraction based on the rotation profile's target behavior and typical proc rates.
-/// Only updates effects with `UptimeModelKind::Unknown`.
-///
-/// Returns the number of effects updated.
-pub fn populate_heuristic_uptimes(
-    effects: &mut [super::normalized_effects::NormalizedEffect],
-    _profile: &RotationProfile,
-) -> usize {
-    use super::normalized_effects::{TriggerRule, UptimeModelKind};
-    use super::quality::FactualValue;
-
-    let mut updated = 0;
-
-    for effect in effects.iter_mut() {
-        if effect.uptime_model.kind != UptimeModelKind::Unknown {
-            continue;
-        }
-
-        let estimated_uptime = match effect.trigger_rule {
-            TriggerRule::Passive => {
-                // Passive effects are always on — set to AlwaysOn instead
-                effect.uptime_model.kind = UptimeModelKind::AlwaysOn;
-                effect.uptime_model.uptime = Some(FactualValue::Resolved(1.0));
-                updated += 1;
-                continue;
-            }
-            TriggerRule::OnCrit => {
-                // Estimate based on typical crit chance in rotation (~50-70%)
-                // and ICD if available
-                let base_rate = 0.6;
-                if let Some(FactualValue::Resolved(icd)) = effect.internal_cooldown {
-                    if icd > 0.0 {
-                        // With ICD: uptime ≈ effect_duration / (effect_duration + icd)
-                        let dur = match effect.effect_duration {
-                            Some(FactualValue::Resolved(d)) if d > 0.0 => d,
-                            _ => 5.0, // default 5s effect duration estimate
-                        };
-                        (dur / (dur + icd)).min(base_rate)
-                    } else {
-                        base_rate
-                    }
-                } else {
-                    base_rate
-                }
-            }
-            TriggerRule::OnHit => {
-                // Estimate based on ~2 hits per second average
-                let base_rate = 0.7;
-                if let Some(FactualValue::Resolved(icd)) = effect.internal_cooldown {
-                    if icd > 0.0 {
-                        let dur = match effect.effect_duration {
-                            Some(FactualValue::Resolved(d)) if d > 0.0 => d,
-                            _ => 5.0,
-                        };
-                        (dur / (dur + icd)).min(base_rate)
-                    } else {
-                        base_rate
-                    }
-                } else {
-                    base_rate
-                }
-            }
-            TriggerRule::OnSkillUse => {
-                // Estimate: skills used every ~2-3 seconds
-                0.5
-            }
-            TriggerRule::OnHealthThreshold => {
-                // Health thresholds: typically active ~30% of the time
-                0.3
-            }
-            TriggerRule::Conditional => {
-                // Generic conditional: ~50% uptime estimate
-                0.5
-            }
-        };
-
-        effect.uptime_model.kind = UptimeModelKind::Estimated;
-        effect.uptime_model.uptime = Some(FactualValue::Resolved(estimated_uptime));
-        effect.evidence_level = EvidenceLevel::Heuristic;
-        updated += 1;
-    }
-
-    updated
 }
 
 // ─── Tests ───

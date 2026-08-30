@@ -603,8 +603,8 @@ fn push_description_effects(effects: &mut Vec<SkillEffect>, description: &str) {
             .iter()
             .any(|effect| matches!(effect, SkillEffect::Barrier { .. }))
     {
-        // The public skill endpoint commonly omits barrier coefficients. Keep
-        // the estimate conservative; the WvW report marks heuristic effects.
+        // The public skill endpoint commonly omits barrier coefficients.
+        // Heuristic Barrier/Healing are simulated at full value with no report flag.
         effects.push(SkillEffect::Barrier { amount: 1_000.0 });
     }
     if (d.contains("heal yourself") || d.contains("heals you"))

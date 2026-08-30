@@ -13,7 +13,8 @@ use crate::data::normalized_effects::{
 use crate::data::quality::FactualValue;
 use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
 
-use super::combat_model::EnemyDummy;
+use super::combat_model::{corrupt_into, EnemyDummy};
+use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::simulator::{
     alacrity_cd_advance_ms, condition_tick_damage, reference_armor, strike_crit_factor_with_bonus,
     SimParams,
@@ -23,6 +24,12 @@ use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect, SkillSlot};
 const TIMELINE_TICK_MS: u32 = 50;
 pub const MIN_PROTECTED_WINDOW_MS: u32 = 2_000;
 pub const TARGET_PROTECTED_WINDOW_MS: u32 = 5_000;
+
+/// Wiki Barrier: disappears 5s after applied; WvW cap is 25% of max health.
+const BARRIER_LIFETIME_MS: u32 = 5_000;
+const WVW_BARRIER_HEALTH_FRACTION: f64 = 0.25;
+/// Wiki Interrupt: interrupted skills get a 5 second cooldown.
+const INTERRUPT_COOLDOWN_MS: u32 = 5_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResourceKind {
@@ -127,7 +134,7 @@ struct EnemyEvent {
 #[derive(Debug, Clone)]
 struct WvwProfile {
     duration_ms: u32,
-    target_health: f64,
+    target_health: Option<f64>,
     enemy_events: VecDeque<EnemyEvent>,
     required_window_ms: u32,
     desired_window_ms: u32,
@@ -219,11 +226,7 @@ impl WvwProfile {
 
         Self {
             duration_ms,
-            target_health: enemy.hp.unwrap_or(match scenario.combat_tier {
-                CombatTier::Solo => 18_000.0,
-                CombatTier::Party => 24_000.0,
-                CombatTier::Squad => 35_000.0,
-            }),
+            target_health: enemy.hp,
             enemy_events: events.into(),
             required_window_ms: MIN_PROTECTED_WINDOW_MS,
             desired_window_ms: TARGET_PROTECTED_WINDOW_MS.min(duration_ms),
@@ -252,6 +255,11 @@ struct TimedCondition {
     stacks: u32,
     expires_at_ms: u32,
     next_tick_ms: u32,
+}
+
+struct BarrierLayer {
+    amount: f64,
+    expires_at_ms: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -328,7 +336,7 @@ struct Timeline<'a> {
     enemy_health: f64,
     target_reached_at_ms: Option<u32>,
     player_health: f64,
-    barrier: f64,
+    barrier: VecDeque<BarrierLayer>,
     protected_run_ms: u32,
     longest_protected_window_ms: u32,
     charge_cover_consumed_this_tick: bool,
@@ -406,7 +414,8 @@ impl<'a> Timeline<'a> {
         let mut state = Self {
             skills,
             params,
-            enemy_health: profile.target_health,
+            // ponytail: no-target dummy uses +inf so events keep firing and target_reached stays false
+            enemy_health: profile.target_health.unwrap_or(f64::INFINITY),
             player_health: params.max_health,
             enemy_protection: enemy.protection,
             enemy_stability: enemy.stability,
@@ -426,7 +435,7 @@ impl<'a> Timeline<'a> {
             combo_field: None,
             enemy_disabled_until_ms: 0,
             target_reached_at_ms: None,
-            barrier: 0.0,
+            barrier: VecDeque::new(),
             protected_run_ms: 0,
             longest_protected_window_ms: 0,
             charge_cover_consumed_this_tick: false,
@@ -465,63 +474,66 @@ impl<'a> Timeline<'a> {
     }
 
     fn load_normalized_effects(&mut self, effects: &[&NormalizedEffect]) {
-        for effect in effects {
-            let value = resolved(&effect.value).copied().unwrap_or(0.0);
-            if matches!(effect.trigger_rule, TriggerRule::Passive) {
-                // Standing modifiers are already folded into SimParams by the
-                // shared combat parser. Applying them here would count the same
-                // trait/rune/sigil a second time.
-                continue;
-            }
+            for effect in effects {
+                if matches!(effect.trigger_rule, TriggerRule::Passive) {
+                    // Standing modifiers are already folded into SimParams by the
+                    // shared combat parser. Applying them here would count the same
+                    // trait/rune/sigil a second time.
+                    continue;
+                }
 
-            if matches!(effect.source_type, SourceType::Skill)
-                && self.skill_directly_models_effect(effect)
-            {
-                continue;
-            }
+                if matches!(effect.source_type, SourceType::Skill)
+                    && self.skill_directly_models_effect(effect)
+                {
+                    continue;
+                }
 
-            let supported = matches!(effect.trigger_rule, TriggerRule::OnHit)
-                || (matches!(effect.trigger_rule, TriggerRule::OnSkillUse)
-                    && matches!(effect.source_type, SourceType::Skill));
-            if !supported {
-                self.unmodeled_effect_sources += 1;
-                continue;
-            }
+                let supported = matches!(effect.trigger_rule, TriggerRule::OnHit)
+                    || (matches!(effect.trigger_rule, TriggerRule::OnSkillUse)
+                        && matches!(effect.source_type, SourceType::Skill));
+                if !supported {
+                    self.unmodeled_effect_sources += 1;
+                    continue;
+                }
+                let Some(&value) = resolved(&effect.value) else {
+                    self.unmodeled_effect_sources += 1;
+                    continue;
+                };
 
-            self.proc_specs.push(ProcSpec {
-                source_type: effect.source_type.clone(),
-                source_id: effect.source_id,
-                trigger: effect.trigger_rule.clone(),
-                category: effect
-                    .inner_category
-                    .clone()
-                    .unwrap_or_else(|| effect.category.clone()),
-                value,
-                duration_ms: effect
-                    .effect_duration
-                    .as_ref()
-                    .and_then(resolved)
-                    .map(|seconds| (seconds * 1_000.0).round() as u32)
-                    .unwrap_or(0),
-                internal_cooldown_ms: effect
-                    .internal_cooldown
-                    .as_ref()
-                    .and_then(resolved)
-                    .map(|seconds| (seconds * 1_000.0).round() as u32)
-                    .or_else(|| {
-                        effect
-                            .status_operation
-                            .as_ref()
-                            .and_then(|op| op.internal_cooldown_ms.as_ref())
-                            .and_then(resolved)
-                            .copied()
-                    })
-                    .unwrap_or(0),
-                next_ready_ms: 0,
-                operation: effect.status_operation.clone(),
-            });
+                self.proc_specs.push(ProcSpec {
+                    source_type: effect.source_type.clone(),
+                    source_id: effect.source_id,
+                    trigger: effect.trigger_rule.clone(),
+                    category: effect
+                        .inner_category
+                        .clone()
+                        .unwrap_or_else(|| effect.category.clone()),
+                    value,
+                    duration_ms: effect
+                        .effect_duration
+                        .as_ref()
+                        .and_then(resolved)
+                        .map(|seconds| (seconds * 1_000.0).round() as u32)
+                        .unwrap_or(0),
+                    internal_cooldown_ms: effect
+                        .internal_cooldown
+                        .as_ref()
+                        .and_then(resolved)
+                        .map(|seconds| (seconds * 1_000.0).round() as u32)
+                        .or_else(|| {
+                            effect
+                                .status_operation
+                                .as_ref()
+                                .and_then(|op| op.internal_cooldown_ms.as_ref())
+                                .and_then(resolved)
+                                .copied()
+                        })
+                        .unwrap_or(0),
+                    next_ready_ms: 0,
+                    operation: effect.status_operation.clone(),
+                });
+            }
         }
-    }
 
     fn run(&mut self) {
         while self.now_ms < self.profile.duration_ms && self.player_health > 0.0 {
@@ -568,17 +580,19 @@ impl<'a> Timeline<'a> {
     }
 
     fn expire_timed_state(&mut self) {
-        self.defenses
-            .retain(|defense| defense.expires_at_ms > self.now_ms);
-        self.buffs.retain(|buff| buff.expires_at_ms > self.now_ms);
-        if self
-            .combo_field
-            .as_ref()
-            .is_some_and(|field| field.expires_at_ms <= self.now_ms)
-        {
-            self.combo_field = None;
+            self.defenses
+                .retain(|defense| defense.expires_at_ms > self.now_ms);
+            self.buffs.retain(|buff| buff.expires_at_ms > self.now_ms);
+            self.barrier
+                .retain(|layer| layer.expires_at_ms > self.now_ms);
+            if self
+                .combo_field
+                .as_ref()
+                .is_some_and(|field| field.expires_at_ms <= self.now_ms)
+            {
+                self.combo_field = None;
+            }
         }
-    }
 
     fn resolve_pending_cast(&mut self) {
         let Some(pending) = self.pending.clone() else {
@@ -636,7 +650,7 @@ impl<'a> Timeline<'a> {
             protected_at_start: self.control_owned(),
             saved_by_charge: false,
         });
-        self.next_action_ms = self.now_ms + cast_ms + 180;
+        self.next_action_ms = self.now_ms + cast_ms + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS;
     }
 
     fn pick_skill(&mut self) -> Option<usize> {
@@ -739,7 +753,7 @@ impl<'a> Timeline<'a> {
         }) {
             self.active_weapon_set = other;
             self.weapon_swap_ready_ms = self.now_ms + cooldown_ms;
-            self.next_action_ms = self.now_ms + 100;
+            self.next_action_ms = self.now_ms + MIN_SKILL_GAP_MS;
         }
     }
 
@@ -773,7 +787,7 @@ impl<'a> Timeline<'a> {
         self.resource_blocked_skills.remove(&skill_id);
         self.set_skill_cooldown(skill_id, self.skills[idx].cooldown_ms);
         self.disabled_until_ms = self.now_ms;
-        self.next_action_ms = self.now_ms + 100;
+        self.next_action_ms = self.now_ms + MIN_SKILL_GAP_MS;
         self.successful_action_count += 1;
         let first_damage_event = self.damage_events.len();
         let control_before = self.control_landed_ms;
@@ -798,41 +812,44 @@ impl<'a> Timeline<'a> {
     }
 
     fn process_enemy_events(&mut self) {
-        while self
-            .profile
-            .enemy_events
-            .front()
-            .is_some_and(|event| event.at_ms <= self.now_ms)
-        {
-            let event = self
+            if self.enemy_health <= 0.0 {
+                return;
+            }
+            while self
                 .profile
                 .enemy_events
-                .pop_front()
-                .expect("front checked");
-            // A disabled opponent cannot continue a queued attack/cast. Existing
-            // conditions still tick separately, but new strikes, CC, strips and
-            // condition applications are lost during the control window.
-            if self.enemy_disabled_until_ms > self.now_ms {
-                continue;
-            }
-            match event.kind {
-                EnemyEventKind::Strike {
-                    damage,
-                    unblockable,
-                } => self.receive_strike(damage, unblockable),
-                EnemyEventKind::Control {
-                    duration_ms,
-                    unblockable,
-                } => self.receive_control(duration_ms, unblockable),
-                EnemyEventKind::Condition {
-                    condition,
-                    stacks,
-                    duration_ms,
-                } => self.receive_condition(condition, stacks, duration_ms),
-                EnemyEventKind::BoonStrip { count } => self.receive_boon_strip(count),
+                .front()
+                .is_some_and(|event| event.at_ms <= self.now_ms)
+            {
+                let event = self
+                    .profile
+                    .enemy_events
+                    .pop_front()
+                    .expect("front checked");
+                // A disabled opponent cannot continue a queued attack/cast. Existing
+                // conditions still tick separately, but new strikes, CC, strips and
+                // condition applications are lost during the control window.
+                if self.enemy_disabled_until_ms > self.now_ms {
+                    continue;
+                }
+                match event.kind {
+                    EnemyEventKind::Strike {
+                        damage,
+                        unblockable,
+                    } => self.receive_strike(damage, unblockable),
+                    EnemyEventKind::Control {
+                        duration_ms,
+                        unblockable,
+                    } => self.receive_control(duration_ms, unblockable),
+                    EnemyEventKind::Condition {
+                        condition,
+                        stacks,
+                        duration_ms,
+                    } => self.receive_condition(condition, stacks, duration_ms),
+                    EnemyEventKind::BoonStrip { count } => self.receive_boon_strip(count),
+                }
             }
         }
-    }
 
     fn receive_strike(&mut self, raw_damage: f64, unblockable: bool) {
         if self.avoids_attack(unblockable) {
@@ -847,17 +864,19 @@ impl<'a> Timeline<'a> {
     }
 
     fn receive_control(&mut self, duration_ms: u32, unblockable: bool) {
-        if self.avoids_attack(unblockable) || self.consume_stability() {
-            return;
-        }
-        if let Some(pending) = self.pending.take() {
-            if pending.started_at_ms < self.now_ms {
-                self.interrupted_casts += 1;
+            if self.avoids_attack(unblockable) || self.consume_stability() {
+                return;
             }
+            if let Some(pending) = self.pending.take() {
+                if pending.started_at_ms < self.now_ms {
+                    self.interrupted_casts += 1;
+                }
+                let skill_id = self.skills[pending.skill_idx].skill_id;
+                self.set_skill_cooldown(skill_id, INTERRUPT_COOLDOWN_MS);
+            }
+            self.disabled_until_ms = self.disabled_until_ms.max(self.now_ms + duration_ms);
+            self.protected_run_ms = 0;
         }
-        self.disabled_until_ms = self.disabled_until_ms.max(self.now_ms + duration_ms);
-        self.protected_run_ms = 0;
-    }
 
     fn receive_condition(&mut self, condition: String, stacks: u32, duration_ms: u32) {
         if self.has_defense(CoverKind::Invulnerability)
@@ -888,17 +907,21 @@ impl<'a> Timeline<'a> {
         }
     }
 
-    fn remove_enemy_boons(&mut self, count: u32) {
-        for _ in 0..count {
-            if self.enemy_stability {
-                self.enemy_stability = false;
-            } else if self.enemy_protection {
-                self.enemy_protection = false;
-            } else {
-                break;
+    fn remove_enemy_boons(&mut self, count: u32) -> Vec<&'static str> {
+            let mut stripped = Vec::new();
+            for _ in 0..count {
+                if self.enemy_stability {
+                    self.enemy_stability = false;
+                    stripped.push("Stability");
+                } else if self.enemy_protection {
+                    self.enemy_protection = false;
+                    stripped.push("Protection");
+                } else {
+                    break;
+                }
             }
+            stripped
         }
-    }
 
     fn avoids_attack(&mut self, unblockable: bool) -> bool {
         if self.has_defense(CoverKind::Invulnerability) || self.has_defense(CoverKind::Evade) {
@@ -943,55 +966,103 @@ impl<'a> Timeline<'a> {
     }
 
     fn absorb_damage(&mut self, damage: f64) {
-        let absorbed = self.barrier.min(damage);
-        self.barrier -= absorbed;
-        self.barrier_absorbed += absorbed;
-        let health_damage = damage - absorbed;
-        self.incoming_damage += health_damage;
-        self.player_health = (self.player_health - health_damage).max(0.0);
-    }
+            let mut remaining = damage;
+            let mut absorbed = 0.0;
+            while remaining > 0.0 {
+                let Some(layer) = self.barrier.front_mut() else {
+                    break;
+                };
+                let take = layer.amount.min(remaining);
+                layer.amount -= take;
+                remaining -= take;
+                absorbed += take;
+                if layer.amount <= 0.0 {
+                    self.barrier.pop_front();
+                }
+            }
+            self.barrier_absorbed += absorbed;
+            self.incoming_damage += remaining;
+            self.player_health = (self.player_health - remaining).max(0.0);
+        }
+
+    fn apply_barrier(&mut self, amount: f64) {
+            if amount <= 0.0 {
+                return;
+            }
+            let cap = self.params.max_health * WVW_BARRIER_HEALTH_FRACTION;
+            let current: f64 = self.barrier.iter().map(|layer| layer.amount).sum();
+            let applied = amount.min((cap - current).max(0.0));
+            if applied > 0.0 {
+                self.barrier.push_back(BarrierLayer {
+                    amount: applied,
+                    expires_at_ms: self.now_ms.saturating_add(BARRIER_LIFETIME_MS),
+                });
+            }
+        }
 
     fn tick_conditions(&mut self) {
-        let mut outgoing_damage = 0.0;
-        let might = self.buff_stacks("Might").min(25) as f64;
-        let condition_damage = self.params.condition_damage
-            + might * crate::data::boon_condition_formulas::boons().might_condi_per_stack();
-        for condition in &mut self.outgoing_conditions {
-            if condition.next_tick_ms <= self.now_ms
-                && condition.next_tick_ms <= condition.expires_at_ms
-            {
-                let tick =
-                    condition_tick_damage(&condition.name, condition_damage, &self.params.mode)
-                        * condition.stacks as f64
-                        * self.params.condition_mult
-                        * self.passive_condition_mult;
-                outgoing_damage += tick;
-                condition.next_tick_ms += 1_000;
+            let mut outgoing_damage = 0.0;
+            let might = self.buff_stacks("Might").min(25) as f64;
+            let condition_damage = self.params.condition_damage
+                + might * crate::data::boon_condition_formulas::boons().might_condi_per_stack();
+            for condition in &mut self.outgoing_conditions {
+                if condition.next_tick_ms <= self.now_ms
+                    && condition.next_tick_ms <= condition.expires_at_ms
+                {
+                    let tick =
+                        condition_tick_damage(&condition.name, condition_damage, &self.params.mode)
+                            * condition.stacks as f64
+                            * self.params.condition_mult
+                            * self.passive_condition_mult;
+                    outgoing_damage += tick;
+                    condition.next_tick_ms += 1_000;
+                }
+                if condition.expires_at_ms <= self.now_ms {
+                    let frac = leftover_condition_fraction(condition);
+                    if frac > 0.0 {
+                        outgoing_damage += condition_tick_damage(
+                            &condition.name,
+                            condition_damage,
+                            &self.params.mode,
+                        ) * condition.stacks as f64
+                            * self.params.condition_mult
+                            * self.passive_condition_mult
+                            * frac;
+                    }
+                }
             }
-        }
-        if outgoing_damage > 0.0 {
-            self.record_damage(outgoing_damage, self.control_owned());
-        }
+            if outgoing_damage > 0.0 {
+                self.record_damage(outgoing_damage, self.control_owned());
+            }
 
-        let mut incoming_damage = 0.0;
-        for condition in &mut self.incoming_conditions {
-            if condition.next_tick_ms <= self.now_ms
-                && condition.next_tick_ms <= condition.expires_at_ms
-            {
-                incoming_damage +=
-                    condition_tick_damage(&condition.name, 1_800.0, &self.params.mode)
-                        * condition.stacks as f64;
-                condition.next_tick_ms += 1_000;
+            let mut incoming_damage = 0.0;
+            for condition in &mut self.incoming_conditions {
+                if condition.next_tick_ms <= self.now_ms
+                    && condition.next_tick_ms <= condition.expires_at_ms
+                {
+                    incoming_damage +=
+                        condition_tick_damage(&condition.name, 1_800.0, &self.params.mode)
+                            * condition.stacks as f64;
+                    condition.next_tick_ms += 1_000;
+                }
+                if condition.expires_at_ms <= self.now_ms {
+                    let frac = leftover_condition_fraction(condition);
+                    if frac > 0.0 {
+                        incoming_damage +=
+                            condition_tick_damage(&condition.name, 1_800.0, &self.params.mode)
+                                * condition.stacks as f64
+                                * frac;
+                    }
+                }
             }
+            if incoming_damage > 0.0 {
+                self.absorb_damage(incoming_damage * self.incoming_condition_mult);
+            }
+            self.outgoing_conditions
+                .retain(|condition| condition.expires_at_ms > self.now_ms);
+            self.incoming_conditions
+                .retain(|condition| condition.expires_at_ms > self.now_ms);
         }
-        if incoming_damage > 0.0 {
-            self.absorb_damage(incoming_damage * self.incoming_condition_mult);
-        }
-        self.outgoing_conditions
-            .retain(|condition| condition.expires_at_ms > self.now_ms);
-        self.incoming_conditions
-            .retain(|condition| condition.expires_at_ms > self.now_ms);
-    }
 
     fn apply_skill_effect(&mut self, skill_id: u32, effect: &SkillEffect, protected: bool) {
         match effect {
@@ -1067,7 +1138,7 @@ impl<'a> Timeline<'a> {
                 self.heal(amount);
             }
             SkillEffect::Barrier { amount } => {
-                self.barrier += amount + self.params.healing_power * 0.30;
+                self.apply_barrier(amount + self.params.healing_power * 0.30);
             }
             SkillEffect::RemovesCondition { conditions_removed } => {
                 self.cleanse(*conditions_removed)
@@ -1085,7 +1156,7 @@ impl<'a> Timeline<'a> {
                 interval_ms,
                 window_ms,
             } => {
-                self.remove_enemy_boons(if *interval_ms == 0 {
+                let _ = self.remove_enemy_boons(if *interval_ms == 0 {
                     // Zero interval = one immediate pulse, not a division.
                     *count_per_pulse
                 } else {
@@ -1093,9 +1164,25 @@ impl<'a> Timeline<'a> {
                         * ((*window_ms).max(*interval_ms))
                             .checked_div(*interval_ms)
                             .unwrap_or(0)
-                })
+                });
             }
-            SkillEffect::CorruptBoons | SkillEffect::StealBoons => self.remove_enemy_boons(1),
+            SkillEffect::CorruptBoons => {
+                for boon in self.remove_enemy_boons(1) {
+                    if let Some(condition) = corrupt_into(boon) {
+                        self.outgoing_conditions.push(TimedCondition {
+                            name: condition.into(),
+                            stacks: 1,
+                            expires_at_ms: self.now_ms.saturating_add(1_000),
+                            next_tick_ms: self.now_ms.saturating_add(1_000),
+                        });
+                    }
+                }
+            }
+            SkillEffect::StealBoons => {
+                for boon in self.remove_enemy_boons(1) {
+                    self.apply_buff(boon, 1, 1_000, true);
+                }
+            }
             SkillEffect::ConvertConditions => {
                 let count = self.incoming_conditions.len() as u32;
                 self.cleanse(count.max(1));
@@ -1290,7 +1377,7 @@ impl<'a> Timeline<'a> {
                 EffectCategory::StrikeDamagePct => {
                     let proc_damage = self.params.weapon_strength * self.params.power
                         / reference_armor()
-                        * as_ratio(value).max(0.01);
+                        * as_ratio(value);
                     self.record_damage(proc_damage, protected);
                 }
                 EffectCategory::AppliesBoon
@@ -1512,7 +1599,7 @@ impl<'a> Timeline<'a> {
         let sustain_margin = (self.healing + self.barrier_absorbed + self.avoided_damage
             - self.incoming_damage)
             / (self.profile.duration_ms as f64 / 1_000.0).max(1.0);
-        let target_reached = self.enemy_health <= 0.0;
+        let target_reached = self.profile.target_health.is_some() && self.enemy_health <= 0.0;
         let sequence = secured_sequence_summary(
             &self.secured_tick_times,
             &self.protected_actions,
@@ -1537,7 +1624,7 @@ impl<'a> Timeline<'a> {
 
         WvwCombatReport {
             duration_ms: self.profile.duration_ms,
-            target_health: self.profile.target_health,
+            target_health: self.profile.target_health.unwrap_or(0.0),
             target_reached_at_ms: self.target_reached_at_ms,
             longest_protected_window_ms: self.longest_protected_window_ms,
             protected_action_count: self.protected_action_count,
@@ -1712,6 +1799,18 @@ fn as_ratio(value: f64) -> f64 {
     }
 }
 
+fn leftover_condition_fraction(condition: &TimedCondition) -> f64 {
+    let period_start = condition.next_tick_ms.saturating_sub(1_000);
+    if condition.expires_at_ms <= period_start {
+        return 0.0;
+    }
+    let remaining_ms = condition.expires_at_ms - period_start;
+    if remaining_ms >= 1_000 {
+        return 0.0;
+    }
+    remaining_ms as f64 / 1_000.0
+}
+
 fn same_trigger(left: &TriggerRule, right: &TriggerRule) -> bool {
     matches!(
         (left, right),
@@ -1799,7 +1898,7 @@ mod tests {
     fn profile(duration_ms: u32, events: Vec<EnemyEvent>) -> WvwProfile {
         WvwProfile {
             duration_ms,
-            target_health: 18_000.0,
+            target_health: Some(18_000.0),
             enemy_events: events.into(),
             required_window_ms: MIN_PROTECTED_WINDOW_MS,
             desired_window_ms: TARGET_PROTECTED_WINDOW_MS.min(duration_ms),
@@ -2860,4 +2959,254 @@ mod tests {
             "1s pulse must be DoT {dot}, not on-skill-use {on_use}; got {pulse}"
         );
     }
+
+    #[test]
+        fn barrier_expires_after_five_seconds_and_caps_at_quarter_health() {
+            let params = params();
+            let mut timeline = Timeline::new(
+                &[],
+                &params,
+                profile(10_000, vec![]),
+                open_enemy(false),
+                &[],
+                &[],
+                true,
+                0,
+            );
+            let cap = params.max_health * WVW_BARRIER_HEALTH_FRACTION;
+            timeline.apply_barrier(params.max_health);
+            let total: f64 = timeline.barrier.iter().map(|layer| layer.amount).sum();
+            assert!((total - cap).abs() < 0.001, "cap {cap}, got {total}");
+            timeline.apply_barrier(10_000.0);
+            let total: f64 = timeline.barrier.iter().map(|layer| layer.amount).sum();
+            assert!(total <= cap + 0.001);
+
+            timeline.now_ms = 8_000;
+            timeline.expire_timed_state();
+            let absorbed_before = timeline.barrier_absorbed;
+            let incoming_before = timeline.incoming_damage;
+            timeline.absorb_damage(1_000.0);
+            assert_eq!(timeline.barrier_absorbed, absorbed_before);
+            assert!((timeline.incoming_damage - incoming_before - 1_000.0).abs() < 0.001);
+        }
+
+        #[test]
+        fn interrupt_sets_five_second_cooldown() {
+            let skills = vec![skill(
+                1,
+                SkillSlot::Weapon2,
+                1_000,
+                30_000,
+                vec![SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: 1.0,
+                }],
+            )];
+            let params = params();
+            let mut timeline = Timeline::new(
+                &skills,
+                &params,
+                profile(2_000, vec![]),
+                open_enemy(false),
+                &[],
+                &[],
+                true,
+                0,
+            );
+            timeline.start_cast(0);
+            assert_eq!(timeline.cooldown_ready_ms[0], 30_000);
+            timeline.now_ms = 200;
+            timeline.receive_control(900, false);
+            assert_eq!(timeline.interrupted_casts, 1);
+            assert!(timeline.pending.is_none());
+            assert_eq!(timeline.cooldown_ready_ms[0], 5_200);
+        }
+
+        #[test]
+        fn killed_dummy_stops_incoming_after_one_second() {
+            let skills = vec![skill(
+                1,
+                SkillSlot::Weapon2,
+                50,
+                1_000,
+                vec![SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: 8.0,
+                }],
+            )];
+            let events = vec![
+                EnemyEvent {
+                    at_ms: 2_000,
+                    kind: EnemyEventKind::Strike {
+                        damage: 3_000.0,
+                        unblockable: true,
+                    },
+                },
+                EnemyEvent {
+                    at_ms: 2_500,
+                    kind: EnemyEventKind::Control {
+                        duration_ms: 1_100,
+                        unblockable: true,
+                    },
+                },
+                EnemyEvent {
+                    at_ms: 3_000,
+                    kind: EnemyEventKind::Condition {
+                        condition: "Bleeding".into(),
+                        stacks: 5,
+                        duration_ms: 4_000,
+                    },
+                },
+                EnemyEvent {
+                    at_ms: 3_500,
+                    kind: EnemyEventKind::BoonStrip { count: 1 },
+                },
+            ];
+            let mut fight = profile(5_000, events);
+            fight.target_health = Some(1.0);
+            let params = params();
+            let report = run_report(&skills, &[], open_enemy(false), fight, &params);
+            assert!(report.target_reached);
+            assert!(report.target_reached_at_ms.expect("kill time") <= 1_000);
+            assert_eq!(report.incoming_damage, 0.0);
+            assert_eq!(report.interrupted_casts, 0);
+        }
+
+        #[test]
+        fn fractional_condition_pays_half_tick_on_expiry() {
+            let params = params();
+            let mut timeline = Timeline::new(
+                &[],
+                &params,
+                profile(5_000, vec![]),
+                open_enemy(false),
+                &[],
+                &[],
+                true,
+                0,
+            );
+            timeline.outgoing_conditions.push(TimedCondition {
+                name: "Bleeding".into(),
+                stacks: 1,
+                expires_at_ms: 1_500,
+                next_tick_ms: 1_000,
+            });
+            let one_tick = condition_tick_damage("Bleeding", params.condition_damage, &params.mode);
+            timeline.now_ms = 1_000;
+            timeline.tick_conditions();
+            timeline.now_ms = 1_500;
+            timeline.tick_conditions();
+            let total: f64 = timeline.damage_events.iter().map(|event| event.amount).sum();
+            assert!(
+                (total - one_tick * 1.5).abs() < 0.001,
+                "expected 1.5 ticks ({}) got {total}",
+                one_tick * 1.5
+            );
+            assert!(timeline.outgoing_conditions.is_empty());
+        }
+
+        #[test]
+        fn no_outcome_target_never_reaches() {
+            let params = params();
+            let enemy = EnemyDummy {
+                protection: false,
+                stability: false,
+                hp: None,
+            };
+            let scenario = ScenarioSpec {
+                game_mode: GameMode::WvW,
+                combat_tier: CombatTier::Squad,
+                combat_kind: CombatKind::StrikeSpike,
+                target_profile: TargetProfile::Single,
+                optimization_target: OptimizationTarget {
+                    label: "no-target".into(),
+                },
+                patch_id: None,
+                objective_profile_id: None,
+            };
+            let built = WvwProfile::for_scenario(&scenario, &enemy, &params, 5_000);
+            assert!(built.target_health.is_none());
+            let skills = vec![skill(
+                1,
+                SkillSlot::Weapon2,
+                50,
+                200,
+                vec![SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: 20.0,
+                }],
+            )];
+            let report = run_report(&skills, &[], enemy, built, &params);
+            assert!(!report.target_reached);
+            assert!(report.target_reached_at_ms.is_none());
+            assert!(report.total_damage > 0.0);
+        }
+
+        #[test]
+        fn unknown_strike_pct_is_unmodeled_not_one_percent() {
+            use crate::data::normalized_effects::{StackingRule, UptimeModel, UptimeModelKind};
+            use crate::data::EvidenceLevel;
+            let effect = NormalizedEffect {
+                effect_id: "test-unknown-strike".into(),
+                source_type: SourceType::Relic,
+                source_id: 1,
+                source_name: "test".into(),
+                category: EffectCategory::StrikeDamagePct,
+                value: FactualValue::Unknown,
+                stacking_rule: StackingRule::NonStacking,
+                trigger_rule: TriggerRule::OnHit,
+                uptime_model: UptimeModel {
+                    kind: UptimeModelKind::Unknown,
+                    uptime: None,
+                },
+                evidence_level: EvidenceLevel::Unknown,
+                source: None,
+                effect_duration: None,
+                internal_cooldown: None,
+                max_stacks: None,
+                status_operation: None,
+                inner_category: None,
+            };
+            let params = params();
+            let timeline = Timeline::new(
+                &[],
+                &params,
+                profile(1_000, vec![]),
+                open_enemy(false),
+                &[&effect],
+                &[],
+                true,
+                0,
+            );
+            assert_eq!(timeline.unmodeled_effect_sources, 1);
+            assert!(timeline.proc_specs.is_empty());
+        }
+
+        #[test]
+        fn corrupt_maps_condition_steal_grants_boon() {
+            let params = params();
+            let mut timeline = Timeline::new(
+                &[],
+                &params,
+                profile(2_000, vec![]),
+                open_enemy(true),
+                &[],
+                &[],
+                true,
+                0,
+            );
+            timeline.enemy_protection = true;
+            timeline.apply_skill_effect(1, &SkillEffect::CorruptBoons, false);
+            assert!(!timeline.enemy_stability);
+            assert_eq!(timeline.outgoing_conditions[0].name, "Fear");
+            timeline.apply_skill_effect(1, &SkillEffect::StealBoons, false);
+            assert!(!timeline.enemy_protection);
+            assert!(timeline.has_buff("Protection"));
+            let conditions = timeline.outgoing_conditions.len();
+            let buffs = timeline.buffs.len();
+            timeline.apply_skill_effect(1, &SkillEffect::CorruptBoons, false);
+            timeline.apply_skill_effect(1, &SkillEffect::StealBoons, false);
+            assert_eq!(timeline.outgoing_conditions.len(), conditions);
+            assert_eq!(timeline.buffs.len(), buffs);
+        }
 }

@@ -2,6 +2,32 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.7.25 - 2026-08-30
+
+### Combat
+
+- WvW barrier now expires after 5 seconds and caps at 25% of max health.
+- Interrupted skills use a 5 second cooldown instead of their full recharge.
+- A killed dummy no longer keeps punching you for the rest of the window.
+- Condition leftover fractions tick (1.5s pays 1.5 ticks, not 1 or 2).
+- Large-scale WvW profiles with no kill target no longer invent 18k/24k/35k HP.
+- Rotation scheduler values strike crit the same way the evaluator does.
+- Corrupt converts the stripped boon; Steal grants it to you.
+
+### Overlay
+
+- News feed text no longer eats words after a bare `&`.
+- A failed feed fetch keeps the last good items and retries in 45 seconds, not 30 minutes of empty.
+- Lock/news counts use the active language's plural rule (English "21 locks", not "21 lock").
+- Localized weapon labels accept Harpoon / Harpoon Gun like English does.
+
+### Other
+
+- Game-data refresh no longer reports success when the icon folder cannot be created.
+- API key requests reject lookalike loopback hosts (`127.0.0.1.evil.com`).
+- GuildJen scrape treats an empty or blocked index as down, not "done 0".
+- Scraper redirects stay on the same host; Luminary is on the shared spec list.
+
 ## 1.7.24 - 2026-08-30
 
 ### Fixed

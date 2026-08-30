@@ -194,8 +194,8 @@ pub fn loc_weapon_type(api_type: &str) -> String {
         return canonical_weapon_type(api_type);
     }
     weapon_label(&lang, api_type)
-        .unwrap_or(api_type)
-        .to_string()
+        .map(str::to_string)
+        .unwrap_or_else(|| canonical_weapon_type(api_type))
 }
 
 /// Localize a `Dagger / Dagger` weapon-set label.
@@ -252,49 +252,42 @@ pub fn canonical_weapon_type(name: &str) -> String {
     }
 }
 
-fn weapon_label<'a>(lang: &str, ty: &'a str) -> Option<&'a str> {
-    let key = alnum_key(ty);
-    let row: [&str; 5] = match key.as_str() {
-        "axe" => ["Axe", "Hache", "Axt", "Hacha", "斧"],
-        "dagger" => ["Dagger", "Dague", "Dolch", "Daga", "匕首"],
-        "mace" => ["Mace", "Masse", "Streitkolben", "Maza", "锤"],
-        "pistol" => ["Pistol", "Pistolet", "Pistole", "Pistola", "手枪"],
-        "scepter" => ["Scepter", "Sceptre", "Zepter", "Cetro", "节杖"],
-        "sword" => ["Sword", "Épée", "Schwert", "Espada", "剑"],
-        "focus" => ["Focus", "Focus", "Fokus", "Foco", "聚能器"],
-        "shield" => ["Shield", "Bouclier", "Schild", "Escudo", "盾"],
-        "torch" => ["Torch", "Torche", "Fackel", "Antorcha", "火炬"],
+fn weapon_label(lang: &str, ty: &str) -> Option<&'static str> {
+    // de/es/fr/zh only — loc_weapon_type never calls this for other codes.
+    let key = weapon_type_key(ty);
+    let row: [&str; 4] = match key.as_str() {
+        "axe" => ["Hache", "Axt", "Hacha", "斧"],
+        "dagger" => ["Dague", "Dolch", "Daga", "匕首"],
+        "mace" => ["Masse", "Streitkolben", "Maza", "锤"],
+        "pistol" => ["Pistolet", "Pistole", "Pistola", "手枪"],
+        "scepter" => ["Sceptre", "Zepter", "Cetro", "节杖"],
+        "sword" => ["Épée", "Schwert", "Espada", "剑"],
+        "focus" => ["Focus", "Fokus", "Foco", "聚能器"],
+        "shield" => ["Bouclier", "Schild", "Escudo", "盾"],
+        "torch" => ["Torche", "Fackel", "Antorcha", "火炬"],
         "warhorn" => [
-            "Warhorn",
             "Cor de guerre",
             "Kriegshorn",
             "Cuerno de guerra",
             "战争号角",
         ],
-        "greatsword" => ["Greatsword", "Espadon", "Großschwert", "Mandoble", "巨剑"],
-        "hammer" => ["Hammer", "Marteau", "Hammer", "Martillo", "锤子"],
-        "longbow" => ["LongBow", "Arc long", "Langbogen", "Arco largo", "长弓"],
-        "rifle" => ["Rifle", "Fusil", "Gewehr", "Rifle", "步枪"],
-        "shortbow" => ["ShortBow", "Arc court", "Kurzbogen", "Arco corto", "短弓"],
-        "staff" => ["Staff", "Bâton", "Stab", "Báculo", "法杖"],
-        "harpoon" => ["Harpoon", "Harpon", "Harpune", "Arpón", "鱼叉"],
-        "speargun" => [
-            "Speargun",
-            "Fusil-harpon",
-            "Harpunenschleuder",
-            "Cañón arpón",
-            "鱼叉枪",
-        ],
-        "trident" => ["Trident", "Trident", "Dreizack", "Tridente", "三叉戟"],
-        "spear" => ["Spear", "Lance", "Speer", "Lanza", "长矛"],
+        "greatsword" => ["Espadon", "Großschwert", "Mandoble", "巨剑"],
+        "hammer" => ["Marteau", "Hammer", "Martillo", "锤子"],
+        "longbow" => ["Arc long", "Langbogen", "Arco largo", "长弓"],
+        "rifle" => ["Fusil", "Gewehr", "Rifle", "步枪"],
+        "shortbow" => ["Arc court", "Kurzbogen", "Arco corto", "短弓"],
+        "staff" => ["Bâton", "Stab", "Báculo", "法杖"],
+        "speargun" => ["Fusil-harpon", "Harpunenschleuder", "Cañón arpón", "鱼叉枪"],
+        "trident" => ["Trident", "Dreizack", "Tridente", "三叉戟"],
+        "spear" => ["Lance", "Speer", "Lanza", "长矛"],
         _ => return None,
     };
     Some(match lang {
-        "fr" => row[1],
-        "de" => row[2],
-        "es" => row[3],
-        "zh" => row[4],
-        _ => row[0],
+        "fr" => row[0],
+        "de" => row[1],
+        "es" => row[2],
+        "zh" => row[3],
+        _ => return None,
     })
 }
 
@@ -307,14 +300,10 @@ pub fn tf(key: &str, args: &[(&str, &str)]) -> String {
     s
 }
 
-/// CLDR plural category for the Slavic pluralization pattern (Polish,
-/// Russian, and related languages). The Germanic/English two-form rule
-/// (`n == 1` vs everything else) is wrong for these locales: 2, 3, and 4
-/// take a distinct "few" form, separate from both "one" and "many".
+/// Catalog bucket (`fmt.*_one` / `_few` / `_many`) selected by the active locale.
 ///
-/// Rule (CLDR, integers): `one` when `n % 10 == 1 && n % 100 != 11`;
-/// `few` when `n % 10` is 2..=4 and `n % 100` is not 12..=14; otherwise
-/// `many` (covers 0, 5..=20, and the rest).
+/// `slavic_plural_form` dispatches on `current()`: Germanic two-form, French
+/// 0/1, Russian CLDR, Polish CLDR. ja/zh/ko strings are identical across forms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlavicPluralForm {
     One,
@@ -322,16 +311,53 @@ pub enum SlavicPluralForm {
     Many,
 }
 
-/// Classify `n` into the CLDR plural category used by Polish and Russian.
+/// Classify `n` into the CLDR one/few/many bucket for the **active** locale.
+///
+/// Callers (`lock_count_key`, `news_count_key`) stay language-blind: this
+/// reads `current()` so English is not fed the Russian rule.
 pub fn slavic_plural_form(n: u64) -> SlavicPluralForm {
-    let mod10 = n % 10;
-    let mod100 = n % 100;
-    if mod10 == 1 && mod100 != 11 {
-        SlavicPluralForm::One
-    } else if (2..=4).contains(&mod10) && !(12..=14).contains(&mod100) {
-        SlavicPluralForm::Few
-    } else {
-        SlavicPluralForm::Many
+    match current().as_str() {
+        "fr" => {
+            if n <= 1 {
+                SlavicPluralForm::One
+            } else {
+                SlavicPluralForm::Many
+            }
+        }
+        "ru" => {
+            let mod10 = n % 10;
+            let mod100 = n % 100;
+            if mod10 == 1 && mod100 != 11 {
+                SlavicPluralForm::One
+            } else if (2..=4).contains(&mod10) && !(12..=14).contains(&mod100) {
+                SlavicPluralForm::Few
+            } else {
+                SlavicPluralForm::Many
+            }
+        }
+        "pl" => {
+            if n == 1 {
+                SlavicPluralForm::One
+            } else {
+                let mod10 = n % 10;
+                let mod100 = n % 100;
+                if (2..=4).contains(&mod10) && !(12..=14).contains(&mod100) {
+                    SlavicPluralForm::Few
+                } else {
+                    SlavicPluralForm::Many
+                }
+            }
+        }
+        // ja/zh/ko: catalogs use the same string for every form.
+        "ja" | "zh" | "ko" => SlavicPluralForm::Many,
+        // en/de/es/it/pt/nl (and unknown): n == 1 ? one : many
+        _ => {
+            if n == 1 {
+                SlavicPluralForm::One
+            } else {
+                SlavicPluralForm::Many
+            }
+        }
     }
 }
 
@@ -456,10 +482,19 @@ mod tests {
             assert_eq!(loc_weapon_type("Dagger"), "Dague");
             assert_eq!(loc_weapon_types("Dagger / ShortBow"), "Dague / Arc court");
             assert_eq!(loc_weapon_type("Short Bow"), "Arc court");
+            assert_eq!(loc_weapon_type("Harpoon"), "Lance");
+            assert_eq!(loc_weapon_type("Harpoon Gun"), "Fusil-harpon");
+        });
+        with_lang("de", || {
+            assert_eq!(loc_weapon_type("Harpoon"), "Speer");
+            assert_eq!(loc_weapon_type("Harpoon Gun"), "Harpunenschleuder");
+            assert_eq!(loc_weapon_type("LongBow"), "Langbogen");
         });
         with_lang("en", || {
             assert_eq!(loc_weapon_type("Dagger"), "Dagger");
             assert_eq!(loc_weapon_type("ShortBow"), "Shortbow");
+            assert_eq!(loc_weapon_type("Harpoon"), "Spear");
+            assert_eq!(loc_weapon_type("Harpoon Gun"), "Speargun");
         });
     }
 
@@ -485,22 +520,43 @@ mod tests {
     }
 
     #[test]
-    fn polish_plural_two_uses_few_form() {
-        // Germanic two-form pluralization (n == 1 ? one : many) would bucket
-        // 2 together with 5, 11, and 25. Polish (and Russian) need a third
-        // "few" bucket for 2-4, excluding 12-14.
-        assert_eq!(slavic_plural_form(2), SlavicPluralForm::Few);
-        assert_eq!(slavic_plural_form(3), SlavicPluralForm::Few);
-        assert_eq!(slavic_plural_form(4), SlavicPluralForm::Few);
-        assert_eq!(slavic_plural_form(22), SlavicPluralForm::Few);
-        assert_eq!(slavic_plural_form(1), SlavicPluralForm::One);
-        assert_eq!(slavic_plural_form(21), SlavicPluralForm::One);
-        assert_eq!(slavic_plural_form(0), SlavicPluralForm::Many);
-        assert_eq!(slavic_plural_form(5), SlavicPluralForm::Many);
-        assert_eq!(slavic_plural_form(11), SlavicPluralForm::Many);
-        assert_eq!(slavic_plural_form(12), SlavicPluralForm::Many);
-        // The two-form English rule would put 2 and 5 in the same bucket.
-        assert_ne!(slavic_plural_form(2), slavic_plural_form(5));
+    fn plural_form_follows_active_locale() {
+        with_lang("en", || {
+            assert_eq!(slavic_plural_form(1), SlavicPluralForm::One);
+            assert_eq!(slavic_plural_form(21), SlavicPluralForm::Many);
+            assert_eq!(slavic_plural_form(0), SlavicPluralForm::Many);
+            assert_eq!(slavic_plural_form(2), SlavicPluralForm::Many);
+        });
+        with_lang("de", || {
+            assert_eq!(slavic_plural_form(1), SlavicPluralForm::One);
+            assert_eq!(slavic_plural_form(21), SlavicPluralForm::Many);
+        });
+        with_lang("fr", || {
+            assert_eq!(slavic_plural_form(0), SlavicPluralForm::One);
+            assert_eq!(slavic_plural_form(1), SlavicPluralForm::One);
+            assert_eq!(slavic_plural_form(2), SlavicPluralForm::Many);
+        });
+        with_lang("ru", || {
+            assert_eq!(slavic_plural_form(1), SlavicPluralForm::One);
+            assert_eq!(slavic_plural_form(21), SlavicPluralForm::One);
+            assert_eq!(slavic_plural_form(2), SlavicPluralForm::Few);
+            assert_eq!(slavic_plural_form(22), SlavicPluralForm::Few);
+            assert_eq!(slavic_plural_form(0), SlavicPluralForm::Many);
+            assert_eq!(slavic_plural_form(5), SlavicPluralForm::Many);
+            assert_eq!(slavic_plural_form(11), SlavicPluralForm::Many);
+            assert_eq!(slavic_plural_form(12), SlavicPluralForm::Many);
+            assert_ne!(slavic_plural_form(2), slavic_plural_form(5));
+        });
+        with_lang("pl", || {
+            assert_eq!(slavic_plural_form(1), SlavicPluralForm::One);
+            assert_eq!(slavic_plural_form(21), SlavicPluralForm::Many);
+            assert_eq!(slavic_plural_form(2), SlavicPluralForm::Few);
+            assert_eq!(slavic_plural_form(3), SlavicPluralForm::Few);
+            assert_eq!(slavic_plural_form(4), SlavicPluralForm::Few);
+            assert_eq!(slavic_plural_form(22), SlavicPluralForm::Few);
+            assert_eq!(slavic_plural_form(12), SlavicPluralForm::Many);
+            assert_eq!(slavic_plural_form(5), SlavicPluralForm::Many);
+        });
     }
 
     #[test]

@@ -631,7 +631,9 @@ fn scrape_guildjen(
     ];
 
     let mut builds = Vec::new();
+    let mut last_html: Option<String> = None;
     let mut any_success = false;
+    let mut saw_link = false;
 
     for index_url in &index_urls {
         if should_cancel() {
@@ -646,9 +648,16 @@ fn scrape_guildjen(
         let Ok(html) = fetch_html(client, index_url) else {
             continue;
         };
-
-        let links = extract_build_links(&html, "guildjen.com/", 40);
+        last_html = Some(html.clone());
         any_success = true;
+        // Path needle matches both absolute `https://guildjen.com/wvw-builds/…`
+        // and relative `/wvw-builds/…` so the relative pin branch is reachable.
+        let needle = if index_url.contains("wvw") {
+            "/wvw-builds/"
+        } else {
+            "/pvp-builds/"
+        };
+        let links = extract_build_links(&html, needle, 40);
         let cap = links.len().min(15);
 
         for (i, link) in links.into_iter().take(15).enumerate() {
@@ -665,6 +674,7 @@ fn scrape_guildjen(
             } else {
                 format!("https://guildjen.com{}", link)
             };
+            saw_link = true;
             if let Ok(mut b) = scrape_guildjen_build(client, &url, today) {
                 b.mode = mode.to_string();
                 builds.push(b);
@@ -675,6 +685,21 @@ fn scrape_guildjen(
 
     if !any_success {
         return Err("GuildJen: failed to fetch any index pages".to_string());
+    }
+    if !saw_link {
+        if last_html
+            .as_deref()
+            .map(looks_like_blocked_page)
+            .unwrap_or(false)
+        {
+            return Err(
+                "GuildJen: request was intercepted by a network block/filter page \
+                 (the domain appears restricted by your gateway/firewall — allowlist \
+                 guildjen.com, e.g. on your UniFi/UDMPro content filter)"
+                    .into(),
+            );
+        }
+        return Err("GuildJen: no build links found on any index page".into());
     }
     Ok((builds, false))
 }
@@ -1032,37 +1057,9 @@ fn extract_relic(html: &str) -> String {
     String::new()
 }
 
-/// Extract trait names from HTML (look for known specialization names as section headers).
+/// Extract specialization/profession names from HTML (known names as section headers).
 fn extract_traits(html: &str) -> Vec<String> {
-    let known_specs = [
-        "Firebrand",
-        "Willbender",
-        "Dragonhunter",
-        "Berserker",
-        "Spellbreaker",
-        "Bladesworn",
-        "Scrapper",
-        "Mechanist",
-        "Holosmith",
-        "Soulbeast",
-        "Untamed",
-        "Druid",
-        "Daredevil",
-        "Specter",
-        "Deadeye",
-        "Weaver",
-        "Tempest",
-        "Catalyst",
-        "Chronomancer",
-        "Virtuoso",
-        "Mirage",
-        "Scourge",
-        "Harbinger",
-        "Reaper",
-        "Renegade",
-        "Vindicator",
-        "Herald",
-        // Core specs
+    const CORE_PROFESSIONS: &[&str] = &[
         "Guardian",
         "Warrior",
         "Engineer",
@@ -1074,9 +1071,11 @@ fn extract_traits(html: &str) -> Vec<String> {
         "Revenant",
     ];
     let mut traits = Vec::new();
-    for spec in &known_specs {
-        if html.contains(spec) && !traits.contains(&spec.to_string()) {
-            traits.push(spec.to_string());
+    let elites = KNOWN_SPECS.iter().map(|s| title_case(s));
+    let cores = CORE_PROFESSIONS.iter().copied().map(str::to_string);
+    for spec in elites.chain(cores) {
+        if html.contains(&spec) && !traits.contains(&spec) {
+            traits.push(spec);
             if traits.len() >= 3 {
                 break;
             }
@@ -1178,12 +1177,41 @@ fn sanitize_filename_component(name: &str) -> String {
     }
 }
 
+/// Follow a redirect only when the next URL's host matches the original request host.
+///
+/// `attempt.stop()` leaves the 3xx with `fetch_html`, which then rejects non-2xx.
+/// Hop cap matches reqwest's default (`previous[0]` is the original URL).
+/// Mockito is a gw2api-only dev-dep; the host check is unit-tested via
+/// [`redirect_stays_on_request_host`].
+fn same_host_redirect(attempt: reqwest::redirect::Attempt<'_>) -> reqwest::redirect::Action {
+    if attempt.previous().len() > 10 {
+        return attempt.error("too many redirects");
+    }
+    let origin = attempt.previous().first().and_then(|u| u.host_str());
+    let next = attempt.url().host_str();
+    if redirect_stays_on_request_host(origin, next) {
+        attempt.follow()
+    } else {
+        attempt.stop()
+    }
+}
+
+/// Whether a redirect target stays on the request's host (A16-7).
+fn redirect_stays_on_request_host(request_host: Option<&str>, next_host: Option<&str>) -> bool {
+    match (request_host, next_host) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        _ => false,
+    }
+}
+
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 fn build_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
     reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(std::time::Duration::from_secs(15))
+        // Origin pins at enqueue are end-to-end only if redirects cannot hop hosts.
+        .redirect(reqwest::redirect::Policy::custom(same_host_redirect))
         // Certificates must validate (Schannel trust store). The old
         // danger_accept_invalid_certs(true) here let any MITM poison the
         // benchmark cache that feeds optimizer comparisons and LLM prompts.
@@ -1266,6 +1294,25 @@ mod tests {
         let links = extract_build_links(html, "/builds/", 10);
         assert_eq!(links.len(), 1);
         assert_eq!(links[0], "/builds/guardian/firebrand");
+    }
+
+    #[test]
+    fn extract_build_links_guildjen_path_needle_matches_relative_and_absolute() {
+        let html = concat!(
+            r#"<a href="/wvw-builds/guardian-firebrand/">rel</a>"#,
+            r#"<a href="https://guildjen.com/wvw-builds/revenant-herald/">abs</a>"#,
+            r#"<a href="/pvp-builds/thief-daredevil/">other mode</a>"#,
+            r#"<a href="https://evil.example/wvw-builds/nope/">off</a>"#,
+        );
+        let links = extract_build_links(html, "/wvw-builds/", 10);
+        assert_eq!(
+            links,
+            vec![
+                "/wvw-builds/guardian-firebrand/".to_string(),
+                "https://guildjen.com/wvw-builds/revenant-herald/".to_string(),
+                "https://evil.example/wvw-builds/nope/".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -1387,6 +1434,30 @@ mod tests {
     fn test_title_case() {
         assert_eq!(title_case("power-dps"), "Power-dps");
         assert_eq!(title_case("guardian firebrand"), "Guardian Firebrand");
+    }
+
+    #[test]
+    fn extract_traits_includes_luminary_from_shared_known_specs() {
+        assert!(
+            KNOWN_SPECS.iter().any(|s| *s == "luminary"),
+            "KNOWN_SPECS must include luminary"
+        );
+        let traits = extract_traits("<h2>Luminary</h2>");
+        assert_eq!(traits, vec!["Luminary".to_string()]);
+    }
+
+    #[test]
+    fn redirect_stays_on_request_host_same_host_case_insensitive() {
+        assert!(redirect_stays_on_request_host(
+            Some("guildjen.com"),
+            Some("GuildJen.com")
+        ));
+        assert!(!redirect_stays_on_request_host(
+            Some("guildjen.com"),
+            Some("evil.example")
+        ));
+        assert!(!redirect_stays_on_request_host(Some("guildjen.com"), None));
+        assert!(!redirect_stays_on_request_host(None, Some("guildjen.com")));
     }
 
     #[test]
@@ -1699,12 +1770,7 @@ mod tests {
         let before = std::fs::read(&seeded_path).expect("read seed");
 
         let partial = sample_guardian_pve("SHOULD_NOT_LAND_ON_DISK");
-        let result = finish_source(
-            "snowcrows",
-            Ok((vec![partial], true)),
-            &tmp,
-            &|_, _| {},
-        );
+        let result = finish_source("snowcrows", Ok((vec![partial], true)), &tmp, &|_, _| {});
 
         assert_eq!(
             result.error.as_deref(),

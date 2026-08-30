@@ -30,7 +30,7 @@ pub struct BenchmarkBuild {
     pub sigils: Vec<String>,
     /// Relic name.
     pub relic: String,
-    /// Trait line names (short form, from page heading or text).
+    /// Specialization names detected on the page (heuristic).
     pub traits: Vec<String>,
     /// Skill names found on the page (heal, utilities, elite).
     pub skills: Vec<String>,
@@ -40,18 +40,6 @@ pub struct BenchmarkBuild {
     pub scraped_at: String,
     /// Any additional notes parsed from the page.
     pub notes: String,
-}
-
-impl BenchmarkBuild {
-    /// Canonical filename for this benchmark entry (for storage).
-    pub fn filename(&self) -> String {
-        format!(
-            "{}_{}_{}.json",
-            self.source,
-            self.profession.to_lowercase().replace(' ', "_"),
-            self.mode.to_lowercase()
-        )
-    }
 }
 
 /// Score delta between the optimizer's result and a community reference build.

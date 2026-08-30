@@ -39,6 +39,19 @@ fn report(
     });
 }
 
+/// `download_missing` already skips per-icon failures. Errors that escape
+/// it are terminal: `Cancelled` stays `Cancelled`; `Cache` (graphics-dir
+/// create) and any other `Err` must fail the refresh so the UI cannot
+/// report success when icons can never be written.
+fn propagate_icon_step<T>(result: Result<T, ApiError>) -> Result<T, ApiError> {
+    match result {
+        Ok(v) => Ok(v),
+        Err(ApiError::Cancelled) => Err(ApiError::Cancelled),
+        Err(ApiError::Cache(msg)) => Err(ApiError::Cache(msg)),
+        Err(e) => Err(e),
+    }
+}
+
 /// Download all game data, calling `on_progress` after each endpoint.
 /// Skips endpoints that are already cached at the current build.
 /// Returns the game build number on success.
@@ -238,9 +251,13 @@ fn download_steps(
     check()?;
     let urls = crate::graphics::collect_from_cache(cache);
     let gfx = cache.graphics_dir();
-    // A single bad icon must not abort a refresh, but cancellation must.
-    if let Err(ApiError::Cancelled) =
-        crate::graphics::download_missing(client, &gfx, &urls, |done, total| {
+    // Per-icon skips stay inside download_missing. Cancelled stays
+    // terminal; Cache and any other Err fail the refresh.
+    propagate_icon_step(crate::graphics::download_missing(
+        client,
+        &gfx,
+        &urls,
+        |done, total| {
             on_progress(DownloadProgress {
                 current_step: step,
                 total_steps: TOTAL_STEPS,
@@ -254,10 +271,8 @@ fn download_steps(
                 inner_done: done,
                 inner_total: total,
             });
-        })
-    {
-        return Err(ApiError::Cancelled);
-    }
+        },
+    ))?;
     report(&mut on_progress, &mut step, "Icons", None);
 
     Ok(build)
@@ -386,6 +401,39 @@ mod tests {
             elapsed < Duration::from_secs(5),
             "cancelled download took {elapsed:?} — it went to the network"
         );
+    }
+
+    #[test]
+    fn propagate_icon_step_does_not_swallow_cache() {
+        assert!(matches!(propagate_icon_step(Ok((1u32, 2u32))), Ok((1, 2))));
+        assert!(matches!(
+            propagate_icon_step::<()>(Err(ApiError::Cancelled)),
+            Err(ApiError::Cancelled)
+        ));
+        let cache_err = propagate_icon_step::<()>(Err(ApiError::Cache("denied".into())));
+        assert!(
+            matches!(cache_err, Err(ApiError::Cache(ref m)) if m == "denied"),
+            "{cache_err:?}"
+        );
+        assert!(matches!(
+            propagate_icon_step::<()>(Err(ApiError::Internal("x".into()))),
+            Err(ApiError::Internal(_))
+        ));
+    }
+
+    #[test]
+    fn download_missing_file_as_graphics_dir_is_cache() {
+        let path = temp_cache_dir("gfx_not_dir");
+        std::fs::write(&path, b"not-a-directory").unwrap();
+        let client = Gw2Client::without_key().unwrap();
+        let err = crate::graphics::download_missing(&client, &path, &[], |_, _| {})
+            .expect_err("create_dir_all on a file must fail");
+        let _ = std::fs::remove_file(&path);
+        assert!(matches!(err, ApiError::Cache(_)), "got {err:?}");
+        assert!(matches!(
+            propagate_icon_step::<(u32, u32)>(Err(err)),
+            Err(ApiError::Cache(_))
+        ));
     }
 
     /// Live smoke test for the whole download path. Lives here rather than in
