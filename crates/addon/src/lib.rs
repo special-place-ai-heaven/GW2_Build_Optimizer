@@ -56,7 +56,11 @@ static HOST_ATTACHED: AtomicBool = AtomicBool::new(false);
 static BOOTSTRAP_FAILED: AtomicBool = AtomicBool::new(false);
 static CHROME_AT: OnceLock<Instant> = OnceLock::new();
 
-/// Textures, quick access, and the ImGui `Render` hook. D3D work — not for `on_load`.
+/// D3D-touching chrome that must wait for ArcDPS to finish hooking: texture
+/// uploads and the Nexus quick-access entry. The ImGui `Render` hook for
+/// [`ui::render`] is registered in `on_load` because Nexus's render registry
+/// is locked for the whole frame and a `Register` call from inside a
+/// PostRender callback would mutate the very vector being iterated.
 fn attach_overlay_host() {
     if HOST_ATTACHED.load(Ordering::Acquire) {
         return;
@@ -85,7 +89,6 @@ fn attach_overlay_host() {
             "GW2 Build Optimizer",
         )
         .revert_on_unload();
-        register_render(RenderType::Render, nexus::gui::render!(ui::render)).revert_on_unload();
     });
     if result.is_err() {
         HOST_ATTACHED.store(false, Ordering::Release);
@@ -157,14 +160,26 @@ fn on_load() {
         )
         .revert_on_unload();
 
-        // Function pointer only — no D3D. Chrome attaches from the first
-        // PostRender after [`CHROME_SETTLE`], when ArcDPS has had time to hook.
+        // The `Render` hook for `ui::render` is registered on load. Nexus locks
+        // its render registry for the entire frame and iterates it on every
+        // PreRender/Render/PostRender pass; a `Register` call from inside a
+        // PostRender callback (deferring chrome attach) would push into the
+        // very vector being iterated. Texture uploads and the quick-access
+        // entry still defer to PostRender via `bootstrap_chrome`.
+        register_render(
+            RenderType::Render,
+            nexus::gui::render!(ui::render),
+        )
+        .revert_on_unload();
+
+        // Function pointer only — no D3D. Texture uploads and the quick-access
+        // entry attach from the first PostRender after [`CHROME_SETTLE`], when
+        // ArcDPS has had time to hook D3D11.
         register_render(
             RenderType::PostRender,
             nexus::gui::render!(bootstrap_chrome),
         )
         .revert_on_unload();
-
         log(
             LogLevel::Info,
             "GW2 Build Optimizer",
@@ -273,6 +288,10 @@ mod tests {
         assert!(
             body.contains("PostRender"),
             "on_load registers a PostRender bootstrap so chrome can attach after ArcDPS"
+        );
+        assert!(
+            body.contains("RenderType::Render"),
+            "on_load must register the Render hook for ui::render; registering it from PostRender mutates the very vector Nexus is iterating (heap crash)"
         );
     }
 
