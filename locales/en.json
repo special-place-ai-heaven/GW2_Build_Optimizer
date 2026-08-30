@@ -610,5 +610,8 @@
   "news.kind.video.hint": "ArenaNet videos. Watch in the browser.",
   "news.kind.guides.hint": "Community build guides.",
   "fmt.news_count": "{n} stories",
+  "fmt.news_one": "{n} story",
+  "fmt.news_few": "{n} stories",
+  "fmt.news_many": "{n} stories",
   "setup.news_header": "GUILD WARS 2"
 }
