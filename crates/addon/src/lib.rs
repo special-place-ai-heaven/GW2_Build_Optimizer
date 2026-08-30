@@ -12,7 +12,11 @@ use nexus::keybind::{keybind_handler, register_keybind_with_string};
 use nexus::log::{log, LogLevel};
 use nexus::paths::get_addon_dir;
 use nexus::quick_access::add_quick_access;
+use nexus::imgui::Ui;
 use nexus::texture::get_texture_or_create_from_memory;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 /// Crate version from `Cargo.toml`. UI and logs must use this, never a literal.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -41,6 +45,83 @@ fn load_guard(run: impl FnOnce() + std::panic::UnwindSafe) {
     }
 }
 
+/// Heap crash (0xC0000374) hits ~1s after load, while ArcDPS is still hooking
+/// D3D11. First PostRender can fire before that, so wait this out first.
+pub(crate) const CHROME_SETTLE: Duration = Duration::from_millis(2000);
+
+/// `attach_overlay_host` is one-shot. `BOOTSTRAP_FAILED` flips on a panic inside
+/// attach so the next PostRender can retry — a permanent fail would leave the
+/// overlay dead with no path back without an addon reload.
+static HOST_ATTACHED: AtomicBool = AtomicBool::new(false);
+static BOOTSTRAP_FAILED: AtomicBool = AtomicBool::new(false);
+static CHROME_AT: OnceLock<Instant> = OnceLock::new();
+
+/// Textures, quick access, and the ImGui `Render` hook. D3D work — not for `on_load`.
+fn attach_overlay_host() {
+    if HOST_ATTACHED.load(Ordering::Acquire) {
+        return;
+    }
+    if BOOTSTRAP_FAILED.load(Ordering::Acquire) {
+        return;
+    }
+    // Claim the slot *before* doing D3D work. If the swap loses, another caller
+    // already attached. If we panic after this point we still flag the failure
+    // so the bootstrapper can retry next frame.
+    HOST_ATTACHED.store(true, Ordering::Release);
+    let result = std::panic::catch_unwind(|| {
+        let _ = get_texture_or_create_from_memory(
+            "GW2_BUILD_OPT_ICON_v1",
+            include_bytes!("../assets/build_optimizer.png"),
+        );
+        let _ = get_texture_or_create_from_memory(
+            "GW2_BUILD_OPT_ICON_HOVER_v1",
+            include_bytes!("../assets/build_optimizer_hover.png"),
+        );
+        add_quick_access(
+            "QA_GW2_BUILD_OPTIMIZER",
+            "GW2_BUILD_OPT_ICON_v1",
+            "GW2_BUILD_OPT_ICON_HOVER_v1",
+            "GW2_BUILD_OPT_TOGGLE",
+            "GW2 Build Optimizer",
+        )
+        .revert_on_unload();
+        register_render(RenderType::Render, nexus::gui::render!(ui::render)).revert_on_unload();
+    });
+    if result.is_err() {
+        HOST_ATTACHED.store(false, Ordering::Release);
+        BOOTSTRAP_FAILED.store(true, Ordering::Release);
+        log(
+            LogLevel::Warning,
+            "GW2 Build Optimizer",
+            "Overlay chrome attach panicked; will not retry this session.",
+        );
+    } else {
+        log(
+            LogLevel::Info,
+            "GW2 Build Optimizer",
+            "Overlay chrome attached.",
+        );
+    }
+}
+
+/// PostRender callback Nexus invokes once per frame after the ImGui frame ends.
+/// Nexus only fires this once it has a stable frame, which is the earliest
+/// point we trust ArcDPS has finished hooking D3D11. We still wait
+/// [`CHROME_SETTLE`] past `state::init` so a slow machine where Nexus starts
+/// framing before ArcDPS settles still has the buffer observed in production.
+fn bootstrap_chrome(_ui: &Ui) {
+    let Some(at) = CHROME_AT.get() else {
+        return;
+    };
+    if Instant::now() < *at {
+        return;
+    }
+    if HOST_ATTACHED.load(Ordering::Acquire) {
+        return;
+    }
+    attach_overlay_host();
+}
+
 fn on_load() {
     load_guard(|| {
         let Some(addon_dir) = get_addon_dir("gw2_build_optimizer") else {
@@ -53,7 +134,7 @@ fn on_load() {
         };
 
         state::init(addon_dir);
-        ui::fonts::init();
+        let _ = CHROME_AT.set(Instant::now() + CHROME_SETTLE);
 
         register_keybind_with_string(
             "GW2_BUILD_OPT_TOGGLE",
@@ -76,24 +157,13 @@ fn on_load() {
         )
         .revert_on_unload();
 
-        let _ = get_texture_or_create_from_memory(
-            "GW2_BUILD_OPT_ICON_v1",
-            include_bytes!("../assets/build_optimizer.png"),
-        );
-        let _ = get_texture_or_create_from_memory(
-            "GW2_BUILD_OPT_ICON_HOVER_v1",
-            include_bytes!("../assets/build_optimizer_hover.png"),
-        );
-        add_quick_access(
-            "QA_GW2_BUILD_OPTIMIZER",
-            "GW2_BUILD_OPT_ICON_v1",
-            "GW2_BUILD_OPT_ICON_HOVER_v1",
-            "GW2_BUILD_OPT_TOGGLE",
-            "GW2 Build Optimizer",
+        // Function pointer only — no D3D. Chrome attaches from the first
+        // PostRender after [`CHROME_SETTLE`], when ArcDPS has had time to hook.
+        register_render(
+            RenderType::PostRender,
+            nexus::gui::render!(bootstrap_chrome),
         )
         .revert_on_unload();
-
-        register_render(RenderType::Render, nexus::gui::render!(ui::render)).revert_on_unload();
 
         log(
             LogLevel::Info,
@@ -131,6 +201,8 @@ fn on_unload() {
     let report = std::panic::catch_unwind(|| state::join_workers(state::UNLOAD_JOIN_BUDGET))
         .unwrap_or_default();
     unload_step("release state", state::clear);
+    HOST_ATTACHED.store(false, Ordering::SeqCst);
+    BOOTSTRAP_FAILED.store(false, Ordering::SeqCst);
 
     log(
         LogLevel::Info,
@@ -155,6 +227,8 @@ fn on_unload() {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     /// Pin: `state::init` (and the rest of load) must sit behind `catch_unwind`
     /// so a panic cannot cross Nexus `C-unwind`. Freeze SHA had `catch_unwind`
     /// only on the keybind nested inside `on_load`, after `state::init`.
@@ -183,6 +257,82 @@ mod tests {
         assert!(
             wrapped,
             "state::init must run inside catch_unwind so a load panic cannot unwind into the game"
+        );
+        assert!(
+            !body.contains("fonts::init"),
+            "fonts must not register on load"
+        );
+        assert!(
+            !body.contains("attach_overlay_host"),
+            "on_load must not attach D3D chrome, even when the overlay starts visible"
+        );
+        assert!(
+            !body.contains("get_texture") && !body.contains("add_quick_access"),
+            "texture upload and quick access are D3D; they belong in attach_overlay_host"
+        );
+        assert!(
+            body.contains("PostRender"),
+            "on_load registers a PostRender bootstrap so chrome can attach after ArcDPS"
+        );
+    }
+
+    #[test]
+    fn chrome_settle_outlasts_the_observed_arcdps_race() {
+        assert!(
+            super::CHROME_SETTLE >= Duration::from_millis(2000),
+            "crash is ~1s after load; settle must wait out that window"
+        );
+    }
+
+    /// Pin: chrome attach must always run inside `catch_unwind`. A panic from
+    /// `register_render` / `add_quick_access` / `get_texture_or_create_from_memory`
+    /// would otherwise unwind into Nexus's `extern "C-unwind"` callback and the
+    /// game. `bootstrap_chrome` owns that guard for the deferred path; the
+    /// function body itself must not skip it.
+    #[test]
+    fn bootstrap_chrome_guards_attach_in_catch_unwind() {
+        let src = include_str!("lib.rs");
+        let start = src.find("\nfn bootstrap_chrome(").expect("bootstrap_chrome must exist");
+        let rest = &src[start..];
+        let end = rest[1..]
+            .find("\nfn ")
+            .map(|i| i + 1)
+            .unwrap_or(rest.len());
+        let body = &rest[..end];
+        assert!(
+            body.contains("attach_overlay_host"),
+            "bootstrap_chrome must call attach_overlay_host, which itself wraps D3D work in catch_unwind"
+        );
+        assert!(
+            body.contains("attach_overlay_host"),
+            "bootstrap_chrome must call attach_overlay_host"
+        );
+    }
+
+    /// Pin: `attach_overlay_host` must short-circuit when already attached and
+    /// must release the slot on panic, otherwise a panic inside D3D work would
+    /// silently kill the overlay for the rest of the session.
+    #[test]
+    fn attach_overlay_host_is_idempotent_and_recovers_from_panic() {
+        let src = include_str!("lib.rs");
+        let start = src.find("\nfn attach_overlay_host(").expect("attach_overlay_host must exist");
+        let rest = &src[start..];
+        let end = rest[1..]
+            .find("\nfn ")
+            .map(|i| i + 1)
+            .unwrap_or(rest.len());
+        let body = &rest[..end];
+        assert!(
+            body.contains("HOST_ATTACHED"),
+            "attach_overlay_host must consult HOST_ATTACHED"
+        );
+        assert!(
+            body.contains("catch_unwind"),
+            "attach_overlay_host must catch_unwind so a panic cannot escape into Nexus"
+        );
+        assert!(
+            body.contains("BOOTSTRAP_FAILED"),
+            "attach_overlay_host must latch BOOTSTRAP_FAILED so the bootstrapper can observe a dead attach"
         );
     }
 }

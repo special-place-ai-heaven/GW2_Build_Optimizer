@@ -237,7 +237,7 @@ pub fn render(ui: &Ui) {
     // rest of the game's ImGui state intact.
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _theme = theme::push(ui, opacity);
-        fonts::init();
+        fonts::init(&ui_font, &ui_lang);
         let _font = fonts::push(&ui_font, &ui_lang);
         let mut opened = true;
         let cond = if snap {
