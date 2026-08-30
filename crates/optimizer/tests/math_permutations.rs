@@ -337,10 +337,11 @@ fn stack_cap_json_and_sim() {
     let pvp_bleed = *pvp.condition_uptime.get("Bleeding").expect("pvp bleed");
     let vuln_avg = *vuln.condition_uptime.get("Vulnerability").expect("vuln");
     // First sim tick is before the dump skill fires, so average stacks is
-    // cap * (ticks_after_apply / duration_s), not the raw cap. Ratios match caps.
+    // cap * (ticks_after_apply / duration_s), not the raw cap. Wiki 2026-08-29:
+    // intensity shares 1500 in every mode (no sourced PvP 100).
     assert!(
-        (pve_bleed / pvp_bleed - 15.0).abs() < 0.05,
-        "PvE/PvP bleed cap ratio 1500/100, got {pve_bleed}/{pvp_bleed}"
+        (pve_bleed - 1200.0).abs() < 0.05 && (pvp_bleed - 1200.0).abs() < 0.05,
+        "PvE/PvP bleed cap 1500 → avg 1200, got {pve_bleed}/{pvp_bleed}"
     );
     assert!(
         (vuln_avg / pve_bleed - 25.0 / 1500.0).abs() < 0.001,
@@ -450,15 +451,17 @@ fn alacrity_recharges_skills_faster() {
         stacks: 1,
         duration_ms: 30_000,
     });
+    // 20s: 4th Big Hit with 25% alac comes up mid-auto and misses the clock.
+    // 25s: no-alac also gets a 4th (t=24000). 22s is the gap (4 vs 3).
     let without = simulate_with(
         &[auto(1), cd_skill.clone()],
-        20_000,
+        22_000,
         &SimParams::basic(2000.0, 0.0, 1100.0),
         EnemyDummy::open(),
     );
     let with = simulate_with(
         &[auto_alac, cd_skill],
-        20_000,
+        22_000,
         &SimParams::basic(2000.0, 0.0, 1100.0),
         EnemyDummy::open(),
     );

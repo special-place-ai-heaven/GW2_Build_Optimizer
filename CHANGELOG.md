@@ -2,6 +2,14 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.7.20 - 2026-08-30
+
+Load panic no longer takes the game with it; unload keeps the DLL mapped until workers finish. Settings LLM keys stay masked on paste. Copy says Copied only after Windows has the text. Ranch Load runs off the draw pass. Weapon lock on Current keeps the equipped prefix. Ungated Improve does not stamp Improved. Empty leftover kits stay Blocked. No game data or character shows a lock hint. Missing combat reads (not computed), not 0/0/0. Spanish leftover chrome and Dutch titles are translated.
+
+Alacrity is +25% recharge (10s to 8s). Confusion pulse is over-time; on-skill-use fires on activation. Live Might raises dummy condition ticks. Trait duration sits outside the Expertise/Concentration cap. Intensity caps at 1500 in every mode. Set-2 sigils copy set 1. Land bars drop the aquatic palette. Giver's prefers three-stat 628. Ranger pets and Revenant legends stay on plates. Short or garbage names do not autofill (fuzzy needs 5+ letters). Gemini billing 403/429 is not a bad key. Cancel stops a Gemini stream. Failed stills retry.
+
+News bodies are capped; stills stay on the allowlisted host. Mailbag strips leftover encode tokens. Saves surface write errors. Hollow game data fails closed.
+
 ## 1.7.19 - 2026-08-29
 
 Choya's mailbag is one box: type, Enter for a new line, select text and press B or click Bold/a colour. The flipped B icon is a real B now, and the row of `?` faces is gone — overlay fonts could not draw them. Formatting still shows in Looks like; the box itself is plain ImGui text.
