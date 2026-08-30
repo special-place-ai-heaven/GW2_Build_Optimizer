@@ -610,5 +610,8 @@
   "news.images": "Beelden tonen",
   "news.video_note": "Deze overlay speelt geen video af. Open in de browser om te kijken.",
   "news.no_match": "Geen berichten gevonden.",
-  "fmt.news_count": "{n} berichten"
+  "fmt.news_count": "{n} berichten",
+  "fmt.news_one": "{n} bericht",
+  "fmt.news_few": "{n} berichten",
+  "fmt.news_many": "{n} berichten"
 }
