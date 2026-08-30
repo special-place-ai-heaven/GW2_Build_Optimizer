@@ -201,6 +201,10 @@ fn start_optimization_inner(state: &mut AddonState, profession_name: &str, entry
                             label: balance_ctx.game_mode.label().to_string(),
                         },
                         patch_id: Some(balance_ctx.patch_id.clone()),
+                        objective_profile_id: selected_role.map(|r| {
+                            r.profile_id_for(&balance_ctx.game_mode, combat_tier)
+                                .to_string()
+                        }),
                     }
                 };
 
@@ -850,9 +854,7 @@ impl ImproveOutcome {
 fn improve_label_override(outcome: ImproveOutcome, locked_spec: Option<&str>) -> Option<String> {
     match outcome {
         ImproveOutcome::KeptCurrentGear => outcome.headline().map(str::to_string),
-        ImproveOutcome::Improved => {
-            locked_spec.map(|name| tf("fmt.improved", &[("name", name)]))
-        }
+        ImproveOutcome::Improved => locked_spec.map(|name| tf("fmt.improved", &[("name", name)])),
         ImproveOutcome::Ungated => None,
     }
 }
@@ -1202,6 +1204,7 @@ mod tests {
                 label: "PvE".to_string(),
             },
             patch_id: None,
+            objective_profile_id: None,
         }
     }
 
@@ -1475,10 +1478,7 @@ mod tests {
             None,
             "Ungated + lock must not stamp fmt.improved"
         );
-        assert_eq!(
-            improve_label_override(ImproveOutcome::Ungated, None),
-            None
-        );
+        assert_eq!(improve_label_override(ImproveOutcome::Ungated, None), None);
 
         // Improved + lock remains the honest use of fmt.improved. Pin the
         // production arm so dropping the stamp cannot hide behind Ungated.
