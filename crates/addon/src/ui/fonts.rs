@@ -25,7 +25,6 @@ const LATIN_RANGES: &[ImWchar] = &[
     0x0020, 0x00FF, 0x0100, 0x017F, 0x0400, 0x04FF, 0x2010, 0x2027, 0x2600, 0x27BF, 0,
 ];
 
-static STARTED: AtomicBool = AtomicBool::new(false);
 static LOADED_LATIN: AtomicBool = AtomicBool::new(false);
 static LOADED_ZH: AtomicBool = AtomicBool::new(false);
 static LOADED_JA: AtomicBool = AtomicBool::new(false);
@@ -72,9 +71,14 @@ impl Drop for FontGuard {
     }
 }
 
-/// Register Windows fonts once ImGui exists. Safe to call every frame.
-pub fn init() {
-    if STARTED.load(Ordering::Acquire) {
+/// Register only the face this frame will push. Safe to call every frame.
+///
+/// English/`auto` returns before touching the atlas.
+pub fn init(pref: &str, ui_language: &str) {
+    let Some(id) = resolve_font_id(pref, ui_language) else {
+        return;
+    };
+    if !slot_ptr(id).is_null() {
         return;
     }
     let atlas = unsafe {
@@ -87,50 +91,57 @@ pub fn init() {
     if atlas.is_null() {
         return;
     }
-    if STARTED.swap(true, Ordering::SeqCst) {
-        return;
-    }
 
     let dir = windows_fonts_dir();
     // ImGui copies ImFontConfig during AddFont; only GlyphRanges must outlive Build.
-    let latin_cfg = make_cfg(LATIN_RANGES.as_ptr(), 2);
-    try_add(
-        ID_LATIN,
-        first_existing(
-            &dir,
-            &["segoeui.ttf", "arial.ttf", "tahoma.ttf", "calibri.ttf"],
-        ),
-        Some(&latin_cfg),
-        &LOADED_LATIN,
-    );
-
-    let zh_cfg = make_cfg(
-        unsafe { ImFontAtlas_GetGlyphRangesChineseSimplifiedCommon(atlas) },
-        1,
-    );
-    try_add(
-        ID_ZH,
-        first_existing(&dir, &["msyh.ttc", "msyh.ttf", "simsun.ttc"]),
-        Some(&zh_cfg),
-        &LOADED_ZH,
-    );
-    let ja_cfg = make_cfg(unsafe { ImFontAtlas_GetGlyphRangesJapanese(atlas) }, 1);
-    try_add(
-        ID_JA,
-        first_existing(
-            &dir,
-            &["YuGothM.ttc", "YuGothR.ttc", "meiryo.ttc", "msgothic.ttc"],
-        ),
-        Some(&ja_cfg),
-        &LOADED_JA,
-    );
-    let ko_cfg = make_cfg(unsafe { ImFontAtlas_GetGlyphRangesKorean(atlas) }, 1);
-    try_add(
-        ID_KO,
-        first_existing(&dir, &["malgun.ttf", "malgunsl.ttf"]),
-        Some(&ko_cfg),
-        &LOADED_KO,
-    );
+    match id {
+        ID_LATIN => {
+            let latin_cfg = make_cfg(LATIN_RANGES.as_ptr(), 2);
+            try_add(
+                ID_LATIN,
+                first_existing(
+                    &dir,
+                    &["segoeui.ttf", "arial.ttf", "tahoma.ttf", "calibri.ttf"],
+                ),
+                Some(&latin_cfg),
+                &LOADED_LATIN,
+            );
+        }
+        ID_ZH => {
+            let zh_cfg = make_cfg(
+                unsafe { ImFontAtlas_GetGlyphRangesChineseSimplifiedCommon(atlas) },
+                1,
+            );
+            try_add(
+                ID_ZH,
+                first_existing(&dir, &["msyh.ttc", "msyh.ttf", "simsun.ttc"]),
+                Some(&zh_cfg),
+                &LOADED_ZH,
+            );
+        }
+        ID_JA => {
+            let ja_cfg = make_cfg(unsafe { ImFontAtlas_GetGlyphRangesJapanese(atlas) }, 1);
+            try_add(
+                ID_JA,
+                first_existing(
+                    &dir,
+                    &["YuGothM.ttc", "YuGothR.ttc", "meiryo.ttc", "msgothic.ttc"],
+                ),
+                Some(&ja_cfg),
+                &LOADED_JA,
+            );
+        }
+        ID_KO => {
+            let ko_cfg = make_cfg(unsafe { ImFontAtlas_GetGlyphRangesKorean(atlas) }, 1);
+            try_add(
+                ID_KO,
+                first_existing(&dir, &["malgun.ttf", "malgunsl.ttf"]),
+                Some(&ko_cfg),
+                &LOADED_KO,
+            );
+        }
+        _ => {}
+    }
 }
 
 fn try_add(id: &str, path: Option<PathBuf>, config: Option<&ImFontConfig>, loaded: &AtomicBool) {
