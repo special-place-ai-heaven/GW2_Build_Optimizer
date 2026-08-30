@@ -170,11 +170,8 @@ fn fetch_body(url: &str, token: &CancellationToken, version: &str) -> Option<Str
     if !resp.status().is_success() {
         return None;
     }
-    let bytes = resp.bytes().ok()?;
-    if bytes.len() > MAX_BYTES {
-        return None;
-    }
-    String::from_utf8(bytes.to_vec()).ok()
+    let bytes = gw2_api::transport::read_body_capped(resp, MAX_BYTES as u64).ok()?;
+    String::from_utf8(bytes).ok()
 }
 
 pub fn parse_feed(source: NewsSource, xml: &str) -> Vec<NewsItem> {
@@ -939,5 +936,54 @@ mod tests {
         let li_p = strip_html("<ul><li><p>Outer</p></li></ul>");
         assert!(li_p.contains("- Outer"), "{li_p}");
         assert!(!li_p.contains("- \nOuter"), "{li_p}");
+    }
+
+    #[test]
+    fn feed_over_cap_is_rejected() {
+        let err = gw2_api::transport::read_body_capped(
+            std::io::Cursor::new(vec![b'x'; MAX_BYTES + 1]),
+            MAX_BYTES as u64,
+        )
+        .expect_err("over-cap must fail closed");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn unknown_still_host_is_dropped() {
+        let xml = r#"<rss><channel><item>
+  <title>X</title>
+  <link>https://www.guildwars2.com/en/news/x/</link>
+  <content:encoded><![CDATA[<img src="https://evil.example/pwn.jpg"/>]]></content:encoded>
+</item></channel></rss>"#;
+        let items = parse_feed(NewsSource::Official, xml);
+        assert_eq!(items[0].image_url, None);
+    }
+
+    #[test]
+    fn feed_hosts_are_still_allowlisted() {
+        for src in [
+            NewsSource::Official,
+            NewsSource::ForumNews,
+            NewsSource::PatchNotes,
+            NewsSource::Youtube,
+            NewsSource::GuildJen,
+        ] {
+            let url = feed_url(src, "en");
+            let host = reqwest::Url::parse(&url)
+                .unwrap()
+                .host_str()
+                .unwrap()
+                .to_string();
+            assert!(
+                crate::news_art::url_ok(&format!("https://{host}/x.jpg")),
+                "{host}"
+            );
+        }
+        assert!(crate::news_art::url_ok(
+            "https://i.ytimg.com/vi/x/mqdefault.jpg"
+        ));
+        assert!(crate::news_art::url_ok(
+            "https://img.youtube.com/vi/x/mqdefault.jpg"
+        ));
     }
 }

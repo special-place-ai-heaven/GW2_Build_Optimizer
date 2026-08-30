@@ -610,5 +610,8 @@
   "news.images": "Mostra immagini",
   "news.video_note": "Questo overlay non riproduce video. Apri nel browser per guardare.",
   "news.no_match": "Nessuna storia corrisponde.",
-  "fmt.news_count": "{n} storie"
+  "fmt.news_count": "{n} storie",
+  "fmt.news_one": "{n} storia",
+  "fmt.news_few": "{n} storie",
+  "fmt.news_many": "{n} storie"
 }

@@ -610,5 +610,8 @@
   "news.images": "显示静帧",
   "news.video_note": "叠加层无法播放视频。请在浏览器中打开观看。",
   "news.no_match": "没有匹配的内容。",
-  "fmt.news_count": "{n} 篇"
+  "fmt.news_count": "{n} 篇",
+  "fmt.news_one": "{n} 篇",
+  "fmt.news_few": "{n} 篇",
+  "fmt.news_many": "{n} 篇"
 }
