@@ -585,7 +585,10 @@ fn scrape_hardstuck_build(
     // Role from page content
     let role = if html_lower.contains("condi") || html_lower.contains("condition damage") {
         "Condi DPS"
-    } else if html_lower.contains("support") || mentions_heal_role(&html_lower) {
+    } else if html_lower.contains("support")
+        || html_lower.contains("healer")
+        || html_lower.contains("heal")
+    {
         "Heal Support"
     } else if html_lower.contains("bruiser") || html_lower.contains("sustain") {
         "Sustain / Bruiser"
@@ -696,7 +699,7 @@ fn scrape_guildjen_build(
         "WvW Roaming"
     } else if html.to_lowercase().contains("zerg") || html.to_lowercase().contains("squad") {
         "WvW Zerg DPS"
-    } else if html.to_lowercase().contains("support") || mentions_heal_role(&html) {
+    } else if html.to_lowercase().contains("support") || html.to_lowercase().contains("heal") {
         "WvW Zerg Support"
     } else {
         "WvW Roaming"
@@ -888,48 +891,16 @@ fn title_case(s: &str) -> String {
 }
 
 /// Extract GW2 build template code (e.g. "[&...]").
-///
-/// Pages often emit an item/skill chat link before the template. Prefer a
-/// decoded type byte of `0x0D`; fall back to the first `[&…]` of length ≥10.
 fn extract_build_code(html: &str) -> Option<String> {
-    let mut pos = 0;
-    let mut first_long = None;
-    while let Some(rel) = html[pos..].find("[&") {
-        let start = pos + rel;
-        let Some(end) = html[start..].find(']') else {
-            break;
-        };
-        let code = &html[start..start + end + 1];
-        if code.len() >= 10 {
-            if chat_link_type_byte(code) == Some(0x0D) {
-                return Some(code.to_string());
-            }
-            if first_long.is_none() {
-                first_long = Some(code.to_string());
-            }
-        }
-        pos = start + 2;
-    }
-    first_long
-}
-
-fn chat_link_type_byte(code: &str) -> Option<u8> {
-    let inner = code.strip_prefix("[&")?.strip_suffix(']')?;
-    let b = inner.as_bytes();
-    if b.len() < 2 {
-        return None;
-    }
-    Some((b64_sextet(b[0])? << 2) | (b64_sextet(b[1])? >> 4))
-}
-
-fn b64_sextet(c: u8) -> Option<u8> {
-    match c {
-        b'A'..=b'Z' => Some(c - b'A'),
-        b'a'..=b'z' => Some(26 + c - b'a'),
-        b'0'..=b'9' => Some(52 + c - b'0'),
-        b'+' => Some(62),
-        b'/' => Some(63),
-        _ => None,
+    // Build codes start with [& and end with ]
+    let start = html.find("[&")?;
+    let end = html[start..].find(']')?;
+    let code = &html[start..start + end + 1];
+    // Basic sanity: build codes are base64 and typically 44-60 chars
+    if code.len() >= 10 {
+        Some(code.to_string())
+    } else {
+        None
     }
 }
 
@@ -947,11 +918,6 @@ fn padded_alnum_words(text: &str) -> String {
             })
             .collect::<String>()
     )
-}
-
-fn mentions_heal_role(html: &str) -> bool {
-    let hay = padded_alnum_words(html);
-    hay.contains(" healer ") || hay.contains(" heal ")
 }
 
 /// Extract gear stat prefix from HTML text.
@@ -1096,7 +1062,6 @@ fn extract_traits(html: &str) -> Vec<String> {
         "Renegade",
         "Vindicator",
         "Herald",
-        "Luminary",
         // Core specs
         "Guardian",
         "Warrior",
@@ -1399,31 +1364,6 @@ mod tests {
             extract_gear_prefix("Use Dire gear for condition sustain."),
             "Dire"
         );
-    }
-
-    #[test]
-    fn health_is_not_heal_role() {
-        assert!(!mentions_heal_role("High health pool and toughness."));
-        assert!(mentions_heal_role(
-            "Role: Heal Support. This is a heal build."
-        ));
-    }
-
-    #[test]
-    fn extract_traits_includes_luminary() {
-        let traits = extract_traits("<h2>Luminary</h2>");
-        assert!(
-            traits.iter().any(|t| t == "Luminary"),
-            "expected Luminary in {traits:?}"
-        );
-    }
-
-    #[test]
-    fn extract_build_code_prefers_template_over_item() {
-        let item = "[&AgEEYQAA]";
-        let build = "[&DQYAAAAqASsATgA2ADYARgBGAEYARgAAAAAAAAAAAAAAAAAAAAAAAAA=]";
-        let html = format!("Item {item} later {build}");
-        assert_eq!(extract_build_code(&html).as_deref(), Some(build));
     }
 
     #[test]
@@ -1759,7 +1699,12 @@ mod tests {
         let before = std::fs::read(&seeded_path).expect("read seed");
 
         let partial = sample_guardian_pve("SHOULD_NOT_LAND_ON_DISK");
-        let result = finish_source("snowcrows", Ok((vec![partial], true)), &tmp, &|_, _| {});
+        let result = finish_source(
+            "snowcrows",
+            Ok((vec![partial], true)),
+            &tmp,
+            &|_, _| {},
+        );
 
         assert_eq!(
             result.error.as_deref(),
