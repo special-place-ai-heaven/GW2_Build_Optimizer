@@ -286,6 +286,14 @@ pub fn texture(url: &str) -> Option<TextureId> {
 }
 
 #[cfg(test)]
+static SLOTS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn slots_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    SLOTS_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -310,6 +318,7 @@ mod tests {
 
     #[test]
     fn refresh_clears_failed_so_take_batch_retries() {
+        let _lock = slots_test_guard();
         let url = "https://i.ytimg.com/vi/retry-failed-still/hqdefault.jpg";
         mark_failed(url);
         assert!(
@@ -319,6 +328,27 @@ mod tests {
         clear_failed();
         assert_eq!(take_batch(&[url.to_string()], 1), vec![url.to_string()]);
         release_pending(&[url.to_string()]);
+    }
+
+    #[test]
+    fn release_pending_retries_stuck_pending_keeps_failed() {
+        let _lock = slots_test_guard();
+        let stuck = "https://i.ytimg.com/vi/release-stuck-pending/hqdefault.jpg";
+        let failed = "https://i.ytimg.com/vi/release-keeps-failed/hqdefault.jpg";
+        assert_eq!(take_batch(&[stuck.to_string()], 1), vec![stuck.to_string()]);
+        mark_failed(failed);
+        release_pending(&[stuck.to_string(), failed.to_string()]);
+        assert_eq!(
+            take_batch(&[stuck.to_string()], 1),
+            vec![stuck.to_string()],
+            "stuck Pending must be retryable after release"
+        );
+        assert!(
+            take_batch(&[failed.to_string()], 1).is_empty(),
+            "Failed must survive release_pending"
+        );
+        release_pending(&[stuck.to_string()]);
+        clear_failed();
     }
 
     #[test]
