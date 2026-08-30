@@ -1186,6 +1186,17 @@ mod tests {
         );
         assert_eq!(pass.gates[0].gate, ViabilityGate::EffectiveHealth);
         assert_eq!(fail.gates[0].gate, ViabilityGate::EffectiveHealth);
+        // The custom floor, not the hardcoded default, must surface in the note.
+        assert!(
+            pass.gates[0].note.contains("15000"),
+            "note should reflect the 15k override: {}",
+            pass.gates[0].note
+        );
+        assert!(
+            fail.gates[0].note.contains("25000"),
+            "note should reflect the 25k override: {}",
+            fail.gates[0].note
+        );
     }
 
     #[test]
@@ -1236,7 +1247,109 @@ mod tests {
         assert!(
             pass.is_viable,
             "20k EHP should pass hardcoded PvE floor when profile id is unset: {:?}",
-            pass.gates
+        pass.gates
+        );
+    }
+
+    /// PIN: embedded JSONs carry no `viability_gates` key, so deserialized profiles
+    /// have `viability_gates.ehp_floor == None` and the hardcoded mode/tier constants
+    /// from `evaluate_viability_gates_for` apply. Pins the exact current mapping —
+    /// if this trips, the gate defaults or the embedded JSONs changed.
+    #[test]
+    fn unset_viability_gates_pin_hardcoded_ehp_floors() {
+        let data = crate::data::objective_profiles::objective_profiles();
+        let pve_profile = data.default_for_mode("PvE").expect("embedded PvE default");
+        let pvp_profile = data.default_for_mode("PvP").expect("embedded PvP default");
+        let wvw_profile = data.default_for_mode("WvW").expect("embedded WvW default");
+        assert!(
+            pve_profile.viability_gates.ehp_floor.is_none()
+                && pvp_profile.viability_gates.ehp_floor.is_none()
+                && wvw_profile.viability_gates.ehp_floor.is_none(),
+            "PIN setup: embedded default profiles must have no ehp_floor override"
+        );
+
+        let mut pvp_scenario = make_pve_scenario();
+        pvp_scenario.game_mode = GameMode::PvP;
+        pvp_scenario.optimization_target = OptimizationTarget {
+            label: "PvP".into(),
+        };
+        let wvw_tier = |tier: CombatTier| {
+            let mut s = make_wvw_scenario();
+            s.combat_tier = tier;
+            s
+        };
+        let mut wvw_staller = make_wvw_scenario();
+        wvw_staller.combat_kind = crate::scenario::CombatKind::Staller;
+
+        // (label, scenario, embedded profile, pinned hardcoded floor).
+        // Mapping pinned from production: PvE→EHP_FLOOR_PVE, PvP→EHP_FLOOR_PVP,
+        // WvW Solo→ROAM, WvW Party→HAVOC, WvW Squad→ZERG, WvW Staller→ROAM.
+        let cases: Vec<(&str, ScenarioSpec, &crate::data::ObjectiveProfile, f64)> = vec![
+            ("PvE", make_pve_scenario(), pve_profile, EHP_FLOOR_PVE),
+            ("PvP", pvp_scenario, pvp_profile, EHP_FLOOR_PVP),
+            (
+                "WvW/Solo",
+                wvw_tier(CombatTier::Solo),
+                wvw_profile,
+                EHP_FLOOR_WVW_ROAM,
+            ),
+            (
+                "WvW/Party",
+                wvw_tier(CombatTier::Party),
+                wvw_profile,
+                EHP_FLOOR_WVW_HAVOC,
+            ),
+            (
+                "WvW/Squad",
+                wvw_tier(CombatTier::Squad),
+                wvw_profile,
+                EHP_FLOOR_WVW_ZERG,
+            ),
+            (
+                "WvW/Staller",
+                wvw_staller,
+                wvw_profile,
+                EHP_FLOOR_WVW_ROAM,
+            ),
+        ];
+
+        for (label, scenario, profile, floor) in &cases {
+            // A no-`viability_gates` profile must behave exactly like no profile at all.
+            assert_ehp_boundary(label, scenario, Some(profile), *floor);
+            assert_ehp_boundary(label, scenario, None, *floor);
+        }
+    }
+
+    /// Asserts that EHP exactly at `floor` passes and just below fails.
+    fn assert_ehp_boundary(
+        label: &str,
+        scenario: &ScenarioSpec,
+        profile: Option<&crate::data::ObjectiveProfile>,
+        floor: f64,
+    ) {
+        let at = CombatPerformance {
+            effective_health: floor,
+            ..CombatPerformance::default()
+        };
+        let below = CombatPerformance {
+            effective_health: floor - 0.5,
+            ..CombatPerformance::default()
+        };
+        let at_report = evaluate_viability_gates_for(None, &at, scenario, profile);
+        let below_report = evaluate_viability_gates_for(None, &below, scenario, profile);
+        let at_gate = gate_by_kind(&at_report.gates, &ViabilityGate::EffectiveHealth)
+            .expect("EffectiveHealth gate");
+        let below_gate = gate_by_kind(&below_report.gates, &ViabilityGate::EffectiveHealth)
+            .expect("EffectiveHealth gate");
+        assert!(
+            at_gate.passed,
+            "{label}: EHP={floor} should pass pinned floor; note='{}'",
+            at_gate.note
+        );
+        assert!(
+            !below_gate.passed,
+            "{label}: EHP={} should fail pinned floor {floor}",
+            floor - 0.5
         );
     }
 
