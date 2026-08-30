@@ -6,16 +6,6 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-/// Basic character info from /v2/characters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Character {
-    pub name: String,
-    pub profession: String,
-    pub level: u32,
-    pub race: Option<String>,
-    pub gender: Option<String>,
-}
-
 /// A build tab from /v2/characters/:id/buildtabs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildTab {
