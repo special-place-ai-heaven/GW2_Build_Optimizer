@@ -138,13 +138,14 @@ fn on_unload() {
         format!("Addon unloaded. {}", report),
     );
     if !report.abandoned.is_empty() {
-        // Detached workers outlive the DLL. Say so: this is the line that explains
-        // a crash right after the player disables the addon.
+        // Detached workers keep the addon image pinned (`pin_addon_module`) so
+        // Nexus `FreeLibrary` cannot unmap `.text` under them. The leftover is a
+        // long-lived mapping, not the old return-into-unmapped-code crash.
         log(
             LogLevel::Warning,
             "GW2 Build Optimizer",
             format!(
-                "{} background worker(s) did not stop within {} ms and were left running.",
+                "{} background worker(s) did not stop within {} ms and were detached; the addon image stays pinned until they return.",
                 report.abandoned.len(),
                 state::UNLOAD_JOIN_BUDGET.as_millis()
             ),
