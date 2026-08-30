@@ -155,8 +155,9 @@ pub struct CombatPerformance {
 /// Calculate all condition tick damage values.
 ///
 /// Simple conditions (Bleeding, Burning, Poison) are mode-aware but currently
-/// same across all modes. Torment uses stationary as the conservative baseline
-/// (movement_fraction weighting is P3-14 scope). Confusion DPS per stack is
+/// same across all modes. Torment blends its stationary/moving ticks by the
+/// Generic profile's `movement_fraction` (P3-14); stationary remains the
+/// conservative floor of the blend. Confusion DPS per stack is
 /// wiki over-time (per second) plus on-skill-use times Generic
 /// `skill_use_frequency_per_second` for this mode. 16.24 is per activation.
 pub fn calculate_condition_ticks(
@@ -166,10 +167,16 @@ pub fn calculate_condition_ticks(
 ) -> ConditionTicks {
     let conds = crate::data::conditions();
     let mode = ctx.game_mode.clone();
-    let skill_uses = crate::data::rotation_profiles::rotation_profiles()
-        .lookup("Generic", None, &mode)
+    // One Generic rotation-profile lookup feeds both blends: Confusion's
+    // on-use rate and Torment's movement weighting. Same path, two fields.
+    let target = crate::data::rotation_profiles::rotation_profiles()
+        .lookup("Generic", None, &mode);
+    let skill_uses = target
         .map(|p| p.target_behavior.skill_use_frequency_per_second)
         .unwrap_or(0.3);
+    let movement_fraction = target
+        .map(|p| p.target_behavior.movement_fraction)
+        .unwrap_or(0.0);
     ConditionTicks {
         bleeding: conds.tick_damage("Bleeding", condition_damage, mode.clone())
             * modifiers.total_condi_mult_for("Bleeding"),
@@ -177,12 +184,23 @@ pub fn calculate_condition_ticks(
             * modifiers.total_condi_mult_for("Burning"),
         poison: conds.tick_damage("Poisoned", condition_damage, mode.clone())
             * modifiers.total_condi_mult_for("Poisoned"),
-        // Torment: stationary baseline (conservative). Movement weighting is P3-14 scope.
-        torment: conds.torment_tick(condition_damage, mode.clone(), false)
-            * modifiers.total_condi_mult_for("Torment"),
+        // Torment: stationary*(1-f) + moving*f, f = Generic `movement_fraction`.
+        // Stationary remains the conservative floor; weight is heuristic profile data.
+        torment: torment_movement_blend(
+            conds.torment_tick(condition_damage, mode.clone(), false),
+            conds.torment_tick(condition_damage, mode.clone(), true),
+            movement_fraction,
+        ) * modifiers.total_condi_mult_for("Torment"),
         confusion: conds.confusion_dps_per_stack(condition_damage, mode, skill_uses)
             * modifiers.total_condi_mult_for("Confusion"),
     }
+}
+
+/// Blend Torment's stationary and moving ticks by movement fraction `f`:
+/// `stationary*(1-f) + moving*f`. `f` comes from the Generic rotation
+/// profile's `target_behavior.movement_fraction` (validated 0.0–1.0 at load).
+fn torment_movement_blend(stationary: f64, moving: f64, f: f64) -> f64 {
+    stationary * (1.0 - f) + moving * f
 }
 
 // ─── Condition Stack Weights ───
@@ -1457,8 +1475,9 @@ mod tests {
         // Burning base: 131.0 (L1 verified against wiki)
         assert!((ticks.burning - 131.0).abs() < 0.1);
         assert!((ticks.poison - 33.5).abs() < 0.1);
-        // Torment PvE stationary: 0.09*0 + 31.8 = 31.8 (L2 verified)
-        assert!((ticks.torment - 31.8).abs() < 0.1);
+        // Torment PvE blend f=0.2: stationary 31.8*(1-0.2) + moving 22.0*0.2
+        // = 25.44 + 4.4 = 29.84 (L2 verified components)
+        assert!((ticks.torment - 29.84).abs() < 0.1);
         // Confusion DPS/stack/s = over_time + on_skill_use * Generic PvE 0.3/s
         // Source: https://wiki.guildwars2.com/wiki/Confusion (16.24 is per activation, not a tick)
         // 18.25 + 16.24 * 0.3 = 23.122
@@ -1478,8 +1497,8 @@ mod tests {
         assert!((ticks.burning - 441.0).abs() < 0.1);
         // Poison: 0.06 * 2000 + 33.5 = 153.5
         assert!((ticks.poison - 153.5).abs() < 0.1);
-        // Torment PvE stationary: 0.09 * 2000 + 31.8 = 211.8 (L2 verified)
-        assert!((ticks.torment - 211.8).abs() < 0.1);
+        // Torment PvE blend f=0.2: 211.8*0.8 + 142.0*0.2 = 169.44 + 28.4 = 197.84
+        assert!((ticks.torment - 197.84).abs() < 0.1);
         // Confusion: (0.05*2000+18.25) + (0.0325*2000+16.24)*0.3 = 118.25 + 24.372 = 142.622
         assert!((ticks.confusion - 142.622).abs() < 0.1);
     }
@@ -1512,14 +1531,25 @@ mod tests {
         let ctx_pvp = BalanceContext::pvp();
         let ticks_pve = calculate_condition_ticks(1000.0, &mods, &ctx_pve);
         let ticks_pvp = calculate_condition_ticks(1000.0, &mods, &ctx_pvp);
-        // PvE stationary: 0.09 * 1000 + 31.8 = 121.8
-        assert!((ticks_pve.torment - 121.8).abs() < 0.1);
-        // PvP stationary: 0.07 * 1000 + 26.0 = 96.0
-        assert!((ticks_pvp.torment - 96.0).abs() < 0.1);
+        // PvE blend f=0.2: stationary 121.8*0.8 + moving 82.0*0.2 = 97.44 + 16.4 = 113.84
+        assert!((ticks_pve.torment - 113.84).abs() < 0.1);
+        // PvP blend f=0.5: stationary 96.0*0.5 + moving 73.8*0.5 = 48.0 + 36.9 = 84.9
+        // (PvP moving: 0.054 * 1000 + 19.8 = 73.8)
+        assert!((ticks_pvp.torment - 84.9).abs() < 0.1);
         assert!(
             (ticks_pve.torment - ticks_pvp.torment).abs() > 1.0,
             "Torment should differ between PvE and PvP"
         );
+    }
+
+    #[test]
+    fn test_torment_movement_blend_endpoints() {
+        // Pin: f=0 returns the stationary tick exactly; f=1 returns moving exactly.
+        // Guards endpoint semantics independent of profile data.
+        let st = 121.8; // PvE stationary at 1000 condition damage
+        let mv = 82.0; // PvE moving at 1000 condition damage
+        assert_eq!(torment_movement_blend(st, mv, 0.0), st);
+        assert_eq!(torment_movement_blend(st, mv, 1.0), mv);
     }
 
     #[test]
