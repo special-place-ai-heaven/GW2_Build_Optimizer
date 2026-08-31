@@ -2,6 +2,17 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.8.0 - 2026-08-31
+
+### Radio (new tab)
+
+- Internet radio while you game: search 30,000+ stations (radio-browser.info) by name, genre, or country and play them in the background.
+- Choya DJ mans the decks in the corner — sleeps when idle, dances while tuning, bobs on air, with an ON AIR badge and EQ bars.
+- Now-playing song titles from the stream (ICY metadata), favorites saved to your config, volume with a proper log taper, optional keybind toggle (assign it in Nexus).
+- Streams that stall reconnect once quietly; a lost audio device tells you instead of dying silently.
+- HLS-only and undecodable-codec stations (OGG/FLAC/Opus) are filtered out rather than offered and failing.
+- If a station will not connect, your antivirus or firewall may be blocking it — the error says so.
+
 ## 1.7.26 - 2026-08-30
 
 ### Combat
