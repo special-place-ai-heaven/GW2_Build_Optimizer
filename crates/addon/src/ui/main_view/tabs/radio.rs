@@ -452,16 +452,36 @@ fn favorites(ui: &Ui, state: &mut AddonState) {
 }
 
 fn stations(ui: &Ui, state: &mut AddonState) {
+    // The header is a draw-list bar plus a dummy — same_line after it lands
+    // back on top of the title. Place the sort combo explicitly, right-
+    // aligned INSIDE the 22px header bar, then restore the cursor.
+    let header_pos = ui.cursor_screen_pos();
+    let header_w = ui.content_region_avail()[0];
     theme::header(ui, &t("radio.results"));
-    ui.same_line_with_spacing(0.0, 18.0);
-    ui.set_window_font_scale(0.85);
-    ui.align_text_to_frame_padding();
-    ui.text_colored(theme::MUTED, t("radio.sort"));
-    ui.set_window_font_scale(1.0);
-    ui.same_line_with_spacing(0.0, 6.0);
+    let after_header = ui.cursor_screen_pos();
     let cur_sort = state.radio.sort;
     let preview = sort_label(cur_sort);
-    ui.set_next_item_width(theme::combo_width_for(ui, &preview).max(110.0));
+    let combo_w = theme::combo_width_for(ui, &preview).max(110.0);
+    let sort_lbl = t("radio.sort");
+    ui.set_window_font_scale(0.85);
+    let lbl_sz = ui.calc_text_size(&sort_lbl);
+    {
+        let dl = ui.get_window_draw_list();
+        dl.add_text(
+            [
+                header_pos[0] + header_w - combo_w - 10.0 - lbl_sz[0],
+                header_pos[1] + ((22.0 - lbl_sz[1]) * 0.5).round(),
+            ],
+            crate::ui::color_u32(theme::MUTED),
+            &sort_lbl,
+        );
+    }
+    ui.set_window_font_scale(1.0);
+    ui.set_cursor_screen_pos([
+        header_pos[0] + header_w - combo_w - 4.0,
+        header_pos[1] + 1.0,
+    ]);
+    ui.set_next_item_width(combo_w);
     if let Some(_c) = ComboBox::new("##radio_sort")
         .preview_value(&preview)
         .begin(ui)
@@ -485,6 +505,7 @@ fn stations(ui: &Ui, state: &mut AddonState) {
             }
         }
     }
+    ui.set_cursor_screen_pos(after_header);
     let bar_h = player_bar_height(ui);
     let h = (ui.content_region_avail()[1] - bar_h - 10.0).max(72.0);
     let mut play: Option<RbStation> = None;

@@ -2,6 +2,13 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.9.2 - 2026-09-01
+
+### Radio
+
+- Sort combo no longer draws on top of the STATIONS header - it sits right-aligned inside the header bar.
+- Dashes the game font cannot draw were showing as `?` in radio messages ("No favorites yet ? ...") - replaced with `-` in all 12 languages.
+
 ## 1.9.1 - 2026-08-31
 
 ### Radio
