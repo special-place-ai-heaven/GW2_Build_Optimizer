@@ -31,13 +31,14 @@
 use std::io::{Read, Seek};
 use std::net::ToSocketAddrs;
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use gw2_core::config::SavedStation;
 use icy_metadata::{IcyHeaders, IcyMetadataReader};
-use rodio::{Decoder, DeviceSinkBuilder, Player};
+use rodio::source::SeekError;
+use rodio::{ChannelCount, Decoder, DeviceSinkBuilder, Player, Sample, SampleRate, Source};
 use stream_download::http::{reqwest, HttpStream};
 use stream_download::storage::bounded::BoundedStorageProvider;
 use stream_download::storage::memory::MemoryStorageProvider;
@@ -87,6 +88,30 @@ const RUNTIME_SHUTDOWN_BUDGET: Duration = Duration::from_millis(700);
 /// UI cap for stream titles and error messages (`chars`, never bytes).
 const MAX_TITLE_CHARS: usize = 200;
 
+/// Visualizer bands rendered behind the player bar.
+pub const EQ_BANDS: usize = 24;
+
+/// Mono samples the visualizer tap ring holds. Power of two so the write
+/// index is a cheap modulo; ~85 ms at 48 kHz — several UI frames of headroom
+/// over [`EQ_WINDOW`].
+const TAP_LEN: usize = 4096;
+
+/// Newest mono samples analyzed per rendered frame (~21 ms at 48 kHz).
+const EQ_WINDOW: usize = 1024;
+
+/// Log-spaced band centers run from [`EQ_FREQ_MIN`] to [`EQ_FREQ_MAX`] Hz.
+const EQ_FREQ_MIN: f32 = 50.0;
+const EQ_FREQ_MAX: f32 = 12_000.0;
+
+/// Perceptual range of a bar: a band at full scale is 1.0; this many dB
+/// below full scale is 0.
+const EQ_RANGE_DB: f32 = 50.0;
+
+/// Per-frame smoothing factors: bars rise fast and fall slow, so a beat
+/// snaps up and playback stopping lets the bars sink gracefully.
+const EQ_ATTACK: f32 = 0.5;
+const EQ_DECAY: f32 = 0.08;
+
 /// The bounds rodio's decoder needs from the reader stack, as one nameable
 /// trait so the two shapes (with/without ICY metadata) can be boxed.
 trait StreamReader: Read + Seek + Send + Sync {}
@@ -112,8 +137,155 @@ static VOLUME_PERCENT: AtomicU8 = AtomicU8::new(60);
 /// check and the write are atomic with respect to the successor's writes.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
+/// Sample tap for the player-bar visualizer: installed by the session that
+/// owns playback, read by [`eq_levels`] on the render thread. Installs are
+/// generation-checked under this lock, so a replaced session can never
+/// resurrect its tap over the successor's (same discipline as STATE writes).
+static TAP: Mutex<Option<Arc<TapBuffer>>> = Mutex::new(None);
+
+/// Smoothed band levels + staleness cursor. Render-thread only, but a static
+/// so bars decay across tab close/reopen instead of snapping to full height.
+static EQ_STATE: Mutex<EqState> = Mutex::new(EqState {
+    levels: [0.0; EQ_BANDS],
+    last_cursor: 0,
+});
+
 fn still_current(my_gen: u64) -> bool {
     GENERATION.load(Ordering::Acquire) == my_gen
+}
+
+/// Lock-free ring of the newest decoded mono samples: written by the audio
+/// callback thread (via [`SampleTap`]), read by the render thread (via
+/// [`eq_levels`]). Single writer; `cursor` counts mono samples ever written
+/// and `cursor % TAP_LEN` is the next slot. Samples are stored as f32 bits in
+/// `AtomicU32`s — a window torn by a concurrent overwrite is a one-frame
+/// visual glitch, never UB and never a NaN on screen (see [`analyze_bands`]).
+struct TapBuffer {
+    samples: Vec<AtomicU32>,
+    cursor: AtomicUsize,
+    /// Source sample rate for the samples currently in the ring; refreshed by
+    /// the tap when a new span changes it.
+    sample_rate: AtomicU32,
+}
+
+impl TapBuffer {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            samples: (0..TAP_LEN).map(|_| AtomicU32::new(0)).collect(),
+            cursor: AtomicUsize::new(0),
+            sample_rate: AtomicU32::new(0),
+        })
+    }
+
+    /// Audio-callback write path: two relaxed stores plus one release store —
+    /// wait-free, no locks, no allocation, no panic.
+    fn push(&self, sample: f32) {
+        let at = self.cursor.load(Ordering::Relaxed);
+        self.samples[at % TAP_LEN].store(sample.to_bits(), Ordering::Relaxed);
+        // Release pairs with the reader's acquire: whoever sees the new
+        // cursor also sees the sample it covers.
+        self.cursor.store(at.wrapping_add(1), Ordering::Release);
+    }
+}
+
+/// Render-side visualizer state: the smoothed levels and the tap cursor last
+/// analyzed — an unchanged cursor means no new audio, which decays the bars.
+struct EqState {
+    levels: [f32; EQ_BANDS],
+    last_cursor: usize,
+}
+
+/// Pass-through `Source` adapter mirroring rodio's own `Amplify` delegation
+/// exactly, additionally folding each interleaved frame down to one mono
+/// sample for the visualizer tap. It wraps the decoder BEFORE the sink
+/// applies volume gain, so bar heights track the stream itself, not the
+/// volume slider — deliberate: the visualizer stays alive at low volume.
+struct SampleTap<I> {
+    input: I,
+    tap: Arc<TapBuffer>,
+    /// Interleaved position within the current frame + running frame sum.
+    frame_pos: u16,
+    frame_sum: f32,
+    /// Span parameters cached at the last frame boundary.
+    chans: u16,
+    rate: u32,
+}
+
+impl<I: Source> SampleTap<I> {
+    fn new(input: I, tap: Arc<TapBuffer>) -> Self {
+        let chans = input.channels().get();
+        let rate = input.sample_rate().get();
+        tap.sample_rate.store(rate, Ordering::Relaxed);
+        Self {
+            input,
+            tap,
+            frame_pos: 0,
+            frame_sum: 0.0,
+            chans,
+            rate,
+        }
+    }
+}
+
+impl<I: Source> Iterator for SampleTap<I> {
+    type Item = Sample;
+
+    #[inline]
+    fn next(&mut self) -> Option<Sample> {
+        let sample = self.input.next()?;
+        if self.frame_pos == 0 {
+            // Frame boundary: spans are frame-aligned, so channel count and
+            // sample rate can only have changed here.
+            self.chans = self.input.channels().get();
+            let rate = self.input.sample_rate().get();
+            if rate != self.rate {
+                self.rate = rate;
+                self.tap.sample_rate.store(rate, Ordering::Relaxed);
+            }
+        }
+        self.frame_sum += sample;
+        self.frame_pos += 1;
+        if self.frame_pos >= self.chans {
+            // Average the frame's channels — proper mono fold, not raw
+            // interleaved pushes.
+            self.tap.push(self.frame_sum / f32::from(self.chans));
+            self.frame_sum = 0.0;
+            self.frame_pos = 0;
+        }
+        Some(sample)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.input.size_hint()
+    }
+}
+
+impl<I: Source> Source for SampleTap<I> {
+    #[inline]
+    fn current_span_len(&self) -> Option<usize> {
+        self.input.current_span_len()
+    }
+
+    #[inline]
+    fn channels(&self) -> ChannelCount {
+        self.input.channels()
+    }
+
+    #[inline]
+    fn sample_rate(&self) -> SampleRate {
+        self.input.sample_rate()
+    }
+
+    #[inline]
+    fn total_duration(&self) -> Option<Duration> {
+        self.input.total_duration()
+    }
+
+    #[inline]
+    fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
+        self.input.try_seek(pos)
+    }
 }
 
 struct Session {
@@ -197,11 +369,44 @@ pub fn set_volume(percent: u8) {
     }
 }
 
+/// Per-band 0..1 levels for the player-bar visualizer; call once per rendered
+/// frame. Reads the newest [`EQ_WINDOW`] tapped mono samples, measures the
+/// [`EQ_BANDS`] log-spaced bands (Goertzel — no FFT dependency), and folds the
+/// result through attack/decay smoothing. With no tap installed, no new
+/// samples since the last call, or too little audio yet, the target is
+/// silence and the bars decay gracefully toward zero. Render-thread path
+/// only; never touches STATE and never blocks the audio thread (the TAP lock
+/// is only ever held briefly at session install, not on the sample path).
+pub fn eq_levels() -> [f32; EQ_BANDS] {
+    let tap = lock_or_recover(&TAP).clone();
+    let mut eq = lock_or_recover(&EQ_STATE);
+    let mut targets = [0.0_f32; EQ_BANDS];
+    if let Some(tap) = tap {
+        let cursor = tap.cursor.load(Ordering::Acquire);
+        let rate = tap.sample_rate.load(Ordering::Relaxed);
+        if cursor != eq.last_cursor && cursor >= EQ_WINDOW && rate > 0 {
+            eq.last_cursor = cursor;
+            let mut window = [0.0_f32; EQ_WINDOW];
+            let start = cursor.wrapping_sub(EQ_WINDOW);
+            for (i, slot) in window.iter_mut().enumerate() {
+                let bits = tap.samples[start.wrapping_add(i) % TAP_LEN].load(Ordering::Relaxed);
+                *slot = f32::from_bits(bits);
+            }
+            targets = analyze_bands(&window, rate as f32);
+        }
+    }
+    for (level, target) in eq.levels.iter_mut().zip(targets) {
+        *level = smooth_band(*level, target);
+    }
+    eq.levels
+}
+
 /// Unload teardown: stop sink -> join audio-owner thread -> drop reader ->
 /// shut the tokio runtime down (bounded). Called from `on_unload` BEFORE
 /// worker cancellation; must never block long or panic.
 pub fn shutdown() {
     stop_session(SHUTDOWN_JOIN_BUDGET);
+    *lock_or_recover(&TAP) = None;
     let runtime = lock_or_recover(&RUNTIME).take();
     if let Some(runtime) = runtime {
         runtime.shutdown_timeout(RUNTIME_SHUTDOWN_BUDGET);
@@ -349,8 +554,19 @@ fn run_session(
     let player = Arc::new(Player::connect_new(device.mixer()));
     *lock_or_recover(&sink_cell) = Some(Arc::clone(&player));
 
+    // One visualizer tap per session, shared by the initial tune-in and every
+    // stall reconnect below. Installed under the TAP lock with a generation
+    // check — a replaced session's install is discarded at the lock.
+    let tap = TapBuffer::new();
+    {
+        let mut guard = lock_or_recover(&TAP);
+        if still_current(my_gen) {
+            *guard = Some(Arc::clone(&tap));
+        }
+    }
+
     // Connect, buffer, decode, append.
-    match open_and_append(&handle, &station, &player, &now_playing, &stop) {
+    match open_and_append(&handle, &station, &player, &now_playing, &stop, &tap) {
         Ok(()) => {}
         Err(SessionEnd::Cancelled) => {
             finish_stopped(my_gen, &player, &sink_cell);
@@ -435,7 +651,7 @@ fn run_session(
                 set_error(my_gen, "stream keeps stalling".to_string());
                 return;
             }
-            match open_and_append(&handle, &station, &player, &now_playing, &stop) {
+            match open_and_append(&handle, &station, &player, &now_playing, &stop, &tap) {
                 Ok(()) => {
                     player.play();
                     last_reconnect = Some(Instant::now());
@@ -482,6 +698,7 @@ fn open_and_append(
     player: &Player,
     now_playing: &NowPlayingCell,
     stop: &Arc<AtomicBool>,
+    tap: &Arc<TapBuffer>,
 ) -> Result<(), SessionEnd> {
     let opened = open_stream(handle, station.stream_url(), now_playing, stop)?;
 
@@ -499,7 +716,9 @@ fn open_and_append(
         .map_err(|e| SessionEnd::Failed(short_msg("cannot decode stream", &e.to_string())))?;
 
     player.clear();
-    player.append(decoder);
+    // The tap rides between the decoder and the sink: every sample the audio
+    // callback pulls is mirrored (mono-folded) into the visualizer ring.
+    player.append(SampleTap::new(decoder, Arc::clone(tap)));
     Ok(())
 }
 
@@ -758,6 +977,91 @@ fn volume_gain(percent: u8) -> f32 {
     }
 }
 
+/// Log-spaced band center frequency in Hz: band 0 at [`EQ_FREQ_MIN`], the
+/// last band at [`EQ_FREQ_MAX`].
+fn band_center(band: usize) -> f32 {
+    let t = band as f32 / (EQ_BANDS - 1) as f32;
+    EQ_FREQ_MIN * (EQ_FREQ_MAX / EQ_FREQ_MIN).powf(t)
+}
+
+/// One analysis window -> perceptual 0..1 levels per band. Non-finite input
+/// samples are zeroed and every output is finite and clamped, so a torn ring
+/// read can never paint NaN bars.
+fn analyze_bands(samples: &[f32], sample_rate: f32) -> [f32; EQ_BANDS] {
+    let mut out = [0.0_f32; EQ_BANDS];
+    let n = samples.len().min(EQ_WINDOW);
+    if n < 2 || sample_rate <= 0.0 {
+        return out;
+    }
+    // Hann window against spectral leakage; NaN/inf samples are dropped here.
+    let mut windowed = [0.0_f32; EQ_WINDOW];
+    for (i, slot) in windowed[..n].iter_mut().enumerate() {
+        let s = samples[i];
+        let s = if s.is_finite() { s } else { 0.0 };
+        let phase = std::f32::consts::TAU * i as f32 / (n - 1) as f32;
+        *slot = s * (0.5 - 0.5 * phase.cos());
+    }
+    for (band, level) in out.iter_mut().enumerate() {
+        let freq = band_center(band);
+        // Bands at/above Nyquist do not exist in this stream; leave them 0.
+        if freq >= sample_rate * 0.45 {
+            continue;
+        }
+        let magnitude = goertzel_magnitude(&windowed[..n], sample_rate, freq);
+        *level = perceptual_level(magnitude, n);
+    }
+    out
+}
+
+/// Magnitude of the DTFT at `freq` over `samples` via the Goertzel recurrence
+/// (the closing power formula is valid off bin centers too, which log-spaced
+/// bands need). f64 state: the recurrence is marginally stable and f32 error
+/// grows with window length.
+fn goertzel_magnitude(samples: &[f32], sample_rate: f32, freq: f32) -> f32 {
+    let omega = std::f64::consts::TAU * f64::from(freq) / f64::from(sample_rate);
+    let coeff = 2.0 * omega.cos();
+    let (mut s1, mut s2) = (0.0_f64, 0.0_f64);
+    for &x in samples {
+        let s0 = f64::from(x) + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    let power = s1 * s1 + s2 * s2 - coeff * s1 * s2;
+    power.max(0.0).sqrt() as f32
+}
+
+/// Windowed magnitude -> perceptual 0..1 level: a full-scale sine at the band
+/// center is 1.0, [`EQ_RANGE_DB`] below full scale is 0. The `4/n` undoes the
+/// DTFT's `n/2` sine gain and the Hann window's 0.5 coherent gain.
+fn perceptual_level(magnitude: f32, window_len: usize) -> f32 {
+    if window_len == 0 {
+        return 0.0;
+    }
+    let amplitude = 4.0 * magnitude / window_len as f32;
+    if !amplitude.is_finite() || amplitude <= 0.0 {
+        return 0.0;
+    }
+    ((20.0 * amplitude.log10() + EQ_RANGE_DB) / EQ_RANGE_DB).clamp(0.0, 1.0)
+}
+
+/// One smoothing step toward `target`: rise at [`EQ_ATTACK`], fall at
+/// [`EQ_DECAY`] per frame. Both inputs are sanitized, so a NaN can neither
+/// enter nor persist in the smoothed state.
+fn smooth_band(prev: f32, target: f32) -> f32 {
+    let prev = if prev.is_finite() {
+        prev.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let target = if target.is_finite() {
+        target.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let rate = if target > prev { EQ_ATTACK } else { EQ_DECAY };
+    prev + (target - prev) * rate
+}
+
 /// Whether a stall has earned its ONE quiet reconnect attempt. The first
 /// stall always has; after a reconnect the stream must have played for
 /// [`STALL_REARM`] before another stall earns a new attempt.
@@ -926,6 +1230,114 @@ mod tests {
         assert_eq!(back.tags, station.tags);
         assert_eq!(back.lastcheckok, 1, "a saved station is presumed playable");
         assert_eq!(back.hls, 0);
+    }
+
+    #[test]
+    fn a_sine_at_a_band_center_peaks_in_that_band_and_not_its_neighbors() {
+        // Band centers are log-spaced across the declared range.
+        assert!((band_center(0) - EQ_FREQ_MIN).abs() < 1e-2);
+        assert!((band_center(EQ_BANDS - 1) - EQ_FREQ_MAX).abs() < 1.0);
+        for b in 1..EQ_BANDS {
+            assert!(band_center(b) > band_center(b - 1), "centers are monotone");
+        }
+
+        // A high band, where log-spaced neighbors sit far outside the Hann
+        // main lobe (low bands are closer together than the FFT resolution).
+        let band = 20;
+        let rate = 48_000.0_f32;
+        let freq = band_center(band);
+        let window: Vec<f32> = (0..EQ_WINDOW)
+            .map(|i| (std::f32::consts::TAU * freq * i as f32 / rate).sin())
+            .collect();
+        let levels = analyze_bands(&window, rate);
+        assert!(
+            levels[band] > 0.9,
+            "a full-scale sine at the center is near 1.0: {}",
+            levels[band]
+        );
+        assert!(
+            levels[band - 1] < levels[band] - 0.3 && levels[band + 1] < levels[band] - 0.3,
+            "neighbors stay well below the peak: {} / {} / {}",
+            levels[band - 1],
+            levels[band],
+            levels[band + 1]
+        );
+        assert!(
+            levels[0] < 0.2 && levels[EQ_BANDS - 1] < 0.2,
+            "far bands stay quiet"
+        );
+    }
+
+    #[test]
+    fn silence_analyzes_to_zero_and_smoothing_decays_toward_zero() {
+        let silence = [0.0_f32; EQ_WINDOW];
+        assert_eq!(analyze_bands(&silence, 48_000.0), [0.0; EQ_BANDS]);
+
+        // A loud bar with a silent target sinks monotonically toward zero.
+        let mut level = 1.0_f32;
+        for _ in 0..120 {
+            let next = smooth_band(level, 0.0);
+            assert!(next < level && next >= 0.0);
+            level = next;
+        }
+        assert!(level < 0.01, "decayed after ~2s of frames: {level}");
+
+        // And the attack path rises much faster than the decay path falls.
+        assert!(smooth_band(0.0, 1.0) > 1.0 - smooth_band(1.0, 0.0));
+    }
+
+    #[test]
+    fn nan_and_infinite_input_cannot_produce_nan_levels() {
+        let mut window = [0.25_f32; EQ_WINDOW];
+        window[10] = f32::NAN;
+        window[11] = f32::INFINITY;
+        window[12] = f32::NEG_INFINITY;
+        for level in analyze_bands(&window, 48_000.0) {
+            assert!(level.is_finite() && (0.0..=1.0).contains(&level));
+        }
+        // The smoother sanitizes both of its inputs too.
+        assert!(smooth_band(f32::NAN, f32::NAN).is_finite());
+        assert!(smooth_band(f32::NAN, 0.5).is_finite());
+        assert!(smooth_band(0.5, f32::INFINITY).is_finite());
+        assert_eq!(perceptual_level(f32::NAN, EQ_WINDOW), 0.0);
+        assert_eq!(perceptual_level(1.0, 0), 0.0);
+    }
+
+    #[test]
+    fn tap_ring_keeps_the_newest_samples_and_counts_them() {
+        let tap = TapBuffer::new();
+        let total = TAP_LEN + 100;
+        for i in 0..total {
+            tap.push(i as f32);
+        }
+        let cursor = tap.cursor.load(Ordering::Acquire);
+        assert_eq!(cursor, total);
+        // The newest EQ_WINDOW samples read back exactly, oldest overwritten.
+        let start = cursor - EQ_WINDOW;
+        for i in 0..EQ_WINDOW {
+            let bits = tap.samples[(start + i) % TAP_LEN].load(Ordering::Relaxed);
+            assert_eq!(f32::from_bits(bits), (start + i) as f32);
+        }
+    }
+
+    #[test]
+    fn sample_tap_passes_audio_through_unchanged_and_folds_stereo_to_mono() {
+        // Exactly representable values so the mono averages compare with ==.
+        let data = vec![0.25_f32, 0.75, -0.5, 0.5, 1.0, 0.0];
+        let buffer = rodio::buffer::SamplesBuffer::new(
+            ChannelCount::new(2).expect("stereo"),
+            SampleRate::new(44_100).expect("rate"),
+            data.clone(),
+        );
+        let tap = TapBuffer::new();
+        let out: Vec<f32> = SampleTap::new(buffer, Arc::clone(&tap)).collect();
+        assert_eq!(out, data, "the tap is a pure pass-through");
+        assert_eq!(tap.cursor.load(Ordering::Acquire), 3, "one push per frame");
+        assert_eq!(tap.sample_rate.load(Ordering::Relaxed), 44_100);
+        let mono: Vec<f32> = (0..3)
+            .map(|i| f32::from_bits(tap.samples[i].load(Ordering::Relaxed)))
+            .collect();
+        assert_eq!(mono, vec![0.5, 0.0, 0.5], "channels average per frame");
     }
 
     #[test]
