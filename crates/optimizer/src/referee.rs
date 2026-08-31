@@ -323,14 +323,17 @@ pub fn evaluate_viability_gates_for(
                     let damage_route = match scenario.combat_kind {
                         CombatKind::StrikeSpike => {
                             fight.target_reached
-                                || fight.peak_protected_damage_2s >= fight.target_health * 0.30
+                                || fight.target_health.is_some_and(|hp| {
+                                    fight.peak_protected_damage_2s >= hp * 0.30
+                                })
                         }
-                        CombatKind::CondiRamp => {
-                            fight.protected_damage >= fight.target_health * 0.20
-                        }
+                        CombatKind::CondiRamp => fight
+                            .target_health
+                            .is_some_and(|hp| fight.protected_damage >= hp * 0.20),
                         CombatKind::Harasser => {
-                            fight.peak_protected_damage_2s >= fight.target_health * 0.15
-                                || fight.secured_sequence_control_ms >= 750
+                            fight.target_health.is_some_and(|hp| {
+                                fight.peak_protected_damage_2s >= hp * 0.15
+                            }) || fight.secured_sequence_control_ms >= 750
                         }
                         CombatKind::Disabler => fight.secured_sequence_control_ms >= 750,
                         CombatKind::Support | CombatKind::Commander | CombatKind::Staller => true,
@@ -851,7 +854,7 @@ mod tests {
             has_cover_answer: true,
             wvw: Some(WvwCombatReport {
                 duration_ms: 5_000,
-                target_health: 18_000.0,
+                target_health: Some(18_000.0),
                 target_reached_at_ms: None,
                 longest_protected_window_ms: 2_500,
                 protected_action_count: 3,
@@ -1033,6 +1036,29 @@ mod tests {
             );
         }
     }
+
+    /// A missing dummy HP must not pass the percent-of-target damage routes.
+    /// `unwrap_or(0.0)` used to make `peak >= 0` true for every StrikeSpike fight.
+    #[test]
+    fn gate_wvw_no_target_does_not_pass_percent_damage() {
+        let mut rot = make_viable_rotation();
+        let fight = rot.wvw.as_mut().expect("fixture has a timeline");
+        fight.target_health = None;
+        fight.target_reached = false;
+        fight.peak_protected_damage_2s = 8_000.0;
+        fight.protected_damage = 10_000.0;
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let gate = gate_by_kind(&report.gates, &ViabilityGate::ProtectedExecution)
+            .expect("WvW evaluates ProtectedExecution");
+        assert!(
+            !gate.passed,
+            "unknown target HP must not satisfy the 30% spike route: {}",
+            gate.note
+        );
+    }
+
 
     #[test]
     fn wvw_outcome_uses_timeline_not_legacy_dummy() {

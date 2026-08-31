@@ -34,7 +34,8 @@ pub struct NewsItem {
 pub struct NewsState {
     feeds: [Option<Vec<NewsItem>>; 5],
     pub loading: bool,
-    pub fetched_at: Option<Instant>,
+    /// Per-source success stamp. A sibling feed must not start another source's 30-min TTL.
+    fetched_at: [Option<Instant>; 5],
     failed_at: [Option<Instant>; 5],
     official_lang: String,
     /// URL of the story in the reader, if any.
@@ -58,7 +59,7 @@ impl NewsState {
         if src == NewsSource::Official {
             self.official_lang = lang.to_string();
         }
-        self.fetched_at = Some(Instant::now());
+        self.fetched_at[src.index()] = Some(Instant::now());
     }
 
     fn note_fetch_failure(&mut self, src: NewsSource) {
@@ -69,6 +70,7 @@ impl NewsState {
         for src in sources {
             self.feeds[src.index()] = None;
             self.failed_at[src.index()] = None;
+            self.fetched_at[src.index()] = None;
             if *src == NewsSource::Official {
                 self.official_lang.clear();
             }
@@ -86,7 +88,7 @@ impl NewsState {
         if self.feeds[src.index()].is_none() {
             return true;
         }
-        self.fetched_at.is_none_or(|t| t.elapsed() > TTL)
+        self.fetched_at[src.index()].is_none_or(|t| t.elapsed() > TTL)
     }
 
     pub fn collected(&self, sources: &[NewsSource]) -> Vec<NewsItem> {
@@ -1155,4 +1157,31 @@ mod tests {
         n.invalidate(&[NewsSource::Youtube]);
         assert!(n.needs(NewsSource::Youtube, "en"));
     }
+
+    #[test]
+    fn official_success_does_not_ttl_lock_youtube() {
+        let mut n = NewsState::default();
+        n.set_feed(
+            NewsSource::Youtube,
+            "en",
+            vec![sample_item(NewsSource::Youtube)],
+        );
+        n.set_feed(
+            NewsSource::Official,
+            "en",
+            vec![sample_item(NewsSource::Official)],
+        );
+        assert!(!n.needs(NewsSource::Official, "en"));
+        assert!(!n.needs(NewsSource::Youtube, "en"));
+        n.fetched_at[NewsSource::Youtube.index()] = None;
+        assert!(
+            n.needs(NewsSource::Youtube, "en"),
+            "Youtube TTL is its own slot; Official success must not stamp it"
+        );
+        assert!(
+            !n.needs(NewsSource::Official, "en"),
+            "fresh Official must stay cached"
+        );
+    }
+
 }

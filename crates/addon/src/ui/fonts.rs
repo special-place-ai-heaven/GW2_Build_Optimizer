@@ -12,9 +12,13 @@ use nexus::imgui::sys::{
 };
 use nexus::log::{log, LogLevel};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 const SIZE_PX: f32 = 16.0;
+const LATIN_FILES: &[&str] = &["segoeui.ttf", "arial.ttf", "tahoma.ttf", "calibri.ttf"];
+const ZH_FILES: &[&str] = &["msyh.ttc", "msyh.ttf", "simsun.ttc"];
+const JA_FILES: &[&str] = &["YuGothM.ttc", "YuGothR.ttc", "meiryo.ttc", "msgothic.ttc"];
+const KO_FILES: &[&str] = &["malgun.ttf", "malgunsl.ttf"];
 const ID_LATIN: &str = "GW2BO_FONT_LATIN";
 const ID_ZH: &str = "GW2BO_FONT_ZH";
 const ID_JA: &str = "GW2BO_FONT_JA";
@@ -25,10 +29,6 @@ const LATIN_RANGES: &[ImWchar] = &[
     0x0020, 0x00FF, 0x0100, 0x017F, 0x0400, 0x04FF, 0x2010, 0x2027, 0x2600, 0x27BF, 0,
 ];
 
-static LOADED_LATIN: AtomicBool = AtomicBool::new(false);
-static LOADED_ZH: AtomicBool = AtomicBool::new(false);
-static LOADED_JA: AtomicBool = AtomicBool::new(false);
-static LOADED_KO: AtomicBool = AtomicBool::new(false);
 static LATIN: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
 static ZH: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
 static JA: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
@@ -99,12 +99,8 @@ pub fn init(pref: &str, ui_language: &str) {
             let latin_cfg = make_cfg(LATIN_RANGES.as_ptr(), 2);
             try_add(
                 ID_LATIN,
-                first_existing(
-                    &dir,
-                    &["segoeui.ttf", "arial.ttf", "tahoma.ttf", "calibri.ttf"],
-                ),
+                first_existing(&dir, LATIN_FILES),
                 Some(&latin_cfg),
-                &LOADED_LATIN,
             );
         }
         ID_ZH => {
@@ -114,37 +110,31 @@ pub fn init(pref: &str, ui_language: &str) {
             );
             try_add(
                 ID_ZH,
-                first_existing(&dir, &["msyh.ttc", "msyh.ttf", "simsun.ttc"]),
+                first_existing(&dir, ZH_FILES),
                 Some(&zh_cfg),
-                &LOADED_ZH,
             );
         }
         ID_JA => {
             let ja_cfg = make_cfg(unsafe { ImFontAtlas_GetGlyphRangesJapanese(atlas) }, 1);
             try_add(
                 ID_JA,
-                first_existing(
-                    &dir,
-                    &["YuGothM.ttc", "YuGothR.ttc", "meiryo.ttc", "msgothic.ttc"],
-                ),
+                first_existing(&dir, JA_FILES),
                 Some(&ja_cfg),
-                &LOADED_JA,
             );
         }
         ID_KO => {
             let ko_cfg = make_cfg(unsafe { ImFontAtlas_GetGlyphRangesKorean(atlas) }, 1);
             try_add(
                 ID_KO,
-                first_existing(&dir, &["malgun.ttf", "malgunsl.ttf"]),
+                first_existing(&dir, KO_FILES),
                 Some(&ko_cfg),
-                &LOADED_KO,
             );
         }
         _ => {}
     }
 }
 
-fn try_add(id: &str, path: Option<PathBuf>, config: Option<&ImFontConfig>, loaded: &AtomicBool) {
+fn try_add(id: &str, path: Option<PathBuf>, config: Option<&ImFontConfig>) {
     let Some(path) = path else {
         log(
             LogLevel::Info,
@@ -154,7 +144,6 @@ fn try_add(id: &str, path: Option<PathBuf>, config: Option<&ImFontConfig>, loade
         return;
     };
     add_font_from_file(id, &path, SIZE_PX, config, RECEIVE).revert_on_unload();
-    loaded.store(true, Ordering::Release);
     log(
         LogLevel::Info,
         "GW2 Build Optimizer",
@@ -219,23 +208,40 @@ pub fn resolve_font_id(pref: &str, ui_language: &str) -> Option<&'static str> {
 }
 
 pub fn combo_options() -> Vec<(&'static str, &'static str)> {
+    let dir = windows_fonts_dir();
     let mut v = vec![
         ("auto", "settings.font_auto"),
         ("game", "settings.font_game"),
     ];
-    if LOADED_LATIN.load(Ordering::Acquire) {
+    if first_existing(&dir, LATIN_FILES).is_some() {
         v.push(("segoe", "settings.font_segoe"));
     }
-    if LOADED_ZH.load(Ordering::Acquire) {
+    if first_existing(&dir, ZH_FILES).is_some() {
         v.push(("zh", "settings.font_yahei"));
     }
-    if LOADED_JA.load(Ordering::Acquire) {
+    if first_existing(&dir, JA_FILES).is_some() {
         v.push(("ja", "settings.font_japanese"));
     }
-    if LOADED_KO.load(Ordering::Acquire) {
+    if first_existing(&dir, KO_FILES).is_some() {
         v.push(("ko", "settings.font_korean"));
     }
     v
+}
+
+/// zh/ja/ko native names need a CJK face. Otherwise use the English catalog name.
+pub fn language_label(lang: &gw2_core::i18n::Language, pref: &str, ui_language: &str) -> &'static str {
+    if !matches!(lang.code, "zh" | "ja" | "ko") {
+        return lang.native_name;
+    }
+    let ok = matches!(
+        (lang.code, resolve_font_id(pref, ui_language)),
+        ("zh", Some(ID_ZH)) | ("ja", Some(ID_JA)) | ("ko", Some(ID_KO))
+    );
+    if ok {
+        lang.native_name
+    } else {
+        lang.choya_name
+    }
 }
 
 pub fn label_key(pref: &str) -> &'static str {
@@ -311,5 +317,40 @@ mod tests {
         assert_eq!(label_key("auto"), "settings.font_auto");
         assert_eq!(label_key(""), "settings.font_auto");
         assert_eq!(label_key("game"), "settings.font_game");
+    }
+
+    #[test]
+    fn combo_lists_faces_present_on_disk() {
+        let ids: Vec<_> = combo_options().into_iter().map(|(id, _)| id).collect();
+        assert!(ids.contains(&"auto"));
+        assert!(ids.contains(&"game"));
+        let dir = windows_fonts_dir();
+        if first_existing(&dir, LATIN_FILES).is_some() {
+            assert!(ids.contains(&"segoe"), "{ids:?}");
+        }
+        if first_existing(&dir, ZH_FILES).is_some() {
+            assert!(ids.contains(&"zh"), "{ids:?}");
+        }
+        if first_existing(&dir, JA_FILES).is_some() {
+            assert!(ids.contains(&"ja"), "{ids:?}");
+        }
+        if first_existing(&dir, KO_FILES).is_some() {
+            assert!(ids.contains(&"ko"), "{ids:?}");
+        }
+    }
+
+    #[test]
+    fn cjk_language_rows_use_english_until_that_face_is_active() {
+        let zh = gw2_core::i18n::language_by_code("zh").unwrap();
+        let ja = gw2_core::i18n::language_by_code("ja").unwrap();
+        let ko = gw2_core::i18n::language_by_code("ko").unwrap();
+        assert_eq!(language_label(zh, "auto", "en"), "Simplified Chinese");
+        assert_eq!(language_label(ja, "game", "en"), "Japanese");
+        assert_eq!(language_label(ko, "segoe", "en"), "Korean");
+        assert_eq!(language_label(zh, "zh", "en"), zh.native_name);
+        assert_eq!(language_label(ja, "ja", "en"), ja.native_name);
+        assert_eq!(language_label(ko, "ko", "en"), ko.native_name);
+        let ru = gw2_core::i18n::language_by_code("ru").unwrap();
+        assert_eq!(language_label(ru, "auto", "en"), ru.native_name);
     }
 }
