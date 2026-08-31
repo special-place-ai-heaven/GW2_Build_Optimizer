@@ -21,12 +21,18 @@
 //!
 //! ## Locking discipline
 //!
-//! [`play`] and [`set_volume`] never block: safe from any thread, including
-//! inside `with_state`. [`stop`]'s bounded join can cost up to its ~1s budget
-//! if the caller holds STATE while the audio thread is waiting on it — the
-//! join is bounded precisely so that worst case is a hitch, never a deadlock.
-//! [`toggle`] reads STATE on the calling thread and must only be called from
-//! threads that do not hold it (the keybind handler path).
+//! [`play`], [`set_volume`], [`pause`] and [`resume`] never block: safe from
+//! any thread, including inside `with_state`. [`pause`]/[`resume`] do not
+//! write `RadioStatus` at all — the UI caller (or [`toggle`]) writes it
+//! optimistically, the same way the Stop button writes `Stopped`; the audio
+//! thread deliberately goes quiet while its session is paused. [`stop`]'s
+//! bounded join can cost up to its ~1s budget if the caller holds STATE while
+//! the audio thread is waiting on it — the join is bounded precisely so that
+//! worst case is a hitch, never a deadlock. [`toggle`] reads STATE on the
+//! calling thread and must only be called from threads that do not hold it
+//! (the keybind handler path). [`duck_tick`] is the one render-thread-only
+//! entry point: it locks STATE itself, so it must never be called from inside
+//! `with_state`.
 
 use std::io::{Read, Seek};
 use std::net::ToSocketAddrs;
@@ -75,6 +81,13 @@ const STOP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// flapping stream errors out instead of hot-looping connect attempts.
 const STALL_REARM: Duration = Duration::from_secs(10);
 
+/// Watchdog ticks skipped after a [`resume`] before the empty-sink stall
+/// check re-arms (~1 s at [`WATCHDOG_INTERVAL`]): the sink needs a moment to
+/// start draining the ring buffer again before "empty" means anything. If the
+/// server dropped the stream during the pause, the re-armed check stalls and
+/// the existing quiet-reconnect machinery re-tunes on its own.
+const RESUME_GRACE_TICKS: u32 = 2;
+
 /// Bounded join budget for [`stop`].
 const STOP_JOIN_BUDGET: Duration = Duration::from_secs(1);
 
@@ -112,6 +125,19 @@ const EQ_RANGE_DB: f32 = 50.0;
 const EQ_ATTACK: f32 = 0.5;
 const EQ_DECAY: f32 = 0.08;
 
+/// Gain multiplier while combat-ducked: ~-10.5 dB under the slider's level —
+/// the music steps back without vanishing.
+const DUCK_FLOOR: f32 = 0.30;
+
+/// Per-frame exponential approach rate for the duck ramp: settles in ~22
+/// frames (~350 ms at 60 fps), inside the 250-400 ms design window. Same
+/// per-frame-constant style as [`EQ_ATTACK`]/[`EQ_DECAY`].
+const DUCK_STEP: f32 = 0.18;
+
+/// Snap-to-target threshold ending a duck ramp, so a settled duck factor
+/// costs zero sink writes per frame.
+const DUCK_SNAP: f32 = 0.01;
+
 /// The bounds rodio's decoder needs from the reader stack, as one nameable
 /// trait so the two shapes (with/without ICY metadata) can be boxed.
 trait StreamReader: Read + Seek + Send + Sync {}
@@ -127,6 +153,11 @@ static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 /// Last requested volume percent; seeded from config on play so a slider move
 /// during the connect phase still wins over the config snapshot.
 static VOLUME_PERCENT: AtomicU8 = AtomicU8::new(60);
+
+/// Combat-duck gain factor as f32 bits, composed into every sink gain write
+/// by [`apply_gain`]. Written only by the render thread ([`duck_tick`]); read
+/// from any thread. `0x3F80_0000` is `1.0f32` — not ducked.
+static DUCK_FACTOR: AtomicU32 = AtomicU32::new(0x3F80_0000);
 
 /// One station session. Owned by [`SESSION`]; the audio-owner thread holds
 /// clones of the stop flag and the sink cell, never the session itself.
@@ -299,6 +330,11 @@ impl<I: Source> Source for SampleTap<I> {
 struct Session {
     /// Set by [`stop`]/[`play`] to end the session; polled by the audio thread.
     stop: Arc<AtomicBool>,
+    /// Set by [`pause`]/[`resume`]; read by the audio thread's watchdog,
+    /// which suspends its empty-sink stall check while the flag is up (a
+    /// paused sink drains to silence and icecast may drop the idle socket —
+    /// both are fine). Never read through STATE.
+    paused: Arc<AtomicBool>,
     /// Sink handle published by the audio thread once the device is open, so
     /// [`set_volume`] can reach the live sink without touching the thread.
     sink: Arc<Mutex<Option<Arc<Player>>>>,
@@ -339,28 +375,105 @@ pub fn request_stop() {
     }
 }
 
-/// Keybind toggle: playing -> stop; otherwise re-tune the current/last station.
+/// Pause the live sink in place, keeping the session (and its buffered
+/// audio) alive for an instant [`resume`]. Never blocks and never locks
+/// STATE on the calling thread — safe from the render thread inside
+/// `with_state`. Deliberately does NOT write `RadioStatus`: the caller sets
+/// `Paused` optimistically, exactly like the Stop button sets `Stopped`
+/// after [`request_stop`]. No-op without a live session.
+pub fn pause() {
+    if let Some(sink) = flag_paused(true) {
+        sink.pause();
+    }
+}
+
+/// Resume a paused sink from its buffer. Same contract as [`pause`]: never
+/// blocks, never locks STATE, status written optimistically by the caller.
+/// The watchdog re-arms its stall check after a short grace
+/// ([`RESUME_GRACE_TICKS`]), so a stream that died during the pause stalls
+/// honestly and the quiet-reconnect machinery re-tunes it.
+pub fn resume() {
+    if let Some(sink) = flag_paused(false) {
+        sink.play();
+    }
+}
+
+/// Flip the session's paused flag and hand back the live sink, if any. The
+/// flag is flipped BEFORE the sink is touched so the watchdog can never see
+/// a pausing sink with an armed stall check.
+fn flag_paused(paused: bool) -> Option<Arc<Player>> {
+    let guard = lock_or_recover(&SESSION);
+    let session = guard.as_ref()?;
+    session.paused.store(paused, Ordering::Release);
+    let sink = lock_or_recover(&session.sink).clone();
+    // Both module locks are released before the caller touches the sink.
+    drop(guard);
+    sink
+}
+
+/// What the keybind toggle does for a given status. Pure: the whole toggle
+/// state machine in one testable place.
+#[derive(Debug, PartialEq, Eq)]
+enum ToggleAction {
+    Pause,
+    Resume,
+    Stop,
+    Tune,
+    Nothing,
+}
+
+fn toggle_action(status: &RadioStatus, has_station: bool) -> ToggleAction {
+    match status {
+        RadioStatus::Playing => ToggleAction::Pause,
+        RadioStatus::Paused => ToggleAction::Resume,
+        RadioStatus::Connecting | RadioStatus::Stalled => ToggleAction::Stop,
+        _ if has_station => ToggleAction::Tune,
+        _ => ToggleAction::Nothing,
+    }
+}
+
+/// Keybind toggle: playing -> pause, paused -> resume, tuning/stalled ->
+/// stop; otherwise re-tune the current/last station.
 ///
 /// Reads STATE on the calling thread — keybind-handler path only; must not be
-/// called while STATE is held (the tab UI calls [`play`]/[`stop`] directly).
+/// called while STATE is held (the tab UI calls the entry points directly).
+/// Pause/resume run inside the STATE closure ([`pause`]/[`resume`] never lock
+/// STATE), which keeps the optimistic status write atomic with the session
+/// thread's generation-gated writes; stop/play defer until STATE is released
+/// because [`stop`] joins a thread that may be waiting on a STATE write.
 pub fn toggle() {
-    let snapshot = crate::state::with_state(|s| {
-        let active = matches!(
-            s.radio.status,
-            RadioStatus::Playing | RadioStatus::Connecting
-        );
+    enum Deferred {
+        Stop,
+        Play(RbStation),
+    }
+    let deferred = crate::state::with_state(|s| {
         let station = s
             .radio
             .current
             .clone()
             .or_else(|| s.config.radio.last_station.as_ref().map(station_from_saved));
-        (active, station)
-    });
-    match snapshot {
-        Some((true, _)) => stop(),
-        Some((false, Some(station))) => play(&station),
+        match toggle_action(&s.radio.status, station.is_some()) {
+            ToggleAction::Pause => {
+                pause();
+                s.radio.status = RadioStatus::Paused;
+                None
+            }
+            ToggleAction::Resume => {
+                resume();
+                s.radio.status = RadioStatus::Playing;
+                None
+            }
+            ToggleAction::Stop => Some(Deferred::Stop),
+            ToggleAction::Tune => station.map(Deferred::Play),
+            ToggleAction::Nothing => None,
+        }
+    })
+    .flatten();
+    match deferred {
+        Some(Deferred::Stop) => stop(),
+        Some(Deferred::Play(station)) => play(&station),
         // Nothing ever played and nothing saved — or the addon is unloading.
-        _ => {}
+        None => {}
     }
 }
 
@@ -369,12 +482,57 @@ pub fn toggle() {
 /// Applies to the live sink if any and always returns fast. Never locks STATE.
 pub fn set_volume(percent: u8) {
     VOLUME_PERCENT.store(percent, Ordering::Release);
+    apply_gain();
+}
+
+/// Push the effective gain — slider taper × combat-duck factor — to the live
+/// sink, if any. The two compose and never write each other's inputs, so the
+/// duck ramp cannot fight the slider (and percent 0 stays muted regardless of
+/// the duck factor). Sink gain only: the visualizer tap is pre-gain by
+/// design. Never locks STATE.
+fn apply_gain() {
     let sink = lock_or_recover(&SESSION)
         .as_ref()
         .and_then(|s| lock_or_recover(&s.sink).clone());
     if let Some(sink) = sink {
-        sink.set_volume(volume_gain(percent));
+        let duck = f32::from_bits(DUCK_FACTOR.load(Ordering::Relaxed));
+        sink.set_volume(volume_gain(VOLUME_PERCENT.load(Ordering::Acquire)) * duck);
     }
+}
+
+/// Combat-duck driver: call once per rendered frame. Render-thread ONLY, and
+/// never from inside `with_state` — unlike every other entry point here it
+/// takes the STATE lock itself (for the config flag). Reads the mumble
+/// link's `IS_IN_COMBAT` bit and ramps [`DUCK_FACTOR`] toward [`DUCK_FLOOR`]
+/// (ducking enabled + in combat) or 1.0, pushing the composed gain to the
+/// sink only while the ramp is actually moving; a settled factor costs one
+/// STATE read and (when enabled) one shared-memory read per frame.
+pub fn duck_tick() {
+    let enabled = crate::state::with_state(|s| s.config.radio.duck_in_combat).unwrap_or(false);
+    let target = if enabled && mumble_in_combat() {
+        DUCK_FLOOR
+    } else {
+        1.0
+    };
+    let current = f32::from_bits(DUCK_FACTOR.load(Ordering::Relaxed));
+    let next = duck_step(current, target);
+    if next != current {
+        DUCK_FACTOR.store(next.to_bits(), Ordering::Relaxed);
+        apply_gain();
+    }
+}
+
+/// True when the mumble link reports the player in combat. A missing link
+/// (character select, mumble disabled) reads as out of combat; the read is a
+/// volatile load from Nexus's shared memory — no locks, no allocation beyond
+/// the identifier lookup.
+fn mumble_in_combat() -> bool {
+    nexus::data_link::get_mumble_link()
+        .map(|link| {
+            link.read_ui_state()
+                .contains(nexus::data_link::mumble::UiState::IS_IN_COMBAT)
+        })
+        .unwrap_or(false)
 }
 
 /// Per-band 0..1 levels for the player-bar visualizer; call once per rendered
@@ -442,9 +600,11 @@ fn start_session(station: RbStation) {
     let old_handle = old.and_then(|mut o| o.handle.take());
 
     let stop = Arc::new(AtomicBool::new(false));
+    let paused = Arc::new(AtomicBool::new(false));
     let sink: Arc<Mutex<Option<Arc<Player>>>> = Arc::new(Mutex::new(None));
 
     let t_stop = Arc::clone(&stop);
+    let t_paused = Arc::clone(&paused);
     let t_sink = Arc::clone(&sink);
     // Pin the module before spawn returns (same contract as spawn_worker):
     // if this thread is ever detached - a stop/shutdown join timing out on a
@@ -456,7 +616,7 @@ fn start_session(station: RbStation) {
             // The audio thread runs across an ABI-adjacent boundary (cpal,
             // symphonia); a panic must die here, not take the process down.
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_session(station, my_gen, t_stop, t_sink, old_handle);
+                run_session(station, my_gen, t_stop, t_paused, t_sink, old_handle);
             }));
             if outcome.is_err() {
                 radio_log("radio audio thread panicked; session abandoned".to_string());
@@ -474,6 +634,7 @@ fn start_session(station: RbStation) {
         Ok(handle) => {
             *guard = Some(Session {
                 stop,
+                paused,
                 sink,
                 handle: Some(handle),
             });
@@ -501,6 +662,7 @@ fn run_session(
     station: RbStation,
     my_gen: u64,
     stop: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
     sink_cell: Arc<Mutex<Option<Arc<Player>>>>,
     old_handle: Option<std::thread::JoinHandle<()>>,
 ) {
@@ -624,6 +786,7 @@ fn run_session(
     // Watchdog: the sink was primed above ("stream ever started" is latched by
     // construction), so an empty sink from here on is a stall, not warm-up.
     let mut last_reconnect: Option<Instant> = None;
+    let mut resume_grace: u32 = 0;
     loop {
         let ticks = (WATCHDOG_INTERVAL.as_millis() / STOP_POLL_INTERVAL.as_millis()).max(1);
         for _ in 0..ticks {
@@ -643,6 +806,13 @@ fn run_session(
                 }
             });
             return;
+        }
+        if !stall_check_armed(paused.load(Ordering::Acquire), &mut resume_grace) {
+            // Paused (or just resumed): a paused sink legitimately runs dry
+            // and icecast may drop the idle socket — neither is a stall. A
+            // stream that actually died surfaces right after the grace, and
+            // the reconnect below re-tunes it.
+            continue;
         }
         if player.empty() {
             // The decoder ran dry: the stream ended or the connection dropped.
@@ -665,7 +835,11 @@ fn run_session(
             }
             match open_and_append(&handle, &station, &player, &now_playing, &stop, &tap) {
                 Ok(()) => {
-                    player.play();
+                    // A pause can land between the stall check and this line;
+                    // resume() owns sink.play() in that case.
+                    if !paused.load(Ordering::Acquire) {
+                        player.play();
+                    }
                     last_reconnect = Some(Instant::now());
                     let live = crate::state::with_state(|s| {
                         if !still_current(my_gen) {
@@ -1081,6 +1255,45 @@ fn stall_wants_reconnect(since_last_reconnect: Option<Duration>) -> bool {
     since_last_reconnect.is_none_or(|d| d >= STALL_REARM)
 }
 
+/// Whether the watchdog's empty-sink stall check may run this tick. While
+/// paused the check is suspended and the grace counter stays fully armed;
+/// after a resume the counter counts [`RESUME_GRACE_TICKS`] ticks down before
+/// the check fires again. Pure: the whole pause/resume watchdog policy in one
+/// testable place.
+fn stall_check_armed(paused: bool, grace: &mut u32) -> bool {
+    if paused {
+        *grace = RESUME_GRACE_TICKS;
+        return false;
+    }
+    if *grace > 0 {
+        *grace -= 1;
+        return false;
+    }
+    true
+}
+
+/// One exponential duck-ramp step toward `target` (either [`DUCK_FLOOR`] or
+/// 1.0), snapping when within [`DUCK_SNAP`] so a settled ramp goes quiescent.
+/// Both inputs sanitized: a NaN can neither enter nor persist in the factor.
+fn duck_step(current: f32, target: f32) -> f32 {
+    let current = if current.is_finite() {
+        current.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let target = if target.is_finite() {
+        target.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let next = current + (target - current) * DUCK_STEP;
+    if (next - target).abs() <= DUCK_SNAP {
+        target
+    } else {
+        next
+    }
+}
+
 /// UI-safe stream title: control characters stripped, capped at
 /// [`MAX_TITLE_CHARS`] via `chars()` (never byte slicing), trimmed.
 fn sanitize_title(raw: &str) -> String {
@@ -1184,6 +1397,96 @@ mod tests {
             volume_gain(20) < at_50 && at_50 < at_80,
             "taper is monotonic"
         );
+    }
+
+    #[test]
+    fn keybind_toggle_pauses_playing_resumes_paused_and_stops_tuning() {
+        assert_eq!(
+            toggle_action(&RadioStatus::Playing, true),
+            ToggleAction::Pause
+        );
+        assert_eq!(
+            toggle_action(&RadioStatus::Playing, false),
+            ToggleAction::Pause
+        );
+        assert_eq!(
+            toggle_action(&RadioStatus::Paused, true),
+            ToggleAction::Resume
+        );
+        assert_eq!(
+            toggle_action(&RadioStatus::Connecting, true),
+            ToggleAction::Stop
+        );
+        assert_eq!(
+            toggle_action(&RadioStatus::Stalled, true),
+            ToggleAction::Stop
+        );
+        // Every "off" state re-tunes when there is a station to tune to.
+        for status in [
+            RadioStatus::Idle,
+            RadioStatus::Stopped,
+            RadioStatus::DeviceLost,
+            RadioStatus::Error("x".to_string()),
+        ] {
+            assert_eq!(toggle_action(&status, true), ToggleAction::Tune);
+            assert_eq!(toggle_action(&status, false), ToggleAction::Nothing);
+        }
+    }
+
+    #[test]
+    fn watchdog_stall_check_suspends_while_paused_and_rearms_after_grace() {
+        let mut grace = 0;
+        assert!(stall_check_armed(false, &mut grace), "normal play: armed");
+        // Paused: suspended, however long the pause lasts.
+        for _ in 0..10 {
+            assert!(!stall_check_armed(true, &mut grace));
+        }
+        // Resumed: the grace ticks pass before the check re-arms, so a
+        // buffer that has not started draining again cannot read as a stall.
+        for tick in 0..RESUME_GRACE_TICKS {
+            assert!(!stall_check_armed(false, &mut grace), "grace tick {tick}");
+        }
+        assert!(stall_check_armed(false, &mut grace), "grace over: armed");
+        assert!(stall_check_armed(false, &mut grace), "and stays armed");
+    }
+
+    #[test]
+    fn duck_ramp_settles_at_both_ends_within_the_design_window() {
+        // Down: 1.0 -> DUCK_FLOOR, monotone, settling EXACTLY at the floor
+        // in ~22 frames (~350 ms at 60 fps, inside the 250-400 ms window).
+        let mut f = 1.0_f32;
+        let mut steps = 0;
+        while f != DUCK_FLOOR {
+            let next = duck_step(f, DUCK_FLOOR);
+            assert!(next < f, "duck ramp is monotone down: {next} !< {f}");
+            f = next;
+            steps += 1;
+            assert!(steps < 60, "ramp must settle");
+        }
+        assert!(
+            (15..=30).contains(&steps),
+            "settled in {steps} frames (~{} ms at 60 fps)",
+            steps * 1000 / 60
+        );
+
+        // Up: DUCK_FLOOR -> 1.0, monotone, settling exactly at unity.
+        let mut steps = 0;
+        while f != 1.0 {
+            let next = duck_step(f, 1.0);
+            assert!(next > f, "recover ramp is monotone up");
+            f = next;
+            steps += 1;
+            assert!(steps < 60, "ramp must settle");
+        }
+        assert!((15..=30).contains(&steps));
+
+        // Settled endpoints are fixed points — a quiescent duck costs nothing.
+        assert_eq!(duck_step(1.0, 1.0), 1.0);
+        assert_eq!(duck_step(DUCK_FLOOR, DUCK_FLOOR), DUCK_FLOOR);
+
+        // NaN can neither enter nor persist.
+        assert!(duck_step(f32::NAN, DUCK_FLOOR).is_finite());
+        assert!(duck_step(0.5, f32::NAN).is_finite());
     }
 
     #[test]

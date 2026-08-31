@@ -8,7 +8,10 @@
 //! worker pattern.
 
 pub mod art;
+#[cfg(test)]
+mod decode_tests;
 pub mod directory;
+pub mod logos;
 pub mod player;
 
 use std::sync::{Arc, Mutex};
@@ -51,6 +54,9 @@ pub enum RadioStatus {
     Idle,
     Connecting,
     Playing,
+    /// Sink paused in place, session alive: a short pause resumes from the
+    /// buffer instantly; a long one re-tunes via the stall machinery.
+    Paused,
     Stalled,
     Stopped,
     /// Audio output device disappeared (unplug / default change).

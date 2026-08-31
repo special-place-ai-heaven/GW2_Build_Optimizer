@@ -14,7 +14,9 @@ crate-type = ["cdylib"]
 gw2-core = { path = "../core" }
 gw2-api = { path = "../gw2api" }
 gw2-optimizer = { path = "../optimizer" }
-nexus = { git = "https://github.com/zerthox/nexus-rs", features = ["serde"] }
+# "mumble": combat detection for radio ducking (gw2_mumble is already in the
+# tree via the serde feature; this only ungates nexus::data_link::mumble).
+nexus = { git = "https://github.com/zerthox/nexus-rs", features = ["serde", "mumble"] }
 serde.workspace = true
 serde_json.workspace = true
 base64.workspace = true
