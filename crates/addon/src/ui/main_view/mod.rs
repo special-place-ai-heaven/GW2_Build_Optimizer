@@ -493,6 +493,7 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
     ui.same_line_with_spacing(0.0, 28.0);
     let saves = t("tab.saves");
     let news = t("tab.news");
+    let radio = t("tab.radio");
     let settings = t("tab.settings");
     let about = t("tab.about");
     let show_news = state.config.news.any_enabled();
@@ -504,6 +505,7 @@ fn render_top_tabs(ui: &Ui, state: &mut AddonState) {
     if show_news {
         utility.push((MainTab::News, news.as_str(), "##main_tab_news"));
     }
+    utility.push((MainTab::Radio, radio.as_str(), "##main_tab_radio"));
     utility.push((MainTab::Settings, settings.as_str(), "##main_tab_settings"));
     utility.push((MainTab::About, about.as_str(), "##main_tab_about"));
     for (tab, label, id) in utility {
@@ -530,7 +532,7 @@ fn render_left_panel(ui: &Ui, state: &mut AddonState) {
     // ── Character section (always visible except Settings) ──
     if !matches!(
         state.main.active_tab,
-        MainTab::Settings | MainTab::About | MainTab::News
+        MainTab::Settings | MainTab::About | MainTab::News | MainTab::Radio
     ) {
         render_left_character_section(ui, state);
     }
@@ -540,7 +542,7 @@ fn render_left_panel(ui: &Ui, state: &mut AddonState) {
             render_left_build_controls(ui, state);
         }
         MainTab::SaveLoad => {}
-        MainTab::Settings | MainTab::About | MainTab::News => {
+        MainTab::Settings | MainTab::About | MainTab::News | MainTab::Radio => {
             // Settings info
             render_left_section_header(ui, &t("section.info"), state.config.section_spacing);
             ui.text_colored(theme::MUTED, format!("  {}", t("info.product")));
@@ -1032,6 +1034,9 @@ fn render_main_content(ui: &Ui, state: &mut AddonState) {
         }
         MainTab::About => {
             tabs::about::render_about_tab(ui, state);
+        }
+        MainTab::Radio => {
+            tabs::radio::render_radio_tab(ui, state);
         }
     }
 }

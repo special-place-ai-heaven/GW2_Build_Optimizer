@@ -3,6 +3,7 @@ mod clipboard;
 mod feedback;
 mod news;
 mod news_art;
+mod radio;
 mod state;
 pub mod ui;
 
@@ -160,6 +161,25 @@ fn on_load() {
         )
         .revert_on_unload();
 
+        register_keybind_with_string(
+            "GW2_BUILD_OPT_RADIO_TOGGLE",
+            keybind_handler!(|_id, is_release| {
+                if !is_release {
+                    // Same ABI-boundary guard as the window toggle above: the
+                    // radio toggle touches the playback runtime and config.
+                    if std::panic::catch_unwind(radio::player::toggle).is_err() {
+                        log(
+                            LogLevel::Warning,
+                            "GW2 Build Optimizer",
+                            "Radio keybind panicked; playback state may be stale.",
+                        );
+                    }
+                }
+            }),
+            "", // unbound by default; the user assigns one in Nexus
+        )
+        .revert_on_unload();
+
         // The `Render` hook for `ui::render` is registered on load. Nexus locks
         // its render registry for the entire frame and iterates it on every
         // PreRender/Render/PostRender pass; a `Register` call from inside a
@@ -207,6 +227,10 @@ fn unload_step(step: &str, run: impl FnOnce() + std::panic::UnwindSafe) {
 fn on_unload() {
     // Cancel first: the workers get the window-rect disk write worth of head start
     // on their `is_cancelled()` checks before anything waits on them.
+    // Audio first: the playback stack owns OS threads (cpal, tokio) that must
+    // be joined before FreeLibrary; radio teardown is bounded and independent
+    // of the worker registry.
+    unload_step("stop radio", radio::player::shutdown);
     unload_step("cancel workers", state::request_shutdown);
     unload_step("persist window", state::persist_window);
 

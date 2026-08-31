@@ -355,6 +355,8 @@ pub struct AddonState {
     pub force_window_pos: bool,
     /// Official RSS (setup) + News tab feeds. Fetched on a worker, never on the download thread.
     pub news: crate::news::NewsState,
+    /// Radio tab session state (search results, playback status, now-playing).
+    pub radio: crate::radio::RadioUiState,
 }
 
 impl AddonState {
@@ -464,6 +466,7 @@ impl AddonState {
         main.weights = OptimizationWeights::default_for_mode(main.game_mode.label());
         self.main = main;
         self.news = crate::news::NewsState::default();
+        self.radio = crate::radio::RadioUiState::default();
         self.screen = Screen::Setup(SetupStep::Language);
 
         crate::ui::save_config_detached(self);
@@ -701,6 +704,7 @@ pub enum MainTab {
     Talk,
     SaveLoad,
     News,
+    Radio,
     Settings,
     About,
 }
@@ -857,6 +861,7 @@ pub fn init(addon_dir: PathBuf) {
         workers: WorkerRegistry::default(),
         force_window_pos: false,
         news: crate::news::NewsState::default(),
+        radio: crate::radio::RadioUiState::default(),
     });
 }
 
