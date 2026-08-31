@@ -47,6 +47,13 @@ thumbnail — **Open in browser** to watch.
 
 ![News desk](docs/screenshots/news.png)
 
+**Radio** plays internet streams in the background while you fight. Search
+stations, pick a genre, heart favourites, set volume. The player bar keeps
+now-playing metadata and an equalizer measured from the live stream — audio
+keeps going when you leave the tab.
+
+![Radio tab](docs/screenshots/radio.jpg)
+
 **Stats** compares Current and Optimized passive Hero-panel attributes and
 defenses using profession, armor weight, gear, upgrades, traits, and the selected
 game mode. Temporary effects and modeled rotation output stay in separately
@@ -144,7 +151,7 @@ patch, use Settings → refresh game data if skills or traits look wrong.
 
 ## Overlay
 
-Tabs: **New Build**, **Improve**, **Choya**, **Saves**, **Settings**, **About**. Overlay chrome
+Tabs: **New Build**, **Improve**, **Choya**, **Saves**, **News**, **Radio**, **Settings**, **About**. Overlay chrome
 follows Settings → Language. Skill, trait, and item names use the official GW2 API
 `lang=` pack (Deutsch, Español, Français, 简体中文).
 
