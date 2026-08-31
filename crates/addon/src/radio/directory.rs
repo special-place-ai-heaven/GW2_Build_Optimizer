@@ -68,6 +68,9 @@ pub struct SearchFilters {
     pub language: Option<String>,
     /// ISO 3166-1 alpha-2 country code ("US", "FR", ...).
     pub countrycode: Option<String>,
+    /// Bitrate cap in kbps (`bitrateMax=`) for poor connections. Stations
+    /// reporting bitrate 0 (unknown) pass any cap — best effort by design.
+    pub max_bitrate: Option<u32>,
 }
 
 /// Search stations by radio-browser tag (genre chip), most-voted first.
@@ -198,6 +201,12 @@ fn filter_params(filters: &SearchFilters) -> String {
         }
         out.push_str("countrycode=");
         out.push_str(&url_encode(c));
+    }
+    if let Some(max) = filters.max_bitrate.filter(|m| *m > 0) {
+        if !out.is_empty() {
+            out.push('&');
+        }
+        out.push_str(&format!("bitrateMax={max}"));
     }
     out
 }
@@ -333,6 +342,7 @@ mod tests {
         let both = SearchFilters {
             language: Some("french".into()),
             countrycode: Some("FR".into()),
+            max_bitrate: None,
         };
         assert_eq!(
             search_path("tag=jazz", &both, 30),
@@ -347,8 +357,21 @@ mod tests {
         let blank = SearchFilters {
             language: Some("  ".into()),
             countrycode: None,
+            max_bitrate: None,
         };
         assert_eq!(filter_params(&blank), "");
+        // Bitrate cap composes; 0 means "any" and is absent.
+        let capped = SearchFilters {
+            language: None,
+            countrycode: None,
+            max_bitrate: Some(128),
+        };
+        assert_eq!(filter_params(&capped), "bitrateMax=128");
+        let uncapped = SearchFilters {
+            max_bitrate: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(filter_params(&uncapped), "");
     }
 
     #[test]

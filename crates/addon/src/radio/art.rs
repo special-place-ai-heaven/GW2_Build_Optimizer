@@ -61,8 +61,9 @@ const RADIO_ZZZ: [f32; 4] = [1313.0, 682.0, 66.0, 60.0];
 const RADIO_HEART: [f32; 4] = [1227.0, 680.0, 52.0, 51.0];
 const RADIO_NOTE_GOLD: [f32; 4] = [854.0, 683.0, 35.0, 60.0];
 
-/// Breathing room between the DJ and the player bar's right edge.
-const MARGIN: f32 = 8.0;
+/// The DJ stays this far from the bar's right edge so the station list's
+/// heart column above is never covered by the pop-out.
+const HEART_CLEARANCE: f32 = 56.0;
 
 // Frame pacing at the overlay's ~60 fps render rate (same assumption as the
 // `frame_count` animations in `theme.rs`).
@@ -106,15 +107,20 @@ pub fn draw_dj_choya(
     let Some(tid) = radio_sheet() else {
         return 0.0;
     };
-    let size = (bar_max[1] - bar_min[1] - 6.0).clamp(24.0, 84.0);
+    // Twice the bar height, popping OUT of it: feet stand on the bar's
+    // bottom edge, the top half rises over the stations area (the bar draws
+    // after the list, so the DJ reads as standing in front of it). Inset
+    // from the right edge so the hearts column stays clear and clickable.
+    let bar_h = bar_max[1] - bar_min[1];
+    let size = ((bar_h - 6.0) * 2.0).clamp(48.0, 170.0);
     let center = [
-        bar_max[0] - size * 0.5 - MARGIN,
-        (bar_min[1] + bar_max[1]) * 0.5,
+        bar_max[0] - HEART_CLEARANCE - size * 0.5,
+        bar_max[1] - 4.0 - size * 0.5,
     ];
-    dl.with_clip_rect_intersect(bar_min, bar_max, || {
+    dl.with_clip_rect_intersect([bar_min[0], bar_min[1] - size * 0.65], bar_max, || {
         draw_dj_states(dl, tid, state, center, size, t);
     });
-    size + MARGIN * 2.0 + BADGE_ZONE
+    HEART_CLEARANCE + size + BADGE_ZONE
 }
 
 fn draw_dj_states(

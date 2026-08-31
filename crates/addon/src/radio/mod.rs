@@ -30,6 +30,9 @@ pub struct RbStation {
     pub countrycode: String,
     pub codec: String,
     pub bitrate: u32,
+    /// Directory vote count — kept so "Popular" sorting can restore the
+    /// API's own order after a client-side re-sort.
+    pub votes: u64,
     pub lastcheckok: u8,
     pub hls: u8,
 }
@@ -71,6 +74,17 @@ pub enum RadioStatus {
 /// into artist/title (the convention is unreliable), always sanitized.
 pub type NowPlayingCell = Arc<Mutex<Option<String>>>;
 
+/// Client-side ordering for the results list. Popular = the directory's
+/// vote order (restorable — `RbStation` keeps `votes`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RadioSort {
+    #[default]
+    Popular,
+    Name,
+    Bitrate,
+    Country,
+}
+
 /// Per-session UI state for the Radio tab, hanging off `AddonState`.
 #[derive(Default)]
 pub struct RadioUiState {
@@ -86,4 +100,6 @@ pub struct RadioUiState {
     pub last_error: Option<String>,
     /// Genre chip currently selected (radio-browser tag), if any.
     pub selected_genre: Option<&'static str>,
+    /// Results ordering; applied on publish and on combo change.
+    pub sort: RadioSort,
 }

@@ -315,6 +315,9 @@ pub struct RadioPreferences {
     /// Station country filter: "any", or an ISO 3166-1 alpha-2 code.
     #[serde(default = "default_radio_country_filter")]
     pub country_filter: String,
+    /// Search bitrate cap in kbps for poor connections; 0 = no cap.
+    #[serde(default)]
+    pub bitrate_max: u32,
     /// Lower the radio volume while the character is in combat (mumble link).
     #[serde(default)]
     pub duck_in_combat: bool,
@@ -328,6 +331,7 @@ impl Default for RadioPreferences {
             last_station: None,
             language_filter: default_radio_language_filter(),
             country_filter: default_radio_country_filter(),
+            bitrate_max: 0,
             duck_in_combat: false,
         }
     }
