@@ -23,3 +23,10 @@ chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
 serde_yaml = "0.9"
 uuid = { version = "1", features = ["v4"] }
+# Radio playback stack. stream-download is pinned to 0.22.x on purpose: 0.23+
+# jumps to reqwest 0.13 while the workspace is on 0.12, and 0.22.9 resolves to
+# the SINGLE shared reqwest. Do NOT bump without re-checking `cargo tree -i reqwest`.
+rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp3", "mp4"] }
+stream-download = { version = "0.22.9", default-features = false, features = ["reqwest-native-tls"] }
+icy-metadata = { version = "0.6", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
