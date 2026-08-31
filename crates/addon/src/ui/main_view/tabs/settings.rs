@@ -703,11 +703,13 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         state.config.ui_language.as_str()
     };
     let (preview_mark, _) = pack_mark(cached_pack_status(&cache, preview_code, build));
+    let font_pref = state.config.ui_font.clone();
+    let ui_lang_pref = state.config.ui_language.clone();
     let auto_preview = format!(
-        "{preview_mark} {} — {}",
+        "{preview_mark} {} - {}",
         t("settings.language_auto"),
         gw2_core::i18n::language_by_code(resolved)
-            .map(|l| l.native_name)
+            .map(|l| crate::ui::fonts::language_label(l, &font_pref, &ui_lang_pref))
             .unwrap_or("English")
     );
     let preview = if state.config.ui_language.eq_ignore_ascii_case("auto") {
@@ -716,7 +718,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         format!(
             "{preview_mark} {}",
             gw2_core::i18n::language_by_code(&state.config.ui_language)
-                .map(|l| l.native_name)
+                .map(|l| crate::ui::fonts::language_label(l, &font_pref, &ui_lang_pref))
                 .unwrap_or(state.config.ui_language.as_str())
         )
     };
@@ -740,7 +742,10 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         for lang in gw2_core::i18n::LANGUAGES {
             let sel = state.config.ui_language == lang.code;
             let (mark, color) = pack_mark(cached_pack_status(&cache, lang.code, build));
-            let label = format!("{mark} {}", lang.native_name);
+            let label = format!(
+                "{mark} {}",
+                crate::ui::fonts::language_label(lang, &font_pref, &ui_lang_pref)
+            );
             let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, color);
             if Selectable::new(&label).selected(sel).build(ui) && !sel {
                 state.config.ui_language = lang.code.into();

@@ -2,6 +2,20 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.7.26 - 2026-08-30
+
+### Combat
+
+- WvW viability no longer treats a missing dummy HP as 0 (any spike used to pass the 30% gate).
+- Prefix search builds the itemstat pool once per neighbour generation instead of three times.
+
+### Overlay
+
+- Fetching the official news feed no longer starts the 30-minute cache clock for YouTube, GuildJen, or the other sources.
+- Settings language list uses English names for Chinese/Japanese/Korean until a CJK font is active (no more `????`).
+- Font combo lists every Windows face we can find (Segoe, YaHei, Yu Gothic, Malgun), not only ones already loaded this session.
+- Data-quality notes use `--` instead of an em-dash the game font cannot draw.
+
 ## 1.7.25 - 2026-08-30
 
 ### Combat

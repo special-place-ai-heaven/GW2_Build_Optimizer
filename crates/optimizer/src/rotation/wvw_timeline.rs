@@ -52,7 +52,7 @@ pub struct SkillResourceRule {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WvwCombatReport {
     pub duration_ms: u32,
-    pub target_health: f64,
+    pub target_health: Option<f64>,
     pub target_reached_at_ms: Option<u32>,
     pub longest_protected_window_ms: u32,
     pub protected_action_count: u32,
@@ -1624,7 +1624,7 @@ impl<'a> Timeline<'a> {
 
         WvwCombatReport {
             duration_ms: self.profile.duration_ms,
-            target_health: self.profile.target_health.unwrap_or(0.0),
+            target_health: self.profile.target_health,
             target_reached_at_ms: self.target_reached_at_ms,
             longest_protected_window_ms: self.longest_protected_window_ms,
             protected_action_count: self.protected_action_count,

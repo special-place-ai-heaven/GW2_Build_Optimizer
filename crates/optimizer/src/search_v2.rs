@@ -336,9 +336,10 @@ pub fn generate_neighbors(
         groups.push(swap_relics_for_failed_gates(candidate, db));
     }
     let gear_locks = &locks.gear_locks;
-    groups.push(swap_gear_prefix(candidate, db, weights, gear_locks));
-    groups.push(swap_gear_groups(candidate, db, weights, gear_locks));
-    groups.push(swap_slot_prefix(candidate, db, weights, gear_locks));
+    let itemstats = prioritized_itemstats(db, weights);
+    groups.push(swap_gear_prefix(candidate, &itemstats, gear_locks));
+    groups.push(swap_gear_groups(candidate, &itemstats, gear_locks));
+    groups.push(swap_slot_prefix(candidate, &itemstats, gear_locks));
     groups.push(swap_rune(candidate, db));
     groups.push(swap_sigil_slots(candidate, db));
     groups.push(swap_relic(candidate, db));
@@ -619,12 +620,12 @@ fn mutable_gear_slot(
 /// `sort_by + dedup_by + truncate` pipeline — is stable across runs.
 fn swap_gear_prefix(
     candidate: &BeamCandidate,
-    db: &GameDb,
-    weights: &OptimizationWeights,
+    itemstats: &[&gw2_api::models::ItemStat],
     gear_locks: &HashMap<GearSlot, u32>,
 ) -> Vec<ValidatedBuild> {
-    prioritized_itemstats(db, weights)
-        .into_iter()
+    itemstats
+        .iter()
+        .copied()
         .filter_map(|itemstat| {
             let mut build = candidate.validated.clone();
             let changed = build.fill_unlocked_gear_slots(
@@ -648,11 +649,9 @@ fn swap_gear_prefix(
 /// instead of stamping a prefix into a hand that holds nothing.
 fn swap_gear_groups(
     candidate: &BeamCandidate,
-    db: &GameDb,
-    weights: &OptimizationWeights,
+    itemstats: &[&gw2_api::models::ItemStat],
     gear_locks: &HashMap<GearSlot, u32>,
 ) -> Vec<ValidatedBuild> {
-    let itemstats = prioritized_itemstats(db, weights);
     let mut out = Vec::with_capacity(itemstats.len() * 3);
     // Slot groups standing in for the old armor / trinkets / weapons categories.
     const GROUPS: [&[GearSlot]; 3] = [&ARMOR_SLOTS, &TRINKET_SLOTS, &WEAPON_SET1_SLOTS];
@@ -713,11 +712,9 @@ const SLOT_PREFIX_CANDIDATES: usize = 4;
 /// discipline as every other neighbour source.
 fn swap_slot_prefix(
     candidate: &BeamCandidate,
-    db: &GameDb,
-    weights: &OptimizationWeights,
+    itemstats: &[&gw2_api::models::ItemStat],
     gear_locks: &HashMap<GearSlot, u32>,
 ) -> Vec<ValidatedBuild> {
-    let itemstats = prioritized_itemstats(db, weights);
     let top_prefixes: Vec<&gw2_api::models::ItemStat> = itemstats
         .iter()
         .copied()
@@ -1935,7 +1932,8 @@ mod tests {
         let candidate = make_candidate(validated);
 
         let weights = OptimizationWeights::default();
-        let neighbors = swap_slot_prefix(&candidate, &db, &weights, &HashMap::new());
+        let itemstats = prioritized_itemstats(&db, &weights);
+        let neighbors = swap_slot_prefix(&candidate, &itemstats, &HashMap::new());
 
         // The pair (helm=Berserker's AND coat=Cavalier's) is directly reachable.
         assert!(neighbors.iter().any(|build| {
@@ -2018,12 +2016,8 @@ mod tests {
         validated.fill_worn_gear_slots(worn.clone());
         let candidate = make_candidate(validated);
 
-        let neighbors = swap_gear_prefix(
-            &candidate,
-            &db,
-            &OptimizationWeights::default(),
-            &HashMap::new(),
-        );
+        let itemstats = prioritized_itemstats(&db, &OptimizationWeights::default());
+        let neighbors = swap_gear_prefix(&candidate, &itemstats, &HashMap::new());
 
         for neighbor in &neighbors {
             assert_ne!(
@@ -2094,7 +2088,8 @@ mod tests {
         let candidate = make_candidate(validated);
 
         let weights = OptimizationWeights::default();
-        let neighbors = swap_slot_prefix(&candidate, &db, &weights, &HashMap::new());
+        let itemstats = prioritized_itemstats(&db, &weights);
+        let neighbors = swap_slot_prefix(&candidate, &itemstats, &HashMap::new());
 
         let changed_slot = |build: &ValidatedBuild| -> GearSlot {
             let mut differing = GearSlot::ALL.iter().copied().filter(|slot| {
@@ -2152,7 +2147,7 @@ mod tests {
         );
 
         // Same inputs, same sequence: the pool is id-ordered, not HashMap-ordered.
-        let again = swap_slot_prefix(&candidate, &db, &weights, &HashMap::new());
+        let again = swap_slot_prefix(&candidate, &itemstats, &HashMap::new());
         assert_eq!(
             again
                 .iter()
