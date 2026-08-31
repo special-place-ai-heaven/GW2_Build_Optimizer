@@ -284,7 +284,15 @@ impl<I: Source> Source for SampleTap<I> {
 
     #[inline]
     fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
-        self.input.try_seek(pos)
+        let out = self.input.try_seek(pos);
+        if out.is_ok() {
+            // Restart the mono fold on a clean frame boundary — a mid-frame
+            // seek would otherwise smear pre-seek samples into the first
+            // post-seek frame. Dead path for live radio, kept exact anyway.
+            self.frame_pos = 0;
+            self.frame_sum = 0.0;
+        }
+        out
     }
 }
 
@@ -405,6 +413,10 @@ pub fn eq_levels() -> [f32; EQ_BANDS] {
 /// shut the tokio runtime down (bounded). Called from `on_unload` BEFORE
 /// worker cancellation; must never block long or panic.
 pub fn shutdown() {
+    // Invalidate the generation FIRST: if the bounded join below times out
+    // while the audio thread sits between its stop check and the tap install,
+    // the detached thread would otherwise repopulate TAP after this clear.
+    GENERATION.fetch_add(1, Ordering::AcqRel);
     stop_session(SHUTDOWN_JOIN_BUDGET);
     *lock_or_recover(&TAP) = None;
     let runtime = lock_or_recover(&RUNTIME).take();

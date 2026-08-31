@@ -424,7 +424,6 @@ fn stations(ui: &Ui, state: &mut AddonState) {
                         }
                     }
                 }
-                art::draw_corner_choya(ui, st);
             });
     }
     if let Some(station) = fav_toggle {
@@ -666,9 +665,20 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
         // text and controls render on top of them.
         eq_bars(&dl, origin, w, bar_h);
 
+        // DJ choya at the right end of the bar, clipped to it — it can no
+        // longer cover the station list's hearts. Text stays clear of the
+        // width it reserves.
+        let choya_w = art::draw_dj_choya(
+            &dl,
+            state,
+            ui.frame_count() as u32,
+            [origin[0] - 2.0, origin[1]],
+            [origin[0] + w + 2.0, origin[1] + bar_h],
+        );
+
         let pad = 10.0;
         let x0 = origin[0] + pad;
-        let right = origin[0] + w - pad;
+        let right = origin[0] + w - pad - choya_w;
         let y1 = origin[1] + 6.0;
         let y2 = y1 + line_h + 3.0;
         let status = state.radio.status.clone();
