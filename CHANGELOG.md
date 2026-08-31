@@ -2,6 +2,16 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.9.0 - 2026-08-31
+
+### Radio
+
+- Station logos: real favicons in the results and favorites lists (downloaded safely, cached on disk, capped at 200 per session so long sessions never bloat VRAM; letter plates remain the fallback).
+- Pause with memory: short pauses resume instantly from the buffer; if the station dropped you while paused, resuming re-tunes seamlessly. The keybind now toggles pause/resume.
+- Lower volume in combat: optional checkbox next to the volume slider — radio ducks to 30% with a smooth ramp when Mumble says you are in combat, and comes back after.
+- AAC+ stations verified: they play their AAC core at correct pitch (missing only the highest frequencies); dropping them entirely would be worse than slightly-reduced fidelity.
+- Long-session memory audit: every streaming buffer proven bounded (~1-2 MB flat regardless of hours played).
+
 ## 1.8.3 - 2026-08-31
 
 ### Radio

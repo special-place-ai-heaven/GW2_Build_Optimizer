@@ -9,7 +9,7 @@
 
 use nexus::imgui::{ChildWindow, ComboBox, DrawListMut, Selectable, Slider, StyleColor, Ui};
 
-use crate::radio::{art, directory, player, RadioStatus, RbStation};
+use crate::radio::{art, directory, logos, player, RadioStatus, RbStation};
 use crate::state::{with_state, AddonState};
 use crate::ui::theme;
 use gw2_core::config::SavedStation;
@@ -54,6 +54,9 @@ pub(in crate::ui::main_view) fn render_radio_tab(ui: &Ui, state: &mut AddonState
     ui.dummy([0.0, 6.0]);
     favorites(ui, state);
     stations(ui, state);
+    // One pass per frame: start a logo download worker for whatever the
+    // visible rows enqueued above (dedupe-guarded, single-flight).
+    logos::kick(state);
     player_bar(ui, state);
 }
 
@@ -456,9 +459,15 @@ fn station_row(ui: &Ui, i: usize, s: &RbStation, fav: bool, active: bool) -> Row
     let dl = ui.get_window_draw_list();
     row_plate(&dl, origin, avail, ROW_H, hovered, active);
 
-    let letter = s.name.chars().next().unwrap_or('#');
     let av_y = origin[1] + (ROW_H - AVATAR) * 0.5;
-    letter_avatar(ui, &dl, [origin[0] + 2.0, av_y], AVATAR, letter);
+    station_avatar(
+        ui,
+        &dl,
+        [origin[0] + 2.0, av_y],
+        AVATAR,
+        &s.name,
+        &s.favicon,
+    );
 
     let tx = origin[0] + 2.0 + AVATAR + 8.0;
     let text_w = row_w - (AVATAR + 12.0);
@@ -509,9 +518,15 @@ fn favorite_row(ui: &Ui, i: usize, f: &SavedStation, active: bool) -> RowAction 
     let dl = ui.get_window_draw_list();
     row_plate(&dl, origin, avail, FAV_ROW_H, hovered, active);
 
-    let letter = f.name.chars().next().unwrap_or('#');
     let av_y = origin[1] + (FAV_ROW_H - FAV_AVATAR) * 0.5;
-    letter_avatar(ui, &dl, [origin[0] + 2.0, av_y], FAV_AVATAR, letter);
+    station_avatar(
+        ui,
+        &dl,
+        [origin[0] + 2.0, av_y],
+        FAV_AVATAR,
+        &f.name,
+        &f.favicon,
+    );
 
     let tx = origin[0] + 2.0 + FAV_AVATAR + 8.0;
     let text_w = row_w - (FAV_AVATAR + 12.0);
@@ -558,9 +573,29 @@ fn row_plate(dl: &DrawListMut, origin: [f32; 2], w: f32, h: f32, hovered: bool, 
     .build();
 }
 
-/// Letter-plate avatar in the `icons::paint_avatar` fallback style. Stations
-/// never load remote favicons — the stream hosts trip antivirus heuristics —
-/// so the letter plate IS the avatar, not a loading state.
+/// Station avatar: the real logo once `radio::logos` has the favicon cached
+/// and decoded, the letter plate while it loads — or permanently, when the
+/// favicon is missing, failed, undecodable (.ico/.webp/.svg), or the session
+/// texture budget is spent. Only rows inside the child's clip rect ask the
+/// pipeline, so a search result never queues 50 downloads at once.
+fn station_avatar(ui: &Ui, dl: &DrawListMut, p: [f32; 2], size: f32, name: &str, favicon: &str) {
+    let p_max = [p[0] + size, p[1] + size];
+    if !favicon.is_empty() && ui.is_rect_visible(p, p_max) {
+        if let Some(tid) = logos::texture(favicon) {
+            let r = size * 0.5;
+            dl.add_image_rounded(tid, p, p_max, r)
+                .col([1.0, 1.0, 1.0, 1.0])
+                .build();
+            dl.add_rect(p, p_max, theme::GOLD_DIM).rounding(r).build();
+            return;
+        }
+    }
+    letter_avatar(ui, dl, p, size, name.chars().next().unwrap_or('#'));
+}
+
+/// Letter-plate avatar in the `icons::paint_avatar` fallback style — the
+/// immediate stand-in while a favicon downloads, and the permanent avatar for
+/// stations without a usable one.
 fn letter_avatar(ui: &Ui, dl: &DrawListMut, p: [f32; 2], size: f32, letter: char) {
     let p_max = [p[0] + size, p[1] + size];
     let r = size * 0.5;
@@ -726,41 +761,61 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
         ui.set_window_font_scale(1.0);
     }
 
-    // Controls row: Play/Stop + volume. Widgets, so they leave the draw list.
+    // Controls row: Play/Pause/Stop + volume. Widgets, so they leave the
+    // draw list. All swap-set buttons share one width so nothing shifts.
     let pad = 10.0;
     let y3 = origin[1] + 6.0 + line_h * 2.0 + 6.0;
     ui.set_cursor_screen_pos([origin[0] + pad, y3]);
     let play_label = t("radio.play");
     let stop_label = t("radio.stop");
-    let btn_w =
-        theme::gold_button_width(ui, &play_label).max(theme::gold_button_width(ui, &stop_label));
-    let busy = matches!(
-        state.radio.status,
-        RadioStatus::Playing | RadioStatus::Connecting | RadioStatus::Stalled
-    );
-    if busy {
-        if theme::gold_button_sized(ui, format!("{stop_label}##radio_stop"), [btn_w, 0.0]) {
-            // Signal-only: this click handler runs under the frame's STATE
-            // guard, where the joining stop() can never finish its join.
-            player::request_stop();
-            state.radio.status = RadioStatus::Stopped;
-        }
-    } else {
-        let resumable = state.radio.current.clone().or_else(|| {
-            state
-                .config
-                .radio
-                .last_station
-                .as_ref()
-                .map(station_from_saved)
-        });
-        match resumable {
-            Some(station) => {
-                if theme::gold_button_sized(ui, format!("{play_label}##radio_play"), [btn_w, 0.0]) {
-                    start_play(state, station);
-                }
+    let pause_label = t("radio.pause");
+    let btn_w = theme::gold_button_width(ui, &play_label)
+        .max(theme::gold_button_width(ui, &stop_label))
+        .max(theme::gold_button_width(ui, &pause_label));
+    match state.radio.status {
+        RadioStatus::Playing => {
+            if theme::gold_button_sized(ui, format!("{pause_label}##radio_pause"), [btn_w, 0.0]) {
+                // pause() never locks STATE; the status is written
+                // optimistically here (the audio thread deliberately goes
+                // quiet while paused), same pattern as Stop below.
+                player::pause();
+                state.radio.status = RadioStatus::Paused;
             }
-            None => dim_button(ui, &format!("{play_label}##radio_play"), btn_w),
+            ui.same_line_with_spacing(0.0, 8.0);
+            stop_button(ui, state, &stop_label, btn_w);
+        }
+        RadioStatus::Paused => {
+            if theme::gold_button_sized(ui, format!("{play_label}##radio_play"), [btn_w, 0.0]) {
+                player::resume();
+                state.radio.status = RadioStatus::Playing;
+            }
+            ui.same_line_with_spacing(0.0, 8.0);
+            stop_button(ui, state, &stop_label, btn_w);
+        }
+        RadioStatus::Connecting | RadioStatus::Stalled => {
+            stop_button(ui, state, &stop_label, btn_w);
+        }
+        _ => {
+            let resumable = state.radio.current.clone().or_else(|| {
+                state
+                    .config
+                    .radio
+                    .last_station
+                    .as_ref()
+                    .map(station_from_saved)
+            });
+            match resumable {
+                Some(station) => {
+                    if theme::gold_button_sized(
+                        ui,
+                        format!("{play_label}##radio_play"),
+                        [btn_w, 0.0],
+                    ) {
+                        start_play(state, station);
+                    }
+                }
+                None => dim_button(ui, &format!("{play_label}##radio_play"), btn_w),
+            }
         }
     }
 
@@ -768,7 +823,11 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
     ui.align_text_to_frame_padding();
     ui.text_colored(theme::MUTED, t("radio.volume"));
     ui.same_line_with_spacing(0.0, 8.0);
-    let slider_w = (ui.content_region_avail()[0] - pad).clamp(90.0, 220.0);
+    // Reserve the combat-duck checkbox's footprint (drawn at 0.85 scale)
+    // before clamping the slider, so the checkbox never falls off the bar.
+    let duck_label = t("radio.duck_in_combat");
+    let duck_w = ui.calc_text_size(&duck_label)[0] * 0.85 + theme::control_height(ui) + 10.0;
+    let slider_w = (ui.content_region_avail()[0] - pad - duck_w).clamp(90.0, 220.0);
     ui.set_next_item_width(slider_w);
     let mut volume = state.config.radio.volume_percent;
     if Slider::new("##radio_vol", 0u8, 100u8).build(ui, &mut volume) {
@@ -780,7 +839,26 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
     if ui.is_item_deactivated_after_edit() {
         crate::ui::save_config_detached(state);
     }
+
+    ui.same_line_with_spacing(0.0, 10.0);
+    ui.set_window_font_scale(0.85);
+    let mut duck = state.config.radio.duck_in_combat;
+    if ui.checkbox(format!("{duck_label}##radio_duck"), &mut duck) {
+        state.config.radio.duck_in_combat = duck;
+        crate::ui::save_config_detached(state);
+    }
+    ui.set_window_font_scale(1.0);
     ui.set_cursor_screen_pos([origin[0], origin[1] + bar_h]);
+}
+
+/// The shared Stop button: signal-only stop + optimistic status write. This
+/// click handler runs under the frame's STATE guard, where the joining
+/// `player::stop()` could never finish its join — hence `request_stop`.
+fn stop_button(ui: &Ui, state: &mut AddonState, label: &str, w: f32) {
+    if theme::gold_button_sized(ui, format!("{label}##radio_stop"), [w, 0.0]) {
+        player::request_stop();
+        state.radio.status = RadioStatus::Stopped;
+    }
 }
 
 /// Real equalizer in the bar's background: 24 low-alpha gold bars driven by
@@ -851,6 +929,7 @@ fn status_line(status: &RadioStatus) -> (String, [f32; 4]) {
         RadioStatus::Idle => (t("radio.status.idle"), theme::MUTED),
         RadioStatus::Connecting => (t("radio.status.connecting"), theme::GOLD),
         RadioStatus::Playing => (t("radio.live"), theme::GOLD),
+        RadioStatus::Paused => (t("radio.status.paused"), theme::MUTED),
         RadioStatus::Stalled => (t("radio.status.stalled"), theme::WARN),
         RadioStatus::Stopped => (t("radio.status.stopped"), theme::MUTED),
         RadioStatus::DeviceLost => (t("radio.status.device_lost"), theme::ERR),

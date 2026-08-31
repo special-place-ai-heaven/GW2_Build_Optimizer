@@ -315,6 +315,9 @@ pub struct RadioPreferences {
     /// Station country filter: "any", or an ISO 3166-1 alpha-2 code.
     #[serde(default = "default_radio_country_filter")]
     pub country_filter: String,
+    /// Lower the radio volume while the character is in combat (mumble link).
+    #[serde(default)]
+    pub duck_in_combat: bool,
 }
 
 impl Default for RadioPreferences {
@@ -325,6 +328,7 @@ impl Default for RadioPreferences {
             last_station: None,
             language_filter: default_radio_language_filter(),
             country_filter: default_radio_country_filter(),
+            duck_in_combat: false,
         }
     }
 }
@@ -556,7 +560,11 @@ pub fn initial_window_size(display: [f32; 2]) -> [f32; 2] {
     if dw < MIN_WINDOW_SIZE[0] || dh < MIN_WINDOW_SIZE[1] {
         return DEFAULT_WINDOW_SIZE;
     }
-    let usable_w = if dw / dh > 2.0 { 1920.0_f32.min(dw) } else { dw };
+    let usable_w = if dw / dh > 2.0 {
+        1920.0_f32.min(dw)
+    } else {
+        dw
+    };
     let margin = DEFAULT_WINDOW_POS[0];
     let w = (usable_w * 0.8).min(dw - margin).max(MIN_WINDOW_SIZE[0]);
     let h = (dh * 0.8).min(dh - margin).max(MIN_WINDOW_SIZE[1]);

@@ -196,6 +196,10 @@ pub fn render(ui: &Ui) {
     // race for the clipboard must still land if the player closed the overlay
     // right after clicking, and the retry must never run under the state lock.
     crate::clipboard::pump();
+    // Also before the visibility check: combat ducking must keep working with
+    // the overlay closed. Render-thread-only; locks STATE itself, so it must
+    // stay outside `with_state`.
+    crate::radio::player::duck_tick();
     if !state::is_window_visible() {
         return;
     }

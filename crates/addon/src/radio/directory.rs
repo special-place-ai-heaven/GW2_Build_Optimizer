@@ -129,6 +129,13 @@ pub fn parse_stations(body: &str) -> Result<Vec<RbStation>, String> {
 /// those stations are usually MP3 and get an honest per-station error if not.
 /// OGG/FLAC/Opus stations would tune in, buffer, and then fail to decode;
 /// offering them and erroring reads as breakage, so they are dropped here.
+///
+/// AAC+/AACP (HE-AAC) stays deliberately: symphonia-codec-aac has no SBR
+/// decoder, but HE-AAC over ADTS is implicitly signalled (header says LC)
+/// and the SBR payload rides in FIL elements the decoder skips unread — so
+/// these stations play their LC core at the correct pitch and tempo, minus
+/// the SBR high band (HE-AAC v2 additionally folds to mono). Degraded but
+/// honestly audible; proven end-to-end in `radio::decode_tests`.
 fn codec_supported(codec: &str) -> bool {
     let c = codec.trim();
     if c.is_empty() {

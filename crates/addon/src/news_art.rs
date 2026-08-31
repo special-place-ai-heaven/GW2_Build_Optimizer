@@ -58,7 +58,9 @@ pub fn url_ok(url: &str) -> bool {
     STILL_HOSTS.iter().any(|ok| host.eq_ignore_ascii_case(ok))
 }
 
-fn reserved_still_host(host: &str) -> bool {
+/// Host-level reject shared with `radio::logos`: "localhost" or a literal IP
+/// in a reserved range. Hostname DNS screening is the caller's business.
+pub(crate) fn reserved_still_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
