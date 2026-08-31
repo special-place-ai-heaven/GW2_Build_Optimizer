@@ -525,7 +525,9 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
     );
     if busy {
         if theme::gold_button_sized(ui, format!("{stop_label}##radio_stop"), [btn_w, 0.0]) {
-            player::stop();
+            // Signal-only: this click handler runs under the frame's STATE
+            // guard, where the joining stop() can never finish its join.
+            player::request_stop();
             state.radio.status = RadioStatus::Stopped;
         }
     } else {
@@ -718,14 +720,19 @@ fn clip_text(ui: &Ui, text: &str, max_w: f32) -> String {
     if ui.calc_text_size(text)[0] <= max_w {
         return text.to_string();
     }
+    // Accumulate per-char widths instead of re-measuring the growing prefix:
+    // O(n) instead of O(n²) — this runs per row, per frame, in a game overlay.
+    // Summed advances ignore kerning, which the bundled fonts do not use.
+    let ell_w = ui.calc_text_size("…")[0];
     let mut s = String::new();
+    let mut w = 0.0;
+    let mut buf = [0u8; 4];
     for ch in text.chars() {
-        let mut probe = s.clone();
-        probe.push(ch);
-        probe.push('…');
-        if ui.calc_text_size(&probe)[0] > max_w {
+        let cw = ui.calc_text_size(ch.encode_utf8(&mut buf))[0];
+        if w + cw + ell_w > max_w {
             break;
         }
+        w += cw;
         s.push(ch);
     }
     s.push('…');

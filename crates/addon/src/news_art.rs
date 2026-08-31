@@ -63,13 +63,21 @@ fn reserved_still_host(host: &str) -> bool {
         return true;
     }
     match host.parse::<std::net::IpAddr>() {
-        Ok(std::net::IpAddr::V4(v)) => {
+        Ok(ip) => ip_is_reserved(ip),
+        Err(_) => false,
+    }
+}
+
+/// Loopback/private/link-local/unspecified/ULA - addresses no community-
+/// submitted URL (news image or radio stream) has any business dialing.
+pub(crate) fn ip_is_reserved(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v) => {
             v.is_loopback() || v.is_private() || v.is_link_local() || v.is_unspecified()
         }
-        Ok(std::net::IpAddr::V6(v)) => {
+        std::net::IpAddr::V6(v) => {
             v.is_loopback() || v.is_unspecified() || ipv6_unique_local_or_link_local(v)
         }
-        Err(_) => false,
     }
 }
 

@@ -79,7 +79,7 @@ fn worker_log(message: String) {
 
 /// Opaque `HMODULE`. Copied into the worker; never dereferenced as a pointer.
 #[derive(Clone, Copy)]
-struct ModuleHandle(usize);
+pub(crate) struct ModuleHandle(usize);
 
 #[cfg(windows)]
 impl ModuleHandle {
@@ -118,7 +118,7 @@ extern "system" {
 /// Returns `None` when this crate is linked into the process image (`cargo test`)
 /// or when the API fails (logged; the worker still starts). On `None`, the
 /// worker returns normally so existing join tests keep working.
-fn pin_addon_module() -> Option<ModuleHandle> {
+pub(crate) fn pin_addon_module() -> Option<ModuleHandle> {
     #[cfg(not(windows))]
     {
         None
@@ -160,7 +160,7 @@ fn pin_addon_module() -> Option<ModuleHandle> {
 }
 
 /// Worker finished. Decrement the pin and exit this thread (never returns).
-fn exit_pinned_worker(handle: ModuleHandle) {
+pub(crate) fn exit_pinned_worker(handle: ModuleHandle) {
     #[cfg(windows)]
     {
         // SAFETY: `handle` is the increment taken on the parent before spawn
@@ -175,7 +175,7 @@ fn exit_pinned_worker(handle: ModuleHandle) {
 }
 
 /// `Builder::spawn` failed after a successful pin: undo the increment here.
-fn undo_module_pin(pin: Option<ModuleHandle>) {
+pub(crate) fn undo_module_pin(pin: Option<ModuleHandle>) {
     #[cfg(windows)]
     if let Some(handle) = pin {
         // SAFETY: the worker never started, so this thread still owns the increment.
@@ -453,6 +453,11 @@ impl AddonState {
     /// `config.json` while STATE is held. Write errors are logged by that worker.
     pub fn reset_to_first_run(&mut self) -> Result<(), std::io::Error> {
         let config = AppConfig::default();
+
+        // Halt any live radio session, signal-only: this method runs under the
+        // caller's STATE guard, so the joining stop() would burn its whole
+        // budget waiting on a status write into this very lock.
+        crate::radio::player::request_stop();
 
         // Workers started before the reset keep the old token, which is cancelled
         // here, so they wind down on their own. Their handles stay in the registry

@@ -29,8 +29,9 @@
 //! threads that do not hold it (the keybind handler path).
 
 use std::io::{Read, Seek};
+use std::net::ToSocketAddrs;
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -104,6 +105,17 @@ static VOLUME_PERCENT: AtomicU8 = AtomicU8::new(60);
 
 /// One station session. Owned by [`SESSION`]; the audio-owner thread holds
 /// clones of the stop flag and the sink cell, never the session itself.
+/// Monotone session generation: bumped by every [`start_session`] and
+/// [`request_stop`]. A session thread may only write status/config while its
+/// generation is still current - a detached predecessor's late writes (stale
+/// `Playing`, wrong `last_station`) are discarded at the lock, where the
+/// check and the write are atomic with respect to the successor's writes.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+fn still_current(my_gen: u64) -> bool {
+    GENERATION.load(Ordering::Acquire) == my_gen
+}
+
 struct Session {
     /// Set by [`stop`]/[`play`] to end the session; polled by the audio thread.
     stop: Arc<AtomicBool>,
@@ -128,8 +140,23 @@ pub fn play(station: &RbStation) {
 ///
 /// Signals the session flag, then JOINs the audio-owner thread (bounded ~1s);
 /// the thread drops the sink/stream and writes `Stopped` as its last act.
+/// Keybind/unload path ONLY - never call while STATE is held (the join waits
+/// on a status write into that lock); the tab UI uses [`request_stop`].
 pub fn stop() {
     stop_session(STOP_JOIN_BUDGET);
+}
+
+/// Signal-only stop for callers that may hold STATE (the tab's Stop button,
+/// settings reset): raises the stop flag and invalidates the session
+/// generation, so the dying thread's late status writes are discarded - the
+/// caller owns the status from here. Never joins and never locks STATE; the
+/// audio thread reaps itself (~50ms) and its handle is joined by the next
+/// [`play`] or by [`shutdown`].
+pub fn request_stop() {
+    GENERATION.fetch_add(1, Ordering::AcqRel);
+    if let Some(session) = lock_or_recover(&SESSION).as_ref() {
+        session.stop.store(true, Ordering::Release);
+    }
 }
 
 /// Keybind toggle: playing -> stop; otherwise re-tune the current/last station.
@@ -186,6 +213,7 @@ pub fn shutdown() {
 // ---------------------------------------------------------------------------
 
 fn start_session(station: RbStation) {
+    let my_gen = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
     let mut guard = lock_or_recover(&SESSION);
     // Signal the old session but let the NEW audio thread join it: the caller
     // may be the render thread holding STATE, and the old thread may be
@@ -201,19 +229,29 @@ fn start_session(station: RbStation) {
 
     let t_stop = Arc::clone(&stop);
     let t_sink = Arc::clone(&sink);
+    // Pin the module before spawn returns (same contract as spawn_worker):
+    // if this thread is ever detached - a stop/shutdown join timing out on a
+    // socket read - FreeLibrary must not unmap `.text` under it.
+    let pin = crate::state::pin_addon_module();
     let spawned = std::thread::Builder::new()
         .name("gw2bo-radio-audio".to_string())
         .spawn(move || {
             // The audio thread runs across an ABI-adjacent boundary (cpal,
             // symphonia); a panic must die here, not take the process down.
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_session(station, t_stop, t_sink, old_handle);
+                run_session(station, my_gen, t_stop, t_sink, old_handle);
             }));
             if outcome.is_err() {
                 radio_log("radio audio thread panicked; session abandoned".to_string());
                 let _ = crate::state::with_state(|s| {
-                    s.radio.status = RadioStatus::Error("playback thread panicked".to_string());
+                    if still_current(my_gen) {
+                        s.radio.status =
+                            RadioStatus::Error("playback thread panicked".to_string());
+                    }
                 });
+            }
+            if let Some(handle) = pin {
+                crate::state::exit_pinned_worker(handle);
             }
         });
     match spawned {
@@ -224,7 +262,10 @@ fn start_session(station: RbStation) {
                 handle: Some(handle),
             });
         }
-        Err(e) => radio_log(format!("failed to spawn radio audio thread: {e}")),
+        Err(e) => {
+            crate::state::undo_module_pin(pin);
+            radio_log(format!("failed to spawn radio audio thread: {e}"));
+        }
     }
 }
 
@@ -242,6 +283,7 @@ fn stop_session(join_budget: Duration) {
 /// Everything a station session does, on the audio-owner thread.
 fn run_session(
     station: RbStation,
+    my_gen: u64,
     stop: Arc<AtomicBool>,
     sink_cell: Arc<Mutex<Option<Arc<Player>>>>,
     old_handle: Option<std::thread::JoinHandle<()>>,
@@ -258,25 +300,28 @@ fn run_session(
     // Connecting on entry; snapshot the now-playing cell and config volume.
     // The Arc is cloned out of STATE here, BEFORE the stream opens, so the
     // ICY callback never locks addon state.
-    let Some((now_playing, volume)) = crate::state::with_state(|s| {
+    let Some(Some((now_playing, volume))) = crate::state::with_state(|s| {
+        if !still_current(my_gen) {
+            return None; // replaced before we even connected
+        }
         s.radio.status = RadioStatus::Connecting;
         s.radio.current = Some(station.clone());
         if let Ok(mut np) = s.radio.now_playing.lock() {
             *np = None;
         }
-        (
+        Some((
             Arc::clone(&s.radio.now_playing),
             s.config.radio.volume_percent,
-        )
+        ))
     }) else {
-        return; // addon is unloading
+        return; // addon is unloading, or a newer session owns the state
     };
     VOLUME_PERCENT.store(volume, Ordering::Release);
 
     let handle = match runtime_handle() {
         Ok(h) => h,
         Err(msg) => {
-            set_error(msg);
+            set_error(my_gen, msg);
             return;
         }
     };
@@ -297,7 +342,7 @@ fn run_session(
     let mut device = match opened {
         Ok(d) => d,
         Err(e) => {
-            set_error(short_msg("no audio output device", &e.to_string()));
+            set_error(my_gen, short_msg("no audio output device", &e.to_string()));
             return;
         }
     };
@@ -309,12 +354,12 @@ fn run_session(
     match open_and_append(&handle, &station, &player, &now_playing, &stop) {
         Ok(()) => {}
         Err(SessionEnd::Cancelled) => {
-            finish_stopped(&player, &sink_cell);
+            finish_stopped(my_gen, &player, &sink_cell);
             return;
         }
         Err(SessionEnd::Failed(msg)) => {
             *lock_or_recover(&sink_cell) = None;
-            set_error(msg);
+            set_error(my_gen, msg);
             return;
         }
     }
@@ -324,25 +369,29 @@ fn run_session(
     player.play();
 
     // Playing: publish the station and persist it for the keybind toggle.
+    // The click ping (directory usage policy) rides the same lock: going
+    // through spawn_worker gives it the module pin, registry tracking, and
+    // cancel token that a raw fire-and-forget thread lacks.
     let published = crate::state::with_state(|s| {
+        if !still_current(my_gen) {
+            return false;
+        }
         s.radio.status = RadioStatus::Playing;
         s.radio.current = Some(station.clone());
         s.config.radio.last_station = Some(saved_from_station(&station));
         crate::ui::save_config_detached(s);
+        if !station.stationuuid.is_empty() {
+            let uuid = station.stationuuid.clone();
+            let _ = s.spawn_worker("radio-click", move |_token| {
+                crate::radio::directory::click(&uuid);
+            });
+        }
+        true
     })
-    .is_some();
+    .unwrap_or(false);
     if !published {
-        finish_stopped(&player, &sink_cell);
+        finish_stopped(my_gen, &player, &sink_cell);
         return;
-    }
-
-    // Count the click for the directory's usage policy. Fire-and-forget on a
-    // short-lived thread: it must never delay or fail playback.
-    if !station.stationuuid.is_empty() {
-        let uuid = station.stationuuid.clone();
-        let _ = std::thread::Builder::new()
-            .name("gw2bo-radio-click".to_string())
-            .spawn(move || crate::radio::directory::click(&uuid));
     }
 
     // Watchdog: the sink was primed above ("stream ever started" is latched by
@@ -353,7 +402,7 @@ fn run_session(
         for _ in 0..ticks {
             std::thread::sleep(STOP_POLL_INTERVAL);
             if stop.load(Ordering::Acquire) {
-                finish_stopped(&player, &sink_cell);
+                finish_stopped(my_gen, &player, &sink_cell);
                 return;
             }
         }
@@ -361,37 +410,56 @@ fn run_session(
             // cpal does not recover on its own; the user presses play to
             // reopen. Leave the session; the next play() reaps this thread.
             *lock_or_recover(&sink_cell) = None;
-            let _ = crate::state::with_state(|s| s.radio.status = RadioStatus::DeviceLost);
+            let _ = crate::state::with_state(|s| {
+                if still_current(my_gen) {
+                    s.radio.status = RadioStatus::DeviceLost;
+                }
+            });
             return;
         }
         if player.empty() {
             // The decoder ran dry: the stream ended or the connection dropped.
-            if crate::state::with_state(|s| s.radio.status = RadioStatus::Stalled).is_none() {
-                finish_stopped(&player, &sink_cell);
+            let live = crate::state::with_state(|s| {
+                if !still_current(my_gen) {
+                    return false;
+                }
+                s.radio.status = RadioStatus::Stalled;
+                true
+            })
+            .unwrap_or(false);
+            if !live {
+                finish_stopped(my_gen, &player, &sink_cell);
                 return;
             }
             if !stall_wants_reconnect(last_reconnect.map(|t| t.elapsed())) {
                 *lock_or_recover(&sink_cell) = None;
-                set_error("stream keeps stalling".to_string());
+                set_error(my_gen, "stream keeps stalling".to_string());
                 return;
             }
             match open_and_append(&handle, &station, &player, &now_playing, &stop) {
                 Ok(()) => {
                     player.play();
                     last_reconnect = Some(Instant::now());
-                    if crate::state::with_state(|s| s.radio.status = RadioStatus::Playing).is_none()
-                    {
-                        finish_stopped(&player, &sink_cell);
+                    let live = crate::state::with_state(|s| {
+                        if !still_current(my_gen) {
+                            return false;
+                        }
+                        s.radio.status = RadioStatus::Playing;
+                        true
+                    })
+                    .unwrap_or(false);
+                    if !live {
+                        finish_stopped(my_gen, &player, &sink_cell);
                         return;
                     }
                 }
                 Err(SessionEnd::Cancelled) => {
-                    finish_stopped(&player, &sink_cell);
+                    finish_stopped(my_gen, &player, &sink_cell);
                     return;
                 }
                 Err(SessionEnd::Failed(msg)) => {
                     *lock_or_recover(&sink_cell) = None;
-                    set_error(msg);
+                    set_error(my_gen, msg);
                     return;
                 }
             }
@@ -421,6 +489,16 @@ fn open_and_append(
         .parse()
         .map_err(|_| SessionEnd::Failed("invalid stream URL".to_string()))?;
 
+    // The station URL is community-submitted directory data: refuse to dial
+    // into the local network. Hostnames are resolved once here; DNS rebinding
+    // after the check is accepted residual risk (the attacker controls
+    // timing, not this addon).
+    if stream_host_reserved(&parsed) {
+        return Err(SessionEnd::Failed(
+            "station points at a private address".to_string(),
+        ));
+    }
+
     let mut headers = reqwest::header::HeaderMap::new();
     // Ask the server to interleave ICY metadata into the stream.
     icy_metadata::add_icy_metadata_header(&mut headers);
@@ -433,6 +511,9 @@ fn open_and_append(
         // the audio body is infinite, and a request timeout would kill
         // playback mid-song.
         .connect_timeout(CONNECT_TIMEOUT)
+        // Icecast mounts redirect occasionally (http->https, CDN hops); ten
+        // hops (reqwest's default) is a tunnel, three is a stream.
+        .redirect(reqwest::redirect::Policy::limited(3))
         .build()
         .map_err(|e| SessionEnd::Failed(short_msg("http client", &e.to_string())))?;
 
@@ -513,15 +594,45 @@ fn open_and_append(
 /// Stop-flag exit path: drop the sink handle, write `Stopped`, return.
 /// Stopping the sink drops the decoder, which drops the stream reader, which
 /// cancels the background download task (`cancel_on_drop`).
-fn finish_stopped(player: &Player, sink_cell: &Arc<Mutex<Option<Arc<Player>>>>) {
-    player.clear();
-    *lock_or_recover(sink_cell) = None;
-    let _ = crate::state::with_state(|s| s.radio.status = RadioStatus::Stopped);
+/// True when the stream URL's host is (or resolves to) an address inside the
+/// local network - loopback, RFC1918, link-local, ULA, unspecified. Literal
+/// IPs are checked directly; hostnames get one blocking resolve (the OS
+/// caches it for the connect that follows). An unresolvable host returns
+/// false: the connect will fail with its own honest error.
+fn stream_host_reserved(url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return true;
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return crate::news_art::ip_is_reserved(ip);
+    }
+    let port = url.port_or_known_default().unwrap_or(443);
+    match (host, port).to_socket_addrs() {
+        Ok(mut addrs) => addrs.any(|a| crate::news_art::ip_is_reserved(a.ip())),
+        Err(_) => false,
+    }
 }
 
-fn set_error(msg: String) {
+fn finish_stopped(my_gen: u64, player: &Player, sink_cell: &Arc<Mutex<Option<Arc<Player>>>>) {
+    player.clear();
+    *lock_or_recover(sink_cell) = None;
+    let _ = crate::state::with_state(|s| {
+        if still_current(my_gen) {
+            s.radio.status = RadioStatus::Stopped;
+        }
+    });
+}
+
+fn set_error(my_gen: u64, msg: String) {
     radio_log(format!("radio: {msg}"));
-    let _ = crate::state::with_state(|s| s.radio.status = RadioStatus::Error(msg));
+    let _ = crate::state::with_state(|s| {
+        if still_current(my_gen) {
+            s.radio.status = RadioStatus::Error(msg);
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------

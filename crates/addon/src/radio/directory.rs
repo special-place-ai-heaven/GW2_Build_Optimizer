@@ -75,7 +75,16 @@ pub fn click(stationuuid: &str) {
     if stationuuid.is_empty() {
         return; // nothing to count — e.g. a hand-entered station without a uuid
     }
-    let _ = get_from_any_mirror(&format!("/json/url/{}", url_encode(stationuuid)));
+    // ONE bounded attempt at the pool name, no mirror walk: a usage-policy
+    // ping does not deserve ~24s of retries, and the caller may be a tracked
+    // worker racing addon unload.
+    let Ok(client) = shared_client() else {
+        return;
+    };
+    let _ = fetch(
+        &client,
+        &format!("{POOL}/json/url/{}", url_encode(stationuuid)),
+    );
 }
 
 /// Parse a `/json/stations/search` body and drop unplayable rows:
@@ -87,8 +96,29 @@ pub fn parse_stations(body: &str) -> Result<Vec<RbStation>, String> {
         .map_err(|e| format!("radio-browser response did not parse: {e}"))?;
     Ok(stations
         .into_iter()
-        .filter(|s| s.lastcheckok == 1 && s.hls == 0 && !is_hls_url(s.stream_url()))
+        .filter(|s| {
+            s.lastcheckok == 1
+                && s.hls == 0
+                && !is_hls_url(s.stream_url())
+                && codec_supported(&s.codec)
+        })
         .collect())
+}
+
+/// Codecs the bundled decoders actually handle (symphonia mp3 + aac/isomp4).
+/// Empty/UNKNOWN pass: the field is checker-derived and often just missing —
+/// those stations are usually MP3 and get an honest per-station error if not.
+/// OGG/FLAC/Opus stations would tune in, buffer, and then fail to decode;
+/// offering them and erroring reads as breakage, so they are dropped here.
+fn codec_supported(codec: &str) -> bool {
+    let c = codec.trim();
+    if c.is_empty() {
+        return true;
+    }
+    matches!(
+        c.to_ascii_uppercase().as_str(),
+        "MP3" | "AAC" | "AAC+" | "AACP" | "MP4" | "M4A" | "UNKNOWN"
+    )
 }
 
 /// Shared `/json/stations/search` GET: sort order comes from the API
@@ -99,12 +129,18 @@ fn search(param: &str, limit: usize) -> Result<Vec<RbStation>, String> {
         // nothing must not download everything.
         return Ok(Vec::new());
     }
-    let sep = if param.is_empty() { "" } else { "&" };
-    let path = format!(
-        "/json/stations/search?{param}{sep}limit={limit}&hidebroken=true&order=votes&reverse=true"
-    );
-    let body = get_from_any_mirror(&path)?;
+    let body = get_from_any_mirror(&search_path(param, limit))?;
     parse_stations(&body)
+}
+
+/// Pure path assembly for `/json/stations/search`, kept I/O-free so the
+/// empty-param "top stations" form stays pinned by tests (this exact
+/// separator bug shipped once).
+fn search_path(param: &str, limit: usize) -> String {
+    let sep = if param.is_empty() { "" } else { "&" };
+    format!(
+        "/json/stations/search?{param}{sep}limit={limit}&hidebroken=true&order=votes&reverse=true"
+    )
 }
 
 /// `.m3u8` sniff on the path portion of a URL, case-insensitive. Query and
@@ -221,13 +257,40 @@ mod tests {
     }
 
     #[test]
+    fn search_path_omits_the_separator_for_top_stations() {
+        assert_eq!(
+            search_path("", 30),
+            "/json/stations/search?limit=30&hidebroken=true&order=votes&reverse=true"
+        );
+        assert_eq!(
+            search_path("tag=jazz", 30),
+            "/json/stations/search?tag=jazz&limit=30&hidebroken=true&order=votes&reverse=true"
+        );
+    }
+
+    #[test]
+    fn codec_filter_keeps_decodable_and_unknown_drops_the_rest() {
+        for ok in ["MP3", "mp3", "AAC", "AAC+", "aacp", "UNKNOWN", "", "  "] {
+            assert!(codec_supported(ok), "{ok:?} should pass");
+        }
+        for bad in ["OGG", "ogg", "FLAC", "OPUS", "WMA"] {
+            assert!(!codec_supported(bad), "{bad:?} should be dropped");
+        }
+    }
+
+    #[test]
     fn filters_drop_broken_hls_and_disguised_hls_rows() {
         let kept = parse_stations(FIXTURE).unwrap();
-        assert_eq!(kept.len(), 33, "38 rows minus the 5 unplayable ones");
+        assert_eq!(
+            kept.len(),
+            32,
+            "38 rows minus 5 unplayable + 1 undecodable (OGG)"
+        );
         for s in &kept {
             assert_eq!(s.lastcheckok, 1);
             assert_eq!(s.hls, 0);
             assert!(!is_hls_url(s.stream_url()));
+            assert!(codec_supported(&s.codec));
         }
         let kept_ids: Vec<&str> = kept.iter().map(|s| s.stationuuid.as_str()).collect();
         // hls == 1
