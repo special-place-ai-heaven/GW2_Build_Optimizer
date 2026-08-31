@@ -56,7 +56,13 @@ pub fn search_by_name(query: &str, limit: usize) -> Result<Vec<RbStation>, Strin
 }
 
 /// Search stations by radio-browser tag (genre chip), most-voted first.
+/// An empty tag means "top stations": the `tag=` param is omitted entirely so
+/// the API returns the unfiltered vote-ordered list (a literal empty `tag=`
+/// matches nothing).
 pub fn search_by_tag(tag: &str, limit: usize) -> Result<Vec<RbStation>, String> {
+    if tag.is_empty() {
+        return search("", limit);
+    }
     search(&format!("tag={}", url_encode(tag)), limit)
 }
 
@@ -93,8 +99,9 @@ fn search(param: &str, limit: usize) -> Result<Vec<RbStation>, String> {
         // nothing must not download everything.
         return Ok(Vec::new());
     }
+    let sep = if param.is_empty() { "" } else { "&" };
     let path = format!(
-        "/json/stations/search?{param}&limit={limit}&hidebroken=true&order=votes&reverse=true"
+        "/json/stations/search?{param}{sep}limit={limit}&hidebroken=true&order=votes&reverse=true"
     );
     let body = get_from_any_mirror(&path)?;
     parse_stations(&body)
