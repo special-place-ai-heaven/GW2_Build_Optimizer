@@ -658,6 +658,7 @@ impl Gw2Client {
             if self.is_cancelled() {
                 return Err(ApiError::Cancelled);
             }
+            #[allow(clippy::type_complexity)]
             let group_results: Vec<Result<(Vec<T>, Vec<serde_json::Value>), ApiError>> =
                 std::thread::scope(|s| {
                     let handles: Vec<_> = group
