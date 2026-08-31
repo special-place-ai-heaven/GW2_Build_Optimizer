@@ -2,6 +2,12 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.8.1 - 2026-08-31
+
+### Radio
+
+- Clicking a station no longer crashes: the tune-in built tokio timers on the audio thread outside any runtime context ("there is no reactor running"). The audio thread now enters the runtime for the whole connect sequence, pinned by a regression test.
+
 ## 1.8.0 - 2026-08-31
 
 ### Radio (new tab)
