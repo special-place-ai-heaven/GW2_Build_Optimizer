@@ -48,11 +48,20 @@ thumbnail — **Open in browser** to watch.
 ![News desk](docs/screenshots/news.png)
 
 **Radio** plays internet streams in the background while you fight. Search
-stations, pick a genre, heart favourites, set volume. The player bar keeps
-now-playing metadata and an equalizer measured from the live stream — audio
-keeps going when you leave the tab.
+30,000+ stations (radio-browser.info) by name, 16 genres, language (Auto
+follows the overlay — French UI gets French stations), country (34,
+including Slovenia), or bitrate cap. Sort by Popular, Name, Bitrate, or
+Country. Filters compose and persist. Heart favourites; last station
+resumes next session. HLS-only and undecodable codecs (OGG/FLAC/Opus)
+are not offered.
 
-![Radio tab](docs/screenshots/radio.jpg)
+Play, pause (short pause keeps the buffer; long pause re-tunes), or stop.
+Volume persists. Optional combat ducking lowers the stream when Mumble
+reports combat. Station logos, live song titles, a 24-band equalizer from
+the decoded audio, and Choya DJ sit in the player bar. Assign a Nexus
+keybind to pause or resume.
+
+![Radio tab](docs/screenshots/radio.png)
 
 **Stats** compares Current and Optimized passive Hero-panel attributes and
 defenses using profession, armor weight, gear, upgrades, traits, and the selected
