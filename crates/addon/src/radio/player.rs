@@ -484,7 +484,48 @@ fn open_and_append(
     now_playing: &NowPlayingCell,
     stop: &Arc<AtomicBool>,
 ) -> Result<(), SessionEnd> {
-    let url = station.stream_url();
+    let opened = open_stream(handle, station.stream_url(), now_playing, stop)?;
+
+    // A live stream has no filename, so the format probe is primed from the
+    // Content-Type; `with_seekable(false)` keeps symphonia from issuing the
+    // `Seek` that breaks on an infinite HTTP stream.
+    let mut builder = Decoder::builder()
+        .with_data(opened.reader)
+        .with_seekable(false);
+    if let Some(mime) = &opened.content_type {
+        builder = builder.with_mime_type(mime);
+    }
+    let decoder = builder
+        .build()
+        .map_err(|e| SessionEnd::Failed(short_msg("cannot decode stream", &e.to_string())))?;
+
+    player.clear();
+    player.append(decoder);
+    Ok(())
+}
+
+/// The connected, buffered, ICY-stripped stream — everything `open_stream`
+/// produces before any decoder or audio device is involved, so the network
+/// path stays testable without a sink.
+struct OpenedStream {
+    reader: Box<dyn StreamReader>,
+    content_type: Option<String>,
+}
+
+/// Connect to the stream URL, buffer it, and wrap ICY metadata handling.
+fn open_stream(
+    handle: &tokio::runtime::Handle,
+    url: &str,
+    now_playing: &NowPlayingCell,
+    stop: &Arc<AtomicBool>,
+) -> Result<OpenedStream, SessionEnd> {
+    // Enter the runtime context for this whole construction sequence:
+    // `tokio::time::timeout` (and other tokio primitives) bind the timer
+    // driver at CONSTRUCTION, and these futures are built on the plain audio
+    // thread before `block_on` runs — without this guard that construction
+    // panics with "there is no reactor running" (shipped crash in 1.8.0).
+    let _reactor = handle.enter();
+
     let parsed: reqwest::Url = url
         .parse()
         .map_err(|_| SessionEnd::Failed("invalid stream URL".to_string()))?;
@@ -575,20 +616,10 @@ fn open_and_append(
         None => Box::new(download),
     };
 
-    // A live stream has no filename, so the format probe is primed from the
-    // Content-Type; `with_seekable(false)` keeps symphonia from issuing the
-    // `Seek` that breaks on an infinite HTTP stream.
-    let mut builder = Decoder::builder().with_data(reader).with_seekable(false);
-    if let Some(mime) = &content_type {
-        builder = builder.with_mime_type(mime);
-    }
-    let decoder = builder
-        .build()
-        .map_err(|e| SessionEnd::Failed(short_msg("cannot decode stream", &e.to_string())))?;
-
-    player.clear();
-    player.append(decoder);
-    Ok(())
+    Ok(OpenedStream {
+        reader,
+        content_type,
+    })
 }
 
 /// Stop-flag exit path: drop the sink handle, write `Stopped`, return.
@@ -790,6 +821,34 @@ pub fn station_from_saved(saved: &SavedStation) -> RbStation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression for the v1.8.0 in-game crash: `tokio::time::timeout` grabs
+    /// the timer driver at CONSTRUCTION, and `open_stream` builds it on the
+    /// plain audio thread before `block_on` ever runs — panicking with
+    /// "there is no reactor running". The `.invalid` TLD never resolves
+    /// (RFC 2606), so the call must reach the tokio construction site and
+    /// then fail the connect honestly — no sockets to real stream hosts.
+    #[test]
+    fn open_stream_off_runtime_thread_fails_cleanly_instead_of_panicking() {
+        let handle = runtime_handle().expect("test runtime");
+        let stop = Arc::new(AtomicBool::new(false));
+        let np: NowPlayingCell = Arc::new(Mutex::new(None));
+        let joined = std::thread::spawn(move || {
+            open_stream(
+                &handle,
+                "http://gw2bo-no-such-host.invalid/stream",
+                &np,
+                &stop,
+            )
+            .err()
+        })
+        .join();
+        let ended = joined.expect("open_stream must not panic off-runtime");
+        assert!(
+            matches!(ended, Some(SessionEnd::Failed(_))),
+            "expected a clean connect failure"
+        );
+    }
 
     #[test]
     fn volume_gain_follows_the_log_curve() {
