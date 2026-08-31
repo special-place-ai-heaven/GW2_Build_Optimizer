@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn mix_burst_fits_inside_its_period() {
-        assert!(MIX_LEN < MIX_PERIOD);
+        const { assert!(MIX_LEN < MIX_PERIOD) };
         // Every MIX frame is reachable inside a burst.
         assert_eq!((MIX_LEN - 1) / MIX_STEP, RADIO_DJ_MIX.len() as u32 - 1);
     }
