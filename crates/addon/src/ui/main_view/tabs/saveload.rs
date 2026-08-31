@@ -447,7 +447,11 @@ fn pending_note_snapshot(
         .get(name)
         .cloned()
         .unwrap_or_default();
-    let saved = state.main.saved_builds.iter_mut().find(|b| b.name == name)?;
+    let saved = state
+        .main
+        .saved_builds
+        .iter_mut()
+        .find(|b| b.name == name)?;
     if saved.notes == draft {
         return None;
     }
@@ -498,9 +502,8 @@ fn load_named(state: &mut AddonState, name: &str) {
     });
     if !spawned {
         // OS refused the thread; work never started. Do not fall back to inline CPU.
-        state.main.comparison.error = Some(
-            "Could not start the load thread - the system refused it. Try again.".into(),
-        );
+        state.main.comparison.error =
+            Some("Could not start the load thread - the system refused it. Try again.".into());
         // Notes still have to land eventually; not on this click frame.
         if let Some(snapshot) = notes_retry {
             let _ = state.spawn_worker("ranch-notes", move |_token| {

@@ -927,10 +927,7 @@ mod tests {
             .find("\nfn render_resolved_sheet(")
             .expect("render_resolved_sheet must exist");
         let rest = &src[start..];
-        let end = rest[1..]
-            .find("\nfn ")
-            .map(|i| i + 1)
-            .unwrap_or(rest.len());
+        let end = rest[1..].find("\nfn ").map(|i| i + 1).unwrap_or(rest.len());
         let body = &rest[..end];
         assert!(
             !body.contains("sug_prefix_for_weapon"),
@@ -940,9 +937,7 @@ mod tests {
             .find("weapon_row(")
             .expect("render_resolved_sheet must call weapon_row");
         let call = &body[wr..];
-        let close = call
-            .find(");")
-            .expect("weapon_row call must close");
+        let close = call.find(");").expect("weapon_row call must close");
         let args = &call[..close];
         assert!(
             args.contains("&set.stat_prefix"),

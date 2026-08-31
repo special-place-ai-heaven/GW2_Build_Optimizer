@@ -7,13 +7,13 @@
 //! changes with state (error hints replace the now-playing line) so nothing
 //! below the list ever shifts.
 
-use nexus::imgui::{ChildWindow, DrawListMut, Slider, StyleColor, Ui};
+use nexus::imgui::{ChildWindow, ComboBox, DrawListMut, Selectable, Slider, StyleColor, Ui};
 
 use crate::radio::{art, directory, player, RadioStatus, RbStation};
 use crate::state::{with_state, AddonState};
 use crate::ui::theme;
 use gw2_core::config::SavedStation;
-use gw2_core::i18n::{t, tf};
+use gw2_core::i18n::{t, tf, LANGUAGES};
 
 /// Rows per directory search. The API orders by votes; 50 is plenty to scan.
 const SEARCH_LIMIT: usize = 50;
@@ -48,6 +48,7 @@ const GENRES: [(&str, &str); 16] = [
 
 pub(in crate::ui::main_view) fn render_radio_tab(ui: &Ui, state: &mut AddonState) {
     search_row(ui, state);
+    filter_row(ui, state);
     ui.dummy([0.0, 4.0]);
     genre_chips(ui, state);
     ui.dummy([0.0, 6.0]);
@@ -115,6 +116,194 @@ enum SearchKind {
     Tag(&'static str),
 }
 
+/// UI locale code -> radio-browser language NAME (its `language=` search
+/// param filters on names, not ISO codes).
+const LOCALE_TO_RB: [(&str, &str); 12] = [
+    ("en", "english"),
+    ("de", "german"),
+    ("es", "spanish"),
+    ("fr", "french"),
+    ("it", "italian"),
+    ("nl", "dutch"),
+    ("pl", "polish"),
+    ("pt", "portuguese"),
+    ("ru", "russian"),
+    ("ja", "japanese"),
+    ("ko", "korean"),
+    ("zh", "chinese"),
+];
+
+/// Country combo: ISO 3166-1 alpha-2 -> English name. English throughout —
+/// internationally recognizable, needs no translation into 12 locales, and
+/// safe in every glyph set the overlay ships.
+const COUNTRIES: [(&str, &str); 34] = [
+    ("US", "United States"),
+    ("GB", "United Kingdom"),
+    ("IE", "Ireland"),
+    ("CA", "Canada"),
+    ("AU", "Australia"),
+    ("DE", "Germany"),
+    ("AT", "Austria"),
+    ("CH", "Switzerland"),
+    ("FR", "France"),
+    ("BE", "Belgium"),
+    ("NL", "Netherlands"),
+    ("ES", "Spain"),
+    ("PT", "Portugal"),
+    ("IT", "Italy"),
+    ("PL", "Poland"),
+    ("CZ", "Czechia"),
+    ("SI", "Slovenia"),
+    ("HR", "Croatia"),
+    ("HU", "Hungary"),
+    ("RO", "Romania"),
+    ("GR", "Greece"),
+    ("SE", "Sweden"),
+    ("NO", "Norway"),
+    ("DK", "Denmark"),
+    ("FI", "Finland"),
+    ("RU", "Russia"),
+    ("BR", "Brazil"),
+    ("MX", "Mexico"),
+    ("AR", "Argentina"),
+    ("TR", "Turkey"),
+    ("JP", "Japan"),
+    ("KR", "South Korea"),
+    ("CN", "China"),
+    ("IN", "India"),
+];
+
+/// Language + country filter combos. Persisted in config; a change re-runs
+/// whatever search context is active so the list updates immediately.
+fn filter_row(ui: &Ui, state: &mut AddonState) {
+    let font_pref = state.config.ui_font.clone();
+    let ui_lang = state.config.ui_language.clone();
+    let mut changed = false;
+
+    ui.align_text_to_frame_padding();
+    ui.set_window_font_scale(0.85);
+    ui.text_colored(theme::MUTED, t("radio.language"));
+    ui.set_window_font_scale(1.0);
+    ui.same_line_with_spacing(0.0, 6.0);
+    let cur_lang = state.config.radio.language_filter.clone();
+    let preview = language_filter_label(&cur_lang, &font_pref, &ui_lang);
+    ui.set_next_item_width(theme::combo_width_for(ui, &preview).max(150.0));
+    if let Some(_c) = ComboBox::new("##radio_lang")
+        .preview_value(&preview)
+        .begin(ui)
+    {
+        for value in ["auto", "any"]
+            .into_iter()
+            .chain(LOCALE_TO_RB.iter().map(|(_, rb)| *rb))
+        {
+            let label = language_filter_label(value, &font_pref, &ui_lang);
+            if Selectable::new(format!("{label}##radio_lang_{value}"))
+                .selected(cur_lang == value)
+                .build(ui)
+                && cur_lang != value
+            {
+                state.config.radio.language_filter = value.to_string();
+                changed = true;
+            }
+        }
+    }
+
+    ui.same_line_with_spacing(0.0, 14.0);
+    ui.set_window_font_scale(0.85);
+    ui.text_colored(theme::MUTED, t("radio.country"));
+    ui.set_window_font_scale(1.0);
+    ui.same_line_with_spacing(0.0, 6.0);
+    let cur_cc = state.config.radio.country_filter.clone();
+    let cc_preview = country_filter_label(&cur_cc);
+    ui.set_next_item_width(theme::combo_width_for(ui, &cc_preview).max(150.0));
+    if let Some(_c) = ComboBox::new("##radio_cc")
+        .preview_value(&cc_preview)
+        .begin(ui)
+    {
+        for value in ["any"]
+            .into_iter()
+            .chain(COUNTRIES.iter().map(|(cc, _)| *cc))
+        {
+            let label = country_filter_label(value);
+            if Selectable::new(format!("{label}##radio_cc_{value}"))
+                .selected(cur_cc == value)
+                .build(ui)
+                && cur_cc != value
+            {
+                state.config.radio.country_filter = value.to_string();
+                changed = true;
+            }
+        }
+    }
+
+    if changed {
+        crate::ui::save_config_detached(state);
+        rekick_current(state);
+    }
+}
+
+/// Display label for a language-filter value ("auto"/"any"/rb name). Native
+/// names via the same CJK-gated helper the Settings language list uses.
+fn language_filter_label(value: &str, font_pref: &str, ui_lang: &str) -> String {
+    match value {
+        "auto" => t("radio.filter_auto"),
+        "any" => t("radio.filter_any"),
+        rb => LOCALE_TO_RB
+            .iter()
+            .find(|(_, name)| *name == rb)
+            .and_then(|(code, _)| LANGUAGES.iter().find(|l| l.code == *code))
+            .map(|l| crate::ui::fonts::language_label(l, font_pref, ui_lang).to_string())
+            .unwrap_or_else(|| rb.to_string()),
+    }
+}
+
+fn country_filter_label(value: &str) -> String {
+    if value == "any" {
+        return t("radio.filter_any");
+    }
+    COUNTRIES
+        .iter()
+        .find(|(cc, _)| *cc == value)
+        .map(|(_, name)| (*name).to_string())
+        .unwrap_or_else(|| value.to_string())
+}
+
+/// Resolve the persisted filter settings into directory search params.
+fn active_filters(state: &AddonState) -> directory::SearchFilters {
+    let language = match state.config.radio.language_filter.as_str() {
+        "any" => None,
+        "auto" => {
+            let ui = gw2_core::i18n::current();
+            LOCALE_TO_RB
+                .iter()
+                .find(|(code, _)| *code == ui)
+                .map(|(_, rb)| (*rb).to_string())
+        }
+        rb => Some(rb.to_string()),
+    };
+    let countrycode = match state.config.radio.country_filter.as_str() {
+        "any" => None,
+        cc => Some(cc.to_string()),
+    };
+    directory::SearchFilters {
+        language,
+        countrycode,
+    }
+}
+
+/// Re-run whatever search context is active (name if typed, else the
+/// selected genre chip, else Top stations) — used when a filter changes.
+fn rekick_current(state: &mut AddonState) {
+    let query = state.radio.search_text.trim().to_string();
+    if !query.is_empty() {
+        kick_search(state, SearchKind::Name(query));
+    } else {
+        let tag = state.radio.selected_genre.unwrap_or("");
+        state.radio.selected_genre = Some(tag);
+        kick_search(state, SearchKind::Tag(tag));
+    }
+}
+
 /// Start a directory-search worker, publishing back via `with_state` — same
 /// shape as `news::kick`. Double-kicks are guarded by `radio.searching`.
 fn kick_search(state: &mut AddonState, kind: SearchKind) {
@@ -123,11 +312,12 @@ fn kick_search(state: &mut AddonState, kind: SearchKind) {
     }
     state.radio.searching = true;
     state.radio.last_error = None;
+    let filters = active_filters(state);
     let spawned = state.spawn_worker("radio-search", move |token| {
         // catch_unwind so a panicking search can never strand the spinner.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &kind {
-            SearchKind::Name(q) => directory::search_by_name(q, SEARCH_LIMIT),
-            SearchKind::Tag(tag) => directory::search_by_tag(tag, SEARCH_LIMIT),
+            SearchKind::Name(q) => directory::search_by_name(q, &filters, SEARCH_LIMIT),
+            SearchKind::Tag(tag) => directory::search_by_tag(tag, &filters, SEARCH_LIMIT),
         }))
         .unwrap_or_else(|_| Err("station search failed".into()));
         if token.is_cancelled() {
@@ -162,17 +352,19 @@ fn favorites(ui: &Ui, state: &mut AddonState) {
     let current_key = current_station_key(state);
     {
         let st: &AddonState = state;
-        ChildWindow::new("##radio_favs").size([0.0, h]).build(ui, || {
-            for (i, f) in st.config.radio.favorites.iter().enumerate() {
-                let key = fav_key(&f.stationuuid, &f.url);
-                let active = current_key.as_deref() == Some(key.as_str());
-                match favorite_row(ui, i, f, active) {
-                    RowAction::Play => play = Some(station_from_saved(f)),
-                    RowAction::Heart => remove = Some(key.clone()),
-                    RowAction::None => {}
+        ChildWindow::new("##radio_favs")
+            .size([0.0, h])
+            .build(ui, || {
+                for (i, f) in st.config.radio.favorites.iter().enumerate() {
+                    let key = fav_key(&f.stationuuid, &f.url);
+                    let active = current_key.as_deref() == Some(key.as_str());
+                    match favorite_row(ui, i, f, active) {
+                        RowAction::Play => play = Some(station_from_saved(f)),
+                        RowAction::Heart => remove = Some(key.clone()),
+                        RowAction::None => {}
+                    }
                 }
-            }
-        });
+            });
     }
     if let Some(key) = remove {
         state
@@ -273,7 +465,11 @@ fn station_row(ui: &Ui, i: usize, s: &RbStation, fav: bool, active: bool) -> Row
     let text_w = row_w - (AVATAR + 12.0);
     let name_color = if active { theme::GOLD } else { theme::CREAM };
     let name = clip_text(ui, &s.name, text_w);
-    dl.add_text([tx, origin[1] + 4.0], crate::ui::color_u32(name_color), &name);
+    dl.add_text(
+        [tx, origin[1] + 4.0],
+        crate::ui::color_u32(name_color),
+        &name,
+    );
 
     ui.set_window_font_scale(0.85);
     let meta = meta_line(&s.countrycode, &s.codec, s.bitrate);
@@ -285,7 +481,15 @@ fn station_row(ui: &Ui, i: usize, s: &RbStation, fav: bool, active: bool) -> Row
     );
     ui.set_window_font_scale(1.0);
 
-    if heart_button(ui, &dl, &format!("##radio_fav_{i}"), heart_x, origin[1], ROW_H, fav) {
+    if heart_button(
+        ui,
+        &dl,
+        &format!("##radio_fav_{i}"),
+        heart_x,
+        origin[1],
+        ROW_H,
+        fav,
+    ) {
         action = RowAction::Heart;
     }
     ui.set_cursor_screen_pos([origin[0], origin[1] + ROW_H + 2.0]);
@@ -361,7 +565,10 @@ fn row_plate(dl: &DrawListMut, origin: [f32; 2], w: f32, h: f32, hovered: bool, 
 fn letter_avatar(ui: &Ui, dl: &DrawListMut, p: [f32; 2], size: f32, letter: char) {
     let p_max = [p[0] + size, p[1] + size];
     let r = size * 0.5;
-    dl.add_rect(p, p_max, theme::PLATE).filled(true).rounding(r).build();
+    dl.add_rect(p, p_max, theme::PLATE)
+        .filled(true)
+        .rounding(r)
+        .build();
     let s: String = letter.to_uppercase().collect();
     let sz = ui.calc_text_size(&s);
     dl.add_text(
@@ -493,12 +700,7 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
             let hint = clip_text(ui, &t("radio.error.av_hint"), right - x0);
             dl.add_text([x0, y2], crate::ui::color_u32(theme::MUTED), &hint);
         } else if status == RadioStatus::Playing {
-            let title = state
-                .radio
-                .now_playing
-                .lock()
-                .ok()
-                .and_then(|g| g.clone());
+            let title = state.radio.now_playing.lock().ok().and_then(|g| g.clone());
             if let Some(title) = title {
                 let label = format!("{}: ", t("radio.now_playing"));
                 let lw = ui.calc_text_size(&label)[0];
@@ -517,8 +719,8 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
     ui.set_cursor_screen_pos([origin[0] + pad, y3]);
     let play_label = t("radio.play");
     let stop_label = t("radio.stop");
-    let btn_w = theme::gold_button_width(ui, &play_label)
-        .max(theme::gold_button_width(ui, &stop_label));
+    let btn_w =
+        theme::gold_button_width(ui, &play_label).max(theme::gold_button_width(ui, &stop_label));
     let busy = matches!(
         state.radio.status,
         RadioStatus::Playing | RadioStatus::Connecting | RadioStatus::Stalled
@@ -531,15 +733,17 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
             state.radio.status = RadioStatus::Stopped;
         }
     } else {
-        let resumable = state
-            .radio
-            .current
-            .clone()
-            .or_else(|| state.config.radio.last_station.as_ref().map(station_from_saved));
+        let resumable = state.radio.current.clone().or_else(|| {
+            state
+                .config
+                .radio
+                .last_station
+                .as_ref()
+                .map(station_from_saved)
+        });
         match resumable {
             Some(station) => {
-                if theme::gold_button_sized(ui, format!("{play_label}##radio_play"), [btn_w, 0.0])
-                {
+                if theme::gold_button_sized(ui, format!("{play_label}##radio_play"), [btn_w, 0.0]) {
                     start_play(state, station);
                 }
             }
@@ -695,7 +899,10 @@ fn station_from_saved(f: &SavedStation) -> RbStation {
 /// country • codec • bitrate, skipping whatever a sparse record lacks.
 fn meta_line(country: &str, codec: &str, bitrate: u32) -> String {
     let bits = if bitrate > 0 {
-        tf("fmt.radio_bitrate", &[("kbps", bitrate.to_string().as_str())])
+        tf(
+            "fmt.radio_bitrate",
+            &[("kbps", bitrate.to_string().as_str())],
+        )
     } else {
         String::new()
     };
@@ -708,7 +915,7 @@ fn join_meta(parts: [&str; 3]) -> String {
         .filter(|p| !p.trim().is_empty())
         .map(|p| p.trim())
         .collect::<Vec<_>>()
-        .join(" • ")
+        .join(" - ")
 }
 
 /// Width-aware end truncation with an ellipsis — UTF-8 safe (chars, never
@@ -778,7 +985,7 @@ mod tests {
 
     #[test]
     fn join_meta_skips_empty_parts() {
-        assert_eq!(join_meta(["DE", "MP3", "128 kbps"]), "DE • MP3 • 128 kbps");
+        assert_eq!(join_meta(["DE", "MP3", "128 kbps"]), "DE - MP3 - 128 kbps");
         assert_eq!(join_meta(["", "MP3", ""]), "MP3");
         assert_eq!(join_meta(["", "", ""]), "");
     }
