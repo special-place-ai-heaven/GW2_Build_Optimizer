@@ -665,7 +665,12 @@ fn parse_pets_field(value: Option<&serde_json::Value>) -> Option<[Option<String>
     if let Some(obj) = value.as_object() {
         let land = two_pet_slots(obj.get("terrestrial").and_then(|v| v.as_array()));
         let water = two_pet_slots(obj.get("aquatic").and_then(|v| v.as_array()));
-        return Some([land[0].clone(), land[1].clone(), water[0].clone(), water[1].clone()]);
+        return Some([
+            land[0].clone(),
+            land[1].clone(),
+            water[0].clone(),
+            water[1].clone(),
+        ]);
     }
     if let Some(arr) = value.as_array() {
         return Some([
@@ -888,18 +893,16 @@ mod tests {
         }"#;
         let parsed = parse_gemini_build(response).unwrap();
         assert!(
-            parsed
-                .skills
-                .iter()
-                .any(|line| line.split(|c: char| !c.is_ascii_alphanumeric()).any(|t| t == "Legend2")),
+            parsed.skills.iter().any(|line| line
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .any(|t| t == "Legend2")),
             "Legend2 must land on skills so legend_ids_from_plate can see it: {:?}",
             parsed.skills
         );
         assert!(
-            parsed
-                .skills
-                .iter()
-                .any(|line| line.split(|c: char| !c.is_ascii_alphanumeric()).any(|t| t == "Legend1")),
+            parsed.skills.iter().any(|line| line
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .any(|t| t == "Legend1")),
             "Legend1 must land on skills: {:?}",
             parsed.skills
         );
@@ -927,13 +930,8 @@ mod tests {
             &OptimizationWeights::preset_power_dps(),
             "PvE",
         );
-        let chat = chat_refinement_prompt_with_tools(
-            "Revenant",
-            "PvE",
-            "power revan",
-            "",
-            "English",
-        );
+        let chat =
+            chat_refinement_prompt_with_tools("Revenant", "PvE", "power revan", "", "English");
         for (name, prompt) in [
             ("new_build", new_build.as_str()),
             ("improve", improve.as_str()),

@@ -169,8 +169,7 @@ pub fn calculate_condition_ticks(
     let mode = ctx.game_mode.clone();
     // One Generic rotation-profile lookup feeds both blends: Confusion's
     // on-use rate and Torment's movement weighting. Same path, two fields.
-    let target = crate::data::rotation_profiles::rotation_profiles()
-        .lookup("Generic", None, &mode);
+    let target = crate::data::rotation_profiles::rotation_profiles().lookup("Generic", None, &mode);
     let skill_uses = target
         .map(|p| p.target_behavior.skill_use_frequency_per_second)
         .unwrap_or(0.3);

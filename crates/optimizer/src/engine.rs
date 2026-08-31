@@ -2861,7 +2861,12 @@ mod tests {
             sustain: 1.0,
             control: 0.0,
         };
-        (ctx, scenario, weights, gw2_core::types::BuildLocks::default())
+        (
+            ctx,
+            scenario,
+            weights,
+            gw2_core::types::BuildLocks::default(),
+        )
     }
 
     /// A SWAP onto a slot the build does not wear (the off-hand beside a
