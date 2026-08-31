@@ -1,14 +1,15 @@
-//! Choya DJ corner sprite + radio garnish (ON AIR badge, EQ bars) from the
+//! Choya DJ sprite + radio garnish (ON AIR badge) from the
 //! `choya_radio.png` atlas (1536x1024 RGBA, embedded).
 //!
 //! Self-contained: own embedded-texture helper (mirroring `theme::embedded_tex`),
-//! own rect tables, draw-list blits only — nothing here is interactive. Call
-//! [`draw_corner_choya`] from INSIDE the stations child window so the garnish
-//! clips to the list area and never paints over the player bar below it.
+//! own rect tables, draw-list blits only — nothing here is interactive. The
+//! DJ lives INSIDE the player bar: [`draw_dj_choya`] takes the bar rect,
+//! sizes the sprite to it, and hard-clips every blit to that rect, so
+//! nothing here can ever paint over the station list (hearts included).
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use nexus::imgui::{DrawListMut, TextureId, Ui};
+use nexus::imgui::{DrawListMut, TextureId};
 
 use crate::radio::RadioStatus;
 use crate::state::AddonState;
@@ -57,16 +58,10 @@ const RADIO_LOVE: [f32; 4] = [357.0, 612.0, 163.0, 172.0];
 const RADIO_ONAIR: [f32; 4] = [1386.0, 668.0, 134.0, 82.0];
 /// Blue zZZ glyphs. The proposed rect ([1286,690,30,30]) was a small heart.
 const RADIO_ZZZ: [f32; 4] = [1313.0, 682.0, 66.0, 60.0];
-const RADIO_EQ_COOL: [f32; 4] = [1060.0, 610.0, 215.0, 59.0];
-/// Warm strip only; the proposed 231x120 box also swallowed the hearts, the
-/// zZZ and the ON AIR badge below it.
-const RADIO_EQ_WARM: [f32; 4] = [1291.0, 620.0, 228.0, 56.0];
 const RADIO_HEART: [f32; 4] = [1227.0, 680.0, 52.0, 51.0];
 const RADIO_NOTE_GOLD: [f32; 4] = [854.0, 683.0, 35.0, 60.0];
 
-/// Corner sprite footprint. The stations child reserves nothing for it — the
-/// DJ floats over the list's bottom-right like a watermark.
-const CHOYA_SIZE: f32 = 110.0;
+/// Breathing room between the DJ and the player bar's right edge.
 const MARGIN: f32 = 8.0;
 
 // Frame pacing at the overlay's ~60 fps render rate (same assumption as the
@@ -94,41 +89,61 @@ fn love_flash_active(flash: u32, now: u32) -> bool {
     flash != 0 && now.wrapping_sub(flash) < LOVE_FRAMES
 }
 
-/// Draw the DJ choya in the tab corner, state-driven.
-pub fn draw_corner_choya(ui: &Ui, state: &AddonState) {
+/// Horizontal space reserved left of the DJ for the ON AIR badge.
+const BADGE_ZONE: f32 = 48.0;
+
+/// Draw the DJ choya inside the player bar, state-driven: sized to the bar
+/// height, anchored at its right end, hard-clipped to the bar rect. Returns
+/// the width reserved at the bar's right (sprite + badge zone) so the bar's
+/// text lines can stay clear of it; 0.0 when the sheet is unavailable.
+pub fn draw_dj_choya(
+    dl: &DrawListMut,
+    state: &AddonState,
+    t: u32,
+    bar_min: [f32; 2],
+    bar_max: [f32; 2],
+) -> f32 {
     let Some(tid) = radio_sheet() else {
-        return;
+        return 0.0;
     };
-    let dl = ui.get_window_draw_list();
-    let wp = ui.window_pos();
-    let ws = ui.window_size();
+    let size = (bar_max[1] - bar_min[1] - 6.0).clamp(24.0, 84.0);
     let center = [
-        wp[0] + ws[0] - CHOYA_SIZE * 0.5 - MARGIN,
-        wp[1] + ws[1] - CHOYA_SIZE * 0.5 - MARGIN,
+        bar_max[0] - size * 0.5 - MARGIN,
+        (bar_min[1] + bar_max[1]) * 0.5,
     ];
-    let t = ui.frame_count() as u32;
+    dl.with_clip_rect_intersect(bar_min, bar_max, || {
+        draw_dj_states(dl, tid, state, center, size, t);
+    });
+    size + MARGIN * 2.0 + BADGE_ZONE
+}
+
+fn draw_dj_states(
+    dl: &DrawListMut,
+    tid: TextureId,
+    state: &AddonState,
+    center: [f32; 2],
+    size: f32,
+    t: u32,
+) {
     let playing = state.radio.status == RadioStatus::Playing;
     let muted = playing && state.config.radio.volume_percent == 0;
 
     if love_flash_active(LOVE_FLASH.load(Ordering::Relaxed), t) {
-        blit(&dl, tid, center, CHOYA_SIZE, RADIO_LOVE, 1.0);
+        blit(dl, tid, center, size, RADIO_LOVE, 1.0);
         // A little heart drifts up and fades over the flash.
         let age = t.wrapping_sub(LOVE_FLASH.load(Ordering::Relaxed)) as f32;
         let rise = age * 0.6;
         let fade = (1.0 - age / LOVE_FRAMES as f32).clamp(0.0, 1.0);
         blit(
-            &dl,
+            dl,
             tid,
-            [
-                center[0] + CHOYA_SIZE * 0.34,
-                center[1] - CHOYA_SIZE * 0.42 - rise,
-            ],
+            [center[0] + size * 0.34, center[1] - size * 0.42 - rise],
             18.0,
             RADIO_HEART,
             fade,
         );
         if playing {
-            draw_playing_garnish(&dl, tid, center, t);
+            draw_playing_garnish(dl, tid, center, size, t);
         }
         return;
     }
@@ -136,11 +151,11 @@ pub fn draw_corner_choya(ui: &Ui, state: &AddonState) {
     match state.radio.status {
         RadioStatus::Connecting | RadioStatus::Stalled => {
             let i = (t / DANCE_STEP) as usize % RADIO_DANCE.len();
-            blit(&dl, tid, center, CHOYA_SIZE, RADIO_DANCE[i], 1.0);
+            blit(dl, tid, center, size, RADIO_DANCE[i], 1.0);
         }
         RadioStatus::Playing if muted => {
-            blit(&dl, tid, center, CHOYA_SIZE, RADIO_MUTED, 1.0);
-            draw_playing_garnish(&dl, tid, center, t);
+            blit(dl, tid, center, size, RADIO_MUTED, 1.0);
+            draw_playing_garnish(dl, tid, center, size, t);
         }
         RadioStatus::Playing => {
             let cycle = t % MIX_PERIOD;
@@ -148,38 +163,38 @@ pub fn draw_corner_choya(ui: &Ui, state: &AddonState) {
             let c = [center[0], center[1] + bob];
             if cycle < MIX_LEN {
                 let i = (cycle / MIX_STEP) as usize % RADIO_DJ_MIX.len();
-                blit(&dl, tid, c, CHOYA_SIZE, RADIO_DJ_MIX[i], 1.0);
+                blit(dl, tid, c, size, RADIO_DJ_MIX[i], 1.0);
             } else {
                 let i = (t / DJ_STEP) as usize % RADIO_DJ_IDLE.len();
-                blit(&dl, tid, c, CHOYA_SIZE, RADIO_DJ_IDLE[i], 1.0);
+                blit(dl, tid, c, size, RADIO_DJ_IDLE[i], 1.0);
             }
             // A gold note drifts up past the deck now and then.
             let orbit = (t % 240) as f32 / 240.0;
             let note_a = (1.0 - (orbit * 2.0 - 1.0).abs()).clamp(0.0, 0.8);
             blit(
-                &dl,
+                dl,
                 tid,
                 [
-                    center[0] - CHOYA_SIZE * 0.52,
-                    center[1] - CHOYA_SIZE * (0.1 + orbit * 0.45),
+                    center[0] - size * 0.52,
+                    center[1] - size * (0.1 + orbit * 0.45),
                 ],
                 16.0,
                 RADIO_NOTE_GOLD,
                 note_a,
             );
-            draw_playing_garnish(&dl, tid, center, t);
+            draw_playing_garnish(dl, tid, center, size, t);
         }
         // Idle, Stopped, DeviceLost and Error all read as "off the decks".
         _ => {
             let i = (t / SLEEP_STEP) as usize % RADIO_SLEEP.len();
-            blit(&dl, tid, center, CHOYA_SIZE, RADIO_SLEEP[i], 1.0);
+            blit(dl, tid, center, size, RADIO_SLEEP[i], 1.0);
             let drift = (t as f32 * 0.03).sin();
             blit(
-                &dl,
+                dl,
                 tid,
                 [
-                    center[0] + CHOYA_SIZE * 0.30,
-                    center[1] - CHOYA_SIZE * 0.44 + drift * 3.0,
+                    center[0] + size * 0.42,
+                    center[1] - size * 0.26 + drift * 3.0,
                 ],
                 26.0,
                 RADIO_ZZZ,
@@ -189,28 +204,26 @@ pub fn draw_corner_choya(ui: &Ui, state: &AddonState) {
     }
 }
 
-/// ON AIR badge + pulsing EQ strip, sitting on the same baseline as the DJ so
-/// they read as one bottom-edge garnish just above the player bar. The EQ is
-/// a sprite, not a real visualizer — it warms up during the mix burst.
-fn draw_playing_garnish(dl: &DrawListMut, tid: TextureId, choya_center: [f32; 2], t: u32) {
-    let base_y = choya_center[1] + CHOYA_SIZE * 0.36;
-    let badge_x = choya_center[0] - CHOYA_SIZE * 0.5 - 36.0;
+/// ON AIR badge to the DJ's left, inside the bar. The sprite EQ strip is
+/// gone — the bar's real equalizer replaced it.
+fn draw_playing_garnish(
+    dl: &DrawListMut,
+    tid: TextureId,
+    choya_center: [f32; 2],
+    size: f32,
+    t: u32,
+) {
     let flash = 0.85 + 0.15 * (t as f32 * 0.08).sin();
-    blit(dl, tid, [badge_x, base_y], 56.0, RADIO_ONAIR, flash);
-
-    let pulse = (t as f32 * 0.09).sin();
-    let eq = if t % MIX_PERIOD < MIX_LEN {
-        RADIO_EQ_WARM
-    } else {
-        RADIO_EQ_COOL
-    };
     blit(
         dl,
         tid,
-        [badge_x - 36.0 - 45.0, base_y + 6.0],
-        90.0 * (1.0 + 0.04 * pulse),
-        eq,
-        0.60 + 0.22 * pulse,
+        [
+            choya_center[0] - size * 0.5 - 26.0,
+            choya_center[1] + size * 0.18,
+        ],
+        40.0,
+        RADIO_ONAIR,
+        flash,
     );
 }
 
@@ -283,8 +296,6 @@ mod tests {
             RADIO_LOVE,
             RADIO_ONAIR,
             RADIO_ZZZ,
-            RADIO_EQ_COOL,
-            RADIO_EQ_WARM,
             RADIO_HEART,
             RADIO_NOTE_GOLD,
         ];
@@ -309,8 +320,6 @@ mod tests {
             RADIO_LOVE,
             RADIO_ONAIR,
             RADIO_ZZZ,
-            RADIO_EQ_COOL,
-            RADIO_EQ_WARM,
             RADIO_HEART,
             RADIO_NOTE_GOLD,
         ];

@@ -5,6 +5,7 @@ All notable changes to GW2 Build Optimizer are documented here.
 ## 1.8.3 - 2026-08-31
 
 ### Radio
+- Choya DJ moved into the player bar (right end, clipped to it) — no more covering the station hearts; the sprite EQ strip retired in favor of the real bars.
 
 - Real equalizer bars behind the player bar: 24 log-spaced frequency bands measured from the decoded audio itself (not a fake animation), drawn in translucent gold so the status and now-playing text stay readable. Bars rise with the music and sink gracefully when playback stops. Their height tracks the stream, not the volume slider — turning the game-side volume down does not flatten the show.
 

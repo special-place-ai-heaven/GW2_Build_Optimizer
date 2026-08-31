@@ -450,7 +450,8 @@ mod tests {
     #[test]
     #[ignore = "hits the live radio-browser.info directory"]
     fn live_directory_search_returns_playable_stations() {
-        let stations = search_by_name("soma", &SearchFilters::default(), 5).expect("directory search should succeed");
+        let stations = search_by_name("soma", &SearchFilters::default(), 5)
+            .expect("directory search should succeed");
         assert!(!stations.is_empty(), "'soma' should match SomaFM stations");
         for s in &stations {
             let url = s.stream_url();
