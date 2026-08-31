@@ -2439,7 +2439,11 @@ mod tests {
 
         // Case-insensitive exact match is always allowed, even under 5 chars.
         let v = execute_tool("get_skill_info", &json!({ "skill_name": "zAp" }), &ctx);
-        assert_eq!(v["id"].as_u64(), Some(7), "exact short name must resolve: {v}");
+        assert_eq!(
+            v["id"].as_u64(),
+            Some(7),
+            "exact short name must resolve: {v}"
+        );
         assert_eq!(v["name"].as_str(), Some("Zap"));
     }
 

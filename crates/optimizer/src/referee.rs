@@ -1059,7 +1059,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn wvw_outcome_uses_timeline_not_legacy_dummy() {
         let mut rot = make_viable_rotation();
@@ -1273,7 +1272,7 @@ mod tests {
         assert!(
             pass.is_viable,
             "20k EHP should pass hardcoded PvE floor when profile id is unset: {:?}",
-        pass.gates
+            pass.gates
         );
     }
 
@@ -1331,12 +1330,7 @@ mod tests {
                 wvw_profile,
                 EHP_FLOOR_WVW_ZERG,
             ),
-            (
-                "WvW/Staller",
-                wvw_staller,
-                wvw_profile,
-                EHP_FLOOR_WVW_ROAM,
-            ),
+            ("WvW/Staller", wvw_staller, wvw_profile, EHP_FLOOR_WVW_ROAM),
         ];
 
         for (label, scenario, profile, floor) in &cases {
