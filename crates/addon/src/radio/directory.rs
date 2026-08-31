@@ -51,19 +51,38 @@ const MAX_BODY_BYTES: u64 = 4 * 1024 * 1024;
 ///
 /// May return fewer than `limit` rows: the API has no HLS filter parameter,
 /// so HLS entries are dropped here after the fetch.
-pub fn search_by_name(query: &str, limit: usize) -> Result<Vec<RbStation>, String> {
-    search(&format!("name={}", url_encode(query)), limit)
+pub fn search_by_name(
+    query: &str,
+    filters: &SearchFilters,
+    limit: usize,
+) -> Result<Vec<RbStation>, String> {
+    search(&format!("name={}", url_encode(query)), filters, limit)
+}
+
+/// Optional filters composed into every directory search. Both compose with
+/// name and tag queries on the API side.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SearchFilters {
+    /// radio-browser language NAME ("english", "french", ...) — the search
+    /// endpoint filters on `language=`, not on ISO codes.
+    pub language: Option<String>,
+    /// ISO 3166-1 alpha-2 country code ("US", "FR", ...).
+    pub countrycode: Option<String>,
 }
 
 /// Search stations by radio-browser tag (genre chip), most-voted first.
 /// An empty tag means "top stations": the `tag=` param is omitted entirely so
 /// the API returns the unfiltered vote-ordered list (a literal empty `tag=`
 /// matches nothing).
-pub fn search_by_tag(tag: &str, limit: usize) -> Result<Vec<RbStation>, String> {
+pub fn search_by_tag(
+    tag: &str,
+    filters: &SearchFilters,
+    limit: usize,
+) -> Result<Vec<RbStation>, String> {
     if tag.is_empty() {
-        return search("", limit);
+        return search("", filters, limit);
     }
-    search(&format!("tag={}", url_encode(tag)), limit)
+    search(&format!("tag={}", url_encode(tag)), filters, limit)
 }
 
 /// Fire-and-forget click ping (`/json/url/{uuid}`) on play start, as the
@@ -123,24 +142,57 @@ fn codec_supported(codec: &str) -> bool {
 
 /// Shared `/json/stations/search` GET: sort order comes from the API
 /// (`order=votes&reverse=true`), never re-sorted here.
-fn search(param: &str, limit: usize) -> Result<Vec<RbStation>, String> {
+fn search(param: &str, filters: &SearchFilters, limit: usize) -> Result<Vec<RbStation>, String> {
     if limit == 0 {
         // The API treats limit=0 as "no limit" (default 100000) — asking for
         // nothing must not download everything.
         return Ok(Vec::new());
     }
-    let body = get_from_any_mirror(&search_path(param, limit))?;
+    let body = get_from_any_mirror(&search_path(param, filters, limit))?;
     parse_stations(&body)
 }
 
 /// Pure path assembly for `/json/stations/search`, kept I/O-free so the
 /// empty-param "top stations" form stays pinned by tests (this exact
 /// separator bug shipped once).
-fn search_path(param: &str, limit: usize) -> String {
-    let sep = if param.is_empty() { "" } else { "&" };
-    format!(
-        "/json/stations/search?{param}{sep}limit={limit}&hidebroken=true&order=votes&reverse=true"
-    )
+fn search_path(param: &str, filters: &SearchFilters, limit: usize) -> String {
+    let fp = filter_params(filters);
+    let mut q = String::new();
+    for part in [param, fp.as_str()] {
+        if !part.is_empty() {
+            q.push_str(part);
+            q.push('&');
+        }
+    }
+    format!("/json/stations/search?{q}limit={limit}&hidebroken=true&order=votes&reverse=true")
+}
+
+/// Pure assembly of the optional `language=`/`countrycode=` params; empty or
+/// whitespace-only values are treated as absent.
+fn filter_params(filters: &SearchFilters) -> String {
+    let mut out = String::new();
+    if let Some(l) = filters
+        .language
+        .as_deref()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+    {
+        out.push_str("language=");
+        out.push_str(&url_encode(l));
+    }
+    if let Some(c) = filters
+        .countrycode
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+    {
+        if !out.is_empty() {
+            out.push('&');
+        }
+        out.push_str("countrycode=");
+        out.push_str(&url_encode(c));
+    }
+    out
 }
 
 /// `.m3u8` sniff on the path portion of a URL, case-insensitive. Query and
@@ -258,14 +310,38 @@ mod tests {
 
     #[test]
     fn search_path_omits_the_separator_for_top_stations() {
+        let none = SearchFilters::default();
         assert_eq!(
-            search_path("", 30),
+            search_path("", &none, 30),
             "/json/stations/search?limit=30&hidebroken=true&order=votes&reverse=true"
         );
         assert_eq!(
-            search_path("tag=jazz", 30),
+            search_path("tag=jazz", &none, 30),
             "/json/stations/search?tag=jazz&limit=30&hidebroken=true&order=votes&reverse=true"
         );
+    }
+
+    #[test]
+    fn search_path_composes_language_and_country_filters() {
+        let both = SearchFilters {
+            language: Some("french".into()),
+            countrycode: Some("FR".into()),
+        };
+        assert_eq!(
+            search_path("tag=jazz", &both, 30),
+            "/json/stations/search?tag=jazz&language=french&countrycode=FR&limit=30&hidebroken=true&order=votes&reverse=true"
+        );
+        // Top stations + filters: no dangling separators either side.
+        assert_eq!(
+            search_path("", &both, 30),
+            "/json/stations/search?language=french&countrycode=FR&limit=30&hidebroken=true&order=votes&reverse=true"
+        );
+        // Whitespace-only values are absent, not encoded.
+        let blank = SearchFilters {
+            language: Some("  ".into()),
+            countrycode: None,
+        };
+        assert_eq!(filter_params(&blank), "");
     }
 
     #[test]
@@ -374,7 +450,7 @@ mod tests {
     #[test]
     #[ignore = "hits the live radio-browser.info directory"]
     fn live_directory_search_returns_playable_stations() {
-        let stations = search_by_name("soma", 5).expect("directory search should succeed");
+        let stations = search_by_name("soma", &SearchFilters::default(), 5).expect("directory search should succeed");
         assert!(!stations.is_empty(), "'soma' should match SomaFM stations");
         for s in &stations {
             let url = s.stream_url();

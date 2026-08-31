@@ -1183,5 +1183,4 @@ mod tests {
             "fresh Official must stay cached"
         );
     }
-
 }

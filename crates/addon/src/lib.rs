@@ -9,11 +9,11 @@ pub mod ui;
 
 use nexus::addon::UpdateProvider;
 use nexus::gui::{register_render, RenderType};
+use nexus::imgui::Ui;
 use nexus::keybind::{keybind_handler, register_keybind_with_string};
 use nexus::log::{log, LogLevel};
 use nexus::paths::get_addon_dir;
 use nexus::quick_access::add_quick_access;
-use nexus::imgui::Ui;
 use nexus::texture::get_texture_or_create_from_memory;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
@@ -186,11 +186,7 @@ fn on_load() {
         // PostRender callback (deferring chrome attach) would push into the
         // very vector being iterated. Texture uploads and the quick-access
         // entry still defer to PostRender via `bootstrap_chrome`.
-        register_render(
-            RenderType::Render,
-            nexus::gui::render!(ui::render),
-        )
-        .revert_on_unload();
+        register_render(RenderType::Render, nexus::gui::render!(ui::render)).revert_on_unload();
 
         // Function pointer only — no D3D. Texture uploads and the quick-access
         // entry attach from the first PostRender after [`CHROME_SETTLE`], when
@@ -281,18 +277,15 @@ mod tests {
         let src = include_str!("lib.rs");
         let start = src.find("\nfn on_load()").expect("on_load must exist");
         let rest = &src[start..];
-        let end = rest[1..]
-            .find("\nfn ")
-            .map(|i| i + 1)
-            .unwrap_or(rest.len());
+        let end = rest[1..].find("\nfn ").map(|i| i + 1).unwrap_or(rest.len());
         let body = &rest[..end];
         let init = body
             .find("state::init")
             .expect("on_load must call state::init");
         let catch = body.find("catch_unwind");
         let guard = body.find("load_guard");
-        let wrapped = catch.map(|c| c < init).unwrap_or(false)
-            || guard.map(|g| g < init).unwrap_or(false);
+        let wrapped =
+            catch.map(|c| c < init).unwrap_or(false) || guard.map(|g| g < init).unwrap_or(false);
         assert!(
             wrapped,
             "state::init must run inside catch_unwind so a load panic cannot unwind into the game"
@@ -335,12 +328,11 @@ mod tests {
     #[test]
     fn bootstrap_chrome_guards_attach_in_catch_unwind() {
         let src = include_str!("lib.rs");
-        let start = src.find("\nfn bootstrap_chrome(").expect("bootstrap_chrome must exist");
+        let start = src
+            .find("\nfn bootstrap_chrome(")
+            .expect("bootstrap_chrome must exist");
         let rest = &src[start..];
-        let end = rest[1..]
-            .find("\nfn ")
-            .map(|i| i + 1)
-            .unwrap_or(rest.len());
+        let end = rest[1..].find("\nfn ").map(|i| i + 1).unwrap_or(rest.len());
         let body = &rest[..end];
         assert!(
             body.contains("attach_overlay_host"),
@@ -358,12 +350,11 @@ mod tests {
     #[test]
     fn attach_overlay_host_is_idempotent_and_recovers_from_panic() {
         let src = include_str!("lib.rs");
-        let start = src.find("\nfn attach_overlay_host(").expect("attach_overlay_host must exist");
+        let start = src
+            .find("\nfn attach_overlay_host(")
+            .expect("attach_overlay_host must exist");
         let rest = &src[start..];
-        let end = rest[1..]
-            .find("\nfn ")
-            .map(|i| i + 1)
-            .unwrap_or(rest.len());
+        let end = rest[1..].find("\nfn ").map(|i| i + 1).unwrap_or(rest.len());
         let body = &rest[..end];
         assert!(
             body.contains("HOST_ATTACHED"),

@@ -119,7 +119,10 @@ pub fn draw_corner_choya(ui: &Ui, state: &AddonState) {
         blit(
             &dl,
             tid,
-            [center[0] + CHOYA_SIZE * 0.34, center[1] - CHOYA_SIZE * 0.42 - rise],
+            [
+                center[0] + CHOYA_SIZE * 0.34,
+                center[1] - CHOYA_SIZE * 0.42 - rise,
+            ],
             18.0,
             RADIO_HEART,
             fade,
@@ -244,7 +247,14 @@ fn sheet_uv(frame: [f32; 4]) -> ([f32; 2], [f32; 2]) {
 }
 
 /// Aspect-preserving blit centered on `center`; `size` bounds the longer side.
-fn blit(dl: &DrawListMut, tid: TextureId, center: [f32; 2], size: f32, frame: [f32; 4], alpha: f32) {
+fn blit(
+    dl: &DrawListMut,
+    tid: TextureId,
+    center: [f32; 2],
+    size: f32,
+    frame: [f32; 4],
+    alpha: f32,
+) {
     let [_, _, w, h] = frame;
     let aspect = (w / h).max(0.01);
     let (dw, dh) = if aspect > 1.0 {

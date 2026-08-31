@@ -2,6 +2,13 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.8.2 - 2026-08-31
+
+### Radio
+
+- Language and Country filters on the search row, applied to every search (name and genre alike). Language defaults to Auto — it follows your overlay language, so an English UI surfaces English stations and a French one surfaces French. Both persist in config.
+- Station rows use `-` separators instead of the bullet the game font cannot draw (no more `?`).
+
 ## 1.8.1 - 2026-08-31
 
 ### Radio

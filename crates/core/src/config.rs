@@ -288,6 +288,14 @@ fn default_radio_volume() -> u8 {
     60
 }
 
+fn default_radio_language_filter() -> String {
+    "auto".to_string()
+}
+
+fn default_radio_country_filter() -> String {
+    "any".to_string()
+}
+
 /// Radio tab persistence: favorites + volume + last station.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RadioPreferences {
@@ -300,6 +308,13 @@ pub struct RadioPreferences {
     /// Last station played, for the keybind toggle and quick resume.
     #[serde(default)]
     pub last_station: Option<SavedStation>,
+    /// Station language filter: "auto" follows the overlay language, "any"
+    /// disables it, otherwise a radio-browser language name ("english", ...).
+    #[serde(default = "default_radio_language_filter")]
+    pub language_filter: String,
+    /// Station country filter: "any", or an ISO 3166-1 alpha-2 code.
+    #[serde(default = "default_radio_country_filter")]
+    pub country_filter: String,
 }
 
 impl Default for RadioPreferences {
@@ -308,6 +323,8 @@ impl Default for RadioPreferences {
             favorites: Vec::new(),
             volume_percent: default_radio_volume(),
             last_station: None,
+            language_filter: default_radio_language_filter(),
+            country_filter: default_radio_country_filter(),
         }
     }
 }

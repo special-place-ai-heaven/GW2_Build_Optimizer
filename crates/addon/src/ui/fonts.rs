@@ -108,27 +108,15 @@ pub fn init(pref: &str, ui_language: &str) {
                 unsafe { ImFontAtlas_GetGlyphRangesChineseSimplifiedCommon(atlas) },
                 1,
             );
-            try_add(
-                ID_ZH,
-                first_existing(&dir, ZH_FILES),
-                Some(&zh_cfg),
-            );
+            try_add(ID_ZH, first_existing(&dir, ZH_FILES), Some(&zh_cfg));
         }
         ID_JA => {
             let ja_cfg = make_cfg(unsafe { ImFontAtlas_GetGlyphRangesJapanese(atlas) }, 1);
-            try_add(
-                ID_JA,
-                first_existing(&dir, JA_FILES),
-                Some(&ja_cfg),
-            );
+            try_add(ID_JA, first_existing(&dir, JA_FILES), Some(&ja_cfg));
         }
         ID_KO => {
             let ko_cfg = make_cfg(unsafe { ImFontAtlas_GetGlyphRangesKorean(atlas) }, 1);
-            try_add(
-                ID_KO,
-                first_existing(&dir, KO_FILES),
-                Some(&ko_cfg),
-            );
+            try_add(ID_KO, first_existing(&dir, KO_FILES), Some(&ko_cfg));
         }
         _ => {}
     }
@@ -229,7 +217,11 @@ pub fn combo_options() -> Vec<(&'static str, &'static str)> {
 }
 
 /// zh/ja/ko native names need a CJK face. Otherwise use the English catalog name.
-pub fn language_label(lang: &gw2_core::i18n::Language, pref: &str, ui_language: &str) -> &'static str {
+pub fn language_label(
+    lang: &gw2_core::i18n::Language,
+    pref: &str,
+    ui_language: &str,
+) -> &'static str {
     if !matches!(lang.code, "zh" | "ja" | "ko") {
         return lang.native_name;
     }

@@ -245,8 +245,7 @@ fn start_session(station: RbStation) {
                 radio_log("radio audio thread panicked; session abandoned".to_string());
                 let _ = crate::state::with_state(|s| {
                     if still_current(my_gen) {
-                        s.radio.status =
-                            RadioStatus::Error("playback thread panicked".to_string());
+                        s.radio.status = RadioStatus::Error("playback thread panicked".to_string());
                     }
                 });
             }
