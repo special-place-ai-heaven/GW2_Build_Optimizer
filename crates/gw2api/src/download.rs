@@ -44,12 +44,7 @@ fn report(
 /// create) and any other `Err` must fail the refresh so the UI cannot
 /// report success when icons can never be written.
 fn propagate_icon_step<T>(result: Result<T, ApiError>) -> Result<T, ApiError> {
-    match result {
-        Ok(v) => Ok(v),
-        Err(ApiError::Cancelled) => Err(ApiError::Cancelled),
-        Err(ApiError::Cache(msg)) => Err(ApiError::Cache(msg)),
-        Err(e) => Err(e),
-    }
+    result
 }
 
 /// Download all game data, calling `on_progress` after each endpoint.
