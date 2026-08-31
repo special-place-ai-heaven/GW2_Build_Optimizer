@@ -1337,6 +1337,8 @@ pub fn station_from_saved(saved: &SavedStation) -> RbStation {
         url: saved.url.clone(),
         url_resolved: saved.url.clone(),
         favicon: saved.favicon.clone(),
+        // A rehydrated favorite has no directory vote count.
+        votes: 0,
         tags: saved.tags.clone(),
         countrycode: saved.countrycode.clone(),
         codec: saved.codec.clone(),
@@ -1518,6 +1520,7 @@ mod tests {
     #[test]
     fn station_round_trips_through_the_saved_snapshot() {
         let station = RbStation {
+            votes: 0,
             stationuuid: "uuid-1".to_string(),
             name: "Groove Salad".to_string(),
             url: "https://example.com/playlist.pls".to_string(),

@@ -9,7 +9,7 @@
 
 use nexus::imgui::{ChildWindow, ComboBox, DrawListMut, Selectable, Slider, StyleColor, Ui};
 
-use crate::radio::{art, directory, logos, player, RadioStatus, RbStation};
+use crate::radio::{art, directory, logos, player, RadioSort, RadioStatus, RbStation};
 use crate::state::{with_state, AddonState};
 use crate::ui::theme;
 use gw2_core::config::SavedStation;
@@ -17,11 +17,13 @@ use gw2_core::i18n::{t, tf, LANGUAGES};
 
 /// Rows per directory search. The API orders by votes; 50 is plenty to scan.
 const SEARCH_LIMIT: usize = 50;
-const ROW_H: f32 = 40.0;
-const AVATAR: f32 = 28.0;
-const FAV_ROW_H: f32 = 26.0;
-const FAV_AVATAR: f32 = 18.0;
-const HEART: f32 = 18.0;
+const ROW_H: f32 = 68.0;
+const AVATAR: f32 = 56.0;
+/// Vertical gap between station rows — the list breathes.
+const ROW_GAP: f32 = 8.0;
+const FAV_ROW_H: f32 = 44.0;
+const FAV_AVATAR: f32 = 36.0;
+const HEART: f32 = 22.0;
 /// Favorites list shows this many rows before it scrolls.
 const FAV_VISIBLE_ROWS: usize = 4;
 
@@ -239,9 +241,69 @@ fn filter_row(ui: &Ui, state: &mut AddonState) {
         }
     }
 
+    ui.same_line_with_spacing(0.0, 14.0);
+    ui.set_window_font_scale(0.85);
+    ui.align_text_to_frame_padding();
+    ui.text_colored(theme::MUTED, t("radio.bitrate"));
+    ui.set_window_font_scale(1.0);
+    ui.same_line_with_spacing(0.0, 6.0);
+    let cur_cap = state.config.radio.bitrate_max;
+    let cap_preview = bitrate_cap_label(ui, cur_cap);
+    ui.set_next_item_width(theme::combo_width_for(ui, &cap_preview).max(110.0));
+    if let Some(_c) = ComboBox::new("##radio_cap")
+        .preview_value(&cap_preview)
+        .begin(ui)
+    {
+        for cap in [0u32, 64, 128, 192] {
+            let label = bitrate_cap_label(ui, cap);
+            if Selectable::new(format!("{label}##radio_cap_{cap}"))
+                .selected(cur_cap == cap)
+                .build(ui)
+                && cur_cap != cap
+            {
+                state.config.radio.bitrate_max = cap;
+                changed = true;
+            }
+        }
+    }
+
     if changed {
         crate::ui::save_config_detached(state);
         rekick_current(state);
+    }
+}
+
+/// "Any" or "128 kbps" — a cap for poor connections, reusing the existing
+/// bitrate format key (ASCII only; the game font lacks a <= glyph).
+fn bitrate_cap_label(_ui: &Ui, cap: u32) -> String {
+    if cap == 0 {
+        t("radio.filter_any")
+    } else {
+        tf("fmt.radio_bitrate", &[("kbps", &cap.to_string())])
+    }
+}
+
+fn sort_label(sort: RadioSort) -> String {
+    match sort {
+        RadioSort::Popular => t("radio.sort.popular"),
+        RadioSort::Name => t("radio.sort.name"),
+        RadioSort::Bitrate => t("radio.bitrate"),
+        RadioSort::Country => t("radio.country"),
+    }
+}
+
+/// Client-side result ordering; stable, so equal keys keep the API's vote
+/// order as the tiebreak.
+fn apply_sort(list: &mut [RbStation], sort: RadioSort) {
+    match sort {
+        RadioSort::Popular => list.sort_by(|a, b| b.votes.cmp(&a.votes)),
+        RadioSort::Name => list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
+        RadioSort::Bitrate => list.sort_by(|a, b| b.bitrate.cmp(&a.bitrate)),
+        RadioSort::Country => list.sort_by(|a, b| {
+            a.countrycode
+                .cmp(&b.countrycode)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        }),
     }
 }
 
@@ -291,6 +353,10 @@ fn active_filters(state: &AddonState) -> directory::SearchFilters {
     directory::SearchFilters {
         language,
         countrycode,
+        max_bitrate: match state.config.radio.bitrate_max {
+            0 => None,
+            n => Some(n),
+        },
     }
 }
 
@@ -329,7 +395,10 @@ fn kick_search(state: &mut AddonState, kind: SearchKind) {
         let _ = with_state(|s| {
             s.radio.searching = false;
             match result {
-                Ok(list) => s.radio.results = list,
+                Ok(mut list) => {
+                    apply_sort(&mut list, s.radio.sort);
+                    s.radio.results = list;
+                }
                 Err(err) => s.radio.last_error = Some(err),
             }
         });
@@ -349,7 +418,7 @@ fn favorites(ui: &Ui, state: &mut AddonState) {
     }
     theme::header(ui, &t("radio.favorites"));
     let n = state.config.radio.favorites.len();
-    let h = (n.min(FAV_VISIBLE_ROWS) as f32) * (FAV_ROW_H + 2.0) + 4.0;
+    let h = (n.min(FAV_VISIBLE_ROWS) as f32) * (FAV_ROW_H + 4.0) + 4.0;
     let mut play: Option<RbStation> = None;
     let mut remove: Option<String> = None;
     let current_key = current_station_key(state);
@@ -384,6 +453,38 @@ fn favorites(ui: &Ui, state: &mut AddonState) {
 
 fn stations(ui: &Ui, state: &mut AddonState) {
     theme::header(ui, &t("radio.results"));
+    ui.same_line_with_spacing(0.0, 18.0);
+    ui.set_window_font_scale(0.85);
+    ui.align_text_to_frame_padding();
+    ui.text_colored(theme::MUTED, t("radio.sort"));
+    ui.set_window_font_scale(1.0);
+    ui.same_line_with_spacing(0.0, 6.0);
+    let cur_sort = state.radio.sort;
+    let preview = sort_label(cur_sort);
+    ui.set_next_item_width(theme::combo_width_for(ui, &preview).max(110.0));
+    if let Some(_c) = ComboBox::new("##radio_sort")
+        .preview_value(&preview)
+        .begin(ui)
+    {
+        for (i, opt) in [
+            RadioSort::Popular,
+            RadioSort::Name,
+            RadioSort::Bitrate,
+            RadioSort::Country,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if Selectable::new(format!("{}##radio_sort_{i}", sort_label(opt)))
+                .selected(cur_sort == opt)
+                .build(ui)
+                && cur_sort != opt
+            {
+                state.radio.sort = opt;
+                apply_sort(&mut state.radio.results, opt);
+            }
+        }
+    }
     let bar_h = player_bar_height(ui);
     let h = (ui.content_region_avail()[1] - bar_h - 10.0).max(72.0);
     let mut play: Option<RbStation> = None;
@@ -469,12 +570,13 @@ fn station_row(ui: &Ui, i: usize, s: &RbStation, fav: bool, active: bool) -> Row
         &s.favicon,
     );
 
-    let tx = origin[0] + 2.0 + AVATAR + 8.0;
-    let text_w = row_w - (AVATAR + 12.0);
+    let tx = origin[0] + 2.0 + AVATAR + 10.0;
+    let text_w = row_w - (AVATAR + 14.0);
     let name_color = if active { theme::GOLD } else { theme::CREAM };
     let name = clip_text(ui, &s.name, text_w);
+    let lh = ui.text_line_height();
     dl.add_text(
-        [tx, origin[1] + 4.0],
+        [tx, origin[1] + ROW_H * 0.5 - lh - 2.0],
         crate::ui::color_u32(name_color),
         &name,
     );
@@ -483,7 +585,7 @@ fn station_row(ui: &Ui, i: usize, s: &RbStation, fav: bool, active: bool) -> Row
     let meta = meta_line(&s.countrycode, &s.codec, s.bitrate);
     let meta = clip_text(ui, &meta, text_w);
     dl.add_text(
-        [tx, origin[1] + ROW_H * 0.5 + 2.0],
+        [tx, origin[1] + ROW_H * 0.5 + 3.0],
         crate::ui::color_u32(theme::MUTED),
         &meta,
     );
@@ -500,7 +602,7 @@ fn station_row(ui: &Ui, i: usize, s: &RbStation, fav: bool, active: bool) -> Row
     ) {
         action = RowAction::Heart;
     }
-    ui.set_cursor_screen_pos([origin[0], origin[1] + ROW_H + 2.0]);
+    ui.set_cursor_screen_pos([origin[0], origin[1] + ROW_H + ROW_GAP]);
     action
 }
 
@@ -550,7 +652,7 @@ fn favorite_row(ui: &Ui, i: usize, f: &SavedStation, active: bool) -> RowAction 
     ) {
         action = RowAction::Heart;
     }
-    ui.set_cursor_screen_pos([origin[0], origin[1] + FAV_ROW_H + 2.0]);
+    ui.set_cursor_screen_pos([origin[0], origin[1] + FAV_ROW_H + 4.0]);
     action
 }
 
@@ -1012,6 +1114,8 @@ fn station_from_saved(f: &SavedStation) -> RbStation {
         url: f.url.clone(),
         url_resolved: f.url.clone(),
         favicon: f.favicon.clone(),
+        // A rehydrated favorite has no directory vote count.
+        votes: 0,
         tags: f.tags.clone(),
         countrycode: f.countrycode.clone(),
         codec: f.codec.clone(),

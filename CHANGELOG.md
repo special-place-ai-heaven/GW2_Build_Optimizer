@@ -2,6 +2,15 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.9.1 - 2026-08-31
+
+### Radio
+
+- Station rows breathe: logos twice as big (56px), taller rows, more space between them.
+- Sort the results: Popular (directory votes), Name, Bitrate, or Country — combo next to the STATIONS header.
+- Bitrate cap for poor connections: Any / 64 / 128 / 192 kbps on the filter row, applied server-side to every search.
+- Choya DJ doubled in size and pops out of the player bar — feet on the bar, head over the station list — moved clear of the hearts column.
+
 ## 1.9.0 - 2026-08-31
 
 ### Radio
