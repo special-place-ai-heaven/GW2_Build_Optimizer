@@ -2,6 +2,12 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.8.3 - 2026-08-31
+
+### Radio
+
+- Real equalizer bars behind the player bar: 24 log-spaced frequency bands measured from the decoded audio itself (not a fake animation), drawn in translucent gold so the status and now-playing text stay readable. Bars rise with the music and sink gracefully when playback stops. Their height tracks the stream, not the volume slider — turning the game-side volume down does not flatten the show.
+
 ## 1.8.2 - 2026-08-31
 
 ### Radio

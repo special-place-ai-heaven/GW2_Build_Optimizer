@@ -662,6 +662,9 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
         )
         .rounding(6.0)
         .build();
+        // Equalizer bars live between the plate and everything else, so all
+        // text and controls render on top of them.
+        eq_bars(&dl, origin, w, bar_h);
 
         let pad = 10.0;
         let x0 = origin[0] + pad;
@@ -768,6 +771,39 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
         crate::ui::save_config_detached(state);
     }
     ui.set_cursor_screen_pos([origin[0], origin[1] + bar_h]);
+}
+
+/// Real equalizer in the bar's background: 24 low-alpha gold bars driven by
+/// the decoded audio via `player::eq_levels()` (one call per frame — the
+/// smoothing lives there). Skipped entirely while idle, so a silent bar costs
+/// nothing and shows nothing.
+fn eq_bars(dl: &DrawListMut, origin: [f32; 2], w: f32, bar_h: f32) {
+    let levels = player::eq_levels();
+    if levels.iter().all(|l| *l < 0.004) {
+        return;
+    }
+    let pad = 8.0;
+    let gap = 2.0;
+    let n = player::EQ_BANDS as f32;
+    let bar_w = ((w - pad * 2.0) - gap * (n - 1.0)) / n;
+    if bar_w < 1.0 {
+        return;
+    }
+    let base = origin[1] + bar_h - 2.0;
+    let max_h = bar_h - 4.0;
+    // Theme gold at low alpha — "slight transparency", text stays readable.
+    let fill = [theme::GOLD[0], theme::GOLD[1], theme::GOLD[2], 0.14];
+    for (i, level) in levels.iter().enumerate() {
+        let h = max_h * level.clamp(0.0, 1.0);
+        if h < 0.5 {
+            continue;
+        }
+        let x = origin[0] + pad + i as f32 * (bar_w + gap);
+        dl.add_rect([x, base - h], [x + bar_w, base], fill)
+            .filled(true)
+            .rounding(1.0)
+            .build();
+    }
 }
 
 /// Gold LIVE pill; returns the width consumed.
