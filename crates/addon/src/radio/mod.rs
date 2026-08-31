@@ -1,0 +1,83 @@
+//! Internet radio: radio-browser.info directory + icecast stream playback.
+//!
+//! Contract scaffold: the shared types live here so the three workstreams
+//! (`player` — playback core, `directory` — radio-browser client, `art` —
+//! choya DJ sprites) plus the tab UI compile independently and merge without
+//! overlap. Stream playback runs on a dedicated tokio runtime owned by
+//! `player`; directory searches use the addon's normal blocking-reqwest
+//! worker pattern.
+
+pub mod art;
+pub mod directory;
+pub mod player;
+
+use std::sync::{Arc, Mutex};
+
+/// One station row from radio-browser.info. Every field serde-defaulted so a
+/// sparse directory record never fails the whole response.
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
+#[serde(default)]
+pub struct RbStation {
+    pub stationuuid: String,
+    pub name: String,
+    pub url: String,
+    pub url_resolved: String,
+    pub favicon: String,
+    pub tags: String,
+    pub countrycode: String,
+    pub codec: String,
+    pub bitrate: u32,
+    pub lastcheckok: u8,
+    pub hls: u8,
+}
+
+impl RbStation {
+    /// The playable URL: `url_resolved` (the directory pre-unwraps .pls/.m3u
+    /// playlist pointers), falling back to raw `url` when empty.
+    pub fn stream_url(&self) -> &str {
+        if self.url_resolved.is_empty() {
+            &self.url
+        } else {
+            &self.url_resolved
+        }
+    }
+}
+
+/// Playback status surfaced to the UI. Written from playback threads via
+/// `with_state`, read every frame by the render thread.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum RadioStatus {
+    #[default]
+    Idle,
+    Connecting,
+    Playing,
+    Stalled,
+    Stopped,
+    /// Audio output device disappeared (unplug / default change).
+    /// cpal does not recover on its own; the user presses play to reopen.
+    DeviceLost,
+    Error(String),
+}
+
+/// Shared now-playing cell: written by the ICY metadata callback on the
+/// playback path, read every frame by the UI. `None` = no title yet (or the
+/// station sends none). The title is raw `StreamTitle` text — never split
+/// into artist/title (the convention is unreliable), always sanitized.
+pub type NowPlayingCell = Arc<Mutex<Option<String>>>;
+
+/// Per-session UI state for the Radio tab, hanging off `AddonState`.
+#[derive(Default)]
+pub struct RadioUiState {
+    pub status: RadioStatus,
+    /// Station currently loaded (connecting/playing/stalled), if any.
+    pub current: Option<RbStation>,
+    pub now_playing: NowPlayingCell,
+    pub search_text: String,
+    pub results: Vec<RbStation>,
+    /// True while a directory search worker is in flight.
+    pub searching: bool,
+    /// Transient one-line error surfaced in the tab.
+    pub last_error: Option<String>,
+    /// Genre chip currently selected (radio-browser tag), if any.
+    pub selected_genre: Option<&'static str>,
+}

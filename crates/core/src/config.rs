@@ -264,6 +264,54 @@ impl NewsPreferences {
     }
 }
 
+/// Snapshot of a station the player saved — enough to re-tune and render the
+/// row offline, without a directory round-trip, across mirror changes.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SavedStation {
+    pub stationuuid: String,
+    pub name: String,
+    /// Resolved stream URL at save time.
+    pub url: String,
+    #[serde(default)]
+    pub favicon: String,
+    #[serde(default)]
+    pub codec: String,
+    #[serde(default)]
+    pub bitrate: u32,
+    #[serde(default)]
+    pub countrycode: String,
+    #[serde(default)]
+    pub tags: String,
+}
+
+fn default_radio_volume() -> u8 {
+    60
+}
+
+/// Radio tab persistence: favorites + volume + last station.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RadioPreferences {
+    /// Favorite stations, deduped by `stationuuid` (fallback: trimmed url).
+    #[serde(default)]
+    pub favorites: Vec<SavedStation>,
+    /// Output volume percent 0-100; log taper applied at the sink.
+    #[serde(default = "default_radio_volume")]
+    pub volume_percent: u8,
+    /// Last station played, for the keybind toggle and quick resume.
+    #[serde(default)]
+    pub last_station: Option<SavedStation>,
+}
+
+impl Default for RadioPreferences {
+    fn default() -> Self {
+        Self {
+            favorites: Vec::new(),
+            volume_percent: default_radio_volume(),
+            last_station: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub gw2_api_key: Option<String>,
@@ -359,6 +407,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub news: NewsPreferences,
 
+    /// Radio tab: favorites, volume, last station. Omitted on old configs.
+    #[serde(default)]
+    pub radio: RadioPreferences,
+
     /// Random id minted once per install for the feedback server (never an account id).
     #[serde(default)]
     pub client_id: Option<String>,
@@ -401,6 +453,7 @@ impl Default for AppConfig {
             ui_language: "auto".into(),
             ui_font: "auto".into(),
             news: NewsPreferences::default(),
+            radio: RadioPreferences::default(),
             client_id: None,
             save_policy: SavePolicy::Writable,
         }
