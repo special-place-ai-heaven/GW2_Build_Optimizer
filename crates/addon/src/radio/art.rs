@@ -509,11 +509,11 @@ fn draw_quip_bubble(
     t: u32,
     bass: f32,
 ) {
-    // Anchor roulette: 0 centered / 1 left-lean / 2 right-lean above the
-    // head, 3 = squished low by the feet as muffled mumbling.
-    let anchor = (h >> 8) % 4;
-    let muffled = anchor == 3;
-    let a = if muffled { alpha * 0.6 } else { alpha };
+    // Anchor roulette — ALWAYS above the head (a low "muffled" slot used to
+    // land inside the now-playing ticker): centered, left/right leans, and
+    // higher/lower altitude variants.
+    let anchor = (h >> 8) % 5;
+    let a = alpha;
 
     // Real measurement at the bubble's own font scale, greedy word-wrap into
     // short lines — the text always fits INSIDE the plate (the old blind
@@ -549,24 +549,21 @@ fn draw_quip_bubble(
         + (t as f32 * 0.05 + (h % 628) as f32 * 0.01).sin() * (1.0 + 3.0 * bass);
 
     // Full-size bubble center + the point near the choya it pops out from.
-    let (mut bx, by, anchor_pt) = if muffled {
-        (
-            center[0] - size * 0.72 - bw * 0.5,
-            c[1] + sz * 0.18 + y_off,
-            [c[0] - sz * 0.38, c[1] + sz * 0.05],
-        )
-    } else {
-        let lean = match anchor {
-            1 => -size * 0.45,
-            2 => size * 0.25,
-            _ => 0.0,
-        };
-        (
-            center[0] + lean,
-            c[1] - sz * 0.62 - 10.0 - bh * 0.5 + y_off,
-            [c[0], c[1] - sz * 0.42],
-        )
+    // Every slot: horizontal lean x altitude, all strictly above the head
+    // (the lowest sits just on top of it — its bottom clears the sprite's
+    // upper edge for any realistic size).
+    let (lean, altitude) = match anchor {
+        1 => (-size * 0.45, 0.62),
+        2 => (size * 0.25, 0.62),
+        3 => (0.0, 0.82),           // higher
+        4 => (-size * 0.25, 0.50),  // lower, still above the head
+        _ => (0.0, 0.62),
     };
+    let (mut bx, by, anchor_pt) = (
+        center[0] + lean,
+        c[1] - sz * altitude - 10.0 - bh * 0.5 + y_off,
+        [c[0], c[1] - sz * 0.42],
+    );
     // Never cover the hearts column: clamp to the sprite's right edge.
     let right_limit = center[0] + size * 0.5;
     if bx + bw * 0.5 > right_limit {
@@ -612,27 +609,17 @@ fn draw_quip_bubble(
         .rounding(5.0)
         .thickness(1.0)
         .build();
-    // Tail after the border so its base covers the border segment cleanly.
-    if muffled {
-        dl.add_triangle(
-            [bmax[0] - 1.0, bc[1] - 4.0],
-            [bmax[0] - 1.0, bc[1] + 4.0],
-            [bmax[0] + 7.0, bc[1] + 1.0],
-            fill,
-        )
-        .filled(true)
-        .build();
-    } else {
-        let base_x = c[0].clamp(bmin[0] + 8.0, bmax[0] - 8.0);
-        dl.add_triangle(
-            [base_x - 5.0, bmax[1] - 1.0],
-            [base_x + 5.0, bmax[1] - 1.0],
-            [base_x + 1.0, bmax[1] + 7.0],
-            fill,
-        )
-        .filled(true)
-        .build();
-    }
+    // Tail after the border so its base covers the border segment cleanly;
+    // always from the bubble's bottom edge down toward the head.
+    let base_x = c[0].clamp(bmin[0] + 8.0, bmax[0] - 8.0);
+    dl.add_triangle(
+        [base_x - 5.0, bmax[1] - 1.0],
+        [base_x + 5.0, bmax[1] - 1.0],
+        [base_x + 1.0, bmax[1] + 7.0],
+        fill,
+    )
+    .filled(true)
+    .build();
 
     // Lines centered horizontally inside the plate, through the pop scale.
     for (li, line) in lines.iter().enumerate() {

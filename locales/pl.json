@@ -39,6 +39,7 @@
   "radio.status.device_lost": "Utracono urządzenie audio - naciśnij Odtwórz, aby wznowić",
   "radio.status.error": "Błąd strumienia",
   "radio.error.av_hint": "Jeśli to się powtarza, stację może blokować antywirus lub zapora sieciowa.",
+  "radio.error.port_hint": "Ta stacja nadaje na porcie {port} - porcie kojarzonym z ruchem Tor/proxy, często blokowanym przez antywirusy i zapory routera. Zezwól na port {port} w oprogramowaniu zabezpieczającym lub routerze, aby jej słuchać.",
   "fmt.radio_bitrate": "{kbps} kb/s",
   "radio.genre.top": "Najlepsze stacje",
   "radio.genre.pop": "Pop",

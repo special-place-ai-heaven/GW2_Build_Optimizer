@@ -1075,9 +1075,18 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
         }
 
         // Line 2: big now-playing marquee, or the antivirus hint on error.
+        // A station on a port security software famously blocks (Tor/SOCKS/
+        // proxy ports) gets the specific story instead of the generic hint.
         if matches!(status, RadioStatus::Error(_)) {
             ui.set_window_font_scale(0.85);
-            let hint = clip_text(ui, &t("radio.error.av_hint"), right - x0);
+            let text = state
+                .radio
+                .current
+                .as_ref()
+                .and_then(|s| av_blocked_port(s.stream_url()))
+                .map(|p| tf("radio.error.port_hint", &[("port", &p.to_string())]))
+                .unwrap_or_else(|| t("radio.error.av_hint"));
+            let hint = clip_text(ui, &text, right - x0);
             dl.add_text([x0, y2], crate::ui::color_u32(theme::MUTED), &hint);
             ui.set_window_font_scale(1.0);
         } else if status == RadioStatus::Playing {
@@ -1359,6 +1368,15 @@ fn now_playing_marquee(
     if big.is_none() {
         ui.set_window_font_scale(1.0);
     }
+}
+
+/// The stream URL's explicit port, when it is one that security software
+/// (antivirus web protection, firewalls) commonly blocks outright: SOCKS,
+/// Tor, I2P and Privoxy ports. Shoutcast servers on these ports fail at
+/// connect time on protected machines — seen in the wild on :9050 twice.
+fn av_blocked_port(url: &str) -> Option<u16> {
+    let port = reqwest::Url::parse(url).ok()?.port()?;
+    matches!(port, 1080 | 4444 | 4445 | 8118 | 9050 | 9051 | 9150).then_some(port)
 }
 
 fn status_line(status: &RadioStatus) -> (String, [f32; 4]) {

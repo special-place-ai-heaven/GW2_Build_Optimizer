@@ -39,6 +39,7 @@
   "radio.status.device_lost": "音频设备丢失 - 按播放重新打开",
   "radio.status.error": "流媒体错误",
   "radio.error.av_hint": "如果频繁出现此问题，可能是杀毒软件或防火墙拦截了该电台。",
+  "radio.error.port_hint": "该电台通过端口 {port} 播放。此端口与 Tor/代理流量相关，常被杀毒软件和路由器防火墙拦截。要收听请在安全软件或路由器中放行端口 {port}。",
   "fmt.radio_bitrate": "{kbps} kbps",
   "radio.genre.top": "热门电台",
   "radio.genre.pop": "流行",

@@ -39,6 +39,7 @@
   "radio.status.device_lost": "Dispositivo de audio perdido - pulsa Reproducir para reabrirlo",
   "radio.status.error": "Error de transmisión",
   "radio.error.av_hint": "Si esto sigue ocurriendo, puede que tu antivirus o cortafuegos esté bloqueando la emisora.",
+  "radio.error.port_hint": "Esta emisora emite por el puerto {port}, un puerto asociado al tráfico Tor/proxy que los antivirus y los cortafuegos del router suelen bloquear. Permite el puerto {port} en tu software de seguridad o router para escucharla.",
   "fmt.radio_bitrate": "{kbps} kbps",
   "radio.genre.top": "Emisoras destacadas",
   "radio.genre.pop": "Pop",
