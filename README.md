@@ -30,10 +30,17 @@ then let the optimizer search for a stronger version around those constraints.
 
 ![Improve Build view](docs/screenshots/improve.png)
 
-**Settings** configures the AI provider and model, overlay language and scale,
-News sources, benchmark sync, and the local game-data cache.
+**Settings** configures the AI provider and model, overlay language, scale,
+theme, News sources, benchmark sync, and the local game-data cache.
 
 ![Settings view](docs/screenshots/settings.png)
+
+**Themes** are picked in Settings. Five premade palettes (Tyrian Gold, Glacial
+Ward, Verdant Wilds, Molten Ember, Void Orchid), or Custom: name it and set
+background, panel, accent, text, and muted. The overlay updates live and
+the choice persists.
+
+![Themes](docs/screenshots/themes.png)
 
 **First-time game data** downloads the catalog (items, skills, pets, official
 names). The wait is filled with official Guild Wars 2 news: read an article,
