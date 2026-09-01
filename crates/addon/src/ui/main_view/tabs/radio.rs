@@ -1073,7 +1073,7 @@ fn heart_button(
         (true, true) => [1.0, 0.45, 0.55, 1.0],
         (true, false) => [0.92, 0.30, 0.42, 1.0],
         (false, true) => [0.85, 0.45, 0.55, 0.95],
-        (false, false) => [0.45, 0.42, 0.36, 0.85],
+        (false, false) => theme::with_alpha(theme::pal().muted, 0.85),
     };
     heart_glyph(dl, [x + HEART * 0.5, y + HEART * 0.5], HEART * 0.46, color);
     if hovered {
@@ -1409,7 +1409,7 @@ fn live_badge(ui: &Ui, dl: &DrawListMut, pos: [f32; 2]) -> f32 {
 /// Inert muted button for "nothing to resume" — same footprint as the gold
 /// Play button so the bar never shifts.
 fn dim_button(ui: &Ui, label: &str, w: f32) {
-    let bg = [0.15, 0.13, 0.09, 0.8];
+    let bg = theme::with_alpha(theme::pal().header_plate, 0.8);
     let _b = ui.push_style_color(StyleColor::Button, bg);
     let _h = ui.push_style_color(StyleColor::ButtonHovered, bg);
     let _a = ui.push_style_color(StyleColor::ButtonActive, bg);

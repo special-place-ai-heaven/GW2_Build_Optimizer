@@ -35,14 +35,14 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.set_column_width(0, col_w);
 
     // ── LEFT COLUMN ─────────────────────────────────────────────────
-    build_display::render_card_header(ui, &t("settings.ai_provider"), [1.0, 0.88, 0.35, 1.0]);
+    build_display::render_card_header(ui, &t("settings.ai_provider"), theme::pal().gold);
     render_api_keys_section(ui, state, col_w);
     ui.spacing();
     render_model_picker_section(ui, state, col_w);
 
     ui.dummy([0.0, 8.0]);
 
-    build_display::render_card_header(ui, &t("settings.opt_defaults"), [1.0, 0.88, 0.35, 1.0]);
+    build_display::render_card_header(ui, &t("settings.opt_defaults"), theme::pal().gold);
     {
         ui.text(t("settings.default_mode"));
         let current_default = state
@@ -61,39 +61,39 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
 
     ui.dummy([0.0, 8.0]);
 
-    build_display::render_card_header(ui, &t("settings.legend"), [0.7, 0.7, 0.7, 1.0]);
+    build_display::render_card_header(ui, &t("settings.legend"), theme::pal().muted);
     ui.spacing();
     ui.text_colored(
         [0.3, 0.9, 0.3, 1.0],
         format!("* {}", t("settings.verified")),
     );
-    theme::wrapped(ui, [0.6, 0.6, 0.6, 1.0], &t("settings.verified_note"));
+    theme::wrapped(ui, theme::pal().muted, &t("settings.verified_note"));
     ui.text_colored(
         [0.95, 0.75, 0.15, 1.0],
         format!("* {}", t("settings.provisional")),
     );
-    theme::wrapped(ui, [0.6, 0.6, 0.6, 1.0], &t("settings.provisional_note"));
+    theme::wrapped(ui, theme::pal().muted, &t("settings.provisional_note"));
     ui.text_colored([1.0, 0.3, 0.2, 1.0], format!("* {}", t("settings.blocked")));
-    theme::wrapped(ui, [0.6, 0.6, 0.6, 1.0], &t("settings.blocked_note"));
+    theme::wrapped(ui, theme::pal().muted, &t("settings.blocked_note"));
 
     // ── RIGHT COLUMN ────────────────────────────────────────────────
     ui.next_column();
     ui.indent_by(gutter);
 
-    build_display::render_card_header(ui, &t("settings.ui_prefs"), [1.0, 0.88, 0.35, 1.0]);
+    build_display::render_card_header(ui, &t("settings.ui_prefs"), theme::pal().gold);
     render_theme_section(ui, state, col_w);
 
     ui.unindent_by(gutter);
     ui.columns(1, "##settings_split_end", false);
 
     ui.dummy([0.0, 8.0]);
-    build_display::render_card_header(ui, &t("settings.news"), [1.0, 0.88, 0.35, 1.0]);
+    build_display::render_card_header(ui, &t("settings.news"), theme::pal().gold);
     render_news_sources(ui, state);
 
     ui.dummy([0.0, 8.0]);
     ui.columns(2, "##settings_bottom", false);
     ui.set_column_width(0, col_w);
-    build_display::render_card_header(ui, &t("settings.cache"), [1.0, 0.88, 0.35, 1.0]);
+    build_display::render_card_header(ui, &t("settings.cache"), theme::pal().gold);
     render_cache_section(ui, state);
     ui.next_column();
     ui.indent_by(gutter);
@@ -107,7 +107,7 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.separator();
     ui.dummy([0.0, 2.0]);
     ui.text_colored(
-        [0.4, 0.4, 0.4, 1.0],
+        theme::pal().muted,
         format!(
             "{} {}  —  {}",
             t("info.product"),
@@ -420,7 +420,7 @@ fn render_model_combo(
         }
         if visible == 0 && !needle.is_empty() {
             ui.text_colored(
-                [0.7, 0.7, 0.7, 1.0],
+                theme::pal().muted,
                 tf(
                     "fmt.no_models",
                     &[("q", state.main.settings_model_search.trim())],
@@ -576,7 +576,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     );
     ui.set_cursor_screen_pos([origin[0] + row_w - refresh_w, origin[1]]);
     if state.main.models_loading {
-        ui.text_colored([0.7, 0.7, 0.7, 1.0], "...");
+        ui.text_colored(theme::pal().muted, "...");
     } else if theme::gold_button_sized(ui, format!("{}##models", refresh), [refresh_w, 0.0]) {
         state.main.available_models.clear();
         state.main.models_error = None;
@@ -609,7 +609,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         state.main.settings_usage_frames -= 1;
     }
     ui.text_colored(
-        [0.5, 0.5, 0.5, 1.0],
+        theme::pal().muted,
         tf(
             "fmt.usage_today",
             &[("n", state.main.settings_usage_today.to_string().as_str())],
@@ -803,7 +803,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     render_theme_style_section(ui, state, right_item_w);
 
     ui.spacing();
-    ui.text_colored([0.7, 0.7, 0.75, 1.0], t("settings.layout"));
+    ui.text_colored(theme::pal().muted, t("settings.layout"));
 
     let left_l = t("settings.left_panel");
     let pad_l = t("settings.panel_padding");
@@ -1200,7 +1200,7 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
 
 fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
-    ui.text_colored([0.7, 0.7, 0.7, 1.0], t("settings.sources"));
+    ui.text_colored(theme::pal().muted, t("settings.sources"));
     ui.spacing();
     if state.main.benchmark_running {
         let live = ["snowcrows", "hardstuck", "guildjen"]
@@ -1248,7 +1248,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
             ),
         );
     } else {
-        ui.text_colored([0.5, 0.5, 0.5, 1.0], t("settings.never_synced"));
+        ui.text_colored(theme::pal().muted, t("settings.never_synced"));
     }
     if let Some(ref err) = state.main.benchmark_error.clone() {
         let short = if err.chars().count() > 80 {

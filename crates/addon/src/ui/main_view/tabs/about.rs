@@ -419,9 +419,9 @@ fn paint_row_plate(ui: &Ui, height: f32, header: bool) {
     let p = ui.cursor_screen_pos();
     let w = ui.content_region_avail()[0];
     let fill = if header {
-        [0.16, 0.13, 0.08, 0.7]
+        theme::with_alpha(theme::pal().header_plate, 0.7)
     } else {
-        [0.12, 0.10, 0.07, 0.42]
+        theme::with_alpha(theme::pal().plate, 0.42)
     };
     ui.get_window_draw_list()
         .add_rect(p, [p[0] + w, p[1] + height], fill)

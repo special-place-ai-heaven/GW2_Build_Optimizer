@@ -5,15 +5,9 @@ use nexus::imgui::Ui;
 use gw2_core::i18n::t;
 use gw2_core::types::ResolvedBuild;
 
-// ─── Color palette ───
-
-const SECTION_HEADER_BG: [f32; 4] = [0.28, 0.24, 0.12, 0.95]; // warm dark gold header
-                                                              // Body bg is not drawn (would cover text due to DrawList ordering).
-                                                              // Card look comes from header + border + accent line.
-const LABEL_COLOR: [f32; 4] = [0.7, 0.7, 0.75, 1.0]; // cool gray labels
-const SECTION_TITLE_COLOR: [f32; 4] = [1.0, 0.88, 0.35, 1.0]; // bright gold titles
-const ACCENT_LINE_COLOR: [f32; 4] = [0.7, 0.55, 0.15, 0.5]; // subtle gold accent
-const CARD_BORDER_COLOR: [f32; 4] = [0.35, 0.3, 0.15, 0.4]; // dim gold border
+// Colors come from the active theme palette (`crate::ui::theme::pal()`).
+// Body bg is not drawn (would cover text due to DrawList ordering).
+// Card look comes from header + border + accent line.
 
 const CARD_ROUNDING: f32 = 5.0;
 const CARD_PAD: f32 = 4.0;
@@ -32,7 +26,7 @@ pub fn render_card_header(ui: &Ui, title: &str, color: [f32; 4]) {
             .add_rect(
                 [start[0] - 1.0, start[1]],
                 [start[0] + width + 1.0, start[1] + bar_h],
-                [0.15, 0.13, 0.08, 0.9],
+                crate::ui::theme::pal().header_plate,
             )
             .filled(true)
             .rounding(CARD_ROUNDING)
@@ -140,7 +134,7 @@ fn render_stance_tabs(
     if names.is_empty() {
         return None;
     }
-    ui.text_colored(LABEL_COLOR, t("slot.stances"));
+    ui.text_colored(crate::ui::theme::pal().muted, t("slot.stances"));
     let n = names.len();
     let mut selected = STANCE_PREVIEW.with(|c| {
         let v = c.get();
@@ -197,7 +191,7 @@ fn paint_group_header(ui: &Ui, x: f32, y: f32, w: f32, h: f32, title: &str) {
     let inner_w = (w - crate::ui::theme::HEADER_ACCENT_W - 8.0).max(1.0);
     let tx = inner_left + ((inner_w - tw) * 0.5).max(0.0);
     let ty = y + ((h - th) * 0.5).round();
-    dl.add_text([tx, ty], SECTION_TITLE_COLOR, title);
+    dl.add_text([tx, ty], crate::ui::theme::pal().gold, title);
 }
 
 fn paint_vdiv(ui: &Ui, x: f32, y: f32, h: f32) {
@@ -264,7 +258,11 @@ fn paint_kit_slot(
     } else {
         crate::ui::theme::pal().plate
     };
-    let border = if empty { [0.28, 0.24, 0.14, 0.45] } else { rim };
+    let border = if empty {
+        crate::ui::theme::with_alpha(crate::ui::theme::pal().chip_idle_rim, 0.45)
+    } else {
+        rim
+    };
     ui.set_cursor_screen_pos(p);
     let _ = ui.invisible_button(id, [slot_w, slot_h]);
     if !empty && !inspect.is_empty() {
@@ -432,7 +430,7 @@ fn render_skill_bar(
         dl.add_rect(
             [start[0] - 1.0, hdr_top],
             [start[0] + avail + 1.0, hdr_bottom],
-            SECTION_HEADER_BG,
+            crate::ui::theme::with_alpha(crate::ui::theme::pal().header_hovered, 0.95),
         )
         .filled(true)
         .rounding(CARD_ROUNDING)
@@ -553,14 +551,14 @@ fn render_skill_bar(
         dl.add_line(
             [start[0] - 1.0, body_top],
             [start[0] + avail + 1.0, body_top],
-            ACCENT_LINE_COLOR,
+            crate::ui::theme::with_alpha(crate::ui::theme::pal().gold_button_active, 0.5),
         )
         .thickness(1.0)
         .build();
         dl.add_rect(
             [start[0] - 1.0, hdr_top],
             [start[0] + avail + 1.0, body_bottom],
-            CARD_BORDER_COLOR,
+            crate::ui::theme::with_alpha(crate::ui::theme::pal().chip_idle_rim, 0.4),
         )
         .rounding(CARD_ROUNDING)
         .build();

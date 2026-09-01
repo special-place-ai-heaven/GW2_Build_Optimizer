@@ -1012,7 +1012,7 @@ fn render_pick(ui: &Ui, draft: &Draft, feedback: &FeedbackState, inner_w: f32) -
             let fill = if hovered && live {
                 theme::pal().gold_hover
             } else {
-                [0.12, 0.10, 0.07, 0.9]
+                theme::with_alpha(theme::pal().plate, 0.9)
             };
             dl.add_rect(p, br, fade(fill, alpha))
                 .filled(true)

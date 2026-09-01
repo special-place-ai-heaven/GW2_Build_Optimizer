@@ -938,7 +938,7 @@ fn diff_color(diff: f64) -> [f32; 4] {
 
 /// Render rotation simulation breakdown: simulated DPS, condition uptimes, skill usage.
 fn render_rotation_breakdown(ui: &Ui, rotation: &RotationBreakdown, db: Option<&GameDb>) {
-    ui.text_colored([0.55, 0.55, 0.55, 1.0], t("note.rotation_sim"));
+    ui.text_colored(crate::ui::theme::pal().muted, t("note.rotation_sim"));
     ui.text(tf(
         "fmt.sim_dps",
         &[

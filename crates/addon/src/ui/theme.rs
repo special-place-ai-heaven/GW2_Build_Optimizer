@@ -913,9 +913,9 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
         let span = (avail - left_pad - right_reserve).max(40.0);
         let track_x1 = track_x0 + span;
         let fill_x = track_x0 + span * fraction;
-        let empty = [0.32, 0.28, 0.22, 0.55];
-        let gold_scribble = [0.95, 0.78, 0.28, 0.95];
-        let gold_scribble_dim = [0.72, 0.55, 0.16, 0.85];
+        let empty = theme.chip_idle_rim;
+        let gold_scribble = with_alpha(theme.gold, 0.95);
+        let gold_scribble_dim = with_alpha(theme.gold_fill, 0.85);
 
         let y0 = bar_y as i32;
         let y1 = (bar_y + bar_h) as i32;

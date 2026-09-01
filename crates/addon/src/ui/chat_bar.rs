@@ -208,7 +208,10 @@ pub fn render_chat_bar(
 
     let avail_h = ui.content_region_avail()[1];
     let scroll_h = (avail_h - COMPOSER_H - 10.0).max(80.0);
-    let _child_bg = ui.push_style_color(StyleColor::ChildBg, [0.05, 0.04, 0.03, 0.35]);
+    let _child_bg = ui.push_style_color(
+        StyleColor::ChildBg,
+        theme::with_alpha(theme::pal().ink, 0.35),
+    );
     ChildWindow::new("##talk_scroll")
         .size([0.0, scroll_h])
         .build(ui, || {

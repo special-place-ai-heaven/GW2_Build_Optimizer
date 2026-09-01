@@ -17,10 +17,6 @@ mod resolution;
 mod stats;
 mod tabs;
 
-// ─── Color palette (shared with build_display) ───
-const HEADER_BG: [f32; 4] = [0.18, 0.16, 0.10, 0.95];
-const ACCENT_COLOR: [f32; 4] = [0.7, 0.55, 0.15, 0.6];
-
 /// `kitchen.json` (chat history). Saved from the frame loop whenever the chat
 /// is dirty, which can be many frames in a row while a reply streams in.
 static KITCHEN_WRITES: crate::ui::SerialWriter = crate::ui::SerialWriter::new("kitchen-save");
@@ -203,7 +199,7 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
             .add_rect(
                 [start[0] - 1.0, start[1]],
                 [start[0] + width + 1.0, start[1] + 18.0],
-                HEADER_BG,
+                theme::with_alpha(theme::pal().frame_bg_hovered, 0.95),
             )
             .filled(true)
             .build();
@@ -316,7 +312,7 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
             .add_line(
                 [pos[0] - 1.0, pos[1]],
                 [pos[0] + width + 1.0, pos[1]],
-                ACCENT_COLOR,
+                theme::with_alpha(theme::pal().gold_button_active, 0.6),
             )
             .thickness(1.0)
             .build();
@@ -339,7 +335,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
             .add_rect(
                 [start[0], start[1]],
                 [start[0] + width, start[1] + 62.0],
-                [0.10, 0.08, 0.05, 0.95],
+                theme::with_alpha(theme::pal().title_bg, 0.95),
             )
             .filled(true)
             .rounding(6.0)
@@ -362,7 +358,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
             .add_rect(
                 [start[0], start[1]],
                 [start[0] + width, start[1] + 3.0],
-                [0.55, 0.42, 0.16, 0.35],
+                theme::with_alpha(theme::pal().gold_dim, 0.35),
             )
             .filled(true)
             .build();
@@ -374,7 +370,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
             let alpha = 0.3 + 0.7 * (phase * std::f32::consts::PI * 2.0).sin().abs();
             let dot_x = start[0] + 16.0 + i as f32 * 12.0;
             draw_list
-                .add_circle([dot_x, dot_y], 3.5, [1.0, 0.84, 0.38, alpha])
+                .add_circle([dot_x, dot_y], 3.5, theme::with_alpha(theme::pal().gold, alpha))
                 .filled(true)
                 .build();
         }
@@ -396,7 +392,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
         };
         draw_list.add_text(
             [start[0] + 16.0, start[1] + 34.0],
-            [0.6, 0.65, 0.75, 1.0],
+            theme::pal().muted,
             detail,
         );
 
@@ -407,7 +403,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
             .add_rect(
                 [start[0] + 8.0, bar_y],
                 [start[0] + width - 8.0, bar_y + 4.0],
-                [0.15, 0.15, 0.2, 0.6],
+                theme::with_alpha(theme::pal().frame_bg, 0.6),
             )
             .filled(true)
             .rounding(2.0)
@@ -572,7 +568,7 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
             .add_rect(
                 [pos[0], pos[1]],
                 [pos[0] + width, pos[1] + bar_h],
-                [0.18, 0.15, 0.08, 0.95],
+                theme::with_alpha(theme::pal().header_plate, 0.95),
             )
             .filled(true)
             .rounding(4.0)
@@ -776,7 +772,7 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
     // Build Template dropdown
     if !state.main.build_tabs.is_empty() {
         ui.spacing();
-        ui.text_colored([0.6, 0.6, 0.7, 1.0], t("label.build"));
+        ui.text_colored(theme::pal().muted, t("label.build"));
         ui.set_next_item_width(-1.0);
         let bt_preview = state
             .main
@@ -823,7 +819,7 @@ fn render_left_character_section(ui: &Ui, state: &mut AddonState) {
 
     // Equipment Template dropdown
     if !state.main.equipment_tabs.is_empty() {
-        ui.text_colored([0.6, 0.6, 0.7, 1.0], t("label.equipment"));
+        ui.text_colored(theme::pal().muted, t("label.equipment"));
         ui.set_next_item_width(-1.0);
         let et_preview = state
             .main

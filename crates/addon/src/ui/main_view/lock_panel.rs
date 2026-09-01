@@ -9,14 +9,15 @@ use nexus::imgui::Ui;
 
 // ─── Colors ───
 
-const LOCKED_COLOR: [f32; 4] = [1.0, 0.85, 0.2, 1.0]; // Gold — locked
 const SELECTED_COLOR: [f32; 4] = [0.5, 0.8, 1.0, 1.0]; // Cyan — selected but unlocked
 const DIM_COLOR: [f32; 4] = [0.35, 0.35, 0.35, 0.8]; // Gray — unselected
 const AVAILABLE_COLOR: [f32; 4] = [0.5, 0.5, 0.5, 0.6]; // Dim — available but not selected
-const LABEL_COLOR: [f32; 4] = [0.75, 0.75, 0.8, 1.0]; // Light gray text
 const ELITE_COLOR: [f32; 4] = [1.0, 0.6, 0.2, 1.0]; // Orange for elite marker
-const HEADER_COLOR: [f32; 4] = [0.85, 0.72, 0.3, 1.0]; // Gold header
-const LOCK_ICON_COLOR: [f32; 4] = [1.0, 0.85, 0.2, 0.8]; // Lock indicator ring
+
+/// Accent for locked specs/traits/tooltips — follows the active theme.
+fn locked_color() -> [f32; 4] {
+    crate::ui::theme::pal().gold
+}
 
 use crate::ui::color_u32;
 
@@ -101,7 +102,10 @@ fn draw_ghost_link(draw_list: &nexus::imgui::DrawListMut, from: [f32; 2], to: [f
     }
     let c1 = [from[0] + dx * 0.42, from[1]];
     let c2 = [to[0] - dx * 0.42, to[1]];
-    let color = color_u32([0.95, 0.84, 0.42, 0.18]);
+    let color = color_u32(crate::ui::theme::with_alpha(
+        crate::ui::theme::pal().gold,
+        0.18,
+    ));
     let n = 20;
     let mut prev = from;
     for i in 1..=n {
@@ -233,18 +237,19 @@ pub fn render_lock_panel(
             .add_rect(
                 [pos[0], pos[1]],
                 [pos[0] + width, pos[1] + 18.0],
-                [0.22, 0.19, 0.10, 0.9],
+                crate::ui::theme::pal().header,
             )
             .filled(true)
             .build();
         let title = t("section.locks");
-        draw_list.add_text([pos[0] + 6.0, pos[1] + 2.0], HEADER_COLOR, &title);
+        let header_color = crate::ui::theme::pal().gold;
+        draw_list.add_text([pos[0] + 6.0, pos[1] + 2.0], header_color, &title);
         // Collapse indicator
         let indicator = if *expanded { "v" } else { ">" };
         let iw = ui.calc_text_size(indicator)[0];
         draw_list.add_text(
             [pos[0] + width - iw - 6.0, pos[1] + 2.0],
-            HEADER_COLOR,
+            header_color,
             indicator,
         );
     }
@@ -323,7 +328,7 @@ pub fn render_lock_panel(
             let draw_list = ui.get_window_draw_list();
 
             // Draw hexagon — radius, outline thickness, and brightness lerp in on hover.
-            let hex_color_base = if spec_locked { LOCKED_COLOR } else { DIM_COLOR };
+            let hex_color_base = if spec_locked { locked_color() } else { DIM_COLOR };
             let hex_color = brighten(hex_color_base, hex_t, 0.3);
             let hex_radius_anim = hex_radius + 2.0 * hex_t;
             if spec_locked {
@@ -331,7 +336,10 @@ pub fn render_lock_panel(
                     &draw_list,
                     hex_center,
                     hex_radius_anim,
-                    color_u32([0.3, 0.25, 0.05, 0.6]),
+                    color_u32(crate::ui::theme::with_alpha(
+                        crate::ui::theme::pal().button,
+                        0.6,
+                    )),
                     true,
                     2.0,
                 );
@@ -369,7 +377,10 @@ pub fn render_lock_panel(
                     .add_circle(
                         hex_center,
                         hex_radius_anim + 3.0,
-                        color_u32(LOCK_ICON_COLOR),
+                        color_u32(crate::ui::theme::with_alpha(
+                            crate::ui::theme::pal().gold,
+                            0.8,
+                        )),
                     )
                     .thickness(2.0)
                     .build();
@@ -405,7 +416,7 @@ pub fn render_lock_panel(
             let nw = ui.calc_text_size(spec_name)[0];
             draw_list.add_text(
                 [hex_center[0] - nw / 2.0, hex_center[1] + hex_radius + 3.0],
-                color_u32(LABEL_COLOR),
+                color_u32(crate::ui::theme::pal().cream),
                 spec_name,
             );
         } // DrawListMut dropped
@@ -493,7 +504,7 @@ pub fn render_lock_panel(
 
                                 // Circle
                                 let (fill_color, outline_color) = if is_locked {
-                                    (LOCKED_COLOR, LOCKED_COLOR)
+                                    (locked_color(), locked_color())
                                 } else if is_selected {
                                     (SELECTED_COLOR, SELECTED_COLOR)
                                 } else {
@@ -554,7 +565,10 @@ pub fn render_lock_panel(
                                         .add_circle(
                                             [cx, cy],
                                             circle_radius_anim + 3.0,
-                                            color_u32(LOCK_ICON_COLOR),
+                                            color_u32(crate::ui::theme::with_alpha(
+                                                crate::ui::theme::pal().gold,
+                                                0.8,
+                                            )),
                                         )
                                         .thickness(1.5)
                                         .build();
@@ -562,7 +576,7 @@ pub fn render_lock_panel(
 
                                 // Trait name to the right of circle
                                 let text_color_base = if is_locked {
-                                    LOCKED_COLOR
+                                    locked_color()
                                 } else if is_selected {
                                     SELECTED_COLOR
                                 } else {
@@ -592,7 +606,7 @@ pub fn render_lock_panel(
                                         ui.text(trait_name);
                                     }
                                     if is_locked {
-                                        ui.text_colored(LOCKED_COLOR, t("lock.locked"));
+                                        ui.text_colored(locked_color(), t("lock.locked"));
                                         ui.text_colored(DIM_COLOR, t("lock.click_unlock"));
                                     } else {
                                         ui.text_colored(DIM_COLOR, t("lock.click_lock"));
@@ -654,7 +668,10 @@ pub fn render_lock_panel(
                 .add_line(
                     [sep_pos[0], sep_pos[1] - 2.0],
                     [sep_pos[0] + avail_width, sep_pos[1] - 2.0],
-                    color_u32([0.3, 0.25, 0.1, 0.3]),
+                    color_u32(crate::ui::theme::with_alpha(
+                        crate::ui::theme::pal().chip_idle_rim,
+                        0.3,
+                    )),
                 )
                 .build();
         }
@@ -714,7 +731,7 @@ pub fn render_lock_panel(
             lock_count_key(lock_count as u64),
             &[("n", &lock_count.to_string())],
         );
-        ui.text_colored(LOCKED_COLOR, format!("  {lock_msg}"));
+        ui.text_colored(locked_color(), format!("  {lock_msg}"));
     }
 
     // Advance the hover animation for next frame.
@@ -903,7 +920,7 @@ pub fn render_optimized_specs_panel(
             let nw = ui.calc_text_size(display_name)[0];
             draw_list.add_text(
                 [hex_center[0] - nw / 2.0, hex_center[1] + hex_radius + 3.0],
-                color_u32(LABEL_COLOR),
+                color_u32(crate::ui::theme::pal().cream),
                 display_name,
             );
         }
