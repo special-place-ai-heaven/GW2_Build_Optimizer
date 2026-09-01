@@ -14,7 +14,6 @@ use super::{comparison, icons};
 const LOCKED_TEXT: [f32; 4] = [0.5, 0.8, 1.0, 1.0];
 /// Same grey as an unselected trait (`Druidic Clarity`).
 const UNLOCKED_TEXT: [f32; 4] = [0.35, 0.35, 0.35, 0.8];
-const LOCK_RING: [f32; 4] = [1.0, 0.85, 0.2, 0.8];
 
 const ARMOR_SLOTS: [&str; 6] = ["Helm", "Shoulders", "Coat", "Gloves", "Leggings", "Boots"];
 const TRINKET_SLOTS: [&str; 6] = [
@@ -598,7 +597,11 @@ fn paint_slot_icon(
     icons::paint_at(ui, url, p, size, tint);
     if locked {
         ui.get_window_draw_list()
-            .add_rect(p, [p[0] + size, p[1] + size], LOCK_RING)
+            .add_rect(
+                p,
+                [p[0] + size, p[1] + size],
+                theme::with_alpha(theme::pal().gold, 0.8),
+            )
             .thickness(1.5)
             .rounding(theme::ICON_ROUNDING)
             .build();

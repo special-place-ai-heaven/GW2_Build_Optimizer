@@ -82,7 +82,7 @@ fn masthead(ui: &Ui, state: &AddonState) {
         dl.add_rect(
             [start[0] - 1.0, start[1]],
             [start[0] + width + 1.0, start[1] + h],
-            [0.15, 0.13, 0.08, 0.9],
+            theme::pal().header_plate,
         )
         .filled(true)
         .rounding(5.0)

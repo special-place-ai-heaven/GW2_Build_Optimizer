@@ -13,6 +13,7 @@ use nexus::imgui::{DrawListMut, TextureId, Ui};
 
 use crate::radio::RadioStatus;
 use crate::state::AddonState;
+use crate::ui::theme;
 
 const SHEET_W: f32 = 1536.0;
 const SHEET_H: f32 = 1024.0;
@@ -587,7 +588,7 @@ fn draw_quip_bubble(
     // Rare ON-AIR overload: pure-hash 1-in-64 jackpot, self-terminating
     // after ~2 s of the visible window. Same track slot always jackpots.
     let jackpot = lcg(h).is_multiple_of(64) && vis < 120;
-    let fill = [0.16, 0.11, 0.08, 0.92 * a];
+    let fill = theme::with_alpha(theme::pal().plate, 0.92 * a);
     if jackpot {
         // Three thin spotlight rays rotating behind the bubble.
         for r in 0..3 {
@@ -595,7 +596,7 @@ fn draw_quip_bubble(
             let (sn, cs) = ang.sin_cos();
             let p2 = [bc[0] + cs * 52.0 - sn * 5.0, bc[1] + sn * 52.0 + cs * 5.0];
             let p3 = [bc[0] + cs * 52.0 + sn * 5.0, bc[1] + sn * 52.0 - cs * 5.0];
-            dl.add_triangle(bc, p2, p3, [1.0, 0.78, 0.35, 0.12 * a])
+            dl.add_triangle(bc, p2, p3, theme::with_alpha(theme::pal().gold, 0.12 * a))
                 .filled(true)
                 .build();
         }
@@ -605,7 +606,7 @@ fn draw_quip_bubble(
         .filled(true)
         .rounding(5.0)
         .build();
-    dl.add_rect(bmin, bmax, [0.88, 0.70, 0.34, 0.9 * a])
+    dl.add_rect(bmin, bmax, theme::with_alpha(theme::pal().gold_fill, 0.9 * a))
         .rounding(5.0)
         .thickness(1.0)
         .build();
@@ -627,11 +628,15 @@ fn draw_quip_bubble(
         let ly = by - text_h * 0.5 + li as f32 * (line_h + LINE_GAP);
         let lp = s([bx - lw * 0.5, ly]);
         dl.add_text([lp[0] + 1.0, lp[1] + 1.0], [0.0, 0.0, 0.0, 0.75 * a], line);
-        dl.add_text(lp, [1.0, 0.9, 0.55, a], line);
+        dl.add_text(lp, theme::with_alpha(theme::pal().gold, a), line);
         if jackpot && bass > 0.6 {
             // The choya seized the mic: 1 px shiver double-draw.
             let dx = (lcg(t.wrapping_add(li as u32)) % 3) as f32 - 1.0;
-            dl.add_text([lp[0] + dx, lp[1]], [1.0, 0.9, 0.55, 0.6 * a], line);
+            dl.add_text(
+                [lp[0] + dx, lp[1]],
+                theme::with_alpha(theme::pal().gold, 0.6 * a),
+                line,
+            );
         }
     }
     ui.set_window_font_scale(1.0);
