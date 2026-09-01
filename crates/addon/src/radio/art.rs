@@ -105,7 +105,7 @@ const DANCE_OFF: f32 = 0.18;
 // intelligence), tiered by how hard the music is hitting and flavored by the
 // station's genre tags. ASCII only — the game font atlas draws '?' for fancy
 // punctuation (a test below enforces that forever).
-const QUIP_SHOW: u32 = 360; // ~6 s visible once fired
+const QUIP_SHOW: u32 = 720; // ~12 s visible once fired (doubled: "too fast to read")
 const QUIP_GAP_MIN: u32 = 1_800; // 30 s between quips...
 const QUIP_GAP_MAX: u32 = 7_200; // ...up to 2 min, hash-picked per quip
 const QUIPS_CHILL: &[&str] = &[
@@ -194,7 +194,8 @@ fn quip_gap(seed: u32) -> u32 {
 /// Fade envelope over the visible window; always in 0..=1.
 fn quip_alpha(vis: u32) -> f32 {
     let fade_in = (vis as f32 / 12.0).min(1.0);
-    let fade_out = (QUIP_SHOW.saturating_sub(vis) as f32 / 30.0).min(1.0);
+    // ~2 s fade-out — the old 0.5 s read as vanishing mid-sentence.
+    let fade_out = (QUIP_SHOW.saturating_sub(vis) as f32 / 120.0).min(1.0);
     fade_in.min(fade_out).clamp(0.0, 1.0)
 }
 
@@ -447,7 +448,7 @@ fn draw_dj_states(
                 .map(|s| s.tags.to_lowercase())
                 .unwrap_or_default();
             if let Some((quip, a, h, vis)) = quip_for(t, bass, &tags) {
-                draw_quip_bubble(ui, dl, tid, &quip, a, h, vis, center, c, size, sz, t, bass);
+                draw_quip_bubble(ui, tid, &quip, a, h, vis, center, c, size, sz, t, bass);
             }
             // A gold note drifts up past the deck now and then.
             let orbit = (t % 240) as f32 / 240.0;
@@ -497,7 +498,6 @@ fn draw_dj_states(
 #[allow(clippy::too_many_arguments)]
 fn draw_quip_bubble(
     ui: &Ui,
-    dl: &DrawListMut,
     tid: TextureId,
     quip: &str,
     alpha: f32,
@@ -510,6 +510,11 @@ fn draw_quip_bubble(
     t: u32,
     bass: f32,
 ) {
+    // Foreground draw list: the bubble renders on top of EVERYTHING — the
+    // now-playing ticker and status text draw after the choya in the window
+    // list and were painting straight over the quip.
+    let dl = ui.get_foreground_draw_list();
+    let dl = &dl;
     // Anchor roulette — ALWAYS above the head (a low "muffled" slot used to
     // land inside the now-playing ticker): centered, left/right leans, and
     // higher/lower altitude variants.
@@ -545,9 +550,11 @@ fn draw_quip_bubble(
     let bw = text_w + 20.0;
     let bh = text_h + 14.0;
 
-    // Per-slot pixel nudge plus a live bob that breathes with the music.
+    // Per-slot pixel nudge plus a slow cartoon float: a lazy ~7 s up-down
+    // drift, with a small faster breath riding on the bass.
     let y_off = ((h >> 16) % 5) as f32 - 2.0
-        + (t as f32 * 0.05 + (h % 628) as f32 * 0.01).sin() * (1.0 + 3.0 * bass);
+        + (t as f32 * 0.015 + (h % 628) as f32 * 0.01).sin() * 6.0
+        + (t as f32 * 0.05).sin() * bass * 1.5;
 
     // Full-size bubble center + the point near the choya it pops out from.
     // Every slot: horizontal lean x altitude, all strictly above the head
