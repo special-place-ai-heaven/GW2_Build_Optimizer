@@ -325,6 +325,14 @@ pub struct RadioPreferences {
     /// uses the configured LLM provider, hard-capped per day).
     #[serde(default)]
     pub ai_quips: bool,
+    /// Last genre chip selected (radio-browser tag). Restored on the tab's
+    /// first open each session; "world music" greets new listeners.
+    #[serde(default = "default_radio_genre")]
+    pub last_genre: String,
+}
+
+fn default_radio_genre() -> String {
+    "world music".into()
 }
 
 impl Default for RadioPreferences {
@@ -338,6 +346,58 @@ impl Default for RadioPreferences {
             bitrate_max: 0,
             duck_in_combat: false,
             ai_quips: false,
+            last_genre: default_radio_genre(),
+        }
+    }
+}
+
+fn default_theme_preset() -> String {
+    "tyrian-gold".into()
+}
+
+/// Overlay theme selection. `preset` is a built-in theme id (or `"custom"`,
+/// which renders from [`ThemeConfig::custom`]); unknown ids fall back to the
+/// default Tyrian Gold at apply time, never at parse time.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ThemeConfig {
+    #[serde(default = "default_theme_preset")]
+    pub preset: String,
+    #[serde(default)]
+    pub custom: CustomTheme,
+}
+
+impl Default for ThemeConfig {
+    fn default() -> Self {
+        Self {
+            preset: default_theme_preset(),
+            custom: CustomTheme::default(),
+        }
+    }
+}
+
+/// The 5 base colors (RGB 0..=1) a custom theme derives its palette from.
+/// Defaults are the Tyrian Gold bases so an untouched custom editor starts
+/// from the shipped look.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CustomTheme {
+    #[serde(default)]
+    pub name: String,
+    pub bg: [f32; 3],
+    pub panel: [f32; 3],
+    pub accent: [f32; 3],
+    pub text: [f32; 3],
+    pub muted: [f32; 3],
+}
+
+impl Default for CustomTheme {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            bg: [0.07, 0.06, 0.045],
+            panel: [0.12, 0.10, 0.07],
+            accent: [1.0, 0.84, 0.38],
+            text: [0.93, 0.90, 0.82],
+            muted: [0.58, 0.54, 0.46],
         }
     }
 }
@@ -386,6 +446,9 @@ pub struct AppConfig {
     /// Font scale multiplier. Default 1.0.
     #[serde(default = "default_font_scale")]
     pub font_scale: f32,
+    /// Overlay theme. Omitted on old configs; defaults to Tyrian Gold.
+    #[serde(default)]
+    pub theme: ThemeConfig,
 
     // ─── Layout Tuning ───
     /// Left panel width in pixels. Default 360.
@@ -469,6 +532,7 @@ impl Default for AppConfig {
             openrouter_model: None,
             window_opacity: 1.0,
             font_scale: 1.0,
+            theme: ThemeConfig::default(),
             left_panel_width: 360.0,
             panel_padding: 6.0,
             section_spacing: 4.0,
@@ -1498,6 +1562,57 @@ mod tests {
         };
         assert_eq!(empty.active_api_key(), None);
         assert_eq!(empty.active_model_id(), DEFAULT_ANTHROPIC_MODEL);
+    }
+
+    #[test]
+    fn theme_defaults_to_tyrian_gold_on_old_configs() {
+        // Pre-theme config.json: no `theme` key at all.
+        let json = r#"{
+            "gw2_api_key": "old-key",
+            "gemini_api_key": "old-gemini-key",
+            "cache_build_number": 12345
+        }"#;
+        let config: AppConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.theme, ThemeConfig::default());
+        assert_eq!(config.theme.preset, "tyrian-gold");
+        assert!(config.theme.custom.name.is_empty());
+        // Custom defaults are the Tyrian Gold bases.
+        assert_eq!(config.theme.custom.bg, [0.07, 0.06, 0.045]);
+        assert_eq!(config.theme.custom.accent, [1.0, 0.84, 0.38]);
+
+        // A theme object missing `preset` still lands on the default.
+        let partial: ThemeConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(partial.preset, "tyrian-gold");
+        assert_eq!(partial.custom, CustomTheme::default());
+    }
+
+    #[test]
+    fn theme_round_trips_through_serde() {
+        let mut config = AppConfig::default();
+        config.theme.preset = "custom".into();
+        config.theme.custom = CustomTheme {
+            name: "My Night".into(),
+            bg: [0.01, 0.02, 0.03],
+            panel: [0.04, 0.05, 0.06],
+            accent: [0.9, 0.1, 0.2],
+            text: [0.91, 0.92, 0.93],
+            muted: [0.5, 0.51, 0.52],
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let back: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.theme, config.theme);
+
+        let preset_only = AppConfig {
+            theme: ThemeConfig {
+                preset: "glacial-ward".into(),
+                custom: CustomTheme::default(),
+            },
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&preset_only).unwrap();
+        let back: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.theme.preset, "glacial-ward");
+        assert_eq!(back.theme.custom, CustomTheme::default());
     }
 
     #[test]

@@ -33,7 +33,7 @@ pub(in crate::ui::main_view) fn render_talk_tab(ui: &Ui, state: &mut AddonState)
     render_choya_identity(ui, state);
 
     ui.spacing();
-    theme::wrapped(ui, theme::MUTED, &talk_context(state));
+    theme::wrapped(ui, theme::pal().muted, &talk_context(state));
     ui.spacing();
     render_starters(ui, state);
     ui.spacing();
@@ -130,7 +130,7 @@ fn render_choya_identity(ui: &Ui, state: &mut AddonState) {
     let text_x = top[0] + box_w + 10.0;
     let ty0 = top[1] + PAD_T + 8.0;
     ui.set_cursor_screen_pos([text_x, ty0]);
-    ui.text_colored(theme::GOLD, t("tab.choya"));
+    ui.text_colored(theme::pal().gold, t("tab.choya"));
     if !state.main.chat.history.is_empty() && !state.main.chat.waiting {
         ui.same_line_with_spacing(0.0, 12.0);
         if ui.small_button(format!("{}##talk", t("btn.clear"))) {
@@ -142,13 +142,13 @@ fn render_choya_identity(ui: &Ui, state: &mut AddonState) {
     }
 
     ui.set_cursor_screen_pos([text_x, ty0 + ui.text_line_height() + 4.0]);
-    ui.text_colored(theme::MUTED, t("choya.assistant"));
+    ui.text_colored(theme::pal().muted, t("choya.assistant"));
     ui.same_line_with_spacing(0.0, 10.0);
     let online = state.config.has_active_llm_key();
     let pip = if online {
         theme::OPTIMIZED
     } else {
-        theme::MUTED
+        theme::pal().muted
     };
     let status = if online {
         t("status.online")

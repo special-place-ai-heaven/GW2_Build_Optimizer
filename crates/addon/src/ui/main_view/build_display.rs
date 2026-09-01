@@ -202,7 +202,7 @@ fn paint_group_header(ui: &Ui, x: f32, y: f32, w: f32, h: f32, title: &str) {
 
 fn paint_vdiv(ui: &Ui, x: f32, y: f32, h: f32) {
     ui.get_window_draw_list()
-        .add_line([x, y + 1.0], [x, y + h - 1.0], crate::ui::theme::GOLD_DIM)
+        .add_line([x, y + 1.0], [x, y + h - 1.0], crate::ui::theme::pal().gold_dim)
         .thickness(1.0)
         .build();
 }
@@ -260,9 +260,9 @@ fn paint_kit_slot(
 ) {
     let empty = value.is_empty();
     let fill = if empty {
-        crate::ui::theme::PLATE_EMPTY
+        crate::ui::theme::pal().plate_empty
     } else {
-        crate::ui::theme::PLATE
+        crate::ui::theme::pal().plate
     };
     let border = if empty { [0.28, 0.24, 0.14, 0.45] } else { rim };
     ui.set_cursor_screen_pos(p);
@@ -296,9 +296,9 @@ fn paint_kit_slot(
             crate::ui::comparison::loc_name(db, value)
         };
         let color = if empty {
-            crate::ui::theme::MUTED
+            crate::ui::theme::pal().muted
         } else {
-            crate::ui::theme::CREAM
+            crate::ui::theme::pal().cream
         };
         let lines = wrap_slot_lines(ui, shown, text_w);
         let block_h = lines.len() as f32 * line;
@@ -481,7 +481,7 @@ fn render_skill_bar(
                 line,
                 &format!("##pet_slot_{id_suffix}_{i}"),
                 shown,
-                crate::ui::theme::GOLD_DIM,
+                crate::ui::theme::pal().gold_dim,
                 db.and_then(|d| crate::ui::icons::pet_url(d, name)),
                 name,
                 crate::ui::icons::PET_ICON_ZOOM,
@@ -496,9 +496,9 @@ fn render_skill_bar(
         let sw = slot_row_w(inner_w, 4, gap);
         let utils = [
             (0usize, heal.as_str(), crate::ui::theme::HEAL_RIM),
-            (1, u1, crate::ui::theme::GOLD_DIM),
-            (2, u2, crate::ui::theme::GOLD_DIM),
-            (3, u3, crate::ui::theme::GOLD_DIM),
+            (1, u1, crate::ui::theme::pal().gold_dim),
+            (2, u2, crate::ui::theme::pal().gold_dim),
+            (3, u3, crate::ui::theme::pal().gold_dim),
         ];
         for (i, value, rim) in utils {
             paint_kit_slot(

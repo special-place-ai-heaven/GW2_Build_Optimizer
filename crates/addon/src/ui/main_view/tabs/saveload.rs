@@ -186,7 +186,7 @@ fn toss_button(ui: &Ui, label: impl AsRef<str>, size: [f32; 2]) -> bool {
         nexus::imgui::StyleColor::ButtonActive,
         [0.50, 0.16, 0.10, 1.0],
     );
-    let _t = ui.push_style_color(nexus::imgui::StyleColor::Text, theme::CREAM);
+    let _t = ui.push_style_color(nexus::imgui::StyleColor::Text, theme::pal().cream);
     ui.button_with_size(label.as_ref(), size)
 }
 
@@ -221,7 +221,7 @@ fn render_ranch_hero(ui: &Ui, char_name: Option<&str>, shown: usize, total: usiz
     let ty0 = top[1] + PAD_T + 10.0;
     let lh = ui.text_line_height();
     ui.set_cursor_screen_pos([text_x, ty0]);
-    ui.text_colored(theme::GOLD, t("ranch.title"));
+    ui.text_colored(theme::pal().gold, t("ranch.title"));
 
     ui.set_cursor_screen_pos([text_x, ty0 + lh + 6.0]);
     let sub = match char_name {
@@ -231,15 +231,15 @@ fn render_ranch_hero(ui: &Ui, char_name: Option<&str>, shown: usize, total: usiz
         ),
         None => t("ranch.herd"),
     };
-    ui.text_colored(theme::CREAM, sub);
+    ui.text_colored(theme::pal().cream, sub);
 
     ui.set_cursor_screen_pos([text_x, ty0 + lh * 2.0 + 12.0]);
-    ui.text_colored(theme::MUTED, t("ranch.quip"));
+    ui.text_colored(theme::pal().muted, t("ranch.quip"));
 
     if char_name.is_some() && total > shown {
         ui.set_cursor_screen_pos([text_x, ty0 + lh * 3.0 + 16.0]);
         ui.text_colored(
-            theme::MUTED,
+            theme::pal().muted,
             tf("ranch.others", &[("n", &(total - shown).to_string())]),
         );
     }
@@ -254,14 +254,14 @@ fn render_empty_paddock(ui: &Ui, char_name: Option<&str>) {
         Some(name) => tf("ranch.empty_char", &[("name", name)]),
         None => t("ranch.empty"),
     };
-    ui.text_colored(theme::MUTED, msg);
-    ui.text_colored(theme::MUTED, t("ranch.empty_hint"));
+    ui.text_colored(theme::pal().muted, msg);
+    ui.text_colored(theme::pal().muted, t("ranch.empty_hint"));
 }
 
 fn render_corral_bar(ui: &Ui, state: &mut AddonState) {
     let btn = action_btn_size(ui);
     ui.align_text_to_frame_padding();
-    ui.text_colored(theme::MUTED, t("ranch.corral_name"));
+    ui.text_colored(theme::pal().muted, t("ranch.corral_name"));
     ui.same_line_with_spacing(0.0, 10.0);
     ui.set_next_item_width(280.0);
     ui.input_text("##ranch_new_name", &mut state.main.save_name_input)
@@ -559,13 +559,13 @@ fn render_ranch_table(ui: &Ui, state: &mut AddonState, rows: &[usize]) {
     let origin = ui.cursor_screen_pos();
     let y = origin[1] + 6.0;
     ui.set_cursor_screen_pos([origin[0] + 10.0, y]);
-    ui.text_colored(theme::GOLD, t("ranch.col.build"));
+    ui.text_colored(theme::pal().gold, t("ranch.col.build"));
     ui.set_cursor_screen_pos([origin[0] + 10.0 + name_w + GAP, y]);
-    ui.text_colored(theme::GOLD, t("ranch.col.created"));
+    ui.text_colored(theme::pal().gold, t("ranch.col.created"));
     ui.set_cursor_screen_pos([origin[0] + 10.0 + name_w + created_w + GAP * 2.0, y]);
-    ui.text_colored(theme::GOLD, t("ranch.col.notes"));
+    ui.text_colored(theme::pal().gold, t("ranch.col.notes"));
     ui.set_cursor_screen_pos([origin[0] + avail - actions_w, y]);
-    ui.text_colored(theme::GOLD, t("ranch.col.actions"));
+    ui.text_colored(theme::pal().gold, t("ranch.col.actions"));
     ui.set_cursor_screen_pos([origin[0], origin[1] + HDR_H + 6.0]);
 
     let mut load_name: Option<String> = None;
@@ -600,10 +600,10 @@ fn render_ranch_table(ui: &Ui, state: &mut AddonState, rows: &[usize]) {
         } else {
             format!("{character}  ·  {mode}  ·  {prefix}")
         };
-        ui.text_colored(theme::MUTED, clip_label(ui, &meta, name_w - 8.0));
+        ui.text_colored(theme::pal().muted, clip_label(ui, &meta, name_w - 8.0));
 
         ui.set_cursor_screen_pos([row[0] + 10.0 + name_w + GAP, text_y + 8.0]);
-        ui.text_colored(theme::CREAM, created);
+        ui.text_colored(theme::pal().cream, created);
 
         let notes_x = row[0] + 10.0 + name_w + created_w + GAP * 2.0;
         ui.set_cursor_screen_pos([notes_x, btn_y]);

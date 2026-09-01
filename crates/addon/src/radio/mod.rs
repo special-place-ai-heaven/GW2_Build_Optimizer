@@ -94,6 +94,9 @@ pub struct RadioUiState {
     pub status: RadioStatus,
     /// Station currently loaded (connecting/playing/stalled), if any.
     pub current: Option<RbStation>,
+    /// True once a search has run this session (auto genre restore included) —
+    /// gates the one-shot first-open genre load.
+    pub auto_kicked: bool,
     pub now_playing: NowPlayingCell,
     pub search_text: String,
     pub results: Vec<RbStation>,

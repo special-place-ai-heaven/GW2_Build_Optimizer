@@ -103,7 +103,7 @@ pub fn inspect_if_hovered(ui: &Ui, name: &str, db: Option<&GameDb>) {
     crate::ui::theme::wide_tooltip(ui, |ui| {
         let mut lines = tip.lines();
         if let Some(title) = lines.next() {
-            ui.text_colored(crate::ui::theme::GOLD, title);
+            ui.text_colored(crate::ui::theme::pal().gold, title);
         }
         for line in lines {
             ui.text(line);
@@ -543,7 +543,7 @@ pub fn render_comparison(
             };
             if !explanation_text.is_empty() {
                 ui.spacing();
-                ui.text_colored(crate::ui::theme::MUTED, t("note.how_to_play"));
+                ui.text_colored(crate::ui::theme::pal().muted, t("note.how_to_play"));
                 ui.spacing();
                 ui.text_wrapped(explanation_text);
             }
@@ -570,29 +570,29 @@ pub(crate) fn render_stats_pane(
     suggestion: &BuildSuggestion,
     db: Option<&GameDb>,
 ) {
-    ui.text_colored(crate::ui::theme::GOLD, t("section.attributes"));
-    ui.text_colored(crate::ui::theme::MUTED, t("note.attributes"));
-    ui.text_colored(crate::ui::theme::MUTED, t("tier.solo"));
+    ui.text_colored(crate::ui::theme::pal().gold, t("section.attributes"));
+    ui.text_colored(crate::ui::theme::pal().muted, t("note.attributes"));
+    ui.text_colored(crate::ui::theme::pal().muted, t("tier.solo"));
     ui.spacing();
     render_primary_stats(ui, current_stats, suggestion.estimated_stats.as_ref());
     ui.spacing();
-    ui.text_colored(crate::ui::theme::GOLD, t("section.combat"));
+    ui.text_colored(crate::ui::theme::pal().gold, t("section.combat"));
     ui.text_colored(
-        crate::ui::theme::MUTED,
+        crate::ui::theme::pal().muted,
         format_combat_live(suggestion.combat_solo.as_ref()),
     );
     ui.spacing();
     render_defenses(ui, comparison, current_stats, suggestion);
 
     ui.spacing();
-    ui.text_colored(crate::ui::theme::GOLD, t("section.boons"));
-    ui.text_colored(crate::ui::theme::MUTED, t("note.boons"));
+    ui.text_colored(crate::ui::theme::pal().gold, t("section.boons"));
+    ui.text_colored(crate::ui::theme::pal().muted, t("note.boons"));
     match suggestion.rotation.as_ref() {
         Some(rotation) => {
             if rotation.has_stability || rotation.stunbreak_count > 0 {
                 ui.spacing();
                 ui.text_colored(
-                    crate::ui::theme::CREAM,
+                    crate::ui::theme::pal().cream,
                     tf(
                         "fmt.stability",
                         &[
@@ -612,10 +612,10 @@ pub(crate) fn render_stats_pane(
             }
             if rotation.buff_uptime.is_empty() {
                 ui.spacing();
-                ui.text_colored(crate::ui::theme::MUTED, t("note.no_boons"));
+                ui.text_colored(crate::ui::theme::pal().muted, t("note.no_boons"));
             } else {
                 ui.spacing();
-                ui.text_colored(crate::ui::theme::GOLD, t("label.uptime"));
+                ui.text_colored(crate::ui::theme::pal().gold, t("label.uptime"));
                 for (name, frac) in rotation.buff_uptime.iter().take(8) {
                     ui.text(format!("  {name}: {:.0}%", display_uptime_pct(*frac)));
                 }
@@ -623,17 +623,17 @@ pub(crate) fn render_stats_pane(
         }
         None => {
             ui.spacing();
-            ui.text_colored(crate::ui::theme::MUTED, t("note.no_rotation"));
+            ui.text_colored(crate::ui::theme::pal().muted, t("note.no_rotation"));
         }
     }
 
     ui.spacing();
-    ui.text_colored(crate::ui::theme::GOLD, t("section.conditions"));
-    ui.text_colored(crate::ui::theme::MUTED, t("note.conditions_full"));
+    ui.text_colored(crate::ui::theme::pal().gold, t("section.conditions"));
+    ui.text_colored(crate::ui::theme::pal().muted, t("note.conditions_full"));
     if let Some(rotation) = suggestion.rotation.as_ref() {
         ui.spacing();
         ui.text_colored(
-            crate::ui::theme::CREAM,
+            crate::ui::theme::pal().cream,
             tf(
                 "fmt.cleanse",
                 &[
@@ -644,7 +644,7 @@ pub(crate) fn render_stats_pane(
         );
         if !rotation.condition_uptime.is_empty() {
             ui.spacing();
-            ui.text_colored(crate::ui::theme::GOLD, t("label.stacks"));
+            ui.text_colored(crate::ui::theme::pal().gold, t("label.stacks"));
             for (name, stacks) in rotation.condition_uptime.iter().take(8) {
                 ui.text(format!("  {name}: {stacks:.1}"));
             }
@@ -653,7 +653,7 @@ pub(crate) fn render_stats_pane(
 
     if let Some(ref rotation) = suggestion.rotation {
         ui.spacing();
-        ui.text_colored(crate::ui::theme::GOLD, t("section.rotation"));
+        ui.text_colored(crate::ui::theme::pal().gold, t("section.rotation"));
         render_rotation_breakdown(ui, rotation, db);
     }
     if let Some(ref viability) = suggestion.viability {
@@ -662,7 +662,7 @@ pub(crate) fn render_stats_pane(
     render_benchmark_delta(ui, suggestion);
     if !suggestion.changes_made.is_empty() {
         ui.spacing();
-        ui.text_colored(crate::ui::theme::GOLD, t("section.changes"));
+        ui.text_colored(crate::ui::theme::pal().gold, t("section.changes"));
         for change in &suggestion.changes_made {
             ui.bullet_text(change);
         }
@@ -743,17 +743,17 @@ pub fn render_chat_code_copy(
             ChatSource::Optimized => [0.14, 0.22, 0.14, 0.95],
         }
     } else {
-        crate::ui::theme::PLATE
+        crate::ui::theme::pal().plate
     };
     let rim = if chat_code.is_some() {
         accent
     } else {
-        crate::ui::theme::GOLD_DIM
+        crate::ui::theme::pal().gold_dim
     };
     let text_col = if chat_code.is_some() {
-        crate::ui::theme::CREAM
+        crate::ui::theme::pal().cream
     } else {
-        crate::ui::theme::MUTED
+        crate::ui::theme::pal().muted
     };
 
     let src = source.label();
@@ -873,7 +873,7 @@ fn render_defenses(
     ];
 
     ui.columns(4, "##defense_cols", true);
-    ui.text_colored(crate::ui::theme::GOLD, t("table.defense"));
+    ui.text_colored(crate::ui::theme::pal().gold, t("table.defense"));
     ui.next_column();
     ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
     ui.next_column();
@@ -908,7 +908,7 @@ fn render_int_row(ui: &Ui, name: &str, cur: i32, sug: i32) {
 fn render_stat_table(ui: &Ui, id: &str, stats: &[(&str, i32, i32)]) {
     ui.columns(4, id, true);
 
-    ui.text_colored(crate::ui::theme::GOLD, t("table.attribute"));
+    ui.text_colored(crate::ui::theme::pal().gold, t("table.attribute"));
     ui.next_column();
     ui.text_colored(crate::ui::theme::CURRENT, t("label.current"));
     ui.next_column();
@@ -1004,9 +1004,9 @@ fn render_benchmark_delta(ui: &Ui, suggestion: &BuildSuggestion) {
         None => {
             // No data — show subtle hint in collapsed section
             if ui.collapsing_header(t("bench.header"), TreeNodeFlags::empty()) {
-                ui.text_colored(crate::ui::theme::MUTED, format!("  {}", t("bench.none")));
+                ui.text_colored(crate::ui::theme::pal().muted, format!("  {}", t("bench.none")));
                 ui.text_colored(
-                    crate::ui::theme::MUTED,
+                    crate::ui::theme::pal().muted,
                     format!("  {}", t("bench.sync_hint")),
                 );
             }

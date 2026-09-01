@@ -1,6 +1,6 @@
 //! Settings tab — AI provider, API keys + model picker, theme, cache, benchmarks.
 
-use nexus::imgui::{ComboBox, Selectable, Ui};
+use nexus::imgui::{ColorEdit, ComboBox, Selectable, Ui};
 
 use crate::state::{AddonState, CancellationToken};
 use crate::ui::theme;
@@ -509,7 +509,7 @@ pub(in crate::ui::main_view) fn render_talk_model_row(ui: &Ui, state: &mut Addon
     );
     if state.main.models_loading {
         ui.same_line();
-        ui.text_colored(theme::MUTED, "...");
+        ui.text_colored(theme::pal().muted, "...");
     }
 }
 
@@ -659,7 +659,7 @@ fn render_news_sources(ui: &Ui, state: &mut AddonState) {
     ui.dummy([0.0, 6.0]);
     ui.columns(4, "##news_kind_cols", false);
     for (i, kind) in NewsKind::ALL.iter().enumerate() {
-        ui.text_colored(theme::GOLD, t(kind.settings_key()));
+        ui.text_colored(theme::pal().gold, t(kind.settings_key()));
         for &src in kind.sources() {
             news_source_tick(ui, state, src);
         }
@@ -755,7 +755,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             }
         }
     }
-    theme::wrapped(ui, theme::MUTED, &t("settings.lang_pack_legend"));
+    theme::wrapped(ui, theme::pal().muted, &t("settings.lang_pack_legend"));
     ui.spacing();
 
     ui.text(t("settings.opacity"));
@@ -797,7 +797,10 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             }
         }
     }
-    theme::wrapped(ui, theme::MUTED, &t("settings.font_hint"));
+    theme::wrapped(ui, theme::pal().muted, &t("settings.font_hint"));
+
+    ui.dummy([0.0, 8.0]);
+    render_theme_style_section(ui, state, right_item_w);
 
     ui.spacing();
     ui.text_colored([0.7, 0.7, 0.75, 1.0], t("settings.layout"));
@@ -856,12 +859,112 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     }
 }
 
+/// Runtime theme picker: the built-in presets from `theme::preset_ids()` plus
+/// one user-defined custom theme. Selecting a row applies instantly —
+/// `theme::apply_theme` is a cheap palette rebuild, so it runs on every
+/// change for live preview — while persistence uses the same
+/// deactivate-after-edit debounce as the radio volume slider (persist once on
+/// release/defocus, not per drag tick or keystroke).
+fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32) {
+    theme::header(ui, &t("settings.theme_section"));
+
+    let is_custom = state.config.theme.preset == "custom";
+    let custom_name = state.config.theme.custom.name.trim().to_string();
+    let custom_row_label = if custom_name.is_empty() {
+        t("settings.theme_custom")
+    } else {
+        custom_name
+    };
+    let preview = if is_custom {
+        custom_row_label.clone()
+    } else {
+        theme::preset_ids()
+            .iter()
+            .copied()
+            .find(|&(id, _)| state.config.theme.preset == id)
+            .map(|(_, name)| name.to_string())
+            .unwrap_or_else(|| state.config.theme.preset.clone())
+    };
+    ui.set_next_item_width(right_item_w * 0.6);
+    if let Some(_c) = ComboBox::new("##theme_preset")
+        .preview_value(&preview)
+        .begin(ui)
+    {
+        for &(id, name) in theme::preset_ids() {
+            let sel = !is_custom && state.config.theme.preset == id;
+            if Selectable::new(name).selected(sel).build(ui) && !sel {
+                state.config.theme.preset = id.to_string();
+                theme::apply_theme(&state.config.theme);
+                crate::ui::save_config_detached(state);
+            }
+        }
+        // The custom row's visible text is the user's theme name (or the
+        // localized "Custom" placeholder). "###" pins the ImGui id to the
+        // suffix alone, so renaming the theme, or naming it after a preset,
+        // never changes/collides ids ("##" would still hash the label).
+        let label = format!("{}###theme_custom_row", custom_row_label);
+        if Selectable::new(&label).selected(is_custom).build(ui) && !is_custom {
+            state.config.theme.preset = "custom".into();
+            theme::apply_theme(&state.config.theme);
+            crate::ui::save_config_detached(state);
+        }
+    }
+
+    if state.config.theme.preset != "custom" {
+        return;
+    }
+
+    ui.spacing();
+    ui.set_next_item_width(right_item_w * 0.6);
+    ui.input_text("##theme_custom_name", &mut state.config.theme.custom.name)
+        .hint(&t("settings.theme_name_hint"))
+        .build();
+    if ui.is_item_deactivated_after_edit() {
+        crate::ui::save_config_detached(state);
+    }
+
+    let mut edited = false;
+    let mut commit = false;
+    {
+        let custom = &mut state.config.theme.custom;
+        let rows: [(String, &mut [f32; 3]); 5] = [
+            (t("settings.theme_bg"), &mut custom.bg),
+            (t("settings.theme_panel"), &mut custom.panel),
+            (t("settings.theme_accent"), &mut custom.accent),
+            (t("settings.theme_text"), &mut custom.text),
+            (t("settings.theme_muted"), &mut custom.muted),
+        ];
+        for (i, (label, value)) in rows.into_iter().enumerate() {
+            ui.set_next_item_width(right_item_w * 0.6);
+            // "###" hashes only the suffix, so the widget identity survives a
+            // language switch mid-edit (with "##" the translated label would
+            // still feed the id hash).
+            if ColorEdit::new(format!("{label}###theme_color_{i}"), value).build(ui) {
+                edited = true;
+            }
+            if ui.is_item_deactivated_after_edit() {
+                commit = true;
+            }
+        }
+    }
+    if edited {
+        theme::apply_theme(&state.config.theme);
+    }
+    if commit {
+        crate::ui::save_config_detached(state);
+    }
+
+    ui.set_window_font_scale(0.85);
+    theme::wrapped(ui, theme::pal().muted, &t("settings.theme_custom_hint"));
+    ui.set_window_font_scale(1.0);
+}
+
 fn pack_mark(status: gw2_api::localize::PackStatus) -> (&'static str, [f32; 4]) {
     match status {
         gw2_api::localize::PackStatus::Ready => ("*", theme::OPTIMIZED),
         gw2_api::localize::PackStatus::Missing => ("!", theme::ERR),
         gw2_api::localize::PackStatus::Stale => ("~", theme::WARN),
-        gw2_api::localize::PackStatus::None => ("-", theme::MUTED),
+        gw2_api::localize::PackStatus::None => ("-", theme::pal().muted),
     }
 }
 
@@ -997,7 +1100,7 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     ));
     ui.same_line();
     ui.text_colored(
-        theme::MUTED,
+        theme::pal().muted,
         tf(
             "fmt.icons_size",
             &[("size", &format_bytes(state.main.settings_graphics_size))],
@@ -1106,7 +1209,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
             .collect::<Vec<_>>()
             .join("  ·  ");
         ui.text_colored(
-            theme::MUTED,
+            theme::pal().muted,
             if live.is_empty() {
                 t("btn.syncing")
             } else {
@@ -1369,6 +1472,29 @@ mod tests {
             gw2_api::localize::PackStatus::None,
             "a build change must not desync the cache from what pack_status would say"
         );
+    }
+
+    /// Every i18n key the Theme section renders must exist in the locale
+    /// catalogs — `t()` echoes the key itself when it is missing everywhere,
+    /// so equality means a hole in the Settings chrome. (Key parity across
+    /// all 12 locales is asserted by gw2-core's
+    /// `every_locale_parses_and_covers_english_keys`; this guards the
+    /// renderer's key spelling against the catalog.)
+    #[test]
+    fn theme_section_locale_keys_exist() {
+        for key in [
+            "settings.theme_section",
+            "settings.theme_custom",
+            "settings.theme_name_hint",
+            "settings.theme_bg",
+            "settings.theme_panel",
+            "settings.theme_accent",
+            "settings.theme_text",
+            "settings.theme_muted",
+            "settings.theme_custom_hint",
+        ] {
+            assert_ne!(t(key), key, "locale catalogs are missing {key}");
+        }
     }
 
     /// Settings LLM key InputText is the same overlay a player may stream or

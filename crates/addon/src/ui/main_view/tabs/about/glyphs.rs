@@ -37,15 +37,15 @@ pub fn glyph_kind(name: &str) -> GlyphKind {
     }
 }
 
-/// Map a taxonomy `color` name to RGBA; anything unknown is `theme::MUTED`.
+/// Map a taxonomy `color` name to RGBA; anything unknown is `theme::pal().muted`.
 pub fn category_color(name: &str) -> [f32; 4] {
     match name {
         "red" => [0.90, 0.32, 0.28, 1.0],
         "orange" => [0.95, 0.62, 0.22, 1.0],
         "green" => [0.55, 0.92, 0.62, 1.0],
         "blue" => [0.62, 0.82, 1.0, 1.0],
-        "gold" => theme::GOLD,
-        _ => theme::MUTED,
+        "gold" => theme::pal().gold,
+        _ => theme::pal().muted,
     }
 }
 
@@ -229,8 +229,8 @@ mod tests {
 
     #[test]
     fn category_color_unknown_is_muted() {
-        assert_eq!(category_color("pink"), theme::MUTED);
-        assert_eq!(category_color(""), theme::MUTED);
+        assert_eq!(category_color("pink"), theme::pal().muted);
+        assert_eq!(category_color(""), theme::pal().muted);
     }
 
     #[test]
@@ -240,7 +240,7 @@ mod tests {
             for b in &names[i + 1..] {
                 assert_ne!(category_color(a), category_color(b), "{a} vs {b}");
             }
-            assert_ne!(category_color(a), theme::MUTED, "{a} is muted");
+            assert_ne!(category_color(a), theme::pal().muted, "{a} is muted");
         }
     }
 }

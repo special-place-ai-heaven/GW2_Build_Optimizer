@@ -739,7 +739,7 @@ fn render_download_step(ui: &Ui, state: &mut AddonState) {
     let scale = state.config.font_scale;
     let show_images = state.config.news.show_images;
     crate::ui::news_feed::scroll_area(ui, "##setup_news", scale, || {
-        ui.text_colored(theme::GOLD, t("setup.news_header"));
+        ui.text_colored(theme::pal().gold, t("setup.news_header"));
         crate::ui::news_feed::render_workspace(
             ui,
             crate::ui::news_feed::Workspace {

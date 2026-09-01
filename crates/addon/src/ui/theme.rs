@@ -1,23 +1,17 @@
-//! Tyrian night overlay tokens. Dark stone + warm gold — GW2, not a dashboard.
+//! Themeable overlay tokens. Dark stone + a warm accent — GW2, not a dashboard.
+//! The active [`Palette`] is derived from 5 base colors (preset or custom) via
+//! [`apply_theme`]; chrome reads it through [`pal`]. Semantic colors (status,
+//! profession, pips) stay as consts below — themes never touch meaning.
 //! Hold the return value of [`push`] for the whole window frame or styles pop.
 
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use nexus::imgui::{DrawListMut, StyleColor, StyleVar, TextureId, Ui};
 
 use super::color_u32;
 
-pub const INK: [f32; 4] = [0.07, 0.06, 0.045, 0.96];
-pub const CHILD: [f32; 4] = [0.09, 0.08, 0.055, 0.35];
-pub const CREAM: [f32; 4] = [0.93, 0.90, 0.82, 1.0];
-pub const MUTED: [f32; 4] = [0.58, 0.54, 0.46, 1.0];
-pub const GOLD: [f32; 4] = [1.0, 0.84, 0.38, 1.0];
-pub const GOLD_DIM: [f32; 4] = [0.55, 0.44, 0.18, 0.85];
-pub const GOLD_FILL: [f32; 4] = [0.78, 0.62, 0.22, 0.95];
-pub const GOLD_HOVER: [f32; 4] = [0.22, 0.18, 0.08, 0.95];
-pub const PLATE: [f32; 4] = [0.12, 0.10, 0.07, 0.94];
-pub const PLATE_EMPTY: [f32; 4] = [0.08, 0.07, 0.055, 0.75];
+// ── Semantic colors (NOT themeable — they carry meaning, not chrome) ────────
 pub const CURRENT: [f32; 4] = [0.62, 0.82, 1.0, 1.0];
 pub const OPTIMIZED: [f32; 4] = [0.55, 0.92, 0.62, 1.0];
 pub const HEAL_RIM: [f32; 4] = [0.42, 0.78, 0.48, 0.95];
@@ -30,12 +24,303 @@ pub const ICON_ROUNDING: f32 = 5.0;
 pub const HEADER_ACCENT_W: f32 = 3.0;
 pub const HEADER_TITLE_GAP: f32 = 10.0;
 
+// ── Runtime theme palette ───────────────────────────────────────────────────
+
+/// Every themeable chrome slot, resolved to RGBA. Themes replace RGB only —
+/// each slot keeps the alpha the shipped Tyrian Gold theme uses.
+///
+/// Field names mirror the historical const names (`gold` is "the accent",
+/// whatever hue the active theme gives it).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Palette {
+    /// Window background (old `INK`).
+    pub ink: [f32; 4],
+    /// Child pane background (old `CHILD`).
+    pub child: [f32; 4],
+    /// Primary text (old `CREAM`).
+    pub cream: [f32; 4],
+    /// Secondary text (old `MUTED`).
+    pub muted: [f32; 4],
+    /// Accent (old `GOLD`).
+    pub gold: [f32; 4],
+    /// Dim accent: borders, separators, scrollbar (old `GOLD_DIM`).
+    pub gold_dim: [f32; 4],
+    /// Filled accent: selected pills, gauges, gold buttons (old `GOLD_FILL`).
+    pub gold_fill: [f32; 4],
+    /// Accent-tinted dark hover fill (old `GOLD_HOVER`).
+    pub gold_hover: [f32; 4],
+    /// Card plate (old `PLATE`).
+    pub plate: [f32; 4],
+    /// Empty slot plate (old `PLATE_EMPTY`).
+    pub plate_empty: [f32; 4],
+    // Derived slots consumed by `push()` / `gold_button*` / chips.
+    pub popup_bg: [f32; 4],
+    pub frame_bg: [f32; 4],
+    pub frame_bg_hovered: [f32; 4],
+    pub frame_bg_active: [f32; 4],
+    pub button: [f32; 4],
+    pub button_hovered: [f32; 4],
+    pub button_active: [f32; 4],
+    pub header: [f32; 4],
+    pub header_hovered: [f32; 4],
+    pub title_bg: [f32; 4],
+    pub title_bg_active: [f32; 4],
+    pub gold_button_hovered: [f32; 4],
+    pub gold_button_active: [f32; 4],
+    /// Near-black text on accent fills. Constant across themes — the WCAG
+    /// gate on every preset keeps it legible on any accent.
+    pub gold_button_text: [f32; 4],
+    /// Idle (unselected, unhovered) pill/chip fill.
+    pub chip_idle_fill: [f32; 4],
+    /// Idle pill/chip rim.
+    pub chip_idle_rim: [f32; 4],
+    /// Section-header plate behind the gold tick (see [`header`]).
+    pub header_plate: [f32; 4],
+}
+
+/// The shipped Tyrian Gold palette, byte-for-byte the pre-theme colors so the
+/// default theme is pixel-identical to what always shipped. `derive_palette`
+/// on the tyrian bases lands close (see tests) but not exact, hence stored.
+const TYRIAN: Palette = Palette {
+    ink: [0.07, 0.06, 0.045, 0.96],
+    child: [0.09, 0.08, 0.055, 0.35],
+    cream: [0.93, 0.90, 0.82, 1.0],
+    muted: [0.58, 0.54, 0.46, 1.0],
+    gold: [1.0, 0.84, 0.38, 1.0],
+    gold_dim: [0.55, 0.44, 0.18, 0.85],
+    gold_fill: [0.78, 0.62, 0.22, 0.95],
+    gold_hover: [0.22, 0.18, 0.08, 0.95],
+    plate: [0.12, 0.10, 0.07, 0.94],
+    plate_empty: [0.08, 0.07, 0.055, 0.75],
+    popup_bg: [0.08, 0.07, 0.05, 0.98],
+    frame_bg: [0.12, 0.10, 0.07, 0.95],
+    frame_bg_hovered: [0.18, 0.15, 0.09, 1.0],
+    frame_bg_active: [0.22, 0.18, 0.08, 1.0],
+    button: [0.32, 0.25, 0.08, 0.95],
+    button_hovered: [0.46, 0.36, 0.10, 1.0],
+    button_active: [0.58, 0.45, 0.12, 1.0],
+    header: [0.22, 0.18, 0.08, 0.9],
+    header_hovered: [0.30, 0.24, 0.10, 1.0],
+    title_bg: [0.10, 0.08, 0.05, 1.0],
+    title_bg_active: [0.16, 0.12, 0.06, 1.0],
+    gold_button_hovered: [0.90, 0.74, 0.28, 1.0],
+    gold_button_active: [0.70, 0.55, 0.16, 1.0],
+    gold_button_text: [0.10, 0.08, 0.04, 1.0],
+    chip_idle_fill: [0.10, 0.09, 0.06, 0.55],
+    chip_idle_rim: [0.32, 0.26, 0.12, 0.55],
+    header_plate: [0.15, 0.13, 0.08, 0.9],
+};
+
+/// One built-in theme: id (stable, stored in config), English display name,
+/// and the 5 base colors the full palette derives from.
+struct Preset {
+    id: &'static str,
+    name: &'static str,
+    bg: [f32; 3],
+    panel: [f32; 3],
+    accent: [f32; 3],
+    text: [f32; 3],
+    muted: [f32; 3],
+}
+
+const PRESETS: &[Preset] = &[
+    Preset {
+        id: "tyrian-gold",
+        name: "Tyrian Gold",
+        bg: [0.07, 0.06, 0.045],
+        panel: [0.12, 0.10, 0.07],
+        accent: [1.0, 0.84, 0.38],
+        text: [0.93, 0.90, 0.82],
+        muted: [0.58, 0.54, 0.46],
+    },
+    Preset {
+        id: "glacial-ward",
+        name: "Glacial Ward",
+        bg: [0.045, 0.06, 0.08],
+        panel: [0.075, 0.10, 0.13],
+        accent: [0.40, 0.76, 1.0],
+        text: [0.84, 0.90, 0.95],
+        muted: [0.47, 0.55, 0.62],
+    },
+    Preset {
+        id: "verdant-wilds",
+        name: "Verdant Wilds",
+        bg: [0.045, 0.07, 0.05],
+        panel: [0.075, 0.115, 0.082],
+        accent: [0.42, 0.85, 0.45],
+        text: [0.85, 0.93, 0.86],
+        muted: [0.47, 0.57, 0.49],
+    },
+    Preset {
+        id: "molten-ember",
+        name: "Molten Ember",
+        bg: [0.08, 0.055, 0.045],
+        panel: [0.13, 0.09, 0.07],
+        accent: [1.0, 0.58, 0.32],
+        text: [0.95, 0.89, 0.84],
+        muted: [0.62, 0.53, 0.47],
+    },
+    Preset {
+        id: "void-orchid",
+        name: "Void Orchid",
+        bg: [0.065, 0.05, 0.085],
+        panel: [0.105, 0.082, 0.135],
+        accent: [0.80, 0.58, 1.0],
+        text: [0.92, 0.88, 0.95],
+        muted: [0.57, 0.51, 0.63],
+    },
+];
+
+/// `(id, English display name)` for every built-in preset, Settings-combo order.
+pub fn preset_ids() -> &'static [(&'static str, &'static str)] {
+    static IDS: OnceLock<Vec<(&'static str, &'static str)>> = OnceLock::new();
+    IDS.get_or_init(|| PRESETS.iter().map(|p| (p.id, p.name)).collect())
+}
+
+fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
+}
+
+/// RGB (0..=1) to HSV, h in degrees.
+fn rgb_to_hsv([r, g, b]: [f32; 3]) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let d = max - min;
+    let h = if d <= 0.0 {
+        0.0
+    } else if max == r {
+        60.0 * ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        60.0 * ((b - r) / d + 2.0)
+    } else {
+        60.0 * ((r - g) / d + 4.0)
+    };
+    let s = if max <= 0.0 { 0.0 } else { d / max };
+    (h, s, max)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [f32; 3] {
+    let c = v * s;
+    let hp = (h / 60.0).rem_euclid(6.0);
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r1, g1, b1) = match hp as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = v - c;
+    [r1 + m, g1 + m, b1 + m]
+}
+
+fn rgba(c: [f32; 3], a: f32) -> [f32; 4] {
+    [c[0], c[1], c[2], a]
+}
+
+/// Same RGB, caller-chosen alpha — for chrome that reuses a palette slot at a
+/// different opacity than the slot ships with.
+pub fn with_alpha(c: [f32; 4], a: f32) -> [f32; 4] {
+    [c[0], c[1], c[2], a]
+}
+
+/// Derive the full palette from the 5 theme bases.
+///
+/// Accent family scales the accent's HSV value; bg-family lifts lerp toward
+/// the accent in RGB so the hue tint stays subtle. Alphas are fixed per slot
+/// (the shipped Tyrian alphas) — themes replace RGB only. Lerp fractions stay
+/// at or under 0.28 toward the accent, which keeps `text` readable on every
+/// hover/header fill for any preset passing the WCAG gate in the tests.
+pub fn derive_palette(
+    bg: [f32; 3],
+    panel: [f32; 3],
+    accent: [f32; 3],
+    text: [f32; 3],
+    muted: [f32; 3],
+) -> Palette {
+    let (ah, a_s, av) = rgb_to_hsv(accent);
+    let (bh, bs, bv) = rgb_to_hsv(bg);
+    let accent_v = |f: f32| hsv_to_rgb(ah, a_s, av * f);
+    Palette {
+        ink: rgba(bg, 0.96),
+        child: rgba(lerp3(bg, [1.0, 1.0, 1.0], 0.035), 0.35),
+        cream: rgba(text, 1.0),
+        muted: rgba(muted, 1.0),
+        gold: rgba(accent, 1.0),
+        gold_dim: rgba(hsv_to_rgb(ah, a_s * 0.92, av * 0.55), 0.85),
+        gold_fill: rgba(accent_v(0.80), 0.95),
+        gold_hover: rgba(lerp3(bg, accent, 0.16), 0.95),
+        plate: rgba(panel, 0.94),
+        plate_empty: rgba(lerp3(bg, panel, 0.2), 0.75),
+        popup_bg: rgba(hsv_to_rgb(bh, bs, bv * 0.92), 0.98),
+        frame_bg: rgba(panel, 0.95),
+        frame_bg_hovered: rgba(lerp3(panel, accent, 0.12), 1.0),
+        frame_bg_active: rgba(lerp3(panel, accent, 0.22), 1.0),
+        button: rgba(accent_v(0.30), 0.95),
+        button_hovered: rgba(accent_v(0.46), 1.0),
+        button_active: rgba(accent_v(0.58), 1.0),
+        header: rgba(lerp3(bg, accent, 0.10), 0.9),
+        header_hovered: rgba(lerp3(bg, accent, 0.18), 1.0),
+        title_bg: rgba(bg, 1.0),
+        title_bg_active: rgba(panel, 1.0),
+        gold_button_hovered: rgba(accent_v(0.90), 1.0),
+        gold_button_active: rgba(accent_v(0.70), 1.0),
+        gold_button_text: [0.10, 0.08, 0.04, 1.0],
+        chip_idle_fill: rgba(lerp3(bg, accent, 0.035), 0.55),
+        chip_idle_rim: rgba(lerp3(bg, accent, 0.28), 0.55),
+        header_plate: rgba(lerp3(bg, accent, 0.09), 0.9),
+    }
+}
+
+/// Active palette. Render is effectively single-threaded; a plain read lock
+/// per [`pal`] call is cheap and uncontended.
+static ACTIVE: RwLock<Palette> = RwLock::new(TYRIAN);
+
+/// Snapshot of the active palette. Take it once per function, not per color.
+pub fn pal() -> Palette {
+    *ACTIVE.read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Rebuild the active palette from config. Cheap — call on every change.
+/// `"tyrian-gold"` uses the exact shipped colors; other preset ids derive
+/// from their bases; `"custom"` derives from `cfg.custom`; anything unknown
+/// falls back to Tyrian Gold.
+pub fn apply_theme(cfg: &gw2_core::config::ThemeConfig) {
+    let palette = match cfg.preset.as_str() {
+        "tyrian-gold" => TYRIAN,
+        "custom" => {
+            // A hand-edited config can hold out-of-range values; clamp so
+            // rendering never sees an out-of-gamut palette.
+            let clamp3 = |c: [f32; 3]| c.map(|v| v.clamp(0.0, 1.0));
+            let c = &cfg.custom;
+            derive_palette(
+                clamp3(c.bg),
+                clamp3(c.panel),
+                clamp3(c.accent),
+                clamp3(c.text),
+                clamp3(c.muted),
+            )
+        }
+        id => PRESETS
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| derive_palette(p.bg, p.panel, p.accent, p.text, p.muted))
+            .unwrap_or(TYRIAN),
+    };
+    *ACTIVE.write().unwrap_or_else(|e| e.into_inner()) = palette;
+}
+
 pub fn header_title_x(left: f32) -> f32 {
     left + HEADER_ACCENT_W + HEADER_TITLE_GAP
 }
 
 pub fn paint_header_accent(draw: &DrawListMut, left: f32, top: f32, height: f32) {
-    draw.add_rect([left, top], [left + HEADER_ACCENT_W, top + height], GOLD)
+    draw.add_rect([left, top], [left + HEADER_ACCENT_W, top + height], pal().gold)
         .filled(true)
         .rounding(2.0)
         .build();
@@ -48,6 +333,7 @@ fn fade(c: [f32; 4], opacity: f32) -> [f32; 4] {
 /// Push overlay colors/rounding. Keep the value alive for the window frame.
 pub fn push<'ui>(ui: &'ui Ui<'_>, opacity: f32) -> impl Sized + 'ui {
     let a = opacity.clamp(0.3, 1.0);
+    let p = pal();
     (
         ui.push_style_var(StyleVar::WindowRounding(8.0)),
         ui.push_style_var(StyleVar::ChildRounding(6.0)),
@@ -56,26 +342,26 @@ pub fn push<'ui>(ui: &'ui Ui<'_>, opacity: f32) -> impl Sized + 'ui {
         ui.push_style_var(StyleVar::PopupRounding(6.0)),
         ui.push_style_var(StyleVar::WindowBorderSize(1.0)),
         ui.push_style_var(StyleVar::WindowPadding([24.0, 16.0])),
-        ui.push_style_color(StyleColor::WindowBg, fade(INK, a)),
-        ui.push_style_color(StyleColor::ChildBg, fade(CHILD, a)),
-        ui.push_style_color(StyleColor::PopupBg, fade([0.08, 0.07, 0.05, 0.98], a)),
-        ui.push_style_color(StyleColor::Border, GOLD_DIM),
-        ui.push_style_color(StyleColor::FrameBg, [0.12, 0.10, 0.07, 0.95]),
-        ui.push_style_color(StyleColor::FrameBgHovered, [0.18, 0.15, 0.09, 1.0]),
-        ui.push_style_color(StyleColor::FrameBgActive, [0.22, 0.18, 0.08, 1.0]),
-        ui.push_style_color(StyleColor::Button, [0.32, 0.25, 0.08, 0.95]),
-        ui.push_style_color(StyleColor::ButtonHovered, [0.46, 0.36, 0.10, 1.0]),
-        ui.push_style_color(StyleColor::ButtonActive, [0.58, 0.45, 0.12, 1.0]),
-        ui.push_style_color(StyleColor::Header, [0.22, 0.18, 0.08, 0.9]),
-        ui.push_style_color(StyleColor::HeaderHovered, [0.30, 0.24, 0.10, 1.0]),
-        ui.push_style_color(StyleColor::TitleBg, fade([0.10, 0.08, 0.05, 1.0], a)),
-        ui.push_style_color(StyleColor::TitleBgActive, fade([0.16, 0.12, 0.06, 1.0], a)),
-        ui.push_style_color(StyleColor::Separator, GOLD_DIM),
-        ui.push_style_color(StyleColor::CheckMark, GOLD),
-        ui.push_style_color(StyleColor::SliderGrab, GOLD_FILL),
-        ui.push_style_color(StyleColor::Text, CREAM),
-        ui.push_style_color(StyleColor::TextDisabled, MUTED),
-        ui.push_style_color(StyleColor::ScrollbarGrab, GOLD_DIM),
+        ui.push_style_color(StyleColor::WindowBg, fade(p.ink, a)),
+        ui.push_style_color(StyleColor::ChildBg, fade(p.child, a)),
+        ui.push_style_color(StyleColor::PopupBg, fade(p.popup_bg, a)),
+        ui.push_style_color(StyleColor::Border, p.gold_dim),
+        ui.push_style_color(StyleColor::FrameBg, p.frame_bg),
+        ui.push_style_color(StyleColor::FrameBgHovered, p.frame_bg_hovered),
+        ui.push_style_color(StyleColor::FrameBgActive, p.frame_bg_active),
+        ui.push_style_color(StyleColor::Button, p.button),
+        ui.push_style_color(StyleColor::ButtonHovered, p.button_hovered),
+        ui.push_style_color(StyleColor::ButtonActive, p.button_active),
+        ui.push_style_color(StyleColor::Header, p.header),
+        ui.push_style_color(StyleColor::HeaderHovered, p.header_hovered),
+        ui.push_style_color(StyleColor::TitleBg, fade(p.title_bg, a)),
+        ui.push_style_color(StyleColor::TitleBgActive, fade(p.title_bg_active, a)),
+        ui.push_style_color(StyleColor::Separator, p.gold_dim),
+        ui.push_style_color(StyleColor::CheckMark, p.gold),
+        ui.push_style_color(StyleColor::SliderGrab, p.gold_fill),
+        ui.push_style_color(StyleColor::Text, p.cream),
+        ui.push_style_color(StyleColor::TextDisabled, p.muted),
+        ui.push_style_color(StyleColor::ScrollbarGrab, p.gold_dim),
     )
 }
 
@@ -93,11 +379,12 @@ pub fn control_height(ui: &Ui) -> f32 {
 
 /// Gold plate button (Copy, Send, Test). Dark text on gold so it reads as the action.
 pub fn gold_button(ui: &Ui, label: impl AsRef<str>) -> bool {
+    let p = pal();
     let _pad = push_gold_button_pad(ui);
-    let _bg = ui.push_style_color(StyleColor::Button, GOLD_FILL);
-    let _h = ui.push_style_color(StyleColor::ButtonHovered, [0.90, 0.74, 0.28, 1.0]);
-    let _a = ui.push_style_color(StyleColor::ButtonActive, [0.70, 0.55, 0.16, 1.0]);
-    let _t = ui.push_style_color(StyleColor::Text, [0.10, 0.08, 0.04, 1.0]);
+    let _bg = ui.push_style_color(StyleColor::Button, p.gold_fill);
+    let _h = ui.push_style_color(StyleColor::ButtonHovered, p.gold_button_hovered);
+    let _a = ui.push_style_color(StyleColor::ButtonActive, p.gold_button_active);
+    let _t = ui.push_style_color(StyleColor::Text, p.gold_button_text);
     ui.button(label.as_ref())
 }
 
@@ -117,11 +404,12 @@ pub fn gold_button_sized(ui: &Ui, label: impl AsRef<str>, size: [f32; 2]) -> boo
     } else {
         size[1]
     };
+    let p = pal();
     let _pad = push_gold_button_pad(ui);
-    let _bg = ui.push_style_color(StyleColor::Button, GOLD_FILL);
-    let _h = ui.push_style_color(StyleColor::ButtonHovered, [0.90, 0.74, 0.28, 1.0]);
-    let _a = ui.push_style_color(StyleColor::ButtonActive, [0.70, 0.55, 0.16, 1.0]);
-    let _t = ui.push_style_color(StyleColor::Text, [0.10, 0.08, 0.04, 1.0]);
+    let _bg = ui.push_style_color(StyleColor::Button, p.gold_fill);
+    let _h = ui.push_style_color(StyleColor::ButtonHovered, p.gold_button_hovered);
+    let _a = ui.push_style_color(StyleColor::ButtonActive, p.gold_button_active);
+    let _t = ui.push_style_color(StyleColor::Text, p.gold_button_text);
     ui.button_with_size(label, [w, h])
 }
 
@@ -181,7 +469,7 @@ pub fn paint_centered_combo_preview(ui: &Ui, preview: &str, origin: [f32; 2], wi
     let tx = origin[0] + pad + (inner_w - sz[0]) * 0.5;
     let ty = origin[1] + (h - sz[1]) * 0.5;
     ui.get_window_draw_list()
-        .add_text([tx, ty], color_u32(CREAM), &shown);
+        .add_text([tx, ty], color_u32(pal().cream), &shown);
 }
 
 fn push_gold_button_pad<'ui>(ui: &'ui Ui<'_>) -> impl Sized + 'ui {
@@ -205,41 +493,42 @@ pub fn pill_pulse(ui: &Ui, label: &str, selected: bool, id: &str, pulse: f32) ->
     let clicked = ui.invisible_button(id, [w, h]);
     let hovered = ui.is_item_hovered();
     let pulse = pulse.clamp(0.0, 1.0);
+    let th = pal();
     let mut fill = if selected {
-        GOLD_FILL
+        th.gold_fill
     } else if hovered {
-        GOLD_HOVER
+        th.gold_hover
     } else {
-        [0.10, 0.09, 0.06, 0.55]
+        th.chip_idle_fill
     };
     let mut rim = if selected {
-        GOLD
+        th.gold
     } else if hovered {
-        GOLD_DIM
+        th.gold_dim
     } else {
-        [0.32, 0.26, 0.12, 0.55]
+        th.chip_idle_rim
     };
     if pulse > 0.0 && !selected {
         fill = [
-            fill[0] + (GOLD_FILL[0] - fill[0]) * pulse,
-            fill[1] + (GOLD_FILL[1] - fill[1]) * pulse,
-            fill[2] + (GOLD_FILL[2] - fill[2]) * pulse,
+            fill[0] + (th.gold_fill[0] - fill[0]) * pulse,
+            fill[1] + (th.gold_fill[1] - fill[1]) * pulse,
+            fill[2] + (th.gold_fill[2] - fill[2]) * pulse,
             0.55 + 0.40 * pulse,
         ];
-        rim = [GOLD[0], GOLD[1], GOLD[2], 0.45 + 0.55 * pulse];
+        rim = [th.gold[0], th.gold[1], th.gold[2], 0.45 + 0.55 * pulse];
     }
     let text = if selected {
-        [0.10, 0.08, 0.04, 1.0]
+        th.gold_button_text
     } else if pulse > 0.0 {
-        let d = [0.10, 0.08, 0.04, 1.0];
+        let d = th.gold_button_text;
         [
-            CREAM[0] + (d[0] - CREAM[0]) * pulse,
-            CREAM[1] + (d[1] - CREAM[1]) * pulse,
-            CREAM[2] + (d[2] - CREAM[2]) * pulse,
+            th.cream[0] + (d[0] - th.cream[0]) * pulse,
+            th.cream[1] + (d[1] - th.cream[1]) * pulse,
+            th.cream[2] + (d[2] - th.cream[2]) * pulse,
             1.0,
         ]
     } else {
-        CREAM
+        th.cream
     };
     {
         let dl = ui.get_window_draw_list();
@@ -272,25 +561,22 @@ pub fn select_chip(ui: &Ui, label: &str, selected: bool, id: &str, pip: Option<[
     let p = ui.cursor_screen_pos();
     let clicked = ui.invisible_button(id, [w, h]);
     let hovered = ui.is_item_hovered();
+    let th = pal();
     let fill = if selected {
-        GOLD_FILL
+        th.gold_fill
     } else if hovered {
-        GOLD_HOVER
+        th.gold_hover
     } else {
-        [0.10, 0.09, 0.06, 0.55]
+        th.chip_idle_fill
     };
     let rim = if selected {
-        GOLD
+        th.gold
     } else if hovered {
-        GOLD_DIM
+        th.gold_dim
     } else {
-        [0.32, 0.26, 0.12, 0.55]
+        th.chip_idle_rim
     };
-    let text = if selected {
-        [0.10, 0.08, 0.04, 1.0]
-    } else {
-        CREAM
-    };
+    let text = if selected { th.gold_button_text } else { th.cream };
     {
         let dl = ui.get_window_draw_list();
         dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], fill)
@@ -352,6 +638,7 @@ pub fn segment_row(ui: &Ui, labels: &[&str], selected: usize, id_prefix: &str) -
     let fit = widest + 16.0;
     let share = ((avail - gap * (n as f32 - 1.0)) / n as f32).max(28.0);
     let w = share.max(fit);
+    let pl = pal();
     let mut clicked = None;
     for (i, label) in labels.iter().enumerate() {
         if i > 0 {
@@ -365,20 +652,20 @@ pub fn segment_row(ui: &Ui, labels: &[&str], selected: usize, id_prefix: &str) -
         let hovered = ui.is_item_hovered();
         let on = i == selected;
         let fill = if on {
-            GOLD_FILL
+            pl.gold_fill
         } else if hovered {
-            GOLD_HOVER
+            pl.gold_hover
         } else {
-            [0.10, 0.09, 0.06, 0.55]
+            pl.chip_idle_fill
         };
         let rim = if on {
-            GOLD
+            pl.gold
         } else if hovered {
-            GOLD_DIM
+            pl.gold_dim
         } else {
-            [0.32, 0.26, 0.12, 0.55]
+            pl.chip_idle_rim
         };
-        let text = if on { [0.10, 0.08, 0.04, 1.0] } else { CREAM };
+        let text = if on { pl.gold_button_text } else { pl.cream };
         let dl = ui.get_window_draw_list();
         dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], fill)
             .filled(true)
@@ -442,7 +729,7 @@ pub fn prose(ui: &Ui, text: &str) {
         if let Some((mark, rest)) = list_mark(t) {
             let pad = 12.0 + depth as f32 * 16.0;
             ui.indent_by(pad);
-            wrapped(ui, CREAM, &format!("{mark} {rest}"));
+            wrapped(ui, pal().cream, &format!("{mark} {rest}"));
             ui.unindent_by(pad);
             ui.dummy([0.0, 2.0]);
             continue;
@@ -452,7 +739,7 @@ pub fn prose(ui: &Ui, text: &str) {
             heading_line(ui, 2, t);
             continue;
         }
-        wrapped(ui, CREAM, t);
+        wrapped(ui, pal().cream, t);
         ui.dummy([0.0, 6.0]);
     }
 }
@@ -464,7 +751,7 @@ fn heading_line(ui: &Ui, level: u8, rest: &str) {
         _ => 6.0,
     };
     ui.dummy([0.0, before]);
-    wrapped(ui, GOLD, rest);
+    wrapped(ui, pal().gold, rest);
     ui.dummy([0.0, 4.0]);
 }
 
@@ -518,12 +805,13 @@ fn list_mark(line: &str) -> Option<(String, &str)> {
 pub fn header(ui: &Ui, title: &str) {
     let start = ui.cursor_screen_pos();
     let width = ui.content_region_avail()[0];
+    let p = pal();
     {
         let dl = ui.get_window_draw_list();
         dl.add_rect(
             [start[0] - 1.0, start[1]],
             [start[0] + width + 1.0, start[1] + 22.0],
-            [0.15, 0.13, 0.08, 0.9],
+            p.header_plate,
         )
         .filled(true)
         .rounding(5.0)
@@ -533,7 +821,7 @@ pub fn header(ui: &Ui, title: &str) {
         paint_header_accent(&dl, start[0], start[1], 22.0);
         let th = ui.calc_text_size(title)[1];
         let ty = start[1] + ((22.0 - th) * 0.5).round();
-        dl.add_text([header_title_x(start[0]), ty], color_u32(GOLD), title);
+        dl.add_text([header_title_x(start[0]), ty], color_u32(p.gold), title);
     }
     ui.dummy([0.0, 24.0]);
 }
@@ -610,10 +898,11 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
     let t = ui.frame_count() as f32;
     let labels = ["Bronze", "Silver", "Gold", "GEM"];
     let end_half = ui.calc_text_size(labels[0])[0].max(ui.calc_text_size(labels[3])[0]) * 0.5 + 6.0;
+    let theme = pal();
     {
         let dl = ui.get_window_draw_list();
 
-        dl.add_text([p[0], p[1]], color_u32(GOLD), "FETCHING TYRIA...");
+        dl.add_text([p[0], p[1]], color_u32(theme.gold), "FETCHING TYRIA...");
 
         let bar_x = p[0];
         let bar_y = p[1] + title_h + headroom;
@@ -664,7 +953,7 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
         while x <= track_x1 {
             let wobble = ((x * 0.18 + t * 0.04).sin()) * 1.1;
             let cur = [x, line_y + wobble];
-            dl.add_line(prev, cur, GOLD_DIM).thickness(1.2).build();
+            dl.add_line(prev, cur, theme.gold_dim).thickness(1.2).build();
             prev = cur;
             x += 5.0;
         }
@@ -672,7 +961,7 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
         let coins = [
             (0.0_f32, [0.78, 0.45, 0.18, 1.0]),
             (1.0 / 3.0, [0.78, 0.80, 0.84, 1.0]),
-            (2.0 / 3.0, GOLD),
+            (2.0 / 3.0, theme.gold),
         ];
         let mark_top = line_y + 6.0;
         let coin_bottom = mark_top + coin_h;
@@ -683,7 +972,7 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
             draw_mystic_coin(&dl, [cx, mark_top + coin_r], coin_r, i, fill, *metal);
             let label = labels[i];
             let tw = ui.calc_text_size(label)[0];
-            dl.add_text([cx - tw * 0.5, label_y], color_u32(MUTED), label);
+            dl.add_text([cx - tw * 0.5, label_y], color_u32(theme.muted), label);
         }
 
         let chest_cx = track_x1 + track_gap + chest_w * 0.5;
@@ -692,7 +981,7 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
         let gem_tw = ui.calc_text_size(labels[3])[0];
         dl.add_text(
             [chest_cx - gem_tw * 0.5, label_y],
-            color_u32(MUTED),
+            color_u32(theme.muted),
             labels[3],
         );
 
@@ -713,12 +1002,12 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
         let cap_sz = ui.calc_text_size(caption);
         let cap_x = origin[0] + ((full - cap_sz[0]) * 0.5).max(0.0);
         let cap_y = label_y + CAP_GAP;
-        dl.add_text([cap_x, cap_y], color_u32(GOLD), caption);
+        dl.add_text([cap_x, cap_y], color_u32(theme.gold), caption);
         ui.set_window_font_scale(NOTE_SCALE);
         let note_sz = ui.calc_text_size(NOTE);
         let note_x = origin[0] + ((full - note_sz[0]) * 0.5).max(0.0);
         let note_y = cap_y + cap_sz[1] + 3.0;
-        let faint = [MUTED[0], MUTED[1], MUTED[2], 0.42];
+        let faint = with_alpha(theme.muted, 0.42);
         dl.add_text([note_x, note_y], color_u32(faint), NOTE);
         ui.set_window_font_scale(1.0);
     }
@@ -930,14 +1219,15 @@ fn draw_choya(ui: &Ui, dl: &DrawListMut, feet: [f32; 2], height: f32, sway: f32,
         bx = feet[0] - w * 0.5 - gap - bw;
     }
     let by = feet[1] - height * 0.78;
-    dl.add_rect([bx, by], [bx + bw, by + bh], PLATE)
+    let p = pal();
+    dl.add_rect([bx, by], [bx + bw, by + bh], p.plate)
         .filled(true)
         .rounding(6.0)
         .build();
-    dl.add_rect([bx, by], [bx + bw, by + bh], GOLD_DIM)
+    dl.add_rect([bx, by], [bx + bw, by + bh], p.gold_dim)
         .rounding(6.0)
         .build();
-    dl.add_text([bx + pad, by + pad * 0.4], color_u32(CREAM), text);
+    dl.add_text([bx + pad, by + pad * 0.4], color_u32(p.cream), text);
 }
 
 /// Face portraits from sheet 2. `center` is the avatar slot center.
@@ -1241,6 +1531,182 @@ fn draw_mystic_coin(
 mod tests {
     use super::choya_gap_ms;
     use std::time::{Duration, Instant};
+
+    // ── Theme system ────────────────────────────────────────────────────────
+
+    /// WCAG 2.x sRGB channel linearization.
+    fn srgb_lin(c: f32) -> f64 {
+        let c = c as f64;
+        if c <= 0.03928 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    fn rel_luminance(c: [f32; 3]) -> f64 {
+        0.2126 * srgb_lin(c[0]) + 0.7152 * srgb_lin(c[1]) + 0.0722 * srgb_lin(c[2])
+    }
+
+    fn contrast(a: [f32; 3], b: [f32; 3]) -> f64 {
+        let (la, lb) = (rel_luminance(a), rel_luminance(b));
+        let (hi, lo) = if la > lb { (la, lb) } else { (lb, la) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
+    /// Every built-in preset keeps its chrome legible. Thresholds sit slightly
+    /// under the design targets (10/4.5/4.5/7) to absorb rounding.
+    #[test]
+    fn presets_pass_wcag_contrast() {
+        let near_black = [0.10, 0.08, 0.04];
+        for p in super::PRESETS {
+            let tb = contrast(p.text, p.bg);
+            assert!(tb >= 7.0, "{}: text/bg contrast {tb:.2} < 7.0", p.id);
+            let mb = contrast(p.muted, p.bg);
+            assert!(mb >= 4.0, "{}: muted/bg contrast {mb:.2} < 4.0", p.id);
+            let ab = contrast(p.accent, p.bg);
+            assert!(ab >= 4.0, "{}: accent/bg contrast {ab:.2} < 4.0", p.id);
+            let na = contrast(near_black, p.accent);
+            assert!(na >= 6.0, "{}: dark-text/accent contrast {na:.2} < 6.0", p.id);
+        }
+    }
+
+    /// The derivation rules reproduce the shipped Tyrian Gold colors closely.
+    /// Major tokens land exactly; the derived family stays within 0.12 per
+    /// channel (the stored `TYRIAN` palette keeps the default pixel-identical).
+    #[test]
+    fn derive_palette_tyrian_stays_close_to_shipped() {
+        let t = &super::PRESETS[0];
+        assert_eq!(t.id, "tyrian-gold");
+        let d = super::derive_palette(t.bg, t.panel, t.accent, t.text, t.muted);
+        let s = super::TYRIAN;
+        let close = |name: &str, a: [f32; 4], b: [f32; 4], tol: f32| {
+            for i in 0..3 {
+                assert!(
+                    (a[i] - b[i]).abs() <= tol,
+                    "{name}[{i}]: derived {} vs shipped {} (tol {tol})",
+                    a[i],
+                    b[i]
+                );
+            }
+            assert!(
+                (a[3] - b[3]).abs() <= 1e-6,
+                "{name}: alpha {} must equal the shipped alpha {}",
+                a[3],
+                b[3]
+            );
+        };
+        for (name, a, b) in [
+            ("ink", d.ink, s.ink),
+            ("cream", d.cream, s.cream),
+            ("muted", d.muted, s.muted),
+            ("gold", d.gold, s.gold),
+            ("plate", d.plate, s.plate),
+            ("frame_bg", d.frame_bg, s.frame_bg),
+        ] {
+            close(name, a, b, 0.005);
+        }
+        for (name, a, b) in [
+            ("child", d.child, s.child),
+            ("gold_dim", d.gold_dim, s.gold_dim),
+            ("gold_fill", d.gold_fill, s.gold_fill),
+            ("gold_hover", d.gold_hover, s.gold_hover),
+            ("plate_empty", d.plate_empty, s.plate_empty),
+            ("popup_bg", d.popup_bg, s.popup_bg),
+            ("frame_bg_hovered", d.frame_bg_hovered, s.frame_bg_hovered),
+            ("frame_bg_active", d.frame_bg_active, s.frame_bg_active),
+            ("button", d.button, s.button),
+            ("button_hovered", d.button_hovered, s.button_hovered),
+            ("button_active", d.button_active, s.button_active),
+            ("header", d.header, s.header),
+            ("header_hovered", d.header_hovered, s.header_hovered),
+            ("title_bg", d.title_bg, s.title_bg),
+            ("title_bg_active", d.title_bg_active, s.title_bg_active),
+            ("gold_button_hovered", d.gold_button_hovered, s.gold_button_hovered),
+            ("gold_button_active", d.gold_button_active, s.gold_button_active),
+            ("gold_button_text", d.gold_button_text, s.gold_button_text),
+            ("chip_idle_fill", d.chip_idle_fill, s.chip_idle_fill),
+            ("chip_idle_rim", d.chip_idle_rim, s.chip_idle_rim),
+            ("header_plate", d.header_plate, s.header_plate),
+        ] {
+            close(name, a, b, 0.12);
+        }
+    }
+
+    #[test]
+    fn preset_ids_match_preset_data() {
+        let ids = super::preset_ids();
+        assert_eq!(ids.len(), super::PRESETS.len());
+        for (i, p) in super::PRESETS.iter().enumerate() {
+            assert_eq!(ids[i], (p.id, p.name));
+        }
+        assert_eq!(ids[0].0, "tyrian-gold");
+    }
+
+    /// One test mutates the shared active palette (no other test reads it) so
+    /// the assertions stay serial. Ends by restoring the default.
+    #[test]
+    fn apply_theme_selects_presets_and_falls_back() {
+        use gw2_core::config::{CustomTheme, ThemeConfig};
+        let cfg = |preset: &str| ThemeConfig {
+            preset: preset.into(),
+            custom: CustomTheme::default(),
+        };
+
+        super::apply_theme(&cfg("glacial-ward"));
+        let g = &super::PRESETS[1];
+        assert_eq!(g.id, "glacial-ward");
+        assert_eq!(
+            super::pal(),
+            super::derive_palette(g.bg, g.panel, g.accent, g.text, g.muted)
+        );
+
+        super::apply_theme(&cfg("no-such-theme"));
+        assert_eq!(super::pal(), super::TYRIAN, "unknown preset falls back");
+
+        let custom = ThemeConfig {
+            preset: "custom".into(),
+            custom: CustomTheme {
+                name: "Test".into(),
+                bg: [0.02, 0.03, 0.04],
+                panel: [0.05, 0.06, 0.08],
+                accent: [0.9, 0.2, 0.4],
+                text: [0.9, 0.9, 0.9],
+                muted: [0.5, 0.5, 0.5],
+            },
+        };
+        super::apply_theme(&custom);
+        assert_eq!(
+            super::pal(),
+            super::derive_palette(
+                [0.02, 0.03, 0.04],
+                [0.05, 0.06, 0.08],
+                [0.9, 0.2, 0.4],
+                [0.9, 0.9, 0.9],
+                [0.5, 0.5, 0.5]
+            )
+        );
+
+        super::apply_theme(&cfg("tyrian-gold"));
+        assert_eq!(super::pal(), super::TYRIAN, "default preset is the shipped palette");
+    }
+
+    #[test]
+    fn hsv_round_trips_key_colors() {
+        for c in [
+            [1.0, 0.84, 0.38],
+            [0.40, 0.76, 1.0],
+            [0.42, 0.85, 0.45],
+            [0.80, 0.58, 1.0],
+            [0.07, 0.06, 0.045],
+        ] {
+            let (h, s, v) = super::rgb_to_hsv(c);
+            let back = super::hsv_to_rgb(h, s, v);
+            for i in 0..3 {
+                assert!((back[i] - c[i]).abs() < 1e-5, "{c:?} -> {back:?}");
+            }
+        }
+    }
 
     #[test]
     fn wrap_pos_local_converts_screen_x_to_window_local() {
