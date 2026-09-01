@@ -49,6 +49,22 @@ const GENRES: [(&str, &str); 16] = [
 ];
 
 pub(in crate::ui::main_view) fn render_radio_tab(ui: &Ui, state: &mut AddonState) {
+    // First open each session: restore the remembered genre (World for new
+    // listeners) so the tab never greets anyone with an empty list.
+    if !state.radio.auto_kicked
+        && !state.radio.searching
+        && state.radio.results.is_empty()
+        && state.radio.search_text.trim().is_empty()
+    {
+        let stored = state.config.radio.last_genre.clone();
+        let tag = GENRES
+            .iter()
+            .map(|(_, t)| *t)
+            .find(|t| *t == stored)
+            .unwrap_or("world music");
+        state.radio.selected_genre = Some(tag);
+        kick_search(state, SearchKind::Tag(tag));
+    }
     search_row(ui, state);
     filter_row(ui, state);
     ui.dummy([0.0, 4.0]);
@@ -81,7 +97,7 @@ fn search_row(ui: &Ui, state: &mut AddonState) {
     if state.radio.searching {
         ui.same_line_with_spacing(0.0, 10.0);
         ui.align_text_to_frame_padding();
-        ui.text_colored(theme::MUTED, t("radio.searching"));
+        ui.text_colored(theme::pal().muted, t("radio.searching"));
     }
     if entered || clicked {
         let query = state.radio.search_text.trim().to_string();
@@ -94,7 +110,7 @@ fn search_row(ui: &Ui, state: &mut AddonState) {
 
 fn genre_chips(ui: &Ui, state: &mut AddonState) {
     ui.set_window_font_scale(0.85);
-    ui.text_colored(theme::MUTED, t("radio.genres"));
+    ui.text_colored(theme::pal().muted, t("radio.genres"));
     ui.set_window_font_scale(1.0);
     let avail = ui.content_region_avail()[0];
     let mut row_x = 0.0_f32;
@@ -112,6 +128,8 @@ fn genre_chips(ui: &Ui, state: &mut AddonState) {
     }
     if let Some(tag) = pick {
         state.radio.selected_genre = Some(tag);
+        state.config.radio.last_genre = tag.to_string();
+        crate::ui::save_config_detached(state);
         kick_search(state, SearchKind::Tag(tag));
     }
 }
@@ -187,7 +205,7 @@ fn filter_row(ui: &Ui, state: &mut AddonState) {
 
     ui.align_text_to_frame_padding();
     ui.set_window_font_scale(0.85);
-    ui.text_colored(theme::MUTED, t("radio.language"));
+    ui.text_colored(theme::pal().muted, t("radio.language"));
     ui.set_window_font_scale(1.0);
     ui.same_line_with_spacing(0.0, 6.0);
     let cur_lang = state.config.radio.language_filter.clone();
@@ -215,7 +233,7 @@ fn filter_row(ui: &Ui, state: &mut AddonState) {
 
     ui.same_line_with_spacing(0.0, 14.0);
     ui.set_window_font_scale(0.85);
-    ui.text_colored(theme::MUTED, t("radio.country"));
+    ui.text_colored(theme::pal().muted, t("radio.country"));
     ui.set_window_font_scale(1.0);
     ui.same_line_with_spacing(0.0, 6.0);
     let cur_cc = state.config.radio.country_filter.clone();
@@ -244,7 +262,7 @@ fn filter_row(ui: &Ui, state: &mut AddonState) {
     ui.same_line_with_spacing(0.0, 14.0);
     ui.set_window_font_scale(0.85);
     ui.align_text_to_frame_padding();
-    ui.text_colored(theme::MUTED, t("radio.bitrate"));
+    ui.text_colored(theme::pal().muted, t("radio.bitrate"));
     ui.set_window_font_scale(1.0);
     ui.same_line_with_spacing(0.0, 6.0);
     let cur_cap = state.config.radio.bitrate_max;
@@ -270,7 +288,7 @@ fn filter_row(ui: &Ui, state: &mut AddonState) {
     ui.same_line_with_spacing(0.0, 14.0);
     ui.set_window_font_scale(0.85);
     ui.align_text_to_frame_padding();
-    ui.text_colored(theme::MUTED, t("radio.sort"));
+    ui.text_colored(theme::pal().muted, t("radio.sort"));
     ui.set_window_font_scale(1.0);
     ui.same_line_with_spacing(0.0, 6.0);
     let cur_sort = state.radio.sort;
@@ -412,6 +430,7 @@ fn kick_search(state: &mut AddonState, kind: SearchKind) {
     if state.radio.searching {
         return;
     }
+    state.radio.auto_kicked = true;
     state.radio.searching = true;
     state.radio.last_error = None;
     let filters = active_filters(state);
@@ -430,6 +449,28 @@ fn kick_search(state: &mut AddonState, kind: SearchKind) {
             match result {
                 Ok(mut list) => {
                     apply_sort(&mut list, s.radio.sort);
+                    // Pin the live station into the results if the search
+                    // didn't include it, so its row (and the controls that
+                    // live on it) is always reachable — a fringe favorite is
+                    // not guaranteed a spot in a genre's top 50.
+                    if matches!(
+                        s.radio.status,
+                        RadioStatus::Connecting
+                            | RadioStatus::Buffering
+                            | RadioStatus::Playing
+                            | RadioStatus::Paused
+                            | RadioStatus::Stalled
+                    ) {
+                        if let Some(cur) = s.radio.current.clone() {
+                            let key = fav_key(&cur.stationuuid, cur.stream_url());
+                            if !list
+                                .iter()
+                                .any(|r| fav_key(&r.stationuuid, r.stream_url()) == key)
+                            {
+                                list.insert(0, cur);
+                            }
+                        }
+                    }
                     s.radio.results = list;
                 }
                 Err(err) => s.radio.last_error = Some(err),
@@ -480,6 +521,29 @@ fn favorites(ui: &Ui, state: &mut AddonState) {
         crate::ui::save_config_detached(state);
     }
     if let Some(station) = play {
+        // Load the station's genre into the stations list below, so the
+        // playing row (and its controls) appears there immediately. No genre
+        // tag recognized -> search the station's name instead; either way the
+        // search-completion pin guarantees the row shows up.
+        let tags = station.tags.to_lowercase();
+        let genre = GENRES
+            .iter()
+            .skip(1) // skip "Top stations" (empty tag matches everything)
+            .map(|(_, t)| *t)
+            .find(|t| tags.contains(*t));
+        match genre {
+            Some(tag) => {
+                state.radio.selected_genre = Some(tag);
+                state.config.radio.last_genre = tag.to_string();
+                crate::ui::save_config_detached(state);
+                kick_search(state, SearchKind::Tag(tag));
+            }
+            None => {
+                state.radio.selected_genre = None;
+                state.radio.search_text = station.name.clone();
+                kick_search(state, SearchKind::Name(station.name.clone()));
+            }
+        }
         start_play(state, station);
     }
 }
@@ -506,12 +570,12 @@ fn stations(ui: &Ui, state: &mut AddonState) {
             .build(ui, || {
                 if st.radio.searching {
                     ui.dummy([0.0, 8.0]);
-                    theme::wrapped(ui, theme::MUTED, &t("radio.searching"));
+                    theme::wrapped(ui, theme::pal().muted, &t("radio.searching"));
                 } else if let Some(err) = &st.radio.last_error {
                     ui.dummy([0.0, 8.0]);
                     theme::wrapped(ui, theme::ERR, err);
                     ui.set_window_font_scale(0.85);
-                    theme::wrapped(ui, theme::MUTED, &t("radio.error.av_hint"));
+                    theme::wrapped(ui, theme::pal().muted, &t("radio.error.av_hint"));
                     ui.set_window_font_scale(1.0);
                 } else if st.radio.results.is_empty() {
                     ui.dummy([0.0, 8.0]);
@@ -520,10 +584,10 @@ fn stations(ui: &Ui, state: &mut AddonState) {
                     let searched = !st.radio.search_text.trim().is_empty()
                         || st.radio.selected_genre.is_some();
                     if searched {
-                        theme::wrapped(ui, theme::MUTED, &t("radio.no_results"));
+                        theme::wrapped(ui, theme::pal().muted, &t("radio.no_results"));
                     }
                     if st.config.radio.favorites.is_empty() {
-                        theme::wrapped(ui, theme::MUTED, &t("radio.no_favorites"));
+                        theme::wrapped(ui, theme::pal().muted, &t("radio.no_favorites"));
                     }
                 } else {
                     for (i, s) in st.radio.results.iter().enumerate() {
@@ -618,39 +682,34 @@ fn controls_on_active_row(state: &AddonState) -> bool {
         .any(|s| fav_key(&s.stationuuid, s.stream_url()) == key)
 }
 
-/// Controls cluster on the active row, right-aligned before the heart.
-/// Connecting/Buffering/Stalled: big ALL-CAPS status with additive dots
-/// (dot, dot, dot, clear) breathing in alpha, plus Stop. Playing/Paused:
-/// Pause|Play, Stop, a volume slider, and the two checkboxes when the row is
-/// wide enough. Returns the width reserved so the name/meta text clears it.
-fn row_controls(
-    ui: &Ui,
-    dl: &DrawListMut,
-    ctl: &RowCtl,
-    origin: [f32; 2],
-    heart_x: f32,
-    out: &mut Vec<CtlAction>,
-) -> f32 {
-    let ch = theme::control_height(ui);
-    let cy = origin[1] + (ROW_H - ch) * 0.5;
-    let play_l = t("radio.play");
-    let stop_l = t("radio.stop");
-    let pause_l = t("radio.pause");
-    let btn_w = theme::gold_button_width(ui, &play_l)
-        .max(theme::gold_button_width(ui, &stop_l))
-        .max(theme::gold_button_width(ui, &pause_l));
-    let tf = ui.frame_count() as u32;
+/// Slider width in the row's controls cluster.
+const ROW_VOL_W: f32 = 220.0;
 
+/// Measured footprint of the active row's controls. Computed BEFORE the
+/// row's invisible click-catcher is submitted so its hit zone can exclude
+/// the whole cluster — in ImGui the first-submitted item under the mouse
+/// wins the click, so an overlapping row button would eat every slider drag
+/// and button press and re-tune the station instead (shipped bug).
+struct CtlLayout {
+    btn_w: f32,
+    with_checks: bool,
+    /// Width reserved at the row's right edge (hit-zone exclusion + text clip).
+    reserve: f32,
+}
+
+fn row_ctl_layout(ui: &Ui, ctl: &RowCtl, origin: [f32; 2], heart_x: f32) -> CtlLayout {
+    let ch = theme::control_height(ui);
+    let btn_w = theme::gold_button_width(ui, &t("radio.play"))
+        .max(theme::gold_button_width(ui, &t("radio.stop")))
+        .max(theme::gold_button_width(ui, &t("radio.pause")));
     match ctl.status {
         RadioStatus::Playing | RadioStatus::Paused => {
-            const VOL_W: f32 = 110.0;
             ui.set_window_font_scale(0.85);
-            let duck_l = t("radio.duck_in_combat");
-            let quips_l = t("radio.ai_quips");
-            let duck_w = ui.calc_text_size(&duck_l)[0] + ch + 8.0;
-            let quips_w = ui.calc_text_size(&quips_l)[0] + ch + 8.0;
+            let vol_label_w = ui.calc_text_size(t("radio.volume"))[0] + 6.0;
+            let duck_w = ui.calc_text_size(t("radio.duck_in_combat"))[0] + ch + 8.0;
+            let quips_w = ui.calc_text_size(t("radio.ai_quips"))[0] + ch + 8.0;
             ui.set_window_font_scale(1.0);
-            let base_w = btn_w + 8.0 + btn_w + 14.0 + VOL_W;
+            let base_w = btn_w + 8.0 + btn_w + 14.0 + vol_label_w + ROW_VOL_W;
             let with_checks =
                 heart_x - 12.0 - (base_w + 16.0 + duck_w + quips_w) > origin[0] + AVATAR + 320.0;
             let total = base_w
@@ -659,7 +718,66 @@ fn row_controls(
                 } else {
                     0.0
                 };
-            ui.set_cursor_screen_pos([heart_x - 12.0 - total, cy]);
+            CtlLayout {
+                btn_w,
+                with_checks,
+                reserve: total + 12.0,
+            }
+        }
+        RadioStatus::Connecting | RadioStatus::Buffering | RadioStatus::Stalled => {
+            ui.set_window_font_scale(1.3);
+            let text_reserve = ui.calc_text_size(format!(
+                "{}...",
+                tuning_label(&ctl.status).trim_end_matches('.').to_uppercase()
+            ))[0];
+            ui.set_window_font_scale(1.0);
+            CtlLayout {
+                btn_w,
+                with_checks: false,
+                reserve: btn_w + 28.0 + text_reserve,
+            }
+        }
+        _ => CtlLayout {
+            btn_w,
+            with_checks: false,
+            reserve: 0.0,
+        },
+    }
+}
+
+fn tuning_label(status: &RadioStatus) -> String {
+    match status {
+        RadioStatus::Connecting => t("radio.status.connecting"),
+        RadioStatus::Buffering => t("radio.status.buffering"),
+        _ => t("radio.status.stalled"),
+    }
+}
+
+/// Controls cluster on the active row, right-aligned before the heart.
+/// Connecting/Buffering/Stalled: big ALL-CAPS status with additive dots
+/// (dot, dot, dot, clear) breathing in alpha, plus Stop. Playing/Paused:
+/// Pause|Play, Stop, a labeled volume slider, and the two checkboxes when
+/// the row is wide enough.
+fn row_controls(
+    ui: &Ui,
+    dl: &DrawListMut,
+    ctl: &RowCtl,
+    layout: &CtlLayout,
+    origin: [f32; 2],
+    heart_x: f32,
+    out: &mut Vec<CtlAction>,
+) {
+    let ch = theme::control_height(ui);
+    let cy = origin[1] + (ROW_H - ch) * 0.5;
+    let play_l = t("radio.play");
+    let stop_l = t("radio.stop");
+    let pause_l = t("radio.pause");
+    let btn_w = layout.btn_w;
+    let tf = ui.frame_count() as u32;
+
+    match ctl.status {
+        RadioStatus::Playing | RadioStatus::Paused => {
+            ui.set_cursor_screen_pos([heart_x - 12.0 - (layout.reserve - 12.0), cy]);
             if ctl.status == RadioStatus::Playing {
                 if theme::gold_button_sized(ui, format!("{pause_l}##row_pause"), [btn_w, 0.0]) {
                     player::pause();
@@ -674,8 +792,14 @@ fn row_controls(
                 player::request_stop();
                 out.push(CtlAction::Stop);
             }
+            // "Volume" label so the slider reads as one, then the slider.
             ui.same_line_with_spacing(0.0, 14.0);
-            ui.set_next_item_width(VOL_W);
+            ui.set_window_font_scale(0.85);
+            ui.align_text_to_frame_padding();
+            ui.text_colored(theme::pal().muted, t("radio.volume"));
+            ui.set_window_font_scale(1.0);
+            ui.same_line_with_spacing(0.0, 6.0);
+            ui.set_next_item_width(ROW_VOL_W);
             let mut vol = ctl.volume;
             if Slider::new("##row_vol", 0u8, 100u8).build(ui, &mut vol) {
                 player::set_volume(vol);
@@ -684,9 +808,11 @@ fn row_controls(
             if ui.is_item_deactivated_after_edit() {
                 out.push(CtlAction::VolumeCommit);
             }
-            if with_checks {
+            if layout.with_checks {
                 ui.same_line_with_spacing(0.0, 12.0);
                 ui.set_window_font_scale(0.85);
+                let duck_l = t("radio.duck_in_combat");
+                let quips_l = t("radio.ai_quips");
                 let mut duck = ctl.duck;
                 if ui.checkbox(format!("{duck_l}##row_duck"), &mut duck) {
                     out.push(CtlAction::ToggleDuck);
@@ -698,7 +824,6 @@ fn row_controls(
                 }
                 ui.set_window_font_scale(1.0);
             }
-            total + 12.0
         }
         RadioStatus::Connecting | RadioStatus::Buffering | RadioStatus::Stalled => {
             let stop_x = heart_x - 12.0 - btn_w;
@@ -707,15 +832,10 @@ fn row_controls(
                 player::request_stop();
                 out.push(CtlAction::Stop);
             }
-            let key = match ctl.status {
-                RadioStatus::Connecting => "radio.status.connecting",
-                RadioStatus::Buffering => "radio.status.buffering",
-                _ => "radio.status.stalled",
-            };
             // ALL CAPS, dots appended additively (., .., ..., clear), alpha
-            // breathing slowly. The width reserve includes the full "..." so
-            // the base text never shifts as dots grow.
-            let base = t(key).trim_end_matches('.').to_uppercase();
+            // breathing slowly. The layout reserve includes the full "..."
+            // so the base text never shifts as dots grow.
+            let base = tuning_label(&ctl.status).trim_end_matches('.').to_uppercase();
             let dots = ".".repeat(((tf / 20) % 4) as usize);
             let breath = 0.5 + 0.35 * (tf as f32 * 0.045).sin();
             ui.set_window_font_scale(1.3);
@@ -730,13 +850,12 @@ fn row_controls(
             );
             dl.add_text(
                 [bx, ty],
-                crate::ui::color_u32([theme::GOLD[0], theme::GOLD[1], theme::GOLD[2], breath]),
+                crate::ui::color_u32([theme::pal().gold[0], theme::pal().gold[1], theme::pal().gold[2], breath]),
                 &text,
             );
             ui.set_window_font_scale(1.0);
-            btn_w + 28.0 + reserve
         }
-        _ => 0.0,
+        _ => {}
     }
 }
 
@@ -757,8 +876,17 @@ fn station_row(
     let avail = ui.content_region_avail()[0];
     let heart_x = origin[0] + avail - HEART - 10.0;
     let row_w = (heart_x - 8.0 - origin[0]).max(40.0);
+
+    // Measure the controls cluster FIRST so the row's click-catcher can
+    // exclude it entirely: in ImGui the first-submitted item under the mouse
+    // wins the click, so an overlapping row button would eat slider drags
+    // and button presses and re-tune the station instead.
+    let layout = ctl.map(|c| row_ctl_layout(ui, c, origin, heart_x));
+    let ctl_w = layout.as_ref().map_or(0.0, |l| l.reserve);
+    let hit_w = (row_w - ctl_w).max(40.0);
+
     let mut action = RowAction::None;
-    if ui.invisible_button(format!("##radio_row_{i}"), [row_w, ROW_H]) {
+    if ui.invisible_button(format!("##radio_row_{i}"), [hit_w, ROW_H]) {
         action = RowAction::Play;
     }
     let hovered = ui.is_item_hovered();
@@ -775,16 +903,16 @@ fn station_row(
         &s.favicon,
     );
 
-    // Controls (or tuning text) on the active row, drawn before the texts so
-    // the name/meta clip width can subtract the space they reserve.
-    let ctl_w = match ctl {
-        Some(ctl) => row_controls(ui, &dl, ctl, origin, heart_x, ctl_out),
-        None => 0.0,
-    };
+    // Controls (or tuning text) on the active row, drawn after the plate so
+    // they sit on top of it visually; their hit zone is already carved out
+    // of the row button above.
+    if let (Some(c), Some(l)) = (ctl, layout.as_ref()) {
+        row_controls(ui, &dl, c, l, origin, heart_x, ctl_out);
+    }
 
     let tx = origin[0] + 2.0 + AVATAR + 10.0;
     let text_w = (row_w - (AVATAR + 14.0) - ctl_w).max(60.0);
-    let name_color = if active { theme::GOLD } else { theme::CREAM };
+    let name_color = if active { theme::pal().gold } else { theme::pal().cream };
     let name = clip_text(ui, &s.name, text_w);
     let lh = ui.text_line_height();
     dl.add_text(
@@ -798,7 +926,7 @@ fn station_row(
     let meta = clip_text(ui, &meta, text_w);
     dl.add_text(
         [tx, origin[1] + ROW_H * 0.5 + 3.0],
-        crate::ui::color_u32(theme::MUTED),
+        crate::ui::color_u32(theme::pal().muted),
         &meta,
     );
     ui.set_window_font_scale(1.0);
@@ -844,7 +972,7 @@ fn favorite_row(ui: &Ui, i: usize, f: &SavedStation, active: bool) -> RowAction 
 
     let tx = origin[0] + 2.0 + FAV_AVATAR + 8.0;
     let text_w = row_w - (FAV_AVATAR + 12.0);
-    let name_color = if active { theme::GOLD } else { theme::CREAM };
+    let name_color = if active { theme::pal().gold } else { theme::pal().cream };
     let name = clip_text(ui, &f.name, text_w);
     let th = ui.calc_text_size(&name)[1];
     dl.add_text(
@@ -873,9 +1001,9 @@ fn row_plate(dl: &DrawListMut, origin: [f32; 2], w: f32, h: f32, hovered: bool, 
         return;
     }
     let fill = if active {
-        [0.22, 0.18, 0.08, 0.55]
+        theme::with_alpha(theme::pal().gold_hover, 0.55)
     } else {
-        theme::GOLD_HOVER
+        theme::pal().gold_hover
     };
     dl.add_rect(
         [origin[0] - 2.0, origin[1]],
@@ -900,7 +1028,7 @@ fn station_avatar(ui: &Ui, dl: &DrawListMut, p: [f32; 2], size: f32, name: &str,
             dl.add_image_rounded(tid, p, p_max, r)
                 .col([1.0, 1.0, 1.0, 1.0])
                 .build();
-            dl.add_rect(p, p_max, theme::GOLD_DIM).rounding(r).build();
+            dl.add_rect(p, p_max, theme::pal().gold_dim).rounding(r).build();
             return;
         }
     }
@@ -913,7 +1041,7 @@ fn station_avatar(ui: &Ui, dl: &DrawListMut, p: [f32; 2], size: f32, name: &str,
 fn letter_avatar(ui: &Ui, dl: &DrawListMut, p: [f32; 2], size: f32, letter: char) {
     let p_max = [p[0] + size, p[1] + size];
     let r = size * 0.5;
-    dl.add_rect(p, p_max, theme::PLATE)
+    dl.add_rect(p, p_max, theme::pal().plate)
         .filled(true)
         .rounding(r)
         .build();
@@ -924,7 +1052,7 @@ fn letter_avatar(ui: &Ui, dl: &DrawListMut, p: [f32; 2], size: f32, letter: char
         crate::ui::color_u32(theme::CURRENT),
         &s,
     );
-    dl.add_rect(p, p_max, theme::GOLD_DIM).rounding(r).build();
+    dl.add_rect(p, p_max, theme::pal().gold_dim).rounding(r).build();
 }
 
 /// Heart toggle with its own hit zone; returns true on click.
@@ -1006,7 +1134,7 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
         dl.add_rect(
             [origin[0] - 2.0, origin[1]],
             [origin[0] + w + 2.0, origin[1] + bar_h],
-            theme::PLATE,
+            theme::pal().plate,
         )
         .filled(true)
         .rounding(6.0)
@@ -1014,7 +1142,7 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
         dl.add_rect(
             [origin[0] - 2.0, origin[1]],
             [origin[0] + w + 2.0, origin[1] + bar_h],
-            theme::GOLD_DIM,
+            theme::pal().gold_dim,
         )
         .rounding(6.0)
         .build();
@@ -1065,9 +1193,9 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
         if let Some(name) = name {
             if !matches!(status, RadioStatus::Error(_)) {
                 let color = if status == RadioStatus::Playing {
-                    theme::GOLD
+                    theme::pal().gold
                 } else {
-                    theme::CREAM
+                    theme::pal().cream
                 };
                 let shown = clip_text(ui, &name, right - x);
                 dl.add_text([x, y1], crate::ui::color_u32(color), &shown);
@@ -1087,7 +1215,7 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
                 .map(|p| tf("radio.error.port_hint", &[("port", &p.to_string())]))
                 .unwrap_or_else(|| t("radio.error.av_hint"));
             let hint = clip_text(ui, &text, right - x0);
-            dl.add_text([x0, y2], crate::ui::color_u32(theme::MUTED), &hint);
+            dl.add_text([x0, y2], crate::ui::color_u32(theme::pal().muted), &hint);
             ui.set_window_font_scale(1.0);
         } else if status == RadioStatus::Playing {
             // No ICY title (plenty of stations send none) -> the station
@@ -1180,7 +1308,7 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
 
     ui.same_line_with_spacing(0.0, 16.0);
     ui.align_text_to_frame_padding();
-    ui.text_colored(theme::MUTED, t("radio.volume"));
+    ui.text_colored(theme::pal().muted, t("radio.volume"));
     ui.same_line_with_spacing(0.0, 8.0);
     // Reserve the combat-duck and AI-quips checkboxes' footprints (drawn at
     // 0.85 scale) before clamping the slider, so neither falls off the bar.
@@ -1245,7 +1373,7 @@ fn eq_bars(dl: &DrawListMut, origin: [f32; 2], w: f32, bar_h: f32, levels: &[f32
     let base = origin[1] + bar_h - 2.0;
     let max_h = bar_h - 4.0;
     // Theme gold at low alpha — "slight transparency", text stays readable.
-    let fill = [theme::GOLD[0], theme::GOLD[1], theme::GOLD[2], 0.14];
+    let fill = [theme::pal().gold[0], theme::pal().gold[1], theme::pal().gold[2], 0.14];
     for (i, level) in levels.iter().enumerate() {
         let h = max_h * level.clamp(0.0, 1.0);
         if h < 0.5 {
@@ -1266,13 +1394,13 @@ fn live_badge(ui: &Ui, dl: &DrawListMut, pos: [f32; 2]) -> f32 {
     let pad_x = 7.0;
     let h = sz[1] + 3.0;
     let w = sz[0] + pad_x * 2.0;
-    dl.add_rect(pos, [pos[0] + w, pos[1] + h], theme::GOLD_FILL)
+    dl.add_rect(pos, [pos[0] + w, pos[1] + h], theme::pal().gold_fill)
         .filled(true)
         .rounding(h * 0.45)
         .build();
     dl.add_text(
         [pos[0] + pad_x, pos[1] + 1.0],
-        crate::ui::color_u32([0.10, 0.08, 0.04, 1.0]),
+        crate::ui::color_u32(theme::pal().gold_button_text),
         &label,
     );
     w
@@ -1285,7 +1413,7 @@ fn dim_button(ui: &Ui, label: &str, w: f32) {
     let _b = ui.push_style_color(StyleColor::Button, bg);
     let _h = ui.push_style_color(StyleColor::ButtonHovered, bg);
     let _a = ui.push_style_color(StyleColor::ButtonActive, bg);
-    let _t = ui.push_style_color(StyleColor::Text, theme::MUTED);
+    let _t = ui.push_style_color(StyleColor::Text, theme::pal().muted);
     let _ = ui.button_with_size(label, [w, theme::control_height(ui)]);
 }
 
@@ -1322,7 +1450,7 @@ fn now_playing_marquee(
     }
     let full_w = ui.calc_text_size(text)[0];
     let line_h = ui.text_line_height();
-    let col = theme::CREAM;
+    let col = theme::pal().cream;
     let fade = (avail * 0.20).clamp(24.0, 180.0);
     let ramp = |mid: f32| -> f32 {
         let a_in = ((mid - pos[0]) / fade).clamp(0.0, 1.0);
@@ -1381,13 +1509,13 @@ fn av_blocked_port(url: &str) -> Option<u16> {
 
 fn status_line(status: &RadioStatus) -> (String, [f32; 4]) {
     match status {
-        RadioStatus::Idle => (t("radio.status.idle"), theme::MUTED),
-        RadioStatus::Connecting => (t("radio.status.connecting"), theme::GOLD),
-        RadioStatus::Buffering => (t("radio.status.buffering"), theme::GOLD),
-        RadioStatus::Playing => (t("radio.live"), theme::GOLD),
-        RadioStatus::Paused => (t("radio.status.paused"), theme::MUTED),
+        RadioStatus::Idle => (t("radio.status.idle"), theme::pal().muted),
+        RadioStatus::Connecting => (t("radio.status.connecting"), theme::pal().gold),
+        RadioStatus::Buffering => (t("radio.status.buffering"), theme::pal().gold),
+        RadioStatus::Playing => (t("radio.live"), theme::pal().gold),
+        RadioStatus::Paused => (t("radio.status.paused"), theme::pal().muted),
         RadioStatus::Stalled => (t("radio.status.stalled"), theme::WARN),
-        RadioStatus::Stopped => (t("radio.status.stopped"), theme::MUTED),
+        RadioStatus::Stopped => (t("radio.status.stopped"), theme::pal().muted),
         RadioStatus::DeviceLost => (t("radio.status.device_lost"), theme::ERR),
         // ASCII '-': the game font renders an em dash as '?'.
         RadioStatus::Error(msg) => (format!("{} - {}", t("radio.status.error"), msg), theme::ERR),

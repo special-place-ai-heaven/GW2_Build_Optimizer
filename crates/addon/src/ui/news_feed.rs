@@ -31,7 +31,7 @@ pub fn render_workspace(ui: &Ui, mut view: Workspace<'_>) {
     if view.items.is_empty() {
         ui.dummy([0.0, 6.0]);
         ui.text_colored(
-            theme::MUTED,
+            theme::pal().muted,
             if view.loading {
                 t("news.loading")
             } else {
@@ -151,9 +151,9 @@ fn mag_cell(ui: &Ui, view: &mut Workspace<'_>, index: usize) {
         cy += img_h;
     }
     ui.set_cursor_screen_pos([p[0] + PAD, cy]);
-    ui.text_colored(theme::GOLD, kicker);
+    ui.text_colored(theme::pal().gold, kicker);
     ui.set_cursor_screen_pos([p[0] + PAD, cy + lh + 2.0]);
-    ui.text_colored(theme::CREAM, title);
+    ui.text_colored(theme::pal().cream, title);
     ui.set_cursor_screen_pos([p[0], p[1] + h]);
     if hit {
         *view.selected = Some(url);
@@ -210,11 +210,11 @@ fn index_row(ui: &Ui, view: &Workspace<'_>, index: usize, on: bool) -> bool {
     let inner = (p[0] + w - 8.0 - text_x).max(20.0);
     ui.set_cursor_screen_pos([text_x, p[1] + 6.0]);
     ui.text_colored(
-        if on { theme::GOLD } else { theme::CREAM },
+        if on { theme::pal().gold } else { theme::pal().cream },
         clip_label(ui, &item.title, inner),
     );
     ui.set_cursor_screen_pos([text_x, p[1] + 6.0 + lh + 2.0]);
-    ui.text_colored(theme::MUTED, clip_label(ui, &kicker_line(item), inner));
+    ui.text_colored(theme::pal().muted, clip_label(ui, &kicker_line(item), inner));
     ui.set_cursor_screen_pos([p[0], p[1] + h]);
     hit
 }
@@ -234,7 +234,7 @@ fn reader_body(ui: &Ui, view: &mut Workspace<'_>, back: bool) {
         .find(|i| Some(i.url.as_str()) == view.selected.as_deref())
         .cloned()
     else {
-        ui.text_colored(theme::MUTED, t("news.no_match"));
+        ui.text_colored(theme::pal().muted, t("news.no_match"));
         return;
     };
 
@@ -249,9 +249,9 @@ fn reader_body(ui: &Ui, view: &mut Workspace<'_>, back: bool) {
         return;
     }
 
-    ui.text_colored(theme::GOLD, kicker_line(&item));
+    ui.text_colored(theme::pal().gold, kicker_line(&item));
     ui.dummy([0.0, 4.0]);
-    theme::wrapped(ui, theme::CREAM, &item.title);
+    theme::wrapped(ui, theme::pal().cream, &item.title);
 
     if view.show_images {
         if let Some(url) = item.image_url.as_deref() {
@@ -274,7 +274,7 @@ fn reader_body(ui: &Ui, view: &mut Workspace<'_>, back: bool) {
             if detail {
                 ui.dummy([0.0, 4.0]);
                 ui.align_text_to_frame_padding();
-                ui.text_colored(theme::MUTED, t("news.zoom"));
+                ui.text_colored(theme::pal().muted, t("news.zoom"));
                 ui.same_line_with_spacing(0.0, 8.0);
                 ui.set_next_item_width(140.0);
                 let _ = nexus::imgui::Slider::new("##news_zoom", 1.0, 5.0)
@@ -290,7 +290,7 @@ fn reader_body(ui: &Ui, view: &mut Workspace<'_>, back: bool) {
 
     if item.source == NewsSource::Youtube {
         ui.dummy([0.0, 6.0]);
-        theme::wrapped(ui, theme::MUTED, &t("news.video_note"));
+        theme::wrapped(ui, theme::pal().muted, &t("news.video_note"));
     }
 
     ui.dummy([0.0, 8.0]);
@@ -338,18 +338,18 @@ fn kicker_line(item: &NewsItem) -> String {
 
 fn plate(ui: &Ui, p: [f32; 2], size: [f32; 2], hovered: bool, on: bool) {
     let fill = if on {
-        [0.16, 0.13, 0.07, 0.92]
+        theme::with_alpha(theme::pal().header_plate, 0.92)
     } else if hovered {
-        theme::GOLD_HOVER
+        theme::pal().gold_hover
     } else {
-        [0.12, 0.10, 0.07, 0.72]
+        theme::with_alpha(theme::pal().plate, 0.72)
     };
     let rim = if on {
-        theme::GOLD
+        theme::pal().gold
     } else if hovered {
-        theme::GOLD_DIM
+        theme::pal().gold_dim
     } else {
-        [0.32, 0.26, 0.12, 0.45]
+        theme::with_alpha(theme::pal().chip_idle_rim, 0.45)
     };
     let dl = ui.get_window_draw_list();
     dl.add_rect(p, [p[0] + size[0], p[1] + size[1]], fill)
@@ -383,7 +383,7 @@ fn paint_still(ui: &Ui, url: Option<&str>, origin: [f32; 2], max_size: [f32; 2])
     let oy = origin[1] + (max_size[1] - fitted[1]) * 0.5;
     let dl = ui.get_window_draw_list();
     let plate = [origin[0] + max_size[0], origin[1] + max_size[1]];
-    dl.add_rect(origin, plate, [0.10, 0.09, 0.06, 0.9])
+    dl.add_rect(origin, plate, theme::with_alpha(theme::pal().chip_idle_fill, 0.9))
         .filled(true)
         .rounding(theme::ICON_ROUNDING)
         .build();

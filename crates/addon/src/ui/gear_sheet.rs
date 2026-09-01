@@ -560,7 +560,7 @@ fn render_suggestion_sheet(
         }
         if sets.is_empty() {
             for w in &sug.weapons {
-                ui.text_colored(theme::CREAM, w);
+                ui.text_colored(theme::pal().cream, w);
             }
         }
     }
@@ -569,7 +569,7 @@ fn render_suggestion_sheet(
 
 fn section(ui: &Ui, title: &str) {
     ui.spacing();
-    ui.text_colored(theme::GOLD, title);
+    ui.text_colored(theme::pal().gold, title);
 }
 
 fn dim_icon(gain: GainTint) -> [f32; 4] {
@@ -583,7 +583,7 @@ fn lock_text_colors(interactive: bool, locked: bool) -> ([f32; 4], [f32; 4], [f3
     } else if interactive {
         (UNLOCKED_TEXT, UNLOCKED_TEXT, UNLOCKED_TEXT)
     } else {
-        (theme::GOLD, theme::CREAM, theme::MUTED)
+        (theme::pal().gold, theme::pal().cream, theme::pal().muted)
     }
 }
 
@@ -698,7 +698,7 @@ fn row(
         icons::draw(ui, nested_url, 18.0, [1.0, 1.0, 1.0, 1.0]);
         ui.same_line();
         ui.set_cursor_screen_pos([np[0] + 18.0 + 10.0, np[1]]);
-        ui.text_colored(theme::MUTED, comparison::loc_name(db, nested));
+        ui.text_colored(theme::pal().muted, comparison::loc_name(db, nested));
         if !interactive {
             comparison::inspect_if_hovered(ui, nested, db);
         }
@@ -711,21 +711,21 @@ fn row(
             if let Some(text) = db.and_then(|d| comparison::inspect_text(key, d)) {
                 let mut lines = text.lines();
                 if let Some(title) = lines.next() {
-                    tip.text_colored(theme::GOLD, title);
+                    tip.text_colored(theme::pal().gold, title);
                 }
                 for line in lines {
                     tip.text(line);
                 }
             } else {
                 let shown = format!("{} {} {}", prefix, slot, name);
-                tip.text_colored(theme::GOLD, shown.trim());
+                tip.text_colored(theme::pal().gold, shown.trim());
                 if !nested.is_empty() {
-                    tip.text_colored(theme::MUTED, nested);
+                    tip.text_colored(theme::pal().muted, nested);
                 }
                 if let Some(o) = other {
                     tip.spacing();
-                    tip.text_colored(theme::MUTED, t("gear.other"));
-                    tip.text_colored(theme::CREAM, o);
+                    tip.text_colored(theme::pal().muted, t("gear.other"));
+                    tip.text_colored(theme::pal().cream, o);
                 }
             }
             append_lock_hint(tip, locked, prefix);
@@ -807,7 +807,7 @@ fn weapon_row(
         icons::draw(ui, surl, 18.0, [1.0, 1.0, 1.0, 1.0]);
         ui.same_line();
         ui.set_cursor_screen_pos([sp[0] + 18.0 + 10.0, sp[1]]);
-        ui.text_colored(theme::MUTED, comparison::loc_name(db, sig));
+        ui.text_colored(theme::pal().muted, comparison::loc_name(db, sig));
         if !interactive {
             comparison::inspect_if_hovered(ui, sig, db);
         }
@@ -816,15 +816,15 @@ fn weapon_row(
     if hovered {
         crate::ui::theme::wide_tooltip(ui, |tip| {
             let shown = format!("{} {} {}", prefix, set_label, weapons);
-            tip.text_colored(theme::GOLD, shown.trim());
+            tip.text_colored(theme::pal().gold, shown.trim());
             let nested = sigils.join(" · ");
             if !nested.is_empty() {
-                tip.text_colored(theme::MUTED, nested);
+                tip.text_colored(theme::pal().muted, nested);
             }
             if let Some(o) = other {
                 tip.spacing();
-                tip.text_colored(theme::MUTED, t("gear.other"));
-                tip.text_colored(theme::CREAM, o);
+                tip.text_colored(theme::pal().muted, t("gear.other"));
+                tip.text_colored(theme::pal().cream, o);
             }
             append_lock_hint(tip, locked, prefix);
         });
@@ -843,14 +843,14 @@ fn weapon_row(
 fn tooltip(ui: &Ui, prefix: &str, slot: &str, name: &str, nested: &str, other: Option<&str>) {
     crate::ui::theme::wide_tooltip(ui, |ui| {
         let shown = format!("{} {} {}", prefix, slot, name);
-        ui.text_colored(theme::GOLD, shown.trim());
+        ui.text_colored(theme::pal().gold, shown.trim());
         if !nested.is_empty() {
-            ui.text_colored(theme::MUTED, nested);
+            ui.text_colored(theme::pal().muted, nested);
         }
         if let Some(o) = other {
             ui.spacing();
-            ui.text_colored(theme::MUTED, t("gear.other"));
-            ui.text_colored(theme::CREAM, o);
+            ui.text_colored(theme::pal().muted, t("gear.other"));
+            ui.text_colored(theme::pal().cream, o);
         }
     });
 }

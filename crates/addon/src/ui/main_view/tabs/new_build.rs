@@ -28,20 +28,20 @@ fn render_scenario_ready(ui: &Ui, state: &AddonState) {
     } else {
         format!("{} · {}", mode, role)
     };
-    theme::wrapped(ui, theme::GOLD, &line);
+    theme::wrapped(ui, theme::pal().gold, &line);
     ui.spacing();
     if state.main.selected_role.is_none() {
-        theme::wrapped(ui, theme::MUTED, &t("new_build.pick_role"));
+        theme::wrapped(ui, theme::pal().muted, &t("new_build.pick_role"));
     } else {
-        theme::wrapped(ui, theme::MUTED, &t("new_build.family_hint"));
+        theme::wrapped(ui, theme::pal().muted, &t("new_build.family_hint"));
         ui.spacing();
-        theme::wrapped(ui, theme::MUTED, &t("new_build.click_optimize"));
+        theme::wrapped(ui, theme::pal().muted, &t("new_build.click_optimize"));
     }
 }
 
 pub(in crate::ui::main_view) fn render_new_build_tab(ui: &Ui, state: &mut AddonState) {
     if state.main.selected_character.is_none() {
-        theme::wrapped(ui, theme::MUTED, &t("new_build.select_character"));
+        theme::wrapped(ui, theme::pal().muted, &t("new_build.select_character"));
         return;
     }
 

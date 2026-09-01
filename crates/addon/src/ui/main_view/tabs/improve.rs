@@ -248,9 +248,9 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 });
         }
     } else if state.main.selected_character.is_some() {
-        ui.text_colored(theme::MUTED, t("improve.loading"));
+        ui.text_colored(theme::pal().muted, t("improve.loading"));
     } else {
-        ui.text_colored(theme::MUTED, t("improve.select"));
+        ui.text_colored(theme::pal().muted, t("improve.select"));
     }
 
     // Save build UI + clear button

@@ -814,6 +814,9 @@ fn lock_state() -> std::sync::MutexGuard<'static, Option<AddonState>> {
 pub fn init(addon_dir: PathBuf) {
     let config_path = AppConfig::config_path(&addon_dir);
     let (config, config_err) = AppConfig::load(&config_path);
+    // Build the active palette before the first frame renders; Settings
+    // re-applies on every change.
+    crate::ui::theme::apply_theme(&config.theme);
 
     let screen = if config.is_setup_complete() {
         Screen::Main

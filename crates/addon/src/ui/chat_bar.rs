@@ -146,7 +146,7 @@ fn draw_bubble_rect(ui: &Ui, p: [f32; 2], bw: f32, bh: f32, from_user: bool) {
     let fill = if from_user {
         [0.16, 0.20, 0.28, 0.96]
     } else {
-        theme::PLATE
+        theme::pal().plate
     };
     let rim = if from_user {
         [
@@ -156,7 +156,7 @@ fn draw_bubble_rect(ui: &Ui, p: [f32; 2], bw: f32, bh: f32, from_user: bool) {
             0.55,
         ]
     } else {
-        theme::GOLD_DIM
+        theme::pal().gold_dim
     };
     dl.add_rect(p, [p[0] + bw, p[1] + bh], fill)
         .filled(true)
@@ -169,7 +169,7 @@ fn draw_bubble_rect(ui: &Ui, p: [f32; 2], bw: f32, bh: f32, from_user: bool) {
 
 fn draw_copy_glyph(ui: &Ui, p: [f32; 2], size: f32, copied: bool) {
     let dl = ui.get_window_draw_list();
-    let col = if copied { theme::GOLD } else { theme::MUTED };
+    let col = if copied { theme::pal().gold } else { theme::pal().muted };
     let back = [p[0] + size * 0.28, p[1]];
     let back_br = [p[0] + size, p[1] + size * 0.78];
     let front = [p[0], p[1] + size * 0.22];
@@ -183,7 +183,7 @@ fn draw_bubble_text(ui: &Ui, p: [f32; 2], lines: &[String]) {
     let line_h = ui.calc_text_size("Ag")[1];
     let mut ty = p[1] + BUBBLE_PAD;
     for line in lines {
-        dl.add_text([p[0] + BUBBLE_PAD, ty], color_u32(theme::CREAM), line);
+        dl.add_text([p[0] + BUBBLE_PAD, ty], color_u32(theme::pal().cream), line);
         ty += line_h;
     }
 }
@@ -214,7 +214,7 @@ pub fn render_chat_bar(
         .build(ui, || {
             let avail = ui.content_region_avail()[0];
             if state.history.is_empty() && !state.waiting {
-                theme::wrapped(ui, theme::MUTED, &t("chat.placeholder_new"));
+                theme::wrapped(ui, theme::pal().muted, &t("chat.placeholder_new"));
                 return;
             }
             let n = state.history.len();
@@ -336,9 +336,9 @@ fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
     let clicked = ui.invisible_button(&id, [w, h]);
     let hovered = ui.is_item_hovered();
     let fill = if hovered {
-        [0.22, 0.18, 0.08, 0.96]
+        theme::with_alpha(theme::pal().gold_hover, 0.96)
     } else {
-        theme::PLATE
+        theme::pal().plate
     };
     {
         let dl = ui.get_window_draw_list();
@@ -346,7 +346,7 @@ fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
             .filled(true)
             .rounding(10.0)
             .build();
-        dl.add_rect(p, [p[0] + w, p[1] + h], theme::GOLD)
+        dl.add_rect(p, [p[0] + w, p[1] + h], theme::pal().gold)
             .rounding(10.0)
             .build();
         let gem_cx = p[0] + PAD_X + gem_w * 0.5;
@@ -354,8 +354,8 @@ fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
         theme::draw_gem_icon(&dl, [gem_cx, gem_top], GEM_H);
         let tx = p[0] + PAD_X + gem_w + GEM_GAP;
         let ty = p[1] + (h - text_h) * 0.5;
-        dl.add_text([tx, ty], color_u32(theme::GOLD), &title);
-        dl.add_text([tx, ty + title_sz[1] + 4.0], color_u32(theme::MUTED), &sub);
+        dl.add_text([tx, ty], color_u32(theme::pal().gold), &title);
+        dl.add_text([tx, ty + title_sz[1] + 4.0], color_u32(theme::pal().muted), &sub);
     }
     if hovered {
         ui.tooltip_text(t("chat.open_optimized"));
@@ -364,7 +364,7 @@ fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
 }
 
 fn draw_send_icon(ui: &Ui, c: [f32; 2], on: bool) {
-    let col = if on { theme::GOLD } else { theme::MUTED };
+    let col = if on { theme::pal().gold } else { theme::pal().muted };
     let dl = ui.get_window_draw_list();
     let s = 11.0;
     dl.add_triangle(
@@ -399,11 +399,11 @@ fn render_composer(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
     let bh = COMPOSER_H;
     {
         let dl = ui.get_window_draw_list();
-        dl.add_rect([bx, by], [bx + bw, by + bh], theme::PLATE)
+        dl.add_rect([bx, by], [bx + bw, by + bh], theme::pal().plate)
             .filled(true)
             .rounding(18.0)
             .build();
-        dl.add_rect([bx, by], [bx + bw, by + bh], theme::GOLD_DIM)
+        dl.add_rect([bx, by], [bx + bw, by + bh], theme::pal().gold_dim)
             .rounding(18.0)
             .build();
     }
@@ -436,7 +436,7 @@ fn render_composer(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
     if state.input.is_empty() {
         ui.get_window_draw_list().add_text(
             [bx + 20.0, by + 16.0],
-            color_u32(theme::MUTED),
+            color_u32(theme::pal().muted),
             t("chat.placeholder"),
         );
     }

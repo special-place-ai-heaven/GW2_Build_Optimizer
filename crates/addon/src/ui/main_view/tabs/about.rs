@@ -51,7 +51,7 @@ fn render_about_hero(ui: &Ui, state: &AddonState) {
     let ty0 = top[1] + PAD_T + 10.0;
     let lh = ui.text_line_height();
     ui.set_cursor_screen_pos([text_x, ty0]);
-    ui.text_colored(theme::GOLD, t("about.title"));
+    ui.text_colored(theme::pal().gold, t("about.title"));
 
     ui.set_cursor_screen_pos([text_x, ty0 + lh + 6.0]);
     let sub = format!(
@@ -63,15 +63,15 @@ fn render_about_hero(ui: &Ui, state: &AddonState) {
             &[("provider", state.config.active_provider.label())]
         ),
     );
-    ui.text_colored(theme::CREAM, sub);
+    ui.text_colored(theme::pal().cream, sub);
 
     ui.set_cursor_screen_pos([text_x, ty0 + lh * 2.0 + 12.0]);
-    ui.text_colored(theme::MUTED, t("about.tagline"));
+    ui.text_colored(theme::pal().muted, t("about.tagline"));
 
     let messages = &state.main.feedback.messages;
     ui.set_cursor_screen_pos([text_x, ty0 + lh * 3.0 + 16.0]);
     ui.text_colored(
-        theme::MUTED,
+        theme::pal().muted,
         tf(
             "about.counts",
             &[
@@ -156,7 +156,7 @@ fn render_whats_new(ui: &Ui, state: &AddonState) {
             // Nested children start at scale 1.0; match the overlay slider.
             ui.set_window_font_scale(scale);
             if entries.is_empty() {
-                ui.text_colored(theme::MUTED, t("about.no_changelog"));
+                ui.text_colored(theme::pal().muted, t("about.no_changelog"));
                 return;
             }
             let _sp = ui.push_style_var(StyleVar::ItemSpacing([10.0 * scale, 8.0 * scale]));
@@ -168,7 +168,7 @@ fn render_whats_new(ui: &Ui, state: &AddonState) {
                     format!("{}  ·  {}", e.version, e.date)
                 };
                 ui.set_window_font_scale(scale * 1.2);
-                ui.text_colored(theme::GOLD, heading);
+                ui.text_colored(theme::pal().gold, heading);
                 ui.set_window_font_scale(scale);
                 ui.dummy([0.0, 6.0]);
                 changelog_body(ui, &e.body);
@@ -299,17 +299,17 @@ fn row_actions(m: &LocalMessage, now: u64) -> RowActions {
 /// renderer blends that toward `CREAM` with the frame pulse.
 fn status_view(m: &LocalMessage, now: u64) -> (String, [f32; 4]) {
     match m.status {
-        MessageStatus::Sending => (t("msg.status.sending"), theme::MUTED),
+        MessageStatus::Sending => (t("msg.status.sending"), theme::pal().muted),
         MessageStatus::Received => (
             tf(
                 "msg.status.received",
                 &[("id", m.short_id.as_deref().unwrap_or("?"))],
             ),
-            theme::MUTED,
+            theme::pal().muted,
         ),
-        MessageStatus::Read => (t("msg.status.read"), theme::MUTED),
-        MessageStatus::Answered => (t("msg.status.answered"), theme::GOLD),
-        MessageStatus::Closed => (t("msg.status.closed"), theme::MUTED),
+        MessageStatus::Read => (t("msg.status.read"), theme::pal().muted),
+        MessageStatus::Answered => (t("msg.status.answered"), theme::pal().gold),
+        MessageStatus::Closed => (t("msg.status.closed"), theme::pal().muted),
         MessageStatus::Failed => {
             let reason = match &m.last_error {
                 Some(FailReason::RateLimited { .. }) => rate_fail_text(m, now),
@@ -318,8 +318,8 @@ fn status_view(m: &LocalMessage, now: u64) -> (String, [f32; 4]) {
             };
             (tf("msg.status.failed", &[("reason", &reason)]), theme::WARN)
         }
-        MessageStatus::Local => (t("msg.status.local"), theme::MUTED),
-        MessageStatus::Unknown => (t("msg.status.unknown"), theme::MUTED),
+        MessageStatus::Local => (t("msg.status.local"), theme::pal().muted),
+        MessageStatus::Unknown => (t("msg.status.unknown"), theme::pal().muted),
     }
 }
 
@@ -369,7 +369,7 @@ struct RowView {
 
 fn row_view(feedback: &FeedbackState, m: &LocalMessage, now: u64) -> RowView {
     let (icon, color) = feedback.taxonomy.category(&m.category).map_or_else(
-        || ("dot".to_string(), theme::MUTED),
+        || ("dot".to_string(), theme::pal().muted),
         |c| (c.icon.clone(), glyphs::category_color(&c.color)),
     );
     let (status, status_color) = status_view(m, now);
@@ -520,17 +520,17 @@ fn expanded_block(ui: &Ui, row: &RowView, x: f32, y: f32, wrap_w: f32, draw: boo
     if !row.context.is_empty() {
         cy += GAP;
         let attached = format!("{}  ·  {}", t("about.attached"), row.context);
-        wrapped(&mut cy, theme::MUTED, &attached);
+        wrapped(&mut cy, theme::pal().muted, &attached);
     }
     if let Some(reply) = &row.reply {
         cy += GAP;
-        line(&mut cy, theme::GOLD, &t("about.reply"));
-        wrapped(&mut cy, theme::CREAM, reply);
+        line(&mut cy, theme::pal().gold, &t("about.reply"));
+        wrapped(&mut cy, theme::pal().cream, reply);
     }
     if let Some(note) = &row.closing_note {
         cy += GAP;
-        line(&mut cy, theme::MUTED, &t("about.closing_note"));
-        wrapped(&mut cy, theme::CREAM, note);
+        line(&mut cy, theme::pal().muted, &t("about.closing_note"));
+        wrapped(&mut cy, theme::pal().cream, note);
     }
     cy - y
 }
@@ -567,7 +567,7 @@ fn edit_and_resend(state: &mut AddonState, report_id: &str) {
 fn refresh_line(ok: Option<bool>, age: Option<Duration>) -> Option<(String, [f32; 4])> {
     match ok {
         Some(true) if age.is_some_and(|a| a < Duration::from_secs(60)) => {
-            Some((t("about.updated_now"), theme::MUTED))
+            Some((t("about.updated_now"), theme::pal().muted))
         }
         Some(false) => {
             let age = match age {
@@ -599,8 +599,8 @@ fn render_messages(ui: &Ui, state: &mut AddonState) {
 
     if state.main.feedback.messages.is_empty() {
         ui.dummy([0.0, 8.0]);
-        ui.text_colored(theme::MUTED, t("about.empty"));
-        ui.text_colored(theme::MUTED, t("about.empty_hint"));
+        ui.text_colored(theme::pal().muted, t("about.empty"));
+        ui.text_colored(theme::pal().muted, t("about.empty_hint"));
         return;
     }
 
@@ -669,13 +669,13 @@ fn render_messages(ui: &Ui, state: &mut AddonState) {
             let origin = ui.cursor_screen_pos();
             let y = origin[1] + 6.0;
             ui.set_cursor_screen_pos([origin[0] + PAD, y]);
-            ui.text_colored(theme::GOLD, t("about.col.message"));
+            ui.text_colored(theme::pal().gold, t("about.col.message"));
             ui.set_cursor_screen_pos([origin[0] + sent_dx, y]);
-            ui.text_colored(theme::GOLD, t("about.col.sent"));
+            ui.text_colored(theme::pal().gold, t("about.col.sent"));
             ui.set_cursor_screen_pos([origin[0] + status_dx, y]);
-            ui.text_colored(theme::GOLD, t("about.col.status"));
+            ui.text_colored(theme::pal().gold, t("about.col.status"));
             ui.set_cursor_screen_pos([origin[0] + avail - actions_w, y]);
-            ui.text_colored(theme::GOLD, t("about.col.actions"));
+            ui.text_colored(theme::pal().gold, t("about.col.actions"));
             ui.set_cursor_screen_pos([origin[0], origin[1] + HDR_H + 6.0]);
 
             for row in &rows {
@@ -700,17 +700,17 @@ fn render_messages(ui: &Ui, state: &mut AddonState) {
                 let title_x = p[0] + PAD + GLYPH + 8.0;
                 let title_w = message_w - GLYPH - 16.0;
                 ui.set_cursor_screen_pos([title_x, text_y]);
-                ui.text_colored(theme::CREAM, clip_label(ui, &row.title, title_w));
+                ui.text_colored(theme::pal().cream, clip_label(ui, &row.title, title_w));
                 ui.set_cursor_screen_pos([title_x, text_y + lh + 2.0]);
-                ui.text_colored(theme::MUTED, clip_label(ui, &row.path, title_w));
+                ui.text_colored(theme::pal().muted, clip_label(ui, &row.path, title_w));
 
                 // Sent.
                 ui.set_cursor_screen_pos([p[0] + sent_dx, text_y + 8.0]);
-                ui.text_colored(theme::CREAM, &row.sent);
+                ui.text_colored(theme::pal().cream, &row.sent);
 
                 // Status: clipped to the column, full text on hover.
                 let color = if row.sending {
-                    blend(theme::MUTED, theme::CREAM, pulse)
+                    blend(theme::pal().muted, theme::pal().cream, pulse)
                 } else {
                     row.status_color
                 };
@@ -914,7 +914,7 @@ mod tests {
             let secs = |n| Some(Duration::from_secs(n));
             assert_eq!(
                 refresh_line(Some(true), secs(10)),
-                Some(("Updated just now".to_string(), theme::MUTED))
+                Some(("Updated just now".to_string(), theme::pal().muted))
             );
             // A success older than a minute says nothing.
             assert_eq!(refresh_line(Some(true), secs(61)), None);
@@ -957,7 +957,7 @@ mod tests {
         with_en(|| {
             assert_eq!(
                 status_view(&msg(MessageStatus::Sending), 0),
-                ("Sending…".to_string(), theme::MUTED)
+                ("Sending…".to_string(), theme::pal().muted)
             );
             let received = LocalMessage {
                 short_id: Some("a3f9".into()),
@@ -965,19 +965,19 @@ mod tests {
             };
             assert_eq!(
                 status_view(&received, 0),
-                ("Received  ·  #a3f9".to_string(), theme::MUTED)
+                ("Received  ·  #a3f9".to_string(), theme::pal().muted)
             );
             assert_eq!(
                 status_view(&msg(MessageStatus::Read), 0),
-                ("Read".to_string(), theme::MUTED)
+                ("Read".to_string(), theme::pal().muted)
             );
             assert_eq!(
                 status_view(&msg(MessageStatus::Answered), 0),
-                ("Answered".to_string(), theme::GOLD)
+                ("Answered".to_string(), theme::pal().gold)
             );
             assert_eq!(
                 status_view(&msg(MessageStatus::Closed), 0),
-                ("Closed".to_string(), theme::MUTED)
+                ("Closed".to_string(), theme::pal().muted)
             );
             assert_eq!(
                 status_view(&failed(Some(FailReason::Network), Some(0)), 0),
@@ -988,11 +988,11 @@ mod tests {
             );
             assert_eq!(
                 status_view(&msg(MessageStatus::Local), 0),
-                ("Local".to_string(), theme::MUTED)
+                ("Local".to_string(), theme::pal().muted)
             );
             assert_eq!(
                 status_view(&msg(MessageStatus::Unknown), 0),
-                ("No longer on server".to_string(), theme::MUTED)
+                ("No longer on server".to_string(), theme::pal().muted)
             );
         });
     }

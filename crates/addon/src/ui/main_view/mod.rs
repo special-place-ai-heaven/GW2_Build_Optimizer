@@ -211,9 +211,9 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
 
     // API health indicator
     let (label, color) = match state.main.api_status {
-        crate::state::ApiStatus::Unknown => (t("status.checking_api"), crate::ui::theme::MUTED),
+        crate::state::ApiStatus::Unknown => (t("status.checking_api"), crate::ui::theme::pal().muted),
         crate::state::ApiStatus::Online => (t("status.api_ready"), crate::ui::theme::OPTIMIZED),
-        crate::state::ApiStatus::Degraded => (t("status.api_slow"), crate::ui::theme::GOLD),
+        crate::state::ApiStatus::Degraded => (t("status.api_slow"), crate::ui::theme::pal().gold),
         crate::state::ApiStatus::Offline => (t("status.api_offline"), crate::ui::theme::ERR),
     };
     {
@@ -353,7 +353,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
             .add_rect(
                 [(glow_x - glow_half).max(start[0]), start[1]],
                 [(glow_x + glow_half).min(start[0] + width), start[1] + 3.0],
-                crate::ui::theme::GOLD,
+                crate::ui::theme::pal().gold,
             )
             .filled(true)
             .build();
@@ -383,7 +383,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
         let finding = t("status.finding_build");
         draw_list.add_text(
             [start[0] + 56.0, start[1] + 10.0],
-            crate::ui::theme::GOLD,
+            crate::ui::theme::pal().gold,
             &finding,
         );
 
@@ -424,7 +424,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
                     (sweep_x + sweep_width).min(start[0] + width - 8.0),
                     bar_y + 4.0,
                 ],
-                crate::ui::theme::GOLD_FILL,
+                crate::ui::theme::pal().gold_fill,
             )
             .filled(true)
             .rounding(2.0)
@@ -435,7 +435,7 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
             .add_rect(
                 [start[0], start[1]],
                 [start[0] + width, start[1] + 62.0],
-                crate::ui::theme::GOLD_DIM,
+                crate::ui::theme::pal().gold_dim,
             )
             .rounding(6.0)
             .build();
@@ -545,15 +545,15 @@ fn render_left_panel(ui: &Ui, state: &mut AddonState) {
         MainTab::Settings | MainTab::About | MainTab::News | MainTab::Radio => {
             // Settings info
             render_left_section_header(ui, &t("section.info"), state.config.section_spacing);
-            ui.text_colored(theme::MUTED, format!("  {}", t("info.product")));
+            ui.text_colored(theme::pal().muted, format!("  {}", t("info.product")));
             ui.text_colored(
-                theme::MUTED,
+                theme::pal().muted,
                 format!("  {}", tf("fmt.version", &[("ver", crate::VERSION)])),
             );
             ui.spacing();
             let provider_label = state.config.active_provider.label();
             ui.text_colored(
-                theme::MUTED,
+                theme::pal().muted,
                 format!("  {}", tf("fmt.ai", &[("provider", provider_label)])),
             );
         }
@@ -582,7 +582,7 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
     // `Text` follows WindowFontScale + FramePadding; DrawList add_text does not.
     ui.set_cursor_screen_pos([crate::ui::theme::header_title_x(pos[0]), pos[1]]);
     ui.align_text_to_frame_padding();
-    ui.text_colored(theme::GOLD, title);
+    ui.text_colored(theme::pal().gold, title);
     ui.set_cursor_screen_pos([pos[0], pos[1] + bar_h]);
     ui.dummy([0.0, spacing * 0.5]);
 }

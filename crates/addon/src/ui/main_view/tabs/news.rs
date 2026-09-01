@@ -92,7 +92,7 @@ fn masthead(ui: &Ui, state: &AddonState) {
         let ty = start[1] + ((h - th) * 0.5).round();
         dl.add_text(
             [theme::header_title_x(start[0]), ty],
-            crate::ui::color_u32(theme::GOLD),
+            crate::ui::color_u32(theme::pal().gold),
             &title,
         );
         let extra = if state.news.loading {
@@ -104,7 +104,7 @@ fn masthead(ui: &Ui, state: &AddonState) {
         let rw = ui.calc_text_size(&right)[0];
         dl.add_text(
             [start[0] + width - rw - 8.0, ty],
-            crate::ui::color_u32(theme::MUTED),
+            crate::ui::color_u32(theme::pal().muted),
             &right,
         );
     }
@@ -125,7 +125,7 @@ fn hover_hint(ui: &Ui, key: &str) {
 
 fn kind_filters(ui: &Ui, state: &mut AddonState) {
     ui.align_text_to_frame_padding();
-    ui.text_colored(theme::MUTED, t("news.filter.show"));
+    ui.text_colored(theme::pal().muted, t("news.filter.show"));
     hover_hint(ui, "news.filter.show.hint");
     ui.same_line_with_spacing(0.0, 8.0);
 
@@ -164,7 +164,7 @@ fn kind_filters(ui: &Ui, state: &mut AddonState) {
         }
         if ui.is_item_hovered() {
             theme::wide_tooltip(ui, |ui| {
-                ui.text_colored(theme::GOLD, t(label_key));
+                ui.text_colored(theme::pal().gold, t(label_key));
                 ui.text(t(hint_key));
             });
         }
@@ -179,23 +179,23 @@ fn kind_icon_button(ui: &Ui, id: &str, side: f32, on: bool, kind: Option<NewsKin
     let hit = ui.invisible_button(id, [side, side]);
     let hovered = ui.is_item_hovered();
     let fill = if on {
-        theme::GOLD_FILL
+        theme::pal().gold_fill
     } else if hovered {
-        theme::GOLD_HOVER
+        theme::pal().gold_hover
     } else {
-        [0.10, 0.09, 0.06, 0.72]
+        theme::with_alpha(theme::pal().chip_idle_fill, 0.72)
     };
     let rim = if on {
-        theme::GOLD
+        theme::pal().gold
     } else if hovered {
-        theme::GOLD_DIM
+        theme::pal().gold_dim
     } else {
-        [0.32, 0.26, 0.12, 0.55]
+        theme::pal().chip_idle_rim
     };
     let ink = if on {
-        [0.10, 0.08, 0.04, 1.0]
+        theme::pal().gold_button_text
     } else {
-        theme::CREAM
+        theme::pal().cream
     };
     let dl = ui.get_window_draw_list();
     dl.add_rect(p, [p[0] + side, p[1] + side], fill)
@@ -333,7 +333,7 @@ fn draw_kind_glyph(
 
 fn layout_and_find(ui: &Ui, state: &mut AddonState) {
     ui.align_text_to_frame_padding();
-    ui.text_colored(theme::MUTED, t("news.layout.label"));
+    ui.text_colored(theme::pal().muted, t("news.layout.label"));
     hover_hint(ui, "news.layout.hint");
 
     let layouts = [

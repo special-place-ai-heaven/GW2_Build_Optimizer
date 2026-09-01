@@ -118,12 +118,12 @@ pub fn paint_on_zoomed(
             .build();
     } else {
         draw_list
-            .add_rect(p_min, p_max, theme::PLATE)
+            .add_rect(p_min, p_max, theme::pal().plate)
             .filled(true)
             .rounding(rounding)
             .build();
         draw_list
-            .add_rect(p_min, p_max, theme::GOLD_DIM)
+            .add_rect(p_min, p_max, theme::pal().gold_dim)
             .rounding(rounding)
             .build();
     }
@@ -150,7 +150,7 @@ pub fn paint_avatar(ui: &Ui, url: Option<&str>, p: [f32; 2], size: f32, letter: 
             .col([1.0, 1.0, 1.0, 1.0])
             .build();
     } else {
-        dl.add_rect(p, p_max, theme::PLATE)
+        dl.add_rect(p, p_max, theme::pal().plate)
             .filled(true)
             .rounding(r)
             .build();
@@ -162,7 +162,7 @@ pub fn paint_avatar(ui: &Ui, url: Option<&str>, p: [f32; 2], size: f32, letter: 
             &s,
         );
     }
-    dl.add_rect(p, p_max, theme::GOLD_DIM).rounding(r).build();
+    dl.add_rect(p, p_max, theme::pal().gold_dim).rounding(r).build();
 }
 
 pub fn item_url(db: &GameDb, id: u32) -> Option<&str> {

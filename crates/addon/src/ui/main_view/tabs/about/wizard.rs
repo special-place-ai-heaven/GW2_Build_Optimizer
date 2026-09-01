@@ -119,9 +119,9 @@ impl RichLine {
 
 fn ink_rgba(c: Ink) -> [f32; 4] {
     match c {
-        Ink::Cream => theme::CREAM,
-        Ink::Gold => theme::GOLD,
-        Ink::Muted => theme::MUTED,
+        Ink::Cream => theme::pal().cream,
+        Ink::Gold => theme::pal().gold,
+        Ink::Muted => theme::pal().muted,
         Ink::Warn => theme::WARN,
         Ink::Alert => theme::ERR,
     }
@@ -517,23 +517,23 @@ fn fmt_icon_button(ui: &Ui, id: &str, side: f32, on: bool, icon: FmtIcon) -> boo
     let hit = ui.invisible_button(id, [side, side]);
     let hovered = ui.is_item_hovered();
     let fill = if on {
-        theme::GOLD_FILL
+        theme::pal().gold_fill
     } else if hovered {
-        theme::GOLD_HOVER
+        theme::pal().gold_hover
     } else {
-        [0.10, 0.09, 0.06, 0.72]
+        theme::with_alpha(theme::pal().chip_idle_fill, 0.72)
     };
     let rim = if on {
-        theme::GOLD
+        theme::pal().gold
     } else if hovered {
-        theme::GOLD_DIM
+        theme::pal().gold_dim
     } else {
-        [0.32, 0.26, 0.12, 0.55]
+        theme::pal().chip_idle_rim
     };
     let ink = if on {
-        [0.10, 0.08, 0.04, 1.0]
+        theme::pal().gold_button_text
     } else {
-        theme::CREAM
+        theme::pal().cream
     };
     let dl = ui.get_window_draw_list();
     dl.add_rect(p, [p[0] + side, p[1] + side], fill)
@@ -659,9 +659,9 @@ fn color_swatch(ui: &Ui, id: &str, side: f32, on: bool, color: [f32; 4]) -> bool
     .rounding(2.0)
     .build();
     let rim = if on {
-        theme::GOLD
+        theme::pal().gold
     } else {
-        [0.32, 0.26, 0.12, 0.7]
+        theme::with_alpha(theme::pal().chip_idle_rim, 0.7)
     };
     dl.add_rect(p, [p[0] + side, p[1] + side], rim)
         .rounding(theme::ICON_ROUNDING)
@@ -677,7 +677,7 @@ fn format_toolbar(
     hi: usize,
     inner_w: f32,
 ) -> Option<FmtCmd> {
-    ui.text_colored(theme::MUTED, t("about.fmt.hint"));
+    ui.text_colored(theme::pal().muted, t("about.fmt.hint"));
     let side = theme::control_height(ui).max(26.0);
     let mut row_x = 0.0_f32;
     let gap = 4.0;
@@ -925,11 +925,11 @@ pub(super) fn render_wizard(ui: &Ui, state: &mut AddonState) {
     {
         let dl = ui.get_window_draw_list();
         let br = [origin[0] + width, origin[1] + plate_h];
-        dl.add_rect(origin, br, theme::PLATE)
+        dl.add_rect(origin, br, theme::pal().plate)
             .filled(true)
             .rounding(ROUNDING)
             .build();
-        dl.add_rect(origin, br, theme::GOLD_DIM)
+        dl.add_rect(origin, br, theme::pal().gold_dim)
             .rounding(ROUNDING)
             .build();
     }
@@ -957,7 +957,7 @@ pub(super) fn render_wizard(ui: &Ui, state: &mut AddonState) {
             render_summary(ui, draft, feedback, bytes, inner_w, right_x)
         }
         WizardStep::Sending => {
-            ui.text_colored(theme::MUTED, t("msg.status.sending"));
+            ui.text_colored(theme::pal().muted, t("msg.status.sending"));
             Action::None
         }
         WizardStep::Sent { short_id } => {
@@ -968,7 +968,7 @@ pub(super) fn render_wizard(ui: &Ui, state: &mut AddonState) {
             done_button(ui)
         }
         WizardStep::Thanks => {
-            ui.text_colored(theme::GOLD, t("about.thanks"));
+            ui.text_colored(theme::pal().gold, t("about.thanks"));
             done_button(ui)
         }
     };
@@ -982,7 +982,7 @@ pub(super) fn render_wizard(ui: &Ui, state: &mut AddonState) {
 }
 
 fn render_pick(ui: &Ui, draft: &Draft, feedback: &FeedbackState, inner_w: f32) -> Action {
-    ui.text_colored(theme::CREAM, t("step.pick"));
+    ui.text_colored(theme::pal().cream, t("step.pick"));
     ui.dummy([0.0, 4.0]);
 
     let cats = &draft.taxonomy.categories;
@@ -1010,7 +1010,7 @@ fn render_pick(ui: &Ui, draft: &Draft, feedback: &FeedbackState, inner_w: f32) -
             let dl = ui.get_window_draw_list();
             let br = [p[0] + tile_w, p[1] + tile_h];
             let fill = if hovered && live {
-                theme::GOLD_HOVER
+                theme::pal().gold_hover
             } else {
                 [0.12, 0.10, 0.07, 0.9]
             };
@@ -1018,7 +1018,7 @@ fn render_pick(ui: &Ui, draft: &Draft, feedback: &FeedbackState, inner_w: f32) -
                 .filled(true)
                 .rounding(ROUNDING)
                 .build();
-            dl.add_rect(p, br, fade(theme::GOLD_DIM, alpha))
+            dl.add_rect(p, br, fade(theme::pal().gold_dim, alpha))
                 .rounding(ROUNDING)
                 .build();
             draw_glyph(
@@ -1032,7 +1032,7 @@ fn render_pick(ui: &Ui, draft: &Draft, feedback: &FeedbackState, inner_w: f32) -
             let th = ui.calc_text_size(label)[1];
             dl.add_text(
                 [p[0] + 36.0, p[1] + ((tile_h - th) * 0.5).round()],
-                color_u32(fade(theme::CREAM, alpha)),
+                color_u32(fade(theme::pal().cream, alpha)),
                 label,
             );
         }
@@ -1086,9 +1086,9 @@ fn render_step(ui: &Ui, draft: &Draft, i: usize, inner_w: f32) -> Action {
     let step = draft.taxonomy.step(&step_id).cloned();
     let cat_id = draft.category.as_deref().unwrap_or_default();
 
-    ui.text_colored(theme::CREAM, step_prompt(&draft.taxonomy, &step_id));
+    ui.text_colored(theme::pal().cream, step_prompt(&draft.taxonomy, &step_id));
     if let Some(quip) = quip_for(cat_id, &step_id) {
-        ui.text_colored(theme::MUTED, quip);
+        ui.text_colored(theme::pal().muted, quip);
     }
     ui.dummy([0.0, 4.0]);
 
@@ -1156,7 +1156,7 @@ fn render_step(ui: &Ui, draft: &Draft, i: usize, inner_w: f32) -> Action {
                 action = Action::Text(step_id.clone(), buf.clone());
             }
             ui.text_colored(
-                theme::MUTED,
+                theme::pal().muted,
                 format!("{}/{}", buf.chars().count(), rule.max),
             );
             if let Some(e) = draft.text_error(&step_id) {
@@ -1164,7 +1164,7 @@ fn render_step(ui: &Ui, draft: &Draft, i: usize, inner_w: f32) -> Action {
             }
             if !buf.trim().is_empty() {
                 ui.dummy([0.0, 6.0]);
-                ui.text_colored(theme::MUTED, t("about.fmt.preview"));
+                ui.text_colored(theme::pal().muted, t("about.fmt.preview"));
                 paint_mail(ui, &buf, inner_w);
             }
         }
@@ -1178,7 +1178,7 @@ fn render_step(ui: &Ui, draft: &Draft, i: usize, inner_w: f32) -> Action {
     ui.align_text_to_frame_padding();
     let n = draft.current_index().unwrap_or(i + 1);
     ui.text_colored(
-        theme::MUTED,
+        theme::pal().muted,
         tf(
             "about.step_n",
             &[
@@ -1224,7 +1224,7 @@ fn render_summary(
         );
     }
     ui.set_cursor_screen_pos([p[0] + 22.0, p[1]]);
-    ui.text_colored(theme::CREAM, path_text(draft));
+    ui.text_colored(theme::pal().cream, path_text(draft));
     let encoded = draft.encoded_body();
     if !encoded.is_empty() {
         let w = (right_x - ui.cursor_screen_pos()[0]).max(40.0);
@@ -1232,10 +1232,10 @@ fn render_summary(
     }
 
     ui.dummy([0.0, 4.0]);
-    ui.text_colored(theme::MUTED, t("about.attached"));
+    ui.text_colored(theme::pal().muted, t("about.attached"));
     ui.same_line_with_spacing(0.0, GAP);
     ui.text_colored(
-        theme::CREAM,
+        theme::pal().cream,
         format!("v{}  ·  {}", crate::VERSION, gw2_core::i18n::current()),
     );
 
@@ -1271,15 +1271,15 @@ fn render_summary(
         }
         if feedback.account_looking_up {
             ui.same_line_with_spacing(0.0, GAP);
-            ui.text_colored(theme::MUTED, t("about.account_lookup"));
+            ui.text_colored(theme::pal().muted, t("about.account_lookup"));
         } else if let Some(Ok(name)) = &feedback.account {
             ui.same_line_with_spacing(0.0, GAP);
-            ui.text_colored(theme::CREAM, name);
+            ui.text_colored(theme::pal().cream, name);
         }
     }
 
     ui.align_text_to_frame_padding();
-    ui.text_colored(theme::MUTED, t("about.reach_me"));
+    ui.text_colored(theme::pal().muted, t("about.reach_me"));
     ui.same_line_with_spacing(0.0, GAP);
     let mut contact = draft.contact.clone();
     ui.set_next_item_width((inner_w * 0.6).max(120.0));
