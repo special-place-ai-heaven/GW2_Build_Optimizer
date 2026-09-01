@@ -53,9 +53,11 @@ use stream_download::{Settings, StreamDownload};
 use super::{NowPlayingCell, RadioStatus, RbStation};
 
 /// How many bytes to buffer before playback may start. At a typical 128 kbps
-/// (16 KiB/s) this is ~4 s of audio — enough cushion against jitter without a
-/// long tune-in delay (stream-download's 256 KiB default would mean ~16 s).
-const PREFETCH_BYTES: u64 = 64 * 1024;
+/// (16 KiB/s) this is ~8 s of cushion against delivery jitter (raised from
+/// 64 KiB after in-game stutter reports on marginal stations). Icecast sends
+/// a burst on connect, so on most stations this fills near-instantly; the
+/// Buffering status makes the wait visible on the ones that trickle.
+const PREFETCH_BYTES: u64 = 128 * 1024;
 
 /// Size of the in-memory ring buffer holding the live stream. Must comfortably
 /// exceed [`PREFETCH_BYTES`]; ~30 s of audio at 128 kbps.
@@ -426,7 +428,9 @@ fn toggle_action(status: &RadioStatus, has_station: bool) -> ToggleAction {
     match status {
         RadioStatus::Playing => ToggleAction::Pause,
         RadioStatus::Paused => ToggleAction::Resume,
-        RadioStatus::Connecting | RadioStatus::Stalled => ToggleAction::Stop,
+        RadioStatus::Connecting | RadioStatus::Buffering | RadioStatus::Stalled => {
+            ToggleAction::Stop
+        }
         _ if has_station => ToggleAction::Tune,
         _ => ToggleAction::Nothing,
     }
@@ -739,8 +743,16 @@ fn run_session(
         }
     }
 
-    // Connect, buffer, decode, append.
-    match open_and_append(&handle, &station, &player, &now_playing, &stop, &tap) {
+    // Connect, buffer, decode, append. Once headers land the UI flips from
+    // Connecting to Buffering (gen-gated like every session status write).
+    let on_headers = || {
+        let _ = crate::state::with_state(|s| {
+            if still_current(my_gen) {
+                s.radio.status = RadioStatus::Buffering;
+            }
+        });
+    };
+    match open_and_append(&handle, &station, &player, &now_playing, &stop, &tap, &on_headers) {
         Ok(()) => {}
         Err(SessionEnd::Cancelled) => {
             finish_stopped(my_gen, &player, &sink_cell);
@@ -833,7 +845,8 @@ fn run_session(
                 set_error(my_gen, "stream keeps stalling".to_string());
                 return;
             }
-            match open_and_append(&handle, &station, &player, &now_playing, &stop, &tap) {
+            match open_and_append(&handle, &station, &player, &now_playing, &stop, &tap, &on_headers)
+            {
                 Ok(()) => {
                     // A pause can land between the stall check and this line;
                     // resume() owns sink.play() in that case.
@@ -878,6 +891,8 @@ enum SessionEnd {
 
 /// Connect to the station, buffer it, strip ICY metadata, decode, and append
 /// to `player`. Used for both the initial tune-in and the stall reconnect.
+/// `on_headers` fires once the server answered (the buffering phase begins) —
+/// the session uses it for the gen-gated Buffering status write.
 fn open_and_append(
     handle: &tokio::runtime::Handle,
     station: &RbStation,
@@ -885,8 +900,28 @@ fn open_and_append(
     now_playing: &NowPlayingCell,
     stop: &Arc<AtomicBool>,
     tap: &Arc<TapBuffer>,
+    on_headers: &dyn Fn(),
 ) -> Result<(), SessionEnd> {
-    let opened = open_stream(handle, station.stream_url(), now_playing, stop)?;
+    // Some directory rows resolve to a dead `url_resolved` while the raw
+    // `url` still answers (playlist unwrap gone stale, CDN hop down). One
+    // quiet fallback to the other URL before surfacing the error.
+    let primary = station.stream_url();
+    let opened = match open_stream(handle, primary, now_playing, stop, on_headers) {
+        Ok(opened) => opened,
+        Err(SessionEnd::Cancelled) => return Err(SessionEnd::Cancelled),
+        Err(SessionEnd::Failed(msg)) => {
+            let alt = station.url.trim();
+            if alt.is_empty() || alt == primary {
+                return Err(SessionEnd::Failed(msg));
+            }
+            match open_stream(handle, alt, now_playing, stop, on_headers) {
+                Ok(opened) => opened,
+                Err(SessionEnd::Cancelled) => return Err(SessionEnd::Cancelled),
+                // The primary URL's error is the station's real story.
+                Err(SessionEnd::Failed(_)) => return Err(SessionEnd::Failed(msg)),
+            }
+        }
+    };
 
     // A live stream has no filename, so the format probe is primed from the
     // Content-Type; `with_seekable(false)` keeps symphonia from issuing the
@@ -917,11 +952,13 @@ struct OpenedStream {
 }
 
 /// Connect to the stream URL, buffer it, and wrap ICY metadata handling.
+/// `on_headers` fires between the header handshake and the prefetch wait.
 fn open_stream(
     handle: &tokio::runtime::Handle,
     url: &str,
     now_playing: &NowPlayingCell,
     stop: &Arc<AtomicBool>,
+    on_headers: &dyn Fn(),
 ) -> Result<OpenedStream, SessionEnd> {
     // Enter the runtime context for this whole construction sequence:
     // `tokio::time::timeout` (and other tokio primitives) bind the timer
@@ -980,6 +1017,9 @@ fn open_stream(
         .content_type()
         .as_ref()
         .map(|ct| format!("{}/{}", ct.r#type, ct.subtype));
+
+    // Headers are in — the wait below is the prefetch filling.
+    on_headers();
 
     let settings = Settings::default().prefetch_bytes(PREFETCH_BYTES);
     let storage = BoundedStorageProvider::new(
@@ -1369,6 +1409,7 @@ mod tests {
                 "http://gw2bo-no-such-host.invalid/stream",
                 &np,
                 &stop,
+                &|| {},
             )
             .err()
         })
