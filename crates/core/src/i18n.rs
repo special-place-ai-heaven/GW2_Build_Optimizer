@@ -406,7 +406,8 @@ mod tests {
     fn english_catalog_has_core_chrome() {
         with_lang("en", || {
             assert_eq!(t("tab.settings"), "Settings");
-            assert_eq!(t("tab.choya"), "Choya");
+            assert_eq!(t("tab.choya"), "Choya Assist");
+            assert_eq!(t("tab.radio"), "Choya Tunes");
             assert_eq!(t("btn.optimize_build"), "Optimize Build");
         });
     }
