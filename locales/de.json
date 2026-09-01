@@ -39,6 +39,7 @@
   "radio.status.device_lost": "Audiogerät verloren - Abspielen drücken zum Neustarten",
   "radio.status.error": "Stream-Fehler",
   "radio.error.av_hint": "Wenn das öfter passiert, blockiert möglicherweise ein Antivirus oder eine Firewall den Sender.",
+  "radio.error.port_hint": "Dieser Sender streamt über Port {port} - einen mit Tor/Proxy-Verkehr assoziierten Port, den Antiviren-Software und Router-Firewalls oft blockieren. Gib Port {port} in deiner Sicherheitssoftware oder deinem Router frei, um ihn zu hören.",
   "fmt.radio_bitrate": "{kbps} kbit/s",
   "radio.genre.top": "Top-Sender",
   "radio.genre.pop": "Pop",

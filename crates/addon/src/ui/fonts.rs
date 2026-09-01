@@ -159,13 +159,19 @@ pub fn push_ticker() -> Option<FontGuard> {
     Some(FontGuard)
 }
 
-/// Whether every char of `text` is inside the ticker face's glyph ranges
-/// (Latin-1, Latin Ext-A, Cyrillic, general punctuation slice). CJK titles
-/// fall back to the scaled UI font rather than rendering tofu at 42 px.
+/// Whether every char of `text` is inside the ticker face's glyph ranges —
+/// this MUST mirror `LATIN_RANGES` exactly. A gate narrower than the font
+/// shipped a regression: one decoration symbol (stars, notes) anywhere in a
+/// title kicked the whole string to the blurry 3x bitmap path, where the
+/// ASCII-only base atlas also turned every accented char into '?'. CJK
+/// titles still fall back to the scaled UI font rather than 42 px tofu.
 pub fn ticker_can_render(text: &str) -> bool {
     text.chars().all(|c| {
         let u = c as u32;
-        u <= 0x017F || (0x0400..=0x04FF).contains(&u) || (0x2010..=0x2027).contains(&u)
+        (0x0020..=0x017F).contains(&u)
+            || (0x0400..=0x04FF).contains(&u)
+            || (0x2010..=0x2027).contains(&u)
+            || (0x2600..=0x27BF).contains(&u)
     })
 }
 

@@ -39,6 +39,7 @@
   "radio.status.device_lost": "Audio device lost - press Play to reopen",
   "radio.status.error": "Stream error",
   "radio.error.av_hint": "If this keeps happening, your antivirus or firewall may be blocking the station.",
+  "radio.error.port_hint": "This station streams on port {port} - a port associated with Tor/proxy traffic, which antivirus software and router firewalls often block. Allow port {port} in your security software or router to listen to it.",
   "fmt.radio_bitrate": "{kbps} kbps",
   "radio.genre.top": "Top stations",
   "radio.genre.pop": "Pop",

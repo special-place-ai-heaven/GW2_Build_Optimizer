@@ -39,6 +39,7 @@
   "radio.status.device_lost": "Audioapparaat verloren - druk op Afspelen om te hervatten",
   "radio.status.error": "Streamfout",
   "radio.error.av_hint": "Als dit blijft gebeuren, blokkeert je antivirus of firewall mogelijk de zender.",
+  "radio.error.port_hint": "Dit station streamt via poort {port} - een poort die met Tor/proxyverkeer wordt geassocieerd en vaak door antivirussoftware en routerfirewalls wordt geblokkeerd. Sta poort {port} toe in je beveiligingssoftware of router om te luisteren.",
   "fmt.radio_bitrate": "{kbps} kbps",
   "radio.genre.top": "Topzenders",
   "radio.genre.pop": "Pop",

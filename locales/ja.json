@@ -39,6 +39,7 @@
   "radio.status.device_lost": "オーディオデバイスが失われました - 再生を押して再開してください",
   "radio.status.error": "ストリームエラー",
   "radio.error.av_hint": "何度も発生する場合は、ウイルス対策ソフトやファイアウォールが放送局をブロックしている可能性があります。",
+  "radio.error.port_hint": "この局はポート{port}で配信しています。Tor/プロキシ通信に関連するポートのため、ウイルス対策ソフトやルーターのファイアウォールにブロックされることがよくあります。聴くにはセキュリティソフトまたはルーターでポート{port}を許可してください。",
   "fmt.radio_bitrate": "{kbps} kbps",
   "radio.genre.top": "人気の放送局",
   "radio.genre.pop": "ポップ",

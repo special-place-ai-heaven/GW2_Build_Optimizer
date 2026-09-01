@@ -39,6 +39,7 @@
   "radio.status.device_lost": "오디오 장치가 끊겼습니다 - 재생을 눌러 다시 여세요",
   "radio.status.error": "스트림 오류",
   "radio.error.av_hint": "이 문제가 계속되면 백신이나 방화벽이 방송국을 차단하고 있을 수 있습니다.",
+  "radio.error.port_hint": "이 방송국은 포트 {port}로 송출됩니다. Tor/프록시 트래픽과 연관된 포트라 백신과 공유기 방화벽이 자주 차단합니다. 들으려면 보안 프로그램이나 공유기에서 포트 {port}를 허용해 주세요.",
   "fmt.radio_bitrate": "{kbps} kbps",
   "radio.genre.top": "인기 방송국",
   "radio.genre.pop": "팝",

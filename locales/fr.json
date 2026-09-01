@@ -39,6 +39,7 @@
   "radio.status.device_lost": "Périphérique audio perdu - appuyez sur Lecture pour relancer",
   "radio.status.error": "Erreur de flux",
   "radio.error.av_hint": "Si cela se reproduit, votre antivirus ou pare-feu bloque peut-être la station.",
+  "radio.error.port_hint": "Cette station diffuse sur le port {port}, un port associé au trafic Tor/proxy, souvent bloqué par les antivirus et les pare-feu de routeur. Autorisez le port {port} dans votre logiciel de sécurité ou votre routeur pour l'écouter.",
   "fmt.radio_bitrate": "{kbps} kbit/s",
   "radio.genre.top": "Meilleures stations",
   "radio.genre.pop": "Pop",

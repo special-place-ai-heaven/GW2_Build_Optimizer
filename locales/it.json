@@ -39,6 +39,7 @@
   "radio.status.device_lost": "Dispositivo audio perso - premi Riproduci per riaprirlo",
   "radio.status.error": "Errore del flusso",
   "radio.error.av_hint": "Se il problema persiste, l'antivirus o il firewall potrebbero bloccare la stazione.",
+  "radio.error.port_hint": "Questa stazione trasmette sulla porta {port}, una porta associata al traffico Tor/proxy, spesso bloccata da antivirus e firewall del router. Consenti la porta {port} nel tuo software di sicurezza o nel router per ascoltarla.",
   "fmt.radio_bitrate": "{kbps} kbps",
   "radio.genre.top": "Migliori stazioni",
   "radio.genre.pop": "Pop",
