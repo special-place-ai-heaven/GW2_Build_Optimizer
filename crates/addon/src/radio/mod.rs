@@ -13,6 +13,7 @@ mod decode_tests;
 pub mod directory;
 pub mod logos;
 pub mod player;
+pub mod quips;
 
 use std::sync::{Arc, Mutex};
 
@@ -56,6 +57,8 @@ pub enum RadioStatus {
     #[default]
     Idle,
     Connecting,
+    /// Headers arrived; prefetching the stream ring before decode starts.
+    Buffering,
     Playing,
     /// Sink paused in place, session alive: a short pause resumes from the
     /// buffer instantly; a long one re-tunes via the stall machinery.

@@ -252,6 +252,7 @@ pub fn render(ui: &Ui) {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _theme = theme::push(ui, opacity);
         fonts::init(&ui_font, &ui_lang);
+        fonts::init_ticker();
         let _font = fonts::push(&ui_font, &ui_lang);
         let mut opened = true;
         let cond = if snap {

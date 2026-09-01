@@ -15,6 +15,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicPtr, Ordering};
 
 const SIZE_PX: f32 = 16.0;
+/// Native size for the now-playing ticker face — rasterized crisp at this
+/// size instead of bitmap-upscaling the 16 px atlas (which reads as a badly
+/// scaled image in-game).
+const TICKER_SIZE_PX: f32 = 42.0;
 const LATIN_FILES: &[&str] = &["segoeui.ttf", "arial.ttf", "tahoma.ttf", "calibri.ttf"];
 const ZH_FILES: &[&str] = &["msyh.ttc", "msyh.ttf", "simsun.ttc"];
 const JA_FILES: &[&str] = &["YuGothM.ttc", "YuGothR.ttc", "meiryo.ttc", "msgothic.ttc"];
@@ -23,6 +27,7 @@ const ID_LATIN: &str = "GW2BO_FONT_LATIN";
 const ID_ZH: &str = "GW2BO_FONT_ZH";
 const ID_JA: &str = "GW2BO_FONT_JA";
 const ID_KO: &str = "GW2BO_FONT_KO";
+const ID_TICKER: &str = "GW2BO_FONT_TICKER";
 
 /// Inclusive pairs, 0-terminated. Latin-1 + Ext-A (Polish) + Cyrillic + dashes/ellipsis.
 const LATIN_RANGES: &[ImWchar] = &[
@@ -33,6 +38,7 @@ static LATIN: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
 static ZH: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
 static JA: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
 static KO: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
+static TICKER: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
 
 const RECEIVE: nexus::font::RawFontReceive = nexus::font_receive!(|id, font| {
     let ptr = font
@@ -47,6 +53,7 @@ fn store_ptr(id: &str, ptr: *mut ImFont) {
         ID_ZH => ZH.store(ptr, Ordering::Release),
         ID_JA => JA.store(ptr, Ordering::Release),
         ID_KO => KO.store(ptr, Ordering::Release),
+        ID_TICKER => TICKER.store(ptr, Ordering::Release),
         _ => {}
     }
 }
@@ -101,6 +108,7 @@ pub fn init(pref: &str, ui_language: &str) {
                 ID_LATIN,
                 first_existing(&dir, LATIN_FILES),
                 Some(&latin_cfg),
+                SIZE_PX,
             );
         }
         ID_ZH => {
@@ -108,21 +116,60 @@ pub fn init(pref: &str, ui_language: &str) {
                 unsafe { ImFontAtlas_GetGlyphRangesChineseSimplifiedCommon(atlas) },
                 1,
             );
-            try_add(ID_ZH, first_existing(&dir, ZH_FILES), Some(&zh_cfg));
+            try_add(ID_ZH, first_existing(&dir, ZH_FILES), Some(&zh_cfg), SIZE_PX);
         }
         ID_JA => {
             let ja_cfg = make_cfg(unsafe { ImFontAtlas_GetGlyphRangesJapanese(atlas) }, 1);
-            try_add(ID_JA, first_existing(&dir, JA_FILES), Some(&ja_cfg));
+            try_add(ID_JA, first_existing(&dir, JA_FILES), Some(&ja_cfg), SIZE_PX);
         }
         ID_KO => {
             let ko_cfg = make_cfg(unsafe { ImFontAtlas_GetGlyphRangesKorean(atlas) }, 1);
-            try_add(ID_KO, first_existing(&dir, KO_FILES), Some(&ko_cfg));
+            try_add(ID_KO, first_existing(&dir, KO_FILES), Some(&ko_cfg), SIZE_PX);
         }
         _ => {}
     }
 }
 
-fn try_add(id: &str, path: Option<PathBuf>, config: Option<&ImFontConfig>) {
+/// Register the big now-playing ticker face (Latin, 42 px native) once —
+/// English UI included: the marquee wants a crisp large font, not a 3x
+/// bitmap upscale of the 16 px atlas. Safe to call every frame.
+pub fn init_ticker() {
+    if !TICKER.load(Ordering::Acquire).is_null() {
+        return;
+    }
+    let dir = windows_fonts_dir();
+    let cfg = make_cfg(LATIN_RANGES.as_ptr(), 2);
+    try_add(
+        ID_TICKER,
+        first_existing(&dir, LATIN_FILES),
+        Some(&cfg),
+        TICKER_SIZE_PX,
+    );
+}
+
+/// Push the 42 px ticker face; `None` (atlas rebuild, no TTF found) lets the
+/// caller fall back to scaling the current font.
+pub fn push_ticker() -> Option<FontGuard> {
+    let ptr = TICKER.load(Ordering::Acquire);
+    if ptr.is_null() {
+        return None;
+    }
+    // Safety: from the Nexus font callback; FontGuard pops on drop.
+    unsafe { sys::igPushFont(ptr) };
+    Some(FontGuard)
+}
+
+/// Whether every char of `text` is inside the ticker face's glyph ranges
+/// (Latin-1, Latin Ext-A, Cyrillic, general punctuation slice). CJK titles
+/// fall back to the scaled UI font rather than rendering tofu at 42 px.
+pub fn ticker_can_render(text: &str) -> bool {
+    text.chars().all(|c| {
+        let u = c as u32;
+        u <= 0x017F || (0x0400..=0x04FF).contains(&u) || (0x2010..=0x2027).contains(&u)
+    })
+}
+
+fn try_add(id: &str, path: Option<PathBuf>, config: Option<&ImFontConfig>, size_px: f32) {
     let Some(path) = path else {
         log(
             LogLevel::Info,
@@ -131,7 +178,7 @@ fn try_add(id: &str, path: Option<PathBuf>, config: Option<&ImFontConfig>) {
         );
         return;
     };
-    add_font_from_file(id, &path, SIZE_PX, config, RECEIVE).revert_on_unload();
+    add_font_from_file(id, &path, size_px, config, RECEIVE).revert_on_unload();
     log(
         LogLevel::Info,
         "GW2 Build Optimizer",

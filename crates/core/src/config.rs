@@ -321,6 +321,10 @@ pub struct RadioPreferences {
     /// Lower the radio volume while the character is in combat (mumble link).
     #[serde(default)]
     pub duck_in_combat: bool,
+    /// Let Choya fetch AI-written quips about the current song (opt-in;
+    /// uses the configured LLM provider, hard-capped per day).
+    #[serde(default)]
+    pub ai_quips: bool,
 }
 
 impl Default for RadioPreferences {
@@ -333,6 +337,7 @@ impl Default for RadioPreferences {
             country_filter: default_radio_country_filter(),
             bitrate_max: 0,
             duck_in_combat: false,
+            ai_quips: false,
         }
     }
 }
