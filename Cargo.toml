@@ -9,7 +9,7 @@ exclude = ["server/feedback"]
 resolver = "2"
 
 [workspace.package]
-version = "1.11.2"
+version = "1.11.9"
 edition = "2021"
 license = "MIT"
 
@@ -30,3 +30,14 @@ rodio = { version = "0.22.2", default-features = false, features = ["playback", 
 stream-download = { version = "0.22.9", default-features = false, features = ["reqwest-native-tls"] }
 icy-metadata = { version = "0.6", default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+# News still processing (crates/addon/src/news_art.rs): decode -> downscale ->
+# re-encode, so the Nexus texture loader is always handed an already-correctly-
+# sized file. `default-features = false` is LOAD-BEARING, not tidiness: the
+# default set is ["rayon", "default-formats"], which would install a global
+# rayon work-stealing thread pool inside a DLL injected into the running game
+# and compile a dozen decoders we never feed (avif, exr, tiff, webp, gif, qoi).
+# `sniff()` only ever admits JPEG and PNG magic, so every other parser would be
+# dead attack surface. Each of "jpeg"/"png" gives BOTH the decoder and encoder.
+# Nothing in this subtree touches reqwest/tokio/rodio, so the stream-download
+# pin above is unaffected -- re-check `cargo tree -i reqwest` if you bump it.
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }

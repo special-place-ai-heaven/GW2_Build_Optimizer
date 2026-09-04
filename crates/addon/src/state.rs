@@ -634,6 +634,15 @@ pub struct MainState {
     /// Lives on `MainState` so the subtle glow lerps smoothly across frames instead
     /// of snapping when `render_lock_panel` returns.
     pub locks_hover: Option<(crate::ui::main_view::lock_panel::LockElementId, f32)>,
+    // Theme
+    /// Which of the five custom-theme base colors the inline Settings picker
+    /// is editing — an index into `THEME_SLOTS`, matching `CustomTheme`'s
+    /// field order (0 bg, 1 panel, 2 accent, 3 text, 4 muted).
+    ///
+    /// Transient UI state, like `locks_panel_expanded`. `MainState` derives
+    /// `Default`, so this opens on Background and the picker is never in a
+    /// dead "nothing selected" state. Readers clamp with `.min(4)`.
+    pub theme_edit_slot: usize,
 }
 
 impl MainState {

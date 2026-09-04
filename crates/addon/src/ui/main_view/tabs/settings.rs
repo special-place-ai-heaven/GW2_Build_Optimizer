@@ -1,10 +1,13 @@
 //! Settings tab — AI provider, API keys + model picker, theme, cache, benchmarks.
 
-use nexus::imgui::{ColorEdit, ComboBox, Selectable, Ui};
+use nexus::imgui::{
+    ColorButton, ColorEditInputMode, ColorFormat, ColorPicker, ColorPickerMode, ComboBox,
+    Selectable, StyleColor, StyleVar, Ui,
+};
 
 use crate::state::{AddonState, CancellationToken};
 use crate::ui::theme;
-use gw2_core::config::{NewsKind, NewsLayout, NewsSource};
+use gw2_core::config::{CustomTheme, NewsKind, NewsLayout, NewsSource, ThemeConfig};
 use gw2_core::i18n::{t, tf};
 
 use super::super::{build_display, stats};
@@ -76,6 +79,10 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.text_colored([1.0, 0.3, 0.2, 1.0], format!("* {}", t("settings.blocked")));
     theme::wrapped(ui, theme::pal().muted, &t("settings.blocked_note"));
 
+    ui.dummy([0.0, 8.0]);
+    build_display::render_card_header(ui, &t("settings.news"), theme::pal().gold);
+    render_news_sources(ui, state, col_w);
+
     // ── RIGHT COLUMN ────────────────────────────────────────────────
     ui.next_column();
     ui.indent_by(gutter);
@@ -85,10 +92,6 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
 
     ui.unindent_by(gutter);
     ui.columns(1, "##settings_split_end", false);
-
-    ui.dummy([0.0, 8.0]);
-    build_display::render_card_header(ui, &t("settings.news"), theme::pal().gold);
-    render_news_sources(ui, state);
 
     ui.dummy([0.0, 8.0]);
     ui.columns(2, "##settings_bottom", false);
@@ -617,7 +620,17 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     );
 }
 
-fn render_news_sources(ui: &Ui, state: &mut AddonState) {
+/// News sources, sized to live inside one settings column.
+///
+/// This used to end the outer two-column split and lay the four kinds out with
+/// `ui.columns(4, ...)` across the FULL window width — five checkboxes spread
+/// over four columns of a 2000px pane, with the last three nearly empty. It
+/// now sits in the left column under the legend, and the kinds are two
+/// content-sized groups rather than four stretched columns.
+///
+/// Groups, not `ui.columns`: ImGui's legacy columns do not nest, and this is
+/// rendered inside the settings split.
+fn render_news_sources(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let desk = t("news.layout.desk");
     let mag = t("news.layout.magazine");
     let reader = t("news.layout.reader");
@@ -643,12 +656,14 @@ fn render_news_sources(ui: &Ui, state: &mut AddonState) {
                 let _ = state.config.save(&state.config_path);
             }
         });
-    ui.same_line_with_spacing(0.0, 12.0);
+    // The stills toggle keeps the layout row's line only while the column can
+    // hold both; in a narrow column it drops underneath instead of clipping.
+    let stills = format!("{}##set_news_stills", t("news.images"));
+    if seg_w + 12.0 + ui.calc_text_size(&stills)[0] + ui.frame_height() + 8.0 <= col_w {
+        ui.same_line_with_spacing(0.0, 12.0);
+    }
     let mut images = state.config.news.show_images;
-    if ui.checkbox(
-        format!("{}##set_news_stills", t("news.images")),
-        &mut images,
-    ) {
+    if ui.checkbox(&stills, &mut images) {
         state.config.news.show_images = images;
         let _ = state.config.save(&state.config_path);
     }
@@ -657,17 +672,27 @@ fn render_news_sources(ui: &Ui, state: &mut AddonState) {
     }
 
     ui.dummy([0.0, 6.0]);
-    ui.columns(4, "##news_kind_cols", false);
-    for (i, kind) in NewsKind::ALL.iter().enumerate() {
-        ui.text_colored(theme::pal().gold, t(kind.settings_key()));
-        for &src in kind.sources() {
-            news_source_tick(ui, state, src);
-        }
-        if i + 1 < NewsKind::ALL.len() {
-            ui.next_column();
-        }
-    }
-    ui.columns(1, "##news_kind_cols_end", false);
+
+    // Two content-sized groups: Articles + Patch notes on the left, Video +
+    // Guides on the right. Five ticks over four full-width columns was the
+    // sparsest thing on the page.
+    let half = NewsKind::ALL.len() / 2;
+    let kind_block = |ui: &Ui, state: &mut AddonState, kinds: &[NewsKind]| {
+        ui.group(|| {
+            for (n, kind) in kinds.iter().enumerate() {
+                if n > 0 {
+                    ui.dummy([0.0, 2.0]);
+                }
+                ui.text_colored(theme::pal().gold, t(kind.settings_key()));
+                for &src in kind.sources() {
+                    news_source_tick(ui, state, src);
+                }
+            }
+        });
+    };
+    kind_block(ui, state, &NewsKind::ALL[..half]);
+    ui.same_line_with_spacing(0.0, 24.0);
+    kind_block(ui, state, &NewsKind::ALL[half..]);
 }
 
 fn news_source_tick(ui: &Ui, state: &mut AddonState, src: NewsSource) {
@@ -859,6 +884,88 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     }
 }
 
+/// The five custom-theme base colors in rail order: `(label key, description
+/// key)`. The index is [`crate::state::MainState::theme_edit_slot`] and it
+/// matches `CustomTheme`'s field order, so the two `theme_base*` helpers stay
+/// trivially checkable against each other.
+const THEME_SLOTS: [(&str, &str); 5] = [
+    ("settings.theme_bg", "settings.theme_bg_desc"),
+    ("settings.theme_panel", "settings.theme_panel_desc"),
+    ("settings.theme_accent", "settings.theme_accent_desc"),
+    ("settings.theme_text", "settings.theme_text_desc"),
+    ("settings.theme_muted", "settings.theme_muted_desc"),
+];
+
+fn theme_base(c: &CustomTheme, i: usize) -> [f32; 3] {
+    match i {
+        0 => c.bg,
+        1 => c.panel,
+        2 => c.accent,
+        3 => c.text,
+        _ => c.muted,
+    }
+}
+
+fn theme_base_mut(c: &mut CustomTheme, i: usize) -> &mut [f32; 3] {
+    match i {
+        0 => &mut c.bg,
+        1 => &mut c.panel,
+        2 => &mut c.accent,
+        3 => &mut c.text,
+        _ => &mut c.muted,
+    }
+}
+
+/// Selection marks for the picked rail row, given the swatch's screen-space
+/// top-left. Everything is drawn OUTSIDE the swatch, on the section ground,
+/// so no mark has to out-contrast the color it is marking — the awkward case
+/// (the player sets a base to the same color as the marker) becomes
+/// mark-vs-ground, the contrast every button and separator already rides on.
+///
+/// The caret is `cream`, deliberately not the accent: `cream` is the theme's
+/// text color and the ground is its background, so cream-on-ground cannot
+/// fail without every word in the addon becoming unreadable. It is the mark
+/// that survives a degenerate palette where `accent == bg` collapses both the
+/// gold ring and the row's header plate. Shape as well as color, so it also
+/// survives greyscale.
+fn draw_slot_marker(ui: &Ui, swatch: [f32; 2], sw: f32) {
+    let p = theme::pal();
+    let (x, y) = (swatch[0], swatch[1]);
+    let dl = ui.get_window_draw_list();
+    dl.add_rect([x - 3.0, y - 3.0], [x + sw + 3.0, y + sw + 3.0], p.gold)
+        .thickness(2.0)
+        .rounding(4.0)
+        .build();
+    let cy = y + sw * 0.5;
+    dl.add_triangle([x - 5.0, cy], [x - 11.0, cy - 5.0], [x - 11.0, cy + 5.0], p.cream)
+        .filled(true)
+        .build();
+}
+
+/// Copy the current preset's five base colors into an UNTOUCHED custom theme,
+/// so opening the custom editor starts from the look the player was just
+/// wearing instead of a fixed palette. Returns whether it wrote anything.
+///
+/// The untouched guard is the whole point: once a player has edited or named a
+/// custom theme, switching preset -> custom -> preset and back must hand their
+/// theme back, not overwrite it. `"custom"` and unknown ids have no bases to
+/// copy, so those are no-ops too.
+fn seed_custom_from_preset(theme: &mut ThemeConfig) -> bool {
+    if theme.custom != CustomTheme::default() {
+        return false;
+    }
+    let Some([bg, panel, accent, text, muted]) = theme::preset_bases(&theme.preset) else {
+        return false;
+    };
+    let c = &mut theme.custom;
+    c.bg = bg;
+    c.panel = panel;
+    c.accent = accent;
+    c.text = text;
+    c.muted = muted;
+    true
+}
+
 /// Runtime theme picker: the built-in presets from `theme::preset_ids()` plus
 /// one user-defined custom theme. Selecting a row applies instantly —
 /// `theme::apply_theme` is a cheap palette rebuild, so it runs on every
@@ -885,7 +992,18 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
             .map(|(_, name)| name.to_string())
             .unwrap_or_else(|| state.config.theme.preset.clone())
     };
-    ui.set_next_item_width(right_item_w * 0.6);
+    let style = ui.clone_style();
+    let fh = ui.frame_height();
+    let gap = style.item_spacing[0];
+
+    // Preset combo and theme name share one line: the name only exists in
+    // custom mode, so a full row of its own bought nothing but height in the
+    // one direction this panel has least of.
+    let combo_w = (right_item_w * 0.42).max(fh * 5.0).min(right_item_w);
+    let name_w = right_item_w - combo_w - gap;
+    let name_beside = name_w >= fh * 6.0;
+
+    ui.set_next_item_width(combo_w);
     if let Some(_c) = ComboBox::new("##theme_preset")
         .preview_value(&preview)
         .begin(ui)
@@ -904,18 +1022,25 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
         // never changes/collides ids ("##" would still hash the label).
         let label = format!("{}###theme_custom_row", custom_row_label);
         if Selectable::new(&label).selected(is_custom).build(ui) && !is_custom {
+            seed_custom_from_preset(&mut state.config.theme);
             state.config.theme.preset = "custom".into();
             theme::apply_theme(&state.config.theme);
             crate::ui::save_config_detached(state);
         }
     }
 
+    // Re-read: the combo above may have just changed it.
     if state.config.theme.preset != "custom" {
         return;
     }
 
-    ui.spacing();
-    ui.set_next_item_width(right_item_w * 0.6);
+    // Beside the combo when the column can hold both, under it when it cannot.
+    if name_beside {
+        ui.same_line();
+        ui.set_next_item_width(name_w);
+    } else {
+        ui.set_next_item_width(right_item_w * 0.6);
+    }
     ui.input_text("##theme_custom_name", &mut state.config.theme.custom.name)
         .hint(&t("settings.theme_name_hint"))
         .build();
@@ -923,30 +1048,186 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
         crate::ui::save_config_detached(state);
     }
 
-    let mut edited = false;
-    let mut commit = false;
-    {
-        let custom = &mut state.config.theme.custom;
-        let rows: [(String, &mut [f32; 3]); 5] = [
-            (t("settings.theme_bg"), &mut custom.bg),
-            (t("settings.theme_panel"), &mut custom.panel),
-            (t("settings.theme_accent"), &mut custom.accent),
-            (t("settings.theme_text"), &mut custom.text),
-            (t("settings.theme_muted"), &mut custom.muted),
-        ];
-        for (i, (label, value)) in rows.into_iter().enumerate() {
-            ui.set_next_item_width(right_item_w * 0.6);
-            // "###" hashes only the suffix, so the widget identity survives a
-            // language switch mid-edit (with "##" the translated label would
-            // still feed the id hash).
-            if ColorEdit::new(format!("{label}###theme_color_{i}"), value).build(ui) {
-                edited = true;
-            }
-            if ui.is_item_deactivated_after_edit() {
-                commit = true;
+    // The swatch grid is a new block, not another row of the form above it.
+    // One item_spacing does not read as a break; this does.
+    ui.dummy([0.0, style.item_spacing[1]]);
+
+    // ── custom base colors: swatch grid + one always-visible picker ──
+    //
+    // Click a swatch (or its label) to point the picker at that base, edit it
+    // in place, then click the next one. No popup, no modal.
+    //
+    // The grid is 2 columns x 3 rows, filled COLUMN-major, so the two surface
+    // colors and the accent stay together on the left and the two type colors
+    // pair on the right. A single vertical list of five spent height — the one
+    // axis a settings pane never has to spare — to say what two columns say in
+    // three rows.
+    //
+    // ColorPicker4's total width IS the item width we set, provided nothing
+    // is drawn past it (hence `label(false)` + `side_preview(false)`), and its
+    // saturation/value square is `width - (frame_height + item_inner_spacing.x)`.
+    // The popup this replaces asked for `frame_height * 12` — a ~238px square.
+    // `frame_height * 7` lands ~128px: 29% of the pixel area, still over a
+    // pixel per saturation percent. That is the "a bit too large" fix, in
+    // numbers.
+    const ROWS: usize = 3;
+    let fs = state.config.font_scale.max(0.5);
+    let lane = 12.0; // caret + ring live here, left of the swatch
+    let col_gap = 12.0; // grid | picker gutter
+    let trail = 6.0; // so the row plate does not end flush against the text
+    let picker_w = (fh * 7.0).min(right_item_w).max(fh * 4.0);
+
+    let labels: [String; 5] = std::array::from_fn(|i| t(THEME_SLOTS[i].0));
+    // Measure the labels, never assume them: "Background" is 10 chars,
+    // "Gedämpfter Text" 15, "Przygaszony tekst" 17, "Приглушённый текст" 18.
+    // The grid sits beside the picker only when the widest label in the
+    // CURRENT language at the CURRENT font scale actually fits there; below
+    // that the section stacks. In side-by-side mode `cell_w` is at least the
+    // width this test demanded, so a label cannot clip by construction.
+    let widest = labels
+        .iter()
+        .map(|l| ui.calc_text_size(l)[0])
+        .fold(0.0_f32, f32::max);
+    let grid_need = lane + (fh + gap + widest + trail) * 2.0 + gap;
+    let side_by_side = right_item_w >= grid_need + col_gap + picker_w;
+    let grid_w = if side_by_side {
+        right_item_w - col_gap - picker_w
+    } else {
+        right_item_w
+    };
+    // Cells are sized to their content, not stretched to the pane: a row plate
+    // running the full width of the column was pure decoration and made the
+    // five look like menu entries rather than swatches.
+    let cell_w = ((grid_w - lane - gap) * 0.5).max(fh + 24.0);
+    let label_w = (cell_w - fh - gap).max(24.0);
+
+    let slot = state.main.theme_edit_slot.min(4);
+    let mut pick: Option<usize> = None;
+    ui.group(|| {
+        // The ring reaches 4px past the swatch; ambient row spacing would let
+        // it touch the neighbouring row's plate. x is unchanged.
+        let _sp = ui.push_style_var(StyleVar::ItemSpacing([gap, 8.0]));
+        // A frame-height row beside a frame-height swatch: centre the label.
+        let _al = ui.push_style_var(StyleVar::SelectableTextAlign([0.0, 0.5]));
+        let p = theme::pal();
+        ui.indent_by(lane);
+        for row in 0..ROWS {
+            for col in 0..2 {
+                // Column-major: left column 0,1,2 — right column 3,4 and one
+                // empty cell at the bottom right.
+                let i = col * ROWS + row;
+                let Some(label) = labels.get(i) else {
+                    continue;
+                };
+                if col > 0 {
+                    ui.same_line();
+                }
+                let sel = i == slot;
+                let c = theme_base(&state.config.theme.custom, i);
+                let swatch = ui.cursor_screen_pos();
+
+                // "###" hashes only the suffix, so widget identity survives a
+                // language switch mid-edit. The visible half is still the
+                // localized label, which ImGui's built-in color tooltip shows
+                // as the tooltip title — free, localized, and a bonus cue
+                // rather than the only one.
+                if ColorButton::new(
+                    format!("{label}###theme_sw_{i}"),
+                    [c[0], c[1], c[2], 1.0],
+                )
+                .size([fh, fh])
+                .alpha(false)
+                // Without the border, a swatch set to the panel color
+                // dissolves into the plate behind it.
+                .border(true)
+                // ColorButton is a drag-drop SOURCE by default. A drag off a
+                // swatch eats the press so the click never lands, and a
+                // dropped color mutates a base with no ActiveId transition,
+                // which the commit-on-deactivate save below would miss.
+                .drag_drop(false)
+                .build(ui)
+                {
+                    pick = Some(i);
+                }
+
+                ui.same_line();
+                {
+                    // Selected row in cream, the other four muted: the grid
+                    // reads as one live cell and four parked ones.
+                    let _tc =
+                        ui.push_style_color(StyleColor::Text, if sel { p.cream } else { p.muted });
+                    // Explicit width: a 0-width Selectable spans the whole
+                    // column, which both swallows the second grid column and
+                    // shoves the picker off the right edge.
+                    if Selectable::new(format!("{label}###theme_row_{i}"))
+                        .selected(sel)
+                        .size([label_w, fh])
+                        .build(ui)
+                    {
+                        pick = Some(i);
+                    }
+                }
+
+                // After both items, so the marks land on top of the row plate.
+                if sel {
+                    draw_slot_marker(ui, swatch, fh);
+                }
             }
         }
+        ui.unindent_by(lane);
+    });
+
+    // Apply the click BEFORE the picker is submitted: on a frame where a rail
+    // click landed the picker cannot be the active item, so re-pointing it is
+    // safe and it follows the new slot with zero lag.
+    if let Some(i) = pick {
+        state.main.theme_edit_slot = i;
     }
+    let slot = state.main.theme_edit_slot.min(4);
+
+    // Plain `same_line` (offset 0) means "previous line end + spacing", which
+    // after a group is the rail's right edge. NOT `same_line_with_pos`: that
+    // offset is measured from the window position plus group and column
+    // offsets and excludes window padding, so inside this two-column settings
+    // layout the number passed is not the x you get.
+    if side_by_side {
+        ui.same_line_with_spacing(0.0, col_gap);
+    }
+    let edited = {
+        let value = theme_base_mut(&mut state.config.theme.custom, slot);
+        ui.set_next_item_width(picker_w);
+        ColorPicker::new("###theme_picker", value)
+            .label(false)
+            // Reclaims frame_height*3 of width, and its "Current"/"Original"
+            // captions are hardcoded English in the widget source. The rail
+            // is the live preview anyway.
+            .side_preview(false)
+            // ColorPicker4 only implies NoSmallPreview when the SIDE preview
+            // is on, so with side_preview off this must be set explicitly or
+            // the hex row keeps a redundant swatch.
+            .small_preview(false)
+            .alpha(false)
+            .alpha_bar(false)
+            // The right-click menu writes g.ColorEditOptions, which persists
+            // in imgui.ini and feeds the picker/input mask back in — a player
+            // who once chose "Hue wheel" in the old popup would get a wheel
+            // here and a broken layout.
+            .options(false)
+            .mode(ColorPickerMode::HueBar) // exactly one PickerMask bit
+            .input_mode(ColorEditInputMode::Rgb) // exactly one InputMask bit
+            .inputs(true)
+            .display_hex(true) // the one field people paste a color into
+            .display_rgb(false)
+            .display_hsv(false)
+            .format(ColorFormat::U8)
+            .build(ui)
+    };
+    // Valid immediately after `build`: ColorPicker4 wraps itself in
+    // BeginGroup/EndGroup and EndGroup forwards both the Edited and
+    // Deactivated status flags to the group item — the same release/defocus
+    // debounce the old ColorEdit rows used.
+    let commit = ui.is_item_deactivated_after_edit();
+
     if edited {
         theme::apply_theme(&state.config.theme);
     }
@@ -954,9 +1235,34 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
         crate::ui::save_config_detached(state);
     }
 
-    ui.set_window_font_scale(0.85);
+    // ── caption: what the selected base actually paints ──────────────
+    // One description instead of five, at full column width where the long
+    // German and Russian strings wrap best. Naming the slot in words is also
+    // the one selection cue no color choice can erase.
+    ui.spacing();
+    theme::wrapped(ui, theme::pal().cream, &labels[slot]);
+    ui.set_window_font_scale(fs * 0.85);
+    {
+        // Reserve the tallest of the five so clicking down the rail never
+        // shifts the controls below this section. Measured at the scale it
+        // renders at, which is why this sits after the push.
+        let wrap_w = ui.content_region_avail()[0].max(8.0);
+        let reserve = THEME_SLOTS
+            .iter()
+            .map(|(_, dk)| ui.calc_text_size_with_opts(t(dk), false, wrap_w)[1])
+            .fold(0.0_f32, f32::max);
+        let top = ui.cursor_screen_pos()[1];
+        theme::wrapped(ui, theme::pal().muted, &t(THEME_SLOTS[slot].1));
+        let used = ui.cursor_screen_pos()[1] - top - style.item_spacing[1];
+        if reserve - used > 0.5 {
+            ui.dummy([0.0, reserve - used]);
+        }
+    }
     theme::wrapped(ui, theme::pal().muted, &t("settings.theme_custom_hint"));
-    ui.set_window_font_scale(1.0);
+    // Restore to `fs`, NOT 1.0: `render_main` sets the window font scale to
+    // config.font_scale, so resetting to 1.0 here silently un-scaled every
+    // section after this one for any player not on 1.0.
+    ui.set_window_font_scale(fs);
 }
 
 fn pack_mark(status: gw2_api::localize::PackStatus) -> (&'static str, [f32; 4]) {
@@ -1474,6 +1780,62 @@ mod tests {
         );
     }
 
+    /// Clicking Custom must open the editor on the preset the player is
+    /// looking at — and must never eat a custom theme they already made.
+    #[test]
+    fn seed_custom_from_preset_only_touches_an_untouched_theme() {
+        use gw2_core::config::CustomTheme;
+
+        // Fresh custom theme + a real preset selected: seeded from that preset.
+        let mut fresh = ThemeConfig {
+            preset: "molten-ember".into(),
+            custom: CustomTheme::default(),
+        };
+        assert!(seed_custom_from_preset(&mut fresh));
+        let [bg, panel, accent, text, muted] =
+            theme::preset_bases("molten-ember").expect("molten-ember is a built-in preset");
+        assert_eq!(
+            (
+                fresh.custom.bg,
+                fresh.custom.panel,
+                fresh.custom.accent,
+                fresh.custom.text,
+                fresh.custom.muted
+            ),
+            (bg, panel, accent, text, muted)
+        );
+        assert!(
+            fresh.custom.name.is_empty(),
+            "seeding copies colors, never a name"
+        );
+
+        // A theme the player has edited is left exactly as they left it.
+        let mine = CustomTheme {
+            name: "Pinkfrost".into(),
+            bg: [0.10, 0.02, 0.08],
+            panel: [0.18, 0.05, 0.14],
+            accent: [1.0, 0.35, 0.75],
+            text: [0.96, 0.90, 0.94],
+            muted: [0.60, 0.48, 0.56],
+        };
+        let mut edited = ThemeConfig {
+            preset: "verdant-wilds".into(),
+            custom: mine.clone(),
+        };
+        assert!(!seed_custom_from_preset(&mut edited));
+        assert_eq!(edited.custom, mine, "an edited custom theme survives");
+
+        // Nothing to copy from: "custom" itself, and an unknown id.
+        for preset in ["custom", "no-such-theme"] {
+            let mut t = ThemeConfig {
+                preset: preset.into(),
+                custom: CustomTheme::default(),
+            };
+            assert!(!seed_custom_from_preset(&mut t), "{preset} has no bases");
+            assert_eq!(t.custom, CustomTheme::default());
+        }
+    }
+
     /// Every i18n key the Theme section renders must exist in the locale
     /// catalogs — `t()` echoes the key itself when it is missing everywhere,
     /// so equality means a hole in the Settings chrome. (Key parity across
@@ -1491,6 +1853,11 @@ mod tests {
             "settings.theme_accent",
             "settings.theme_text",
             "settings.theme_muted",
+            "settings.theme_bg_desc",
+            "settings.theme_panel_desc",
+            "settings.theme_accent_desc",
+            "settings.theme_text_desc",
+            "settings.theme_muted_desc",
             "settings.theme_custom_hint",
         ] {
             assert_ne!(t(key), key, "locale catalogs are missing {key}");

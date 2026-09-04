@@ -2,6 +2,86 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.11.9 - 2026-09-04
+
+### News
+
+- Large images are downscaled instead of skipped. Stills wider or taller than 1024px are now shrunk before they are cached, so the overlay is handed an image it can actually use. The official blog's announcement art went from 1920x1080 and 1.9 MB to 1024x576 and 0.7 MB, and its texture from 8.3 MB of video memory to 2.4 MB. Images already small enough — YouTube thumbnails, for one — are left untouched rather than re-encoded.
+- The download limit that was silently rejecting those images has been raised. It fails closed, so the pictures that most needed shrinking were never fetched in the first place.
+- Truncated images are no longer cached. A download cut off mid-transfer used to be stored as a permanent half-grey thumbnail.
+
+## 1.11.8 - 2026-09-04
+
+### News
+
+- Images are back. Article art, YouTube thumbnails and guide images had all stopped loading: the still-image allowlist only listed the hosts the feeds are *fetched from*, not the CDNs those feeds actually serve pictures from. YouTube round-robins thumbnails over i1-i4.ytimg.com, GuildJen serves through Jetpack Photon, and the official blog serves from a CloudFront distribution — none of them were admitted, so every image was discarded before it was ever downloaded.
+- Official-blog images written as `//host/path` now resolve instead of being dropped.
+- YouTube stills arrive as 16:9 instead of the letterboxed 4:3 crop, from one host instead of four.
+- The News source picker moved into the left column of Settings. It used to stretch five checkboxes across the full window in four columns, three of them nearly empty.
+
+### Themes
+
+- Glacial Ward is the new default theme. An existing theme choice is untouched.
+- The custom theme editor is rebuilt around one always-visible colour picker, with the five base colours beside it as a 2x3 grid of swatches — click a swatch to point the picker at it, then click the next. The three R/G/B number boxes per colour are gone, and the picker itself is about a third of its old area.
+- Every base colour now says what it paints ("Headers, buttons, highlights, and the selected row"), translated into all 12 languages.
+- Choosing Custom starts from the theme you were just looking at rather than a fixed palette. A custom theme you have already edited or named is never overwritten.
+- The theme dropdown and the theme name share one line, and the name box only appears for a custom theme.
+
+### Fixed
+
+- Overlay text scale: several sections reset the font scale to 100% instead of the value on your Settings slider, silently shrinking everything drawn after them for anyone not on the default. Radio and the theme editor are corrected.
+
+## 1.11.2 - 2026-09-01
+
+### Radio
+
+- Quip bubbles draw on top of everything else in the overlay, stay for 12 seconds, fade over 2, and float with a cartoon bob.
+
+## 1.11.1 - 2026-09-01
+
+### Themes
+
+- Theme sweep: 59 remaining hardcoded colours across 14 files now follow the palette — the API status strip, the INFO sidebar, section bars, the whole spec-and-trait lock panel, settings headers and legends, progress banners, spinner dots, the chat background and the choya speech bubble. Meaning colours (errors, warnings, comparison green and blue, profession identity, heal and elite rims) deliberately stay fixed so they read the same in every theme.
+
+## 1.11.0 - 2026-09-01
+
+### Themes
+
+- Five themes: Tyrian Gold, Glacial Ward, Verdant Wilds, Molten Ember and Void Orchid, each contrast-checked so text stays readable.
+- Custom theme: name it and set five base colours; every other shade is derived from them. Live preview, and the choice persists.
+- Settings has a Theme section, localized in all 12 languages.
+
+### Radio
+
+- The World genre loads on the tab's first open, and your last genre is remembered between sessions.
+- Playing a favourite loads its genre into the station list and pins the live station into the results, so the controls row is always reachable.
+- The volume slider is twice as long, and dragging it no longer re-tunes the station.
+
+## 1.10.7 - 2026-09-01
+
+### Radio
+
+- A star or a music note anywhere in a song title no longer forces the whole ticker onto the blurry fallback font, which also turned accented characters into "?".
+- Quip bubbles always sit above the choya's head. The low one used to land inside the now-playing ticker.
+- Stations that fail on ports commonly blocked by antivirus or router firewalls now say so, naming the port and both likely culprits, in all 12 languages.
+
+## 1.10.6 - 2026-09-01
+
+### Interface
+
+- Tabs renamed to Choya Assist and Choya Tunes, translated natively in all 12 languages.
+
+## 1.10.5 - 2026-09-01
+
+### Radio
+
+- AI quips, opt-in: the choya asks your configured AI for short lines about the song playing, capped at 30 a day with 90 seconds between them, and only while the player bar is on screen. Canned genre-flavoured lines cover it when the feature is off or unavailable.
+- Quips appear in a speech bubble with a tail and a pop-in, with mood emotes and a rare ON-AIR jackpot, roughly every 30 seconds to 2 minutes plus a greeting when you tune in.
+- The now-playing ticker flows endlessly with a small dancing choya between repeats, and renders crisp at 42px.
+- Playback controls move onto the active station's row while it plays; the slim player bar keeps LIVE, ticker, equalizer and DJ.
+- The choya dances to a followable groove instead of twitching.
+- Buffering status, doubled prefetch, and a retry on the station's raw URL when the resolved one fails.
+
 ## 1.9.2 - 2026-09-01
 
 ### Radio

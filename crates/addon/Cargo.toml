@@ -27,3 +27,4 @@ rodio.workspace = true
 stream-download.workspace = true
 icy-metadata.workspace = true
 tokio.workspace = true
+image.workspace = true

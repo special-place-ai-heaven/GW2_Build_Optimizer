@@ -386,15 +386,40 @@ fn item_image(block: &str) -> Option<String> {
         .or_else(|| enclosure_image(block))
         .or_else(|| tagged_attr(block, "media:content", "url"))
         .or_else(|| first_img_src(block))
-        .and_then(|u| https_image(&decode_entities(&u)))
-        .map(prefer_youtube_still)
+        // Normalize BEFORE admitting. The other order looks equivalent and is
+        // not: `https_image` short-circuits to None on a URL the allowlist
+        // rejects, so a rewrite chained after it never runs on exactly the
+        // URLs that need rewriting.
+        .map(|u| prefer_youtube_still(scheme_relative_to_https(&decode_entities(&u))))
+        .and_then(|u| https_image(&u))
+}
+
+/// WordPress-backed feeds emit scheme-relative `//host/path` image srcs.
+/// `Url::parse` has no scheme to work with there and rejects them outright,
+/// so those stills were dropped before any host was ever considered.
+fn scheme_relative_to_https(url: &str) -> String {
+    let url = url.trim();
+    match url.strip_prefix("//") {
+        Some(rest) => format!("https://{rest}"),
+        None => url.to_string(),
+    }
 }
 
 /// YouTube `hqdefault` is 4:3 with letterbox bars. `mqdefault` is 16:9.
+/// The feed round-robins thumbnails across `i1`-`i4.ytimg.com`, so this also
+/// collapses the shard away and every video's still comes from one host.
 fn prefer_youtube_still(url: String) -> String {
-    let Some(rest) = url
-        .strip_prefix("https://i.ytimg.com/vi/")
-        .or_else(|| url.strip_prefix("https://img.youtube.com/vi/"))
+    const YT_STILL_PREFIXES: &[&str] = &[
+        "https://i.ytimg.com/vi/",
+        "https://i1.ytimg.com/vi/",
+        "https://i2.ytimg.com/vi/",
+        "https://i3.ytimg.com/vi/",
+        "https://i4.ytimg.com/vi/",
+        "https://img.youtube.com/vi/",
+    ];
+    let Some(rest) = YT_STILL_PREFIXES
+        .iter()
+        .find_map(|p| url.strip_prefix(p))
     else {
         return url;
     };
@@ -840,7 +865,7 @@ mod tests {
   <link rel="alternate" href="https://www.youtube.com/watch?v=abc"/>
   <published>2026-08-20T12:00:00+00:00</published>
     <media:group>
-    <media:thumbnail url="https://i.ytimg.com/vi/abc/hqdefault.jpg"/>
+    <media:thumbnail url="https://i3.ytimg.com/vi/abc/hqdefault.jpg"/>
     <media:description>A trailer about raids.</media:description>
   </media:group>
 </entry>
@@ -1024,6 +1049,41 @@ mod tests {
         assert!(crate::news_art::url_ok(
             "https://img.youtube.com/vi/x/mqdefault.jpg"
         ));
+    }
+
+    /// End-to-end for the regression: a sharded YouTube thumbnail and a
+    /// scheme-relative WordPress src must both survive `item_image`.
+    ///
+    /// This is the test the old suite was missing. It asserted that FEED hosts
+    /// were allowlisted, which was never in doubt — the IMAGE hosts are a
+    /// different set entirely, and nothing checked those.
+    #[test]
+    fn real_world_image_srcs_survive_admission() {
+        // YouTube: shard normalized away, and hqdefault upgraded to 16:9.
+        assert_eq!(
+            item_image(r#"<media:thumbnail url="https://i3.ytimg.com/vi/abc/hqdefault.jpg"/>"#),
+            Some("https://i.ytimg.com/vi/abc/mqdefault.jpg".into())
+        );
+        // GuildJen: Photon host admitted, and the fit/ssl query it needs kept.
+        assert_eq!(
+            item_image(
+                r#"<img src="https://i0.wp.com/guildjen.com/wp-content/uploads/2026/08/x.jpg?fit=1280%2C720&amp;ssl=1"/>"#
+            ),
+            Some(
+                "https://i0.wp.com/guildjen.com/wp-content/uploads/2026/08/x.jpg?fit=1280%2C720&ssl=1"
+                    .into()
+            )
+        );
+        // Official blog: scheme-relative src gets a scheme before parsing.
+        assert_eq!(
+            item_image(r#"<img src="//d3qqidoz8mm2hm.cloudfront.net/wp-content/x.jpg"/>"#),
+            Some("https://d3qqidoz8mm2hm.cloudfront.net/wp-content/x.jpg".into())
+        );
+        // A host nobody allowlisted is still dropped, scheme-relative or not.
+        assert_eq!(
+            item_image(r#"<img src="//evil.example/track.png"/>"#),
+            None
+        );
     }
 
     #[test]
