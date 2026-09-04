@@ -19,7 +19,7 @@ use crate::validation::{
     ValidatedBuild, ValidatedItem, ValidatedSpec, ValidatedWeaponSet, ARMOR_SLOTS, TRINKET_SLOTS,
     WEAPON_SET1_SLOTS,
 };
-use gw2_api::models::{Profession, Specialization};
+use gw2_api::models::{Profession, Skill, Specialization};
 use gw2_core::types::{BuildLocks, GearSlot, PrefixRef};
 
 // ─── Core types ──────────────────────────────────────────────────────────────
@@ -38,6 +38,9 @@ pub struct SearchConfig {
     pub beam_width: usize,
     /// Hard cap on referee evaluations across the entire run.
     pub eval_budget: usize,
+    /// Stop after this many consecutive generations with no improvement in the
+    /// best rank. Best rank is monotone (elitism), so "no improvement" is exact.
+    pub patience: u32,
     /// Wall-clock time limit (seconds).  The search aborts cleanly when this
     /// elapses so the caller always gets a result inside `time_limit_secs + ε`.
     pub time_limit_secs: u64,
@@ -47,7 +50,18 @@ impl Default for SearchConfig {
     fn default() -> Self {
         Self {
             beam_width: 10,
-            eval_budget: 1500,
+            // A CEILING, not the stop. The search ends when `patience`
+            // generations pass without improving the best rank, or at the
+            // deadline, or on cancel, whichever comes first.
+            //
+            // History, so nobody re-litigates it: at 1500 the search ran only 3
+            // generations; raising it to 50_000 changed NOTHING because
+            // admission was `take(80)` of a round-robin list, i.e. the same
+            // first ~6 options of every operator, re-scored 64 times. That is
+            // fixed by `sample_indices`, which is the only reason a higher
+            // ceiling can do anything now. Patience stops it wasting headroom.
+            eval_budget: 200_000,
+            patience: 3,
             time_limit_secs: 45,
         }
     }
@@ -326,6 +340,34 @@ pub fn generate_neighbors(
     locks: &BuildLocks,
     weights: &OptimizationWeights,
 ) -> Vec<ValidatedBuild> {
+    let groups = generate_neighbor_groups(candidate, db, profession_name, locks, weights);
+    let total: usize = groups.iter().map(|g| g.len()).sum();
+    let max_len = groups.iter().map(|g| g.len()).max().unwrap_or(0);
+    let mut neighbors: Vec<ValidatedBuild> = Vec::with_capacity(total);
+    let mut iters: Vec<_> = groups.into_iter().map(|g| g.into_iter()).collect();
+    for _ in 0..max_len {
+        for it in iters.iter_mut() {
+            if let Some(n) = it.next() {
+                neighbors.push(n);
+            }
+        }
+    }
+    neighbors
+}
+
+/// The neighbourhood as one `Vec` per operator, un-interleaved. The beam
+/// admits from each group separately so a 3-item operator (elite-spec swap)
+/// is fully enumerated every generation while a 900-item one (per-slot
+/// prefix) is strided — striding the flattened list instead gave every
+/// operator admission proportional to its SIZE, which starved exactly the
+/// swaps that move a build the most.
+pub fn generate_neighbor_groups(
+    candidate: &BeamCandidate,
+    db: &GameDb,
+    profession_name: &str,
+    locks: &BuildLocks,
+    weights: &OptimizationWeights,
+) -> Vec<Vec<ValidatedBuild>> {
     let mut groups: Vec<Vec<ValidatedBuild>> = Vec::new();
     if !candidate.report.viability.is_viable {
         groups.push(swap_utilities_for_failed_gates(
@@ -347,21 +389,228 @@ pub fn generate_neighbors(
     groups.push(swap_utility_skills(candidate, db, profession_name));
     groups.push(swap_elite_skills(candidate, db, profession_name));
     groups.push(swap_major_traits(candidate, db, locks));
-    groups.push(swap_elite_spec(candidate, db, profession_name, locks));
+    groups.push(swap_elite_spec(
+        candidate,
+        db,
+        profession_name,
+        locks,
+        weights,
+    ));
     groups.push(swap_weapons(candidate, db, profession_name));
+    groups
+}
 
-    let total: usize = groups.iter().map(|g| g.len()).sum();
-    let max_len = groups.iter().map(|g| g.len()).max().unwrap_or(0);
-    let mut neighbors: Vec<ValidatedBuild> = Vec::with_capacity(total);
-    let mut iters: Vec<_> = groups.into_iter().map(|g| g.into_iter()).collect();
-    for _ in 0..max_len {
-        for it in iters.iter_mut() {
-            if let Some(n) = it.next() {
-                neighbors.push(n);
+/// Which of `len` generated neighbours to score when only `cap` fit the budget.
+///
+/// The old rule was `take(cap)`: the first `cap` in emission order. Neighbours
+/// are interleaved round-robin across ~14 operators, so with ~1000 generated
+/// and 80 admitted that meant roughly the first SIX options of every operator —
+/// the same six, every generation, at every budget. Measured in-game
+/// 2026-09-04: `generated=31977 admitted=1500`. Raising the eval budget 33x
+/// changed nothing because it re-scored that head slice 64 times. Every rune,
+/// trait, sigil or prefix past the sixth was unreachable at any price.
+///
+/// This strides across a list so a sample of `cap` spans its depth, and
+/// rotates the offset by generation so consecutive generations see different
+/// slices. Used PER OPERATOR GROUP via `sample_group` — striding the flattened
+/// round-robin list handed each operator admission in proportion to its size,
+/// which starved the small, high-leverage swaps (elite spec, weapons).
+/// Deterministic: no RNG, so a run is reproducible from its inputs.
+fn sample_indices(len: usize, cap: usize, generation: u32) -> Vec<usize> {
+    if len == 0 || cap == 0 {
+        return Vec::new();
+    }
+    if len <= cap {
+        return (0..len).collect();
+    }
+    let gap = len / cap;
+    if gap <= 1 {
+        // cap < len < 2*cap: a stride cannot rotate (offset is always 0), so
+        // slide a contiguous window instead. Every index is reached within
+        // len - cap + 1 generations.
+        let start = (generation as usize) % (len - cap + 1);
+        return (start..start + cap).collect();
+    }
+    // `i * len / cap` lands the cap picks evenly across [0, len), so the last
+    // pick sits within one gap of the end — a plain stride with floor division
+    // left the tail unreachable. The generation offset rotates within a gap so
+    // consecutive generations see disjoint slices.
+    let offset = (generation as usize) % gap;
+    (0..cap)
+        .map(|i| (i * len / cap + offset).min(len - 1))
+        .collect()
+}
+
+/// Admission for ONE operator group: `quota` picks, always including index 0.
+/// Operators emit their priority head first (`prioritized_itemstats` puts the
+/// radar-primary prefix at index 0 on purpose), so index 0 is never left to
+/// the rotation. The rest of the quota strides and rotates over indices 1..
+fn sample_group(len: usize, quota: usize, generation: u32) -> Vec<usize> {
+    if len == 0 || quota == 0 {
+        return Vec::new();
+    }
+    if len <= quota {
+        return (0..len).collect();
+    }
+    let mut picks = vec![0usize];
+    picks.extend(
+        sample_indices(len - 1, quota - 1, generation)
+            .into_iter()
+            .map(|i| i + 1),
+    );
+    picks
+}
+
+/// How many generations the rotation needs to show every index of a group of
+/// `len` at `quota` per generation. Patience is measured against the largest
+/// of these, so "stale" means "a full cycle did not improve", not "three of
+/// nineteen slices did not".
+fn rotation_cycle(len: usize, quota: usize) -> u32 {
+    if quota == 0 || len <= quota {
+        return 1;
+    }
+    let rest = len - 1;
+    let q = quota - 1;
+    if q == 0 {
+        return rest as u32;
+    }
+    let gap = rest / q;
+    if gap <= 1 {
+        (rest - q + 1) as u32
+    } else {
+        gap as u32
+    }
+}
+
+/// Split `cap` admissions across groups: each group gets at most its size, the
+/// leftover goes to the largest groups. Deterministic in group order.
+fn group_quotas(sizes: &[usize], cap: usize) -> Vec<usize> {
+    let k = sizes.iter().filter(|&&n| n > 0).count();
+    if k == 0 || cap == 0 {
+        return vec![0; sizes.len()];
+    }
+    let base = cap / k;
+    let mut quotas: Vec<usize> = sizes.iter().map(|&n| n.min(base)).collect();
+    let mut left = cap - quotas.iter().sum::<usize>();
+    // Largest groups first, ties by index so the split is deterministic.
+    let mut order: Vec<usize> = (0..sizes.len()).collect();
+    order.sort_by_key(|&i| (std::cmp::Reverse(sizes[i]), i));
+    while left > 0 {
+        let mut gave = false;
+        for &i in &order {
+            if left == 0 {
+                break;
+            }
+            if quotas[i] < sizes[i] {
+                quotas[i] += 1;
+                left -= 1;
+                gave = true;
             }
         }
+        if !gave {
+            break;
+        }
     }
-    neighbors
+    quotas
+}
+
+/// Make the seed viable BEFORE the beam spends its budget on it.
+///
+/// Measured in-game 2026-09-04: the WvW-roam seed failed two gates
+/// (CleanseRate 3.7 < 4.0 per 20s; SustainRecovery repeatable=false) and the
+/// beam could not rescue it in 1500 evaluations. Not one sampled neighbour
+/// flipped viability, because the gate-repair operators get the same ~6
+/// samples as every other operator. Here they are tried EXHAUSTIVELY, gate by
+/// gate, and the best rank wins each round. Gear groups and major traits are
+/// added only when a sustain gate fails, since nothing else can move it.
+#[allow(clippy::too_many_arguments)]
+fn repair_seed(
+    mut seed: BeamCandidate,
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+    locks: &BuildLocks,
+    eval_count: &mut usize,
+    eval_budget: usize,
+    deadline: Instant,
+    on_progress: &mut dyn FnMut(OptimizeProgress),
+    is_cancelled: &dyn Fn() -> bool,
+) -> BeamCandidate {
+    const MAX_ROUNDS: usize = 4;
+    let out_of_time = |evals: usize| evals >= eval_budget || Instant::now() >= deadline;
+    for round in 1..=MAX_ROUNDS {
+        if seed.report.viability.is_viable || is_cancelled() || out_of_time(*eval_count) {
+            break;
+        }
+        on_progress(OptimizeProgress {
+            stage: format!("Repairing seed viability (round {round}, {} evals)...", *eval_count),
+            done: false,
+        });
+        let mut candidates = swap_utilities_for_failed_gates(&seed, db, profession_name);
+        candidates.extend(swap_relics_for_failed_gates(&seed, db));
+        // Utilities alone cap out (two distinct cleanse skills = 1.0/20s,
+        // measured); the strongest cleanse sources are the heal skill and
+        // Sigil of Cleansing, both now credited by the gate.
+        if gate_failed(&seed.report.viability, ViabilityGate::CleanseRate) {
+            candidates.extend(swap_sigil_slots(&seed, db));
+            candidates.extend(swap_heal_skills(&seed, db, profession_name));
+        }
+        let sustain_failed = gate_failed(&seed.report.viability, ViabilityGate::SustainRecovery)
+            || gate_failed(&seed.report.viability, ViabilityGate::EffectiveHealth);
+        if sustain_failed {
+            let itemstats = prioritized_itemstats(db, weights);
+            candidates.extend(swap_gear_groups(&seed, &itemstats, &locks.gear_locks));
+            candidates.extend(swap_major_traits(&seed, db, locks));
+        }
+        if candidates.is_empty() {
+            break;
+        }
+        let current = referee::search_rank(&seed.report);
+        let current_short = seed.report.viability.shortfall;
+        let mut best: Option<BeamCandidate> = None;
+        for validated in candidates {
+            if is_cancelled() || out_of_time(*eval_count) {
+                break;
+            }
+            let report = referee::evaluate_validated_build(
+                &validated,
+                db,
+                profession_name,
+                weights,
+                ctx,
+                scenario,
+            );
+            *eval_count += 1;
+            // Rank first; on a rank tie prefer the smaller gate shortfall. A
+            // cleanse rate climbing 0.5 -> 3.9 leaves rank unchanged (the gate
+            // still fails) — measured in-game, repair discarded exactly that.
+            let key = |rep: &RefereeReport| {
+                (referee::search_rank(rep), std::cmp::Reverse(shortfall_key(rep)))
+            };
+            let better = best.as_ref().is_none_or(|b| key(&report) > key(&b.report));
+            if better {
+                best = Some(BeamCandidate { validated, report });
+            }
+        }
+        match best {
+            Some(b)
+                if referee::search_rank(&b.report) > current
+                    || (referee::search_rank(&b.report) == current
+                        && b.report.viability.shortfall + 1e-9 < current_short) =>
+            {
+                seed = b
+            }
+            _ => break,
+        }
+    }
+    seed
+}
+
+/// Gate shortfall as a sortable integer (f64 is not `Ord`). Micro-units.
+fn shortfall_key(report: &RefereeReport) -> i64 {
+    (report.viability.shortfall * 1_000_000.0).round() as i64
 }
 
 // ─── Beam search entry point ──────────────────────────────────────────────────
@@ -474,6 +723,61 @@ pub fn optimize_v2_search(
     let mut eval_count = 0usize;
     let mut generation = 0u32;
 
+    // Funnel diagnostic. Answered 2026-09-04: the objective was NOT flat
+    // (297 distinct ranks, 70% of neighbours beat the seed); admission was
+    // (`generated=31977 admitted=1500`). Kept because the receipt is cheap and
+    // the next regression will look identical from the outside.
+    if !beam[0].report.viability.is_viable {
+        let before = referee::viability_failure_summary(&beam[0].report.viability);
+        let seed = beam.pop().expect("beam seeded");
+        let repaired = repair_seed(
+            seed,
+            db,
+            profession_name,
+            weights,
+            ctx,
+            scenario,
+            locks,
+            &mut eval_count,
+            config.eval_budget,
+            deadline,
+            on_progress,
+            is_cancelled,
+        );
+        let after = if repaired.report.viability.is_viable {
+            "VIABLE".to_string()
+        } else {
+            format!(
+                "{} (shortfall {:.2})",
+                referee::viability_failure_summary(&repaired.report.viability),
+                repaired.report.viability.shortfall
+            )
+        };
+        on_progress(OptimizeProgress {
+            stage: format!(
+                "search_v2 seed repair: {eval_count} evals | before: {before} | after: {after}"
+            ),
+            done: false,
+        });
+        beam.push(repaired);
+    }
+    let seed_rank = referee::search_rank(&beam[0].report);
+    let mut last_best = seed_rank;
+    let mut stale_gens = 0u32;
+    let mut improved_at: Vec<u32> = Vec::new();
+    // Longest rotation cycle seen across operator groups: the number of
+    // generations needed before every neighbour has had its turn. Patience
+    // is measured against this, so stopping means a whole cycle was flat.
+    let mut cycle_len = 1u32;
+    let mut fn_generated = 0usize;
+    let mut fn_admitted = 0usize;
+    let mut fn_distinct: std::collections::HashSet<[i64; 9]> = std::collections::HashSet::new();
+    let mut fn_beat = 0usize;
+    let mut fn_tied = 0usize;
+    let mut fn_worse = 0usize;
+    // Index of the FIRST rank key that differs from the seed; 9 = identical.
+    let mut fn_first_diff = [0usize; 10];
+
     // Step 5: beam loop — keep permuting until the clock or eval budget is gone.
     while eval_count < config.eval_budget && Instant::now() < deadline && !is_cancelled() {
         generation += 1;
@@ -494,33 +798,71 @@ pub fn optimize_v2_search(
         let neighbor_cap = budget_per.clamp(1, 80);
 
         for candidate in &beam {
-            if Instant::now() >= deadline || is_cancelled() {
+            if eval_count >= config.eval_budget || Instant::now() >= deadline || is_cancelled() {
                 break;
             }
-            let neighbors = generate_neighbors(candidate, db, profession_name, locks, weights);
-            for neighbor in neighbors.into_iter().take(neighbor_cap) {
-                if eval_count >= config.eval_budget || Instant::now() >= deadline || is_cancelled()
-                {
-                    break;
+            let groups = generate_neighbor_groups(candidate, db, profession_name, locks, weights);
+            let sizes: Vec<usize> = groups.iter().map(|g| g.len()).collect();
+            fn_generated += sizes.iter().sum::<usize>();
+            let quotas = group_quotas(&sizes, neighbor_cap);
+            for (group, &quota) in groups.into_iter().zip(quotas.iter()) {
+                if quota == 0 {
+                    continue;
                 }
-                let report = referee::evaluate_validated_build(
-                    &neighbor,
-                    db,
-                    profession_name,
-                    weights,
-                    ctx,
-                    scenario,
-                );
-                eval_count += 1;
-                next.push(BeamCandidate {
-                    validated: neighbor,
-                    report,
-                });
+                cycle_len = cycle_len.max(rotation_cycle(group.len(), quota));
+                // `picks` is ascending, so one forward pass keeps exactly those.
+                let picks = sample_group(group.len(), quota, generation);
+                let mut next_pick = 0usize;
+                for (i, neighbor) in group.into_iter().enumerate() {
+                    if next_pick >= picks.len() || picks[next_pick] != i {
+                        continue;
+                    }
+                    next_pick += 1;
+                    if eval_count >= config.eval_budget
+                        || Instant::now() >= deadline
+                        || is_cancelled()
+                    {
+                        break;
+                    }
+                    fn_admitted += 1;
+                    let report = referee::evaluate_validated_build(
+                        &neighbor,
+                        db,
+                        profession_name,
+                        weights,
+                        ctx,
+                        scenario,
+                    );
+                    eval_count += 1;
+                    {
+                        let r = referee::search_rank(&report);
+                        fn_distinct.insert(r);
+                        match r.cmp(&seed_rank) {
+                            std::cmp::Ordering::Greater => fn_beat += 1,
+                            std::cmp::Ordering::Equal => fn_tied += 1,
+                            std::cmp::Ordering::Less => fn_worse += 1,
+                        }
+                        let k = (0..9).find(|&i| r[i] != seed_rank[i]).unwrap_or(9);
+                        fn_first_diff[k] += 1;
+                    }
+                    next.push(BeamCandidate {
+                        validated: neighbor,
+                        report,
+                    });
+                }
             }
         }
 
         // Viable kit first; roam ranks the fight sim, not paper combat indices.
-        next.sort_by_key(|candidate| std::cmp::Reverse(referee::search_rank(&candidate.report)));
+        // Rank first, then the smaller gate shortfall: two non-viable kits
+        // with the same passed-gate count are ordered by how close the
+        // failing gate is to passing, so the beam can walk a gate up.
+        next.sort_by_key(|candidate| {
+            (
+                std::cmp::Reverse(referee::search_rank(&candidate.report)),
+                shortfall_key(&candidate.report),
+            )
+        });
 
         // A build identity includes every combat-relevant choice. Omitting
         // weapons, sigils, or traits collapsed genuinely different WvW chains.
@@ -544,11 +886,79 @@ pub fn optimize_v2_search(
             break;
         }
         beam = next;
+
+        // Patience: stop when generations stop earning their evaluations.
+        let best_now = beam
+            .first()
+            .map(|c| referee::search_rank(&c.report))
+            .unwrap_or(last_best);
+        if best_now > last_best {
+            last_best = best_now;
+            stale_gens = 0;
+            improved_at.push(generation);
+        } else {
+            stale_gens += 1;
+            // Wait out a rotation cycle, but not the ~150-generation cycle of
+            // the per-slot prefix group: the nudge pass sweeps those slots
+            // exhaustively afterwards, so the beam need not. Measured
+            // 2026-09-04 (in-game, both modes): late improvements arrived
+            // after gaps of 14 and 17 flat generations; an uncapped cycle of
+            // 91 then burned ~11s confirming nothing else was there.
+            const CYCLE_CAP: u32 = 24;
+            if stale_gens >= config.patience.max(cycle_len.min(CYCLE_CAP)) {
+                break;
+            }
+        }
     }
 
     if is_cancelled() {
         return Err("Cancelled".into());
     }
+
+    // Budget receipt: evals, generations, wall time, which generations
+    // improved, and the winning rank. Measured 2026-09-04 at ~187us per eval.
+    // Log the winning rank alongside the budget: comparing this number across
+    // two budgets is what tells us whether a wider search actually found a
+    // better build, rather than merely looking at more of them.
+    let best_rank = beam
+        .first()
+        .map(|c| format!("{:?}", crate::referee::search_rank(&c.report)))
+        .unwrap_or_else(|| "none".into());
+    let head_short = beam
+        .first()
+        .map(|c| c.report.viability.shortfall)
+        .unwrap_or(f64::NAN);
+    let head_flow = beam
+        .first()
+        .map(|c| c.report.realized)
+        .map(|a| {
+            format!(
+                "[p={:.2} c={:.2} b={:.2} h={:.2} s={:.2} ctl={:.2}]",
+                a.power, a.condition, a.boon_support, a.healing, a.sustain, a.control
+            )
+        })
+        .unwrap_or_else(|| "none".into());
+    on_progress(OptimizeProgress {
+        stage: format!(
+            "search_v2 funnel: generated={fn_generated} admitted={fn_admitted} scored={eval_count} distinct_ranks={} | vs seed: beat={fn_beat} tied={fn_tied} worse={fn_worse} | first differing key histogram k0..k8,same={:?} | seed_rank={seed_rank:?}",
+            fn_distinct.len(),
+            fn_first_diff,
+        ),
+        done: false,
+    });
+    on_progress(OptimizeProgress {
+        stage: format!(
+            "search_v2: {} evals / {} generations in {:.2}s (budget {}, beam {}, limit {}s, patience {} x cycle {cycle_len}) improved_at_gens={improved_at:?} best_rank={best_rank} head_shortfall={head_short:.2} head_flow={head_flow}",
+            eval_count,
+            generation,
+            start.elapsed().as_secs_f32(),
+            config.eval_budget,
+            config.beam_width,
+            config.time_limit_secs,
+            config.patience,
+        ),
+        done: false,
+    });
 
     finish_search(beam)
 }
@@ -1043,9 +1453,9 @@ fn swap_major_traits(
 /// - If the skill has a required `specialization`, that spec must be in the
 ///   current build's equipped spec IDs.
 ///
-/// Skills that are already in another utility slot are kept as-is (no
-/// de-duplication — GW2 does not forbid duplicate utility skills, and keeping
-/// them avoids ruling out valid states).
+/// A skill already held in any utility slot is never proposed for another:
+/// GW2 equips one copy of a utility, and a doubled bar's simulated output
+/// would count twice in the realized rank.
 fn swap_utility_skills(
     candidate: &BeamCandidate,
     db: &GameDb,
@@ -1101,8 +1511,22 @@ fn swap_utility_skills(
 
     let mut neighbors: Vec<ValidatedBuild> = Vec::new();
 
+    let held: Vec<u32> = candidate
+        .validated
+        .skills
+        .utilities
+        .iter()
+        .flatten()
+        .map(|(id, _)| *id)
+        .collect();
     for slot_idx in 0..3usize {
         for &skill_id in &utility_skills {
+            // GW2 equips one copy of a utility; a bar with two copies is an
+            // illegal template whose simulated output the realized rank
+            // would otherwise count twice.
+            if held.contains(&skill_id) {
+                continue;
+            }
             let skill = match db.skills.get(&skill_id) {
                 Some(s) => s,
                 None => continue,
@@ -1210,9 +1634,20 @@ fn swap_utilities_for_failed_gates(
         })
         .collect();
 
+    let held: Vec<u32> = candidate
+        .validated
+        .skills
+        .utilities
+        .iter()
+        .flatten()
+        .map(|(id, _)| *id)
+        .collect();
     let mut neighbors: Vec<ValidatedBuild> = Vec::new();
     for slot_idx in 0..3usize {
         for &skill_id in &utility_skills {
+            if held.contains(&skill_id) {
+                continue;
+            }
             let skill = match db.skills.get(&skill_id) {
                 Some(s) => s,
                 None => continue,
@@ -1254,8 +1689,16 @@ fn swap_elite_spec(
     db: &GameDb,
     profession_name: &str,
     locks: &BuildLocks,
+    weights: &OptimizationWeights,
 ) -> Vec<ValidatedBuild> {
     if locks.specs[2].is_some() {
+        return Vec::new();
+    }
+    // A Revenant elite swap changes the legend package, and nothing here can
+    // rebuild one (refill_bar and the skill operators are legend-blind); the
+    // candidate would ship with an empty bar. Skipped, and said so in the
+    // ledger, rather than burning evaluations on a kit that cannot win.
+    if profession_name == "Revenant" {
         return Vec::new();
     }
     let Some(profession) = db.profession(profession_name) else {
@@ -1290,7 +1733,7 @@ fn swap_elite_spec(
         } else {
             b.specializations.push(vs);
         }
-        retarget_after_elite_swap(&mut b, db, profession);
+        retarget_after_elite_swap(&mut b, db, profession, weights);
         out.push(b);
     }
     out
@@ -1325,7 +1768,12 @@ fn validated_spec_from(spec: &Specialization, db: &GameDb, locks: &BuildLocks) -
     }
 }
 
-fn retarget_after_elite_swap(build: &mut ValidatedBuild, db: &GameDb, profession: &Profession) {
+fn retarget_after_elite_swap(
+    build: &mut ValidatedBuild,
+    db: &GameDb,
+    profession: &Profession,
+    weights: &OptimizationWeights,
+) {
     let equipped: Vec<u32> = build.specializations.iter().map(|s| s.spec_id).collect();
     let elite_ids: Vec<u32> = build
         .specializations
@@ -1351,6 +1799,7 @@ fn retarget_after_elite_swap(build: &mut ValidatedBuild, db: &GameDb, profession
             build.skills.elite = None;
         }
     }
+    refill_bar(build, db, &profession.name, weights);
     build.skills.profession =
         crate::rotation::builder::profession_skills_for_build(db, &profession.name, &equipped);
 
@@ -1380,6 +1829,64 @@ fn skill_gated_out(id: u32, db: &GameDb, equipped: &[u32]) -> bool {
     match db.skills.get(&id).and_then(|s| s.specialization) {
         Some(req) => !equipped.contains(&req),
         None => false,
+    }
+}
+
+/// Fill every empty bar slot with the best eligible skill by the seed's own
+/// effect scoring (`pick_best_skill`, no synergy context).
+///
+/// An elite-spec swap empties every slot the old spec gated, and nothing else
+/// in the beam is obliged to fill them: the PvE rank never reads the rotation,
+/// so a hole costs nothing and ships. Measured 2026-09-04: Reaper -> Ritualist
+/// handed back three empty utilities and no elite, and 36 fillers tried in
+/// the first slot moved the rank 0 times.
+fn refill_bar(
+    build: &mut ValidatedBuild,
+    db: &GameDb,
+    profession_name: &str,
+    weights: &OptimizationWeights,
+) {
+    // Revenant bars are legend packages, not slot choices.
+    if profession_name == "Revenant" {
+        return;
+    }
+    let equipped: Vec<u32> = build.specializations.iter().map(|s| s.spec_id).collect();
+    let pick = |slot: &str, taken: &[u32]| -> Option<(u32, String)> {
+        let eligible: Vec<&Skill> = db
+            .skills_by_profession
+            .get(profession_name)
+            .into_iter()
+            .flatten()
+            .filter_map(|id| db.skills.get(id))
+            .filter(|s| {
+                s.slot.as_deref() == Some(slot)
+                    && db.skill_palette_id(s.id) != 0
+                    && s.specialization.is_none_or(|req| equipped.contains(&req))
+                    && !taken.contains(&s.id)
+            })
+            .collect();
+        let refs: Vec<&&Skill> = eligible.iter().collect();
+        synergy_pipeline::pick_best_skill(&refs, weights, &[]).map(|(id, name, _)| (id, name))
+    };
+    if build.skills.heal.is_none() {
+        build.skills.heal = pick("Heal", &[]);
+    }
+    if build.skills.elite.is_none() {
+        build.skills.elite = pick("Elite", &[]);
+    }
+    build.skills.utilities.resize(3, None);
+    for i in 0..3 {
+        if build.skills.utilities[i].is_some() {
+            continue;
+        }
+        let taken: Vec<u32> = build
+            .skills
+            .utilities
+            .iter()
+            .flatten()
+            .map(|(id, _)| *id)
+            .collect();
+        build.skills.utilities[i] = pick("Utility", &taken);
     }
 }
 
@@ -1563,9 +2070,12 @@ mod tests {
             viability: ViabilityReport {
                 gates: Vec::new(),
                 is_viable: true,
+                shortfall: 0.0,
             },
             user_intent_score: 0.0,
             raw_direction_score: -1.0,
+            realized: Default::default(),
+            stat_direction_score: -1.0,
             quality: DataQuality::Verified,
             quality_reasons: Vec::new(),
         }
@@ -2257,6 +2767,8 @@ mod tests {
             &SearchConfig {
                 beam_width: 2,
                 eval_budget: 40,
+                // Exercises budget/deadline, not patience.
+                patience: u32::MAX,
                 time_limit_secs: 30,
             },
             &mut |_| {},
@@ -2423,6 +2935,8 @@ mod tests {
         let config = SearchConfig {
             beam_width: 4,
             eval_budget: 200,
+            // Exercises determinism under a fixed budget, not patience.
+            patience: u32::MAX,
             time_limit_secs: 30,
         };
 
@@ -2477,6 +2991,8 @@ mod tests {
         let config = SearchConfig {
             beam_width: 4,
             eval_budget: 200,
+            // Exercises locks under a fixed budget, not patience.
+            patience: u32::MAX,
             time_limit_secs: 30,
         };
 
@@ -2543,14 +3059,85 @@ mod tests {
     }
 
     /// SearchConfig::default() must have the expected sentinel values.
+    /// `take(cap)` scored the first cap neighbours — with round-robin operator
+    /// interleaving that was the first ~6 options of every operator, forever.
+    /// The sample must reach the END of the list, not just its head.
+    #[test]
+    fn sample_indices_spans_the_whole_neighbourhood() {
+        let picks = sample_indices(1066, 80, 1);
+        assert_eq!(picks.len(), 80);
+        assert!(picks.windows(2).all(|w| w[0] < w[1]), "ascending, no duplicates");
+        assert!(
+            *picks.last().unwrap() >= 1066 - 1066 / 80 - 1,
+            "must reach the deep end: last pick was {}",
+            picks.last().unwrap()
+        );
+        // Old behaviour, for contrast: take(80) never passes index 79.
+        assert!(picks.iter().any(|&i| i > 79), "must sample past the old head slice");
+
+        // Consecutive generations see different slices of the same list.
+        let g1 = sample_indices(1066, 80, 1);
+        let g2 = sample_indices(1066, 80, 2);
+        assert_ne!(g1, g2, "generations must rotate the offset");
+        assert!(g1.iter().all(|i| !g2.contains(i)), "rotated slices are disjoint");
+
+        // Fewer neighbours than the cap: take them all, in order.
+        assert_eq!(sample_indices(5, 80, 3), vec![0, 1, 2, 3, 4]);
+        assert!(sample_indices(0, 80, 0).is_empty());
+        assert!(sample_indices(10, 0, 0).is_empty());
+        // Every index stays in bounds at every rotation.
+        for g in 0..50u32 {
+            assert!(sample_indices(1066, 80, g).iter().all(|&i| i < 1066));
+        }
+    }
+
+    /// Reviewer finding: striding the flattened list gave the 3-item
+    /// elite-spec operator ~0.16 admissions per generation. Per-group quotas
+    /// must enumerate small groups fully and always keep index 0.
+    #[test]
+    fn group_quotas_enumerate_small_operators_and_keep_the_head() {
+        let sizes = [3usize, 18, 924, 66, 0, 2];
+        let q = group_quotas(&sizes, 80);
+        assert_eq!(q.iter().sum::<usize>(), 80, "the cap is spent exactly");
+        assert_eq!(q[0], 3, "a 3-item operator is fully enumerated");
+        assert_eq!(q[5], 2);
+        assert_eq!(q[4], 0, "empty groups get nothing");
+        assert!(q[2] > q[3], "leftover goes to the largest group");
+        for (g, &quota) in sizes.iter().zip(q.iter()) {
+            let picks = sample_group(*g, quota, 7);
+            if quota > 0 {
+                assert_eq!(picks[0], 0, "priority head is always admitted");
+            }
+            assert!(picks.windows(2).all(|w| w[0] < w[1]));
+            assert!(picks.iter().all(|&i| i < *g));
+        }
+        assert_eq!(sample_group(3, 3, 5), vec![0, 1, 2]);
+    }
+
+    /// cap < len < 2*cap used to leave `len - cap` indices unreachable at
+    /// every generation. A sliding window reaches all of them.
+    #[test]
+    fn sample_indices_slides_when_it_cannot_stride() {
+        let mut seen = std::collections::HashSet::new();
+        // 120 - 80 + 1 = 41 window starts; the last index needs the 41st.
+        for g in 0..41u32 {
+            for i in sample_indices(120, 80, g) {
+                assert!(i < 120);
+                seen.insert(i);
+            }
+        }
+        assert_eq!(seen.len(), 120, "every index reachable within the cycle");
+        assert_eq!(rotation_cycle(120, 80), 41);
+        assert_eq!(rotation_cycle(3, 5), 1, "fully enumerated groups need no cycle");
+        assert!(rotation_cycle(924, 48) >= 19);
+    }
+
     #[test]
     fn test_search_config_default() {
         let config = SearchConfig::default();
         assert_eq!(config.beam_width, 10, "default beam_width should be 10");
-        assert_eq!(
-            config.eval_budget, 1500,
-            "default eval_budget should be 1500"
-        );
+        assert_eq!(config.eval_budget, 200_000, "budget is a ceiling now");
+        assert_eq!(config.patience, 3, "patience is the real stopping rule");
         assert_eq!(config.time_limit_secs, 45);
     }
 
@@ -2698,6 +3285,199 @@ mod tests {
                 .any(|b| b.specializations.iter().any(|s| s.elite && s.spec_id == 62)),
             "free elite must jump to Firebrand"
         );
+    }
+
+    fn bar_skill(id: u32, slot: &str, spec: Option<u32>) -> Skill {
+        Skill {
+            id,
+            name: format!("skill{id}"),
+            description: None,
+            icon: None,
+            chat_link: None,
+            skill_type: None,
+            weapon_type: None,
+            professions: vec!["Guardian".into()],
+            slot: Some(slot.into()),
+            facts: vec![],
+            traited_facts: vec![],
+            categories: vec![],
+            attunement: None,
+            cost: None,
+            dual_wield: None,
+            flip_skill: None,
+            initiative: None,
+            next_chain: None,
+            prev_chain: None,
+            transform_skills: vec![],
+            bundle_skills: vec![],
+            toolbelt_skill: None,
+            flags: vec![],
+            specialization: spec,
+        }
+    }
+
+    /// Reaper -> Ritualist in-game (2026-09-04) shipped three empty utility
+    /// slots and no elite: the swap emptied every Reaper shout, and the PvE
+    /// rank never looks at skills, so nothing ever refilled them.
+    #[test]
+    fn elite_swap_refills_every_slot_it_empties() {
+        let mut db = empty_db();
+        db.specializations
+            .insert(27, spec_line(27, "Dragonhunter", true));
+        db.specializations
+            .insert(62, spec_line(62, "Firebrand", true));
+        let mut weapons = HashMap::new();
+        let (n, w) = twohand("Greatsword", None);
+        weapons.insert(n, w);
+        db.professions.insert(
+            "Guardian".into(),
+            gw2_api::models::Profession {
+                id: "Guardian".into(),
+                name: "Guardian".into(),
+                code: None,
+                specializations: vec![27, 62],
+                weapons,
+                training: Vec::new(),
+                skills_by_palette: Vec::new(),
+                icon: None,
+                icon_big: None,
+            },
+        );
+        // (id, slot, gating spec)
+        let bar = [
+            (100, "Heal", Some(27)),
+            (101, "Heal", None),
+            (110, "Utility", Some(27)),
+            (111, "Utility", Some(27)),
+            (112, "Utility", None),
+            (113, "Utility", None),
+            (114, "Utility", Some(62)),
+            (120, "Elite", Some(27)),
+            (121, "Elite", Some(62)),
+        ];
+        for (id, slot, spec) in bar {
+            db.skills.insert(id, bar_skill(id, slot, spec));
+            db.skill_to_palette.insert(id, id);
+        }
+        db.skills_by_profession
+            .insert("Guardian".into(), bar.iter().map(|(id, _, _)| *id).collect());
+
+        let named = |id: u32| Some((id, format!("skill{id}")));
+        let mut build = ValidatedBuild {
+            specializations: vec![ValidatedSpec {
+                spec_id: 27,
+                name: "Dragonhunter".into(),
+                elite: true,
+                trait_ids: vec![1, 4, 7],
+                trait_names: vec!["a".into(), "b".into(), "c".into()],
+                all_trait_ids: vec![1, 4, 7],
+            }],
+            ..Default::default()
+        };
+        build.skills.heal = named(100);
+        build.skills.utilities = vec![named(110), named(111), named(112)];
+        build.skills.elite = named(120);
+        let candidate = make_candidate(build);
+
+        let swapped = swap_elite_spec(
+            &candidate,
+            &db,
+            "Guardian",
+            &BuildLocks::default(),
+            &OptimizationWeights::default(),
+        );
+        let fb = swapped
+            .iter()
+            .find(|b| b.specializations.iter().any(|s| s.elite && s.spec_id == 62))
+            .expect("Firebrand candidate");
+        let ids: Vec<u32> = fb
+            .skills
+            .heal
+            .iter()
+            .chain(fb.skills.utilities.iter().flatten())
+            .chain(fb.skills.elite.iter())
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(fb.skills.utilities.len(), 3);
+        assert_eq!(ids.len(), 5, "every bar slot filled: {ids:?}");
+        assert!(
+            ids.iter().all(|id| db.skills[id].specialization != Some(27)),
+            "no Dragonhunter skill survives: {ids:?}"
+        );
+        let mut dedup = ids.clone();
+        dedup.sort_unstable();
+        dedup.dedup();
+        assert_eq!(dedup.len(), 5, "no duplicate slots: {ids:?}");
+        assert!(
+            fb.skills.utilities.iter().flatten().any(|(id, _)| *id == 112),
+            "the never-gated core utility stays put: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn utility_swap_never_doubles_a_held_skill() {
+        let mut db = empty_db();
+        for (id, spec) in [(112, None), (113, None)] {
+            db.skills.insert(id, bar_skill(id, "Utility", spec));
+            db.skill_to_palette.insert(id, id);
+        }
+        db.skills_by_profession
+            .insert("Guardian".into(), vec![112, 113]);
+        let mut build = ValidatedBuild::default();
+        build.skills.utilities = vec![Some((112, "skill112".into())), None, None];
+        let candidate = make_candidate(build);
+        let neighbours = swap_utility_skills(&candidate, &db, "Guardian");
+        assert!(!neighbours.is_empty());
+        for b in &neighbours {
+            let ids: Vec<u32> = b.skills.utilities.iter().flatten().map(|(id, _)| *id).collect();
+            let mut dedup = ids.clone();
+            dedup.sort_unstable();
+            dedup.dedup();
+            assert_eq!(ids.len(), dedup.len(), "doubled utility proposed: {ids:?}");
+        }
+    }
+
+    #[test]
+    fn revenant_elite_swap_is_not_attempted() {
+        let mut db = empty_db();
+        db.specializations
+            .insert(52, spec_line(52, "Herald", true));
+        db.specializations
+            .insert(63, spec_line(63, "Renegade", true));
+        db.professions.insert(
+            "Revenant".into(),
+            gw2_api::models::Profession {
+                id: "Revenant".into(),
+                name: "Revenant".into(),
+                code: None,
+                specializations: vec![52, 63],
+                weapons: HashMap::new(),
+                training: Vec::new(),
+                skills_by_palette: Vec::new(),
+                icon: None,
+                icon_big: None,
+            },
+        );
+        let build = ValidatedBuild {
+            specializations: vec![ValidatedSpec {
+                spec_id: 52,
+                name: "Herald".into(),
+                elite: true,
+                trait_ids: vec![1, 4, 7],
+                trait_names: vec!["a".into(), "b".into(), "c".into()],
+                all_trait_ids: vec![1, 4, 7],
+            }],
+            ..Default::default()
+        };
+        let candidate = make_candidate(build);
+        assert!(swap_elite_spec(
+            &candidate,
+            &db,
+            "Revenant",
+            &BuildLocks::default(),
+            &OptimizationWeights::default()
+        )
+        .is_empty());
     }
 
     #[test]

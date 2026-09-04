@@ -1166,12 +1166,25 @@ pub fn calculate_validated_stats(
 }
 
 /// Simulate a rotation from validated skill IDs.
-pub fn simulate_validated_rotation(
+/// A validated build's skills resolved into simulator inputs, so the gate
+/// simulation and the flow simulation share one (expensive) fact parse.
+pub struct PreparedRotation {
+    pub skills: Vec<rotation::RotationSkill>,
+    pub params: rotation::simulator::SimParams,
+    profession_name: String,
+}
+
+/// Window for the flow simulation. Long enough that a burst-then-nothing kit
+/// averages below one that keeps its output up; the gate simulation keeps the
+/// short mode/tier window from `simulation_window_ms_for_mode`.
+pub const FLOW_WINDOW_MS: u32 = 60_000;
+
+pub fn prepare_validated_rotation(
     validated: &ValidatedBuild,
     db: &GameDb,
     stats: &stats::StatBlock,
     scenario: Option<&crate::scenario::ScenarioSpec>,
-) -> Option<rotation::SimulationResult> {
+) -> Option<PreparedRotation> {
     // Heal/utility/elite stay at weapon_set 0 (always available); weapon skills
     // get tagged with their actual set 1 or 2 so the simulator's weapon-swap
     // logic in `is_skill_available` and `should_weapon_swap` can decide when to
@@ -1184,7 +1197,11 @@ pub fn simulate_validated_rotation(
         non_weapon_ids.push(*id);
     }
     for (id, _) in validated.skills.utilities.iter().flatten() {
-        non_weapon_ids.push(*id);
+        // One copy per skill: a doubled utility would get two cooldown
+        // states and count twice.
+        if !non_weapon_ids.contains(id) {
+            non_weapon_ids.push(*id);
+        }
     }
     if let Some((id, _)) = &validated.skills.elite {
         non_weapon_ids.push(*id);
@@ -1262,26 +1279,6 @@ pub fn simulate_validated_rotation(
         return None;
     }
 
-    let duration_ms = scenario
-        .map(|s| {
-            crate::rotation::combat_model::simulation_window_ms_for_mode(
-                &s.game_mode,
-                s.combat_tier,
-                s.combat_kind,
-            )
-        })
-        .unwrap_or(0);
-
-    let enemy = scenario
-        .map(|s| {
-            crate::rotation::combat_model::EnemyDummy::for_scenario(
-                &s.game_mode,
-                s.combat_tier,
-                s.combat_kind,
-            )
-        })
-        .unwrap_or_default();
-
     let (_, mods) = calculate_validated_stats(validated, db, profession_name, &sim_ctx);
     let power = stats.get("Power");
     let condition_damage = stats.get("ConditionDamage");
@@ -1313,21 +1310,73 @@ pub fn simulate_validated_rotation(
         max_health: derived.health,
         armor: derived.armor,
         mode: mode.clone(),
+        intent: None,
     };
 
+
+    Some(PreparedRotation {
+        skills: rotation_skills,
+        params,
+        profession_name: profession_name.to_string(),
+    })
+}
+
+pub fn simulate_validated_rotation(
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    stats: &stats::StatBlock,
+    scenario: Option<&crate::scenario::ScenarioSpec>,
+) -> Option<rotation::SimulationResult> {
+    let prepared = prepare_validated_rotation(validated, db, stats, scenario)?;
+    Some(simulate_prepared(&prepared, validated, db, scenario))
+}
+
+/// Gate simulation: the short mode/tier window on the scenario's dummy, plus
+/// the counterplay-aware WvW timeline. Feeds the viability gates.
+pub fn simulate_prepared(
+    prepared: &PreparedRotation,
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    scenario: Option<&crate::scenario::ScenarioSpec>,
+) -> rotation::SimulationResult {
+    let rotation_skills = &prepared.skills;
+    let params = &prepared.params;
+    let profession_name = prepared.profession_name.as_str();
+    let mode = params.mode.clone();
+    let sim_ctx = BalanceContext::new(mode.clone());
+    let duration_ms = scenario
+        .map(|s| {
+            crate::rotation::combat_model::simulation_window_ms_for_mode(
+                &s.game_mode,
+                s.combat_tier,
+                s.combat_kind,
+            )
+        })
+        .unwrap_or(0);
+
+    let enemy = scenario
+        .map(|s| {
+            crate::rotation::combat_model::EnemyDummy::for_scenario(
+                &s.game_mode,
+                s.combat_tier,
+                s.combat_kind,
+            )
+        })
+        .unwrap_or_default();
+
     let mut result =
-        rotation::simulator::simulate_with(&rotation_skills, duration_ms, &params, enemy);
+        rotation::simulator::simulate_with(rotation_skills, duration_ms, params, enemy);
 
     if let Some(scenario) = scenario.filter(|scenario| scenario.game_mode == GameMode::WvW) {
         let (active_effects, unmodeled_sources) =
-            active_normalized_effects(validated, &rotation_skills, mode.label());
+            active_normalized_effects(validated, rotation_skills, mode.label());
         let (resource_rules, resource_model_complete) =
-            wvw_resource_rules(validated, &rotation_skills, db, profession_name, &sim_ctx);
+            wvw_resource_rules(validated, rotation_skills, db, profession_name, &sim_ctx);
         result.wvw = Some(rotation::wvw_timeline::evaluate_wvw_timeline(
             rotation::wvw_timeline::WvwTimelineInput {
-                skills: &rotation_skills,
+                skills: rotation_skills,
                 duration_ms,
-                params: &params,
+                params,
                 enemy,
                 scenario,
                 active_effects: &active_effects,
@@ -1339,7 +1388,31 @@ pub fn simulate_validated_rotation(
         ));
     }
 
-    Some(result)
+    result
+}
+
+/// Flow simulation: `FLOW_WINDOW_MS` on the scenario's dummy with no
+/// downstate, scheduled toward the user's radar weights. This is what the
+/// rank scores (`scoring::realized_axes`): a bar with an empty slot now
+/// produces less than a full one in every mode.
+pub fn simulate_flow(
+    prepared: &PreparedRotation,
+    weights: &OptimizationWeights,
+    scenario: Option<&crate::scenario::ScenarioSpec>,
+) -> rotation::SimulationResult {
+    let mut params = prepared.params.clone();
+    params.intent = Some(weights.clamped());
+    let mut enemy = scenario
+        .map(|s| {
+            crate::rotation::combat_model::EnemyDummy::for_scenario(
+                &s.game_mode,
+                s.combat_tier,
+                s.combat_kind,
+            )
+        })
+        .unwrap_or_default();
+    enemy.hp = None;
+    rotation::simulator::simulate_with(&prepared.skills, FLOW_WINDOW_MS, &params, enemy)
 }
 
 /// Equipment-budget slot name → the GearSlot whose prefix pays for it.

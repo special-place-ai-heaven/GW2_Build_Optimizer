@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::combat::CombatPerformance;
 use crate::data::objective_profiles;
+use crate::rotation::SimulationResult;
 
 /// Default normalization divisors for cross-axis score comparison.
 /// These are used as fallbacks when no objective profile is loaded.
@@ -21,6 +22,32 @@ pub const HEALING_NORM: f64 = 1500.0;
 pub const BOON_SUPPORT_NORM: f64 = 1.0;
 /// Default normalization for control scoring axis.
 pub const CONTROL_NORM: f64 = 1.0;
+
+/// Norms for the REALIZED axes: what the 60s flow simulation measures a build
+/// actually producing, as opposed to the closed-form stat indices above.
+/// Calibrated 2026-09-04 against synergy seeds for all nine professions on
+/// the live game database (`examples/flow_calibration.rs`); 1.0 is the
+/// ceiling a well-built specialist reaches, not the average build.
+/// Measured PvE power seeds: Warrior 51k, Thief 44k, Guardian 43k, Necro 42k.
+pub const REALIZED_STRIKE_DPS_NORM: f64 = 45_000.0;
+/// Measured PvE condition seeds: Engineer 17k, then 3.5k-5.3k. The simulator
+/// under-models condition output (few proc sources), so this is set where a
+/// strong seed reaches ~0.65 rather than at the one outlier.
+pub const REALIZED_CONDI_DPS_NORM: f64 = 8_000.0;
+/// Self-healing plus barrier per second. Measured healer seeds (2026-09-05,
+/// after the weapon-swap fix): Tempest 472, Paragon 281, Amalgam 276,
+/// Chronomancer 240, then 60-130.
+pub const REALIZED_HEALING_NORM: f64 = 400.0;
+/// Boon-equivalents at full uptime (presence uptime x `boon_value`, Might as
+/// stacks/25). Measured support seeds (2026-09-05): Chronomancer 3.9,
+/// Soulbeast 3.5, Firebrand 3.0, Paragon 2.9, Amalgam 2.8, Tempest 2.6.
+pub const REALIZED_BOON_NORM: f64 = 3.5;
+/// Control-seconds per second: hard CC plus soft control at half weight per
+/// condition, so a kit keeping three soft conditions up alone reads 1.5.
+/// Measured disrupt seeds: Untamed 1.7, Reaper 1.6, Deadeye 1.5, then 0.6-1.1.
+pub const REALIZED_CONTROL_NORM: f64 = 1.5;
+/// Damage reduction Protection grants while up (wiki: incoming strike x0.67).
+pub const PROTECTION_REDUCTION: f64 = 0.33;
 
 /// 6-axis radar chart labels, in render order (clockwise from top).
 pub const AXIS_LABELS: [&str; 6] = [
@@ -475,6 +502,107 @@ impl ObjectiveScorer {
     }
 }
 
+/// Per-axis realized output as fractions of the realized norms, uncapped.
+/// Same axis order as `OptimizationWeights::as_array`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RealizedAxes {
+    pub power: f64,
+    pub condition: f64,
+    pub boon_support: f64,
+    pub healing: f64,
+    pub sustain: f64,
+    pub control: f64,
+}
+
+impl RealizedAxes {
+    pub fn as_array(&self) -> [f64; 6] {
+        [
+            self.power,
+            self.condition,
+            self.boon_support,
+            self.healing,
+            self.sustain,
+            self.control,
+        ]
+    }
+}
+
+/// What the build actually produced in the flow simulation, per axis.
+///
+/// Sustain keeps the closed-form effective health (a stat, not an output)
+/// and adds the Protection uptime the rotation really maintained. Everything
+/// else is measured: strike and condition damage per second, healing and
+/// barrier per second, boon-equivalents kept up, and control uptime.
+pub fn realized_axes(flow: &SimulationResult, perf: &CombatPerformance) -> RealizedAxes {
+    let protection = flow
+        .buff_uptime
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("Protection"))
+        .map(|(_, uptime)| *uptime)
+        .unwrap_or(0.0);
+    RealizedAxes {
+        power: flow.strike_dps / REALIZED_STRIKE_DPS_NORM,
+        condition: flow.condition_dps / REALIZED_CONDI_DPS_NORM,
+        boon_support: flow.boon_equivalents / REALIZED_BOON_NORM,
+        healing: flow.healing_per_second / REALIZED_HEALING_NORM,
+        sustain: perf.effective_health / EFFECTIVE_HEALTH_NORM + protection * PROTECTION_REDUCTION,
+        control: flow.control_uptime / REALIZED_CONTROL_NORM,
+    }
+}
+
+/// Realized axes for a build with nothing to simulate: it produces nothing,
+/// so only its stat-derived sustain counts. Keeps every build on one scale
+/// instead of letting a skill-less kit fall back to the closed-form score.
+pub fn realized_axes_no_rotation(perf: &CombatPerformance) -> RealizedAxes {
+    RealizedAxes {
+        sustain: perf.effective_health / EFFECTIVE_HEALTH_NORM,
+        ..RealizedAxes::default()
+    }
+}
+
+/// Capped, penalized weighted score over realized axes: the live rank when a
+/// rotation exists. Same caps and neglect penalty as `score_with_weights`.
+pub fn score_realized(axes: &RealizedAxes, weights: &OptimizationWeights) -> f64 {
+    score_axes(axes.as_array(), weights, true)
+}
+
+/// Uncapped weighted direction over realized axes: the rank tie-break when a
+/// rotation exists, so surplus output past a cap stays visible.
+pub fn raw_realized(axes: &RealizedAxes, weights: &OptimizationWeights) -> f64 {
+    score_axes(axes.as_array(), weights, false)
+}
+
+/// Weighted mean of six axis scores. `capped` is the live rank: each axis
+/// saturates at 1.0 and a neglected axis the user weighted >= 0.4 (scoring
+/// below 0.15) applies a graduated penalty, multiplicative so several
+/// neglected axes compound. Uncapped is the direction tie-break.
+fn score_axes(axis_scores: [f64; 6], weights: &OptimizationWeights, capped: bool) -> f64 {
+    let w = weights.clamped();
+    let total_w = w.total().max(0.01);
+    let axis_weights = w.as_array();
+    let scores = if capped {
+        axis_scores.map(|score| score.min(1.0))
+    } else {
+        axis_scores
+    };
+    let raw = axis_weights
+        .iter()
+        .zip(scores.iter())
+        .map(|(weight, score)| weight * score)
+        .sum::<f64>()
+        / total_w;
+    if !capped {
+        return raw;
+    }
+    let mut penalty = 1.0;
+    for i in 0..6 {
+        if axis_weights[i] >= 0.4 && scores[i] < 0.15 {
+            penalty *= 1.0 - axis_weights[i] * 0.7;
+        }
+    }
+    raw * penalty
+}
+
 /// Uncapped weighted direction score: same axes as `score_with_weights`
 /// but WITHOUT the per-axis saturation caps. Radar weights are a direction
 /// indicator, not a goal — once a capped axis is satisfied, surplus piece
@@ -538,9 +666,6 @@ fn score_with_norms(
     effective_health_norm: f64,
     healing_norm: f64,
 ) -> f64 {
-    let w = weights.clamped();
-    let total_w = w.total().max(0.01);
-
     let power_score = (perf.strike_dps_index / strike_dps_norm).min(1.0);
     let condition_score = (perf.condition_dps_index / condi_dps_norm
         + (perf.condi_duration_pct / 100.0).min(1.0) * 0.15)
@@ -555,34 +680,18 @@ fn score_with_norms(
     let control_score =
         (perf.condi_duration_pct / 100.0 * 0.6 + perf.boon_duration_pct / 100.0 * 0.4).min(1.0);
 
-    let raw = (w.power * power_score
-        + w.condition * condition_score
-        + w.boon_support * boon_support_score
-        + w.healing * healing_score
-        + w.sustain * sustain_score
-        + w.control * control_score)
-        / total_w;
-
-    // Graduated penalty: if any axis the user weighted >= 0.4 scores below 0.15,
-    // penalize proportionally to that axis's weight. Multiplicative so multiple
-    // neglected axes compound.
-    let axis_weights = w.as_array();
-    let axis_scores = [
-        power_score,
-        condition_score,
-        boon_support_score,
-        healing_score,
-        sustain_score,
-        control_score,
-    ];
-    let mut penalty = 1.0;
-    for i in 0..6 {
-        if axis_weights[i] >= 0.4 && axis_scores[i] < 0.15 {
-            penalty *= 1.0 - axis_weights[i] * 0.7;
-        }
-    }
-
-    raw * penalty
+    score_axes(
+        [
+            power_score,
+            condition_score,
+            boon_support_score,
+            healing_score,
+            sustain_score,
+            control_score,
+        ],
+        weights,
+        true,
+    )
 }
 
 // ─── Hierarchical Tier Tables ───
@@ -878,6 +987,88 @@ fn magnitude_6(v: &[f64; 6]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    fn flow(strike: f64, hps: f64, boons: f64, ctl: f64, protection: f64) -> SimulationResult {
+        SimulationResult {
+            duration_ms: 60_000,
+            strike_dps: strike,
+            condition_dps: 0.0,
+            total_dps: strike,
+            condition_uptime: HashMap::new(),
+            buff_uptime: HashMap::from([("Protection".to_string(), protection)]),
+            skill_usage: Vec::new(),
+            stunbreak_count: 0,
+            has_stability: false,
+            stability_uptime: 0.0,
+            cleanse_count: 0,
+            cleanse_rate_per_20s: 0.0,
+            healing_per_second: hps,
+            control_uptime: ctl,
+            might_stacks_avg: 0.0,
+            boon_equivalents: boons,
+            has_mobility_out: false,
+            escape_kinds: 0,
+            has_strip: false,
+            has_corrupt: false,
+            downed: false,
+            finished: false,
+            has_interrupt: false,
+            has_cover_answer: false,
+            wvw: None,
+        }
+    }
+
+    #[test]
+    fn realized_axes_are_fractions_of_the_norms() {
+        let perf = CombatPerformance {
+            effective_health: EFFECTIVE_HEALTH_NORM / 2.0,
+            ..Default::default()
+        };
+        let axes = realized_axes(
+            &flow(
+                REALIZED_STRIKE_DPS_NORM,
+                REALIZED_HEALING_NORM / 2.0,
+                REALIZED_BOON_NORM,
+                REALIZED_CONTROL_NORM * 2.0,
+                1.0,
+            ),
+            &perf,
+        );
+        assert!((axes.power - 1.0).abs() < 1e-9);
+        assert!((axes.healing - 0.5).abs() < 1e-9);
+        assert!((axes.boon_support - 1.0).abs() < 1e-9);
+        assert!((axes.control - 2.0).abs() < 1e-9);
+        assert!((axes.sustain - (0.5 + PROTECTION_REDUCTION)).abs() < 1e-9);
+
+        // The capped rank saturates control at 1.0; the raw direction keeps
+        // the surplus so it can still break ties.
+        let ctl = OptimizationWeights {
+            power: 0.0,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 0.0,
+            sustain: 0.0,
+            control: 1.0,
+        };
+        assert!((score_realized(&axes, &ctl) - 1.0).abs() < 1e-9);
+        assert!((raw_realized(&axes, &ctl) - 2.0).abs() < 1e-9);
+
+        // A heavily weighted axis the kit does nothing for is penalized:
+        // healer weights on a kit with no healing. raw = 0.5*0.5/1.5, then
+        // the healing axis (weight 1.0, score 0) multiplies by 1 - 0.7.
+        let none = realized_axes_no_rotation(&perf);
+        let healer = OptimizationWeights {
+            power: 0.0,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 1.0,
+            sustain: 0.5,
+            control: 0.0,
+        };
+        let penalized = score_realized(&none, &healer);
+        assert!((penalized - 0.05).abs() < 1e-6, "{penalized}");
+    }
 
     #[test]
     fn test_weights_clamped() {

@@ -349,6 +349,10 @@ fn dummy_rotation() -> SimulationResult {
         stability_uptime: 0.5,
         cleanse_count: 1,
         cleanse_rate_per_20s: 2.0,
+        healing_per_second: 0.0,
+        control_uptime: 0.0,
+        might_stacks_avg: 0.0,
+        boon_equivalents: 0.0,
         has_mobility_out: true,
         escape_kinds: 1,
         has_strip: false,
@@ -382,6 +386,7 @@ fn ranked_report(intent: f64, combat: CombatPerformance) -> RefereeReport {
         rotation: Some(dummy_rotation()),
         viability: ViabilityReport {
             is_viable: true,
+            shortfall: 0.0,
             gates: vec![GateResult {
                 gate: ViabilityGate::StabilityAccess,
                 passed: true,
@@ -390,6 +395,8 @@ fn ranked_report(intent: f64, combat: CombatPerformance) -> RefereeReport {
         },
         user_intent_score: intent,
         raw_direction_score: -1.0,
+        realized: Default::default(),
+        stat_direction_score: -1.0,
         quality: DataQuality::Verified,
         quality_reasons: Vec::new(),
     }

@@ -2,6 +2,67 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.11.24 - 2026-09-05
+
+### Optimize
+
+- Builds are now ranked by what they actually do, not by their stat sheet. Every candidate is played for 60 seconds on a dummy in a simulation that casts skills the way your radar asks (heals for a healer, stuns for control, damage for damage), and the score comes from what came out: strike and condition damage per second, healing per second, boons kept up, control landed, and effective health with the Protection the rotation really maintained. Before this, in PvE, the score never looked at a single skill: a bar with three empty utility slots scored exactly the same as a full one.
+- Measured on the same Necromancer PvE Roamer run: the score rose from 0.58 to 0.82 of the ceiling, and emptying the utility bar now costs a third of the score instead of nothing.
+- Exact ties in produced output are still broken by the stat direction of the radar, so two gear sets that do the same thing are ordered as before.
+- Racial skills (Battle Roar, Shrapnel Mine, Reaper of Grenth, Healing Seed and the rest) are no longer offered as build skills. The optimizer does not know your character's race, no published build carries one, and the healer seeds that had picked Healing Seed healed for zero.
+- The simulator runs about five times faster per evaluation, so the wider objective still finishes a search by patience well inside the time limit (Necromancer PvE: 42 rounds in 18 seconds).
+- Fixed from an adversarial review of the new objective before it shipped: a utility could be proposed twice on one bar and its output counted twice; a weapon skill the radar made worthless (a bleed on a healer) pinned the simulation to that weapon set so the other set's heals were never cast; chill, cripple, weakness and slow on the enemy were lengthened by your boon duration instead of your condition duration; five stacks of Stability read as five times the uptime; every boon counted the same, so Swiftness plus Vigor beat Quickness; the scheduler spent stuns into a target with Stability. Builds that fail a viability check no longer pay for the flow simulation at all.
+- Revenant elite-specialization swaps are no longer attempted by the search: a legend package cannot be rebuilt by the skill operators, so the candidate would have shipped with an empty bar. The seed's elite stands for Revenant until the search can carry legends.
+
+## 1.11.23 - 2026-09-04
+
+### Optimize
+
+- Optimized PvE builds no longer come back with empty utility and elite slots. When the search moved a build to a different elite specialization (Reaper to Ritualist, for example), every skill the old specialization owned was removed and nothing put replacements in; in PvE the score does not look at skills at all, so the holes cost nothing and shipped. The swap now refills every slot it empties with the best eligible skill by the same scoring the initial build uses.
+- Verified against the live game data: the exact in-game run (Necromancer, PvE, Roamer) that produced three empty utilities and no elite now returns Consume Conditions, Signet of Spite, Blood Is Power, Well of Power and Lich Form, at the same score.
+
+## 1.11.22 - 2026-09-04
+
+### Optimize
+
+- The WvW/PvP cleanse check now counts cleanses from sigils, runes, relics and traits, not only from the skills on the bar. A Sigil of Cleansing was worth zero to it; a build that leaned on gear for cleansing was being sent back for repair over a shortfall it did not have.
+- Self-applied Resistance now lowers the cleanse requirement in proportion to its uptime (capped at 75%), since Resistance ignores the non-damaging conditions that the requirement is mostly about.
+- Repairing a build that fails the cleanse check can now change sigils and the heal skill, not just utilities.
+- The search receipt in the log shows how far the best build is from passing a check it still fails, so a failing check that is getting closer is visible instead of silent.
+
+## 1.11.21 - 2026-09-04
+
+### Optimize
+
+- Small choices were being starved. Elite-specialization swaps (three options) got roughly one look every six rounds while gear prefixes (hundreds of options) got dozens, because attention was handed out in proportion to how many options a category had. Each category now gets its own share every round, so the swaps that move a build the most are always considered.
+- The "stop when it flattens" rule now waits at least one full rotation through every option before giving up, capped so it cannot stall for ten seconds on a large build. The build repair that runs before the search now respects the time limit and the Cancel button.
+- The log now records how many candidates were generated, admitted and scored, how many beat the starting build, and which rounds improved it, so a search that finds nothing can be told apart from one that never looked.
+
+## 1.11.20 - 2026-09-04
+
+### Optimize
+
+- The search now keeps going while it is still finding better builds and stops once it flattens, instead of quitting after a fixed number of tries. Measured in-game: it used to stop after three rounds; it now climbs for twenty or more when there is something to find.
+- Every option is now actually considered. The old search scored only the first handful of choices from each category (the first few runes, the first few traits, the first few gear prefixes) and never looked further, no matter how much time it had. It now spreads its attention across all of them and rotates each round.
+- Builds that fail a WvW/PvP viability check (too little cleanse, cannot survive the return fight) are repaired before the search begins, and both the repair and the search can now climb a failing check gradually instead of only noticing the moment it passes.
+
+## 1.11.11 - 2026-09-04
+
+### Choya Assist
+
+- Choya was being told to guess. When you had a build equipped, the instructions said "do not call tools, edit that loadout" — so it named traits from memory rather than from the live game data, and a name that no longer exists gets the whole build thrown away. It now has to look up the real trait columns for every specialization it touches, whether you have a build equipped or not.
+- The two-tool-call budget is gone. Checking three specializations' trait columns never fit in it. A few extra lookups cost seconds; a wrong name costs you the entire build.
+- New standing rules: no name may come from memory, only from a tool result. Every specialization gets exactly one trait per column. And reasoning must be shown with mechanism and numbers — cooldown against uptime, internal cooldowns on sigil procs, whether a trait's trigger condition can actually be met, which skill applies the condition your rune boosts.
+- The write-up now has to name the synergy chain concretely: what triggers what, on what cooldown, and the resulting uptime — plus the weakness the build accepts.
+- Token ceilings raised: 16k to 64k per reply, and the thinking budget from 8k to 32k. A thinking model could previously spend half the budget deliberating and have too little left to answer with.
+
+## 1.11.10 - 2026-09-04
+
+### Choya Assist
+
+- Choya gives you the build again. If it named one trait wrong out of the three in a specialization, the whole build was thrown away and you got only the write-up — the "expected 3 traits, got 2" note at the end of every reply. Its correct picks are now kept and the one column it fumbled is filled from game data, so the build lands. A specialization where nothing it named exists is still refused, so a wrong guess cannot be dressed up as a real build.
+- When a build is refused, the log now names the trait or skill that failed instead of only reporting that a count came up short.
+
 ## 1.11.9 - 2026-09-04
 
 ### News

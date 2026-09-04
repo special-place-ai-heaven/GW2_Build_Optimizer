@@ -243,6 +243,23 @@ pub struct SimulationResult {
     pub cleanse_count: u32,
     /// Estimated conditions removed per 20 seconds (sum of conditions_removed × uptime_factor).
     pub cleanse_rate_per_20s: f64,
+    /// Self-healing plus barrier per second over the window, from the same
+    /// conservative healing-power model the WvW timeline uses. Stays zero
+    /// unless the scheduler had a reason to cast heals (`SimParams::intent`).
+    pub healing_per_second: f64,
+    /// Control-seconds per second: hard CC as non-overlapping disabled time
+    /// (at most 1.0) plus 0.5 per distinct soft control condition present
+    /// (chill, cripple, weakness, slow, blind). Can exceed 1.0; the scoring
+    /// norm (`REALIZED_CONTROL_NORM`) is set accordingly.
+    pub control_uptime: f64,
+    /// Time-averaged Might stacks (0..=25). `buff_uptime["Might"]` is capped
+    /// at 1.0 and cannot tell 3 stacks from 25.
+    pub might_stacks_avg: f64,
+    /// Boon-equivalents at full uptime: every boon's presence uptime times
+    /// its worth (Quickness/Alacrity/Fury/Protection/Stability 1.0, Aegis
+    /// 0.75, Regeneration/Resolution/Vigor/Resistance 0.5, Swiftness 0.25),
+    /// with Might counted as `might_stacks_avg / 25`.
+    pub boon_equivalents: f64,
     /// Kit has stealth, evade, block, invuln/aegis, or mobility to disengage a group.
     pub has_mobility_out: bool,
     /// Distinct roam-out categories (mobility, stealth, block, invuln/aegis).

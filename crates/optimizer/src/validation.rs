@@ -705,8 +705,19 @@ fn validate_specializations(
             }
         }
 
-        // Omitted columns may fill. Garbage names must not become a legal spec.
-        if !unknown_trait {
+        // Fill the columns the model left empty or named wrongly, but only when
+        // it demonstrably knew this spec: at least one name resolved, or it
+        // named none at all. A spec where NOTHING resolved is a hallucination
+        // and must not be laundered into a legal build.
+        //
+        // The old test here was `!unknown_trait`, which threw away the whole
+        // build over a single bad name out of three — and a spec stuck at 2
+        // traits fails `plate_is_servable`, so the player got prose and no
+        // build, permanently. Keeping the model's good picks and filling only
+        // the column it fumbled is strictly closer to what it asked for than
+        // discarding all three.
+        let named_nothing_real = unknown_trait && resolved_trait_ids.is_empty();
+        if !named_nothing_real {
             complete_major_trait_columns(
                 &major_traits,
                 &mut resolved_trait_ids,
@@ -889,7 +900,10 @@ fn validate_skills(
     // Filter to only core skills (specialization == None) or skills from the equipped elite spec.
     // This prevents cross-spec skill suggestions from slipping through (e.g. Berserker using
     // a Spellbreaker utility when Spellbreaker is not equipped).
-    let all_prof_skills = db.profession_skills(profession_name);
+    // Racial skills are excluded from the search pools but a plate that
+    // names one is legal for the right race, so resolve against everything
+    // the profession can slot.
+    let all_prof_skills = db.skills_usable_by(profession_name);
     let prof_skills: Vec<&Skill> = all_prof_skills
         .into_iter()
         .filter(|s| match s.specialization {
@@ -2237,6 +2251,49 @@ mod tests {
             .warnings
             .iter()
             .any(|w| w.contains("Arcane Precision")));
+    }
+
+    /// The live failure: Choya names three traits and ONE of them is wrong
+    /// (a minor trait, another spec's trait, a hallucination). Two good names
+    /// prove it knew this spec, so the bad column must fill from game data
+    /// rather than the whole build being discarded — a spec stuck at 2 traits
+    /// fails `plate_is_servable`, so the player gets prose and no build at all.
+    #[test]
+    fn validate_gemini_build_fills_around_one_bad_trait_name() {
+        let db = arcane_ele_db();
+        let response = GeminiBuildResponse {
+            specializations: vec![(
+                "Arcane".into(),
+                vec![
+                    "Arcane Resurrection".into(),
+                    "NotARealTrait".into(),
+                    "Evasive Arcana".into(),
+                ],
+            )],
+            ..Default::default()
+        };
+        let result = validate_gemini_build(&response, &db, "Elementalist");
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("NotARealTrait")),
+            "the bad name must still be reported: {:?}",
+            result.warnings
+        );
+        assert_eq!(
+            result.specializations[0].trait_ids,
+            vec![1, 2, 3],
+            "the unresolved column fills from game data"
+        );
+        assert!(
+            !result
+                .errors
+                .iter()
+                .any(|e| matches!(e.code, RejectCode::IncompleteSpecTraits { .. })),
+            "one bad name must not sink the build: {:?}",
+            result.errors
+        );
     }
 
     #[test]

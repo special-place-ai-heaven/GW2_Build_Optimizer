@@ -127,15 +127,7 @@ impl GameDb {
         let pets: HashMap<u32, Pet> = pets_vec.into_iter().map(|p| (p.id, p)).collect();
 
         // Build derived indexes
-        let mut skills_by_profession: HashMap<String, Vec<u32>> = HashMap::new();
-        for skill in skills.values() {
-            for prof in &skill.professions {
-                skills_by_profession
-                    .entry(prof.clone())
-                    .or_default()
-                    .push(skill.id);
-            }
-        }
+        let mut skills_by_profession = profession_skill_index(&skills);
 
         let mut traits_by_spec: HashMap<u32, Vec<u32>> = HashMap::new();
         for t in traits.values() {
@@ -591,6 +583,22 @@ impl GameDb {
             .unwrap_or_default()
     }
 
+    /// Every skill a character of `profession` can slot: the profession's
+    /// own skills plus racial skills (shared across professions). The search
+    /// never picks from this — it does not know the race — but a build the
+    /// player or an LLM names must still resolve.
+    pub fn skills_usable_by(&self, profession: &str) -> Vec<&Skill> {
+        let mut out = self.profession_skills(profession);
+        let mut racial: Vec<&Skill> = self
+            .skills
+            .values()
+            .filter(|s| s.professions.len() > 1 && s.professions.iter().any(|p| p == profession))
+            .collect();
+        racial.sort_by_key(|s| s.id);
+        out.extend(racial);
+        out
+    }
+
     /// Get all traits in a specialization.
     pub fn spec_traits(&self, spec_id: u32) -> Vec<&GW2Trait> {
         self.traits_by_spec
@@ -734,6 +742,24 @@ fn is_boon(status: &str) -> bool {
 /// Test-only thin wrapper preserved so the alias-routing regression suite in
 /// `data::boon_condition_formulas::tests` keeps exercising the shared
 /// `is_condition` helper through the path the gamedb module consumes it by.
+/// Skills per profession, by the profession the skill belongs to.
+///
+/// Racial skills list every profession that can slot them (eight: all but
+/// Revenant). The optimizer does not know the character's race, no published
+/// build carries one, and the flow simulation cannot value most of them
+/// (Healing Seed has no Heal fact), so a skill shared by several professions
+/// belongs to none here. Measured 2026-09-05: 10 of 36 calibration seeds had
+/// picked Battle Roar, Shrapnel Mine, Reaper of Grenth or Healing Seed.
+fn profession_skill_index(skills: &HashMap<u32, Skill>) -> HashMap<String, Vec<u32>> {
+    let mut index: HashMap<String, Vec<u32>> = HashMap::new();
+    for skill in skills.values() {
+        if let [profession] = skill.professions.as_slice() {
+            index.entry(profession.clone()).or_default().push(skill.id);
+        }
+    }
+    index
+}
+
 #[cfg(test)]
 pub(crate) mod tests_alias_helpers {
     pub(crate) fn is_condition(status: &str) -> bool {
@@ -762,6 +788,68 @@ mod tests {
             elite,
             utilities: utilities.to_vec(),
         }
+    }
+
+    #[test]
+    fn racial_skills_belong_to_no_profession() {
+        let skill = |id: u32, professions: &[&str]| gw2_api::models::Skill {
+            id,
+            name: format!("skill{id}"),
+            description: None,
+            icon: None,
+            chat_link: None,
+            skill_type: None,
+            weapon_type: None,
+            professions: professions.iter().map(|p| p.to_string()).collect(),
+            slot: Some("Utility".into()),
+            facts: vec![],
+            traited_facts: vec![],
+            categories: vec![],
+            attunement: None,
+            cost: None,
+            dual_wield: None,
+            flip_skill: None,
+            initiative: None,
+            next_chain: None,
+            prev_chain: None,
+            transform_skills: vec![],
+            bundle_skills: vec![],
+            toolbelt_skill: None,
+            flags: vec![],
+            specialization: None,
+        };
+        let mut skills = HashMap::new();
+        skills.insert(1, skill(1, &["Warrior"]));
+        skills.insert(
+            2,
+            skill(
+                2,
+                &[
+                    "Guardian",
+                    "Warrior",
+                    "Engineer",
+                    "Ranger",
+                    "Thief",
+                    "Elementalist",
+                    "Mesmer",
+                    "Necromancer",
+                ],
+            ),
+        );
+        let index = profession_skill_index(&skills);
+        assert_eq!(index.get("Warrior"), Some(&vec![1]));
+        assert!(
+            index.values().flatten().all(|id| *id != 2),
+            "a racial skill must not be indexed under any profession: {index:?}"
+        );
+
+        // ...but a named racial skill still resolves for the profession.
+        let mut db = GameDb::empty_for_tests();
+        db.skills = skills;
+        db.skills_by_profession = index;
+        let usable: Vec<u32> = db.skills_usable_by("Warrior").iter().map(|s| s.id).collect();
+        assert_eq!(usable, vec![1, 2]);
+        assert!(db.skills_usable_by("Revenant").is_empty());
     }
 
     #[test]

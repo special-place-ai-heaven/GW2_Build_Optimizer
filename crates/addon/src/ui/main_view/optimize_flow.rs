@@ -240,6 +240,20 @@ fn start_optimization_inner(state: &mut AddonState, profession_name: &str, entry
                             if token_v2.is_cancelled() {
                                 return;
                             }
+                            // The search's budget receipt is a diagnostic, not a
+                            // status: log it and keep it out of the banner. The
+                            // default 1500-eval / 10-wide budget stops the beam
+                            // after three generations, so this is how we find out
+                            // whether that ceiling is real or whether the search
+                            // is idling inside its 45s allowance.
+                            if progress.stage.starts_with("search_v2") {
+                                nexus::log::log(
+                                    nexus::log::LogLevel::Info,
+                                    "GW2BuildOpt",
+                                    progress.stage.clone(),
+                                );
+                                return;
+                            }
                             crate::state::with_state(|s| {
                                 s.main.optimize_stage = progress.stage.clone();
                             });
