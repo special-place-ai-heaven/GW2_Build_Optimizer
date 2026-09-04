@@ -257,13 +257,18 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             nexus::log::LogLevel::Warning,
                             "GW2BuildOpt",
                             format!(
-                                "Kitchen validation errors: {}",
+                                "Kitchen validation errors: {} | warnings: {}",
                                 validated
                                     .errors
                                     .iter()
                                     .map(|e| e.detail.as_str())
                                     .collect::<Vec<_>>()
-                                    .join("; ")
+                                    .join("; "),
+                                // The warnings name the trait/skill the model
+                                // actually got wrong; the errors only say a
+                                // count came up short. Logging errors alone
+                                // made "expected 3 traits, got 2" undiagnosable.
+                                validated.warnings.join("; ")
                             ),
                         );
                     }

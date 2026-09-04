@@ -26,6 +26,10 @@ use super::combat_model::{
 };
 use super::skill_timings::{HUMAN_DELAY_MS, MIN_SKILL_GAP_MS};
 use super::{RotationSkill, SimulationResult, SkillEffect, SkillSlot, SkillUsage};
+use crate::scoring::{
+    OptimizationWeights, PROTECTION_REDUCTION, REALIZED_BOON_NORM, REALIZED_CONDI_DPS_NORM,
+    REALIZED_CONTROL_NORM, REALIZED_HEALING_NORM, REALIZED_STRIKE_DPS_NORM,
+};
 
 /// Tick resolution for the simulation (ms per step).
 const TICK_MS: u32 = 100;
@@ -54,17 +58,128 @@ pub(super) fn reference_armor() -> f64 {
 /// Active condition stack being tracked.
 #[derive(Debug, Clone)]
 struct ConditionStack {
-    condition: String,
+    /// Index into `SimState::condition_slots`.
+    slot: usize,
     remaining_ms: u32,
     /// Per-application pulse clock (apply + 1s, then +1s). Not a global wall pulse.
     next_tick_ms: u32,
 }
 
+/// One distinct condition name in a sim, with its tick formula resolved once.
+/// Tick damage is linear in condition damage (wiki), so a 60s run never
+/// looks the formula up again: 25 Bleeding stacks x 600 ticks did, and cost
+/// more than the whole gate simulation.
+#[derive(Debug, Clone)]
+struct ConditionSlot {
+    name: String,
+    base: f64,
+    per_condition_damage: f64,
+}
+
 /// Active buff being tracked.
 #[derive(Debug, Clone)]
 struct BuffInstance {
-    buff: String,
     remaining_ms: u32,
+    kind: BuffKind,
+    /// Index into `SimState::buff_slots`.
+    slot: usize,
+}
+
+/// What the scheduler asks of a buff every tick, resolved once at push time
+/// instead of a string compare per instance per tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuffKind {
+    Might,
+    Fury,
+    Quickness,
+    Alacrity,
+    /// Index into `SOFT_CONTROL`.
+    SoftControl(u8),
+    Other,
+}
+
+fn buff_kind(name: &str) -> BuffKind {
+    if name.eq_ignore_ascii_case("Might") {
+        return BuffKind::Might;
+    }
+    if name.eq_ignore_ascii_case("Fury") {
+        return BuffKind::Fury;
+    }
+    if name.eq_ignore_ascii_case("Quickness") {
+        return BuffKind::Quickness;
+    }
+    if name.eq_ignore_ascii_case("Alacrity") {
+        return BuffKind::Alacrity;
+    }
+    let canonical = crate::data::boon_condition_formulas::canonical_condition_name(name);
+    match SOFT_CONTROL
+        .iter()
+        .position(|s| s.eq_ignore_ascii_case(canonical))
+    {
+        Some(i) => BuffKind::SoftControl(i as u8),
+        None => BuffKind::Other,
+    }
+}
+
+/// A skill's cast value with everything that does not change during a sim
+/// folded in advance. Only the strike term depends on live Might and Fury.
+#[derive(Debug, Clone, Copy)]
+struct StaticCast {
+    /// Strike damage per unit of effective power at crit factor 1.0.
+    strike_coeff: f64,
+    /// Every other axis of `CastValue`, strike zeroed.
+    rest: CastValue,
+    cast_time_s: f64,
+}
+
+impl StaticCast {
+    /// `enemy_stability`: hard CC lands nothing through Stability, so the
+    /// scheduler must not spend casts on it; soft control still applies.
+    fn new(skill: &RotationSkill, params: &SimParams, enemy_stability: bool) -> Self {
+        let strike_coeff: f64 = skill
+            .effects
+            .iter()
+            .map(|effect| match effect {
+                SkillEffect::StrikeDamage {
+                    hit_count,
+                    dmg_multiplier,
+                } => {
+                    params.weapon_strength / reference_armor()
+                        * dmg_multiplier
+                        * (*hit_count as f64)
+                        * params.strike_mult
+                }
+                _ => 0.0,
+            })
+            .sum();
+        let mut rest = skill_cast_value(
+            skill,
+            params.power,
+            params.condition_damage,
+            params.weapon_strength,
+            params,
+            0.0,
+            false,
+        );
+        rest.strike = 0.0;
+        if enemy_stability {
+            let hard_control_s: f64 = skill
+                .effects
+                .iter()
+                .map(|effect| match effect {
+                    SkillEffect::CrowdControl { duration_ms, .. } => *duration_ms as f64 / 1000.0,
+                    _ => 0.0,
+                })
+                .sum();
+            rest.control_s = (rest.control_s - hard_control_s).max(0.0);
+        }
+        Self {
+            strike_coeff,
+            rest,
+            cast_time_s: (skill.cast_time_ms + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS) as f64
+                / 1000.0,
+        }
+    }
 }
 
 /// Internal state for a skill's cooldown.
@@ -95,6 +210,10 @@ pub struct SimParams {
     pub max_health: f64,
     pub armor: f64,
     pub mode: GameMode,
+    /// When set, the scheduler ranks casts by radar-weighted worth instead
+    /// of damage per cast time, so heals, boons and control get cast on an
+    /// open dummy. `None` is the gate simulation's pure DPCT.
+    pub intent: Option<OptimizationWeights>,
 }
 
 impl SimParams {
@@ -116,6 +235,7 @@ impl SimParams {
             max_health: 20_000.0,
             armor: 2_000.0,
             mode: GameMode::PvE,
+            intent: None,
         }
     }
 }
@@ -203,13 +323,25 @@ struct SimState {
 
     // Tracking
     conditions: Vec<ConditionStack>,
+    condition_slots: Vec<ConditionSlot>,
     buffs: Vec<BuffInstance>,
+    buff_slots: Vec<String>,
+    /// Scratch: which buff slots had a live instance this tick.
+    buff_seen: Vec<bool>,
+    static_casts: Vec<StaticCast>,
     total_strike_damage: f64,
     total_condition_damage: f64,
-    skill_casts: HashMap<u32, u32>,        // skill_id → cast count
-    skill_damage: HashMap<u32, f64>,       // skill_id → total damage
-    condition_ticks: HashMap<String, f64>, // condition → paid tick units (fractional last pulse)
-    buff_active_ms: HashMap<String, u32>,  // buff → total ms active
+    skill_casts: HashMap<u32, u32>,  // skill_id → cast count
+    skill_damage: HashMap<u32, f64>, // skill_id → total damage
+    /// Per condition slot: paid tick units (fractional last pulse).
+    condition_ticks: Vec<f64>,
+    /// Per buff slot: total ms active, summed over instances.
+    buff_active_ms: Vec<u32>,
+    total_healing: f64,
+    /// Control-seconds in ms: hard CC non-overlapping, soft control at half.
+    control_ms: f64,
+    enemy_disabled_until_ms: u32,
+    might_stack_ms: f64,
     params: SimParams,
 }
 
@@ -228,6 +360,10 @@ impl SimState {
             .collect();
 
         let has_weapon_sets = skills.iter().any(|s| s.weapon_set > 0);
+        let static_casts = skills
+            .iter()
+            .map(|skill| StaticCast::new(skill, &params, enemy.stability))
+            .collect();
 
         Self {
             skills: skills.to_vec(),
@@ -245,13 +381,21 @@ impl SimState {
             stomp_ends_ms: 0,
             enemy,
             conditions: Vec::new(),
+            condition_slots: Vec::new(),
             buffs: Vec::new(),
+            buff_slots: Vec::new(),
+            buff_seen: Vec::new(),
+            static_casts,
             total_strike_damage: 0.0,
             total_condition_damage: 0.0,
             skill_casts: HashMap::new(),
             skill_damage: HashMap::new(),
-            condition_ticks: HashMap::new(),
-            buff_active_ms: HashMap::new(),
+            condition_ticks: Vec::new(),
+            buff_active_ms: Vec::new(),
+            total_healing: 0.0,
+            control_ms: 0.0,
+            enemy_disabled_until_ms: 0,
+            might_stack_ms: 0.0,
             params,
         }
     }
@@ -264,10 +408,14 @@ impl SimState {
             // Tick conditions and buffs
             self.tick_conditions(condition_damage);
             self.tick_buffs();
+            self.might_stack_ms += self.live_might_stacks() * TICK_MS as f64;
+            self.control_ms += self.soft_control_weight() * TICK_MS as f64;
 
             // Alacrity: +25% recharge (wiki 2018). 100ms wall = 125ms CD. 10s → 8s.
-            let cd_tick =
-                alacrity_cd_advance_ms(TICK_MS, self.buffs.iter().any(|b| b.buff == "Alacrity"));
+            let cd_tick = alacrity_cd_advance_ms(
+                TICK_MS,
+                self.buffs.iter().any(|b| b.kind == BuffKind::Alacrity),
+            );
             for state in &mut self.skill_states {
                 state.cooldown_remaining_ms = state.cooldown_remaining_ms.saturating_sub(cd_tick);
             }
@@ -276,13 +424,11 @@ impl SimState {
             // Try to use a skill if the character is free
             if self.current_time_ms >= self.next_action_ms {
                 // Check if weapon swap would be beneficial
-                if self.has_weapon_sets
-                    && self.should_weapon_swap(power, condition_damage, weapon_strength)
-                {
+                if self.has_weapon_sets && self.should_weapon_swap(power) {
                     self.weapon_swap();
                 }
 
-                if let Some(idx) = self.pick_skill(power, condition_damage, weapon_strength) {
+                if let Some(idx) = self.pick_skill(power) {
                     self.use_skill(idx, power, weapon_strength);
                 }
             }
@@ -295,12 +441,8 @@ impl SimState {
     ///
     /// Availability means: off cooldown AND (weapon_set==0 OR weapon_set==active_set).
     /// Auto-attack (Weapon1 with cooldown 0) is used as filler when nothing else is ready.
-    fn pick_skill(&self, power: f64, condition_damage: f64, weapon_strength: f64) -> Option<usize> {
-        let fury_active = self
-            .buffs
-            .iter()
-            .any(|buff| buff.buff.eq_ignore_ascii_case("Fury"));
-        let live_might = self.live_might_stacks();
+    fn pick_skill(&self, power: f64) -> Option<usize> {
+        let (effective_power, crit_factor) = self.strike_terms(power);
         let mut best_idx = None;
         let mut best_dpct = 0.0f64;
         let mut filler_idx = None;
@@ -333,15 +475,7 @@ impl SimState {
                 continue;
             }
 
-            let dpct = skill_dps_efficiency(
-                skill,
-                power,
-                condition_damage,
-                weapon_strength,
-                &self.params,
-                live_might,
-                fury_active,
-            );
+            let dpct = self.priority(i, effective_power, crit_factor);
             if dpct > best_dpct {
                 best_dpct = dpct;
                 best_idx = Some(i);
@@ -384,45 +518,94 @@ impl SimState {
 
     /// Decide if we should weapon swap: all active weapon skills on CD,
     /// swap is available, and the other set has usable skills.
-    fn should_weapon_swap(&self, power: f64, condition_damage: f64, weapon_strength: f64) -> bool {
+    fn should_weapon_swap(&self, power: f64) -> bool {
         if self.weapon_swap_cooldown_ms > 0 {
             return false;
         }
 
         let other_set = if self.active_weapon_set == 1 { 2 } else { 1 };
 
-        // Check: are all active set weapon skills on cooldown?
+        let (effective_power, crit_factor) = self.strike_terms(power);
+
+        // Check: does the active set still have a skill worth casting? A
+        // skill `pick_skill` would never cast (priority 0 — e.g. a
+        // condition skill under a healer radar) is not a reason to stay.
         let has_active_weapon_ready = self.skills.iter().enumerate().any(|(i, s)| {
             s.weapon_set == self.active_weapon_set
                 && s.slot != SkillSlot::Weapon1
                 && self.skill_states[i].cooldown_remaining_ms == 0
+                && self.priority(i, effective_power, crit_factor) > 0.0
         });
 
         if has_active_weapon_ready {
             return false; // still have skills to use on current set
         }
 
-        let fury_active = self
-            .buffs
-            .iter()
-            .any(|buff| buff.buff.eq_ignore_ascii_case("Fury"));
-        let live_might = self.live_might_stacks();
-
         // Check: does the other set have off-cooldown skills with DPCT > 0?
         self.skills.iter().enumerate().any(|(i, s)| {
             s.weapon_set == other_set
                 && s.slot != SkillSlot::Weapon1
                 && self.skill_states[i].cooldown_remaining_ms == 0
-                && skill_dps_efficiency(
-                    s,
-                    power,
-                    condition_damage,
-                    weapon_strength,
-                    &self.params,
-                    live_might,
-                    fury_active,
-                ) > 0.0
+                && self.priority(i, effective_power, crit_factor) > 0.0
         })
+    }
+
+    /// Live strike terms shared by every candidate this decision: effective
+    /// power with Might, and the crit factor with Fury.
+    fn strike_terms(&self, power: f64) -> (f64, f64) {
+        let fury_bonus = if self.buffs.iter().any(|b| b.kind == BuffKind::Fury) {
+            self.params.fury_crit_chance_bonus
+        } else {
+            0.0
+        };
+        (
+            power + self.live_might_stacks() * 30.0,
+            strike_crit_factor_with_bonus(
+                self.params.precision,
+                self.params.ferocity,
+                self.params.crit_chance_bonus + fury_bonus,
+            ),
+        )
+    }
+
+    /// Scheduling priority of skill `idx` per second of cast time, from its
+    /// precomputed cast value. Same formula as `skill_dps_efficiency`.
+    fn priority(&self, idx: usize, effective_power: f64, crit_factor: f64) -> f64 {
+        let sc = &self.static_casts[idx];
+        if sc.cast_time_s <= 0.0 {
+            return 0.0;
+        }
+        let strike = sc.strike_coeff * effective_power * crit_factor;
+        match &self.params.intent {
+            Some(weights) => intent_value(&CastValue { strike, ..sc.rest }, weights) / sc.cast_time_s,
+            None => (strike + sc.rest.condition + sc.rest.boon_dps) / sc.cast_time_s,
+        }
+    }
+
+    fn condition_slot(&mut self, name: &str) -> usize {
+        if let Some(i) = self.condition_slots.iter().position(|c| c.name == name) {
+            return i;
+        }
+        let mode = &self.params.mode;
+        let base = condition_tick_damage(name, 0.0, mode);
+        let per_condition_damage = (condition_tick_damage(name, 1_000.0, mode) - base) / 1_000.0;
+        self.condition_slots.push(ConditionSlot {
+            name: name.to_string(),
+            base,
+            per_condition_damage,
+        });
+        self.condition_ticks.push(0.0);
+        self.condition_slots.len() - 1
+    }
+
+    fn buff_slot(&mut self, name: &str) -> usize {
+        if let Some(i) = self.buff_slots.iter().position(|b| b == name) {
+            return i;
+        }
+        self.buff_slots.push(name.to_string());
+        self.buff_active_ms.push(0);
+        self.buff_seen.push(false);
+        self.buff_slots.len() - 1
     }
 
     /// Perform a weapon swap.
@@ -452,11 +635,7 @@ impl SimState {
                     dmg_multiplier,
                 } => {
                     let effective_power = power + self.live_might_stacks() * 30.0;
-                    let fury_bonus = if self
-                        .buffs
-                        .iter()
-                        .any(|buff| buff.buff.eq_ignore_ascii_case("Fury"))
-                    {
+                    let fury_bonus = if self.buffs.iter().any(|b| b.kind == BuffKind::Fury) {
                         self.params.fury_crit_chance_bonus
                     } else {
                         0.0
@@ -483,15 +662,12 @@ impl SimState {
                     duration_ms,
                 } => {
                     let cap = condition_stack_cap(condition, &self.params.mode);
-                    let current = self
-                        .conditions
-                        .iter()
-                        .filter(|s| s.condition == *condition)
-                        .count();
+                    let slot = self.condition_slot(condition);
+                    let current = self.conditions.iter().filter(|s| s.slot == slot).count();
                     let can_apply = (*stacks as usize).min(cap.saturating_sub(current));
                     for _ in 0..can_apply {
                         self.conditions.push(ConditionStack {
-                            condition: condition.clone(),
+                            slot,
                             remaining_ms: (*duration_ms as f64
                                 * self.params.condition_duration_mult)
                                 .round() as u32,
@@ -506,27 +682,54 @@ impl SimState {
                     stacks,
                     duration_ms,
                 } => {
+                    let kind = buff_kind(buff);
+                    let slot = self.buff_slot(buff);
+                    // The builder files non-damaging conditions here too;
+                    // those are on the enemy and follow Expertise, not
+                    // Concentration.
+                    let duration_mult = match kind {
+                        BuffKind::SoftControl(_) => self.params.condition_duration_mult,
+                        _ => self.params.boon_duration_mult,
+                    };
                     for _ in 0..*stacks {
                         self.buffs.push(BuffInstance {
-                            buff: buff.clone(),
-                            remaining_ms: (*duration_ms as f64 * self.params.boon_duration_mult)
-                                .round() as u32,
+                            remaining_ms: (*duration_ms as f64 * duration_mult).round() as u32,
+                            kind,
+                            slot,
                         });
                     }
                 }
                 SkillEffect::ComboField { .. } | SkillEffect::ComboFinisher { .. } => {
                     // Combo fields tracked but not simulated for damage
                 }
-                SkillEffect::Healing { .. } | SkillEffect::Barrier { .. } => {
-                    // Incoming pressure, healing, and barrier are resolved by
-                    // the counterplay-aware WvW timeline.
+                SkillEffect::Healing { hit_count } => {
+                    // Same conservative model as the WvW timeline. The open
+                    // dummy has no incoming pressure, so this is output the
+                    // scheduler chose to produce, not survival.
+                    self.total_healing += (1_200.0 + self.params.healing_power * 0.45)
+                        * *hit_count as f64
+                        * self.params.healing_mult;
+                }
+                SkillEffect::Barrier { amount } => {
+                    self.total_healing += amount + self.params.healing_power * 0.30;
                 }
                 SkillEffect::RemovesCondition { .. } => {
                     // Cleanse effects are tracked at the roster level (cleanse_count / cleanse_rate_per_20s),
                     // not as in-sim condition deletion (no enemy condi bar).
                 }
-                SkillEffect::CrowdControl { .. }
-                | SkillEffect::ConvertConditions
+                SkillEffect::CrowdControl { duration_ms, .. } => {
+                    // Non-overlapping disabled time; nothing lands through
+                    // Stability. Same accounting as the WvW timeline.
+                    if !self.enemy.stability {
+                        let previous_end = self.enemy_disabled_until_ms.max(self.current_time_ms);
+                        let new_end = self
+                            .enemy_disabled_until_ms
+                            .max(self.current_time_ms + *duration_ms);
+                        self.control_ms += new_end.saturating_sub(previous_end) as f64;
+                        self.enemy_disabled_until_ms = new_end;
+                    }
+                }
+                SkillEffect::ConvertConditions
                 | SkillEffect::Cover { .. }
                 | SkillEffect::Mobility { .. } => {}
                 SkillEffect::StripBoons { .. }
@@ -545,7 +748,7 @@ impl SimState {
         // GW2 mechanic: "skills and actions execute 50% faster" = cast * 2/3.
         // Quickness does NOT reduce cooldowns.
         // Round-half-up via (n*2 + 1)/3 to avoid systematic floor bias from integer division.
-        let quickness_active = self.buffs.iter().any(|b| b.buff == "Quickness");
+        let quickness_active = self.buffs.iter().any(|b| b.kind == BuffKind::Quickness);
         let effective_cast = if quickness_active {
             (cast_time * 2 + 1) / 3
         } else {
@@ -557,10 +760,22 @@ impl SimState {
             self.current_time_ms + effective_cast + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS;
     }
 
+    /// Soft control present this tick: half weight per distinct condition.
+    /// The builder files non-damaging conditions under `buffs`.
+    fn soft_control_weight(&self) -> f64 {
+        let mut present = 0u8;
+        for b in &self.buffs {
+            if let BuffKind::SoftControl(i) = b.kind {
+                present |= 1 << i;
+            }
+        }
+        present.count_ones() as f64 * 0.5
+    }
+
     fn live_might_stacks(&self) -> f64 {
         self.buffs
             .iter()
-            .filter(|buff| buff.buff.eq_ignore_ascii_case("Might"))
+            .filter(|buff| buff.kind == BuffKind::Might)
             .count()
             .min(25) as f64
     }
@@ -582,18 +797,14 @@ impl SimState {
         let now = self.current_time_ms;
         let mut tick_total = 0.0;
         for stack in &mut self.conditions {
-            let tick_dmg =
-                condition_tick_damage(&stack.condition, condition_damage, &self.params.mode)
-                    * self.params.condition_mult;
+            let slot = &self.condition_slots[stack.slot];
+            let tick_dmg = (slot.base + slot.per_condition_damage * condition_damage)
+                * self.params.condition_mult;
 
             while stack.next_tick_ms <= now && stack.remaining_ms >= CONDITION_TICK_INTERVAL_MS {
                 self.total_condition_damage += tick_dmg;
                 tick_total += tick_dmg;
-                if let Some(count) = self.condition_ticks.get_mut(&stack.condition) {
-                    *count += 1.0;
-                } else {
-                    self.condition_ticks.insert(stack.condition.clone(), 1.0);
-                }
+                self.condition_ticks[stack.slot] += 1.0;
                 stack.remaining_ms -= CONDITION_TICK_INTERVAL_MS;
                 stack.next_tick_ms = stack
                     .next_tick_ms
@@ -613,11 +824,7 @@ impl SimState {
                 let frac_dmg = tick_dmg * frac;
                 self.total_condition_damage += frac_dmg;
                 tick_total += frac_dmg;
-                if let Some(count) = self.condition_ticks.get_mut(&stack.condition) {
-                    *count += frac;
-                } else {
-                    self.condition_ticks.insert(stack.condition.clone(), frac);
-                }
+                self.condition_ticks[stack.slot] += frac;
                 stack.remaining_ms = 0;
             }
         }
@@ -643,16 +850,17 @@ impl SimState {
     }
 
     /// Tick buffs — track uptime, remove expired.
+    ///
+    /// Uptime is presence: a slot counts once per tick however many instances
+    /// are live, so five stacks of Stability for 5 s are 5 s of Stability,
+    /// not 25. Might's stack count is tracked separately (`might_stack_ms`).
     fn tick_buffs(&mut self) {
+        self.buff_seen.iter_mut().for_each(|seen| *seen = false);
         for buff in &mut self.buffs {
             if buff.remaining_ms > 0 {
-                // Avoid `buff.buff.clone()` once the buff name is interned in
-                // the uptime map. Sim runs ~thousands of ticks; clone savings
-                // compound across long simulations.
-                if let Some(ms) = self.buff_active_ms.get_mut(&buff.buff) {
-                    *ms += TICK_MS;
-                } else {
-                    self.buff_active_ms.insert(buff.buff.clone(), TICK_MS);
+                if !self.buff_seen[buff.slot] {
+                    self.buff_seen[buff.slot] = true;
+                    self.buff_active_ms[buff.slot] += TICK_MS;
                 }
                 buff.remaining_ms = buff.remaining_ms.saturating_sub(TICK_MS);
             }
@@ -670,15 +878,21 @@ impl SimState {
 
         // Average condition stacks: total ticks / duration in seconds
         let condition_uptime: HashMap<String, f64> = self
-            .condition_ticks
+            .condition_slots
             .iter()
-            .map(|(name, ticks)| (name.clone(), ticks / duration_secs))
+            .zip(&self.condition_ticks)
+            .filter(|(_, ticks)| **ticks > 0.0)
+            .map(|(slot, ticks)| (slot.name.clone(), ticks / duration_secs))
             .collect();
 
-        // Buff uptime as fraction of total duration
+        // Buff uptime as fraction of total duration (presence, see tick_buffs).
+        // Only names that were ever active, so a zero-duration tooltip buff
+        // does not surface as a 0% row.
         let buff_uptime: HashMap<String, f64> = self
-            .buff_active_ms
+            .buff_slots
             .iter()
+            .zip(&self.buff_active_ms)
+            .filter(|(_, ms)| **ms > 0)
             .map(|(name, ms)| {
                 let fraction = *ms as f64 / self.duration_ms as f64;
                 (name.clone(), fraction.min(1.0))
@@ -746,6 +960,22 @@ impl SimState {
             })
             .sum();
 
+        let healing_per_second = self.total_healing / duration_secs;
+        let control_uptime = self.control_ms / self.duration_ms as f64;
+        let might_stacks_avg = self.might_stack_ms / self.duration_ms as f64;
+        // From the slot vectors (insertion order), not the map: float sums
+        // are order-dependent and the rank compares exact micro-units.
+        let boon_equivalents = self
+            .buff_slots
+            .iter()
+            .zip(&self.buff_active_ms)
+            .filter(|(name, _)| !name.eq_ignore_ascii_case("Might"))
+            .map(|(name, ms)| {
+                boon_value(name) * (*ms as f64 / self.duration_ms as f64).min(1.0)
+            })
+            .sum::<f64>()
+            + might_stacks_avg / 25.0;
+
         SimulationResult {
             duration_ms: self.duration_ms,
             strike_dps,
@@ -759,6 +989,10 @@ impl SimState {
             stability_uptime,
             cleanse_count,
             cleanse_rate_per_20s,
+            healing_per_second,
+            control_uptime,
+            might_stacks_avg,
+            boon_equivalents,
             has_mobility_out: kit_has_mobility_out(&self.skills),
             escape_kinds: kit_escape_kinds(&self.skills),
             has_strip: kit_has_strip(&self.skills),
@@ -772,17 +1006,72 @@ impl SimState {
     }
 }
 
-/// Calculate damage per second of cast time (DPCT) for a skill.
-///
-/// This is the core metric for optimal skill scheduling: the skill with the
-/// highest DPCT should always be used first when multiple are off cooldown.
-///
-/// Accounts for:
-/// - **Strike damage**: same expected strike as `use_skill` (Might power,
-///   Fury crit bonus, `strike_crit_factor_with_bonus`, `strike_mult`)
-/// - **Condition damage**: total tick damage over the condition's full duration
-/// - **Buff value**: estimated DPS increase from Might, Fury, Quickness
-fn skill_dps_efficiency(
+/// Boons, as named by the rotation builder. Anything else in `buffs` is a
+/// non-damaging status the builder filed there (Chilled, Vulnerability, ...).
+const BOONS: [&str; 12] = [
+    "Might",
+    "Fury",
+    "Quickness",
+    "Alacrity",
+    "Protection",
+    "Regeneration",
+    "Swiftness",
+    "Vigor",
+    "Stability",
+    "Resolution",
+    "Resistance",
+    "Aegis",
+];
+
+/// Non-damaging conditions that hamper the target: counted as control at
+/// half the weight of a hard disable while present.
+const SOFT_CONTROL: [&str; 5] = ["Chilled", "Crippled", "Weakness", "Slow", "Blinded"];
+
+fn is_boon(status: &str) -> bool {
+    BOONS.iter().any(|b| b.eq_ignore_ascii_case(status))
+}
+
+/// How much one second of a boon is worth on the boon-support axis, relative
+/// to a second of Quickness. Heuristic, deliberately coarse: the damage
+/// boons and the two that decide fights (Protection, Stability) count in
+/// full, the comfort boons half, Swiftness a quarter. Might is scaled by
+/// stacks/25 on top of this by the callers.
+fn boon_value(status: &str) -> f64 {
+    let canonical = BOONS
+        .iter()
+        .find(|b| b.eq_ignore_ascii_case(status))
+        .copied()
+        .unwrap_or("");
+    match canonical {
+        "Might" | "Fury" | "Quickness" | "Alacrity" | "Protection" | "Stability" => 1.0,
+        "Aegis" => 0.75,
+        "Regeneration" | "Resolution" | "Vigor" | "Resistance" => 0.5,
+        "Swiftness" => 0.25,
+        _ => 0.0,
+    }
+}
+
+fn is_soft_control(status: &str) -> bool {
+    let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
+    SOFT_CONTROL.iter().any(|s| s.eq_ignore_ascii_case(canonical))
+}
+
+/// What one cast produces, per radar axis, before dividing by cast time.
+#[derive(Debug, Default, Clone, Copy)]
+struct CastValue {
+    strike: f64,
+    condition: f64,
+    /// DPS-equivalent of Might/Fury/Quickness over their duration.
+    boon_dps: f64,
+    healing: f64,
+    /// Seconds of control: hard CC at full weight, soft control at half.
+    control_s: f64,
+    /// Boon-equivalent seconds (Might as stacks/25).
+    boon_s: f64,
+    protection_s: f64,
+}
+
+fn skill_cast_value(
     skill: &RotationSkill,
     power: f64,
     condition_damage: f64,
@@ -790,14 +1079,8 @@ fn skill_dps_efficiency(
     params: &SimParams,
     live_might_stacks: f64,
     fury_active: bool,
-) -> f64 {
-    let cast_time_s = (skill.cast_time_ms + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS) as f64 / 1000.0;
-    if cast_time_s <= 0.0 {
-        return 0.0;
-    }
-
-    let mut total_damage_value = 0.0;
-
+) -> CastValue {
+    let mut v = CastValue::default();
     for effect in &skill.effects {
         match effect {
             SkillEffect::StrikeDamage {
@@ -811,7 +1094,7 @@ fn skill_dps_efficiency(
                 } else {
                     0.0
                 };
-                total_damage_value += weapon_strength * effective_power / reference_armor()
+                v.strike += weapon_strength * effective_power / reference_armor()
                     * dmg_multiplier
                     * (*hit_count as f64)
                     * strike_crit_factor_with_bonus(
@@ -829,14 +1112,15 @@ fn skill_dps_efficiency(
                 // Total condition damage over the full duration of all stacks
                 let tick_dmg = condition_tick_damage(condition, condition_damage, &params.mode);
                 let duration_s = *duration_ms as f64 / 1000.0;
-                total_damage_value += tick_dmg * (*stacks as f64) * duration_s;
+                v.condition += tick_dmg * (*stacks as f64) * duration_s;
             }
             SkillEffect::ApplyBuff {
                 buff,
                 stacks,
                 duration_ms,
             } => {
-                total_damage_value += estimate_buff_dps_value(
+                let duration_s = *duration_ms as f64 / 1000.0;
+                v.boon_dps += estimate_buff_dps_value(
                     buff,
                     *stacks,
                     *duration_ms,
@@ -844,12 +1128,87 @@ fn skill_dps_efficiency(
                     weapon_strength,
                     &params.mode,
                 );
+                if is_boon(buff) {
+                    let equivalents = if buff.eq_ignore_ascii_case("Might") {
+                        (*stacks as f64 / 25.0).min(1.0)
+                    } else {
+                        boon_value(buff)
+                    };
+                    v.boon_s += equivalents * duration_s;
+                    if buff.eq_ignore_ascii_case("Protection") {
+                        v.protection_s += duration_s;
+                    }
+                } else if is_soft_control(buff) {
+                    v.control_s += 0.5 * duration_s;
+                }
+            }
+            SkillEffect::Healing { hit_count } => {
+                v.healing += (1_200.0 + params.healing_power * 0.45)
+                    * *hit_count as f64
+                    * params.healing_mult;
+            }
+            SkillEffect::Barrier { amount } => {
+                v.healing += amount + params.healing_power * 0.30;
+            }
+            SkillEffect::CrowdControl { duration_ms, .. } => {
+                v.control_s += *duration_ms as f64 / 1000.0;
             }
             _ => {}
         }
     }
+    v
+}
 
-    total_damage_value / cast_time_s
+/// Radar-weighted worth of one cast. Every axis is expressed in seconds at
+/// its realized norm, so a stun, a heal and a cleave are commensurable, then
+/// weighted by what the user asked for. A zero weight leaves an axis
+/// worthless, as it should.
+fn intent_value(v: &CastValue, w: &OptimizationWeights) -> f64 {
+    w.power * v.strike / REALIZED_STRIKE_DPS_NORM
+        + w.power.max(w.condition) * v.boon_dps / REALIZED_STRIKE_DPS_NORM
+        + w.condition * v.condition / REALIZED_CONDI_DPS_NORM
+        + w.boon_support * v.boon_s / REALIZED_BOON_NORM
+        + w.healing * v.healing / REALIZED_HEALING_NORM
+        + w.sustain * v.protection_s * PROTECTION_REDUCTION
+        + w.control * v.control_s / REALIZED_CONTROL_NORM
+}
+
+/// Scheduling priority per second of cast time: the reference formula the
+/// tests pin. `SimState::priority` is the same arithmetic over a precomputed
+/// `StaticCast`, which is what the simulation itself runs.
+///
+/// Without `SimParams::intent` this is DPCT: damage per cast time with buffs
+/// as DPS-equivalents (the gate simulation). With intent it is
+/// `intent_value` per cast time: the flow simulation schedules toward the
+/// radar, so a healer casts heals and a controller lands its stuns even on
+/// an open dummy that never hits back.
+#[cfg(test)]
+fn skill_dps_efficiency(
+    skill: &RotationSkill,
+    power: f64,
+    condition_damage: f64,
+    weapon_strength: f64,
+    params: &SimParams,
+    live_might_stacks: f64,
+    fury_active: bool,
+) -> f64 {
+    let cast_time_s = (skill.cast_time_ms + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS) as f64 / 1000.0;
+    if cast_time_s <= 0.0 {
+        return 0.0;
+    }
+    let v = skill_cast_value(
+        skill,
+        power,
+        condition_damage,
+        weapon_strength,
+        params,
+        live_might_stacks,
+        fury_active,
+    );
+    match &params.intent {
+        Some(weights) => intent_value(&v, weights) / cast_time_s,
+        None => (v.strike + v.condition + v.boon_dps) / cast_time_s,
+    }
 }
 
 /// Estimate the total DPS value of applying a buff.
@@ -1015,6 +1374,239 @@ mod tests {
             is_stunbreak: false,
             weapon_set: 0,
         }
+    }
+
+    fn heal_skill() -> RotationSkill {
+        RotationSkill {
+            skill_id: 40,
+            name: "Heal".into(),
+            slot: SkillSlot::Heal,
+            cast_time_ms: 1000,
+            cooldown_ms: 20_000,
+            effects: vec![SkillEffect::Healing { hit_count: 1 }],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+        }
+    }
+
+    fn stun_skill() -> RotationSkill {
+        RotationSkill {
+            skill_id: 41,
+            name: "Stun".into(),
+            slot: SkillSlot::Utility,
+            cast_time_ms: 500,
+            cooldown_ms: 10_000,
+            effects: vec![SkillEffect::CrowdControl {
+                kind: super::super::ControlKind::Stun,
+                duration_ms: 2_000,
+                stops_dodge: true,
+            }],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+        }
+    }
+
+    /// On an open dummy nothing hits back, so pure DPCT never casts a heal
+    /// or a stun. With intent the scheduler plays the role the radar asks
+    /// for, and the result reports what it produced.
+    #[test]
+    fn intent_schedules_heals_and_control_on_an_open_dummy() {
+        let skills = vec![auto_attack(), heal_skill(), stun_skill()];
+        let params = SimParams::basic(2_000.0, 0.0, 1_000.0);
+        let dpct = simulate_with(&skills, 30_000, &params, EnemyDummy::open());
+        assert_eq!(dpct.healing_per_second, 0.0, "DPCT never heals a full bar");
+        assert_eq!(dpct.control_uptime, 0.0, "DPCT never stuns a dummy");
+
+        let mut wanted = params.clone();
+        wanted.intent = Some(OptimizationWeights {
+            power: 0.2,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 1.0,
+            sustain: 0.0,
+            control: 1.0,
+        });
+        let flow = simulate_with(&skills, 30_000, &wanted, EnemyDummy::open());
+        // Two heals in 30s at 1200 base: 2400 / 30 = 80 per second.
+        assert!(
+            (flow.healing_per_second - 80.0).abs() < 1.0,
+            "heals cast on cooldown: {}",
+            flow.healing_per_second
+        );
+        // Three stuns of 2s in 30s: 6 / 30 = 0.2 of the window.
+        assert!(
+            (flow.control_uptime - 0.2).abs() < 0.02,
+            "stuns land on cooldown: {}",
+            flow.control_uptime
+        );
+        assert!(flow.strike_dps > 0.0, "the filler still swings between casts");
+    }
+
+    /// A stunned dummy with Stability takes nothing, so the scheduler must
+    /// not spend the cast either: on an open dummy the same stun is cast.
+    #[test]
+    fn stability_on_the_dummy_blocks_control_and_the_scheduler_knows() {
+        let skills = vec![auto_attack(), stun_skill()];
+        let mut params = SimParams::basic(2_000.0, 0.0, 1_000.0);
+        params.intent = Some(OptimizationWeights {
+            control: 1.0,
+            ..OptimizationWeights::default()
+        });
+        let stable = EnemyDummy {
+            stability: true,
+            ..EnemyDummy::open()
+        };
+        let flow = simulate_with(&skills, 30_000, &params, stable);
+        assert_eq!(flow.control_uptime, 0.0);
+        assert!(
+            !flow.skill_usage.iter().any(|u| u.name == "Stun"),
+            "no cast wasted into Stability: {:?}",
+            flow.skill_usage
+        );
+        let open = simulate_with(&skills, 30_000, &params, EnemyDummy::open());
+        assert!(open.skill_usage.iter().any(|u| u.name == "Stun" && u.cast_count >= 1));
+    }
+
+    fn status_skill(id: u32, status: &str, stacks: u32, duration_ms: u32) -> RotationSkill {
+        RotationSkill {
+            skill_id: id,
+            name: status.into(),
+            slot: SkillSlot::Utility,
+            cast_time_ms: 500,
+            cooldown_ms: 30_000,
+            effects: vec![SkillEffect::ApplyBuff {
+                buff: status.into(),
+                stacks,
+                duration_ms,
+            }],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 0,
+        }
+    }
+
+    /// Chill is on the enemy: Expertise lengthens it, Concentration does not.
+    #[test]
+    fn soft_control_follows_condition_duration_not_boon_duration() {
+        let skills = vec![auto_attack(), status_skill(50, "Chilled", 1, 4_000)];
+        let mut base = SimParams::basic(2_000.0, 0.0, 1_000.0);
+        base.intent = Some(OptimizationWeights {
+            control: 1.0,
+            ..OptimizationWeights::default()
+        });
+        let plain = simulate_with(&skills, 30_000, &base, EnemyDummy::open());
+        let mut concentration = base.clone();
+        concentration.boon_duration_mult = 1.5;
+        let mut expertise = base.clone();
+        expertise.condition_duration_mult = 1.5;
+        let with_conc = simulate_with(&skills, 30_000, &concentration, EnemyDummy::open());
+        let with_exp = simulate_with(&skills, 30_000, &expertise, EnemyDummy::open());
+        assert!(plain.control_uptime > 0.0);
+        assert_eq!(with_conc.control_uptime, plain.control_uptime, "Concentration must not touch Chill");
+        assert!(
+            with_exp.control_uptime > plain.control_uptime,
+            "Expertise must lengthen Chill: {} vs {}",
+            with_exp.control_uptime,
+            plain.control_uptime
+        );
+    }
+
+    /// Five stacks of Stability for five seconds are five seconds of
+    /// Stability, whatever the stack count.
+    #[test]
+    fn stacked_stability_counts_once_in_uptime_and_boons() {
+        let skills = vec![auto_attack(), status_skill(51, "Stability", 5, 5_000)];
+        let mut params = SimParams::basic(2_000.0, 0.0, 1_000.0);
+        // Pure DPCT never casts a Stability skill; a boon radar does.
+        params.intent = Some(OptimizationWeights {
+            boon_support: 1.0,
+            ..OptimizationWeights::default()
+        });
+        // Cast at 0 s and 30 s in a 60 s window: 10 s of presence.
+        let result = simulate_with(&skills, 60_000, &params, EnemyDummy::open());
+        let uptime = result.buff_uptime["Stability"];
+        assert!((uptime - 10.0 / 60.0).abs() < 0.02, "presence uptime: {uptime}");
+        assert!(
+            (result.boon_equivalents - uptime).abs() < 1e-9,
+            "Stability is a full-value boon: {}",
+            result.boon_equivalents
+        );
+    }
+
+    /// A set-1 skill the radar makes worthless must not pin the sim to set 1.
+    #[test]
+    fn zero_priority_skills_do_not_block_weapon_swap() {
+        let mut set1_auto = auto_attack();
+        set1_auto.weapon_set = 1;
+        let mut set1_bleed = RotationSkill {
+            skill_id: 60,
+            name: "Bleed".into(),
+            slot: SkillSlot::Weapon2,
+            cast_time_ms: 500,
+            cooldown_ms: 8_000,
+            effects: vec![SkillEffect::ApplyCondition {
+                condition: "Bleeding".into(),
+                stacks: 3,
+                duration_ms: 6_000,
+            }],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 1,
+        };
+        set1_bleed.weapon_set = 1;
+        let mut set2_auto = auto_attack();
+        set2_auto.skill_id = 61;
+        set2_auto.weapon_set = 2;
+        let set2_heal = RotationSkill {
+            skill_id: 62,
+            name: "Staff Heal".into(),
+            slot: SkillSlot::Weapon3,
+            cast_time_ms: 750,
+            cooldown_ms: 5_000,
+            effects: vec![SkillEffect::Healing { hit_count: 1 }],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: 2,
+        };
+        let skills = vec![set1_auto, set1_bleed, set2_auto, set2_heal];
+        let mut params = SimParams::basic(2_000.0, 1_000.0, 1_000.0);
+        params.intent = Some(OptimizationWeights {
+            power: 0.0,
+            condition: 0.0,
+            boon_support: 0.0,
+            healing: 1.0,
+            sustain: 0.0,
+            control: 0.0,
+        });
+        let flow = simulate_with(&skills, 30_000, &params, EnemyDummy::open());
+        assert!(
+            flow.skill_usage.iter().any(|u| u.name == "Staff Heal" && u.cast_count >= 1),
+            "must swap to the set that heals: {:?}",
+            flow.skill_usage
+        );
+    }
+
+
+    #[test]
+    fn might_average_keeps_the_stacks_the_uptime_cap_loses() {
+        // 6 Might for 10s every 25s over 50s: 12 stack-seconds x 5 casts... the
+        // skill is cast at 0s and 25s, so 2 x 6 x 10 = 120 stack-seconds / 50s.
+        let skills = vec![auto_attack(), buff_skill()];
+        let params = SimParams::basic(2_000.0, 0.0, 1_000.0);
+        let result = simulate_with(&skills, 50_000, &params, EnemyDummy::open());
+        assert!(result.buff_uptime["Might"] <= 1.0);
+        assert!(
+            (result.might_stacks_avg - 2.4).abs() < 0.2,
+            "average stacks: {}",
+            result.might_stacks_avg
+        );
+        assert!(
+            (result.boon_equivalents - 2.4 / 25.0).abs() < 0.01,
+            "Might alone counts as stacks/25: {}",
+            result.boon_equivalents
+        );
     }
 
     fn dpct(skill: &RotationSkill, power: f64, condition_damage: f64, weapon_strength: f64) -> f64 {
@@ -1649,8 +2241,9 @@ mod tests {
     fn paid_bleed_ticks(remaining_ms: u32, window_ms: u32) -> (f64, f64) {
         let params = SimParams::basic(1_000.0, 1_000.0, 1_100.0);
         let mut sim = SimState::new(&[], window_ms, EnemyDummy::open(), params);
+        let slot = sim.condition_slot("Bleeding");
         sim.conditions.push(ConditionStack {
-            condition: "Bleeding".into(),
+            slot,
             remaining_ms,
             next_tick_ms: CONDITION_TICK_INTERVAL_MS,
         });
@@ -1658,7 +2251,7 @@ mod tests {
             sim.tick_conditions(1_000.0);
             sim.current_time_ms += TICK_MS;
         }
-        let ticks = sim.condition_ticks.get("Bleeding").copied().unwrap_or(0.0);
+        let ticks = sim.condition_ticks[slot];
         (sim.total_condition_damage, ticks)
     }
 
@@ -1809,13 +2402,13 @@ mod tests {
         let skills = vec![strike, condi];
         let sim_old = SimState::new(&skills, 5_000, EnemyDummy::open(), no_crit);
         assert_eq!(
-            sim_old.pick_skill(power, condition_damage, weapon_strength),
+            sim_old.pick_skill(power),
             Some(1),
             "old formula / no-crit params pick condi"
         );
         let sim_new = SimState::new(&skills, 5_000, EnemyDummy::open(), high_crit);
         assert_eq!(
-            sim_new.pick_skill(power, condition_damage, weapon_strength),
+            sim_new.pick_skill(power),
             Some(0),
             "high-crit params pick strike"
         );

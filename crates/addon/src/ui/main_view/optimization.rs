@@ -649,6 +649,7 @@ pub(super) fn simulate_suggestion_rotation(
             max_health: stats.map(|s| s.health as f64).unwrap_or(19_212.0),
             armor: stats.map(|s| s.armor as f64).unwrap_or(2_597.0),
             mode,
+            intent: None,
         },
         gw2_optimizer::rotation::combat_model::EnemyDummy::default(),
     );

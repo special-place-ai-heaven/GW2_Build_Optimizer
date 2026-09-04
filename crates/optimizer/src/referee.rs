@@ -6,7 +6,7 @@ use crate::gamedb::GameDb;
 use crate::rotation;
 use crate::rotation::SimulationResult;
 use crate::scenario::{CombatKind, CombatTier, ScenarioSpec};
-use crate::scoring::{raw_direction_score, score_with_weights, OptimizationWeights};
+use crate::scoring::{self, raw_direction_score, OptimizationWeights};
 use crate::stats;
 use crate::validation::ValidatedBuild;
 use gw2_core::types::GameMode;
@@ -109,6 +109,12 @@ pub struct GateResult {
 /// non-viable and the referee assigns it a sentinel score of -1.0.
 #[derive(Debug, Clone)]
 pub struct ViabilityReport {
+    /// Sum over failed gates of how far below threshold each sits, normalized
+    /// to 0..=1 per gate (1.0 for gates with no graded metric). Zero when
+    /// viable. `search_rank` cannot see a cleanse rate climbing 0.5 -> 3.9
+    /// while it still fails; this can, so seed repair and the beam tie-break
+    /// can climb a gate gradually instead of only on the flip.
+    pub shortfall: f64,
     /// Results for each gate that was evaluated.
     pub gates: Vec<GateResult>,
     /// Whether all evaluated gates passed.
@@ -129,6 +135,8 @@ pub(crate) fn is_roam_objective(scenario: &ScenarioSpec) -> bool {
 
 /// Higher is better. WvW first requires a viable, completed exchange, then
 /// honors the player's radar weights before ranking surplus role execution.
+/// PvE/PvP: realized capped score, realized uncapped direction, then the
+/// closed-form stat direction as the last word when output ties exactly.
 pub fn search_rank(report: &RefereeReport) -> [i64; 9] {
     let viable = i64::from(report.viability.is_viable);
     let gates = report.viability.gates.iter().filter(|g| g.passed).count() as i64;
@@ -187,7 +195,8 @@ pub fn search_rank(report: &RefereeReport) -> [i64; 9] {
     } else {
         let score = (report.user_intent_score * 1_000_000.0) as i64;
         let raw = (report.raw_direction_score * 1_000_000.0) as i64;
-        [viable, gates, score, raw, 0, 0, 0, 0, 0]
+        let stats = (report.stat_direction_score * 1_000_000.0) as i64;
+        [viable, gates, score, raw, stats, 0, 0, 0, 0]
     }
 }
 
@@ -231,6 +240,10 @@ pub fn evaluate_viability_gates_for(
     profile: Option<&crate::data::ObjectiveProfile>,
 ) -> ViabilityReport {
     let mut gates: Vec<GateResult> = Vec::new();
+    // Graded distance below threshold, per gate that has a metric. Gates that
+    // fail without a graded entry count 1.0 in the final pass below.
+    let mut shortfall = 0.0f64;
+    let mut graded: Vec<ViabilityGate> = Vec::new();
 
     let requires_pvp_gates = matches!(scenario.game_mode, GameMode::WvW | GameMode::PvP);
 
@@ -239,6 +252,11 @@ pub fn evaluate_viability_gates_for(
         gates.push(match rotation {
             Some(rot) => {
                 let passed = rot.stunbreak_count >= MIN_STUNBREAKS;
+                if !passed {
+                    shortfall += (MIN_STUNBREAKS.saturating_sub(rot.stunbreak_count)) as f64
+                        / MIN_STUNBREAKS.max(1) as f64;
+                    graded.push(ViabilityGate::StunbreakCount);
+                }
                 GateResult {
                     gate: ViabilityGate::StunbreakCount,
                     passed,
@@ -288,19 +306,17 @@ pub fn evaluate_viability_gates_for(
         // ── Cleanse gate ────────────────────────────────────────────────────
         gates.push(match rotation {
             Some(rot) => {
-                let required_rate = if matches!(
-                    scenario.combat_kind,
-                    CombatKind::CondiRamp
-                        | CombatKind::Support
-                        | CombatKind::Commander
-                        | CombatKind::Staller
-                ) {
-                    MIN_CLEANSE_RATE_PER_20S * 2.0
-                } else {
-                    MIN_CLEANSE_RATE_PER_20S
-                };
+                let required_rate = effective_cleanse_requirement(scenario, rot);
                 let passed = rot.cleanse_count >= MIN_CLEANSE_COUNT
                     && rot.cleanse_rate_per_20s >= required_rate;
+                if !passed {
+                    let count_short = (MIN_CLEANSE_COUNT.saturating_sub(rot.cleanse_count)) as f64
+                        / MIN_CLEANSE_COUNT.max(1) as f64;
+                    let rate_short =
+                        ((required_rate - rot.cleanse_rate_per_20s) / required_rate).clamp(0.0, 1.0);
+                    shortfall += count_short.max(rate_short);
+                    graded.push(ViabilityGate::CleanseRate);
+                }
                 GateResult {
                     gate: ViabilityGate::CleanseRate,
                     passed,
@@ -370,6 +386,16 @@ pub fn evaluate_viability_gates_for(
                             | CombatKind::Staller
                     );
                     let passed = fight.player_survived && (!requires_repeat || fight.repeatable);
+                    if !passed {
+                        // Not repeatable but alive: closer to repeatable the
+                        // more health is left, so that is the gradient.
+                        shortfall += if fight.player_survived {
+                            (1.0 - fight.remaining_health_ratio).clamp(0.0, 1.0)
+                        } else {
+                            1.0
+                        };
+                        graded.push(ViabilityGate::SustainRecovery);
+                    }
                     GateResult {
                         gate: ViabilityGate::SustainRecovery,
                         passed,
@@ -515,6 +541,10 @@ pub fn evaluate_viability_gates_for(
         .and_then(|p| p.viability_gates.ehp_floor)
         .unwrap_or(default_ehp_floor);
     let passed = combat_perf.effective_health >= ehp_floor;
+    if !passed && ehp_floor > 0.0 {
+        shortfall += ((ehp_floor - combat_perf.effective_health) / ehp_floor).clamp(0.0, 1.0);
+        graded.push(ViabilityGate::EffectiveHealth);
+    }
     gates.push(GateResult {
         gate: ViabilityGate::EffectiveHealth,
         passed,
@@ -525,7 +555,198 @@ pub fn evaluate_viability_gates_for(
     });
 
     let is_viable = gates.iter().all(|g| g.passed);
-    ViabilityReport { gates, is_viable }
+    for g in &gates {
+        if !g.passed && !graded.contains(&g.gate) {
+            shortfall += 1.0;
+        }
+    }
+    ViabilityReport {
+        gates,
+        is_viable,
+        shortfall,
+    }
+}
+
+/// Cleanse rate the scenario demands per 20s. Sustained/support kinds need
+/// double the floor. Shared by the gate and [`apply_offbar_cleanse`] so the
+/// two cannot drift.
+pub fn required_cleanse_rate(scenario: &ScenarioSpec) -> f64 {
+    if matches!(
+        scenario.combat_kind,
+        CombatKind::CondiRamp | CombatKind::Support | CombatKind::Commander | CombatKind::Staller
+    ) {
+        MIN_CLEANSE_RATE_PER_20S * 2.0
+    } else {
+        MIN_CLEANSE_RATE_PER_20S
+    }
+}
+
+/// The rate the gate actually demands of THIS kit: the scenario floor, lowered
+/// by self-Resistance uptime. Resistance ignores non-damaging conditions, so a
+/// build that holds it needs less cleanse — but damaging conditions still
+/// tick through it, so the reduction is capped at 75%. Uses the same
+/// `buff_uptime` map the Stability gate reads; a kit with no Resistance sees
+/// exactly the scenario floor. Shared by the gate and the off-bar pass.
+pub fn effective_cleanse_requirement(scenario: &ScenarioSpec, rot: &SimulationResult) -> f64 {
+    let resistance = rot
+        .buff_uptime
+        .get("Resistance")
+        .copied()
+        .unwrap_or(0.0)
+        .clamp(0.0, 0.75);
+    required_cleanse_rate(scenario) * (1.0 - resistance)
+}
+
+/// Seconds after "cooldown" in gear/trait tooltip text ("(Cooldown: 9
+/// Seconds)"). Skill facts use "recharge"; upgrades use "cooldown".
+fn cooldown_seconds_in_text(text: &str) -> Option<f64> {
+    let lower = text.to_lowercase();
+    let idx = lower.find("cooldown")?;
+    let rest = &lower[idx..];
+    let digits: String = rest
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let n: f64 = digits.parse().ok()?;
+    (n > 0.0).then_some(n)
+}
+
+/// Leading count before the remove/cleanse verb ("Remove 2 conditions").
+/// Defaults to 1 when the text only says "a condition".
+fn cleanse_count_in_text(text: &str) -> u32 {
+    let lower = text.to_lowercase();
+    let verb = ["remov", "cleanse", "cure"]
+        .iter()
+        .filter_map(|v| lower.find(v))
+        .min();
+    let Some(v) = verb else { return 1 };
+    let after = &lower[v..];
+    let digits: String = after
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit() && *c != '.')
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().map(|n: u32| n.max(1)).unwrap_or(1)
+}
+
+/// Per-20s cleanse rate one piece of tooltip text contributes: count times
+/// 20 / cooldown. Without a stated cooldown the trigger is on some event
+/// (weapon swap, heal use) whose cadence is unknown here, so it is credited
+/// at ONE cleanse per 20s — deliberately conservative.
+fn cleanse_rate_from_text(text: &str) -> f64 {
+    if !crate::text_util::text_describes_condition_cleanse(text) {
+        return 0.0;
+    }
+    let count = cleanse_count_in_text(text) as f64;
+    match cooldown_seconds_in_text(text) {
+        Some(cd) => count * 20.0 / cd,
+        None => count,
+    }
+}
+
+fn item_cleanse_rate(db: &GameDb, id: u32) -> f64 {
+    let Some(item) = db.items.get(&id) else {
+        return 0.0;
+    };
+    let mut rate = cleanse_rate_from_text(&item.name);
+    if let Some(d) = item.description.as_deref() {
+        rate = rate.max(cleanse_rate_from_text(d));
+    }
+    if let Some(details) = &item.details {
+        for b in &details.bonuses {
+            rate = rate.max(cleanse_rate_from_text(b));
+        }
+        if let Some(d) = details
+            .infix_upgrade
+            .as_ref()
+            .and_then(|u| u.buff.as_ref())
+            .and_then(|b| b.description.as_deref())
+        {
+            rate = rate.max(cleanse_rate_from_text(d));
+        }
+    }
+    rate
+}
+
+/// Cleanses per 20s the kit gets from OFF the skill bar: active sigils, the
+/// rune, the relic, and traits. The rotation only sees skills, so Sigil of
+/// Cleansing (1 condition per weapon swap, 9s ICD, ~2.2/20s on its own) and
+/// every cleanse trait counted for nothing at the gate — a WvW-roam seed was
+/// measured stuck at 1.0/20s against a required 2.0 with no way up. Every
+/// profession runs through this; nothing here is class-specific.
+pub fn kit_cleanse_rate_from_gear(validated: &ValidatedBuild, db: &GameDb) -> f64 {
+    let mut rate = 0.0;
+    for id in validated.active_sigil_ids() {
+        rate += item_cleanse_rate(db, id);
+    }
+    if let Some(r) = &validated.rune {
+        rate += item_cleanse_rate(db, r.id);
+    }
+    if let Some(r) = &validated.relic {
+        rate += item_cleanse_rate(db, r.id);
+    }
+    for spec in &validated.specializations {
+        for &id in spec.all_trait_ids.iter().chain(spec.trait_ids.iter()) {
+            if let Some(tr) = db.traits.get(&id) {
+                let mut t = cleanse_rate_from_text(&tr.name);
+                if let Some(d) = tr.description.as_deref() {
+                    t = t.max(cleanse_rate_from_text(d));
+                }
+                rate += t;
+            }
+        }
+    }
+    rate
+}
+
+/// Re-judge the CleanseRate gate with off-bar cleanse added, keeping the
+/// report's `shortfall` exact for the new total.
+pub fn apply_offbar_cleanse(
+    report: &mut ViabilityReport,
+    rotation: Option<&SimulationResult>,
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    scenario: &ScenarioSpec,
+) {
+    let Some(rot) = rotation else { return };
+    let gear = kit_cleanse_rate_from_gear(validated, db);
+    if gear <= 0.0 {
+        return;
+    }
+    let required = effective_cleanse_requirement(scenario, rot);
+    let count_short = (MIN_CLEANSE_COUNT.saturating_sub(rot.cleanse_count)) as f64
+        / MIN_CLEANSE_COUNT.max(1) as f64;
+    let short = |rate: f64| {
+        let rate_short = ((required - rate) / required).clamp(0.0, 1.0);
+        count_short.max(rate_short)
+    };
+    let before = rot.cleanse_rate_per_20s;
+    let after = before + gear;
+    let was_failing = rot.cleanse_count < MIN_CLEANSE_COUNT || before < required;
+    let now_passes = rot.cleanse_count >= MIN_CLEANSE_COUNT && after >= required;
+    let mut changed = false;
+    for g in &mut report.gates {
+        if g.gate != ViabilityGate::CleanseRate {
+            continue;
+        }
+        g.note = format!(
+            "cleanse_count={}, rate={:.1}/20s incl. {:.1} from sigils/rune/relic/traits (required count >={}, rate >={required:.1}/20s)",
+            rot.cleanse_count, after, gear, MIN_CLEANSE_COUNT
+        );
+        if was_failing {
+            let prev = short(before);
+            let next = if now_passes { 0.0 } else { short(after) };
+            report.shortfall = (report.shortfall - prev + next).max(0.0);
+        }
+        if !g.passed && now_passes {
+            g.passed = true;
+            changed = true;
+        }
+    }
+    if changed {
+        report.is_viable = report.gates.iter().all(|g| g.passed);
+    }
 }
 
 /// Relic, rune, or trait grants Stability even when the skill bar has none.
@@ -605,6 +826,8 @@ pub fn apply_offbar_stability(
     }
     if changed {
         report.is_viable = report.gates.iter().all(|g| g.passed);
+        // StabilityAccess has no graded metric, so it counted 1.0 when failed.
+        report.shortfall = (report.shortfall - 1.0).max(0.0);
     }
 }
 
@@ -654,6 +877,13 @@ pub struct RefereeReport {
     /// post-saturation piece swaps toward the user's wished stats win ties
     /// that the capped `user_intent_score` cannot see.
     pub raw_direction_score: f64,
+    /// Per-axis output of the 60s flow simulation, as fractions of the
+    /// realized norms. This is what `user_intent_score` is computed from.
+    pub realized: scoring::RealizedAxes,
+    /// Uncapped closed-form radar direction of the stats alone. The last
+    /// PvE/PvP rank key: it only speaks when realized output ties exactly,
+    /// which a kit that produces nothing at all will do.
+    pub stat_direction_score: f64,
     pub quality: DataQuality,
     pub quality_reasons: Vec<DataQualityReason>,
 }
@@ -716,8 +946,10 @@ pub fn evaluate_validated_build(
         CombatTier::Party => combat_party.clone(),
         CombatTier::Squad => combat_squad.clone(),
     };
-    let rotation = engine::simulate_validated_rotation(validated, db, &stats, Some(scenario));
-
+    let prepared = engine::prepare_validated_rotation(validated, db, &stats, Some(scenario));
+    let rotation = prepared
+        .as_ref()
+        .map(|p| engine::simulate_prepared(p, validated, db, Some(scenario)));
     // ── Viability gating ──────────────────────────────────────────────────────
     // Run before score computation. Non-viable builds receive sentinel score -1.0.
     let mut viability = evaluate_viability_gates_for(
@@ -730,13 +962,28 @@ pub fn evaluate_validated_build(
         ),
     );
     apply_offbar_stability(&mut viability, validated, db);
-    let (user_intent_score, raw_direction_score) = if viability.is_viable {
+    apply_offbar_cleanse(&mut viability, rotation.as_ref(), validated, db, scenario);
+
+    // The flow simulation is most of an evaluation's cost and nothing reads
+    // its axes for a build the gates already sent to -1.0.
+    let realized = match prepared.as_ref() {
+        Some(p) if viability.is_viable => scoring::realized_axes(
+            &engine::simulate_flow(p, weights, Some(scenario)),
+            &primary_combat,
+        ),
+        _ => scoring::realized_axes_no_rotation(&primary_combat),
+    };
+    // What the rotation produced, scheduled toward the radar. The closed-form
+    // stat score could not see a skill at all (measured 2026-09-04: 0 of 36
+    // utilities moved a PvE rank).
+    let (user_intent_score, raw_direction_score, stat_direction_score) = if viability.is_viable {
         (
-            score_with_weights(&primary_combat, weights),
+            scoring::score_realized(&realized, weights),
+            scoring::raw_realized(&realized, weights),
             raw_direction_score(&primary_combat, weights),
         )
     } else {
-        (-1.0, -1.0)
+        (-1.0, -1.0, -1.0)
     };
 
     let mut quality = DataQuality::Verified;
@@ -799,6 +1046,8 @@ pub fn evaluate_validated_build(
         viability,
         user_intent_score,
         raw_direction_score,
+        realized,
+        stat_direction_score,
         quality,
         quality_reasons,
     }
@@ -844,6 +1093,10 @@ mod tests {
             stability_uptime: 0.6,
             cleanse_count: 2,
             cleanse_rate_per_20s: 4.0,
+            healing_per_second: 0.0,
+            control_uptime: 0.0,
+            might_stacks_avg: 0.0,
+            boon_equivalents: 0.0,
             has_mobility_out: true,
             escape_kinds: 1,
             has_strip: true,
@@ -897,6 +1150,77 @@ mod tests {
         }
     }
 
+    fn sigil_item(id: u32, name: &str, bonus: &str) -> gw2_api::models::Item {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "name": name, "type": "UpgradeComponent", "rarity": "Exotic",
+            "level": 60, "details": { "type": "Sigil", "bonuses": [bonus] }
+        }))
+        .expect("test item")
+    }
+
+    /// Sigil of Cleansing: 1 condition per weapon swap, 9s ICD = 20/9 per 20s.
+    /// A damage sigil contributes nothing. Rates add across seats.
+    #[test]
+    fn gear_cleanse_rate_reads_sigil_tooltips() {
+        use super::{
+            cleanse_count_in_text, cleanse_rate_from_text, cooldown_seconds_in_text,
+            kit_cleanse_rate_from_gear,
+        };
+        use crate::validation::ValidatedItem;
+        let mut db = GameDb::empty_for_tests();
+        db.items.insert(1, sigil_item(1, "Superior Sigil of Cleansing",
+            "Remove 1 condition when you swap to this weapon while in combat. (Cooldown: 9 Seconds)"));
+        db.items.insert(2, sigil_item(2, "Superior Sigil of Force", "+5% Damage"));
+        let mut b = ValidatedBuild {
+            sigils: vec![
+                ValidatedItem { id: 1, name: "Cleansing".into() },
+                ValidatedItem { id: 2, name: "Force".into() },
+            ],
+            ..Default::default()
+        };
+        let rate = kit_cleanse_rate_from_gear(&b, &db);
+        assert!((rate - 20.0 / 9.0).abs() < 1e-9, "got {rate}");
+        b.sigils.push(ValidatedItem { id: 1, name: "Cleansing".into() });
+        // Only the two active seats count.
+        assert!((kit_cleanse_rate_from_gear(&b, &db) - 20.0 / 9.0).abs() < 1e-9);
+        assert_eq!(cleanse_count_in_text("Remove 2 conditions from allies"), 2);
+        assert_eq!(cooldown_seconds_in_text("(Cooldown: 9 Seconds)"), Some(9.0));
+        assert_eq!(cleanse_rate_from_text("Grants Might on hit"), 0.0);
+    }
+
+    /// A gate failing on rate alone must flip to passed once gear covers the
+    /// gap, and the report's shortfall must return to exactly zero.
+    #[test]
+    fn offbar_cleanse_flips_the_gate_and_zeroes_shortfall() {
+        use super::{apply_offbar_cleanse, effective_cleanse_requirement, MIN_CLEANSE_COUNT};
+        use crate::validation::ValidatedItem;
+        let mut db = GameDb::empty_for_tests();
+        db.items.insert(1, sigil_item(1, "Superior Sigil of Cleansing",
+            "Remove 1 condition when you swap to this weapon while in combat. (Cooldown: 9 Seconds)"));
+        let b = ValidatedBuild {
+            sigils: vec![ValidatedItem { id: 1, name: "Cleansing".into() }],
+            ..Default::default()
+        };
+        let mut scenario = make_wvw_scenario();
+        scenario.combat_tier = CombatTier::Solo;
+        let mut rot = make_viable_rotation();
+        rot.cleanse_count = MIN_CLEANSE_COUNT;
+        // Same requirement the gate and the off-bar pass use (Resistance-aware).
+        let required = effective_cleanse_requirement(&scenario, &rot);
+        rot.cleanse_rate_per_20s = required * 0.5; // fails on rate only
+        let combat = make_viable_combat();
+        let mut report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
+        let cleanse = |r: &ViabilityReport| {
+            r.gates.iter().find(|g| g.gate == ViabilityGate::CleanseRate).cloned().unwrap()
+        };
+        assert!(!cleanse(&report).passed);
+        assert!((report.shortfall - 0.5).abs() < 1e-9, "rate shortfall is 0.5: {}", report.shortfall);
+        apply_offbar_cleanse(&mut report, Some(&rot), &b, &db, &scenario);
+        assert!(cleanse(&report).passed, "{}", cleanse(&report).note);
+        assert!(report.is_viable);
+        assert!(report.shortfall.abs() < 1e-9, "shortfall must be zero: {}", report.shortfall);
+    }
+
     fn make_rank_report(rotation: SimulationResult) -> RefereeReport {
         let mut scenario = make_wvw_scenario();
         scenario.combat_tier = CombatTier::Solo;
@@ -912,9 +1236,12 @@ mod tests {
             viability: ViabilityReport {
                 gates: Vec::new(),
                 is_viable: true,
+                shortfall: 0.0,
             },
             user_intent_score: 0.0,
             raw_direction_score: -1.0,
+            realized: Default::default(),
+            stat_direction_score: -1.0,
             quality: DataQuality::Verified,
             quality_reasons: Vec::new(),
         }
@@ -1529,6 +1856,124 @@ mod tests {
         }
     }
 
+    /// The rank must see skills. The same build with a striking utility in a
+    /// slot outranks the build with every slot empty, in PvE, where the
+    /// closed-form stat score could not tell them apart (0 of 36 fillers
+    /// moved the rank, measured 2026-09-04).
+    #[test]
+    fn pve_rank_prefers_the_bar_that_produces_more() {
+        let mut db = make_test_db();
+        db.skills.insert(
+            777,
+            gw2_api::models::Skill {
+                id: 777,
+                name: "Cleave".into(),
+                description: None,
+                icon: None,
+                chat_link: None,
+                skill_type: None,
+                weapon_type: None,
+                professions: vec!["Warrior".into()],
+                slot: Some("Utility".into()),
+                facts: vec![
+                    gw2_api::models::Fact::Damage {
+                        text: None,
+                        icon: None,
+                        hit_count: Some(3),
+                        dmg_multiplier: Some(1.5),
+                    },
+                    gw2_api::models::Fact::Recharge {
+                        text: None,
+                        icon: None,
+                        value: Some(8.0),
+                    },
+                ],
+                traited_facts: vec![],
+                categories: vec![],
+                attunement: None,
+                cost: None,
+                dual_wield: None,
+                flip_skill: None,
+                initiative: None,
+                next_chain: None,
+                prev_chain: None,
+                transform_skills: vec![],
+                bundle_skills: vec![],
+                toolbelt_skill: None,
+                flags: vec![],
+                specialization: None,
+            },
+        );
+        let ctx = BalanceContext::new(GameMode::PvE);
+        let mut scenario = ScenarioSpec::from_balance_context(&ctx);
+        scenario.combat_tier = CombatTier::Party;
+        let weights = OptimizationWeights::preset_power_dps();
+
+        db.skills.insert(
+            778,
+            gw2_api::models::Skill {
+                id: 778,
+                name: "Second Cleave".into(),
+                facts: vec![
+                    gw2_api::models::Fact::Damage {
+                        text: None,
+                        icon: None,
+                        hit_count: Some(2),
+                        dmg_multiplier: Some(1.2),
+                    },
+                    gw2_api::models::Fact::Recharge {
+                        text: None,
+                        icon: None,
+                        value: Some(12.0),
+                    },
+                ],
+                ..db.skills[&777].clone()
+            },
+        );
+        let mut full = make_minimal_validated();
+        full.skills.utilities = vec![Some((777, "Cleave".into())), None, None];
+        let mut fuller = make_minimal_validated();
+        fuller.skills.utilities = vec![
+            Some((777, "Cleave".into())),
+            Some((778, "Second Cleave".into())),
+            None,
+        ];
+        let mut hole = make_minimal_validated();
+        hole.skills.utilities = vec![None, None, None];
+
+        let full_report =
+            evaluate_validated_build(&full, &db, "Warrior", &weights, &ctx, &scenario);
+        let hole_report =
+            evaluate_validated_build(&hole, &db, "Warrior", &weights, &ctx, &scenario);
+        assert!(
+            full_report.viability.is_viable && hole_report.viability.is_viable,
+            "{:?} / {:?}",
+            full_report.viability.gates,
+            hole_report.viability.gates
+        );
+        assert!(
+            full_report.realized.power > hole_report.realized.power,
+            "cleave produced strike: {:?} vs {:?}",
+            full_report.realized,
+            hole_report.realized
+        );
+        assert!(
+            search_rank(&full_report) > search_rank(&hole_report),
+            "full {:?} vs hole {:?}",
+            search_rank(&full_report),
+            search_rank(&hole_report)
+        );
+        // Two real rotations: the fuller bar must outrank the one-skill bar.
+        let fuller_report =
+            evaluate_validated_build(&fuller, &db, "Warrior", &weights, &ctx, &scenario);
+        assert!(
+            search_rank(&fuller_report) > search_rank(&full_report),
+            "fuller {:?} vs full {:?}",
+            search_rank(&fuller_report),
+            search_rank(&full_report)
+        );
+    }
+
     #[test]
     fn referee_evaluation_is_deterministic_for_same_inputs() {
         let db = make_test_db();
@@ -1974,9 +2419,12 @@ mod tests {
                 viability: ViabilityReport {
                     gates: Vec::new(),
                     is_viable: true,
+                    shortfall: 0.0,
                 },
                 user_intent_score: 0.5,
                 raw_direction_score: raw,
+                realized: Default::default(),
+                stat_direction_score: -1.0,
                 quality: DataQuality::Verified,
                 quality_reasons: Vec::new(),
             }

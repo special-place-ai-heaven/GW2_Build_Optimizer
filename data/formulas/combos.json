@@ -1,0 +1,110 @@
+{
+  "_schema": "Combo field x finisher interaction table. 9 fields x 4 finishers = 36 outcomes.",
+  "_why": "The rotation simulator carries 'Combo fields tracked but not simulated for damage', so every field/finisher chain scores as zero today. Published expert builds treat these as load-bearing ('a water field which you can blast and leap finisher in for extra sustain'), which means the objective cannot currently see a mechanic real builds are designed around.",
+  "_rules": {
+    "max_combatants_per_field": {
+      "value": 5,
+      "note": "Only 5 unique combatants may combo with a given field.",
+      "evidence_level": "Factual",
+      "sources": ["https://wiki.guildwars2.com/wiki/Combo"]
+    },
+    "finisher_scales_with_finisher_user": {
+      "value": true,
+      "note": "Combo output uses the stats of the player who applied the FINISHER, not the field. A water blast heals more from higher Healing Power, so combo value couples to gear.",
+      "evidence_level": "Factual",
+      "sources": ["https://guildjen.com/what-are-combo-fields-and-finishers/"]
+    },
+    "field_priority": {
+      "value": "own_fields_first_then_oldest",
+      "note": "A finisher prioritises fields you created, then the field created first.",
+      "evidence_level": "Inferred",
+      "sources": ["https://guildjen.com/what-are-combo-fields-and-finishers/"]
+    },
+    "leap_first_field_wins": {
+      "value": true,
+      "note": "The first field a leap passes through decides the effect. An interrupted leap produces NO finisher.",
+      "evidence_level": "Factual",
+      "sources": ["https://guildjen.com/what-are-combo-fields-and-finishers/"]
+    },
+    "projectile_partial_proc": {
+      "value": 0.20,
+      "note": "Some projectile finishers proc at 20% per projectile, usually slot-1 autoattacks and multi-projectile skills. Revenant Hammer autoattack is a documented 100% exception, so this is a per-skill flag and NOT a blanket rate.",
+      "evidence_level": "Factual",
+      "sources": ["https://wiki.guildwars2.com/wiki/Combo"]
+    },
+    "ordering": {
+      "value": "fields_before_finishers",
+      "note": "Fields must be laid before finishers land. This is a hard ordering constraint on any rotation that intends to combo.",
+      "evidence_level": "Factual",
+      "sources": ["https://wiki.guildwars2.com/wiki/Combo"]
+    },
+    "finisher_availability": {
+      "note": "Not every profession has every finisher type. Leap: absent on Necromancer except Reaper or Sword via Expanded Weapon Proficiency. Projectile: absent on Guardian except Longbow via Dragonhunter/Weaponmaster Training, or Pistol via Expanded Weapon Proficiency. Whirl: absent on Engineer and Necromancer except Scrapper and Reaper, or via Weaponmaster Training on Hammer and Greatsword respectively.",
+      "evidence_level": "Factual",
+      "sources": ["https://wiki.guildwars2.com/wiki/Combo"]
+    }
+  },
+  "_target_key": "self = finisher user only; area_allies = allies in the blast; enemy_hit = the struck enemy; bolts = scattered whirl projectiles, may multi-hit one target at point blank",
+  "_evidence_level_key": "Factual = stated by the wiki or an in-game tooltip; Inferred = consistent secondary source, not wiki-confirmed",
+  "evidence_level": "Factual",
+  "sources": [
+    "https://wiki.guildwars2.com/wiki/Combo",
+    "https://guildjen.com/what-are-combo-fields-and-finishers/"
+  ],
+  "fields": {
+    "Dark": {
+      "blast": { "effect": "Dark Aura", "target": "area_allies", "duration_s": 3 },
+      "leap": { "effect": "Dark Aura", "target": "self", "duration_s": 5 },
+      "projectile": { "effect": "LifeSteal", "target": "enemy_hit" },
+      "whirl": { "effect": "LifeSteal", "target": "bolts" }
+    },
+    "Ethereal": {
+      "blast": { "effect": "Chaos Aura", "target": "area_allies", "duration_s": 3 },
+      "leap": { "effect": "Chaos Aura", "target": "self", "duration_s": 5 },
+      "projectile": { "effect": "Confusion", "target": "enemy_hit", "duration_s": 5 },
+      "whirl": { "effect": "Confusion", "target": "bolts", "duration_s": 5 }
+    },
+    "Fire": {
+      "blast": { "effect": "Might", "target": "area_allies", "stacks": 3, "duration_s": 20 },
+      "leap": { "effect": "Fire Aura", "target": "self", "duration_s": 5 },
+      "projectile": { "effect": "Burning", "target": "enemy_hit", "stacks": 1, "duration_s": 1 },
+      "whirl": { "effect": "Burning", "target": "bolts", "stacks": 1, "duration_s": 1 }
+    },
+    "Ice": {
+      "blast": { "effect": "Frost Aura", "target": "area_allies", "duration_s": 3 },
+      "leap": { "effect": "Frost Aura", "target": "self", "duration_s": 5 },
+      "projectile": { "effect": "Chilled", "target": "enemy_hit", "duration_s": 1 },
+      "whirl": { "effect": "Chilled", "target": "bolts", "duration_s": 1 }
+    },
+    "Light": {
+      "blast": { "effect": "ConditionCleanse", "target": "area_allies", "conditions_removed": 1 },
+      "leap": { "effect": "Light Aura", "target": "self", "duration_s": 5 },
+      "projectile": { "effect": "ConditionCleanse", "target": "self", "conditions_removed": 1 },
+      "whirl": { "effect": "ConditionCleanse", "target": "bolts", "conditions_removed": 1 }
+    },
+    "Lightning": {
+      "blast": { "effect": "Swiftness", "target": "area_allies", "duration_s": 10 },
+      "leap": { "effect": "Daze", "target": "enemy_hit", "duration_s": 1 },
+      "projectile": { "effect": "Vulnerability", "target": "enemy_hit", "stacks": 2, "duration_s": 5 },
+      "whirl": { "effect": "Vulnerability", "target": "bolts", "stacks": 2, "duration_s": 5 }
+    },
+    "Poison": {
+      "blast": { "effect": "Weakness", "target": "area_enemies", "duration_s": 3 },
+      "leap": { "effect": "Weakness", "target": "enemy_hit", "duration_s": 8 },
+      "projectile": { "effect": "Poisoned", "target": "enemy_hit", "duration_s": 2 },
+      "whirl": { "effect": "Poisoned", "target": "bolts", "duration_s": 2 }
+    },
+    "Smoke": {
+      "blast": { "effect": "Stealth", "target": "area_allies", "duration_s": 3 },
+      "leap": { "effect": "Stealth", "target": "self", "duration_s": 3 },
+      "projectile": { "effect": "Blinded", "target": "enemy_hit", "duration_s": 3 },
+      "whirl": { "effect": "Blinded", "target": "bolts", "duration_s": 3 }
+    },
+    "Water": {
+      "blast": { "effect": "Healing", "target": "area_allies", "scales_with": "healing_power" },
+      "leap": { "effect": "Healing", "target": "self", "scales_with": "healing_power" },
+      "projectile": { "effect": "Regeneration", "target": "ally_near_target", "duration_s": 2 },
+      "whirl": { "effect": "Regeneration", "target": "bolts", "duration_s": 2 }
+    }
+  }
+}

@@ -1214,7 +1214,7 @@ fn condition_cleanse_count_from_fact(fact: &Fact) -> Option<u32> {
     }
 }
 
-fn pick_best_skill(
+pub(crate) fn pick_best_skill(
     skills: &[&&Skill],
     weights: &OptimizationWeights,
     accumulated: &[(ComponentId, Vec<NormalizedEffect>)],

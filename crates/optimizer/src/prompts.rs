@@ -110,6 +110,37 @@ pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
 
 /// Build a tool-aware prompt for generating a new build.
 /// Instructs Gemini to use available function calls to query game data.
+/// The rules every build-producing prompt carries, kept in one place so the
+/// three prompts cannot drift apart on the part that decides whether a build
+/// is legal and defensible.
+///
+/// This exists because of a live failure: the chat prompt used to say "if the
+/// player has a loadout equipped, do not call tools, edit that loadout", so
+/// the model named traits from training data that is older than the current
+/// game build. One name out of six did not exist, validation refused the
+/// whole build, and the player got four replies in a row with no build in
+/// them. A model told not to look things up will guess, and a guess that is
+/// not in the game is worth nothing.
+const BUILD_DISCIPLINE: &str = r#"NO ASSUMPTIONS. THIS IS THE RULE THAT MATTERS MOST.
+Every specialization, trait, skill, rune, sigil and relic name you output must have come back from a tool call in THIS conversation. Not from memory. Your training data is older than the live game build, names change between patches, and a name that does not exist today is discarded — the player then gets no build at all, which is the worst possible answer.
+- Before you name traits for a specialization, call get_spec_traits for that specialization and choose ONLY from what it returns.
+- Every specialization has exactly 3 trait columns (Adept, Master, Grandmaster). Pick exactly one trait from EACH column: 3 traits, never two from one column, never a minor trait (those are automatic and cannot be chosen).
+- Before you name a skill, rune, sigil or relic, confirm it exists with the matching tool.
+- If a tool does not return what you expected, choose from what it DID return. Never fall back on a remembered name.
+
+REASON WITH MECHANISM AND NUMBERS, NOT VIBES.
+A build is a machine: triggers fire effects, effects have durations, sources have cooldowns. Show the machine actually runs.
+- Cooldown vs uptime is arithmetic. A 5s effect on a 30s cooldown is ~17% uptime; do not write about it as if it were permanent. State the fraction.
+- Internal cooldowns bound proc rate. A sigil with a 9s ICD fires at most once per 9s no matter how often you crit, so a second on-crit source may add nothing.
+- Triggers must be satisfiable. Read proc_triggers and damage_modifiers from get_trait_details: a trait keyed on a boon, a condition, or a threshold you never reach is dead weight. Name what supplies the trigger, or drop the trait.
+- Condition builds: use find_condition_sources to establish what applies each condition and how often, then match rune, relic and sigil duration bonuses to the condition you actually stack most. A Burning-duration rune on a build that mostly bleeds is a wasted slot.
+- Multipliers only count when their condition holds. Do not stack damage modifiers your build cannot meet at the same time.
+- Cooldowns must fit the rotation. If three of your utilities are on 40s+ cooldowns, say what fills the gap between them.
+- Verify before you commit: find_synergies on the chosen trait and skill IDs, then simulate_rotation or simulate_combat. If the numbers contradict the plan, change the plan — never the numbers.
+
+WHAT THE EXPLANATION MUST SAY.
+Give the synergy chain concretely: what triggers what, on what cooldown, and the uptime or multiplier that results. "Corruptor's Fervor stacks toughness" is not an argument. "Corruptor's Fervor gives Carapace per condition applied, and Harbinger Shroud pulses Torment every second, so Carapace holds near cap in sustained fights" is. Name the weakness the build accepts, in one clause — every build trades something."#;
+
 pub fn new_build_prompt_with_tools(
     profession: &str,
     weights: &OptimizationWeights,
@@ -150,7 +181,9 @@ Phase 4 — Verify the complete build:
 13. Call simulate_combat to verify the gear+trait combo performs well numerically
 14. Call simulate_rotation with selected skill IDs to see real DPS, condition uptime, buff uptime, and control metrics (stunbreaks, stability)
 
-Think step by step. Use synergy tools to discover and verify interactions rather than guessing. Every component (traits, skills, rune, sigils, relic) must synergize as a codependent system — a rune that boosts Burning duration is wasted if your build barely applies Burning.
+{discipline}
+
+Every component (traits, skills, rune, sigils, relic) must work as one codependent system — a rune that boosts Burning duration is wasted if your build barely applies Burning.
 
 After gathering data, respond with ONLY a JSON build object:
 ```json
@@ -182,6 +215,7 @@ After gathering data, respond with ONLY a JSON build object:
         profession = profession,
         game_mode = game_mode,
         weights_guidance = weights_guidance,
+        discipline = BUILD_DISCIPLINE,
     )
 }
 
@@ -197,6 +231,8 @@ pub fn improve_build_prompt_with_tools(
         r#"You are an expert Guild Wars 2 build optimizer with access to the game's full database.
 
 Improve the player's current {summary} build for {profession} in {game_mode}.
+
+{discipline}
 
 {weights_guidance}
 
@@ -244,6 +280,7 @@ After gathering data, respond with ONLY a JSON build object:
         profession = profession,
         game_mode = game_mode,
         weights_guidance = weights_guidance,
+        discipline = BUILD_DISCIPLINE,
     )
 }
 
@@ -271,9 +308,9 @@ Named gear prefix in the player's message wins (including Celestial). Ignore a p
 If they greet you, ask a question, or are just chatting — no build. Reply with JSON:
 {{"explanation": "<your spoken reply>", "specializations": []}}
 
-If they want a build, a loadout, an improve, or anything to equip: reply with the FULL JSON build object (specializations, weapons, skills, rune, sigils, relic, pets, legends, stat_prefix). Never explanation-only. Weapon type names match the API: Shortbow, Longbow, Greatsword (no spaces). If Context already lists an equipped Character loadout, do not call tools; edit that loadout. Copy weapons unchanged only if they asked to keep them. explanation: 2-4 sentences in {reply_language}.
+If they want a build, a loadout, an improve, or anything to equip: reply with the FULL JSON build object (specializations, weapons, skills, rune, sigils, relic, pets, legends, stat_prefix). Never explanation-only. Weapon type names match the API: Shortbow, Longbow, Greatsword (no spaces). An equipped Character loadout in Context is your STARTING POINT, not a licence to skip the tools — you must still call get_spec_traits for every specialization you keep or change, because the trait names in that summary are the only ones you may reuse verbatim. Copy weapons unchanged only if they asked to keep them. explanation: 2-4 sentences in {reply_language}.
 
-If they want a new build and Context has no Character loadout: use at most two tool rounds, then reply with the full JSON build object. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: 2-4 sentences in {reply_language}.
+Take as many tool rounds as the build needs — a wrong name costs the player the entire build, a few extra calls cost seconds. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: 2-4 sentences in {reply_language}.
 
 The player's message:
 <message>
@@ -288,7 +325,11 @@ Tools — use any of them when cooking a build:
 - Pantry: get_profession_info, get_spec_traits, get_trait_details, get_skill_info, list_runes, list_sigils, list_relics, search_upgrades, upgrade_synergies, calculate_stats
 - Taste: simulate_combat, simulate_rotation, score_build, find_synergies, get_build_synergy_report, find_condition_sources, search_skills_by_effect, search_traits_by_effect
 
-Prefer search_upgrades / upgrade_synergies over list_* dumps. When plating a build, serve ONLY JSON. specializations MUST be objects with name and traits (not a bare array of strings).
+Prefer search_upgrades / upgrade_synergies over list_* dumps.
+
+{discipline}
+
+When plating a build, serve ONLY JSON. specializations MUST be objects with name and traits (not a bare array of strings).
 ```json
 {{
   "specializations": [
@@ -335,6 +376,7 @@ weapon-set-2-main, weapon-set-2-off. A key naming a slot the build does not wear
         request = request,
         kitchen = kitchen,
         reply_language = reply_language,
+        discipline = BUILD_DISCIPLINE,
     )
 }
 
@@ -1097,7 +1139,27 @@ Phase 4 — Verify the complete build:
 13. Call simulate_combat to verify the gear+trait combo performs well numerically
 14. Call simulate_rotation with selected skill IDs to see real DPS, condition uptime, buff uptime, and control metrics (stunbreaks, stability)
 
-Think step by step. Use synergy tools to discover and verify interactions rather than guessing. Every component (traits, skills, rune, sigils, relic) must synergize as a codependent system — a rune that boosts Burning duration is wasted if your build barely applies Burning.
+NO ASSUMPTIONS. THIS IS THE RULE THAT MATTERS MOST.
+Every specialization, trait, skill, rune, sigil and relic name you output must have come back from a tool call in THIS conversation. Not from memory. Your training data is older than the live game build, names change between patches, and a name that does not exist today is discarded — the player then gets no build at all, which is the worst possible answer.
+- Before you name traits for a specialization, call get_spec_traits for that specialization and choose ONLY from what it returns.
+- Every specialization has exactly 3 trait columns (Adept, Master, Grandmaster). Pick exactly one trait from EACH column: 3 traits, never two from one column, never a minor trait (those are automatic and cannot be chosen).
+- Before you name a skill, rune, sigil or relic, confirm it exists with the matching tool.
+- If a tool does not return what you expected, choose from what it DID return. Never fall back on a remembered name.
+
+REASON WITH MECHANISM AND NUMBERS, NOT VIBES.
+A build is a machine: triggers fire effects, effects have durations, sources have cooldowns. Show the machine actually runs.
+- Cooldown vs uptime is arithmetic. A 5s effect on a 30s cooldown is ~17% uptime; do not write about it as if it were permanent. State the fraction.
+- Internal cooldowns bound proc rate. A sigil with a 9s ICD fires at most once per 9s no matter how often you crit, so a second on-crit source may add nothing.
+- Triggers must be satisfiable. Read proc_triggers and damage_modifiers from get_trait_details: a trait keyed on a boon, a condition, or a threshold you never reach is dead weight. Name what supplies the trigger, or drop the trait.
+- Condition builds: use find_condition_sources to establish what applies each condition and how often, then match rune, relic and sigil duration bonuses to the condition you actually stack most. A Burning-duration rune on a build that mostly bleeds is a wasted slot.
+- Multipliers only count when their condition holds. Do not stack damage modifiers your build cannot meet at the same time.
+- Cooldowns must fit the rotation. If three of your utilities are on 40s+ cooldowns, say what fills the gap between them.
+- Verify before you commit: find_synergies on the chosen trait and skill IDs, then simulate_rotation or simulate_combat. If the numbers contradict the plan, change the plan — never the numbers.
+
+WHAT THE EXPLANATION MUST SAY.
+Give the synergy chain concretely: what triggers what, on what cooldown, and the uptime or multiplier that results. "Corruptor's Fervor stacks toughness" is not an argument. "Corruptor's Fervor gives Carapace per condition applied, and Harbinger Shroud pulses Torment every second, so Carapace holds near cap in sustained fights" is. Name the weakness the build accepts, in one clause — every build trades something.
+
+Every component (traits, skills, rune, sigils, relic) must work as one codependent system — a rune that boosts Burning duration is wasted if your build barely applies Burning.
 
 After gathering data, respond with ONLY a JSON build object:
 ```json
@@ -1138,6 +1200,26 @@ After gathering data, respond with ONLY a JSON build object:
         let expected = r#"You are an expert Guild Wars 2 build optimizer with access to the game's full database.
 
 Improve the player's current Power build for Guardian in PvE.
+
+NO ASSUMPTIONS. THIS IS THE RULE THAT MATTERS MOST.
+Every specialization, trait, skill, rune, sigil and relic name you output must have come back from a tool call in THIS conversation. Not from memory. Your training data is older than the live game build, names change between patches, and a name that does not exist today is discarded — the player then gets no build at all, which is the worst possible answer.
+- Before you name traits for a specialization, call get_spec_traits for that specialization and choose ONLY from what it returns.
+- Every specialization has exactly 3 trait columns (Adept, Master, Grandmaster). Pick exactly one trait from EACH column: 3 traits, never two from one column, never a minor trait (those are automatic and cannot be chosen).
+- Before you name a skill, rune, sigil or relic, confirm it exists with the matching tool.
+- If a tool does not return what you expected, choose from what it DID return. Never fall back on a remembered name.
+
+REASON WITH MECHANISM AND NUMBERS, NOT VIBES.
+A build is a machine: triggers fire effects, effects have durations, sources have cooldowns. Show the machine actually runs.
+- Cooldown vs uptime is arithmetic. A 5s effect on a 30s cooldown is ~17% uptime; do not write about it as if it were permanent. State the fraction.
+- Internal cooldowns bound proc rate. A sigil with a 9s ICD fires at most once per 9s no matter how often you crit, so a second on-crit source may add nothing.
+- Triggers must be satisfiable. Read proc_triggers and damage_modifiers from get_trait_details: a trait keyed on a boon, a condition, or a threshold you never reach is dead weight. Name what supplies the trigger, or drop the trait.
+- Condition builds: use find_condition_sources to establish what applies each condition and how often, then match rune, relic and sigil duration bonuses to the condition you actually stack most. A Burning-duration rune on a build that mostly bleeds is a wasted slot.
+- Multipliers only count when their condition holds. Do not stack damage modifiers your build cannot meet at the same time.
+- Cooldowns must fit the rotation. If three of your utilities are on 40s+ cooldowns, say what fills the gap between them.
+- Verify before you commit: find_synergies on the chosen trait and skill IDs, then simulate_rotation or simulate_combat. If the numbers contradict the plan, change the plan — never the numbers.
+
+WHAT THE EXPLANATION MUST SAY.
+Give the synergy chain concretely: what triggers what, on what cooldown, and the uptime or multiplier that results. "Corruptor's Fervor stacks toughness" is not an argument. "Corruptor's Fervor gives Carapace per condition applied, and Harbinger Shroud pulses Torment every second, so Carapace holds near cap in sustained fights" is. Name the weakness the build accepts, in one clause — every build trades something.
 
 PLAYER PRIORITIES (6-axis radar chart): Power damage (100%)
 MANDATORY: Use Berserker's or Assassin's gear (highest Power/Precision/Ferocity). Do NOT use any gear with Healing Power, Vitality, or Toughness as primary stat.
@@ -1202,9 +1284,17 @@ After gathering data, respond with ONLY a JSON build object:
             prompt.contains("Write the \"explanation\" field in English"),
             "reply language instruction missing: {prompt}"
         );
+        // Was: "If Context already lists an equipped Character loadout, do not
+        // call tools; edit that loadout." That shortcut is why Choya named
+        // traits from memory and had whole builds refused. The loadout is now
+        // a starting point, and the tool lookup is mandatory either way.
         assert!(
-            prompt.contains("If Context already lists an equipped Character loadout"),
-            "equipped-loadout shortcut missing: {prompt}"
+            prompt.contains("An equipped Character loadout in Context is your STARTING POINT"),
+            "equipped-loadout handling missing: {prompt}"
+        );
+        assert!(
+            !prompt.contains("do not call tools"),
+            "the equipped-loadout path must never forbid tool use: {prompt}"
         );
         assert!(
             prompt.starts_with("You are Choya, a Guild Wars 2 cactus piñata and build advisor"),
@@ -1289,6 +1379,68 @@ After gathering data, respond with ONLY a JSON build object:
         assert!(
             prompt.contains(&"x".repeat(500)),
             "full capped order should still be present"
+        );
+    }
+
+    /// The live failure this rule exists for: the chat prompt told the model
+    /// NOT to call tools when a loadout was equipped, so it named traits from
+    /// training data older than the game build. One name of six did not
+    /// exist, validation refused the whole build, and the player got four
+    /// replies in a row with no build in them.
+    #[test]
+    fn build_prompts_forbid_naming_from_memory() {
+        let w = OptimizationWeights::preset_power_dps();
+        for (name, prompt) in [
+            ("new", new_build_prompt_with_tools("Necromancer", &w, "WvW")),
+            ("improve", improve_build_prompt_with_tools("Necromancer", &w, "WvW")),
+            (
+                "chat",
+                chat_refinement_prompt_with_tools(
+                    "Necromancer",
+                    "WvW",
+                    "give me an unkillable harbinger",
+                    "Character: Harbinger, Tab 4",
+                    "English",
+                ),
+            ),
+        ] {
+            assert!(
+                prompt.contains("NO ASSUMPTIONS"),
+                "{name}: must forbid naming from memory"
+            );
+            assert!(
+                prompt.contains("get_spec_traits"),
+                "{name}: must say where legal trait names come from"
+            );
+            assert!(
+                prompt.contains("one trait from EACH column"),
+                "{name}: must state the 3-columns-pick-one rule that validation enforces"
+            );
+            assert!(
+                prompt.contains("Internal cooldowns"),
+                "{name}: must demand mechanism/timing reasoning, not vibes"
+            );
+        }
+    }
+
+    /// A player with a build equipped is the COMMON case, and it was the one
+    /// that forbade tool calls outright.
+    #[test]
+    fn equipped_loadout_does_not_forbid_tool_use() {
+        let chat = chat_refinement_prompt_with_tools(
+            "Necromancer",
+            "WvW",
+            "improve this",
+            "Character: Harbinger, Tab 4: HARBI",
+            "English",
+        );
+        assert!(
+            !chat.contains("do not call tools"),
+            "an equipped loadout must never again mean 'guess from memory'"
+        );
+        assert!(
+            !chat.contains("at most two tool rounds"),
+            "verifying three specs' trait columns does not fit in two rounds"
         );
     }
 

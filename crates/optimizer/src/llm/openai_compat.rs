@@ -46,10 +46,19 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
 /// Completion ceiling per chat completion. Reasoning models spend the same
 /// budget on hidden thinking, so the cap must cover both or the answer gets
 /// truncated (or arrives empty) with finish_reason "length".
-pub(crate) const MAX_COMPLETION_TOKENS: u32 = 16_384;
+///
+/// Raised from 16_384: a build is worth real tokens. The reasoning cap used
+/// to be HALF of this, so a thinking model could spend the entire budget
+/// deliberating and have nothing left to answer with. Designing a build from
+/// live tool data — trait columns for three specs, skill facts, upgrade
+/// ranking, then a rotation sim — is not a 16k job.
+pub(crate) const MAX_COMPLETION_TOKENS: u32 = 65_536;
 /// Upper bound on hidden reasoning tokens per request (OpenRouter
 /// `reasoning.max_tokens`; ignored by providers without thinking support).
-pub(crate) const REASONING_TOKEN_CAP: u32 = 8_192;
+///
+/// Deliberately well under [`MAX_COMPLETION_TOKENS`] so a long think always
+/// leaves room for the build itself.
+pub(crate) const REASONING_TOKEN_CAP: u32 = 32_768;
 
 pub(crate) fn http_client() -> Result<reqwest::blocking::Client, LlmError> {
     reqwest::blocking::Client::builder()
