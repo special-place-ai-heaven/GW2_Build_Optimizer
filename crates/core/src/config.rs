@@ -352,12 +352,12 @@ impl Default for RadioPreferences {
 }
 
 fn default_theme_preset() -> String {
-    "tyrian-gold".into()
+    "glacial-ward".into()
 }
 
 /// Overlay theme selection. `preset` is a built-in theme id (or `"custom"`,
-/// which renders from [`ThemeConfig::custom`]); unknown ids fall back to the
-/// default Tyrian Gold at apply time, never at parse time.
+/// which renders from [`ThemeConfig::custom`]); unknown ids fall back to
+/// Tyrian Gold at apply time, never at parse time.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ThemeConfig {
     #[serde(default = "default_theme_preset")]
@@ -446,7 +446,7 @@ pub struct AppConfig {
     /// Font scale multiplier. Default 1.0.
     #[serde(default = "default_font_scale")]
     pub font_scale: f32,
-    /// Overlay theme. Omitted on old configs; defaults to Tyrian Gold.
+    /// Overlay theme. Omitted on old configs; defaults to Glacial Ward.
     #[serde(default)]
     pub theme: ThemeConfig,
 
@@ -1565,7 +1565,7 @@ mod tests {
     }
 
     #[test]
-    fn theme_defaults_to_tyrian_gold_on_old_configs() {
+    fn theme_defaults_to_glacial_ward_on_old_configs() {
         // Pre-theme config.json: no `theme` key at all.
         let json = r#"{
             "gw2_api_key": "old-key",
@@ -1574,7 +1574,7 @@ mod tests {
         }"#;
         let config: AppConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.theme, ThemeConfig::default());
-        assert_eq!(config.theme.preset, "tyrian-gold");
+        assert_eq!(config.theme.preset, "glacial-ward");
         assert!(config.theme.custom.name.is_empty());
         // Custom defaults are the Tyrian Gold bases.
         assert_eq!(config.theme.custom.bg, [0.07, 0.06, 0.045]);
@@ -1582,7 +1582,7 @@ mod tests {
 
         // A theme object missing `preset` still lands on the default.
         let partial: ThemeConfig = serde_json::from_str("{}").unwrap();
-        assert_eq!(partial.preset, "tyrian-gold");
+        assert_eq!(partial.preset, "glacial-ward");
         assert_eq!(partial.custom, CustomTheme::default());
     }
 

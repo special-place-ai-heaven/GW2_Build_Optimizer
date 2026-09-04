@@ -524,7 +524,7 @@ fn draw_quip_bubble(
     // Real measurement at the bubble's own font scale, greedy word-wrap into
     // short lines — the text always fits INSIDE the plate (the old blind
     // px/char estimate shipped an overflowing bubble).
-    ui.set_window_font_scale(1.15);
+    theme::font_scale(ui, 1.15);
     const MAX_LINE_W: f32 = 200.0;
     const LINE_GAP: f32 = 2.0;
     let mut lines: Vec<String> = vec![String::new()];
@@ -646,7 +646,7 @@ fn draw_quip_bubble(
             );
         }
     }
-    ui.set_window_font_scale(1.0);
+    theme::font_scale_reset(ui);
     if jackpot {
         let pulse = 1.0 + 0.15 * (t as f32 * 0.3).sin() * bass;
         blit(

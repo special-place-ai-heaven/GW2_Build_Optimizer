@@ -12,7 +12,13 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use crate::state::CancellationToken;
 
 const TIMEOUT: Duration = Duration::from_secs(8);
-const MAX_BYTES: usize = 1_500_000;
+/// Download cap for one still. Fails closed, so this is an admission gate,
+/// not a hint: at 1_500_000 it was rejecting the official blog's 1.95 MB
+/// announcement PNGs outright — the exact images that most needed shrinking
+/// never reached the cache at all. 4 MB is ~2x the largest image observed
+/// across the five live feeds, and every still over MAX_EDGE is downscaled
+/// before it is written, so this bounds the DOWNLOAD, not what we keep.
+const MAX_BYTES: usize = 4_000_000;
 
 #[derive(Clone)]
 enum Slot {
@@ -30,16 +36,31 @@ fn slots() -> std::sync::MutexGuard<'static, HashMap<String, Slot>> {
         .unwrap_or_else(|e| e.into_inner())
 }
 
-/// Feed hosts from `news::feed_url` plus the YouTube still CDNs that
-/// `prefer_youtube_still` already rewrites to. Any other https host is a
-/// still the overlay must not fetch.
-const STILL_HOSTS: &[&str] = &[
-    "www.guildwars2.com",
-    "en-forum.guildwars2.com",
-    "www.youtube.com",
-    "www.guildjen.com",
-    "i.ytimg.com",
-    "img.youtube.com",
+/// Registrable domains the news feeds serve stills from — matched as "this
+/// exact host, or a subdomain of it". Any other https host is a still the
+/// overlay must not fetch.
+///
+/// This is a DOMAIN list, not a host list, because the feeds do not serve
+/// stills from the host you fetched the feed from. Verified against the live
+/// feeds on 2026-09-04: YouTube round-robins thumbnails over
+/// `i1`-`i4.ytimg.com` (never bare `i.ytimg.com`), GuildJen proxies every
+/// image through Jetpack Photon at `i0.wp.com`, and the official blog serves
+/// from one CloudFront distribution. An exact-host list missed all three and
+/// silently blanked every image in the News tab — see the regression test
+/// `live_feed_image_hosts_are_allowlisted`.
+///
+/// The CloudFront entry is one ArenaNet distribution on purpose: plain
+/// `cloudfront.net` would allowlist every AWS customer on the internet.
+const STILL_DOMAINS: &[&str] = &[
+    "guildwars2.com",
+    "youtube.com",
+    "ytimg.com",
+    "guildjen.com",
+    // Jetpack Photon. Only ever reached via a URL the GuildJen feed handed us,
+    // and Photon fetches server-side, so this does not widen who learns the
+    // player's IP beyond "the feeds we ship".
+    "wp.com",
+    "d3qqidoz8mm2hm.cloudfront.net",
 ];
 
 pub fn url_ok(url: &str) -> bool {
@@ -55,7 +76,12 @@ pub fn url_ok(url: &str) -> bool {
     if reserved_still_host(host) {
         return false;
     }
-    STILL_HOSTS.iter().any(|ok| host.eq_ignore_ascii_case(ok))
+    let host = host.to_ascii_lowercase();
+    STILL_DOMAINS.iter().any(|d| {
+        // `strip_suffix` + the dot check is what keeps `evilytimg.com` out;
+        // a bare `ends_with("ytimg.com")` would let it in.
+        host == *d || host.strip_suffix(d).is_some_and(|pre| pre.ends_with('.'))
+    })
 }
 
 /// Host-level reject shared with `radio::logos`: "localhost" or a literal IP
@@ -167,6 +193,92 @@ pub fn release_pending(urls: &[String]) {
     }
 }
 
+/// Longest edge we keep. The News tab draws stills at 120px in a card
+/// (`ui/news_feed.rs`), 48px in the index, and `240 * zoom` expanded — and
+/// `fit_box` takes the smaller of the width- and height-fit, so in practice
+/// the pane width binds long before the zoom ceiling does. 1024 draws 1:1 in a
+/// news window up to ~1024px of content width and only softens past that,
+/// while throwing away ~72% of a 1920x1080 source's pixels. Going higher buys
+/// nothing on screen and costs encode time, which scales with OUTPUT pixels.
+const MAX_EDGE: u32 = 1024;
+
+/// Header-declared dimension we refuse before a decoder is ever allocated.
+/// `MAX_BYTES` caps the COMPRESSED bytes and says nothing about the decode: a
+/// 2 MB PNG can legally declare 40000x40000 and ask for 6.4 GB of RGBA inside
+/// the game process.
+const MAX_SRC_DIM: u32 = 8_000;
+
+/// Belt to [`MAX_SRC_DIM`]'s braces, handed to the decoder itself. Well under
+/// `Limits::default()`'s 512 MiB, which inside a game process is not a limit
+/// so much as a crash.
+const MAX_DECODE_ALLOC: u64 = 96 * 1024 * 1024;
+
+/// Shrink an oversized still to [`MAX_EDGE`] and re-encode it in its own
+/// format, so the Nexus texture loader is handed an image the overlay can
+/// actually use. Returns the new bytes and their pixel size.
+///
+/// Nothing here trusts the input. The hosts are allowlisted; the CONTENT is
+/// written by whoever the feed links to.
+///
+/// `catch_unwind` is not decoration: image's own README still lists "Many
+/// decoders will panic on malicious input" under Known issues, and nexus ships
+/// `panic_msgbox`, whose hook calls `MessageBoxA`. An unguarded decoder panic
+/// would pop a Win32 dialog over the running game and poison the `SLOTS`
+/// mutex on the way out. Same reasoning as [`texture`] below.
+fn downscale(bytes: &[u8], ext: &str, src: (u32, u32)) -> Option<(Vec<u8>, u32, u32)> {
+    if src.0.max(src.1) > MAX_SRC_DIM {
+        return None;
+    }
+    let format = match ext {
+        "png" => image::ImageFormat::Png,
+        _ => image::ImageFormat::Jpeg,
+    };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // `sniff` already decided the format, so set it rather than letting the
+        // reader guess: PNG magic can then never be routed to another parser.
+        let mut reader =
+            image::ImageReader::with_format(std::io::Cursor::new(bytes), format);
+        // `Limits` is #[non_exhaustive] — a struct literal is a hard E0639, and
+        // starting from `default()` means any limit image adds later arrives at
+        // image's recommended value instead of unlimited. The two dimension
+        // caps are the only ones image documents as STRICT; `max_alloc` is
+        // explicitly non-strict and "some decoders may ignore it", so it is the
+        // backstop, not the gate. Default leaves both dimensions at `None`.
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(MAX_SRC_DIM);
+        limits.max_image_height = Some(MAX_SRC_DIM);
+        limits.max_alloc = Some(MAX_DECODE_ALLOC);
+        reader.limits(limits);
+        // Must go through `ImageReader::decode`. The low-level decoders defeat
+        // this: `PngDecoder::new` is `with_limits(r, Limits::no_limits())` and
+        // the JPEG one hardcodes `set_max_width(usize::MAX)`. Only `decode()`
+        // forwards the limits down into the decoder.
+        let img = reader.decode().ok()?;
+        // `resize` preserves aspect and fits inside the box, so a landscape
+        // still lands at 1024 wide and a portrait at 1024 tall.
+        let small = img.resize(MAX_EDGE, MAX_EDGE, image::imageops::FilterType::Lanczos3);
+        let (w, h) = (small.width(), small.height());
+        let mut out = Vec::new();
+        small
+            .write_to(&mut std::io::Cursor::new(&mut out), format)
+            .ok()?;
+        Some((out, w, h))
+    }))
+    .ok()
+    .flatten()
+}
+
+/// A JPEG that does not end in EOI was truncated in transit.
+///
+/// This has to be checked by hand: `image` hardcodes zune-jpeg's
+/// `set_strict_mode(false)` and exposes no way to turn it back on, so feeding
+/// it 1% of a JPEG still returns `Ok` with the full declared dimensions. A
+/// connection dropped mid-body would otherwise be cached as a permanent
+/// half-grey thumbnail — the disk cache never re-fetches a Ready slot.
+fn jpeg_is_complete(bytes: &[u8]) -> bool {
+    matches!(bytes.last_chunk::<2>(), Some([0xFF, 0xD9]))
+}
+
 pub fn download(
     url: &str,
     dir: &Path,
@@ -191,7 +303,19 @@ pub fn download(
     }
     let bytes = gw2_api::transport::read_body_capped(resp, MAX_BYTES as u64).ok()?;
     let ext = sniff(&bytes)?;
-    let (pw, ph) = pixel_size(&bytes).unwrap_or((16, 9));
+    if ext == "jpg" && !jpeg_is_complete(&bytes) {
+        return None;
+    }
+    // Header walk, no decoder allocated yet.
+    let (pw, ph) = pixel_size(&bytes)?;
+    // Only pay for a decode when the image is actually too big. Most stills
+    // are not: YouTube already hands us a 320x180 mqdefault, and re-encoding
+    // that would cost quality and time to change nothing.
+    let (bytes, pw, ph) = if pw.max(ph) > MAX_EDGE {
+        downscale(&bytes, ext, (pw, ph))?
+    } else {
+        (bytes, pw, ph)
+    };
     let aspect = pw as f32 / ph as f32;
     std::fs::create_dir_all(dir).ok()?;
     let path = dir.join(format!("{}.{ext}", file_stem(url)));
@@ -307,6 +431,120 @@ pub(crate) fn slots_test_guard() -> std::sync::MutexGuard<'static, ()> {
 mod tests {
     use super::*;
 
+    fn encode(w: u32, h: u32, format: image::ImageFormat) -> Vec<u8> {
+        let img = image::DynamicImage::new_rgb8(w, h);
+        let mut out = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut out), format)
+            .expect("test image encodes");
+        out
+    }
+
+    /// The whole point of the feature: an image too big for any News draw site
+    /// comes back at MAX_EDGE, still the right shape, and still decodable.
+    #[test]
+    fn downscale_fits_max_edge_and_keeps_aspect() {
+        for (w, h, want) in [
+            (1920u32, 1080u32, (1024u32, 576u32)), // landscape 16:9
+            (1080, 1920, (576, 1024)),             // portrait
+            (2000, 2000, (1024, 1024)),            // square
+        ] {
+            let src = encode(w, h, image::ImageFormat::Png);
+            let (out, ow, oh) =
+                downscale(&src, "png", (w, h)).unwrap_or_else(|| panic!("{w}x{h} downscales"));
+            assert_eq!((ow, oh), want, "{w}x{h}");
+            // Re-parseable, and the header agrees with the reported size — the
+            // texture loader reads the file, not our return value.
+            assert_eq!(pixel_size(&out), Some(want), "{w}x{h} header");
+            assert_eq!(sniff(&out), Some("png"), "{w}x{h} stays PNG");
+        }
+    }
+
+    /// A still already smaller than MAX_EDGE must never reach `downscale` —
+    /// re-encoding YouTube's 320x180 mqdefault would cost quality to change
+    /// nothing. This pins the branch condition `download` uses.
+    #[test]
+    fn images_at_or_under_max_edge_are_not_resized() {
+        for (w, h) in [(320u32, 180u32), (MAX_EDGE, 576), (576, MAX_EDGE)] {
+            assert!(
+                w.max(h) <= MAX_EDGE,
+                "{w}x{h} must take the pass-through branch"
+            );
+        }
+        assert!(1920u32.max(1080) > MAX_EDGE, "1920x1080 must be resized");
+    }
+
+    /// MAX_BYTES caps compressed bytes and says nothing about the decode, so a
+    /// header claiming absurd dimensions is refused before a decoder is even
+    /// allocated. Note the bytes here are empty: nothing parses them.
+    #[test]
+    fn decompression_bomb_is_refused_before_decoding() {
+        assert!(downscale(&[], "png", (40_000, 40_000)).is_none());
+        assert!(downscale(&[], "png", (MAX_SRC_DIM + 1, 8)).is_none());
+        assert!(downscale(&[], "jpg", (8, MAX_SRC_DIM + 1)).is_none());
+    }
+
+    /// `image` hardcodes zune-jpeg's non-strict mode, so a JPEG cut off in
+    /// transit decodes "successfully" as a half-grey image and would be cached
+    /// forever. The EOI marker is the only thing that catches it.
+    #[test]
+    fn truncated_jpeg_is_rejected() {
+        let full = encode(64, 64, image::ImageFormat::Jpeg);
+        assert!(jpeg_is_complete(&full), "a complete JPEG ends in FFD9");
+        assert!(!jpeg_is_complete(&full[..full.len() / 2]));
+        assert!(!jpeg_is_complete(&full[..1]));
+        assert!(!jpeg_is_complete(&[]));
+    }
+
+    /// Allowlisted host, unvetted content: garbage must return None, never
+    /// panic. A panic here pops nexus's Win32 message box over the running
+    /// game and poisons the SLOTS mutex.
+    #[test]
+    fn corrupt_input_returns_none_without_panicking() {
+        assert!(downscale(b"not an image at all", "png", (100, 100)).is_none());
+        assert!(downscale(&[], "png", (100, 100)).is_none());
+        // Valid PNG magic and header, body replaced with noise.
+        let mut wrecked = encode(1200, 900, image::ImageFormat::Png);
+        let tail = wrecked.len() / 2;
+        for (i, b) in wrecked[tail..].iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        let _ = downscale(&wrecked, "png", (1200, 900));
+    }
+
+    /// Live end-to-end against the image that forced this work: the official
+    /// blog's 1920x1080 announcement PNG, ~1.95 MB — which the old 1.5 MB cap
+    /// rejected outright, so it never reached the cache at all.
+    ///
+    /// Ignored by default; it needs the network. Run it with:
+    ///   cargo test -p gw2-build-optimizer live_official_still -- --ignored --nocapture
+    #[test]
+    #[ignore = "hits the network"]
+    fn live_official_still_downscales() {
+        let url = "https://d3qqidoz8mm2hm.cloudfront.net/wp-content/uploads/2026/08/51b06GW2_AnniversarySale_Social_1920x1080_EN_announcement.png";
+        assert!(url_ok(url), "host must be allowlisted");
+        let bytes = reqwest::blocking::get(url)
+            .expect("fetch")
+            .bytes()
+            .expect("body")
+            .to_vec();
+        assert!(
+            bytes.len() <= MAX_BYTES,
+            "{} bytes exceeds MAX_BYTES {MAX_BYTES}",
+            bytes.len()
+        );
+        let ext = sniff(&bytes).expect("sniffs as an image");
+        let (pw, ph) = pixel_size(&bytes).expect("header parses");
+        let (out, ow, oh) = downscale(&bytes, ext, (pw, ph)).expect("downscales");
+        println!(
+            "{pw}x{ph} {} bytes  ->  {ow}x{oh} {} bytes  ({:.1}% of original)",
+            bytes.len(),
+            out.len(),
+            100.0 * out.len() as f32 / bytes.len() as f32
+        );
+        assert_eq!(ow.max(oh), MAX_EDGE);
+        assert!(out.len() < bytes.len(), "must actually get smaller");
+    }
+
     #[test]
     fn only_https_feed_hosts() {
         assert!(url_ok("https://i.ytimg.com/vi/x/hqdefault.jpg"));
@@ -324,6 +562,47 @@ mod tests {
         assert!(!url_ok("https://[fd00::1]/x.jpg"));
         assert!(!url_ok("https://evil.example/x.jpg"));
         assert!(!url_ok("javascript:alert(1)"));
+    }
+
+    /// The hosts the live feeds ACTUALLY serve stills from, captured
+    /// 2026-09-04. The previous exact-host allowlist passed every test above
+    /// and still rejected all of these, which is how every News image went
+    /// dark with CI green.
+    #[test]
+    fn live_feed_image_hosts_are_allowlisted() {
+        // YouTube round-robins the shard; it never serves bare i.ytimg.com.
+        for shard in ["i1", "i2", "i3", "i4"] {
+            assert!(
+                url_ok(&format!("https://{shard}.ytimg.com/vi/abc/hqdefault.jpg")),
+                "{shard}.ytimg.com"
+            );
+        }
+        // GuildJen proxies every image through Jetpack Photon.
+        assert!(url_ok(
+            "https://i0.wp.com/guildjen.com/wp-content/uploads/2026/08/x.jpg?fit=1280%2C720&ssl=1"
+        ));
+        // www.guildjen.com/feed/ 301s to the apex, and the download re-checks
+        // the post-redirect URL.
+        assert!(url_ok("https://guildjen.com/wp-content/uploads/2026/08/x.jpg"));
+        // The official blog's CloudFront distribution.
+        assert!(url_ok("https://d3qqidoz8mm2hm.cloudfront.net/wp-content/x.jpg"));
+    }
+
+    /// Suffix matching must not become "ends with these letters". Each of
+    /// these is a domain an attacker can register today.
+    #[test]
+    fn lookalike_domains_stay_rejected() {
+        for bad in [
+            "https://evilytimg.com/vi/x/hqdefault.jpg",
+            "https://ytimg.com.evil.example/x.jpg",
+            "https://notguildjen.com/x.jpg",
+            "https://wp.com.evil.example/x.jpg",
+            "https://myguildwars2.com/x.jpg",
+            // One ArenaNet distribution is allowlisted, not all of CloudFront.
+            "https://d111111abcdef8.cloudfront.net/x.jpg",
+        ] {
+            assert!(!url_ok(bad), "{bad} must not be admitted");
+        }
     }
 
     #[test]

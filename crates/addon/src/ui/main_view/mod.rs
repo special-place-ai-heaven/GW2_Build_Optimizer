@@ -25,6 +25,8 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     // Apply global UI scale (text + element sizing)
     let scale = state.config.font_scale;
     ui.set_window_font_scale(scale);
+    // Publish it so scoped changes can restore to it — see theme::font_scale.
+    theme::set_ui_scale(scale);
     // Scale element sizes proportionally
     let pad = theme::control_pad(ui);
     let _s1 = ui.push_style_var(nexus::imgui::StyleVar::FramePadding(pad));

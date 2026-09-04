@@ -171,6 +171,16 @@ const PRESETS: &[Preset] = &[
     },
 ];
 
+/// The five base colors of a built-in preset, in `CustomTheme` field order
+/// (bg, panel, accent, text, muted). `None` for `"custom"` or an unknown id.
+/// Used to seed a fresh custom theme from whatever preset is on screen.
+pub fn preset_bases(id: &str) -> Option<[[f32; 3]; 5]> {
+    PRESETS
+        .iter()
+        .find(|p| p.id == id)
+        .map(|p| [p.bg, p.panel, p.accent, p.text, p.muted])
+}
+
 /// `(id, English display name)` for every built-in preset, Settings-combo order.
 pub fn preset_ids() -> &'static [(&'static str, &'static str)] {
     static IDS: OnceLock<Vec<(&'static str, &'static str)>> = OnceLock::new();
@@ -281,6 +291,43 @@ pub fn derive_palette(
 /// per [`pal`] call is cheap and uncontended.
 static ACTIVE: RwLock<Palette> = RwLock::new(TYRIAN);
 
+/// The window font scale `render_main` pushed for this frame, i.e. the
+/// player's Settings font-scale slider. Same single-threaded-render argument
+/// as [`ACTIVE`].
+static UI_SCALE: RwLock<f32> = RwLock::new(1.0);
+
+/// Record the frame's base font scale. Called once by `render_main`, right
+/// after it pushes the scale onto the window.
+pub fn set_ui_scale(scale: f32) {
+    *UI_SCALE.write().unwrap_or_else(|e| e.into_inner()) = scale;
+}
+
+/// The player's font scale, for code that needs to size against it.
+pub fn ui_scale() -> f32 {
+    *UI_SCALE.read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Push a font scale RELATIVE to the player's UI scale, and pair it with
+/// [`font_scale_reset`].
+///
+/// Always use these two instead of `ui.set_window_font_scale` directly.
+/// `render_main` sets the window font scale to `config.font_scale`, so a
+/// section that pushed `0.85` and restored a literal `1.0` did not restore
+/// anything — it silently un-scaled every section rendered after it for any
+/// player not on 1.0. Going through here makes the restore impossible to get
+/// wrong, because it does not take a number.
+///
+/// Nested `ChildWindow`s start at 1.0 regardless of the parent, so a child
+/// that wants the player's scale must call one of these too.
+pub fn font_scale(ui: &Ui, factor: f32) {
+    ui.set_window_font_scale(ui_scale() * factor);
+}
+
+/// Restore the player's UI scale after [`font_scale`].
+pub fn font_scale_reset(ui: &Ui) {
+    ui.set_window_font_scale(ui_scale());
+}
+
 /// Snapshot of the active palette. Take it once per function, not per color.
 pub fn pal() -> Palette {
     *ACTIVE.read().unwrap_or_else(|e| e.into_inner())
@@ -288,8 +335,8 @@ pub fn pal() -> Palette {
 
 /// Rebuild the active palette from config. Cheap — call on every change.
 /// `"tyrian-gold"` uses the exact shipped colors; other preset ids derive
-/// from their bases; `"custom"` derives from `cfg.custom`; anything unknown
-/// falls back to Tyrian Gold.
+/// from their bases (the default `"glacial-ward"` among them); `"custom"`
+/// derives from `cfg.custom`; anything unknown falls back to Tyrian Gold.
 pub fn apply_theme(cfg: &gw2_core::config::ThemeConfig) {
     let palette = match cfg.preset.as_str() {
         "tyrian-gold" => TYRIAN,
@@ -1633,6 +1680,23 @@ mod tests {
         }
     }
 
+    /// Seeding a fresh custom theme reads its bases from here, so every
+    /// preset must hand back exactly the five colors it renders from, and
+    /// `"custom"` must NOT resolve (it has no bases of its own to copy).
+    #[test]
+    fn preset_bases_round_trip_every_preset() {
+        for p in super::PRESETS {
+            assert_eq!(
+                super::preset_bases(p.id),
+                Some([p.bg, p.panel, p.accent, p.text, p.muted]),
+                "{} must expose its own bases",
+                p.id
+            );
+        }
+        assert_eq!(super::preset_bases("custom"), None);
+        assert_eq!(super::preset_bases("no-such-theme"), None);
+    }
+
     #[test]
     fn preset_ids_match_preset_data() {
         let ids = super::preset_ids();
@@ -1644,7 +1708,7 @@ mod tests {
     }
 
     /// One test mutates the shared active palette (no other test reads it) so
-    /// the assertions stay serial. Ends by restoring the default.
+    /// the assertions stay serial. Ends on the shipped Tyrian Gold palette.
     #[test]
     fn apply_theme_selects_presets_and_falls_back() {
         use gw2_core::config::{CustomTheme, ThemeConfig};
@@ -1688,7 +1752,7 @@ mod tests {
         );
 
         super::apply_theme(&cfg("tyrian-gold"));
-        assert_eq!(super::pal(), super::TYRIAN, "default preset is the shipped palette");
+        assert_eq!(super::pal(), super::TYRIAN, "tyrian-gold is the shipped palette");
     }
 
     #[test]
