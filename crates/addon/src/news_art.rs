@@ -311,6 +311,10 @@ fn jpeg_is_complete(bytes: &[u8]) -> bool {
     matches!(bytes.last_chunk::<2>(), Some([0xFF, 0xD9]))
 }
 
+fn exceeds_max_edge(w: u32, h: u32) -> bool {
+    w.max(h) > MAX_EDGE
+}
+
 pub fn download(
     url: &str,
     dir: &Path,
@@ -343,7 +347,7 @@ pub fn download(
     // Only pay for a decode when the image is actually too big. Most stills
     // are not: YouTube already hands us a 320x180 mqdefault, and re-encoding
     // that would cost quality and time to change nothing.
-    let (bytes, pw, ph) = if pw.max(ph) > MAX_EDGE {
+    let (bytes, pw, ph) = if exceeds_max_edge(pw, ph) {
         downscale(&bytes, ext, (pw, ph))?
     } else {
         (bytes, pw, ph)
@@ -498,11 +502,11 @@ mod tests {
     fn images_at_or_under_max_edge_are_not_resized() {
         for (w, h) in [(320u32, 180u32), (MAX_EDGE, 576), (576, MAX_EDGE)] {
             assert!(
-                w.max(h) <= MAX_EDGE,
+                !exceeds_max_edge(w, h),
                 "{w}x{h} must take the pass-through branch"
             );
         }
-        assert!(1920u32.max(1080) > MAX_EDGE, "1920x1080 must be resized");
+        assert!(exceeds_max_edge(1920, 1080), "1920x1080 must be resized");
     }
 
     /// MAX_BYTES caps compressed bytes and says nothing about the decode, so a

@@ -877,8 +877,7 @@ fn find_ci(haystack: &str, needle: &str, from: usize) -> Option<usize> {
     if pat.is_empty() || bytes.len() < pat.len() {
         return None;
     }
-    (from..=bytes.len() - pat.len())
-        .find(|&i| bytes[i..i + pat.len()].eq_ignore_ascii_case(pat))
+    (from..=bytes.len() - pat.len()).find(|&i| bytes[i..i + pat.len()].eq_ignore_ascii_case(pat))
 }
 
 /// Build links from GuildJen's index tables, and only from those tables.
@@ -955,7 +954,6 @@ fn extract_build_links(html: &str, needle: &str, max: usize) -> Vec<String> {
     }
     links
 }
-
 
 /// Every elite specialization, with the profession that owns it.
 ///
@@ -1594,14 +1592,26 @@ mod tests {
     #[test]
     fn profession_comes_from_the_spec_in_the_slug() {
         for (slug, profession, spec) in [
-            ("power-hammer-luminary-roaming-build", "Guardian", "Luminary"),
+            (
+                "power-hammer-luminary-roaming-build",
+                "Guardian",
+                "Luminary",
+            ),
             ("condition-scourge-havoc-build", "Necromancer", "Scourge"),
-            ("celestial-spear-antiquary-roaming-build", "Thief", "Antiquary"),
+            (
+                "celestial-spear-antiquary-roaming-build",
+                "Thief",
+                "Antiquary",
+            ),
             ("support-paragon-cloud-build", "Warrior", "Paragon"),
             ("power-conduit-roaming-build", "Revenant", "Conduit"),
         ] {
             let got = profession_from_slug(slug).expect(slug);
-            assert_eq!((got.0.as_str(), got.1.as_str()), (profession, spec), "{slug}");
+            assert_eq!(
+                (got.0.as_str(), got.1.as_str()),
+                (profession, spec),
+                "{slug}"
+            );
         }
     }
 
@@ -1677,7 +1687,7 @@ mod tests {
     #[test]
     fn extract_traits_includes_luminary_from_shared_known_specs() {
         assert!(
-            KNOWN_SPECS.iter().any(|s| *s == "luminary"),
+            KNOWN_SPECS.contains(&"luminary"),
             "KNOWN_SPECS must include luminary"
         );
         let traits = extract_traits("<h2>Luminary</h2>");
