@@ -1509,25 +1509,22 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
 
     let duration_s = clamp_rotation_duration(args.get("duration_seconds").and_then(|v| v.as_u64()));
 
-    // Get stats from gear prefix (or use sensible defaults)
-    let gear_prefix = args
-        .get("gear_prefix")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Berserker's");
-    // Use the deterministic, case-insensitive lookup so LLM-supplied prefixes
-    // like "berserker's" don't silently fall through to hardcoded defaults
-    // and run the simulation against the wrong stats.
-    let (power, condition_damage, weapon_strength) = if let Some(gear_stats) =
-        find_itemstat_by_name(ctx.db, gear_prefix)
-            .and_then(|istat| calculate_full_set_stats(ctx.db, istat, ctx.balance_ctx))
-    {
-        let base = stats::base_stats();
-        let power = base.power + gear_stats.power;
-        let condition_damage = base.condition_damage + gear_stats.condition_damage;
-        (power, condition_damage, 1100.0)
-    } else {
-        (2000.0, 1000.0, 1100.0) // fallback defaults
+    let gear_prefix = args.get("gear_prefix").and_then(|v| v.as_str()).unwrap_or("");
+    let Some(gear_stats) = find_itemstat_by_name(ctx.db, gear_prefix)
+        .and_then(|istat| calculate_full_set_stats(ctx.db, istat, ctx.balance_ctx))
+    else {
+        return json!({
+            "error": format!(
+                "No stat sheet for '{}' in {}: the prefix is unknown, or it has no budget the game mode can price.",
+                gear_prefix,
+                ctx.balance_ctx.game_mode.label()
+            )
+        });
     };
+    let base = stats::base_stats();
+    let power = base.power + gear_stats.power;
+    let condition_damage = base.condition_damage + gear_stats.condition_damage;
+    let weapon_strength = 1100.0;
 
     // Build rotation skills from the provided IDs
     let rotation_skills =
@@ -2182,6 +2179,7 @@ fn format_combat_performance(perf: &CombatPerformance, label: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gw2_api::models::StatAttribute;
 
     #[test]
     fn test_tool_declarations_count() {
@@ -2648,6 +2646,88 @@ mod tests {
         // duration_seconds must come back clamped in the tool's own JSON answer,
         // and the call must return promptly — a hang here would mean the clamp
         // never reached `rotation::simulator::simulate`.
+        let mut db = db_with_itemstats(vec![(1, "Berserker's")]);
+        db.itemstats.insert(
+            1,
+            ItemStat {
+                id: 1,
+                name: "Berserker's".into(),
+                attributes: vec![
+                    StatAttribute {
+                        attribute: "Power".into(),
+                        multiplier: 0.35,
+                        value: 0,
+                    },
+                    StatAttribute {
+                        attribute: "Precision".into(),
+                        multiplier: 0.25,
+                        value: 0,
+                    },
+                    StatAttribute {
+                        attribute: "Ferocity".into(),
+                        multiplier: 0.25,
+                        value: 0,
+                    },
+                ],
+            },
+        );
+        db.skills.insert(
+            999,
+            gw2_api::models::Skill {
+                id: 999,
+                name: "Test Strike".into(),
+                description: None,
+                icon: None,
+                chat_link: None,
+                skill_type: None,
+                weapon_type: None,
+                professions: vec![],
+                slot: None,
+                facts: vec![],
+                traited_facts: vec![],
+                categories: vec![],
+                attunement: None,
+                cost: None,
+                dual_wield: None,
+                flip_skill: None,
+                initiative: None,
+                next_chain: None,
+                prev_chain: None,
+                transform_skills: vec![],
+                bundle_skills: vec![],
+                toolbelt_skill: None,
+                flags: vec![],
+                specialization: None,
+            },
+        );
+        let empty_candidates: Vec<BuildCandidate> = vec![];
+        let balance_ctx = BalanceContext::new(gw2_core::types::GameMode::PvE);
+        let ctx = ToolContext {
+            db: &db,
+            profession_name: "Guardian",
+            candidates: &empty_candidates,
+            current_build_summary: None,
+            weights: OptimizationWeights::default(),
+            balance_ctx: &balance_ctx,
+        };
+        let args = json!({
+            "skill_ids": [999],
+            "gear_prefix": "Berserker's",
+            "duration_seconds": u64::MAX
+        });
+        let result = exec_simulate_rotation(&args, &ctx);
+        let reported = result["duration_s"]
+            .as_u64()
+            .expect("a valid skill list must produce a duration_s in the response");
+        assert_eq!(
+            reported, MAX_ROTATION_DURATION_SECONDS as u64,
+            "tool must clamp an absurd duration_seconds, not run (or report) it unbounded"
+        );
+    }
+
+
+    #[test]
+    fn simulate_rotation_errors_when_prefix_cannot_be_priced() {
         let mut db = db_with_itemstats(vec![]);
         db.skills.insert(
             999,
@@ -2688,14 +2768,17 @@ mod tests {
             weights: OptimizationWeights::default(),
             balance_ctx: &balance_ctx,
         };
-        let args = json!({ "skill_ids": [999], "duration_seconds": u64::MAX });
-        let result = exec_simulate_rotation(&args, &ctx);
-        let reported = result["duration_s"]
-            .as_u64()
-            .expect("a valid skill list must produce a duration_s in the response");
-        assert_eq!(
-            reported, MAX_ROTATION_DURATION_SECONDS as u64,
-            "tool must clamp an absurd duration_seconds, not run (or report) it unbounded"
+        let result = exec_simulate_rotation(
+            &json!({ "skill_ids": [999], "gear_prefix": "NotARealPrefix" }),
+            &ctx,
         );
+        assert!(
+            result.get("error").and_then(|v| v.as_str()).is_some_and(|e| {
+                e.contains("NotARealPrefix") && e.contains("No stat sheet")
+            }),
+            "unresolved prefix must be a tool error, not invented DPS: {result}"
+        );
+        assert!(result.get("dps").is_none());
     }
+
 }
