@@ -9,7 +9,6 @@ pub mod engine;
 pub mod gamedb;
 pub mod gemini;
 pub mod gemini_tools;
-pub mod gw2_embeds;
 #[cfg(test)]
 mod grouped_sheet;
 pub mod itemstat_pool;
@@ -17,6 +16,7 @@ pub mod llm;
 #[cfg(test)]
 pub mod parser_consistency_tests;
 pub mod prompts;
+pub mod providers;
 pub mod referee;
 pub mod rotation;
 pub mod scenario;

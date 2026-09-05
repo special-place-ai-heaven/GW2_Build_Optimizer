@@ -1565,8 +1565,26 @@ fn title_case(s: &str) -> String {
 /// builds (measured 2026-09-06). The decoder settles it: a build template
 /// announces itself with a `0x0D` header and is long enough to carry a skill
 /// bar, and nothing else is accepted.
+///
+/// Searched twice: once as sent, once with entity references resolved. Two
+/// of the three sites escape the code, differently, and neither decodes raw.
+///
+/// - Snowcrows prints it in a JS string inside an `onclick`, so the ampersand
+///   arrives as `&amp;` and the base64 body reads `amp;DQgn…`. The only other
+///   `[&` on the page is `[&quot;div&quot;,…]`, a JSON array in a Livewire
+///   `wire:snapshot` attribute — and that decoy is what all 180 Snowcrows
+///   rows in the store recorded as their build code.
+/// - GuildJen prints it in `<pre class="wp-block-code">` with the *bracket*
+///   escaped too, and not consistently: `&#91;&amp;DQcX…]` on one page,
+///   `[&amp;DQEQ…]` on another. A literal replace of either form alone misses
+///   the other. Measured over 27 pages: 0/27 decode raw, 27/27 unescaped.
+///
+/// Unescaping cannot corrupt a valid link — none of `&`, `#`, `;` are in the
+/// base64 alphabet. The 71 `[&…]` waypoint links GuildJen ships in a
+/// world-boss-timer JSON blob are still rejected, by the decoder rather than
+/// by luck: they are five-byte item links with no `0x0D` header.
 fn extract_build_code(html: &str) -> Option<String> {
-    crate::build_template::find_in_text(html).map(|(code, _)| code)
+    crate::providers::build_code_in(html)
 }
 
 /// Space-padded alnum words — same boundary idea as `prefix_named_in_text`.
@@ -3089,4 +3107,78 @@ mod tests {
             result.error
         );
     }
+
+    /// Snowcrows prints the build template inside a JS string inside an
+    /// `onclick`, so the ampersand arrives HTML-escaped and the base64 body
+    /// reads `amp;DQgn…`. The only other `[&` on the page is a JSON array in
+    /// a Livewire `wire:snapshot` attribute — and that decoy is what all 180
+    /// Snowcrows rows in the store recorded as their build code.
+    ///
+    /// Both shapes verbatim from snowcrows.com/builds/raids/necromancer/
+    /// condition-reaper as the server sent it on 2026-09-06.
+    #[test]
+    fn an_escaped_build_code_is_found_and_the_livewire_decoy_is_not() {
+        const PAGE: &str = concat!(
+            r#"<div wire:snapshot="[&quot;div&quot;,&quot;9ZtEYc0ZeKP5qDXJEd3X&quot;]">"#,
+            r#"<a class="tab mr-2" icon="fa-code" href="javascript://" onclick="#,
+            r#"navigator.clipboard.writeText('[&amp;DQgnNzInIibBEgAAgAAAAEABAACm"#,
+            r#"EgAAkgAAAAAAAAAAAAAAAAAAAAAAAAA=]');">Build Template</a></div>"#,
+        );
+
+        let code = extract_build_code(PAGE).expect("the escaped template must be found");
+        assert!(
+            code.starts_with("[&DQ"),
+            "the decoded code must be the unescaped template, got {code}"
+        );
+        assert!(
+            !code.contains("quot;"),
+            "the Livewire snapshot array is not a build code, got {code}"
+        );
+        let decoded = crate::build_template::decode(&code).expect("a real template");
+        assert_eq!(decoded.profession, 8, "8 is Necromancer, as the page title says");
+
+        // A page carrying only the decoy yields nothing rather than the decoy.
+        assert_eq!(
+            extract_build_code(
+                r#"<div wire:snapshot="[&quot;div&quot;,&quot;9ZtEYc0ZeKP5qDXJEd3X&quot;]"></div>"#
+            ),
+            None
+        );
+    }
+
+    /// GuildJen escapes the bracket as well as the ampersand, and not
+    /// consistently between pages — so a literal replace of either form alone
+    /// misses the other. Both spellings verbatim from the live site,
+    /// 2026-09-06. Measured over 27 pages: 0/27 decode raw, 27/27 unescaped.
+    ///
+    /// The waypoint link is one of 71 that GuildJen ships on every page in a
+    /// world-boss-timer JSON blob. It is the literal source of the code
+    /// recorded on 407 of 739 stored builds, and the decoder — not luck —
+    /// is what rejects it.
+    #[test]
+    fn guildjen_escapes_the_bracket_too_and_waypoints_are_not_builds() {
+        const WAYPOINT: &str = r#"{"name":"Shadow Behemoth","wp":"[&BPcAAAA=]"}"#;
+        const ESCAPED_BRACKET: &str = concat!(
+            r#"<pre class="wp-block-code"><code>&#91;&amp;DQcXFi02STqJHQ8BhQFmAYQdfwFr"#,
+            r#"HWQBbR2aAQAAAAAAAAAAAAAAAAAAAAADVQBaADEAAA==]</code></pre>"#,
+        );
+        const BARE_BRACKET: &str = concat!(
+            r#"<pre class="wp-block-code"><code>[&amp;DQEQOS4XQSkmDyYPRwFIAdgaRwFM"#,
+            r#"AbkBiRKJEgAAAAAAAAAAAAAAAAAAAAA=]</code></pre>"#,
+        );
+
+        for (label, page) in [
+            ("bracket escaped", format!("{WAYPOINT}{ESCAPED_BRACKET}")),
+            ("bracket bare", format!("{WAYPOINT}{BARE_BRACKET}")),
+        ] {
+            let code = extract_build_code(&page).unwrap_or_else(|| panic!("{label}"));
+            let decoded = crate::build_template::decode(&code)
+                .unwrap_or_else(|| panic!("{label}: {code} must decode"));
+            assert!(decoded.profession >= 1 && decoded.profession <= 9, "{label}");
+        }
+
+        // Waypoints alone are not a build, however many there are.
+        assert_eq!(extract_build_code(&WAYPOINT.repeat(71)), None);
+    }
+
 }
