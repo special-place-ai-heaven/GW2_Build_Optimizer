@@ -835,13 +835,11 @@ pub fn init(addon_dir: PathBuf) {
         Screen::Main
     } else if !config.has_gw2_key() {
         Screen::Setup(SetupStep::Language)
-    } else if config.has_gw2_key() && config.has_active_llm_key() {
-        // Keys present but cache missing — go to download
+    } else if config.has_active_llm_key() {
+        // GW2 key is present; cache missing — go to download
         Screen::Setup(SetupStep::DataDownload)
-    } else if config.has_gw2_key() {
-        Screen::Setup(SetupStep::LlmApiKey)
     } else {
-        Screen::Setup(SetupStep::Gw2ApiKey)
+        Screen::Setup(SetupStep::LlmApiKey)
     };
 
     let mut setup = SetupState::default();
@@ -1231,7 +1229,7 @@ mod tests {
     // ── init() screen routing ─────────────────────────────────────────────────
 
     #[test]
-    fn test_init_routes_to_gw2_key_when_no_keys() {
+    fn test_init_routes_to_language_when_no_keys() {
         let _serial = state_test_guard();
         reset_state();
         // No config.json in the dir → AppConfig::load returns default (no keys).

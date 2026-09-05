@@ -132,3 +132,12 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W046: `.gitignore` ignores every `.symforge/` directory.
 - W047: `BOOTSTRAP_FAILED` doc matches the no-retry latch.
 - Did not bump Cargo.toml.
+
+## Sprint 20 — US4 docs and dead UI (W050–W052, W054, W057, W088)
+
+- W050/W051: radio art docs match the foreground quip bubble and five head anchors; `EQ_WARM` / `let a = alpha` gone.
+- W052: `finish_stopped` already had its own doc; no edit needed.
+- W054: setup routing drops the unreachable Gw2ApiKey arm.
+- W057: `strip_label_ci` already shared by both gear_diff parsers (W008).
+- W088: unused `render_presets` deleted; `PRESETS` stays for tests.
+- Did not bump Cargo.toml.

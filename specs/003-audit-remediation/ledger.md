@@ -67,14 +67,14 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 53 | [W047](#w047) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/lib.rs:53` |
 | 54 | [W048](#w048) | S3/confirmed | US4 | planned | `crates/addon/src/news.rs:183` |
 | 55 | [W049](#w049) | S3/confirmed | US4 | planned | `crates/addon/src/news_art.rs:394` |
-| 56 | [W050](#w050) | S3/confirmed | US4 | planned | `crates/addon/src/radio/art.rs:6` |
-| 57 | [W051](#w051) | S3/confirmed | US4 | planned | `crates/addon/src/radio/art.rs:492` |
-| 58 | [W052](#w052) | S3/confirmed | US4 | planned | `crates/addon/src/radio/player.rs:1069` |
+| 56 | [W050](#w050) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/radio/art.rs:6` |
+| 57 | [W051](#w051) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/radio/art.rs:492` |
+| 58 | [W052](#w052) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/radio/player.rs:1069` |
 | 59 | [W053](#w053) | S3/confirmed | US4 | planned | `crates/addon/src/state.rs:530` |
-| 60 | [W054](#w054) | S3/confirmed | US4 | planned | `crates/addon/src/state.rs:830` |
+| 60 | [W054](#w054) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/state.rs:830` |
 | 61 | [W055](#w055) | S3/confirmed | US4 | planned | `crates/addon/src/ui/comparison.rs:557` |
 | 62 | [W056](#w056) | S3/confirmed | US4 | planned | `crates/addon/src/ui/comparison.rs:1171` |
-| 63 | [W057](#w057) | S3/confirmed | US4 | planned | `crates/addon/src/ui/gear_diff.rs:20` |
+| 63 | [W057](#w057) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/ui/gear_diff.rs:20` |
 | 64 | [W058](#w058) | S3/confirmed | US4 | planned | `crates/addon/src/ui/gear_sheet.rs:344` |
 | 65 | [W059](#w059) | S3/confirmed | US4 | planned | `crates/addon/src/ui/main_view/character.rs:37` |
 | 66 | [W060](#w060) | S3/confirmed | US4 | planned | `crates/addon/src/ui/main_view/lock_panel.rs:79` |
@@ -104,7 +104,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 90 | [W085](#w085) | S3/confirmed | US4 | planned | `crates/addon/src/ui/main_view/tabs/settings.rs:520` |
 | 91 | [W086](#w086) | S3/confirmed | US4 | planned | `crates/addon/src/ui/main_view/tabs/settings.rs:595` |
 | 92 | [W087](#w087) | S3/confirmed | US4 | planned | `crates/addon/src/ui/news_feed.rs:406` |
-| 93 | [W088](#w088) | S3/confirmed | US4 | planned | `crates/addon/src/ui/radar_chart.rs:286` |
+| 93 | [W088](#w088) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/ui/radar_chart.rs:286` |
 | 94 | [W089](#w089) | S3/confirmed | US4 | planned | `crates/addon/src/ui/setup.rs:556` |
 | 95 | [W090](#w090) | S3/confirmed | US4 | planned | `crates/addon/src/ui/theme.rs:544` |
 | 96 | [W091](#w091) | S3/confirmed | US4 | planned | `crates/addon/src/ui/theme.rs:924` |
@@ -1055,7 +1055,7 @@ Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the s
 
 ### W050
 
-- Task: T058 [US4]. Status: **planned**.
+- Task: T058 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/radio/art.rs:6`.
 - Dependencies: story entry gate.
 
@@ -1063,13 +1063,13 @@ Claim: The module doc states as an invariant that every blit is hard-clipped to 
 
 Remediation decision: Reword the module doc to say the sprite blits are clipped to the bar rect while the quip bubble deliberately renders on the foreground draw list above everything, and note the `right_limit` clamp at art.rs:576-579 as the actual mechanism that keeps the bubble off the hearts column.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Module doc now describes clipped sprites vs foreground bubble + `right_limit`.
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 
 ### W051
 
-- Task: T059 [US4]. Status: **planned**.
+- Task: T059 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/radio/art.rs:492`.
 - Dependencies: story entry gate.
 
@@ -1083,7 +1083,7 @@ Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the s
 
 ### W052
 
-- Task: T060 [US4]. Status: **planned**.
+- Task: T060 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/radio/player.rs:1069`.
 - Dependencies: story entry gate.
 
@@ -1111,7 +1111,7 @@ Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the s
 
 ### W054
 
-- Task: T062 [US4]. Status: **planned**.
+- Task: T062 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/state.rs:830`.
 - Dependencies: story entry gate.
 
@@ -1119,7 +1119,7 @@ Claim: The final `else => Screen::Setup(SetupStep::Gw2ApiKey)` arm (line 840) is
 
 Remediation decision: Drop the redundant `config.has_gw2_key() &&`, and replace the dead `else` arm by making the `has_gw2_key()` branch the `else` (or leave one arm and delete the other). Rename the test to match what it asserts.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: After a GW2 key, routing is LLM-key vs data-download. Dead Gw2ApiKey arm gone. Test renamed `test_init_routes_to_language_when_no_keys`.
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 
@@ -1153,11 +1153,13 @@ Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the s
 
 ### W057
 
-- Task: T065 [US4]. Status: **planned**.
+- Task: T065 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/ui/gear_diff.rs:20`.
 - Dependencies: W008.
 
 Claim: `strip_label_ci` is defined twice in this 164-line file, byte-for-byte identical including its 4-line safety comment: once nested inside `parse_suggestion_skills` (lines 20-30) and again inside `parse_suggestion_weapons` (lines 61-71).
+
+Verification: Closed by W008 — one module-scope `strip_label_ci` used by both parsers.
 
 Remediation decision: Hoist a single private `fn strip_label_ci` to module scope and call it from both parsers.
 
@@ -1573,7 +1575,7 @@ Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the s
 
 ### W088
 
-- Task: T095 [US4]. Status: **planned**.
+- Task: T095 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/ui/radar_chart.rs:286`.
 - Dependencies: story entry gate.
 
