@@ -120,6 +120,7 @@ mod tests {
             content: Some(text.into()),
             tool_calls: None,
             tool_call_id: None,
+            reasoning_details: None,
         }
     }
 
@@ -136,6 +137,7 @@ mod tests {
                 },
             }]),
             tool_call_id: None,
+            reasoning_details: None,
         }
     }
 
@@ -145,6 +147,7 @@ mod tests {
             content: Some(body.into()),
             tool_calls: None,
             tool_call_id: Some(id.into()),
+            reasoning_details: None,
         }
     }
 
@@ -212,6 +215,7 @@ mod tests {
                 content: Some("short reply".into()),
                 tool_calls: None,
                 tool_call_id: None,
+                reasoning_details: None,
             },
         ];
         let original_len = messages.len();

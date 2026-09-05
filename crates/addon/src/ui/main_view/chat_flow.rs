@@ -270,11 +270,35 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                         }
                                         gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx)
                                     },
-                                    3,
+                                    // Same budget the Optimize advisor gets.
+                                    // Composing a build is get_current_build,
+                                    // then get_spec_traits for each of three
+                                    // specializations, then runes/sigils/relic
+                                    // - past three rounds before it can answer.
+                                    // The prompt already says "take as many
+                                    // tool rounds as the build needs"; three
+                                    // was the number contradicting it, and
+                                    // gemini-flash-latest ran out on every
+                                    // request (measured in-game 2026-09-05).
+                                    8,
                                     &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
                                         let tools_str = humanize_tool_names(tool_names);
                                         crate::state::with_state(|s| {
                                             if s.main.chat_epoch != epoch {
+                                                return;
+                                            }
+                                            // No tools this round means the
+                                            // loop is closing and the model is
+                                            // writing the build. That request
+                                            // is the longest one of the run
+                                            // (90s measured in-game), so the
+                                            // counter must stop reading (8/8)
+                                            // and looking, or it reads as a
+                                            // hang. Reuses the existing
+                                            // translated key rather than
+                                            // adding a thirteenth string.
+                                            if tool_names.is_empty() {
+                                                s.main.optimize_stage = t("choya.thinking");
                                                 return;
                                             }
                                             s.main.optimize_stage = tf(

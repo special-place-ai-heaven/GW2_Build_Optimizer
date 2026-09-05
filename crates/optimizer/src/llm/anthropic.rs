@@ -717,10 +717,22 @@ impl LlmClient for AnthropicClient {
         // Turns exhausted while the model was still calling tools. Every tool
         // result is already in `messages`, so one final request with the tools
         // withheld makes it answer from what it gathered, instead of serving
-        // whatever it happened to say mid-thought.
+        // whatever it happened to say mid-thought. Withholding the tools is
+        // not enough on its own — the system prompt still orders tool use, so
+        // the request also has to countermand it.
         if super::cancel::is_cancelled() {
             return Err(LlmError::Unavailable(CANCELLED.to_string()));
         }
+        // Empty tool list: the caller renders this as "writing", not as
+        // another lookup round. Without it the UI freezes on (N/N) for the
+        // whole closing request, which is the longest one of the run.
+        on_progress(max_turns, max_turns, &[]);
+        messages.push(AnthropicMessage {
+            role: "user".to_string(),
+            content: AnthropicContent::Text(
+                super::openai_compat::CLOSING_TURN.to_string(),
+            ),
+        });
         trim_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
         let closing = self.send_messages(&messages, None, None, ANTHROPIC_MAX_TOKENS)?;
         extract_text(&closing.content.unwrap_or_default())

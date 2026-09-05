@@ -333,7 +333,7 @@ Prefer search_upgrades / upgrade_synergies over list_* dumps.
 
 {discipline}
 
-When plating a build, serve ONLY JSON. specializations MUST be objects with name and traits (not a bare array of strings).
+A turn is either tool calls or the finished plate, never both: call tools with no text beside them, then plate in a turn of its own. When plating a build, serve ONLY JSON. specializations MUST be objects with name and traits (not a bare array of strings).
 ```json
 {{
   "specializations": [
