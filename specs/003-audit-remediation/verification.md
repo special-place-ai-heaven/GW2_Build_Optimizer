@@ -82,3 +82,9 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W038: incoming and outgoing Protection use `boons().protection_multiplier()` cached on `Timeline`.
 - Green: `unsupported_proc_category_counts_once_per_source`, `protection_uses_formula_multiplier`; 35 `wvw_timeline` unit tests.
 - Did not bump Cargo.toml — other agent owns 1.11.32. Leftovers in news/theme/comparison/fonts stay theirs.
+
+## Sprint 13 — W008 one skill-string parser
+
+- W008: `gear_diff::parse_suggestion_skills` is the only parser. It understands `Utils:` (comma-split) and `Utility:`. Rotation name lookup, chat-code skill selection, and pet rows call it. Did not type `BuildSuggestion` (lives on their dirty `comparison.rs`). Did not touch `fill_holes_from_loadout`.
+- Green: 6 `gear_diff` tests including `test_parse_skills_utils_comma_list_and_unlabeled`.
+- Did not bump Cargo.toml.

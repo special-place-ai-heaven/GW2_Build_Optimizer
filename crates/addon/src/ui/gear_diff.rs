@@ -1,5 +1,5 @@
 //! Parsing helpers for LLM-generated suggestion strings: route "Set N:",
-//! "Heal:", "Utility:" etc. prefixed entries into structured fields for rendering.
+//! "Heal:", "Utils:" / "Utility:" etc. prefixed entries into structured fields.
 
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedSkills {
@@ -10,24 +10,31 @@ pub(crate) struct ParsedSkills {
     pub pets: String,
 }
 
-/// Parse suggestion skill strings: "Heal: X", "Utility: X", "Elite: X",
-/// plus optional "Stances:" / "Pets:" rows.
+fn strip_label_ci<'a>(s: &'a str, label: &str) -> Option<&'a str> {
+    let head = s.get(..label.len())?;
+    if head.eq_ignore_ascii_case(label) {
+        Some(&s[label.len()..])
+    } else {
+        None
+    }
+}
+
+fn push_csv_names(dest: &mut Vec<String>, rest: &str) {
+    for name in rest.split(',') {
+        let name = name.trim();
+        if !name.is_empty() {
+            dest.push(name.to_string());
+        }
+    }
+}
+
+/// Parse suggestion skill strings: "Heal: X", "Utils: a, b, c" / "Utility: X",
+/// "Elite: X", plus optional "Stances:" / "Pets:" rows.
 ///
 /// Prefix matching is case-insensitive — the LLM occasionally lowercases
 /// labels, and a case-sensitive `strip_prefix` would silently misroute
 /// "heal: X" into the utility bucket.
 pub(crate) fn parse_suggestion_skills(skills: &[String]) -> ParsedSkills {
-    fn strip_label_ci<'a>(s: &'a str, label: &str) -> Option<&'a str> {
-        // `get` returns None on a non-char-boundary index, so this stays
-        // UTF-8 safe even if the LLM-provided string starts with multibyte
-        // characters within the first `label.len()` bytes.
-        let head = s.get(..label.len())?;
-        if head.eq_ignore_ascii_case(label) {
-            Some(&s[label.len()..])
-        } else {
-            None
-        }
-    }
     let mut parsed = ParsedSkills {
         heal: String::new(),
         utilities: Vec::new(),
@@ -38,8 +45,10 @@ pub(crate) fn parse_suggestion_skills(skills: &[String]) -> ParsedSkills {
     for s in skills {
         if let Some(name) = strip_label_ci(s, "Heal: ") {
             parsed.heal = name.trim().to_string();
-        } else if let Some(name) = strip_label_ci(s, "Utility: ") {
-            parsed.utilities.push(name.trim().to_string());
+        } else if let Some(rest) = strip_label_ci(s, "Utils: ") {
+            push_csv_names(&mut parsed.utilities, rest);
+        } else if let Some(rest) = strip_label_ci(s, "Utility: ") {
+            push_csv_names(&mut parsed.utilities, rest);
         } else if let Some(name) = strip_label_ci(s, "Elite: ") {
             parsed.elite = name.trim().to_string();
         } else if let Some(name) = strip_label_ci(s, "Stances: ") {
@@ -58,17 +67,6 @@ pub(crate) fn parse_suggestion_skills(skills: &[String]) -> ParsedSkills {
 /// Prefix matching is case-insensitive so "set 1:" or "SET 1:" route the
 /// same as the canonical "Set 1:".
 pub(crate) fn parse_suggestion_weapons(weapons: &[String]) -> Vec<(String, String)> {
-    fn strip_label_ci<'a>(s: &'a str, label: &str) -> Option<&'a str> {
-        // `get` returns None on a non-char-boundary index, so this stays
-        // UTF-8 safe even if the LLM-provided string starts with multibyte
-        // characters within the first `label.len()` bytes.
-        let head = s.get(..label.len())?;
-        if head.eq_ignore_ascii_case(label) {
-            Some(&s[label.len()..])
-        } else {
-            None
-        }
-    }
     let mut result = Vec::new();
     for w in weapons {
         if let Some(rest) = strip_label_ci(w, "Set 1: ") {
@@ -132,6 +130,30 @@ mod tests {
         assert_eq!(parsed.heal, "Mending");
         assert_eq!(parsed.utilities, vec!["Signet of Resolve".to_string()]);
         assert_eq!(parsed.elite, "Feel My Wrath");
+    }
+
+    #[test]
+    fn test_parse_skills_utils_comma_list_and_unlabeled() {
+        // summarize_resolved_build writes "Utils:"; gemini_from_validated writes
+        // "Utility:". Unlabeled rows stay utilities so rotation name lookup
+        // still sees them.
+        let skills = vec![
+            "utils: Blood Reckoning, Bull's Charge, Signet of Fury".to_string(),
+            "orphaned".to_string(),
+            "Pets: #7 / #8".to_string(),
+        ];
+        let parsed = parse_suggestion_skills(&skills);
+        assert_eq!(
+            parsed.utilities,
+            vec![
+                "Blood Reckoning".to_string(),
+                "Bull's Charge".to_string(),
+                "Signet of Fury".to_string(),
+                "orphaned".to_string(),
+            ]
+        );
+        assert_eq!(parsed.pets, "#7 / #8");
+        assert!(parsed.heal.is_empty());
     }
 
     #[test]
