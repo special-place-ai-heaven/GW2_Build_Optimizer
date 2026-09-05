@@ -2,6 +2,12 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.11.32 - 2026-09-05
+
+### Choya
+
+- Choya no longer composes a build from nothing. The chat advertised a `get_optimizer_results` tool and then handed it an empty list, so every call answered "No optimizer results available" and Choya reasoned from the player's message alone - while the deterministic optimizer could answer the same scenario, respecting the same locks, in about 30 milliseconds, with a build that already passes every viability check. Measured 2026-09-05 against a real character: WvW Roam Support with Scourge locked, the deterministic answer sits at 68% health and repeatable; the plate Choya composed blind that evening sat at 44% and could not repeat, so the referee refused it and the second attempt timed out. That worked answer is now in Choya's Context as a floor: match its survivability at least, then beat it on what the player actually asked for, and be able to say why if you depart from it.
+
 ## 1.11.31 - 2026-09-05
 
 ### Choya

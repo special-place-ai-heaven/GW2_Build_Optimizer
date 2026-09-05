@@ -115,6 +115,7 @@ fn main() {
     let prefix = gw2_optimizer::scoring::select_gear_prefix(&weights).primary;
     println!("prefix={prefix}");
 
+    let seed_started = std::time::Instant::now();
     let seed = synergy_pipeline::optimize_synergy(
         &db,
         prof,
@@ -126,6 +127,7 @@ fn main() {
         &mut |_| {},
     )
     .expect("seed");
+    println!("seed took {:?}", seed_started.elapsed());
     print_report("SEED  ", &seed.validated, &db, prof, &weights, &ctx, &scenario);
 
     let result = search_v2::optimize_v2_search(
