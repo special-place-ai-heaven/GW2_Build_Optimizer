@@ -671,10 +671,18 @@ fn scrape_guildjen(
         // categories — the WvW "Power Reaper Roaming Build" appears on the PvP
         // page — so scanning the whole document would file builds under the
         // wrong game mode.
-        let links = extract_table_build_links(&html, 40);
-        let cap = links.len().min(15);
+        // Spread the fetch budget across professions instead of spending it
+        // on the first two. The tables are grouped by profession, so taking
+        // the top 15 of a 99-row WvW page fetched Elementalist and part of
+        // Necromancer and left the other seven professions with no reference
+        // at all. Measured 2026-09-05: the store held Guardian, Mesmer,
+        // Revenant, Thief and Warrior, and a Necromancer in WvW was told "No
+        // benchmark data available". The slug names the profession, so this
+        // costs no extra requests - it only changes which 15 are asked for.
+        let links = spread_by_profession(extract_table_build_links(&html, 200), 15);
+        let cap = links.len();
 
-        for (i, link) in links.into_iter().take(15).enumerate() {
+        for (i, link) in links.into_iter().enumerate() {
             if should_cancel() {
                 return Ok((builds, true));
             }
@@ -935,6 +943,44 @@ fn extract_table_build_links(html: &str, max: usize) -> Vec<String> {
         pos = end + 1;
     }
     links
+}
+
+/// Round-robin `links` by the profession named in each slug, capped at `max`.
+///
+/// Links naming no profession are dropped here rather than fetched and
+/// rejected later: `scrape_guildjen_build` refuses them anyway, and spending
+/// one of a small budget on a page that cannot be filed is the waste this
+/// function exists to avoid.
+fn spread_by_profession(links: Vec<String>, max: usize) -> Vec<String> {
+    let mut buckets: Vec<(String, Vec<String>)> = Vec::new();
+    for link in links {
+        let slug = link.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+        let Some((profession, _)) = profession_from_slug(slug) else {
+            continue;
+        };
+        match buckets.iter_mut().find(|(p, _)| *p == profession) {
+            Some((_, in_bucket)) => in_bucket.push(link),
+            None => buckets.push((profession, vec![link])),
+        }
+    }
+    let mut out = Vec::new();
+    for round in 0.. {
+        let mut added = false;
+        for (_, in_bucket) in &buckets {
+            let Some(link) = in_bucket.get(round) else {
+                continue;
+            };
+            out.push(link.clone());
+            added = true;
+            if out.len() >= max {
+                return out;
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+    out
 }
 
 /// Whether an href points at a single GuildJen build page.
@@ -1523,6 +1569,42 @@ mod tests {
         );
     }
 
+    /// A budget spent top-down on a profession-grouped table buys one or two
+    /// professions and starves the rest. Round-robin buys breadth for the
+    /// same number of requests.
+    #[test]
+    fn spread_by_profession_covers_every_profession_before_repeating() {
+        let link = |slug: &str| format!("/{slug}-build/");
+        let links = vec![
+            link("power-reaper-roaming"),
+            link("condition-reaper-roaming"),
+            link("celestial-harbinger-roaming"),
+            link("power-scourge-cloud"),
+            link("celestial-catalyst-roaming"),
+            link("power-hammer-catalyst-havoc"),
+            link("celestial-tempest-roaming"),
+            link("power-scrapper-roaming"),
+            link("not-a-profession-at-all"),
+        ];
+        // Necromancer has four, Elementalist three, Engineer one.
+        let picked = spread_by_profession(links.clone(), 3);
+        assert_eq!(
+            picked,
+            vec![
+                link("power-reaper-roaming"),
+                link("celestial-catalyst-roaming"),
+                link("power-scrapper-roaming"),
+            ],
+            "one from each profession before any profession gets a second"
+        );
+
+        // The whole list, minus the slug that names no profession: it would
+        // be refused after the fetch, so it never costs a request.
+        let all = spread_by_profession(links, 99);
+        assert_eq!(all.len(), 8);
+        assert!(!all.iter().any(|l| l.contains("not-a-profession")));
+    }
+
     /// The category list is read off the sitemap so a category added or
     /// retired by the site needs no code change. The hub itself, the sub-80
     /// levelling category, guide pages and anything off-site are excluded.
@@ -2048,6 +2130,31 @@ mod tests {
                 unfiled.len(),
                 links.len(),
                 unfiled
+            );
+
+            // What the sync actually asks for, and how many professions that
+            // covers. Top-down would spend the whole budget on one or two.
+            let picked = spread_by_profession(links.clone(), 15);
+            let mut covered: Vec<String> = Vec::new();
+            for href in &picked {
+                let slug = href.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+                if let Some((prof, _)) = profession_from_slug(slug) {
+                    if !covered.contains(&prof) {
+                        covered.push(prof);
+                    }
+                }
+            }
+            println!(
+                "-- {} fetched, covering {} professions: {} --",
+                picked.len(),
+                covered.len(),
+                covered.join(", ")
+            );
+            assert!(
+                covered.len() >= 8,
+                "a 15-build budget must reach nearly every profession, got {}: {:?}",
+                covered.len(),
+                covered
             );
             checked += 1;
         }
