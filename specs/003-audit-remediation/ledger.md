@@ -23,7 +23,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 9 | [W019](#w019) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/objective_profiles.rs:86` |
 | 10 | [W044](#w044) | S2/confirmed | US2 | verified-scoped | `data/normalized_effects/2026-01-13/pve.json:2` |
 | 11 | [W013](#w013) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/balance.rs:11` |
-| 12 | [W015](#w015) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/manifests.rs:43` |
+| 12 | [W015](#w015) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/data/manifests.rs:43` |
 | 13 | [W016](#w016) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/mod.rs:137` |
 | 14 | [W039](#w039) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:1389` |
 | 15 | [W038](#w038) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:861` |
@@ -439,7 +439,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W015
 
-- Task: T014 [US2]. Status: **planned**.
+- Task: T014 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/manifests.rs:43`.
 - Dependencies: W013.
 
@@ -447,9 +447,9 @@ Claim: The patch-staleness warning is never delivered to anyone. `grep -rn --inc
 
 Remediation decision: Wire manifest staleness detection to the live build-number result and visible data status.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `check_api_health` writes `live_build_mismatch` onto `MainState.manifest_staleness`. Status bar shows a chip; About hero shows the message. `ManifestFreshness` / `freshness()` make the current-vs-stale status typed. No new locale keys (other agent owns locales).
 
-Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
+Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers. In-game: live `/v2/build` ≠ manifest `game_build_id` should warn on the status bar and About.
 
 ### W016
 

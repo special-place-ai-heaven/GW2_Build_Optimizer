@@ -20,7 +20,7 @@ pub use balance_overrides::{
 };
 pub use boon_condition_formulas::{boons, conditions, BoonFormulas, ConditionFormulas};
 pub use cleanse_sources::{CleanseRegistry, CleanseSource, SourceKind};
-pub use manifests::{check_staleness, PatchManifest};
+pub use manifests::{check_staleness, freshness, ManifestFreshness, PatchManifest};
 pub use normalized_effects::{
     map_legacy_effect, score_effect, EffectCategory, NormalizedEffect, SourceType, StackingRule,
     StatusOperation, TriggerRule, UptimeModel,
