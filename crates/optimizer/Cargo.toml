@@ -7,6 +7,7 @@ edition.workspace = true
 gw2-core = { path = "../core" }
 gw2-api = { path = "../gw2api" }
 base64.workspace = true
+html.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true

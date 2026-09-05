@@ -8,34 +8,46 @@
 //! scraped builds, whatever the profession, because those words appear in
 //! GuildJen's "POPULAR POSTS" column on every page.
 //!
-//! This is a port of the scoring in crawl4ai's `PruningContentFilter`
-//! (`crawl4ai/content_filter_strategy.py`), which is not a model or a
-//! library but one recursive pass of arithmetic. Each element is scored on
-//! how much of it is text, how much of that text is inside links, what kind
-//! of tag it is, whether its class or id names it as furniture, and how much
-//! text it holds; a subtree scoring below [`PRUNE_THRESHOLD`] is dropped and
-//! the rest is walked.
+//! Two things separate the article from the page, in this order.
 //!
-//! Link density is the term that does the work here. A sidebar of build
-//! titles is almost entirely anchor text with no prose between; an article
-//! body is the reverse. One ratio separates them, without a per-site
-//! selector to maintain.
+//! **Landmarks do the work.** GuildJen marks its sidebar
+//! `<aside class="col-4 main-sidebar">`, its menus `<nav>`, its foot
+//! `<footer>`. A landmark tag is a statement of intent by the page author,
+//! which beats any ratio we could compute. Dropping [`NEVER_CONTENT`] takes
+//! the "POPULAR POSTS" column with it.
 //!
-//! Scoring only. Walking a real document needs a parser, and the caller
-//! supplies the numbers — which also means the arithmetic can be tested
-//! against measured pages without one.
+//! **Scoring is cleanup.** A port of crawl4ai's `PruningContentFilter`
+//! (`crawl4ai/content_filter_strategy.py`) scores what remains on text
+//! density, link density, tag and class, and drops the near-empty wrappers a
+//! landmark rule cannot name. It is a weak filter by construction — see
+//! [`prune_score`] — and is not what removes the sidebar.
+//!
+//! Nothing here keys on a per-site selector. Three sites redesign
+//! independently, and a selector that breaks does so silently.
 
 /// Below this, an element and everything under it is not the article.
 ///
-/// crawl4ai's default. Left alone until a page argues otherwise: the point
-/// of porting a tuned heuristic is to inherit the tuning.
+/// crawl4ai's default, kept with its scoring.
 pub const PRUNE_THRESHOLD: f64 = 0.48;
 
-/// Class and id fragments that name an element as furniture rather than
-/// content. crawl4ai's list, matched anywhere in the value rather than only
-/// at the start — see [`class_id_penalty`].
+/// Tags that are never the article, whatever they score.
+///
+/// This list, not the scoring, is what removes the furniture. Measured on a
+/// GuildJen build page 2026-09-06: one `<aside>`, two `<nav>`, one
+/// `<footer>`, and the sidebar is the `<aside>`.
+///
+/// `<article>` is deliberately not treated as a content marker anywhere: the
+/// same page uses it 32 times, for the *cards inside that sidebar*. A tag
+/// means whatever the theme wants it to mean, so only the negative signals
+/// are trusted.
+pub const NEVER_CONTENT: &[&str] = &[
+    "script", "style", "noscript", "svg", "iframe", "form", "button", "template", "nav", "aside",
+    "footer", "header",
+];
+
+/// Class and id fragments naming an element as furniture. crawl4ai's list.
 const FURNITURE: &[&str] = &[
-    "nav", "footer", "header", "sidebar", "ads", "comment", "promo", "advert", "social", "share",
+    "sidebar", "footer", "ads", "comment", "promo", "advert", "social", "share",
 ];
 
 /// How much a tag suggests prose. Unlisted tags score 0.5, as in crawl4ai.
@@ -54,26 +66,25 @@ fn tag_weight(tag: &str) -> f64 {
     }
 }
 
-/// `-0.5` per attribute naming the element as furniture, `0.0` otherwise.
+/// `-0.5` when an attribute names the element as furniture, else `0.0`.
 ///
-/// Deliberately unlike the original in two ways.
+/// crawl4ai wraps this in `max(0, class_score)` over a value that can only be
+/// `0`, `-0.5` or `-1.0`, so the term is always zero and the signal never
+/// fires. Here it is allowed through.
 ///
-/// crawl4ai wraps this in `max(0, class_score)`, and the score it wraps can
-/// only ever be `0`, `-0.5` or `-1.0` — so the clamp makes the term always
-/// zero and the signal never fires. Here the penalty is allowed through,
-/// which is what the metric was named for.
-///
-/// It also uses Python's `re.match`, which anchors at the start, so
-/// `class="widget sidebar"` does not match while `class="sidebar widget"`
-/// does. Matched anywhere here: WordPress themes put the meaningful word
-/// second at least as often as first.
+/// `nav` and `header` are in [`NEVER_CONTENT`] but deliberately not in
+/// [`FURNITURE`]: as substrings they hit `navigation` on a content wrapper
+/// and `header` on the article's own title block. The list is applied to
+/// every element including page wrappers, and GuildJen's `<body>` carries
+/// `right-sidebar` as a *layout* class — matched on an ancestor, one word
+/// would delete the document. Only the score is at stake here, never a
+/// hard drop.
 fn class_id_penalty(class_and_id: &str) -> f64 {
     let lower = class_and_id.to_ascii_lowercase();
-    let hits = FURNITURE.iter().filter(|w| lower.contains(**w)).count();
-    if hits == 0 {
-        0.0
-    } else {
+    if FURNITURE.iter().any(|w| lower.contains(w)) {
         -0.5
+    } else {
+        0.0
     }
 }
 
@@ -92,29 +103,23 @@ pub struct NodeMetrics<'a> {
     ///
     /// Direct, not descendant: an article whose paragraphs contain links is
     /// still an article, while a list whose every child is a link is a menu.
-    /// Counting descendants would erase that difference.
     pub direct_link_text_len: usize,
 }
 
-/// Text length at which the size term is considered maxed out.
+/// crawl4ai's composite score — higher is more article-like.
 ///
-/// crawl4ai adds a raw `ln(text_len + 1)`, which is unbounded while its four
-/// other metrics are ratios in `0..1`. At realistic sizes that one term
-/// swamps the rest: a 320-character sidebar contributes `0.1 * ln(321)` =
-/// 0.58 on its own, clearing the 0.48 threshold before anything has been
-/// judged, and the composite scores it 0.666 — kept, links and furniture
-/// class and all. Under a fixed threshold the other four metrics cannot
-/// outvote it, so the filter only ever drops near-empty elements.
+/// Its `ln(text_len + 1)` term is unbounded while the other four are ratios
+/// in `0..1`, and that asymmetry looks like a defect. It is not: it is what
+/// makes a top-down walk possible. A page wrapper is mostly markup with its
+/// text spread across descendants, so it scores badly on density and
+/// survives only on bulk. Normalising the term to `0..1` scored the
+/// outermost `div` of a real GuildJen page at 0.44 against a 0.48 threshold
+/// and deleted the whole document — 60,441 bytes in, 99 out.
 ///
-/// Normalising against a full article's worth of prose puts the term back in
-/// `0..1` with the others, which is what the published weights describe.
-const FULL_ARTICLE_CHARS: f64 = 5_000.0;
-
-/// Composite score in `0.0..=1.0` — higher is more article-like.
-///
-/// crawl4ai's metrics and weights, with its length term normalised (see
-/// [`FULL_ARTICLE_CHARS`]) and its class/id penalty allowed to fire (see
-/// [`class_id_penalty`]).
+/// The cost of keeping it is that this filter is weak: past a hundred or so
+/// characters the length term alone clears the threshold, so in practice
+/// only near-empty elements are dropped. That is why [`NEVER_CONTENT`] does
+/// the real work and this is cleanup.
 pub fn prune_score(m: &NodeMetrics) -> f64 {
     let text_density = if m.inner_html_len > 0 {
         m.text_len as f64 / m.inner_html_len as f64
@@ -127,13 +132,11 @@ pub fn prune_score(m: &NodeMetrics) -> f64 {
     } else {
         0.0
     };
-    let size = (((m.text_len + 1) as f64).ln() / FULL_ARTICLE_CHARS.ln()).min(1.0);
-
     0.4 * text_density
         + 0.2 * prose_density
         + 0.2 * tag_weight(m.tag)
         + 0.1 * class_id_penalty(m.class_and_id)
-        + 0.1 * size
+        + 0.1 * ((m.text_len + 1) as f64).ln()
 }
 
 /// Whether this element and everything under it should be dropped.
@@ -141,45 +144,192 @@ pub fn should_prune(m: &NodeMetrics) -> bool {
     prune_score(m) < PRUNE_THRESHOLD
 }
 
+/// The page with everything that is not the article removed.
+///
+/// Returns HTML rather than text: what survives still has to yield a gear
+/// table and the `alt` attributes of rune and sigil icons, so the tags have
+/// to come through. Attributes are re-emitted as they arrived — this output
+/// is read by our own extractors, never by a browser.
+pub fn prune_to_article(document: &str) -> String {
+    let parsed = ::html::Html::parse_document(document);
+    let Some(body) = parsed
+        .select(&::html::Selector::parse("body").expect("body is a valid selector"))
+        .next()
+    else {
+        return String::new();
+    };
+    let mut out = String::with_capacity(document.len() / 4);
+    emit_children(body, &mut out, 0);
+    out
+}
+
+/// Deepest nesting this walk will follow.
+///
+/// The walk is mutual recursion over attacker-shaped input, on a worker
+/// thread with the 2 MiB default stack, inside the game process. html5ever
+/// imposes no nesting limit of its own: 110 KB of `<div>` produces a tree
+/// 10,005 levels deep, and a release build of this walk overflows its stack
+/// at around 3,500 levels — 39 KB of input, far under the 2 MiB body cap
+/// that was supposed to bound this.
+///
+/// A stack overflow is not a panic. Windows aborts the process, so the
+/// `catch_unwind` around the optimize worker cannot save it and the player's
+/// game closes. Browsers cap nesting near this figure for the same reason;
+/// no real build page comes close.
+const MAX_DEPTH: u32 = 512;
+
+/// Append the surviving children of `parent`.
+fn emit_children(parent: ::html::ElementRef<'_>, out: &mut String, depth: u32) {
+    if depth >= MAX_DEPTH {
+        return;
+    }
+    for child in parent.children() {
+        match child.value() {
+            ::html::Node::Text(text) => out.push_str(&text.text),
+            ::html::Node::Element(_) => {
+                if let Some(element) = ::html::ElementRef::wrap(child) {
+                    emit_element(element, out, depth + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Length of the `alt` and `title` text on descendant images.
+///
+/// An icon with a name is text to a reader, and on these pages it is the
+/// only text there is: the rune, the four sigils and the relic are images
+/// whose names live in `alt`. Without this a cell holding one icon has
+/// `text_len` 0, scores 0.1, and is pruned — deleting exactly the fields
+/// this whole exercise exists to recover.
+fn alt_text_len(element: ::html::ElementRef<'_>) -> usize {
+    let own = element.value();
+    let self_alt = if own.name() == "img" {
+        own.attr("alt")
+            .or_else(|| own.attr("title"))
+            .map_or(0, |t| t.trim().len())
+    } else {
+        0
+    };
+    // `select` walks descendants only, so an `<img>` scored on its own has
+    // to add its own attributes or it reads as empty and is dropped.
+    self_alt
+        + element
+            .select(&::html::Selector::parse("img").expect("img is a valid selector"))
+            .filter_map(|img| {
+                let v = img.value();
+                v.attr("alt").or_else(|| v.attr("title"))
+            })
+            .map(|text| text.trim().len())
+            .sum::<usize>()
+}
+
+/// Elements with no closing tag. Emitting `</img>` would be malformed, and
+/// recursing into a void element's children is meaningless.
+const VOID_ELEMENTS: &[&str] = &[
+    "img", "br", "hr", "input", "meta", "link", "source", "track", "area", "base", "col", "embed",
+    "param", "wbr",
+];
+
+/// Append one element and its surviving subtree, or nothing if it is
+/// furniture by tag or scores below the threshold.
+fn emit_element(element: ::html::ElementRef<'_>, out: &mut String, depth: u32) {
+    if depth >= MAX_DEPTH {
+        return;
+    }
+    let el = element.value();
+    let name = el.name();
+    if NEVER_CONTENT.contains(&name) {
+        return;
+    }
+    let class_and_id = format!(
+        "{} {}",
+        el.attr("class").unwrap_or_default(),
+        el.attr("id").unwrap_or_default()
+    );
+    let direct_link_text_len: usize = element
+        .children()
+        .filter_map(::html::ElementRef::wrap)
+        .filter(|c| c.value().name() == "a")
+        .map(|a| a.text().collect::<String>().trim().len())
+        .sum();
+    let metrics = NodeMetrics {
+        tag: name,
+        class_and_id: &class_and_id,
+        text_len: element.text().collect::<String>().trim().len() + alt_text_len(element),
+        inner_html_len: element.inner_html().len(),
+        direct_link_text_len,
+    };
+    if should_prune(&metrics) {
+        return;
+    }
+    out.push('<');
+    out.push_str(name);
+    for (attr, value) in el.attrs() {
+        out.push(' ');
+        out.push_str(attr);
+        out.push_str("=\"");
+        // Escaped, because our own extractors read this back: an `alt`
+        // holding a quote would otherwise close the attribute early and the
+        // rune name after it would be read as markup.
+        for ch in value.chars() {
+            match ch {
+                '"' => out.push_str("&quot;"),
+                '&' => out.push_str("&amp;"),
+                _ => out.push(ch),
+            }
+        }
+        out.push('"');
+    }
+    out.push('>');
+    if VOID_ELEMENTS.contains(&name) {
+        return;
+    }
+    emit_children(element, out, depth);
+    out.push_str("</");
+    out.push_str(name);
+    out.push('>');
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Shapes measured from guildjen.com/support-troubadour-cloud-build/ on
-    /// 2026-09-06. The sidebar is the element that has to lose.
+    /// The landmark drop is the fix, so this is the test that matters.
     #[test]
-    fn the_sidebar_loses_and_the_article_survives() {
-        // "POPULAR POSTS": ten build titles, each its own link, no prose.
-        let sidebar = NodeMetrics {
-            tag: "div",
-            class_and_id: "widget-area sidebar",
-            text_len: 320,
-            inner_html_len: 4_800,
-            direct_link_text_len: 300,
-        };
-        // The build's own text: several paragraphs, a couple of links.
-        let article = NodeMetrics {
-            tag: "article",
-            class_and_id: "post-content entry",
-            text_len: 2_400,
-            inner_html_len: 5_200,
-            direct_link_text_len: 40,
-        };
-
-        assert!(
-            should_prune(&sidebar),
-            "sidebar scored {:.3}, needed < {PRUNE_THRESHOLD}",
-            prune_score(&sidebar)
-        );
-        assert!(
-            !should_prune(&article),
-            "article scored {:.3}, needed >= {PRUNE_THRESHOLD}",
-            prune_score(&article)
-        );
-        assert!(prune_score(&article) > prune_score(&sidebar));
+    fn landmarks_are_dropped_and_the_article_survives() {
+        let page = "<html><body>\
+             <nav><a href=\"/x\">Menu</a></nav>\
+             <div class=\"content\"><p>Minstrel gear on every slot for this build.</p></div>\
+             <aside class=\"main-sidebar\"><h4><a>Power Zeal Dragonhunter Cloud Build</a></h4></aside>\
+             <footer><a>Legal</a></footer>\
+             <script>var popular = 'Firebrand';</script>\
+             </body></html>";
+        let article = prune_to_article(page);
+        assert!(article.contains("Minstrel gear"), "kept: {article}");
+        for gone in ["Dragonhunter", "Firebrand", "Menu", "Legal"] {
+            assert!(!article.contains(gone), "{gone} survived: {article}");
+        }
     }
 
-    /// The distinction the whole thing rests on: a menu is links with nothing
+    /// Attributes have to come through: the runes, sigils and relic are icon
+    /// names living in `alt`, and the gear is a table.
+    #[test]
+    fn tags_and_attributes_survive_for_later_extraction() {
+        let page = "<html><body><div class=\"entry\">\
+             <table><tr><td>Helm</td><td>Minstrel</td>\
+             <td><img alt=\"Superior Rune of the Water\" src=\"r.png\"></td></tr></table>\
+             </div></body></html>";
+        let article = prune_to_article(page);
+        assert!(article.contains("<table"), "table structure kept: {article}");
+        assert!(
+            article.contains("Superior Rune of the Water"),
+            "image alt kept: {article}"
+        );
+    }
+
+    /// The distinction the scoring rests on: a menu is links with nothing
     /// between them; an article is prose that happens to link out.
     #[test]
     fn link_density_separates_a_menu_from_prose() {
@@ -195,10 +345,7 @@ mod tests {
             direct_link_text_len: 400,
             ..base
         });
-        assert!(
-            prose > menu,
-            "prose {prose:.3} should beat all-link {menu:.3}"
-        );
+        assert!(prose > menu, "prose {prose:.3} beats all-link {menu:.3}");
         // The term is worth exactly its weight, end to end.
         assert!((prose - menu - 0.2).abs() < 1e-9);
     }
@@ -213,26 +360,60 @@ mod tests {
             inner_html_len: 1_000,
             direct_link_text_len: 0,
         };
-        for furniture in ["sidebar", "widget nav", "post-footer", "social-share"] {
+        for furniture in ["main-sidebar", "post-footer", "social-share"] {
             let scored = prune_score(&NodeMetrics {
                 class_and_id: furniture,
                 ..plain
             });
-            assert!(
-                scored < prune_score(&plain),
-                "{furniture} should score below plain content"
-            );
+            assert!(scored < prune_score(&plain), "{furniture} should score low");
         }
         assert_eq!(class_id_penalty("entry-content"), 0.0);
-        // Matched anywhere, not just at the start - the original misses this.
+        // Matched anywhere, not only at the start - the original misses this.
         assert_eq!(class_id_penalty("widget sidebar"), -0.5);
+        // And `nav`/`header` are absent on purpose: as substrings they would
+        // hit "navigation" and the article's own header block.
+        assert_eq!(class_id_penalty("main-navigation"), 0.0);
+        assert_eq!(class_id_penalty("entry-header"), 0.0);
     }
 
-    /// An empty wrapper has no text to be article-like with, and must not be
-    /// rescued by the link-density term scoring a perfect 1.0 for having no
-    /// links to divide by.
+    /// Deeply nested input must return, not die.
+    ///
+    /// The walk is mutual recursion over remote HTML on a worker thread with
+    /// the default 2 MiB stack, inside the game process. Measured before the
+    /// cap: a release build overflowed at roughly 3,500 levels, which is
+    /// 39 KB of input — nowhere near the 2 MiB body cap meant to bound it.
+    /// A stack overflow aborts on Windows rather than unwinding, so the
+    /// `catch_unwind` around the worker cannot catch it and the player's game
+    /// closes.
     #[test]
-    fn empty_elements_do_not_score_as_content() {
+    fn deep_nesting_returns_instead_of_overflowing() {
+        let deep = format!(
+            "<html><body>{}<p>the build</p>{}</body></html>",
+            "<div>".repeat(20_000),
+            "</div>".repeat(20_000)
+        );
+        // Returning at all is the assertion; the cap truncates past 512.
+        let article = prune_to_article(&deep);
+        assert!(article.len() < deep.len());
+    }
+
+    /// A quote inside an attribute must not close it early: our own
+    /// extractors read this output back, and `alt` is where the rune names
+    /// live.
+    #[test]
+    fn attribute_values_are_escaped_on_the_way_out() {
+        let page = "<html><body><div class=\"entry\">\
+             <img alt='Superior Rune &amp; &quot;Water&quot; of some length here' src=\"r.png\">\
+             </div></body></html>";
+        let article = prune_to_article(page);
+        assert!(!article.contains("\"Water\""), "unescaped quote: {article}");
+        assert!(article.contains("&quot;Water&quot;"), "escaped: {article}");
+        assert!(article.contains("&amp;"), "ampersand escaped: {article}");
+    }
+
+    /// The one thing the scoring reliably removes.
+    #[test]
+    fn empty_wrappers_are_dropped() {
         let empty = NodeMetrics {
             tag: "div",
             class_and_id: "",
@@ -241,51 +422,49 @@ mod tests {
             direct_link_text_len: 0,
         };
         assert!(should_prune(&empty), "scored {:.3}", prune_score(&empty));
-    }
-
-    /// A single "POPULAR POSTS" entry: one link, its own title, nothing else.
-    /// The container may survive on bulk; the leaves are what must not.
-    #[test]
-    fn a_sidebar_link_item_is_pruned() {
-        let item = NodeMetrics {
-            tag: "li",
-            class_and_id: "",
-            // "Power Zeal Dragonhunter Cloud Build" inside an anchor.
-            text_len: 35,
-            inner_html_len: 105,
-            direct_link_text_len: 35,
-        };
-        assert!(should_prune(&item), "scored {:.3}", prune_score(&item));
-    }
-
-    /// Every term stays inside its published weight, so the threshold means
-    /// what it says. crawl4ai's raw `ln(text_len + 1)` does not: it reaches
-    /// 0.58 on a 320-character element and 0.78 on a full article, out of a
-    /// nominal 0.1.
-    #[test]
-    fn no_single_term_can_outvote_the_rest() {
-        let huge = NodeMetrics {
-            tag: "span",
-            class_and_id: "sidebar",
-            text_len: 500_000,
-            inner_html_len: 1_000_000,
-            direct_link_text_len: 500_000,
-        };
-        let score = prune_score(&huge);
-        assert!(
-            (0.0..=1.0).contains(&score),
-            "score left its range: {score:.3}"
-        );
-        assert!(
-            should_prune(&huge),
-            "all-link furniture must lose however large: {score:.3}"
-        );
+        assert!(prune_to_article("<html><body><div></div></body></html>").is_empty());
     }
 
     #[test]
     fn tag_weight_prefers_prose_containers() {
         assert!(tag_weight("article") > tag_weight("div"));
         assert!(tag_weight("p") > tag_weight("span"));
-        assert_eq!(tag_weight("aside"), 0.5, "unlisted tags take the default");
+        assert_eq!(tag_weight("main"), 0.5, "unlisted tags take the default");
+    }
+
+    /// The whole point, against a real page.
+    ///
+    /// Ignored: it needs a capture, which is 60 KB and goes stale.
+    ///   GUILDJEN_BUILD_HTML=troubadour.html \
+    ///     cargo test -p gw2-optimizer article_live -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn article_live_page_keeps_the_build_and_drops_the_furniture() {
+        let path = std::env::var("GUILDJEN_BUILD_HTML").expect("set GUILDJEN_BUILD_HTML");
+        let page = std::fs::read_to_string(&path).expect("readable capture");
+        let article = prune_to_article(&page);
+        println!(
+            "-- {} bytes in, {} out ({:.0}% kept) --",
+            page.len(),
+            article.len(),
+            100.0 * article.len() as f64 / page.len() as f64
+        );
+        for needle in ["Troubadour", "Minstrel", "[&"] {
+            assert!(article.contains(needle), "{needle:?} was pruned away");
+        }
+        // Not asserted, and deliberately so: the rune, sigil and relic names
+        // are not in this page's markup at any encoding. GuildJen renders
+        // them in the browser with its `gw2-embeddings-patched` plugin, so a
+        // fetch of the real page contains zero occurrences of "Superior
+        // Rune", "Superior Sigil" or "Relic of" (measured 2026-09-06 against
+        // 808 KB of server HTML). No parser, reader mode or scoring can
+        // recover text a server never sent. The 71 `[&...]` chat links on the
+        // page belong to an event-timer widget, not the gear table.
+        for needle in ["Dragonhunter", "Willbender", "Firebrand"] {
+            assert!(
+                !article.contains(needle),
+                "{needle:?} survived - another build, from the furniture"
+            );
+        }
     }
 }
