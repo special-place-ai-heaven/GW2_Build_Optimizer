@@ -11,7 +11,7 @@ use serde_json::Value;
 use super::body::{json_capped, read_body_capped};
 use super::openai_compat::{
     http_client, is_function_call_failure, send_chat, Message, ProviderCore, CHAT_REQUEST_TIMEOUT,
-    MAX_COMPLETION_TOKENS, METADATA_TIMEOUT,
+    closing_request, MAX_COMPLETION_TOKENS, METADATA_TIMEOUT,
 };
 use super::rate::{persist_usage, PersistedUsage, RateTracker};
 use super::trim::trim_openai_messages;
@@ -104,7 +104,7 @@ impl OpenAiClient {
             // `reasoning` and `provider` are OpenRouter extensions.
             // `api.openai.com` rejects unknown top-level body arguments, so
             // sending either here is a 400 on every request (Claude F8).
-            reasoning_max_tokens: None,
+            reasoning_effort: None,
             supports_provider_prefs: false,
             require_tool_endpoints: tools.is_some(),
             request_timeout: CHAT_REQUEST_TIMEOUT,
@@ -232,6 +232,7 @@ impl LlmClient for OpenAiClient {
             content: Some(prompt.to_string()),
             tool_calls: None,
             tool_call_id: None,
+            reasoning_details: None,
         }];
 
         let response = self.send_chat(&messages, None)?;
@@ -246,6 +247,7 @@ impl LlmClient for OpenAiClient {
             content: Some(prompt.to_string()),
             tool_calls: None,
             tool_call_id: None,
+            reasoning_details: None,
         }];
         let response = self.send_chat_capped(&messages, None, max_tokens)?;
         response
@@ -277,6 +279,7 @@ impl LlmClient for OpenAiClient {
             content: Some(prompt.to_string()),
             tool_calls: None,
             tool_call_id: None,
+            reasoning_details: None,
         }];
 
         for turn in 0..max_turns {
@@ -291,7 +294,9 @@ impl LlmClient for OpenAiClient {
                 Ok(response) => response,
                 // The model cannot drive our tools at all. Losing the whole
                 // conversation over that is worse than answering without them.
-                Err(e) if is_function_call_failure(&e) => self.send_chat(&messages, None)?,
+                Err(e) if is_function_call_failure(&e) => {
+                    self.send_chat(&closing_request(&messages), None)?
+                }
                 Err(e) => return Err(e),
             };
 
@@ -333,6 +338,7 @@ impl LlmClient for OpenAiClient {
                     content: Some(result_str),
                     tool_calls: None,
                     tool_call_id: Some(tc.id.clone()),
+                    reasoning_details: None,
                 });
             }
         }
@@ -344,6 +350,11 @@ impl LlmClient for OpenAiClient {
         if super::cancel::is_cancelled() {
             return Err(LlmError::Unavailable(super::cancel::CANCELLED.to_string()));
         }
+        // Empty tool list: the caller renders this as "writing", not as
+        // another lookup round. Without it the UI freezes on (N/N) for the
+        // whole closing request, which is the longest one of the run.
+        on_progress(max_turns, max_turns, &[]);
+        let mut messages = closing_request(&messages);
         trim_openai_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
         self.send_chat(&messages, None)?
             .content
@@ -644,6 +655,7 @@ mod tests {
             content: Some("Hello".to_string()),
             tool_calls: None,
             tool_call_id: None,
+            reasoning_details: None,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["role"], "user");
@@ -657,6 +669,7 @@ mod tests {
             content: Some(r#"{"result": "ok"}"#.to_string()),
             tool_calls: None,
             tool_call_id: Some("call_abc123".to_string()),
+            reasoning_details: None,
         };
         let json = serde_json::to_value(&tool_msg).unwrap();
         assert_eq!(json["role"], "tool");
@@ -689,6 +702,7 @@ mod tests {
             content: Some(r#"{"result":49}"#.into()),
             tool_calls: None,
             tool_call_id: Some(tool_calls[0].id.clone()),
+            reasoning_details: None,
         };
         let wire = serde_json::to_value(&follow_up).unwrap();
         assert_eq!(wire["role"], "tool");

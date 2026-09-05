@@ -52,6 +52,36 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
 /// deliberating and have nothing left to answer with. Designing a build from
 /// live tool data — trait columns for three specs, skill facts, upgrade
 /// ranking, then a rotation sim — is not a 16k job.
+/// The turn that closes a tool loop which ran out of rounds.
+///
+/// Withholding the tool declarations is not enough on its own: the system
+/// prompt still orders the model to call `get_spec_traits` and friends, so a
+/// model that obeys emits another call and returns no prose — which is exactly
+/// the "no answer" a caller then reports. Measured in-game 2026-09-05:
+/// gemini-flash-latest used all its rounds and the tool-free closing request
+/// still came back empty. This message countermands the standing instruction
+/// for that one request.
+pub(crate) const CLOSING_TURN: &str = "Stop calling tools. You have every tool \
+     result you are going to get, and no tools are available on this request. \
+     Answer now, in full, using only what you have already gathered.";
+
+/// `messages` plus the turn that closes a tool loop. Send it with no tools.
+///
+/// Both ways out of a tool loop need it: rounds exhausted, and a model that
+/// cannot emit a usable function call at all. Withholding the declarations is
+/// only half of either fix — see [`CLOSING_TURN`].
+pub(crate) fn closing_request(messages: &[Message]) -> Vec<Message> {
+    let mut closing = messages.to_vec();
+    closing.push(Message {
+        role: "user".to_string(),
+        content: Some(CLOSING_TURN.to_string()),
+        tool_calls: None,
+        tool_call_id: None,
+        reasoning_details: None,
+    });
+    closing
+}
+
 /// Whether a failure means "this model could not produce a usable function
 /// call", rather than a transport, auth or quota problem.
 ///
@@ -59,10 +89,17 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
 /// `native_finish_reason: MALFORMED_FUNCTION_CALL`, and OpenRouter attaches no
 /// top-level `error` object because the provider itself succeeded. The stream
 /// therefore ends empty and [`sse::read_stream`] reports it as a parse failure
-/// carrying that reason. Measured 2026-09-05: gemini-3.8-flash failed this way
-/// on every tool-carrying Choya request while answering toolless ones fine, and
-/// glm-5.3-flash drove the same twenty declarations without trouble — so it is
-/// the model, not the schema, and the loop can recover by dropping the tools.
+/// carrying that reason.
+///
+/// This is a last resort, not the explanation. The failures measured in-game on
+/// 2026-09-05 were caused by asking for tool calls while sending no tool
+/// declarations, and the glm-5.3-flash comparison that looked like a
+/// model difference was confounded: the branch keyed on whether a character was
+/// loaded, not on the model, so glm took the tools path and gemini did not.
+/// Google's own documentation gives a second, real trigger — requiring
+/// structured text immediately before a tool call — which the build prompt
+/// still does. Dropping the tools only salvages a reply; it does not fix
+/// either cause.
 pub(crate) fn is_function_call_failure(err: &LlmError) -> bool {
     let LlmError::Parse(message) = err else {
         return false;
@@ -71,12 +108,19 @@ pub(crate) fn is_function_call_failure(err: &LlmError) -> bool {
 }
 
 pub(crate) const MAX_COMPLETION_TOKENS: u32 = 65_536;
-/// Upper bound on hidden reasoning tokens per request (OpenRouter
-/// `reasoning.max_tokens`; ignored by providers without thinking support).
+/// How hard a thinking model may think (OpenRouter `reasoning.effort`;
+/// ignored by providers without thinking support).
 ///
-/// Deliberately well under [`MAX_COMPLETION_TOKENS`] so a long think always
-/// leaves room for the build itself.
-pub(crate) const REASONING_TOKEN_CAP: u32 = 32_768;
+/// "medium" is half the completion budget on Anthropic
+/// (`budget_tokens = max_tokens * effort_ratio`, 0.5 at medium), which is
+/// what the old raw `reasoning.max_tokens: 32_768` against
+/// [`MAX_COMPLETION_TOKENS`] spelled out by hand — so nothing changes where
+/// that already worked. It is also the only knob Gemini 3 honours: those
+/// models take Google's `thinkingLevel`, and a raw token budget is remapped
+/// to a level Google picks, which bought minutes of thinking and no control
+/// (OpenRouter reasoning-tokens docs, "Google Gemini 3 Models with Thinking
+/// Levels").
+pub(crate) const REASONING_EFFORT: &str = "medium";
 
 pub(crate) fn http_client() -> Result<reqwest::blocking::Client, LlmError> {
     reqwest::blocking::Client::builder()
@@ -185,8 +229,7 @@ pub(crate) struct ChatRequest {
 /// ignore unknown parameters (per OpenRouter's parameter docs).
 #[derive(Serialize, Debug, Clone)]
 pub(crate) struct ReasoningConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) max_tokens: Option<u32>,
+    pub(crate) effort: &'static str,
 }
 
 /// OpenRouter `provider` routing preferences.
@@ -207,6 +250,15 @@ pub(crate) struct Message {
     /// For role="tool" messages: the ID of the tool call being responded to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) tool_call_id: Option<String>,
+    /// OpenRouter reasoning blocks, carried back verbatim on the assistant
+    /// turn they came from. A tool loop is one continuous thought interrupted
+    /// by lookups, so the provider needs its own blocks back to resume it:
+    /// OpenRouter's "Preserving Reasoning" contract requires the sequence to
+    /// match what the model produced, neither rearranged nor modified, and
+    /// Gemini 3 rejects a continued loop whose blocks were dropped. Opaque by
+    /// design: we never look inside one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reasoning_details: Option<Vec<Value>>,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -250,8 +302,8 @@ pub(crate) struct ProviderCore<'a> {
     /// Provider name for error strings ("OpenRouter", "OpenAI").
     pub(crate) label: &'a str,
     pub(crate) max_tokens: u32,
-    /// OpenRouter `reasoning.max_tokens`. `None` omits the field.
-    pub(crate) reasoning_max_tokens: Option<u32>,
+    /// OpenRouter `reasoning.effort`. `None` omits the field.
+    pub(crate) reasoning_effort: Option<&'static str>,
     /// Whether this base URL understands the OpenRouter-only top-level
     /// `provider` block. `api.openai.com` rejects unknown top-level body
     /// arguments, so sending it there breaks the OpenAI provider outright
@@ -308,9 +360,9 @@ pub(crate) fn send_chat(
         tools: openai_tools,
         max_tokens: Some(core.max_tokens),
         stream: Some(true),
-        reasoning: core.reasoning_max_tokens.map(|t| ReasoningConfig {
-            max_tokens: Some(t),
-        }),
+        reasoning: core
+            .reasoning_effort
+            .map(|effort| ReasoningConfig { effort }),
         // OpenRouter-only body field. `api.openai.com` rejects unknown
         // top-level arguments, so posting it to every OpenAI-compatible base
         // URL made the OpenAI provider fail outright (Claude F8).
@@ -424,6 +476,7 @@ mod tests {
             content: Some(text.into()),
             tool_calls: None,
             tool_call_id: None,
+            reasoning_details: None,
         }
     }
 
@@ -650,7 +703,7 @@ mod tests {
             extra_headers: &[],
             label: "OpenRouter",
             max_tokens: MAX_COMPLETION_TOKENS,
-            reasoning_max_tokens: None,
+            reasoning_effort: None,
             supports_provider_prefs: true,
             require_tool_endpoints: false,
             // Short: a hung mock must fail the test, not stall it for 420 s.
@@ -757,7 +810,7 @@ mod tests {
         let rate = Mutex::new(RateTracker::new(60));
         let mut core = test_core(&http, &rate, &server.base_url, &no_cancel);
         core.supports_provider_prefs = false;
-        core.reasoning_max_tokens = None;
+        core.reasoning_effort = None;
         send_chat(core, &[user("hi")], None).expect("ok");
 
         let body = server.posted_body(0);
@@ -777,7 +830,7 @@ mod tests {
         let mut core = test_core(&http, &rate, &server.base_url, &no_cancel);
         core.supports_provider_prefs = true;
         core.require_tool_endpoints = true;
-        core.reasoning_max_tokens = Some(REASONING_TOKEN_CAP);
+        core.reasoning_effort = Some(REASONING_EFFORT);
         send_chat(core, &[user("hi")], None).expect("ok");
 
         let body = server.posted_body(0);
@@ -786,8 +839,8 @@ mod tests {
             serde_json::json!(true)
         );
         assert_eq!(
-            body["reasoning"]["max_tokens"],
-            serde_json::json!(REASONING_TOKEN_CAP)
+            body["reasoning"]["effort"],
+            serde_json::json!(REASONING_EFFORT)
         );
     }
 
@@ -900,7 +953,7 @@ mod tests {
             extra_headers: &[],
             label: "OpenRouter",
             max_tokens: MAX_COMPLETION_TOKENS,
-            reasoning_max_tokens: Some(REASONING_TOKEN_CAP),
+            reasoning_effort: Some(REASONING_EFFORT),
             supports_provider_prefs: true,
             require_tool_endpoints: false,
             request_timeout: CHAT_REQUEST_TIMEOUT,

@@ -74,6 +74,10 @@ struct StreamChoice {
 struct StreamDelta {
     content: Option<String>,
     tool_calls: Option<Vec<StreamToolCallDelta>>,
+    /// Reasoning blocks, streamed a piece at a time. Kept opaque and in
+    /// arrival order: what goes back on the next turn has to be the sequence
+    /// the model produced.
+    reasoning_details: Option<Vec<Value>>,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +98,7 @@ struct StreamFunctionDelta {
 pub(crate) struct StreamAccumulator {
     content: String,
     tool_calls: Vec<StreamToolCall>,
+    reasoning_details: Vec<Value>,
 }
 
 #[derive(Default)]
@@ -132,6 +137,8 @@ pub(crate) fn apply_chunk(
         if let Some(text) = delta.content {
             acc.content.push_str(&text);
         }
+        acc.reasoning_details
+            .extend(delta.reasoning_details.unwrap_or_default());
         for call in delta.tool_calls.unwrap_or_default() {
             // Bound the index *before* it can size an allocation.
             if call.index > MAX_TOOL_CALL_INDEX {
@@ -184,6 +191,8 @@ impl StreamAccumulator {
             content,
             tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
             tool_call_id: None,
+            reasoning_details: (!self.reasoning_details.is_empty())
+                .then_some(self.reasoning_details),
         })
     }
 }
@@ -438,6 +447,39 @@ mod tests {
                 );
             }
             StreamedMessage::Message(_) => panic!("expected empty"),
+        }
+    }
+
+    /// OpenRouter streams reasoning blocks a piece at a time and requires the
+    /// sequence back unmodified on the next turn of a tool loop — Gemini 3
+    /// rejects a loop whose blocks were dropped. The signature rides its own
+    /// block, so losing arrival order loses the signature.
+    #[test]
+    fn streamed_reasoning_blocks_reach_the_assistant_message_in_order() {
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{\"reasoning_details\":[",
+            "{\"type\":\"reasoning.text\",\"text\":\"weighing prefixes\",\"index\":0}]}}]}
+",
+            "data: {\"choices\":[{\"delta\":{\"reasoning_details\":[",
+            "{\"type\":\"reasoning.encrypted\",\"data\":\"opaque\",\"index\":1}]}}]}
+",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Minstrel.\"},\"finish_reason\":\"stop\"}]}
+",
+            "data: [DONE]
+",
+        );
+        match read_stream(sse.as_bytes(), &|| false).expect("ok") {
+            StreamedMessage::Message(m) => {
+                let blocks = m.reasoning_details.clone().expect("blocks preserved");
+                assert_eq!(blocks.len(), 2, "both chunks kept: {blocks:?}");
+                assert_eq!(blocks[0]["text"], "weighing prefixes");
+                assert_eq!(blocks[1]["data"], "opaque");
+                // And they go back out on the wire under the name OpenRouter
+                // reads them by.
+                let wire = serde_json::to_value(&m).expect("serializes");
+                assert_eq!(wire["reasoning_details"], serde_json::json!(blocks));
+            }
+            StreamedMessage::Empty(finish) => panic!("expected content, got empty: {finish}"),
         }
     }
 

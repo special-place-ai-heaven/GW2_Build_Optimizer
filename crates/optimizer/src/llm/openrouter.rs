@@ -20,7 +20,7 @@ use serde_json::Value;
 use super::body::{json_capped, read_body_capped};
 use super::openai_compat::{
     http_client, is_function_call_failure, send_chat, Message, ProviderCore, CHAT_REQUEST_TIMEOUT,
-    MAX_COMPLETION_TOKENS, METADATA_TIMEOUT, REASONING_TOKEN_CAP,
+    closing_request, MAX_COMPLETION_TOKENS, METADATA_TIMEOUT, REASONING_EFFORT,
 };
 use super::rate::{persist_usage, PersistedUsage, RateTracker};
 use super::trim::trim_openai_messages;
@@ -92,7 +92,7 @@ impl OpenRouterClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, LlmError> {
-        self.send_chat_capped(messages, tools, MAX_COMPLETION_TOKENS, Some(REASONING_TOKEN_CAP))
+        self.send_chat_capped(messages, tools, MAX_COMPLETION_TOKENS, Some(REASONING_EFFORT))
     }
 
     /// `send_chat` with an explicit completion budget. `generate_brief` passes
@@ -103,7 +103,7 @@ impl OpenRouterClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
         max_tokens: u32,
-        reasoning_max_tokens: Option<u32>,
+        reasoning_effort: Option<&'static str>,
     ) -> Result<Message, LlmError> {
         let extra_headers = [
             ("HTTP-Referer", OPENROUTER_HTTP_REFERER.to_string()),
@@ -119,7 +119,7 @@ impl OpenRouterClient {
             extra_headers: &extra_headers,
             label: "OpenRouter",
             max_tokens,
-            reasoning_max_tokens,
+            reasoning_effort,
             // OpenRouter is the one base URL that understands the top-level
             // `provider` routing block.
             supports_provider_prefs: true,
@@ -250,6 +250,7 @@ impl LlmClient for OpenRouterClient {
             content: Some(prompt.to_string()),
             tool_calls: None,
             tool_call_id: None,
+            reasoning_details: None,
         }];
 
         let response = self.send_chat(&messages, None)?;
@@ -264,6 +265,7 @@ impl LlmClient for OpenRouterClient {
             content: Some(prompt.to_string()),
             tool_calls: None,
             tool_call_id: None,
+            reasoning_details: None,
         }];
         let response = self.send_chat_capped(&messages, None, max_tokens, None)?;
         response
@@ -295,6 +297,7 @@ impl LlmClient for OpenRouterClient {
             content: Some(prompt.to_string()),
             tool_calls: None,
             tool_call_id: None,
+            reasoning_details: None,
         }];
 
         for turn in 0..max_turns {
@@ -309,7 +312,9 @@ impl LlmClient for OpenRouterClient {
                 Ok(response) => response,
                 // The model cannot drive our tools at all. Losing the whole
                 // conversation over that is worse than answering without them.
-                Err(e) if is_function_call_failure(&e) => self.send_chat(&messages, None)?,
+                Err(e) if is_function_call_failure(&e) => {
+                    self.send_chat(&closing_request(&messages), None)?
+                }
                 Err(e) => return Err(e),
             };
 
@@ -351,6 +356,7 @@ impl LlmClient for OpenRouterClient {
                     content: Some(result_str),
                     tool_calls: None,
                     tool_call_id: Some(tc.id.clone()),
+                    reasoning_details: None,
                 });
             }
         }
@@ -363,6 +369,11 @@ impl LlmClient for OpenRouterClient {
         if super::cancel::is_cancelled() {
             return Err(LlmError::Unavailable(super::cancel::CANCELLED.to_string()));
         }
+        // Empty tool list: the caller renders this as "writing", not as
+        // another lookup round. Without it the UI freezes on (N/N) for the
+        // whole closing request, which is the longest one of the run.
+        on_progress(max_turns, max_turns, &[]);
+        let mut messages = closing_request(&messages);
         trim_openai_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
         self.send_chat(&messages, None)?
             .content
@@ -528,6 +539,7 @@ mod tests {
             content: Some("Hello".to_string()),
             tool_calls: None,
             tool_call_id: None,
+            reasoning_details: None,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["role"], "user");
@@ -541,6 +553,7 @@ mod tests {
             content: Some(r#"{"result": "ok"}"#.to_string()),
             tool_calls: None,
             tool_call_id: Some("call_abc123".to_string()),
+            reasoning_details: None,
         };
         let json = serde_json::to_value(&tool_msg).unwrap();
         assert_eq!(json["role"], "tool");
@@ -575,6 +588,7 @@ mod tests {
             content: Some(r#"{"result":49}"#.into()),
             tool_calls: None,
             tool_call_id: Some(tool_calls[0].id.clone()),
+            reasoning_details: None,
         };
         let wire = serde_json::to_value(&follow_up).unwrap();
         assert_eq!(wire["role"], "tool");
