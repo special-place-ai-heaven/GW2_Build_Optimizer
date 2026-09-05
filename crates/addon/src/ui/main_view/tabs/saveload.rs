@@ -504,12 +504,22 @@ fn load_named(state: &mut AddonState, name: &str) {
         // OS refused the thread; work never started. Do not fall back to inline CPU.
         state.main.comparison.error =
             Some("Could not start the load thread - the system refused it. Try again.".into());
-        // Notes still have to land eventually; not on this click frame.
         if let Some(snapshot) = notes_retry {
-            let _ = state.spawn_worker("ranch-notes", move |_token| {
-                write_note_snapshot(&addon_dir_retry, &snapshot);
+            let worker_snapshot = snapshot.clone();
+            let notes_ok = state.spawn_worker("ranch-notes", move |_token| {
+                write_note_snapshot(&addon_dir_retry, &worker_snapshot);
             });
+            if !notes_ok {
+                save_note_now(state, &snapshot);
+            }
         }
+    }
+}
+
+fn save_note_now(state: &mut AddonState, snapshot: &gw2_core::types::SavedBuild) {
+    let storage = gw2_core::storage::BuildStorage::new(&state.addon_dir);
+    if let Err(e) = storage.save_overwrite(snapshot) {
+        state.main.error = Some(tf("fmt.save_failed", &[("err", &e.to_string())]));
     }
 }
 
@@ -1592,6 +1602,14 @@ mod tests {
         assert!(
             !click.contains("save_overwrite"),
             "load_named must not save_overwrite on the Load click/draw frame"
+        );
+        assert!(
+            click.contains("save_note_now"),
+            "if ranch-notes also fails to spawn, notes write on this frame"
+        );
+        assert!(
+            click.contains("notes_ok"),
+            "the ranch-notes spawn result must be checked"
         );
         for forbidden in [
             "simulate_suggestion_rotation",
