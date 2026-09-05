@@ -313,7 +313,10 @@ fn scrape_snowcrows(
     on_progress: &dyn Fn(&str, &str),
 ) -> Result<(Vec<BenchmarkBuild>, bool), String> {
     let mut last_html: Option<String> = None;
-    let mut all_links: Vec<String> = Vec::new();
+    // Carried with the link so progress can name the class it is on, the
+    // way the GuildJen path does. The profession is only known here, at
+    // the index page the link came from.
+    let mut all_links: Vec<(String, String)> = Vec::new();
 
     on_progress("snowcrows", "listing builds…");
     // Collect build links from each profession's page
@@ -335,8 +338,8 @@ fn scrape_snowcrows(
             // /builds/raids/{profession}/{slug} has 4 parts
             if parts.len() >= 4 && !parts[3].is_empty() && !parts[3].contains('?') {
                 let full = format!("https://snowcrows.com{}", link);
-                if !all_links.contains(&full) {
-                    all_links.push(full);
+                if !all_links.iter().any(|(_, seen)| *seen == full) {
+                    all_links.push((title_case(profession), full));
                 }
             }
         }
@@ -367,7 +370,7 @@ fn scrape_snowcrows(
     on_progress("snowcrows", &format!("0/{}", total));
     // Every build the index lists. `all_links` is accumulated one profession
     // page at a time, so this already walks a class at a time.
-    for (i, url) in all_links.into_iter().enumerate() {
+    for (i, (class, url)) in all_links.into_iter().enumerate() {
         if should_cancel() {
             return Ok((builds, true));
         }
@@ -377,7 +380,7 @@ fn scrape_snowcrows(
         if let Ok(b) = scrape_snowcrows_build(client, &url, today) {
             builds.push(b)
         }
-        on_progress("snowcrows", &format!("{}/{}", i + 1, total));
+        on_progress("snowcrows", &format!("{class} {}/{total}", i + 1));
     }
     Ok((builds, false))
 }
@@ -502,7 +505,7 @@ fn scrape_hardstuck(
     on_progress: &dyn Fn(&str, &str),
 ) -> Result<(Vec<BenchmarkBuild>, bool), String> {
     let mut last_html: Option<String> = None;
-    let mut all_links: Vec<String> = Vec::new();
+    let mut all_links: Vec<(String, String)> = Vec::new();
 
     on_progress("hardstuck", "listing builds…");
     // Each profession page lists builds for that profession
@@ -530,8 +533,8 @@ fn scrape_hardstuck(
                 let Some(full) = pin_hardstuck_href(&link) else {
                     continue;
                 };
-                if !all_links.contains(&full) {
-                    all_links.push(full);
+                if !all_links.iter().any(|(_, seen)| *seen == full) {
+                    all_links.push((title_case(profession), full));
                 }
             }
         }
@@ -561,7 +564,7 @@ fn scrape_hardstuck(
     let total = all_links.len();
     on_progress("hardstuck", &format!("0/{}", total));
     // Every build, one profession page at a time.
-    for (i, url) in all_links.into_iter().enumerate() {
+    for (i, (class, url)) in all_links.into_iter().enumerate() {
         if should_cancel() {
             return Ok((builds, true));
         }
@@ -571,7 +574,7 @@ fn scrape_hardstuck(
         if let Ok(b) = scrape_hardstuck_build(client, &url, today) {
             builds.push(b)
         }
-        on_progress("hardstuck", &format!("{}/{}", i + 1, total));
+        on_progress("hardstuck", &format!("{class} {}/{total}", i + 1));
     }
     Ok((builds, false))
 }
