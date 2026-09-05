@@ -466,7 +466,20 @@ pub fn ensure_loaded(state: &mut AddonState) {
         return;
     }
     let store = FeedbackStore::new(&state.addon_dir);
-    let file = store.load();
+    let file = match store.load() {
+        Ok(file) => file,
+        Err(error) => {
+            crate::ui::log_disk_error(format!(
+                "Feedback history could not be loaded; history saving is disabled: {error}"
+            ));
+            state.main.error = Some(
+                "Feedback history could not be loaded. History saving is disabled until the addon is reloaded; the existing file is preserved."
+                    .to_string(),
+            );
+            state.main.feedback.history_load_error = Some(error);
+            gw2_core::feedback::message::MessagesFile::default()
+        }
+    };
     let mut taxonomy = FeedbackTaxonomy::embedded();
     if let Some(cached) = store.load_taxonomy() {
         if cached.taxonomy_version > taxonomy.taxonomy_version {
@@ -682,7 +695,10 @@ pub fn refresh_on_open(state: &mut AddonState) {
 /// and [`FeedbackStore::save`] stages through one `messages.json.tmp`, so the
 /// write must neither stall the frame nor overlap another save of the same file.
 pub fn flush_dirty(state: &mut AddonState) {
-    if !state.main.feedback.dirty {
+    if !state.main.feedback.loaded
+        || state.main.feedback.history_load_error.is_some()
+        || !state.main.feedback.dirty
+    {
         return;
     }
     let file = gw2_core::feedback::message::MessagesFile {
@@ -804,6 +820,38 @@ mod tests {
         clear();
         let _ = std::fs::remove_dir_all(&dir);
         out
+    }
+
+    #[test]
+    fn unreadable_history_never_flushes_an_empty_snapshot() {
+        with_fresh_state("unreadable_history", |state| {
+            std::fs::create_dir_all(&state.addon_dir).unwrap();
+            let path = state.addon_dir.join("messages.json");
+            std::fs::write(&path, b"{broken history").unwrap();
+            ensure_loaded(state);
+            assert!(state.main.feedback.history_load_error.is_some());
+            // A transient read failure may disappear before the next frame.
+            // The empty in-memory snapshot must still never replace history.
+            let restored = br#"{"messages":[],"last_path":null}"#;
+            std::fs::write(&path, restored).unwrap();
+            state.main.feedback.dirty = true;
+            flush_dirty(state);
+            assert!(
+                state.main.feedback.dirty,
+                "failed-load history must refuse flush"
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), restored);
+        });
+    }
+
+    #[test]
+    fn missing_history_loads_without_refusing_future_saves() {
+        with_fresh_state("missing_history", |state| {
+            ensure_loaded(state);
+            assert!(state.main.feedback.loaded);
+            assert!(state.main.feedback.history_load_error.is_none());
+            assert!(state.main.feedback.messages.is_empty());
+        });
     }
 
     fn ranger_untamed() -> ResolvedBuild {
