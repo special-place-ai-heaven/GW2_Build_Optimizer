@@ -30,26 +30,22 @@ impl FeedbackStore {
         self.dir.join("feedback_taxonomy.json")
     }
 
-    /// Load `messages.json`. A missing file yields the empty default; an unreadable
-    /// or unparseable file logs a warning and yields the empty default without
-    /// touching the file on disk. Any message still `Sending` was interrupted by
+    /// Load `messages.json`. Only a missing file yields the empty default.
+    /// Other failures must inhibit saving until a successful reload, so an empty
+    /// fallback cannot replace existing history. Any message still `Sending` was interrupted by
     /// an unload and is mapped to `Failed(Interrupted)` (in memory only; the caller
     /// persists it on the next `save`).
-    pub fn load(&self) -> MessagesFile {
+    pub fn load(&self) -> Result<MessagesFile, String> {
         let path = self.messages_path();
-        if !path.exists() {
-            return MessagesFile::default();
-        }
-        let mut file = match std::fs::read_to_string(&path)
-            .map_err(|e| e.to_string())
-            .and_then(|s| serde_json::from_str::<MessagesFile>(&s).map_err(|e| e.to_string()))
-        {
-            Ok(file) => file,
-            Err(e) => {
-                eprintln!("Warning: messages.json unreadable, starting empty: {e}");
-                return MessagesFile::default();
+        let raw = match std::fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(MessagesFile::default());
             }
+            Err(e) => return Err(format!("Failed to read messages.json: {e}")),
         };
+        let mut file: MessagesFile = serde_json::from_str(&raw)
+            .map_err(|e| format!("Failed to parse messages.json: {e}"))?;
 
         let now = now_unix();
         for m in file
@@ -61,7 +57,7 @@ impl FeedbackStore {
             m.last_error = Some(FailReason::Interrupted);
             m.failed_at = Some(now);
         }
-        file
+        Ok(file)
     }
 
     /// Write `messages.json` crash-safely (`messages.json.tmp` then rename).
@@ -110,7 +106,7 @@ impl FeedbackStore {
             let _ = std::fs::remove_file(&tmp_path);
             return Err(format!("Failed to write {}: {}", tmp_path.display(), e));
         }
-        std::fs::rename(&tmp_path, path).map_err(|e| {
+        crate::storage::replace_file(&tmp_path, path).map_err(|e| {
             let _ = std::fs::remove_file(&tmp_path);
             format!(
                 "Failed to rename {} → {}: {}",
@@ -180,7 +176,7 @@ mod tests {
         assert!(store.messages_path().exists());
         assert_eq!(store.messages_path(), dir.join("messages.json"));
 
-        let loaded = store.load();
+        let loaded = store.load().unwrap();
         assert_eq!(loaded, file);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -191,7 +187,7 @@ mod tests {
         let dir = temp_dir("missing");
         let store = FeedbackStore::new(&dir);
 
-        let loaded = store.load();
+        let loaded = store.load().unwrap();
         assert_eq!(loaded, MessagesFile::default());
         assert!(
             !store.messages_path().exists(),
@@ -202,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_file_is_empty_and_untouched() {
+    fn unreadable_file_returns_error_and_is_untouched() {
         let dir = temp_dir("unreadable");
         std::fs::create_dir_all(&dir).unwrap();
         let store = FeedbackStore::new(&dir);
@@ -210,8 +206,7 @@ mod tests {
         let garbage = b"{not json";
         std::fs::write(store.messages_path(), garbage).unwrap();
 
-        let loaded = store.load();
-        assert_eq!(loaded, MessagesFile::default());
+        assert!(store.load().is_err());
 
         let after = std::fs::read(store.messages_path()).unwrap();
         assert_eq!(
@@ -237,7 +232,7 @@ mod tests {
         store.save(&file).unwrap();
 
         let before = now_unix();
-        let loaded = store.load();
+        let loaded = store.load().unwrap();
         let after = now_unix();
 
         let in_flight = &loaded.messages[0];
@@ -261,6 +256,16 @@ mod tests {
         assert!(raw.contains("\"sending\""));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_failure_is_not_treated_as_a_missing_file() {
+        let dir = temp_dir("read_failure");
+        let store = FeedbackStore::new(&dir);
+        std::fs::create_dir_all(store.messages_path()).unwrap();
+        assert!(store.load().is_err());
+        assert!(store.messages_path().is_dir());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -320,6 +325,11 @@ mod tests {
         );
         assert!(store.messages_path().exists());
         assert!(store.taxonomy_path().exists());
+        assert_eq!(store.load().unwrap().messages[0].report_id, "x");
+        store
+            .save_taxonomy(crate::feedback::taxonomy::EMBEDDED)
+            .unwrap();
+        assert!(store.load_taxonomy().is_some());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

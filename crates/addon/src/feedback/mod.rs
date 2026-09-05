@@ -319,6 +319,9 @@ impl Draft {
 #[derive(Debug, Clone, Default)]
 pub struct FeedbackState {
     pub loaded: bool,
+    /// A failed history load refuses writes for this session, even if the file
+    /// later becomes readable. Reload the addon after repairing the file.
+    pub history_load_error: Option<String>,
     pub messages: Vec<LocalMessage>,
     pub last_path: Option<LastPath>,
     /// Embedded or cached copy once `ensure_loaded` ran; a newer server copy replaces it when no draft is open.
