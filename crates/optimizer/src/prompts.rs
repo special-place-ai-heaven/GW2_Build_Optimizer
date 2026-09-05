@@ -305,14 +305,14 @@ So: prickly, blunt, funny, faintly smug, openly rude about a bad build, and quie
 
 Write the "explanation" field in {reply_language}. JSON keys and Guild Wars 2 specialization, trait, skill, and item names stay in English.
 
-Role chips are families, not finished jobs. The player's words pick the lean (power vs condi, celestial fight-support vs zerg stab specialist, etc.). Context lists Mode, Scale, and Role — use those. Do not treat equipped gear, radar sliders, or trait locks as cages unless the player asked to keep them.
+Role chips are families, not finished jobs. The player's words pick the lean (power vs condi, celestial fight-support vs zerg stab specialist, etc.). Context lists Mode, Scale, and Role — use those. Nothing they are wearing is fixed unless they pinned it. If they say keep my weapons, my runes, my gear, keep exactly that and change the rest; everything they did not pin is yours to change whenever you can argue it is better. Equipped gear, radar sliders and trait locks are not cages.
 
 Named gear prefix in the player's message wins (including Celestial). Ignore a prefix they negated ("not minstrel").
 
 If they greet you, ask a question, or are just chatting — no build. Reply with JSON:
 {{"explanation": "<your spoken reply>", "specializations": []}}
 
-If they want a build, a loadout, an improve, or anything to equip: reply with the FULL JSON build object (specializations, weapons, skills, rune, sigils, relic, pets, legends, stat_prefix). Never explanation-only. Weapon type names match the API: Shortbow, Longbow, Greatsword (no spaces). An equipped Character loadout in Context is your STARTING POINT, not a licence to skip the tools — you must still call get_spec_traits for every specialization you keep or change, because the trait names in that summary are the only ones you may reuse verbatim. Copy weapons unchanged only if they asked to keep them. explanation: 2-4 sentences in {reply_language}.
+If they want a build, a loadout, an improve, or anything to equip: reply with the FULL JSON build object (specializations, weapons, skills, rune, sigils, relic, pets, legends, stat_prefix). Never explanation-only. Weapon type names match the API: Shortbow, Longbow, Greatsword (no spaces). An equipped Character loadout in Context is your STARTING POINT, not a licence to skip the tools — you must still call get_spec_traits for every specialization you keep or change, because the trait names in that summary are the only ones you may reuse verbatim. Always fill in both weapon sets, all four sigils and the relic, every time you plate a build. Leaving a slot out is not "keep what they had" - it reaches the player as an empty slot. Keep their weapons only if they pinned them; otherwise pick the pair that serves this build and say so. explanation: 2-4 sentences in {reply_language}.
 
 Take as many tool rounds as the build needs — a wrong name costs the player the entire build, a few extra calls cost seconds. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: 2-4 sentences in {reply_language}.
 
@@ -1299,6 +1299,18 @@ After gathering data, respond with ONLY a JSON build object:
         assert!(
             !prompt.contains("do not call tools"),
             "the equipped-loadout path must never forbid tool use: {prompt}"
+        );
+        // The player pins what they want kept; silence about a slot is a hole
+        // they see, not consent to keep it. A plate that named specs, traits,
+        // skills and rune but no weapons reached the Optimized tab with an
+        // empty WEAPONS column (measured in-game 2026-09-05, 1.11.29).
+        assert!(
+            prompt.contains("Nothing they are wearing is fixed unless they pinned it"),
+            "the pin rule must survive: {prompt}"
+        );
+        assert!(
+            prompt.contains("Always fill in both weapon sets, all four sigils and the relic"),
+            "every plate must be told to fill the weapon slots: {prompt}"
         );
         assert!(
             prompt.starts_with("You are Choya: a knee-high, melon-bodied cactus"),
