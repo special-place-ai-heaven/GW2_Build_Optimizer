@@ -447,7 +447,7 @@ fn toggle_action(status: &RadioStatus, has_station: bool) -> ToggleAction {
 pub fn toggle() {
     enum Deferred {
         Stop,
-        Play(RbStation),
+        Play(Box<RbStation>),
     }
     let deferred = crate::state::with_state(|s| {
         let station = s
@@ -467,7 +467,7 @@ pub fn toggle() {
                 None
             }
             ToggleAction::Stop => Some(Deferred::Stop),
-            ToggleAction::Tune => station.map(Deferred::Play),
+            ToggleAction::Tune => station.map(|s| Deferred::Play(Box::new(s))),
             ToggleAction::Nothing => None,
         }
     })

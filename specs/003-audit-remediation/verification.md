@@ -25,3 +25,10 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - Green: `cargo test --workspace --no-fail-fast` at 1f85f27, all suites pass. Two wall-clock tests flake under parallel load and pass in isolation: `gw2-api client::tests::fetch_bytes_rejects_a_body_over_the_icon_cap` and `gw2-optimizer scraper::tests::scrape_guildjen_aborts_at_inner_loop_when_cancelled` (500 ms budget, mostly reqwest client construction; predates this campaign at d88cb32). Neither is a regression; the scraper one is an open flaky-test finding for this campaign.
 - `cargo check` clean. Formatting left alone: the tree carries pre-existing `cargo fmt` drift across files outside this sprint, and reformatting them would bury the diff.
 - Workspace Clippy still blocked by W001. In-game acceptance pending: the release build ships as v1.11.29 for the player to exercise.
+
+## Sprint 4 — W001 strict Clippy
+
+- W001: the ten deny-warnings diagnostics are gone. `quip_for` uses `is_multiple_of`; `toggle` boxes the large `Play` station; radio sort uses `sort_by_key`; gold-button width takes owned `t()` strings; scraper luminary guard uses `KNOWN_SPECS.contains`; news stills share `exceeds_max_edge` between `download` and the resize test.
+- CI still runs `cargo clippy --workspace --all-targets -- -D warnings`. Local run of that command exits 0.
+- Green: `news_art` lib tests 13 passed / 1 ignored; `extract_traits_includes_luminary_from_shared_known_specs` passed.
+- No version bump: this sprint is the CI gate, not a player-facing DLL. In-game acceptance for US1 remains the existing 1.11.29/1.11.30 handoff.

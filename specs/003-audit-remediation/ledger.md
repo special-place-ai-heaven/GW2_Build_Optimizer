@@ -12,11 +12,11 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 
 | Order | ID | Audit severity/verdict | Story | State | Source |
 |---|---|---|---|---|---|
-| 1 | [W011](#w011) | S2/confirmed | US1 | planned | `crates/core/src/feedback/store.rs:50` |
-| 2 | [W006](#w006) | S2/confirmed | US1 | planned | `crates/addon/src/ui/main_view/lock_panel.rs:686` |
-| 3 | [W002](#w002) | S2/confirmed | US1 | planned | `crates/addon/src/radio/player.rs:1077` |
-| 4 | [W012](#w012) | S2/confirmed | US1 | planned | `crates/core/src/feedback/store.rs:113` |
-| 5 | [W001](#w001) | S2/confirmed | US1 | planned | `.github/workflows/ci.yml:17` |
+| 1 | [W011](#w011) | S2/confirmed | US1 | verified-scoped | `crates/core/src/feedback/store.rs:50` |
+| 2 | [W006](#w006) | S2/confirmed | US1 | verified-scoped | `crates/addon/src/ui/main_view/lock_panel.rs:686` |
+| 3 | [W002](#w002) | S2/confirmed | US1 | verified-scoped | `crates/addon/src/radio/player.rs:1077` |
+| 4 | [W012](#w012) | S2/confirmed | US1 | verified-scoped | `crates/core/src/feedback/store.rs:113` |
+| 5 | [W001](#w001) | S2/confirmed | US1 | verified-scoped | `.github/workflows/ci.yml:17` |
 | 6 | [B001](#b001) | S2/observed | US2 | planned | `crates/addon/src/ui/main_view/optimization.rs:1050` |
 | 7 | [W025](#w025) | S2/confirmed | US2 | planned | `crates/optimizer/src/gemini_tools.rs:1529` |
 | 8 | [W035](#w035) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/simulator.rs:220` |
@@ -341,7 +341,7 @@ Acceptance: Demonstrate the invalid-input or failed-I/O path is safe, the normal
 
 ### W001
 
-- Task: T007 [US1]. Status: **planned**.
+- Task: T007 [US1]. Status: **verified-scoped**; workspace/in-game gates pending.
 - Audit: S2, confirmed; location: `.github/workflows/ci.yml:17`.
 - Dependencies: story entry gate.
 
@@ -349,7 +349,7 @@ Claim: The workspace CI gate cannot pass. I ran `cargo clippy --workspace --all-
 
 Remediation decision: Fix all ten observed Clippy diagnostics without relaxing CI; verify workspace Clippy including all targets.
 
-Verification: Current source path confirmed via SymForge; regression/implementation pending.
+Verification: All ten sites fixed in place (news_art downscale predicate + test, `is_multiple_of`, boxed `Deferred::Play`, `sort_by_key`, drop needless `t()` borrows, `KNOWN_SPECS.contains`). `cargo clippy --workspace --all-targets -- -D warnings` exits 0. CI workflow still uses `-D warnings`. news_art lib tests 13 passed; scraper luminary test passed.
 
 Acceptance: Demonstrate the invalid-input or failed-I/O path is safe, the normal path still works, and relevant tests plus strict Clippy pass.
 

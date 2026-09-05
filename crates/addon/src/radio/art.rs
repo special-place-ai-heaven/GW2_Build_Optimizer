@@ -204,9 +204,11 @@ fn quip_alpha(vis: u32) -> f32 {
 fn genre_table(tags: &str) -> Option<&'static [&'static str]> {
     if tags.contains("metal") || tags.contains("punk") || tags.contains("hard rock") {
         Some(QUIPS_METAL)
-    } else if ["techno", "house", "electro", "dance", "trance", "edm", "drum"]
-        .iter()
-        .any(|g| tags.contains(g))
+    } else if [
+        "techno", "house", "electro", "dance", "trance", "edm", "drum",
+    ]
+    .iter()
+    .any(|g| tags.contains(g))
     {
         Some(QUIPS_ELECTRONIC)
     } else if [
@@ -273,7 +275,7 @@ fn quip_for(t: u32, bass: f32, tags: &str) -> Option<(String, f32, u32, u32)> {
     };
     let table = match genre_table(tags) {
         // Half the time the genre flavor speaks; half stays on the mood tier.
-        Some(flavor) if (h >> 10) % 2 == 0 => flavor,
+        Some(flavor) if (h >> 10).is_multiple_of(2) => flavor,
         _ => match tier {
             2 => QUIPS_BANGER,
             1 => QUIPS_GROOVE,
@@ -563,8 +565,8 @@ fn draw_quip_bubble(
     let (lean, altitude) = match anchor {
         1 => (-size * 0.45, 0.62),
         2 => (size * 0.25, 0.62),
-        3 => (0.0, 0.82),           // higher
-        4 => (-size * 0.25, 0.50),  // lower, still above the head
+        3 => (0.0, 0.82),          // higher
+        4 => (-size * 0.25, 0.50), // lower, still above the head
         _ => (0.0, 0.62),
     };
     let (mut bx, by, anchor_pt) = (
@@ -613,10 +615,14 @@ fn draw_quip_bubble(
         .filled(true)
         .rounding(5.0)
         .build();
-    dl.add_rect(bmin, bmax, theme::with_alpha(theme::pal().gold_fill, 0.9 * a))
-        .rounding(5.0)
-        .thickness(1.0)
-        .build();
+    dl.add_rect(
+        bmin,
+        bmax,
+        theme::with_alpha(theme::pal().gold_fill, 0.9 * a),
+    )
+    .rounding(5.0)
+    .thickness(1.0)
+    .build();
     // Tail after the border so its base covers the border segment cleanly;
     // always from the bubble's bottom edge down toward the head.
     let base_x = c[0].clamp(bmin[0] + 8.0, bmax[0] - 8.0);
@@ -881,7 +887,10 @@ mod tests {
     #[test]
     fn genre_table_matches_station_tags() {
         assert_eq!(genre_table("metal,rock"), Some(QUIPS_METAL));
-        assert_eq!(genre_table("deep house,electronica"), Some(QUIPS_ELECTRONIC));
+        assert_eq!(
+            genre_table("deep house,electronica"),
+            Some(QUIPS_ELECTRONIC)
+        );
         assert_eq!(genre_table("smooth jazz"), Some(QUIPS_SOFT));
         assert_eq!(genre_table("news,talk"), None);
         assert_eq!(genre_table(""), None);

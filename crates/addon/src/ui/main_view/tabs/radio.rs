@@ -347,9 +347,9 @@ fn sort_label(sort: RadioSort) -> String {
 /// order as the tiebreak.
 fn apply_sort(list: &mut [RbStation], sort: RadioSort) {
     match sort {
-        RadioSort::Popular => list.sort_by(|a, b| b.votes.cmp(&a.votes)),
-        RadioSort::Name => list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
-        RadioSort::Bitrate => list.sort_by(|a, b| b.bitrate.cmp(&a.bitrate)),
+        RadioSort::Popular => list.sort_by_key(|s| std::cmp::Reverse(s.votes)),
+        RadioSort::Name => list.sort_by_key(|s| s.name.to_lowercase()),
+        RadioSort::Bitrate => list.sort_by_key(|s| std::cmp::Reverse(s.bitrate)),
         RadioSort::Country => list.sort_by(|a, b| {
             a.countrycode
                 .cmp(&b.countrycode)
@@ -699,9 +699,9 @@ struct CtlLayout {
 
 fn row_ctl_layout(ui: &Ui, ctl: &RowCtl, origin: [f32; 2], heart_x: f32) -> CtlLayout {
     let ch = theme::control_height(ui);
-    let btn_w = theme::gold_button_width(ui, &t("radio.play"))
-        .max(theme::gold_button_width(ui, &t("radio.stop")))
-        .max(theme::gold_button_width(ui, &t("radio.pause")));
+    let btn_w = theme::gold_button_width(ui, t("radio.play"))
+        .max(theme::gold_button_width(ui, t("radio.stop")))
+        .max(theme::gold_button_width(ui, t("radio.pause")));
     match ctl.status {
         RadioStatus::Playing | RadioStatus::Paused => {
             theme::font_scale(ui, 0.85);
@@ -728,7 +728,9 @@ fn row_ctl_layout(ui: &Ui, ctl: &RowCtl, origin: [f32; 2], heart_x: f32) -> CtlL
             theme::font_scale(ui, 1.3);
             let text_reserve = ui.calc_text_size(format!(
                 "{}...",
-                tuning_label(&ctl.status).trim_end_matches('.').to_uppercase()
+                tuning_label(&ctl.status)
+                    .trim_end_matches('.')
+                    .to_uppercase()
             ))[0];
             theme::font_scale_reset(ui);
             CtlLayout {
@@ -835,7 +837,9 @@ fn row_controls(
             // ALL CAPS, dots appended additively (., .., ..., clear), alpha
             // breathing slowly. The layout reserve includes the full "..."
             // so the base text never shifts as dots grow.
-            let base = tuning_label(&ctl.status).trim_end_matches('.').to_uppercase();
+            let base = tuning_label(&ctl.status)
+                .trim_end_matches('.')
+                .to_uppercase();
             let dots = ".".repeat(((tf / 20) % 4) as usize);
             let breath = 0.5 + 0.35 * (tf as f32 * 0.045).sin();
             theme::font_scale(ui, 1.3);
@@ -850,7 +854,12 @@ fn row_controls(
             );
             dl.add_text(
                 [bx, ty],
-                crate::ui::color_u32([theme::pal().gold[0], theme::pal().gold[1], theme::pal().gold[2], breath]),
+                crate::ui::color_u32([
+                    theme::pal().gold[0],
+                    theme::pal().gold[1],
+                    theme::pal().gold[2],
+                    breath,
+                ]),
                 &text,
             );
             theme::font_scale_reset(ui);
@@ -912,7 +921,11 @@ fn station_row(
 
     let tx = origin[0] + 2.0 + AVATAR + 10.0;
     let text_w = (row_w - (AVATAR + 14.0) - ctl_w).max(60.0);
-    let name_color = if active { theme::pal().gold } else { theme::pal().cream };
+    let name_color = if active {
+        theme::pal().gold
+    } else {
+        theme::pal().cream
+    };
     let name = clip_text(ui, &s.name, text_w);
     let lh = ui.text_line_height();
     dl.add_text(
@@ -972,7 +985,11 @@ fn favorite_row(ui: &Ui, i: usize, f: &SavedStation, active: bool) -> RowAction 
 
     let tx = origin[0] + 2.0 + FAV_AVATAR + 8.0;
     let text_w = row_w - (FAV_AVATAR + 12.0);
-    let name_color = if active { theme::pal().gold } else { theme::pal().cream };
+    let name_color = if active {
+        theme::pal().gold
+    } else {
+        theme::pal().cream
+    };
     let name = clip_text(ui, &f.name, text_w);
     let th = ui.calc_text_size(&name)[1];
     dl.add_text(
@@ -1028,7 +1045,9 @@ fn station_avatar(ui: &Ui, dl: &DrawListMut, p: [f32; 2], size: f32, name: &str,
             dl.add_image_rounded(tid, p, p_max, r)
                 .col([1.0, 1.0, 1.0, 1.0])
                 .build();
-            dl.add_rect(p, p_max, theme::pal().gold_dim).rounding(r).build();
+            dl.add_rect(p, p_max, theme::pal().gold_dim)
+                .rounding(r)
+                .build();
             return;
         }
     }
@@ -1052,7 +1071,9 @@ fn letter_avatar(ui: &Ui, dl: &DrawListMut, p: [f32; 2], size: f32, letter: char
         crate::ui::color_u32(theme::CURRENT),
         &s,
     );
-    dl.add_rect(p, p_max, theme::pal().gold_dim).rounding(r).build();
+    dl.add_rect(p, p_max, theme::pal().gold_dim)
+        .rounding(r)
+        .build();
 }
 
 /// Heart toggle with its own hit zone; returns true on click.
@@ -1359,7 +1380,13 @@ fn stop_button(ui: &Ui, state: &mut AddonState, label: &str, w: f32) {
 /// Real equalizer in the bar's background: 24 low-alpha gold bars driven by
 /// the decoded audio (levels computed once per frame by the caller). Skipped
 /// entirely while idle, so a silent bar costs nothing and shows nothing.
-fn eq_bars(dl: &DrawListMut, origin: [f32; 2], w: f32, bar_h: f32, levels: &[f32; player::EQ_BANDS]) {
+fn eq_bars(
+    dl: &DrawListMut,
+    origin: [f32; 2],
+    w: f32,
+    bar_h: f32,
+    levels: &[f32; player::EQ_BANDS],
+) {
     if levels.iter().all(|l| *l < 0.004) {
         return;
     }
@@ -1373,7 +1400,12 @@ fn eq_bars(dl: &DrawListMut, origin: [f32; 2], w: f32, bar_h: f32, levels: &[f32
     let base = origin[1] + bar_h - 2.0;
     let max_h = bar_h - 4.0;
     // Theme gold at low alpha — "slight transparency", text stays readable.
-    let fill = [theme::pal().gold[0], theme::pal().gold[1], theme::pal().gold[2], 0.14];
+    let fill = [
+        theme::pal().gold[0],
+        theme::pal().gold[1],
+        theme::pal().gold[2],
+        0.14,
+    ];
     for (i, level) in levels.iter().enumerate() {
         let h = max_h * level.clamp(0.0, 1.0);
         if h < 0.5 {
@@ -1424,22 +1456,15 @@ fn dim_button(ui: &Ui, label: &str, w: f32) {
 /// back to 0% before the DJ choya. The zone starts indented, not at the
 /// bar's true edge. Per-glyph alpha keeps the equalizer behind the text
 /// untouched.
-fn now_playing_marquee(
-    ui: &Ui,
-    dl: &DrawListMut,
-    text: &str,
-    pos: [f32; 2],
-    avail: f32,
-    t: u32,
-) {
+fn now_playing_marquee(ui: &Ui, dl: &DrawListMut, text: &str, pos: [f32; 2], avail: f32, t: u32) {
     if avail < 60.0 {
         return;
     }
     const MAX_A: f32 = 0.70;
     const ICON: f32 = 44.0;
     const SEP_GAP: f32 = 40.0; // breathing room each side of the icon
-    // Crisp path: the dedicated 42 px ticker face. Fallback (atlas rebuild,
-    // no TTF, CJK title): bitmap-scale the current font instead.
+                               // Crisp path: the dedicated 42 px ticker face. Fallback (atlas rebuild,
+                               // no TTF, CJK title): bitmap-scale the current font instead.
     let big = if crate::ui::fonts::ticker_can_render(text) {
         crate::ui::fonts::push_ticker()
     } else {
