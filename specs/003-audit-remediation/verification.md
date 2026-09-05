@@ -63,3 +63,9 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W013: `SNAPSHOT_PATCH_ID` deleted. `new()` reads `latest_manifest()`. `for_patch` is the historical constructor. Unknown patches are `!patch_is_known`. `live_build_mismatch` wraps `check_staleness` for W015.
 - Green: `new_uses_the_active_manifest_not_a_hand_edited_literal`, `for_patch_keeps_historical_ids_and_flags_unknown`, `live_build_mismatch_is_observable`.
 - Did not bump Cargo.toml — other agent owns 1.11.32.
+
+## Sprint 10 — W015 live-build staleness is visible
+
+- W015: `freshness()` / `ManifestFreshness` sit next to `check_staleness`. The API health check stores the warning on `MainState.manifest_staleness`. Status bar chip + About hero show it.
+- Green: `freshness_is_current_or_stale`, existing staleness tests, `live_build_mismatch_is_what_the_health_check_stores`.
+- Did not bump Cargo.toml or touch locales / scraper / chat_flow.

@@ -600,6 +600,8 @@ pub struct MainState {
     pub api_health_checking: bool,
     /// Live `/v2/build` id. Compared to `cache_build_number` to prompt a data refresh.
     pub live_build_number: Option<u32>,
+    /// Active-manifest vs live `/v2/build` warning from `check_staleness`.
+    pub manifest_staleness: Option<String>,
     /// Cached "Usage today" count for the active provider's persisted usage
     /// file, displayed in the Settings tab. Refreshed every ~60 frames (~1s)
     /// instead of reading the file every render frame.

@@ -255,6 +255,7 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
             }
         }
     }
+    stats::render_manifest_staleness(ui, state);
 
     if !state.main.game_db_loading {
         if let Some(lang) = gw2_core::i18n::api_lang(&state.config.ui_language) {
