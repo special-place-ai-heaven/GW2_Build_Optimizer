@@ -2,6 +2,12 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.11.30 - 2026-09-05
+
+### Choya
+
+- A build from the chat keeps the weapons you are holding. The prompt tells Choya to copy your weapons only if you asked it to, so a plate that changes nothing about them says nothing about them - and nothing put them back. Seen in-game 2026-09-05 on 1.11.29: a complete heal Scourge, specs, traits, skills and rune all present, arrived on the Optimized tab with an empty WEAPONS column. Your equipped weapon sets, their sigils and your relic are now carried onto any plate that does not name its own, the same way your heal, elite, utilities and stat prefix already were.
+
 ## 1.11.29 - 2026-09-05
 
 ### Choya

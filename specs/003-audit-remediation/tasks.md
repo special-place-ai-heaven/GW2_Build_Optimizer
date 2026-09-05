@@ -4,6 +4,8 @@ User override (2026-09-05): work in small sprints and commit often. Verified loc
 
 Input: spec.md, plan.md, research.md, data-model.md, contracts/remediation.md. Detailed claims and acceptance: ledger.md. All tasks preserve existing user/other-agent edits.
 
+[X] means the remedy is implemented and its ledger status is **verified-scoped**: code changed, scoped tests green. Per the closure rules, in-game acceptance is a separate batch gate tracked in verification.md, not in these boxes.
+
 ## Phase 1: Setup
 
 - [X] T001 Capture baseline and import all report IDs in specs/003-audit-remediation/ledger.md.
@@ -16,10 +18,10 @@ Input: spec.md, plan.md, research.md, data-model.md, contracts/remediation.md. D
 
 Independent acceptance: see spec.md US1; each item must satisfy its own ledger acceptance and dependencies. Write behavioral regression tests before the corresponding fix. Exact target is the source path below; use SymForge to resolve current symbols rather than historical line numbers.
 
-- [ ] T003 [US1] W011: Return a fallible history load; keep a session write-refusal on addon feedback state after any non-NotFound failure, surface the error, and propagate refusal into flush_dirty. Target: `crates/core/src/feedback/store.rs`. Record evidence in ledger.md#w011.
-- [ ] T004 [US1] W006: Extract the Lock All spec/trait mutation into a helper that iterates only locks.specs.len() entries; preserve the existing bounded trait-column lookup. Target: `crates/addon/src/ui/main_view/lock_panel.rs`. Record evidence in ledger.md#w006.
-- [ ] T005 [US1] W002: Share URL host normalization and reserved-address screening between radio player and logos; test bracketed loopback, mapped IPv4, link-local and public literals. Target: `crates/addon/src/radio/player.rs`. Record evidence in ledger.md#w002.
-- [ ] T006 [US1] W012: Use crate::storage::replace_file for atomic feedback and taxonomy publication, preserving temporary-file cleanup and the previous file on errors. Target: `crates/core/src/feedback/store.rs`. Depends on W011. Record evidence in ledger.md#w012.
+- [X] T003 [US1] W011: Return a fallible history load; keep a session write-refusal on addon feedback state after any non-NotFound failure, surface the error, and propagate refusal into flush_dirty. Target: `crates/core/src/feedback/store.rs`. Record evidence in ledger.md#w011.
+- [X] T004 [US1] W006: Extract the Lock All spec/trait mutation into a helper that iterates only locks.specs.len() entries; preserve the existing bounded trait-column lookup. Target: `crates/addon/src/ui/main_view/lock_panel.rs`. Record evidence in ledger.md#w006.
+- [X] T005 [US1] W002: Share URL host normalization and reserved-address screening between radio player and logos; test bracketed loopback, mapped IPv4, link-local and public literals. Target: `crates/addon/src/radio/player.rs`. Record evidence in ledger.md#w002.
+- [X] T006 [US1] W012: Use crate::storage::replace_file for atomic feedback and taxonomy publication, preserving temporary-file cleanup and the previous file on errors. Target: `crates/core/src/feedback/store.rs`. Depends on W011. Record evidence in ledger.md#w012.
 - [ ] T007 [US1] W001: Fix all ten observed Clippy diagnostics without relaxing CI; verify workspace Clippy including all targets. Target: `.github/workflows/ci.yml`. Record evidence in ledger.md#w001.
 
 ## Phase 4: US2 — Trust builds and calculations (P2)

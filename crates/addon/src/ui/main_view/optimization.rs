@@ -1456,6 +1456,46 @@ pub(super) fn fill_holes_from_loadout(
             parsed.stat_prefix = prefix.to_string();
         }
     }
+
+    // Weapons, sigils and relic. The prompt tells the model to copy weapons
+    // only when the player asked to keep them, so a plate that changes
+    // nothing about them omits all three by design - and nothing put them
+    // back, while `plate_is_servable` never required them. A complete heal
+    // Scourge therefore reached the Optimized tab with an empty WEAPONS
+    // column and no sigils (measured in-game 2026-09-05, 1.11.29). The plate
+    // names weapon *types* ("Staff"), not item names, so that is what the
+    // equipped set contributes.
+    if parsed.weapons.is_empty() {
+        for set in &current.weapons {
+            let main = set
+                .main_hand
+                .as_ref()
+                .map(|w| w.weapon_type.as_str())
+                .unwrap_or_default();
+            if main.is_empty() {
+                continue;
+            }
+            match set.off_hand.as_ref().map(|w| w.weapon_type.as_str()) {
+                Some(off) if !off.is_empty() => {
+                    parsed.weapons.push(format!("{}: {main} / {off}", set.label));
+                }
+                _ => parsed.weapons.push(format!("{}: {main}", set.label)),
+            }
+        }
+    }
+    if parsed.sigils.is_empty() {
+        parsed.sigils = current
+            .weapons
+            .iter()
+            .flat_map(|set| set.sigils.iter())
+            .map(|s| s.name.clone())
+            .collect();
+    }
+    if parsed.relic.is_empty() {
+        if let Some(relic) = &current.relic {
+            parsed.relic = relic.name.clone();
+        }
+    }
 }
 
 /// Keep the ranger's equipped pets on a plated suggestion. Search never
@@ -2191,6 +2231,79 @@ mod tests {
             .iter()
             .any(|t| t == "Arcane Precision"));
         assert!(parsed.skills.iter().any(|s| s.contains("Arcane Blast")));
+    }
+
+    /// A plate that changes nothing about the weapons omits them, and the
+    /// player then sees an empty WEAPONS column with no sigils (measured
+    /// in-game 2026-09-05 on 1.11.29, heal Scourge). Weapon *types*, not
+    /// item names: that is what the plate speaks.
+    #[test]
+    fn fill_holes_from_loadout_keeps_equipped_weapons_sigils_and_relic() {
+        let weapon = |ty: &str| gw2_core::types::WeaponInfo {
+            name: format!("Minstrel's {ty} of Water"),
+            weapon_type: ty.into(),
+            id: 0,
+        };
+        let current = gw2_core::types::ResolvedBuild {
+            specializations: vec![gw2_core::types::ResolvedSpec {
+                id: 5,
+                name: "Blood Magic".into(),
+                elite: false,
+                traits_selected: vec![],
+                traits_available: vec![],
+            }],
+            weapons: vec![
+                gw2_core::types::ResolvedWeaponSet {
+                    label: "Set 1".into(),
+                    stat_prefix: "Minstrel's".into(),
+                    main_hand: Some(weapon("Scepter")),
+                    off_hand: Some(weapon("Focus")),
+                    sigils: vec![gw2_core::types::UpgradeInfo {
+                        id: 1,
+                        name: "Superior Sigil of Concentration".into(),
+                    }],
+                },
+                gw2_core::types::ResolvedWeaponSet {
+                    label: "Set 2".into(),
+                    stat_prefix: "Minstrel's".into(),
+                    main_hand: Some(weapon("Staff")),
+                    off_hand: None,
+                    sigils: vec![gw2_core::types::UpgradeInfo {
+                        id: 2,
+                        name: "Superior Sigil of Transference".into(),
+                    }],
+                },
+            ],
+            relic: Some(gw2_core::types::ResolvedRelic {
+                id: 3,
+                name: "Relic of the Water".into(),
+                description: String::new(),
+            }),
+            ..Default::default()
+        };
+        let mut parsed = gw2_optimizer::prompts::GeminiBuildResponse {
+            specializations: vec![("Blood Magic".into(), vec!["Blood Renewal".into()])],
+            ..Default::default()
+        };
+        fill_holes_from_loadout(&mut parsed, &current);
+        assert_eq!(
+            parsed.weapons,
+            vec!["Set 1: Scepter / Focus".to_string(), "Set 2: Staff".to_string()],
+            "a two-hander must not grow an off-hand"
+        );
+        assert_eq!(parsed.sigils.len(), 2, "sigils ride the equipped weapons");
+        assert_eq!(parsed.relic, "Relic of the Water");
+
+        // A plate that named its own weapons keeps them.
+        let mut chosen = gw2_optimizer::prompts::GeminiBuildResponse {
+            specializations: vec![("Blood Magic".into(), vec!["Blood Renewal".into()])],
+            weapons: vec!["Set 1: Greatsword".into()],
+            relic: "Relic of Durability".into(),
+            ..Default::default()
+        };
+        fill_holes_from_loadout(&mut chosen, &current);
+        assert_eq!(chosen.weapons, vec!["Set 1: Greatsword".to_string()]);
+        assert_eq!(chosen.relic, "Relic of Durability");
     }
 
     #[test]
