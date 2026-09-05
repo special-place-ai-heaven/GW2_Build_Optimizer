@@ -45,3 +45,9 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W025: `exec_simulate_rotation` no longer invents 2000 power / 1000 condition damage. Unresolved prefixes return `{"error":"No stat sheet for ..."}` with no `dps` object.
 - The duration-clamp tool test now seeds a priceable Berserker's prefix so it still exercises the simulator after the fallback was removed.
 - Green: `simulate_rotation_errors_when_prefix_cannot_be_priced`, `duration_seconds_is_clamped`.
+
+## Sprint 7 — W035 simulate_rotation uses resolved SimParams
+
+- W035: the LLM `simulate_rotation` tool builds `SimParams` from base+prefix (precision, ferocity, mode fury, duration mults, derived health/armor) and calls `simulate_with`. `simulate` / `simulate_against` are test-only wrappers around `SimParams::basic`.
+- Green: `simulate_rotation_uses_resolved_crit_not_basic_defaults` (Berserker strike ≠ `basic`, equals `simulate_with`); `duration_seconds_is_clamped`; `simulate_rotation_errors_when_prefix_cannot_be_priced`; 34 simulator unit tests.
+- No version bump: tool-path correctness, not a player-facing DLL. Other agent stays on Choya/referee.

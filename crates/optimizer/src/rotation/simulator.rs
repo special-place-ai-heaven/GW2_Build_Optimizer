@@ -217,6 +217,9 @@ pub struct SimParams {
 }
 
 impl SimParams {
+    /// Test convenience: PvE, precision/ferocity 0 (skips crit), fury 25,
+    /// 20k health / 2k armor. Shipping paths must build a full [`SimParams`]
+    /// and call [`simulate_with`].
     pub fn basic(power: f64, condition_damage: f64, weapon_strength: f64) -> Self {
         Self {
             power,
@@ -240,6 +243,7 @@ impl SimParams {
     }
 }
 
+#[cfg(test)]
 /// Run a rotation simulation with the given skills and parameters.
 ///
 /// Skills should have their `weapon_set` field set:
@@ -264,6 +268,7 @@ pub fn simulate(
     )
 }
 
+#[cfg(test)]
 /// Like [`simulate`], but the dummy can start with Protection/Stability.
 pub fn simulate_against(
     skills: &[RotationSkill],

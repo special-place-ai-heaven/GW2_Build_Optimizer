@@ -19,7 +19,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 5 | [W001](#w001) | S2/confirmed | US1 | verified-scoped | `.github/workflows/ci.yml:17` |
 | 6 | [B001](#b001) | S2/observed | US2 | verified-scoped | `crates/addon/src/ui/main_view/optimization.rs:1050` |
 | 7 | [W025](#w025) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/gemini_tools.rs:1529` |
-| 8 | [W035](#w035) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/simulator.rs:220` |
+| 8 | [W035](#w035) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/simulator.rs:220` |
 | 9 | [W019](#w019) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/objective_profiles.rs:86` |
 | 10 | [W044](#w044) | S2/confirmed | US2 | planned | `data/normalized_effects/2026-01-13/pve.json:2` |
 | 11 | [W013](#w013) | S2/confirmed | US2 | planned | `crates/optimizer/src/balance.rs:11` |
@@ -383,7 +383,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W035
 
-- Task: T010 [US2]. Status: **planned**.
+- Task: T010 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/rotation/simulator.rs:220`.
 - Dependencies: W025.
 
@@ -391,9 +391,9 @@ Claim: `SimParams::basic` is a constructor whose defaults are documented as test
 
 Remediation decision: Build SimParams from resolved stats and balance mode in the tool and call simulate_with; restrict the basic test convenience to actual test consumers.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `exec_simulate_rotation` now adds base+prefix into `rotation_sim_params` (precision, ferocity, fury-for-mode, duration mults, derived health/armor) and calls `simulate_with`. `simulate` / `simulate_against` are `#[cfg(test)]`. `SimParams::basic` stays pub for integration tests (`math_permutations`, `wvw_timeline`). `simulate_rotation_uses_resolved_crit_not_basic_defaults` proves a Berserker strike skill differs from `simulate()`/`basic` and matches `simulate_with` on the resolved params.
 
-Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
+Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers. In-game: Choya `simulate_rotation` on a precision prefix should report higher strike than the old no-crit path.
 
 ### W019
 
