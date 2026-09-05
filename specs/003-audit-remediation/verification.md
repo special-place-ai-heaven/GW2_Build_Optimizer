@@ -14,3 +14,14 @@ Commit: 0496b0b. Verified 273 unique tasks, 268 unique finding entries; git diff
 - Limitation: a failed history load intentionally disables history writes until addon reload. Repair/recover the file before reloading; in-session new feedback state is not persisted while refusal is active.
 - Workspace Clippy remains blocked by W001's pre-existing diagnostics; in-game acceptance and release build remain pending. These are scoped verified remedies, not campaign completion.
 - Other agent owns concurrent Cargo version/lockfile and LLM/chat/scraper changes; they are excluded from this sprint commit.
+
+## Sprint 3 — W006/W002 Lock All bounds and reserved-address guard
+
+Committed as 1f85f27 by the other agent's session partner after that session hit its quota mid-sprint; the code and its tests were authored there, this entry records only what was independently checked before committing.
+
+- W006: the Lock All spec/trait mutation moved into `lock_current_specs`, bounded by `locks.specs.len()`. Regression covers four input specs against a three-slot array and a specialization whose `major_traits` is not nine long.
+- W002: `news_art::url_host_is_reserved` and `normalized_host` now serve news stills, station logos and the stream connect. `player::stream_host_reserved` and `logos::host_resolves_reserved` both delegate; the duplicated bracket/parse/resolve blocks are gone.
+- Additional finding inside W002's remedy: `ip_is_reserved` did not unwrap IPv4-mapped IPv6, so `::ffff:127.0.0.1` answered false to `Ipv6Addr::is_loopback` and passed both guards. It now checks `to_ipv4_mapped` first, covered by `stream_guard_rejects_reserved_ipv6_literals` and `dns_screen_rejects_reserved_literals_and_garbage`.
+- Green: `cargo test --workspace --no-fail-fast` at 1f85f27, all suites pass. Two wall-clock tests flake under parallel load and pass in isolation: `gw2-api client::tests::fetch_bytes_rejects_a_body_over_the_icon_cap` and `gw2-optimizer scraper::tests::scrape_guildjen_aborts_at_inner_loop_when_cancelled` (500 ms budget, mostly reqwest client construction; predates this campaign at d88cb32). Neither is a regression; the scraper one is an open flaky-test finding for this campaign.
+- `cargo check` clean. Formatting left alone: the tree carries pre-existing `cargo fmt` drift across files outside this sprint, and reformatting them would bury the diff.
+- Workspace Clippy still blocked by W001. In-game acceptance pending: the release build ships as v1.11.29 for the player to exercise.

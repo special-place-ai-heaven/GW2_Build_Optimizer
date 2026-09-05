@@ -299,7 +299,7 @@ Acceptance: Demonstrate the invalid-input or failed-I/O path is safe, the normal
 
 ### W006
 
-- Task: T004 [US1]. Status: **planned**.
+- Task: T004 [US1]. Status: **verified-scoped**; workspace/in-game gates pending.
 - Audit: S2, confirmed; location: `crates/addon/src/ui/main_view/lock_panel.rs:686`.
 - Dependencies: story entry gate.
 
@@ -313,7 +313,7 @@ Acceptance: Demonstrate the invalid-input or failed-I/O path is safe, the normal
 
 ### W002
 
-- Task: T005 [US1]. Status: **planned**.
+- Task: T005 [US1]. Status: **verified-scoped**; workspace/in-game gates pending.
 - Audit: S2, confirmed; location: `crates/addon/src/radio/player.rs:1077`.
 - Dependencies: story entry gate.
 

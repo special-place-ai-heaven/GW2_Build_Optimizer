@@ -2,6 +2,39 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.11.29 - 2026-09-05
+
+### Choya
+
+- When Choya's build is sent back for a second try, it is now told what to change, not just what failed. The refusal used to be the referee's own note - "SustainRecovery (survived=true, health=44%, margin=-566/s, repeatable=false)" - which is true and tells a model nothing about which half of the build to touch, on the one retry it gets. Seen in-game 2026-09-05 asking for a heal build that stops dying first: the first plate was refused for exactly that, and the second never landed. Each gate now carries its remedy - raise sustain, add cleanse, add a stunbreak, add a disengage, raise effective health, strip boons first, raise damage, add an interrupt, cover the chain, or stop overspending the profession resource.
+- A failed chat request now records what the provider actually said. The error shown in the bubble is a category ("Request timed out. Try a larger/faster model."), and the provider's own message was thrown away before anything logged it, so an in-game timeout left no trace of which request, how long, or why. The raw error is written to the Nexus log first.
+
+### Overlay
+
+- Lock All no longer crashes the overlay. It wrote into a three-slot array using a counter taken straight from the character's build tab, and nothing on that path - neither the API response nor the on-disk cache - is clamped to three, so a tab resolving four or more specializations panicked out of bounds inside the render callback.
+
+### Radio
+
+- The station guard now catches every form of a local address. It read the URL host straight into an IP parse, so an IPv6 literal arrived with its brackets ("[::1]"), failed to parse, and fell through to a resolver-dependent lookup of that bracketed text - the exact trap the station-logo screen documented and defended against, in the one copy that never got the fix. Both now use one guard, shared with news images.
+- That guard also missed IPv4-mapped IPv6: `::ffff:127.0.0.1` is loopback, but answers no when asked directly, so it walked through both the stream and favicon screens. It is now unwrapped before the check.
+
+## 1.11.28 - 2026-09-05
+
+### Choya
+
+- Google models keep their train of thought across a tool loop. A tool loop is one continuous thought interrupted by lookups, and the reasoning blocks a model produces have to come back to it on the next turn, in the order it produced them; the addon dropped them. Gemini 3 refuses to continue a loop whose blocks are missing, and 1.11.27 made that the normal case by always sending tools and raising the round budget from three to eight.
+- Choya stops thinking for minutes at a time. The thinking budget was sent as a token cap, which Gemini 3 does not take - those models want a thinking level, and a raw token budget is remapped to whatever level Google picks. It is now sent as a level. On models that already worked the setting is unchanged: it is the same half of the completion budget the old cap spelled out by hand.
+- A model that cannot produce a usable tool call is now told to stop calling tools before being asked again. It was only having the tool list withheld, while the prompt in the same breath went on ordering it to call `get_spec_traits` - the exact contradiction that already had to be countermanded when a loop runs out of rounds.
+- The prompt no longer asks for strict JSON and a tool call in the same turn, which Google documents as a cause of malformed function calls. A turn is now either tool calls or the finished build.
+
+### Benchmarks
+
+- Sync Benchmarks finds builds again. GuildJen moved: the profession was read out of a URL path segment the site no longer has, and the list of category pages was frozen while GuildJen keeps adding and retiring builds. Categories are now discovered from the builds hub, links are read only from each page's build table so a sidebar entry cannot file itself under the wrong game mode, and the profession comes from the elite specialization or core name in the address.
+
+### Feedback
+
+- A message you send the developer is no longer lost when the history file cannot be read. A failed load was treated as "no history yet", and the next write published that empty state over the real file. A failed load now refuses to publish for the rest of the session and says so, and every write goes through the same atomic replace the rest of the addon uses.
+
 ## 1.11.27 - 2026-09-05
 
 ### Choya
