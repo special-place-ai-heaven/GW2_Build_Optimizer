@@ -8,6 +8,14 @@ All notable changes to GW2 Build Optimizer are documented here.
 
 - Choya no longer composes a build from nothing. The chat advertised a `get_optimizer_results` tool and then handed it an empty list, so every call answered "No optimizer results available" and Choya reasoned from the player's message alone - while the deterministic optimizer could answer the same scenario, respecting the same locks, in about 30 milliseconds, with a build that already passes every viability check. Measured 2026-09-05 against a real character: WvW Roam Support with Scourge locked, the deterministic answer sits at 68% health and repeatable; the plate Choya composed blind that evening sat at 44% and could not repeat, so the referee refused it and the second attempt timed out. That worked answer is now in Choya's Context as a floor: match its survivability at least, then beat it on what the player actually asked for, and be able to say why if you depart from it.
 
+### Benchmarks
+
+- Sync Benchmarks now reaches nearly every profession instead of the first one or two. The build tables are grouped by profession, and the sync took the top 15 rows of each - so a 99-row WvW page bought Elementalist and part of Necromancer, and the other seven professions got no reference at all. Measured 2026-09-05: the store held Guardian, Mesmer, Revenant, Thief and Warrior, and a Necromancer looking at WvW was told "No benchmark data available" while the sync was working exactly as written. The 15 are now spread across professions round-robin, which covers eight of the nine on the live WvW page for the same number of requests, since the address already names the profession and choosing costs no fetch.
+
+### Overlay
+
+- The arrow in "Go to Settings > Sync Benchmarks", "Settings > Cache > Refresh Game Data" and the stale-data notice is no longer a question mark. Those strings used a typographic arrow, which is outside the glyph range the Latin overlay font is built with, so it reached the player as "?". Latin languages only - the CJK fonts carry it.
+
 ## 1.11.31 - 2026-09-05
 
 ### Choya
