@@ -19,11 +19,10 @@
 //!
 //! # Canonical-build smoke suite — one command, all three providers,
 //! # asserts the response validates against a real GameDb.
-//! # Also set GW2_OPTIMIZER_CACHE_DIR to a populated cache directory
-//! # (e.g. the addon's cache/ folder). Per-provider sections skip
-//! # independently when their API key env var is missing.
-//! GW2_OPTIMIZER_CACHE_DIR=~/AppData/Roaming/Guild\ Wars\ 2/addons/gw2_build_optimizer/cache \
-//!   GEMINI_API_KEY=... OPENAI_API_KEY=... ANTHROPIC_API_KEY=... \
+//! # The GameDb comes from the addon cache named by dev.cfg (copy
+//! # dev.cfg.example). Per-provider sections skip independently when their
+//! # API key env var is missing.
+//! GEMINI_API_KEY=... OPENAI_API_KEY=... ANTHROPIC_API_KEY=... \
 //!   cargo test -p gw2-optimizer --test live_llm -- --ignored --nocapture canonical_build_smoke
 //! ```
 
@@ -34,7 +33,6 @@ use gw2_optimizer::prompts::{new_build_prompt_with_tools, parse_gemini_build};
 use gw2_optimizer::scoring::OptimizationWeights;
 use gw2_optimizer::validation::validate_gemini_build;
 use serde_json::{json, Value};
-use std::path::PathBuf;
 use std::time::Instant;
 
 // ─── Helpers ───
@@ -403,13 +401,12 @@ fn test_create_client_factory_anthropic() {
 //
 // One command, all three providers: send the canonical new-build prompt
 // and assert the response parses and validates against a real GameDb.
-// Gated on GW2_OPTIMIZER_CACHE_DIR *and* each provider's API key env var.
+// Gated on the dev.cfg cache dir *and* each provider's API key env var.
 // Per-provider sections skip independently if a key is missing; the whole
 // test skips if the cache dir is absent.
 
 fn load_game_db_for_smoke() -> Option<GameDb> {
-    let dir = std::env::var("GW2_OPTIMIZER_CACHE_DIR").ok()?;
-    let cache = DataCache::new(PathBuf::from(dir));
+    let cache = DataCache::new(gw2_api::dev_config::cache_dir().ok()?);
     match GameDb::load(&cache) {
         Ok(db) => Some(db),
         Err(e) => {
@@ -478,8 +475,7 @@ fn run_canonical_build_smoke(client: &dyn LlmClient, db: &GameDb) {
 fn test_all_providers_canonical_build_smoke() {
     let Some(db) = load_game_db_for_smoke() else {
         eprintln!(
-            "[skip] set GW2_OPTIMIZER_CACHE_DIR to a populated cache dir \
-             (addon's cache/ folder works)"
+            "[skip] dev.cfg names no populated addon cache (see dev.cfg.example)"
         );
         return;
     };

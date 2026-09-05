@@ -78,6 +78,16 @@ impl OpenAiClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, LlmError> {
+        self.send_chat_capped(messages, tools, MAX_COMPLETION_TOKENS)
+    }
+
+    /// `send_chat` with an explicit completion budget (see `generate_brief`).
+    fn send_chat_capped(
+        &self,
+        messages: &[Message],
+        tools: Option<&[ToolDefinition]>,
+        max_tokens: u32,
+    ) -> Result<Message, LlmError> {
         let extra_headers: [(&str, String); 0] = [];
         let is_cancelled = super::cancel::is_cancelled;
         let core = ProviderCore {
@@ -90,7 +100,7 @@ impl OpenAiClient {
             label: "OpenAI",
             // Same ceiling as OpenRouter: reasoning models share this budget
             // between thinking and the answer.
-            max_tokens: MAX_COMPLETION_TOKENS,
+            max_tokens,
             // `reasoning` and `provider` are OpenRouter extensions.
             // `api.openai.com` rejects unknown top-level body arguments, so
             // sending either here is a 400 on every request (Claude F8).
@@ -225,6 +235,19 @@ impl LlmClient for OpenAiClient {
         }];
 
         let response = self.send_chat(&messages, None)?;
+        response
+            .content
+            .ok_or_else(|| LlmError::Parse("No response text from OpenAI".into()))
+    }
+
+    fn generate_brief(&self, prompt: &str, max_tokens: u32) -> Result<String, LlmError> {
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: Some(prompt.to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+        }];
+        let response = self.send_chat_capped(&messages, None, max_tokens)?;
         response
             .content
             .ok_or_else(|| LlmError::Parse("No response text from OpenAI".into()))

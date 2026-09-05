@@ -37,10 +37,15 @@ pub fn build_rotation_skills_for_context(
         .collect()
 }
 
-/// Enrich rotation skills with `RemovesCondition` effects, using NormalizedEffects data
-/// as the primary source and description text as a fallback heuristic.
+/// Enrich rotation skills with `RemovesCondition` effects: the cleanse registry
+/// (`data/cleanse_sources.json`) first, then NormalizedEffects data, then the
+/// description text as a fallback heuristic.
 ///
-/// Primary path: scan `ne_effects` for entries with `category == RemovesCondition`
+/// Registry path: `cleanse_sources::registry().skill(id)` decides for every id
+/// it knows; `gate_count_with(equipped_traits)` is the count (0 for ally-only
+/// sources and for traited cleanses whose trait the build does not run).
+///
+/// NormalizedEffects path: scan `ne_effects` for entries with `category == RemovesCondition`
 /// whose `source_id` matches a skill's `skill_id`. When found, add a
 /// `RemovesCondition` effect carrying the `conditions_removed` count from
 /// `status_operation.amount_value` (floored to u32, minimum 1).
@@ -55,6 +60,7 @@ pub fn enrich_with_cleanse(
     skills: &mut [RotationSkill],
     ne_effects: &[NormalizedEffect],
     db: &GameDb,
+    equipped_traits: &[u32],
 ) {
     use crate::data::quality::FactualValue;
 
@@ -85,8 +91,24 @@ pub fn enrich_with_cleanse(
             continue;
         }
 
+        // The registry (data/cleanse_sources.json) is authoritative for every
+        // id it knows, including "known, and it only cleanses allies".
+        let reg = crate::data::cleanse_sources::registry();
+        if let Some(src) = reg.skill(skill.skill_id) {
+            let count = src.gate_count_with(equipped_traits);
+            if count > 0 {
+                skill.effects.push(SkillEffect::RemovesCondition {
+                    conditions_removed: count,
+                });
+            }
+            continue;
+        }
+        if reg.knows_skill(skill.skill_id) {
+            continue; // read by a cataloguer and judged not to cleanse
+        }
+
         if let Some(&count) = ne_cleanse.get(&skill.skill_id) {
-            // Primary: NormalizedEffects data matched by source_id.
+            // NormalizedEffects data matched by source_id.
             skill.effects.push(SkillEffect::RemovesCondition {
                 conditions_removed: count,
             });
@@ -221,6 +243,28 @@ pub fn tag_weapon_set(skills: &mut [RotationSkill], weapon_set: u8) {
             skill.weapon_set = weapon_set;
         }
     }
+}
+
+/// Join the two tagged weapon sets. A skill carried by both sets (an off-hand
+/// dagger on each set) shares one cooldown in game, so it becomes ONE skill
+/// usable on either set (`weapon_set` 0) instead of two independent copies.
+/// Measured 2026-09-05: a Necromancer with Dagger/Dagger + Scepter/Dagger
+/// simulated three Deathly Swarms, tripling its damage and cleanse credit.
+pub fn merge_weapon_sets(
+    mut set1: Vec<RotationSkill>,
+    set2: Vec<RotationSkill>,
+) -> Vec<RotationSkill> {
+    let set1_ids: Vec<u32> = set1.iter().map(|s| s.skill_id).collect();
+    let (shared, own): (Vec<_>, Vec<_>) = set2
+        .into_iter()
+        .partition(|s2| set1_ids.contains(&s2.skill_id));
+    for s1 in set1.iter_mut() {
+        if shared.iter().any(|s2| s2.skill_id == s1.skill_id) {
+            s1.weapon_set = 0;
+        }
+    }
+    set1.extend(own);
+    set1
 }
 
 /// Resolve the F1-F5 mechanic bar for the equipped specialization set.
@@ -381,6 +425,10 @@ fn extract_effects_for_context(
                         interval_ms,
                         window_ms,
                     });
+                } else if crate::data::cleanse_sources::registry().knows_skill(skill_id) {
+                    // The registry decides this skill's cleanse in
+                    // `enrich_with_cleanse`; a fact-derived effect here would
+                    // pre-empt it through that function's idempotency guard.
                 } else if let Some(conditions_removed) =
                     condition_cleanse_count_from_text(text, *value)
                 {
@@ -1299,11 +1347,13 @@ mod tests {
     #[test]
     fn test_enrich_with_cleanse_ne_primary() {
         // NormalizedEffects has a RemovesCondition entry → should add effect.
-        let mut skills = vec![cleanse_test_skill(9158)];
-        let ne = vec![cleanse_ne(9158, 3.0)];
+        // (990_001: an id the cleanse registry does not know; 9158 Signet of
+        // Resolve is in the table and the table decides before NE data.)
+        let mut skills = vec![cleanse_test_skill(990_001)];
+        let ne = vec![cleanse_ne(990_001, 3.0)];
         let db = empty_db();
 
-        enrich_with_cleanse(&mut skills, &ne, &db);
+        enrich_with_cleanse(&mut skills, &ne, &db, &[]);
 
         let cleanse_effects: Vec<_> = skills[0]
             .effects
@@ -1333,7 +1383,7 @@ mod tests {
         db.skills.insert(500, skill_entry);
 
         let mut skills = vec![cleanse_test_skill(500)];
-        enrich_with_cleanse(&mut skills, &[], &db);
+        enrich_with_cleanse(&mut skills, &[], &db, &[]);
 
         let has_cleanse = skills[0].effects.iter().any(|e| {
             matches!(
@@ -1349,6 +1399,49 @@ mod tests {
         );
     }
 
+    /// An off-hand dagger on both sets: Deathly Swarm is one skill with one
+    /// cooldown, usable on either set; the sets' own skills keep their tags.
+    #[test]
+    fn merge_weapon_sets_keeps_one_copy_of_a_shared_skill() {
+        let weapon = |id: u32, set: u8| RotationSkill {
+            skill_id: id,
+            name: format!("Skill {id}"),
+            slot: SkillSlot::Weapon4,
+            cast_time_ms: 500,
+            cooldown_ms: 16_000,
+            effects: vec![],
+            next_chain: None,
+            is_stunbreak: false,
+            weapon_set: set,
+        };
+        let set1 = vec![weapon(1, 1), weapon(10705, 1)];
+        let set2 = vec![weapon(10705, 2), weapon(2, 2)];
+        let merged = merge_weapon_sets(set1, set2);
+        let sets: Vec<(u32, u8)> = merged.iter().map(|s| (s.skill_id, s.weapon_set)).collect();
+        assert_eq!(sets, vec![(1, 1), (10705, 0), (2, 2)]);
+    }
+
+    /// The registry decides before any text: "Suffer!" (30670) has no
+    /// description in this fixture and still counts its two transfers, and a
+    /// Cleansing Ire burst counts only with the trait (1649) equipped.
+    #[test]
+    fn registry_decides_before_text_and_honours_required_traits() {
+        let db = empty_db();
+        let removed = |s: &RotationSkill| {
+            s.effects.iter().find_map(|e| match e {
+                SkillEffect::RemovesCondition { conditions_removed } => Some(*conditions_removed),
+                _ => None,
+            })
+        };
+        let mut skills = vec![cleanse_test_skill(30670), cleanse_test_skill(14422)];
+        enrich_with_cleanse(&mut skills, &[], &db, &[]);
+        assert_eq!(removed(&skills[0]), Some(2), "\"Suffer!\" transfers 1 + 1 additional");
+        assert_eq!(removed(&skills[1]), None, "Eviscerate without Cleansing Ire");
+        let mut traited = vec![cleanse_test_skill(14422)];
+        enrich_with_cleanse(&mut traited, &[], &db, &[1649]);
+        assert!(removed(&traited[0]).is_some(), "Eviscerate with Cleansing Ire");
+    }
+
     #[test]
     fn test_enrich_with_cleanse_no_match() {
         // No NE entry, no matching description → no cleanse effect added.
@@ -1358,7 +1451,7 @@ mod tests {
         db.skills.insert(999, skill_entry);
 
         let mut skills = vec![cleanse_test_skill(999)];
-        enrich_with_cleanse(&mut skills, &[], &db);
+        enrich_with_cleanse(&mut skills, &[], &db, &[]);
 
         let has_cleanse = skills[0]
             .effects
@@ -1374,8 +1467,8 @@ mod tests {
         let ne = vec![cleanse_ne(9158, 3.0)];
         let db = empty_db();
 
-        enrich_with_cleanse(&mut skills, &ne, &db);
-        enrich_with_cleanse(&mut skills, &ne, &db);
+        enrich_with_cleanse(&mut skills, &ne, &db, &[]);
+        enrich_with_cleanse(&mut skills, &ne, &db, &[]);
 
         let cleanse_count = skills[0]
             .effects
@@ -1399,7 +1492,7 @@ mod tests {
         ];
         let db = empty_db();
 
-        enrich_with_cleanse(&mut skills, &ne, &db);
+        enrich_with_cleanse(&mut skills, &ne, &db, &[]);
 
         let max_count = skills[0].effects.iter().find_map(|e| {
             if let SkillEffect::RemovesCondition { conditions_removed } = e {

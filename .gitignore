@@ -37,3 +37,6 @@ REVIEW-*.md
 REVIEW-BRIEF*.md
 REVIEW-CONSOLIDATION*.md
 REVIEW-FINDINGS*.md
+
+# Machine-local developer settings (see dev.cfg.example).
+/dev.cfg

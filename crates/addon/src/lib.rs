@@ -128,7 +128,7 @@ fn bootstrap_chrome(_ui: &Ui) {
 
 fn on_load() {
     load_guard(|| {
-        let Some(addon_dir) = get_addon_dir("gw2_build_optimizer") else {
+        let Some(addon_dir) = get_addon_dir(gw2_core::ADDON_DIR_NAME) else {
             log(
                 LogLevel::Warning,
                 "GW2 Build Optimizer",

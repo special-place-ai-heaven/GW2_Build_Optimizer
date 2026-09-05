@@ -5,6 +5,7 @@
 //! The norms are set so a well-built specialist lands near 1.0 on its axis.
 //! Run:
 //!   cargo run --release -p gw2-optimizer --example flow_calibration [PvE|WvW|PvP]
+//! Reads the cache directory from dev.cfg (copy dev.cfg.example).
 use std::time::Instant;
 
 use gw2_api::cache::DataCache;
@@ -28,7 +29,7 @@ const PROFESSIONS: [&str; 9] = [
 ];
 
 fn main() {
-    let cache = DataCache::new("C:/GAMES/Guild Wars 2/addons/gw2_build_optimizer/cache");
+    let cache = DataCache::new(gw2_api::dev_config::cache_dir_or_exit());
     let db = GameDb::load(&cache).expect("load real GameDb");
     let mode = match std::env::args().nth(1).as_deref() {
         Some("WvW") => GameMode::WvW,

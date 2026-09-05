@@ -616,7 +616,7 @@ fn cooldown_seconds_in_text(text: &str) -> Option<f64> {
 /// Defaults to 1 when the text only says "a condition".
 fn cleanse_count_in_text(text: &str) -> u32 {
     let lower = text.to_lowercase();
-    let verb = ["remov", "cleanse", "cure"]
+    let verb = ["remov", "cleanse", "cure", "purg", "transfer", "consum"]
         .iter()
         .filter_map(|v| lower.find(v))
         .min();
@@ -676,19 +676,31 @@ fn item_cleanse_rate(db: &GameDb, id: u32) -> f64 {
 /// measured stuck at 1.0/20s against a required 2.0 with no way up. Every
 /// profession runs through this; nothing here is class-specific.
 pub fn kit_cleanse_rate_from_gear(validated: &ValidatedBuild, db: &GameDb) -> f64 {
+    let reg = crate::data::cleanse_sources::registry();
+    // Registry first (data/cleanse_sources.json); tooltip text only for ids
+    // the registry does not know.
+    let item_rate = |id: u32| match reg.item(id) {
+        Some(s) => s.rate_per_20s(),
+        None if reg.knows_item(id) => 0.0, // judged not to cleanse
+        None => item_cleanse_rate(db, id),
+    };
     let mut rate = 0.0;
     for id in validated.active_sigil_ids() {
-        rate += item_cleanse_rate(db, id);
+        rate += item_rate(id);
     }
     if let Some(r) = &validated.rune {
-        rate += item_cleanse_rate(db, r.id);
+        rate += item_rate(r.id);
     }
     if let Some(r) = &validated.relic {
-        rate += item_cleanse_rate(db, r.id);
+        rate += item_rate(r.id);
     }
     for spec in &validated.specializations {
         for &id in spec.all_trait_ids.iter().chain(spec.trait_ids.iter()) {
-            if let Some(tr) = db.traits.get(&id) {
+            if let Some(src) = reg.trait_(id) {
+                rate += src.rate_per_20s();
+            } else if reg.knows_trait(id) {
+                // read by a cataloguer and judged not to cleanse
+            } else if let Some(tr) = db.traits.get(&id) {
                 let mut t = cleanse_rate_from_text(&tr.name);
                 if let Some(d) = tr.description.as_deref() {
                     t = t.max(cleanse_rate_from_text(d));
@@ -1186,6 +1198,21 @@ mod tests {
         assert_eq!(cleanse_count_in_text("Remove 2 conditions from allies"), 2);
         assert_eq!(cooldown_seconds_in_text("(Cooldown: 9 Seconds)"), Some(9.0));
         assert_eq!(cleanse_rate_from_text("Grants Might on hit"), 0.0);
+    }
+
+    /// The registry knows Superior Sigil of Cleansing (67340) even when the
+    /// item is not in the database: 3 conditions per swap, 9 s cooldown.
+    #[test]
+    fn gear_cleanse_rate_reads_the_registry_first() {
+        use super::kit_cleanse_rate_from_gear;
+        use crate::validation::ValidatedItem;
+        let db = GameDb::empty_for_tests();
+        let b = ValidatedBuild {
+            sigils: vec![ValidatedItem { id: 67340, name: "Cleansing".into() }],
+            ..Default::default()
+        };
+        let rate = kit_cleanse_rate_from_gear(&b, &db);
+        assert!((rate - 3.0 * 20.0 / 9.0).abs() < 1e-9, "got {rate}");
     }
 
     /// A gate failing on rate alone must flip to passed once gear covers the

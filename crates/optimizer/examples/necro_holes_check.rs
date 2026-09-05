@@ -1,6 +1,7 @@
 //! Reproduce: PvE Necromancer optimize hands back a build with empty utility
 //! and elite slots (seen in-game 2026-09-04 on 1.11.22). Run:
 //!   cargo run --release -p gw2-optimizer --example necro_holes_check
+//! Reads the cache directory from dev.cfg (copy dev.cfg.example).
 use gw2_api::cache::DataCache;
 use gw2_core::types::{BuildLocks, GameMode};
 use gw2_optimizer::balance::BalanceContext;
@@ -24,18 +25,60 @@ fn describe(v: &ValidatedBuild) -> String {
             .unwrap_or_else(|| "<EMPTY>".into())
     };
     let utils: Vec<String> = v.skills.utilities.iter().map(name).collect();
+    let hand = |h: &Option<String>| h.clone().unwrap_or_else(|| "-".into());
     format!(
-        "specs={} | heal={} | utils=[{}] (len {}) | elite={}",
+        "specs={} | heal={} | utils=[{}] (len {}) | elite={} | weapons={}/{} + {}/{}",
         specs.join("/"),
         name(&v.skills.heal),
         utils.join(", "),
         v.skills.utilities.len(),
-        name(&v.skills.elite)
+        name(&v.skills.elite),
+        hand(&v.weapons.set1.main_hand),
+        hand(&v.weapons.set1.off_hand),
+        hand(&v.weapons.set2.main_hand),
+        hand(&v.weapons.set2.off_hand),
     )
 }
 
+/// Every skill the rotation counts as a cleanse, with the count and cooldown
+/// the gate sees, so a CleanseRate note can be traced to its sources.
+fn print_cleanses(
+    v: &ValidatedBuild,
+    db: &GameDb,
+    prof: &str,
+    ctx: &BalanceContext,
+    scenario: &ScenarioSpec,
+) {
+    use gw2_optimizer::rotation::SkillEffect;
+    let (stats, _) = gw2_optimizer::engine::calculate_validated_stats(v, db, prof, ctx);
+    let Some(prepared) =
+        gw2_optimizer::engine::prepare_validated_rotation(v, db, &stats, Some(scenario))
+    else {
+        println!("       cleanses: (no rotation)");
+        return;
+    };
+    for s in &prepared.skills {
+        let removed: u32 = s
+            .effects
+            .iter()
+            .filter_map(|e| match e {
+                SkillEffect::RemovesCondition { conditions_removed } => Some(*conditions_removed),
+                _ => None,
+            })
+            .sum();
+        if removed > 0 {
+            println!(
+                "       cleanse {:<28} removes={} cooldown={}s",
+                s.name,
+                removed,
+                s.cooldown_ms as f64 / 1000.0
+            );
+        }
+    }
+}
+
 fn main() {
-    let cache = DataCache::new("C:/GAMES/Guild Wars 2/addons/gw2_build_optimizer/cache");
+    let cache = DataCache::new(gw2_api::dev_config::cache_dir_or_exit());
     let db = GameDb::load(&cache).expect("load real GameDb");
     let prof = "Necromancer";
     let weights = OptimizationWeights {
@@ -46,21 +89,34 @@ fn main() {
         sustain: 0.4,
         control: 0.6,
     };
-    let ctx = BalanceContext::new(GameMode::PvE);
+    // `WvW` argument reproduces the in-game Roam/Roamer run; default is PvE.
+    let wvw = std::env::args().nth(1).as_deref() == Some("WvW");
+    let mode = if wvw { GameMode::WvW } else { GameMode::PvE };
+    let weights = if wvw {
+        OptimizationWeights {
+            power: 0.5,
+            condition: 0.2,
+            boon_support: 0.1,
+            healing: 0.2,
+            sustain: 0.5,
+            control: 0.5,
+        }
+    } else {
+        weights
+    };
+    let tier = if wvw { CombatTier::Solo } else { CombatTier::Party };
+    let ctx = BalanceContext::new(mode.clone());
     let role = RoleObjective::WvWRoamer;
     let scenario = ScenarioSpec {
-        game_mode: GameMode::PvE,
-        combat_tier: CombatTier::Party,
+        game_mode: mode.clone(),
+        combat_tier: tier,
         combat_kind: role.combat_kind_for_weights(&weights),
         target_profile: TargetProfile::Single,
         optimization_target: OptimizationTarget {
-            label: "PvE".into(),
+            label: mode.label().to_string(),
         },
         patch_id: Some(ctx.patch_id.clone()),
-        objective_profile_id: Some(
-            role.profile_id_for(&GameMode::PvE, CombatTier::Party)
-                .to_string(),
-        ),
+        objective_profile_id: Some(role.profile_id_for(&mode, tier).to_string()),
     };
     let locks = BuildLocks::default();
     let prefix = gw2_optimizer::scoring::select_gear_prefix(&weights).primary;
@@ -78,6 +134,10 @@ fn main() {
     .expect("seed");
     let seed_rep = referee::evaluate_validated_build(&seed.validated, &db, prof, &weights, &ctx, &scenario);
     println!("SEED   {}\n       rank={:?}", describe(&seed.validated), referee::search_rank(&seed_rep));
+    for g in &seed_rep.viability.gates {
+        println!("       gate {:?} passed={} {}", g.gate, g.passed, g.note);
+    }
+    print_cleanses(&seed.validated, &db, prof, &ctx, &scenario);
 
     let result = search_v2::optimize_v2_search(
         &db,
@@ -97,6 +157,13 @@ fn main() {
     .expect("search");
     let rep = referee::evaluate_validated_build(&result, &db, prof, &weights, &ctx, &scenario);
     println!("RESULT {}\n       rank={:?}", describe(&result), referee::search_rank(&rep));
+    for g in &rep.viability.gates {
+        println!("       gate {:?} passed={} {}", g.gate, g.passed, g.note);
+    }
+    print_cleanses(&result, &db, prof, &ctx, &scenario);
+    if wvw {
+        return;
+    }
 
     // Does filling a hole move the rank at all?
     let equipped: Vec<u32> = result.specializations.iter().map(|s| s.spec_id).collect();

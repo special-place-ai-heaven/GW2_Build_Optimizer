@@ -1183,6 +1183,14 @@ pub(crate) fn skill_has_cc_answer(skill: &Skill) -> bool {
 }
 
 pub(crate) fn skill_cleanse_count(skill: &Skill) -> u32 {
+    let reg = crate::data::cleanse_sources::registry();
+    if let Some(src) = reg.skill(skill.id) {
+        // No trait context here: a cleanse that needs a trait counts as none.
+        return src.gate_count_with(&[]);
+    }
+    if reg.knows_skill(skill.id) {
+        return 0; // read by a cataloguer and judged not to cleanse
+    }
     let fact_count: u32 = skill
         .facts
         .iter()
@@ -2042,7 +2050,7 @@ pub(crate) mod runtime_diagnostics_tests {
                 None,
             ),
             make_utility_skill(
-                9_101,
+                909_101,
                 "Stunbreak Utility",
                 vec![Fact::StunBreak {
                     text: Some("Breaks Stun".into()),
@@ -2052,7 +2060,7 @@ pub(crate) mod runtime_diagnostics_tests {
                 None,
             ),
             make_utility_skill(
-                9_102,
+                909_102,
                 "Stability Utility",
                 vec![Fact::Buff {
                     text: Some("Apply Buff/Condition".into()),
@@ -2065,7 +2073,7 @@ pub(crate) mod runtime_diagnostics_tests {
                 None,
             ),
             make_utility_skill(
-                9_103,
+                909_103,
                 "Cleanse Utility",
                 vec![
                     Fact::Number {
@@ -2111,9 +2119,9 @@ pub(crate) mod runtime_diagnostics_tests {
             .filter_map(|slot| slot.as_ref().map(|(id, _)| *id))
             .collect();
 
-        assert!(selected_utilities.contains(&9_101), "missing stunbreak");
-        assert!(selected_utilities.contains(&9_102), "missing stability");
-        assert!(selected_utilities.contains(&9_103), "missing cleanse");
+        assert!(selected_utilities.contains(&909_101), "missing stunbreak");
+        assert!(selected_utilities.contains(&909_102), "missing stability");
+        assert!(selected_utilities.contains(&909_103), "missing cleanse");
 
         let scenario = ScenarioSpec::from_balance_context(&ctx).with_combat_tier(CombatTier::Squad);
         let report = crate::referee::evaluate_validated_build(

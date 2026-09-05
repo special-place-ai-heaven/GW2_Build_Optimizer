@@ -145,6 +145,16 @@ pub trait LlmClient: Send + Sync {
     /// Simple text generation (no caching, no tools).
     fn generate(&self, prompt: &str) -> Result<String, LlmError>;
 
+    /// One short answer with a hard completion cap and no reasoning budget:
+    /// the Optimize advisor (three SWAP lines) and the build explanation
+    /// (200 words). Under the 64k/32k Choya ceilings a thinking model routed
+    /// through OpenRouter took minutes for either, and Optimize looked hung
+    /// (2026-09-05). Providers without a per-call cap fall back to `generate`.
+    fn generate_brief(&self, prompt: &str, max_tokens: u32) -> Result<String, LlmError> {
+        let _ = max_tokens;
+        self.generate(prompt)
+    }
+
     /// Text generation with response caching (same prompt within TTL returns cached result).
     fn generate_cached(&self, prompt: &str) -> Result<String, LlmError>;
 

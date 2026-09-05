@@ -78,9 +78,64 @@ pub(crate) fn normalize_sigil_family(name: &str) -> String {
 /// remove/cleanse/cure verb. Used by rotation analysis and the synergy
 /// pipeline to detect cleanse coverage.
 pub(crate) fn text_describes_condition_cleanse(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    lower.contains("condit")
-        && (lower.contains("remov") || lower.contains("cleanse") || lower.contains("cure"))
+    // ASCII-only lowercase copy so byte windows never split a multibyte char.
+    let lower: String = text
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii() { c } else { ' ' })
+        .collect();
+    if !lower.contains("condit") {
+        return false;
+    }
+    // Every verb the game uses for getting a condition OFF the caster or an
+    // ally, each within a short window of "condit" so "condition damage ...
+    // transference" (Chaotic Transference) does not read as a cleanse:
+    // remove / cleanse / cure / purge it, transfer or send it to a foe,
+    // consume it (Consume Conditions, Spectral Walk), convert it INTO a boon
+    // (Well of Power), but not a boon into a condition (Corrupt Boon).
+    const WINDOW: usize = 48;
+    let bytes = lower.as_bytes();
+    let at_word_start = |i: usize| i == 0 || !bytes[i - 1].is_ascii_alphabetic();
+    let near_condit = |i: usize, len: usize| {
+        let lo = i.saturating_sub(WINDOW);
+        let hi = (i + len + WINDOW).min(lower.len());
+        lower[lo..hi].contains("condit")
+    };
+    for verb in ["remov", "cleanse", "cure", "purg", "transfer", "consum", "send", "sent"] {
+        for (i, _) in lower.match_indices(verb) {
+            if !at_word_start(i) || !near_condit(i, verb.len()) {
+                continue;
+            }
+            // "transference" is a stat trait, not a transfer.
+            if verb == "transfer" && bytes.get(i + verb.len()) == Some(&b'e') {
+                continue;
+            }
+            return true;
+        }
+    }
+    for (i, _) in lower.match_indices("convert") {
+        if !at_word_start(i) {
+            continue;
+        }
+        let before = &lower[i.saturating_sub(WINDOW)..i];
+        let after = &lower[i..(i + WINDOW).min(lower.len())];
+        if before.contains("boon") {
+            continue; // "Boons Converted to Conditions"
+        }
+        let condit_after = after.find("condit");
+        let boon_after = after.find("boon");
+        let cleanse = match (condit_after, boon_after) {
+            (Some(c), Some(b)) => c < b, // "convert conditions into boons", not the reverse
+            (Some(_), None) => true,     // "convert conditions into life force"
+            // "Conditions Converted to Boons": the condition sits before the verb.
+            (None, Some(_)) => before.contains("condit"),
+            (None, None) => false,
+        };
+        if cleanse {
+            return true;
+        }
+    }
+    false
 }
 
 /// Heuristic: skill text grants Stability (not "instability").
@@ -300,6 +355,45 @@ mod tests {
         assert!(!text_describes_condition_cleanse(
             "Conditions you apply last longer"
         ));
+    }
+
+    /// Necromancer, Revenant and Engineer cleanse by transferring, sending,
+    /// consuming and converting; a WvW Reaper with "Suffer!" was judged to
+    /// have no cleanse at all (2026-09-05). Boon corruption is the inverse.
+    #[test]
+    fn condition_cleanse_knows_every_verb_the_game_uses() {
+        assert!(text_describes_condition_cleanse("Conditions Transferred"));
+        assert!(text_describes_condition_cleanse(
+            "Transfer conditions to each foe you strike."
+        ));
+        assert!(text_describes_condition_cleanse("Conditions Sent"));
+        assert!(text_describes_condition_cleanse(
+            "Feast on your conditions, gaining health for each one consumed."
+        ));
+        assert!(text_describes_condition_cleanse(
+            "become spectral, consuming conditions for life force"
+        ));
+        assert!(text_describes_condition_cleanse("Conditions Converted to Boons"));
+        assert!(text_describes_condition_cleanse("Convert conditions into boons."));
+        assert!(text_describes_condition_cleanse("Purge conditions from allies."));
+        // Not cleanses.
+        assert!(!text_describes_condition_cleanse(
+            "Corrupt boons on your foe, converting their boons into conditions."
+        ));
+        assert!(!text_describes_condition_cleanse("Boons Converted to Conditions"));
+        assert!(!text_describes_condition_cleanse(
+            "Gain condition damage based on a percentage of your toughness. (Chaotic Transference)"
+        ));
+        assert!(!text_describes_condition_cleanse(
+            "Conditions present on the target deal more damage."
+        ));
+        assert!(!text_describes_condition_cleanse(
+            "Secure the area; conditions last longer."
+        ));
+        assert!(
+            !text_describes_condition_cleanse("Übermächtige Zustände"),
+            "non-ASCII is safe"
+        );
     }
 
     #[test]

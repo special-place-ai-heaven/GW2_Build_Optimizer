@@ -958,7 +958,9 @@ impl SimState {
                 let casts_in_20s = 20.0 / cooldown_s;
                 Some(conditions_removed as f64 * casts_in_20s)
             })
-            .sum();
+            // Not `.sum()`: the empty f64 sum is -0.0 and the gate note
+            // printed "rate=-0.0/20s" for a kit with no cleanse at all.
+            .fold(0.0, |acc, r| acc + r);
 
         let healing_per_second = self.total_healing / duration_secs;
         let control_uptime = self.control_ms / self.duration_ms as f64;
@@ -1978,6 +1980,10 @@ mod tests {
         let skills = vec![auto_attack()];
         let result = simulate(&skills, 5000, 2000.0, 0.0, 1100.0);
         assert_eq!(result.cleanse_count, 0);
+        assert!(
+            result.cleanse_rate_per_20s.is_sign_positive(),
+            "an empty kit reports 0.0, never -0.0"
+        );
         assert_eq!(result.cleanse_rate_per_20s, 0.0);
     }
 
