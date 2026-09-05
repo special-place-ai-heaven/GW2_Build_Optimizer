@@ -27,7 +27,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 13 | [W016](#w016) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/data/mod.rs:137` |
 | 14 | [W039](#w039) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:1389` |
 | 15 | [W038](#w038) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:861` |
-| 16 | [W008](#w008) | S2/confirmed | US2 | planned | `crates/addon/src/ui/main_view/optimization.rs:714` |
+| 16 | [W008](#w008) | S2/confirmed | US2 | verified-scoped | `crates/addon/src/ui/main_view/optimization.rs:714` |
 | 17 | [W004](#w004) | S2/confirmed | US2 | planned | `crates/addon/src/state.rs:898` |
 | 18 | [W009](#w009) | S2/confirmed | US2 | planned | `crates/addon/src/ui/main_view/tabs/settings.rs:60` |
 | 19 | [W082](#w082) | S3/confirmed | US2 | planned | `crates/addon/src/ui/main_view/tabs/saveload.rs:509` |
@@ -495,7 +495,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W008
 
-- Task: T018 [US2]. Status: **planned**.
+- Task: T018 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/addon/src/ui/main_view/optimization.rs:714`.
 - Dependencies: story entry gate.
 
@@ -503,9 +503,9 @@ Claim: Three independent parsers exist for the same ad-hoc "Heal: / Utils: / Uti
 
 Remediation decision: Give `BuildSuggestion` typed fields (`heal: Option<SkillRef>`, `utilities: [Option<SkillRef>; 3]`, `elite`, `pets`, `stances`) and format the display strings from those at render time; delete all three parsers. Short of that, move one parser into `gear_diff` and have the other two call it. The verbatim-duplicated `strip_label_ci` helper (optimization.rs:880, gear_diff.rs:20, gear_diff.rs:61) goes with it.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Took the ledger short path (one parser, not typed `BuildSuggestion` fields — those live on dirty `comparison.rs`). `parse_suggestion_skills` now splits `Utils:` / `Utility:` and keeps Pets/Stances/unlabeled. `parse_skill_names`, `skill_selection_from_suggestion`, and `pet_selection_from_suggestion` call it. One `strip_label_ci` in `gear_diff`. `fill_holes_from_loadout` untouched. `test_parse_skills_utils_comma_list_and_unlabeled` plus 5 existing gear_diff tests passed.
 
-Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
+Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers. Typed fields remain an upgrade if comparison.rs is free.
 
 ### W004
 
