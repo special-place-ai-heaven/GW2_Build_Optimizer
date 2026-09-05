@@ -251,6 +251,7 @@ fn paint_kit_slot(
     icon_url: Option<&str>,
     inspect: &str,
     icon_zoom: f32,
+    changed: bool,
 ) {
     let empty = value.is_empty();
     let fill = if empty {
@@ -277,6 +278,9 @@ fn paint_kit_slot(
         dl.add_rect(p, [p[0] + slot_w, p[1] + slot_h], border)
             .rounding(6.0)
             .build();
+        if changed {
+            crate::ui::theme::paint_changed_rect(&dl, p, [p[0] + slot_w, p[1] + slot_h], 6.0);
+        }
         let icon_p = [p[0] + pad, p[1] + ((slot_h - icon) * 0.5).round()];
         crate::ui::icons::paint_on_zoomed(
             &dl,
@@ -313,6 +317,25 @@ fn paint_kit_slot(
     }
 }
 
+/// The equipped bar, for marking which slots a suggestion moved. Utilities
+/// compare as a set: the same three in another order is not a change.
+#[derive(Default)]
+pub struct WornSkills {
+    pub heal: String,
+    pub utilities: Vec<String>,
+    pub elite: String,
+    pub pets: Vec<String>,
+}
+
+impl WornSkills {
+    fn moved(&self, was: &str, now: &str) -> bool {
+        !now.is_empty() && !was.eq_ignore_ascii_case(now)
+    }
+    fn moved_from_set(&self, set: &[String], now: &str) -> bool {
+        !now.is_empty() && !set.iter().any(|s| s.eq_ignore_ascii_case(now))
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_skill_bar(
     ui: &Ui,
@@ -323,6 +346,7 @@ fn render_skill_bar(
     utilities: &[String],
     elite: &str,
     id_suffix: &str,
+    worn: Option<&WornSkills>,
 ) {
     let (heal, utilities, elite) = match peek_stance_kit(db, stances) {
         Some((h, u, e)) => (h, u, e),
@@ -483,6 +507,7 @@ fn render_skill_bar(
                 db.and_then(|d| crate::ui::icons::pet_url(d, name)),
                 name,
                 crate::ui::icons::PET_ICON_ZOOM,
+                worn.is_some_and(|w| w.moved_from_set(&w.pets, name)),
             );
         }
         x += pet_w + div_w;
@@ -493,12 +518,12 @@ fn render_skill_bar(
         let inner_w = (util_w - group_pad * 2.0).max(1.0);
         let sw = slot_row_w(inner_w, 4, gap);
         let utils = [
-            (0usize, heal.as_str(), crate::ui::theme::HEAL_RIM),
-            (1, u1, crate::ui::theme::pal().gold_dim),
-            (2, u2, crate::ui::theme::pal().gold_dim),
-            (3, u3, crate::ui::theme::pal().gold_dim),
+            (0usize, heal.as_str(), crate::ui::theme::HEAL_RIM, true),
+            (1, u1, crate::ui::theme::pal().gold_dim, false),
+            (2, u2, crate::ui::theme::pal().gold_dim, false),
+            (3, u3, crate::ui::theme::pal().gold_dim, false),
         ];
-        for (i, value, rim) in utils {
+        for (i, value, rim, is_heal) in utils {
             paint_kit_slot(
                 ui,
                 db,
@@ -515,6 +540,13 @@ fn render_skill_bar(
                 db.and_then(|d| crate::ui::icons::skill_url_by_name(d, value)),
                 value,
                 1.0,
+                worn.is_some_and(|w| {
+                    if is_heal {
+                        w.moved(&w.heal, value)
+                    } else {
+                        w.moved_from_set(&w.utilities, value)
+                    }
+                }),
             );
         }
         x += util_w + div_w;
@@ -539,6 +571,7 @@ fn render_skill_bar(
             db.and_then(|d| crate::ui::icons::skill_url_by_name(d, elite.as_str())),
             elite.as_str(),
             1.0,
+            worn.is_some_and(|w| w.moved(&w.elite, elite.as_str())),
         );
     }
 
@@ -613,15 +646,32 @@ pub fn render_build_skills(
         &utils,
         elite,
         "cur",
+        None,
     );
 }
 
+/// `worn` is the equipped build; every slot that differs from it gets a green
+/// halo, so the player can see what Choya moved without diffing two screens
+/// by eye. `None` leaves the bar unmarked.
 pub fn render_suggestion_skills(
     ui: &Ui,
     suggestion: &super::super::comparison::BuildSuggestion,
     db: Option<&gw2_optimizer::gamedb::GameDb>,
+    worn: Option<&ResolvedBuild>,
 ) {
     let parsed = crate::ui::gear_diff::parse_suggestion_skills(&suggestion.skills);
+    let worn = worn.map(|b| WornSkills {
+        heal: b.skills.heal.as_ref().map(|s| s.name.clone()).unwrap_or_default(),
+        utilities: b
+            .skills
+            .utilities
+            .iter()
+            .flatten()
+            .map(|s| s.name.clone())
+            .collect(),
+        elite: b.skills.elite.as_ref().map(|s| s.name.clone()).unwrap_or_default(),
+        pets: b.pets.clone(),
+    });
     render_skill_bar(
         ui,
         db,
@@ -631,6 +681,7 @@ pub fn render_suggestion_skills(
         &parsed.utilities,
         &parsed.elite,
         "sug",
+        worn.as_ref(),
     );
 }
 
@@ -679,6 +730,27 @@ mod tests {
         let (heal, _, _) = stance_kit(&db, "Alliance").expect("alliance kit");
         assert_eq!(heal, "Selfish Spirit");
         assert!(stance_kit(&db, "Entity").is_none());
+    }
+
+    #[test]
+    fn worn_skills_marks_a_swap_but_not_a_reorder() {
+        let worn = super::WornSkills {
+            heal: "Well of Blood".into(),
+            utilities: vec![
+                "Trail of Anguish".into(),
+                "Well of Power".into(),
+                "Sand Swell".into(),
+            ],
+            elite: "Ghastly Breach".into(),
+            pets: vec![],
+        };
+        // The same three utilities in another order is not a change.
+        assert!(!worn.moved_from_set(&worn.utilities, "Sand Swell"));
+        assert!(worn.moved_from_set(&worn.utilities, "Corrosive Poison Cloud"));
+        assert!(!worn.moved(&worn.heal, "Well of Blood"));
+        assert!(worn.moved(&worn.heal, "Signet of Vampirism"));
+        // An empty slot is nothing to mark, not a change to something blank.
+        assert!(!worn.moved(&worn.elite, ""));
     }
 
     #[test]

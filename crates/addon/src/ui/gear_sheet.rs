@@ -158,6 +158,15 @@ pub enum GainTint {
     None,
     Up,
     Down,
+    /// Changed, but the build's combat result did not move. Still marked:
+    /// the player is being handed a build to equip, and "same as yours" and
+    /// "different, no measured gain" are not the same answer.
+    Flat,
+}
+
+/// Whether this slot differs from what the player is wearing.
+pub fn tint_changed(tint: GainTint) -> bool {
+    !matches!(tint, GainTint::None)
 }
 
 pub fn slot_label(api: &str) -> String {
@@ -193,8 +202,11 @@ pub fn combat_gain(cur: Option<&CombatMetrics>, opt: Option<&CombatMetrics>) -> 
 }
 
 pub fn slot_tint(changed: bool, viewing_optimized: bool, gain: i32) -> GainTint {
-    if !changed || gain == 0 {
+    if !changed {
         return GainTint::None;
+    }
+    if gain == 0 {
+        return GainTint::Flat;
     }
     let opt_is_better = gain > 0;
     if viewing_optimized == opt_is_better {
@@ -206,7 +218,7 @@ pub fn slot_tint(changed: bool, viewing_optimized: bool, gain: i32) -> GainTint 
 
 fn icon_tint(gain: GainTint) -> [f32; 4] {
     match gain {
-        GainTint::None => [1.0, 1.0, 1.0, 1.0],
+        GainTint::None | GainTint::Flat => [1.0, 1.0, 1.0, 1.0],
         GainTint::Up => [0.78, 1.0, 0.78, 1.0],
         GainTint::Down => [1.0, 0.78, 0.78, 1.0],
     }
@@ -423,6 +435,11 @@ fn render_suggestion_sheet(
     mut locks: Option<&mut BuildLocks>,
 ) {
     let rune_url = db.and_then(|d| icons::upgrade_url(d, &sug.rune));
+    let rune_changed = !sug.rune.is_empty()
+        && current
+            .rune
+            .as_ref()
+            .is_none_or(|r| !r.name.eq_ignore_ascii_case(&sug.rune));
     ui.columns(3, "##gear_cols", false);
     {
         section(ui, &t("section.armor"));
@@ -453,7 +470,7 @@ fn render_suggestion_sheet(
                 rune_url,
                 other.as_deref(),
                 slot_tint(
-                    cur_prefix != suggested && !suggested.is_empty(),
+                    rune_changed || (cur_prefix != suggested && !suggested.is_empty()),
                     viewing_optimized,
                     gain,
                 ),
@@ -680,6 +697,17 @@ fn row(
         }
         ui.same_line();
     }
+    // Green halo means Choya moved this slot; the gold lock ring means the
+    // player pinned it. Same shape, so the two read as one language, and an
+    // unmarked slot honestly means "same as what you are wearing".
+    if tint_changed(tint) {
+        theme::paint_changed_rect(
+            &ui.get_window_draw_list(),
+            p,
+            [p[0] + ICON, p[1] + ICON],
+            theme::ICON_ROUNDING,
+        );
+    }
     ui.set_cursor_screen_pos([p[0] + ICON + GAP, p[1]]);
     let (prefix_col, slot_col, name_col) = lock_text_colors(interactive, locked);
     if !prefix.is_empty() {
@@ -788,6 +816,17 @@ fn weapon_row(
         icons::draw(ui, url, ICON, itint);
         ui.same_line();
     }
+    // Green halo means Choya moved this slot; the gold lock ring means the
+    // player pinned it. Same shape, so the two read as one language, and an
+    // unmarked slot honestly means "same as what you are wearing".
+    if tint_changed(tint) {
+        theme::paint_changed_rect(
+            &ui.get_window_draw_list(),
+            p,
+            [p[0] + ICON, p[1] + ICON],
+            theme::ICON_ROUNDING,
+        );
+    }
     ui.set_cursor_screen_pos([p[0] + ICON + GAP, p[1]]);
     let (prefix_col, slot_col, _) = lock_text_colors(interactive, locked);
     if !prefix.is_empty() {
@@ -872,6 +911,12 @@ mod tests {
     #[test]
     fn tint_follows_combat_not_power() {
         assert_eq!(slot_tint(false, true, 100), GainTint::None);
+        // A changed slot with no combat delta still reads as changed: the
+        // player is being handed a build to equip, and "identical to yours"
+        // is a different answer from "different, no measured gain".
+        assert_eq!(slot_tint(true, true, 0), GainTint::Flat);
+        assert!(tint_changed(GainTint::Flat));
+        assert!(!tint_changed(GainTint::None));
         assert_eq!(slot_tint(true, true, 50), GainTint::Up);
         assert_eq!(slot_tint(true, false, 50), GainTint::Down);
         assert_eq!(slot_tint(true, true, -20), GainTint::Down);

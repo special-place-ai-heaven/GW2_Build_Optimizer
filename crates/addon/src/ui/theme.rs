@@ -366,6 +366,33 @@ pub fn header_title_x(left: f32) -> f32 {
     left + HEADER_ACCENT_W + HEADER_TITLE_GAP
 }
 
+/// A slot the suggestion moved away from what the player is wearing.
+///
+/// Deliberately the same shape as the gold lock ring: one visual language,
+/// two meanings - gold says you pinned it, green says Choya changed it. It is
+/// brighter than [`HEAL_RIM`], which is also green and already sits on the
+/// heal slot, so the two never read as the same mark.
+pub const CHANGED: [f32; 4] = [0.30, 1.0, 0.50, 1.0];
+
+/// Halo just outside a rectangular slot or icon.
+pub fn paint_changed_rect(draw: &DrawListMut, min: [f32; 2], max: [f32; 2], rounding: f32) {
+    draw.add_rect(
+        [min[0] - 2.0, min[1] - 2.0],
+        [max[0] + 2.0, max[1] + 2.0],
+        with_alpha(CHANGED, 0.95),
+    )
+    .thickness(2.0)
+    .rounding(rounding + 2.0)
+    .build();
+}
+
+/// Halo just outside a circular trait node.
+pub fn paint_changed_circle(draw: &DrawListMut, center: [f32; 2], radius: f32) {
+    draw.add_circle(center, radius + 3.0, with_alpha(CHANGED, 0.95))
+        .thickness(2.0)
+        .build();
+}
+
 pub fn paint_header_accent(draw: &DrawListMut, left: f32, top: f32, height: f32) {
     draw.add_rect([left, top], [left + HEADER_ACCENT_W, top + height], pal().gold)
         .filled(true)
