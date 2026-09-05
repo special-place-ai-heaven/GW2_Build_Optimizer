@@ -96,7 +96,6 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         .map(|r| r.family_brief(&state.main.game_mode, state.main.wvw_combat_tier))
         .unwrap_or("No role chip. Infer the job from the player's words.");
     let keep_weapons = keep_equipped_weapons(&display);
-    let has_loadout = !character.is_empty();
     let on_the_pass = state
         .main
         .comparison
@@ -133,6 +132,15 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     let db_clone = clone_game_db_for_worker(&state.main.game_db);
     let weights = state.main.weights.clone();
     let loadout = state.main.current_build.clone();
+    // The plate is ranked before it is served, so the chat path needs the same
+    // scenario the Improve button builds — same tier mapping, same role
+    // profile. Without one there is nothing for the referee to judge against.
+    let combat_tier = match state.main.game_mode {
+        gw2_core::types::GameMode::WvW => state.main.wvw_combat_tier,
+        gw2_core::types::GameMode::PvP => gw2_optimizer::scenario::CombatTier::Solo,
+        gw2_core::types::GameMode::PvE => gw2_optimizer::scenario::CombatTier::Party,
+    };
+    let selected_role = state.main.selected_role;
     let chat_balance_ctx = BalanceContext::new(state.main.game_mode.clone());
 
     let spawned = state.spawn_worker("chat-message", move |token| {
@@ -155,13 +163,6 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                 }
 
                 if let Some(ref db) = db_clone {
-                    let prompt = gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
-                        &profession,
-                        &game_mode_label,
-                        &message,
-                        &kitchen,
-                        gw2_core::i18n::choya_name_for(&config.ui_language),
-                    );
                     let tools = gw2_optimizer::llm::tools::tool_definitions();
                     let empty_candidates = vec![];
                     let ctx = gw2_optimizer::gemini_tools::ToolContext {
@@ -172,64 +173,200 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         weights: weights.clone(),
                         balance_ctx: &chat_balance_ctx,
                     };
-
-                    let response = if has_loadout {
-                        client.generate(&prompt).map_err(|e| e.to_string())?
-                    } else {
-                        client
-                            .generate_with_tools_progress(
-                                &prompt,
-                                &tools,
-                                &mut |name: &str, args: &serde_json::Value| {
-                                    let stale =
-                                        crate::state::with_state(|s| s.main.chat_epoch != epoch)
-                                            .unwrap_or(true);
-                                    if stale {
-                                        return serde_json::json!({"error": "cancelled"});
-                                    }
-                                    gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx)
-                                },
-                                3,
-                                &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
-                                    let tools_str = humanize_tool_names(tool_names);
-                                    crate::state::with_state(|s| {
-                                        if s.main.chat_epoch != epoch {
-                                            return;
-                                        }
-                                        s.main.optimize_stage = tf(
-                                            "fmt.choya_looking",
-                                            &[
-                                                ("turn", &turn.to_string()),
-                                                ("max", &max_turns.to_string()),
-                                                ("tools", &tools_str),
-                                            ],
-                                        );
-                                    });
-                                },
-                            )
-                            .map_err(|e| e.to_string())?
+                    let scenario = gw2_optimizer::scenario::ScenarioSpec {
+                        game_mode: chat_balance_ctx.game_mode.clone(),
+                        combat_tier,
+                        combat_kind: selected_role
+                            .map(|r| r.combat_kind_for_weights(&weights))
+                            .unwrap_or_else(|| {
+                                if weights.condition > weights.power {
+                                    gw2_optimizer::scenario::CombatKind::CondiRamp
+                                } else {
+                                    gw2_optimizer::scenario::CombatKind::StrikeSpike
+                                }
+                            }),
+                        target_profile: gw2_optimizer::scenario::TargetProfile::Single,
+                        optimization_target: gw2_optimizer::scenario::OptimizationTarget {
+                            label: game_mode_label.clone(),
+                        },
+                        patch_id: Some(chat_balance_ctx.patch_id.clone()),
+                        objective_profile_id: selected_role.map(|r| {
+                            r.profile_id_for(&chat_balance_ctx.game_mode, combat_tier)
+                                .to_string()
+                        }),
                     };
+                    // What the plate has to beat. Ranked once: the player's
+                    // gear does not change while Choya is thinking.
+                    let baseline = rank_current_build(
+                        loadout.as_ref(),
+                        db,
+                        &profession,
+                        &weights,
+                        &chat_balance_ctx,
+                        &scenario,
+                    );
 
-                    let mut parsed = match gw2_optimizer::prompts::parse_gemini_build(&response) {
-                        Ok(p) => p,
-                        Err(_) => {
-                            let explanation: String =
-                                response.chars().filter(|c| *c != '`').take(800).collect();
-                            let explanation = explanation.trim().to_string();
-                            if explanation.is_empty() {
-                                return Err("Empty reply".into());
+                    // Two attempts, not one: a rejected plate is told exactly
+                    // which check it failed and gets to compose again. One
+                    // attempt would only ever refuse; unlimited attempts would
+                    // burn the player's tokens on a model that cannot get there.
+                    let mut feedback: Option<String> = None;
+                    let mut rejected: Option<String> = None;
+                    for attempt in 1..=2u32 {
+                        if token.is_cancelled() {
+                            return Err("Cancelled".into());
+                        }
+                        let mut prompt =
+                            gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
+                                &profession,
+                                &game_mode_label,
+                                &message,
+                                &kitchen,
+                                gw2_core::i18n::choya_name_for(&config.ui_language),
+                            );
+                        if let Some(ref why) = feedback {
+                            prompt.push_str(&format!(
+                                "\n\nYOUR PREVIOUS PLATE WAS REFUSED: {why}\n\
+                                 Compose a different build that fixes exactly that, \
+                                 in the same JSON shape. Do not repeat the refused one."
+                            ));
+                            // A second whole LLM call is another 10-40s of
+                            // silence. Say why it is happening.
+                            crate::state::with_state(|s| {
+                                if s.main.chat_epoch == epoch {
+                                    s.main.optimize_stage =
+                                        "That plate did not beat your build. Trying again..."
+                                            .to_string();
+                                }
+                            });
+                        }
+
+                        // Always with tools, equipped loadout or not. The
+                        // prompt tells the model "an equipped Character
+                        // loadout is your STARTING POINT, not a licence to
+                        // skip the tools - you must still call get_spec_traits
+                        // for every specialization you keep or change". An
+                        // earlier pass removed the opposite instruction from
+                        // the prompt but left this branch handing that same
+                        // request zero tool declarations, so a model that
+                        // obeyed had nothing to call. Measured in-game
+                        // 2026-09-05 on every Google model tried:
+                        // gemini-3.8-flash and gemini-flash-latest answered
+                        // MALFORMED_FUNCTION_CALL, gemini-3.7-flash emitted a
+                        // call with no text ("No response text"), while
+                        // glm-5.3-flash - which had taken the tools branch -
+                        // worked. The contradiction was the bug, not the model.
+                        let response = {
+                            client
+                                .generate_with_tools_progress(
+                                    &prompt,
+                                    &tools,
+                                    &mut |name: &str, args: &serde_json::Value| {
+                                        let stale =
+                                            crate::state::with_state(|s| s.main.chat_epoch != epoch)
+                                                .unwrap_or(true);
+                                        if stale {
+                                            return serde_json::json!({"error": "cancelled"});
+                                        }
+                                        gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx)
+                                    },
+                                    3,
+                                    &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
+                                        let tools_str = humanize_tool_names(tool_names);
+                                        crate::state::with_state(|s| {
+                                            if s.main.chat_epoch != epoch {
+                                                return;
+                                            }
+                                            s.main.optimize_stage = tf(
+                                                "fmt.choya_looking",
+                                                &[
+                                                    ("turn", &turn.to_string()),
+                                                    ("max", &max_turns.to_string()),
+                                                    ("tools", &tools_str),
+                                                ],
+                                            );
+                                        });
+                                    },
+                                )
+                                .map_err(|e| e.to_string())?
+                        };
+
+                        let mut parsed = match gw2_optimizer::prompts::parse_gemini_build(&response)
+                        {
+                            Ok(p) => p,
+                            Err(_) => {
+                                let explanation: String =
+                                    response.chars().filter(|c| *c != '`').take(800).collect();
+                                let explanation = explanation.trim().to_string();
+                                if explanation.is_empty() {
+                                    return Err("Empty reply".into());
+                                }
+                                gw2_optimizer::prompts::GeminiBuildResponse {
+                                    explanation,
+                                    ..Default::default()
+                                }
                             }
-                            gw2_optimizer::prompts::GeminiBuildResponse {
-                                explanation,
-                                ..Default::default()
+                        };
+                        if let Some(ref cur) = loadout {
+                            fill_holes_from_loadout(&mut parsed, cur);
+                        }
+                        apply_radar_prefix(&mut parsed, &weights, &message);
+
+                        // A reply with no complete kit is conversation, not a
+                        // build. Nothing to rank, nothing to refuse.
+                        let mut plate_profession = profession.clone();
+                        if let Some(inferred) =
+                            gw2_optimizer::validation::infer_profession_from_spec_names(
+                                db,
+                                parsed.specializations.iter().map(|(n, _)| n.as_str()),
+                            )
+                        {
+                            plate_profession = inferred;
+                        }
+                        let validated = gw2_optimizer::validation::validate_gemini_build(
+                            &parsed,
+                            db,
+                            &plate_profession,
+                        );
+                        if !plate_is_servable(&validated) {
+                            return Ok(parsed);
+                        }
+
+                        match plate_shortfall(
+                            &validated,
+                            baseline.as_ref(),
+                            db,
+                            &plate_profession,
+                            &weights,
+                            &chat_balance_ctx,
+                            &scenario,
+                        ) {
+                            Ok(()) => return Ok(parsed),
+                            Err(why) => {
+                                nexus::log::log(
+                                    nexus::log::LogLevel::Info,
+                                    "GW2BuildOpt",
+                                    format!("Choya plate refused (attempt {attempt}): {why}"),
+                                );
+                                feedback = Some(why.clone());
+                                rejected = Some(why);
                             }
                         }
-                    };
-                    if let Some(ref cur) = loadout {
-                        fill_holes_from_loadout(&mut parsed, cur);
                     }
-                    apply_radar_prefix(&mut parsed, &weights, &message);
-                    Ok(parsed)
+
+                    // Both attempts lost to the player's own build. Serving the
+                    // second one anyway is the bug this gate exists to stop, so
+                    // Choya says what happened and the build stands.
+                    // ponytail: plain English like `KEPT_GEAR_HEADLINE` in
+                    // optimize_flow; move behind `t("choya.kept")` when
+                    // `locales/` is next open.
+                    Ok(gw2_optimizer::prompts::GeminiBuildResponse {
+                        explanation: format!(
+                            "I kept your build - nothing I plated beat it. {}",
+                            rejected.unwrap_or_default()
+                        ),
+                        ..Default::default()
+                    })
                 } else {
                     Err("Game data not loaded".into())
                 }
@@ -447,6 +584,94 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         state.main.chat.waiting = false;
         state.main.optimize_stage.clear();
     }
+}
+
+/// The player's own build, ranked, for the plate to beat.
+///
+/// `None` when there is nothing to compare against (no resolved character, or
+/// gear the validator cannot resolve). A missing baseline disables the gate
+/// rather than blocking the answer — the same choice the Improve tab makes.
+fn rank_current_build(
+    loadout: Option<&gw2_core::types::ResolvedBuild>,
+    db: &GameDb,
+    profession_name: &str,
+    weights: &gw2_optimizer::scoring::OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &gw2_optimizer::scenario::ScenarioSpec,
+) -> Option<gw2_optimizer::referee::RefereeReport> {
+    let plate = super::optimize_flow::baseline_plate_from_loadout(loadout?);
+    let validated = gw2_optimizer::validation::validate_gemini_build(&plate, db, profession_name);
+    if !validated.errors.is_empty() {
+        return None;
+    }
+    Some(gw2_optimizer::referee::evaluate_validated_build(
+        &validated,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+    ))
+}
+
+/// Why a plate is not fit to serve, phrased for the model to act on.
+///
+/// `Ok(())` means serve it. The chat path used to have no such check at all:
+/// [`plate_is_servable`] asks only whether three specializations carry three
+/// traits each, so any structurally complete answer was plated as "Choya's
+/// pick" no matter what it did to the player's build. Measured in-game
+/// 2026-09-05 (Guardian, WvW Roam, Bruiser): the served plate lost 207 Power,
+/// 280 Ferocity, 311 Condition Damage and 157 Healing Power to gain 81
+/// Vitality, and carried zero condition cleanse in a game mode whose own
+/// viability gate demands at least one — because neither the referee nor the
+/// always-better baseline ever ran on this path.
+fn plate_shortfall(
+    plate: &gw2_optimizer::validation::ValidatedBuild,
+    baseline: Option<&gw2_optimizer::referee::RefereeReport>,
+    db: &GameDb,
+    profession_name: &str,
+    weights: &gw2_optimizer::scoring::OptimizationWeights,
+    ctx: &BalanceContext,
+    scenario: &gw2_optimizer::scenario::ScenarioSpec,
+) -> Result<(), String> {
+    let report = gw2_optimizer::referee::evaluate_validated_build(
+        plate,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+    );
+    if !report.viability.is_viable {
+        let failed: Vec<String> = report
+            .viability
+            .gates
+            .iter()
+            .filter(|g| !g.passed)
+            .map(|g| format!("{:?} ({})", g.gate, g.note))
+            .collect();
+        return Err(format!(
+            "that build is not viable in this game mode. Failed checks: {}",
+            failed.join("; ")
+        ));
+    }
+    // No baseline is not a pass mark, it is an unarmed gate: viability alone
+    // still had to hold above.
+    let Some(baseline) = baseline else {
+        return Ok(());
+    };
+    if super::optimize_flow::beats_baseline(
+        &gw2_optimizer::referee::search_rank(&report),
+        &gw2_optimizer::referee::search_rank(baseline),
+    ) {
+        return Ok(());
+    }
+    Err(format!(
+        "that build does not beat what the player is already wearing \
+         (their build scores {:.0}, yours {:.0} on the same weights). \
+         Keep what already works and change only what you can argue is better.",
+        baseline.user_intent_score, report.user_intent_score,
+    ))
 }
 
 pub(super) fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -> bool {

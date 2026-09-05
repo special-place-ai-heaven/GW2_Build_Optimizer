@@ -59,6 +59,15 @@ pub(crate) struct StreamChunk {
 struct StreamChoice {
     delta: Option<StreamDelta>,
     finish_reason: Option<String>,
+    /// The upstream provider's own reason, which OpenRouter passes through
+    /// untouched. This is the only field that says WHY a normalized
+    /// `finish_reason: "error"` happened: Google reports
+    /// `MALFORMED_FUNCTION_CALL` here when the model fails to emit a usable
+    /// function call, and OpenRouter attaches no top-level `error` object for
+    /// it because the provider itself answered 200. Dropping this field is how
+    /// a diagnosable failure reached the player as a bare "Empty response"
+    /// (gemini-3.8-flash via OpenRouter, measured 2026-09-05).
+    native_finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -110,7 +119,14 @@ pub(crate) fn apply_chunk(
 ) -> Result<(), LlmError> {
     for choice in chunk.choices {
         if let Some(reason) = choice.finish_reason {
-            *finish = Some(reason);
+            // Keep the provider's own wording when it says more than the
+            // normalized one ("error" alone is not a diagnosis).
+            *finish = Some(match choice.native_finish_reason {
+                Some(native) if !native.eq_ignore_ascii_case(&reason) => {
+                    format!("{reason}/{native}")
+                }
+                _ => reason,
+            });
         }
         let Some(delta) = choice.delta else { continue };
         if let Some(text) = delta.content {
@@ -389,6 +405,49 @@ mod tests {
     fn test_read_stream_empty_body_reports_finish_reason() {
         let sse = concat!(
             "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n",
+            "data: [DONE]\n",
+        );
+        match read_stream(sse.as_bytes(), &|| false).expect("ok") {
+            StreamedMessage::Empty(finish) => assert_eq!(finish, "length"),
+            StreamedMessage::Message(_) => panic!("expected empty"),
+        }
+    }
+
+    /// Measured OpenRouter shape (2026-09-05, generation
+    /// `gen-1788632847`): gemini-3.8-flash failed to emit a usable function
+    /// call, so Google answered 200 with `MALFORMED_FUNCTION_CALL` and
+    /// OpenRouter normalized `finish_reason` to `"error"` — with no top-level
+    /// `error` object, because the provider itself succeeded. Reporting only
+    /// the normalized reason told the player "Empty response (finish_reason:
+    /// error)", which names no cause they could act on.
+    #[test]
+    fn read_stream_empty_body_keeps_the_providers_own_finish_reason() {
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"error\",",
+            "\"native_finish_reason\":\"MALFORMED_FUNCTION_CALL\"}]}\n",
+            "data: [DONE]\n",
+        );
+        match read_stream(sse.as_bytes(), &|| false).expect("ok") {
+            StreamedMessage::Empty(finish) => {
+                assert_eq!(finish, "error/MALFORMED_FUNCTION_CALL");
+                assert!(
+                    super::super::openai_compat::is_function_call_failure(&LlmError::Parse(
+                        format!("Empty response from OpenRouter (finish_reason: {finish})")
+                    )),
+                    "the tool loop must recognise this as a function-call failure"
+                );
+            }
+            StreamedMessage::Message(_) => panic!("expected empty"),
+        }
+    }
+
+    /// A provider that repeats the normalized reason verbatim must not produce
+    /// "stop/stop".
+    #[test]
+    fn read_stream_does_not_repeat_an_identical_native_finish_reason() {
+        let sse = concat!(
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\",",
+            "\"native_finish_reason\":\"LENGTH\"}]}\n",
             "data: [DONE]\n",
         );
         match read_stream(sse.as_bytes(), &|| false).expect("ok") {

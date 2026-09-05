@@ -52,6 +52,24 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
 /// deliberating and have nothing left to answer with. Designing a build from
 /// live tool data — trait columns for three specs, skill facts, upgrade
 /// ranking, then a rotation sim — is not a 16k job.
+/// Whether a failure means "this model could not produce a usable function
+/// call", rather than a transport, auth or quota problem.
+///
+/// Google answers a failed function call with HTTP 200 and
+/// `native_finish_reason: MALFORMED_FUNCTION_CALL`, and OpenRouter attaches no
+/// top-level `error` object because the provider itself succeeded. The stream
+/// therefore ends empty and [`sse::read_stream`] reports it as a parse failure
+/// carrying that reason. Measured 2026-09-05: gemini-3.8-flash failed this way
+/// on every tool-carrying Choya request while answering toolless ones fine, and
+/// glm-5.3-flash drove the same twenty declarations without trouble — so it is
+/// the model, not the schema, and the loop can recover by dropping the tools.
+pub(crate) fn is_function_call_failure(err: &LlmError) -> bool {
+    let LlmError::Parse(message) = err else {
+        return false;
+    };
+    message.to_ascii_uppercase().contains("MALFORMED_FUNCTION_CALL")
+}
+
 pub(crate) const MAX_COMPLETION_TOKENS: u32 = 65_536;
 /// Upper bound on hidden reasoning tokens per request (OpenRouter
 /// `reasoning.max_tokens`; ignored by providers without thinking support).
