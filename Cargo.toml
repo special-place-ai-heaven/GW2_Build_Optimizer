@@ -9,7 +9,7 @@ exclude = ["server/feedback"]
 resolver = "2"
 
 [workspace.package]
-version = "1.11.28"
+version = "1.11.29"
 edition = "2021"
 license = "MIT"
 

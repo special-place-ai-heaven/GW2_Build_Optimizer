@@ -565,6 +565,14 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             }
                         }
                         Err(e) => {
+                            // format_provider_issue turns this into a category
+                            // ("Request timed out"), which is all the player
+                            // needs and nowhere near enough to diagnose from.
+                            nexus::log::log(
+                                nexus::log::LogLevel::Warning,
+                                "GW2BuildOpt",
+                                format!("Choya request failed: {e}"),
+                            );
                             crate::state::with_state(|s| {
                                 if s.main.chat_epoch != epoch {
                                     return;
@@ -649,6 +657,40 @@ fn rank_current_build(
 /// Vitality, and carried zero condition cleanse in a game mode whose own
 /// viability gate demands at least one — because neither the referee nor the
 /// always-better baseline ever ran on this path.
+/// What to change to pass a gate, in the model's vocabulary rather than the
+/// referee's. The gate note already carries the numbers; a model handed
+/// "SustainRecovery (margin=-566/s, repeatable=false)" and nothing else has
+/// to guess which half of the build to touch, and its second attempt is the
+/// player's last one.
+fn gate_remedy(gate: &gw2_optimizer::referee::ViabilityGate) -> &'static str {
+    use gw2_optimizer::referee::ViabilityGate as G;
+    match gate {
+        G::StunbreakCount => "add a stunbreak - it has no way out of a hard CC",
+        G::StabilityAccess => {
+            "give it Stability, or an evade, block, invuln or stealth it can use on demand"
+        }
+        G::CleanseRate => {
+            "add condition cleanse: a cleansing utility, a trait that cleanses, or a rune or              relic that does"
+        }
+        G::EffectiveHealth => {
+            "raise effective health: Toughness and Vitality in the prefix, or a defensive              specialization"
+        }
+        G::MobilityOut => "add a disengage: stealth, an evade, a block, or a movement skill",
+        G::HarasserStrip => "strip or corrupt boons before the damage lands, not after",
+        G::EncounterOutcome => "raise damage - the target does not go down inside the clock",
+        G::SecureCompletion => "add an interrupt so the target cannot recover",
+        G::ProtectedExecution => {
+            "cover the chain - the key skills are being interrupted before they land"
+        }
+        G::SustainRecovery => {
+            "raise sustain so it survives the answer and keeps going: healing per second,              Protection or barrier uptime, Toughness and Vitality, or a heal skill with a              shorter cooldown"
+        }
+        G::ResourceLegality => {
+            "the rotation spends more of the profession resource than it generates - cheaper              skills, or one that generates"
+        }
+    }
+}
+
 fn plate_shortfall(
     plate: &gw2_optimizer::validation::ValidatedBuild,
     baseline: Option<&gw2_optimizer::referee::RefereeReport>,
@@ -672,7 +714,7 @@ fn plate_shortfall(
             .gates
             .iter()
             .filter(|g| !g.passed)
-            .map(|g| format!("{:?} ({})", g.gate, g.note))
+            .map(|g| format!("{:?} ({}) - {}", g.gate, g.note, gate_remedy(&g.gate)))
             .collect();
         return Err(format!(
             "that build is not viable in this game mode. Failed checks: {}",
