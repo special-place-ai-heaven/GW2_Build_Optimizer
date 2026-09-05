@@ -25,8 +25,8 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 11 | [W013](#w013) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/balance.rs:11` |
 | 12 | [W015](#w015) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/data/manifests.rs:43` |
 | 13 | [W016](#w016) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/data/mod.rs:137` |
-| 14 | [W039](#w039) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:1389` |
-| 15 | [W038](#w038) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:861` |
+| 14 | [W039](#w039) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:1389` |
+| 15 | [W038](#w038) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:861` |
 | 16 | [W008](#w008) | S2/confirmed | US2 | planned | `crates/addon/src/ui/main_view/optimization.rs:714` |
 | 17 | [W004](#w004) | S2/confirmed | US2 | planned | `crates/addon/src/state.rs:898` |
 | 18 | [W009](#w009) | S2/confirmed | US2 | planned | `crates/addon/src/ui/main_view/tabs/settings.rs:60` |
@@ -467,7 +467,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W039
 
-- Task: T016 [US2]. Status: **planned**.
+- Task: T016 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/rotation/wvw_timeline.rs:1389`.
 - Dependencies: story entry gate.
 
@@ -475,13 +475,13 @@ Claim: `trigger_procs` matches on `EffectCategory` and handles 9 of the 22 varia
 
 Remediation decision: Count unsupported proc categories and zero-duration unsupported healing in coverage; test reporting without counting the same source repeatedly per tick.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `trigger_procs` catch-all now calls `note_unmodeled_proc`, which increments `unmodeled_effect_sources` once per `(source_type, source_id)`. Five OnHit fires of FlatStat plus zero-duration `OutgoingHealingPct` still report 2, not 10. `unsupported_proc_category_counts_once_per_source` passed. Existing `unsupported_normalized_trigger_degrades_coverage` still counts at load.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
 ### W038
 
-- Task: T017 [US2]. Status: **planned**.
+- Task: T017 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/rotation/wvw_timeline.rs:861`.
 - Dependencies: story entry gate.
 
@@ -489,7 +489,7 @@ Claim: The Protection strike multiplier is hardcoded as the literal 0.67 twice i
 
 Remediation decision: Replace both literals with `crate::data::boon_condition_formulas::boons().protection_multiplier()`, matching simulator.rs:653. If the per-tick call cost matters, resolve it once into a Timeline field in `Timeline::new`.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Both `0.67` literals removed. `Timeline::new` stores `boons().protection_multiplier()` once; incoming `receive_strike` and outgoing `StrikeDamage` use that field. `protection_uses_formula_multiplier` passed (incoming 1000 and outgoing open/prot ratio). 35 `wvw_timeline` unit tests passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
