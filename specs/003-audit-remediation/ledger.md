@@ -17,7 +17,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 3 | [W002](#w002) | S2/confirmed | US1 | verified-scoped | `crates/addon/src/radio/player.rs:1077` |
 | 4 | [W012](#w012) | S2/confirmed | US1 | verified-scoped | `crates/core/src/feedback/store.rs:113` |
 | 5 | [W001](#w001) | S2/confirmed | US1 | verified-scoped | `.github/workflows/ci.yml:17` |
-| 6 | [B001](#b001) | S2/observed | US2 | planned | `crates/addon/src/ui/main_view/optimization.rs:1050` |
+| 6 | [B001](#b001) | S2/observed | US2 | verified-scoped | `crates/addon/src/ui/main_view/optimization.rs:1050` |
 | 7 | [W025](#w025) | S2/confirmed | US2 | planned | `crates/optimizer/src/gemini_tools.rs:1529` |
 | 8 | [W035](#w035) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/simulator.rs:220` |
 | 9 | [W019](#w019) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/objective_profiles.rs:86` |
@@ -355,7 +355,7 @@ Acceptance: Demonstrate the invalid-input or failed-I/O path is safe, the normal
 
 ### B001
 
-- Task: T008 [US2]. Status: **planned**.
+- Task: T008 [US2]. Status: **verified-scoped**; workspace/in-game gates pending.
 - Audit: S2, observed; location: `crates/addon/src/ui/main_view/optimization.rs:1050`.
 - Dependencies: story entry gate.
 
@@ -363,7 +363,7 @@ Claim: Choya copies validated per-slot prefixes but plates a uniform PvE prefix 
 
 Remediation decision: Pass the accepted ValidatedBuild into attach_chat_stats and use engine::calculate_validated_stats with balance context and returned modifiers. Surface validation corrections. Add mixed-slot independent-budget and PvP regressions.
 
-Verification: Independent SymForge research confirmed both uniform-PvE projection and hidden validator warnings; implementation pending.
+Verification: `attach_chat_stats` now takes `Option<&ValidatedBuild>`. Present builds use `calculate_validated_stats` plus returned modifiers and `gear_quality_reasons`; warnings land on `quality_reasons` and in the chat bubble. `attach_chat_stats_uses_validated_mixed_slots` and `attach_chat_stats_pvp_uses_amulet_not_land_kit` passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 

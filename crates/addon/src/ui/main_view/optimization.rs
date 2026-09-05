@@ -1052,15 +1052,48 @@ pub(super) fn attach_chat_stats(
     db: &gw2_optimizer::gamedb::GameDb,
     profession: &str,
     game_mode: &gw2_core::types::GameMode,
+    validated: Option<&gw2_optimizer::validation::ValidatedBuild>,
 ) {
-    if suggestion.stat_prefix.is_empty() {
-        return;
-    }
-    let Some((_name, full, derived)) =
-        gw2_optimizer::gemini_tools::estimate_prefix_stats(db, &suggestion.stat_prefix, profession)
-    else {
-        return;
+    let balance_ctx = BalanceContext::new(game_mode.clone());
+    let (full, modifiers) = if let Some(validated) = validated {
+        let (full, modifiers) = gw2_optimizer::engine::calculate_validated_stats(
+            validated,
+            db,
+            profession,
+            &balance_ctx,
+        );
+        for warning in &validated.warnings {
+            if !suggestion.quality_reasons.iter().any(|r| r == warning) {
+                suggestion.quality_reasons.push(warning.clone());
+            }
+        }
+        for reason in gw2_optimizer::engine::gear_quality_reasons(
+            validated,
+            db,
+            profession,
+            &balance_ctx,
+        ) {
+            let text = reason.to_string();
+            if !suggestion.quality_reasons.iter().any(|r| r == &text) {
+                suggestion.quality_reasons.push(text);
+            }
+        }
+        (full, modifiers)
+    } else {
+        if suggestion.stat_prefix.is_empty() {
+            return;
+        }
+        let Some((_name, full, _derived)) = gw2_optimizer::gemini_tools::estimate_prefix_stats_in(
+            db,
+            &suggestion.stat_prefix,
+            profession,
+            &balance_ctx,
+        ) else {
+            return;
+        };
+        (full, gw2_optimizer::combat::DamageModifiers::default())
     };
+    let derived = gw2_optimizer::stats::compute_derived(&full, profession);
     suggestion.estimated_stats = Some(gw2_core::types::StatBlock {
         power: full.power.round() as i32,
         precision: full.precision.round() as i32,
@@ -1076,14 +1109,13 @@ pub(super) fn attach_chat_stats(
         health: derived.health.round() as i32,
         armor: derived.armor.round() as i32,
     });
-    let modifiers = gw2_optimizer::combat::DamageModifiers::default();
-    let balance_ctx = BalanceContext::new(game_mode.clone());
     let (solo, party, squad) =
         compute_3tier_combat(&full, &derived, &modifiers, profession, &balance_ctx);
     suggestion.combat_solo = solo;
     suggestion.combat_party = party;
     suggestion.combat_squad = squad;
 }
+
 
 /// Merge validator-resolved names onto the raw LLM tasting so the plate is edible.
 pub(super) fn gemini_from_validated(
@@ -1477,7 +1509,9 @@ pub(super) fn fill_holes_from_loadout(
             }
             match set.off_hand.as_ref().map(|w| w.weapon_type.as_str()) {
                 Some(off) if !off.is_empty() => {
-                    parsed.weapons.push(format!("{}: {main} / {off}", set.label));
+                    parsed
+                        .weapons
+                        .push(format!("{}: {main} / {off}", set.label));
                 }
                 _ => parsed.weapons.push(format!("{}: {main}", set.label)),
             }
@@ -1631,7 +1665,8 @@ pub(super) fn humanize_tool_names(tool_names: &[String]) -> String {
 mod tests {
     use super::super::chat_flow::plate_is_servable;
     use super::{
-        apply_radar_prefix, chat_display_text, fill_holes_from_loadout, format_provider_issue,
+        apply_radar_prefix, attach_chat_stats, chat_display_text, fill_holes_from_loadout,
+        format_provider_issue,
         gemini_from_validated, keep_equipped_weapons, keep_loadout_pets, kitchen_brief,
         leftover_plate_quality, snapshot_ranger_pets, suggestion_to_chat_code,
     };
@@ -2288,7 +2323,10 @@ mod tests {
         fill_holes_from_loadout(&mut parsed, &current);
         assert_eq!(
             parsed.weapons,
-            vec!["Set 1: Scepter / Focus".to_string(), "Set 2: Staff".to_string()],
+            vec![
+                "Set 1: Scepter / Focus".to_string(),
+                "Set 2: Staff".to_string()
+            ],
             "a two-hander must not grow an off-hand"
         );
         assert_eq!(parsed.sigils.len(), 2, "sigils ride the equipped weapons");
@@ -2393,4 +2431,152 @@ mod tests {
             gw2_optimizer::data::DataQuality::Verified
         );
     }
+
+
+    fn prefix_stat(
+        id: u32,
+        name: &str,
+        major: &str,
+        minor_a: &str,
+        minor_b: &str,
+    ) -> gw2_api::models::ItemStat {
+        gw2_api::models::ItemStat {
+            id,
+            name: name.into(),
+            attributes: vec![
+                gw2_api::models::StatAttribute {
+                    attribute: major.into(),
+                    multiplier: 0.35,
+                    value: 0,
+                },
+                gw2_api::models::StatAttribute {
+                    attribute: minor_a.into(),
+                    multiplier: 0.25,
+                    value: 0,
+                },
+                gw2_api::models::StatAttribute {
+                    attribute: minor_b.into(),
+                    multiplier: 0.25,
+                    value: 0,
+                },
+            ],
+        }
+    }
+
+    fn mixed_chat_db() -> gw2_optimizer::gamedb::GameDb {
+        let mut db = gw2_optimizer::gamedb::GameDb::empty_for_tests();
+        db.itemstats.insert(
+            1,
+            prefix_stat(1, "Berserker's", "Power", "Precision", "Ferocity"),
+        );
+        db.itemstats.insert(
+            2,
+            prefix_stat(2, "Sentinel's", "Vitality", "Toughness", "Power"),
+        );
+        db.pvp_amulets.insert(
+            10,
+            gw2_api::models::PvpAmulet {
+                id: 10,
+                name: "Berserker Amulet".into(),
+                icon: None,
+                attributes: [
+                    ("Power".into(), 900),
+                    ("Precision".into(), 900),
+                    ("CritDamage".into(), 560),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        );
+        db
+    }
+
+    fn mixed_validated() -> gw2_optimizer::validation::ValidatedBuild {
+        let mut v = gw2_optimizer::validation::ValidatedBuild::default();
+        v.fill_gear_slots(gw2_core::types::PrefixRef {
+            itemstat_id: 1,
+            name: "Berserker's".into(),
+        });
+        v.gear_slots.set(
+            gw2_core::types::GearSlot::Helm,
+            gw2_core::types::PrefixRef {
+                itemstat_id: 2,
+                name: "Sentinel's".into(),
+            },
+        );
+        v.warnings
+            .push("Helm prefix remapped from Berserker's to Sentinel's".into());
+        v
+    }
+
+    #[test]
+    fn attach_chat_stats_uses_validated_mixed_slots() {
+        let db = mixed_chat_db();
+        let validated = mixed_validated();
+        let ctx = gw2_optimizer::balance::BalanceContext::pve();
+        let (expected, _) =
+            gw2_optimizer::engine::calculate_validated_stats(&validated, &db, "Warrior", &ctx);
+        let uniform =
+            gw2_optimizer::gemini_tools::estimate_prefix_stats(&db, "Berserker's", "Warrior")
+                .expect("berserker prefix");
+        assert!(
+            expected.toughness > uniform.1.toughness,
+            "Sentinel helm must add toughness the uniform Berserker sheet lacks"
+        );
+
+        let mut suggestion = BuildSuggestion {
+            stat_prefix: "Berserker's".into(),
+            ..Default::default()
+        };
+        attach_chat_stats(
+            &mut suggestion,
+            &db,
+            "Warrior",
+            &gw2_core::types::GameMode::PvE,
+            Some(&validated),
+        );
+        let plated = suggestion.estimated_stats.expect("stats");
+        assert_eq!(plated.toughness, expected.toughness.round() as i32);
+        assert_eq!(plated.vitality, expected.vitality.round() as i32);
+        assert!(
+            suggestion
+                .quality_reasons
+                .iter()
+                .any(|r| r.contains("Helm prefix remapped")),
+            "validator corrections must reach the plate: {:?}",
+            suggestion.quality_reasons
+        );
+    }
+
+    #[test]
+    fn attach_chat_stats_pvp_uses_amulet_not_land_kit() {
+        let db = mixed_chat_db();
+        let validated = mixed_validated();
+        let mut suggestion = BuildSuggestion {
+            stat_prefix: "Berserker's".into(),
+            ..Default::default()
+        };
+        attach_chat_stats(
+            &mut suggestion,
+            &db,
+            "Warrior",
+            &gw2_core::types::GameMode::PvP,
+            Some(&validated),
+        );
+        let plated = suggestion.estimated_stats.expect("pvp stats");
+        let land =
+            gw2_optimizer::gemini_tools::estimate_prefix_stats(&db, "Berserker's", "Warrior")
+                .expect("land");
+        let pvp_ctx = gw2_optimizer::balance::BalanceContext::pvp();
+        let (expected, _) =
+            gw2_optimizer::engine::calculate_validated_stats(&validated, &db, "Warrior", &pvp_ctx);
+        assert_eq!(plated.power, expected.power.round() as i32);
+        assert!(
+            (plated.power as f64) < land.1.power,
+            "PvP amulet must not be plated as a land kit: plated={} land={}",
+            plated.power,
+            land.1.power
+        );
+    }
+
 }

@@ -2,6 +2,12 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.11.31 - 2026-09-05
+
+### Choya
+
+- A chat plate now uses the validated per-slot kit for its stats, not one prefix painted over the whole set. Mixed Sentinel/Dragon (or any mixed prefixes) show the toughness and vitality those slots actually give, PvP plates use the amulet, and the validator's slot corrections show up on the plate and in the bubble.
+
 ## 1.11.30 - 2026-09-05
 
 ### Choya

@@ -32,3 +32,10 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - CI still runs `cargo clippy --workspace --all-targets -- -D warnings`. Local run of that command exits 0.
 - Green: `news_art` lib tests 13 passed / 1 ignored; `extract_traits_includes_luminary_from_shared_known_specs` passed.
 - No version bump: this sprint is the CI gate, not a player-facing DLL. In-game acceptance for US1 remains the existing 1.11.29/1.11.30 handoff.
+
+## Sprint 5 — B001 validated Choya plate stats
+
+- B001: `attach_chat_stats` takes the accepted `ValidatedBuild` and plates `calculate_validated_stats` plus the returned modifiers. Validator warnings and gear-quality reasons go on `quality_reasons`; chat narrative includes warnings with errors.
+- Mixed Sentinel helm on a Berserker kit now matches the referee sheet (not a uniform prefix estimate). PvP uses the amulet, not a land kit.
+- Green: `attach_chat_stats_uses_validated_mixed_slots`, `attach_chat_stats_pvp_uses_amulet_not_land_kit`, leftover-kit tests.
+- Version 1.11.31. In-game still pending: mixed Sentinel/Dragon Choya plate toughness/vitality and ranking.
