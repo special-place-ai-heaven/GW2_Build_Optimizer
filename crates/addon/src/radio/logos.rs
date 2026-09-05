@@ -22,7 +22,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -76,19 +75,6 @@ fn created() -> std::sync::MutexGuard<'static, HashSet<String>> {
         .unwrap_or_else(|e| e.into_inner())
 }
 
-/// `Url::host_str` keeps the brackets on IPv6 literals (`"[::1]"`), which
-/// would slip past the `IpAddr` parse in `reserved_still_host`. Strip them so
-/// the reserved-range check sees the actual address. (news_art never hits
-/// this: its host allowlist rejects IP literals outright.)
-fn normalized_host(u: &reqwest::Url) -> Option<&str> {
-    let host = u.host_str()?;
-    Some(
-        host.strip_prefix('[')
-            .and_then(|h| h.strip_suffix(']'))
-            .unwrap_or(host),
-    )
-}
-
 /// Syntactic screen for a favicon URL: http or https on any public host.
 /// Unlike news stills there is no host allowlist — favicon hosts are
 /// arbitrary — and plain http is allowed. "localhost" and reserved-range
@@ -100,7 +86,7 @@ fn url_ok(url: &str) -> bool {
     if u.scheme() != "https" && u.scheme() != "http" {
         return false;
     }
-    let Some(host) = normalized_host(&u) else {
+    let Some(host) = crate::news_art::normalized_host(&u) else {
         return false;
     };
     !crate::news_art::reserved_still_host(host)
@@ -108,24 +94,14 @@ fn url_ok(url: &str) -> bool {
 
 /// DNS-level check on top of `url_ok`: with no host allowlist, a favicon
 /// hostname must not *resolve* into the local network either (same rule the
-/// stream connect enforces in `player`). Literal IPs were already screened
-/// syntactically; an unresolvable host passes — the GET then fails with its
+/// stream connect enforces in `player`). Reserved literal IPs are also rejected;
+/// an unresolvable host passes — the GET then fails with its
 /// own honest error. Worker thread only: this can block on a resolve.
 fn host_resolves_reserved(url: &str) -> bool {
     let Ok(u) = reqwest::Url::parse(url) else {
         return true;
     };
-    let Some(host) = normalized_host(&u) else {
-        return true;
-    };
-    if host.parse::<std::net::IpAddr>().is_ok() {
-        return false;
-    }
-    let port = u.port_or_known_default().unwrap_or(443);
-    match (host, port).to_socket_addrs() {
-        Ok(mut addrs) => addrs.any(|a| crate::news_art::ip_is_reserved(a.ip())),
-        Err(_) => false,
-    }
+    crate::news_art::url_host_is_reserved(&u)
 }
 
 /// Full per-hop screen: syntax plus DNS. Used for the original URL and every
@@ -426,10 +402,13 @@ mod tests {
     }
 
     #[test]
-    fn dns_screen_skips_literals_and_rejects_garbage() {
-        // Literal IPs are the syntactic screen's job — no resolve happens.
-        assert!(!host_resolves_reserved("http://127.0.0.1/x.png"));
-        assert!(!host_resolves_reserved("https://[fd00::1]/x.png"));
+    fn dns_screen_rejects_reserved_literals_and_garbage() {
+        assert!(host_resolves_reserved("http://127.0.0.1/x.png"));
+        assert!(host_resolves_reserved("https://[fd00::1]/x.png"));
+        assert!(host_resolves_reserved("https://[::ffff:127.0.0.1]/x.png"));
+        assert!(!host_resolves_reserved(
+            "https://[2606:4700:4700::1111]/x.png"
+        ));
         // Unparseable input fails closed.
         assert!(host_resolves_reserved("not a url"));
     }
