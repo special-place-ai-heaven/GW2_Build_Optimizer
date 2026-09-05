@@ -9,6 +9,7 @@
 //! Storage: writes one JSON file per (source, profession, mode) to
 //! `{addon_dir}/benchmarks/`.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::benchmark::{BenchmarkBuild, ScrapeResult};
@@ -157,6 +158,19 @@ pub fn scrape_all_with_progress(
 
     let today = today_string();
 
+    // Anything read today already, so a second run in the same day only
+    // fetches what is new or missing. Read once, before any source starts:
+    // a source that finishes mid-run writes into this same folder, and
+    // re-reading would let one source's fresh output masquerade as another's
+    // prior state.
+    let known = load_todays_builds(&benchmarks_dir, &today);
+    if !known.is_empty() {
+        on_progress(
+            "snowcrows",
+            &format!("{} build(s) already read today", known.len()),
+        );
+    }
+
     // Scrape #1: Snowcrows. Cancellation re-checked here so a pulse during
     // setup above still aborts before any network I/O.
     if should_cancel() {
@@ -172,7 +186,7 @@ pub fn scrape_all_with_progress(
     on_progress("snowcrows", "starting");
     let sc_result = finish_source(
         "snowcrows",
-        scrape_snowcrows(&client, &today, should_cancel, on_progress),
+        scrape_snowcrows(&client, &today, &known, should_cancel, on_progress),
         &benchmarks_dir,
         on_progress,
     );
@@ -190,7 +204,7 @@ pub fn scrape_all_with_progress(
     on_progress("hardstuck", "starting");
     let hs_result = finish_source(
         "hardstuck",
-        scrape_hardstuck(&client, &today, should_cancel, on_progress),
+        scrape_hardstuck(&client, &today, &known, should_cancel, on_progress),
         &benchmarks_dir,
         on_progress,
     );
@@ -203,7 +217,7 @@ pub fn scrape_all_with_progress(
     on_progress("guildjen", "starting");
     let gj_result = finish_source(
         "guildjen",
-        scrape_guildjen(&client, &today, should_cancel, on_progress),
+        scrape_guildjen(&client, &today, &known, should_cancel, on_progress),
         &benchmarks_dir,
         on_progress,
     );
@@ -319,6 +333,7 @@ const SC_PROFESSIONS: &[&str] = &[
 fn scrape_snowcrows(
     client: &reqwest::blocking::Client,
     today: &str,
+    known: &HashMap<String, BenchmarkBuild>,
     should_cancel: &dyn Fn() -> bool,
     on_progress: &dyn Fn(&str, &str),
 ) -> Result<(Vec<BenchmarkBuild>, bool), String> {
@@ -383,6 +398,13 @@ fn scrape_snowcrows(
     for (i, (class, url)) in all_links.into_iter().enumerate() {
         if should_cancel() {
             return Ok((builds, true));
+        }
+        // Already read today: take it and skip both the request and the
+        // wait that would have come with it.
+        if let Some(b) = known.get(&url) {
+            builds.push(b.clone());
+            on_progress("snowcrows", &format!("{class} {}/{total}", i + 1));
+            continue;
         }
         if i > 0 && !pace(should_cancel) {
             return Ok((builds, true));
@@ -511,6 +533,7 @@ fn pin_hardstuck_href(link: &str) -> Option<String> {
 fn scrape_hardstuck(
     client: &reqwest::blocking::Client,
     today: &str,
+    known: &HashMap<String, BenchmarkBuild>,
     should_cancel: &dyn Fn() -> bool,
     on_progress: &dyn Fn(&str, &str),
 ) -> Result<(Vec<BenchmarkBuild>, bool), String> {
@@ -577,6 +600,11 @@ fn scrape_hardstuck(
     for (i, (class, url)) in all_links.into_iter().enumerate() {
         if should_cancel() {
             return Ok((builds, true));
+        }
+        if let Some(b) = known.get(&url) {
+            builds.push(b.clone());
+            on_progress("hardstuck", &format!("{class} {}/{total}", i + 1));
+            continue;
         }
         if i > 0 && !pace(should_cancel) {
             return Ok((builds, true));
@@ -658,6 +686,7 @@ fn scrape_hardstuck_build(
 fn scrape_guildjen(
     client: &reqwest::blocking::Client,
     today: &str,
+    known: &HashMap<String, BenchmarkBuild>,
     should_cancel: &dyn Fn() -> bool,
     on_progress: &dyn Fn(&str, &str),
 ) -> Result<(Vec<BenchmarkBuild>, bool), String> {
@@ -729,9 +758,6 @@ fn scrape_guildjen(
                 if should_cancel() {
                     return Ok((builds, true));
                 }
-                if i > 0 && !pace(should_cancel) {
-                    return Ok((builds, true));
-                }
                 // Pin to the real host: an index page (compromised, or
                 // MITM'd if TLS were ever bypassed) must not steer us to
                 // arbitrary absolute URLs — only relative paths on
@@ -744,6 +770,21 @@ fn scrape_guildjen(
                     format!("https://guildjen.com{}", link)
                 };
                 saw_link = true;
+                // Already read today: take it and skip both the request and
+                // the wait that would have come with it. The mode is the
+                // index page's to say, not the stored copy's - the same
+                // build is listed under more than one category.
+                if let Some(known_build) = known.get(&url) {
+                    let mut b = known_build.clone();
+                    b.mode = mode.to_string();
+                    builds.push(b);
+                    i += 1;
+                    on_progress("guildjen", &format!("{mode} {class} {i}/{cap}"));
+                    continue;
+                }
+                if i > 0 && !pace(should_cancel) {
+                    return Ok((builds, true));
+                }
                 if let Ok(mut b) = scrape_guildjen_build(client, &url, today) {
                     b.mode = mode.to_string();
                     builds.push(b);
@@ -1726,6 +1767,43 @@ fn prune_stale_benchmarks(dir: &Path) -> usize {
     removed
 }
 
+/// Builds already on disk from a sync run today, keyed by their page URL.
+///
+/// A sync of every row is several hundred requests over ten minutes or more,
+/// and the reasons to run one twice in a day are ordinary: it was cancelled,
+/// the game was closed, a source failed and you want it again. Refetching a
+/// page we already read today buys nothing and spends the politeness budget
+/// that keeps the sync working at all.
+///
+/// Same-day is the whole freshness rule, deliberately. Anything longer and a
+/// deliberate re-sync would quietly do nothing, which is worse than slow;
+/// anything shorter and this does not help. So: running it twice today costs
+/// what running it once did, and tomorrow it all refreshes.
+fn load_todays_builds(dir: &Path, today: &str) -> HashMap<String, BenchmarkBuild> {
+    let mut known = HashMap::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return known;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if !name.to_str().is_some_and(is_current_benchmark_file) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let Ok(builds) = serde_json::from_str::<Vec<BenchmarkBuild>>(&text) else {
+            continue;
+        };
+        for build in builds {
+            if build.scraped_at == today && !build.source_url.is_empty() {
+                known.insert(build.source_url.clone(), build);
+            }
+        }
+    }
+    known
+}
+
 fn save_builds(builds: &[BenchmarkBuild], dir: &Path) -> Result<(), String> {
     if builds.is_empty() {
         return Ok(());
@@ -1949,6 +2027,73 @@ mod tests {
             ],
             "only in-table build links, and never the sidebar"
         );
+    }
+
+    /// Only today's builds are reusable, and only from files this version
+    /// writes. Yesterday's have to be refetched or a re-sync would silently
+    /// serve stale references forever.
+    #[test]
+    fn only_todays_builds_are_reused() {
+        let tmp = std::env::temp_dir().join(format!(
+            "gw2bo-reuse-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&tmp).expect("temp dir");
+
+        let build = |url: &str, when: &str| BenchmarkBuild {
+            source: "guildjen".into(),
+            profession: "Necromancer".into(),
+            spec_name: "Scourge".into(),
+            mode: "WvW".into(),
+            role: "WvW Zerg Support".into(),
+            build_code: None,
+            gear_prefix: "Minstrel's".into(),
+            rune: String::new(),
+            sigils: vec![],
+            relic: String::new(),
+            traits: vec![],
+            skills: vec![],
+            source_url: url.into(),
+            scraped_at: when.into(),
+            notes: String::new(),
+        };
+
+        std::fs::write(
+            tmp.join("guildjen_necromancer_wvw.json"),
+            serde_json::to_string(&vec![
+                build("https://guildjen.com/fresh-build/", "2026-09-06"),
+                build("https://guildjen.com/stale-build/", "2026-09-05"),
+                // No URL is no key: it could never be matched anyway.
+                build("", "2026-09-06"),
+            ])
+            .unwrap(),
+        )
+        .expect("seed");
+
+        // An old-format file is not a source of truth even if it parses.
+        std::fs::write(
+            tmp.join("guildjen_comments_wvw.json"),
+            serde_json::to_string(&vec![build(
+                "https://guildjen.com/from-junk/",
+                "2026-09-06",
+            )])
+            .unwrap(),
+        )
+        .expect("seed");
+
+        let known = load_todays_builds(&tmp, "2026-09-06");
+        assert_eq!(known.len(), 1, "one reusable entry: {known:?}");
+        assert!(known.contains_key("https://guildjen.com/fresh-build/"));
+        assert!(!known.contains_key("https://guildjen.com/stale-build/"));
+        assert!(!known.contains_key("https://guildjen.com/from-junk/"));
+
+        // A folder with nothing in it is not an error, it is a first run.
+        let empty = tmp.join("empty");
+        std::fs::create_dir_all(&empty).expect("temp dir");
+        assert!(load_todays_builds(&empty, "2026-09-06").is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// Fixture is the real thing: these are the exact names found in a
@@ -2517,7 +2662,7 @@ mod tests {
         let client = build_client().expect("client build must succeed");
 
         let start = Instant::now();
-        let result = scrape_snowcrows(&client, "2026-04-16", &predicate, &|_, _| {});
+        let result = scrape_snowcrows(&client, "2026-04-16", &HashMap::new(), &predicate, &|_, _| {});
         let elapsed = start.elapsed();
 
         assert!(
@@ -2558,7 +2703,7 @@ mod tests {
         let client = build_client().expect("client build must succeed");
 
         let start = Instant::now();
-        let result = scrape_hardstuck(&client, "2026-04-16", &predicate, &|_, _| {});
+        let result = scrape_hardstuck(&client, "2026-04-16", &HashMap::new(), &predicate, &|_, _| {});
         let elapsed = start.elapsed();
 
         assert!(
@@ -2692,7 +2837,7 @@ mod tests {
         let client = build_client().expect("client build must succeed");
 
         let start = Instant::now();
-        let result = scrape_guildjen(&client, "2026-04-16", &predicate, &|_, _| {});
+        let result = scrape_guildjen(&client, "2026-04-16", &HashMap::new(), &predicate, &|_, _| {});
         let elapsed = start.elapsed();
 
         assert!(
