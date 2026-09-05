@@ -24,7 +24,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 10 | [W044](#w044) | S2/confirmed | US2 | verified-scoped | `data/normalized_effects/2026-01-13/pve.json:2` |
 | 11 | [W013](#w013) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/balance.rs:11` |
 | 12 | [W015](#w015) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/data/manifests.rs:43` |
-| 13 | [W016](#w016) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/mod.rs:137` |
+| 13 | [W016](#w016) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/data/mod.rs:137` |
 | 14 | [W039](#w039) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:1389` |
 | 15 | [W038](#w038) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:861` |
 | 16 | [W008](#w008) | S2/confirmed | US2 | planned | `crates/addon/src/ui/main_view/optimization.rs:714` |
@@ -453,7 +453,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W016
 
-- Task: T015 [US2]. Status: **planned**.
+- Task: T015 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/mod.rs:137`.
 - Dependencies: W044.
 
@@ -461,7 +461,7 @@ Claim: The entire data-layer health check is unreachable from the shipping DLL. 
 
 Remediation decision: Wire data initialization to startup and propagate disabled/degraded status; no success-quality fallback after a loader failure.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `state::init` calls `initialize()` and stores `DataState` on `MainState`. `Disabled` sets the status-bar error and `optimize_block_reason`; Optimize/Improve refuse to start. `Degraded` does not pretend to be Ready. Embedded data still returns Ready.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 

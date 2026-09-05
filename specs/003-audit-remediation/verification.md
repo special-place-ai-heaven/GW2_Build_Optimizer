@@ -69,3 +69,9 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W015: `freshness()` / `ManifestFreshness` sit next to `check_staleness`. The API health check stores the warning on `MainState.manifest_staleness`. Status bar chip + About hero show it.
 - Green: `freshness_is_current_or_stale`, existing staleness tests, `live_build_mismatch_is_what_the_health_check_stores`.
 - Did not bump Cargo.toml or touch locales / scraper / chat_flow.
+
+## Sprint 11 — W016 data initialize at startup
+
+- W016: `state::init` runs `data::initialize()`. `Disabled` is stored, logged, shown, and blocks Optimize/Improve. `Degraded` is not treated as Ready.
+- Green: `test_initialize_returns_ready`, `disabled_blocks_optimize_and_is_not_ready`.
+- Did not bump Cargo.toml.

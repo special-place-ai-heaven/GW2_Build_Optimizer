@@ -128,6 +128,23 @@ pub enum DataState {
     Disabled { errors: Vec<DataLoadError> },
 }
 
+impl DataState {
+    /// `Disabled` is a hard stop. `Degraded` is optional-data loss, not a fake Ready.
+    pub fn optimize_block_reason(&self) -> Option<String> {
+        match self {
+            Self::Disabled { errors } => Some(format!(
+                "Balance data failed to load: {}",
+                errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )),
+            Self::Ready | Self::Degraded { .. } => None,
+        }
+    }
+}
+
 /// Load all Phase A data and return overall health status.
 ///
 /// Calls each loader's `try_load()` function. If any required loader fails,
@@ -188,6 +205,24 @@ mod tests {
             "expected DataState::Ready, got {:?}",
             state,
         );
+        assert!(state.optimize_block_reason().is_none());
+    }
+
+    #[test]
+    fn disabled_blocks_optimize_and_is_not_ready() {
+        let state = DataState::Disabled {
+            errors: vec![DataLoadError::MissingRequired {
+                source: "test".into(),
+            }],
+        };
+        let reason = state.optimize_block_reason().expect("Disabled must block");
+        assert!(reason.contains("test"));
+        assert!(DataState::Ready.optimize_block_reason().is_none());
+        assert!(DataState::Degraded {
+            reasons: vec!["optional".into()]
+        }
+        .optimize_block_reason()
+        .is_none());
     }
 
     #[test]

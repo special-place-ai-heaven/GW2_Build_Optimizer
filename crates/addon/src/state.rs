@@ -602,6 +602,8 @@ pub struct MainState {
     pub live_build_number: Option<u32>,
     /// Active-manifest vs live `/v2/build` warning from `check_staleness`.
     pub manifest_staleness: Option<String>,
+    /// Result of `gw2_optimizer::data::initialize()` at addon load.
+    pub data_state: Option<gw2_optimizer::data::DataState>,
     /// Cached "Usage today" count for the active provider's persisted usage
     /// file, displayed in the Settings tab. Refreshed every ~60 frames (~1s)
     /// instead of reading the file every render frame.
@@ -856,6 +858,14 @@ pub fn init(addon_dir: PathBuf) {
     gw2_core::i18n::set_language(&config.ui_language);
     // Surface any config parse error in the UI status bar
     main.error = config_err;
+    let data_state = gw2_optimizer::data::initialize();
+    if let Some(reason) = data_state.optimize_block_reason() {
+        worker_log(reason.clone());
+        if main.error.is_none() {
+            main.error = Some(reason);
+        }
+    }
+    main.data_state = Some(data_state);
     // Apply saved default game mode from config
     let default_mode_label = config.default_game_mode.as_deref().unwrap_or("PvE");
     main.game_mode = match default_mode_label {

@@ -429,6 +429,18 @@ pub(super) fn check_api_health(state: &mut AddonState) {
 
 /// Status-bar chip when the live `/v2/build` is not the verified manifest build.
 pub(super) fn render_manifest_staleness(ui: &nexus::imgui::Ui, state: &crate::state::AddonState) {
+    if let Some(reason) = state
+        .main
+        .data_state
+        .as_ref()
+        .and_then(|s| s.optimize_block_reason())
+    {
+        ui.same_line();
+        ui.text_colored(crate::ui::theme::ERR, "| Data disabled");
+        if ui.is_item_hovered() {
+            ui.tooltip_text(reason);
+        }
+    }
     let Some(msg) = state.main.manifest_staleness.as_deref() else {
         return;
     };
