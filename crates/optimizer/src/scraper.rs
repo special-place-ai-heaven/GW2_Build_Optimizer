@@ -78,6 +78,9 @@ pub fn scrape_all_with_progress(
     should_cancel: &dyn Fn() -> bool,
     on_progress: &dyn Fn(&str, &str),
 ) -> Vec<ScrapeResult> {
+    // A previous run's slowdown is not this run's problem: the pressure
+    // that caused it may be hours old.
+    THROTTLE_MS.store(0, std::sync::atomic::Ordering::Relaxed);
     // Cancel before any work
     if should_cancel() {
         on_progress("snowcrows", "cancelled");
@@ -800,6 +803,53 @@ fn scrape_guildjen_build(
 
 // ─── HTML extraction helpers ──────────────────────────────────────────────────
 
+/// Extra milliseconds added to every gap after the site pushes back.
+///
+/// The point of a sync is to finish. Retrying a 429 three times at a fixed
+/// backoff and then carrying on at the old rate is how a soft "slow down"
+/// becomes a hard block: the site asked, we did not listen, and the next
+/// several hundred requests arrive at the same cadence. This grows on every
+/// throttling signal and decays on success, so a run that meets resistance
+/// slows down and keeps going instead of stopping.
+///
+/// One sync runs at a time, so a process-wide cell is enough and keeps the
+/// signal out of three scrapers' signatures.
+static THROTTLE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// First slowdown step, and the floor once any pushback is seen.
+const THROTTLE_STEP_MS: u64 = 4_000;
+/// Ceiling, so a site that refuses everything cannot wedge the run at an
+/// unbounded delay. Past this the run is failing anyway and should say so.
+const THROTTLE_CEILING_MS: u64 = 30_000;
+
+/// How much the sync is currently holding back, in milliseconds.
+///
+/// Zero when the run is at its normal pace. Non-zero means the site asked us
+/// to slow down and we are obliging - the run has not failed and has not
+/// stopped, it is waiting, and the player deserves to be told that rather
+/// than watching a bar that appears stuck.
+pub fn sync_backoff_ms() -> u64 {
+    THROTTLE_MS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Note that the site pushed back, and slow everything down from here.
+fn throttle_up() {
+    use std::sync::atomic::Ordering;
+    let current = THROTTLE_MS.load(Ordering::Relaxed);
+    let next = (current * 2).clamp(THROTTLE_STEP_MS, THROTTLE_CEILING_MS);
+    THROTTLE_MS.store(next, Ordering::Relaxed);
+}
+
+/// Ease back off after a page comes through cleanly. Three-quarters rather
+/// than straight to zero: one success after a 429 is not proof the pressure
+/// is gone, and sprinting again is what earns the next one.
+fn throttle_down() {
+    use std::sync::atomic::Ordering;
+    let current = THROTTLE_MS.load(Ordering::Relaxed);
+    if current > 0 {
+        THROTTLE_MS.store(current * 3 / 4, Ordering::Relaxed);
+    }
+}
+
 /// Gap between build pages, in milliseconds, picked fresh each time.
 ///
 /// One steady trickle rather than bursts with rests: a burst-and-pause shape
@@ -827,7 +877,8 @@ fn pace(should_cancel: &dyn Fn() -> bool) -> bool {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| u64::from(d.subsec_nanos()))
         .unwrap_or(0);
-    let mut left = std::time::Duration::from_millis(lo + jitter % (hi - lo));
+    let extra = THROTTLE_MS.load(std::sync::atomic::Ordering::Relaxed);
+    let mut left = std::time::Duration::from_millis(lo + jitter % (hi - lo) + extra);
     let slice = std::time::Duration::from_millis(100);
     while !left.is_zero() {
         if should_cancel() {
@@ -841,14 +892,49 @@ fn pace(should_cancel: &dyn Fn() -> bool) -> bool {
 }
 
 /// Statuses worth asking again for. 429 is the site saying "slower", not
-/// "no"; 5xx and 408 are the upstream having a moment. 403 and 404 are
-/// answers, and asking twice will not change them.
+/// "no"; 5xx and 408 are the upstream having a moment. 403 is in the set
+/// because a bot filter answers with one and that IS transient - the whole
+/// point is that the run recovers rather than losing every remaining page.
+/// 404 is an answer, and asking twice will not change it.
 fn retryable_status(status: u16) -> bool {
-    matches!(status, 408 | 425 | 429 | 500 | 502 | 503 | 504)
+    matches!(status, 403 | 408 | 425 | 429 | 500 | 502 | 503 | 504)
 }
 
-/// Attempts per page, including the first.
+/// Statuses that mean "you are going too fast", as opposed to "I am unwell".
+fn throttling_status(status: u16) -> bool {
+    matches!(status, 403 | 429 | 503)
+}
+
+/// Longest `Retry-After` honoured inside a single fetch.
+///
+/// This wait cannot poll cancellation, so it stays short; anything the site
+/// asks for beyond it is handed to [`THROTTLE_MS`], which spreads the wait
+/// across later gaps where Cancel does land.
+const MAX_RETRY_AFTER_MS: u64 = 15_000;
+
+/// The site's own `Retry-After`, in milliseconds, when it gave one in seconds.
+fn retry_after_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(|secs| secs.saturating_mul(1_000))
+}
+
+/// Attempts per page when something went wrong at the transport.
 const FETCH_ATTEMPTS: u32 = 3;
+/// Attempts per page when the site is rate limiting.
+///
+/// Higher than [`FETCH_ATTEMPTS`] on purpose. A rate limit is a wait, not a
+/// refusal: the page is there and the site has told us when to come back for
+/// it. Giving up after three tries turns a delay into a missing build, and a
+/// stretch of 429s into a sync that quietly returns half the data. With the
+/// run-wide slowdown widening every gap at the same time, these attempts are
+/// spread over minutes, not hammered.
+const THROTTLED_ATTEMPTS: u32 = 8;
 
 /// One page, retried through the failures a long sync actually hits.
 ///
@@ -859,53 +945,140 @@ const FETCH_ATTEMPTS: u32 = 3;
 /// for the same reason the pacing is.
 fn fetch_html(client: &reqwest::blocking::Client, url: &str) -> Result<String, String> {
     let mut last = String::new();
-    for attempt in 0..FETCH_ATTEMPTS {
+    let mut wait_ms = 0u64;
+    // Raised the moment the site says "slower": that answer means the page
+    // exists and we asked too soon, so the sync waits it out rather than
+    // dropping the build.
+    let mut attempts = FETCH_ATTEMPTS;
+    let mut attempt = 0;
+    while attempt < attempts {
         if attempt > 0 {
             let jitter = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| u64::from(d.subsec_nanos()) % 1_500)
                 .unwrap_or(0);
-            let base = 2_000 * u64::from(attempt);
+            // The site's own number when it gave one, our growing backoff
+            // otherwise. Asking again sooner than it said is how a soft
+            // "slow down" turns into a hard "no".
+            let base = wait_ms.max(2_000 * u64::from(attempt));
             std::thread::sleep(std::time::Duration::from_millis(base + jitter));
         }
         match fetch_html_once(client, url) {
-            Ok(html) => return Ok(html),
-            Err((retryable, message)) => {
+            Ok(html) => {
+                throttle_down();
+                return Ok(html);
+            }
+            Err(FetchFailure {
+                retryable,
+                throttled,
+                retry_after_ms,
+                message,
+            }) => {
                 last = message;
+                if throttled {
+                    throttle_up();
+                    attempts = THROTTLED_ATTEMPTS;
+                }
+                // Beyond what one fetch can wait for, the remainder lands on
+                // the run-wide gap, where Cancel still works.
+                wait_ms = retry_after_ms.unwrap_or(0).min(MAX_RETRY_AFTER_MS);
                 if !retryable {
                     break;
                 }
             }
         }
+        attempt += 1;
     }
     Err(last)
 }
 
-/// `Err(retryable, message)` so [`fetch_html`] can tell "ask again" from "no".
-fn fetch_html_once(
-    client: &reqwest::blocking::Client,
-    url: &str,
-) -> Result<String, (bool, String)> {
+/// Why one attempt failed, and what to do about it.
+struct FetchFailure {
+    /// Worth another attempt at this URL.
+    retryable: bool,
+    /// The site asked us to slow down, so the whole run should.
+    throttled: bool,
+    /// What it asked for, if it said.
+    retry_after_ms: Option<u64>,
+    message: String,
+}
+
+impl FetchFailure {
+    fn permanent(message: String) -> Self {
+        Self {
+            retryable: false,
+            throttled: false,
+            retry_after_ms: None,
+            message,
+        }
+    }
+
+    /// A transport failure: dropped connection, DNS hiccup, timeout. Worth
+    /// another try, but not a sign we are being too quick.
+    fn transient(message: String) -> Self {
+        Self {
+            retryable: true,
+            throttled: false,
+            retry_after_ms: None,
+            message,
+        }
+    }
+}
+
+/// One attempt, classified so [`fetch_html`] can tell "ask again" from "no"
+/// and "you are going too fast" from "I am unwell".
+fn fetch_html_once(client: &reqwest::blocking::Client, url: &str) -> Result<String, FetchFailure> {
     let resp = client
         .get(url)
         .send()
-        // A transport failure is a dropped connection, a DNS hiccup or a
-        // timeout - all worth one more try.
-        .map_err(|e| (true, format!("HTTP error fetching {}: {}", url, e)))?;
+        .map_err(|e| FetchFailure::transient(format!("HTTP error fetching {}: {}", url, e)))?;
 
     let status = resp.status();
     if !status.is_success() {
-        return Err((
-            retryable_status(status.as_u16()),
-            format!("HTTP {} fetching {} (expected 2xx)", status.as_u16(), url),
-        ));
+        let code = status.as_u16();
+        return Err(FetchFailure {
+            retryable: retryable_status(code),
+            throttled: throttling_status(code),
+            retry_after_ms: retry_after_ms(resp.headers()),
+            message: format!("HTTP {} fetching {} (expected 2xx)", code, url),
+        });
     }
 
     // Cap the body: a hostile endpoint must not stream unbounded bytes into
     // the game process. Build pages are well under 1 MiB.
     let bytes = gw2_api::transport::read_body_capped(resp, 2 * 1024 * 1024)
-        .map_err(|e| (true, format!("error reading {}: {}", url, e)))?;
-    String::from_utf8(bytes).map_err(|_| (false, format!("UTF-8 error reading {}", url)))
+        .map_err(|e| FetchFailure::transient(format!("error reading {}: {}", url, e)))?;
+    let html = String::from_utf8(bytes)
+        .map_err(|_| FetchFailure::permanent(format!("UTF-8 error reading {}", url)))?;
+
+    // A filter that answers 200 with an interstitial is still a refusal, and
+    // reading it as a build page would file its text as a benchmark.
+    if looks_rate_limited(&html) {
+        return Err(FetchFailure {
+            retryable: true,
+            throttled: true,
+            retry_after_ms: None,
+            message: format!("rate-limit or challenge page returned for {}", url),
+        });
+    }
+    Ok(html)
+}
+
+/// Whether a 200 body is an anti-bot interstitial rather than the page.
+///
+/// Cloudflare and friends answer with a normal status and a challenge, so
+/// status alone does not see this. Kept narrow and paired with a length
+/// check: a real build page mentioning "rate limit" in prose is long, an
+/// interstitial is not.
+fn looks_rate_limited(html: &str) -> bool {
+    if html.len() > 8_192 {
+        return false;
+    }
+    let lower = html.to_lowercase();
+    ["rate limit", "too many requests", "checking your browser", "cf-browser-verification",
+     "attention required", "unusual traffic"]
+        .iter()
+        .any(|needle| lower.contains(needle))
 }
 
 /// Heuristic: does this look like a network/security interstitial (block page,
@@ -1703,6 +1876,69 @@ mod tests {
             ],
             "only in-table build links, and never the sidebar"
         );
+    }
+
+    /// A rate limit is a wait, not a refusal. Everything that means "slower"
+    /// has to be retryable AND slow the run down; everything that means "no"
+    /// must not be retried forever.
+    #[test]
+    fn pushback_is_told_apart_from_refusal() {
+        // Slow down: retried, and the whole run eases off.
+        for code in [403, 429, 503] {
+            assert!(retryable_status(code), "{code} must be retried");
+            assert!(throttling_status(code), "{code} must slow the run");
+        }
+        // Upstream having a moment: retried, but we were not the problem.
+        for code in [408, 425, 500, 502, 504] {
+            assert!(retryable_status(code), "{code} must be retried");
+            assert!(!throttling_status(code), "{code} is not about our rate");
+        }
+        // An answer. Asking again will not change it.
+        assert!(!retryable_status(404));
+        assert!(!retryable_status(410));
+    }
+
+    /// A challenge page arrives with status 200, so only the body gives it
+    /// away - and a real build page that happens to say "rate limit" in
+    /// prose must not be mistaken for one.
+    #[test]
+    fn rate_limit_interstitials_are_recognised_by_body() {
+        assert!(looks_rate_limited(
+            "<html><body>Attention Required! | Cloudflare</body></html>"
+        ));
+        assert!(looks_rate_limited("<html>Checking your browser...</html>"));
+        assert!(looks_rate_limited("<html>429 Too Many Requests</html>"));
+
+        let real_page = format!(
+            "<html><body>{}<p>Sigil of Concentration has no rate limit.</p></body></html>",
+            "<div>build content</div>".repeat(500)
+        );
+        assert!(real_page.len() > 8_192);
+        assert!(
+            !looks_rate_limited(&real_page),
+            "a full page is not an interstitial, whatever it mentions"
+        );
+    }
+
+    /// The site's own number wins over our guess, and only when it gave one
+    /// in the seconds form.
+    #[test]
+    fn retry_after_is_read_when_the_site_gives_one() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        assert_eq!(retry_after_ms(&headers), None);
+
+        headers.insert(
+            reqwest::header::RETRY_AFTER,
+            reqwest::header::HeaderValue::from_static("30"),
+        );
+        assert_eq!(retry_after_ms(&headers), Some(30_000));
+
+        // HTTP-date form: not parsed, and must not be read as 0.
+        headers.insert(
+            reqwest::header::RETRY_AFTER,
+            reqwest::header::HeaderValue::from_static("Wed, 21 Oct 2026 07:28:00 GMT"),
+        );
+        assert_eq!(retry_after_ms(&headers), None);
     }
 
     /// The sync walks a class at a time, so the links arrive grouped. A slug

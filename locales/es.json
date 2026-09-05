@@ -433,6 +433,7 @@
   "label.reasons": "Motivos:",
   "bench.header": "vs meta de la comunidad",
   "bench.none": "No hay datos de benchmark.",
+  "bench.throttled": "En pausa - el sitio nos pidió ir más despacio. La sincronización está esperando y continuará sola.",
   "bench.sync_hint": "Ajustes > Sync benchmarks para descargar referencias.",
   "bench.on_par": "a la par",
   "bench.close": "cerca",

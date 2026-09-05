@@ -433,6 +433,7 @@
   "label.reasons": "Powody:",
   "bench.header": "vs meta społeczności",
   "bench.none": "Brak danych porównawczych.",
+  "bench.throttled": "Wstrzymano - witryna poprosiła o zwolnienie tempa. Synchronizacja czeka i sama będzie kontynuowana.",
   "bench.sync_hint": "Przejdź do Ustawienia > Sync Benchmarks, aby pobrać buildy referencyjne.",
   "bench.on_par": "na równi",
   "bench.close": "blisko",

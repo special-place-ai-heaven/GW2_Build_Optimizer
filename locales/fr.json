@@ -433,6 +433,7 @@
   "label.reasons": "Raisons :",
   "bench.header": "vs méta communautaire",
   "bench.none": "Aucun benchmark disponible.",
+  "bench.throttled": "En pause - le site nous demande de ralentir. La synchronisation attend et reprendra d'elle-même.",
   "bench.sync_hint": "Paramètres > Sync benchmarks pour télécharger les références.",
   "bench.on_par": "au niveau",
   "bench.close": "proche",

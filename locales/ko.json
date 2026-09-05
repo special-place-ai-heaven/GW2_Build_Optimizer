@@ -433,6 +433,7 @@
   "label.reasons": "이유:",
   "bench.header": "커뮤니티 메타 대비",
   "bench.none": "벤치마크 데이터가 없습니다.",
+  "bench.throttled": "일시 중지 - 사이트에서 속도를 낮춰 달라고 요청했습니다. 동기화는 대기 중이며 자동으로 계속됩니다.",
   "bench.sync_hint": "설정 > Sync Benchmarks에서 참조 빌드를 내려받으세요.",
   "bench.on_par": "동등",
   "bench.close": "근접",

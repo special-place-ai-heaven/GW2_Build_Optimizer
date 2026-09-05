@@ -433,6 +433,7 @@
   "label.reasons": "Motivos:",
   "bench.header": "vs meta da comunidade",
   "bench.none": "Nenhum dado de referência disponível.",
+  "bench.throttled": "Em pausa - o site pediu para desacelerarmos. A sincronização está aguardando e continuará sozinha.",
   "bench.sync_hint": "Vá a Configurações > Sync Benchmarks para baixar builds de referência.",
   "bench.on_par": "equivalente",
   "bench.close": "perto",
