@@ -856,7 +856,7 @@ fn select_skills(
                 Some(spec_id) => candidate.spec_ids.contains(&spec_id),
                 None => true,
             })
-            .filter(|s| db.skill_to_palette.is_empty() || db.skill_palette_id(s.id) != 0)
+            .filter(|s| db.skill_palette_id(s.id) != 0)
             .collect();
 
         // Heal skill
