@@ -33,6 +33,8 @@
 //!    whoever holds the database turns them into names and item types.
 
 pub mod guildjen;
+pub mod hardstuck;
+pub mod snowcrows;
 
 /// One equipment row as a site published it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -58,13 +60,19 @@ pub struct GearRow {
 impl GearRow {
     /// Whether this row is one of the six armour pieces, which is what makes
     /// its upgrade the build's rune rather than a sigil.
+    ///
+    /// Eight names for six pieces: the API calls them Coat and Leggings,
+    /// Hardstuck displays Chest and Legs, and a slot the reader recognises
+    /// but this list does not would send the rune into the sigils.
     pub fn is_armour(&self) -> bool {
-        const ARMOUR: [&str; 6] = [
+        const ARMOUR: [&str; 8] = [
             "helm",
             "shoulders",
             "coat",
+            "chest",
             "gloves",
             "leggings",
+            "legs",
             "boots",
         ];
         let slot = self.slot.to_ascii_lowercase();
@@ -274,14 +282,16 @@ mod tests {
 
     #[test]
     fn the_dominant_stat_is_what_most_of_the_gear_uses() {
-        let mut build = ProviderBuild::default();
-        // Six Grieving armour pieces, three Viper's trinkets: a real mix,
-        // measured on the Snowcrows reaper page.
-        build.gear = ["Helm", "Coat", "Boots"]
-            .iter()
-            .map(|s| row(s, "Grieving"))
-            .chain(["Ring", "Amulet"].iter().map(|s| row(s, "Viper's")))
-            .collect();
+        // Grieving armour with Viper's trinkets: a real mix, measured on the
+        // Snowcrows reaper page.
+        let build = ProviderBuild {
+            gear: ["Helm", "Coat", "Boots"]
+                .iter()
+                .map(|s| row(s, "Grieving"))
+                .chain(["Ring", "Amulet"].iter().map(|s| row(s, "Viper's")))
+                .collect(),
+            ..Default::default()
+        };
         assert_eq!(build.dominant_stat(), Some("Grieving".into()));
         assert_eq!(ProviderBuild::default().dominant_stat(), None);
     }
