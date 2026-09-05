@@ -1606,17 +1606,19 @@ impl<'a> Timeline<'a> {
             self.profile.required_window_ms,
         );
         let chain_completed = sequence.completed;
-        let cooldown_recovery = !sequence.skill_ids.is_empty()
-            && sequence.skill_ids.iter().all(|skill_id| {
-                self.skills
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, skill)| skill.skill_id == *skill_id)
-                    .all(|(idx, _)| self.cooldown_ready_ms[idx] <= self.profile.duration_ms + 5_000)
-            });
+        // Repeatable = the player leaves the exchange able to fight again:
+        // alive, resources back, and either the target went down, the fight
+        // was net-positive, or half the bar is left. Skill cooldowns are NOT
+        // part of it: the timeline already refuses to recast a skill that is
+        // on cooldown inside the fight, and demanding every skill of the best
+        // secured window be ready again 5s after the window closed failed
+        // every heal (20-30s) and every elite (60-180s) in the game. In-game
+        // 2026-09-05 a Roam/Support Scourge at 87% health after the fight was
+        // non-viable on that rule alone and 32k search evaluations found
+        // nothing viable, because nothing could be.
         let resource_recovery = self.sequence_resources_recovered(&sequence.skill_ids);
         let repeatable = self.player_health > 0.0
-            && cooldown_recovery
+            && chain_completed
             && resource_recovery
             && (target_reached || sustain_margin >= 0.0 || remaining_health_ratio >= 0.50);
 
@@ -2403,6 +2405,67 @@ mod tests {
             skills,
             vec![rule(201, ResourceKind::Adrenaline, 10.0, 0.0, false)],
             true,
+        );
+    }
+
+    #[test]
+    fn long_cooldown_in_the_secured_sequence_is_still_repeatable() {
+        // Seen in-game 2026-09-05 on 1.11.25: a Roam/Support Scourge left the
+        // exchange alive at 87% health and was still judged not repeatable,
+        // because its heal (25s) and elite (120s) sat inside the best secured
+        // window and were not off cooldown 5s after a 20s fight. Every heal and
+        // elite in the game trips that rule. Repeatable is about the player
+        // coming out of the exchange able to fight again, not about the burst
+        // being castable again 5s later.
+        let skills = vec![
+            skill(
+                201,
+                SkillSlot::Elite,
+                50,
+                120_000,
+                vec![
+                    SkillEffect::Cover {
+                        kind: CoverKind::Block,
+                        duration_ms: 2_500,
+                        strippable: false,
+                    },
+                    SkillEffect::CrowdControl {
+                        kind: ControlKind::Stun,
+                        duration_ms: 1_000,
+                        stops_dodge: true,
+                    },
+                    SkillEffect::StrikeDamage {
+                        hit_count: 1,
+                        dmg_multiplier: 8.0,
+                    },
+                ],
+            ),
+            skill(
+                202,
+                SkillSlot::Weapon2,
+                200,
+                700,
+                vec![SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: 8.0,
+                }],
+            ),
+        ];
+        let params = params();
+        let report = run_report(
+            &skills,
+            &[],
+            open_enemy(false),
+            published_fixture_profile(),
+            &params,
+        );
+        assert!(report.chain_completed, "{report:?}");
+        assert!(report.player_survived, "{report:?}");
+        assert!(report.remaining_health_ratio >= 0.5, "{report:?}");
+        assert!(
+            report.repeatable,
+            "alive at {:.0}% after a completed sequence must be repeatable: {report:?}",
+            report.remaining_health_ratio * 100.0
         );
     }
 
