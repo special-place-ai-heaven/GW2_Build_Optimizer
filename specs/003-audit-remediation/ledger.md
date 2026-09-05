@@ -36,14 +36,14 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 22 | [W157](#w157) | S3/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:1109` |
 | 23 | [W231](#w231) | S4/confirmed | US2 | verified-scoped | `crates/optimizer/src/llm/sse.rs:317` |
 | 24 | [W034](#w034) | S2/confirmed | US2 | planned | `crates/optimizer/src/referee.rs:937` |
-| 25 | [W003](#w003) | S2/confirmed | US3 | planned | `crates/addon/src/radio/player.rs:1357` |
+| 25 | [W003](#w003) | S2/confirmed | US3 | verified-scoped | `crates/addon/src/radio/player.rs:1357` |
 | 26 | [W005](#w005) | S2/confirmed | US3 | planned | `crates/addon/src/ui/gear_sheet.rs:250` |
 | 27 | [W007](#w007) | S2/confirmed | US3 | planned | `crates/addon/src/ui/main_view/lock_panel.rs:790` |
-| 28 | [W010](#w010) | S2/confirmed | US3 | planned | `crates/addon/src/ui/mod.rs:212` |
-| 29 | [W014](#w014) | S2/confirmed | US3 | planned | `crates/optimizer/src/data/balance_overrides.rs:302` |
-| 30 | [W017](#w017) | S2/confirmed | US3 | planned | `crates/optimizer/src/data/normalized_effects.rs:522` |
-| 31 | [W018](#w018) | S2/confirmed | US3 | planned | `crates/optimizer/src/data/normalized_effects.rs:724` |
-| 32 | [W020](#w020) | S2/confirmed | US3 | planned | `crates/optimizer/src/data/patch_ledger.rs:17` |
+| 28 | [W010](#w010) | S2/confirmed | US3 | verified-scoped | `crates/addon/src/ui/mod.rs:212` |
+| 29 | [W014](#w014) | S2/confirmed | US3 | verified-scoped | `crates/optimizer/src/data/balance_overrides.rs:302` |
+| 30 | [W017](#w017) | S2/confirmed | US3 | verified-scoped | `crates/optimizer/src/data/normalized_effects.rs:522` |
+| 31 | [W018](#w018) | S2/confirmed | US3 | verified-scoped | `crates/optimizer/src/data/normalized_effects.rs:724` |
+| 32 | [W020](#w020) | S2/confirmed | US3 | verified-scoped | `crates/optimizer/src/data/patch_ledger.rs:17` |
 | 33 | [W021](#w021) | S2/confirmed | US3 | planned | `crates/optimizer/src/data/rotation_profiles.rs:119` |
 | 34 | [W022](#w022) | S2/confirmed | US3 | planned | `crates/optimizer/src/engine.rs:70` |
 | 35 | [W023](#w023) | S2/confirmed | US3 | planned | `crates/optimizer/src/engine.rs:1103` |
@@ -621,7 +621,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W003
 
-- Task: T027 [US3]. Status: **planned**.
+- Task: T027 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/addon/src/radio/player.rs:1357`.
 - Dependencies: story entry gate.
 
@@ -629,7 +629,7 @@ Claim: `saved_from_station` and `station_from_saved` exist twice, field-for-fiel
 
 Remediation decision: Delete the two private copies in ui/main_view/tabs/radio.rs and import the already-`pub` `player::saved_from_station` / `player::station_from_saved` (the file already does `use crate::radio::{..., player, ...}`); keep one round-trip test.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: UI copies deleted. `radio.rs` play/favorites/restore call `player::saved_from_station` / `player::station_from_saved`. One remaining test: `station_round_trips_through_the_saved_snapshot` in player.rs.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
@@ -663,7 +663,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W010
 
-- Task: T030 [US3]. Status: **planned**.
+- Task: T030 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/addon/src/ui/mod.rs:212`.
 - Dependencies: story entry gate.
 
@@ -671,13 +671,13 @@ Claim: A one-version config migration is still compiled into the hot render path
 
 Remediation decision: Delete the `legacy` branch here and the `LEGACY_FIRST_WINDOW_SIZE` const, or move the one-shot upgrade into `AppConfig::load` gated on a stored config schema version so it can only fire once per install.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `LEGACY_FIRST_WINDOW_SIZE` is gone. Render applies a default size only when the rect is unset or the player forced a snap (`window_needs_default_size`). 800×600 is a normal persisted size. `window_init_is_only_missing_size_or_forced_snap` plus existing snap-geometry tests (which already use 800×600) passed.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W014
 
-- Task: T031 [US3]. Status: **planned**.
+- Task: T031 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/balance_overrides.rs:302`.
 - Dependencies: story entry gate.
 
@@ -685,13 +685,13 @@ Claim: This function is unconditionally a no-op AND has no caller. (a) Every one
 
 Remediation decision: Remove the unused no-op check_wvw_quality and its re-export, including the unreachable placeholder lookup (W106), after proving current callers are absent.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `check_wvw_quality` and its re-export are gone. No production callers. Tests that only asserted the no-op Verified return were deleted; `test_wvw_no_known_split_uses_base_value` still pins lookup-None. `known_mode_splits` remains.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W017
 
-- Task: T032 [US3]. Status: **planned**.
+- Task: T032 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/normalized_effects.rs:522`.
 - Dependencies: story entry gate.
 
@@ -699,13 +699,13 @@ Claim: This is a second, unused ~130-line effect scorer running in parallel with
 
 Remediation decision: Keep the live synergy scorer and remove the unused parallel score_effect implementation and exclusive helpers/re-export after reference checks.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `score_effect`, `effect_uptime`, `status_weight_for_scoring`, and `cond_importance_from_op` are gone. Live scorer remains `synergy::score_normalized_effect`. `tests_alias_helpers` kept for the boon/condition alias suite. Re-export dropped.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W018
 
-- Task: T033 [US3]. Status: **planned**.
+- Task: T033 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/normalized_effects.rs:724`.
 - Dependencies: story entry gate.
 
@@ -713,13 +713,13 @@ Claim: A ~200-line migration shim (lines 719-1020) with no caller. Its own doc s
 
 Remediation decision: Remove unused legacy-effect mapper and exclusive helpers/re-export after reference checks; retain any still-live synergy import.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `map_legacy_effect`, `map_stat_type_to_hint`, `map_damage_category`, and the `use crate::synergy` import are gone. Exclusive mapper tests deleted. Live synergy extractors untouched.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W020
 
-- Task: T034 [US3]. Status: **planned**.
+- Task: T034 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/patch_ledger.rs:17`.
 - Dependencies: W013.
 
@@ -727,7 +727,7 @@ Claim: The whole `patch_ledger` module is consumed only by test code. `grep -rn 
 
 Remediation decision: Retain patch ledgers as test-time provenance: gate the module appropriately and move serde_yaml to dev dependencies if no runtime consumer remains. Preserve historical data files.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `patch_ledger` is `#[cfg(test)]`. `serde_yaml` moved to optimizer `[dev-dependencies]`. YAML files kept. `initialize()` never loaded ledgers. Consistency tests still call `patch_ledger::ledgers()`.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
