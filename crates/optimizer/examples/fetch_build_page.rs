@@ -113,6 +113,18 @@ fn main() {
     item_ids.dedup();
     println!("  distinct item ids: {} -> {:?}", item_ids.len(), &item_ids[..item_ids.len().min(12)]);
 
+    // Ids the page published for machines, if it publishes any.
+    let ids = gw2_optimizer::gw2_embeds::extract(&html);
+    println!("  gw2 embed ids:");
+    println!("    items      : {:?}", ids.items);
+    println!("    traitlines : {:?}", ids.traitlines);
+    println!("    traits     : {:?}", ids.traits);
+    println!("    skills     : {} ids", ids.skills.len());
+    println!(
+        "    rune (most repeated item): {:?}",
+        gw2_optimizer::gw2_embeds::most_repeated_item(&ids.items)
+    );
+
     if let Some(path) = out {
         let mut f = std::fs::File::create(&path).expect("create");
         f.write_all(html.as_bytes()).expect("write");

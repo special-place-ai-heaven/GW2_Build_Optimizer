@@ -9,6 +9,7 @@ pub mod engine;
 pub mod gamedb;
 pub mod gemini;
 pub mod gemini_tools;
+pub mod gw2_embeds;
 #[cfg(test)]
 mod grouped_sheet;
 pub mod itemstat_pool;
