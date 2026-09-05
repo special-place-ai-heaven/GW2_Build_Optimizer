@@ -51,3 +51,9 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W035: the LLM `simulate_rotation` tool builds `SimParams` from base+prefix (precision, ferocity, mode fury, duration mults, derived health/armor) and calls `simulate_with`. `simulate` / `simulate_against` are test-only wrappers around `SimParams::basic`.
 - Green: `simulate_rotation_uses_resolved_crit_not_basic_defaults` (Berserker strike ≠ `basic`, equals `simulate_with`); `duration_seconds_is_clamped`; `simulate_rotation_errors_when_prefix_cannot_be_priced`; 34 simulator unit tests.
 - No version bump: tool-path correctness, not a player-facing DLL. Other agent stays on Choya/referee.
+
+## Sprint 8 — W044 normalized-effect patch mismatch
+
+- W044: `effects_for_mode` no longer ignores patch. It resolves the active manifest, then `inherits_from`. Exact `effects_for("2026-07-15")` stays None; inherited rows keep patch_id `2026-01-13`. Historical JSON was not copied.
+- Green: `test_normalized_effects_patch_ids_exist_in_manifests`, `test_effects_for_unknown_returns_none`, two wvw_timeline tests that still go through `effects_for_mode`.
+- Did not touch `engine.rs` (dirty in this checkout), `scraper.rs`, `chat_flow.rs`, or locales.

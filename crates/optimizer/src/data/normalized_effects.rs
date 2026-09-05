@@ -394,12 +394,41 @@ impl NormalizedEffectsData {
             .map(|f| f.effects.as_slice())
     }
 
-    /// Effects for a game mode, ignoring snapshot patch_id mismatch.
+
+    /// Exact `(patch_id, mode)` first, then walk that manifest's `inherits_from`.
+    /// `sourced_patch` is the file that answered — not relabeled to `patch_id`.
+    pub fn effects_for_resolved<'a>(
+        &'a self,
+        patch_id: &str,
+        mode: &str,
+    ) -> Option<(&'a [NormalizedEffect], &'a str)> {
+        let manifests = super::manifests::manifests();
+        let mut current = Some(patch_id);
+        let mut seen = HashSet::new();
+        while let Some(id) = current {
+            if !seen.insert(id) {
+                break;
+            }
+            if let Some(file) = self.files.values().find(|f| {
+                f.patch_id == id && f.mode.eq_ignore_ascii_case(mode)
+            }) {
+                return Some((file.effects.as_slice(), file.patch_id.as_str()));
+            }
+            current = manifests
+                .iter()
+                .find(|m| m.patch_id == id)
+                .and_then(|m| m.inherits_from.as_deref());
+        }
+        None
+    }
+
+
+    /// Effects for `mode` on the active manifest, then `inherits_from`.
+    /// Never selects a file only because its mode matches.
     pub fn effects_for_mode(&self, mode: &str) -> &[NormalizedEffect] {
-        self.files
-            .values()
-            .find(|f| f.mode.eq_ignore_ascii_case(mode))
-            .map(|f| f.effects.as_slice())
+        let active = super::manifests::latest_manifest().patch_id.as_str();
+        self.effects_for_resolved(active, mode)
+            .map(|(effects, _)| effects)
             .unwrap_or(&[])
     }
 
@@ -407,6 +436,19 @@ impl NormalizedEffectsData {
     pub fn file_count(&self) -> usize {
         self.files.len()
     }
+
+
+    /// `(patch_id, mode)` for every embedded file. Historical snapshots stay labeled.
+    pub fn loaded_snapshots(&self) -> Vec<(&str, &str)> {
+        let mut keys: Vec<_> = self
+            .files
+            .values()
+            .map(|f| (f.patch_id.as_str(), f.mode.as_str()))
+            .collect();
+        keys.sort_unstable();
+        keys
+    }
+
 
     /// Total number of effects across all files.
     pub fn effect_count(&self) -> usize {
@@ -1528,9 +1570,14 @@ mod tests {
         assert!(data.effects_for("9999-99-99", "PvE").is_none());
         assert!(data.effects_for("2026-01-13", "Ranked").is_none());
         assert!(
-            !data.effects_for_mode("WvW").is_empty(),
-            "mode lookup should ignore patch_id"
+            data.effects_for("2026-07-15", "WvW").is_none(),
+            "active snapshot has no own NE file — do not invent one"
         );
+        let (wvw, sourced) = data
+            .effects_for_resolved("2026-07-15", "WvW")
+            .expect("active patch inherits_from 2026-01-13");
+        assert_eq!(sourced, "2026-01-13");
+        assert!(!wvw.is_empty());
     }
 
     // ─── 11. Loader: malformed JSON → DataLoadError ───

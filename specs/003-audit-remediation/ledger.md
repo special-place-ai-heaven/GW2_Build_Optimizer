@@ -21,7 +21,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 7 | [W025](#w025) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/gemini_tools.rs:1529` |
 | 8 | [W035](#w035) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/simulator.rs:220` |
 | 9 | [W019](#w019) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/objective_profiles.rs:86` |
-| 10 | [W044](#w044) | S2/confirmed | US2 | planned | `data/normalized_effects/2026-01-13/pve.json:2` |
+| 10 | [W044](#w044) | S2/confirmed | US2 | verified-scoped | `data/normalized_effects/2026-01-13/pve.json:2` |
 | 11 | [W013](#w013) | S2/confirmed | US2 | planned | `crates/optimizer/src/balance.rs:11` |
 | 12 | [W015](#w015) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/manifests.rs:43` |
 | 13 | [W016](#w016) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/mod.rs:137` |
@@ -411,7 +411,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W044
 
-- Task: T012 [US2]. Status: **planned**.
+- Task: T012 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `data/normalized_effects/2026-01-13/pve.json:2`.
 - Dependencies: story entry gate.
 
@@ -419,9 +419,9 @@ Claim: The patch-aware data layer has no normalized effects for the patch it dec
 
 Remediation decision: Make normalized-effect patch mismatch explicit in production and active-manifest consistency validation; historical data must not be silently relabeled as current verified evidence.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `effects_for("2026-07-15", mode)` is None. `effects_for_resolved` walks `inherits_from` and returns the 2026-01-13 slice with `sourced_patch` still `"2026-01-13"`. `effects_for_mode` uses the active manifest + that walk — it no longer picks a file by mode alone. Consistency test asserts against `latest_manifest()`, not a hardcoded superseded id. Historical JSON was not copied into a 2026-07-15 folder.
 
-Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
+Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers. Authoring a real 2026-07-15 NE snapshot is a later data task, not this remedy.
 
 ### W013
 
