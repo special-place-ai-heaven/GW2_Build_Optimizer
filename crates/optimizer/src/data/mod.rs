@@ -8,6 +8,7 @@ mod consistency_tests;
 pub mod manifests;
 pub mod normalized_effects;
 pub mod objective_profiles;
+#[cfg(test)]
 pub mod patch_ledger;
 pub mod profession_profiles;
 pub mod quality;
@@ -15,18 +16,15 @@ pub mod rotation_profiles;
 pub mod slot_budgets;
 pub mod universal_formulas;
 
-pub use balance_overrides::{
-    check_wvw_quality, known_mode_splits, BalanceOverrides, KnownModeSplit, OverrideResult,
-};
+pub use balance_overrides::{known_mode_splits, BalanceOverrides, KnownModeSplit, OverrideResult};
 pub use boon_condition_formulas::{boons, conditions, BoonFormulas, ConditionFormulas};
 pub use cleanse_sources::{CleanseRegistry, CleanseSource, SourceKind};
 pub use manifests::{check_staleness, freshness, ManifestFreshness, PatchManifest};
 pub use normalized_effects::{
-    map_legacy_effect, score_effect, EffectCategory, NormalizedEffect, SourceType, StackingRule,
-    StatusOperation, TriggerRule, UptimeModel,
+    EffectCategory, NormalizedEffect, SourceType, StackingRule, StatusOperation, TriggerRule,
+    UptimeModel,
 };
 pub use objective_profiles::{ObjectiveProfile, ObjectiveProfileData, ObjectiveProfileFile};
-pub use patch_ledger::PatchLedger;
 pub use profession_profiles::ProfessionProfiles;
 pub use quality::{DataQuality, DataQualityReason, FactualValue};
 pub use rotation_profiles::{

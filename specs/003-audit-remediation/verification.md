@@ -113,3 +113,13 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W231: provider error codes above `u16::MAX` become 502, not a wrapped 429.
 - Green: `timeline_at_saturates_near_u32_max` (36 `wvw_timeline` tests), `out_of_range_error_code_falls_back_to_502` (16 `sse` tests).
 - Did not bump Cargo.toml.
+
+## Sprint 18 — US3 dead duplicates (W003, W010, W014, W017, W018, W020)
+
+- W003: radio UI calls `player::saved_from_station` / `player::station_from_saved`; local copies gone.
+- W010: no per-frame 800×600 migrate; `LEGACY_FIRST_WINDOW_SIZE` deleted.
+- W014: unused no-op `check_wvw_quality` removed.
+- W017/W018: unused `score_effect` / `map_legacy_effect` and exclusive helpers removed; live synergy scorer stays.
+- W020: `patch_ledger` is test-only; `serde_yaml` is a dev-dependency.
+- Green: `station_round_trips_through_the_saved_snapshot`, `window_init_is_only_missing_size_or_forced_snap`, `test_wvw_no_known_split_uses_base_value`, `test_baseline_data_loads_and_validates`, `test_ledger_for_patch_found`, `test_patch_ledger_ids_exist_in_manifests`, `test_initialize_returns_ready`.
+- Did not bump Cargo.toml.

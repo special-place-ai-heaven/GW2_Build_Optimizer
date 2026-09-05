@@ -191,6 +191,12 @@ pub(crate) fn window_needs_snap(pos: [f32; 2], size: [f32; 2], display: [f32; 2]
     vis_area < total * 0.75
 }
 
+/// First-run / reset apply when size is missing or the player forced a snap.
+/// Pre-1.7.22 800×600 is a normal persisted size, not a migrate trigger.
+fn window_needs_default_size(unset: bool, force_snap: bool) -> bool {
+    unset || force_snap
+}
+
 pub fn render(ui: &Ui) {
     // Before the visibility check and outside `with_state`: a copy that lost the
     // race for the clipboard must still land if the player closed the overlay
@@ -209,11 +215,7 @@ pub fn render(ui: &Ui) {
         let snap = s.force_window_pos;
         s.force_window_pos = false;
         let unset = s.config.window_w.is_none() || s.config.window_h.is_none();
-        let legacy = {
-            let (_, sz) = s.config.window_rect();
-            sz == gw2_core::config::LEGACY_FIRST_WINDOW_SIZE
-        };
-        let apply = snap || unset || legacy;
+        let apply = window_needs_default_size(unset, snap);
         if apply {
             let size = gw2_core::config::initial_window_size(display);
             let pos = if snap {
@@ -323,7 +325,7 @@ pub fn render(ui: &Ui) {
 
 #[cfg(test)]
 mod tests {
-    use super::window_needs_snap;
+    use super::{window_needs_default_size, window_needs_snap};
 
     /// The window rect, "overlay closed", and the build number a finished data
     /// refresh writes are all saved from inside `with_state`, on the render
@@ -412,6 +414,13 @@ mod tests {
             [800.0, 600.0],
             [1920.0, 1080.0]
         ));
+    }
+
+    #[test]
+    fn window_init_is_only_missing_size_or_forced_snap() {
+        assert!(window_needs_default_size(true, false));
+        assert!(window_needs_default_size(false, true));
+        assert!(!window_needs_default_size(false, false));
     }
 
     #[test]
