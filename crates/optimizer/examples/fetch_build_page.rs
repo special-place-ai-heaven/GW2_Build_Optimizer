@@ -113,16 +113,20 @@ fn main() {
     item_ids.dedup();
     println!("  distinct item ids: {} -> {:?}", item_ids.len(), &item_ids[..item_ids.len().min(12)]);
 
-    // Ids the page published for machines, if it publishes any.
-    let ids = gw2_optimizer::gw2_embeds::extract(&html);
-    println!("  gw2 embed ids:");
-    println!("    items      : {:?}", ids.items);
-    println!("    traitlines : {:?}", ids.traitlines);
-    println!("    traits     : {:?}", ids.traits);
-    println!("    skills     : {} ids", ids.skills.len());
+    // Which convention this page publishes ids in. Each site has its own,
+    // and a count of zero is the first thing to check when a parser that
+    // works elsewhere returns nothing here.
+    println!("  id conventions:");
+    for (label, needle) in [
+        ("data-gw2-embed  (GuildJen)", "data-gw2-embed"),
+        ("data-armory-embed (Snowcrows)", "data-armory-embed"),
+        ("<gw2object       (Hardstuck)", "<gw2object"),
+    ] {
+        println!("    {label}: {}", count(needle));
+    }
     println!(
-        "    rune (most repeated item): {:?}",
-        gw2_optimizer::gw2_embeds::most_repeated_item(&ids.items)
+        "  parsed as guildjen: {:?}",
+        gw2_optimizer::providers::guildjen::parse(&html)
     );
 
     if let Some(path) = out {
