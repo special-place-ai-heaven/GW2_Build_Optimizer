@@ -362,6 +362,8 @@ struct Timeline<'a> {
     bonus_boon_duration: f64,
     bonus_condition_duration: f64,
     unmodeled_effect_sources: u32,
+    unmodeled_proc_keys: HashSet<(u8, u32)>,
+    protection_multiplier: f64,
     resource_rules: HashMap<u32, SkillResourceRule>,
     resources: HashMap<ResourceKind, f64>,
     resource_blocked_skills: HashSet<u32>,
@@ -461,6 +463,9 @@ impl<'a> Timeline<'a> {
             bonus_boon_duration: 0.0,
             bonus_condition_duration: 0.0,
             unmodeled_effect_sources,
+            unmodeled_proc_keys: HashSet::new(),
+            protection_multiplier: crate::data::boon_condition_formulas::boons()
+                .protection_multiplier(),
             resource_rules: resource_rules
                 .iter()
                 .map(|rule| (rule.skill_id, rule.clone()))
@@ -858,7 +863,7 @@ impl<'a> Timeline<'a> {
         }
         let mut damage = raw_damage * self.incoming_strike_mult;
         if self.has_defense(CoverKind::Protection) {
-            damage *= 0.67;
+            damage *= self.protection_multiplier;
         }
         self.absorb_damage(damage);
     }
@@ -1087,7 +1092,7 @@ impl<'a> Timeline<'a> {
                     * self.params.strike_mult
                     * self.passive_strike_mult;
                 if self.enemy_protection {
-                    damage *= 0.67;
+                    damage *= self.protection_multiplier;
                 }
                 self.record_damage(damage, protected);
                 self.remove_defense(CoverKind::Stealth);
@@ -1342,6 +1347,19 @@ impl<'a> Timeline<'a> {
         }
     }
 
+    fn note_unmodeled_proc(&mut self, source_type: &SourceType, source_id: u32) {
+        let tag = match source_type {
+            SourceType::Trait => 0,
+            SourceType::Skill => 1,
+            SourceType::Rune => 2,
+            SourceType::Sigil => 3,
+            SourceType::Relic => 4,
+        };
+        if self.unmodeled_proc_keys.insert((tag, source_id)) {
+            self.unmodeled_effect_sources += 1;
+        }
+    }
+
     fn trigger_procs(
         &mut self,
         trigger: TriggerRule,
@@ -1388,6 +1406,9 @@ impl<'a> Timeline<'a> {
                 EffectCategory::OutgoingHealingPct if duration_ms > 0 => self.heal(value.max(0.0)),
                 _ => {
                     let _ = cooldown;
+                    let source_type = self.proc_specs[idx].source_type.clone();
+                    let source_id = self.proc_specs[idx].source_id;
+                    self.note_unmodeled_proc(&source_type, source_id);
                 }
             }
         }
@@ -2710,6 +2731,122 @@ mod tests {
 
         assert_eq!(timeline.unmodeled_effect_sources, 1);
         assert!(timeline.proc_specs.is_empty());
+    }
+
+    fn test_proc_effect(
+        source_id: u32,
+        category: EffectCategory,
+        duration: Option<f64>,
+    ) -> NormalizedEffect {
+        use crate::data::normalized_effects::{StackingRule, UptimeModel, UptimeModelKind};
+        use crate::data::EvidenceLevel;
+        NormalizedEffect {
+            effect_id: format!("test-proc-{source_id}"),
+            source_type: SourceType::Relic,
+            source_id,
+            source_name: "test".into(),
+            category,
+            value: FactualValue::Resolved(10.0),
+            stacking_rule: StackingRule::NonStacking,
+            trigger_rule: TriggerRule::OnHit,
+            uptime_model: UptimeModel {
+                kind: UptimeModelKind::Unknown,
+                uptime: None,
+            },
+            evidence_level: EvidenceLevel::Unknown,
+            source: None,
+            effect_duration: duration.map(FactualValue::Resolved),
+            internal_cooldown: None,
+            max_stacks: None,
+            status_operation: None,
+            inner_category: None,
+        }
+    }
+
+    #[test]
+    fn unsupported_proc_category_counts_once_per_source() {
+        let flat = test_proc_effect(11, EffectCategory::FlatStat, None);
+        let heal = test_proc_effect(22, EffectCategory::OutgoingHealingPct, None);
+        let params = params();
+        let mut timeline = Timeline::new(
+            &[],
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &[&flat, &heal],
+            &[],
+            true,
+            0,
+        );
+        assert_eq!(timeline.unmodeled_effect_sources, 0);
+        assert_eq!(timeline.proc_specs.len(), 2);
+
+        for _ in 0..5 {
+            timeline.trigger_procs(TriggerRule::OnHit, None, false);
+        }
+
+        assert_eq!(timeline.unmodeled_effect_sources, 2);
+        assert_eq!(timeline.healing, 0.0);
+    }
+
+    #[test]
+    fn protection_uses_formula_multiplier() {
+        let params = params();
+        let mut incoming = Timeline::new(
+            &[],
+            &params,
+            profile(1_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        incoming.apply_skill_effect(
+            1,
+            &SkillEffect::Cover {
+                kind: CoverKind::Protection,
+                duration_ms: 5_000,
+                strippable: true,
+            },
+            false,
+        );
+        incoming.receive_strike(1_000.0, true);
+        let expected = 1_000.0 * incoming.protection_multiplier;
+        assert!((incoming.incoming_damage - expected).abs() < 1e-9);
+
+        let mut open = Timeline::new(
+            &[],
+            &params,
+            profile(1_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        let mut prot = Timeline::new(
+            &[],
+            &params,
+            profile(1_000, vec![]),
+            EnemyDummy {
+                protection: true,
+                stability: false,
+                hp: Some(18_000.0),
+            },
+            &[],
+            &[],
+            true,
+            0,
+        );
+        let strike = SkillEffect::StrikeDamage {
+            hit_count: 1,
+            dmg_multiplier: 1.0,
+        };
+        open.apply_skill_effect(1, &strike, false);
+        prot.apply_skill_effect(1, &strike, false);
+        let ratio = prot.damage_events[0].amount / open.damage_events[0].amount;
+        assert!((ratio - prot.protection_multiplier).abs() < 1e-9);
     }
 
     #[test]

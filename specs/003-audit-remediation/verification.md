@@ -75,3 +75,10 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W016: `state::init` runs `data::initialize()`. `Disabled` is stored, logged, shown, and blocks Optimize/Improve. `Degraded` is not treated as Ready.
 - Green: `test_initialize_returns_ready`, `disabled_blocks_optimize_and_is_not_ready`.
 - Did not bump Cargo.toml.
+
+## Sprint 12 — W039 unmodeled procs + W038 Protection formula
+
+- W039: unsupported `trigger_procs` categories and zero-duration `OutgoingHealingPct` increment `unmodeled_effect_sources` once per source, not once per tick.
+- W038: incoming and outgoing Protection use `boons().protection_multiplier()` cached on `Timeline`.
+- Green: `unsupported_proc_category_counts_once_per_source`, `protection_uses_formula_multiplier`; 35 `wvw_timeline` unit tests.
+- Did not bump Cargo.toml — other agent owns 1.11.32. Leftovers in news/theme/comparison/fonts stay theirs.
