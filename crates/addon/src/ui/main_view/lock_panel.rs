@@ -795,11 +795,17 @@ fn optimized_trait_selected(selected: &[String], english_name: &str) -> bool {
 
 /// Render the optimized build's specs & traits in the same visual style as the lock panel.
 /// Read-only — no click interactions. Matches the lock panel layout for side-by-side comparison.
+/// `worn` is the player's equipped specs in the same shape. When present,
+/// every spec and trait that differs from it gets a green halo, so a build
+/// they are about to equip shows at a glance what Choya moved and what it
+/// left alone. `None` while rendering the equipped build itself - there is
+/// nothing to mark against.
 pub fn render_optimized_specs_panel(
     ui: &Ui,
     db: Option<&GameDb>,
     suggestion_specs: &[(String, Vec<String>)], // (spec_name, [trait1, trait2, trait3])
     title: &str,
+    worn: Option<&[(String, Vec<String>)]>,
 ) {
     let spacing = 4.0_f32;
 
@@ -868,6 +874,21 @@ pub fn render_optimized_specs_panel(
         let spec_info = spec_by_name.get(lookup_name);
         let is_elite = spec_info.is_some_and(|s| s.elite) || spec_name.ends_with(" [E]");
 
+        // Traits the player already runs in THIS spec. A spec they are not
+        // running at all has none, so every trait in it reads as changed -
+        // which is the truth.
+        let worn_traits: Option<&[String]> = worn.map(|specs| {
+            specs
+                .iter()
+                .find(|(n, _)| {
+                    n.strip_suffix(" [E]")
+                        .unwrap_or(n.as_str())
+                        .eq_ignore_ascii_case(lookup_name)
+                })
+                .map_or(&[][..], |(_, traits)| traits.as_slice())
+        });
+        let spec_changed = worn_traits.is_some_and(|w| w.is_empty());
+
         // ── Hexagon (spec identity) ──
         let hex_center = [
             row_start[0] + hex_area_width / 2.0,
@@ -895,6 +916,9 @@ pub fn render_optimized_specs_panel(
                 false,
                 2.0,
             );
+            if spec_changed {
+                crate::ui::theme::paint_changed_circle(&draw_list, hex_center, hex_radius);
+            }
 
             if let Some(url) = db
                 .and_then(|d| crate::ui::icons::spec_url_by_name(d, lookup_name))
@@ -985,6 +1009,19 @@ pub fn render_optimized_specs_panel(
                             draw_list
                                 .add_circle([cx, cy], circle_radius, color_u32(outline_color))
                                 .build();
+                            if is_selected
+                                && worn_traits.is_some_and(|w| {
+                                    trait_info.is_some_and(|ti| {
+                                        !optimized_trait_selected(w, &ti.name)
+                                    })
+                                })
+                            {
+                                crate::ui::theme::paint_changed_circle(
+                                    &draw_list,
+                                    [cx, cy],
+                                    circle_radius,
+                                );
+                            }
 
                             if let Some(url) = trait_info.and_then(|t| t.icon.as_deref()) {
                                 let r = circle_radius;

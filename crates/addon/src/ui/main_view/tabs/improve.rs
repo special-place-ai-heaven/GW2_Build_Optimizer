@@ -163,7 +163,12 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                     ResultPane::Build => {
                         let viewing = state.main.comparison.show_optimized;
                         if viewing {
-                            build_display::render_suggestion_skills(ui, &suggestion, db_ref);
+                            build_display::render_suggestion_skills(
+                                ui,
+                                &suggestion,
+                                db_ref,
+                                Some(&build),
+                            );
                         } else {
                             build_display::render_build_skills(ui, &build, db_ref);
                         }
@@ -174,6 +179,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                                 db_ref.map(|db| db as &gw2_optimizer::gamedb::GameDb),
                                 &suggestion.specializations,
                                 &t("section.optimized_specs"),
+                                Some(&crate::ui::comparison::spec_pairs_from_build(&build)),
                             );
                         } else {
                             let mut specs_open = true;

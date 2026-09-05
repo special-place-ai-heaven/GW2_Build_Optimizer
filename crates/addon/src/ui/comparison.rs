@@ -502,7 +502,12 @@ pub fn render_comparison(
         ResultPane::Build => {
             let viewing = comparison.show_optimized;
             if viewing {
-                crate::ui::main_view::build_display::render_suggestion_skills(ui, &suggestion, db);
+                crate::ui::main_view::build_display::render_suggestion_skills(
+                    ui,
+                    &suggestion,
+                    db,
+                    Some(current_build),
+                );
             } else {
                 crate::ui::main_view::build_display::render_build_skills(ui, current_build, db);
             }
@@ -513,6 +518,7 @@ pub fn render_comparison(
                     db,
                     &suggestion.specializations,
                     &t("section.optimized_specs"),
+                    Some(&spec_pairs_from_build(current_build)),
                 );
             } else {
                 let current_specs = spec_pairs_from_build(current_build);
@@ -521,6 +527,7 @@ pub fn render_comparison(
                     db,
                     &current_specs,
                     &t("section.specs"),
+                    None,
                 );
             }
             let gain = crate::ui::gear_sheet::combat_gain(
@@ -669,7 +676,7 @@ pub(crate) fn render_stats_pane(
     }
 }
 
-fn spec_pairs_from_build(build: &ResolvedBuild) -> Vec<(String, Vec<String>)> {
+pub(crate) fn spec_pairs_from_build(build: &ResolvedBuild) -> Vec<(String, Vec<String>)> {
     build
         .specializations
         .iter()
