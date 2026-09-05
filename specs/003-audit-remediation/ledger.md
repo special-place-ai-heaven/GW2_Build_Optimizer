@@ -33,8 +33,8 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 19 | [W082](#w082) | S3/confirmed | US2 | verified-scoped | `crates/addon/src/ui/main_view/tabs/saveload.rs:509` |
 | 20 | [W182](#w182) | S3/confirmed | US2 | verified-scoped | `crates/optimizer/src/synergy_pipeline.rs:859` |
 | 21 | [W225](#w225) | S4/confirmed | US2 | planned | `crates/optimizer/src/llm/openai.rs:325` |
-| 22 | [W157](#w157) | S3/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:1109` |
-| 23 | [W231](#w231) | S4/confirmed | US2 | planned | `crates/optimizer/src/llm/sse.rs:317` |
+| 22 | [W157](#w157) | S3/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:1109` |
+| 23 | [W231](#w231) | S4/confirmed | US2 | verified-scoped | `crates/optimizer/src/llm/sse.rs:317` |
 | 24 | [W034](#w034) | S2/confirmed | US2 | planned | `crates/optimizer/src/referee.rs:937` |
 | 25 | [W003](#w003) | S2/confirmed | US3 | planned | `crates/addon/src/radio/player.rs:1357` |
 | 26 | [W005](#w005) | S2/confirmed | US3 | planned | `crates/addon/src/ui/gear_sheet.rs:250` |
@@ -579,7 +579,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W157
 
-- Task: T024 [US2]. Status: **planned**.
+- Task: T024 [US2]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/optimizer/src/rotation/wvw_timeline.rs:1109`.
 - Dependencies: story entry gate.
 
@@ -587,13 +587,13 @@ Claim: Millisecond arithmetic on API-derived durations mixes saturating and non-
 
 Remediation decision: Use `saturating_add` for every `now_ms`/`current_time_ms` + duration expression, matching the sibling lines that already do. A one-line helper (`fn at(&self, offset_ms: u32) -> u32 { self.now_ms.saturating_add(offset_ms) }`) makes the whole file consistent and removes the choice.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `Timeline::at` saturates `now_ms + offset`. Production `self.now_ms +` sites now go through it (or `now_ms.saturating_add` where borrowck forbids `at`). Simulator duration/next-action adds saturate too. `timeline_at_saturates_near_u32_max` plus 36 `wvw_timeline` tests passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
 ### W231
 
-- Task: T025 [US2]. Status: **planned**.
+- Task: T025 [US2]. Status: **verified-scoped**.
 - Audit: S4, confirmed; location: `crates/optimizer/src/llm/sse.rs:317`.
 - Dependencies: story entry gate.
 
@@ -601,7 +601,7 @@ Claim: `code` is a u64 taken verbatim from the provider's error object and trunc
 
 Remediation decision: `u16::try_from(code).unwrap_or(502)` so an out-of-range code falls back to the generic 502 instead of wrapping.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `error_object_to_llm_error` uses `u16::try_from(code).unwrap_or(502)`. `out_of_range_error_code_falls_back_to_502` (65965 → 502, 429 stays 429). 16 `llm::sse` tests passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 

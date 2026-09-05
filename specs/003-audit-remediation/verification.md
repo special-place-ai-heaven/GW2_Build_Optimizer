@@ -106,3 +106,10 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W182: `select_skills` no longer waives the palette gate on an empty map. The WvW diag fixture now gives each synthetic skill a palette id.
 - Green: `optimize_synergy_wvw_selects_required_bar_utilities`, `select_skills_skips_heals_without_template_palette`.
 - Did not bump Cargo.toml.
+
+## Sprint 17 — W157 saturate timeline clocks + W231 SSE status clamp
+
+- W157: `Timeline::at` saturates duration math; simulator next-action/control ends do the same.
+- W231: provider error codes above `u16::MAX` become 502, not a wrapped 429.
+- Green: `timeline_at_saturates_near_u32_max` (36 `wvw_timeline` tests), `out_of_range_error_code_falls_back_to_502` (16 `sse` tests).
+- Did not bump Cargo.toml.

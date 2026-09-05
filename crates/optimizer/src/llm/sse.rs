@@ -339,7 +339,8 @@ fn envelope_error(body: &str) -> LlmError {
 /// holding embedded JSON, not a nested object, so nothing here deserializes
 /// into a struct — only `code` is read, and only as a number.
 fn error_object_to_llm_error(err: &Value) -> LlmError {
-    let status = err.get("code").and_then(Value::as_u64).unwrap_or(502) as u16;
+    let code = err.get("code").and_then(Value::as_u64).unwrap_or(502);
+    let status = u16::try_from(code).unwrap_or(502);
     LlmError::Api {
         status,
         message: err.to_string(),
@@ -406,6 +407,21 @@ mod tests {
                 assert_eq!(status, 429);
                 assert!(message.contains("Rate limit exceeded"));
             }
+            other => panic!("expected Api error, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn out_of_range_error_code_falls_back_to_502() {
+        // 65965 as u16 wraps to 429 (RateLimited). Must not retry as 429.
+        let err = serde_json::json!({"code": 65965, "message": "bogus"});
+        match error_object_to_llm_error(&err) {
+            LlmError::Api { status, .. } => assert_eq!(status, 502),
+            other => panic!("expected Api error, got: {other}"),
+        }
+        let err_429 = serde_json::json!({"code": 429, "message": "rate"});
+        match error_object_to_llm_error(&err_429) {
+            LlmError::Api { status, .. } => assert_eq!(status, 429),
             other => panic!("expected Api error, got: {other}"),
         }
     }
