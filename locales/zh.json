@@ -433,6 +433,7 @@
   "label.reasons": "原因：",
   "bench.header": "对比社区标准",
   "bench.none": "没有可用的对比数据。",
+  "bench.throttled": "已暂停 - 网站要求降低访问速度。同步正在等待，稍后会自动继续。",
   "bench.sync_hint": "前往 设置 > 同步基准数据 以下载参考配装。",
   "bench.on_par": "持平",
   "bench.close": "接近",

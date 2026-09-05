@@ -1576,6 +1576,11 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         if !any {
             ui.text_colored(theme::pal().muted, t("btn.syncing"));
         }
+        // A run that is waiting out a rate limit looks identical to a hung
+        // one from outside, and the waits are tens of seconds. Say so.
+        if gw2_optimizer::scraper::sync_backoff_ms() > 0 {
+            ui.text_colored([0.9, 0.8, 0.2, 1.0], t("bench.throttled"));
+        }
     } else if let Some(ref last) = state.main.benchmark_last_synced {
         let sc = state
             .main

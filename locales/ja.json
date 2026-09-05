@@ -433,6 +433,7 @@
   "label.reasons": "理由:",
   "bench.header": "コミュニティメタ比較",
   "bench.none": "ベンチマークデータがありません。",
+  "bench.throttled": "一時停止 - サイトから速度を落とすよう求められました。同期は待機中で、自動的に再開します。",
   "bench.sync_hint": "設定 > Sync Benchmarksで参照ビルドをダウンロードしてください。",
   "bench.on_par": "同水準",
   "bench.close": "近い",
