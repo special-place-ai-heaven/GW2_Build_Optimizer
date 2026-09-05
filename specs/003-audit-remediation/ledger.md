@@ -18,7 +18,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 4 | [W012](#w012) | S2/confirmed | US1 | verified-scoped | `crates/core/src/feedback/store.rs:113` |
 | 5 | [W001](#w001) | S2/confirmed | US1 | verified-scoped | `.github/workflows/ci.yml:17` |
 | 6 | [B001](#b001) | S2/observed | US2 | verified-scoped | `crates/addon/src/ui/main_view/optimization.rs:1050` |
-| 7 | [W025](#w025) | S2/confirmed | US2 | planned | `crates/optimizer/src/gemini_tools.rs:1529` |
+| 7 | [W025](#w025) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/gemini_tools.rs:1529` |
 | 8 | [W035](#w035) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/simulator.rs:220` |
 | 9 | [W019](#w019) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/objective_profiles.rs:86` |
 | 10 | [W044](#w044) | S2/confirmed | US2 | planned | `data/normalized_effects/2026-01-13/pve.json:2` |
@@ -369,7 +369,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W025
 
-- Task: T009 [US2]. Status: **planned**.
+- Task: T009 [US2]. Status: **verified-scoped**; workspace/in-game gates pending.
 - Audit: S2, confirmed; location: `crates/optimizer/src/gemini_tools.rs:1529`.
 - Dependencies: story entry gate.
 
@@ -377,7 +377,7 @@ Claim: exec_simulate_rotation silently substitutes invented stats (2000 power / 
 
 Remediation decision: Return an explicit tool error when prefix/stat resolution fails; never invent a stat block.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Invented `(2000, 1000, 1100)` fallback removed. Unresolved/unpriceable prefixes return the same class of `error` JSON as `exec_calculate_stats`. `simulate_rotation_errors_when_prefix_cannot_be_priced` and `duration_seconds_is_clamped` passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 

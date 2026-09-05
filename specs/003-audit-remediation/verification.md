@@ -39,3 +39,9 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - Mixed Sentinel helm on a Berserker kit now matches the referee sheet (not a uniform prefix estimate). PvP uses the amulet, not a land kit.
 - Green: `attach_chat_stats_uses_validated_mixed_slots`, `attach_chat_stats_pvp_uses_amulet_not_land_kit`, leftover-kit tests.
 - Version 1.11.31. In-game still pending: mixed Sentinel/Dragon Choya plate toughness/vitality and ranking.
+
+## Sprint 6 — W025 simulate_rotation prefix errors
+
+- W025: `exec_simulate_rotation` no longer invents 2000 power / 1000 condition damage. Unresolved prefixes return `{"error":"No stat sheet for ..."}` with no `dps` object.
+- The duration-clamp tool test now seeds a priceable Berserker's prefix so it still exercises the simulator after the fallback was removed.
+- Green: `simulate_rotation_errors_when_prefix_cannot_be_priced`, `duration_seconds_is_clamped`.
