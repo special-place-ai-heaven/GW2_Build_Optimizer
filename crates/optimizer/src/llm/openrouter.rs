@@ -92,6 +92,19 @@ impl OpenRouterClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, LlmError> {
+        self.send_chat_capped(messages, tools, MAX_COMPLETION_TOKENS, Some(REASONING_TOKEN_CAP))
+    }
+
+    /// `send_chat` with an explicit completion budget. `generate_brief` passes
+    /// a small cap and no reasoning budget so a three-line answer cannot think
+    /// for minutes.
+    fn send_chat_capped(
+        &self,
+        messages: &[Message],
+        tools: Option<&[ToolDefinition]>,
+        max_tokens: u32,
+        reasoning_max_tokens: Option<u32>,
+    ) -> Result<Message, LlmError> {
         let extra_headers = [
             ("HTTP-Referer", OPENROUTER_HTTP_REFERER.to_string()),
             ("X-Title", OPENROUTER_X_TITLE.to_string()),
@@ -105,8 +118,8 @@ impl OpenRouterClient {
             model: &self.model,
             extra_headers: &extra_headers,
             label: "OpenRouter",
-            max_tokens: MAX_COMPLETION_TOKENS,
-            reasoning_max_tokens: Some(REASONING_TOKEN_CAP),
+            max_tokens,
+            reasoning_max_tokens,
             // OpenRouter is the one base URL that understands the top-level
             // `provider` routing block.
             supports_provider_prefs: true,
@@ -240,6 +253,19 @@ impl LlmClient for OpenRouterClient {
         }];
 
         let response = self.send_chat(&messages, None)?;
+        response
+            .content
+            .ok_or_else(|| LlmError::Parse("No response text from OpenRouter".into()))
+    }
+
+    fn generate_brief(&self, prompt: &str, max_tokens: u32) -> Result<String, LlmError> {
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: Some(prompt.to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+        }];
+        let response = self.send_chat_capped(&messages, None, max_tokens, None)?;
         response
             .content
             .ok_or_else(|| LlmError::Parse("No response text from OpenRouter".into()))

@@ -1,0 +1,7 @@
+# Developer settings for `cargo run --example ...` and the live-cache tests.
+# Copy this file to dev.cfg (git-ignored) and point it at your game.
+# The addon itself never reads this file: Nexus tells it its directory.
+
+# The game's addons directory, where gw2_build_optimizer.dll is deployed.
+# The addon's cache is read from <addons_dir>/gw2_build_optimizer/cache.
+addons_dir = C:/Games/Guild Wars 2/addons

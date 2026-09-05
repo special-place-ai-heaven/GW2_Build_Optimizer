@@ -1,13 +1,13 @@
 //! Empirical check of the per-slot nudge pass on real game data: druid roam,
 //! user weights from the bug report. Run:
 //!   cargo run --release -p gw2-optimizer --example nudge_druid_check
+//! Reads the cache directory from dev.cfg (copy dev.cfg.example).
 use gw2_api::cache::DataCache;
 use gw2_optimizer::scoring::OptimizationWeights;
 use gw2_optimizer::{engine, search_v2};
 
 fn main() {
-    let cache_dir = std::path::Path::new("C:/GAMES/Guild Wars 2/addons/gw2_build_optimizer/cache");
-    let cache = DataCache::new(cache_dir);
+    let cache = DataCache::new(gw2_api::dev_config::cache_dir_or_exit());
     let db = gw2_optimizer::gamedb::GameDb::load(&cache).expect("load real GameDb");
     println!(
         "db loaded: {} items, {} itemstats",

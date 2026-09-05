@@ -5,8 +5,6 @@
 //! default so CI (which has no such cache) never runs it. Run explicitly with
 //! `cargo test -p gw2-optimizer --test upgrade_graph_live -- --ignored`.
 
-use std::path::Path;
-
 use gw2_api::cache::DataCache;
 use gw2_api::models::Item;
 use gw2_optimizer::balance::BalanceContext;
@@ -14,10 +12,10 @@ use gw2_optimizer::gamedb::GameDb;
 use gw2_optimizer::scoring::AXIS_KEYS;
 use gw2_optimizer::upgrade_graph::{UpgradeGraph, UpgradeKind};
 
-const LIVE_CACHE: &str = r"C:\GAMES\Guild Wars 2\addons\gw2_build_optimizer\cache";
-
+/// The live cache named by `dev.cfg` (see `dev.cfg.example`); the test is a
+/// no-op on a machine without one.
 fn try_live_graph() -> Option<UpgradeGraph> {
-    let dir = Path::new(LIVE_CACHE);
+    let dir = gw2_api::dev_config::cache_dir().ok()?;
     if !dir.join("items.json").exists() {
         return None;
     }

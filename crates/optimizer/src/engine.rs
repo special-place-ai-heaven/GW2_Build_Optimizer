@@ -180,9 +180,9 @@ pub fn optimize_cancellable(
     let solo_profile = &combat::buff_profiles_for_profession(&profession.name, ctx)[0];
     let cw = combat::condition_weights_for_profession(&profession.name, ctx);
     for candidate in &mut gear_candidates {
-        let mock_stats = calculate_candidate_stats(candidate, itemstats_cache);
+        let candidate_stats = calculate_candidate_stats(candidate, itemstats_cache);
         let mut full_stats = stats::base_stats();
-        full_stats += &mock_stats;
+        full_stats += &candidate_stats;
         let derived = stats::compute_derived(&full_stats, &profession.name);
         let perf = combat::calculate_combat_performance(
             &full_stats,
@@ -1240,16 +1240,16 @@ pub fn prepare_validated_rotation(
     // HashMap lookup keyed on id (which equals the name for GW2 professions).
     if let Some(profession) = db.profession(profession_name) {
         if let Some(ref main) = validated.weapons.set1.main_hand {
-            add_weapon_skill_ids(&mut set1_ids, profession, main, db, 1);
+            add_weapon_skill_ids(&mut set1_ids, profession, main, db, Hand::Main);
         }
         if let Some(ref off) = validated.weapons.set1.off_hand {
-            add_weapon_skill_ids(&mut set1_ids, profession, off, db, 1);
+            add_weapon_skill_ids(&mut set1_ids, profession, off, db, Hand::Off);
         }
         if let Some(ref main) = validated.weapons.set2.main_hand {
-            add_weapon_skill_ids(&mut set2_ids, profession, main, db, 2);
+            add_weapon_skill_ids(&mut set2_ids, profession, main, db, Hand::Main);
         }
         if let Some(ref off) = validated.weapons.set2.off_hand {
-            add_weapon_skill_ids(&mut set2_ids, profession, off, db, 2);
+            add_weapon_skill_ids(&mut set2_ids, profession, off, db, Hand::Off);
         }
     }
 
@@ -1270,10 +1270,16 @@ pub fn prepare_validated_rotation(
     let mut set2_skills =
         rotation::builder::build_rotation_skills_for_context(&set2_ids, db, &sim_ctx);
     rotation::builder::tag_weapon_set(&mut set2_skills, 2);
-    rotation_skills.extend(set1_skills);
-    rotation_skills.extend(set2_skills);
+    rotation_skills.extend(rotation::builder::merge_weapon_sets(set1_skills, set2_skills));
     let ne = crate::data::normalized_effects::effects().effects_for_mode(mode.label());
-    rotation::builder::enrich_with_cleanse(&mut rotation_skills, ne, db);
+    // Traited cleanses (Cleansing Ire bursts, Restorative Illusions shatters)
+    // count only when the build runs the trait.
+    let equipped_traits: Vec<u32> = validated
+        .specializations
+        .iter()
+        .flat_map(|s| s.all_trait_ids.iter().chain(s.trait_ids.iter()).copied())
+        .collect();
+    rotation::builder::enrich_with_cleanse(&mut rotation_skills, ne, db, &equipped_traits);
 
     if rotation_skills.is_empty() {
         return None;
@@ -1759,15 +1765,40 @@ fn weapon_swap_cooldown_for(profession_name: &str, bladesworn: bool) -> Option<u
 /// Add weapon skill IDs for a given weapon type from the profession's weapon data.
 /// Land bar: skip the underwater palette. Weapon `Aquatic` marks that palette,
 /// not a land reject — Land Spear stays, its NoUnderwater skills stay.
+/// The hand a weapon is wielded in. A one-handed weapon contributes only that
+/// hand's slots (main: 1-3, off: 4-5); a two-hander contributes all five.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Hand {
+    Main,
+    Off,
+}
+
 fn add_weapon_skill_ids(
     skill_ids: &mut Vec<u32>,
     profession: &Profession,
     weapon_type: &str,
     db: &GameDb,
-    _weapon_set: u8,
+    hand: Hand,
 ) {
     if let Some(weapon_info) = profession.weapons.get(weapon_type) {
+        let two_handed = weapon_info
+            .flags
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case("TwoHand"));
         for skill_ref in &weapon_info.skills {
+            // The API lists every dagger skill under "Dagger"; a dagger in each
+            // hand used to bring Deathly Swarm (slot 4) in twice.
+            let hand_ok = two_handed
+                || match hand {
+                    Hand::Main => matches!(
+                        skill_ref.slot.as_str(),
+                        "Weapon_1" | "Weapon_2" | "Weapon_3"
+                    ),
+                    Hand::Off => matches!(skill_ref.slot.as_str(), "Weapon_4" | "Weapon_5"),
+                };
+            if !hand_ok {
+                continue;
+            }
             let Some(skill) = db.skills.get(&skill_ref.id) else {
                 continue;
             };
@@ -2084,7 +2115,7 @@ pub fn optimize_deterministic_cancellable(
             summary,
         );
 
-        match client.generate(&prompt) {
+        match client.generate_brief(&prompt, BRIEF_REPLY_TOKENS) {
             Ok(explanation) => {
                 result.validated.synergy_explanation = explanation;
             }
@@ -2310,6 +2341,11 @@ fn advisor_candidate_slots_legal(candidate: &ValidatedBuild) -> bool {
         .all(|(slot, cell)| cell.is_none() || candidate.wears(*slot))
 }
 
+/// Completion cap for the advisor's three SWAP lines and the 200-word build
+/// explanation: thinking and answer together. A reasoning model that needs
+/// more than this for either has nothing the search can use.
+pub const BRIEF_REPLY_TOKENS: u32 = 2_048;
+
 #[allow(clippy::too_many_arguments)]
 pub fn llm_advisor(
     current: crate::validation::ValidatedBuild,
@@ -2369,7 +2405,7 @@ pub fn llm_advisor(
     );
 
     // Call LLM.
-    let response = match llm_client.generate(&prompt) {
+    let response = match llm_client.generate_brief(&prompt, BRIEF_REPLY_TOKENS) {
         Ok(r) => r,
         Err(_) => {
             // LLM advisor failure is non-fatal — return original build silently.
@@ -3991,12 +4027,78 @@ mod tests {
             icon_big: None,
         };
         let mut ids = Vec::new();
-        add_weapon_skill_ids(&mut ids, &profession, "Spear", &db, 1);
+        add_weapon_skill_ids(&mut ids, &profession, "Spear", &db, Hand::Main);
         assert_eq!(
             ids,
             vec![1],
             "aquatic palette must stay off the land bar; got {ids:?}"
         );
+    }
+
+    /// The API lists all five dagger skills under "Dagger". A main-hand dagger
+    /// brings slots 1-3, an off-hand dagger 4-5; Dagger/Dagger must not carry
+    /// Deathly Swarm (slot 4) twice.
+    #[test]
+    fn one_handed_weapon_contributes_only_its_hands_slots() {
+        let mut db = GameDb::empty_for_tests();
+        let mut skills = Vec::new();
+        for slot in 1..=5u32 {
+            let s = gw2_api::models::Skill {
+                id: slot,
+                name: format!("Dagger {slot}"),
+                description: None,
+                icon: None,
+                chat_link: None,
+                skill_type: Some("Weapon".into()),
+                weapon_type: Some("Dagger".into()),
+                professions: vec!["Necromancer".into()],
+                slot: Some(format!("Weapon_{slot}")),
+                facts: vec![],
+                traited_facts: vec![],
+                categories: vec![],
+                attunement: None,
+                cost: None,
+                dual_wield: None,
+                flip_skill: None,
+                initiative: None,
+                next_chain: None,
+                prev_chain: None,
+                transform_skills: vec![],
+                bundle_skills: vec![],
+                toolbelt_skill: None,
+                flags: vec![],
+                specialization: None,
+            };
+            db.skills.insert(slot, s);
+            skills.push(gw2_api::models::WeaponSkillRef {
+                id: slot,
+                slot: format!("Weapon_{slot}"),
+            });
+        }
+        let mut weapons = HashMap::new();
+        weapons.insert(
+            "Dagger".into(),
+            gw2_api::models::WeaponInfo {
+                specialization: None,
+                flags: vec!["Mainhand".into(), "Offhand".into()],
+                skills,
+            },
+        );
+        let profession = Profession {
+            id: "Necromancer".into(),
+            name: "Necromancer".into(),
+            code: None,
+            specializations: vec![],
+            weapons,
+            training: vec![],
+            skills_by_palette: vec![],
+            icon: None,
+            icon_big: None,
+        };
+        let mut ids = Vec::new();
+        add_weapon_skill_ids(&mut ids, &profession, "Dagger", &db, Hand::Main);
+        add_weapon_skill_ids(&mut ids, &profession, "Dagger", &db, Hand::Off);
+        assert_eq!(ids, vec![1, 2, 3, 4, 5], "each slot exactly once; got {ids:?}");
     }
 
     #[test]

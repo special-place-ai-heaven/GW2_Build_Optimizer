@@ -898,8 +898,7 @@ mod tests {
                 msg.content.as_deref().map(str::len).unwrap_or(0)
             ),
             Err(e) => {
-                println!("ERR after {:.1}s: {e}", t0.elapsed().as_secs_f64());
-                println!("DEBUG chain: {e:?}");
+                println!("ERR after {:.1}s: {e:?}", t0.elapsed().as_secs_f64());
             }
         }
     }

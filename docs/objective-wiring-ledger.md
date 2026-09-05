@@ -249,6 +249,67 @@ field" become expressible. This is what SimulationCraft does and it is far cheap
 than sequence search. Only escalate to a finite-horizon MDP if predicates prove
 insufficient.
 
+## Cleanse registry (2026-09-05)
+
+Measured on the live database after 1.11.24 shipped: WvW, Roam, Roamer,
+Necromancer. The seed (Death Magic / Spite / Reaper with "Suffer!") failed the
+CleanseRate gate with `cleanse_count=0, rate=-0.0/20s`; seed repair spent 644
+evaluations and the beam 24 generations without a single viable candidate,
+and the search served the non-viable head. Cause: `text_describes_condition_cleanse`
+knew remove / cleanse / cure. Necromancer cleanses by transferring ("Suffer!",
+Deathly Swarm, Putrid Mark: fact "Conditions Transferred"), sending (Plague
+Signet: "Conditions Sent"), consuming (Consume Conditions, Spectral Walk) and
+converting (Well of Power: "Conditions Converted to Boons"). Every profession
+has its own verbs, so the fix is a table, not a wider regex.
+
+`data/cleanse_sources.json` (embedded, `data::cleanse_sources::registry()`):
+385 sources — 280 skills, 77 traits, 28 sigils/relics — and 354 judged
+non-cleanses. Built by ten cataloguers (one per profession, one for gear)
+from the API cache facts with the wiki Condition/Boon pages as the
+completeness check, each file then re-derived by an adversarial verifier; 20
+agents, 3.7 M tokens. `examples/cleanse_registry_check.rs` audits every entry
+against the cache (id, name, profession, specialization, slot) and lists
+what the text heuristic still flags outside the table: 0 problems, 0 unknown
+ids at build 205780.
+
+Where it is read: `builder::enrich_with_cleanse` (registry, then
+NormalizedEffects, then text), `synergy_pipeline::skill_cleanse_count`
+(registry, then facts, then text), `referee::kit_cleanse_rate_from_gear`
+(registry, then tooltip text). An id the table knows never reaches the text
+heuristic, including the 354 non-cleanses. `gate_count()` is the self count,
+0 for movement-only cleanses; `rate_per_20s()` keeps the gate's convention
+(count x 20 / cooldown, one activation per 20 s when no cooldown is stated).
+99 skills cleanse only with a trait equipped (`requires_trait`; Cleansing Ire,
+Restorative Illusions, Blurred Inscriptions, Hardening Persistence, Stainless
+Steel...) and count only when `prepare_validated_rotation` finds that trait
+on the build; without build context (`skill_cleanse_count`) they count as
+none.
+
+Known limits, recorded rather than hidden: "all conditions" is stored as 99;
+counts without a fact (Consume Conditions, Elixir of Bliss, Preservation) are
+wiki-sourced and say so in `evidence`; pulse skills store duration x rate
+(Well of Power 6, Spectral Walk 5, Weapon of Remedy 5/3); an enabler trait
+(Cleansing Ire) carries its own conservative 1 per 20 s while the bursts it
+unlocks carry the real counts, a mild double credit when both are present;
+ally counts assume the caster stands in its own radius; pet skills and
+consumables are not catalogued (the rotation does not simulate either).
+Same-name id variants (PvP splits, underwater, legend variants) each have an
+entry. The text heuristic stays as the safety net for ids a future patch
+adds, now with every verb (transfer / send / consume / convert-into-boons /
+purge) bound to a 48-character window around "condit" and a veto for
+"boons ... into conditions".
+
+Found by the probe's new cleanse trace (`examples/necro_holes_check.rs`
+prints every skill the gate counts): the seed's Dagger/Dagger + Scepter/Dagger
+carried Deathly Swarm three times. `add_weapon_skill_ids` took every skill the
+API lists under a weapon regardless of hand, so a main-hand dagger brought
+slots 4-5 as well; and the same skill on both sets was two independent
+cooldowns. Now a one-hander contributes its hand's slots only (two-handers all
+five, by the `TwoHand` flag), and `builder::merge_weapon_sets` keeps one
+instance of a skill shared by both sets, usable on either (`weapon_set` 0).
+The seed's cleanse rate fell from 14.0 to the honest 9.0 per 20 s; this also
+removes the same triple credit from strike and condition damage.
+
 ## The oracle problem
 
 Objective changes have no ground truth. A score that moves is not a score that

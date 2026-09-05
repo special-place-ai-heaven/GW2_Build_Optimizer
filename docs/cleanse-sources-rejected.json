@@ -1,0 +1,2150 @@
+{
+  "game_build": 205780,
+  "generated": "2026-09-05",
+  "rejected": {
+    "Elementalist": [
+      {
+        "kind": "Skill",
+        "id": 5534,
+        "name": "Tornado",
+        "reason": "no cleanse text; hit on Stability description ('...stunned...'); transform elite"
+      },
+      {
+        "kind": "Skill",
+        "id": 5554,
+        "name": "Mist Form",
+        "reason": "no cleanse text; hit on Stability (traited fact); invulnerability only"
+      },
+      {
+        "kind": "Skill",
+        "id": 5602,
+        "name": "Whirlpool",
+        "reason": "no cleanse text; hit on Stability description"
+      },
+      {
+        "kind": "Skill",
+        "id": 5639,
+        "name": "Armor of Earth",
+        "reason": "no cleanse text; boons/barrier only"
+      },
+      {
+        "kind": "Skill",
+        "id": 5641,
+        "name": "Arcane Shield",
+        "reason": "no cleanse text; block/Stability"
+      },
+      {
+        "kind": "Skill",
+        "id": 29618,
+        "name": "Overload Earth",
+        "reason": "no cleanse text; inflicts conditions and grants protection/stability"
+      },
+      {
+        "kind": "Skill",
+        "id": 29968,
+        "name": "\"Rebound!\"",
+        "reason": "no cleanse text; lethal-blow prevention + aura"
+      },
+      {
+        "kind": "Skill",
+        "id": 30047,
+        "name": "\"Eye of the Storm!\"",
+        "reason": "no cleanse text; superspeed/swiftness/stun break"
+      },
+      {
+        "kind": "Skill",
+        "id": 30864,
+        "name": "Tidal Surge",
+        "reason": "no cleanse text; heal + regeneration only (regeneration can feed Cleansing Water but the skill itself removes nothing)"
+      },
+      {
+        "kind": "Skill",
+        "id": 40332,
+        "name": "Pressure Blast",
+        "reason": "no cleanse text; heal + regeneration, inflicts Blinded"
+      },
+      {
+        "kind": "Skill",
+        "id": 40963,
+        "name": "Grinding Stones",
+        "reason": "no cleanse text; damage reduction/Stability"
+      },
+      {
+        "kind": "Skill",
+        "id": 44550,
+        "name": "Lahar",
+        "reason": "no cleanse text; inflicts Crippled/Immobile"
+      },
+      {
+        "kind": "Skill",
+        "id": 44926,
+        "name": "Stone Resonance",
+        "reason": "no cleanse text; barrier/protection stance"
+      },
+      {
+        "kind": "Skill",
+        "id": 45742,
+        "name": "Glacial Drift",
+        "reason": "no cleanse text; chills foes"
+      },
+      {
+        "kind": "Skill",
+        "id": 46185,
+        "name": "Molten Burst",
+        "reason": "no cleanse text; barrier + burning"
+      },
+      {
+        "kind": "Skill",
+        "id": 46447,
+        "name": "Lava Skin",
+        "reason": "no cleanse text; barrier over time"
+      },
+      {
+        "kind": "Skill",
+        "id": 51684,
+        "name": "Transmute Earth",
+        "reason": "no cleanse text on the skill itself; transmuting an aura only cleanses via trait Smothering Auras (340), recorded there"
+      },
+      {
+        "kind": "Skill",
+        "id": 62884,
+        "name": "Surging Flames",
+        "reason": "no cleanse text; inflicts Burning"
+      },
+      {
+        "kind": "Skill",
+        "id": 71863,
+        "name": "Frostfire Flurry",
+        "reason": "'consume' refers to consuming a bullet (fire aura / extra conditions), not conditions"
+      },
+      {
+        "kind": "Skill",
+        "id": 71993,
+        "name": "Molten Meteor",
+        "reason": "'consume' refers to consuming a bullet (explosion / bleeding), not conditions"
+      },
+      {
+        "kind": "Skill",
+        "id": 72900,
+        "name": "Etching: Haboob",
+        "reason": "no cleanse text; hit on Stability description"
+      },
+      {
+        "kind": "Skill",
+        "id": 76585,
+        "name": "Conflagration",
+        "reason": "'Maximum Stacks Transferred' = spreads Burning from the target to nearby foes (foe-to-foe), not a cleanse of caster/allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 77247,
+        "name": "Toad's Fortitude",
+        "reason": "grants Resistance (makes nondamaging conditions ineffective) - rule 2 excludes Resistance; no removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 34637,
+        "name": "Glyph of Elemental Power",
+        "reason": "air-attunement variant: 'Air Attunement Daze enemies.' - no cleanse (water variant is 34772)"
+      },
+      {
+        "kind": "Skill",
+        "id": 34714,
+        "name": "Glyph of Elemental Power",
+        "reason": "earth-attunement variant: 'Earth Attunement Grant barrier to allies.' - no cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 34736,
+        "name": "Glyph of Elemental Power",
+        "reason": "fire-attunement variant: 'Fire Attunement Burn enemies.' - no cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 71796,
+        "name": "Aerial Agility",
+        "reason": "follow-up 'Dash again.' chain skill; no cleanse text (cleanse is on the initial cast ids 71847/71857)"
+      },
+      {
+        "kind": "Trait",
+        "id": 263,
+        "name": "Arcane Lightning",
+        "reason": "no cleanse text; ferocity + arcane skill side effects"
+      },
+      {
+        "kind": "Trait",
+        "id": 281,
+        "name": "Rock Solid",
+        "reason": "no cleanse text; Stability on earth attunement"
+      },
+      {
+        "kind": "Trait",
+        "id": 364,
+        "name": "Soothing Disruption",
+        "reason": "no cleanse text; grants boons incl. Resistance on cantrips - rule 2 excludes Resistance"
+      },
+      {
+        "kind": "Trait",
+        "id": 1675,
+        "name": "Inferno",
+        "reason": "'Power Converted to Burning Damage' is an attribute conversion, not a condition conversion"
+      },
+      {
+        "kind": "Trait",
+        "id": 1902,
+        "name": "Harmonious Conduit",
+        "reason": "no cleanse text; Stability/Swiftness on overload"
+      },
+      {
+        "kind": "Trait",
+        "id": 2025,
+        "name": "Singularity",
+        "reason": "mechanic grant only; its Overload Water cleanse is recorded as skill 29415"
+      },
+      {
+        "kind": "Trait",
+        "id": 2227,
+        "name": "Depth of Elements",
+        "reason": "'Energy is consumed' refers to sphere energy; Water Sphere (62839) grants boons/combo field, no removal text"
+      },
+      {
+        "kind": "Trait",
+        "id": 2230,
+        "name": "Hardened Auras",
+        "reason": "no cleanse text; damage reduction on self-aura"
+      },
+      {
+        "kind": "Trait",
+        "id": 2233,
+        "name": "Elemental Synergy",
+        "reason": "two unnamed effects in cache; description has no removal text; live wiki: water bonus is a heal, others might/endurance/stability - no cleanse"
+      },
+      {
+        "kind": "Trait",
+        "id": 2344,
+        "name": "Evocation",
+        "reason": "mechanic grant only; its Buoyant Deluge cleanse is recorded as skills 76811/76935/77357; Conflagration transfers burning foe-to-foe"
+      },
+      {
+        "kind": "Trait",
+        "id": 2415,
+        "name": "Altruistic Aspect",
+        "reason": "no cleanse text; grants boons incl. Resistance - rule 2 excludes Resistance"
+      }
+    ],
+    "Engineer": [
+      {
+        "kind": "Skill",
+        "id": 5862,
+        "name": "Elixir U",
+        "reason": "grants quickness/stability/vigor; no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 5967,
+        "name": "Toss Elixir B",
+        "reason": "grants boons to allies; no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 6092,
+        "name": "Toss Elixir B",
+        "reason": "grants boons to allies; no condition removal (variant id)"
+      },
+      {
+        "kind": "Skill",
+        "id": 6180,
+        "name": "Rumble",
+        "reason": "damage + stability stunbreak; matched on 'stability' text only"
+      },
+      {
+        "kind": "Skill",
+        "id": 12335,
+        "name": "Pain Transference",
+        "reason": "racial toolbelt skill (Asura Pain Inverter) -- out of scope per schema rule 5 even though prof=['Engineer']; text would be Transfer 1 (boon steal + give one condition)"
+      },
+      {
+        "kind": "Skill",
+        "id": 12354,
+        "name": "Invigorating Roar",
+        "reason": "racial toolbelt skill (Charr Battle Roar) -- out of scope; text would be ally Remove specific:Weakness,Vulnerability"
+      },
+      {
+        "kind": "Skill",
+        "id": 12378,
+        "name": "Blessing of Kormir",
+        "reason": "racial toolbelt skill (Human Prayer to Kormir) -- out of scope; text would be ally Remove 1"
+      },
+      {
+        "kind": "Skill",
+        "id": 12465,
+        "name": "Leafy Bandage",
+        "reason": "racial toolbelt skill (Sylvari Healing Seed) -- out of scope; text would be self Remove specific:Bleeding,Burning,Poisoned"
+      },
+      {
+        "kind": "Skill",
+        "id": 30027,
+        "name": "Defense Field",
+        "reason": "missile-blocking dome + stability; no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 68280,
+        "name": "Defense Field",
+        "reason": "missile-blocking dome + stability; no condition removal (variant id)"
+      },
+      {
+        "kind": "Skill",
+        "id": 30262,
+        "name": "Flashbang",
+        "reason": "'Remove stealth' from enemies -- not a condition cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 76500,
+        "name": "Flashbang",
+        "reason": "'Remove stealth' from enemies -- not a condition cleanse (variant id)"
+      },
+      {
+        "kind": "Skill",
+        "id": 30828,
+        "name": "Slick Shoes",
+        "reason": "knockdown + stability stunbreak; no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 50472,
+        "name": "Slick Shoes",
+        "reason": "knockdown + stability stunbreak; no condition removal (variant id)"
+      },
+      {
+        "kind": "Skill",
+        "id": 41218,
+        "name": "Spectrum Shield",
+        "reason": "damage reduction + stability; no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 73122,
+        "name": "Conduit Surge",
+        "reason": "inflicts burning; matched on condition text only"
+      },
+      {
+        "kind": "Skill",
+        "id": 77069,
+        "name": "Solid State",
+        "reason": "stance with stun/stability; no cleanse text and no traited fact -- converts only via Stainless Steel (2366), recorded on the trait"
+      },
+      {
+        "kind": "Skill",
+        "id": 6161,
+        "name": "Throw Mine",
+        "reason": "sweep hit: 'Boons Removed' on foes (boon strip), not a cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 30337,
+        "name": "Throw Mine",
+        "reason": "sweep hit: 'Boons Removed' on foes (boon strip), not a cleanse (Gadgeteer variant)"
+      },
+      {
+        "kind": "Skill",
+        "id": 6164,
+        "name": "Mine Field",
+        "reason": "sweep hit: 'Boons Removed' on foes (boon strip), not a cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 6166,
+        "name": "Detonate Mine Field",
+        "reason": "sweep hit: 'remove a boon from them' (boon strip), not a cleanse"
+      },
+      {
+        "kind": "Trait",
+        "id": 520,
+        "name": "Comeback Cure",
+        "reason": "grants regeneration WHEN you remove a condition from an ally; does not itself cleanse"
+      },
+      {
+        "kind": "Trait",
+        "id": 526,
+        "name": "Sharpshooter",
+        "reason": "'Power Converted to Bleeding Damage' -- stat conversion, not a cleanse"
+      },
+      {
+        "kind": "Trait",
+        "id": 1679,
+        "name": "Gadgeteer",
+        "reason": "modifies gadgets; the traited gadget variants (Rocket Boots 29522, Utility Goggles 29591, A.E.D. 30881) are recorded as skills with unchanged cleanse counts; adds no cleanse itself"
+      },
+      {
+        "kind": "Trait",
+        "id": 1849,
+        "name": "Applied Force",
+        "reason": "stability/might; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 1860,
+        "name": "Object in Motion",
+        "reason": "damage modifier keyed on boons; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 1867,
+        "name": "Mass Momentum",
+        "reason": "might/stability; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 1871,
+        "name": "Equal and Opposite Reaction",
+        "reason": "quickness/stability on disable; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 1877,
+        "name": "Impact Savant",
+        "reason": "sweep hit: strike damage converted into barrier; not a cleanse"
+      },
+      {
+        "kind": "Trait",
+        "id": 1984,
+        "name": "Juggernaut",
+        "reason": "might/stability/fire aura; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2377,
+        "name": "Experimental Union",
+        "reason": "Amalgam minor granting access to Evolve and the morph-skill menu; no cleanse itself -- Defensive Protocol: Cleanse (76798) recorded as a Skill, Evolve (76642/76651) recorded with Stainless Steel traited fact"
+      },
+      {
+        "kind": "Trait",
+        "id": 2387,
+        "name": "New Genes",
+        "reason": "morph skills grant boons; no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 6046,
+        "name": "Super Elixir",
+        "reason": "id variant (Range=1200, Recharge=20 legacy tooltip) with NO Conditions Removed fact and no cleanse text in its cache record; only 5937 and 6102 carry the cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 6104,
+        "name": "Super Elixir",
+        "reason": "'Burst the orb' mid-air sequence variant with NO Conditions Removed fact and no cleanse text in its cache record"
+      },
+      {
+        "kind": "Skill",
+        "id": 15072,
+        "name": "Super Elixir",
+        "reason": "id variant (Range=1200, Recharge=20) with NO Conditions Removed fact and no cleanse text in its cache record"
+      }
+    ],
+    "Guardian": [
+      {
+        "kind": "Skill",
+        "id": 9118,
+        "name": "Virtue of Courage",
+        "reason": "Aegis/Protection/Stability only; matched on Stability text ('feared'). No condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 9268,
+        "name": "Virtue of Courage",
+        "reason": "Variant id; Aegis/Protection/Stability only. No condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 9124,
+        "name": "Banish",
+        "reason": "'consume' refers to the Banished effect used by Mighty Blow, not conditions."
+      },
+      {
+        "kind": "Skill",
+        "id": 9153,
+        "name": "\"Stand Your Ground!\"",
+        "reason": "Grants Stability + Resolution (incoming condition damage reduction, rule 2). Converts 1 only via Pure of Voice (recorded on trait 553)."
+      },
+      {
+        "kind": "Skill",
+        "id": 9253,
+        "name": "Hallowed Ground",
+        "reason": "Stability/Resolution pulses only; no condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 9260,
+        "name": "Zealot's Embrace",
+        "reason": "Inflicts Immobile and grants barrier; no condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 30039,
+        "name": "Shield of Courage",
+        "reason": "Aegis/Protection/Stability block; no condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 30461,
+        "name": "Signet of Courage",
+        "reason": "Healing + Protection/Resolution/Stability; no condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 68676,
+        "name": "Signet of Courage",
+        "reason": "Variant id; healing + boons only; no condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 30553,
+        "name": "Fragments of Faith",
+        "reason": "Aegis/Stability/Crippled trap; no condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 40114,
+        "name": "Portent of Freedom",
+        "reason": "Stability/Resolution stunbreak; no condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 41328,
+        "name": "Unhindered Delivery",
+        "reason": "Stability/Resolution/Swiftness stunbreak; no condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 42259,
+        "name": "Tome of Courage",
+        "reason": "Grants Aegis/Protection/Resolution/Stability; no condition removal fact or text (Resolution = incoming condition damage reduction, rule 2)."
+      },
+      {
+        "kind": "Skill",
+        "id": 42371,
+        "name": "Tome of Courage",
+        "reason": "Grants Aegis/Protection/Resolution/Stability; no condition removal fact or text (Resolution = incoming condition damage reduction, rule 2)."
+      },
+      {
+        "kind": "Skill",
+        "id": 68646,
+        "name": "Tome of Courage",
+        "reason": "Grants Aegis/Protection/Resolution/Stability; no condition removal fact or text (Resolution = incoming condition damage reduction, rule 2)."
+      },
+      {
+        "kind": "Skill",
+        "id": 68650,
+        "name": "Tome of Courage",
+        "reason": "Grants Aegis/Protection/Resolution/Stability; no condition removal fact or text (Resolution = incoming condition damage reduction, rule 2)."
+      },
+      {
+        "kind": "Skill",
+        "id": 45082,
+        "name": "Flame Rush",
+        "reason": "'purging fire' is flavour text; facts are Burning + damage only."
+      },
+      {
+        "kind": "Skill",
+        "id": 62532,
+        "name": "Crashing Courage",
+        "reason": "desc: Virtue. Shadowstep a short distance while gaining boons... Gain courage. | facts: Aegis, Stability, Resolution boons only; 'Removes other active Virtue effects' refers to Virtue buffs, not conditions."
+      },
+      {
+        "kind": "Skill",
+        "id": 62555,
+        "name": "Crashing Courage",
+        "reason": "desc: Virtue. Shadowstep a short distance while gaining boons... Gain courage. | facts: Aegis, Stability, Resolution boons only; 'Removes other active Virtue effects' refers to Virtue buffs, not conditions."
+      },
+      {
+        "kind": "Skill",
+        "id": 62596,
+        "name": "Crashing Courage",
+        "reason": "desc: Virtue. Shadowstep a short distance while gaining boons... Gain courage. | facts: Aegis, Stability, Resolution boons only; 'Removes other active Virtue effects' refers to Virtue buffs, not conditions."
+      },
+      {
+        "kind": "Skill",
+        "id": 62648,
+        "name": "Crashing Courage",
+        "reason": "desc: Virtue. Shadowstep a short distance while gaining boons... Gain courage. | facts: Aegis, Stability, Resolution boons only; 'Removes other active Virtue effects' refers to Virtue buffs, not conditions."
+      },
+      {
+        "kind": "Skill",
+        "id": 68670,
+        "name": "\"Feel My Wrath!\"",
+        "reason": "Quickness/Fury/Superspeed/Stability; no condition removal. Converts 1 only via Pure of Voice (trait 553)."
+      },
+      {
+        "kind": "Skill",
+        "id": 68686,
+        "name": "Dragon's Maw",
+        "reason": "Might/Slow/Stability trap; no condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 73132,
+        "name": "Symbol of Luminance",
+        "reason": "Grants Resistance (rule 2) and 'do not consume the illuminated effect' refers to the Illuminated buff; no condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 77300,
+        "name": "Valorous Stance",
+        "reason": "Stability/Protection and heal-on-boon; no condition removal."
+      },
+      {
+        "kind": "Trait",
+        "id": 612,
+        "name": "Indomitable Courage",
+        "reason": "Stability + stunbreak on Virtue 3; no condition removal."
+      },
+      {
+        "kind": "Trait",
+        "id": 1848,
+        "name": "Virtuous Action",
+        "reason": "Minor that unlocks Traps and the Dragonhunter virtues; the cleansing virtue (Wings of Resolve) is recorded under skill ids 30083/30225/30286/30783. Trait itself removes nothing."
+      },
+      {
+        "kind": "Trait",
+        "id": 1963,
+        "name": "Heavy Light",
+        "reason": "Stability on disable + damage modifiers; no condition removal."
+      },
+      {
+        "kind": "Trait",
+        "id": 2089,
+        "name": "Purity of Word",
+        "reason": "Minor that unlocks Tomes and Mantras ('purge corruption' is flavour); Tome of Resolve is recorded under skill ids 41780/45023/68648/68649. Trait itself removes nothing."
+      },
+      {
+        "kind": "Skill",
+        "id": 62608,
+        "name": "Flash Combo",
+        "reason": "Not a candidate; no cleanse text. Its flip skill Repose (62669) is the cleanse - map 62608 -> 62669 via flip_skill."
+      },
+      {
+        "kind": "Skill",
+        "id": 76708,
+        "name": "Luminous Staff",
+        "reason": "Not a candidate; boons + symbol only. Its flip skill Restorative Glow (77136) is the cleanse - map 76708 -> 77136 via flip_skill."
+      },
+      {
+        "kind": "Skill",
+        "id": 78514,
+        "name": "Radiant Resolve",
+        "reason": "Cache record has no condition-removal text or fact: desc 'Virtue: Regenerates health. Activate: Heal yourself and nearby allies while granting light aura...' and the only fact is Recharge=30. Wiki infobox (2026-09-05) lists 'Self Condition Removal: 2' (PvE and PvP/WvW), so this is very likely a real self-2 cleanse like every other Virtue 2 - re-add when the cache carries the fact. Still covered indirectly: Absolute Resolve (610) fires on it as Virtue skill 2, and its light aura triggers Purging Light (2401)."
+      },
+      {
+        "kind": "Skill",
+        "id": 78604,
+        "name": "Radiant Resolve",
+        "reason": "Cache record has no condition-removal text or fact: desc 'Virtue: Regenerates health. Activate: Heal yourself and nearby allies while granting light aura...' and the only fact is Recharge=30. Wiki infobox (2026-09-05) lists 'Self Condition Removal: 2' (PvE and PvP/WvW), so this is very likely a real self-2 cleanse like every other Virtue 2 - re-add when the cache carries the fact. Still covered indirectly: Absolute Resolve (610) fires on it as Virtue skill 2, and its light aura triggers Purging Light (2401). flip_skill=78514."
+      }
+    ],
+    "Mesmer": [
+      {
+        "kind": "Skill",
+        "id": 10232,
+        "name": "Signet of Domination",
+        "reason": "removes BOONS from foe (Boons Removed=3/5); no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 10236,
+        "name": "Signet of Inspiration",
+        "reason": "grants/extends boons only; no condition fact"
+      },
+      {
+        "kind": "Skill",
+        "id": 10237,
+        "name": "Mantra of Concentration",
+        "reason": "stun break + stability/aegis; no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 10238,
+        "name": "Power Break",
+        "reason": "stun break + stability; no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 29526,
+        "name": "Well of Precognition",
+        "reason": "aegis/stability/endurance; no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 29856,
+        "name": "Well of Senility",
+        "reason": "removes BOONS from foes; no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 72946,
+        "name": "Phantasmal Lancer",
+        "reason": "removes BOONS from foe (Boons Removed=2); no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 668,
+        "name": "Chaotic Transference",
+        "reason": "grants boons on chaos aura; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 1687,
+        "name": "Bountiful Disillusionment",
+        "reason": "stability/boons on shatter; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 1913,
+        "name": "Illusionary Reversion",
+        "reason": "clone + alacrity; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2169,
+        "name": "Dune Cloak",
+        "reason": "grants Mirage Cloak on shatter (which can trigger Elusive Mind 2113) but removes nothing itself"
+      },
+      {
+        "kind": "Trait",
+        "id": 2216,
+        "name": "Psychic Blades",
+        "reason": "replaces shatters with Bladesongs; the 1866 traited cleanse is recorded on the Bladesong skill ids; trait removes nothing"
+      },
+      {
+        "kind": "Trait",
+        "id": 2386,
+        "name": "Wandering Minstrel",
+        "reason": "replaces shatters with Instruments; the 1866/2035 traited cleanses are recorded on the Instrument skill ids; trait removes nothing"
+      },
+      {
+        "kind": "Trait",
+        "id": 2441,
+        "name": "Altered Chord",
+        "reason": "augments Crescendo (damage/confusion/daze/heal); no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2030,
+        "name": "Time Splitter",
+        "reason": "(sweep hit, not in slice) replaces shatters with Chronomancer shatters; 1866 cleanse recorded on the skill ids; trait removes nothing"
+      },
+      {
+        "kind": "Skill",
+        "id": 62553,
+        "name": "Rain of Swords",
+        "reason": "(sweep hit, not in slice) damage + Vulnerability only; no condition-removal fact or text in the cache (earlier reason 'grants Resistance' was wrong)"
+      },
+      {
+        "kind": "Skill",
+        "id": 45425,
+        "name": "Rain of Swords",
+        "reason": "(sweep hit, not in slice) id variant of 62553 (GroundTargeted flag); damage + Vulnerability only; no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 10267,
+        "name": "Phantasmal Disenchanter",
+        "reason": "(sweep hit, not in slice) removes BOONS from foes (Boons Removed=5/1); no condition removal"
+      }
+    ],
+    "Necromancer": [
+      {
+        "kind": "Skill",
+        "id": 10529,
+        "name": "Dark Pact",
+        "reason": "bleeds self, immobilizes foe and removes/converts foe boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 10545,
+        "name": "Well of Corruption",
+        "reason": "converts boons on foes into conditions; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 10671,
+        "name": "Well of Corruption",
+        "reason": "variant id; converts boons on foes into conditions; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 10550,
+        "name": "Lich Form",
+        "reason": "'removes other spectral effects' refers to the caster's own spectral buffs, not conditions"
+      },
+      {
+        "kind": "Skill",
+        "id": 10555,
+        "name": "Spinal Shivers",
+        "reason": "chills foe and removes up to three boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 10594,
+        "name": "Life Transfer",
+        "reason": "steals life force / heals; no condition removal (Transfusion traited facts are healing/revive only)"
+      },
+      {
+        "kind": "Skill",
+        "id": 10602,
+        "name": "Corrupt Boon",
+        "reason": "poisons self and converts foe boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 10604,
+        "name": "Dark Path",
+        "reason": "'Send out a claw' inflicts bleeding/chill; no condition transfer or removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 10612,
+        "name": "Signet of the Locust",
+        "reason": "strikes and removes foe boons, heals per boon removed; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 10623,
+        "name": "Crimson Tide",
+        "reason": "'Send a devouring surge' is a projectile; inflicts bleeding only"
+      },
+      {
+        "kind": "Skill",
+        "id": 10647,
+        "name": "Charge",
+        "reason": "flesh golem charge; inflicts conditions, no cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 10701,
+        "name": "Unholy Feast",
+        "reason": "cripples foes and removes their boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 10709,
+        "name": "Feast of Corruption",
+        "reason": "corrupts foe boons and gains life force per condition ON THE FOE; conditions are not removed"
+      },
+      {
+        "kind": "Skill",
+        "id": 19115,
+        "name": "Reaper's Mark",
+        "reason": "fear mark; no cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 29666,
+        "name": "\"Nothing Can Save You!\"",
+        "reason": "converts foe boons into vulnerability; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 29855,
+        "name": "Nightfall",
+        "reason": "converts foe boons into conditions; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 29958,
+        "name": "Infusing Terror",
+        "reason": "stability + incoming condition-damage reduction; no removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 30105,
+        "name": "\"Chilled to the Bone!\"",
+        "reason": "inflicts conditions and grants boons; no cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 40274,
+        "name": "Trail of Anguish",
+        "reason": "corrupts a foe boon into torment; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 41615,
+        "name": "Serpent Siphon",
+        "reason": "corrupts a foe boon into torment; no direct cleanse (cleanse only arises via Abrasive Grit barrier, recorded on trait 2167)"
+      },
+      {
+        "kind": "Skill",
+        "id": 42355,
+        "name": "Ghastly Breach",
+        "reason": "corrupts a foe boon per pulse; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 42917,
+        "name": "Sand Swell",
+        "reason": "corrupts a foe boon into torment; no direct cleanse (barrier can trigger Abrasive Grit, recorded on trait 2167)"
+      },
+      {
+        "kind": "Skill",
+        "id": 42935,
+        "name": "Desiccate",
+        "reason": "corrupts a foe boon into torment; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 43148,
+        "name": "Sand Flare",
+        "reason": "barrier + corrupts a foe boon; no direct cleanse (barrier can trigger Abrasive Grit, recorded on trait 2167)"
+      },
+      {
+        "kind": "Skill",
+        "id": 44663,
+        "name": "Desert Shroud",
+        "reason": "its only 'Conditions Removed=1' is traited_fact(trait 1922 Shrouded Removal); the cleanse is recorded on trait 1922 to avoid double counting. Barrier pulses can also trigger Abrasive Grit (trait 2167)"
+      },
+      {
+        "kind": "Skill",
+        "id": 54870,
+        "name": "Sandstorm Shroud",
+        "reason": "its only 'Conditions Removed=1' is traited_fact(trait 1922 Shrouded Removal); recorded on trait 1922. Boons Converted to Conditions=2 is foe boon corruption"
+      },
+      {
+        "kind": "Skill",
+        "id": 51647,
+        "name": "Devouring Darkness",
+        "reason": "corrupts foe boons; life force per condition ON THE FOE; no removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 62530,
+        "name": "Elixir of Risk",
+        "reason": "might/fury + weakness on foes; 'consume that amount of Blight' consumes Blight (a self effect), not conditions"
+      },
+      {
+        "kind": "Skill",
+        "id": 68105,
+        "name": "Elixir of Risk",
+        "reason": "variant id; same as 62530, consumes Blight not conditions"
+      },
+      {
+        "kind": "Skill",
+        "id": 62646,
+        "name": "Elixir of Ignorance",
+        "reason": "grants Resistance/protection + stun break; Resistance is not a cleanse; consumes Blight not conditions"
+      },
+      {
+        "kind": "Skill",
+        "id": 68075,
+        "name": "Elixir of Ignorance",
+        "reason": "variant id; grants Resistance; not a cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 62655,
+        "name": "Elixir of Ambition",
+        "reason": "grants boons, inflicts conditions; consumes Blight not conditions"
+      },
+      {
+        "kind": "Skill",
+        "id": 68090,
+        "name": "Elixir of Ambition",
+        "reason": "variant id; same as 62655"
+      },
+      {
+        "kind": "Skill",
+        "id": 62662,
+        "name": "Elixir of Anguish",
+        "reason": "swiftness/quickness + cripple; consumes Blight not conditions"
+      },
+      {
+        "kind": "Skill",
+        "id": 68113,
+        "name": "Elixir of Anguish",
+        "reason": "variant id; same as 62662"
+      },
+      {
+        "kind": "Skill",
+        "id": 62667,
+        "name": "Elixir of Promise",
+        "reason": "heal + regeneration; consumes Blight not conditions; no cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 68081,
+        "name": "Elixir of Promise",
+        "reason": "variant id; same as 62667"
+      },
+      {
+        "kind": "Skill",
+        "id": 71791,
+        "name": "Path of Gluttony",
+        "reason": "corrupts foe boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 71799,
+        "name": "Path of Gluttony",
+        "reason": "variant id; corrupts foe boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 71867,
+        "name": "Path of Gluttony",
+        "reason": "variant id; corrupts foe boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 71974,
+        "name": "Path of Gluttony",
+        "reason": "variant id; corrupts foe boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 71871,
+        "name": "Gorge",
+        "reason": "corrupts foe boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 71926,
+        "name": "Consume",
+        "reason": "'Consume' is the skill name; it inflicts weakness and grants might, no condition consumption"
+      },
+      {
+        "kind": "Skill",
+        "id": 73007,
+        "name": "Extirpate",
+        "reason": "removes foe boons and negates incoming boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 76752,
+        "name": "Weapon of Warding",
+        "reason": "block stacks; 'when the last stack is removed' refers to the block effect, not conditions (cleanses only via Wielder's Boon, recorded on trait 2376)"
+      },
+      {
+        "kind": "Skill",
+        "id": 76941,
+        "name": "Xinrae's Weapon",
+        "reason": "heal/life-steal weapon spell; no cleanse of its own (cleanses only via Wielder's Boon, trait 2376)"
+      },
+      {
+        "kind": "Trait",
+        "id": 801,
+        "name": "Lingering Curse",
+        "reason": "condition damage + Devouring Darkness (boon corruption); no cleanse"
+      },
+      {
+        "kind": "Trait",
+        "id": 813,
+        "name": "Weakening Shroud",
+        "reason": "weakness/bleed on shroud entry + Boons Converted to Conditions=1; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Trait",
+        "id": 899,
+        "name": "Chill of Death",
+        "reason": "Lesser Spinal Shivers removes foe boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Trait",
+        "id": 903,
+        "name": "Spiteful Spirit",
+        "reason": "trait skill removes foe boons on shroud entry; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Trait",
+        "id": 1693,
+        "name": "Path of Corruption",
+        "reason": "shroud skill 2 corrupts foe boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Trait",
+        "id": 2123,
+        "name": "Herald of Sorrow",
+        "reason": "only swaps Desert Shroud for Sandstorm Shroud; the 'Conditions Removed=1' under its trait-skill is traited_fact(trait 1922 Shrouded Removal)"
+      },
+      {
+        "kind": "Trait",
+        "id": 2192,
+        "name": "Implacable Foe",
+        "reason": "stability + damage reduction on Harbinger Shroud entry; no cleanse"
+      },
+      {
+        "kind": "Trait",
+        "id": 2203,
+        "name": "Doom Approaches",
+        "reason": "Blight/vulnerability/boon corruption facts; no cleanse"
+      },
+      {
+        "kind": "Trait",
+        "id": 2218,
+        "name": "Cascading Corruption",
+        "reason": "'consume Blight' stacks; damage/torment; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2333,
+        "name": "Lingering Spirits",
+        "reason": "'consumed by spirits' refers to life force; no cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 10606,
+        "name": "Epidemic",
+        "reason": "wiki-only: spreads conditions FROM a target foe TO nearby foes; nothing is removed from the caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 79344,
+        "name": "Lesser Signet of the Locust",
+        "reason": "wiki-only (boon page): removes foe boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 13906,
+        "name": "Lesser Spinal Shivers",
+        "reason": "wiki-only (boon page): removes foe boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 29560,
+        "name": "Spiteful Spirit",
+        "reason": "wiki-only (boon page) trait skill: removes foe boons; removes/corrupts BOONS on foes (Boons Removed / Boons Converted to Conditions); no condition cleanse on caster or allies"
+      },
+      {
+        "kind": "Skill",
+        "id": 18504,
+        "name": "Dhuumfire",
+        "reason": "same name as wiki's 'Dhuumfire (underwater death shroud skill)' but this id is the life-force blast that sets foes alight; no Conditions Transferred fact (the transferring variant is id 24287, recorded)"
+      },
+      {
+        "kind": "Trait",
+        "id": 816,
+        "name": "Master of Corruption",
+        "reason": "corruption skills inflict extra conditions on the caster and recharge faster; nothing is removed (judged from cache facts by the integrator)"
+      },
+      {
+        "kind": "Trait",
+        "id": 2405,
+        "name": "Empowering Spirits",
+        "reason": "grants boons (Might, Fury, Resolution, Quickness, Vigor) on spirit summon; Resolution is damage reduction, not a cleanse"
+      }
+    ],
+    "Ranger": [
+      {
+        "kind": "Skill",
+        "id": 12516,
+        "name": "\"Strength of the Pack!\"",
+        "reason": "Grants stability/fury/swiftness/might; no condition-removal text or fact."
+      },
+      {
+        "kind": "Skill",
+        "id": 31503,
+        "name": "Natural Convergence",
+        "reason": "Inflicts cripple/slow/immobilize on foes; no cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 34070,
+        "name": "Natural Convergence",
+        "reason": "Underwater variant; inflicts conditions on foes; no cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 31607,
+        "name": "Glyph of Alignment",
+        "reason": "Non-celestial variant: inflicts bleeding/immobilize/weakness; cleanse belongs to CA variant 31348 (recorded)."
+      },
+      {
+        "kind": "Skill",
+        "id": 31658,
+        "name": "Glyph of Equality",
+        "reason": "Non-celestial variant: dazes foes; no Conditions Removed fact; cleanse belongs to CA variant 31401 (recorded)."
+      },
+      {
+        "kind": "Skill",
+        "id": 31914,
+        "name": "\"We Heal As One!\"",
+        "reason": "Heals and copies boons between you and pet; no cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 55024,
+        "name": "Glyph of the Stars",
+        "reason": "Celestial Avatar variant: revive/heal/boons; no Conditions Removed fact; cleanse belongs to non-celestial variant 55046 (recorded)."
+      },
+      {
+        "kind": "Skill",
+        "id": 63129,
+        "name": "Sundering Volley",
+        "reason": "Inflicts bleeding/vulnerability/immobilize on foes."
+      },
+      {
+        "kind": "Skill",
+        "id": 63131,
+        "name": "Unleashed Savage Shock Wave",
+        "reason": "Damage bonus vs foes with conditions; no cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 63157,
+        "name": "Exploding Spores",
+        "reason": "Removes BOONS from foes (Boons Removed=2); not a condition cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 63163,
+        "name": "Forest's Fortification",
+        "reason": "Grants Resistance/Resolution/damage reduction; no removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 63197,
+        "name": "Unleashed Overbearing Smash",
+        "reason": "Removes boons from foes; not a cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 63208,
+        "name": "Unleashed Thump",
+        "reason": "Grants might/fury; no cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 63258,
+        "name": "Rending Vines",
+        "reason": "Removes/corrupts boons on foes; not a cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 63301,
+        "name": "Jagged Fan",
+        "reason": "Inflicts bleeding/torment on foes."
+      },
+      {
+        "kind": "Skill",
+        "id": 63319,
+        "name": "Perilous Gift",
+        "reason": "Immunity to condition damage while active; does not remove conditions."
+      },
+      {
+        "kind": "Skill",
+        "id": 63326,
+        "name": "Toxic Shot",
+        "reason": "Inflicts poison/torment/weakness on foes."
+      },
+      {
+        "kind": "Skill",
+        "id": 63350,
+        "name": "Savage Slash",
+        "reason": "Removes boons from foes; inflicts vulnerability."
+      },
+      {
+        "kind": "Skill",
+        "id": 63438,
+        "name": "Relentless Whirl",
+        "reason": "Damage + stability; no cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 69175,
+        "name": "Solar Brilliance",
+        "reason": "Heals/protection/blind; no cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 69223,
+        "name": "Neurotoxin Burst",
+        "reason": "Inflicts vulnerability/bleeding/poison on foes."
+      },
+      {
+        "kind": "Skill",
+        "id": 72079,
+        "name": "Rampant Growth",
+        "reason": "Immobilizes foes, heals allies; no cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 72636,
+        "name": "Tormenting Visions",
+        "reason": "Inflicts torment."
+      },
+      {
+        "kind": "Skill",
+        "id": 31869,
+        "name": "Celestial Avatar",
+        "reason": "Sweep hit on 'Consume' - consumes astral force, not conditions. (Druidic Clarity 1868 carries the CA-entry cleanse.)"
+      },
+      {
+        "kind": "Skill",
+        "id": 76787,
+        "name": "Summon Cyclone Bow",
+        "reason": "Sweep hit on 'consumes' - consumes arrows, not conditions."
+      },
+      {
+        "kind": "Skill",
+        "id": 12497,
+        "name": "Frost Spirit",
+        "reason": "Grants Resistance/Resolution; the cleanse is its slam skill Cold Snap (12600, recorded)."
+      },
+      {
+        "kind": "Skill",
+        "id": 69379,
+        "name": "Frost Spirit",
+        "reason": "Variant id; same as 12497 - cleanse is Cold Snap (12600)."
+      },
+      {
+        "kind": "Trait",
+        "id": 1056,
+        "name": "Fortifying Bond",
+        "reason": "Shares boons with pet (incl. Resistance); no removal."
+      },
+      {
+        "kind": "Trait",
+        "id": 2134,
+        "name": "Fresh Reinforcement",
+        "reason": "Copies pet boons on beastmode entry; no removal."
+      },
+      {
+        "kind": "Trait",
+        "id": 2151,
+        "name": "Elevated Bond",
+        "reason": "Minor granting beastmode/stances; its trait-skills Spiritual Reprieve (44626) and Unflinching Fortitude (45797) are recorded as skills; the trait itself removes nothing."
+      },
+      {
+        "kind": "Trait",
+        "id": 2263,
+        "name": "Enhancing Impact",
+        "reason": "Grants quickness/stability on disable; no removal."
+      },
+      {
+        "kind": "Trait",
+        "id": 2268,
+        "name": "Unleashed Power",
+        "reason": "Grants Cantrips/Unleash and ambush skills; none of the trait-skills cleanse."
+      },
+      {
+        "kind": "Trait",
+        "id": 2271,
+        "name": "Let Loose",
+        "reason": "Ambushes grant boons; no removal."
+      },
+      {
+        "kind": "Trait",
+        "id": 2278,
+        "name": "Corrupting Vines",
+        "reason": "Converts foes' BOONS into conditions / removes boons; not a cleanse."
+      },
+      {
+        "kind": "Trait",
+        "id": 2301,
+        "name": "Blinding Outburst",
+        "reason": "Damage + blind; no removal."
+      },
+      {
+        "kind": "Trait",
+        "id": 2336,
+        "name": "Gale Force",
+        "reason": "'convert' refers to Wind Force stacks -> Gale Force buff; not conditions."
+      },
+      {
+        "kind": "Trait",
+        "id": 2359,
+        "name": "Teachings of the Tengu",
+        "reason": "'consumes' refers to arrows; no condition removal."
+      },
+      {
+        "kind": "Trait",
+        "id": 2055,
+        "name": "Eclipse",
+        "reason": "Celestial Avatar skills inflict Vulnerability/Poison/Immobile/Chill/Burning on foes; nothing is removed"
+      }
+    ],
+    "Revenant": [
+      {
+        "kind": "Skill",
+        "id": 26666,
+        "name": "Manifest Toxin",
+        "reason": "Mace auto-attack; inflicts Poisoned. No condition removal text or fact."
+      },
+      {
+        "kind": "Skill",
+        "id": 27080,
+        "name": "Gaze of Darkness",
+        "reason": "'Consume' means consuming Facet of Darkness, not conditions. Applies Blinded/Revealed/Vulnerability only."
+      },
+      {
+        "kind": "Skill",
+        "id": 27162,
+        "name": "Elemental Blast",
+        "reason": "'Consume' refers to Facet of Elements; inflicts Burning/Chilled/Weakness. No cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 27228,
+        "name": "Infuse Light",
+        "reason": "'Convert all incoming strikes to heals' converts damage, not conditions."
+      },
+      {
+        "kind": "Skill",
+        "id": 27505,
+        "name": "Banish Enchantment",
+        "reason": "Boons Removed=3 from foes (boon strip), not condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 28075,
+        "name": "Chaotic Release",
+        "reason": "'Consume' refers to Facet of Chaos; knockback + superspeed. No cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 28113,
+        "name": "Burst of Strength",
+        "reason": "'Consume' refers to Facet of Strength; damage modifier. No cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 28472,
+        "name": "Shackling Wave",
+        "reason": "Inflicts Immobile/Vulnerability. No cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 28516,
+        "name": "Inspiring Reinforcement",
+        "reason": "Grants Stability, inflicts Weakness. No cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 50383,
+        "name": "Inspiring Reinforcement",
+        "reason": "Id variant; grants Stability, blocks missiles. No cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 51675,
+        "name": "True Nature",
+        "reason": "Dwarf variant: 'Grant stability to nearby allies.' No cleanse fact (cleanse variants are 51696/51713/51714)."
+      },
+      {
+        "kind": "Skill",
+        "id": 51698,
+        "name": "Elemental Blast",
+        "reason": "Dragon-legend variant; 'Consume Facet of Elements'. Inflicts conditions, grants Quickness. No cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 62692,
+        "name": "Mist Unleashed",
+        "reason": "Greatsword 2; inflicts Vulnerability. No cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 62796,
+        "name": "Awakening",
+        "reason": "Stun break + Protection/Stability. No cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 62878,
+        "name": "Reaver's Rage",
+        "reason": "Stun break + Stability. No cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 77291,
+        "name": "Gladiator's Defense",
+        "reason": "'Remove additional energy' is an energy cost; grants Resolution/Resistance (rule 2). No condition removal."
+      },
+      {
+        "kind": "Skill",
+        "id": 77371,
+        "name": "Cosmic Wisdom",
+        "reason": "No cleanse itself; the cleanse on activation belongs to trait Ethereal Purification (2416), recorded there. Its 'Form of the Monk' buff ('Legendary Centaur skills are always empowered') only enables Purifying Essence's uncounted 'remove additional conditions' bonus - no count fact in the cache, noted on 29197/27715."
+      },
+      {
+        "kind": "Skill",
+        "id": 78587,
+        "name": "Banish Enchantment",
+        "reason": "Conduit id variant; Boons Removed=3 from foes. Not a cleanse."
+      },
+      {
+        "kind": "Skill",
+        "id": 78845,
+        "name": "Release Potential: Assassin",
+        "reason": "Inflicts Crippled/Immobile. No cleanse."
+      },
+      {
+        "kind": "Trait",
+        "id": 1772,
+        "name": "Draconic Echo",
+        "reason": "Retains facet passives after consume; no condition removal."
+      },
+      {
+        "kind": "Trait",
+        "id": 1774,
+        "name": "Spirit Boon",
+        "reason": "Grants boons (incl. Resistance) on invoke; Resistance is not a cleanse (rule 2)."
+      },
+      {
+        "kind": "Trait",
+        "id": 1777,
+        "name": "Crystal Harbinger",
+        "reason": "Grants Legendary Dragon skills / Facet of Nature; the Facet of Nature-Demon transfer is recorded on skill 29371. Trait itself has no cleanse fact."
+      },
+      {
+        "kind": "Trait",
+        "id": 1784,
+        "name": "Glaring Resolve",
+        "reason": "Stability + heal on stun break. No cleanse."
+      },
+      {
+        "kind": "Trait",
+        "id": 1808,
+        "name": "Expose Defenses",
+        "reason": "Applies Vulnerability. No cleanse."
+      },
+      {
+        "kind": "Trait",
+        "id": 1818,
+        "name": "Fortified Blessing",
+        "reason": "Grants Protection WHEN you remove a condition from an ally; reactive, does not remove anything itself."
+      },
+      {
+        "kind": "Trait",
+        "id": 1820,
+        "name": "Invigorating Dismissal",
+        "reason": "Grants endurance WHEN you remove a condition from an ally; reactive, does not remove anything itself."
+      },
+      {
+        "kind": "Trait",
+        "id": 2352,
+        "name": "Found Purpose",
+        "reason": "Grants boons (incl. Resistance) on Numinous Gift. Not a cleanse (rule 2)."
+      },
+      {
+        "kind": "Trait",
+        "id": 2355,
+        "name": "Shared Wisdom",
+        "reason": "Grants boons (incl. Resolution) on Legendary Entity skills. Not a cleanse (rule 2)."
+      },
+      {
+        "kind": "Trait",
+        "id": 2364,
+        "name": "Enigmatic Connection",
+        "reason": "Grants Release Potential/Cosmic Wisdom access; no cleanse fact."
+      },
+      {
+        "kind": "Trait",
+        "id": 2440,
+        "name": "Numinous Gift",
+        "reason": "Grants boons (incl. Resistance/Resolution) on Cosmic Wisdom. Not a cleanse (rule 2)."
+      },
+      {
+        "kind": "Skill",
+        "id": 76968,
+        "name": "Twin Moon Sweep",
+        "reason": "Wiki-only (listed under elite skills that remove conditions). Cache desc: 'Spawn a Fragment of Razah ... damaging and inflicting conditions on foes ... Resonance. This skill gains bonus effects depending on the legend equipped in the other slot.' Facts: Range=600, Recharge=3.0. No removal text or fact; the resonance bonus is not in the API, so not recorded."
+      },
+      {
+        "kind": "Skill",
+        "id": 77001,
+        "name": "Twin Moon Sweep",
+        "reason": "Id variant of 76968; same description, no cleanse text or fact."
+      },
+      {
+        "kind": "Skill",
+        "id": 27356,
+        "name": "Energy Expulsion",
+        "reason": "Id variant of 29114 with neither the 'Conditions Removed per 10 Energy' fact nor any removal text; cleanse recorded on 29114."
+      },
+      {
+        "kind": "Skill",
+        "id": 28219,
+        "name": "Empowering Misery",
+        "reason": "Sweep hit: 'Heal per Condition=596'; healing per condition, explicitly not a cleanse (rule 2)."
+      },
+      {
+        "kind": "Skill",
+        "id": 78681,
+        "name": "Empowering Misery",
+        "reason": "Conduit id variant; healing per condition, not a cleanse (rule 2)."
+      },
+      {
+        "kind": "Skill",
+        "id": 51667,
+        "name": "True Nature",
+        "reason": "Assassin-legend id variant: 'Legendary Dragon. Consume. Strip boons from nearby enemies.' Boons Removed=2 (3 with trait 1806). Boon strip, not condition removal. Cleanse variants are 51696/51713/51714."
+      },
+      {
+        "kind": "Skill",
+        "id": 29393,
+        "name": "True Nature",
+        "reason": "Trait-skill listed under Crystal Harbinger (1777), cache prof=[]: 'Consume Facet of Nature to unify allies, granting them your boons.' Facts are True Nature buffs only; no removal/transfer fact or text."
+      },
+      {
+        "kind": "Trait",
+        "id": 1799,
+        "name": "Invoking Torment",
+        "reason": "Corruption minor that grants Invoke Torment (59591) on legend swap; own facts: Combat Only only. No cleanse of its own - the transfer comes from Permeating Pestilence (1721), recorded there (and on 59591 with count 0)."
+      },
+      {
+        "kind": "Trait",
+        "id": 1814,
+        "name": "Serene Rejuvenation",
+        "reason": "Centaur skills apply Vigor/Regeneration/Swiftness/Resistance in an area; Resistance is not a cleanse (rule 2)"
+      }
+    ],
+    "Thief": [
+      {
+        "kind": "Skill",
+        "id": 41205,
+        "name": "Binding Shadow",
+        "reason": "removes BOONS from the target (Boons Removed=2), not conditions"
+      },
+      {
+        "kind": "Skill",
+        "id": 44087,
+        "name": "Malicious Death's Judgment",
+        "reason": "'consumes all malice' - consumes the malice resource, not conditions; regex false positive"
+      },
+      {
+        "kind": "Skill",
+        "id": 50417,
+        "name": "Malicious Deadly Strike",
+        "reason": "'consumes all malice' - consumes the malice resource, not conditions; regex false positive"
+      },
+      {
+        "kind": "Skill",
+        "id": 50449,
+        "name": "Malicious Ripper",
+        "reason": "'consumes all malice' - consumes the malice resource, not conditions; regex false positive"
+      },
+      {
+        "kind": "Skill",
+        "id": 50451,
+        "name": "Malicious Surprise Shot",
+        "reason": "'consumes all malice' - consumes the malice resource, not conditions; regex false positive"
+      },
+      {
+        "kind": "Skill",
+        "id": 50466,
+        "name": "Malicious Sneak Attack",
+        "reason": "'consumes all malice' - consumes the malice resource, not conditions; regex false positive"
+      },
+      {
+        "kind": "Skill",
+        "id": 50481,
+        "name": "Malicious Backstab",
+        "reason": "'consumes all malice' - consumes the malice resource, not conditions; regex false positive"
+      },
+      {
+        "kind": "Skill",
+        "id": 50484,
+        "name": "Malicious Tactical Strike",
+        "reason": "'consumes all malice' - consumes the malice resource, not conditions; regex false positive"
+      },
+      {
+        "kind": "Skill",
+        "id": 69250,
+        "name": "Malicious Hook Strike",
+        "reason": "'consumes all malice' - consumes the malice resource, not conditions; regex false positive"
+      },
+      {
+        "kind": "Skill",
+        "id": 71835,
+        "name": "Malicious Cunning Salvo",
+        "reason": "'consumes all malice' - consumes the malice resource, not conditions; regex false positive"
+      },
+      {
+        "kind": "Skill",
+        "id": 72924,
+        "name": "Malicious Ashen Assault",
+        "reason": "'consumes all malice' - consumes the malice resource, not conditions; regex false positive"
+      },
+      {
+        "kind": "Skill",
+        "id": 69173,
+        "name": "Malicious Shadowsquall",
+        "reason": "'consumes all malice' - consumes the malice resource, not conditions; regex false positive"
+      },
+      {
+        "kind": "Skill",
+        "id": 63249,
+        "name": "Mind Shock",
+        "reason": "no condition removal text or fact (stun + stability + tethered heal)"
+      },
+      {
+        "kind": "Skill",
+        "id": 63323,
+        "name": "Well of Bounty",
+        "reason": "grants boons only; no condition removal text or fact"
+      },
+      {
+        "kind": "Skill",
+        "id": 72904,
+        "name": "Shattering Assault",
+        "reason": "removes BOONS from foes (Boons Removed=1, Additional Boons Removed=2), not conditions"
+      },
+      {
+        "kind": "Skill",
+        "id": 78309,
+        "name": "Zephyrite Sun Crystal",
+        "reason": "Profession_3 stun-break variant: 'Break stuns and dash ... damaging and burning enemies' - no condition removal text or fact"
+      },
+      {
+        "kind": "Skill",
+        "id": 79285,
+        "name": "Zephyrite Sun Crystal",
+        "reason": "Profession_3 stun-break variant: 'Break stuns and dash ... damaging and burning enemies' - no condition removal text or fact"
+      },
+      {
+        "kind": "Skill",
+        "id": 76966,
+        "name": "Reshuffle",
+        "reason": "skill text 'Redraw any artifacts you currently have in your skill slots.' does not cleanse; the cleanse belongs to trait Card Swap (2423), recorded there"
+      },
+      {
+        "kind": "Skill",
+        "id": 76886,
+        "name": "Antivenom Draught",
+        "reason": "wiki lists it as a heal that removes conditions, but the cache record has an EMPTY description and no cleanse facts (only Recharge=10.0); live API (checked 2026-09-05) is equally empty, so a cache refresh will not help - cannot quote evidence; flagged unresolved"
+      },
+      {
+        "kind": "Skill",
+        "id": 76881,
+        "name": "Antivenom Draught: Backfired",
+        "reason": "backfired placeholder state; desc 'This skill has backfired and cannot be used again until fully recharged.'"
+      },
+      {
+        "kind": "Skill",
+        "id": 77230,
+        "name": "Canach-Coin Toss",
+        "reason": "wiki lists it under condition->boon conversion, but the cache record has an EMPTY description and no conversion facts (only Recharge=15.0); live API (checked 2026-09-05) is equally empty, so a cache refresh will not help - cannot quote evidence; flagged unresolved"
+      },
+      {
+        "kind": "Skill",
+        "id": 76744,
+        "name": "Canach-Coin Toss",
+        "reason": "backfired placeholder state; desc 'This skill has backfired and cannot be used again until fully recharged.'"
+      },
+      {
+        "kind": "Skill",
+        "id": 12440,
+        "name": "Healing Seed",
+        "reason": "sylvari racial heal (8 professions listed); no condition removal text or fact"
+      },
+      {
+        "kind": "Trait",
+        "id": 2272,
+        "name": "Dark Sentry",
+        "reason": "applies Rot Wallow Venom / outgoing healing; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2284,
+        "name": "Second Opinion",
+        "reason": "'condition damage is converted to healing power' - attribute conversion, not condition conversion"
+      },
+      {
+        "kind": "Trait",
+        "id": 2403,
+        "name": "Trinket Collector",
+        "reason": "replaces Steal with Skritt Swipe and grants artifacts; own text does not cleanse. The Zephyrite Sun Crystal artifact it can grant (76733/76895) is recorded separately"
+      },
+      {
+        "kind": "Trait",
+        "id": 2409,
+        "name": "Prodigious Pincher",
+        "reason": "'remove all stacks, then Pilfer' - removes its own effect stacks, not conditions"
+      },
+      {
+        "kind": "Trait",
+        "id": 2275,
+        "name": "Consume Shadows",
+        "reason": "'consumes your remaining shadow force' - consumes a resource, not conditions; regex sweep hit"
+      },
+      {
+        "kind": "Trait",
+        "id": 2289,
+        "name": "Shadestep",
+        "reason": "Shadow Shroud skills heal and grant Alacrity/Regeneration/Protection/Aegis to allies; nothing is removed"
+      }
+    ],
+    "Warrior": [
+      {
+        "kind": "Skill",
+        "id": 14388,
+        "name": "Stomp",
+        "reason": "grants stability and launches foes; no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 14408,
+        "name": "Banner of Tactics",
+        "reason": "pulses boons incl. Resistance; Resistance is not a cleanse (rule 2)"
+      },
+      {
+        "kind": "Skill",
+        "id": 14573,
+        "name": "Banner of Tactics",
+        "reason": "id variant; boons incl. Resistance/Resolution only, no removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 14412,
+        "name": "Balanced Stance",
+        "reason": "stability/swiftness/crit immunity; no removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 14413,
+        "name": "Dolyak Signet",
+        "reason": "heal + stability; no removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 14482,
+        "name": "Hammer Shock",
+        "reason": "INFLICTS cripple ('crippling wave'); regex false positive"
+      },
+      {
+        "kind": "Skill",
+        "id": 14483,
+        "name": "Rampage",
+        "reason": "reduces DURATION of incoming movement-impeding conditions; duration reduction is not removal (rule 2)"
+      },
+      {
+        "kind": "Skill",
+        "id": 30074,
+        "name": "Shattering Blow",
+        "reason": "inflicts bleeding, stability, block; no removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 45333,
+        "name": "Winds of Disenchantment",
+        "reason": "removes BOONS from foes; not a condition cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 14353,
+        "name": "Eviscerate",
+        "reason": "extra id variant with NO Conditions Removed traited fact in the cache (other Eviscerate ids 14422/14423/14424/43566 carry it)"
+      },
+      {
+        "kind": "Skill",
+        "id": 76782,
+        "name": "Chant of Recuperation",
+        "reason": "skill has no cleanse fact; the removal is on trait Calming Tongue (2433), recorded there"
+      },
+      {
+        "kind": "Trait",
+        "id": 1447,
+        "name": "Brave Stride",
+        "reason": "stability/fury/adrenaline on movement skills; no removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 1480,
+        "name": "Marching Orders",
+        "reason": "Soldier's Focus grants boons only; the cleanse is Martial Cadence (1667)"
+      },
+      {
+        "kind": "Trait",
+        "id": 1708,
+        "name": "Stalwart Strength",
+        "reason": "stability on disable + damage; no removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 1831,
+        "name": "Primal Rage",
+        "reason": "grants berserk mode / primal bursts; the trait itself removes nothing - the primal burst skills are recorded individually via Cleansing Ire traited facts"
+      },
+      {
+        "kind": "Trait",
+        "id": 2130,
+        "name": "Attacker's Insight",
+        "reason": "Insight on disable/boon removal; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2175,
+        "name": "Spellbreaker's Conviction",
+        "reason": "grants Full Counter; the trait removes nothing - Full Counter (44165) and Resolute Counter (2168) are recorded"
+      },
+      {
+        "kind": "Trait",
+        "id": 2239,
+        "name": "Unyielding Dragon",
+        "reason": "'ignores blindness' is not removal; might on flow conversion"
+      },
+      {
+        "kind": "Trait",
+        "id": 2242,
+        "name": "Dragonscale Defense",
+        "reason": "stability/protection on Dragon Trigger; no removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2245,
+        "name": "Daring Dragon",
+        "reason": "alacrity/might/fury to allies; no removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2261,
+        "name": "Immortal Dragon",
+        "reason": "heal + protection; no removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2307,
+        "name": "Eternal Champion",
+        "reason": "stability/endurance on berserk; no removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 14568,
+        "name": "\"Shake It Off!\"",
+        "reason": "trait-granted copy (cache professions=[], specialization=None, slot=None - no profession/spec/slot to match); its cleanse (Conditions Removed=1, Recharge=25.0, 5 targets) is recorded on trait Shrug It Off (1479), which fires it - folded there to avoid double counting, same convention as the other profession files"
+      },
+      {
+        "kind": "Skill",
+        "id": 14375,
+        "name": "Arcing Slice",
+        "reason": "extra id variant with NO Conditions Removed traited fact in the cache (the level-1/2/3 ids of the same name carry it and are recorded)"
+      },
+      {
+        "kind": "Skill",
+        "id": 14506,
+        "name": "Combustive Shot",
+        "reason": "extra id variant with NO Conditions Removed traited fact in the cache (the level-1/2/3 ids of the same name carry it and are recorded)"
+      },
+      {
+        "kind": "Skill",
+        "id": 14387,
+        "name": "Earthshaker",
+        "reason": "extra id variant with NO Conditions Removed traited fact in the cache (the level-1/2/3 ids of the same name carry it and are recorded)"
+      },
+      {
+        "kind": "Skill",
+        "id": 14544,
+        "name": "Forceful Shot",
+        "reason": "extra id variant with NO Conditions Removed traited fact in the cache (the level-1/2/3 ids of the same name carry it and are recorded)"
+      },
+      {
+        "kind": "Skill",
+        "id": 14396,
+        "name": "Kill Shot",
+        "reason": "extra id variant with NO Conditions Removed traited fact in the cache (the level-1/2/3 ids of the same name carry it and are recorded)"
+      },
+      {
+        "kind": "Skill",
+        "id": 14414,
+        "name": "Skull Crack",
+        "reason": "extra id variant with NO Conditions Removed traited fact in the cache (the level-1/2/3 ids of the same name carry it and are recorded)"
+      },
+      {
+        "kind": "Skill",
+        "id": 14443,
+        "name": "Whirling Strike",
+        "reason": "extra id variant with NO Conditions Removed traited fact in the cache (the level-1/2/3 ids of the same name carry it and are recorded)"
+      },
+      {
+        "kind": "Skill",
+        "id": 43123,
+        "name": "Break Enchantments",
+        "reason": "removes BOONS from foes; not a condition cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 44004,
+        "name": "Wastrel's Ruin",
+        "reason": "removes BOONS from the target; not a condition cleanse"
+      },
+      {
+        "kind": "Skill",
+        "id": 62800,
+        "name": "Dragon's Roar",
+        "reason": "'consumes all your ammo' - resource consumption, no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 62969,
+        "name": "Flow",
+        "reason": "Gun X Sword trait-skill; adrenaline gain 'converted to flow' - resource conversion, no condition removal"
+      },
+      {
+        "kind": "Skill",
+        "id": 77155,
+        "name": "Chant of Freedom",
+        "reason": "stun break + swiftness; 'removing motivation stacks' is the Paragon resource, not conditions"
+      },
+      {
+        "kind": "Skill",
+        "id": 77342,
+        "name": "Chant of Action",
+        "reason": "boons; 'removing motivation' is the Paragon resource, not conditions"
+      },
+      {
+        "kind": "Trait",
+        "id": 2126,
+        "name": "Loss Aversion",
+        "reason": "triggers on removing BOONS from a foe; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2162,
+        "name": "Dispelling Force",
+        "reason": "disables remove BOONS (fact: Boons Removed=1); no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2163,
+        "name": "Enchantment Collapse",
+        "reason": "foes lose additional BOONS; no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2226,
+        "name": "Gun X Sword",
+        "reason": "adrenaline 'converted to flow' - resource conversion, no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 2253,
+        "name": "Unshakable Mountain",
+        "reason": "barrier when you 'convert' flow into charges - resource conversion, no condition removal"
+      },
+      {
+        "kind": "Trait",
+        "id": 1471,
+        "name": "Roaring Reveille",
+        "reason": "warhorn skills apply Fury and Resistance; Resistance is not a cleanse (rule 2)"
+      }
+    ],
+    "Gear": [
+      {
+        "kind": "Relic",
+        "id": 100074,
+        "name": "Relic of Cerus",
+        "reason": "converts BOONS into conditions on enemies (rule 2), not a cleanse"
+      },
+      {
+        "kind": "Relic",
+        "id": 101500,
+        "name": "Relic of Cerus",
+        "reason": "converts BOONS into conditions on enemies (rule 2), not a cleanse"
+      },
+      {
+        "kind": "Relic",
+        "id": 101198,
+        "name": "Relic of Nayos",
+        "reason": "heals when a condition is removed - benefits from cleanses, removes none itself"
+      },
+      {
+        "kind": "Relic",
+        "id": 101627,
+        "name": "Relic of Nayos",
+        "reason": "heals when a condition is removed - benefits from cleanses, removes none itself"
+      },
+      {
+        "kind": "Relic",
+        "id": 109664,
+        "name": "Relic of the Cruel Overseer",
+        "reason": "converts outgoing condition damage into healing; regex hit on 'convert', no condition removal"
+      },
+      {
+        "kind": "Sigil",
+        "id": 21257,
+        "name": "Sigil of Nullification",
+        "reason": "sweep hit on 'remove': removes BOONS from foes, not conditions"
+      },
+      {
+        "kind": "Sigil",
+        "id": 24572,
+        "name": "Superior Sigil of Nullification",
+        "reason": "sweep hit on 'remove': removes BOONS from foes, not conditions"
+      },
+      {
+        "kind": "Sigil",
+        "id": 91474,
+        "name": "Superior Sigil of Nullification",
+        "reason": "sweep hit on 'remove': removes BOONS from foes, not conditions"
+      },
+      {
+        "kind": "Sigil",
+        "id": 81207,
+        "name": "Sigil of Revocation",
+        "reason": "sweep hit on 'remove': removes BOONS from foes, not conditions"
+      },
+      {
+        "kind": "Sigil",
+        "id": 81233,
+        "name": "Sigil of Annulment",
+        "reason": "sweep hit on 'remove': removes BOONS from foes, not conditions"
+      },
+      {
+        "kind": "Sigil",
+        "id": 74326,
+        "name": "Superior Sigil of Transference",
+        "reason": "sweep hit on 'transfer' (name only): +healing to other allies"
+      },
+      {
+        "kind": "Sigil",
+        "id": 91448,
+        "name": "Superior Sigil of Transference",
+        "reason": "sweep hit on 'transfer' (name only): +healing to other allies"
+      },
+      {
+        "kind": "Sigil",
+        "id": 94901,
+        "name": "Sigil of Transference",
+        "reason": "sweep hit on 'transfer' (name only): +healing to other allies"
+      },
+      {
+        "kind": "Relic",
+        "id": 99965,
+        "name": "Relic of the Flock",
+        "reason": "sweep hit on 'convert': excess healing converted to barrier"
+      },
+      {
+        "kind": "Relic",
+        "id": 100633,
+        "name": "Relic of the Flock",
+        "reason": "sweep hit on 'convert': excess healing converted to barrier"
+      },
+      {
+        "kind": "Relic",
+        "id": 101191,
+        "name": "Relic of Nourys",
+        "reason": "sweep hit on 'remove'/'consum'/'convert': boon-removal stacks consumed for damage/healing conversion"
+      },
+      {
+        "kind": "Relic",
+        "id": 101503,
+        "name": "Relic of Nourys",
+        "reason": "sweep hit on 'remove'/'consum'/'convert': boon-removal stacks consumed for damage/healing conversion"
+      },
+      {
+        "kind": "Relic",
+        "id": 101944,
+        "name": "Relic of Zakiros",
+        "reason": "sweep hit on 'convert': critical-strike damage converted to healing"
+      },
+      {
+        "kind": "Relic",
+        "id": 101955,
+        "name": "Relic of Zakiros",
+        "reason": "sweep hit on 'convert': critical-strike damage converted to healing"
+      }
+    ]
+  }
+}

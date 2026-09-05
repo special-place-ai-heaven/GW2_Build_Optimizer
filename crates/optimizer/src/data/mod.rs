@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod balance_overrides;
 pub mod boon_condition_formulas;
+pub mod cleanse_sources;
 #[cfg(test)]
 mod consistency_tests;
 pub mod manifests;
@@ -18,6 +19,7 @@ pub use balance_overrides::{
     check_wvw_quality, known_mode_splits, BalanceOverrides, KnownModeSplit, OverrideResult,
 };
 pub use boon_condition_formulas::{boons, conditions, BoonFormulas, ConditionFormulas};
+pub use cleanse_sources::{CleanseRegistry, CleanseSource, SourceKind};
 pub use manifests::{check_staleness, PatchManifest};
 pub use normalized_effects::{
     map_legacy_effect, score_effect, EffectCategory, NormalizedEffect, SourceType, StackingRule,
@@ -160,6 +162,9 @@ pub fn initialize() -> DataState {
         errors.extend(errs);
     }
     if let Err(errs) = objective_profiles::try_load_objective_profiles() {
+        errors.extend(errs);
+    }
+    if let Err(errs) = cleanse_sources::try_load_cleanse_sources() {
         errors.extend(errs);
     }
 

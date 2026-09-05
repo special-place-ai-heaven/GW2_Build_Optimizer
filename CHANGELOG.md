@@ -2,6 +2,16 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.11.25 - 2026-09-05
+
+### Optimize
+
+- The optimizer now knows every condition cleanse in the game from a table, not from a text pattern. `data/cleanse_sources.json` lists 385 sources: 280 skills (heal, utility, elite, weapon, profession-mechanic, toolbelt and kit skills), 77 traits and 28 sigils and relics, one list per profession and specialization, catalogued from the game data by one reader per profession, cross-checked against the wiki, and re-derived by a second independent reader. 354 look-alikes (boon corruption, Resistance, "heal when you remove a condition", condition-damage text) are recorded as judged non-cleanses so the old text pattern can never fire on them again. Before this, in WvW, a Reaper running "Suffer!", with Consume Conditions, Plague Signet, Well of Power and Spectral Walk all one swap away, was judged to have no cleanse at all and the search served a non-viable build (seen in-game 2026-09-05 on 1.11.24): Necromancer transfers, sends, consumes and converts its conditions, and the pattern only knew remove, cleanse and cure.
+- Cleanses that exist only through a trait (Cleansing Ire on Warrior bursts, Restorative Illusions on Mesmer shatters, Blurred Inscriptions on Signet of Midnight, 99 in all) count only when the build runs that trait.
+- The two short LLM calls at the end of Optimize (the advisor's three swap suggestions and the build explanation) are capped at 2048 tokens with no separate thinking budget. Under the 64k/32k Choya ceilings a thinking model routed through OpenRouter took minutes for each, and Optimize looked hung.
+- A kit with no cleanse reports a rate of 0.0 instead of -0.0 in the viability report.
+- A one-handed weapon only contributes the skills of the hand it is in, and a weapon skill carried by both weapon sets is one skill with one cooldown, usable on either set. A dagger in each hand of a Necromancer with a dagger on the second set was simulated as three separate Deathly Swarms, each with its own cooldown, which tripled that skill's damage and cleanse credit (found by the new cleanse trace in the probe, 2026-09-05).
+
 ## 1.11.24 - 2026-09-05
 
 ### Optimize
