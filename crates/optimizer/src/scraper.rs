@@ -106,16 +106,19 @@ pub fn scrape_all_with_progress(
                     source: "snowcrows".into(),
                     builds: vec![],
                     error: Some(msg.clone()),
+                    failed: 0,
                 },
                 ScrapeResult {
                     source: "hardstuck".into(),
                     builds: vec![],
                     error: Some(msg.clone()),
+                    failed: 0,
                 },
                 ScrapeResult {
                     source: "guildjen".into(),
                     builds: vec![],
                     error: Some(msg),
+                    failed: 0,
                 },
             ];
         }
@@ -132,16 +135,19 @@ pub fn scrape_all_with_progress(
                 source: "snowcrows".into(),
                 builds: vec![],
                 error: Some(msg.clone()),
+                failed: 0,
             },
             ScrapeResult {
                 source: "hardstuck".into(),
                 builds: vec![],
                 error: Some(msg.clone()),
+                failed: 0,
             },
             ScrapeResult {
                 source: "guildjen".into(),
                 builds: vec![],
                 error: Some(msg),
+                failed: 0,
             },
         ];
     }
@@ -227,12 +233,12 @@ pub fn scrape_all_with_progress(
 
 fn finish_source(
     source: &str,
-    result: Result<(Vec<BenchmarkBuild>, bool), String>,
+    result: Result<(Vec<BenchmarkBuild>, bool, usize), String>,
     dir: &Path,
     on_progress: &dyn Fn(&str, &str),
 ) -> ScrapeResult {
     match result {
-        Ok((builds, cancelled)) => {
+        Ok((builds, cancelled, failed)) => {
             // Cancel mid-source must not overwrite last-good on-disk groups
             // with a partial scrape. Keep the in-memory vec for this session.
             if cancelled {
@@ -241,6 +247,7 @@ fn finish_source(
                     source: source.into(),
                     builds,
                     error: Some(CANCELLED_ERROR.into()),
+                    failed,
                 };
             }
             if let Err(e) = save_builds(&builds, dir) {
@@ -249,6 +256,7 @@ fn finish_source(
                     source: source.into(),
                     builds,
                     error: Some(e),
+                    failed,
                 };
             }
             on_progress(source, &format!("done {}", builds.len()));
@@ -256,6 +264,7 @@ fn finish_source(
                 source: source.into(),
                 builds,
                 error: None,
+                failed,
             }
         }
         Err(e) => {
@@ -264,6 +273,9 @@ fn finish_source(
                 source: source.into(),
                 builds: vec![],
                 error: Some(e),
+                // The source never got far enough to list a page, so nothing
+                // could have failed individually - the whole thing did.
+                failed: 0,
             }
         }
     }
@@ -275,6 +287,7 @@ fn cancelled_result(source: &str) -> ScrapeResult {
         source: source.into(),
         builds: vec![],
         error: Some(CANCELLED_ERROR.into()),
+        failed: 0,
     }
 }
 
@@ -336,7 +349,7 @@ fn scrape_snowcrows(
     known: &HashMap<String, BenchmarkBuild>,
     should_cancel: &dyn Fn() -> bool,
     on_progress: &dyn Fn(&str, &str),
-) -> Result<(Vec<BenchmarkBuild>, bool), String> {
+) -> Result<(Vec<BenchmarkBuild>, bool, usize), String> {
     let mut last_html: Option<String> = None;
     // Carried with the link so progress can name the class it is on, the
     // way the GuildJen path does. The profession is only known here, at
@@ -347,7 +360,7 @@ fn scrape_snowcrows(
     // Collect build links from each profession's page
     for profession in SC_PROFESSIONS {
         if should_cancel() {
-            return Ok((Vec::new(), true));
+            return Ok((Vec::new(), true, 0));
         }
         let prof_url = format!("https://snowcrows.com/builds/raids/{}", profession);
         on_progress("snowcrows", &format!("listing {}…", profession));
@@ -391,13 +404,14 @@ fn scrape_snowcrows(
     }
 
     let mut builds = Vec::new();
+    let mut failed = 0usize;
     let total = all_links.len();
     on_progress("snowcrows", &format!("0/{}", total));
     // Every build the index lists. `all_links` is accumulated one profession
     // page at a time, so this already walks a class at a time.
     for (i, (class, url)) in all_links.into_iter().enumerate() {
         if should_cancel() {
-            return Ok((builds, true));
+            return Ok((builds, true, failed));
         }
         // Already read today: take it and skip both the request and the
         // wait that would have come with it.
@@ -407,14 +421,15 @@ fn scrape_snowcrows(
             continue;
         }
         if i > 0 && !pace(should_cancel) {
-            return Ok((builds, true));
+            return Ok((builds, true, failed));
         }
-        if let Ok(b) = scrape_snowcrows_build(client, &url, today) {
-            builds.push(b)
+        match scrape_snowcrows_build(client, &url, today) {
+            Ok(b) => builds.push(b),
+            Err(_) => failed += 1,
         }
         on_progress("snowcrows", &format!("{class} {}/{total}", i + 1));
     }
-    Ok((builds, false))
+    Ok((builds, false, failed))
 }
 
 /// Build a `BenchmarkBuild` from page HTML once the per-site fields
@@ -536,7 +551,7 @@ fn scrape_hardstuck(
     known: &HashMap<String, BenchmarkBuild>,
     should_cancel: &dyn Fn() -> bool,
     on_progress: &dyn Fn(&str, &str),
-) -> Result<(Vec<BenchmarkBuild>, bool), String> {
+) -> Result<(Vec<BenchmarkBuild>, bool, usize), String> {
     let mut last_html: Option<String> = None;
     let mut all_links: Vec<(String, String)> = Vec::new();
 
@@ -544,7 +559,7 @@ fn scrape_hardstuck(
     // Each profession page lists builds for that profession
     for profession in HS_PROFESSIONS {
         if should_cancel() {
-            return Ok((Vec::new(), true));
+            return Ok((Vec::new(), true, 0));
         }
         let prof_url = format!("https://hardstuck.gg/gw2/builds/{}/", profession);
         on_progress("hardstuck", &format!("listing {}…", profession));
@@ -554,8 +569,7 @@ fn scrape_hardstuck(
         last_html = Some(html.clone());
         // Build links: href="/gw2/builds/{profession}/{slug}/" with a non-empty slug
         // slug can be numeric (24929) or text (blood-harbinger)
-        let links =
-            extract_build_links(&html, &format!("/gw2/builds/{}/", profession), usize::MAX);
+        let links = extract_build_links(&html, &format!("/gw2/builds/{}/", profession), usize::MAX);
         for link in links {
             let parts: Vec<&str> = link.trim_matches('/').split('/').collect();
             // /gw2/builds/{profession}/{slug} = exactly 4 segments
@@ -594,12 +608,13 @@ fn scrape_hardstuck(
     }
 
     let mut builds = Vec::new();
+    let mut failed = 0usize;
     let total = all_links.len();
     on_progress("hardstuck", &format!("0/{}", total));
     // Every build, one profession page at a time.
     for (i, (class, url)) in all_links.into_iter().enumerate() {
         if should_cancel() {
-            return Ok((builds, true));
+            return Ok((builds, true, failed));
         }
         if let Some(b) = known.get(&url) {
             builds.push(b.clone());
@@ -607,14 +622,15 @@ fn scrape_hardstuck(
             continue;
         }
         if i > 0 && !pace(should_cancel) {
-            return Ok((builds, true));
+            return Ok((builds, true, failed));
         }
-        if let Ok(b) = scrape_hardstuck_build(client, &url, today) {
-            builds.push(b)
+        match scrape_hardstuck_build(client, &url, today) {
+            Ok(b) => builds.push(b),
+            Err(_) => failed += 1,
         }
         on_progress("hardstuck", &format!("{class} {}/{total}", i + 1));
     }
-    Ok((builds, false))
+    Ok((builds, false, failed))
 }
 
 fn scrape_hardstuck_build(
@@ -689,7 +705,7 @@ fn scrape_guildjen(
     known: &HashMap<String, BenchmarkBuild>,
     should_cancel: &dyn Fn() -> bool,
     on_progress: &dyn Fn(&str, &str),
-) -> Result<(Vec<BenchmarkBuild>, bool), String> {
+) -> Result<(Vec<BenchmarkBuild>, bool, usize), String> {
     // The six category pages linked from the hub at /gw2-builds/, verified
     // against the live site 2026-09-05. The old `/wvw-builds/` and
     // `/pvp-builds/` addresses no longer carry the build tables, which is why
@@ -703,7 +719,7 @@ fn scrape_guildjen(
     // should touch the network zero times, and fetch_html now retries with
     // backoff, so a missed check here costs seconds of dead waiting.
     if should_cancel() {
-        return Ok((Vec::new(), true));
+        return Ok((Vec::new(), true, 0));
     }
     on_progress("guildjen", "listing categories…");
     let index_urls = match fetch_html(client, GUILDJEN_SITEMAP) {
@@ -723,16 +739,22 @@ fn scrape_guildjen(
     };
 
     let mut builds = Vec::new();
+    let mut failed = 0usize;
     let mut last_html: Option<String> = None;
     let mut any_success = false;
     let mut saw_link = false;
 
     for (index_url, mode) in &index_urls {
         if should_cancel() {
-            return Ok((builds, true));
+            return Ok((builds, true, failed));
         }
         let mode = *mode;
-        on_progress("guildjen", &format!("listing {}…", mode));
+        // Name the category, not just the mode. Raid, fractal and open world
+        // are all "PvE", and each index restarts the count with its own
+        // total, so three PvE categories in a row read as one list whose
+        // total kept changing - 53/67 then 8/48 is two pages, not a bug.
+        let category = category_label(index_url);
+        on_progress("guildjen", &format!("listing {category}…"));
         let Ok(html) = fetch_html(client, index_url) else {
             continue;
         };
@@ -756,7 +778,7 @@ fn scrape_guildjen(
         for (class, class_links) in by_class {
             for link in class_links {
                 if should_cancel() {
-                    return Ok((builds, true));
+                    return Ok((builds, true, failed));
                 }
                 // Pin to the real host: an index page (compromised, or
                 // MITM'd if TLS were ever bypassed) must not steer us to
@@ -779,18 +801,21 @@ fn scrape_guildjen(
                     b.mode = mode.to_string();
                     builds.push(b);
                     i += 1;
-                    on_progress("guildjen", &format!("{mode} {class} {i}/{cap}"));
+                    on_progress("guildjen", &format!("{category} {class} {i}/{cap}"));
                     continue;
                 }
                 if i > 0 && !pace(should_cancel) {
-                    return Ok((builds, true));
+                    return Ok((builds, true, failed));
                 }
-                if let Ok(mut b) = scrape_guildjen_build(client, &url, today) {
-                    b.mode = mode.to_string();
-                    builds.push(b);
+                match scrape_guildjen_build(client, &url, today) {
+                    Ok(mut b) => {
+                        b.mode = mode.to_string();
+                        builds.push(b);
+                    }
+                    Err(_) => failed += 1,
                 }
                 i += 1;
-                on_progress("guildjen", &format!("{mode} {class} {i}/{cap}"));
+                on_progress("guildjen", &format!("{category} {class} {i}/{cap}"));
             }
         }
     }
@@ -813,7 +838,7 @@ fn scrape_guildjen(
         }
         return Err("GuildJen: no build links found on any index page".into());
     }
-    Ok((builds, false))
+    Ok((builds, false, failed))
 }
 
 fn scrape_guildjen_build(
@@ -1129,10 +1154,16 @@ fn looks_rate_limited(html: &str) -> bool {
         return false;
     }
     let lower = html.to_lowercase();
-    ["rate limit", "too many requests", "checking your browser", "cf-browser-verification",
-     "attention required", "unusual traffic"]
-        .iter()
-        .any(|needle| lower.contains(needle))
+    [
+        "rate limit",
+        "too many requests",
+        "checking your browser",
+        "cf-browser-verification",
+        "attention required",
+        "unusual traffic",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 /// Heuristic: does this look like a network/security interstitial (block page,
@@ -1187,6 +1218,27 @@ fn guildjen_fallback_categories() -> Vec<(String, &'static str)> {
     .iter()
     .map(|slug| (format!("https://guildjen.com/{slug}/"), category_mode(slug)))
     .collect()
+}
+
+/// Short display name for a category index, from its slug.
+///
+/// `/gw2-open-world-builds/` reads as "Open World". The mode alone is not
+/// enough: raid, fractal and open world are all PvE, so progress lines from
+/// three different indexes were indistinguishable.
+fn category_label(url: &str) -> String {
+    let slug = url.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    let words = slug
+        .trim_start_matches("gw2-")
+        .trim_end_matches("-builds")
+        .replace('-', " ");
+    if words.is_empty() {
+        return "Builds".to_string();
+    }
+    words
+        .split(' ')
+        .map(title_case)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Game mode from a category slug. Everything that is neither WvW nor PvP is
@@ -2253,7 +2305,10 @@ mod tests {
         );
         assert_eq!(
             grouped[0].1,
-            vec![link("power-reaper-roaming"), link("condition-reaper-roaming")],
+            vec![
+                link("power-reaper-roaming"),
+                link("condition-reaper-roaming")
+            ],
             "a class keeps every build it has, in page order"
         );
         assert_eq!(grouped[1].1.len(), 2);
@@ -2662,7 +2717,13 @@ mod tests {
         let client = build_client().expect("client build must succeed");
 
         let start = Instant::now();
-        let result = scrape_snowcrows(&client, "2026-04-16", &HashMap::new(), &predicate, &|_, _| {});
+        let result = scrape_snowcrows(
+            &client,
+            "2026-04-16",
+            &HashMap::new(),
+            &predicate,
+            &|_, _| {},
+        );
         let elapsed = start.elapsed();
 
         assert!(
@@ -2671,7 +2732,7 @@ mod tests {
             elapsed
         );
         match result {
-            Ok((builds, cancelled)) => {
+            Ok((builds, cancelled, _failed)) => {
                 assert!(cancelled, "cancelled flag must be true");
                 assert!(
                     builds.is_empty(),
@@ -2703,7 +2764,13 @@ mod tests {
         let client = build_client().expect("client build must succeed");
 
         let start = Instant::now();
-        let result = scrape_hardstuck(&client, "2026-04-16", &HashMap::new(), &predicate, &|_, _| {});
+        let result = scrape_hardstuck(
+            &client,
+            "2026-04-16",
+            &HashMap::new(),
+            &predicate,
+            &|_, _| {},
+        );
         let elapsed = start.elapsed();
 
         assert!(
@@ -2712,7 +2779,7 @@ mod tests {
             elapsed
         );
         match result {
-            Ok((builds, cancelled)) => {
+            Ok((builds, cancelled, _failed)) => {
                 assert!(cancelled, "cancelled flag must be true");
                 assert!(
                     builds.is_empty(),
@@ -2755,11 +2822,15 @@ mod tests {
                 println!("  {mode:4} {url}");
             }
             assert!(
-                categories.iter().any(|(u, m)| u.contains("wvw") && *m == "WvW"),
+                categories
+                    .iter()
+                    .any(|(u, m)| u.contains("wvw") && *m == "WvW"),
                 "the WvW category must be discovered"
             );
             assert!(
-                categories.iter().any(|(u, m)| u.contains("pvp") && *m == "PvP"),
+                categories
+                    .iter()
+                    .any(|(u, m)| u.contains("pvp") && *m == "PvP"),
                 "the PvP category must be discovered"
             );
             assert!(
@@ -2837,7 +2908,13 @@ mod tests {
         let client = build_client().expect("client build must succeed");
 
         let start = Instant::now();
-        let result = scrape_guildjen(&client, "2026-04-16", &HashMap::new(), &predicate, &|_, _| {});
+        let result = scrape_guildjen(
+            &client,
+            "2026-04-16",
+            &HashMap::new(),
+            &predicate,
+            &|_, _| {},
+        );
         let elapsed = start.elapsed();
 
         assert!(
@@ -2846,7 +2923,7 @@ mod tests {
             elapsed
         );
         match result {
-            Ok((builds, cancelled)) => {
+            Ok((builds, cancelled, _failed)) => {
                 assert!(cancelled, "cancelled flag must be true");
                 assert!(
                     builds.is_empty(),
@@ -2903,7 +2980,7 @@ mod tests {
         let before = std::fs::read(&seeded_path).expect("read seed");
 
         let partial = sample_guardian_pve("SHOULD_NOT_LAND_ON_DISK");
-        let result = finish_source("snowcrows", Ok((vec![partial], true)), &tmp, &|_, _| {});
+        let result = finish_source("snowcrows", Ok((vec![partial], true, 0)), &tmp, &|_, _| {});
 
         assert_eq!(
             result.error.as_deref(),
@@ -2951,7 +3028,7 @@ mod tests {
         );
         let result = finish_source(
             "snowcrows",
-            Ok((vec![sample_guardian_pve("x")], false)),
+            Ok((vec![sample_guardian_pve("x")], false, 0)),
             &missing,
             &|_, _| {},
         );

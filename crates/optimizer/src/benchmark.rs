@@ -72,6 +72,13 @@ pub struct ScrapeResult {
     pub builds: Vec<BenchmarkBuild>,
     /// Error message if the scrape failed or partially failed.
     pub error: Option<String>,
+    /// Pages that were listed but produced no build.
+    ///
+    /// Separate from `error`, which is about the source as a whole. A run
+    /// can list 157 builds, return 148 and be entirely healthy apart from
+    /// nine pages whose layout the extractor did not recognise - and saying
+    /// "done 148" alone hides that nine went missing.
+    pub failed: usize,
 }
 
 // ─── Matching ────────────────────────────────────────────────────────────────
