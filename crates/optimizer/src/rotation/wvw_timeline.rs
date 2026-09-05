@@ -563,7 +563,7 @@ impl<'a> Timeline<'a> {
                 self.try_stunbreak();
             }
 
-            self.now_ms += TIMELINE_TICK_MS;
+            self.now_ms = self.now_ms.saturating_add(TIMELINE_TICK_MS);
             self.tick_alacrity_recharge();
         }
     }
@@ -651,11 +651,12 @@ impl<'a> Timeline<'a> {
         self.pending = Some(PendingCast {
             skill_idx,
             started_at_ms: self.now_ms,
-            resolves_at_ms: self.now_ms + cast_ms,
+            resolves_at_ms: self.at(cast_ms),
             protected_at_start: self.control_owned(),
             saved_by_charge: false,
         });
-        self.next_action_ms = self.now_ms + cast_ms + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS;
+        self.next_action_ms =
+            self.at(cast_ms.saturating_add(HUMAN_DELAY_MS).saturating_add(MIN_SKILL_GAP_MS));
     }
 
     fn pick_skill(&mut self) -> Option<usize> {
@@ -665,7 +666,7 @@ impl<'a> Timeline<'a> {
             .profile
             .enemy_events
             .front()
-            .is_some_and(|event| event.at_ms <= self.now_ms + 900);
+            .is_some_and(|event| event.at_ms <= self.at(900));
 
         let mut best: Option<(usize, f64)> = None;
         let mut filler = None;
@@ -757,8 +758,8 @@ impl<'a> Timeline<'a> {
             skill.weapon_set == other && self.cooldown_ready_ms[idx] <= self.now_ms
         }) {
             self.active_weapon_set = other;
-            self.weapon_swap_ready_ms = self.now_ms + cooldown_ms;
-            self.next_action_ms = self.now_ms + MIN_SKILL_GAP_MS;
+            self.weapon_swap_ready_ms = self.at(cooldown_ms);
+            self.next_action_ms = self.at(MIN_SKILL_GAP_MS);
         }
     }
 
@@ -792,7 +793,7 @@ impl<'a> Timeline<'a> {
         self.resource_blocked_skills.remove(&skill_id);
         self.set_skill_cooldown(skill_id, self.skills[idx].cooldown_ms);
         self.disabled_until_ms = self.now_ms;
-        self.next_action_ms = self.now_ms + MIN_SKILL_GAP_MS;
+        self.next_action_ms = self.at(MIN_SKILL_GAP_MS);
         self.successful_action_count += 1;
         let first_damage_event = self.damage_events.len();
         let control_before = self.control_landed_ms;
@@ -879,7 +880,7 @@ impl<'a> Timeline<'a> {
             let skill_id = self.skills[pending.skill_idx].skill_id;
             self.set_skill_cooldown(skill_id, INTERRUPT_COOLDOWN_MS);
         }
-        self.disabled_until_ms = self.disabled_until_ms.max(self.now_ms + duration_ms);
+        self.disabled_until_ms = self.disabled_until_ms.max(self.at(duration_ms));
         self.protected_run_ms = 0;
     }
 
@@ -892,8 +893,8 @@ impl<'a> Timeline<'a> {
         self.incoming_conditions.push(TimedCondition {
             name: condition,
             stacks,
-            expires_at_ms: self.now_ms + duration_ms,
-            next_tick_ms: self.now_ms + 1_000,
+            expires_at_ms: self.at(duration_ms),
+            next_tick_ms: self.at(1_000),
         });
     }
 
@@ -1111,8 +1112,8 @@ impl<'a> Timeline<'a> {
                 self.outgoing_conditions.push(TimedCondition {
                     name: condition.clone(),
                     stacks: *stacks,
-                    expires_at_ms: self.now_ms + duration,
-                    next_tick_ms: self.now_ms + 1_000,
+                    expires_at_ms: self.at(duration),
+                    next_tick_ms: self.at(1_000),
                 });
             }
             SkillEffect::ApplyBuff {
@@ -1149,7 +1150,7 @@ impl<'a> Timeline<'a> {
             SkillEffect::CrowdControl { duration_ms, .. } => {
                 if !self.enemy_stability {
                     let previous_end = self.enemy_disabled_until_ms.max(self.now_ms);
-                    let new_end = self.enemy_disabled_until_ms.max(self.now_ms + *duration_ms);
+                    let new_end = self.enemy_disabled_until_ms.max(self.at(*duration_ms));
                     self.enemy_disabled_until_ms = new_end;
                     self.control_landed_ms += new_end.saturating_sub(previous_end);
                 }
@@ -1263,7 +1264,7 @@ impl<'a> Timeline<'a> {
         self.buffs.push(TimedBuff {
             name: name.into(),
             stacks,
-            expires_at_ms: self.now_ms + duration,
+            expires_at_ms: self.at(duration),
         });
         if let Some(kind) = boon_cover_kind(name) {
             self.apply_defense(kind, duration, stacks, true);
@@ -1276,13 +1277,13 @@ impl<'a> Timeline<'a> {
             .iter_mut()
             .find(|defense| defense.kind == kind)
         {
-            existing.expires_at_ms = existing.expires_at_ms.max(self.now_ms + duration_ms);
+            existing.expires_at_ms = existing.expires_at_ms.max(self.now_ms.saturating_add(duration_ms));
             existing.stacks = existing.stacks.max(stacks);
             existing.strippable &= strippable;
         } else {
             self.defenses.push(TimedDefense {
                 kind,
-                expires_at_ms: self.now_ms + duration_ms,
+                expires_at_ms: self.at(duration_ms),
                 stacks,
                 strippable,
             });
@@ -1314,8 +1315,8 @@ impl<'a> Timeline<'a> {
                 self.outgoing_conditions.push(TimedCondition {
                     name: operation.status_kind.clone(),
                     stacks: amount,
-                    expires_at_ms: self.now_ms + duration,
-                    next_tick_ms: self.now_ms + 1_000,
+                    expires_at_ms: self.at(duration),
+                    next_tick_ms: self.at(1_000),
                 })
             }
             (OperationType::RemovesCondition, TargetSide::Self_ | TargetSide::Ally)
@@ -1345,6 +1346,10 @@ impl<'a> Timeline<'a> {
                 .any(|item| matches!(item, SkillEffect::RemovesCondition { .. })),
             _ => false,
         }
+    }
+
+    fn at(&self, offset_ms: u32) -> u32 {
+        self.now_ms.saturating_add(offset_ms)
     }
 
     fn note_unmodeled_proc(&mut self, source_type: &SourceType, source_id: u32) {
@@ -1380,7 +1385,8 @@ impl<'a> Timeline<'a> {
         for idx in ready {
             let (category, value, duration_ms, operation, cooldown) = {
                 let proc_spec = &mut self.proc_specs[idx];
-                proc_spec.next_ready_ms = self.now_ms + proc_spec.internal_cooldown_ms;
+                proc_spec.next_ready_ms =
+                    self.now_ms.saturating_add(proc_spec.internal_cooldown_ms);
                 (
                     proc_spec.category.clone(),
                     proc_spec.value,
@@ -1474,7 +1480,7 @@ impl<'a> Timeline<'a> {
     /// The game tracks recharge by skill, not by rendered bar position. The
     /// same skill equipped in both weapon sets therefore shares one timer.
     fn set_skill_cooldown(&mut self, skill_id: u32, cooldown_ms: u32) {
-        let ready_ms = self.now_ms + cooldown_ms;
+        let ready_ms = self.at(cooldown_ms);
         for (idx, skill) in self.skills.iter().enumerate() {
             if skill.skill_id == skill_id {
                 self.cooldown_ready_ms[idx] = ready_ms;
@@ -2787,6 +2793,24 @@ mod tests {
 
         assert_eq!(timeline.unmodeled_effect_sources, 2);
         assert_eq!(timeline.healing, 0.0);
+    }
+
+    #[test]
+    fn timeline_at_saturates_near_u32_max() {
+        let params = params();
+        let mut timeline = Timeline::new(
+            &[],
+            &params,
+            profile(1_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.now_ms = u32::MAX - 10;
+        assert_eq!(timeline.at(20), u32::MAX);
+        assert_eq!(timeline.at(5), u32::MAX - 5);
     }
 
     #[test]
