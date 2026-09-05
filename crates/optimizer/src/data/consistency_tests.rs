@@ -109,33 +109,47 @@ mod tests {
     /// All patch_ids referenced in normalized_effects files must exist in manifests.
     #[test]
     fn test_normalized_effects_patch_ids_exist_in_manifests() {
-        let ms = manifests::manifests();
-        let manifest_ids: Vec<&str> = ms.iter().map(|m| m.patch_id.as_str()).collect();
-        let effects = normalized_effects::effects();
+            let ms = manifests::manifests();
+            let manifest_ids: std::collections::HashSet<&str> =
+                ms.iter().map(|m| m.patch_id.as_str()).collect();
+            let effects = normalized_effects::effects();
+            let active = manifests::latest_manifest();
 
-        // Verify the effects container loaded files for each mode
-        assert_eq!(
-            effects.file_count(),
-            3,
-            "expected 3 effects files (PvE, PvP, WvW)",
-        );
-
-        // Verify effects are accessible for the manifest patch_id and all modes
-        for mode in &["PvE", "PvP", "WvW"] {
-            let effs = effects.effects_for("2026-01-13", mode);
-            assert!(
-                effs.is_some(),
-                "normalized_effects missing for patch '2026-01-13', mode '{}'",
-                mode,
+            assert_eq!(
+                effects.file_count(),
+                3,
+                "expected 3 effects files (PvE, PvP, WvW)",
             );
-        }
 
-        // Verify the manifest_ids contain our expected patch
-        assert!(
-            manifest_ids.contains(&"2026-01-13"),
-            "manifest set must contain '2026-01-13' (used by normalized_effects)",
-        );
-    }
+            for (patch, mode) in effects.loaded_snapshots() {
+                assert!(
+                    manifest_ids.contains(patch),
+                    "normalized_effects patch '{patch}' ({mode}) is not in manifests",
+                );
+            }
+
+            for mode in ["PvE", "PvP", "WvW"] {
+                assert!(
+                    effects.effects_for(&active.patch_id, mode).is_none(),
+                    "active {} must not claim a NE file it does not have",
+                    mode,
+                );
+                let (slice, sourced) = effects
+                    .effects_for_resolved(&active.patch_id, mode)
+                    .expect("active patch must inherit a historical NE snapshot, not invent one");
+                assert_ne!(
+                    sourced,
+                    active.patch_id.as_str(),
+                    "inherited NE must keep the historical patch_id, not relabel as {}",
+                    active.patch_id
+                );
+                assert!(!slice.is_empty(), "{mode} inherited snapshot is empty");
+                assert!(
+                    effects.effects_for(sourced, mode).is_some(),
+                    "sourced patch {sourced} must have an explicit {mode} file",
+                );
+            }
+        }
 
     /// All patch_ids referenced in patch ledgers must exist in manifests.
     #[test]
