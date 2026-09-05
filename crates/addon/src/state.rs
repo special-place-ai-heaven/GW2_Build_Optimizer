@@ -553,6 +553,14 @@ pub struct MainState {
     pub benchmark_last_synced: Option<String>,
     /// Per-source build counts: "snowcrows" -> n, "hardstuck" -> n, "guildjen" -> n.
     pub benchmark_counts: std::collections::HashMap<String, usize>,
+    /// Per-source count of pages that listed but produced no build.
+    pub benchmark_failed: std::collections::HashMap<String, usize>,
+    /// Builds held per source and mode, keyed "snowcrows|PvE".
+    ///
+    /// The sources do not cover the same modes - Snowcrows is PvE, GuildJen
+    /// is WvW and PvP - so one total per source hides which of them can
+    /// actually answer the mode you are playing.
+    pub benchmark_mode_counts: std::collections::HashMap<String, usize>,
     /// Live heartbeat while a sync is running ("12/45", "listing guardian…").
     pub benchmark_live: std::collections::HashMap<String, String>,
     /// Per-source error after a sync (shown as "down" on that row).

@@ -53,13 +53,18 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
             .default_game_mode
             .clone()
             .unwrap_or_else(|| "PvE".into());
-        for mode in &["PvE", "PvP", "WvW"] {
-            let is_sel = current_default == *mode;
+        // Three even columns rather than a stack: the labels are four
+        // characters, the panel is short on height and has width to spare.
+        ui.columns(3, "##default_mode_cols", false);
+        for mode in ["PvE", "PvP", "WvW"] {
+            let is_sel = current_default == mode;
             if ui.radio_button_bool(mode, is_sel) && !is_sel {
                 state.config.default_game_mode = Some(mode.to_string());
                 let _ = state.config.save(&state.config_path);
             }
+            ui.next_column();
         }
+        ui.columns(1, "##default_mode_end", false);
     }
 
     ui.dummy([0.0, 8.0]);
@@ -1505,6 +1510,9 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
 }
 
 /// Sync sources in the order they are reported, with their display casing.
+/// Game modes as `BenchmarkBuild::mode` spells them, in display order.
+const BENCHMARK_MODES: &[&str] = &["PvE", "PvP", "WvW"];
+
 const BENCHMARK_SOURCES: &[(&str, &str)] = &[
     ("snowcrows", "Snowcrows"),
     ("hardstuck", "Hardstuck"),
@@ -1555,6 +1563,9 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
     ui.text_colored(theme::pal().muted, t("settings.sources"));
     ui.spacing();
+    // Set by a row's Retry button; read by the sync trigger below, so both
+    // paths spawn the one worker rather than duplicating it.
+    let mut retry_requested = false;
     if state.main.benchmark_running {
         // A full sync is several hundred pages over minutes. One joined line
         // said which sources were alive and nothing about how far along they
@@ -1582,36 +1593,61 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
             ui.text_colored([0.9, 0.8, 0.2, 1.0], t("bench.throttled"));
         }
     } else if let Some(ref last) = state.main.benchmark_last_synced {
-        let sc = state
-            .main
-            .benchmark_counts
-            .get("snowcrows")
-            .copied()
-            .unwrap_or(0);
-        let hs = state
-            .main
-            .benchmark_counts
-            .get("hardstuck")
-            .copied()
-            .unwrap_or(0);
-        let gj = state
-            .main
-            .benchmark_counts
-            .get("guildjen")
-            .copied()
-            .unwrap_or(0);
-        ui.text_colored(
-            [0.5, 0.9, 0.5, 1.0],
-            tf(
-                "fmt.synced",
-                &[
-                    ("when", last),
-                    ("sc", &sc.to_string()),
-                    ("hs", &hs.to_string()),
-                    ("gj", &gj.to_string()),
-                ],
-            ),
-        );
+        // A row per source: what came back, and what did not. One joined
+        // line of three totals could not say that a source listed 157 pages
+        // and returned 148 - the nine that failed simply vanished.
+        ui.text_colored(theme::pal().muted, tf("fmt.synced_when", &[("when", last)]));
+        // Providers down the side, game modes across: the sources do not
+        // cover the same modes, and one total per source could not say
+        // whether the one you play is covered at all. The red column is what
+        // a run listed and could not read, with its retry beside it.
+        ui.columns(5, "##bench_grid", false);
+        ui.next_column();
+        for mode in BENCHMARK_MODES {
+            ui.text_colored(theme::pal().muted, *mode);
+            ui.next_column();
+        }
+        ui.next_column();
+        for (key, label) in BENCHMARK_SOURCES {
+            ui.text_colored(theme::pal().gold, *label);
+            ui.next_column();
+            for mode in BENCHMARK_MODES {
+                let n = state
+                    .main
+                    .benchmark_mode_counts
+                    .get(&format!("{key}|{mode}"))
+                    .copied()
+                    .unwrap_or(0);
+                if n > 0 {
+                    ui.text_colored([0.5, 0.9, 0.5, 1.0], n.to_string());
+                } else {
+                    ui.text_colored(theme::pal().muted, "-");
+                }
+                ui.next_column();
+            }
+            let bad = state
+                .main
+                .benchmark_failed
+                .get(*key)
+                .copied()
+                .unwrap_or(0);
+            if bad > 0 {
+                ui.text_colored([1.0, 0.4, 0.2, 1.0], bad.to_string());
+                ui.same_line();
+                // Only where there is something to retry, and cheap to take:
+                // a re-run today skips every page already read and fetches
+                // exactly these.
+                if theme::gold_button_sized(
+                    ui,
+                    format!("{}##retry_{key}", t("btn.retry")),
+                    [56.0, 0.0],
+                ) {
+                    retry_requested = true;
+                }
+            }
+            ui.next_column();
+        }
+        ui.columns(1, "##bench_grid_end", false);
     } else {
         ui.text_colored(theme::pal().muted, t("settings.never_synced"));
     }
@@ -1639,7 +1675,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
             },
             [160.0, 0.0],
         );
-    } else if theme::gold_button_sized(ui, t("btn.sync"), [160.0, 0.0]) {
+    } else if theme::gold_button_sized(ui, t("btn.sync"), [160.0, 0.0]) || retry_requested {
         let addon_dir = state.addon_dir.clone();
         state.main.benchmark_running = true;
         state.main.benchmark_error = None;
@@ -1684,14 +1720,24 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
                     }
                 };
                 let mut counts = std::collections::HashMap::new();
+                let mut failures = std::collections::HashMap::new();
+                let mut mode_counts = std::collections::HashMap::new();
                 let mut errors = Vec::new();
                 for r in &results {
                     counts.insert(r.source.clone(), r.builds.len());
+                    failures.insert(r.source.clone(), r.failed);
+                    for b in &r.builds {
+                        *mode_counts
+                            .entry(format!("{}|{}", r.source, b.mode))
+                            .or_insert(0) += 1;
+                    }
                     if let Some(ref e) = r.error {
                         errors.push(format!("{}: {}", r.source, e));
                     }
                 }
                 s.main.benchmark_counts = counts;
+                s.main.benchmark_failed = failures;
+                s.main.benchmark_mode_counts = mode_counts;
                 s.main.benchmark_error = if errors.is_empty() {
                     None
                 } else {

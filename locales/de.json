@@ -433,6 +433,8 @@
   "label.reasons": "Gründe:",
   "bench.header": "vs Community-Meta",
   "bench.none": "Keine Benchmark-Daten.",
+  "btn.retry": "Erneut",
+  "fmt.synced_when": "Synchronisiert {when}",
   "bench.throttled": "Pausiert - die Website bittet um langsamere Zugriffe. Die Synchronisierung wartet und läuft von selbst weiter.",
   "bench.sync_hint": "Einstellungen > Benchmarks synchronisieren für Referenzbuilds.",
   "bench.on_par": "gleichauf",
