@@ -28,7 +28,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 14 | [W039](#w039) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:1389` |
 | 15 | [W038](#w038) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:861` |
 | 16 | [W008](#w008) | S2/confirmed | US2 | verified-scoped | `crates/addon/src/ui/main_view/optimization.rs:714` |
-| 17 | [W004](#w004) | S2/confirmed | US2 | planned | `crates/addon/src/state.rs:898` |
+| 17 | [W004](#w004) | S2/confirmed | US2 | verified-scoped | `crates/addon/src/state.rs:898` |
 | 18 | [W009](#w009) | S2/confirmed | US2 | planned | `crates/addon/src/ui/main_view/tabs/settings.rs:60` |
 | 19 | [W082](#w082) | S3/confirmed | US2 | planned | `crates/addon/src/ui/main_view/tabs/saveload.rs:509` |
 | 20 | [W182](#w182) | S3/confirmed | US2 | planned | `crates/optimizer/src/synergy_pipeline.rs:859` |
@@ -509,7 +509,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W004
 
-- Task: T019 [US2]. Status: **planned**.
+- Task: T019 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/addon/src/state.rs:898`.
 - Dependencies: story entry gate.
 
@@ -517,7 +517,7 @@ Claim: Config and chat-history writes on shipping paths discard their `Result` e
 
 Remediation decision: Route these through `if let Err(e) = ... { crate::ui::log_disk_error(format!("config save failed: {e}")) }`, matching `save_config_detached`. For `save_history`, log both the `to_vec` failure and the `rename` failure.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `toggle_window` and `persist_window` log `config save failed` via `log_disk_error` after the STATE guard drops. `save_history` logs serialize, write, and rename failures. `toggle_persist_reset_do_not_save_under_state`, `kitchen_history_roundtrips_on_disk`, and `save_history_logs_when_directory_is_missing` passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 

@@ -907,7 +907,9 @@ pub fn toggle_window() {
         }
         (state.config.clone(), state.config_path.clone())
     };
-    let _ = snapshot.0.save(&snapshot.1);
+    if let Err(e) = snapshot.0.save(&snapshot.1) {
+        crate::ui::log_disk_error(format!("config save failed: {e}"));
+    }
 }
 
 pub fn persist_window() {
@@ -919,7 +921,9 @@ pub fn persist_window() {
         state.config.window_visible = state.window_visible;
         (state.config.clone(), state.config_path.clone())
     };
-    let _ = snapshot.0.save(&snapshot.1);
+    if let Err(e) = snapshot.0.save(&snapshot.1) {
+        crate::ui::log_disk_error(format!("config save failed: {e}"));
+    }
 }
 
 pub fn is_window_visible() -> bool {
@@ -1867,12 +1871,20 @@ mod tests {
         let reset = pin_fn(src, "reset_to_first_run");
 
         assert!(
+            toggle.contains("log_disk_error"),
+            "toggle_window must log a failed config save"
+        );
+        assert!(
             !toggle.contains("state.config.save"),
             "toggle_window must not save through the locked AddonState"
         );
         assert!(
             brace_depth_at(toggle, ".save(") < brace_depth_at(toggle, "lock_state()"),
             "toggle_window must drop the STATE guard before writing config.json"
+        );
+        assert!(
+            persist.contains("log_disk_error"),
+            "persist_window must log a failed config save"
         );
         assert!(
             !persist.contains("state.config.save"),
