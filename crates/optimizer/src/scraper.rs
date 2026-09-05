@@ -634,18 +634,18 @@ fn scrape_guildjen(
     // nothing. The known three are only the fallback for a hub that will not
     // load.
     on_progress("guildjen", "listing categories…");
-    let index_urls = match fetch_html(client, GUILDJEN_HUB) {
-        Ok(hub) => {
-            let found = guildjen_category_pages(&hub);
+    let index_urls = match fetch_html(client, GUILDJEN_SITEMAP) {
+        Ok(sitemap) => {
+            let found = guildjen_category_pages(&sitemap);
             if found.is_empty() {
-                on_progress("guildjen", "hub listed no categories; using known set");
+                on_progress("guildjen", "sitemap listed no categories; using known set");
                 guildjen_fallback_categories()
             } else {
                 found
             }
         }
         Err(_) => {
-            on_progress("guildjen", "hub unreachable; using known set");
+            on_progress("guildjen", "sitemap unreachable; using known set");
             guildjen_fallback_categories()
         }
     };
@@ -803,42 +803,69 @@ fn looks_like_blocked_page(html: &str) -> bool {
 
 /// Extract hrefs containing `needle` from anchor tags in HTML.
 /// GuildJen's build hub. Every category index is linked from here.
+/// The site's own page index, and the only ungated list of its categories.
+///
+/// Not the build hub at `/gw2-builds/`: that page renders its category grid
+/// inside a consent-gated embed, so a fetch without marketing cookies gets
+/// prose, social links and one off-site card. Measured 2026-09-05: the
+/// rendered hub carried 41 anchors and not one category among them, so
+/// discovery found nothing and every sync silently ran on the fallback list.
+/// The sitemap is served by Yoast, needs no consent, and is what the site
+/// publishes for machines to read.
+const GUILDJEN_SITEMAP: &str = "https://guildjen.com/page-sitemap.xml";
+/// The hub, excluded from discovery: it is a `-builds` page that lists no
+/// builds of its own.
 const GUILDJEN_HUB: &str = "https://guildjen.com/gw2-builds/";
 
-/// The categories to fall back on when the hub cannot be read.
+/// The categories to fall back on when the sitemap cannot be read.
 ///
-/// WvW and PvP are GuildJen's own beat and nothing else in this scraper covers
-/// them; Open World is PvE that Snowcrows does not publish.
+/// Every build category the sitemap listed on 2026-09-05, minus the hub and
+/// levelling. WvW and PvP are GuildJen's own beat and nothing else in this
+/// scraper covers them; raid, fractal and open world are PvE.
 fn guildjen_fallback_categories() -> Vec<(String, &'static str)> {
-    vec![
-        ("https://guildjen.com/gw2-wvw-builds/".to_string(), "WvW"),
-        ("https://guildjen.com/gw2-pvp-builds/".to_string(), "PvP"),
-        (
-            "https://guildjen.com/gw2-open-world-builds/".to_string(),
-            "PvE",
-        ),
+    [
+        "gw2-wvw-builds",
+        "gw2-pvp-builds",
+        "gw2-open-world-builds",
+        "gw2-raid-builds",
+        "gw2-fractal-builds",
     ]
+    .iter()
+    .map(|slug| (format!("https://guildjen.com/{slug}/"), category_mode(slug)))
+    .collect()
 }
 
-/// Every category index linked from the build hub, paired with its game mode.
+/// Game mode from a category slug. Everything that is neither WvW nor PvP is
+/// PvE: raids, fractals and open world all share the PvE dummy.
+fn category_mode(slug: &str) -> &'static str {
+    if slug.contains("wvw") {
+        "WvW"
+    } else if slug.contains("pvp") {
+        "PvP"
+    } else {
+        "PvE"
+    }
+}
+
+/// Every build category the sitemap lists, paired with its game mode.
 ///
 /// Category pages are root-level slugs of the form `/gw2-<name>-builds/`. The
-/// hub itself (`/gw2-builds/`) is excluded, as is anything off-site (the "Low
-/// Intensity" card points at another domain) and the levelling category, whose
-/// sub-80 kits are not valid references for a level-80 comparison.
-fn guildjen_category_pages(hub_html: &str) -> Vec<(String, &'static str)> {
+/// hub itself is excluded - it lists no builds - as is the levelling category,
+/// whose sub-80 kits are not valid references for a level-80 comparison.
+fn guildjen_category_pages(sitemap_xml: &str) -> Vec<(String, &'static str)> {
     let mut out: Vec<(String, &'static str)> = Vec::new();
     let mut pos = 0;
-    while let Some(href_start) = find_ci(hub_html, "href=\"", pos) {
-        let abs = href_start + 6;
-        let Some(close) = hub_html[abs..].find('"') else {
+    while let Some(loc_start) = find_ci(sitemap_xml, "<loc>", pos) {
+        let abs = loc_start + 5;
+        let Some(close) = find_ci(sitemap_xml, "</loc>", abs) else {
             break;
         };
-        let href = &hub_html[abs..abs + close];
-        pos = abs + close + 1;
+        let href = sitemap_xml[abs..close].trim();
+        pos = close + 6;
 
         let Some(path) = href
             .strip_prefix("https://guildjen.com")
+            .or_else(|| href.strip_prefix("http://guildjen.com"))
             .or_else(|| (!href.starts_with("http")).then_some(href))
         else {
             continue;
@@ -853,19 +880,10 @@ fn guildjen_category_pages(hub_html: &str) -> Vec<(String, &'static str)> {
             continue;
         }
         let url = format!("https://guildjen.com/{slug}/");
-        if out.iter().any(|(seen, _)| *seen == url) {
+        if url == GUILDJEN_HUB || out.iter().any(|(seen, _)| *seen == url) {
             continue;
         }
-        // Mode from the category slug. Everything that is neither WvW nor PvP
-        // is PvE: raids, fractals and open world all share the PvE dummy.
-        let mode = if slug.contains("wvw") {
-            "WvW"
-        } else if slug.contains("pvp") {
-            "PvP"
-        } else {
-            "PvE"
-        };
-        out.push((url, mode));
+        out.push((url, category_mode(slug)));
     }
     out
 }
@@ -1505,24 +1523,31 @@ mod tests {
         );
     }
 
-    /// The category list is read off the hub so a category added or retired by
-    /// the site needs no code change. The hub itself, off-site cards and the
-    /// sub-80 levelling category are excluded.
+    /// The category list is read off the sitemap so a category added or
+    /// retired by the site needs no code change. The hub itself, the sub-80
+    /// levelling category, guide pages and anything off-site are excluded.
+    ///
+    /// Shape taken from the live `page-sitemap.xml` on 2026-09-05, which
+    /// listed five build categories plus the hub and levelling.
     #[test]
-    fn hub_discovery_names_categories_and_their_modes() {
-        let hub = concat!(
-            r#"<a href="https://guildjen.com/gw2-wvw-builds/">WvW</a>"#,
-            r#"<a href="/gw2-pvp-builds/">PvP</a>"#,
-            r#"<a href="/gw2-open-world-builds/">Open World</a>"#,
-            r#"<a href="/gw2-raid-builds/">Raid</a>"#,
-            r#"<a href="/gw2-wvw-builds/">WvW again</a>"#,
-            r#"<a href="/gw2-builds/">the hub itself</a>"#,
-            r#"<a href="/gw2-leveling-builds/">sub-80</a>"#,
-            r#"<a href="https://aw2.help/">off-site</a>"#,
-            r#"<a href="/gw2-mount-guides/">not builds</a>"#,
+    fn sitemap_discovery_names_categories_and_their_modes() {
+        let sitemap = concat!(
+            "<urlset>",
+            "<url><loc>https://guildjen.com/gw2-wvw-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-pvp-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-open-world-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-raid-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-fractal-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-wvw-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-leveling-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-mount-guides/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-wvw-guides/</loc></url>",
+            "<url><loc>https://aw2.help/gw2-low-intensity-builds/</loc></url>",
+            "</urlset>",
         );
         assert_eq!(
-            guildjen_category_pages(hub),
+            guildjen_category_pages(sitemap),
             vec![
                 ("https://guildjen.com/gw2-wvw-builds/".to_string(), "WvW"),
                 ("https://guildjen.com/gw2-pvp-builds/".to_string(), "PvP"),
@@ -1531,8 +1556,33 @@ mod tests {
                     "PvE"
                 ),
                 ("https://guildjen.com/gw2-raid-builds/".to_string(), "PvE"),
+                (
+                    "https://guildjen.com/gw2-fractal-builds/".to_string(),
+                    "PvE"
+                ),
             ]
         );
+    }
+
+    /// The fallback has to cover what discovery would have found, or a
+    /// sitemap outage quietly narrows the sync. Both lists agree on the
+    /// 2026-09-05 site.
+    #[test]
+    fn fallback_matches_what_the_sitemap_would_discover() {
+        let sitemap = concat!(
+            "<url><loc>https://guildjen.com/gw2-raid-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-wvw-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-fractal-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-pvp-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-open-world-builds/</loc></url>",
+            "<url><loc>https://guildjen.com/gw2-leveling-builds/</loc></url>",
+        );
+        let mut discovered = guildjen_category_pages(sitemap);
+        let mut fallback = guildjen_fallback_categories();
+        discovered.sort();
+        fallback.sort();
+        assert_eq!(discovered, fallback);
     }
 
     #[test]
@@ -1932,6 +1982,79 @@ mod tests {
         assert!(
             calls.load(Ordering::Relaxed) >= 1,
             "predicate must be invoked at least once at inner loop entry"
+        );
+    }
+
+    /// Shape check against real GuildJen pages.
+    ///
+    /// Ignored by default: it needs captures from the live site, which are
+    /// 50-100 KB each and go stale the moment GuildJen publishes. The unit
+    /// tests above pin the parsing rules; this one answers what they cannot -
+    /// does the site still look the way those rules assume?
+    ///
+    /// Capture with raw HTTP, not a browser: the sitemap ships an XSL
+    /// stylesheet, so a rendering client hands back a transformed table with
+    /// no `<loc>` left in it. `fetch_html` uses reqwest and sees the XML.
+    /// Either variable may be omitted to check only the other half.
+    ///
+    ///   GUILDJEN_SITEMAP_XML=page-sitemap.xml \
+    ///   GUILDJEN_CATEGORY_HTML=wvw.html \
+    ///     cargo test -p gw2-optimizer guildjen_live -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn guildjen_live_pages_yield_categories_and_builds() {
+        let mut checked = 0;
+
+        if let Ok(p) = std::env::var("GUILDJEN_SITEMAP_XML") {
+            let xml = std::fs::read_to_string(&p).expect("sitemap readable");
+            let categories = guildjen_category_pages(&xml);
+            println!("-- {} categories from the sitemap --", categories.len());
+            for (url, mode) in &categories {
+                println!("  {mode:4} {url}");
+            }
+            assert!(
+                categories.iter().any(|(u, m)| u.contains("wvw") && *m == "WvW"),
+                "the WvW category must be discovered"
+            );
+            assert!(
+                categories.iter().any(|(u, m)| u.contains("pvp") && *m == "PvP"),
+                "the PvP category must be discovered"
+            );
+            assert!(
+                !categories.iter().any(|(u, _)| u == GUILDJEN_HUB),
+                "the hub lists no builds and must not be a category"
+            );
+            checked += 1;
+        }
+
+        if let Ok(p) = std::env::var("GUILDJEN_CATEGORY_HTML") {
+            let html = std::fs::read_to_string(&p).expect("category html readable");
+            let links = extract_table_build_links(&html, 500);
+            println!("-- {} build links from the category tables --", links.len());
+            assert!(!links.is_empty(), "a category page must yield build links");
+
+            // Every link has to name a profession or the scrape drops it.
+            let mut unfiled = Vec::new();
+            for href in &links {
+                let slug = href.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+                match profession_from_slug(slug) {
+                    Some((prof, spec)) => println!("  {prof:12} {spec:14} {slug}"),
+                    None => unfiled.push(slug.to_string()),
+                }
+            }
+            assert!(
+                unfiled.is_empty(),
+                "{} of {} builds name no profession and would be dropped: {:?}",
+                unfiled.len(),
+                links.len(),
+                unfiled
+            );
+            checked += 1;
+        }
+
+        assert!(
+            checked > 0,
+            "set GUILDJEN_SITEMAP_XML and/or GUILDJEN_CATEGORY_HTML"
         );
     }
 
