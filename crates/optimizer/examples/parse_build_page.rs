@@ -19,6 +19,11 @@ fn main() {
 
     let build = match site.as_str() {
         "guildjen" => providers::guildjen::parse(&html),
+        "snowcrows" => providers::snowcrows::parse(&html),
+        "hardstuck" => {
+            println!("  game mode  : {:?}", providers::hardstuck::game_mode(&html));
+            providers::hardstuck::parse(&html)
+        }
         other => {
             eprintln!("no parser for {other} yet");
             std::process::exit(2);
