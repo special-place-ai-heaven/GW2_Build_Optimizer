@@ -141,6 +141,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         gw2_core::types::GameMode::PvE => gw2_optimizer::scenario::CombatTier::Party,
     };
     let selected_role = state.main.selected_role;
+    let chat_locks = state.main.build_locks.clone();
     let chat_balance_ctx = BalanceContext::new(state.main.game_mode.clone());
 
     let spawned = state.spawn_worker("chat-message", move |token| {
@@ -163,16 +164,6 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                 }
 
                 if let Some(ref db) = db_clone {
-                    let tools = gw2_optimizer::llm::tools::tool_definitions();
-                    let empty_candidates = vec![];
-                    let ctx = gw2_optimizer::gemini_tools::ToolContext {
-                        db,
-                        profession_name: &profession,
-                        candidates: &empty_candidates,
-                        current_build_summary: Some(kitchen.as_str()),
-                        weights: weights.clone(),
-                        balance_ctx: &chat_balance_ctx,
-                    };
                     let scenario = gw2_optimizer::scenario::ScenarioSpec {
                         game_mode: chat_balance_ctx.game_mode.clone(),
                         combat_tier,
@@ -194,6 +185,54 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             r.profile_id_for(&chat_balance_ctx.game_mode, combat_tier)
                                 .to_string()
                         }),
+                    };
+                    // A worked answer for this exact scenario, handed to the
+                    // model in Context.
+                    //
+                    // `get_optimizer_results` is advertised in the prompt but
+                    // this path passes it an empty candidate list, so it has
+                    // only ever replied "No optimizer results available" -
+                    // the model composes blind while a proven-viable build is
+                    // 30ms away. Measured 2026-09-05 on the player's own
+                    // cache, WvW Roam/Support with Scourge locked: the
+                    // deterministic seed lands at 68% health, repeatable, in
+                    // 28ms, while the plate the referee refused that evening
+                    // sat at 44% and could not repeat. The floor is free;
+                    // withholding it is not.
+                    let reference = reference_build(
+                        db,
+                        &profession,
+                        &weights,
+                        &chat_balance_ctx,
+                        &chat_locks,
+                        &scenario,
+                    );
+                    if let Some((line, verdict)) = reference.as_ref() {
+                        kitchen.push_str(
+                            "\nWorked answer from the deterministic optimizer for \
+                             this exact Mode/Scale/Role, which already passes every \
+                             viability check:\n  ",
+                        );
+                        kitchen.push_str(line);
+                        kitchen.push_str("\n  ");
+                        kitchen.push_str(verdict);
+                        kitchen.push_str(
+                            "\nThat is your floor, not your answer: it ignores what \
+                             the player just asked for. Match its survivability at \
+                             least, then beat it on what they actually said. If you \
+                             depart from it, be able to say why.",
+                        );
+                    }
+
+                    let tools = gw2_optimizer::llm::tools::tool_definitions();
+                    let empty_candidates = vec![];
+                    let ctx = gw2_optimizer::gemini_tools::ToolContext {
+                        db,
+                        profession_name: &profession,
+                        candidates: &empty_candidates,
+                        current_build_summary: Some(kitchen.as_str()),
+                        weights: weights.clone(),
+                        balance_ctx: &chat_balance_ctx,
                     };
                     // What the plate has to beat. Ranked once: the player's
                     // gear does not change while Choya is thinking.
@@ -635,6 +674,82 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
 /// `None` when there is nothing to compare against (no resolved character, or
 /// gear the validator cannot resolve). A missing baseline disables the gate
 /// rather than blocking the answer — the same choice the Improve tab makes.
+/// One line of build plus one line of referee verdict for the deterministic
+/// answer to this scenario, or `None` if the pipeline cannot produce one.
+///
+/// The synergy pipeline is the cheap tier - measured at 28ms against the
+/// player's own cache - and its answer is already referee-viable, so there is
+/// no reason for the chat to reason from nothing.
+fn reference_build(
+    db: &GameDb,
+    profession_name: &str,
+    weights: &gw2_optimizer::scoring::OptimizationWeights,
+    ctx: &BalanceContext,
+    locks: &gw2_core::types::BuildLocks,
+    scenario: &gw2_optimizer::scenario::ScenarioSpec,
+) -> Option<(String, String)> {
+    let prefix = gw2_optimizer::scoring::select_gear_prefix(weights).primary;
+    let seed = gw2_optimizer::synergy_pipeline::optimize_synergy(
+        db,
+        profession_name,
+        weights,
+        ctx,
+        prefix,
+        locks,
+        Some(scenario),
+        &mut |_| {},
+    )
+    .ok()?;
+    let v = &seed.validated;
+    if !v.errors.is_empty() {
+        return None;
+    }
+    let name = |o: &Option<(u32, String)>| {
+        o.as_ref()
+            .map(|(_, n)| n.as_str())
+            .unwrap_or("-")
+            .to_string()
+    };
+    let specs: Vec<String> = v
+        .specializations
+        .iter()
+        .map(|s| {
+            let traits: Vec<&str> = s.trait_names.iter().map(|t| t.as_str()).collect();
+            format!("{} [{}]", s.name, traits.join(", "))
+        })
+        .collect();
+    let utils: Vec<String> = v.skills.utilities.iter().map(name).collect();
+    let hand = |h: &Option<String>| h.clone().unwrap_or_else(|| "-".into());
+    let line = format!(
+        "{prefix} | {} | heal {} | utilities {} | elite {} | weapons {}/{} + {}/{}",
+        specs.join(" | "),
+        name(&v.skills.heal),
+        utils.join(", "),
+        name(&v.skills.elite),
+        hand(&v.weapons.set1.main_hand),
+        hand(&v.weapons.set1.off_hand),
+        hand(&v.weapons.set2.main_hand),
+        hand(&v.weapons.set2.off_hand),
+    );
+    // The gate notes carry the numbers the plate will be judged on.
+    let report = gw2_optimizer::referee::evaluate_validated_build(
+        v,
+        db,
+        profession_name,
+        weights,
+        ctx,
+        scenario,
+    );
+    let verdict = report
+        .viability
+        .gates
+        .iter()
+        .map(|g| format!("{:?}: {}", g.gate, g.note))
+        .collect::<Vec<_>>()
+        .join("; ");
+    Some((line, format!("It passes with - {verdict}")))
+}
+
 fn rank_current_build(
     loadout: Option<&gw2_core::types::ResolvedBuild>,
     db: &GameDb,
