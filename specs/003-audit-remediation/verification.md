@@ -57,3 +57,9 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W044: `effects_for_mode` no longer ignores patch. It resolves the active manifest, then `inherits_from`. Exact `effects_for("2026-07-15")` stays None; inherited rows keep patch_id `2026-01-13`. Historical JSON was not copied.
 - Green: `test_normalized_effects_patch_ids_exist_in_manifests`, `test_effects_for_unknown_returns_none`, two wvw_timeline tests that still go through `effects_for_mode`.
 - Did not touch `engine.rs` (dirty in this checkout), `scraper.rs`, `chat_flow.rs`, or locales.
+
+## Sprint 9 — W013 manifest-backed BalanceContext.patch_id
+
+- W013: `SNAPSHOT_PATCH_ID` deleted. `new()` reads `latest_manifest()`. `for_patch` is the historical constructor. Unknown patches are `!patch_is_known`. `live_build_mismatch` wraps `check_staleness` for W015.
+- Green: `new_uses_the_active_manifest_not_a_hand_edited_literal`, `for_patch_keeps_historical_ids_and_flags_unknown`, `live_build_mismatch_is_observable`.
+- Did not bump Cargo.toml — other agent owns 1.11.32.
