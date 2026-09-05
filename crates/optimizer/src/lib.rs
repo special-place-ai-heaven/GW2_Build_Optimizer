@@ -1,5 +1,6 @@
 pub mod balance;
 pub mod benchmark;
+pub mod build_template;
 pub mod combat;
 pub mod context;
 pub mod data;

@@ -448,19 +448,28 @@ fn benchmark_from_html(
     mode: &str,
     role: &str,
 ) -> BenchmarkBuild {
+    let build_code = extract_build_code(html);
+    // Everything after the chat code is the page, not the build: a video
+    // embed, share buttons, the author card, and a "Related Posts" list of
+    // other builds whose specializations are not this one's. Confirmed
+    // against guildjen.com/support-troubadour-cloud-build/ on 2026-09-06.
+    let body = build_code
+        .as_deref()
+        .and_then(|code| html.find(code).map(|at| &html[..at + code.len()]))
+        .unwrap_or(html);
     BenchmarkBuild {
         source: source.into(),
         profession,
         spec_name,
         mode: mode.into(),
         role: role.to_string(),
-        build_code: extract_build_code(html),
-        gear_prefix: extract_gear_prefix(html),
-        rune: extract_rune(html),
-        sigils: extract_sigils(html),
-        relic: extract_relic(html),
-        traits: extract_traits(html),
-        skills: extract_skills(html),
+        gear_prefix: extract_gear_prefix(body),
+        rune: extract_rune(body),
+        sigils: extract_sigils(body),
+        relic: extract_relic(body),
+        traits: extract_traits(body),
+        skills: extract_skills(body),
+        build_code,
         source_url: url.to_string(),
         scraped_at: today.to_string(),
         notes: String::new(),
@@ -1547,17 +1556,17 @@ fn title_case(s: &str) -> String {
 }
 
 /// Extract GW2 build template code (e.g. "[&...]").
+/// The page's build template, if it prints one.
+///
+/// Every chat link on a page shares the `[&...]` syntax — items, skills,
+/// traits, WvW objectives — and the build's own code is rarely the first.
+/// Taking the first one that is at least ten characters long recorded the
+/// five-byte item link `[&BPcAAAA=]` as the build code of 407 of 739 scraped
+/// builds (measured 2026-09-06). The decoder settles it: a build template
+/// announces itself with a `0x0D` header and is long enough to carry a skill
+/// bar, and nothing else is accepted.
 fn extract_build_code(html: &str) -> Option<String> {
-    // Build codes start with [& and end with ]
-    let start = html.find("[&")?;
-    let end = html[start..].find(']')?;
-    let code = &html[start..start + end + 1];
-    // Basic sanity: build codes are base64 and typically 44-60 chars
-    if code.len() >= 10 {
-        Some(code.to_string())
-    } else {
-        None
-    }
+    crate::build_template::find_in_text(html).map(|(code, _)| code)
 }
 
 /// Space-padded alnum words — same boundary idea as `prefix_named_in_text`.
@@ -2492,11 +2501,53 @@ mod tests {
 
     #[test]
     fn test_extract_build_code() {
-        let html =
-            r#"Build code: [&DQYAAAAqASsATgA2ADYARgBGAEYARgAAAAAAAAAAAAAAAAAAAAAAAAA=] use it"#;
-        let code = extract_build_code(html);
-        assert!(code.is_some());
-        assert!(code.unwrap().starts_with("[&"));
+        let build = "[&DQYAAAAqASsATgA2ADYARgBGAEYARgAAAAAAAAAAAAAAAAAAAAAAAAA=]";
+        let html = format!("Build code: {build} use it");
+        assert_eq!(extract_build_code(&html).as_deref(), Some(build));
+
+        // The regression: an item link earlier on the page was taken as the
+        // build code on 407 of 739 scraped builds, because the old rule was
+        // "first [&...] of at least ten characters".
+        let with_item = format!("<p>Uses [&BPcAAAA=] and [&BkgAAAA=]</p><code>{build}</code>");
+        assert_eq!(extract_build_code(&with_item).as_deref(), Some(build));
+
+        // A page that prints no template gets none, rather than an item.
+        assert_eq!(extract_build_code("<p>Uses [&BPcAAAA=]</p>"), None);
+    }
+
+    /// Everything after the chat code is the page, not the build. The
+    /// "Related Posts" list at the foot of a GuildJen build names other
+    /// builds' specializations, which is how 431 of 739 scraped builds
+    /// recorded Firebrand / Willbender / Dragonhunter whatever they were.
+    #[test]
+    fn extraction_stops_at_the_build_code() {
+        let build = "[&DQYAAAAqASsATgA2ADYARgBGAEYARgAAAAAAAAAAAAAAAAAAAAAAAAA=]";
+        let html = format!(
+            "<h1>Celestial Tempest Roaming</h1><p>Tempest is the elite.</p>\
+             <code>{build}</code>\
+             <aside>Related Posts: Firebrand, Willbender, Dragonhunter</aside>"
+        );
+        let b = benchmark_from_html(
+            &html,
+            "https://guildjen.com/celestial-tempest-roaming-build/",
+            "2026-09-06",
+            "guildjen",
+            "Elementalist".into(),
+            "Tempest".into(),
+            "WvW",
+            "WvW Roaming",
+        );
+        assert_eq!(b.build_code.as_deref(), Some(build));
+        assert!(
+            !b.traits.iter().any(|t| t == "Firebrand"),
+            "the footer must not reach the build: {:?}",
+            b.traits
+        );
+        assert!(
+            b.traits.iter().any(|t| t == "Tempest"),
+            "what the article itself names still counts: {:?}",
+            b.traits
+        );
     }
 
     #[test]
