@@ -100,3 +100,9 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W082: if `ranch-notes` also fails to spawn, `save_note_now` writes the dirty notes snapshot on the click frame.
 - Green: `ranch_load_click_handler_spawns_worker_instead_of_inline_cpu`, `ranch_load_click_handler_does_not_persist_notes_on_click_frame`.
 - Did not bump Cargo.toml.
+
+## Sprint 16 — W182 palette gate matches the beam
+
+- W182: `select_skills` no longer waives the palette gate on an empty map. The WvW diag fixture now gives each synthetic skill a palette id.
+- Green: `optimize_synergy_wvw_selects_required_bar_utilities`, `select_skills_skips_heals_without_template_palette`.
+- Did not bump Cargo.toml.

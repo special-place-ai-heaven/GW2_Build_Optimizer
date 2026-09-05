@@ -31,7 +31,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 17 | [W004](#w004) | S2/confirmed | US2 | verified-scoped | `crates/addon/src/state.rs:898` |
 | 18 | [W009](#w009) | S2/confirmed | US2 | planned | `crates/addon/src/ui/main_view/tabs/settings.rs:60` |
 | 19 | [W082](#w082) | S3/confirmed | US2 | verified-scoped | `crates/addon/src/ui/main_view/tabs/saveload.rs:509` |
-| 20 | [W182](#w182) | S3/confirmed | US2 | planned | `crates/optimizer/src/synergy_pipeline.rs:859` |
+| 20 | [W182](#w182) | S3/confirmed | US2 | verified-scoped | `crates/optimizer/src/synergy_pipeline.rs:859` |
 | 21 | [W225](#w225) | S4/confirmed | US2 | planned | `crates/optimizer/src/llm/openai.rs:325` |
 | 22 | [W157](#w157) | S3/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:1109` |
 | 23 | [W231](#w231) | S4/confirmed | US2 | planned | `crates/optimizer/src/llm/sse.rs:317` |
@@ -551,7 +551,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W182
 
-- Task: T022 [US2]. Status: **planned**.
+- Task: T022 [US2]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/optimizer/src/synergy_pipeline.rs:859`.
 - Dependencies: story entry gate.
 
@@ -559,7 +559,7 @@ Claim: select_skills waives the template-palette gate whenever the whole skill_t
 
 Remediation decision: Drop the `is_empty() ||` clause and give the diag fixture palette entries (as the sibling test already does), so the seed and the beam apply one gating rule.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Dropped `skill_to_palette.is_empty() ||`. Seed now requires a non-zero palette id, same as the beam. Diag WvW fixture inserts `skill_to_palette` for each synthetic skill. `optimize_synergy_wvw_selects_required_bar_utilities` and `select_skills_skips_heals_without_template_palette` passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
