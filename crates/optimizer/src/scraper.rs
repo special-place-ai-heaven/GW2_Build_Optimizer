@@ -15,8 +15,20 @@ use crate::benchmark::{BenchmarkBuild, ScrapeResult};
 
 // ─── User agent ──────────────────────────────────────────────────────────────
 
+/// Firefox on Windows, matching the platform the addon actually runs on.
+///
+/// A cross-platform claim is worse than none: a macOS Safari string arriving
+/// from a Windows game process is an inconsistency, not a disguise. Whatever
+/// this says, the header set below has to agree with it - a browser
+/// User-Agent over a bare request is more conspicuous than the honest one it
+/// replaced, because no real Firefox has ever sent a navigation without
+/// Accept-Language or Sec-Fetch-Mode.
+///
+/// This is a fixed string and will age. A years-old version is its own
+/// signal; refresh it when it drifts far from current. What actually keeps
+/// this welcome is [`PACE_MS`] and the retry backoff, not the header.
 const USER_AGENT: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) GW2BuildOptimizer/1.0 (research scraper)";
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0";
 
 // ─── Public entry point ───────────────────────────────────────────────────────
 
@@ -1547,19 +1559,36 @@ fn redirect_stays_on_request_host(request_host: Option<&str>, next_host: Option<
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 fn build_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
+    // What Firefox sends on a top-level navigation, because that is what
+    // [`USER_AGENT`] claims to be. Half a fingerprint is worth less than
+    // none: a browser string with no Accept-Language and no Sec-Fetch-Mode
+    // is a mismatch any filter can read.
     let mut headers = reqwest::header::HeaderMap::new();
-    // A request with no Accept and no Accept-Language is not what a reader
-    // looks like, and filters notice. The User-Agent still says plainly who
-    // we are: the point is to be a polite guest, not a disguised one.
-    headers.insert(
+    let mut set = |name: reqwest::header::HeaderName, value: &'static str| {
+        headers.insert(name, reqwest::header::HeaderValue::from_static(value));
+    };
+    set(
         reqwest::header::ACCEPT,
-        reqwest::header::HeaderValue::from_static(
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        ),
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,\
+         image/webp,image/png,image/svg+xml,*/*;q=0.8",
     );
-    headers.insert(
-        reqwest::header::ACCEPT_LANGUAGE,
-        reqwest::header::HeaderValue::from_static("en-US,en;q=0.9"),
+    set(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.5");
+    set(reqwest::header::UPGRADE_INSECURE_REQUESTS, "1");
+    set(
+        reqwest::header::HeaderName::from_static("sec-fetch-dest"),
+        "document",
+    );
+    set(
+        reqwest::header::HeaderName::from_static("sec-fetch-mode"),
+        "navigate",
+    );
+    set(
+        reqwest::header::HeaderName::from_static("sec-fetch-site"),
+        "none",
+    );
+    set(
+        reqwest::header::HeaderName::from_static("sec-fetch-user"),
+        "?1",
     );
     reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)

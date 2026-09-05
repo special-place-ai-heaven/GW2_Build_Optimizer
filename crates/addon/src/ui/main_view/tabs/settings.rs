@@ -1504,24 +1504,78 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     }
 }
 
+/// Sync sources in the order they are reported, with their display casing.
+const BENCHMARK_SOURCES: &[(&str, &str)] = &[
+    ("snowcrows", "Snowcrows"),
+    ("hardstuck", "Hardstuck"),
+    ("guildjen", "GuildJen"),
+];
+
+/// The `done/total` a scraper's progress line ends with.
+///
+/// Every scraper reports its build loop as a trailing `n/total` - "Guardian
+/// 12/45", "WvW Necromancer 12/99" - so the tail is the one part of the line
+/// that is a contract rather than prose. A listing line has no fraction and
+/// gets no bar, which is the honest rendering: nothing is countable yet.
+fn progress_fraction(line: &str) -> Option<(usize, usize)> {
+    let tail = line.rsplit(char::is_whitespace).next()?;
+    let (done, total) = tail.split_once('/')?;
+    let total: usize = total.parse().ok()?;
+    (total > 0).then_some((done.parse().ok()?, total))
+}
+
+/// A thin filled bar for one source's progress.
+fn sync_bar(ui: &Ui, fraction: f32) {
+    let width = (ui.content_region_avail()[0] - 16.0).max(1.0);
+    let pos = ui.cursor_screen_pos();
+    let draw = ui.get_window_draw_list();
+    draw.add_rect(
+        [pos[0] + 8.0, pos[1] + 2.0],
+        [pos[0] + width + 8.0, pos[1] + 8.0],
+        [0.2, 0.2, 0.2, 0.8],
+    )
+    .filled(true)
+    .rounding(3.0)
+    .build();
+    let filled = width * fraction.clamp(0.0, 1.0);
+    if filled > 0.0 {
+        draw.add_rect(
+            [pos[0] + 8.0, pos[1] + 2.0],
+            [pos[0] + 8.0 + filled, pos[1] + 8.0],
+            theme::pal().gold,
+        )
+        .filled(true)
+        .rounding(3.0)
+        .build();
+    }
+    ui.dummy([width, 11.0]);
+}
+
 fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
     ui.text_colored(theme::pal().muted, t("settings.sources"));
     ui.spacing();
     if state.main.benchmark_running {
-        let live = ["snowcrows", "hardstuck", "guildjen"]
-            .iter()
-            .filter_map(|k| state.main.benchmark_live.get(*k).map(|s| s.as_str()))
-            .collect::<Vec<_>>()
-            .join("  ·  ");
-        ui.text_colored(
-            theme::pal().muted,
-            if live.is_empty() {
-                t("btn.syncing")
-            } else {
-                live
-            },
-        );
+        // A full sync is several hundred pages over minutes. One joined line
+        // said which sources were alive and nothing about how far along they
+        // were, so a run that was working looked identical to one that had
+        // hung. A row and a bar per source, naming the class in flight.
+        let mut any = false;
+        for (key, label) in BENCHMARK_SOURCES {
+            let Some(live) = state.main.benchmark_live.get(*key) else {
+                continue;
+            };
+            any = true;
+            ui.text_colored(theme::pal().gold, *label);
+            ui.same_line();
+            ui.text_colored(theme::pal().muted, live);
+            if let Some((done, total)) = progress_fraction(live) {
+                sync_bar(ui, done as f32 / total.max(1) as f32);
+            }
+        }
+        if !any {
+            ui.text_colored(theme::pal().muted, t("btn.syncing"));
+        }
     } else if let Some(ref last) = state.main.benchmark_last_synced {
         let sc = state
             .main
@@ -1671,6 +1725,20 @@ fn format_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bar is driven off the tail of a progress line, so the shapes
+    /// every scraper actually emits have to parse - and a listing line,
+    /// which counts nothing yet, must not draw an empty bar.
+    #[test]
+    fn progress_fraction_reads_the_trailing_count() {
+        assert_eq!(progress_fraction("WvW Necromancer 12/99"), Some((12, 99)));
+        assert_eq!(progress_fraction("Guardian 12/45"), Some((12, 45)));
+        assert_eq!(progress_fraction("0/500"), Some((0, 500)));
+        // No count yet, or nothing countable: no bar.
+        assert_eq!(progress_fraction("listing categories…"), None);
+        assert_eq!(progress_fraction("guildjen WvW"), None);
+        assert_eq!(progress_fraction("3/0"), None);
+    }
 
     /// Fresh global `STATE` rooted at a per-test temp dir, mirroring
     /// `state::tests::init_worker_test` (that helper is private to `state.rs`'s
