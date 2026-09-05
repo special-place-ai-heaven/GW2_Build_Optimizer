@@ -57,14 +57,14 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 43 | [W032](#w032) | S2/confirmed | US3 | planned | `crates/optimizer/src/parser_consistency_tests.rs:3` |
 | 44 | [W033](#w033) | S2/confirmed | US3 | planned | `crates/optimizer/src/prompts.rs:401` |
 | 45 | [W036](#w036) | S2/confirmed | US3 | planned | `crates/optimizer/src/rotation/skill_timings.rs:18` |
-| 46 | [W037](#w037) | S2/confirmed | US3 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:357` |
+| 46 | [W037](#w037) | S2/confirmed | US3 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:357` |
 | 47 | [W040](#w040) | S2/confirmed | US3 | planned | `crates/optimizer/src/scoring.rs:400` |
 | 48 | [W041](#w041) | S2/confirmed | US3 | planned | `crates/optimizer/src/scraper.rs:952` |
-| 49 | [W042](#w042) | S2/confirmed | US3 | planned | `crates/optimizer/src/synergy.rs:111` |
+| 49 | [W042](#w042) | S2/confirmed | US3 | verified-scoped | `crates/optimizer/src/synergy.rs:111` |
 | 50 | [W043](#w043) | S2/confirmed | US3 | planned | `crates/optimizer/src/text_util.rs:14` |
-| 51 | [W045](#w045) | S2/confirmed | US3 | planned | `docs/architecture.md:21` |
-| 52 | [W046](#w046) | S3/confirmed | US4 | planned | `.gitignore:32` |
-| 53 | [W047](#w047) | S3/confirmed | US4 | planned | `crates/addon/src/lib.rs:53` |
+| 51 | [W045](#w045) | S2/confirmed | US3 | verified-scoped | `docs/architecture.md:21` |
+| 52 | [W046](#w046) | S3/confirmed | US4 | verified-scoped | `.gitignore:32` |
+| 53 | [W047](#w047) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/lib.rs:53` |
 | 54 | [W048](#w048) | S3/confirmed | US4 | planned | `crates/addon/src/news.rs:183` |
 | 55 | [W049](#w049) | S3/confirmed | US4 | planned | `crates/addon/src/news_art.rs:394` |
 | 56 | [W050](#w050) | S3/confirmed | US4 | planned | `crates/addon/src/radio/art.rs:6` |
@@ -915,7 +915,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W037
 
-- Task: T048 [US3]. Status: **planned**.
+- Task: T048 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/rotation/wvw_timeline.rs:357`.
 - Dependencies: W039.
 
@@ -923,7 +923,7 @@ Claim: Seven Timeline fields are declared, initialised once to their identity va
 
 Remediation decision: Remove unwritten identity fields only after tracing passive parameter folding and preserving coverage accounting in W039.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: The seven identity fields are gone. Reads that multiplied by 1.0 or added 0.0 duration were dropped. W039 `unmodeled_effect_sources` / `note_unmodeled_proc` stay. Existing `wvw_timeline` tests still pin the math.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
@@ -957,7 +957,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W042
 
-- Task: T051 [US3]. Status: **planned**.
+- Task: T051 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/synergy.rs:111`.
 - Dependencies: story entry gate.
 
@@ -965,7 +965,7 @@ Claim: NormalizedEffect::BenefitsFromStatus, NormalizedEffect::ProcEffect and th
 
 Remediation decision: Remove unconstructible legacy effect variants and exclusive rules after normalized mapper cleanup; preserve live normalized proc support.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Legacy `BenefitsFromStatus`, `ProcEffect`, `ProcTrigger`, and `EnablerPayoff` are gone. Live `EffectCategory::ProcEffect` (JSON / timeline) stays. Extractors never emitted the removed variants.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
@@ -985,7 +985,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W045
 
-- Task: T053 [US3]. Status: **planned**.
+- Task: T053 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `docs/architecture.md:21`.
 - Dependencies: story entry gate.
 
@@ -993,13 +993,13 @@ Claim: The documented 3-tier optimization pipeline names two functions that do n
 
 Remediation decision: Re-derive the tier list from the actual call sites in crates/addon/src/ui/main_view/optimize_flow.rs and update both docs/architecture.md:20-22 and CLAUDE.md:30/37-41 with the real entry points (optimize_deterministic_cancellable, optimize_cancellable) and whatever the LLM tier is called now.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Docs now name `optimize_v2` → `optimize_deterministic_cancellable` → `optimize_cancellable`, matching `optimize_flow.rs`. Phantom `optimize_with_gemini` / `enrich_with_gemini` removed.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W046
 
-- Task: T054 [US4]. Status: **planned**.
+- Task: T054 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `.gitignore:32`.
 - Dependencies: story entry gate.
 
@@ -1007,13 +1007,13 @@ Claim: The tracked ignore rule for SymForge scratch directories is root-anchored
 
 Remediation decision: Change the rule in .gitignore to un-anchored `.symforge/` (matching the `.git/info/exclude` pattern) so every clone ignores the nested directories.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `.gitignore` now has un-anchored `.symforge/`. Nested tee dirs are ignored on every clone.
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 
 ### W047
 
-- Task: T055 [US4]. Status: **planned**.
+- Task: T055 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/lib.rs:53`.
 - Dependencies: story entry gate.
 
@@ -1021,7 +1021,7 @@ Claim: The doc says `BOOTSTRAP_FAILED` exists so "the next PostRender can retry"
 
 Remediation decision: Rewrite the doc to match the code: BOOTSTRAP_FAILED latches a panicked attach so the PostRender bootstrapper stops retrying for the session (a retry loop would re-panic every frame); recovery requires an addon reload.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Doc now says the flag latches a panic and stops retrying for the session. Code still returns immediately when set and logs "will not retry this session."
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 

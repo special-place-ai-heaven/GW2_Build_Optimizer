@@ -123,3 +123,12 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W020: `patch_ledger` is test-only; `serde_yaml` is a dev-dependency.
 - Green: `station_round_trips_through_the_saved_snapshot`, `window_init_is_only_missing_size_or_forced_snap`, `test_wvw_no_known_split_uses_base_value`, `test_baseline_data_loads_and_validates`, `test_ledger_for_patch_found`, `test_patch_ledger_ids_exist_in_manifests`, `test_initialize_returns_ready`.
 - Did not bump Cargo.toml.
+
+## Sprint 19 — W037/W042/W045 + US4 W046/W047
+
+- W037: Timeline identity multipliers/duration bonuses removed; coverage counters stay.
+- W042: unconstructible legacy `BenefitsFromStatus` / `ProcEffect` / `ProcTrigger` / `EnablerPayoff` removed.
+- W045: docs name `optimize_v2` → deterministic cancellable → legacy cancellable.
+- W046: `.gitignore` ignores every `.symforge/` directory.
+- W047: `BOOTSTRAP_FAILED` doc matches the no-retry latch.
+- Did not bump Cargo.toml.
