@@ -145,6 +145,16 @@ pub fn scrape_all_with_progress(
         ];
     }
 
+    // Before anything is written: a folder half full of files no version
+    // still produces is not a store, it is a haunting.
+    let pruned = prune_stale_benchmarks(&benchmarks_dir);
+    if pruned > 0 {
+        on_progress(
+            "guildjen",
+            &format!("removed {pruned} file(s) from an older format"),
+        );
+    }
+
     let today = today_string();
 
     // Scrape #1: Snowcrows. Cancellation re-checked here so a pulse during
@@ -1656,6 +1666,66 @@ fn strip_tags(s: &str) -> String {
     }
     result
 }
+/// The sources this addon scrapes. A file naming any other is not ours.
+const KNOWN_SOURCES: &[&str] = &["snowcrows", "hardstuck", "guildjen"];
+/// Game modes, lowercased as [`save_builds`] writes them.
+const KNOWN_MODES: &[&str] = &["pve", "pvp", "wvw"];
+
+/// Whether a benchmark filename is one the current scraper could have written.
+///
+/// [`save_builds`] names every file `{source}_{profession}_{mode}.json` with
+/// all three lowercased, so anything else in that folder came from a version
+/// that filed builds under something that is not a profession.
+fn is_current_benchmark_file(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".json") else {
+        return false;
+    };
+    let parts: Vec<&str> = stem.split('_').collect();
+    let [source, profession, mode] = parts[..] else {
+        return false;
+    };
+    KNOWN_SOURCES.contains(&source)
+        && CORE_PROFESSIONS.contains(&profession)
+        && KNOWN_MODES.contains(&mode)
+}
+
+/// Delete benchmark files the current scraper could never have written, and
+/// report how many went.
+///
+/// Until 1.11.30 the GuildJen scraper read the profession out of a URL path
+/// segment the site no longer has, so it filed builds under whatever it found
+/// there. A real install collected `guildjen_1.0_pvp.json`,
+/// `guildjen_comments_wvw.json`, `guildjen_fonts_pvp.json`,
+/// `guildjen_pages_pvp.json`, `guildjen_https__wvw.json` and
+/// `guildjen_guildjen.com_pvp.json`. Nothing generates those names any more,
+/// so nothing will ever overwrite them: they sit in the folder looking like
+/// benchmark data for the life of the install, on every machine that ran a
+/// sync before the fix. They are swept at the start of each run.
+///
+/// Only the name is judged, and only against names this code writes. A file
+/// that parses as `{known source}_{known profession}_{known mode}` is kept
+/// whatever is inside it - deciding a build is stale is a different question
+/// from deciding a filename is impossible.
+fn prune_stale_benchmarks(dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.ends_with(".json") || is_current_benchmark_file(name) {
+            continue;
+        }
+        if std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 fn save_builds(builds: &[BenchmarkBuild], dir: &Path) -> Result<(), String> {
     if builds.is_empty() {
         return Ok(());
@@ -1879,6 +1949,77 @@ mod tests {
             ],
             "only in-table build links, and never the sidebar"
         );
+    }
+
+    /// Fixture is the real thing: these are the exact names found in a
+    /// player's benchmarks folder on 2026-09-05, written by the scraper
+    /// before it stopped reading the profession out of a URL path.
+    #[test]
+    fn prune_removes_only_what_no_version_still_writes() {
+        let tmp = std::env::temp_dir().join(format!(
+            "gw2bo-prune-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&tmp).expect("temp dir");
+
+        let junk = [
+            "guildjen_1.0_pvp.json",
+            "guildjen_10_wvw.json",
+            "guildjen_comments_pvp.json",
+            "guildjen_fonts_wvw.json",
+            "guildjen_pages_pvp.json",
+            "guildjen_https__wvw.json",
+            "guildjen_guildjen.com_pvp.json",
+        ];
+        let keep = [
+            "guildjen_guardian_pve.json",
+            "guildjen_necromancer_wvw.json",
+            "snowcrows_elementalist_pve.json",
+            "hardstuck_revenant_pvp.json",
+        ];
+        // Not ours, not a benchmark, not touched.
+        let bystander = "notes.txt";
+
+        for name in junk.iter().chain(keep.iter()) {
+            std::fs::write(tmp.join(name), "[]").expect("seed");
+        }
+        std::fs::write(tmp.join(bystander), "hello").expect("seed");
+
+        assert_eq!(prune_stale_benchmarks(&tmp), junk.len());
+        for name in junk {
+            assert!(!tmp.join(name).exists(), "{name} should be gone");
+        }
+        for name in keep {
+            assert!(tmp.join(name).exists(), "{name} must survive");
+        }
+        assert!(
+            tmp.join(bystander).exists(),
+            "a non-json file is none of our business"
+        );
+
+        // Idempotent: a second run finds nothing left to do.
+        assert_eq!(prune_stale_benchmarks(&tmp), 0);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The name test on its own, including the shapes that are nearly right.
+    #[test]
+    fn only_source_profession_mode_names_are_ours() {
+        assert!(is_current_benchmark_file("guildjen_necromancer_wvw.json"));
+        assert!(is_current_benchmark_file("snowcrows_guardian_pve.json"));
+
+        // Right shape, wrong middle: this is the whole bug class.
+        assert!(!is_current_benchmark_file("guildjen_comments_pvp.json"));
+        // A specialization is not a profession; save_builds writes the class.
+        assert!(!is_current_benchmark_file("guildjen_scourge_wvw.json"));
+        // Unknown source, unknown mode, empty segment, missing segment.
+        assert!(!is_current_benchmark_file("metabattle_guardian_pve.json"));
+        assert!(!is_current_benchmark_file("guildjen_guardian_raids.json"));
+        assert!(!is_current_benchmark_file("guildjen_https__wvw.json"));
+        assert!(!is_current_benchmark_file("guildjen_guardian.json"));
+        assert!(!is_current_benchmark_file("guildjen_guardian_pve.txt"));
     }
 
     /// A rate limit is a wait, not a refusal. Everything that means "slower"
