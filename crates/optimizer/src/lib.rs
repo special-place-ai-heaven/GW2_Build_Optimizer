@@ -1,3 +1,4 @@
+pub mod article;
 pub mod balance;
 pub mod benchmark;
 pub mod build_template;
