@@ -593,6 +593,7 @@ dependencies = [
 name = "gw2-optimizer"
 version = "1.11.32"
 dependencies = [
+ "base64",
  "chrono",
  "gw2-api",
  "gw2-core",
