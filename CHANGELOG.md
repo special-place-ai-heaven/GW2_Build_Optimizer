@@ -8,6 +8,10 @@ All notable changes to GW2 Build Optimizer are documented here.
 
 - A chat plate now uses the validated per-slot kit for its stats, not one prefix painted over the whole set. Mixed Sentinel/Dragon (or any mixed prefixes) show the toughness and vitality those slots actually give, PvP plates use the amulet, and the validator's slot corrections show up on the plate and in the bubble.
 
+### Benchmarks
+
+- Sync Benchmarks reads GuildJen's category list from the site's sitemap, and now finds every build category it publishes. Discovery was reading the build hub, whose category grid renders inside a consent-gated embed: fetched without marketing cookies that page carries prose, social links and one off-site card, and on 2026-09-05 it had 41 links with not one category among them. So discovery found nothing on every run and the sync quietly fell back to a hardcoded list of three - which was itself short two categories, dropping raid and fractal builds entirely. The sitemap needs no consent, is what the site publishes for machines, and listed five. Checked against the live WvW page the same day: 99 builds listed, all 99 filed under the right profession and specialization, newest elite specs included.
+
 ## 1.11.30 - 2026-09-05
 
 ### Choya
