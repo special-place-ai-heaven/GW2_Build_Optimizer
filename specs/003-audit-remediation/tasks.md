@@ -28,7 +28,7 @@ Independent acceptance: see spec.md US1; each item must satisfy its own ledger a
 
 Independent acceptance: see spec.md US2; each item must satisfy its own ledger acceptance and dependencies. Write behavioral regression tests before the corresponding fix. Exact target is the source path below; use SymForge to resolve current symbols rather than historical line numbers.
 
-- [ ] T008 [US2] B001: Pass the accepted ValidatedBuild into attach_chat_stats and use engine::calculate_validated_stats with balance context and returned modifiers. Target: `crates/addon/src/ui/main_view/optimization.rs`. Record evidence in ledger.md#b001.
+- [X] T008 [US2] B001: Pass the accepted ValidatedBuild into attach_chat_stats and use engine::calculate_validated_stats with balance context and returned modifiers. Target: `crates/addon/src/ui/main_view/optimization.rs`. Record evidence in ledger.md#b001.
 - [ ] T009 [US2] W025: Return an explicit tool error when prefix/stat resolution fails; never invent a stat block. Target: `crates/optimizer/src/gemini_tools.rs`. Record evidence in ledger.md#w025.
 - [ ] T010 [US2] W035: Build SimParams from resolved stats and balance mode in the tool and call simulate_with; restrict the basic test convenience to actual test consumers. Target: `crates/optimizer/src/rotation/simulator.rs`. Depends on W025. Record evidence in ledger.md#w035.
 - [ ] T011 [US2] W019: Implement profile viability requirements in the referee with failed/pass boundary tests; preserve mode-specific semantics. Target: `crates/optimizer/src/data/objective_profiles.rs`. Depends on W044. Record evidence in ledger.md#w019.

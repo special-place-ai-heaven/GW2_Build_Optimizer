@@ -216,14 +216,13 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         if token.is_cancelled() {
                             return Err("Cancelled".into());
                         }
-                        let mut prompt =
-                            gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
-                                &profession,
-                                &game_mode_label,
-                                &message,
-                                &kitchen,
-                                gw2_core::i18n::choya_name_for(&config.ui_language),
-                            );
+                        let mut prompt = gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
+                            &profession,
+                            &game_mode_label,
+                            &message,
+                            &kitchen,
+                            gw2_core::i18n::choya_name_for(&config.ui_language),
+                        );
                         if let Some(ref why) = feedback {
                             prompt.push_str(&format!(
                                 "\n\nYOUR PREVIOUS PLATE WAS REFUSED: {why}\n\
@@ -262,9 +261,10 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     &prompt,
                                     &tools,
                                     &mut |name: &str, args: &serde_json::Value| {
-                                        let stale =
-                                            crate::state::with_state(|s| s.main.chat_epoch != epoch)
-                                                .unwrap_or(true);
+                                        let stale = crate::state::with_state(|s| {
+                                            s.main.chat_epoch != epoch
+                                        })
+                                        .unwrap_or(true);
                                         if stale {
                                             return serde_json::json!({"error": "cancelled"});
                                         }
@@ -491,7 +491,13 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 };
                                 let errors: Vec<String> = validated
                                     .as_ref()
-                                    .map(|v| v.errors.iter().map(|e| e.detail.clone()).collect())
+                                    .map(|v| {
+                                        v.errors
+                                            .iter()
+                                            .map(|e| e.detail.clone())
+                                            .chain(v.warnings.iter().cloned())
+                                            .collect()
+                                    })
                                     .unwrap_or_default();
                                 let body = if plated.explanation.is_empty() {
                                     t("choya.heres_a_build")
@@ -517,7 +523,13 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     suggestion.slot_prefixes = Some(v.gear_slots.clone());
                                 }
                                 if let Some(ref db) = live_db {
-                                    attach_chat_stats(&mut suggestion, db, &profession, &live_mode);
+                                    attach_chat_stats(
+                                        &mut suggestion,
+                                        db,
+                                        &profession,
+                                        &live_mode,
+                                        validated.as_ref(),
+                                    );
                                     if let Some(v) = &validated {
                                         suggestion.chat_code =
                                             validated_build_to_chat_code(v, &profession, db);
