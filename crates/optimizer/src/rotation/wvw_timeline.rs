@@ -354,13 +354,6 @@ struct Timeline<'a> {
     conditions_cleansed: u32,
     combo_activations: u32,
     proc_specs: Vec<ProcSpec>,
-    passive_strike_mult: f64,
-    passive_condition_mult: f64,
-    passive_healing_mult: f64,
-    incoming_strike_mult: f64,
-    incoming_condition_mult: f64,
-    bonus_boon_duration: f64,
-    bonus_condition_duration: f64,
     unmodeled_effect_sources: u32,
     unmodeled_proc_keys: HashSet<(u8, u32)>,
     protection_multiplier: f64,
@@ -455,13 +448,6 @@ impl<'a> Timeline<'a> {
             conditions_cleansed: 0,
             combo_activations: 0,
             proc_specs: Vec::new(),
-            passive_strike_mult: 1.0,
-            passive_condition_mult: 1.0,
-            passive_healing_mult: 1.0,
-            incoming_strike_mult: 1.0,
-            incoming_condition_mult: 1.0,
-            bonus_boon_duration: 0.0,
-            bonus_condition_duration: 0.0,
             unmodeled_effect_sources,
             unmodeled_proc_keys: HashSet::new(),
             protection_multiplier: crate::data::boon_condition_formulas::boons()
@@ -655,8 +641,9 @@ impl<'a> Timeline<'a> {
             protected_at_start: self.control_owned(),
             saved_by_charge: false,
         });
-        self.next_action_ms =
-            self.at(cast_ms.saturating_add(HUMAN_DELAY_MS).saturating_add(MIN_SKILL_GAP_MS));
+        self.next_action_ms = self.at(cast_ms
+            .saturating_add(HUMAN_DELAY_MS)
+            .saturating_add(MIN_SKILL_GAP_MS));
     }
 
     fn pick_skill(&mut self) -> Option<usize> {
@@ -862,7 +849,7 @@ impl<'a> Timeline<'a> {
             self.avoided_damage += raw_damage;
             return;
         }
-        let mut damage = raw_damage * self.incoming_strike_mult;
+        let mut damage = raw_damage;
         if self.has_defense(CoverKind::Protection) {
             damage *= self.protection_multiplier;
         }
@@ -968,7 +955,7 @@ impl<'a> Timeline<'a> {
         }
         let dmg = crate::data::conditions().confusion_tick(1_800.0, self.params.mode.clone(), true)
             * stacks as f64;
-        self.absorb_damage(dmg * self.incoming_condition_mult);
+        self.absorb_damage(dmg);
     }
 
     fn absorb_damage(&mut self, damage: f64) {
@@ -1018,8 +1005,7 @@ impl<'a> Timeline<'a> {
                 let tick =
                     condition_tick_damage(&condition.name, condition_damage, &self.params.mode)
                         * condition.stacks as f64
-                        * self.params.condition_mult
-                        * self.passive_condition_mult;
+                        * self.params.condition_mult;
                 outgoing_damage += tick;
                 condition.next_tick_ms += 1_000;
             }
@@ -1030,7 +1016,6 @@ impl<'a> Timeline<'a> {
                         condition_tick_damage(&condition.name, condition_damage, &self.params.mode)
                             * condition.stacks as f64
                             * self.params.condition_mult
-                            * self.passive_condition_mult
                             * frac;
                 }
             }
@@ -1060,7 +1045,7 @@ impl<'a> Timeline<'a> {
             }
         }
         if incoming_damage > 0.0 {
-            self.absorb_damage(incoming_damage * self.incoming_condition_mult);
+            self.absorb_damage(incoming_damage);
         }
         self.outgoing_conditions
             .retain(|condition| condition.expires_at_ms > self.now_ms);
@@ -1090,8 +1075,7 @@ impl<'a> Timeline<'a> {
                         self.params.ferocity,
                         self.params.crit_chance_bonus + fury_bonus,
                     )
-                    * self.params.strike_mult
-                    * self.passive_strike_mult;
+                    * self.params.strike_mult;
                 if self.enemy_protection {
                     damage *= self.protection_multiplier;
                 }
@@ -1105,10 +1089,8 @@ impl<'a> Timeline<'a> {
                 stacks,
                 duration_ms,
             } => {
-                let duration = (*duration_ms as f64
-                    * self.params.condition_duration_mult
-                    * (1.0 + self.bonus_condition_duration))
-                    .round() as u32;
+                let duration =
+                    (*duration_ms as f64 * self.params.condition_duration_mult).round() as u32;
                 self.outgoing_conditions.push(TimedCondition {
                     name: condition.clone(),
                     stacks: *stacks,
@@ -1137,8 +1119,7 @@ impl<'a> Timeline<'a> {
             SkillEffect::Healing { hit_count } => {
                 let amount = (1_200.0 + self.params.healing_power * 0.45)
                     * *hit_count as f64
-                    * self.params.healing_mult
-                    * self.passive_healing_mult;
+                    * self.params.healing_mult;
                 self.heal(amount);
             }
             SkillEffect::Barrier { amount } => {
@@ -1256,8 +1237,7 @@ impl<'a> Timeline<'a> {
 
     fn apply_buff(&mut self, name: &str, stacks: u32, duration_ms: u32, scale_duration: bool) {
         let duration = if scale_duration {
-            (duration_ms as f64 * self.params.boon_duration_mult * (1.0 + self.bonus_boon_duration))
-                .round() as u32
+            (duration_ms as f64 * self.params.boon_duration_mult).round() as u32
         } else {
             duration_ms
         };
@@ -1277,7 +1257,9 @@ impl<'a> Timeline<'a> {
             .iter_mut()
             .find(|defense| defense.kind == kind)
         {
-            existing.expires_at_ms = existing.expires_at_ms.max(self.now_ms.saturating_add(duration_ms));
+            existing.expires_at_ms = existing
+                .expires_at_ms
+                .max(self.now_ms.saturating_add(duration_ms));
             existing.stacks = existing.stacks.max(stacks);
             existing.strippable &= strippable;
         } else {
