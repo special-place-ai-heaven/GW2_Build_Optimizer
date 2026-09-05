@@ -624,40 +624,54 @@ fn scrape_guildjen(
     should_cancel: &dyn Fn() -> bool,
     on_progress: &dyn Fn(&str, &str),
 ) -> Result<(Vec<BenchmarkBuild>, bool), String> {
-    // GuildJen's main build index pages
-    let index_urls = [
-        "https://guildjen.com/wvw-builds/",
-        "https://guildjen.com/pvp-builds/",
-    ];
+    // The six category pages linked from the hub at /gw2-builds/, verified
+    // against the live site 2026-09-05. The old `/wvw-builds/` and
+    // `/pvp-builds/` addresses no longer carry the build tables, which is why
+    // a sync reported "no build links found on any index page".
+    // Read the category list off the hub instead of hardcoding it: GuildJen
+    // adds and retires categories as well as builds, and the last hardcoded
+    // pair (`/wvw-builds/`, `/pvp-builds/`) silently went stale and returned
+    // nothing. The known three are only the fallback for a hub that will not
+    // load.
+    on_progress("guildjen", "listing categories…");
+    let index_urls = match fetch_html(client, GUILDJEN_HUB) {
+        Ok(hub) => {
+            let found = guildjen_category_pages(&hub);
+            if found.is_empty() {
+                on_progress("guildjen", "hub listed no categories; using known set");
+                guildjen_fallback_categories()
+            } else {
+                found
+            }
+        }
+        Err(_) => {
+            on_progress("guildjen", "hub unreachable; using known set");
+            guildjen_fallback_categories()
+        }
+    };
 
     let mut builds = Vec::new();
     let mut last_html: Option<String> = None;
     let mut any_success = false;
     let mut saw_link = false;
 
-    for index_url in &index_urls {
+    for (index_url, mode) in &index_urls {
         if should_cancel() {
             return Ok((builds, true));
         }
-        let mode = if index_url.contains("wvw") {
-            "WvW"
-        } else {
-            "PvP"
-        };
+        let mode = *mode;
         on_progress("guildjen", &format!("listing {}…", mode));
         let Ok(html) = fetch_html(client, index_url) else {
             continue;
         };
         last_html = Some(html.clone());
         any_success = true;
-        // Path needle matches both absolute `https://guildjen.com/wvw-builds/…`
-        // and relative `/wvw-builds/…` so the relative pin branch is reachable.
-        let needle = if index_url.contains("wvw") {
-            "/wvw-builds/"
-        } else {
-            "/pvp-builds/"
-        };
-        let links = extract_build_links(&html, needle, 40);
+        // Only the rows of the build tables. Every page also carries "Trending"
+        // and "Popular Posts" sidebars holding build links from OTHER
+        // categories — the WvW "Power Reaper Roaming Build" appears on the PvP
+        // page — so scanning the whole document would file builds under the
+        // wrong game mode.
+        let links = extract_table_build_links(&html, 40);
         let cap = links.len().min(15);
 
         for (i, link) in links.into_iter().take(15).enumerate() {
@@ -711,14 +725,22 @@ fn scrape_guildjen_build(
 ) -> Result<BenchmarkBuild, String> {
     let html = fetch_html(client, url)?;
 
-    let (profession, spec_name) = parse_profession_spec_from_url(url);
-    let mode = if url.contains("wvw") {
-        "WvW"
-    } else if url.contains("pvp") {
-        "PvP"
-    } else {
-        "WvW"
+    // The slug names the specialization, never the profession path — GuildJen
+    // build pages live at the site root. A slug that names neither is not a
+    // build page we can file, so it is dropped rather than stored under a
+    // profession no character has.
+    let slug = url
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or_default();
+    let Some((profession, spec_name)) = profession_from_slug(slug) else {
+        return Err(format!("GuildJen: no profession in slug {slug}"));
     };
+    // Placeholder only: the caller overwrites this with the index page the
+    // link came from, which is the one authority on the mode. The slug does
+    // not carry it (`/power-willbender-roaming-build/` says neither).
+    let mode = "WvW";
 
     let role = if html.to_lowercase().contains("roam") {
         "WvW Roaming"
@@ -780,6 +802,139 @@ fn looks_like_blocked_page(html: &str) -> bool {
 }
 
 /// Extract hrefs containing `needle` from anchor tags in HTML.
+/// GuildJen's build hub. Every category index is linked from here.
+const GUILDJEN_HUB: &str = "https://guildjen.com/gw2-builds/";
+
+/// The categories to fall back on when the hub cannot be read.
+///
+/// WvW and PvP are GuildJen's own beat and nothing else in this scraper covers
+/// them; Open World is PvE that Snowcrows does not publish.
+fn guildjen_fallback_categories() -> Vec<(String, &'static str)> {
+    vec![
+        ("https://guildjen.com/gw2-wvw-builds/".to_string(), "WvW"),
+        ("https://guildjen.com/gw2-pvp-builds/".to_string(), "PvP"),
+        (
+            "https://guildjen.com/gw2-open-world-builds/".to_string(),
+            "PvE",
+        ),
+    ]
+}
+
+/// Every category index linked from the build hub, paired with its game mode.
+///
+/// Category pages are root-level slugs of the form `/gw2-<name>-builds/`. The
+/// hub itself (`/gw2-builds/`) is excluded, as is anything off-site (the "Low
+/// Intensity" card points at another domain) and the levelling category, whose
+/// sub-80 kits are not valid references for a level-80 comparison.
+fn guildjen_category_pages(hub_html: &str) -> Vec<(String, &'static str)> {
+    let mut out: Vec<(String, &'static str)> = Vec::new();
+    let mut pos = 0;
+    while let Some(href_start) = find_ci(hub_html, "href=\"", pos) {
+        let abs = href_start + 6;
+        let Some(close) = hub_html[abs..].find('"') else {
+            break;
+        };
+        let href = &hub_html[abs..abs + close];
+        pos = abs + close + 1;
+
+        let Some(path) = href
+            .strip_prefix("https://guildjen.com")
+            .or_else(|| (!href.starts_with("http")).then_some(href))
+        else {
+            continue;
+        };
+        let slug = path.trim_matches('/');
+        if slug.contains('/')
+            || !slug.starts_with("gw2-")
+            || !slug.ends_with("-builds")
+            || slug == "gw2-builds"
+            || slug.contains("leveling")
+        {
+            continue;
+        }
+        let url = format!("https://guildjen.com/{slug}/");
+        if out.iter().any(|(seen, _)| *seen == url) {
+            continue;
+        }
+        // Mode from the category slug. Everything that is neither WvW nor PvP
+        // is PvE: raids, fractals and open world all share the PvE dummy.
+        let mode = if slug.contains("wvw") {
+            "WvW"
+        } else if slug.contains("pvp") {
+            "PvP"
+        } else {
+            "PvE"
+        };
+        out.push((url, mode));
+    }
+    out
+}
+
+/// Case-insensitive `str::find` for ASCII needles, from a byte offset.
+fn find_ci(haystack: &str, needle: &str, from: usize) -> Option<usize> {
+    let bytes = haystack.as_bytes();
+    let pat = needle.as_bytes();
+    if pat.is_empty() || bytes.len() < pat.len() {
+        return None;
+    }
+    (from..=bytes.len() - pat.len())
+        .find(|&i| bytes[i..i + pat.len()].eq_ignore_ascii_case(pat))
+}
+
+/// Build links from GuildJen's index tables, and only from those tables.
+///
+/// Every category page also renders "Trending" and "Popular Posts" sidebars
+/// that link builds from OTHER categories — the WvW "Power Reaper Roaming
+/// Build" is listed on the PvP page — so a whole-document scan files builds
+/// under whichever page happened to mention them. The tables are the listing;
+/// the sidebars are decoration.
+///
+/// A build page is a flat slug on the site root ending in `-build/`
+/// (`/power-hammer-luminary-roaming-build/`). Category pages end in `-builds/`
+/// and guides in `-guide/`, so the singular suffix is what separates them.
+fn extract_table_build_links(html: &str, max: usize) -> Vec<String> {
+    let mut links: Vec<String> = Vec::new();
+    let mut pos = 0;
+
+    while let Some(open) = find_ci(html, "<table", pos) {
+        let end = find_ci(html, "</table", open).unwrap_or(html.len());
+        let table = &html[open..end];
+
+        let mut tpos = 0;
+        while let Some(href_start) = find_ci(table, "href=\"", tpos) {
+            let abs = href_start + 6;
+            let Some(close) = table[abs..].find('"') else {
+                break;
+            };
+            let href = &table[abs..abs + close];
+            if is_guildjen_build_link(href) && !links.contains(&href.to_string()) {
+                links.push(href.to_string());
+                if links.len() >= max {
+                    return links;
+                }
+            }
+            tpos = abs + close + 1;
+        }
+        pos = end + 1;
+    }
+    links
+}
+
+/// Whether an href points at a single GuildJen build page.
+fn is_guildjen_build_link(href: &str) -> bool {
+    let path = href
+        .strip_prefix("https://guildjen.com")
+        .or_else(|| href.strip_prefix("http://guildjen.com"))
+        .unwrap_or(href);
+    // Off-site links and anything with a query or fragment are not builds.
+    if path.starts_with("http") || path.contains('?') || path.contains('#') {
+        return false;
+    }
+    let trimmed = path.trim_end_matches('/');
+    // Root-level slug only: `/a-build` has one leading slash and no others.
+    trimmed.starts_with('/') && !trimmed[1..].contains('/') && trimmed.ends_with("-build")
+}
+
 fn extract_build_links(html: &str, needle: &str, max: usize) -> Vec<String> {
     let mut links = Vec::new();
     let mut pos = 0;
@@ -801,56 +956,67 @@ fn extract_build_links(html: &str, needle: &str, max: usize) -> Vec<String> {
     links
 }
 
-/// Parse profession and spec name from a URL path.
-/// E.g. /builds/guardian/firebrand → ("Guardian", "Firebrand")
-fn parse_profession_spec_from_url(url: &str) -> (String, String) {
-    // Remove query strings and fragments
-    let url = url.split('?').next().unwrap_or(url);
-    let url = url.split('#').next().unwrap_or(url);
-    let parts: Vec<&str> = url
-        .trim_end_matches('/')
-        .split('/')
-        .filter(|p| !p.is_empty())
-        .collect();
 
-    // Known profession names for matching
-    let professions = [
-        "guardian",
-        "warrior",
-        "engineer",
-        "ranger",
-        "thief",
-        "elementalist",
-        "mesmer",
-        "necromancer",
-        "revenant",
-    ];
+/// Every elite specialization, with the profession that owns it.
+///
+/// This is the only reliable way to name the profession of a GuildJen build:
+/// its URLs are flat slugs on the site root (`/power-hammer-luminary-roaming-build/`)
+/// and carry no profession path segment at all. Reading one out of the path is
+/// what produced benchmark entries whose profession was `Guildjen.com`, `Fonts`
+/// or `1.0` (measured on the synced cache 2026-09-05), none of which could ever
+/// match a real character.
+const SPEC_PROFESSIONS: &[(&str, &str)] = &[
+    ("dragonhunter", "Guardian"),
+    ("firebrand", "Guardian"),
+    ("willbender", "Guardian"),
+    ("luminary", "Guardian"),
+    ("berserker", "Warrior"),
+    ("spellbreaker", "Warrior"),
+    ("bladesworn", "Warrior"),
+    ("paragon", "Warrior"),
+    ("scrapper", "Engineer"),
+    ("holosmith", "Engineer"),
+    ("mechanist", "Engineer"),
+    ("amalgam", "Engineer"),
+    ("druid", "Ranger"),
+    ("soulbeast", "Ranger"),
+    ("untamed", "Ranger"),
+    ("galeshot", "Ranger"),
+    ("daredevil", "Thief"),
+    ("deadeye", "Thief"),
+    ("specter", "Thief"),
+    ("antiquary", "Thief"),
+    ("tempest", "Elementalist"),
+    ("weaver", "Elementalist"),
+    ("catalyst", "Elementalist"),
+    ("evoker", "Elementalist"),
+    ("chronomancer", "Mesmer"),
+    ("mirage", "Mesmer"),
+    ("virtuoso", "Mesmer"),
+    ("troubadour", "Mesmer"),
+    ("reaper", "Necromancer"),
+    ("scourge", "Necromancer"),
+    ("harbinger", "Necromancer"),
+    ("ritualist", "Necromancer"),
+    ("herald", "Revenant"),
+    ("renegade", "Revenant"),
+    ("vindicator", "Revenant"),
+    ("conduit", "Revenant"),
+];
 
-    let mut profession = String::new();
-    let mut spec = String::new();
-
-    for (i, part) in parts.iter().enumerate() {
-        let lower = part.to_lowercase();
-        if professions.iter().any(|&p| lower.contains(p)) {
-            profession = title_case(&lower.replace('-', " "));
-            if let Some(next) = parts.get(i + 1) {
-                spec = title_case(&next.replace('-', " "));
-            }
-            break;
-        }
-    }
-
-    // If not found via profession keyword, use last two meaningful path segments
-    if profession.is_empty() && parts.len() >= 2 {
-        let last_idx = parts.len() - 1;
-        spec = title_case(&parts[last_idx].replace('-', " "));
-        if last_idx > 0 {
-            profession = title_case(&parts[last_idx - 1].replace('-', " "));
-        }
-    }
-
-    (profession, spec)
-}
+/// The nine core professions, for slugs that name one directly
+/// (`power-core-guardian-roaming-build`).
+const CORE_PROFESSIONS: &[&str] = &[
+    "guardian",
+    "warrior",
+    "engineer",
+    "ranger",
+    "thief",
+    "elementalist",
+    "mesmer",
+    "necromancer",
+    "revenant",
+];
 
 /// Known GW2 elite spec names for slug extraction.
 const KNOWN_SPECS: &[&str] = &[
@@ -883,6 +1049,26 @@ const KNOWN_SPECS: &[&str] = &[
     "herald",
     "luminary",
 ];
+
+/// Name the profession a build slug belongs to.
+///
+/// Elite spec first, because "power-core-guardian" and "condition-firebrand"
+/// both name a Guardian but only one of them says so. Returns the profession
+/// and the spec name to display; a core build reports its profession as both.
+fn profession_from_slug(slug: &str) -> Option<(String, String)> {
+    let lower = slug.to_lowercase();
+    for (spec, profession) in SPEC_PROFESSIONS {
+        if lower.contains(spec) {
+            return Some(((*profession).to_string(), title_case(spec)));
+        }
+    }
+    for profession in CORE_PROFESSIONS {
+        if lower.contains(profession) {
+            return Some((title_case(profession), title_case(profession)));
+        }
+    }
+    None
+}
 
 /// Extract elite spec name from a Snowcrows URL slug.
 /// e.g. "power-dragonhunter-virtues-longbow-greatsword" → "Dragonhunter"
@@ -1296,21 +1482,57 @@ mod tests {
         assert_eq!(links[0], "/builds/guardian/firebrand");
     }
 
+    /// Build links live in the category table. Every GuildJen page also
+    /// renders "Trending" and "Popular Posts" sidebars carrying builds from
+    /// OTHER categories, so a whole-document scan files a WvW build under PvP.
+    /// Category pages (`-builds/`) and guides (`-guide/`) are not builds.
     #[test]
-    fn extract_build_links_guildjen_path_needle_matches_relative_and_absolute() {
+    fn table_build_links_ignore_sidebars_and_non_builds() {
         let html = concat!(
-            r#"<a href="/wvw-builds/guardian-firebrand/">rel</a>"#,
-            r#"<a href="https://guildjen.com/wvw-builds/revenant-herald/">abs</a>"#,
-            r#"<a href="/pvp-builds/thief-daredevil/">other mode</a>"#,
-            r#"<a href="https://evil.example/wvw-builds/nope/">off</a>"#,
+            r#"<table><tr><td><a href="/power-hammer-luminary-roaming-build/">in table</a></td>"#,
+            r#"<td><a href="https://guildjen.com/support-luminary-cloud-build/">abs</a></td></tr>"#,
+            r#"<tr><td><a href="/gw2-wvw-builds/">category</a>"#,
+            r#"<a href="/legendary-armor-guide/">guide</a>"#,
+            r#"<a href="https://evil.example/fake-build/">off-site</a></td></tr></table>"#,
+            r#"<aside><a href="/power-reaper-roaming-build/">sidebar</a></aside>"#,
         );
-        let links = extract_build_links(html, "/wvw-builds/", 10);
+        let links = extract_table_build_links(html, 10);
         assert_eq!(
             links,
             vec![
-                "/wvw-builds/guardian-firebrand/".to_string(),
-                "https://guildjen.com/wvw-builds/revenant-herald/".to_string(),
-                "https://evil.example/wvw-builds/nope/".to_string(),
+                "/power-hammer-luminary-roaming-build/".to_string(),
+                "https://guildjen.com/support-luminary-cloud-build/".to_string(),
+            ],
+            "only in-table build links, and never the sidebar"
+        );
+    }
+
+    /// The category list is read off the hub so a category added or retired by
+    /// the site needs no code change. The hub itself, off-site cards and the
+    /// sub-80 levelling category are excluded.
+    #[test]
+    fn hub_discovery_names_categories_and_their_modes() {
+        let hub = concat!(
+            r#"<a href="https://guildjen.com/gw2-wvw-builds/">WvW</a>"#,
+            r#"<a href="/gw2-pvp-builds/">PvP</a>"#,
+            r#"<a href="/gw2-open-world-builds/">Open World</a>"#,
+            r#"<a href="/gw2-raid-builds/">Raid</a>"#,
+            r#"<a href="/gw2-wvw-builds/">WvW again</a>"#,
+            r#"<a href="/gw2-builds/">the hub itself</a>"#,
+            r#"<a href="/gw2-leveling-builds/">sub-80</a>"#,
+            r#"<a href="https://aw2.help/">off-site</a>"#,
+            r#"<a href="/gw2-mount-guides/">not builds</a>"#,
+        );
+        assert_eq!(
+            guildjen_category_pages(hub),
+            vec![
+                ("https://guildjen.com/gw2-wvw-builds/".to_string(), "WvW"),
+                ("https://guildjen.com/gw2-pvp-builds/".to_string(), "PvP"),
+                (
+                    "https://guildjen.com/gw2-open-world-builds/".to_string(),
+                    "PvE"
+                ),
+                ("https://guildjen.com/gw2-raid-builds/".to_string(), "PvE"),
             ]
         );
     }
@@ -1365,22 +1587,38 @@ mod tests {
         ));
     }
 
+    /// GuildJen build URLs are flat slugs on the site root with no profession
+    /// segment, so the profession has to come from the specialization named in
+    /// the slug. Reading it from the path is what filed builds under
+    /// `Guildjen.com`, `Fonts` and `1.0` (synced cache, 2026-09-05).
     #[test]
-    fn test_parse_profession_spec_guardian_firebrand() {
-        let (prof, spec) = parse_profession_spec_from_url(
-            "https://snowcrows.com/builds/guardian/firebrand/power-dps",
-        );
-        assert_eq!(prof, "Guardian");
-        assert_eq!(spec, "Firebrand");
+    fn profession_comes_from_the_spec_in_the_slug() {
+        for (slug, profession, spec) in [
+            ("power-hammer-luminary-roaming-build", "Guardian", "Luminary"),
+            ("condition-scourge-havoc-build", "Necromancer", "Scourge"),
+            ("celestial-spear-antiquary-roaming-build", "Thief", "Antiquary"),
+            ("support-paragon-cloud-build", "Warrior", "Paragon"),
+            ("power-conduit-roaming-build", "Revenant", "Conduit"),
+        ] {
+            let got = profession_from_slug(slug).expect(slug);
+            assert_eq!((got.0.as_str(), got.1.as_str()), (profession, spec), "{slug}");
+        }
     }
 
+    /// A core build names its profession directly and has no elite spec.
     #[test]
-    fn test_parse_profession_spec_necromancer_scourge() {
-        let (prof, spec) = parse_profession_spec_from_url(
-            "https://snowcrows.com/builds/necromancer/scourge/condi",
-        );
-        assert_eq!(prof, "Necromancer");
-        assert_eq!(spec, "Scourge");
+    fn profession_falls_back_to_a_core_name() {
+        let (prof, spec) = profession_from_slug("power-core-guardian-roaming-build").expect("core");
+        assert_eq!(prof, "Guardian");
+        assert_eq!(spec, "Guardian");
+    }
+
+    /// Anything that names neither is refused rather than stored under a
+    /// profession no character has.
+    #[test]
+    fn profession_refuses_a_slug_that_names_neither() {
+        assert!(profession_from_slug("legendary-armor-guide-open-world").is_none());
+        assert!(profession_from_slug("gw2-event-timers").is_none());
     }
 
     #[test]
