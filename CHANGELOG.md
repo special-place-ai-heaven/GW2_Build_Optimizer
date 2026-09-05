@@ -6,6 +6,7 @@ All notable changes to GW2 Build Optimizer are documented here.
 
 ### Choya
 
+- Choya changes anything you did not pin. The rule is now stated as you would say it: if you ask it to keep your weapons, your runes or your gear, it keeps exactly that and changes the rest - and everything you did not name is its to improve whenever it can argue the change is better. It is also told to fill both weapon sets, all four sigils and the relic on every build, because saying nothing about a slot is not "keep what they had", it reaches you as an empty slot.
 - A build from the chat keeps the weapons you are holding. The prompt tells Choya to copy your weapons only if you asked it to, so a plate that changes nothing about them says nothing about them - and nothing put them back. Seen in-game 2026-09-05 on 1.11.29: a complete heal Scourge, specs, traits, skills and rune all present, arrived on the Optimized tab with an empty WEAPONS column. Your equipped weapon sets, their sigils and your relic are now carried onto any plate that does not name its own, the same way your heal, elite, utilities and stat prefix already were.
 
 ## 1.11.29 - 2026-09-05
