@@ -35,7 +35,6 @@
 //! `with_state`.
 
 use std::io::{Read, Seek};
-use std::net::ToSocketAddrs;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -752,7 +751,15 @@ fn run_session(
             }
         });
     };
-    match open_and_append(&handle, &station, &player, &now_playing, &stop, &tap, &on_headers) {
+    match open_and_append(
+        &handle,
+        &station,
+        &player,
+        &now_playing,
+        &stop,
+        &tap,
+        &on_headers,
+    ) {
         Ok(()) => {}
         Err(SessionEnd::Cancelled) => {
             finish_stopped(my_gen, &player, &sink_cell);
@@ -845,8 +852,15 @@ fn run_session(
                 set_error(my_gen, "stream keeps stalling".to_string());
                 return;
             }
-            match open_and_append(&handle, &station, &player, &now_playing, &stop, &tap, &on_headers)
-            {
+            match open_and_append(
+                &handle,
+                &station,
+                &player,
+                &now_playing,
+                &stop,
+                &tap,
+                &on_headers,
+            ) {
                 Ok(()) => {
                     // A pause can land between the stall check and this line;
                     // resume() owns sink.play() in that case.
@@ -1066,31 +1080,17 @@ fn open_stream(
     })
 }
 
-/// Stop-flag exit path: drop the sink handle, write `Stopped`, return.
-/// Stopping the sink drops the decoder, which drops the stream reader, which
-/// cancels the background download task (`cancel_on_drop`).
 /// True when the stream URL's host is (or resolves to) an address inside the
 /// local network - loopback, RFC1918, link-local, ULA, unspecified. Literal
 /// IPs are checked directly; hostnames get one blocking resolve (the OS
 /// caches it for the connect that follows). An unresolvable host returns
 /// false: the connect will fail with its own honest error.
 fn stream_host_reserved(url: &reqwest::Url) -> bool {
-    let Some(host) = url.host_str() else {
-        return true;
-    };
-    if host.eq_ignore_ascii_case("localhost") {
-        return true;
-    }
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        return crate::news_art::ip_is_reserved(ip);
-    }
-    let port = url.port_or_known_default().unwrap_or(443);
-    match (host, port).to_socket_addrs() {
-        Ok(mut addrs) => addrs.any(|a| crate::news_art::ip_is_reserved(a.ip())),
-        Err(_) => false,
-    }
+    crate::news_art::url_host_is_reserved(url)
 }
 
+/// Stop-flag exit path: drop the sink handle and write `Stopped`.
+/// Dropping the decoder cancels its background download via `cancel_on_drop`.
 fn finish_stopped(my_gen: u64, player: &Player, sink_cell: &Arc<Mutex<Option<Arc<Player>>>>) {
     player.clear();
     *lock_or_recover(sink_cell) = None;
@@ -1391,6 +1391,25 @@ pub fn station_from_saved(saved: &SavedStation) -> RbStation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_guard_rejects_reserved_ipv6_literals() {
+        for host in [
+            "[::1]",
+            "[::]",
+            "[fe80::1]",
+            "[fd00::1]",
+            "[::ffff:127.0.0.1]",
+        ] {
+            let url = reqwest::Url::parse(&format!("http://{host}:8000/stream")).unwrap();
+            assert!(
+                stream_host_reserved(&url),
+                "reserved literal admitted: {host}"
+            );
+        }
+        let public = reqwest::Url::parse("https://[2606:4700:4700::1111]/stream").unwrap();
+        assert!(!stream_host_reserved(&public));
+    }
 
     /// Regression for the v1.8.0 in-game crash: `tokio::time::timeout` grabs
     /// the timer driver at CONSTRUCTION, and `open_stream` builds it on the

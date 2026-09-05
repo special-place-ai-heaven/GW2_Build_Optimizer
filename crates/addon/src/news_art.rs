@@ -96,6 +96,35 @@ pub(crate) fn reserved_still_host(host: &str) -> bool {
     }
 }
 
+/// URL host text without brackets around IPv6 literals.
+pub(crate) fn normalized_host(url: &reqwest::Url) -> Option<&str> {
+    let host = url.host_str()?;
+    Some(
+        host.strip_prefix('[')
+            .and_then(|h| h.strip_suffix(']'))
+            .unwrap_or(host),
+    )
+}
+
+/// Shared radio stream/logo screen. DNS resolution must run on a worker.
+/// An unresolved hostname is left to the transport's connection error.
+pub(crate) fn url_host_is_reserved(url: &reqwest::Url) -> bool {
+    use std::net::ToSocketAddrs;
+    let Some(host) = normalized_host(url) else {
+        return true;
+    };
+    if reserved_still_host(host) {
+        return true;
+    }
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return false;
+    }
+    match (host, url.port_or_known_default().unwrap_or(443)).to_socket_addrs() {
+        Ok(mut addrs) => addrs.any(|a| ip_is_reserved(a.ip())),
+        Err(_) => false,
+    }
+}
+
 /// Loopback/private/link-local/unspecified/ULA - addresses no community-
 /// submitted URL (news image or radio stream) has any business dialing.
 pub(crate) fn ip_is_reserved(ip: std::net::IpAddr) -> bool {
@@ -104,7 +133,11 @@ pub(crate) fn ip_is_reserved(ip: std::net::IpAddr) -> bool {
             v.is_loopback() || v.is_private() || v.is_link_local() || v.is_unspecified()
         }
         std::net::IpAddr::V6(v) => {
-            v.is_loopback() || v.is_unspecified() || ipv6_unique_local_or_link_local(v)
+            v.to_ipv4_mapped()
+                .is_some_and(|ip| ip_is_reserved(std::net::IpAddr::V4(ip)))
+                || v.is_loopback()
+                || v.is_unspecified()
+                || ipv6_unique_local_or_link_local(v)
         }
     }
 }
@@ -236,8 +269,7 @@ fn downscale(bytes: &[u8], ext: &str, src: (u32, u32)) -> Option<(Vec<u8>, u32, 
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         // `sniff` already decided the format, so set it rather than letting the
         // reader guess: PNG magic can then never be routed to another parser.
-        let mut reader =
-            image::ImageReader::with_format(std::io::Cursor::new(bytes), format);
+        let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), format);
         // `Limits` is #[non_exhaustive] — a struct literal is a hard E0639, and
         // starting from `default()` means any limit image adds later arrives at
         // image's recommended value instead of unlimited. The two dimension
@@ -583,9 +615,13 @@ mod tests {
         ));
         // www.guildjen.com/feed/ 301s to the apex, and the download re-checks
         // the post-redirect URL.
-        assert!(url_ok("https://guildjen.com/wp-content/uploads/2026/08/x.jpg"));
+        assert!(url_ok(
+            "https://guildjen.com/wp-content/uploads/2026/08/x.jpg"
+        ));
         // The official blog's CloudFront distribution.
-        assert!(url_ok("https://d3qqidoz8mm2hm.cloudfront.net/wp-content/x.jpg"));
+        assert!(url_ok(
+            "https://d3qqidoz8mm2hm.cloudfront.net/wp-content/x.jpg"
+        ));
     }
 
     /// Suffix matching must not become "ends with these letters". Each of

@@ -206,6 +206,26 @@ fn lock_empty_state_key(db: Option<&GameDb>, profession_name: &str) -> Option<&'
 
 // ─── Main render function ───
 
+/// Lock only the three supported specialization slots, even for malformed API/cache input.
+fn lock_current_specs(locks: &mut BuildLocks, db: &GameDb, current_specs: &[(u32, Vec<u32>)]) {
+    for (slot, (spec_id, trait_ids)) in current_specs.iter().take(locks.specs.len()).enumerate() {
+        locks.specs[slot] = Some(*spec_id);
+        if let Some(spec) = db.specializations.get(spec_id) {
+            if spec.major_traits.len() == 9 {
+                let mut cols = [None; 3];
+                for &tid in trait_ids {
+                    for (col, selected) in cols.iter_mut().enumerate() {
+                        if spec.major_traits[col * 3..col * 3 + 3].contains(&tid) {
+                            *selected = Some(tid);
+                        }
+                    }
+                }
+                locks.trait_locks.insert(*spec_id, cols);
+            }
+        }
+    }
+}
+
 /// Render the spec & trait lock panel in the left menu.
 /// Returns true if any lock state was modified.
 ///
@@ -328,7 +348,11 @@ pub fn render_lock_panel(
             let draw_list = ui.get_window_draw_list();
 
             // Draw hexagon — radius, outline thickness, and brightness lerp in on hover.
-            let hex_color_base = if spec_locked { locked_color() } else { DIM_COLOR };
+            let hex_color_base = if spec_locked {
+                locked_color()
+            } else {
+                DIM_COLOR
+            };
             let hex_color = brighten(hex_color_base, hex_t, 0.3);
             let hex_radius_anim = hex_radius + 2.0 * hex_t;
             if spec_locked {
@@ -682,23 +706,7 @@ pub fn render_lock_panel(
     let btn_width = (avail_width - 6.0) / 2.0;
     if crate::ui::theme::gold_button_sized(ui, t("btn.lock_all"), [btn_width, 0.0]) {
         // Lock all current build specs and traits
-        for (slot, (spec_id, trait_ids)) in current_specs.iter().enumerate() {
-            locks.specs[slot] = Some(*spec_id);
-            if let Some(spec) = db.specializations.get(spec_id) {
-                if spec.major_traits.len() == 9 {
-                    let mut cols = [None; 3];
-                    for &tid in trait_ids {
-                        // Find which column this trait belongs to
-                        for (col, slot) in cols.iter_mut().enumerate() {
-                            if spec.major_traits[col * 3..col * 3 + 3].contains(&tid) {
-                                *slot = Some(tid);
-                            }
-                        }
-                    }
-                    locks.trait_locks.insert(*spec_id, cols);
-                }
-            }
-        }
+        lock_current_specs(locks, db, current_specs);
         let gear_names = resolved_gear_names(current_build);
         for slot in GearSlot::ALL {
             if let Some(name) = gear_names[slot as usize].as_deref() {
@@ -1066,6 +1074,46 @@ pub fn render_optimized_specs_panel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lock_all_bounds_specializations_and_ignores_unknown_traits() {
+        let mut db = GameDb::empty_for_tests();
+        db.specializations.insert(
+            1,
+            serde_json::from_value(serde_json::json!({
+                "id": 1, "name": "Test", "profession": "Guardian", "elite": false,
+                "icon": "", "background": "", "minor_traits": [],
+                "major_traits": [10, 11, 12, 20, 21, 22, 30, 31, 32]
+            }))
+            .unwrap(),
+        );
+        let mut locks = BuildLocks::default();
+        lock_current_specs(
+            &mut locks,
+            &db,
+            &[
+                (1, vec![11, 22, 30, 999]),
+                (2, vec![]),
+                (3, vec![]),
+                (4, vec![]),
+            ],
+        );
+        assert_eq!(locks.specs, [Some(1), Some(2), Some(3)]);
+        assert_eq!(
+            locks.trait_locks.get(&1),
+            Some(&[Some(11), Some(22), Some(30)])
+        );
+        assert!(!locks.trait_locks.contains_key(&4));
+        db.specializations
+            .get_mut(&1)
+            .unwrap()
+            .major_traits
+            .truncate(8);
+        let mut malformed = BuildLocks::default();
+        lock_current_specs(&mut malformed, &db, &[(1, vec![11, 22, 30])]);
+        assert_eq!(malformed.specs, [Some(1), None, None]);
+        assert!(malformed.trait_locks.is_empty());
+    }
 
     #[test]
     fn tick_hover_starts_state_at_zero_when_first_hovered() {
