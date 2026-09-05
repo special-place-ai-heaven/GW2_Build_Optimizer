@@ -207,6 +207,23 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         &chat_locks,
                         &scenario,
                     );
+                    // Whether the model was handed a worked answer, and what
+                    // that answer scored, is the first thing worth knowing when
+                    // a plate is refused: a build that lands far below a
+                    // reference it was shown is a different failure from one
+                    // that never saw a reference at all.
+                    nexus::log::log(
+                        nexus::log::LogLevel::Info,
+                        "GW2BuildOpt",
+                        match reference.as_ref() {
+                            Some((line, verdict)) => {
+                                format!("Choya reference for {profession}: {line} | {verdict}")
+                            }
+                            None => format!(
+                                "Choya has no deterministic reference for {profession}                                  (pipeline produced none) - composing unaided"
+                            ),
+                        },
+                    );
                     if let Some((line, verdict)) = reference.as_ref() {
                         kitchen.push_str(
                             "\nWorked answer from the deterministic optimizer for \
