@@ -88,3 +88,15 @@ Committed as 1f85f27 by the other agent's session partner after that session hit
 - W008: `gear_diff::parse_suggestion_skills` is the only parser. It understands `Utils:` (comma-split) and `Utility:`. Rotation name lookup, chat-code skill selection, and pet rows call it. Did not type `BuildSuggestion` (lives on their dirty `comparison.rs`). Did not touch `fill_holes_from_loadout`.
 - Green: 6 `gear_diff` tests including `test_parse_skills_utils_comma_list_and_unlabeled`.
 - Did not bump Cargo.toml.
+
+## Sprint 14 — W004 log config and chat-history save failures
+
+- W004: toggle/persist window config saves and `save_history` log through `log_disk_error` instead of `let _ =`.
+- Green: `toggle_persist_reset_do_not_save_under_state`, `kitchen_history_roundtrips_on_disk`, `save_history_logs_when_directory_is_missing`.
+- Isolated `chat_bar.rs` from their rustfmt leftovers. Did not bump Cargo.toml.
+
+## Sprint 15 — W082 ranch-notes spawn fallback
+
+- W082: if `ranch-notes` also fails to spawn, `save_note_now` writes the dirty notes snapshot on the click frame.
+- Green: `ranch_load_click_handler_spawns_worker_instead_of_inline_cpu`, `ranch_load_click_handler_does_not_persist_notes_on_click_frame`.
+- Did not bump Cargo.toml.

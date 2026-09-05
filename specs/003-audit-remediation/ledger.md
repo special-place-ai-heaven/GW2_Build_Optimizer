@@ -30,7 +30,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 16 | [W008](#w008) | S2/confirmed | US2 | verified-scoped | `crates/addon/src/ui/main_view/optimization.rs:714` |
 | 17 | [W004](#w004) | S2/confirmed | US2 | verified-scoped | `crates/addon/src/state.rs:898` |
 | 18 | [W009](#w009) | S2/confirmed | US2 | planned | `crates/addon/src/ui/main_view/tabs/settings.rs:60` |
-| 19 | [W082](#w082) | S3/confirmed | US2 | planned | `crates/addon/src/ui/main_view/tabs/saveload.rs:509` |
+| 19 | [W082](#w082) | S3/confirmed | US2 | verified-scoped | `crates/addon/src/ui/main_view/tabs/saveload.rs:509` |
 | 20 | [W182](#w182) | S3/confirmed | US2 | planned | `crates/optimizer/src/synergy_pipeline.rs:859` |
 | 21 | [W225](#w225) | S4/confirmed | US2 | planned | `crates/optimizer/src/llm/openai.rs:325` |
 | 22 | [W157](#w157) | S3/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:1109` |
@@ -537,7 +537,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W082
 
-- Task: T021 [US2]. Status: **planned**.
+- Task: T021 [US2]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/ui/main_view/tabs/saveload.rs:509`.
 - Dependencies: story entry gate.
 
@@ -545,7 +545,7 @@ Claim: When the ranch-load thread cannot be spawned, `load_named` falls back to 
 
 Remediation decision: Check the second spawn's result and, on `false`, either write the snapshot synchronously (it is a tiny JSON) or set `state.main.error` to say the notes were not saved; alternatively revert the in-memory notes mutation.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `ranch-notes` spawn result is checked. On `false`, `save_note_now` writes the snapshot on this frame (tiny JSON; does not take STATE). Happy-path Load still does not `save_overwrite` inline. Both ranch-load pin tests passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
