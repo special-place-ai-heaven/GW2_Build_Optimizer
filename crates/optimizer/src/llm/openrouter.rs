@@ -19,8 +19,8 @@ use serde_json::Value;
 
 use super::body::{json_capped, read_body_capped};
 use super::openai_compat::{
-    http_client, send_chat, Message, ProviderCore, CHAT_REQUEST_TIMEOUT, MAX_COMPLETION_TOKENS,
-    METADATA_TIMEOUT, REASONING_TOKEN_CAP,
+    http_client, is_function_call_failure, send_chat, Message, ProviderCore, CHAT_REQUEST_TIMEOUT,
+    MAX_COMPLETION_TOKENS, METADATA_TIMEOUT, REASONING_TOKEN_CAP,
 };
 use super::rate::{persist_usage, PersistedUsage, RateTracker};
 use super::trim::trim_openai_messages;
@@ -297,8 +297,6 @@ impl LlmClient for OpenRouterClient {
             tool_call_id: None,
         }];
 
-        let mut last_text: Option<String> = None;
-
         for turn in 0..max_turns {
             // Between turns as well as inside the stream: a tool loop is up to
             // max_turns whole requests, so checking only inside one of them
@@ -307,22 +305,24 @@ impl LlmClient for OpenRouterClient {
                 return Err(LlmError::Unavailable(super::cancel::CANCELLED.to_string()));
             }
             trim_openai_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
-            let response = self.send_chat(&messages, Some(tools))?;
-
-            // Capture text content
-            if let Some(ref text) = response.content {
-                if !text.is_empty() {
-                    last_text = Some(text.clone());
-                }
-            }
+            let response = match self.send_chat(&messages, Some(tools)) {
+                Ok(response) => response,
+                // The model cannot drive our tools at all. Losing the whole
+                // conversation over that is worse than answering without them.
+                Err(e) if is_function_call_failure(&e) => self.send_chat(&messages, None)?,
+                Err(e) => return Err(e),
+            };
 
             // Check for tool calls
             let tool_calls = match response.tool_calls {
                 Some(ref calls) if !calls.is_empty() => calls.clone(),
                 _ => {
-                    // No tool calls — return text
-                    return last_text
-                        .or(response.content)
+                    // Done. Only THIS turn's text is the answer: text carried
+                    // by an earlier turn arrived alongside that turn's tool
+                    // calls, which means the model was still working.
+                    return response
+                        .content
+                        .filter(|text| !text.is_empty())
                         .ok_or_else(|| LlmError::Parse("No response text from OpenRouter".into()));
                 }
             };
@@ -355,13 +355,23 @@ impl LlmClient for OpenRouterClient {
             }
         }
 
-        // Max turns exceeded
-        last_text.ok_or_else(|| {
-            LlmError::Parse(format!(
-                "Tool loop exceeded {} turns with no text response",
-                max_turns
-            ))
-        })
+        // Turns exhausted while the model was still calling tools. Every tool
+        // result is already in `messages`, so one final request with the tools
+        // withheld makes it answer from what it gathered. Returning the last
+        // text seen instead is how a model's turn-1 scratch JSON reached the
+        // chat bubble verbatim (glm-5.3-flash, measured 2026-09-05).
+        if super::cancel::is_cancelled() {
+            return Err(LlmError::Unavailable(super::cancel::CANCELLED.to_string()));
+        }
+        trim_openai_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
+        self.send_chat(&messages, None)?
+            .content
+            .filter(|text| !text.is_empty())
+            .ok_or_else(|| {
+                LlmError::Parse(format!(
+                    "Tool loop exceeded {max_turns} turns with no answer"
+                ))
+            })
     }
 
     fn list_models(&self) -> Result<Vec<super::ModelInfo>, LlmError> {

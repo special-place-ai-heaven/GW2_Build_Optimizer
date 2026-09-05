@@ -2,6 +2,23 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.11.27 - 2026-09-05
+
+### Choya
+
+- Choya's build now has to beat the one you are already wearing before you are shown it. The chat path never ran the viability gates or the always-better check that the Improve button has always run, so any structurally complete answer was served as "Choya's pick". Seen in-game 2026-09-05 (Guardian, WvW Roam, Bruiser): the plate lost 207 Power, 280 Ferocity, 311 Condition Damage and 157 Healing Power to gain 81 Vitality, and carried no condition cleanse at all in a mode whose own gate demands it. A plate that fails is now sent back to Choya once with the exact check it failed; if the second one also loses, Choya says so and your build stands.
+- Choya no longer answers with its own half-finished notes. When a model asked for tools and ran out of turns, the chat showed whatever it had said mid-thought, which is how a raw `{"explanation":...,"specializations":[]}` blob reached the bubble. The tool loop now makes one final request with the tools withheld, so the model answers from what it gathered.
+- Choya talks to Google models again. When a character was loaded, the chat asked the model for a build while sending it no tools at all, and the prompt in the same breath told it "an equipped loadout is your STARTING POINT, not a licence to skip the tools - you must still call get_spec_traits". A model that obeyed had nothing to call. Every Google model tried on 2026-09-05 failed on this: Gemini 3.8 Flash and Gemini Flash Latest answered MALFORMED_FUNCTION_CALL, Gemini 3.7 Flash returned a call and no text. The contradiction was introduced earlier the same day in 1.11.10-1.11.24, which removed the old "do not call tools" instruction from the prompt without changing the code that withholds them. The tools are now sent on both paths.
+- A model that genuinely cannot use the tools no longer kills the conversation: that case retries once with the tools dropped instead of failing.
+- Provider errors name their cause. OpenRouter reports the upstream reason in a field the addon discarded, so a failed Gemini call read only "Empty response (finish_reason: error)". It now reads "error/MALFORMED_FUNCTION_CALL".
+- Choya sounds like a choya. The persona follows the wiki: grumbling, needled, famously aggressive, keeps the village peaceful by kicking troublemakers off the mesa, likes shiny things, dancing and coconuts. One flourish per reply, never in the middle of the reasoning. The radio DJ voice gained the same lore and a "needled" mood.
+
+## 1.11.26 - 2026-09-05
+
+### Optimize
+
+- A WvW build is no longer judged non-viable because its heal or elite is still on cooldown five seconds after the fight. The Sustain gate's "repeatable" check demanded that every skill in the best protected window be ready again within 5s of a 20s fight, which every heal (20-30s) and every elite (60-180s) in the game fails, so for Support, Condi, Commander and Troll roles the search spent its whole budget looking for a viable build that could not exist. Seen in-game 2026-09-05 on 1.11.25: a Roam/Support Scourge finished the exchange at 87% health and was reported NON-VIABLE with "repeatable=false". Repeatable now means the player leaves the exchange alive, with resources back, and either the target down, a positive sustain margin, or half the bar left. Cooldowns are still enforced inside the fight. The same run replayed: the seed is viable at once, the search runs 53 rounds in 15s instead of stalling, and the result is viable.
+
 ## 1.11.25 - 2026-09-05
 
 ### Optimize

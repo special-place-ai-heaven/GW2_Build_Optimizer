@@ -661,8 +661,6 @@ impl LlmClient for AnthropicClient {
             content: AnthropicContent::Text(prompt.to_string()),
         }];
 
-        let mut last_text: Option<String> = None;
-
         for turn in 0..max_turns {
             // Between turns as well as inside the stream: a tool loop is up to
             // max_turns whole requests, so checking only inside one of them
@@ -676,16 +674,14 @@ impl LlmClient for AnthropicClient {
 
             let blocks = response.content.unwrap_or_default();
 
-            // Capture text
-            if let Some(text) = extract_text(&blocks) {
-                last_text = Some(text);
-            }
-
             // Check for tool use
             let tool_uses = extract_tool_uses(&blocks);
             if tool_uses.is_empty() {
-                // No tool calls — return text
-                return last_text
+                // Done. Only THIS turn's text is the answer: text carried by an
+                // earlier turn arrived alongside that turn's tool calls, which
+                // means the model was still working.
+                return extract_text(&blocks)
+                    .filter(|text| !text.is_empty())
                     .ok_or_else(|| LlmError::Parse("No response text from Anthropic".into()));
             }
 
@@ -718,13 +714,22 @@ impl LlmClient for AnthropicClient {
             });
         }
 
-        // Max turns exceeded
-        last_text.ok_or_else(|| {
-            LlmError::Parse(format!(
-                "Tool loop exceeded {} turns with no text response",
-                max_turns
-            ))
-        })
+        // Turns exhausted while the model was still calling tools. Every tool
+        // result is already in `messages`, so one final request with the tools
+        // withheld makes it answer from what it gathered, instead of serving
+        // whatever it happened to say mid-thought.
+        if super::cancel::is_cancelled() {
+            return Err(LlmError::Unavailable(CANCELLED.to_string()));
+        }
+        trim_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
+        let closing = self.send_messages(&messages, None, None, ANTHROPIC_MAX_TOKENS)?;
+        extract_text(&closing.content.unwrap_or_default())
+            .filter(|text| !text.is_empty())
+            .ok_or_else(|| {
+                LlmError::Parse(format!(
+                    "Tool loop exceeded {max_turns} turns with no answer"
+                ))
+            })
     }
 
     fn list_models(&self) -> Result<Vec<super::ModelInfo>, LlmError> {

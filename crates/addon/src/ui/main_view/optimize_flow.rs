@@ -1037,7 +1037,7 @@ fn apply_improve_baseline_gate(
 
 /// Lexicographic strictly-greater comparison of referee ranks. Equal ranks
 /// mean the optimizer matched but did not beat the current gear.
-fn beats_baseline(result_rank: &[i64; 9], baseline_rank: &[i64; 9]) -> bool {
+pub(super) fn beats_baseline(result_rank: &[i64; 9], baseline_rank: &[i64; 9]) -> bool {
     result_rank > baseline_rank
 }
 
@@ -1060,7 +1060,7 @@ fn improve_quality_reason(result_intent: f64, baseline_intent: f64) -> String {
 /// Weapon sets follow `lock_panel::resolved_gear_names` indexing (set 0 →
 /// Set 1 slots, the rest → Set 2); pieces use the shared `piece_gear_slot`
 /// mapping. PvP has no gear pieces, so its amulet surfaces via `stat_prefix`.
-fn baseline_plate_from_loadout(
+pub(super) fn baseline_plate_from_loadout(
     loadout: &gw2_core::types::ResolvedBuild,
 ) -> gw2_optimizer::prompts::GeminiBuildResponse {
     let set_label = |index: usize| if index == 0 { 1 } else { 2 };
