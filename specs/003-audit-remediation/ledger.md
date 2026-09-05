@@ -22,7 +22,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 8 | [W035](#w035) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/simulator.rs:220` |
 | 9 | [W019](#w019) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/objective_profiles.rs:86` |
 | 10 | [W044](#w044) | S2/confirmed | US2 | verified-scoped | `data/normalized_effects/2026-01-13/pve.json:2` |
-| 11 | [W013](#w013) | S2/confirmed | US2 | planned | `crates/optimizer/src/balance.rs:11` |
+| 11 | [W013](#w013) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/balance.rs:11` |
 | 12 | [W015](#w015) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/manifests.rs:43` |
 | 13 | [W016](#w016) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/mod.rs:137` |
 | 14 | [W039](#w039) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:1389` |
@@ -425,7 +425,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W013
 
-- Task: T013 [US2]. Status: **planned**.
+- Task: T013 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/balance.rs:11`.
 - Dependencies: W044.
 
@@ -433,9 +433,9 @@ Claim: `SNAPSHOT_PATCH_ID` is a hand-edited date literal and the ONLY writer of 
 
 Remediation decision: Derive the active patch from manifests, retain explicit historical lookup, and make unsupported live-build/patch mismatch observable. Do not delete historical override data.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `SNAPSHOT_PATCH_ID` is gone. `BalanceContext::new` uses `latest_manifest().patch_id`. `for_patch` keeps historical ids (`2026-01-13` stays known). Unknown ids report `patch_is_known() == false`. `live_build_mismatch` surfaces `check_staleness` (W015 still wires it to the addon). On-disk 2026-01-13 override files were not deleted.
 
-Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
+Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers. W015 delivers the warning to the player.
 
 ### W015
 
