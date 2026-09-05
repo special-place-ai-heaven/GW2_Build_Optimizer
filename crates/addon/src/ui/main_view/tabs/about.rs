@@ -81,7 +81,15 @@ fn render_about_hero(ui: &Ui, state: &AddonState) {
         ),
     );
 
-    if let Some(stale) = state.main.manifest_staleness.as_deref() {
+    if let Some(reason) = state
+        .main
+        .data_state
+        .as_ref()
+        .and_then(|s| s.optimize_block_reason())
+    {
+        ui.set_cursor_screen_pos([text_x, ty0 + lh * 4.0 + 20.0]);
+        ui.text_colored(theme::ERR, reason);
+    } else if let Some(stale) = state.main.manifest_staleness.as_deref() {
         ui.set_cursor_screen_pos([text_x, ty0 + lh * 4.0 + 20.0]);
         ui.text_colored(theme::WARN, stale);
     }
