@@ -313,7 +313,7 @@ fn scrape_snowcrows(
         };
         last_html = Some(html.clone());
         // Build links look like: href="/builds/raids/guardian/power-dragonhunter-..."
-        let links = extract_build_links(&html, "/builds/raids/", 50);
+        let links = extract_build_links(&html, "/builds/raids/", usize::MAX);
         for link in links {
             // Skip profession-index links (no build slug after the profession name)
             let parts: Vec<&str> = link.trim_matches('/').split('/').collect();
@@ -348,11 +348,15 @@ fn scrape_snowcrows(
     }
 
     let mut builds = Vec::new();
-    let total = all_links.len().min(45);
+    let total = all_links.len();
     on_progress("snowcrows", &format!("0/{}", total));
-    // Cap at 45 builds total (5 per profession on average across 9 professions)
-    for (i, url) in all_links.into_iter().take(45).enumerate() {
+    // Every build the index lists. `all_links` is accumulated one profession
+    // page at a time, so this already walks a class at a time.
+    for (i, url) in all_links.into_iter().enumerate() {
         if should_cancel() {
+            return Ok((builds, true));
+        }
+        if i > 0 && !pace(should_cancel) {
             return Ok((builds, true));
         }
         if let Ok(b) = scrape_snowcrows_build(client, &url, today) {
@@ -499,7 +503,8 @@ fn scrape_hardstuck(
         last_html = Some(html.clone());
         // Build links: href="/gw2/builds/{profession}/{slug}/" with a non-empty slug
         // slug can be numeric (24929) or text (blood-harbinger)
-        let links = extract_build_links(&html, &format!("/gw2/builds/{}/", profession), 40);
+        let links =
+            extract_build_links(&html, &format!("/gw2/builds/{}/", profession), usize::MAX);
         for link in links {
             let parts: Vec<&str> = link.trim_matches('/').split('/').collect();
             // /gw2/builds/{profession}/{slug} = exactly 4 segments
@@ -538,10 +543,14 @@ fn scrape_hardstuck(
     }
 
     let mut builds = Vec::new();
-    let total = all_links.len().min(45);
+    let total = all_links.len();
     on_progress("hardstuck", &format!("0/{}", total));
-    for (i, url) in all_links.into_iter().take(45).enumerate() {
+    // Every build, one profession page at a time.
+    for (i, url) in all_links.into_iter().enumerate() {
         if should_cancel() {
+            return Ok((builds, true));
+        }
+        if i > 0 && !pace(should_cancel) {
             return Ok((builds, true));
         }
         if let Ok(b) = scrape_hardstuck_build(client, &url, today) {
@@ -633,6 +642,12 @@ fn scrape_guildjen(
     // pair (`/wvw-builds/`, `/pvp-builds/`) silently went stale and returned
     // nothing. The known three are only the fallback for a hub that will not
     // load.
+    // Before the first request, not after: a sync cancelled at the door
+    // should touch the network zero times, and fetch_html now retries with
+    // backoff, so a missed check here costs seconds of dead waiting.
+    if should_cancel() {
+        return Ok((Vec::new(), true));
+    }
     on_progress("guildjen", "listing categories…");
     let index_urls = match fetch_html(client, GUILDJEN_SITEMAP) {
         Ok(sitemap) => {
@@ -671,37 +686,43 @@ fn scrape_guildjen(
         // categories — the WvW "Power Reaper Roaming Build" appears on the PvP
         // page — so scanning the whole document would file builds under the
         // wrong game mode.
-        // Spread the fetch budget across professions instead of spending it
-        // on the first two. The tables are grouped by profession, so taking
-        // the top 15 of a 99-row WvW page fetched Elementalist and part of
-        // Necromancer and left the other seven professions with no reference
-        // at all. Measured 2026-09-05: the store held Guardian, Mesmer,
-        // Revenant, Thief and Warrior, and a Necromancer in WvW was told "No
-        // benchmark data available". The slug names the profession, so this
-        // costs no extra requests - it only changes which 15 are asked for.
-        let links = spread_by_profession(extract_table_build_links(&html, 200), 15);
-        let cap = links.len();
+        // Every build the table lists, a class at a time. Taking the top 15
+        // of a 99-row page bought Elementalist and part of Necromancer and
+        // left the other seven professions with no reference at all -
+        // measured 2026-09-05, where a Necromancer in WvW was told "No
+        // benchmark data available" while the store held Guardian, Mesmer,
+        // Revenant, Thief and Warrior.
+        let by_class = group_by_profession(extract_table_build_links(&html, usize::MAX));
+        let cap: usize = by_class.iter().map(|(_, l)| l.len()).sum();
+        let mut i = 0usize;
 
-        for (i, link) in links.into_iter().enumerate() {
-            if should_cancel() {
-                return Ok((builds, true));
+        for (class, class_links) in by_class {
+            for link in class_links {
+                if should_cancel() {
+                    return Ok((builds, true));
+                }
+                if i > 0 && !pace(should_cancel) {
+                    return Ok((builds, true));
+                }
+                // Pin to the real host: an index page (compromised, or
+                // MITM'd if TLS were ever bypassed) must not steer us to
+                // arbitrary absolute URLs — only relative paths on
+                // guildjen.com may be followed.
+                let url = if link.starts_with("https://guildjen.com/") {
+                    link
+                } else if link.starts_with("http") {
+                    continue;
+                } else {
+                    format!("https://guildjen.com{}", link)
+                };
+                saw_link = true;
+                if let Ok(mut b) = scrape_guildjen_build(client, &url, today) {
+                    b.mode = mode.to_string();
+                    builds.push(b);
+                }
+                i += 1;
+                on_progress("guildjen", &format!("{mode} {class} {i}/{cap}"));
             }
-            // Pin to the real host: an index page (compromised, or MITM'd if
-            // TLS were ever bypassed) must not steer us to arbitrary absolute
-            // URLs — only relative paths on guildjen.com may be followed.
-            let url = if link.starts_with("https://guildjen.com/") {
-                link
-            } else if link.starts_with("http") {
-                continue;
-            } else {
-                format!("https://guildjen.com{}", link)
-            };
-            saw_link = true;
-            if let Ok(mut b) = scrape_guildjen_build(client, &url, today) {
-                b.mode = mode.to_string();
-                builds.push(b);
-            }
-            on_progress("guildjen", &format!("{} {}/{}", mode, i + 1, cap));
         }
     }
 
@@ -767,26 +788,112 @@ fn scrape_guildjen_build(
 
 // ─── HTML extraction helpers ──────────────────────────────────────────────────
 
+/// Gap between build pages, in milliseconds, picked fresh each time.
+///
+/// One steady trickle rather than bursts with rests: a burst-and-pause shape
+/// is itself a pattern, and a request every second or two is both gentler on
+/// the site and less distinctive than five-at-once repeated eighty times.
+const PACE_MS: (u64, u64) = (800, 2_200);
+
+/// Wait before the next build page, and report whether to keep going.
+///
+/// A full sync is several hundred pages. Fetched back to back that is
+/// unmistakably a script, and GuildJen already answers traffic it dislikes
+/// with a block page - see [`looks_like_blocked_page`], which exists because
+/// that happened.
+///
+/// The gap is jittered because an exactly regular cadence is itself the
+/// signature: 1.000s four hundred times over is more obviously automated than
+/// no delay at all. Jitter comes from the clock rather than a `rand`
+/// dependency - this needs irregularity, not randomness, and nothing here is
+/// security sensitive.
+///
+/// Sleeps in slices so Cancel still lands promptly. `false` means cancelled.
+fn pace(should_cancel: &dyn Fn() -> bool) -> bool {
+    let (lo, hi) = PACE_MS;
+    let jitter = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::from(d.subsec_nanos()))
+        .unwrap_or(0);
+    let mut left = std::time::Duration::from_millis(lo + jitter % (hi - lo));
+    let slice = std::time::Duration::from_millis(100);
+    while !left.is_zero() {
+        if should_cancel() {
+            return false;
+        }
+        let step = slice.min(left);
+        std::thread::sleep(step);
+        left -= step;
+    }
+    true
+}
+
+/// Statuses worth asking again for. 429 is the site saying "slower", not
+/// "no"; 5xx and 408 are the upstream having a moment. 403 and 404 are
+/// answers, and asking twice will not change them.
+fn retryable_status(status: u16) -> bool {
+    matches!(status, 408 | 425 | 429 | 500 | 502 | 503 | 504)
+}
+
+/// Attempts per page, including the first.
+const FETCH_ATTEMPTS: u32 = 3;
+
+/// One page, retried through the failures a long sync actually hits.
+///
+/// A full sync is several hundred requests spread over many minutes. At that
+/// length a dropped connection or a single 429 is ordinary, and every caller
+/// here discards a failure silently (`if let Ok(b) = ...`), so one blip used
+/// to cost a build with nothing said about it. Backoff grows and is jittered,
+/// for the same reason the pacing is.
 fn fetch_html(client: &reqwest::blocking::Client, url: &str) -> Result<String, String> {
+    let mut last = String::new();
+    for attempt in 0..FETCH_ATTEMPTS {
+        if attempt > 0 {
+            let jitter = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| u64::from(d.subsec_nanos()) % 1_500)
+                .unwrap_or(0);
+            let base = 2_000 * u64::from(attempt);
+            std::thread::sleep(std::time::Duration::from_millis(base + jitter));
+        }
+        match fetch_html_once(client, url) {
+            Ok(html) => return Ok(html),
+            Err((retryable, message)) => {
+                last = message;
+                if !retryable {
+                    break;
+                }
+            }
+        }
+    }
+    Err(last)
+}
+
+/// `Err(retryable, message)` so [`fetch_html`] can tell "ask again" from "no".
+fn fetch_html_once(
+    client: &reqwest::blocking::Client,
+    url: &str,
+) -> Result<String, (bool, String)> {
     let resp = client
         .get(url)
         .send()
-        .map_err(|e| format!("HTTP error fetching {}: {}", url, e))?;
+        // A transport failure is a dropped connection, a DNS hiccup or a
+        // timeout - all worth one more try.
+        .map_err(|e| (true, format!("HTTP error fetching {}: {}", url, e)))?;
 
     let status = resp.status();
     if !status.is_success() {
-        return Err(format!(
-            "HTTP {} fetching {} (expected 2xx)",
-            status.as_u16(),
-            url
+        return Err((
+            retryable_status(status.as_u16()),
+            format!("HTTP {} fetching {} (expected 2xx)", status.as_u16(), url),
         ));
     }
 
     // Cap the body: a hostile endpoint must not stream unbounded bytes into
     // the game process. Build pages are well under 1 MiB.
     let bytes = gw2_api::transport::read_body_capped(resp, 2 * 1024 * 1024)
-        .map_err(|e| format!("error reading {}: {}", url, e))?;
-    String::from_utf8(bytes).map_err(|_| format!("UTF-8 error reading {}", url))
+        .map_err(|e| (true, format!("error reading {}: {}", url, e)))?;
+    String::from_utf8(bytes).map_err(|_| (false, format!("UTF-8 error reading {}", url)))
 }
 
 /// Heuristic: does this look like a network/security interstitial (block page,
@@ -945,13 +1052,15 @@ fn extract_table_build_links(html: &str, max: usize) -> Vec<String> {
     links
 }
 
-/// Round-robin `links` by the profession named in each slug, capped at `max`.
+/// Group `links` by the profession named in each slug, first-seen order.
+///
+/// The sync walks a class at a time, so progress names the class it is on and
+/// a cancel leaves whole classes done rather than a slice of each.
 ///
 /// Links naming no profession are dropped here rather than fetched and
-/// rejected later: `scrape_guildjen_build` refuses them anyway, and spending
-/// one of a small budget on a page that cannot be filed is the waste this
-/// function exists to avoid.
-fn spread_by_profession(links: Vec<String>, max: usize) -> Vec<String> {
+/// rejected later: `scrape_guildjen_build` refuses them anyway, so fetching
+/// one is a request spent on nothing.
+fn group_by_profession(links: Vec<String>) -> Vec<(String, Vec<String>)> {
     let mut buckets: Vec<(String, Vec<String>)> = Vec::new();
     for link in links {
         let slug = link.trim_end_matches('/').rsplit('/').next().unwrap_or("");
@@ -963,24 +1072,7 @@ fn spread_by_profession(links: Vec<String>, max: usize) -> Vec<String> {
             None => buckets.push((profession, vec![link])),
         }
     }
-    let mut out = Vec::new();
-    for round in 0.. {
-        let mut added = false;
-        for (_, in_bucket) in &buckets {
-            let Some(link) = in_bucket.get(round) else {
-                continue;
-            };
-            out.push(link.clone());
-            added = true;
-            if out.len() >= max {
-                return out;
-            }
-        }
-        if !added {
-            break;
-        }
-    }
-    out
+    buckets
 }
 
 /// Whether an href points at a single GuildJen build page.
@@ -1455,8 +1547,23 @@ fn redirect_stays_on_request_host(request_host: Option<&str>, next_host: Option<
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 fn build_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    // A request with no Accept and no Accept-Language is not what a reader
+    // looks like, and filters notice. The User-Agent still says plainly who
+    // we are: the point is to be a polite guest, not a disguised one.
+    headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_static(
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        ),
+    );
+    headers.insert(
+        reqwest::header::ACCEPT_LANGUAGE,
+        reqwest::header::HeaderValue::from_static("en-US,en;q=0.9"),
+    );
     reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
+        .default_headers(headers)
         .timeout(std::time::Duration::from_secs(15))
         // Origin pins at enqueue are end-to-end only if redirects cannot hop hosts.
         .redirect(reqwest::redirect::Policy::custom(same_host_redirect))
@@ -1569,40 +1676,39 @@ mod tests {
         );
     }
 
-    /// A budget spent top-down on a profession-grouped table buys one or two
-    /// professions and starves the rest. Round-robin buys breadth for the
-    /// same number of requests.
+    /// The sync walks a class at a time, so the links arrive grouped. A slug
+    /// that names no profession is dropped here rather than fetched and
+    /// refused, which is a request saved.
     #[test]
-    fn spread_by_profession_covers_every_profession_before_repeating() {
+    fn group_by_profession_buckets_every_class_and_drops_the_unfilable() {
         let link = |slug: &str| format!("/{slug}-build/");
-        let links = vec![
+        let grouped = group_by_profession(vec![
             link("power-reaper-roaming"),
-            link("condition-reaper-roaming"),
-            link("celestial-harbinger-roaming"),
-            link("power-scourge-cloud"),
             link("celestial-catalyst-roaming"),
-            link("power-hammer-catalyst-havoc"),
-            link("celestial-tempest-roaming"),
+            link("condition-reaper-roaming"),
             link("power-scrapper-roaming"),
+            link("celestial-tempest-roaming"),
             link("not-a-profession-at-all"),
-        ];
-        // Necromancer has four, Elementalist three, Engineer one.
-        let picked = spread_by_profession(links.clone(), 3);
-        assert_eq!(
-            picked,
-            vec![
-                link("power-reaper-roaming"),
-                link("celestial-catalyst-roaming"),
-                link("power-scrapper-roaming"),
-            ],
-            "one from each profession before any profession gets a second"
-        );
+        ]);
 
-        // The whole list, minus the slug that names no profession: it would
-        // be refused after the fetch, so it never costs a request.
-        let all = spread_by_profession(links, 99);
-        assert_eq!(all.len(), 8);
-        assert!(!all.iter().any(|l| l.contains("not-a-profession")));
+        let classes: Vec<&str> = grouped.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(
+            classes,
+            vec!["Necromancer", "Elementalist", "Engineer"],
+            "first-seen order, one bucket per class"
+        );
+        assert_eq!(
+            grouped[0].1,
+            vec![link("power-reaper-roaming"), link("condition-reaper-roaming")],
+            "a class keeps every build it has, in page order"
+        );
+        assert_eq!(grouped[1].1.len(), 2);
+        assert_eq!(grouped[2].1.len(), 1);
+        assert_eq!(
+            grouped.iter().map(|(_, l)| l.len()).sum::<usize>(),
+            5,
+            "the slug naming no profession is gone"
+        );
     }
 
     /// The category list is read off the sitemap so a category added or
@@ -2132,29 +2238,24 @@ mod tests {
                 unfiled
             );
 
-            // What the sync actually asks for, and how many professions that
-            // covers. Top-down would spend the whole budget on one or two.
-            let picked = spread_by_profession(links.clone(), 15);
-            let mut covered: Vec<String> = Vec::new();
-            for href in &picked {
-                let slug = href.trim_end_matches('/').rsplit('/').next().unwrap_or("");
-                if let Some((prof, _)) = profession_from_slug(slug) {
-                    if !covered.contains(&prof) {
-                        covered.push(prof);
-                    }
-                }
-            }
+            // What the sync asks for, and the classes it covers. Every row
+            // is fetched now, so this is the whole table.
+            let by_class = group_by_profession(links.clone());
+            let covered: Vec<String> = by_class
+                .iter()
+                .map(|(c, l)| format!("{c} x{}", l.len()))
+                .collect();
+            let fetched: usize = by_class.iter().map(|(_, l)| l.len()).sum();
             println!(
-                "-- {} fetched, covering {} professions: {} --",
-                picked.len(),
-                covered.len(),
+                "-- {fetched} fetched across {} classes: {} --",
+                by_class.len(),
                 covered.join(", ")
             );
+            assert_eq!(fetched, links.len(), "every listed build is fetched");
             assert!(
-                covered.len() >= 8,
-                "a 15-build budget must reach nearly every profession, got {}: {:?}",
-                covered.len(),
-                covered
+                by_class.len() >= 8,
+                "a full page must cover nearly every class, got {}: {covered:?}",
+                by_class.len()
             );
             checked += 1;
         }
