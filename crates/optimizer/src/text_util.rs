@@ -21,10 +21,7 @@ fn sentence_end(s: &str, from: usize) -> usize {
     while let Some(rel) = s[at..].find('.') {
         let dot = at + rel;
         let head = &s[..dot];
-        if ABBREVIATIONS
-            .iter()
-            .any(|abbr| head.ends_with(abbr) && !head.ends_with(&format!("{abbr}{abbr}")))
-        {
+        if ABBREVIATIONS.iter().any(|abbr| head.ends_with(abbr)) {
             at = dot + 1;
             continue;
         }
