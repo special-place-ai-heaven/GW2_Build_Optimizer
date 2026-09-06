@@ -96,6 +96,20 @@ const RESIDUAL: f64 = 0.40;
 /// burst: uncleansed stacks then overlap the new ones and the pressure
 /// compounds, which is the thing that makes cleansing worth a utility slot.
 const CONDITION_DURATION_MS: u32 = 10_000;
+
+/// Chilled: skills recharge at 34% of the normal rate.
+///
+/// The enemy's answer to Alacrity, and the reason a condition that deals no
+/// damage at all can still be the one that kills you.
+const CHILLED_RECHARGE_PERCENT: u32 = 34;
+
+/// How long the opener's Chill sits on you.
+///
+/// Shorter than [`CONDITION_DURATION_MS`]: a damaging condition ticks for as
+/// long as it lasts, but Chill only has to cover the recovery window to do its
+/// job, and a chill that outlasted the lull would mean the heal never comes
+/// back at all rather than comes back late.
+const CHILL_DURATION_MS: u32 = 4_000;
 pub const TARGET_PROTECTED_WINDOW_MS: u32 = 5_000;
 
 /// Wiki Barrier: disappears 5s after applied; WvW cap is 25% of max health.
@@ -283,6 +297,17 @@ impl WvwProfile {
             events.push(EnemyEvent {
                 at_ms: cycle + 2_600,
                 kind: EnemyEventKind::BoonStrip { count: 1 },
+            });
+            // Chill goes on before the peak, so the recovery window after it
+            // is spent waiting rather than healing. It deals no damage; it
+            // costs you the answer to the damage.
+            events.push(EnemyEvent {
+                at_ms: cycle + 2_800,
+                kind: EnemyEventKind::Condition {
+                    condition: "Chilled".into(),
+                    stacks: 1,
+                    duration_ms: CHILL_DURATION_MS,
+                },
             });
             events.push(EnemyEvent {
                 at_ms: cycle + 3_050,
@@ -648,13 +673,36 @@ impl<'a> Timeline<'a> {
             }
 
             self.now_ms = self.now_ms.saturating_add(TIMELINE_TICK_MS);
-            self.tick_alacrity_recharge();
+            self.tick_recharge_rate();
         }
     }
 
-    /// Dummy clock: 100ms wall consumes 125ms CD. Apply *4/5 at set is the leftover snapshot.
-    fn tick_alacrity_recharge(&mut self) {
+    /// How fast skills come back this tick.
+    ///
+    /// Dummy clock: 100ms wall consumes 125ms CD under Alacrity, and 34ms
+    /// under Chilled. Apply *4/5 at set is the leftover snapshot.
+    ///
+    /// Only the Alacrity half of this existed. Nothing the enemy did could
+    /// touch skill availability, which leaves out the thing that actually
+    /// kills a support: Chilled does not have to out-damage your healing, it
+    /// only has to keep your heal on cooldown until the next burst lands. It
+    /// is also what makes cleansing existential rather than a damage tax -
+    /// the cleanse is buying back the heal, not the 130/s tick.
+    fn tick_recharge_rate(&mut self) {
         if !self.now_ms.is_multiple_of(100) {
+            return;
+        }
+        // Chilled wins: the wiki is explicit that Alacrity and Chilled are
+        // both recharge-rate modifiers and the slow applies to the already
+        // hastened rate, but a build that is Chilled through its whole
+        // recovery window is in the situation this models either way.
+        if self.has_condition("Chilled") {
+            let lost = 100 - CHILLED_RECHARGE_PERCENT;
+            for ready in &mut self.cooldown_ready_ms {
+                if *ready > self.now_ms {
+                    *ready = ready.saturating_add(lost);
+                }
+            }
             return;
         }
         let extra = alacrity_cd_advance_ms(100, self.has_buff("Alacrity")).saturating_sub(100);
@@ -666,6 +714,13 @@ impl<'a> Timeline<'a> {
                 *ready = ready.saturating_sub(extra);
             }
         }
+    }
+
+    /// Whether a condition the enemy applied is currently on the player.
+    fn has_condition(&self, name: &str) -> bool {
+        self.incoming_conditions
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case(name) && c.expires_at_ms > self.now_ms)
     }
 
     fn expire_timed_state(&mut self) {
@@ -2225,6 +2280,51 @@ mod tests {
         assert_eq!(report.total_damage, 0.0);
     }
 
+    /// Chilled has to cost the player skill uptime, or it is just a word.
+    ///
+    /// It deals no damage at all, so nothing in the damage model can see it.
+    /// What it does is keep the heal on cooldown until the next burst lands,
+    /// which is the actual way a support dies, and the reason cleansing is
+    /// worth a utility slot rather than a damage tax.
+    #[test]
+    fn chilled_keeps_a_skill_on_cooldown_longer() {
+        // One skill, short cooldown, nothing else to do but recast it.
+        let bar = vec![skill(1, SkillSlot::Weapon1, 200, 2_000, vec![])];
+        let params = params();
+
+        let clear = run_report(
+            &bar,
+            &[],
+            open_enemy(false),
+            profile(12_000, vec![]),
+            &params,
+        );
+        let chilled = run_report(
+            &bar,
+            &[],
+            open_enemy(false),
+            profile(
+                12_000,
+                vec![EnemyEvent {
+                    at_ms: 100,
+                    kind: EnemyEventKind::Condition {
+                        condition: "Chilled".into(),
+                        stacks: 1,
+                        duration_ms: 10_000,
+                    },
+                }],
+            ),
+            &params,
+        );
+
+        assert!(
+            chilled.successful_action_count < clear.successful_action_count,
+            "Chilled must cost casts over the same window - clear {}, chilled {}",
+            clear.successful_action_count,
+            chilled.successful_action_count
+        );
+    }
+
     /// Conditions have to outlast the lull, or cleansing is decoration.
     ///
     /// The applied duration used to be 4,000 ms against a burst period that is
@@ -3319,7 +3419,7 @@ mod tests {
         );
         for _ in 0..160 {
             timeline.now_ms += TIMELINE_TICK_MS;
-            timeline.tick_alacrity_recharge();
+            timeline.tick_recharge_rate();
         }
         assert!(
             timeline.cooldown_ready_ms[0] <= timeline.now_ms,
@@ -3355,13 +3455,13 @@ mod tests {
         timeline.set_skill_cooldown(1, 10_000);
         for _ in 0..40 {
             timeline.now_ms += TIMELINE_TICK_MS;
-            timeline.tick_alacrity_recharge();
+            timeline.tick_recharge_rate();
         }
         assert_eq!(timeline.cooldown_ready_ms[0], 10_000);
         timeline.apply_buff("Alacrity", 1, 30_000, false);
         for _ in 0..128 {
             timeline.now_ms += TIMELINE_TICK_MS;
-            timeline.tick_alacrity_recharge();
+            timeline.tick_recharge_rate();
         }
         assert!(
             timeline.cooldown_ready_ms[0] <= timeline.now_ms,
