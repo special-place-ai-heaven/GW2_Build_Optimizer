@@ -2,7 +2,7 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
-## 1.11.32 - 2026-09-06
+## 1.12.0 - 2026-09-06
 
 ### Choya
 
