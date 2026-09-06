@@ -1,4 +1,4 @@
-//! Message developer wizard — the step runner over [`Draft`] shown inside the
+//! Message developer wizard - the step runner over [`Draft`] shown inside the
 //! About tab below the action row: pick tiles, chip steps, text steps, the
 //! summary card, and the sent/thanks plates. The label helpers at the top are
 //! pure and unit-tested; everything ImGui sits below them.
@@ -32,7 +32,7 @@ const CONTACT_MAX: usize = 200;
 /// Plate height measured last frame, stored as `f32` bits. The plate has to be
 /// painted before its content and the draw list cannot be channel-split here
 /// because `select_chip` / `draw_choya_avatar` re-borrow it, so the height lags
-/// one frame — invisible except on the very first frame after opening.
+/// one frame - invisible except on the very first frame after opening.
 static PLATE_H: AtomicU32 = AtomicU32::new(0);
 /// Byte range of the mail textarea selection (last InputText ALWAYS callback).
 static SEL_LO: AtomicU32 = AtomicU32::new(0);
@@ -490,7 +490,7 @@ fn layout_mail(ui: &Ui, encoded: &str, wrap_w: f32, origin: Option<[f32; 2]>) ->
     y
 }
 
-/// Formatted mailbag body (bold is a 1px double-draw — overlay fonts have no bold face).
+/// Formatted mailbag body (bold is a 1px double-draw - overlay fonts have no bold face).
 pub(super) fn paint_mail(ui: &Ui, encoded: &str, wrap_w: f32) {
     let origin = ui.cursor_screen_pos();
     let h = layout_mail(ui, encoded, wrap_w, Some(origin));
@@ -1712,13 +1712,13 @@ mod tests {
                 fail_text(&FailReason::RateLimited {
                     retry_after_secs: 61
                 }),
-                "Slow down — try again in 2 min."
+                "Slow down - try again in 2 min."
             );
             assert_eq!(
                 fail_text(&FailReason::RateLimited {
                     retry_after_secs: 120
                 }),
-                "Slow down — try again in 2 min."
+                "Slow down - try again in 2 min."
             );
             assert_eq!(
                 fail_text(&FailReason::Rejected {
@@ -1740,14 +1740,14 @@ mod tests {
                 ),
                 (
                     FailReason::Server,
-                    "Choya's mailbox is down. Your message is saved — try again later.",
+                    "Choya's mailbox is down. Your message is saved - try again later.",
                 ),
-                (FailReason::Timeout, "Took too long. Saved — try again."),
+                (FailReason::Timeout, "Took too long. Saved - try again."),
                 (
                     FailReason::RateLimited {
                         retry_after_secs: 90,
                     },
-                    "Slow down — try again in 2 min.",
+                    "Slow down - try again in 2 min.",
                 ),
                 (FailReason::TooLarge, "Message too long (limit 4000)."),
                 (
@@ -1799,11 +1799,11 @@ mod tests {
             };
             assert_eq!(
                 fail_copy(&reason, &draft, &feedback, 1_000),
-                "Slow down — try again in 2 min."
+                "Slow down - try again in 2 min."
             );
             assert_eq!(
                 fail_copy(&reason, &draft, &feedback, 1_030),
-                "Slow down — try again in 1 min."
+                "Slow down - try again in 1 min."
             );
         });
     }

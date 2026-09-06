@@ -1,4 +1,4 @@
-//! About tab — in-game changelog, Message developer wizard, message list.
+//! About tab - in-game changelog, Message developer wizard, message list.
 
 pub(super) mod glyphs;
 mod wizard;
@@ -192,7 +192,7 @@ fn render_whats_new(ui: &Ui, state: &AddonState) {
 
 // ── Messages table (pure helpers) ────────────────────────────────────────────
 
-/// `YYYY-MM-DD HH:MM` (UTC) from unix seconds — the Saves tab's `format_timestamp`
+/// `YYYY-MM-DD HH:MM` (UTC) from unix seconds - the Saves tab's `format_timestamp`
 /// algorithm, copied because that helper is private to `saveload.rs`.
 fn format_sent(timestamp: u64) -> String {
     let secs_per_day: u64 = 86400;
@@ -504,7 +504,7 @@ fn wrapped_to(ui: &Ui, color: [f32; 4], text: &str, right_x: f32) {
 }
 
 /// Lay out the expanded row's content from (`x`, `y`) and return its height.
-/// With `draw == false` nothing is emitted — that pass sizes the plate, which
+/// With `draw == false` nothing is emitted - that pass sizes the plate, which
 /// has to be painted before the text it sits under.
 fn expanded_block(ui: &Ui, row: &RowView, x: f32, y: f32, wrap_w: f32, draw: bool) -> f32 {
     const GAP: f32 = 8.0;
@@ -575,7 +575,7 @@ fn edit_and_resend(state: &mut AddonState, report_id: &str) {
 
 /// The line under the table (design §6a): "Updated just now" in MUTED while the last
 /// refresh succeeded under a minute ago; "Status as of … · Choya unreachable" in WARN
-/// after a failed one, aged from the last success (or "—" when there never was one);
+/// after a failed one, aged from the last success (or "-" when there never was one);
 /// nothing otherwise. `age` is the time since the last successful refresh.
 fn refresh_line(ok: Option<bool>, age: Option<Duration>) -> Option<(String, [f32; 4])> {
     match ok {
@@ -584,7 +584,7 @@ fn refresh_line(ok: Option<bool>, age: Option<Duration>) -> Option<(String, [f32
         }
         Some(false) => {
             let age = match age {
-                None => "—".to_string(),
+                None => "-".to_string(),
                 Some(a) => {
                     let mins = a.as_secs() / 60;
                     if mins < 60 {
@@ -948,7 +948,7 @@ mod tests {
             assert_eq!(
                 refresh_line(Some(false), None),
                 Some((
-                    "Status as of —  ·  Choya unreachable".to_string(),
+                    "Status as of -  ·  Choya unreachable".to_string(),
                     theme::WARN
                 ))
             );
@@ -961,7 +961,7 @@ mod tests {
         // 2026-08-24 18:41:00 UTC
         assert_eq!(format_sent(1_787_596_860), "2026-08-24 18:41");
         assert_eq!(format_sent(0), "1970-01-01 00:00");
-        // 2024-02-29 23:59:59 UTC — leap day survives the month walk.
+        // 2024-02-29 23:59:59 UTC - leap day survives the month walk.
         assert_eq!(format_sent(1_709_251_199), "2024-02-29 23:59");
     }
 
@@ -995,7 +995,7 @@ mod tests {
             assert_eq!(
                 status_view(&failed(Some(FailReason::Network), Some(0)), 0),
                 (
-                    "Not sent — Couldn't reach Choya. Check your connection.".to_string(),
+                    "Not sent - Couldn't reach Choya. Check your connection.".to_string(),
                     theme::WARN
                 )
             );
@@ -1021,11 +1021,11 @@ mod tests {
             );
             assert_eq!(
                 status_view(&m, 1_000).0,
-                "Not sent — Slow down — try again in 2 min."
+                "Not sent - Slow down - try again in 2 min."
             );
             assert_eq!(
                 status_view(&m, 1_030).0,
-                "Not sent — Slow down — try again in 1 min."
+                "Not sent - Slow down - try again in 1 min."
             );
         });
     }
