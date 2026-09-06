@@ -156,6 +156,245 @@ pub struct BuildShape {
     pub role: String,
 }
 
+/// The coarse job a role name describes, when it describes one.
+///
+/// Not a taxonomy of the eleven words the three sites use between them —
+/// only the distinction that decides whether a build is the WRONG ANSWER
+/// rather than a worse one. A healer and a DPS are not near neighbours; they
+/// are opposite jobs, and offering one in place of the other is not a
+/// suggestion, it is a wrong answer with a card around it.
+///
+/// Order matters and is the whole trick. "Zerg Boon DPS" is a DPS that
+/// happens to give boons, so damage is tested before support; "Offensive
+/// Support" is a support that happens to do damage, so `heal` is tested
+/// before both. `None` means the words say nothing either way and nothing is
+/// ruled out on their account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobFamily {
+    /// Keeps other people alive: healing, cleansing, boons, stability.
+    Support,
+    /// Sustained damage — the thing that dies to it dies over a fight.
+    Damage,
+    /// Burst. Not a Damage build with better numbers: it opens with a
+    /// disable and spends everything inside a window of a few seconds, and
+    /// it is a glass cannon that must disengage if the window closes with
+    /// the target alive. Asking for one and being handed a zerg DPS is the
+    /// wrong build, not a lesser one.
+    Assassin,
+    /// Wins one fight at a time — medium damage, medium sustain, cleanse
+    /// and control.
+    Duelist,
+    /// Stands in it. Front line, outnumbered, still alive.
+    Bruiser,
+}
+
+/// See [`JobFamily`].
+pub fn job_family(role: &str) -> Option<JobFamily> {
+    let role = role.to_lowercase();
+    let has = |word: &str| role.contains(word);
+    // Order is the whole trick. The specific words go first, because the
+    // generic ones appear inside them: "Roaming Assassin" is an assassin
+    // before it is anything else, and "Offensive Support" is a support even
+    // though it does damage.
+    if has("heal") || has("medic") {
+        return Some(JobFamily::Support);
+    }
+    if has("assassin") {
+        return Some(JobFamily::Assassin);
+    }
+    if has("duelist") {
+        return Some(JobFamily::Duelist);
+    }
+    // A PvP sidenoder holds a point alone against whoever walks onto it —
+    // that is the duelist's job under another name.
+    if has("sidenoder") {
+        return Some(JobFamily::Duelist);
+    }
+    if has("dps") || has("damage") || has("hybrid") {
+        return Some(JobFamily::Damage);
+    }
+    if has("support") {
+        return Some(JobFamily::Support);
+    }
+    if has("bruiser") || has("tank") || has("troll") {
+        return Some(JobFamily::Bruiser);
+    }
+    None
+}
+
+/// Power or condition, when the role name says.
+///
+/// Cross-referenced as a disqualifier, not a preference. A condition build
+/// is not a power build with different numbers — different stats, different
+/// runes, different sigils, different traits, and a different way of
+/// killing something. Offered in place of one another they are simply the
+/// wrong build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flavour {
+    Power,
+    Condi,
+    /// Says it wants both, so neither rules it out.
+    Hybrid,
+}
+
+/// What a stat prefix is FOR, read off the attributes it grants.
+///
+/// The role name is a label somebody typed; the prefix is what the build
+/// wears. GuildJen publishes a Reaper as "Roaming DPS" and says nothing
+/// about power or condition — but it is Marauder, and Marauder grants Power,
+/// Precision, Ferocity and Vitality, so the build is a power build whatever
+/// the label omits. Matching on the label alone offered that build to
+/// someone asking for condition damage.
+///
+/// This answers "power or condition", not "what job is this". Celestial
+/// grants both and therefore reads as Hybrid here — but nobody wears
+/// Celestial to be a damage build; it is a bruiser's prefix, moderate at
+/// everything and excellent at nothing. That judgement belongs to
+/// [`prefix_job`], which is about the job, not the damage type.
+pub fn prefix_flavour(prefix: &str, db: &crate::gamedb::GameDb) -> Option<Flavour> {
+    if prefix.trim().is_empty() {
+        return None;
+    }
+    let wanted = prefix.trim().trim_end_matches("'s").to_lowercase();
+    let stat = db.itemstats.values().find(|stat| {
+        let name = stat.name.trim().trim_end_matches("'s").to_lowercase();
+        name == wanted
+    })?;
+
+    let grants = |attribute: &str| {
+        stat.attributes
+            .iter()
+            .any(|a| a.attribute.eq_ignore_ascii_case(attribute) && a.value + 1 > 0)
+    };
+    let condi = grants("ConditionDamage") || grants("ConditionDuration");
+    let power = grants("Power") || grants("CritDamage");
+    match (power, condi) {
+        // Everything at once is the definition of Celestial, and of Hybrid.
+        (true, true) => Some(Flavour::Hybrid),
+        (true, false) => Some(Flavour::Power),
+        (false, true) => Some(Flavour::Condi),
+        // Minstrel's and Harrier's grant neither: they are not damage
+        // prefixes at all, and have no flavour to disagree about.
+        (false, false) => None,
+    }
+}
+
+/// The job a stat prefix is dressed for, when the role name did not say.
+///
+/// Gear is a statement of intent. Nobody wears Minstrel's to deal damage or
+/// Berserker's to hold a door, so where a site publishes a build as nothing
+/// more specific than "Roamer" or "DPS", the prefix still says what it is
+/// for.
+///
+/// Deliberately only three answers and only from the extremes, because this
+/// is a fallback for silence and a confident wrong guess is worse than none:
+///
+/// - grants no offence at all but grants healing → Support (Minstrel's,
+///   Harrier's)
+/// - grants everything → Bruiser. Celestial is moderate at all nine
+///   attributes, which is a bruiser's shape: enough damage to threaten,
+///   enough sustain to stay. It is not a damage prefix.
+/// - grants offence and no defence → Damage (Berserker's, Viper's)
+///
+/// Anything in between — Marauder, Trailblazer's, Demolisher — says both
+/// things and is left to the label.
+pub fn prefix_job(prefix: &str, db: &crate::gamedb::GameDb) -> Option<JobFamily> {
+    if prefix.trim().is_empty() {
+        return None;
+    }
+    let wanted = prefix.trim().trim_end_matches("'s").to_lowercase();
+    let stat = db.itemstats.values().find(|stat| {
+        let name = stat.name.trim().trim_end_matches("'s").to_lowercase();
+        name == wanted
+    })?;
+    let grants = |attribute: &str| {
+        stat.attributes
+            .iter()
+            .any(|a| a.attribute.eq_ignore_ascii_case(attribute) && a.value + 1 > 0)
+    };
+    let offence = grants("Power") || grants("ConditionDamage") || grants("CritDamage");
+    let defence = grants("Toughness") || grants("Vitality");
+    let healing = grants("Healing") || grants("BoonDuration");
+
+    match (offence, defence, healing) {
+        (false, _, true) => Some(JobFamily::Support),
+        // Everything at once: Celestial.
+        (true, true, true) => Some(JobFamily::Bruiser),
+        (true, false, false) => Some(JobFamily::Damage),
+        _ => None,
+    }
+}
+
+/// See [`Flavour`]. `None` where the words do not say.
+pub fn damage_flavour(role: &str) -> Option<Flavour> {
+    let role = role.to_lowercase();
+    if role.contains("hybrid") {
+        return Some(Flavour::Hybrid);
+    }
+    if role.contains("condi") {
+        return Some(Flavour::Condi);
+    }
+    if role.contains("power") {
+        return Some(Flavour::Power);
+    }
+    None
+}
+
+/// How many people are around, as the sites name it.
+///
+/// The player put it plainly: the smaller the group, the more self-sufficient
+/// a build has to be, because a large group covers for it with overlapping
+/// boons and a lone one has nobody. A zerg healer dropped into a roaming
+/// fight dies to the first assassin that looks at it. So scale is not
+/// decoration on a role name; it changes what the job IS.
+///
+/// It disqualifies, but ASYMMETRICALLY, because self-reliance only runs one
+/// way. A roaming build can walk into a zerg — it carries its own sustain
+/// and never knew who it would meet, and roamers adapt by swapping utility
+/// skills rather than rebuilding. A zerg build cannot go roaming: it leans
+/// on twenty people's overlapping boons, and alone it dies to the first
+/// assassin that looks at it.
+///
+/// So a candidate is allowed when it is at least as self-reliant as the
+/// scale asked for — see [`Scale::self_reliance`]. Where that leaves
+/// nothing, nothing is offered: the sites have simply not published that
+/// build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scale {
+    Solo,
+    Small,
+    Large,
+}
+
+impl Scale {
+    /// How much a build made for this scale has to carry alone, smallest
+    /// group first. A build may always be offered to a LARGER group than it
+    /// was written for, never to a smaller one.
+    pub fn self_reliance(self) -> u8 {
+        match self {
+            Scale::Solo => 0,
+            Scale::Small => 1,
+            Scale::Large => 2,
+        }
+    }
+}
+
+/// See [`Scale`]. `None` where the words do not say.
+pub fn role_scale(role: &str) -> Option<Scale> {
+    let role = role.to_lowercase();
+    let has = |word: &str| role.contains(word);
+    if has("roam") || has("solo") || has("duel") || has("open world") {
+        return Some(Scale::Solo);
+    }
+    if has("havoc") || has("party") || has("group") || has("fractal") {
+        return Some(Scale::Small);
+    }
+    if has("zerg") || has("cloud") || has("squad") || has("raid") || has("strike") {
+        return Some(Scale::Large);
+    }
+    None
+}
+
 /// How close a published build is to a proposed one. Higher is closer.
 ///
 /// Weighted by how much each agreement actually says. Two builds sharing all
@@ -207,6 +446,11 @@ pub fn closeness(shape: &BuildShape, build: &BenchmarkBuild, db: &crate::gamedb:
     let rune_hit = !shape.rune.is_empty() && named(published.rune_id) == lower(&shape.rune);
     let relic_hit = !shape.relic.is_empty() && named(published.relic_id) == lower(&shape.relic);
 
+    let scale_hit = match (role_scale(&shape.role), role_scale(&build.role)) {
+        (Some(want), Some(theirs)) => want == theirs,
+        _ => false,
+    };
+
     let prefix_hit = !shape.stat_prefix.is_empty()
         && (lower(&build.gear_prefix) == lower(&shape.stat_prefix)
             || published
@@ -219,6 +463,7 @@ pub fn closeness(shape: &BuildShape, build: &BenchmarkBuild, db: &crate::gamedb:
         + u32::from(relic_hit) * 3
         + u32::from(prefix_hit) * 2
         + role_similarity(&lower(&build.role), &lower(&shape.role)) as u32 * 8
+        + u32::from(scale_hit) * 9
 }
 
 /// The closest published build from each site, for "you might also like".
@@ -248,6 +493,67 @@ pub fn closest_per_source<'a>(
             || build.mode.to_lowercase() != mode
         {
             continue;
+        }
+        // Wrong job, no card. A site with nothing for this job should offer
+        // nothing: GuildJen publishes no Necromancer WvW support build at
+        // all, and without this it answered a request for a healer with its
+        // closest DPS — same profession, same mode, opposite job.
+        // The label says the job where it can; the gear says it where the
+        // label was vague. "Roamer" and a bare "DPS" name no job at all, and
+        // a Celestial roamer is a bruiser whatever the page called it.
+        let want_job = job_family(&shape.role)
+            .or_else(|| prefix_job(&shape.stat_prefix, db));
+        let their_job = job_family(&build.role).or_else(|| {
+            prefix_job(
+                &build
+                    .published
+                    .dominant_stat()
+                    .unwrap_or_else(|| build.gear_prefix.clone()),
+                db,
+            )
+        });
+        if let (Some(want), Some(theirs)) = (want_job, their_job) {
+            if want != theirs {
+                continue;
+            }
+        }
+        // Power and condition are not variants of one build. Read from the
+        // gear first and the label only when the gear is silent: a site that
+        // writes "Roaming DPS" and equips Marauder has told us it is a power
+        // build without using the word.
+        let want_flavour = damage_flavour(&shape.role)
+            .or_else(|| prefix_flavour(&shape.stat_prefix, db));
+        // Label first on both sides, gear only where the label is silent. A
+        // build that says "Condi DPS" is a condition build even on Celestial
+        // — Celestial grants power too, so reading the gear first made it
+        // answer a request for a power build.
+        let their_flavour = damage_flavour(&build.role).or_else(|| {
+            prefix_flavour(
+                &build
+                    .published
+                    .dominant_stat()
+                    .unwrap_or_else(|| build.gear_prefix.clone()),
+                db,
+            )
+        });
+        if let (Some(want), Some(theirs)) = (want_flavour, their_flavour) {
+            if want != theirs && want != Flavour::Hybrid && theirs != Flavour::Hybrid {
+                continue;
+            }
+        }
+        // Scale is not a shade of the same job — see `Scale`. A hybrid is the
+        // exception: it carries its own sustain instead of leaning on twenty
+        // other people's boons, so it plays at any scale and its published
+        // one says nothing about where it can go.
+        let hybrid = matches!(their_flavour, Some(Flavour::Hybrid))
+            || matches!(want_flavour, Some(Flavour::Hybrid));
+        if !hybrid {
+            if let (Some(want), Some(theirs)) = (role_scale(&shape.role), role_scale(&build.role))
+            {
+                if theirs.self_reliance() > want.self_reliance() {
+                    continue;
+                }
+            }
         }
         let score = closeness(shape, build, db);
         if score == 0 {
@@ -520,5 +826,52 @@ mod tests {
         let d = delta.unwrap();
         assert!(d.pct_of_ref > 0.0);
         assert!(d.pct_of_ref <= 200.0);
+    }
+    /// Every role string here is one the three sites actually publish.
+    #[test]
+    fn a_healer_and_a_dps_are_never_the_same_job() {
+        use super::{job_family, JobFamily::*};
+
+        // The case that produced a wrong card: asked for WvW Support on a
+        // Necromancer, offered GuildJen's "Roaming DPS". GuildJen publishes
+        // no Necromancer WvW support build at all, so the honest answer from
+        // that site is nothing.
+        assert_eq!(job_family("Support"), Some(Support));
+        assert_eq!(job_family("Roaming DPS"), Some(Damage));
+        assert_ne!(job_family("Support"), job_family("Roaming DPS"));
+
+        // A DPS that hands out boons is a DPS. Damage is tested first for
+        // exactly this reason.
+        assert_eq!(job_family("Zerg Boon DPS"), Some(Damage));
+        assert_eq!(job_family("Group Boon DPS"), Some(Damage));
+        // A support that does damage is a support, and `heal` and `medic`
+        // are tested before damage so this stays true.
+        assert_eq!(job_family("Offensive Support"), Some(Support));
+        assert_eq!(job_family("Havoc Medic"), Some(Support));
+        assert_eq!(job_family("Fractal Healer"), Some(Support));
+        assert_eq!(job_family("Zerg Support"), Some(Support));
+
+        assert_eq!(job_family("Roaming Bruiser"), Some(Bruiser));
+        assert_eq!(job_family("Cloud Tank"), Some(Bruiser));
+        // An assassin is its own job, not a DPS with better numbers: ask
+        // for one and a Zerg Power DPS is the wrong answer.
+        assert_eq!(job_family("Roaming Assassin"), Some(Assassin));
+        assert_eq!(job_family("Havoc Assassin"), Some(Assassin));
+        assert_ne!(job_family("Roaming Assassin"), job_family("Zerg Power DPS"));
+        assert_eq!(job_family("Duelist"), Some(Duelist));
+        assert_ne!(job_family("Duelist"), job_family("Roaming DPS"));
+
+        // Words that say nothing about the job rule nothing out: a Roamer
+        // may be any of these, and refusing to guess is not the same as
+        // guessing wrong.
+        assert_eq!(job_family("Open World Hybrid"), Some(Damage), "hybrid deals damage");
+        assert_eq!(job_family("Sidenoder"), Some(Duelist), "holds a point alone");
+        // These say nothing about the job and are left saying nothing: a PvP
+        // Roamer may be any of them, and refusing to guess is not the same
+        // as guessing wrong.
+        assert_eq!(job_family("Roamer"), None);
+        assert_eq!(job_family("Raid"), None);
+        assert_eq!(job_family("Group Niche"), None);
+        assert_eq!(job_family(""), None);
     }
 }
