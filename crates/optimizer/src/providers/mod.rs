@@ -37,7 +37,8 @@ pub mod hardstuck;
 pub mod snowcrows;
 
 /// One equipment row as a site published it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct GearRow {
     /// Slot as the page names it: `Helm`, `Rifle`, `Amulet`. Empty when the
     /// page labels the row with nothing, which is how GuildJen renders the
@@ -99,7 +100,7 @@ impl GearRow {
 }
 
 /// One specialization line with the three majors the build chose.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SpecLine {
     /// Specialization id, matching `GameDb::specializations`.
     pub id: u32,
@@ -114,42 +115,61 @@ pub struct SpecLine {
 /// armour and no trinkets, a Hardstuck variant can carry no relic at all,
 /// and a page that stops publishing something should produce an empty field
 /// rather than a confident wrong one.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct ProviderBuild {
     /// The `[&…]` build template, already validated by
     /// [`crate::build_template::decode`].
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub build_code: Option<String>,
     /// Specialization lines in the order the page listed them.
     ///
     /// Not necessarily the build template's slot order — GuildJen's document
     /// order matches the template on only 20 of 27 pages. When the order
     /// matters, take it from the template.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub specs: Vec<SpecLine>,
     /// Heal, three utilities, elite — as real skill ids, not palette ids.
     /// Empty when the page publishes only a chat code, whose skill field is
     /// palette ids needing `GameDb::palette_to_skill`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub skill_ids: Vec<u32>,
     /// Equipment rows in page order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub gear: Vec<GearRow>,
     /// The rune, when the page's structure states which upgrade it is.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rune_id: Option<u32>,
     /// Sigils, in the order their weapons appear.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sigil_ids: Vec<u32>,
     /// The relic, when the page's structure states it. Left unset where only
     /// an item *type* could tell a relic from food — that is a `GameDb`
     /// question, and these parsers do not have one.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub relic_id: Option<u32>,
     /// PvP amulet, the stat source in that mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub amulet_id: Option<u32>,
 }
 
 impl ProviderBuild {
-    /// Whether the page yielded anything worth storing.
+    /// Whether the page yielded nothing at all.
+    ///
+    /// Every field counts. This decides two things that must agree: whether
+    /// the record is written to disk at all, and whether a row cached
+    /// earlier today may be reused instead of refetched. A partial check —
+    /// one that ignored, say, a page that published only its rune — would
+    /// drop that rune on save and then refetch the page forever.
     pub fn is_empty(&self) -> bool {
         self.build_code.is_none()
             && self.specs.is_empty()
             && self.skill_ids.is_empty()
             && self.gear.is_empty()
+            && self.rune_id.is_none()
+            && self.sigil_ids.is_empty()
+            && self.relic_id.is_none()
+            && self.amulet_id.is_none()
     }
 
     /// Every stat prefix the rows named, most-used first.
@@ -294,6 +314,79 @@ mod tests {
         };
         assert_eq!(build.dominant_stat(), Some("Grieving".into()));
         assert_eq!(ProviderBuild::default().dominant_stat(), None);
+    }
+
+    /// Snowcrows prints the build template inside a JS string inside an
+    /// `onclick`, so the ampersand arrives HTML-escaped and the base64 body
+    /// reads `amp;DQgn…`. The only other `[&` on the page is a JSON array in
+    /// a Livewire `wire:snapshot` attribute — and that decoy is what all 180
+    /// Snowcrows rows in the store recorded as their build code.
+    ///
+    /// Both shapes verbatim from snowcrows.com/builds/raids/necromancer/
+    /// condition-reaper as the server sent it on 2026-09-06.
+    #[test]
+    fn an_escaped_build_code_is_found_and_the_livewire_decoy_is_not() {
+        const PAGE: &str = concat!(
+            r#"<div wire:snapshot="[&quot;div&quot;,&quot;9ZtEYc0ZeKP5qDXJEd3X&quot;]">"#,
+            r#"<a class="tab mr-2" icon="fa-code" href="javascript://" onclick="#,
+            r#"navigator.clipboard.writeText('[&amp;DQgnNzInIibBEgAAgAAAAEABAACm"#,
+            r#"EgAAkgAAAAAAAAAAAAAAAAAAAAAAAAA=]');">Build Template</a></div>"#,
+        );
+
+        let code = build_code_in(PAGE).expect("the escaped template must be found");
+        assert!(
+            code.starts_with("[&DQ"),
+            "the decoded code must be the unescaped template, got {code}"
+        );
+        assert!(
+            !code.contains("quot;"),
+            "the Livewire snapshot array is not a build code, got {code}"
+        );
+        let decoded = crate::build_template::decode(&code).expect("a real template");
+        assert_eq!(decoded.profession, 8, "8 is Necromancer, as the page title says");
+
+        // A page carrying only the decoy yields nothing rather than the decoy.
+        assert_eq!(
+            build_code_in(
+                r#"<div wire:snapshot="[&quot;div&quot;,&quot;9ZtEYc0ZeKP5qDXJEd3X&quot;]"></div>"#
+            ),
+            None
+        );
+    }
+
+    /// GuildJen escapes the bracket as well as the ampersand, and not
+    /// consistently between pages — so a literal replace of either form alone
+    /// misses the other. Both spellings verbatim from the live site,
+    /// 2026-09-06. Measured over 27 pages: 0/27 decode raw, 27/27 unescaped.
+    ///
+    /// The waypoint link is one of 71 that GuildJen ships on every page in a
+    /// world-boss-timer JSON blob. It is the literal source of the code
+    /// recorded on 407 of 739 stored builds, and the decoder — not luck —
+    /// is what rejects it.
+    #[test]
+    fn guildjen_escapes_the_bracket_too_and_waypoints_are_not_builds() {
+        const WAYPOINT: &str = r#"{"name":"Shadow Behemoth","wp":"[&BPcAAAA=]"}"#;
+        const ESCAPED_BRACKET: &str = concat!(
+            r#"<pre class="wp-block-code"><code>&#91;&amp;DQcXFi02STqJHQ8BhQFmAYQdfwFr"#,
+            r#"HWQBbR2aAQAAAAAAAAAAAAAAAAAAAAADVQBaADEAAA==]</code></pre>"#,
+        );
+        const BARE_BRACKET: &str = concat!(
+            r#"<pre class="wp-block-code"><code>[&amp;DQEQOS4XQSkmDyYPRwFIAdgaRwFM"#,
+            r#"AbkBiRKJEgAAAAAAAAAAAAAAAAAAAAA=]</code></pre>"#,
+        );
+
+        for (label, page) in [
+            ("bracket escaped", format!("{WAYPOINT}{ESCAPED_BRACKET}")),
+            ("bracket bare", format!("{WAYPOINT}{BARE_BRACKET}")),
+        ] {
+            let code = build_code_in(&page).unwrap_or_else(|| panic!("{label}"));
+            let decoded = crate::build_template::decode(&code)
+                .unwrap_or_else(|| panic!("{label}: {code} must decode"));
+            assert!(decoded.profession >= 1 && decoded.profession <= 9, "{label}");
+        }
+
+        // Waypoints alone are not a build, however many there are.
+        assert_eq!(build_code_in(&WAYPOINT.repeat(71)), None);
     }
 
     /// Only the references the sites actually emit are resolved; anything

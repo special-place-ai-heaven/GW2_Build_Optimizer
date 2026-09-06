@@ -5,10 +5,15 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::providers::ProviderBuild;
 use crate::scoring::{select_gear_prefix, OptimizationWeights};
 
 /// A single normalized reference build from a community build site.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `Default` is derived so adding a field is a one-line diff at every
+/// construction site instead of a compile error at each one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BenchmarkBuild {
     /// Source site: "snowcrows", "hardstuck", or "guildjen".
     pub source: String,
@@ -22,24 +27,33 @@ pub struct BenchmarkBuild {
     pub role: String,
     /// GW2 build template code if found.
     pub build_code: Option<String>,
-    /// Gear stat prefix (e.g. "Berserker's", "Viper's").
+    /// The stat prefix most of the gear uses (e.g. "Berserker's", "Viper's").
+    ///
+    /// A reduction, not the whole truth — most builds mix prefixes, and the
+    /// per-slot detail is on [`BenchmarkBuild::published`]. This one string
+    /// is what the scorer compares against.
     pub gear_prefix: String,
-    /// Rune name.
-    pub rune: String,
-    /// Sigil names.
-    pub sigils: Vec<String>,
-    /// Relic name.
-    pub relic: String,
-    /// Specialization names detected on the page (heuristic).
-    pub traits: Vec<String>,
-    /// Skill names found on the page (heal, utilities, elite).
-    pub skills: Vec<String>,
     /// Page URL this was scraped from.
     pub source_url: String,
     /// ISO date when this was scraped (e.g. "2026-03-30").
     pub scraped_at: String,
-    /// Any additional notes parsed from the page.
-    pub notes: String,
+    /// What the page published, in GW2 API ids: gear, upgrades, traits and
+    /// the skill bar.
+    ///
+    /// This replaced six name fields — `rune`, `sigils`, `relic`, `traits`,
+    /// `skills` and `notes` — which no code ever read and which could not be
+    /// filled honestly: none of the three sites writes gear names into its
+    /// markup, so the text extractors returned empty strings 570 to 739
+    /// times out of 739, and where they did return something it was page
+    /// furniture. 431 of 739 rows recorded the same three elite specs
+    /// whatever the profession, taken from a navigation menu.
+    ///
+    /// Ids do not have that failure mode: they need no fuzzy matching, they
+    /// do not move with the site's wording, and they are the numbers
+    /// `GameDb` is already keyed on — so a name is a read-time lookup, not a
+    /// scrape-time guess.
+    #[serde(skip_serializing_if = "ProviderBuild::is_empty")]
+    pub published: ProviderBuild,
 }
 
 /// Score delta between the optimizer's result and a community reference build.
@@ -215,15 +229,81 @@ mod tests {
             role: role.into(),
             build_code: None,
             gear_prefix: gear.into(),
-            rune: String::new(),
-            sigils: vec![],
-            relic: String::new(),
-            traits: vec![],
-            skills: vec![],
             source_url: "https://example.com".into(),
             scraped_at: "2026-01-01".into(),
-            notes: String::new(),
+            ..Default::default()
         }
+    }
+
+    /// A row exactly as the store held it before ids existed, verbatim from
+    /// `guildjen_elementalist_pve.json` on 2026-09-05 — six fields that no
+    /// longer exist among them.
+    ///
+    /// This test is the guard on the one mistake that would be invisible.
+    /// Both load paths swallow a parse error (`if let Ok(v)` in
+    /// `load_benchmarks`, `let Ok(..) else { continue }` in
+    /// `load_todays_builds`), so a field added without `#[serde(default)]`
+    /// would drop all 739 rows at once with no log line: the Settings tab
+    /// would read "never synced", the Improve tab would show "no benchmark
+    /// data", and the next sync would refetch every page.
+    #[test]
+    fn a_row_written_before_ids_existed_still_loads() {
+        const LEGACY: &str = r#"{
+            "source": "guildjen",
+            "profession": "Elementalist",
+            "spec_name": "Evoker",
+            "mode": "PvE",
+            "role": "WvW Roaming",
+            "build_code": "[&BPcAAAA=]",
+            "gear_prefix": "Plaguedoctor's",
+            "rune": "",
+            "sigils": [],
+            "relic": "",
+            "traits": ["Firebrand", "Willbender", "Dragonhunter"],
+            "skills": [],
+            "source_url": "https://guildjen.com/heal-dps-evoker-build/",
+            "scraped_at": "2026-09-05",
+            "notes": ""
+        }"#;
+
+        let build: BenchmarkBuild = serde_json::from_str(LEGACY).expect("a legacy row must load");
+        // The fields every reader actually touches survive untouched.
+        assert_eq!(build.profession, "Elementalist");
+        assert_eq!(build.mode, "PvE");
+        assert_eq!(build.gear_prefix, "Plaguedoctor's");
+        assert_eq!(build.source_url, "https://guildjen.com/heal-dps-evoker-build/");
+        // The six deleted fields are ignored rather than fatal, and the row
+        // reports honestly that it carries no ids.
+        assert!(
+            build.published.is_empty(),
+            "a pre-ids row must not pretend to have published any"
+        );
+
+        // A whole file of them, which is what load_benchmarks actually reads.
+        let file = format!("[{LEGACY},{LEGACY}]");
+        let rows: Vec<BenchmarkBuild> = serde_json::from_str(&file).expect("a legacy file");
+        assert_eq!(rows.len(), 2);
+    }
+
+    /// Rolling back to an older build must not brick the store either: there
+    /// is no `deny_unknown_fields`, so a row carrying ids loads anywhere.
+    #[test]
+    fn a_row_carrying_ids_round_trips() {
+        let mut build = make_build("Necromancer", "PvE", "Condi DPS", "Viper's");
+        build.published.rune_id = Some(24762);
+        build.published.sigil_ids = vec![44944, 24560];
+        build.published.specs = vec![crate::providers::SpecLine {
+            id: 39,
+            trait_ids: vec![815, 816, 801],
+        }];
+
+        let json = serde_json::to_string(&build).expect("serialise");
+        let back: BenchmarkBuild = serde_json::from_str(&json).expect("deserialise");
+        assert_eq!(back.published, build.published);
+        assert!(
+            !json.contains("\"gear\""),
+            "empty id fields are not written, keeping the store small: {json}"
+        );
     }
 
     #[test]
