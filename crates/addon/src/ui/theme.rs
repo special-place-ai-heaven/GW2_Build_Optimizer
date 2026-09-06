@@ -1742,6 +1742,7 @@ mod tests {
         let cfg = |preset: &str| ThemeConfig {
             preset: preset.into(),
             custom: CustomTheme::default(),
+            ..Default::default()
         };
 
         super::apply_theme(&cfg("glacial-ward"));
@@ -1765,6 +1766,7 @@ mod tests {
                 text: [0.9, 0.9, 0.9],
                 muted: [0.5, 0.5, 0.5],
             },
+            ..Default::default()
         };
         super::apply_theme(&custom);
         assert_eq!(

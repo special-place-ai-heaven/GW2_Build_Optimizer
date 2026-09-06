@@ -1120,13 +1120,39 @@ fn render_theme_style_section(
                 crate::ui::save_config_detached(state);
             }
         }
-        // The custom row's visible text is the user's theme name (or the
-        // localized "Custom" placeholder). "###" pins the ImGui id to the
-        // suffix alone, so renaming the theme, or naming it after a preset,
-        // never changes/collides ids ("##" would still hash the label).
-        let label = format!("{}###theme_custom_row", custom_row_label);
-        if Selectable::new(&label).selected(is_custom).build(ui) && !is_custom {
+        // Named themes, then "Custom" beneath them. Cloned first: the rows
+        // write to `state.config.theme` as they are drawn.
+        let kept = state.config.theme.saved.clone();
+        for entry in &kept {
+            // "###" pins the id to the suffix, so a theme named after a
+            // preset cannot collide with it. Names are unique by `remember`.
+            let label = format!("{}###theme_saved_{}", entry.name, entry.name);
+            let sel = is_custom
+                && state
+                    .config
+                    .theme
+                    .custom
+                    .name
+                    .trim()
+                    .eq_ignore_ascii_case(entry.name.trim());
+            if Selectable::new(&label).selected(sel).build(ui) && !sel {
+                state.config.theme.custom = entry.clone();
+                state.config.theme.preset = "custom".into();
+                theme::apply_theme(&state.config.theme);
+                crate::ui::save_config_detached(state);
+            }
+        }
+        // Always the localized placeholder, never the current theme's name:
+        // this row is the scratch slot for the NEXT theme, and labelling it
+        // "Rob" is what left no way to start a second one.
+        let starting_new = is_custom && state.config.theme.custom.name.trim().is_empty();
+        let label = format!("{}###theme_custom_row", t("settings.theme_custom"));
+        if Selectable::new(&label).selected(starting_new).build(ui) && !starting_new {
+            // Keep whatever was being edited before handing the slot over.
+            let editing = state.config.theme.custom.clone();
+            state.config.theme.remember(&editing);
             seed_custom_from_preset(&mut state.config.theme);
+            state.config.theme.custom.name.clear();
             state.config.theme.preset = "custom".into();
             theme::apply_theme(&state.config.theme);
             crate::ui::save_config_detached(state);
@@ -1149,6 +1175,10 @@ fn render_theme_style_section(
         .hint(&t("settings.theme_name_hint"))
         .build();
     if ui.is_item_deactivated_after_edit() {
+        // Naming a theme is what keeps it. On commit rather than per
+        // keystroke, or every letter typed would leave a saved theme behind.
+        let named = state.config.theme.custom.clone();
+        state.config.theme.remember(&named);
         crate::ui::save_config_detached(state);
     }
 
@@ -1321,6 +1351,11 @@ fn render_theme_style_section(
         theme::apply_theme(&state.config.theme);
     }
     if commit {
+        // A colour change to a named theme belongs to that theme, or editing
+        // a saved one would only ever change the live buffer and be lost the
+        // next time it was picked from the list.
+        let edited = state.config.theme.custom.clone();
+        state.config.theme.remember(&edited);
         crate::ui::save_config_detached(state);
     }
 
@@ -2049,6 +2084,7 @@ mod tests {
         let mut fresh = ThemeConfig {
             preset: "molten-ember".into(),
             custom: CustomTheme::default(),
+            ..Default::default()
         };
         assert!(seed_custom_from_preset(&mut fresh));
         let [bg, panel, accent, text, muted] =
@@ -2080,6 +2116,7 @@ mod tests {
         let mut edited = ThemeConfig {
             preset: "verdant-wilds".into(),
             custom: mine.clone(),
+            ..Default::default()
         };
         assert!(!seed_custom_from_preset(&mut edited));
         assert_eq!(edited.custom, mine, "an edited custom theme survives");
@@ -2089,6 +2126,7 @@ mod tests {
             let mut t = ThemeConfig {
                 preset: preset.into(),
                 custom: CustomTheme::default(),
+                ..Default::default()
             };
             assert!(!seed_custom_from_preset(&mut t), "{preset} has no bases");
             assert_eq!(t.custom, CustomTheme::default());
