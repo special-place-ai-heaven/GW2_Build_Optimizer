@@ -106,19 +106,17 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.unindent_by(gutter);
     ui.columns(1, "##settings_split_end", false);
 
-    // Cache and Benchmarks run full width, one under the other, rather than
-    // side by side. The benchmark grid is a five-column table — providers
-    // down the side, game modes across — and a column set cannot be opened
-    // inside another one: doing so would end the pair and leave the rest of
-    // the tab single-column, which is the same fault that was breaking
-    // everything below Default Game Mode. It wants the width anyway.
     ui.dummy([0.0, 8.0]);
+    ui.columns(2, "##settings_bottom", false);
+    ui.set_column_width(0, col_w);
     build_display::render_card_header(ui, &t("settings.cache"), theme::pal().gold);
     render_cache_section(ui, state);
-
-    ui.dummy([0.0, 8.0]);
+    ui.next_column();
+    ui.indent_by(gutter);
     build_display::render_card_header(ui, &t("settings.benchmarks"), [0.6, 0.8, 1.0, 1.0]);
     render_benchmark_section(ui, state);
+    ui.unindent_by(gutter);
+    ui.columns(1, "##settings_end", false);
 
     // ── Footer ─────────────────────────────────────────────────────
     ui.dummy([0.0, 4.0]);
@@ -1613,29 +1611,49 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         // cover the same modes, and one total per source could not say
         // whether the one you play is covered at all. The red column is what
         // a run listed and could not read, with its retry beside it.
-        ui.columns(5, "##bench_grid", false);
-        ui.next_column();
-        for mode in BENCHMARK_MODES {
+        // Positioned by hand rather than with `ui.columns`. This grid sits
+        // in the right-hand column of the tab, and a column set cannot be
+        // opened inside another one — doing so ends the outer pair and
+        // drops everything after it into a single full-width column. Laid
+        // out full width the grid also read badly: three counts and a dash
+        // stretched across the whole window with nothing between them.
+        //
+        // Widths come from the text so the grid follows the font scale, and
+        // stay wide enough for a four-digit count.
+        let scale = state.config.font_scale.max(0.5);
+        let label_w = BENCHMARK_SOURCES
+            .iter()
+            .map(|(_, label)| ui.calc_text_size(label)[0])
+            .fold(0.0_f32, f32::max)
+            + 14.0 * scale;
+        let mode_w = BENCHMARK_MODES
+            .iter()
+            .map(|mode| ui.calc_text_size(mode)[0])
+            .fold(ui.calc_text_size("8888")[0], f32::max)
+            + 12.0 * scale;
+        let column_at = |n: usize| label_w + mode_w * n as f32;
+
+        // Header: an empty corner cell, then the modes.
+        ui.text(" ");
+        for (n, mode) in BENCHMARK_MODES.iter().enumerate() {
+            ui.same_line_with_pos(column_at(n));
             ui.text_colored(theme::pal().muted, *mode);
-            ui.next_column();
         }
-        ui.next_column();
         for (key, label) in BENCHMARK_SOURCES {
             ui.text_colored(theme::pal().gold, *label);
-            ui.next_column();
-            for mode in BENCHMARK_MODES {
-                let n = state
+            for (n, mode) in BENCHMARK_MODES.iter().enumerate() {
+                ui.same_line_with_pos(column_at(n));
+                let count = state
                     .main
                     .benchmark_mode_counts
                     .get(&format!("{key}|{mode}"))
                     .copied()
                     .unwrap_or(0);
-                if n > 0 {
-                    ui.text_colored([0.5, 0.9, 0.5, 1.0], n.to_string());
+                if count > 0 {
+                    ui.text_colored([0.5, 0.9, 0.5, 1.0], count.to_string());
                 } else {
                     ui.text_colored(theme::pal().muted, "-");
                 }
-                ui.next_column();
             }
             let bad = state
                 .main
@@ -1644,6 +1662,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
                 .copied()
                 .unwrap_or(0);
             if bad > 0 {
+                ui.same_line_with_pos(column_at(BENCHMARK_MODES.len()));
                 ui.text_colored([1.0, 0.4, 0.2, 1.0], bad.to_string());
                 ui.same_line();
                 // Only where there is something to retry, and cheap to take:
@@ -1652,14 +1671,12 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
                 if theme::gold_button_sized(
                     ui,
                     format!("{}##retry_{key}", t("btn.retry")),
-                    [56.0, 0.0],
+                    [56.0 * scale, 0.0],
                 ) {
                     retry_requested = true;
                 }
             }
-            ui.next_column();
         }
-        ui.columns(1, "##bench_grid_end", false);
     } else {
         ui.text_colored(theme::pal().muted, t("settings.never_synced"));
     }
