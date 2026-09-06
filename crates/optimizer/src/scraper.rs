@@ -494,20 +494,18 @@ fn scrape_snowcrows_build(
         .unwrap_or_default();
     let slug = url_parts.last().copied().unwrap_or("");
 
-    // Derive spec and role from slug
-    // "power-dragonhunter-virtues-longbow-greatsword" → spec=Dragonhunter, role=Power DPS
     let spec_name = extract_spec_from_slug(slug);
-    let role = if slug.starts_with("condition") || slug.starts_with("condi") {
-        "Condi DPS"
-    } else if slug.starts_with("heal") {
-        "Heal Support"
-    } else if slug.starts_with("power") {
-        "Power DPS"
-    } else if slug.starts_with("celestial") {
-        "Hybrid / Celestial"
-    } else {
-        "Power DPS"
-    };
+    // The build's own heading, falling back to the slug it is derived from.
+    // Both say the same thing — "Condition Reaper", `condition-reaper-…` —
+    // but the heading is the site's statement rather than our reading of a
+    // URL, and it goes through the same vocabulary as the other two sources
+    // so the stored roles stay comparable.
+    let name = crate::providers::snowcrows::build_name(&html)
+        .unwrap_or_else(|| slug.replace('-', " "));
+    let role = crate::providers::role_label(
+        crate::providers::snowcrows::scale_from_url(url),
+        crate::providers::role_in_name(&name).unwrap_or_default(),
+    );
 
     Ok(benchmark_from_html(
         &html,
@@ -517,7 +515,7 @@ fn scrape_snowcrows_build(
         profession,
         spec_name,
         "PvE",
-        role,
+        &role,
     ))
 }
 
@@ -775,12 +773,16 @@ fn scrape_guildjen(
         // measured 2026-09-05, where a Necromancer in WvW was told "No
         // benchmark data available" while the store held Guardian, Mesmer,
         // Revenant, Thief and Warrior.
-        let by_class = group_by_profession(extract_table_build_links(&html, usize::MAX));
+        // The index states the profession, role and playstyle of every build
+        // it lists, so nothing below has to infer them from a slug or from
+        // the body text of the build page.
+        let by_class =
+            group_rows_by_profession(crate::providers::guildjen::index_rows(&html));
         let cap: usize = by_class.iter().map(|(_, l)| l.len()).sum();
         let mut i = 0usize;
 
-        for (class, class_links) in by_class {
-            for link in class_links {
+        for (class, class_rows) in by_class {
+            for row in class_rows {
                 if should_cancel() {
                     return Ok((builds, true, failed));
                 }
@@ -788,6 +790,7 @@ fn scrape_guildjen(
                 // MITM'd if TLS were ever bypassed) must not steer us to
                 // arbitrary absolute URLs — only relative paths on
                 // guildjen.com may be followed.
+                let link = row.url.clone();
                 let url = if link.starts_with("https://guildjen.com/") {
                     link
                 } else if link.starts_with("http") {
@@ -811,7 +814,7 @@ fn scrape_guildjen(
                 if i > 0 && !pace(should_cancel) {
                     return Ok((builds, true, failed));
                 }
-                match scrape_guildjen_build(client, &url, today) {
+                match scrape_guildjen_build(client, &url, &row, mode, &category, today) {
                     Ok(mut b) => {
                         b.mode = mode.to_string();
                         builds.push(b);
@@ -848,40 +851,116 @@ fn scrape_guildjen(
 fn scrape_guildjen_build(
     client: &reqwest::blocking::Client,
     url: &str,
+    row: &crate::providers::guildjen::IndexRow,
+    mode: &str,
+    category: &str,
     today: &str,
 ) -> Result<BenchmarkBuild, String> {
     let html = fetch_html(client, url)?;
 
     // The slug names the specialization, never the profession path — GuildJen
-    // build pages live at the site root. A slug that names neither is not a
-    // build page we can file, so it is dropped rather than stored under a
-    // profession no character has.
+    // build pages live at the site root. A slug that names neither, and that
+    // the index did not file under a profession either, is not a build page
+    // we can store.
     let slug = url
         .trim_end_matches('/')
         .rsplit('/')
         .next()
         .unwrap_or_default();
-    let Some((profession, spec_name)) = profession_from_slug(slug) else {
-        return Err(format!("GuildJen: no profession in slug {slug}"));
+    let from_slug = profession_from_slug(slug);
+    let profession = match (&row.profession, &from_slug) {
+        (stated, _) if !stated.is_empty() => stated.clone(),
+        (_, Some((profession, _))) => profession.clone(),
+        _ => return Err(format!("GuildJen: no profession for {slug}")),
     };
-    // Placeholder only: the caller overwrites this with the index page the
-    // link came from, which is the one authority on the mode. The slug does
-    // not carry it (`/power-willbender-roaming-build/` says neither).
-    let mode = "WvW";
+    let spec_name = from_slug
+        .map(|(_, spec)| spec)
+        .unwrap_or_else(|| extract_spec_from_slug(slug));
 
-    let role = if html.to_lowercase().contains("roam") {
-        "WvW Roaming"
-    } else if html.to_lowercase().contains("zerg") || html.to_lowercase().contains("squad") {
-        "WvW Zerg DPS"
-    } else if html.to_lowercase().contains("support") || html.to_lowercase().contains("heal") {
-        "WvW Zerg Support"
-    } else {
-        "WvW Roaming"
-    };
+    // The role used to be a text scan for "roam"/"zerg"/"support" over the
+    // whole page, with every branch — including the fallback — returning a
+    // WvW label. All 411 stored GuildJen builds read "WvW Roaming",
+    // Elementalist PvE ones included. The index states it instead.
+    let role = crate::providers::role_label(
+        &guildjen_scale(mode, category, row),
+        &guildjen_job(row),
+    );
 
     Ok(benchmark_from_html(
-        &html, url, today, "guildjen", profession, spec_name, mode, role,
+        &html, url, today, "guildjen", profession, spec_name, mode, &role,
     ))
+}
+
+/// Where a GuildJen build is played, in the site's own words.
+///
+/// PvE is split by the index it was listed on — open world, fractal, raid —
+/// which is the solo, group and squad distinction. WvW is split by the
+/// site's playstyle instead, since all of it is one index.
+fn guildjen_scale(mode: &str, category: &str, row: &crate::providers::guildjen::IndexRow) -> String {
+    match mode {
+        "PvE" => category.to_string(),
+        // A WvW build commonly carries two: `havoc` and `cloud` together.
+        // Smallest first, because that is the one that constrains the build
+        // — a havoc build can join a cloud, not the other way round.
+        "WvW" => ["roaming", "havoc", "cloud"]
+            .iter()
+            .find(|wanted| row.playstyles.iter().any(|had| had == *wanted))
+            .map(|found| crate::providers::title_case(found))
+            .unwrap_or_default(),
+        // PvP is always five a side; there is no scale to state.
+        _ => String::new(),
+    }
+}
+
+/// What a GuildJen build does, preferring its own name over the index's
+/// coarser tag.
+///
+/// The name is the same vocabulary the other two sites use — "Heal DPS
+/// Luminary", "Power Vengeance Dragonhunter" — so it keeps the stored roles
+/// comparable across sources. `post_role-*` is the fallback, and it is the
+/// only answer on the open-world index, where most rows carry no role at all
+/// and the playstyle is the distinction the site draws.
+fn guildjen_job(row: &crate::providers::guildjen::IndexRow) -> String {
+    if let Some(job) = crate::providers::role_in_name(&row.name) {
+        return job.to_string();
+    }
+    if let Some(role) = row.roles.first() {
+        return crate::providers::title_case(role);
+    }
+    row.playstyles
+        .first()
+        .map(|playstyle| crate::providers::title_case(playstyle))
+        .unwrap_or_default()
+}
+
+/// Group index rows by the profession the index states, first-seen order.
+///
+/// The sync walks a class at a time, so progress names the class it is on
+/// and a cancel leaves whole classes done rather than a slice of each.
+///
+/// A row the index files under no profession falls back to the slug, and one
+/// that names neither is dropped here rather than fetched and rejected
+/// later: that is a request spent on nothing.
+fn group_rows_by_profession(
+    rows: Vec<crate::providers::guildjen::IndexRow>,
+) -> Vec<(String, Vec<crate::providers::guildjen::IndexRow>)> {
+    let mut buckets: Vec<(String, Vec<crate::providers::guildjen::IndexRow>)> = Vec::new();
+    for row in rows {
+        let profession = if !row.profession.is_empty() {
+            row.profession.clone()
+        } else {
+            let slug = row.url.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+            match profession_from_slug(slug) {
+                Some((profession, _)) => profession,
+                None => continue,
+            }
+        };
+        match buckets.iter_mut().find(|(name, _)| *name == profession) {
+            Some((_, links)) => links.push(row),
+            None => buckets.push((profession, vec![row])),
+        }
+    }
+    buckets
 }
 
 // ─── HTML extraction helpers ──────────────────────────────────────────────────
@@ -1306,83 +1385,6 @@ fn find_ci(haystack: &str, needle: &str, from: usize) -> Option<usize> {
         return None;
     }
     (from..=bytes.len() - pat.len()).find(|&i| bytes[i..i + pat.len()].eq_ignore_ascii_case(pat))
-}
-
-/// Build links from GuildJen's index tables, and only from those tables.
-///
-/// Every category page also renders "Trending" and "Popular Posts" sidebars
-/// that link builds from OTHER categories — the WvW "Power Reaper Roaming
-/// Build" is listed on the PvP page — so a whole-document scan files builds
-/// under whichever page happened to mention them. The tables are the listing;
-/// the sidebars are decoration.
-///
-/// A build page is a flat slug on the site root ending in `-build/`
-/// (`/power-hammer-luminary-roaming-build/`). Category pages end in `-builds/`
-/// and guides in `-guide/`, so the singular suffix is what separates them.
-fn extract_table_build_links(html: &str, max: usize) -> Vec<String> {
-    let mut links: Vec<String> = Vec::new();
-    let mut pos = 0;
-
-    while let Some(open) = find_ci(html, "<table", pos) {
-        let end = find_ci(html, "</table", open).unwrap_or(html.len());
-        let table = &html[open..end];
-
-        let mut tpos = 0;
-        while let Some(href_start) = find_ci(table, "href=\"", tpos) {
-            let abs = href_start + 6;
-            let Some(close) = table[abs..].find('"') else {
-                break;
-            };
-            let href = &table[abs..abs + close];
-            if is_guildjen_build_link(href) && !links.contains(&href.to_string()) {
-                links.push(href.to_string());
-                if links.len() >= max {
-                    return links;
-                }
-            }
-            tpos = abs + close + 1;
-        }
-        pos = end + 1;
-    }
-    links
-}
-
-/// Group `links` by the profession named in each slug, first-seen order.
-///
-/// The sync walks a class at a time, so progress names the class it is on and
-/// a cancel leaves whole classes done rather than a slice of each.
-///
-/// Links naming no profession are dropped here rather than fetched and
-/// rejected later: `scrape_guildjen_build` refuses them anyway, so fetching
-/// one is a request spent on nothing.
-fn group_by_profession(links: Vec<String>) -> Vec<(String, Vec<String>)> {
-    let mut buckets: Vec<(String, Vec<String>)> = Vec::new();
-    for link in links {
-        let slug = link.trim_end_matches('/').rsplit('/').next().unwrap_or("");
-        let Some((profession, _)) = profession_from_slug(slug) else {
-            continue;
-        };
-        match buckets.iter_mut().find(|(p, _)| *p == profession) {
-            Some((_, in_bucket)) => in_bucket.push(link),
-            None => buckets.push((profession, vec![link])),
-        }
-    }
-    buckets
-}
-
-/// Whether an href points at a single GuildJen build page.
-fn is_guildjen_build_link(href: &str) -> bool {
-    let path = href
-        .strip_prefix("https://guildjen.com")
-        .or_else(|| href.strip_prefix("http://guildjen.com"))
-        .unwrap_or(href);
-    // Off-site links and anything with a query or fragment are not builds.
-    if path.starts_with("http") || path.contains('?') || path.contains('#') {
-        return false;
-    }
-    let trimmed = path.trim_end_matches('/');
-    // Root-level slug only: `/a-build` has one leading slash and no others.
-    trimmed.starts_with('/') && !trimmed[1..].contains('/') && trimmed.ends_with("-build")
 }
 
 fn extract_build_links(html: &str, needle: &str, max: usize) -> Vec<String> {
@@ -1914,30 +1916,6 @@ mod tests {
         assert_eq!(links[0], "/builds/guardian/firebrand");
     }
 
-    /// Build links live in the category table. Every GuildJen page also
-    /// renders "Trending" and "Popular Posts" sidebars carrying builds from
-    /// OTHER categories, so a whole-document scan files a WvW build under PvP.
-    /// Category pages (`-builds/`) and guides (`-guide/`) are not builds.
-    #[test]
-    fn table_build_links_ignore_sidebars_and_non_builds() {
-        let html = concat!(
-            r#"<table><tr><td><a href="/power-hammer-luminary-roaming-build/">in table</a></td>"#,
-            r#"<td><a href="https://guildjen.com/support-luminary-cloud-build/">abs</a></td></tr>"#,
-            r#"<tr><td><a href="/gw2-wvw-builds/">category</a>"#,
-            r#"<a href="/legendary-armor-guide/">guide</a>"#,
-            r#"<a href="https://evil.example/fake-build/">off-site</a></td></tr></table>"#,
-            r#"<aside><a href="/power-reaper-roaming-build/">sidebar</a></aside>"#,
-        );
-        let links = extract_table_build_links(html, 10);
-        assert_eq!(
-            links,
-            vec![
-                "/power-hammer-luminary-roaming-build/".to_string(),
-                "https://guildjen.com/support-luminary-cloud-build/".to_string(),
-            ],
-            "only in-table build links, and never the sidebar"
-        );
-    }
 
     /// Only today's builds are reusable, and only from files this version
     /// writes, and only if they carry ids. Yesterday's have to be refetched
@@ -2152,43 +2130,6 @@ mod tests {
         assert_eq!(retry_after_ms(&headers), None);
     }
 
-    /// The sync walks a class at a time, so the links arrive grouped. A slug
-    /// that names no profession is dropped here rather than fetched and
-    /// refused, which is a request saved.
-    #[test]
-    fn group_by_profession_buckets_every_class_and_drops_the_unfilable() {
-        let link = |slug: &str| format!("/{slug}-build/");
-        let grouped = group_by_profession(vec![
-            link("power-reaper-roaming"),
-            link("celestial-catalyst-roaming"),
-            link("condition-reaper-roaming"),
-            link("power-scrapper-roaming"),
-            link("celestial-tempest-roaming"),
-            link("not-a-profession-at-all"),
-        ]);
-
-        let classes: Vec<&str> = grouped.iter().map(|(c, _)| c.as_str()).collect();
-        assert_eq!(
-            classes,
-            vec!["Necromancer", "Elementalist", "Engineer"],
-            "first-seen order, one bucket per class"
-        );
-        assert_eq!(
-            grouped[0].1,
-            vec![
-                link("power-reaper-roaming"),
-                link("condition-reaper-roaming")
-            ],
-            "a class keeps every build it has, in page order"
-        );
-        assert_eq!(grouped[1].1.len(), 2);
-        assert_eq!(grouped[2].1.len(), 1);
-        assert_eq!(
-            grouped.iter().map(|(_, l)| l.len()).sum::<usize>(),
-            5,
-            "the slug naming no profession is gone"
-        );
-    }
 
     /// The category list is read off the sitemap so a category added or
     /// retired by the site needs no code change. The hub itself, the sub-80
@@ -2721,30 +2662,38 @@ mod tests {
 
         if let Ok(p) = std::env::var("GUILDJEN_CATEGORY_HTML") {
             let html = std::fs::read_to_string(&p).expect("category html readable");
-            let links = extract_table_build_links(&html, 500);
-            println!("-- {} build links from the category tables --", links.len());
-            assert!(!links.is_empty(), "a category page must yield build links");
+            let rows = crate::providers::guildjen::index_rows(&html);
+            println!("-- {} builds listed by the index --", rows.len());
+            assert!(!rows.is_empty(), "a category page must list builds");
 
-            // Every link has to name a profession or the scrape drops it.
+            // The index files each build under a profession itself, so the
+            // slug is only the fallback. A row with neither is dropped.
             let mut unfiled = Vec::new();
-            for href in &links {
-                let slug = href.trim_end_matches('/').rsplit('/').next().unwrap_or("");
-                match profession_from_slug(slug) {
-                    Some((prof, spec)) => println!("  {prof:12} {spec:14} {slug}"),
-                    None => unfiled.push(slug.to_string()),
+            for row in &rows {
+                let slug = row.url.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+                if !row.profession.is_empty() {
+                    println!(
+                        "  {:12} {:24} roles {:?} play {:?}",
+                        row.profession, row.name, row.roles, row.playstyles
+                    );
+                } else if let Some((prof, spec)) = profession_from_slug(slug) {
+                    println!("  {prof:12} {spec:14} {slug}  (from slug)");
+                } else {
+                    unfiled.push(slug.to_string());
                 }
             }
             assert!(
                 unfiled.is_empty(),
                 "{} of {} builds name no profession and would be dropped: {:?}",
                 unfiled.len(),
-                links.len(),
+                rows.len(),
                 unfiled
             );
 
             // What the sync asks for, and the classes it covers. Every row
             // is fetched now, so this is the whole table.
-            let by_class = group_by_profession(links.clone());
+            let links = rows.clone();
+            let by_class = group_rows_by_profession(rows);
             let covered: Vec<String> = by_class
                 .iter()
                 .map(|(c, l)| format!("{c} x{}", l.len()))
