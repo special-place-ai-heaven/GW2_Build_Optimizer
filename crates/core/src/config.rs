@@ -43,6 +43,41 @@ impl LlmProvider {
             LlmProvider::OpenRouter => "OpenRouter",
         }
     }
+
+    /// Page where a first-time user creates an API key.
+    ///
+    /// A live GET of the Gemini and OpenRouter URLs on 2026-09-06 opened a
+    /// sign-in wall, not a Create Key button. Overlay copy has to say that.
+    pub fn key_page_url(&self) -> &'static str {
+        match self {
+            LlmProvider::Gemini => "https://aistudio.google.com/apikey",
+            LlmProvider::OpenAI => "https://platform.openai.com/api-keys",
+            LlmProvider::Anthropic => "https://console.anthropic.com/settings/keys",
+            LlmProvider::OpenRouter => "https://openrouter.ai/keys",
+        }
+    }
+
+    /// Locale key for the one-line "what this page is" line. Same key on
+    /// setup and Settings so the on-ramp is worded once.
+    pub fn setup_howto_key(&self) -> &'static str {
+        match self {
+            LlmProvider::Gemini => "setup.gemini_howto",
+            LlmProvider::OpenAI => "setup.openai_howto",
+            LlmProvider::Anthropic => "setup.anthropic_howto",
+            LlmProvider::OpenRouter => "setup.openrouter_howto",
+        }
+    }
+
+    /// Locale key for the sign-in-then-create-key steps. Same key on both
+    /// screens; see [`Self::setup_howto_key`].
+    pub fn setup_steps_key(&self) -> &'static str {
+        match self {
+            LlmProvider::Gemini => "setup.gemini_steps",
+            LlmProvider::OpenAI => "setup.openai_steps",
+            LlmProvider::Anthropic => "setup.anthropic_steps",
+            LlmProvider::OpenRouter => "setup.openrouter_steps",
+        }
+    }
 }
 
 /// Whether the config held in memory may be written back over `config.json`.
@@ -1006,6 +1041,33 @@ impl AppConfig {
 mod tests {
     use super::*;
     use std::env;
+
+    #[test]
+    fn every_provider_has_a_key_page_url() {
+        for provider in &LlmProvider::ALL {
+            let url = provider.key_page_url();
+            assert!(
+                url.starts_with("https://"),
+                "{url} is not an https key page"
+            );
+            assert!(
+                provider.setup_howto_key().starts_with("setup."),
+                "howto key must be a setup.* locale id"
+            );
+            assert!(
+                provider.setup_steps_key().starts_with("setup."),
+                "steps key must be a setup.* locale id"
+            );
+        }
+        assert_eq!(
+            LlmProvider::Gemini.key_page_url(),
+            "https://aistudio.google.com/apikey"
+        );
+        assert_eq!(
+            LlmProvider::OpenRouter.key_page_url(),
+            "https://openrouter.ai/keys"
+        );
+    }
 
     /// Two saves of the same config file must never stage into one path.
     ///
