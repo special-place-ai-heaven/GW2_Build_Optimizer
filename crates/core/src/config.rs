@@ -197,6 +197,10 @@ fn default_show_images() -> bool {
     true
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// Ticked sources + reading tools. All sources off until the player opts in —
 /// that is what hides the News tab. Setup still paints official GW2 headlines.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -471,6 +475,14 @@ pub struct AppConfig {
     /// OpenRouter model ID (e.g. "anthropic/claude-sonnet-4-5").
     #[serde(default)]
     pub openrouter_model: Option<String>,
+    /// Show only models that cost nothing to use.
+    ///
+    /// On by default, because that is what most people installing this will
+    /// want: a free account, no card, no spend. OpenRouter lists 431 models
+    /// and 22 of them are free — finding those by scrolling is not something
+    /// to ask of anyone. Turning it off shows everything.
+    #[serde(default = "default_true")]
+    pub free_models_only: bool,
 
     // ─── UI Preferences ───
     /// Window opacity (0.0–1.0). Default 1.0.
@@ -563,6 +575,7 @@ impl Default for AppConfig {
             anthropic_model: None,
             openrouter_api_key: None,
             openrouter_model: None,
+            free_models_only: true,
             window_opacity: 1.0,
             font_scale: 1.0,
             theme: ThemeConfig::default(),

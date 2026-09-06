@@ -446,6 +446,8 @@
   "btn.retry": "Ponów",
   "fmt.synced_when": "Zsynchronizowano {when}",
   "bench.failed": "Błędy",
+  "settings.free_only": "Darmowe",
+  "settings.free_none": "Ten dostawca nie ma darmowych modeli.",
   "bench.throttled": "Wstrzymano - witryna poprosiła o zwolnienie tempa. Synchronizacja czeka i sama będzie kontynuowana.",
   "bench.sync_hint": "Przejdź do Ustawienia > Sync Benchmarks, aby pobrać buildy referencyjne.",
   "bench.on_par": "na równi",

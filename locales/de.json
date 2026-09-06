@@ -446,6 +446,8 @@
   "btn.retry": "Erneut",
   "fmt.synced_when": "Synchronisiert {when}",
   "bench.failed": "Fehler",
+  "settings.free_only": "Gratis",
+  "settings.free_none": "Dieser Anbieter hat keine kostenlosen Modelle.",
   "bench.throttled": "Pausiert - die Website bittet um langsamere Zugriffe. Die Synchronisierung wartet und läuft von selbst weiter.",
   "bench.sync_hint": "Einstellungen > Benchmarks synchronisieren für Referenzbuilds.",
   "bench.on_par": "gleichauf",

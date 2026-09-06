@@ -196,8 +196,7 @@ pub(super) fn start_fetch_models(state: &mut AddonState) {
                 s.main.models_loading = false;
                 match result {
                     Some(Ok(models)) => {
-                        s.main.available_models =
-                            models.into_iter().map(|m| (m.id, m.display_name)).collect();
+                        s.main.available_models = models;
                         s.main.models_error = None;
                     }
                     Some(Err(e)) => {

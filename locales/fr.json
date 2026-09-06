@@ -446,6 +446,8 @@
   "btn.retry": "Réessayer",
   "fmt.synced_when": "Synchronisé {when}",
   "bench.failed": "Échecs",
+  "settings.free_only": "Gratuit",
+  "settings.free_none": "Ce fournisseur n'a aucun modèle gratuit.",
   "bench.throttled": "En pause - le site nous demande de ralentir. La synchronisation attend et reprendra d'elle-même.",
   "bench.sync_hint": "Paramètres > Sync benchmarks pour télécharger les références.",
   "bench.on_par": "au niveau",

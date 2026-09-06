@@ -1427,6 +1427,157 @@ pub fn draw_choya_party(ui: &Ui, center: [f32; 2], size: f32) {
     blit_frame(&ui.get_window_draw_list(), tid, center, size, CHOYA2_PARTY);
 }
 
+/// Quips the Free Choya says while it is up. One is picked per appearance.
+const FREE_QUIPS: [&str; 6] = [
+    "We are free, baby!",
+    "YEY! Free!",
+    "No card, no problem",
+    "Zero gold, zero coin",
+    "Free as a skritt in a vault",
+    "Choya approves this budget",
+];
+
+/// A Choya in shades, dancing above the Free filter.
+///
+/// `rise` is 0 hidden to 1 fully up, eased by the caller. It drives both the
+/// slide and the fade together, so the sprite arrives from under the row
+/// rather than blinking into place, and leaves the same way. At 0 nothing is
+/// drawn at all — an invisible sprite is still a texture bind every frame.
+///
+/// Drawn on the foreground list: the row it sits above is near the top of a
+/// panel, and a window-local list would clip the poor thing off at the knees.
+pub fn draw_free_choya(ui: &Ui, anchor: [f32; 2], row_h: f32, rise: f32) {
+    let rise = rise.clamp(0.0, 1.0);
+    if rise <= 0.01 {
+        return;
+    }
+    let size = (row_h * 1.9).clamp(28.0, 64.0);
+    let t = ui.frame_count() as f32;
+    // Slow, because a fast dance beside a settings control reads as a bug.
+    // Two rates that do not divide evenly, so the sway and the bob drift
+    // against each other and the loop never looks like a loop.
+    let sway = (t * 0.045).sin() * size * 0.10;
+    let bob = (t * 0.031).sin() * size * 0.05;
+    // Travels its own height on the way in, so it looks like it climbed out
+    // from behind the row.
+    let hidden = size * 0.9;
+    let center = [
+        anchor[0] + sway,
+        anchor[1] - size * 0.55 + bob + hidden * (1.0 - rise),
+    ];
+    let dl = ui.get_foreground_draw_list();
+    let Some(tid) = choya_sheet2() else {
+        // Sheet two is where the shades live. Without it, the first sheet's
+        // dance pose still dances — just bare-faced.
+        if let Some(tid) = choya_sheet() {
+            blit_alpha(&dl, tid, center, size, CHOYA_DANCE, rise);
+        }
+        return;
+    };
+    blit_alpha(&dl, tid, center, size, CHOYA2_PARTY, rise);
+    // Shades sit on the face, and the sprite is wider than it is tall, so it
+    // is placed against the body's width rather than scaled to `size`.
+    blit_alpha(
+        &dl,
+        tid,
+        [center[0], center[1] - size * 0.17],
+        size * 0.52,
+        CHOYA2_SHADES,
+        rise,
+    );
+    // A maraca each side, counter-swaying, and a note that drifts off.
+    blit_alpha(
+        &dl,
+        tid,
+        [center[0] - size * 0.42 - sway, center[1] + size * 0.08],
+        size * 0.26,
+        CHOYA2_MARACA,
+        rise,
+    );
+    blit_alpha(
+        &dl,
+        tid,
+        [center[0] + size * 0.42 - sway, center[1] + size * 0.08],
+        size * 0.26,
+        CHOYA2_MARACA2,
+        rise,
+    );
+    let note = (t * 0.02).fract();
+    blit_alpha(
+        &dl,
+        tid,
+        [
+            center[0] + size * (0.30 + note * 0.25),
+            center[1] - size * (0.35 + note * 0.55),
+        ],
+        size * 0.18,
+        CHOYA2_NOTE,
+        rise * (1.0 - note),
+    );
+    draw_free_quip(ui, &dl, center, size, rise);
+}
+
+/// The speech bubble above the dancing Choya.
+///
+/// The quip is chosen from the frame count at the moment it rises, so it
+/// holds still while the Choya is up and is a different one next time. It
+/// fades in behind the sprite's own rise so the words arrive after the
+/// dancer, which is the order a reader expects.
+fn draw_free_quip(ui: &Ui, dl: &DrawListMut, center: [f32; 2], size: f32, rise: f32) {
+    let alpha = ((rise - 0.55) / 0.45).clamp(0.0, 1.0);
+    if alpha <= 0.02 {
+        return;
+    }
+    let quip = FREE_QUIPS[(ui.frame_count() as usize / 600) % FREE_QUIPS.len()];
+    let text = ui.calc_text_size(quip);
+    let pad = [7.0, 4.0];
+    let tail = 5.0;
+    let w = text[0] + pad[0] * 2.0;
+    let h = text[1] + pad[1] * 2.0;
+    let min = [center[0] - w * 0.5, center[1] - size * 0.62 - h - tail];
+    let max = [min[0] + w, min[1] + h];
+    let p = pal();
+    let bg = [p.gold_fill[0], p.gold_fill[1], p.gold_fill[2], alpha * 0.95];
+    dl.add_rect(min, max, color_u32(bg)).filled(true).rounding(5.0).build();
+    // The tail, pointing down at whoever is talking.
+    dl.add_triangle(
+        [center[0] - tail, max[1]],
+        [center[0] + tail, max[1]],
+        [center[0], max[1] + tail],
+        color_u32(bg),
+    )
+    .filled(true)
+    .build();
+    let ink = [0.10, 0.08, 0.05, alpha];
+    dl.add_text([min[0] + pad[0], min[1] + pad[1]], color_u32(ink), quip);
+}
+
+/// [`blit_frame`] with an alpha, for anything that fades.
+fn blit_alpha(
+    dl: &DrawListMut,
+    tid: TextureId,
+    center: [f32; 2],
+    size: f32,
+    frame: [f32; 4],
+    alpha: f32,
+) {
+    let [_, _, w, h] = frame;
+    let aspect = (w / h).max(0.01);
+    let (dw, dh) = if aspect > 1.0 {
+        (size, size / aspect)
+    } else {
+        (size * aspect, size)
+    };
+    let pmin = [center[0] - dw * 0.5, center[1] - dh * 0.5];
+    let pmax = [center[0] + dw * 0.5, center[1] + dh * 0.5];
+    let (uv0, uv1) = sheet_uv(frame);
+    dl.add_image(tid, pmin, pmax)
+        .uv_min(uv0)
+        .uv_max(uv1)
+        .col([1.0, 1.0, 1.0, alpha.clamp(0.0, 1.0)])
+        .build();
+}
+
 pub const HEADER_POSE_COUNT: u8 = 4;
 pub const HEADER_POSE_SECS: u64 = 60;
 pub const COMPOSER_BOB_SECS: f32 = 3.0;

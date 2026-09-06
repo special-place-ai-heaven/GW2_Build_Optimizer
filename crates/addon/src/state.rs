@@ -602,8 +602,17 @@ pub struct MainState {
     /// Frame counter for "Copied!" tooltip feedback.
     pub copy_feedback_frames: u32,
     // Dynamic model list
-    /// Models fetched from the active provider's API: (id, display_name).
-    pub available_models: Vec<(String, String)>,
+    /// Models fetched from the active provider's API.
+    ///
+    /// The whole row, not just id and name: the picker prunes on what a model
+    /// can do and orders on how well it does it, and the request builder
+    /// sizes itself from the same data.
+    pub available_models: Vec<gw2_optimizer::llm::ModelInfo>,
+    /// How far the Free-filter Choya has risen, 0 hidden to 1 fully up.
+    ///
+    /// Eased per frame rather than stored as a bool so the sprite slides and
+    /// fades instead of appearing.
+    pub free_choya_rise: f32,
     /// Whether a model list fetch is in progress.
     pub models_loading: bool,
     /// Error from the last model list fetch.
