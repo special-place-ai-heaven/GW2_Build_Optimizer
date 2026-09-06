@@ -201,10 +201,12 @@ pub fn push_ticker() -> Option<FontGuard> {
 /// path, where the ASCII-only base atlas also turned every accented char into
 /// '?'. A copy that must be kept in step by hand eventually is not.
 fn in_latin_ranges(u: u32) -> bool {
-    // Pairs are inclusive; `chunks_exact` leaves the terminating 0 behind.
+    // Pairs are inclusive; the terminating 0 is left over and ignored.
     LATIN_RANGES
-        .chunks_exact(2)
-        .any(|pair| (u32::from(pair[0])..=u32::from(pair[1])).contains(&u))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .any(|[lo, hi]| (u32::from(*lo)..=u32::from(*hi)).contains(&u))
 }
 
 /// Whether every char of `text` is inside the ticker face's glyph ranges.
