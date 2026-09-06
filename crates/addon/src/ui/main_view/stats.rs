@@ -399,6 +399,8 @@ pub(super) fn check_api_health(state: &mut AddonState) {
                 s.main.api_health_checking = false;
                 if let Some(b) = live_build {
                     s.main.live_build_number = Some(b);
+                    s.main.manifest_staleness =
+                        gw2_optimizer::balance::live_build_mismatch(u64::from(b));
                 }
                 if let Some(st) = status {
                     s.main.api_status = st;
@@ -423,6 +425,32 @@ pub(super) fn check_api_health(state: &mut AddonState) {
         state.main.api_health_checking = false;
     }
 }
+
+
+/// Status-bar chip when the live `/v2/build` is not the verified manifest build.
+pub(super) fn render_manifest_staleness(ui: &nexus::imgui::Ui, state: &crate::state::AddonState) {
+    if let Some(reason) = state
+        .main
+        .data_state
+        .as_ref()
+        .and_then(|s| s.optimize_block_reason())
+    {
+        ui.same_line();
+        ui.text_colored(crate::ui::theme::ERR, "| Data disabled");
+        if ui.is_item_hovered() {
+            ui.tooltip_text(reason);
+        }
+    }
+    let Some(msg) = state.main.manifest_staleness.as_deref() else {
+        return;
+    };
+    ui.same_line();
+    ui.text_colored(crate::ui::theme::WARN, "| Data snapshot stale");
+    if ui.is_item_hovered() {
+        ui.tooltip_text(msg);
+    }
+}
+
 
 /// Load GameDb once on main screen entry (S11-T06)
 pub(super) fn load_game_db(state: &mut AddonState) {
@@ -549,6 +577,15 @@ pub(super) fn compute_3tier_combat(
 mod tests {
     use super::{locale_attempt_allowed, LOCALE_RETRY_INTERVAL};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn live_build_mismatch_is_what_the_health_check_stores() {
+        let verified = gw2_optimizer::data::manifests::latest_manifest().game_build_id;
+        assert!(gw2_optimizer::balance::live_build_mismatch(verified).is_none());
+        let warn = gw2_optimizer::balance::live_build_mismatch(1).expect("stale");
+        assert!(warn.contains("1"));
+        assert!(warn.contains(&verified.to_string()));
+    }
 
     /// `ensure_localized_names` runs on every frame. When the pack for the
     /// selected language is missing, stale or corrupt there is nothing to

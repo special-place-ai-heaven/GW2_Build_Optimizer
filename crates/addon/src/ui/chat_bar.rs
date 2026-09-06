@@ -566,12 +566,20 @@ pub fn load_history(addon_dir: &Path) -> Vec<ChatMessage> {
 
 pub fn save_history(addon_dir: &Path, history: &[ChatMessage]) {
     let path = addon_dir.join("kitchen.json");
-    let Ok(json) = serde_json::to_vec(history) else {
-        return;
+    let json = match serde_json::to_vec(history) {
+        Ok(json) => json,
+        Err(e) => {
+            crate::ui::log_disk_error(format!("chat history serialize failed: {e}"));
+            return;
+        }
     };
     let tmp = addon_dir.join("kitchen.json.tmp");
-    if std::fs::write(&tmp, json).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
+    if let Err(e) = std::fs::write(&tmp, json) {
+        crate::ui::log_disk_error(format!("chat history write failed: {e}"));
+        return;
+    }
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        crate::ui::log_disk_error(format!("chat history rename failed: {e}"));
     }
 }
 
@@ -701,6 +709,20 @@ mod tests {
         assert_eq!(loaded[0].text, "plate this");
         assert_eq!(loaded[0].chips[0].code, encode_item(24836));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_history_logs_when_directory_is_missing() {
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_kitchen_missing_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        save_history(&dir, &[]);
+        assert!(!dir.join("kitchen.json").exists());
     }
 
     #[test]

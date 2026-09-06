@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use thiserror::Error;
 
-use super::{try_load, DataLoadError, DataQuality, DataQualityReason, EvidenceLevel};
+use super::{try_load, DataLoadError, EvidenceLevel};
 
 // ─── Embedded baseline JSON (compile-time) ───
 
@@ -289,78 +289,6 @@ pub fn known_mode_splits() -> &'static [KnownModeSplit] {
         // would be added here with handled_in_phase_a: false.
     ];
     SPLITS
-}
-
-/// Check WvW data quality by examining known mode splits against the override system.
-///
-/// For each known split that is NOT handled in Phase A data:
-/// - If the WvW override exists with a value: quality is maintained (Verified)
-/// - If the WvW override exists but is Unknown: degrades to Provisional
-/// - If no WvW override exists: degrades to Provisional (known split, missing data)
-///
-/// Returns the overall quality and a list of reasons for any degradation.
-pub fn check_wvw_quality(
-    overrides: &BalanceOverrides,
-    patch_id: &str,
-) -> (DataQuality, Vec<DataQualityReason>) {
-    let mut quality = DataQuality::Verified;
-    let mut reasons = Vec::new();
-
-    for split in known_mode_splits() {
-        // Phase A data already handles this split — no override needed
-        if split.handled_in_phase_a {
-            continue;
-        }
-
-        // For splits NOT handled in Phase A, check if the override system has WvW data.
-        // Note: We cannot use source_id here because KnownModeSplit tracks by name,
-        // not by GW2 API ID. This is intentional — known splits are documented at the
-        // concept level, not the API entity level. Future P3-13 work may add ID mapping.
-        //
-        // For now, we check if ANY WvW override file exists for this patch (it does,
-        // since we load pve.json/pvp.json/wvw.json). The absence of an entity in the
-        // WvW file means no override is registered → known split is unresolved.
-        let wvw_result = overrides.lookup(
-            patch_id,
-            "WvW",
-            split.source_type,
-            0, // placeholder — known splits don't map to specific IDs yet
-            split.field,
-        );
-
-        match wvw_result {
-            Some(OverrideResult::Value { .. }) => {
-                // WvW-specific value exists — quality maintained
-            }
-            Some(OverrideResult::Unknown { .. }) => {
-                quality = quality.merge(&DataQuality::Provisional);
-                reasons.push(DataQualityReason {
-                    field: split.field.to_string(),
-                    entity: split.entity_name.to_string(),
-                    modes: vec!["WvW".to_string()],
-                    explanation: format!(
-                        "Known mode split ({}), WvW value explicitly unknown",
-                        split.description,
-                    ),
-                });
-            }
-            None => {
-                // No override registered — known split is unresolved for WvW
-                quality = quality.merge(&DataQuality::Provisional);
-                reasons.push(DataQualityReason {
-                    field: split.field.to_string(),
-                    entity: split.entity_name.to_string(),
-                    modes: vec!["WvW".to_string()],
-                    explanation: format!(
-                        "Known mode split ({}), no WvW override registered",
-                        split.description,
-                    ),
-                });
-            }
-        }
-    }
-
-    (quality, reasons)
 }
 
 #[cfg(test)]
@@ -740,28 +668,7 @@ mod tests {
         );
     }
 
-    /// When a known split exists but WvW override is missing, quality degrades.
-    #[test]
-    fn test_wvw_known_split_missing_degrades_quality() {
-        // Empty WvW overrides — no entities at all
-        let wvw_json = r#"{
-            "patch_id": "test-patch",
-            "mode": "WvW",
-            "entities": []
-        }"#;
-        let file = load_override_file(wvw_json).unwrap();
-        let mut files = HashMap::new();
-        files.insert((file.patch_id.clone(), file.mode.clone()), file);
-        let overrides = BalanceOverrides { files };
-
-        // All known splits are currently handled_in_phase_a = true,
-        // so check_wvw_quality should return Verified (no unresolved splits).
-        let (quality, reasons) = check_wvw_quality(&overrides, "test-patch");
-        assert_eq!(quality, DataQuality::Verified);
-        assert!(reasons.is_empty(), "all known splits handled in Phase A");
-    }
-
-    /// When WvW has no known split, base value is used — quality stays Verified.
+    /// When WvW has no known split, lookup returns None and the caller keeps the base value.
     #[test]
     fn test_wvw_no_known_split_uses_base_value() {
         let wvw_json = r#"{
@@ -774,15 +681,8 @@ mod tests {
         files.insert((file.patch_id.clone(), file.mode.clone()), file);
         let overrides = BalanceOverrides { files };
 
-        // Lookup a coefficient that has no known split — should return None
-        // (no override, use base value, no quality degradation).
         let result = overrides.lookup("test-patch", "WvW", "Skill", 9999, "coefficient");
         assert_eq!(result, None, "non-split coefficient should return None");
-
-        // Quality should be Verified since there are no unresolved splits
-        let (quality, reasons) = check_wvw_quality(&overrides, "test-patch");
-        assert_eq!(quality, DataQuality::Verified);
-        assert!(reasons.is_empty());
     }
 
     /// When a WvW override exists but the value is explicitly Unknown, quality degrades.
@@ -969,22 +869,5 @@ mod tests {
                 split.entity_name, split.field,
             );
         }
-    }
-
-    /// check_wvw_quality returns Verified when all known splits are handled in Phase A.
-    #[test]
-    fn test_check_wvw_quality_baseline_verified() {
-        let o = overrides();
-        let (quality, reasons) = check_wvw_quality(o, "2026-01-13");
-        assert_eq!(
-            quality,
-            DataQuality::Verified,
-            "baseline should be Verified (all splits handled in Phase A)",
-        );
-        assert!(
-            reasons.is_empty(),
-            "no reasons expected when all splits handled: {:?}",
-            reasons,
-        );
     }
 }

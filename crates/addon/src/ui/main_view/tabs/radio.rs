@@ -505,7 +505,7 @@ fn favorites(ui: &Ui, state: &mut AddonState) {
                     let key = fav_key(&f.stationuuid, &f.url);
                     let active = current_key.as_deref() == Some(key.as_str());
                     match favorite_row(ui, i, f, active) {
-                        RowAction::Play => play = Some(station_from_saved(f)),
+                        RowAction::Play => play = Some(player::station_from_saved(f)),
                         RowAction::Heart => remove = Some(key.clone()),
                         RowAction::None => {}
                     }
@@ -1310,7 +1310,7 @@ fn player_bar(ui: &Ui, state: &mut AddonState) {
                     .radio
                     .last_station
                     .as_ref()
-                    .map(station_from_saved)
+                    .map(player::station_from_saved)
             });
             match resumable {
                 Some(station) => {
@@ -1568,7 +1568,7 @@ fn toggle_favorite(state: &mut AddonState, station: &RbStation, now_frames: u32)
     {
         favorites.remove(i);
     } else {
-        favorites.push(saved_from_station(station));
+        favorites.push(player::saved_from_station(station));
         art::flash_love(now_frames);
     }
     crate::ui::save_config_detached(state);
@@ -1599,37 +1599,6 @@ fn fav_key(uuid: &str, url: &str) -> String {
         url.trim().to_string()
     } else {
         uuid.to_string()
-    }
-}
-
-fn saved_from_station(s: &RbStation) -> SavedStation {
-    SavedStation {
-        stationuuid: s.stationuuid.clone(),
-        name: s.name.clone(),
-        url: s.stream_url().to_string(),
-        favicon: s.favicon.clone(),
-        codec: s.codec.clone(),
-        bitrate: s.bitrate,
-        countrycode: s.countrycode.clone(),
-        tags: s.tags.clone(),
-    }
-}
-
-fn station_from_saved(f: &SavedStation) -> RbStation {
-    RbStation {
-        stationuuid: f.stationuuid.clone(),
-        name: f.name.clone(),
-        url: f.url.clone(),
-        url_resolved: f.url.clone(),
-        favicon: f.favicon.clone(),
-        // A rehydrated favorite has no directory vote count.
-        votes: 0,
-        tags: f.tags.clone(),
-        countrycode: f.countrycode.clone(),
-        codec: f.codec.clone(),
-        bitrate: f.bitrate,
-        lastcheckok: 1,
-        hls: 0,
     }
 }
 
@@ -1710,25 +1679,5 @@ mod tests {
         assert_eq!(join_meta(["DE", "MP3", "128 kbps"]), "DE - MP3 - 128 kbps");
         assert_eq!(join_meta(["", "MP3", ""]), "MP3");
         assert_eq!(join_meta(["", "", ""]), "");
-    }
-
-    #[test]
-    fn saved_station_round_trips_to_a_playable_row() {
-        let s = RbStation {
-            stationuuid: "u1".into(),
-            name: "Radio Tyria".into(),
-            url: "http://raw/".into(),
-            url_resolved: "http://resolved/".into(),
-            codec: "MP3".into(),
-            bitrate: 128,
-            countrycode: "DE".into(),
-            ..Default::default()
-        };
-        let saved = saved_from_station(&s);
-        assert_eq!(saved.url, "http://resolved/");
-        let back = station_from_saved(&saved);
-        assert_eq!(back.stream_url(), "http://resolved/");
-        assert_eq!(back.lastcheckok, 1);
-        assert_eq!(back.hls, 0);
     }
 }

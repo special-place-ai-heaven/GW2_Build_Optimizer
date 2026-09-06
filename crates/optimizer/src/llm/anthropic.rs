@@ -266,7 +266,10 @@ fn read_anthropic_stream<R: std::io::Read>(
             } => ContentBlock::ToolUse {
                 id,
                 name,
-                input: serde_json::from_str(&input_json).unwrap_or_else(|_| serde_json::json!({})),
+                input: match super::parse_tool_arguments(&input_json) {
+                    Ok(v) => v,
+                    Err(err) => err,
+                },
             },
         })
         .collect::<Vec<_>>();
@@ -699,7 +702,11 @@ impl LlmClient for AnthropicClient {
             // Execute each tool and build result blocks
             let mut result_blocks = Vec::new();
             for (tool_use_id, name, input) in &tool_uses {
-                let result = execute_tool(name, input);
+                let result = if super::unparseable_tool_input(input) {
+                    input.clone()
+                } else {
+                    execute_tool(name, input)
+                };
                 let result_str = serde_json::to_string(&result).unwrap_or_default();
                 result_blocks.push(ContentBlock::ToolResult {
                     tool_use_id: tool_use_id.clone(),
@@ -729,9 +736,7 @@ impl LlmClient for AnthropicClient {
         on_progress(max_turns, max_turns, &[]);
         messages.push(AnthropicMessage {
             role: "user".to_string(),
-            content: AnthropicContent::Text(
-                super::openai_compat::CLOSING_TURN.to_string(),
-            ),
+            content: AnthropicContent::Text(super::openai_compat::CLOSING_TURN.to_string()),
         });
         trim_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
         let closing = self.send_messages(&messages, None, None, ANTHROPIC_MAX_TOKENS)?;

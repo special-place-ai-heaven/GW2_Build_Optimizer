@@ -712,31 +712,14 @@ fn parse_weapon_sets(weapons: &[String]) -> Vec<(u8, Vec<String>)> {
 /// "Utils: Blood Reckoning, Bull's Charge, Signet of Fury" → 3 names
 /// "Elite: Head Butt" → "Head Butt"
 fn parse_skill_names(skills: &[String]) -> Vec<String> {
+    let parsed = crate::ui::gear_diff::parse_suggestion_skills(skills);
     let mut names = Vec::new();
-    for s in skills {
-        if let Some(rest) = s.strip_prefix("Heal: ") {
-            names.push(rest.trim().to_string());
-        } else if let Some(rest) = s.strip_prefix("Utils: ") {
-            for name in rest.split(',') {
-                let name = name.trim();
-                if !name.is_empty() {
-                    names.push(name.to_string());
-                }
-            }
-        } else if let Some(rest) = s.strip_prefix("Elite: ") {
-            names.push(rest.trim().to_string());
-        } else if let Some(rest) = s.strip_prefix("Utility: ") {
-            let name = rest.trim();
-            if !name.is_empty() {
-                names.push(name.to_string());
-            }
-        } else {
-            // Fallback: try the whole string as a skill name
-            let trimmed = s.trim();
-            if !trimmed.is_empty() {
-                names.push(trimmed.to_string());
-            }
-        }
+    if !parsed.heal.is_empty() {
+        names.push(parsed.heal);
+    }
+    names.extend(parsed.utilities);
+    if !parsed.elite.is_empty() {
+        names.push(parsed.elite);
     }
     names
 }
@@ -877,41 +860,26 @@ fn skill_selection_from_suggestion(
     db: &gw2_optimizer::gamedb::GameDb,
     profession: &str,
 ) -> gw2_api::models::SkillSelection {
-    fn strip_label_ci<'a>(s: &'a str, label: &str) -> Option<&'a str> {
-        let head = s.get(..label.len())?;
-        if head.eq_ignore_ascii_case(label) {
-            Some(&s[label.len()..])
-        } else {
-            None
-        }
-    }
-
-    let mut heal = None;
-    let mut utilities = Vec::new();
-    let mut elite = None;
-    for s in skills {
-        if let Some(rest) = strip_label_ci(s, "Heal: ") {
-            heal = skill_id_by_name(db, profession, rest.trim());
-        } else if let Some(rest) = strip_label_ci(s, "Utils: ") {
-            for name in rest.split(',') {
-                let name = name.trim();
-                if !name.is_empty() {
-                    utilities.push(skill_id_by_name(db, profession, name));
-                }
-            }
-        } else if let Some(rest) = strip_label_ci(s, "Utility: ") {
-            let name = rest.trim();
-            if !name.is_empty() {
-                utilities.push(skill_id_by_name(db, profession, name));
-            }
-        } else if let Some(rest) = strip_label_ci(s, "Elite: ") {
-            elite = skill_id_by_name(db, profession, rest.trim());
-        }
-    }
+    let parsed = crate::ui::gear_diff::parse_suggestion_skills(skills);
+    let heal = if parsed.heal.is_empty() {
+        None
+    } else {
+        skill_id_by_name(db, profession, parsed.heal.trim())
+    };
+    let mut utilities: Vec<Option<u32>> = parsed
+        .utilities
+        .iter()
+        .map(|name| skill_id_by_name(db, profession, name))
+        .collect();
     utilities.truncate(3);
     while utilities.len() < 3 {
         utilities.push(None);
     }
+    let elite = if parsed.elite.is_empty() {
+        None
+    } else {
+        skill_id_by_name(db, profession, parsed.elite.trim())
+    };
     gw2_api::models::SkillSelection {
         heal,
         utilities,
@@ -920,28 +888,26 @@ fn skill_selection_from_suggestion(
 }
 
 fn pet_selection_from_suggestion(skills: &[String]) -> Option<gw2_api::models::PetSelection> {
-    for s in skills {
-        let Some(rest) = s.strip_prefix("Pets: ") else {
-            continue;
-        };
-        let mut ids = Vec::new();
-        for part in rest.split('/') {
-            let t = part.trim().trim_start_matches('#');
-            if let Ok(id) = t.parse::<u32>() {
-                ids.push(Some(id));
-            }
-        }
-        if ids.is_empty() {
-            return None;
-        }
-        let t1 = ids.first().copied().flatten();
-        let t2 = ids.get(1).copied().flatten();
-        return Some(gw2_api::models::PetSelection {
-            terrestrial: vec![t1, t2],
-            aquatic: vec![],
-        });
+    let pets = crate::ui::gear_diff::parse_suggestion_skills(skills).pets;
+    if pets.is_empty() {
+        return None;
     }
-    None
+    let mut ids = Vec::new();
+    for part in pets.split('/') {
+        let t = part.trim().trim_start_matches('#');
+        if let Ok(id) = t.parse::<u32>() {
+            ids.push(Some(id));
+        }
+    }
+    if ids.is_empty() {
+        return None;
+    }
+    let t1 = ids.first().copied().flatten();
+    let t2 = ids.get(1).copied().flatten();
+    Some(gw2_api::models::PetSelection {
+        terrestrial: vec![t1, t2],
+        aquatic: vec![],
+    })
 }
 
 /// Summarize a ResolvedBuild as text for LLM prompts.

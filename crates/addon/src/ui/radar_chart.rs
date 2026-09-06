@@ -281,31 +281,6 @@ fn draw_filled_polygon(
     }
 }
 
-/// Render preset buttons in a compact grid (2 per row).
-/// Returns Some(preset_weights) if a preset was clicked.
-pub fn render_presets(ui: &Ui) -> Option<OptimizationWeights> {
-    let mut result = None;
-    let btn_width = (ui.content_region_avail()[0] - 6.0) / 2.0;
-    for (i, (name, preset_fn)) in OptimizationWeights::PRESETS.iter().enumerate() {
-        if i % 2 == 1 {
-            ui.same_line();
-        }
-        let label = match *name {
-            "Power DPS" => t("preset.power_dps"),
-            "Condi DPS" => t("preset.condi_dps"),
-            "Tank" => t("preset.tank"),
-            "Healer" => t("preset.healer"),
-            "Balanced" => t("preset.balanced"),
-            "Celestial" => t("preset.celestial"),
-            other => other.to_string(),
-        };
-        if ui.button_with_size(format!("{label}##preset_{i}"), [btn_width, 0.0]) {
-            result = Some(preset_fn());
-        }
-    }
-    result
-}
-
 /// Render the legend showing what each polygon color represents.
 pub fn render_legend(ui: &Ui, show_current: bool, show_optimized: bool) {
     if show_current {
