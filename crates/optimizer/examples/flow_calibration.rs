@@ -68,9 +68,12 @@ fn main() {
                     continue;
                 }
             };
-            let Some(prep) =
-                engine::prepare_validated_rotation(&seed.validated, &db, &seed.stats, Some(&scenario))
-            else {
+            let Some(prep) = engine::prepare_validated_rotation(
+                &seed.validated,
+                &db,
+                &seed.stats,
+                Some(&scenario),
+            ) else {
                 println!("{prof:<14}{label:<8} no rotation");
                 continue;
             };
@@ -86,14 +89,36 @@ fn main() {
                 .map(|(_, n)| n.clone())
                 .collect();
             let name = |o: &Option<(u32, String)>| {
-                o.as_ref().map(|(_, n)| n.clone()).unwrap_or_else(|| "-".into())
+                o.as_ref()
+                    .map(|(_, n)| n.clone())
+                    .unwrap_or_else(|| "-".into())
             };
             let weapons = format!(
                 "{}/{} + {}/{}",
-                seed.validated.weapons.set1.main_hand.as_deref().unwrap_or("-"),
-                seed.validated.weapons.set1.off_hand.as_deref().unwrap_or("-"),
-                seed.validated.weapons.set2.main_hand.as_deref().unwrap_or("-"),
-                seed.validated.weapons.set2.off_hand.as_deref().unwrap_or("-"),
+                seed.validated
+                    .weapons
+                    .set1
+                    .main_hand
+                    .as_deref()
+                    .unwrap_or("-"),
+                seed.validated
+                    .weapons
+                    .set1
+                    .off_hand
+                    .as_deref()
+                    .unwrap_or("-"),
+                seed.validated
+                    .weapons
+                    .set2
+                    .main_hand
+                    .as_deref()
+                    .unwrap_or("-"),
+                seed.validated
+                    .weapons
+                    .set2
+                    .off_hand
+                    .as_deref()
+                    .unwrap_or("-"),
             );
             let specs: Vec<&str> = seed
                 .validated

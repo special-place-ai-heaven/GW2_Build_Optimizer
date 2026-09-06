@@ -19,31 +19,31 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 5 | [W001](#w001) | S2/confirmed | US1 | verified-scoped | `.github/workflows/ci.yml:17` |
 | 6 | [B001](#b001) | S2/observed | US2 | verified-scoped | `crates/addon/src/ui/main_view/optimization.rs:1050` |
 | 7 | [W025](#w025) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/gemini_tools.rs:1529` |
-| 8 | [W035](#w035) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/simulator.rs:220` |
+| 8 | [W035](#w035) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/simulator.rs:220` |
 | 9 | [W019](#w019) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/objective_profiles.rs:86` |
-| 10 | [W044](#w044) | S2/confirmed | US2 | planned | `data/normalized_effects/2026-01-13/pve.json:2` |
-| 11 | [W013](#w013) | S2/confirmed | US2 | planned | `crates/optimizer/src/balance.rs:11` |
-| 12 | [W015](#w015) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/manifests.rs:43` |
-| 13 | [W016](#w016) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/mod.rs:137` |
-| 14 | [W039](#w039) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:1389` |
-| 15 | [W038](#w038) | S2/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:861` |
-| 16 | [W008](#w008) | S2/confirmed | US2 | planned | `crates/addon/src/ui/main_view/optimization.rs:714` |
-| 17 | [W004](#w004) | S2/confirmed | US2 | planned | `crates/addon/src/state.rs:898` |
+| 10 | [W044](#w044) | S2/confirmed | US2 | verified-scoped | `data/normalized_effects/2026-01-13/pve.json:2` |
+| 11 | [W013](#w013) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/balance.rs:11` |
+| 12 | [W015](#w015) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/data/manifests.rs:43` |
+| 13 | [W016](#w016) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/data/mod.rs:137` |
+| 14 | [W039](#w039) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:1389` |
+| 15 | [W038](#w038) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:861` |
+| 16 | [W008](#w008) | S2/confirmed | US2 | verified-scoped | `crates/addon/src/ui/main_view/optimization.rs:714` |
+| 17 | [W004](#w004) | S2/confirmed | US2 | verified-scoped | `crates/addon/src/state.rs:898` |
 | 18 | [W009](#w009) | S2/confirmed | US2 | planned | `crates/addon/src/ui/main_view/tabs/settings.rs:60` |
-| 19 | [W082](#w082) | S3/confirmed | US2 | planned | `crates/addon/src/ui/main_view/tabs/saveload.rs:509` |
-| 20 | [W182](#w182) | S3/confirmed | US2 | planned | `crates/optimizer/src/synergy_pipeline.rs:859` |
+| 19 | [W082](#w082) | S3/confirmed | US2 | verified-scoped | `crates/addon/src/ui/main_view/tabs/saveload.rs:509` |
+| 20 | [W182](#w182) | S3/confirmed | US2 | verified-scoped | `crates/optimizer/src/synergy_pipeline.rs:859` |
 | 21 | [W225](#w225) | S4/confirmed | US2 | planned | `crates/optimizer/src/llm/openai.rs:325` |
-| 22 | [W157](#w157) | S3/confirmed | US2 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:1109` |
-| 23 | [W231](#w231) | S4/confirmed | US2 | planned | `crates/optimizer/src/llm/sse.rs:317` |
+| 22 | [W157](#w157) | S3/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:1109` |
+| 23 | [W231](#w231) | S4/confirmed | US2 | verified-scoped | `crates/optimizer/src/llm/sse.rs:317` |
 | 24 | [W034](#w034) | S2/confirmed | US2 | planned | `crates/optimizer/src/referee.rs:937` |
-| 25 | [W003](#w003) | S2/confirmed | US3 | planned | `crates/addon/src/radio/player.rs:1357` |
+| 25 | [W003](#w003) | S2/confirmed | US3 | verified-scoped | `crates/addon/src/radio/player.rs:1357` |
 | 26 | [W005](#w005) | S2/confirmed | US3 | planned | `crates/addon/src/ui/gear_sheet.rs:250` |
 | 27 | [W007](#w007) | S2/confirmed | US3 | planned | `crates/addon/src/ui/main_view/lock_panel.rs:790` |
-| 28 | [W010](#w010) | S2/confirmed | US3 | planned | `crates/addon/src/ui/mod.rs:212` |
-| 29 | [W014](#w014) | S2/confirmed | US3 | planned | `crates/optimizer/src/data/balance_overrides.rs:302` |
-| 30 | [W017](#w017) | S2/confirmed | US3 | planned | `crates/optimizer/src/data/normalized_effects.rs:522` |
-| 31 | [W018](#w018) | S2/confirmed | US3 | planned | `crates/optimizer/src/data/normalized_effects.rs:724` |
-| 32 | [W020](#w020) | S2/confirmed | US3 | planned | `crates/optimizer/src/data/patch_ledger.rs:17` |
+| 28 | [W010](#w010) | S2/confirmed | US3 | verified-scoped | `crates/addon/src/ui/mod.rs:212` |
+| 29 | [W014](#w014) | S2/confirmed | US3 | verified-scoped | `crates/optimizer/src/data/balance_overrides.rs:302` |
+| 30 | [W017](#w017) | S2/confirmed | US3 | verified-scoped | `crates/optimizer/src/data/normalized_effects.rs:522` |
+| 31 | [W018](#w018) | S2/confirmed | US3 | verified-scoped | `crates/optimizer/src/data/normalized_effects.rs:724` |
+| 32 | [W020](#w020) | S2/confirmed | US3 | verified-scoped | `crates/optimizer/src/data/patch_ledger.rs:17` |
 | 33 | [W021](#w021) | S2/confirmed | US3 | planned | `crates/optimizer/src/data/rotation_profiles.rs:119` |
 | 34 | [W022](#w022) | S2/confirmed | US3 | planned | `crates/optimizer/src/engine.rs:70` |
 | 35 | [W023](#w023) | S2/confirmed | US3 | planned | `crates/optimizer/src/engine.rs:1103` |
@@ -57,24 +57,24 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 43 | [W032](#w032) | S2/confirmed | US3 | planned | `crates/optimizer/src/parser_consistency_tests.rs:3` |
 | 44 | [W033](#w033) | S2/confirmed | US3 | planned | `crates/optimizer/src/prompts.rs:401` |
 | 45 | [W036](#w036) | S2/confirmed | US3 | planned | `crates/optimizer/src/rotation/skill_timings.rs:18` |
-| 46 | [W037](#w037) | S2/confirmed | US3 | planned | `crates/optimizer/src/rotation/wvw_timeline.rs:357` |
+| 46 | [W037](#w037) | S2/confirmed | US3 | verified-scoped | `crates/optimizer/src/rotation/wvw_timeline.rs:357` |
 | 47 | [W040](#w040) | S2/confirmed | US3 | planned | `crates/optimizer/src/scoring.rs:400` |
 | 48 | [W041](#w041) | S2/confirmed | US3 | planned | `crates/optimizer/src/scraper.rs:952` |
-| 49 | [W042](#w042) | S2/confirmed | US3 | planned | `crates/optimizer/src/synergy.rs:111` |
+| 49 | [W042](#w042) | S2/confirmed | US3 | verified-scoped | `crates/optimizer/src/synergy.rs:111` |
 | 50 | [W043](#w043) | S2/confirmed | US3 | planned | `crates/optimizer/src/text_util.rs:14` |
-| 51 | [W045](#w045) | S2/confirmed | US3 | planned | `docs/architecture.md:21` |
-| 52 | [W046](#w046) | S3/confirmed | US4 | planned | `.gitignore:32` |
-| 53 | [W047](#w047) | S3/confirmed | US4 | planned | `crates/addon/src/lib.rs:53` |
+| 51 | [W045](#w045) | S2/confirmed | US3 | verified-scoped | `docs/architecture.md:21` |
+| 52 | [W046](#w046) | S3/confirmed | US4 | verified-scoped | `.gitignore:32` |
+| 53 | [W047](#w047) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/lib.rs:53` |
 | 54 | [W048](#w048) | S3/confirmed | US4 | planned | `crates/addon/src/news.rs:183` |
 | 55 | [W049](#w049) | S3/confirmed | US4 | planned | `crates/addon/src/news_art.rs:394` |
-| 56 | [W050](#w050) | S3/confirmed | US4 | planned | `crates/addon/src/radio/art.rs:6` |
-| 57 | [W051](#w051) | S3/confirmed | US4 | planned | `crates/addon/src/radio/art.rs:492` |
-| 58 | [W052](#w052) | S3/confirmed | US4 | planned | `crates/addon/src/radio/player.rs:1069` |
+| 56 | [W050](#w050) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/radio/art.rs:6` |
+| 57 | [W051](#w051) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/radio/art.rs:492` |
+| 58 | [W052](#w052) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/radio/player.rs:1069` |
 | 59 | [W053](#w053) | S3/confirmed | US4 | planned | `crates/addon/src/state.rs:530` |
-| 60 | [W054](#w054) | S3/confirmed | US4 | planned | `crates/addon/src/state.rs:830` |
+| 60 | [W054](#w054) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/state.rs:830` |
 | 61 | [W055](#w055) | S3/confirmed | US4 | planned | `crates/addon/src/ui/comparison.rs:557` |
 | 62 | [W056](#w056) | S3/confirmed | US4 | planned | `crates/addon/src/ui/comparison.rs:1171` |
-| 63 | [W057](#w057) | S3/confirmed | US4 | planned | `crates/addon/src/ui/gear_diff.rs:20` |
+| 63 | [W057](#w057) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/ui/gear_diff.rs:20` |
 | 64 | [W058](#w058) | S3/confirmed | US4 | planned | `crates/addon/src/ui/gear_sheet.rs:344` |
 | 65 | [W059](#w059) | S3/confirmed | US4 | planned | `crates/addon/src/ui/main_view/character.rs:37` |
 | 66 | [W060](#w060) | S3/confirmed | US4 | planned | `crates/addon/src/ui/main_view/lock_panel.rs:79` |
@@ -104,7 +104,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 90 | [W085](#w085) | S3/confirmed | US4 | planned | `crates/addon/src/ui/main_view/tabs/settings.rs:520` |
 | 91 | [W086](#w086) | S3/confirmed | US4 | planned | `crates/addon/src/ui/main_view/tabs/settings.rs:595` |
 | 92 | [W087](#w087) | S3/confirmed | US4 | planned | `crates/addon/src/ui/news_feed.rs:406` |
-| 93 | [W088](#w088) | S3/confirmed | US4 | planned | `crates/addon/src/ui/radar_chart.rs:286` |
+| 93 | [W088](#w088) | S3/confirmed | US4 | verified-scoped | `crates/addon/src/ui/radar_chart.rs:286` |
 | 94 | [W089](#w089) | S3/confirmed | US4 | planned | `crates/addon/src/ui/setup.rs:556` |
 | 95 | [W090](#w090) | S3/confirmed | US4 | planned | `crates/addon/src/ui/theme.rs:544` |
 | 96 | [W091](#w091) | S3/confirmed | US4 | planned | `crates/addon/src/ui/theme.rs:924` |
@@ -383,7 +383,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W035
 
-- Task: T010 [US2]. Status: **planned**.
+- Task: T010 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/rotation/simulator.rs:220`.
 - Dependencies: W025.
 
@@ -391,9 +391,9 @@ Claim: `SimParams::basic` is a constructor whose defaults are documented as test
 
 Remediation decision: Build SimParams from resolved stats and balance mode in the tool and call simulate_with; restrict the basic test convenience to actual test consumers.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `exec_simulate_rotation` now adds base+prefix into `rotation_sim_params` (precision, ferocity, fury-for-mode, duration mults, derived health/armor) and calls `simulate_with`. `simulate` / `simulate_against` are `#[cfg(test)]`. `SimParams::basic` stays pub for integration tests (`math_permutations`, `wvw_timeline`). `simulate_rotation_uses_resolved_crit_not_basic_defaults` proves a Berserker strike skill differs from `simulate()`/`basic` and matches `simulate_with` on the resolved params.
 
-Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
+Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers. In-game: Choya `simulate_rotation` on a precision prefix should report higher strike than the old no-crit path.
 
 ### W019
 
@@ -411,7 +411,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W044
 
-- Task: T012 [US2]. Status: **planned**.
+- Task: T012 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `data/normalized_effects/2026-01-13/pve.json:2`.
 - Dependencies: story entry gate.
 
@@ -419,13 +419,13 @@ Claim: The patch-aware data layer has no normalized effects for the patch it dec
 
 Remediation decision: Make normalized-effect patch mismatch explicit in production and active-manifest consistency validation; historical data must not be silently relabeled as current verified evidence.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `effects_for("2026-07-15", mode)` is None. `effects_for_resolved` walks `inherits_from` and returns the 2026-01-13 slice with `sourced_patch` still `"2026-01-13"`. `effects_for_mode` uses the active manifest + that walk — it no longer picks a file by mode alone. Consistency test asserts against `latest_manifest()`, not a hardcoded superseded id. Historical JSON was not copied into a 2026-07-15 folder.
 
-Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
+Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers. Authoring a real 2026-07-15 NE snapshot is a later data task, not this remedy.
 
 ### W013
 
-- Task: T013 [US2]. Status: **planned**.
+- Task: T013 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/balance.rs:11`.
 - Dependencies: W044.
 
@@ -433,13 +433,13 @@ Claim: `SNAPSHOT_PATCH_ID` is a hand-edited date literal and the ONLY writer of 
 
 Remediation decision: Derive the active patch from manifests, retain explicit historical lookup, and make unsupported live-build/patch mismatch observable. Do not delete historical override data.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `SNAPSHOT_PATCH_ID` is gone. `BalanceContext::new` uses `latest_manifest().patch_id`. `for_patch` keeps historical ids (`2026-01-13` stays known). Unknown ids report `patch_is_known() == false`. `live_build_mismatch` surfaces `check_staleness` (W015 still wires it to the addon). On-disk 2026-01-13 override files were not deleted.
 
-Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
+Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers. W015 delivers the warning to the player.
 
 ### W015
 
-- Task: T014 [US2]. Status: **planned**.
+- Task: T014 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/manifests.rs:43`.
 - Dependencies: W013.
 
@@ -447,13 +447,13 @@ Claim: The patch-staleness warning is never delivered to anyone. `grep -rn --inc
 
 Remediation decision: Wire manifest staleness detection to the live build-number result and visible data status.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `check_api_health` writes `live_build_mismatch` onto `MainState.manifest_staleness`. Status bar shows a chip; About hero shows the message. `ManifestFreshness` / `freshness()` make the current-vs-stale status typed. No new locale keys (other agent owns locales).
 
-Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
+Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers. In-game: live `/v2/build` ≠ manifest `game_build_id` should warn on the status bar and About.
 
 ### W016
 
-- Task: T015 [US2]. Status: **planned**.
+- Task: T015 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/mod.rs:137`.
 - Dependencies: W044.
 
@@ -461,13 +461,13 @@ Claim: The entire data-layer health check is unreachable from the shipping DLL. 
 
 Remediation decision: Wire data initialization to startup and propagate disabled/degraded status; no success-quality fallback after a loader failure.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `state::init` calls `initialize()` and stores `DataState` on `MainState`. `Disabled` sets the status-bar error and `optimize_block_reason`; Optimize/Improve refuse to start. `Degraded` does not pretend to be Ready. Embedded data still returns Ready.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
 ### W039
 
-- Task: T016 [US2]. Status: **planned**.
+- Task: T016 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/rotation/wvw_timeline.rs:1389`.
 - Dependencies: story entry gate.
 
@@ -475,13 +475,13 @@ Claim: `trigger_procs` matches on `EffectCategory` and handles 9 of the 22 varia
 
 Remediation decision: Count unsupported proc categories and zero-duration unsupported healing in coverage; test reporting without counting the same source repeatedly per tick.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `trigger_procs` catch-all now calls `note_unmodeled_proc`, which increments `unmodeled_effect_sources` once per `(source_type, source_id)`. Five OnHit fires of FlatStat plus zero-duration `OutgoingHealingPct` still report 2, not 10. `unsupported_proc_category_counts_once_per_source` passed. Existing `unsupported_normalized_trigger_degrades_coverage` still counts at load.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
 ### W038
 
-- Task: T017 [US2]. Status: **planned**.
+- Task: T017 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/rotation/wvw_timeline.rs:861`.
 - Dependencies: story entry gate.
 
@@ -489,13 +489,13 @@ Claim: The Protection strike multiplier is hardcoded as the literal 0.67 twice i
 
 Remediation decision: Replace both literals with `crate::data::boon_condition_formulas::boons().protection_multiplier()`, matching simulator.rs:653. If the per-tick call cost matters, resolve it once into a Timeline field in `Timeline::new`.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Both `0.67` literals removed. `Timeline::new` stores `boons().protection_multiplier()` once; incoming `receive_strike` and outgoing `StrikeDamage` use that field. `protection_uses_formula_multiplier` passed (incoming 1000 and outgoing open/prot ratio). 35 `wvw_timeline` unit tests passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
 ### W008
 
-- Task: T018 [US2]. Status: **planned**.
+- Task: T018 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/addon/src/ui/main_view/optimization.rs:714`.
 - Dependencies: story entry gate.
 
@@ -503,13 +503,13 @@ Claim: Three independent parsers exist for the same ad-hoc "Heal: / Utils: / Uti
 
 Remediation decision: Give `BuildSuggestion` typed fields (`heal: Option<SkillRef>`, `utilities: [Option<SkillRef>; 3]`, `elite`, `pets`, `stances`) and format the display strings from those at render time; delete all three parsers. Short of that, move one parser into `gear_diff` and have the other two call it. The verbatim-duplicated `strip_label_ci` helper (optimization.rs:880, gear_diff.rs:20, gear_diff.rs:61) goes with it.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Took the ledger short path (one parser, not typed `BuildSuggestion` fields — those live on dirty `comparison.rs`). `parse_suggestion_skills` now splits `Utils:` / `Utility:` and keeps Pets/Stances/unlabeled. `parse_skill_names`, `skill_selection_from_suggestion`, and `pet_selection_from_suggestion` call it. One `strip_label_ci` in `gear_diff`. `fill_holes_from_loadout` untouched. `test_parse_skills_utils_comma_list_and_unlabeled` plus 5 existing gear_diff tests passed.
 
-Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
+Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers. Typed fields remain an upgrade if comparison.rs is free.
 
 ### W004
 
-- Task: T019 [US2]. Status: **planned**.
+- Task: T019 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/addon/src/state.rs:898`.
 - Dependencies: story entry gate.
 
@@ -517,13 +517,13 @@ Claim: Config and chat-history writes on shipping paths discard their `Result` e
 
 Remediation decision: Route these through `if let Err(e) = ... { crate::ui::log_disk_error(format!("config save failed: {e}")) }`, matching `save_config_detached`. For `save_history`, log both the `to_vec` failure and the `rename` failure.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `toggle_window` and `persist_window` log `config save failed` via `log_disk_error` after the STATE guard drops. `save_history` logs serialize, write, and rename failures. `toggle_persist_reset_do_not_save_under_state`, `kitchen_history_roundtrips_on_disk`, and `save_history_logs_when_directory_is_missing` passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
 ### W009
 
-- Task: T020 [US2]. Status: **planned**.
+- Task: T020 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/addon/src/ui/main_view/tabs/settings.rs:60`.
 - Dependencies: story entry gate.
 
@@ -531,13 +531,13 @@ Claim: 19 Settings/News click handlers persist config with `let _ = state.config
 
 Remediation decision: Replace every `let _ = state.config.save(&state.config_path)` in settings.rs and news.rs with `crate::ui::save_config_detached(state)` (already used in the theme section of the same file); if a synchronous save is genuinely required somewhere, `if let Err(e) = .. { nexus::log::log(Warning, ..) }` as settings.rs:238 already does.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: 17 settings.rs + 2 news.rs `let _ =` saves now call `save_config_detached`. The settings.rs:238 `if let Err` path is unchanged. `settings_and_news_saves_are_detached` pins both files. Setup/keybind remain synchronous.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
 ### W082
 
-- Task: T021 [US2]. Status: **planned**.
+- Task: T021 [US2]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/ui/main_view/tabs/saveload.rs:509`.
 - Dependencies: story entry gate.
 
@@ -545,13 +545,13 @@ Claim: When the ranch-load thread cannot be spawned, `load_named` falls back to 
 
 Remediation decision: Check the second spawn's result and, on `false`, either write the snapshot synchronously (it is a tiny JSON) or set `state.main.error` to say the notes were not saved; alternatively revert the in-memory notes mutation.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `ranch-notes` spawn result is checked. On `false`, `save_note_now` writes the snapshot on this frame (tiny JSON; does not take STATE). Happy-path Load still does not `save_overwrite` inline. Both ranch-load pin tests passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
 ### W182
 
-- Task: T022 [US2]. Status: **planned**.
+- Task: T022 [US2]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/optimizer/src/synergy_pipeline.rs:859`.
 - Dependencies: story entry gate.
 
@@ -559,13 +559,13 @@ Claim: select_skills waives the template-palette gate whenever the whole skill_t
 
 Remediation decision: Drop the `is_empty() ||` clause and give the diag fixture palette entries (as the sibling test already does), so the seed and the beam apply one gating rule.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Dropped `skill_to_palette.is_empty() ||`. Seed now requires a non-zero palette id, same as the beam. Diag WvW fixture inserts `skill_to_palette` for each synthetic skill. `optimize_synergy_wvw_selects_required_bar_utilities` and `select_skills_skips_heals_without_template_palette` passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
 ### W225
 
-- Task: T023 [US2]. Status: **planned**.
+- Task: T023 [US2]. Status: **verified-scoped**.
 - Audit: S4, confirmed; location: `crates/optimizer/src/llm/openai.rs:325`.
 - Dependencies: story entry gate.
 
@@ -573,13 +573,13 @@ Claim: Malformed tool-call arguments from the model (typically a JSON string tru
 
 Remediation decision: On parse failure push a tool result of {"error":"unparseable arguments: <err>"} (so the model can retry) and count/report it the way sse.rs reports skipped payloads, instead of executing with empty args.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `parse_tool_arguments` / `run_tool_or_parse_error` in `llm/mod.rs` push `{"error":"unparseable arguments: …"}` and skip `execute_tool`. OpenAI, OpenRouter, and Anthropic stream assemble use it. `truncated_json_is_error_not_empty_object`, `valid_args_reach_the_tool`, and `unparseable_args_do_not_execute` passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
 ### W157
 
-- Task: T024 [US2]. Status: **planned**.
+- Task: T024 [US2]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/optimizer/src/rotation/wvw_timeline.rs:1109`.
 - Dependencies: story entry gate.
 
@@ -587,13 +587,13 @@ Claim: Millisecond arithmetic on API-derived durations mixes saturating and non-
 
 Remediation decision: Use `saturating_add` for every `now_ms`/`current_time_ms` + duration expression, matching the sibling lines that already do. A one-line helper (`fn at(&self, offset_ms: u32) -> u32 { self.now_ms.saturating_add(offset_ms) }`) makes the whole file consistent and removes the choice.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `Timeline::at` saturates `now_ms + offset`. Production `self.now_ms +` sites now go through it (or `now_ms.saturating_add` where borrowck forbids `at`). Simulator duration/next-action adds saturate too. `timeline_at_saturates_near_u32_max` plus 36 `wvw_timeline` tests passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
 ### W231
 
-- Task: T025 [US2]. Status: **planned**.
+- Task: T025 [US2]. Status: **verified-scoped**.
 - Audit: S4, confirmed; location: `crates/optimizer/src/llm/sse.rs:317`.
 - Dependencies: story entry gate.
 
@@ -601,7 +601,7 @@ Claim: `code` is a u64 taken verbatim from the provider's error object and trunc
 
 Remediation decision: `u16::try_from(code).unwrap_or(502)` so an out-of-range code falls back to the generic 502 instead of wrapping.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `error_object_to_llm_error` uses `u16::try_from(code).unwrap_or(502)`. `out_of_range_error_code_falls_back_to_502` (65965 → 502, 429 stays 429). 16 `llm::sse` tests passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
@@ -621,7 +621,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W003
 
-- Task: T027 [US3]. Status: **planned**.
+- Task: T027 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/addon/src/radio/player.rs:1357`.
 - Dependencies: story entry gate.
 
@@ -629,7 +629,7 @@ Claim: `saved_from_station` and `station_from_saved` exist twice, field-for-fiel
 
 Remediation decision: Delete the two private copies in ui/main_view/tabs/radio.rs and import the already-`pub` `player::saved_from_station` / `player::station_from_saved` (the file already does `use crate::radio::{..., player, ...}`); keep one round-trip test.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: UI copies deleted. `radio.rs` play/favorites/restore call `player::saved_from_station` / `player::station_from_saved`. One remaining test: `station_round_trips_through_the_saved_snapshot` in player.rs.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
@@ -663,7 +663,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W010
 
-- Task: T030 [US3]. Status: **planned**.
+- Task: T030 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/addon/src/ui/mod.rs:212`.
 - Dependencies: story entry gate.
 
@@ -671,13 +671,13 @@ Claim: A one-version config migration is still compiled into the hot render path
 
 Remediation decision: Delete the `legacy` branch here and the `LEGACY_FIRST_WINDOW_SIZE` const, or move the one-shot upgrade into `AppConfig::load` gated on a stored config schema version so it can only fire once per install.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `LEGACY_FIRST_WINDOW_SIZE` is gone. Render applies a default size only when the rect is unset or the player forced a snap (`window_needs_default_size`). 800×600 is a normal persisted size. `window_init_is_only_missing_size_or_forced_snap` plus existing snap-geometry tests (which already use 800×600) passed.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W014
 
-- Task: T031 [US3]. Status: **planned**.
+- Task: T031 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/balance_overrides.rs:302`.
 - Dependencies: story entry gate.
 
@@ -685,13 +685,13 @@ Claim: This function is unconditionally a no-op AND has no caller. (a) Every one
 
 Remediation decision: Remove the unused no-op check_wvw_quality and its re-export, including the unreachable placeholder lookup (W106), after proving current callers are absent.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `check_wvw_quality` and its re-export are gone. No production callers. Tests that only asserted the no-op Verified return were deleted; `test_wvw_no_known_split_uses_base_value` still pins lookup-None. `known_mode_splits` remains.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W017
 
-- Task: T032 [US3]. Status: **planned**.
+- Task: T032 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/normalized_effects.rs:522`.
 - Dependencies: story entry gate.
 
@@ -699,13 +699,13 @@ Claim: This is a second, unused ~130-line effect scorer running in parallel with
 
 Remediation decision: Keep the live synergy scorer and remove the unused parallel score_effect implementation and exclusive helpers/re-export after reference checks.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `score_effect`, `effect_uptime`, `status_weight_for_scoring`, and `cond_importance_from_op` are gone. Live scorer remains `synergy::score_normalized_effect`. `tests_alias_helpers` kept for the boon/condition alias suite. Re-export dropped.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W018
 
-- Task: T033 [US3]. Status: **planned**.
+- Task: T033 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/normalized_effects.rs:724`.
 - Dependencies: story entry gate.
 
@@ -713,13 +713,13 @@ Claim: A ~200-line migration shim (lines 719-1020) with no caller. Its own doc s
 
 Remediation decision: Remove unused legacy-effect mapper and exclusive helpers/re-export after reference checks; retain any still-live synergy import.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `map_legacy_effect`, `map_stat_type_to_hint`, `map_damage_category`, and the `use crate::synergy` import are gone. Exclusive mapper tests deleted. Live synergy extractors untouched.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W020
 
-- Task: T034 [US3]. Status: **planned**.
+- Task: T034 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/patch_ledger.rs:17`.
 - Dependencies: W013.
 
@@ -727,7 +727,7 @@ Claim: The whole `patch_ledger` module is consumed only by test code. `grep -rn 
 
 Remediation decision: Retain patch ledgers as test-time provenance: gate the module appropriately and move serde_yaml to dev dependencies if no runtime consumer remains. Preserve historical data files.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `patch_ledger` is `#[cfg(test)]`. `serde_yaml` moved to optimizer `[dev-dependencies]`. YAML files kept. `initialize()` never loaded ledgers. Consistency tests still call `patch_ledger::ledgers()`.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
@@ -789,7 +789,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W026
 
-- Task: T039 [US3]. Status: **planned**.
+- Task: T039 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/gemini_tools.rs:1913`.
 - Dependencies: W032.
 
@@ -797,7 +797,7 @@ Claim: This is the third independent parser of GW2 rune-bonus strings in the opt
 
 Remediation decision: Extract one tokenizer (markup strip + number/percent/stat-name extraction) into a shared module and have all three call sites map its output into their own result type, rather than each re-scanning the raw string.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `text_util::percent_clauses` walks every `N%`; combat `parse_percent_clauses` and synergy (via `apply_upgrade_text`) consume it. Gemini `extract_number` is `first_number(strip_gw2_markup(text))`. `percent_clauses_keeps_each_clause`, `first_number_reads_stat_bonus`, and `parse_percent_clauses_keeps_both_duration_bonuses` passed.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
@@ -873,7 +873,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W032
 
-- Task: T045 [US3]. Status: **planned**.
+- Task: T045 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/parser_consistency_tests.rs:3`.
 - Dependencies: story entry gate.
 
@@ -881,7 +881,7 @@ Claim: This module's own doc is the codebase admitting to two independently-main
 
 Remediation decision: Extract a production Fact classification core consumed by combat and synergy, preserving independent output projection tests across handled Fact variants.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `interpret_percent_fact` is the standing-percent policy (conditional skip, Scholar 90% scale, `classify_percent_text`). Combat and synergy both call it, then project independently. `interpret_percent_fact_skips_conditionals_and_scales_scholar`, `parsers_agree_on_modifier_classification`, `damage_fact_is_not_a_percent_modifier`, and `buff_status_is_synergy_only` passed.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
@@ -901,7 +901,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W036
 
-- Task: T047 [US3]. Status: **planned**.
+- Task: T047 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/rotation/skill_timings.rs:18`.
 - Dependencies: story entry gate.
 
@@ -909,13 +909,13 @@ Claim: Cast times have two live sources of truth. builder.rs:147-148 reads `sour
 
 Remediation decision: Consolidate sourced activation timings in balance override data while preserving explicit aftercast semantics and fallback evidence; test overlapping skills before removing the table.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Removed Heartseeker (13097) from `timing_for`. Remaining table rows keep aftercast + fallback for patches without `activation_ms`. `heartseeker_is_not_a_table_row` and `sourced_skill_values_are_isolated_by_mode` (activation_ms = 750 on PvE/PvP/WvW) passed.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W037
 
-- Task: T048 [US3]. Status: **planned**.
+- Task: T048 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/rotation/wvw_timeline.rs:357`.
 - Dependencies: W039.
 
@@ -923,13 +923,13 @@ Claim: Seven Timeline fields are declared, initialised once to their identity va
 
 Remediation decision: Remove unwritten identity fields only after tracing passive parameter folding and preserving coverage accounting in W039.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: The seven identity fields are gone. Reads that multiplied by 1.0 or added 0.0 duration were dropped. W039 `unmodeled_effect_sources` / `note_unmodeled_proc` stay. Existing `wvw_timeline` tests still pin the math.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W040
 
-- Task: T049 [US3]. Status: **planned**.
+- Task: T049 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/scoring.rs:400`.
 - Dependencies: story entry gate.
 
@@ -937,7 +937,7 @@ Claim: `ObjectiveScorer` (struct L400-418 + impl L420-503, ~105 lines: from_mode
 
 Remediation decision: Remove the uncalled ObjectiveScorer twin after reference checks; preserve live calibrated score_with_weights constants and regression expectations.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Deleted `ObjectiveScorer` plus `BOON_SUPPORT_NORM` / `CONTROL_NORM`. Live rank remains `score_with_weights`. Integration ranking and profile-priority tests now read weights/priorities directly. `score_with_weights_ignores_json_norms` and `score_with_weights_differs_when_axis_weights_differ` passed.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
@@ -957,7 +957,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W042
 
-- Task: T051 [US3]. Status: **planned**.
+- Task: T051 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/synergy.rs:111`.
 - Dependencies: story entry gate.
 
@@ -965,13 +965,13 @@ Claim: NormalizedEffect::BenefitsFromStatus, NormalizedEffect::ProcEffect and th
 
 Remediation decision: Remove unconstructible legacy effect variants and exclusive rules after normalized mapper cleanup; preserve live normalized proc support.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Legacy `BenefitsFromStatus`, `ProcEffect`, `ProcTrigger`, and `EnablerPayoff` are gone. Live `EffectCategory::ProcEffect` (JSON / timeline) stays. Extractors never emitted the removed variants.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W043
 
-- Task: T052 [US3]. Status: **planned**.
+- Task: T052 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/text_util.rs:14`.
 - Dependencies: W032.
 
@@ -979,13 +979,13 @@ Claim: `extract_percent_before` is gated `#[cfg(test)]`, so it is not compiled i
 
 Remediation decision: Either delete `extract_percent_before` and its 6 tests outright, or drop the `#[cfg(test)]` gate and make combat.rs/synergy.rs actually call it — then the comment becomes true. Do not leave it as-is. If deleted, move the closest-percent regression assertion onto whichever production function now owns that behaviour.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Deleted `extract_percent_before` and its tests. Multi-clause regression now lives on `parse_percent_clauses_keeps_both_duration_bonuses` (10% condi + 5% boon both land).
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W045
 
-- Task: T053 [US3]. Status: **planned**.
+- Task: T053 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `docs/architecture.md:21`.
 - Dependencies: story entry gate.
 
@@ -993,13 +993,13 @@ Claim: The documented 3-tier optimization pipeline names two functions that do n
 
 Remediation decision: Re-derive the tier list from the actual call sites in crates/addon/src/ui/main_view/optimize_flow.rs and update both docs/architecture.md:20-22 and CLAUDE.md:30/37-41 with the real entry points (optimize_deterministic_cancellable, optimize_cancellable) and whatever the LLM tier is called now.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Docs now name `optimize_v2` → `optimize_deterministic_cancellable` → `optimize_cancellable`, matching `optimize_flow.rs`. Phantom `optimize_with_gemini` / `enrich_with_gemini` removed.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
 ### W046
 
-- Task: T054 [US4]. Status: **planned**.
+- Task: T054 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `.gitignore:32`.
 - Dependencies: story entry gate.
 
@@ -1007,13 +1007,13 @@ Claim: The tracked ignore rule for SymForge scratch directories is root-anchored
 
 Remediation decision: Change the rule in .gitignore to un-anchored `.symforge/` (matching the `.git/info/exclude` pattern) so every clone ignores the nested directories.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `.gitignore` now has un-anchored `.symforge/`. Nested tee dirs are ignored on every clone.
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 
 ### W047
 
-- Task: T055 [US4]. Status: **planned**.
+- Task: T055 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/lib.rs:53`.
 - Dependencies: story entry gate.
 
@@ -1021,7 +1021,7 @@ Claim: The doc says `BOOTSTRAP_FAILED` exists so "the next PostRender can retry"
 
 Remediation decision: Rewrite the doc to match the code: BOOTSTRAP_FAILED latches a panicked attach so the PostRender bootstrapper stops retrying for the session (a retry loop would re-panic every frame); recovery requires an addon reload.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Doc now says the flag latches a panic and stops retrying for the session. Code still returns immediately when set and logs "will not retry this session."
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 
@@ -1041,7 +1041,7 @@ Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the s
 
 ### W049
 
-- Task: T057 [US4]. Status: **planned**.
+- Task: T057 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/news_art.rs:394`.
 - Dependencies: story entry gate.
 
@@ -1049,13 +1049,13 @@ Claim: News stills are uploaded as Nexus textures and written to `cache/news` wi
 
 Remediation decision: Reuse the logos discipline in news_art: a `CREATED` set gated by a `MAX_TEXTURES` cap before `get_texture_or_create_from_file`, and a call to a shared `evict_oldest(dir, MAX_CACHE_FILES)` after the tmp+rename write in `download`. `evict_victims` in logos.rs:388 is already pure and unit-tested — lift it to a shared helper rather than copying it.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Lifted `admit_texture` / `evict_oldest` / `evict_victims` to `cache_bounds.rs`. News stills and radio logos both gate uploads at 200 and evict disk at 500. `admit_texture_caps_distinct_ids`, `evict_victims_drops_oldest_beyond_cap`, and `stills_reuse_logo_cache_bounds` passed.
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 
 ### W050
 
-- Task: T058 [US4]. Status: **planned**.
+- Task: T058 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/radio/art.rs:6`.
 - Dependencies: story entry gate.
 
@@ -1063,13 +1063,13 @@ Claim: The module doc states as an invariant that every blit is hard-clipped to 
 
 Remediation decision: Reword the module doc to say the sprite blits are clipped to the bar rect while the quip bubble deliberately renders on the foreground draw list above everything, and note the `right_limit` clamp at art.rs:576-579 as the actual mechanism that keeps the bubble off the hearts column.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Module doc now describes clipped sprites vs foreground bubble + `right_limit`.
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 
 ### W051
 
-- Task: T059 [US4]. Status: **planned**.
+- Task: T059 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/radio/art.rs:492`.
 - Dependencies: story entry gate.
 
@@ -1083,7 +1083,7 @@ Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the s
 
 ### W052
 
-- Task: T060 [US4]. Status: **planned**.
+- Task: T060 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/radio/player.rs:1069`.
 - Dependencies: story entry gate.
 
@@ -1111,7 +1111,7 @@ Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the s
 
 ### W054
 
-- Task: T062 [US4]. Status: **planned**.
+- Task: T062 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/state.rs:830`.
 - Dependencies: story entry gate.
 
@@ -1119,7 +1119,7 @@ Claim: The final `else => Screen::Setup(SetupStep::Gw2ApiKey)` arm (line 840) is
 
 Remediation decision: Drop the redundant `config.has_gw2_key() &&`, and replace the dead `else` arm by making the `has_gw2_key()` branch the `else` (or leave one arm and delete the other). Rename the test to match what it asserts.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: After a GW2 key, routing is LLM-key vs data-download. Dead Gw2ApiKey arm gone. Test renamed `test_init_routes_to_language_when_no_keys`.
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 
@@ -1153,11 +1153,13 @@ Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the s
 
 ### W057
 
-- Task: T065 [US4]. Status: **planned**.
+- Task: T065 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/ui/gear_diff.rs:20`.
 - Dependencies: W008.
 
 Claim: `strip_label_ci` is defined twice in this 164-line file, byte-for-byte identical including its 4-line safety comment: once nested inside `parse_suggestion_skills` (lines 20-30) and again inside `parse_suggestion_weapons` (lines 61-71).
+
+Verification: Closed by W008 — one module-scope `strip_label_ci` used by both parsers.
 
 Remediation decision: Hoist a single private `fn strip_label_ci` to module scope and call it from both parsers.
 
@@ -1573,7 +1575,7 @@ Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the s
 
 ### W088
 
-- Task: T095 [US4]. Status: **planned**.
+- Task: T095 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/ui/radar_chart.rs:286`.
 - Dependencies: story entry gate.
 
@@ -1581,7 +1583,7 @@ Claim: `render_presets` has no caller anywhere. `grep -rn --include=*.rs 'render
 
 Remediation decision: Delete `render_presets`; then `OptimizationWeights::PRESETS` and its six preset fns have no non-test consumer and can follow in the optimizer crate.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Deleted `render_presets`. `OptimizationWeights::PRESETS` is `#[cfg(test)]` (the six preset constructors stay `pub` for integration tests). `test_preset_roundtrip` and `test_all_presets_within_budget` still compile against it.
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 

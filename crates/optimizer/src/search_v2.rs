@@ -545,7 +545,10 @@ fn repair_seed(
             break;
         }
         on_progress(OptimizeProgress {
-            stage: format!("Repairing seed viability (round {round}, {} evals)...", *eval_count),
+            stage: format!(
+                "Repairing seed viability (round {round}, {} evals)...",
+                *eval_count
+            ),
             done: false,
         });
         let mut candidates = swap_utilities_for_failed_gates(&seed, db, profession_name);
@@ -587,7 +590,10 @@ fn repair_seed(
             // cleanse rate climbing 0.5 -> 3.9 leaves rank unchanged (the gate
             // still fails) — measured in-game, repair discarded exactly that.
             let key = |rep: &RefereeReport| {
-                (referee::search_rank(rep), std::cmp::Reverse(shortfall_key(rep)))
+                (
+                    referee::search_rank(rep),
+                    std::cmp::Reverse(shortfall_key(rep)),
+                )
             };
             let better = best.as_ref().is_none_or(|b| key(&report) > key(&b.report));
             if better {
@@ -3066,20 +3072,29 @@ mod tests {
     fn sample_indices_spans_the_whole_neighbourhood() {
         let picks = sample_indices(1066, 80, 1);
         assert_eq!(picks.len(), 80);
-        assert!(picks.windows(2).all(|w| w[0] < w[1]), "ascending, no duplicates");
+        assert!(
+            picks.windows(2).all(|w| w[0] < w[1]),
+            "ascending, no duplicates"
+        );
         assert!(
             *picks.last().unwrap() >= 1066 - 1066 / 80 - 1,
             "must reach the deep end: last pick was {}",
             picks.last().unwrap()
         );
         // Old behaviour, for contrast: take(80) never passes index 79.
-        assert!(picks.iter().any(|&i| i > 79), "must sample past the old head slice");
+        assert!(
+            picks.iter().any(|&i| i > 79),
+            "must sample past the old head slice"
+        );
 
         // Consecutive generations see different slices of the same list.
         let g1 = sample_indices(1066, 80, 1);
         let g2 = sample_indices(1066, 80, 2);
         assert_ne!(g1, g2, "generations must rotate the offset");
-        assert!(g1.iter().all(|i| !g2.contains(i)), "rotated slices are disjoint");
+        assert!(
+            g1.iter().all(|i| !g2.contains(i)),
+            "rotated slices are disjoint"
+        );
 
         // Fewer neighbours than the cap: take them all, in order.
         assert_eq!(sample_indices(5, 80, 3), vec![0, 1, 2, 3, 4]);
@@ -3128,7 +3143,11 @@ mod tests {
         }
         assert_eq!(seen.len(), 120, "every index reachable within the cycle");
         assert_eq!(rotation_cycle(120, 80), 41);
-        assert_eq!(rotation_cycle(3, 5), 1, "fully enumerated groups need no cycle");
+        assert_eq!(
+            rotation_cycle(3, 5),
+            1,
+            "fully enumerated groups need no cycle"
+        );
         assert!(rotation_cycle(924, 48) >= 19);
     }
 
@@ -3359,8 +3378,10 @@ mod tests {
             db.skills.insert(id, bar_skill(id, slot, spec));
             db.skill_to_palette.insert(id, id);
         }
-        db.skills_by_profession
-            .insert("Guardian".into(), bar.iter().map(|(id, _, _)| *id).collect());
+        db.skills_by_profession.insert(
+            "Guardian".into(),
+            bar.iter().map(|(id, _, _)| *id).collect(),
+        );
 
         let named = |id: u32| Some((id, format!("skill{id}")));
         let mut build = ValidatedBuild {
@@ -3401,7 +3422,8 @@ mod tests {
         assert_eq!(fb.skills.utilities.len(), 3);
         assert_eq!(ids.len(), 5, "every bar slot filled: {ids:?}");
         assert!(
-            ids.iter().all(|id| db.skills[id].specialization != Some(27)),
+            ids.iter()
+                .all(|id| db.skills[id].specialization != Some(27)),
             "no Dragonhunter skill survives: {ids:?}"
         );
         let mut dedup = ids.clone();
@@ -3409,7 +3431,11 @@ mod tests {
         dedup.dedup();
         assert_eq!(dedup.len(), 5, "no duplicate slots: {ids:?}");
         assert!(
-            fb.skills.utilities.iter().flatten().any(|(id, _)| *id == 112),
+            fb.skills
+                .utilities
+                .iter()
+                .flatten()
+                .any(|(id, _)| *id == 112),
             "the never-gated core utility stays put: {ids:?}"
         );
     }
@@ -3429,7 +3455,13 @@ mod tests {
         let neighbours = swap_utility_skills(&candidate, &db, "Guardian");
         assert!(!neighbours.is_empty());
         for b in &neighbours {
-            let ids: Vec<u32> = b.skills.utilities.iter().flatten().map(|(id, _)| *id).collect();
+            let ids: Vec<u32> = b
+                .skills
+                .utilities
+                .iter()
+                .flatten()
+                .map(|(id, _)| *id)
+                .collect();
             let mut dedup = ids.clone();
             dedup.sort_unstable();
             dedup.dedup();
@@ -3440,8 +3472,7 @@ mod tests {
     #[test]
     fn revenant_elite_swap_is_not_attempted() {
         let mut db = empty_db();
-        db.specializations
-            .insert(52, spec_line(52, "Herald", true));
+        db.specializations.insert(52, spec_line(52, "Herald", true));
         db.specializations
             .insert(63, spec_line(63, "Renegade", true));
         db.professions.insert(

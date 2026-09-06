@@ -474,9 +474,7 @@ fn run_canonical_build_smoke(client: &dyn LlmClient, db: &GameDb) {
 #[ignore]
 fn test_all_providers_canonical_build_smoke() {
     let Some(db) = load_game_db_for_smoke() else {
-        eprintln!(
-            "[skip] dev.cfg names no populated addon cache (see dev.cfg.example)"
-        );
+        eprintln!("[skip] dev.cfg names no populated addon cache (see dev.cfg.example)");
         return;
     };
 

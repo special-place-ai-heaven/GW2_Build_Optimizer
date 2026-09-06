@@ -1,5 +1,7 @@
+pub mod article;
 pub mod balance;
 pub mod benchmark;
+pub mod build_template;
 pub mod combat;
 pub mod context;
 pub mod data;
@@ -14,6 +16,7 @@ pub mod llm;
 #[cfg(test)]
 pub mod parser_consistency_tests;
 pub mod prompts;
+pub mod providers;
 pub mod referee;
 pub mod rotation;
 pub mod scenario;

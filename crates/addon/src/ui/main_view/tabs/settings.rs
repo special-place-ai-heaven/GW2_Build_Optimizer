@@ -45,6 +45,10 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
 
     ui.dummy([0.0, 8.0]);
 
+    // Where Optimization Defaults begins, so Theme can start level with it
+    // in the column beside. Columns only offset x, so a y taken in one is
+    // directly comparable in the other.
+    let defaults_y = ui.cursor_pos()[1];
     build_display::render_card_header(ui, &t("settings.opt_defaults"), theme::pal().gold);
     {
         ui.text(t("settings.default_mode"));
@@ -53,11 +57,24 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
             .default_game_mode
             .clone()
             .unwrap_or_else(|| "PvE".into());
-        for mode in &["PvE", "PvP", "WvW"] {
+        // One row rather than a stack: the labels are three characters and
+        // the panel is short on height.
+        //
+        // `same_line`, never a nested `ui.columns`. ImGui columns do not
+        // nest: opening a set inside another ENDS the outer one, and closing
+        // it with `columns(1)` leaves the rest of the tab in a single
+        // full-width column. That is what happened here — everything from
+        // this row down rendered full width, the right-hand column never
+        // appeared, and UI Preferences picked up the right column's 48px
+        // indent while sitting under News.
+        for (at, mode) in ["PvE", "PvP", "WvW"].iter().enumerate() {
+            if at > 0 {
+                ui.same_line();
+            }
             let is_sel = current_default == *mode;
             if ui.radio_button_bool(mode, is_sel) && !is_sel {
-                state.config.default_game_mode = Some(mode.to_string());
-                let _ = state.config.save(&state.config_path);
+                state.config.default_game_mode = Some((*mode).to_string());
+                crate::ui::save_config_detached(state);
             }
         }
     }
@@ -88,7 +105,7 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.indent_by(gutter);
 
     build_display::render_card_header(ui, &t("settings.ui_prefs"), theme::pal().gold);
-    render_theme_section(ui, state, col_w);
+    render_theme_section(ui, state, col_w, defaults_y);
 
     ui.unindent_by(gutter);
     ui.columns(1, "##settings_split_end", false);
@@ -220,11 +237,25 @@ fn spawn_key_validation(
 
 fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let mut provider_changed = false;
-    for provider in &gw2_core::config::LlmProvider::ALL {
-        let is_selected = state.config.active_provider == *provider;
-        if ui.radio_button_bool(provider.label(), is_selected) && !is_selected {
-            state.config.active_provider = provider.clone();
-            provider_changed = true;
+    // Two to a row rather than a stack of four. The labels are short and the
+    // column is wide, so a single file of radios spent four rows on what
+    // fits in two — and this panel is short on height.
+    //
+    // The second is placed at a fixed offset instead of by `same_line`, so
+    // the right-hand radios line up down the column whatever the labels say.
+    let start_x = ui.cursor_pos()[0];
+    let second_x = start_x + (col_w - 12.0) * 0.5;
+    for pair in gw2_core::config::LlmProvider::ALL.chunks(2) {
+        let row_y = ui.cursor_pos()[1];
+        for (at, provider) in pair.iter().enumerate() {
+            if at > 0 {
+                ui.set_cursor_pos([second_x, row_y]);
+            }
+            let is_selected = state.config.active_provider == *provider;
+            if ui.radio_button_bool(provider.label(), is_selected) && !is_selected {
+                state.config.active_provider = provider.clone();
+                provider_changed = true;
+            }
         }
     }
     if provider_changed {
@@ -335,7 +366,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
                     state.config.openrouter_api_key = Some(key.clone())
                 }
             }
-            let _ = state.config.save(&state.config_path);
+            crate::ui::save_config_detached(state);
             state.main.settings_key_input.clear();
             state.main.settings_key_status = Some(t("settings.saved_validating"));
             state.main.settings_key_valid = false;
@@ -366,9 +397,20 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     }
 }
 
-fn model_catalog(state: &AddonState) -> Vec<(String, String)> {
+/// Every model the active provider offers, before any of the user's filters.
+///
+/// Pruned to the ones that could serve a request from this addon at all — a
+/// music generator and a batch job that answers tomorrow are not alternatives
+/// to a chat model, they are noise in a list someone has to read.
+fn model_catalog(state: &AddonState) -> Vec<gw2_optimizer::llm::ModelInfo> {
     if !state.main.available_models.is_empty() {
-        return state.main.available_models.clone();
+        return state
+            .main
+            .available_models
+            .iter()
+            .filter(|m| m.usable())
+            .cloned()
+            .collect();
     }
     let hardcoded: &[(&str, &str)] = match state.config.active_provider {
         gw2_core::config::LlmProvider::Gemini => gw2_core::config::GEMINI_MODELS,
@@ -376,9 +418,32 @@ fn model_catalog(state: &AddonState) -> Vec<(String, String)> {
         gw2_core::config::LlmProvider::Anthropic => gw2_core::config::ANTHROPIC_MODELS,
         gw2_core::config::LlmProvider::OpenRouter => gw2_core::config::OPENROUTER_MODELS,
     };
+    // The offline fallback states no capabilities, so it claims none — see
+    // `ModelInfo::default`. Nothing here is filtered out for lack of data.
     hardcoded
         .iter()
-        .map(|(id, label)| (id.to_string(), label.to_string()))
+        .map(|(id, label)| gw2_optimizer::llm::ModelInfo {
+            id: (*id).to_string(),
+            display_name: (*label).to_string(),
+            ..Default::default()
+        })
+        .collect()
+}
+
+/// The catalog as the picker should show it, honouring the Free filter.
+///
+/// The filter is dropped rather than applied when it would empty the list:
+/// showing someone nothing because their provider has no free models teaches
+/// them less than showing them what there is.
+fn visible_models(
+    state: &AddonState,
+    catalog: &[gw2_optimizer::llm::ModelInfo],
+) -> Vec<gw2_optimizer::llm::ModelInfo> {
+    let any_free = catalog.iter().any(|m| m.free);
+    catalog
+        .iter()
+        .filter(|m| !state.config.free_models_only || !any_free || m.free)
+        .cloned()
         .collect()
 }
 
@@ -386,7 +451,7 @@ fn render_model_combo(
     ui: &Ui,
     state: &mut AddonState,
     preview: &str,
-    display_models: &[(String, String)],
+    display_models: &[gw2_optimizer::llm::ModelInfo],
     current_model: &str,
     id: &str,
     width: f32,
@@ -406,7 +471,8 @@ fn render_model_combo(
         .build();
         let needle = state.main.settings_model_search.trim().to_lowercase();
         let mut visible = 0usize;
-        for (mid, label) in display_models {
+        for model in display_models {
+            let (mid, label) = (&model.id, &model.display_name);
             if !needle.is_empty()
                 && !mid.to_lowercase().contains(&needle)
                 && !label.to_lowercase().contains(&needle)
@@ -418,7 +484,14 @@ fn render_model_combo(
             if Selectable::new(label).selected(sel).build(ui) {
                 state.config.set_active_model_id(mid.clone());
                 state.main.provider_issue = None;
-                let _ = state.config.save(&state.config_path);
+                crate::ui::save_config_detached(state);
+            }
+            // The score the row was ordered by, so the order is legible
+            // rather than mysterious. Agentic where it exists — it measures
+            // the thing this addon asks of a model.
+            if let Some(score) = model.agentic_index.or(model.coding_index) {
+                ui.same_line();
+                ui.text_colored(theme::pal().muted, format!("{score:.0}"));
             }
         }
         if visible == 0 && !needle.is_empty() {
@@ -444,8 +517,8 @@ pub(in crate::ui::main_view) fn render_talk_model_row(ui: &Ui, state: &mut Addon
     let display_models = model_catalog(state);
     let preview = display_models
         .iter()
-        .find(|(id, _)| *id == current_model)
-        .map(|(_, l)| l.as_str())
+        .find(|m| m.id == current_model)
+        .map(|m| m.display_name.as_str())
         .unwrap_or(&current_model)
         .to_string();
 
@@ -482,7 +555,7 @@ pub(in crate::ui::main_view) fn render_talk_model_row(ui: &Ui, state: &mut Addon
                 state.main.models_error = None;
                 state.main.settings_model_search.clear();
                 state.main.provider_issue = None;
-                let _ = state.config.save(&state.config_path);
+                crate::ui::save_config_detached(state);
             }
         }
     }
@@ -533,24 +606,12 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     if state.main.available_models.is_empty() && !state.main.models_loading && has_key {
         stats::start_fetch_models(state);
     }
-    let display_models: Vec<(String, String)> = if !state.main.available_models.is_empty() {
-        state.main.available_models.clone()
-    } else {
-        let hardcoded: &[(&str, &str)] = match state.config.active_provider {
-            gw2_core::config::LlmProvider::Gemini => gw2_core::config::GEMINI_MODELS,
-            gw2_core::config::LlmProvider::OpenAI => gw2_core::config::OPENAI_MODELS,
-            gw2_core::config::LlmProvider::Anthropic => gw2_core::config::ANTHROPIC_MODELS,
-            gw2_core::config::LlmProvider::OpenRouter => gw2_core::config::OPENROUTER_MODELS,
-        };
-        hardcoded
-            .iter()
-            .map(|(id, label)| (id.to_string(), label.to_string()))
-            .collect()
-    };
+    let catalog = model_catalog(state);
+    let display_models = visible_models(state, &catalog);
     let preview = display_models
         .iter()
-        .find(|(id, _)| *id == current_model)
-        .map(|(_, l)| l.as_str())
+        .find(|m| m.id == current_model)
+        .map(|m| m.display_name.as_str())
         .unwrap_or(&current_model);
     let row_w = (col_w - 8.0).max(80.0);
     let origin = ui.cursor_screen_pos();
@@ -559,7 +620,14 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let refresh = t("btn.refresh");
     let refresh_w = theme::gold_button_width(ui, refresh.as_str());
     let gap = 8.0;
-    let combo_w = (row_w - label_w - refresh_w - gap * 2.0).max(48.0);
+    // The Free filter sits between the list it filters and the button that
+    // refills it. Greyed where the provider has no free models at all —
+    // OpenAI and Anthropic publish none, so the control would be a promise
+    // the provider cannot keep.
+    let free_label = t("settings.free_only");
+    let any_free = catalog.iter().any(|m| m.free);
+    let free_w = theme::switch_width(ui, free_label.as_str());
+    let combo_w = (row_w - label_w - refresh_w - free_w - gap * 3.0).max(48.0);
     let row_h = ui.frame_height().max(theme::control_height(ui));
 
     ui.set_cursor_screen_pos([
@@ -577,6 +645,37 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         config_field,
         combo_w,
     );
+    let free_x = origin[0] + row_w - refresh_w - gap - free_w;
+    ui.set_cursor_screen_pos([free_x, origin[1] + (row_h - ui.text_line_height()) * 0.5]);
+    // One eased value drives the knob and the Choya together, so the switch
+    // does not snap while the dancer slides.
+    let want = if any_free && state.config.free_models_only {
+        1.0
+    } else {
+        0.0
+    };
+    state.main.free_choya_rise += (want - state.main.free_choya_rise) * 0.08;
+    let slide = state.main.free_choya_rise;
+    if any_free {
+        if theme::switch(ui, &free_label, slide, "##free_models") {
+            state.config.free_models_only = !state.config.free_models_only;
+            crate::ui::save_config_detached(state);
+        }
+    } else {
+        let dim = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+        theme::switch(ui, &free_label, 0.0, "##free_models_off");
+        dim.pop();
+        if ui.is_item_hovered() {
+            ui.tooltip_text(t("settings.free_none"));
+        }
+    }
+    theme::draw_free_choya(
+        ui,
+        [free_x + free_w * 0.5, origin[1]],
+        row_h,
+        state.main.free_choya_rise,
+    );
+
     ui.set_cursor_screen_pos([origin[0] + row_w - refresh_w, origin[1]]);
     if state.main.models_loading {
         ui.text_colored(theme::pal().muted, "...");
@@ -653,7 +752,7 @@ fn render_news_sources(ui: &Ui, state: &mut AddonState, col_w: f32) {
                     2 => NewsLayout::Reader,
                     _ => NewsLayout::Desk,
                 };
-                let _ = state.config.save(&state.config_path);
+                crate::ui::save_config_detached(state);
             }
         });
     // The stills toggle keeps the layout row's line only while the column can
@@ -665,7 +764,7 @@ fn render_news_sources(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let mut images = state.config.news.show_images;
     if ui.checkbox(&stills, &mut images) {
         state.config.news.show_images = images;
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
     }
     if ui.is_item_hovered() {
         theme::wide_tooltip(ui, |ui| ui.text(t("settings.news_hint")));
@@ -700,7 +799,7 @@ fn news_source_tick(ui: &Ui, state: &mut AddonState, src: NewsSource) {
     let label = format!("{}##news_src_{}", t(src.label_key()), src.index());
     if ui.checkbox(label, &mut on) {
         state.config.news.set(src, on);
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
         if on {
             crate::news::kick(state, &[src]);
         }
@@ -710,11 +809,24 @@ fn news_source_tick(ui: &Ui, state: &mut AddonState, src: NewsSource) {
     }
 }
 
-fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
+fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32, theme_align_y: f32) {
     let right_item_w = col_w - 12.0;
+    // Paired two to a row. Each of these was a label on one line and a
+    // control on the next, so four settings cost eight rows in a panel that
+    // is short on height and has width to spare.
+    //
+    // `ui.group` + `same_line`, never a nested `ui.columns`: this renders
+    // inside the tab's right-hand column, and opening a column set here
+    // would end that one and drop the rest of the tab into a single
+    // full-width column. Same rule as `render_news_sources`.
+    let pair_w = (right_item_w - 12.0) * 0.5;
+    // Where the right-hand half of every pair starts. Fixed, not
+    // `same_line`: after a group `same_line` resumes from the group's own
+    // baseline, which left the right column sitting a few pixels low and
+    // its controls not lining up with the row above.
+    let pair_x = ui.cursor_pos()[0];
+    let second_x = pair_x + pair_w + 12.0;
 
-    ui.text(t("settings.language"));
-    ui.set_next_item_width(right_item_w * 0.6);
     let resolved = gw2_core::i18n::resolve(&state.config.ui_language);
     let cache = gw2_api::cache::DataCache::new(state.addon_dir.join("cache"));
     let build = state
@@ -747,85 +859,100 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
                 .unwrap_or(state.config.ui_language.as_str())
         )
     };
-    if let Some(_c) = ComboBox::new("##ui_language")
-        .preview_value(&preview)
-        .begin(ui)
-    {
-        let auto_sel = state.config.ui_language.eq_ignore_ascii_case("auto");
-        let auto_code = gw2_core::i18n::resolve("auto");
-        let (auto_mark, auto_color) = pack_mark(cached_pack_status(&cache, auto_code, build));
+    let lang_row_y = ui.cursor_pos()[1];
+    ui.group(|| {
+        ui.text(t("settings.language"));
+        ui.set_next_item_width(pair_w);
+        if let Some(_c) = ComboBox::new("##ui_language")
+            .preview_value(&preview)
+            .begin(ui)
         {
-            let auto_label = format!("{auto_mark} {}", t("settings.language_auto"));
-            let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, auto_color);
-            if Selectable::new(&auto_label).selected(auto_sel).build(ui) && !auto_sel {
-                state.config.ui_language = "auto".into();
-                gw2_core::i18n::set_language("auto");
-                let _ = state.config.save(&state.config_path);
-                super::super::stats::ensure_localized_names(state);
+            let auto_sel = state.config.ui_language.eq_ignore_ascii_case("auto");
+            let auto_code = gw2_core::i18n::resolve("auto");
+            let (auto_mark, auto_color) = pack_mark(cached_pack_status(&cache, auto_code, build));
+            {
+                let auto_label = format!("{auto_mark} {}", t("settings.language_auto"));
+                let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, auto_color);
+                if Selectable::new(&auto_label).selected(auto_sel).build(ui) && !auto_sel {
+                    state.config.ui_language = "auto".into();
+                    gw2_core::i18n::set_language("auto");
+                    crate::ui::save_config_detached(state);
+                    super::super::stats::ensure_localized_names(state);
+                }
+            }
+            for lang in gw2_core::i18n::LANGUAGES {
+                let sel = state.config.ui_language == lang.code;
+                let (mark, color) = pack_mark(cached_pack_status(&cache, lang.code, build));
+                let label = format!(
+                    "{mark} {}",
+                    crate::ui::fonts::language_label(lang, &font_pref, &ui_lang_pref)
+                );
+                let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, color);
+                if Selectable::new(&label).selected(sel).build(ui) && !sel {
+                    state.config.ui_language = lang.code.into();
+                    gw2_core::i18n::set_language(lang.code);
+                    crate::ui::save_config_detached(state);
+                    super::super::stats::ensure_localized_names(state);
+                }
             }
         }
-        for lang in gw2_core::i18n::LANGUAGES {
-            let sel = state.config.ui_language == lang.code;
-            let (mark, color) = pack_mark(cached_pack_status(&cache, lang.code, build));
-            let label = format!(
-                "{mark} {}",
-                crate::ui::fonts::language_label(lang, &font_pref, &ui_lang_pref)
-            );
-            let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, color);
-            if Selectable::new(&label).selected(sel).build(ui) && !sel {
-                state.config.ui_language = lang.code.into();
-                gw2_core::i18n::set_language(lang.code);
-                let _ = state.config.save(&state.config_path);
-                super::super::stats::ensure_localized_names(state);
+    });
+    ui.set_cursor_pos([second_x, lang_row_y]);
+    ui.group(|| {
+        ui.text(t("settings.font"));
+        ui.set_next_item_width(pair_w);
+        let current_font = state.config.ui_font.clone();
+        let font_preview = t(crate::ui::fonts::label_key(&current_font));
+        if let Some(_c) = ComboBox::new("##ui_font")
+            .preview_value(&font_preview)
+            .begin(ui)
+        {
+            for (id, key) in crate::ui::fonts::combo_options() {
+                let label = t(key);
+                let sel = current_font == id;
+                if Selectable::new(&label).selected(sel).build(ui) && !sel {
+                    state.config.ui_font = id.to_string();
+                    crate::ui::save_config_detached(state);
+                }
             }
         }
-    }
+    });
+    // Both legends below the pair rather than inside it: wrapped prose in a
+    // group is measured against the whole column, which would widen the
+    // first group and push the second off the panel.
     theme::wrapped(ui, theme::pal().muted, &t("settings.lang_pack_legend"));
+    theme::wrapped(ui, theme::pal().muted, &t("settings.font_hint"));
     ui.spacing();
 
-    ui.text(t("settings.opacity"));
-    ui.set_next_item_width(right_item_w * 0.6);
-    let mut opacity = state.config.window_opacity;
-    if nexus::imgui::Slider::new("##opacity", 0.3, 1.0)
-        .display_format("%.2f")
-        .build(ui, &mut opacity)
-    {
-        state.config.window_opacity = opacity;
-        let _ = state.config.save(&state.config_path);
-    }
-
-    ui.text(t("settings.scale"));
-    ui.set_next_item_width(right_item_w * 0.6);
-    let mut scale = state.config.font_scale;
-    if nexus::imgui::Slider::new("##font_scale", 0.5, 2.0)
-        .display_format("%.2f")
-        .build(ui, &mut scale)
-    {
-        state.config.font_scale = scale;
-        let _ = state.config.save(&state.config_path);
-    }
-
-    ui.text(t("settings.font"));
-    ui.set_next_item_width(right_item_w * 0.6);
-    let current_font = state.config.ui_font.clone();
-    let font_preview = t(crate::ui::fonts::label_key(&current_font));
-    if let Some(_c) = ComboBox::new("##ui_font")
-        .preview_value(&font_preview)
-        .begin(ui)
-    {
-        for (id, key) in crate::ui::fonts::combo_options() {
-            let label = t(key);
-            let sel = current_font == id;
-            if Selectable::new(&label).selected(sel).build(ui) && !sel {
-                state.config.ui_font = id.to_string();
-                let _ = state.config.save(&state.config_path);
-            }
+    let slider_row_y = ui.cursor_pos()[1];
+    ui.group(|| {
+        ui.text(t("settings.opacity"));
+        ui.set_next_item_width(pair_w);
+        let mut opacity = state.config.window_opacity;
+        if nexus::imgui::Slider::new("##opacity", 0.3, 1.0)
+            .display_format("%.2f")
+            .build(ui, &mut opacity)
+        {
+            state.config.window_opacity = opacity;
+            crate::ui::save_config_detached(state);
         }
-    }
-    theme::wrapped(ui, theme::pal().muted, &t("settings.font_hint"));
+    });
+    ui.set_cursor_pos([second_x, slider_row_y]);
+    ui.group(|| {
+        ui.text(t("settings.scale"));
+        ui.set_next_item_width(pair_w);
+        let mut scale = state.config.font_scale;
+        if nexus::imgui::Slider::new("##font_scale", 0.5, 2.0)
+            .display_format("%.2f")
+            .build(ui, &mut scale)
+        {
+            state.config.font_scale = scale;
+            crate::ui::save_config_detached(state);
+        }
+    });
 
     ui.dummy([0.0, 8.0]);
-    render_theme_style_section(ui, state, right_item_w);
+    render_theme_style_section(ui, state, right_item_w, theme_align_y);
 
     ui.spacing();
     ui.text_colored(theme::pal().muted, t("settings.layout"));
@@ -866,7 +993,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         state.config.panel_padding = vals[1];
         state.config.section_spacing = vals[2];
         state.config.content_indent = vals[3];
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
     }
 
     ui.spacing();
@@ -880,7 +1007,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         state.config.window_w = None;
         state.config.window_h = None;
         state.force_window_pos = true;
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
     }
 }
 
@@ -937,9 +1064,14 @@ fn draw_slot_marker(ui: &Ui, swatch: [f32; 2], sw: f32) {
         .rounding(4.0)
         .build();
     let cy = y + sw * 0.5;
-    dl.add_triangle([x - 5.0, cy], [x - 11.0, cy - 5.0], [x - 11.0, cy + 5.0], p.cream)
-        .filled(true)
-        .build();
+    dl.add_triangle(
+        [x - 5.0, cy],
+        [x - 11.0, cy - 5.0],
+        [x - 11.0, cy + 5.0],
+        p.cream,
+    )
+    .filled(true)
+    .build();
 }
 
 /// Copy the current preset's five base colors into an UNTOUCHED custom theme,
@@ -972,7 +1104,12 @@ fn seed_custom_from_preset(theme: &mut ThemeConfig) -> bool {
 /// change for live preview — while persistence uses the same
 /// deactivate-after-edit debounce as the radio volume slider (persist once on
 /// release/defocus, not per drag tick or keystroke).
-fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32) {
+fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32, align_y: f32) {
+    // Start level with Optimization Defaults in the column beside, unless
+    // UI Preferences already runs past it - never backwards, or the header
+    // would be drawn over the sliders above it.
+    let at = ui.cursor_pos();
+    ui.set_cursor_pos([at[0], at[1].max(align_y)]);
     theme::header(ui, &t("settings.theme_section"));
 
     let is_custom = state.config.theme.preset == "custom";
@@ -996,12 +1133,42 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
     let fh = ui.frame_height();
     let gap = style.item_spacing[0];
 
+    // The grid | picker split is decided here rather than further down,
+    // because the preset row has to respect it: a theme-name field run to
+    // the pane's right edge sat over the picker's column and forced the
+    // picker a whole row lower than it needed to be.
+    let lane = 12.0; // caret + ring live here, left of the swatch
+    let col_gap = 12.0; // grid | picker gutter
+    let trail = 6.0; // so the row plate does not end flush against the text
+    let picker_w = (fh * 7.0).min(right_item_w).max(fh * 4.0);
+    let labels: [String; 5] = std::array::from_fn(|i| t(THEME_SLOTS[i].0));
+    // Measure the labels, never assume them: "Background" is 10 chars,
+    // "Gedämpfter Text" 15, "Przygaszony tekst" 17, "Приглушённый текст" 18.
+    // The grid sits beside the picker only when the widest label in the
+    // CURRENT language at the CURRENT font scale actually fits there; below
+    // that the section stacks. In side-by-side mode `cell_w` is at least the
+    // width this test demanded, so a label cannot clip by construction.
+    let widest = labels
+        .iter()
+        .map(|l| ui.calc_text_size(l)[0])
+        .fold(0.0_f32, f32::max);
+    let grid_need = lane + (fh + gap + widest + trail) * 2.0 + gap;
+    let side_by_side = right_item_w >= grid_need + col_gap + picker_w;
+    let grid_w = if side_by_side {
+        right_item_w - col_gap - picker_w
+    } else {
+        right_item_w
+    };
+
     // Preset combo and theme name share one line: the name only exists in
     // custom mode, so a full row of its own bought nothing but height in the
-    // one direction this panel has least of.
-    let combo_w = (right_item_w * 0.42).max(fh * 5.0).min(right_item_w);
-    let name_w = right_item_w - combo_w - gap;
+    // one direction this panel has least of. Both stay inside the grid
+    // column so the picker can rise to meet them.
+    let combo_w = (grid_w * 0.42).max(fh * 5.0).min(grid_w);
+    let name_w = grid_w - combo_w - gap;
     let name_beside = name_w >= fh * 6.0;
+    // Where the preset row starts, so the picker can be placed level with it.
+    let preset_row = ui.cursor_pos();
 
     ui.set_next_item_width(combo_w);
     if let Some(_c) = ComboBox::new("##theme_preset")
@@ -1016,13 +1183,39 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
                 crate::ui::save_config_detached(state);
             }
         }
-        // The custom row's visible text is the user's theme name (or the
-        // localized "Custom" placeholder). "###" pins the ImGui id to the
-        // suffix alone, so renaming the theme, or naming it after a preset,
-        // never changes/collides ids ("##" would still hash the label).
-        let label = format!("{}###theme_custom_row", custom_row_label);
-        if Selectable::new(&label).selected(is_custom).build(ui) && !is_custom {
+        // Named themes, then "Custom" beneath them. Cloned first: the rows
+        // write to `state.config.theme` as they are drawn.
+        let kept = state.config.theme.saved.clone();
+        for entry in &kept {
+            // "###" pins the id to the suffix, so a theme named after a
+            // preset cannot collide with it. Names are unique by `remember`.
+            let label = format!("{}###theme_saved_{}", entry.name, entry.name);
+            let sel = is_custom
+                && state
+                    .config
+                    .theme
+                    .custom
+                    .name
+                    .trim()
+                    .eq_ignore_ascii_case(entry.name.trim());
+            if Selectable::new(&label).selected(sel).build(ui) && !sel {
+                state.config.theme.custom = entry.clone();
+                state.config.theme.preset = "custom".into();
+                theme::apply_theme(&state.config.theme);
+                crate::ui::save_config_detached(state);
+            }
+        }
+        // Always the localized placeholder, never the current theme's name:
+        // this row is the scratch slot for the NEXT theme, and labelling it
+        // "Rob" is what left no way to start a second one.
+        let starting_new = is_custom && state.config.theme.custom.name.trim().is_empty();
+        let label = format!("{}###theme_custom_row", t("settings.theme_custom"));
+        if Selectable::new(&label).selected(starting_new).build(ui) && !starting_new {
+            // Keep whatever was being edited before handing the slot over.
+            let editing = state.config.theme.custom.clone();
+            state.config.theme.remember(&editing);
             seed_custom_from_preset(&mut state.config.theme);
+            state.config.theme.custom.name.clear();
             state.config.theme.preset = "custom".into();
             theme::apply_theme(&state.config.theme);
             crate::ui::save_config_detached(state);
@@ -1045,6 +1238,10 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
         .hint(&t("settings.theme_name_hint"))
         .build();
     if ui.is_item_deactivated_after_edit() {
+        // Naming a theme is what keeps it. On commit rather than per
+        // keystroke, or every letter typed would leave a saved theme behind.
+        let named = state.config.theme.custom.clone();
+        state.config.theme.remember(&named);
         crate::ui::save_config_detached(state);
     }
 
@@ -1072,29 +1269,6 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
     // numbers.
     const ROWS: usize = 3;
     let fs = state.config.font_scale.max(0.5);
-    let lane = 12.0; // caret + ring live here, left of the swatch
-    let col_gap = 12.0; // grid | picker gutter
-    let trail = 6.0; // so the row plate does not end flush against the text
-    let picker_w = (fh * 7.0).min(right_item_w).max(fh * 4.0);
-
-    let labels: [String; 5] = std::array::from_fn(|i| t(THEME_SLOTS[i].0));
-    // Measure the labels, never assume them: "Background" is 10 chars,
-    // "Gedämpfter Text" 15, "Przygaszony tekst" 17, "Приглушённый текст" 18.
-    // The grid sits beside the picker only when the widest label in the
-    // CURRENT language at the CURRENT font scale actually fits there; below
-    // that the section stacks. In side-by-side mode `cell_w` is at least the
-    // width this test demanded, so a label cannot clip by construction.
-    let widest = labels
-        .iter()
-        .map(|l| ui.calc_text_size(l)[0])
-        .fold(0.0_f32, f32::max);
-    let grid_need = lane + (fh + gap + widest + trail) * 2.0 + gap;
-    let side_by_side = right_item_w >= grid_need + col_gap + picker_w;
-    let grid_w = if side_by_side {
-        right_item_w - col_gap - picker_w
-    } else {
-        right_item_w
-    };
     // Cells are sized to their content, not stretched to the pane: a row plate
     // running the full width of the column was pure decoration and made the
     // five look like menu entries rather than swatches.
@@ -1131,21 +1305,18 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
                 // localized label, which ImGui's built-in color tooltip shows
                 // as the tooltip title — free, localized, and a bonus cue
                 // rather than the only one.
-                if ColorButton::new(
-                    format!("{label}###theme_sw_{i}"),
-                    [c[0], c[1], c[2], 1.0],
-                )
-                .size([fh, fh])
-                .alpha(false)
-                // Without the border, a swatch set to the panel color
-                // dissolves into the plate behind it.
-                .border(true)
-                // ColorButton is a drag-drop SOURCE by default. A drag off a
-                // swatch eats the press so the click never lands, and a
-                // dropped color mutates a base with no ActiveId transition,
-                // which the commit-on-deactivate save below would miss.
-                .drag_drop(false)
-                .build(ui)
+                if ColorButton::new(format!("{label}###theme_sw_{i}"), [c[0], c[1], c[2], 1.0])
+                    .size([fh, fh])
+                    .alpha(false)
+                    // Without the border, a swatch set to the panel color
+                    // dissolves into the plate behind it.
+                    .border(true)
+                    // ColorButton is a drag-drop SOURCE by default. A drag off a
+                    // swatch eats the press so the click never lands, and a
+                    // dropped color mutates a base with no ActiveId transition,
+                    // which the commit-on-deactivate save below would miss.
+                    .drag_drop(false)
+                    .build(ui)
                 {
                     pick = Some(i);
                 }
@@ -1185,13 +1356,16 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
     }
     let slot = state.main.theme_edit_slot.min(4);
 
-    // Plain `same_line` (offset 0) means "previous line end + spacing", which
-    // after a group is the rail's right edge. NOT `same_line_with_pos`: that
-    // offset is measured from the window position plus group and column
-    // offsets and excludes window padding, so inside this two-column settings
-    // layout the number passed is not the x you get.
+    // The picker rises to the preset row rather than starting level with the
+    // swatch grid, which is a row and a half of height back. `preset_row`
+    // came from `cursor_pos`, so feeding it to `set_cursor_pos` round-trips
+    // in the same space — unlike `same_line_with_pos`, whose offset excludes
+    // window padding and is measured from the window plus group and column
+    // offsets, so inside this two-column layout the number passed is not the
+    // x you get.
+    let grid_bottom = ui.cursor_pos()[1];
     if side_by_side {
-        ui.same_line_with_spacing(0.0, col_gap);
+        ui.set_cursor_pos([preset_row[0] + grid_w + col_gap, preset_row[1]]);
     }
     let edited = {
         let value = theme_base_mut(&mut state.config.theme.custom, slot);
@@ -1228,10 +1402,23 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
     // debounce the old ColorEdit rows used.
     let commit = ui.is_item_deactivated_after_edit();
 
+    // Whichever column is taller decides where the section ends. The picker
+    // was moved up, so it can now finish ABOVE the swatch grid — carrying on
+    // from the picker alone would draw the next paragraph over the swatches.
+    if side_by_side {
+        let below = grid_bottom.max(ui.cursor_pos()[1]);
+        ui.set_cursor_pos([preset_row[0], below]);
+    }
+
     if edited {
         theme::apply_theme(&state.config.theme);
     }
     if commit {
+        // A colour change to a named theme belongs to that theme, or editing
+        // a saved one would only ever change the live buffer and be lost the
+        // next time it was picked from the list.
+        let edited = state.config.theme.custom.clone();
+        state.config.theme.remember(&edited);
         crate::ui::save_config_detached(state);
     }
 
@@ -1354,6 +1541,9 @@ fn cached_pack_status(
 }
 
 fn render_cache_section(ui: &Ui, state: &mut AddonState) {
+    // Set by the confirmation below, acted on after it, so the borrow of
+    // `state` for the buttons is finished before the clear runs.
+    let mut clear_requested = false;
     if let Some(ref key) = state.config.gw2_api_key {
         let display = if key.chars().count() > 12 {
             let pre: String = key.chars().take(8).collect();
@@ -1414,17 +1604,51 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     );
     ui.same_line();
     let refreshing = state.main.game_db_loading;
+    // Clear Cache reads like a tidy-up and is the most expensive button in
+    // the addon: it discards every item, skill, trait and icon the API ever
+    // sent, and the next start re-downloads all of it. It also sits beside
+    // Refresh Game Data, which is what someone chasing stale data actually
+    // wants. So it asks first, and the question names the cost rather than
+    // saying "are you sure".
     if refreshing {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
         theme::gold_button_sized(ui, t("btn.clear_cache"), [100.0, 0.0]);
         style.pop();
+        state.main.confirm_clear_cache = false;
+    } else if state.main.confirm_clear_cache {
+        if theme::gold_button_sized(ui, t("btn.yes"), [56.0, 0.0]) {
+            state.main.confirm_clear_cache = false;
+            clear_requested = true;
+        }
+        ui.same_line();
+        if ui.button_with_size(t("btn.no"), [56.0, 0.0]) {
+            state.main.confirm_clear_cache = false;
+        }
     } else if theme::gold_button_sized(ui, t("btn.clear_cache"), [100.0, 0.0]) {
+        state.main.confirm_clear_cache = true;
+    }
+    if state.main.confirm_clear_cache {
+        theme::wrapped(
+            ui,
+            theme::WARN,
+            &tf(
+                "settings.clear_cache_q",
+                &[(
+                    "size",
+                    &format_bytes(
+                        state.main.settings_cache_size + state.main.settings_graphics_size,
+                    ),
+                )],
+            ),
+        );
+    }
+    if clear_requested {
         let cache = gw2_api::cache::DataCache::new(&cache_dir);
         if let Err(e) = cache.clear_all() {
             state.main.error = Some(tf("fmt.err_clear_cache", &[("err", &e.to_string())]));
         } else {
             state.config.cache_build_number = None;
-            let _ = state.config.save(&state.config_path);
+            crate::ui::save_config_detached(state);
             state.main.game_db = None;
             state.setup.download_progress = None;
             // Force the cached "Cache: …" label to recompute on the next frame
@@ -1446,7 +1670,7 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
         &mut auto_refresh,
     ) {
         state.config.auto_refresh_cache = auto_refresh;
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
     }
 
     ui.spacing();
@@ -1474,7 +1698,7 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
             state.main.error = Some(tf("fmt.err_refresh", &[("err", &e.to_string())]));
         } else {
             state.config.cache_build_number = None;
-            let _ = state.config.save(&state.config_path);
+            crate::ui::save_config_detached(state);
             state.main.game_db = None;
             state.setup.download_progress = None;
             // Force the cached "Cache: …" label to recompute on the next frame.
@@ -1504,57 +1728,209 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     }
 }
 
+/// Sync sources in the order they are reported, with their display casing.
+/// Game modes as `BenchmarkBuild::mode` spells them, in display order.
+const BENCHMARK_MODES: &[&str] = &["PvE", "PvP", "WvW"];
+
+const BENCHMARK_SOURCES: &[(&str, &str)] = &[
+    ("snowcrows", "Snowcrows"),
+    ("hardstuck", "Hardstuck"),
+    ("guildjen", "GuildJen"),
+];
+
+/// The `done/total` a scraper's progress line ends with.
+///
+/// Every scraper reports its build loop as a trailing `n/total` - "Guardian
+/// 12/45", "WvW Necromancer 12/99" - so the tail is the one part of the line
+/// that is a contract rather than prose. A listing line has no fraction and
+/// gets no bar, which is the honest rendering: nothing is countable yet.
+fn progress_fraction(line: &str) -> Option<(usize, usize)> {
+    let tail = line.rsplit(char::is_whitespace).next()?;
+    let (done, total) = tail.split_once('/')?;
+    let total: usize = total.parse().ok()?;
+    (total > 0).then_some((done.parse().ok()?, total))
+}
+
+/// A thin filled bar for one source's progress.
+fn sync_bar(ui: &Ui, fraction: f32) {
+    let width = (ui.content_region_avail()[0] - 16.0).max(1.0);
+    let pos = ui.cursor_screen_pos();
+    let draw = ui.get_window_draw_list();
+    draw.add_rect(
+        [pos[0] + 8.0, pos[1] + 2.0],
+        [pos[0] + width + 8.0, pos[1] + 8.0],
+        [0.2, 0.2, 0.2, 0.8],
+    )
+    .filled(true)
+    .rounding(3.0)
+    .build();
+    let filled = width * fraction.clamp(0.0, 1.0);
+    if filled > 0.0 {
+        draw.add_rect(
+            [pos[0] + 8.0, pos[1] + 2.0],
+            [pos[0] + 8.0 + filled, pos[1] + 8.0],
+            theme::pal().gold,
+        )
+        .filled(true)
+        .rounding(3.0)
+        .build();
+    }
+    ui.dummy([width, 11.0]);
+}
+
 fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
     ui.text_colored(theme::pal().muted, t("settings.sources"));
     ui.spacing();
+    // Set by a row's Retry button; read by the sync trigger below, so both
+    // paths spawn the one worker rather than duplicating it.
+    let mut retry_requested = false;
     if state.main.benchmark_running {
-        let live = ["snowcrows", "hardstuck", "guildjen"]
+        // A full sync is several hundred pages over minutes. One joined line
+        // said which sources were alive and nothing about how far along they
+        // were, so a run that was working looked identical to one that had
+        // hung. A row and a bar per source, naming the class in flight.
+        let mut any = false;
+        for (key, label) in BENCHMARK_SOURCES {
+            let Some(live) = state.main.benchmark_live.get(*key) else {
+                continue;
+            };
+            any = true;
+            ui.text_colored(theme::pal().gold, *label);
+            ui.same_line();
+            ui.text_colored(theme::pal().muted, live);
+            if let Some((done, total)) = progress_fraction(live) {
+                sync_bar(ui, done as f32 / total.max(1) as f32);
+            }
+        }
+        if !any {
+            ui.text_colored(theme::pal().muted, t("btn.syncing"));
+        }
+        // A run that is waiting out a rate limit looks identical to a hung
+        // one from outside, and the waits are tens of seconds. Say so.
+        if gw2_optimizer::scraper::sync_backoff_ms() > 0 {
+            ui.text_colored([0.9, 0.8, 0.2, 1.0], t("bench.throttled"));
+        }
+        ui.spacing();
+    }
+    {
+        // A row per source: what came back, and what did not. One joined
+        // line of three totals could not say that a source listed 157 pages
+        // and returned 148 - the nine that failed simply vanished.
+        //
+        // Drawn whether or not a sync has ever run, and left up while one is
+        // running. A grid of dashes still answers the question the table
+        // exists for — which modes are not covered — so the progress rows
+        // belong above it rather than in place of it.
+        let synced = state.main.benchmark_last_synced.clone();
+        match synced {
+            Some(ref last) => {
+                ui.text_colored(theme::pal().muted, tf("fmt.synced_when", &[("when", last)]))
+            }
+            None => ui.text_colored(theme::pal().muted, t("settings.never_synced")),
+        }
+        // Providers down the side, game modes across: the sources do not
+        // cover the same modes, and one total per source could not say
+        // whether the one you play is covered at all. The red column is what
+        // a run listed and could not read, with its retry beside it.
+        // Positioned by hand rather than with `ui.columns`. This grid sits
+        // in the right-hand column of the tab, and a column set cannot be
+        // opened inside another one — doing so ends the outer pair and
+        // drops everything after it into a single full-width column. Laid
+        // out full width the grid also read badly: three counts and a dash
+        // stretched across the whole window with nothing between them.
+        //
+        // Every width comes from the text it holds, so the grid follows the
+        // font scale and takes only the room it needs. It does NOT share out
+        // the panel: three counts of at most four digits, dealt a third of
+        // the window each, left a hand's width of empty space inside every
+        // column and still pushed the failure column off the right edge. The
+        // slack belongs after the last column, not inside each one.
+        let scale = state.config.font_scale.max(0.5);
+        let label_w = BENCHMARK_SOURCES
             .iter()
-            .filter_map(|k| state.main.benchmark_live.get(*k).map(|s| s.as_str()))
-            .collect::<Vec<_>>()
-            .join("  ·  ");
-        ui.text_colored(
-            theme::pal().muted,
-            if live.is_empty() {
-                t("btn.syncing")
+            .map(|(_, label)| ui.calc_text_size(label)[0])
+            .fold(0.0_f32, f32::max)
+            + 16.0 * scale;
+        // Room for a four-digit count or the widest heading, whichever is
+        // wider, plus a gap so the next column does not touch it. Failed is
+        // one of the headings: it is a column of the same table, not an
+        // annotation hung off the end of it.
+        let failed_label = t("bench.failed");
+        let mode_w = BENCHMARK_MODES
+            .iter()
+            .map(|mode| ui.calc_text_size(mode)[0])
+            .chain(std::iter::once(ui.calc_text_size(&failed_label)[0]))
+            .fold(ui.calc_text_size("8888")[0], f32::max)
+            + 24.0 * scale;
+        // Measured, not guessed: `gold_button_sized` grows a button past the
+        // width it is given when the label needs more, so a fixed 76px
+        // reservation was wrong at any font scale where "Retry" got wider
+        // than that, and the button hung off the panel.
+        let retry_button_w = theme::gold_button_width(ui, t("btn.retry")).max(56.0 * scale);
+        let avail = ui.content_region_avail()[0];
+
+        // Cells are placed with `set_cursor_pos` from the row's own starting
+        // x, NOT `same_line_with_pos`. That offset ignores the indent, and
+        // this section renders inside the right column's 48px one, so the
+        // counts were drawn on top of the source names — "Snowcr180".
+        let row_x = ui.cursor_pos()[0];
+        let column_at = |n: usize| row_x + label_w + mode_w * n as f32;
+        let fail_x = column_at(BENCHMARK_MODES.len());
+        // The button follows the Failed column, pinned inside the panel as a
+        // floor for a window narrowed past the point where the grid fits at
+        // all. Content-sized columns keep the grid far short of the edge at
+        // any ordinary width, so this clamp does nothing until the panel is
+        // genuinely too small.
+        let retry_x = column_at(BENCHMARK_MODES.len() + 1).min(row_x + avail - retry_button_w);
+
+        // Header: an empty corner cell, then the modes.
+        let header_y = ui.cursor_pos()[1];
+        ui.text(" ");
+        for (n, mode) in BENCHMARK_MODES.iter().enumerate() {
+            ui.set_cursor_pos([column_at(n), header_y]);
+            ui.text_colored(theme::pal().muted, *mode);
+        }
+        ui.set_cursor_pos([fail_x, header_y]);
+        ui.text_colored(theme::pal().muted, &failed_label);
+        for (key, label) in BENCHMARK_SOURCES {
+            let row_y = ui.cursor_pos()[1];
+            ui.text_colored(theme::pal().gold, *label);
+            for (n, mode) in BENCHMARK_MODES.iter().enumerate() {
+                ui.set_cursor_pos([column_at(n), row_y]);
+                let count = state
+                    .main
+                    .benchmark_mode_counts
+                    .get(&format!("{key}|{mode}"))
+                    .copied()
+                    .unwrap_or(0);
+                if count > 0 {
+                    ui.text_colored([0.5, 0.9, 0.5, 1.0], count.to_string());
+                } else {
+                    ui.text_colored(theme::pal().muted, "-");
+                }
+            }
+            let bad = state.main.benchmark_failed.get(*key).copied().unwrap_or(0);
+            ui.set_cursor_pos([fail_x, row_y]);
+            if bad > 0 {
+                ui.text_colored([1.0, 0.4, 0.2, 1.0], bad.to_string());
+                // Only where there is something to retry, and cheap to take:
+                // a re-run today skips every page already read and fetches
+                // exactly these.
+                ui.set_cursor_pos([retry_x, row_y]);
+                if theme::gold_button_sized(
+                    ui,
+                    format!("{}##retry_{key}", t("btn.retry")),
+                    [retry_button_w, 0.0],
+                ) {
+                    retry_requested = true;
+                }
             } else {
-                live
-            },
-        );
-    } else if let Some(ref last) = state.main.benchmark_last_synced {
-        let sc = state
-            .main
-            .benchmark_counts
-            .get("snowcrows")
-            .copied()
-            .unwrap_or(0);
-        let hs = state
-            .main
-            .benchmark_counts
-            .get("hardstuck")
-            .copied()
-            .unwrap_or(0);
-        let gj = state
-            .main
-            .benchmark_counts
-            .get("guildjen")
-            .copied()
-            .unwrap_or(0);
-        ui.text_colored(
-            [0.5, 0.9, 0.5, 1.0],
-            tf(
-                "fmt.synced",
-                &[
-                    ("when", last),
-                    ("sc", &sc.to_string()),
-                    ("hs", &hs.to_string()),
-                    ("gj", &gj.to_string()),
-                ],
-            ),
-        );
-    } else {
-        ui.text_colored(theme::pal().muted, t("settings.never_synced"));
+                // A dash, not a zero. Failures are not written to disk, so
+                // after a restart this is unknown rather than clean.
+                ui.text_colored(theme::pal().muted, "-");
+            }
+        }
     }
     if let Some(ref err) = state.main.benchmark_error.clone() {
         let short = if err.chars().count() > 80 {
@@ -1580,7 +1956,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
             },
             [160.0, 0.0],
         );
-    } else if theme::gold_button_sized(ui, t("btn.sync"), [160.0, 0.0]) {
+    } else if theme::gold_button_sized(ui, t("btn.sync"), [160.0, 0.0]) || retry_requested {
         let addon_dir = state.addon_dir.clone();
         state.main.benchmark_running = true;
         state.main.benchmark_error = None;
@@ -1625,14 +2001,24 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
                     }
                 };
                 let mut counts = std::collections::HashMap::new();
+                let mut failures = std::collections::HashMap::new();
+                let mut mode_counts = std::collections::HashMap::new();
                 let mut errors = Vec::new();
                 for r in &results {
                     counts.insert(r.source.clone(), r.builds.len());
+                    failures.insert(r.source.clone(), r.failed);
+                    for b in &r.builds {
+                        *mode_counts
+                            .entry(format!("{}|{}", r.source, b.mode))
+                            .or_insert(0) += 1;
+                    }
                     if let Some(ref e) = r.error {
                         errors.push(format!("{}: {}", r.source, e));
                     }
                 }
                 s.main.benchmark_counts = counts;
+                s.main.benchmark_failed = failures;
+                s.main.benchmark_mode_counts = mode_counts;
                 s.main.benchmark_error = if errors.is_empty() {
                     None
                 } else {
@@ -1671,6 +2057,20 @@ fn format_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bar is driven off the tail of a progress line, so the shapes
+    /// every scraper actually emits have to parse - and a listing line,
+    /// which counts nothing yet, must not draw an empty bar.
+    #[test]
+    fn progress_fraction_reads_the_trailing_count() {
+        assert_eq!(progress_fraction("WvW Necromancer 12/99"), Some((12, 99)));
+        assert_eq!(progress_fraction("Guardian 12/45"), Some((12, 45)));
+        assert_eq!(progress_fraction("0/500"), Some((0, 500)));
+        // No count yet, or nothing countable: no bar.
+        assert_eq!(progress_fraction("listing categories…"), None);
+        assert_eq!(progress_fraction("guildjen WvW"), None);
+        assert_eq!(progress_fraction("3/0"), None);
+    }
 
     /// Fresh global `STATE` rooted at a per-test temp dir, mirroring
     /// `state::tests::init_worker_test` (that helper is private to `state.rs`'s
@@ -1790,6 +2190,7 @@ mod tests {
         let mut fresh = ThemeConfig {
             preset: "molten-ember".into(),
             custom: CustomTheme::default(),
+            ..Default::default()
         };
         assert!(seed_custom_from_preset(&mut fresh));
         let [bg, panel, accent, text, muted] =
@@ -1821,6 +2222,7 @@ mod tests {
         let mut edited = ThemeConfig {
             preset: "verdant-wilds".into(),
             custom: mine.clone(),
+            ..Default::default()
         };
         assert!(!seed_custom_from_preset(&mut edited));
         assert_eq!(edited.custom, mine, "an edited custom theme survives");
@@ -1830,6 +2232,7 @@ mod tests {
             let mut t = ThemeConfig {
                 preset: preset.into(),
                 custom: CustomTheme::default(),
+                ..Default::default()
             };
             assert!(!seed_custom_from_preset(&mut t), "{preset} has no bases");
             assert_eq!(t.custom, CustomTheme::default());

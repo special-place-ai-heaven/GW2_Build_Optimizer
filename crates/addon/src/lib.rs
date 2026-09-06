@@ -1,3 +1,4 @@
+mod cache_bounds;
 mod chat_links;
 mod clipboard;
 mod feedback;
@@ -50,9 +51,9 @@ fn load_guard(run: impl FnOnce() + std::panic::UnwindSafe) {
 /// D3D11. First PostRender can fire before that, so wait this out first.
 pub(crate) const CHROME_SETTLE: Duration = Duration::from_millis(2000);
 
-/// `attach_overlay_host` is one-shot. `BOOTSTRAP_FAILED` flips on a panic inside
-/// attach so the next PostRender can retry — a permanent fail would leave the
-/// overlay dead with no path back without an addon reload.
+/// `attach_overlay_host` is one-shot. `BOOTSTRAP_FAILED` latches a panic inside
+/// attach so the PostRender bootstrapper stops retrying for the session;
+/// recovery requires an addon reload.
 static HOST_ATTACHED: AtomicBool = AtomicBool::new(false);
 static BOOTSTRAP_FAILED: AtomicBool = AtomicBool::new(false);
 static CHROME_AT: OnceLock<Instant> = OnceLock::new();

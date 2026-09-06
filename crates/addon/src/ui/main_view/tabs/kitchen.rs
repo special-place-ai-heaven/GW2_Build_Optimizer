@@ -33,6 +33,14 @@ pub(in crate::ui::main_view) fn render_talk_tab(ui: &Ui, state: &mut AddonState)
     render_choya_identity(ui, state);
 
     ui.spacing();
+    // No character is the one part of this line worth interrupting for: it
+    // changes what Choya can know about you, and in muted grey among three
+    // other facts it reads as scenery. Choya will still plate a build and
+    // pick a profession itself — this says why the build is a guess rather
+    // than yours.
+    if state.main.selected_character.is_none() {
+        ui.text_colored(theme::WARN, t("talk.pick_character"));
+    }
     theme::wrapped(ui, theme::pal().muted, &talk_context(state));
     ui.spacing();
     render_starters(ui, state);
@@ -67,17 +75,44 @@ pub(in crate::ui::main_view) fn render_talk_tab(ui: &Ui, state: &mut AddonState)
     } else {
         None
     };
+    // Matched before the chat draws, because the cards sit inside it. The
+    // match itself only runs when the proposal changed — see
+    // `provider_picks::refresh_provider_picks`.
+    crate::ui::main_view::provider_picks::refresh_provider_picks(state);
+    let picks: Vec<crate::ui::chat_bar::PickCard> = state
+        .main
+        .provider_picks
+        .iter()
+        .map(|build| crate::ui::chat_bar::PickCard {
+            title: if build.spec_name.is_empty() {
+                build.profession.clone()
+            } else {
+                build.spec_name.clone()
+            },
+            source: build.source.clone(),
+            detail: if build.gear_prefix.is_empty() {
+                build.role.clone()
+            } else {
+                format!("{} \u{00b7} {}", build.role, build.gear_prefix)
+            },
+        })
+        .collect();
+
     match crate::ui::chat_bar::render_chat_bar(
         ui,
         &mut state.main.chat,
         cooking.as_deref(),
         user_icon.as_deref(),
         user_letter,
+        &picks,
     ) {
         Some(ChatAction::Send(msg)) => {
             crate::ui::main_view::chat_flow::send_chat_message(state, msg)
         }
         Some(ChatAction::OpenBuild) => open_optimized_tab(state),
+        Some(ChatAction::OpenPick(n)) => {
+            crate::ui::main_view::provider_picks::adopt_provider_pick(state, n)
+        }
         None => {}
     }
 }
@@ -223,7 +258,7 @@ fn talk_context(state: &AddonState) -> String {
     let role = state
         .main
         .selected_role
-        .map(super::super::role_i18n_key)
+        .map(|role| super::super::role_i18n_key(&state.main.game_mode, role))
         .map(t)
         .unwrap_or_else(|| t("talk.no_role"));
     format!(

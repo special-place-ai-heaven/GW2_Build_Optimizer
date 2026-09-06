@@ -750,30 +750,20 @@ pub fn extract_damage_modifiers(
 
 /// Extract a damage modifier from a single Fact.
 fn extract_modifier_from_fact(mods: &mut DamageModifiers, fact: &Fact) {
-    match fact {
-        Fact::Percent {
-            text: Some(ref text),
-            percent: Some(pct),
-            ..
-        } => {
-            if percent_text_is_conditional(text) && !text_lower_has_90hp(text) {
-                return;
-            }
-            let uptime = if text_lower_has_90hp(text) { 0.9 } else { 1.0 };
-            let points = *pct * uptime;
-            let decimal = points / 100.0;
-            if !apply_percent_category(mods, text, points, decimal, true) {
-                mods.unparsed.push(text.clone());
-            }
+    let Fact::Percent {
+        text: Some(ref text),
+        percent: Some(pct),
+        ..
+    } = fact
+    else {
+        return;
+    };
+    match interpret_percent_fact(text, *pct) {
+        PercentInterp::Skip => {}
+        PercentInterp::Classified(class, points) => {
+            apply_percent_class(mods, class, points, points / 100.0, true);
         }
-        Fact::Buff {
-            text: Some(ref text),
-            status: Some(ref status),
-            ..
-        } => {
-            let _ = (text, status);
-        }
-        _ => {}
+        PercentInterp::Unknown(_) => mods.unparsed.push(text.clone()),
     }
 }
 
@@ -819,6 +809,33 @@ pub(crate) enum PercentClass {
     SpecificCondiDuration(String),
     Strike,
     Ignore,
+}
+
+/// Shared standing-percent policy. Combat and synergy both call this, then
+/// project into `DamageModifiers` / `NormalizedEffect` independently.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PercentInterp {
+    /// Conditional tooltip (Scholar 90% HP is not this — see
+    /// [`percent_text_is_conditional`]). Both parsers skip.
+    Skip,
+    Classified(PercentClass, f64),
+    /// Scaled but no known category — combat records unparsed; synergy drops.
+    Unknown(f64),
+}
+
+pub(crate) fn interpret_percent_fact(text: &str, percent: f64) -> PercentInterp {
+    if percent_text_is_conditional(text) {
+        return PercentInterp::Skip;
+    }
+    let scaled = if text_lower_has_90hp(text) {
+        percent * 0.9
+    } else {
+        percent
+    };
+    match classify_percent_text(text, scaled) {
+        Some(class) => PercentInterp::Classified(class, scaled),
+        None => PercentInterp::Unknown(scaled),
+    }
 }
 
 /// Map tooltip text and its raw percentage into one standing-combat category.
@@ -904,26 +921,39 @@ fn apply_percent_category(
     from_trait: bool,
 ) -> bool {
     match classify_percent_text(hay, points) {
-        Some(PercentClass::Ignore) => true,
-        Some(PercentClass::CritChancePts) => {
+        Some(class) => apply_percent_class(mods, class, points, decimal, from_trait),
+        None => false,
+    }
+}
+
+fn apply_percent_class(
+    mods: &mut DamageModifiers,
+    class: PercentClass,
+    points: f64,
+    decimal: f64,
+    from_trait: bool,
+) -> bool {
+    match class {
+        PercentClass::Ignore => true,
+        PercentClass::CritChancePts => {
             mods.crit_chance_pct.push(points);
             true
         }
-        Some(PercentClass::CritDamagePts) => {
+        PercentClass::CritDamagePts => {
             mods.crit_damage_pct.push(points);
             true
         }
-        Some(PercentClass::Condition) => {
+        PercentClass::Condition => {
             if decimal.abs() > 0.001 {
                 mods.condition_pct.push(decimal);
             }
             true
         }
-        Some(PercentClass::Healing) => {
+        PercentClass::Healing => {
             mods.healing_pct.push(decimal);
             true
         }
-        Some(PercentClass::CondiDuration) => {
+        PercentClass::CondiDuration => {
             if from_trait {
                 mods.trait_condi_duration_pct.push(decimal);
             } else {
@@ -931,7 +961,7 @@ fn apply_percent_category(
             }
             true
         }
-        Some(PercentClass::BoonDuration) => {
+        PercentClass::BoonDuration => {
             if from_trait {
                 mods.trait_boon_duration_pct.push(decimal);
             } else {
@@ -939,7 +969,7 @@ fn apply_percent_category(
             }
             true
         }
-        Some(PercentClass::SpecificCondiDuration(key)) => {
+        PercentClass::SpecificCondiDuration(key) => {
             if from_trait {
                 mods.trait_specific_condi_duration
                     .entry(key)
@@ -953,13 +983,12 @@ fn apply_percent_category(
             }
             true
         }
-        Some(PercentClass::Strike) => {
+        PercentClass::Strike => {
             if decimal.abs() > 0.001 {
                 mods.strike_pct.push(decimal);
             }
             true
         }
-        None => false,
     }
 }
 
@@ -1051,59 +1080,34 @@ fn parse_rune_modifier(mods: &mut DamageModifiers, bonus: &str) {
 pub(crate) fn parse_percent_clauses(mods: &mut DamageModifiers, text: &str) -> bool {
     let s = strip_gw2_markup(text).trim().to_lowercase();
     let stacks = stack_multiplier(&s);
-    let mut from = 0;
     let mut any = false;
-    while let Some(rel) = s[from..].find('%') {
-        let pct_idx = from + rel;
-        let is_num_part = |c: char| c.is_ascii_digit() || c == '.' || c == '-' || c == '−';
-        let num_start = s[..pct_idx]
-            .char_indices()
-            .rev()
-            .find(|(_, c)| !is_num_part(*c))
-            .map(|(i, c)| i + c.len_utf8())
-            .unwrap_or(0);
-        if num_start >= pct_idx {
-            from = pct_idx + 1;
+    for clause in crate::text_util::percent_clauses(text) {
+        let hay = &clause.hay;
+        if percent_text_is_ignored(hay) {
             continue;
         }
-        let num = s[num_start..pct_idx].replace('−', "-");
-        let Ok(value) = num.parse::<f64>() else {
-            from = pct_idx + 1;
-            continue;
-        };
-        let rest = s[pct_idx + 1..].trim();
-        let before = s[..num_start].trim();
-        let hay = format!("{before} {rest}");
-        if percent_text_is_ignored(&hay) {
-            from = pct_idx + 1;
+        if percent_is_vs_target(&clause.after) {
             continue;
         }
-        if percent_is_vs_target(rest) {
-            from = pct_idx + 1;
+        if upgrade_unreliable(&s) || upgrade_unreliable(hay) {
             continue;
         }
-        if upgrade_unreliable(&s) || upgrade_unreliable(&hay) {
-            from = pct_idx + 1;
-            continue;
-        }
-        if percent_text_is_conditional(&hay)
+        if percent_text_is_conditional(hay)
             && stacks <= 1.0
-            && !text_lower_has_90hp(&hay)
-            && !easy_rotation_trigger(&hay)
+            && !text_lower_has_90hp(hay)
+            && !easy_rotation_trigger(hay)
         {
-            from = pct_idx + 1;
             continue;
         }
         let stacks = if upgrade_unreliable(&s) { 0.0 } else { stacks };
         let uptime = upgrade_uptime(&s);
-        let scaled = value * stacks * uptime;
+        let scaled = clause.value * stacks * uptime;
         let decimal = scaled / 100.0;
-        if apply_percent_category(mods, &hay, scaled, decimal, false) {
+        if apply_percent_category(mods, hay, scaled, decimal, false) {
             any = true;
         } else {
             mods.unparsed.push(text.to_string());
         }
-        from = pct_idx + 1;
     }
     any
 }
@@ -1919,6 +1923,35 @@ mod tests {
             icon: None,
             percent: Some(percent),
         }
+    }
+
+    #[test]
+    fn parse_percent_clauses_keeps_both_duration_bonuses() {
+        let mut mods = DamageModifiers::default();
+        assert!(parse_percent_clauses(
+            &mut mods,
+            "+10% condition duration. +5% boon duration.",
+        ));
+        assert_eq!(mods.condi_duration_pct.len(), 1);
+        assert!((mods.condi_duration_pct[0] - 0.10).abs() < 0.001);
+        assert_eq!(mods.boon_duration_pct.len(), 1);
+        assert!((mods.boon_duration_pct[0] - 0.05).abs() < 0.001);
+    }
+
+    #[test]
+    fn interpret_percent_fact_skips_conditionals_and_scales_scholar() {
+        assert_eq!(
+            interpret_percent_fact("Damage increased while above 50% health", 10.0),
+            PercentInterp::Skip
+        );
+        assert_eq!(
+            interpret_percent_fact("Strike Damage while above 90% health", 10.0),
+            PercentInterp::Classified(PercentClass::Strike, 9.0)
+        );
+        assert_eq!(
+            interpret_percent_fact("+10% Strike Damage", 10.0),
+            PercentInterp::Classified(PercentClass::Strike, 10.0)
+        );
     }
 
     #[test]

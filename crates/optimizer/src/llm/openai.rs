@@ -10,8 +10,8 @@ use serde_json::Value;
 
 use super::body::{json_capped, read_body_capped};
 use super::openai_compat::{
-    http_client, is_function_call_failure, send_chat, Message, ProviderCore, CHAT_REQUEST_TIMEOUT,
-    closing_request, MAX_COMPLETION_TOKENS, METADATA_TIMEOUT,
+    closing_request, http_client, is_function_call_failure, send_chat, Message, ProviderCore,
+    CHAT_REQUEST_TIMEOUT, MAX_COMPLETION_TOKENS, METADATA_TIMEOUT,
 };
 use super::rate::{persist_usage, PersistedUsage, RateTracker};
 use super::trim::trim_openai_messages;
@@ -326,11 +326,13 @@ impl LlmClient for OpenAiClient {
 
             // Execute each tool call and add responses
             for tc in &tool_calls {
-                // OpenAI sends arguments as a JSON *string* — parse it
-                let args: Value = serde_json::from_str(&tc.function.arguments)
-                    .unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
-
-                let result = execute_tool(&tc.function.name, &args);
+                // OpenAI sends arguments as a JSON *string*. Truncated JSON
+                // is an error the model can retry — not an empty-object run.
+                let result = super::run_tool_or_parse_error(
+                    execute_tool,
+                    &tc.function.name,
+                    &tc.function.arguments,
+                );
                 let result_str = serde_json::to_string(&result).unwrap_or_default();
 
                 messages.push(Message {
@@ -431,6 +433,12 @@ impl LlmClient for OpenAiClient {
                 super::ModelInfo {
                     id: m.id,
                     display_name: display,
+                    // OpenAI publishes no free tier and no per-model price in
+                    // its catalog: every model here bills. Nor does it publish
+                    // capabilities, so the rest stays at its default of "not
+                    // stated" rather than being invented here.
+                    free: false,
+                    ..Default::default()
                 }
             })
             .collect();

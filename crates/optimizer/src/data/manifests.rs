@@ -38,17 +38,34 @@ pub fn latest_manifest() -> &'static PatchManifest {
         .expect("no active manifests found")
 }
 
-/// Returns a staleness warning message if the live game build doesn't match
+/// Live game build versus the active manifest's `game_build_id`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManifestFreshness {
+    Current { build: u64 },
+    Stale { verified: u64, live: u64 },
+}
+
+/// Whether the live game build matches the active manifest.
+pub fn freshness(live_build_id: u64) -> ManifestFreshness {
+    let verified = latest_manifest().game_build_id;
+    if verified == live_build_id {
+        ManifestFreshness::Current { build: verified }
+    } else {
+        ManifestFreshness::Stale {
+            verified,
+            live: live_build_id,
+        }
+    }
+}
+
+/// Returns a staleness warning if the live game build doesn't match
 /// the latest manifest's game_build_id, or None if they match.
 pub fn check_staleness(live_build_id: u64) -> Option<String> {
-    let manifest = latest_manifest();
-    if manifest.game_build_id != live_build_id {
-        Some(format!(
-            "Balance data verified for build {}, but game is running build {}",
-            manifest.game_build_id, live_build_id
-        ))
-    } else {
-        None
+    match freshness(live_build_id) {
+        ManifestFreshness::Current { .. } => None,
+        ManifestFreshness::Stale { verified, live } => Some(format!(
+            "Balance data verified for build {verified}, but game is running build {live}"
+        )),
     }
 }
 
@@ -243,6 +260,24 @@ mod tests {
             msg.contains(&latest_manifest().game_build_id.to_string()),
             "message should mention manifest build: {}",
             msg
+        );
+    }
+
+    #[test]
+    fn freshness_is_current_or_stale() {
+        let m = latest_manifest();
+        assert_eq!(
+            freshness(m.game_build_id),
+            ManifestFreshness::Current {
+                build: m.game_build_id
+            }
+        );
+        assert_eq!(
+            freshness(1),
+            ManifestFreshness::Stale {
+                verified: m.game_build_id,
+                live: 1
+            }
         );
     }
 

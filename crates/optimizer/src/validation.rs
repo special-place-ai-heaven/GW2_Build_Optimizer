@@ -2274,10 +2274,7 @@ mod tests {
         };
         let result = validate_gemini_build(&response, &db, "Elementalist");
         assert!(
-            result
-                .warnings
-                .iter()
-                .any(|w| w.contains("NotARealTrait")),
+            result.warnings.iter().any(|w| w.contains("NotARealTrait")),
             "the bad name must still be reported: {:?}",
             result.warnings
         );

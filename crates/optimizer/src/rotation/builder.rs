@@ -1068,6 +1068,9 @@ mod tests {
             sourced_skill_value(&wvw, 13097, "damage_coefficient:below_25"),
             Some(2.0)
         );
+        assert_eq!(sourced_skill_u32(&pve, 13097, "activation_ms"), Some(750));
+        assert_eq!(sourced_skill_u32(&pvp, 13097, "activation_ms"), Some(750));
+        assert_eq!(sourced_skill_u32(&wvw, 13097, "activation_ms"), Some(750));
     }
 
     #[test]
@@ -1435,11 +1438,22 @@ mod tests {
         };
         let mut skills = vec![cleanse_test_skill(30670), cleanse_test_skill(14422)];
         enrich_with_cleanse(&mut skills, &[], &db, &[]);
-        assert_eq!(removed(&skills[0]), Some(2), "\"Suffer!\" transfers 1 + 1 additional");
-        assert_eq!(removed(&skills[1]), None, "Eviscerate without Cleansing Ire");
+        assert_eq!(
+            removed(&skills[0]),
+            Some(2),
+            "\"Suffer!\" transfers 1 + 1 additional"
+        );
+        assert_eq!(
+            removed(&skills[1]),
+            None,
+            "Eviscerate without Cleansing Ire"
+        );
         let mut traited = vec![cleanse_test_skill(14422)];
         enrich_with_cleanse(&mut traited, &[], &db, &[1649]);
-        assert!(removed(&traited[0]).is_some(), "Eviscerate with Cleansing Ire");
+        assert!(
+            removed(&traited[0]).is_some(),
+            "Eviscerate with Cleansing Ire"
+        );
     }
 
     #[test]

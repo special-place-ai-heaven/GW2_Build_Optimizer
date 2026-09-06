@@ -75,6 +75,16 @@ fn start_optimization_inner(state: &mut AddonState, profession_name: &str, entry
         return;
     }
 
+    if let Some(reason) = state
+        .main
+        .data_state
+        .as_ref()
+        .and_then(|s| s.optimize_block_reason())
+    {
+        state.main.error = Some(reason);
+        return;
+    }
+
     if state.main.game_db.is_none() {
         state.main.error = Some(t("err.no_gamedb"));
         return;
@@ -121,7 +131,7 @@ fn start_optimization_inner(state: &mut AddonState, profession_name: &str, entry
     let selected_role = state.main.selected_role;
     let build_locks = state.main.build_locks.clone();
     let combat_tier = match game_mode {
-        gw2_core::types::GameMode::WvW => state.main.wvw_combat_tier,
+        gw2_core::types::GameMode::WvW => state.main.combat_tier,
         gw2_core::types::GameMode::PvP => gw2_optimizer::scenario::CombatTier::Solo,
         gw2_core::types::GameMode::PvE => gw2_optimizer::scenario::CombatTier::Party,
     };

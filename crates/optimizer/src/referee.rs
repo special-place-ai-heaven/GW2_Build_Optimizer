@@ -92,6 +92,48 @@ pub enum ViabilityGate {
     ResourceLegality,
 }
 
+impl ViabilityGate {
+    /// Whether failing this gate should refuse a build outright.
+    ///
+    /// Measured, not decided. `cargo run -p gw2-optimizer --example
+    /// calibrate_viability` runs every synced community build through these
+    /// gates, and a gate that the published meta fails is not describing the
+    /// game — it is describing us. Rates on 582 builds, 2026-09-06:
+    ///
+    /// | gate | meta passes |
+    /// |---|---|
+    /// | MobilityOut | 100% |
+    /// | EffectiveHealth | 96% |
+    /// | StabilityAccess | 96% |
+    /// | StunbreakCount | 88% |
+    /// | SustainRecovery | 82% |
+    /// | CleanseRate | 80% |
+    /// | ResourceLegality | 77% |
+    /// | SecureCompletion | 63% |
+    /// | EncounterOutcome | 37% |
+    /// | ProtectedExecution | 27% |
+    /// | HarasserStrip | 11% |
+    ///
+    /// The top group is a floor real builds clear, so failing one is a real
+    /// fault and blocks. The bottom four reject most of what people actually
+    /// play — HarasserStrip refuses 89% of published roamers — so they are
+    /// reported as concerns and do not veto. That is not leniency: a rule
+    /// contradicted by the entire body of evidence it claims to describe has
+    /// no authority to reject anything.
+    ///
+    /// This table is a measurement with a date on it. When a gate is fixed,
+    /// rerun the harness and move it.
+    pub fn blocks(&self) -> bool {
+        !matches!(
+            self,
+            ViabilityGate::HarasserStrip
+                | ViabilityGate::ProtectedExecution
+                | ViabilityGate::EncounterOutcome
+                | ViabilityGate::SecureCompletion
+        )
+    }
+}
+
 /// Result of a single viability gate check.
 #[derive(Debug, Clone)]
 pub struct GateResult {
@@ -231,8 +273,15 @@ pub fn evaluate_viability_gates(
     evaluate_viability_gates_for(rotation, combat_perf, scenario, None)
 }
 
-/// Same as [`evaluate_viability_gates`], applying `profile.viability_gates`
-/// floors when present. Unset fields keep the hardcoded mode/tier defaults.
+/// Same as [`evaluate_viability_gates`], applying the profile's `ehp_floor`
+/// when it sets one. Unset keeps the hardcoded mode/tier default.
+///
+/// Only `ehp_floor`. `ViabilityGates` also carries `min_stunbreaks`,
+/// `requires_stability`, `min_cleanse_count`, `min_cleanse_rate` and
+/// `boon_uptime_floors`, and nothing reads them — those gates still use the
+/// `MIN_STUNBREAKS` and `MIN_CLEANSE_COUNT` constants below. Said plainly
+/// because the doc used to say "floors", plural, which reads as though a
+/// profile could set them and left the next person to discover otherwise.
 pub fn evaluate_viability_gates_for(
     rotation: Option<&SimulationResult>,
     combat_perf: &CombatPerformance,
@@ -358,8 +407,17 @@ pub fn evaluate_viability_gates_for(
                     GateResult {
                         gate: ViabilityGate::ProtectedExecution,
                         passed,
+                        // `chain_completed` decides this gate — for a
+                        // Support build it decides it alone, since the damage
+                        // route is unconditional there — so it is named. It
+                        // used to be omitted, leaving a note whose every
+                        // number looked healthy above its stated minimum
+                        // while the gate failed, which reads as a broken
+                        // calculation rather than an unfinished chain.
                         note: format!(
-                            "protected={}ms, actions={}, 2s spike={:.0}, sequence control={}ms, interrupted={} (minimum {}ms secured inside the sequence)",
+                            "chain completed={}, damage route={}, protected={}ms, actions={}, 2s spike={:.0}, sequence control={}ms, interrupted={} (minimum {}ms secured inside the sequence)",
+                            fight.chain_completed,
+                            damage_route,
                             fight.longest_protected_window_ms,
                             fight.protected_action_count,
                             fight.peak_protected_damage_2s,
@@ -1182,17 +1240,27 @@ mod tests {
         let mut db = GameDb::empty_for_tests();
         db.items.insert(1, sigil_item(1, "Superior Sigil of Cleansing",
             "Remove 1 condition when you swap to this weapon while in combat. (Cooldown: 9 Seconds)"));
-        db.items.insert(2, sigil_item(2, "Superior Sigil of Force", "+5% Damage"));
+        db.items
+            .insert(2, sigil_item(2, "Superior Sigil of Force", "+5% Damage"));
         let mut b = ValidatedBuild {
             sigils: vec![
-                ValidatedItem { id: 1, name: "Cleansing".into() },
-                ValidatedItem { id: 2, name: "Force".into() },
+                ValidatedItem {
+                    id: 1,
+                    name: "Cleansing".into(),
+                },
+                ValidatedItem {
+                    id: 2,
+                    name: "Force".into(),
+                },
             ],
             ..Default::default()
         };
         let rate = kit_cleanse_rate_from_gear(&b, &db);
         assert!((rate - 20.0 / 9.0).abs() < 1e-9, "got {rate}");
-        b.sigils.push(ValidatedItem { id: 1, name: "Cleansing".into() });
+        b.sigils.push(ValidatedItem {
+            id: 1,
+            name: "Cleansing".into(),
+        });
         // Only the two active seats count.
         assert!((kit_cleanse_rate_from_gear(&b, &db) - 20.0 / 9.0).abs() < 1e-9);
         assert_eq!(cleanse_count_in_text("Remove 2 conditions from allies"), 2);
@@ -1208,7 +1276,10 @@ mod tests {
         use crate::validation::ValidatedItem;
         let db = GameDb::empty_for_tests();
         let b = ValidatedBuild {
-            sigils: vec![ValidatedItem { id: 67340, name: "Cleansing".into() }],
+            sigils: vec![ValidatedItem {
+                id: 67340,
+                name: "Cleansing".into(),
+            }],
             ..Default::default()
         };
         let rate = kit_cleanse_rate_from_gear(&b, &db);
@@ -1225,7 +1296,10 @@ mod tests {
         db.items.insert(1, sigil_item(1, "Superior Sigil of Cleansing",
             "Remove 1 condition when you swap to this weapon while in combat. (Cooldown: 9 Seconds)"));
         let b = ValidatedBuild {
-            sigils: vec![ValidatedItem { id: 1, name: "Cleansing".into() }],
+            sigils: vec![ValidatedItem {
+                id: 1,
+                name: "Cleansing".into(),
+            }],
             ..Default::default()
         };
         let mut scenario = make_wvw_scenario();
@@ -1238,14 +1312,26 @@ mod tests {
         let combat = make_viable_combat();
         let mut report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
         let cleanse = |r: &ViabilityReport| {
-            r.gates.iter().find(|g| g.gate == ViabilityGate::CleanseRate).cloned().unwrap()
+            r.gates
+                .iter()
+                .find(|g| g.gate == ViabilityGate::CleanseRate)
+                .cloned()
+                .unwrap()
         };
         assert!(!cleanse(&report).passed);
-        assert!((report.shortfall - 0.5).abs() < 1e-9, "rate shortfall is 0.5: {}", report.shortfall);
+        assert!(
+            (report.shortfall - 0.5).abs() < 1e-9,
+            "rate shortfall is 0.5: {}",
+            report.shortfall
+        );
         apply_offbar_cleanse(&mut report, Some(&rot), &b, &db, &scenario);
         assert!(cleanse(&report).passed, "{}", cleanse(&report).note);
         assert!(report.is_viable);
-        assert!(report.shortfall.abs() < 1e-9, "shortfall must be zero: {}", report.shortfall);
+        assert!(
+            report.shortfall.abs() < 1e-9,
+            "shortfall must be zero: {}",
+            report.shortfall
+        );
     }
 
     fn make_rank_report(rotation: SimulationResult) -> RefereeReport {

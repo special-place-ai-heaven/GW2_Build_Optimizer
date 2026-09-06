@@ -50,6 +50,13 @@ pub struct BuildSuggestion {
     pub data_quality: gw2_optimizer::data::DataQuality,
     /// Human-readable reasons for quality degradation (empty when Verified).
     pub quality_reasons: Vec<String>,
+    /// Where this build was published, when it came from a community site
+    /// rather than from Choya. Empty for anything we cooked ourselves.
+    ///
+    /// It travels on the suggestion rather than being looked up again at
+    /// render time, because by then the build has moved tabs and nothing on
+    /// screen remembers which row it came from.
+    pub source_url: String,
 }
 
 /// Which result view is showing.
@@ -386,6 +393,79 @@ pub struct ComparisonState {
     pub show_optimized: bool,
 }
 
+/// A link to the site a published build came from, named after that site.
+///
+/// Only for builds this addon did not cook. It sits with the build rather
+/// than on the card that opened it, because this is where someone is when
+/// they decide they want to read the author's own write-up — which is the
+/// one thing worth going to a website for, since we show the build itself.
+pub(crate) fn render_source_link(ui: &Ui, suggestion: &BuildSuggestion) {
+    if suggestion.source_url.is_empty() {
+        return;
+    }
+    ui.same_line_with_spacing(0.0, 12.0);
+    let site = site_name(&suggestion.source_url);
+    // The site's own mark, so the button says where it goes before it is
+    // clicked. Sized to the text beside it, so it follows the font scale
+    // instead of being a pixel count that drifts out of line.
+    let at = ui.cursor_screen_pos();
+    let mark = ui.text_line_height();
+    let clicked = ui.small_button(format!("  {}", tf("fmt.site_link", &[("site", &site)])));
+    let h = ui.item_rect_size()[1];
+    let mid = [at[0] + 5.0 + mark * 0.5, at[1] + h * 0.5];
+    let dl = ui.get_window_draw_list();
+    match crate::ui::theme::site_tex(&site) {
+        Some(tid) => {
+            let r = mark * 0.5;
+            dl.add_image(tid, [mid[0] - r, mid[1] - r], [mid[0] + r, mid[1] + r])
+                .build();
+        }
+        // No mark bundled: a coloured pip still tells the buttons apart.
+        None => {
+            dl.add_circle(mid, 3.0, site_colour(&site))
+                .filled(true)
+                .build();
+        }
+    }
+    if clicked {
+        let _ = crate::feedback::shell::open_url(&suggestion.source_url);
+    }
+}
+
+/// A stable colour per community site, for telling their links apart.
+///
+/// Anything unrecognised gets the theme's gold, so a fourth site added later
+/// looks deliberate rather than broken.
+fn site_colour(site: &str) -> [f32; 4] {
+    match site.to_lowercase().as_str() {
+        "guildjen" => [0.44, 0.75, 0.36, 1.0],
+        "hardstuck" => [0.85, 0.34, 0.31, 1.0],
+        "snowcrows" => [0.36, 0.75, 0.87, 1.0],
+        _ => crate::ui::theme::pal().gold,
+    }
+}
+
+/// The site's own name, out of its URL: `https://guildjen.com/x` -> `GuildJen`.
+///
+/// Read from the URL rather than stored, so a build that names its source in
+/// one place cannot disagree with itself in another.
+fn site_name(url: &str) -> String {
+    let host = url
+        .split("://")
+        .nth(1)
+        .unwrap_or(url)
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .trim_start_matches("www.");
+    let word = host.split('.').next().unwrap_or(host);
+    let mut chars = word.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
 /// Which build the top Chat strip is copying.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatSource {
@@ -489,6 +569,7 @@ pub fn render_comparison(
     comparison.selected_suggestion = idx;
 
     render_data_quality_badge(ui, &comparison.suggestions[idx]);
+    render_source_link(ui, &comparison.suggestions[idx]);
     render_result_pane_tabs(ui, &mut comparison.result_pane);
     if comparison.result_pane == ResultPane::Build {
         ui.same_line_with_spacing(0.0, 16.0);
@@ -1011,7 +1092,10 @@ fn render_benchmark_delta(ui: &Ui, suggestion: &BuildSuggestion) {
         None => {
             // No data — show subtle hint in collapsed section
             if ui.collapsing_header(t("bench.header"), TreeNodeFlags::empty()) {
-                ui.text_colored(crate::ui::theme::pal().muted, format!("  {}", t("bench.none")));
+                ui.text_colored(
+                    crate::ui::theme::pal().muted,
+                    format!("  {}", t("bench.none")),
+                );
                 ui.text_colored(
                     crate::ui::theme::pal().muted,
                     format!("  {}", t("bench.sync_hint")),

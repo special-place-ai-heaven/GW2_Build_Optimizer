@@ -394,10 +394,14 @@ pub fn paint_changed_circle(draw: &DrawListMut, center: [f32; 2], radius: f32) {
 }
 
 pub fn paint_header_accent(draw: &DrawListMut, left: f32, top: f32, height: f32) {
-    draw.add_rect([left, top], [left + HEADER_ACCENT_W, top + height], pal().gold)
-        .filled(true)
-        .rounding(2.0)
-        .build();
+    draw.add_rect(
+        [left, top],
+        [left + HEADER_ACCENT_W, top + height],
+        pal().gold,
+    )
+    .filled(true)
+    .rounding(2.0)
+    .build();
 }
 
 fn fade(c: [f32; 4], opacity: f32) -> [f32; 4] {
@@ -618,6 +622,83 @@ pub fn pill_pulse(ui: &Ui, label: &str, selected: bool, id: &str, pulse: f32) ->
     clicked
 }
 
+/// Width of [`switch`] for a given label, so a row can be laid out before it
+/// is drawn.
+pub fn switch_width(ui: &Ui, label: &str) -> f32 {
+    let h = switch_height(ui);
+    h * 1.9 + 6.0 + ui.calc_text_size(label)[0]
+}
+
+fn switch_height(ui: &Ui) -> f32 {
+    (ui.current_font_size() * 0.85).round().max(12.0)
+}
+
+/// A sliding on/off switch: track, knob, label to its right.
+///
+/// ImGui has no such widget — it ships `checkbox` — so this is drawn the same
+/// way [`pill`] is, an invisible button under two draw calls.
+///
+/// `anim` is the eased 0..1 the caller already keeps for this state, not a
+/// second copy of it. The knob travels with it and the track colour lerps
+/// along the same value, so the switch and whatever else the state drives
+/// move together instead of one snapping while the other slides. Pass `on as
+/// u8 as f32` to get an unanimated switch.
+///
+/// Returns true on the frame it is clicked.
+pub fn switch(ui: &Ui, label: &str, anim: f32, id: &str) -> bool {
+    let th = pal();
+    let h = switch_height(ui);
+    let track_w = h * 1.9;
+    let gap = 6.0;
+    let text = ui.calc_text_size(label);
+    let p = ui.cursor_screen_pos();
+    // The whole thing is the hit target, label included — a knob this size is
+    // a small thing to ask someone to hit.
+    let clicked = ui.invisible_button(id, [track_w + gap + text[0], h.max(text[1])]);
+    let hovered = ui.is_item_hovered();
+    let anim = anim.clamp(0.0, 1.0);
+
+    // Vertically centred against the taller of knob and label, so the switch
+    // lines up with text of any scale.
+    let row_h = h.max(text[1]);
+    let ty = p[1] + (row_h - h) * 0.5;
+    let off = [
+        th.chip_idle_fill[0],
+        th.chip_idle_fill[1],
+        th.chip_idle_fill[2],
+    ];
+    let on = [th.gold_fill[0], th.gold_fill[1], th.gold_fill[2]];
+    let mix = |a: f32, b: f32| a + (b - a) * anim;
+    let fill = [
+        mix(off[0], on[0]),
+        mix(off[1], on[1]),
+        mix(off[2], on[2]),
+        if hovered { 1.0 } else { 0.92 },
+    ];
+    let rim = if hovered { th.gold } else { th.chip_idle_rim };
+
+    let dl = ui.get_window_draw_list();
+    dl.add_rect([p[0], ty], [p[0] + track_w, ty + h], fill)
+        .filled(true)
+        .rounding(h * 0.5)
+        .build();
+    dl.add_rect([p[0], ty], [p[0] + track_w, ty + h], rim)
+        .rounding(h * 0.5)
+        .build();
+    // Left at rest, right when on, and every point between while it moves.
+    let r = h * 0.5 - 2.0;
+    let cx = p[0] + r + 2.0 + (track_w - (r + 2.0) * 2.0) * anim;
+    dl.add_circle([cx, ty + h * 0.5], r, th.cream)
+        .filled(true)
+        .build();
+    dl.add_text(
+        [p[0] + track_w + gap, p[1] + (row_h - text[1]) * 0.5],
+        color_u32(th.cream),
+        label,
+    );
+    clicked
+}
+
 pub const PIP_DAMAGE: [f32; 4] = [0.90, 0.32, 0.28, 1.0];
 pub const PIP_FRONT: [f32; 4] = [0.80, 0.82, 0.86, 1.0];
 pub const PIP_HEAL: [f32; 4] = [0.32, 0.78, 0.48, 1.0];
@@ -650,7 +731,11 @@ pub fn select_chip(ui: &Ui, label: &str, selected: bool, id: &str, pip: Option<[
     } else {
         th.chip_idle_rim
     };
-    let text = if selected { th.gold_button_text } else { th.cream };
+    let text = if selected {
+        th.gold_button_text
+    } else {
+        th.cream
+    };
     {
         let dl = ui.get_window_draw_list();
         dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], fill)
@@ -1027,7 +1112,9 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
         while x <= track_x1 {
             let wobble = ((x * 0.18 + t * 0.04).sin()) * 1.1;
             let cur = [x, line_y + wobble];
-            dl.add_line(prev, cur, theme.gold_dim).thickness(1.2).build();
+            dl.add_line(prev, cur, theme.gold_dim)
+                .thickness(1.2)
+                .build();
             prev = cur;
             x += 5.0;
         }
@@ -1125,6 +1212,30 @@ fn mystic_coin_tex(metal: usize) -> Option<TextureId> {
         2 => (
             "GW2BO_MYSTIC_GOLD2",
             include_bytes!("../../assets/mystic_coin_gold.png"),
+        ),
+        _ => return None,
+    };
+    embedded_tex(key, bytes)
+}
+
+/// A community site's own mark, for the button that links to it.
+///
+/// Their favicon, shown beside a link to their page: it says where the URL
+/// goes before you click it, which is the whole job. A site we have no mark
+/// for returns None and the caller draws a coloured pip instead.
+pub fn site_tex(site: &str) -> Option<TextureId> {
+    let (key, bytes): (&str, &[u8]) = match site.to_lowercase().as_str() {
+        "guildjen" => (
+            "GW2BO_SITE_GUILDJEN",
+            include_bytes!("../../assets/guildjen.png"),
+        ),
+        "hardstuck" => (
+            "GW2BO_SITE_HARDSTUCK",
+            include_bytes!("../../assets/hardstuck.png"),
+        ),
+        "snowcrows" => (
+            "GW2BO_SITE_SNOWCROWS",
+            include_bytes!("../../assets/snowcrows.png"),
         ),
         _ => return None,
     };
@@ -1427,6 +1538,160 @@ pub fn draw_choya_party(ui: &Ui, center: [f32; 2], size: f32) {
     blit_frame(&ui.get_window_draw_list(), tid, center, size, CHOYA2_PARTY);
 }
 
+/// Quips the Free Choya says while it is up. One is picked per appearance.
+const FREE_QUIPS: [&str; 6] = [
+    "We are free, baby!",
+    "YEY! Free!",
+    "No card, no problem",
+    "Zero gold, zero coin",
+    "Free as a skritt in a vault",
+    "Choya approves this budget",
+];
+
+/// A Choya in shades, dancing above the Free filter.
+///
+/// `rise` is 0 hidden to 1 fully up, eased by the caller. It drives both the
+/// slide and the fade together, so the sprite arrives from under the row
+/// rather than blinking into place, and leaves the same way. At 0 nothing is
+/// drawn at all — an invisible sprite is still a texture bind every frame.
+///
+/// Drawn on the foreground list: the row it sits above is near the top of a
+/// panel, and a window-local list would clip the poor thing off at the knees.
+pub fn draw_free_choya(ui: &Ui, anchor: [f32; 2], row_h: f32, rise: f32) {
+    let rise = rise.clamp(0.0, 1.0);
+    if rise <= 0.01 {
+        return;
+    }
+    let size = (row_h * 1.9).clamp(28.0, 64.0);
+    let t = ui.frame_count() as f32;
+    // Slow, because a fast dance beside a settings control reads as a bug.
+    // Two rates that do not divide evenly, so the sway and the bob drift
+    // against each other and the loop never looks like a loop.
+    let sway = (t * 0.045).sin() * size * 0.10;
+    let bob = (t * 0.031).sin() * size * 0.05;
+    // Travels its own height on the way in, so it looks like it climbed out
+    // from behind the row.
+    let hidden = size * 0.9;
+    let center = [
+        anchor[0] + sway,
+        anchor[1] - size * 0.55 + bob + hidden * (1.0 - rise),
+    ];
+    let dl = ui.get_foreground_draw_list();
+    let Some(tid) = choya_sheet2() else {
+        // Sheet two is where the shades live. Without it, the first sheet's
+        // dance pose still dances — just bare-faced.
+        if let Some(tid) = choya_sheet() {
+            blit_alpha(&dl, tid, center, size, CHOYA_DANCE, rise);
+        }
+        return;
+    };
+    blit_alpha(&dl, tid, center, size, CHOYA2_PARTY, rise);
+    // Shades sit on the face, and the sprite is wider than it is tall, so it
+    // is placed against the body's width rather than scaled to `size`.
+    blit_alpha(
+        &dl,
+        tid,
+        [center[0], center[1] - size * 0.17],
+        size * 0.52,
+        CHOYA2_SHADES,
+        rise,
+    );
+    // A maraca each side, counter-swaying, and a note that drifts off.
+    blit_alpha(
+        &dl,
+        tid,
+        [center[0] - size * 0.42 - sway, center[1] + size * 0.08],
+        size * 0.26,
+        CHOYA2_MARACA,
+        rise,
+    );
+    blit_alpha(
+        &dl,
+        tid,
+        [center[0] + size * 0.42 - sway, center[1] + size * 0.08],
+        size * 0.26,
+        CHOYA2_MARACA2,
+        rise,
+    );
+    let note = (t * 0.02).fract();
+    blit_alpha(
+        &dl,
+        tid,
+        [
+            center[0] + size * (0.30 + note * 0.25),
+            center[1] - size * (0.35 + note * 0.55),
+        ],
+        size * 0.18,
+        CHOYA2_NOTE,
+        rise * (1.0 - note),
+    );
+    draw_free_quip(ui, &dl, center, size, rise);
+}
+
+/// The speech bubble above the dancing Choya.
+///
+/// The quip is chosen from the frame count at the moment it rises, so it
+/// holds still while the Choya is up and is a different one next time. It
+/// fades in behind the sprite's own rise so the words arrive after the
+/// dancer, which is the order a reader expects.
+fn draw_free_quip(ui: &Ui, dl: &DrawListMut, center: [f32; 2], size: f32, rise: f32) {
+    let alpha = ((rise - 0.55) / 0.45).clamp(0.0, 1.0);
+    if alpha <= 0.02 {
+        return;
+    }
+    let quip = FREE_QUIPS[(ui.frame_count() as usize / 600) % FREE_QUIPS.len()];
+    let text = ui.calc_text_size(quip);
+    let pad = [7.0, 4.0];
+    let tail = 5.0;
+    let w = text[0] + pad[0] * 2.0;
+    let h = text[1] + pad[1] * 2.0;
+    let min = [center[0] - w * 0.5, center[1] - size * 0.62 - h - tail];
+    let max = [min[0] + w, min[1] + h];
+    let p = pal();
+    let bg = [p.gold_fill[0], p.gold_fill[1], p.gold_fill[2], alpha * 0.95];
+    dl.add_rect(min, max, color_u32(bg))
+        .filled(true)
+        .rounding(5.0)
+        .build();
+    // The tail, pointing down at whoever is talking.
+    dl.add_triangle(
+        [center[0] - tail, max[1]],
+        [center[0] + tail, max[1]],
+        [center[0], max[1] + tail],
+        color_u32(bg),
+    )
+    .filled(true)
+    .build();
+    let ink = [0.10, 0.08, 0.05, alpha];
+    dl.add_text([min[0] + pad[0], min[1] + pad[1]], color_u32(ink), quip);
+}
+
+/// [`blit_frame`] with an alpha, for anything that fades.
+fn blit_alpha(
+    dl: &DrawListMut,
+    tid: TextureId,
+    center: [f32; 2],
+    size: f32,
+    frame: [f32; 4],
+    alpha: f32,
+) {
+    let [_, _, w, h] = frame;
+    let aspect = (w / h).max(0.01);
+    let (dw, dh) = if aspect > 1.0 {
+        (size, size / aspect)
+    } else {
+        (size * aspect, size)
+    };
+    let pmin = [center[0] - dw * 0.5, center[1] - dh * 0.5];
+    let pmax = [center[0] + dw * 0.5, center[1] + dh * 0.5];
+    let (uv0, uv1) = sheet_uv(frame);
+    dl.add_image(tid, pmin, pmax)
+        .uv_min(uv0)
+        .uv_max(uv1)
+        .col([1.0, 1.0, 1.0, alpha.clamp(0.0, 1.0)])
+        .build();
+}
+
 pub const HEADER_POSE_COUNT: u8 = 4;
 pub const HEADER_POSE_SECS: u64 = 60;
 pub const COMPOSER_BOB_SECS: f32 = 3.0;
@@ -1641,7 +1906,11 @@ mod tests {
             let ab = contrast(p.accent, p.bg);
             assert!(ab >= 4.0, "{}: accent/bg contrast {ab:.2} < 4.0", p.id);
             let na = contrast(near_black, p.accent);
-            assert!(na >= 6.0, "{}: dark-text/accent contrast {na:.2} < 6.0", p.id);
+            assert!(
+                na >= 6.0,
+                "{}: dark-text/accent contrast {na:.2} < 6.0",
+                p.id
+            );
         }
     }
 
@@ -1696,8 +1965,16 @@ mod tests {
             ("header_hovered", d.header_hovered, s.header_hovered),
             ("title_bg", d.title_bg, s.title_bg),
             ("title_bg_active", d.title_bg_active, s.title_bg_active),
-            ("gold_button_hovered", d.gold_button_hovered, s.gold_button_hovered),
-            ("gold_button_active", d.gold_button_active, s.gold_button_active),
+            (
+                "gold_button_hovered",
+                d.gold_button_hovered,
+                s.gold_button_hovered,
+            ),
+            (
+                "gold_button_active",
+                d.gold_button_active,
+                s.gold_button_active,
+            ),
             ("gold_button_text", d.gold_button_text, s.gold_button_text),
             ("chip_idle_fill", d.chip_idle_fill, s.chip_idle_fill),
             ("chip_idle_rim", d.chip_idle_rim, s.chip_idle_rim),
@@ -1742,6 +2019,7 @@ mod tests {
         let cfg = |preset: &str| ThemeConfig {
             preset: preset.into(),
             custom: CustomTheme::default(),
+            ..Default::default()
         };
 
         super::apply_theme(&cfg("glacial-ward"));
@@ -1765,6 +2043,7 @@ mod tests {
                 text: [0.9, 0.9, 0.9],
                 muted: [0.5, 0.5, 0.5],
             },
+            ..Default::default()
         };
         super::apply_theme(&custom);
         assert_eq!(
@@ -1779,7 +2058,11 @@ mod tests {
         );
 
         super::apply_theme(&cfg("tyrian-gold"));
-        assert_eq!(super::pal(), super::TYRIAN, "tyrian-gold is the shipped palette");
+        assert_eq!(
+            super::pal(),
+            super::TYRIAN,
+            "tyrian-gold is the shipped palette"
+        );
     }
 
     #[test]

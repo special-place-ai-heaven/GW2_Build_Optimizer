@@ -1270,7 +1270,10 @@ pub fn prepare_validated_rotation(
     let mut set2_skills =
         rotation::builder::build_rotation_skills_for_context(&set2_ids, db, &sim_ctx);
     rotation::builder::tag_weapon_set(&mut set2_skills, 2);
-    rotation_skills.extend(rotation::builder::merge_weapon_sets(set1_skills, set2_skills));
+    rotation_skills.extend(rotation::builder::merge_weapon_sets(
+        set1_skills,
+        set2_skills,
+    ));
     let ne = crate::data::normalized_effects::effects().effects_for_mode(mode.label());
     // Traited cleanses (Cleansing Ire bursts, Restorative Illusions shatters)
     // count only when the build runs the trait.
@@ -1318,7 +1321,6 @@ pub fn prepare_validated_rotation(
         mode: mode.clone(),
         intent: None,
     };
-
 
     Some(PreparedRotation {
         skills: rotation_skills,
@@ -4098,7 +4100,11 @@ mod tests {
         let mut ids = Vec::new();
         add_weapon_skill_ids(&mut ids, &profession, "Dagger", &db, Hand::Main);
         add_weapon_skill_ids(&mut ids, &profession, "Dagger", &db, Hand::Off);
-        assert_eq!(ids, vec![1, 2, 3, 4, 5], "each slot exactly once; got {ids:?}");
+        assert_eq!(
+            ids,
+            vec![1, 2, 3, 4, 5],
+            "each slot exactly once; got {ids:?}"
+        );
     }
 
     #[test]

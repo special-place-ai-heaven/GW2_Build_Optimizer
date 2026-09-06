@@ -492,7 +492,7 @@ pub struct MainState {
     pub game_mode: GameMode,
     /// WvW combat sub-tier: Solo (Roaming), Party (Havoc/small group), Squad (Zerg).
     /// Only meaningful when game_mode == WvW. Defaults to Squad.
-    pub wvw_combat_tier: gw2_optimizer::scenario::CombatTier,
+    pub combat_tier: gw2_optimizer::scenario::CombatTier,
     /// Selected role objective for 'Create New Build' flow. None = no role chosen yet.
     pub selected_role: Option<gw2_optimizer::scenario::RoleObjective>,
     pub current_build: Option<ResolvedBuild>,
@@ -553,6 +553,14 @@ pub struct MainState {
     pub benchmark_last_synced: Option<String>,
     /// Per-source build counts: "snowcrows" -> n, "hardstuck" -> n, "guildjen" -> n.
     pub benchmark_counts: std::collections::HashMap<String, usize>,
+    /// Per-source count of pages that listed but produced no build.
+    pub benchmark_failed: std::collections::HashMap<String, usize>,
+    /// Builds held per source and mode, keyed "snowcrows|PvE".
+    ///
+    /// The sources do not cover the same modes - Snowcrows is PvE, GuildJen
+    /// is WvW and PvP - so one total per source hides which of them can
+    /// actually answer the mode you are playing.
+    pub benchmark_mode_counts: std::collections::HashMap<String, usize>,
     /// Live heartbeat while a sync is running ("12/45", "listing guardian…").
     pub benchmark_live: std::collections::HashMap<String, String>,
     /// Per-source error after a sync (shown as "down" on that row).
@@ -577,6 +585,14 @@ pub struct MainState {
     pub confirm_delete: Option<String>,
     /// Name of the saved build pending overwrite confirmation.
     pub confirm_overwrite: Option<String>,
+    /// Whether Clear Cache is waiting to be confirmed.
+    ///
+    /// It reads like a tidy-up and is the most expensive button in the addon:
+    /// it throws away every item, skill, trait and icon the API ever sent and
+    /// makes the next start re-download all of it. Nothing about the label
+    /// says so, and it sits beside Refresh Game Data, which is the one people
+    /// actually want.
+    pub confirm_clear_cache: bool,
     /// In-progress note drafts keyed by save name.
     pub note_drafts: std::collections::HashMap<String, String>,
     /// Generation for in-flight kitchen orders. Timeout and send bump it; late applies are ignored.
@@ -586,8 +602,25 @@ pub struct MainState {
     /// Frame counter for "Copied!" tooltip feedback.
     pub copy_feedback_frames: u32,
     // Dynamic model list
-    /// Models fetched from the active provider's API: (id, display_name).
-    pub available_models: Vec<(String, String)>,
+    /// Models fetched from the active provider's API.
+    ///
+    /// The whole row, not just id and name: the picker prunes on what a model
+    /// can do and orders on how well it does it, and the request builder
+    /// sizes itself from the same data.
+    pub available_models: Vec<gw2_optimizer::llm::ModelInfo>,
+    /// Published builds closest to the current proposal, one per site.
+    ///
+    /// Recomputed only when [`Self::provider_picks_key`] changes: matching
+    /// reads every benchmark row on disk, which is not a per-frame job.
+    pub provider_picks: Vec<gw2_optimizer::benchmark::BenchmarkBuild>,
+    /// What `provider_picks` was computed for — profession, mode, role and
+    /// the proposal's specs. Empty means nothing has been matched yet.
+    pub provider_picks_key: String,
+    /// How far the Free-filter Choya has risen, 0 hidden to 1 fully up.
+    ///
+    /// Eased per frame rather than stored as a bool so the sprite slides and
+    /// fades instead of appearing.
+    pub free_choya_rise: f32,
     /// Whether a model list fetch is in progress.
     pub models_loading: bool,
     /// Error from the last model list fetch.
@@ -600,6 +633,10 @@ pub struct MainState {
     pub api_health_checking: bool,
     /// Live `/v2/build` id. Compared to `cache_build_number` to prompt a data refresh.
     pub live_build_number: Option<u32>,
+    /// Active-manifest vs live `/v2/build` warning from `check_staleness`.
+    pub manifest_staleness: Option<String>,
+    /// Result of `gw2_optimizer::data::initialize()` at addon load.
+    pub data_state: Option<gw2_optimizer::data::DataState>,
     /// Cached "Usage today" count for the active provider's persisted usage
     /// file, displayed in the Settings tab. Refreshed every ~60 frames (~1s)
     /// instead of reading the file every render frame.
@@ -683,10 +720,23 @@ impl MainState {
             return;
         }
         let mut counts = std::collections::HashMap::new();
+        let mut mode_counts = std::collections::HashMap::new();
         for b in &builds {
             *counts.entry(b.source.clone()).or_insert(0) += 1;
+            // Same key the live sync writes, or the grid reads a dash for
+            // every cell. Only a sync used to fill this, so after a restart
+            // the benchmarks table showed nothing at all while several
+            // hundred builds sat on disk — a store that looked empty and was
+            // not.
+            *mode_counts
+                .entry(format!("{}|{}", b.source, b.mode))
+                .or_insert(0) += 1;
         }
         self.benchmark_counts = counts;
+        self.benchmark_mode_counts = mode_counts;
+        // `benchmark_failed` is deliberately left alone: what a run could not
+        // read is not written to disk, so after a restart we do not know, and
+        // an invented zero would show a clean grid over an unknown one.
         let stamp = std::fs::metadata(addon_dir.join("benchmarks"))
             .ok()
             .and_then(|m| m.modified().ok())
@@ -831,13 +881,11 @@ pub fn init(addon_dir: PathBuf) {
         Screen::Main
     } else if !config.has_gw2_key() {
         Screen::Setup(SetupStep::Language)
-    } else if config.has_gw2_key() && config.has_active_llm_key() {
-        // Keys present but cache missing — go to download
+    } else if config.has_active_llm_key() {
+        // GW2 key is present; cache missing — go to download
         Screen::Setup(SetupStep::DataDownload)
-    } else if config.has_gw2_key() {
-        Screen::Setup(SetupStep::LlmApiKey)
     } else {
-        Screen::Setup(SetupStep::Gw2ApiKey)
+        Screen::Setup(SetupStep::LlmApiKey)
     };
 
     let mut setup = SetupState::default();
@@ -854,6 +902,14 @@ pub fn init(addon_dir: PathBuf) {
     gw2_core::i18n::set_language(&config.ui_language);
     // Surface any config parse error in the UI status bar
     main.error = config_err;
+    let data_state = gw2_optimizer::data::initialize();
+    if let Some(reason) = data_state.optimize_block_reason() {
+        worker_log(reason.clone());
+        if main.error.is_none() {
+            main.error = Some(reason);
+        }
+    }
+    main.data_state = Some(data_state);
     // Apply saved default game mode from config
     let default_mode_label = config.default_game_mode.as_deref().unwrap_or("PvE");
     main.game_mode = match default_mode_label {
@@ -895,7 +951,9 @@ pub fn toggle_window() {
         }
         (state.config.clone(), state.config_path.clone())
     };
-    let _ = snapshot.0.save(&snapshot.1);
+    if let Err(e) = snapshot.0.save(&snapshot.1) {
+        crate::ui::log_disk_error(format!("config save failed: {e}"));
+    }
 }
 
 pub fn persist_window() {
@@ -907,7 +965,9 @@ pub fn persist_window() {
         state.config.window_visible = state.window_visible;
         (state.config.clone(), state.config_path.clone())
     };
-    let _ = snapshot.0.save(&snapshot.1);
+    if let Err(e) = snapshot.0.save(&snapshot.1) {
+        crate::ui::log_disk_error(format!("config save failed: {e}"));
+    }
 }
 
 pub fn is_window_visible() -> bool {
@@ -1215,7 +1275,7 @@ mod tests {
     // ── init() screen routing ─────────────────────────────────────────────────
 
     #[test]
-    fn test_init_routes_to_gw2_key_when_no_keys() {
+    fn test_init_routes_to_language_when_no_keys() {
         let _serial = state_test_guard();
         reset_state();
         // No config.json in the dir → AppConfig::load returns default (no keys).
@@ -1855,12 +1915,20 @@ mod tests {
         let reset = pin_fn(src, "reset_to_first_run");
 
         assert!(
+            toggle.contains("log_disk_error"),
+            "toggle_window must log a failed config save"
+        );
+        assert!(
             !toggle.contains("state.config.save"),
             "toggle_window must not save through the locked AddonState"
         );
         assert!(
             brace_depth_at(toggle, ".save(") < brace_depth_at(toggle, "lock_state()"),
             "toggle_window must drop the STATE guard before writing config.json"
+        );
+        assert!(
+            persist.contains("log_disk_error"),
+            "persist_window must log a failed config save"
         );
         assert!(
             !persist.contains("state.config.save"),

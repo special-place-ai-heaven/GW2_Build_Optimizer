@@ -9,14 +9,27 @@
 //! Storage: writes one JSON file per (source, profession, mode) to
 //! `{addon_dir}/benchmarks/`.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::benchmark::{BenchmarkBuild, ScrapeResult};
 
 // ─── User agent ──────────────────────────────────────────────────────────────
 
+/// Firefox on Windows, matching the platform the addon actually runs on.
+///
+/// A cross-platform claim is worse than none: a macOS Safari string arriving
+/// from a Windows game process is an inconsistency, not a disguise. Whatever
+/// this says, the header set below has to agree with it - a browser
+/// User-Agent over a bare request is more conspicuous than the honest one it
+/// replaced, because no real Firefox has ever sent a navigation without
+/// Accept-Language or Sec-Fetch-Mode.
+///
+/// This is a fixed string and will age. A years-old version is its own
+/// signal; refresh it when it drifts far from current. What actually keeps
+/// this welcome is [`PACE_MS`] and the retry backoff, not the header.
 const USER_AGENT: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) GW2BuildOptimizer/1.0 (research scraper)";
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0";
 
 // ─── Public entry point ───────────────────────────────────────────────────────
 
@@ -66,6 +79,9 @@ pub fn scrape_all_with_progress(
     should_cancel: &dyn Fn() -> bool,
     on_progress: &dyn Fn(&str, &str),
 ) -> Vec<ScrapeResult> {
+    // A previous run's slowdown is not this run's problem: the pressure
+    // that caused it may be hours old.
+    THROTTLE_MS.store(0, std::sync::atomic::Ordering::Relaxed);
     // Cancel before any work
     if should_cancel() {
         on_progress("snowcrows", "cancelled");
@@ -90,16 +106,19 @@ pub fn scrape_all_with_progress(
                     source: "snowcrows".into(),
                     builds: vec![],
                     error: Some(msg.clone()),
+                    failed: 0,
                 },
                 ScrapeResult {
                     source: "hardstuck".into(),
                     builds: vec![],
                     error: Some(msg.clone()),
+                    failed: 0,
                 },
                 ScrapeResult {
                     source: "guildjen".into(),
                     builds: vec![],
                     error: Some(msg),
+                    failed: 0,
                 },
             ];
         }
@@ -116,21 +135,47 @@ pub fn scrape_all_with_progress(
                 source: "snowcrows".into(),
                 builds: vec![],
                 error: Some(msg.clone()),
+                failed: 0,
             },
             ScrapeResult {
                 source: "hardstuck".into(),
                 builds: vec![],
                 error: Some(msg.clone()),
+                failed: 0,
             },
             ScrapeResult {
                 source: "guildjen".into(),
                 builds: vec![],
                 error: Some(msg),
+                failed: 0,
             },
         ];
     }
 
+    // Before anything is written: a folder half full of files no version
+    // still produces is not a store, it is a haunting.
+    let pruned = prune_stale_benchmarks(&benchmarks_dir);
+    if pruned > 0 {
+        on_progress(
+            "guildjen",
+            &format!("removed {pruned} file(s) from an older format"),
+        );
+    }
+
     let today = today_string();
+
+    // Anything read today already, so a second run in the same day only
+    // fetches what is new or missing. Read once, before any source starts:
+    // a source that finishes mid-run writes into this same folder, and
+    // re-reading would let one source's fresh output masquerade as another's
+    // prior state.
+    let known = load_todays_builds(&benchmarks_dir, &today);
+    if !known.is_empty() {
+        on_progress(
+            "snowcrows",
+            &format!("{} build(s) already read today", known.len()),
+        );
+    }
 
     // Scrape #1: Snowcrows. Cancellation re-checked here so a pulse during
     // setup above still aborts before any network I/O.
@@ -147,7 +192,7 @@ pub fn scrape_all_with_progress(
     on_progress("snowcrows", "starting");
     let sc_result = finish_source(
         "snowcrows",
-        scrape_snowcrows(&client, &today, should_cancel, on_progress),
+        scrape_snowcrows(&client, &today, &known, should_cancel, on_progress),
         &benchmarks_dir,
         on_progress,
     );
@@ -165,7 +210,7 @@ pub fn scrape_all_with_progress(
     on_progress("hardstuck", "starting");
     let hs_result = finish_source(
         "hardstuck",
-        scrape_hardstuck(&client, &today, should_cancel, on_progress),
+        scrape_hardstuck(&client, &today, &known, should_cancel, on_progress),
         &benchmarks_dir,
         on_progress,
     );
@@ -178,7 +223,7 @@ pub fn scrape_all_with_progress(
     on_progress("guildjen", "starting");
     let gj_result = finish_source(
         "guildjen",
-        scrape_guildjen(&client, &today, should_cancel, on_progress),
+        scrape_guildjen(&client, &today, &known, should_cancel, on_progress),
         &benchmarks_dir,
         on_progress,
     );
@@ -188,12 +233,12 @@ pub fn scrape_all_with_progress(
 
 fn finish_source(
     source: &str,
-    result: Result<(Vec<BenchmarkBuild>, bool), String>,
+    result: Result<(Vec<BenchmarkBuild>, bool, usize), String>,
     dir: &Path,
     on_progress: &dyn Fn(&str, &str),
 ) -> ScrapeResult {
     match result {
-        Ok((builds, cancelled)) => {
+        Ok((builds, cancelled, failed)) => {
             // Cancel mid-source must not overwrite last-good on-disk groups
             // with a partial scrape. Keep the in-memory vec for this session.
             if cancelled {
@@ -202,6 +247,7 @@ fn finish_source(
                     source: source.into(),
                     builds,
                     error: Some(CANCELLED_ERROR.into()),
+                    failed,
                 };
             }
             if let Err(e) = save_builds(&builds, dir) {
@@ -210,6 +256,7 @@ fn finish_source(
                     source: source.into(),
                     builds,
                     error: Some(e),
+                    failed,
                 };
             }
             on_progress(source, &format!("done {}", builds.len()));
@@ -217,6 +264,7 @@ fn finish_source(
                 source: source.into(),
                 builds,
                 error: None,
+                failed,
             }
         }
         Err(e) => {
@@ -225,6 +273,9 @@ fn finish_source(
                 source: source.into(),
                 builds: vec![],
                 error: Some(e),
+                // The source never got far enough to list a page, so nothing
+                // could have failed individually - the whole thing did.
+                failed: 0,
             }
         }
     }
@@ -236,6 +287,7 @@ fn cancelled_result(source: &str) -> ScrapeResult {
         source: source.into(),
         builds: vec![],
         error: Some(CANCELLED_ERROR.into()),
+        failed: 0,
     }
 }
 
@@ -294,17 +346,21 @@ const SC_PROFESSIONS: &[&str] = &[
 fn scrape_snowcrows(
     client: &reqwest::blocking::Client,
     today: &str,
+    known: &HashMap<String, BenchmarkBuild>,
     should_cancel: &dyn Fn() -> bool,
     on_progress: &dyn Fn(&str, &str),
-) -> Result<(Vec<BenchmarkBuild>, bool), String> {
+) -> Result<(Vec<BenchmarkBuild>, bool, usize), String> {
     let mut last_html: Option<String> = None;
-    let mut all_links: Vec<String> = Vec::new();
+    // Carried with the link so progress can name the class it is on, the
+    // way the GuildJen path does. The profession is only known here, at
+    // the index page the link came from.
+    let mut all_links: Vec<(String, String)> = Vec::new();
 
     on_progress("snowcrows", "listing builds…");
     // Collect build links from each profession's page
     for profession in SC_PROFESSIONS {
         if should_cancel() {
-            return Ok((Vec::new(), true));
+            return Ok((Vec::new(), true, 0));
         }
         let prof_url = format!("https://snowcrows.com/builds/raids/{}", profession);
         on_progress("snowcrows", &format!("listing {}…", profession));
@@ -313,15 +369,15 @@ fn scrape_snowcrows(
         };
         last_html = Some(html.clone());
         // Build links look like: href="/builds/raids/guardian/power-dragonhunter-..."
-        let links = extract_build_links(&html, "/builds/raids/", 50);
+        let links = extract_build_links(&html, "/builds/raids/", usize::MAX);
         for link in links {
             // Skip profession-index links (no build slug after the profession name)
             let parts: Vec<&str> = link.trim_matches('/').split('/').collect();
             // /builds/raids/{profession}/{slug} has 4 parts
             if parts.len() >= 4 && !parts[3].is_empty() && !parts[3].contains('?') {
                 let full = format!("https://snowcrows.com{}", link);
-                if !all_links.contains(&full) {
-                    all_links.push(full);
+                if !all_links.iter().any(|(_, seen)| *seen == full) {
+                    all_links.push((title_case(profession), full));
                 }
             }
         }
@@ -348,19 +404,32 @@ fn scrape_snowcrows(
     }
 
     let mut builds = Vec::new();
-    let total = all_links.len().min(45);
+    let mut failed = 0usize;
+    let total = all_links.len();
     on_progress("snowcrows", &format!("0/{}", total));
-    // Cap at 45 builds total (5 per profession on average across 9 professions)
-    for (i, url) in all_links.into_iter().take(45).enumerate() {
+    // Every build the index lists. `all_links` is accumulated one profession
+    // page at a time, so this already walks a class at a time.
+    for (i, (class, url)) in all_links.into_iter().enumerate() {
         if should_cancel() {
-            return Ok((builds, true));
+            return Ok((builds, true, failed));
         }
-        if let Ok(b) = scrape_snowcrows_build(client, &url, today) {
-            builds.push(b)
+        // Already read today: take it and skip both the request and the
+        // wait that would have come with it.
+        if let Some(b) = known.get(&url) {
+            builds.push(b.clone());
+            on_progress("snowcrows", &format!("{class} {}/{total}", i + 1));
+            continue;
         }
-        on_progress("snowcrows", &format!("{}/{}", i + 1, total));
+        if i > 0 && !pace(should_cancel) {
+            return Ok((builds, true, failed));
+        }
+        match scrape_snowcrows_build(client, &url, today) {
+            Ok(b) => builds.push(b),
+            Err(_) => failed += 1,
+        }
+        on_progress("snowcrows", &format!("{class} {}/{total}", i + 1));
     }
-    Ok((builds, false))
+    Ok((builds, false, failed))
 }
 
 /// Build a `BenchmarkBuild` from page HTML once the per-site fields
@@ -368,6 +437,41 @@ fn scrape_snowcrows(
 /// extraction is identical across every source, so it lives here.
 // Builder over per-site fields already derived by the caller; bundling the HTML
 // and metadata into a struct would just mirror the argument list.
+#[allow(clippy::too_many_arguments)]
+/// A per-build ceiling, so one pathological page cannot bloat the day's file.
+///
+/// Measured over saved pages from all three sites: 8.6 KB for a Hardstuck
+/// build, 14 KB and 24 KB for GuildJen's largest, 19 KB for a Snowcrows one.
+/// So this holds every real page with room to spare, and the worst case is
+/// ~24 MB across a full sync — beside a 118 MB game-data cache the addon
+/// already loads, that is not the thing to optimise.
+///
+/// It cuts from the END, which is where the rotation sits on a Hardstuck
+/// page. Do not lower it without re-measuring.
+const PROSE_LIMIT: usize = 32_768;
+
+/// Truncate to at most `max_bytes`, on a character boundary.
+///
+/// Slicing a `&str` at a byte index panics when a multi-byte character
+/// straddles it. An em dash in a build description did exactly that once and
+/// killed a 328-page sync mid-run, so no byte index touches this text.
+fn truncate_chars(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_string();
+    }
+    let end = text
+        .char_indices()
+        .map(|(at, _)| at)
+        .take_while(|at| *at <= max_bytes)
+        .last()
+        .unwrap_or(0);
+    text[..end].to_string()
+}
+
+// Eight facts about one page, each already computed by the caller and none
+// derivable from the others: where it came from, when, which site, and the
+// four labels the index carried. Bundling them into a struct would move the
+// same eight assignments one line up and add a type nobody else uses.
 #[allow(clippy::too_many_arguments)]
 fn benchmark_from_html(
     html: &str,
@@ -379,22 +483,39 @@ fn benchmark_from_html(
     mode: &str,
     role: &str,
 ) -> BenchmarkBuild {
+    // Each site publishes ids its own way, so the parser is chosen by site
+    // rather than by trying all three. An unknown source gets GuildJen's
+    // reader, which finds nothing rather than inventing something.
+    let mut published = match source {
+        "snowcrows" => crate::providers::snowcrows::parse(html),
+        "hardstuck" => crate::providers::hardstuck::parse(html),
+        _ => crate::providers::guildjen::parse(html),
+    };
+    // The pruner runs once here and serves both readers below. It must not
+    // run *before* the parsers: it deletes the ids — Snowcrows' embeds are
+    // empty divs and Hardstuck's chat code lives in an `<input value>`.
+    let article = crate::article::prune_to_article(html);
+    let prose = crate::article::article_text(html);
+    // The prefix the gear actually states, when it states one; otherwise a
+    // text scan, which is what wanted the prose in the first place.
+    let gear_prefix = published
+        .dominant_stat()
+        .unwrap_or_else(|| extract_gear_prefix(&article));
+    // The rotation and the role's operating instructions live in this text.
+    // Captured during the scrape because the alternative is fetching every
+    // page a second time.
+    published.prose = truncate_chars(&prose, PROSE_LIMIT);
     BenchmarkBuild {
         source: source.into(),
         profession,
         spec_name,
         mode: mode.into(),
         role: role.to_string(),
-        build_code: extract_build_code(html),
-        gear_prefix: extract_gear_prefix(html),
-        rune: extract_rune(html),
-        sigils: extract_sigils(html),
-        relic: extract_relic(html),
-        traits: extract_traits(html),
-        skills: extract_skills(html),
+        gear_prefix,
+        build_code: published.build_code.clone(),
         source_url: url.to_string(),
         scraped_at: today.to_string(),
-        notes: String::new(),
+        published,
     }
 }
 
@@ -414,20 +535,18 @@ fn scrape_snowcrows_build(
         .unwrap_or_default();
     let slug = url_parts.last().copied().unwrap_or("");
 
-    // Derive spec and role from slug
-    // "power-dragonhunter-virtues-longbow-greatsword" → spec=Dragonhunter, role=Power DPS
     let spec_name = extract_spec_from_slug(slug);
-    let role = if slug.starts_with("condition") || slug.starts_with("condi") {
-        "Condi DPS"
-    } else if slug.starts_with("heal") {
-        "Heal Support"
-    } else if slug.starts_with("power") {
-        "Power DPS"
-    } else if slug.starts_with("celestial") {
-        "Hybrid / Celestial"
-    } else {
-        "Power DPS"
-    };
+    // The build's own heading, falling back to the slug it is derived from.
+    // Both say the same thing — "Condition Reaper", `condition-reaper-…` —
+    // but the heading is the site's statement rather than our reading of a
+    // URL, and it goes through the same vocabulary as the other two sources
+    // so the stored roles stay comparable.
+    let name =
+        crate::providers::snowcrows::build_name(&html).unwrap_or_else(|| slug.replace('-', " "));
+    let role = crate::providers::role_label(
+        crate::providers::snowcrows::scale_from_url(url),
+        crate::providers::role_in_name(&name).unwrap_or_default(),
+    );
 
     Ok(benchmark_from_html(
         &html,
@@ -437,7 +556,7 @@ fn scrape_snowcrows_build(
         profession,
         spec_name,
         "PvE",
-        role,
+        &role,
     ))
 }
 
@@ -479,17 +598,18 @@ fn pin_hardstuck_href(link: &str) -> Option<String> {
 fn scrape_hardstuck(
     client: &reqwest::blocking::Client,
     today: &str,
+    known: &HashMap<String, BenchmarkBuild>,
     should_cancel: &dyn Fn() -> bool,
     on_progress: &dyn Fn(&str, &str),
-) -> Result<(Vec<BenchmarkBuild>, bool), String> {
+) -> Result<(Vec<BenchmarkBuild>, bool, usize), String> {
     let mut last_html: Option<String> = None;
-    let mut all_links: Vec<String> = Vec::new();
+    let mut all_links: Vec<(String, String)> = Vec::new();
 
     on_progress("hardstuck", "listing builds…");
     // Each profession page lists builds for that profession
     for profession in HS_PROFESSIONS {
         if should_cancel() {
-            return Ok((Vec::new(), true));
+            return Ok((Vec::new(), true, 0));
         }
         let prof_url = format!("https://hardstuck.gg/gw2/builds/{}/", profession);
         on_progress("hardstuck", &format!("listing {}…", profession));
@@ -499,7 +619,7 @@ fn scrape_hardstuck(
         last_html = Some(html.clone());
         // Build links: href="/gw2/builds/{profession}/{slug}/" with a non-empty slug
         // slug can be numeric (24929) or text (blood-harbinger)
-        let links = extract_build_links(&html, &format!("/gw2/builds/{}/", profession), 40);
+        let links = extract_build_links(&html, &format!("/gw2/builds/{}/", profession), usize::MAX);
         for link in links {
             let parts: Vec<&str> = link.trim_matches('/').split('/').collect();
             // /gw2/builds/{profession}/{slug} = exactly 4 segments
@@ -510,8 +630,8 @@ fn scrape_hardstuck(
                 let Some(full) = pin_hardstuck_href(&link) else {
                     continue;
                 };
-                if !all_links.contains(&full) {
-                    all_links.push(full);
+                if !all_links.iter().any(|(_, seen)| *seen == full) {
+                    all_links.push((title_case(profession), full));
                 }
             }
         }
@@ -538,18 +658,29 @@ fn scrape_hardstuck(
     }
 
     let mut builds = Vec::new();
-    let total = all_links.len().min(45);
+    let mut failed = 0usize;
+    let total = all_links.len();
     on_progress("hardstuck", &format!("0/{}", total));
-    for (i, url) in all_links.into_iter().take(45).enumerate() {
+    // Every build, one profession page at a time.
+    for (i, (class, url)) in all_links.into_iter().enumerate() {
         if should_cancel() {
-            return Ok((builds, true));
+            return Ok((builds, true, failed));
         }
-        if let Ok(b) = scrape_hardstuck_build(client, &url, today) {
-            builds.push(b)
+        if let Some(b) = known.get(&url) {
+            builds.push(b.clone());
+            on_progress("hardstuck", &format!("{class} {}/{total}", i + 1));
+            continue;
         }
-        on_progress("hardstuck", &format!("{}/{}", i + 1, total));
+        if i > 0 && !pace(should_cancel) {
+            return Ok((builds, true, failed));
+        }
+        match scrape_hardstuck_build(client, &url, today) {
+            Ok(b) => builds.push(b),
+            Err(_) => failed += 1,
+        }
+        on_progress("hardstuck", &format!("{class} {}/{total}", i + 1));
     }
-    Ok((builds, false))
+    Ok((builds, false, failed))
 }
 
 fn scrape_hardstuck_build(
@@ -572,31 +703,28 @@ fn scrape_hardstuck_build(
     // Spec name from slug (same approach as Snowcrows)
     let spec_name = extract_spec_from_slug(slug);
 
-    // Mode: try to extract from page content — Hardstuck tags with PVP/WVW/PVE labels
-    let html_lower = html.to_lowercase();
-    let mode = if html_lower.contains("pvp") || html_lower.contains("player vs player") {
-        "PvP"
-    } else if html_lower.contains("wvw") || html_lower.contains("world vs world") {
-        "WvW"
-    } else {
-        "PvE"
-    };
-
-    // Role from page content
-    let role = if html_lower.contains("condi") || html_lower.contains("condition damage") {
-        "Condi DPS"
-    } else if html_lower.contains("support")
-        || html_lower.contains("healer")
-        || html_lower.contains("heal")
-    {
-        "Heal Support"
-    } else if html_lower.contains("bruiser") || html_lower.contains("sustain") {
-        "Sustain / Bruiser"
-    } else if html_lower.contains("roamer") || html_lower.contains("roaming") {
-        "WvW Roaming"
-    } else {
-        "Power DPS"
-    };
+    // Mode and role as the page states them, never scanned out of its text.
+    // Both used to be `html.contains(..)` over the whole page, and both were
+    // wrong nearly always: every Hardstuck page names all three modes in its
+    // filter nav, so the mode scan answered PvP for all eleven pages
+    // measured while the page's own class said six PvE, four PvP and one
+    // WvW — hence nine `hardstuck_*_pvp.json` files and no PvE or WvW ones.
+    // The role scan matched "condi" on nearly every page, giving 142 of 157
+    // stored rows the role "Condi DPS".
+    let (mode, scale) = crate::providers::hardstuck::mode_and_scale(&html)
+        .or_else(|| crate::providers::hardstuck::game_mode(&html).map(|mode| (mode, "")))
+        .unwrap_or(("PvE", ""));
+    let name = crate::providers::hardstuck::build_name(&html).unwrap_or_default();
+    // The name first, because it distinguishes power from condition from
+    // heal where Hardstuck's own tag says only "Damage". Its tag second,
+    // because it is the only thing that names the job on a build whose title
+    // does not: "Blood Harbinger" is a Bruiser and nothing in that name says
+    // so. 20 of 148 rows recorded no role at all before this.
+    let job = crate::providers::role_in_name(&name)
+        .map(str::to_string)
+        .or_else(|| crate::providers::hardstuck::build_role(&html))
+        .unwrap_or_default();
+    let role = crate::providers::role_label(scale, &job);
 
     Ok(benchmark_from_html(
         &html,
@@ -606,7 +734,7 @@ fn scrape_hardstuck_build(
         profession,
         spec_name,
         mode,
-        role,
+        &role,
     ))
 }
 
@@ -621,9 +749,10 @@ fn scrape_hardstuck_build(
 fn scrape_guildjen(
     client: &reqwest::blocking::Client,
     today: &str,
+    known: &HashMap<String, BenchmarkBuild>,
     should_cancel: &dyn Fn() -> bool,
     on_progress: &dyn Fn(&str, &str),
-) -> Result<(Vec<BenchmarkBuild>, bool), String> {
+) -> Result<(Vec<BenchmarkBuild>, bool, usize), String> {
     // The six category pages linked from the hub at /gw2-builds/, verified
     // against the live site 2026-09-05. The old `/wvw-builds/` and
     // `/pvp-builds/` addresses no longer carry the build tables, which is why
@@ -633,6 +762,12 @@ fn scrape_guildjen(
     // pair (`/wvw-builds/`, `/pvp-builds/`) silently went stale and returned
     // nothing. The known three are only the fallback for a hub that will not
     // load.
+    // Before the first request, not after: a sync cancelled at the door
+    // should touch the network zero times, and fetch_html now retries with
+    // backoff, so a missed check here costs seconds of dead waiting.
+    if should_cancel() {
+        return Ok((Vec::new(), true, 0));
+    }
     on_progress("guildjen", "listing categories…");
     let index_urls = match fetch_html(client, GUILDJEN_SITEMAP) {
         Ok(sitemap) => {
@@ -651,16 +786,22 @@ fn scrape_guildjen(
     };
 
     let mut builds = Vec::new();
+    let mut failed = 0usize;
     let mut last_html: Option<String> = None;
     let mut any_success = false;
     let mut saw_link = false;
 
     for (index_url, mode) in &index_urls {
         if should_cancel() {
-            return Ok((builds, true));
+            return Ok((builds, true, failed));
         }
         let mode = *mode;
-        on_progress("guildjen", &format!("listing {}…", mode));
+        // Name the category, not just the mode. Raid, fractal and open world
+        // are all "PvE", and each index restarts the count with its own
+        // total, so three PvE categories in a row read as one list whose
+        // total kept changing - 53/67 then 8/48 is two pages, not a bug.
+        let category = category_label(index_url);
+        on_progress("guildjen", &format!("listing {category}…"));
         let Ok(html) = fetch_html(client, index_url) else {
             continue;
         };
@@ -671,29 +812,62 @@ fn scrape_guildjen(
         // categories — the WvW "Power Reaper Roaming Build" appears on the PvP
         // page — so scanning the whole document would file builds under the
         // wrong game mode.
-        let links = extract_table_build_links(&html, 40);
-        let cap = links.len().min(15);
+        // Every build the table lists, a class at a time. Taking the top 15
+        // of a 99-row page bought Elementalist and part of Necromancer and
+        // left the other seven professions with no reference at all -
+        // measured 2026-09-05, where a Necromancer in WvW was told "No
+        // benchmark data available" while the store held Guardian, Mesmer,
+        // Revenant, Thief and Warrior.
+        // The index states the profession, role and playstyle of every build
+        // it lists, so nothing below has to infer them from a slug or from
+        // the body text of the build page.
+        let by_class = group_rows_by_profession(crate::providers::guildjen::index_rows(&html));
+        let cap: usize = by_class.iter().map(|(_, l)| l.len()).sum();
+        let mut i = 0usize;
 
-        for (i, link) in links.into_iter().take(15).enumerate() {
-            if should_cancel() {
-                return Ok((builds, true));
+        for (class, class_rows) in by_class {
+            for row in class_rows {
+                if should_cancel() {
+                    return Ok((builds, true, failed));
+                }
+                // Pin to the real host: an index page (compromised, or
+                // MITM'd if TLS were ever bypassed) must not steer us to
+                // arbitrary absolute URLs — only relative paths on
+                // guildjen.com may be followed.
+                let link = row.url.clone();
+                let url = if link.starts_with("https://guildjen.com/") {
+                    link
+                } else if link.starts_with("http") {
+                    continue;
+                } else {
+                    format!("https://guildjen.com{}", link)
+                };
+                saw_link = true;
+                // Already read today: take it and skip both the request and
+                // the wait that would have come with it. The mode is the
+                // index page's to say, not the stored copy's - the same
+                // build is listed under more than one category.
+                if let Some(known_build) = known.get(&url) {
+                    let mut b = known_build.clone();
+                    b.mode = mode.to_string();
+                    builds.push(b);
+                    i += 1;
+                    on_progress("guildjen", &format!("{category} {class} {i}/{cap}"));
+                    continue;
+                }
+                if i > 0 && !pace(should_cancel) {
+                    return Ok((builds, true, failed));
+                }
+                match scrape_guildjen_build(client, &url, &row, mode, &category, today) {
+                    Ok(mut b) => {
+                        b.mode = mode.to_string();
+                        builds.push(b);
+                    }
+                    Err(_) => failed += 1,
+                }
+                i += 1;
+                on_progress("guildjen", &format!("{category} {class} {i}/{cap}"));
             }
-            // Pin to the real host: an index page (compromised, or MITM'd if
-            // TLS were ever bypassed) must not steer us to arbitrary absolute
-            // URLs — only relative paths on guildjen.com may be followed.
-            let url = if link.starts_with("https://guildjen.com/") {
-                link
-            } else if link.starts_with("http") {
-                continue;
-            } else {
-                format!("https://guildjen.com{}", link)
-            };
-            saw_link = true;
-            if let Ok(mut b) = scrape_guildjen_build(client, &url, today) {
-                b.mode = mode.to_string();
-                builds.push(b);
-            }
-            on_progress("guildjen", &format!("{} {}/{}", mode, i + 1, cap));
         }
     }
 
@@ -715,70 +889,434 @@ fn scrape_guildjen(
         }
         return Err("GuildJen: no build links found on any index page".into());
     }
-    Ok((builds, false))
+    Ok((builds, false, failed))
 }
 
 fn scrape_guildjen_build(
     client: &reqwest::blocking::Client,
     url: &str,
+    row: &crate::providers::guildjen::IndexRow,
+    mode: &str,
+    category: &str,
     today: &str,
 ) -> Result<BenchmarkBuild, String> {
     let html = fetch_html(client, url)?;
 
     // The slug names the specialization, never the profession path — GuildJen
-    // build pages live at the site root. A slug that names neither is not a
-    // build page we can file, so it is dropped rather than stored under a
-    // profession no character has.
+    // build pages live at the site root. A slug that names neither, and that
+    // the index did not file under a profession either, is not a build page
+    // we can store.
     let slug = url
         .trim_end_matches('/')
         .rsplit('/')
         .next()
         .unwrap_or_default();
-    let Some((profession, spec_name)) = profession_from_slug(slug) else {
-        return Err(format!("GuildJen: no profession in slug {slug}"));
+    let from_slug = profession_from_slug(slug);
+    let profession = match (&row.profession, &from_slug) {
+        (stated, _) if !stated.is_empty() => stated.clone(),
+        (_, Some((profession, _))) => profession.clone(),
+        _ => return Err(format!("GuildJen: no profession for {slug}")),
     };
-    // Placeholder only: the caller overwrites this with the index page the
-    // link came from, which is the one authority on the mode. The slug does
-    // not carry it (`/power-willbender-roaming-build/` says neither).
-    let mode = "WvW";
+    let spec_name = from_slug
+        .map(|(_, spec)| spec)
+        .unwrap_or_else(|| extract_spec_from_slug(slug));
 
-    let role = if html.to_lowercase().contains("roam") {
-        "WvW Roaming"
-    } else if html.to_lowercase().contains("zerg") || html.to_lowercase().contains("squad") {
-        "WvW Zerg DPS"
-    } else if html.to_lowercase().contains("support") || html.to_lowercase().contains("heal") {
-        "WvW Zerg Support"
-    } else {
-        "WvW Roaming"
-    };
+    // The role used to be a text scan for "roam"/"zerg"/"support" over the
+    // whole page, with every branch — including the fallback — returning a
+    // WvW label. All 411 stored GuildJen builds read "WvW Roaming",
+    // Elementalist PvE ones included. The index states it instead.
+    let role = crate::providers::role_label(
+        &guildjen_scale(mode, category, row),
+        &guildjen_job(mode, row),
+    );
 
     Ok(benchmark_from_html(
-        &html, url, today, "guildjen", profession, spec_name, mode, role,
+        &html, url, today, "guildjen", profession, spec_name, mode, &role,
     ))
+}
+
+/// Where a GuildJen build is played, in the site's own words.
+///
+/// PvE is split by the index it was listed on — open world, fractal, raid —
+/// which is the solo, group and squad distinction. WvW is split by the
+/// site's playstyle instead, since all of it is one index.
+fn guildjen_scale(
+    mode: &str,
+    category: &str,
+    row: &crate::providers::guildjen::IndexRow,
+) -> String {
+    match mode {
+        "PvE" => category.to_string(),
+        // A WvW build commonly carries two: `havoc` and `cloud` together.
+        // Smallest first, because that is the one that constrains the build
+        // — a havoc build can join a cloud, not the other way round.
+        "WvW" => ["roaming", "havoc", "cloud"]
+            .iter()
+            .find(|wanted| row.playstyles.iter().any(|had| had == *wanted))
+            .map(|found| crate::providers::title_case(found))
+            .unwrap_or_default(),
+        // PvP is always five a side; there is no scale to state.
+        _ => String::new(),
+    }
+}
+
+/// What a GuildJen build does, from whichever source says more in that mode.
+///
+/// Measured across all five indexes: PvE's role tags are only `dps`,
+/// `support`, `tank`, `kiter` and `quickness`, and most open-world rows
+/// carry none at all — so in PvE the build's own name is the better source,
+/// and "Heal DPS Luminary" is a Healer where the tag says only `support`.
+///
+/// WvW and PvP are the other way round. Their tags are rich — bruiser,
+/// assassin, medic, roamer, duelist — and the name is not: reading it would
+/// call a "Celestial Spear Antiquary" a Hybrid rather than the Bruiser the
+/// site says it is.
+///
+/// Whichever comes second is the fallback, and a row with neither falls back
+/// to the playstyle, which on the open-world index is the distinction the
+/// site actually draws.
+fn guildjen_job(mode: &str, row: &crate::providers::guildjen::IndexRow) -> String {
+    let named = crate::providers::role_in_name(&row.name).map(str::to_string);
+    let tagged = row.roles.first().map(|role| match role.as_str() {
+        // Not a word to title-case, and on its own it does not say which
+        // kind of damage — so the name wins where there is one.
+        "dps" => "DPS".to_string(),
+        other => crate::providers::title_case(other),
+    });
+    let (first, second) = if mode == "PvE" {
+        (named, tagged)
+    } else {
+        (tagged, named)
+    };
+    first
+        .or(second)
+        .or_else(|| {
+            row.playstyles
+                .first()
+                .map(|playstyle| crate::providers::title_case(playstyle))
+        })
+        .unwrap_or_default()
+}
+
+/// Group index rows by the profession the index states, first-seen order.
+///
+/// The sync walks a class at a time, so progress names the class it is on
+/// and a cancel leaves whole classes done rather than a slice of each.
+///
+/// A row the index files under no profession falls back to the slug, and one
+/// that names neither is dropped here rather than fetched and rejected
+/// later: that is a request spent on nothing.
+fn group_rows_by_profession(
+    rows: Vec<crate::providers::guildjen::IndexRow>,
+) -> Vec<(String, Vec<crate::providers::guildjen::IndexRow>)> {
+    let mut buckets: Vec<(String, Vec<crate::providers::guildjen::IndexRow>)> = Vec::new();
+    for row in rows {
+        let profession = if !row.profession.is_empty() {
+            row.profession.clone()
+        } else {
+            let slug = row
+                .url
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or("");
+            match profession_from_slug(slug) {
+                Some((profession, _)) => profession,
+                None => continue,
+            }
+        };
+        match buckets.iter_mut().find(|(name, _)| *name == profession) {
+            Some((_, links)) => links.push(row),
+            None => buckets.push((profession, vec![row])),
+        }
+    }
+    buckets
 }
 
 // ─── HTML extraction helpers ──────────────────────────────────────────────────
 
+/// Extra milliseconds added to every gap after the site pushes back.
+///
+/// The point of a sync is to finish. Retrying a 429 three times at a fixed
+/// backoff and then carrying on at the old rate is how a soft "slow down"
+/// becomes a hard block: the site asked, we did not listen, and the next
+/// several hundred requests arrive at the same cadence. This grows on every
+/// throttling signal and decays on success, so a run that meets resistance
+/// slows down and keeps going instead of stopping.
+///
+/// One sync runs at a time, so a process-wide cell is enough and keeps the
+/// signal out of three scrapers' signatures.
+static THROTTLE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// First slowdown step, and the floor once any pushback is seen.
+const THROTTLE_STEP_MS: u64 = 4_000;
+/// Ceiling, so a site that refuses everything cannot wedge the run at an
+/// unbounded delay. Past this the run is failing anyway and should say so.
+const THROTTLE_CEILING_MS: u64 = 30_000;
+
+/// How much the sync is currently holding back, in milliseconds.
+///
+/// Zero when the run is at its normal pace. Non-zero means the site asked us
+/// to slow down and we are obliging - the run has not failed and has not
+/// stopped, it is waiting, and the player deserves to be told that rather
+/// than watching a bar that appears stuck.
+pub fn sync_backoff_ms() -> u64 {
+    THROTTLE_MS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Note that the site pushed back, and slow everything down from here.
+fn throttle_up() {
+    use std::sync::atomic::Ordering;
+    let current = THROTTLE_MS.load(Ordering::Relaxed);
+    let next = (current * 2).clamp(THROTTLE_STEP_MS, THROTTLE_CEILING_MS);
+    THROTTLE_MS.store(next, Ordering::Relaxed);
+}
+
+/// Ease back off after a page comes through cleanly. Three-quarters rather
+/// than straight to zero: one success after a 429 is not proof the pressure
+/// is gone, and sprinting again is what earns the next one.
+fn throttle_down() {
+    use std::sync::atomic::Ordering;
+    let current = THROTTLE_MS.load(Ordering::Relaxed);
+    if current > 0 {
+        THROTTLE_MS.store(current * 3 / 4, Ordering::Relaxed);
+    }
+}
+
+/// Gap between build pages, in milliseconds, picked fresh each time.
+///
+/// One steady trickle rather than bursts with rests: a burst-and-pause shape
+/// is itself a pattern, and a request every second or two is both gentler on
+/// the site and less distinctive than five-at-once repeated eighty times.
+const PACE_MS: (u64, u64) = (800, 2_200);
+
+/// Wait before the next build page, and report whether to keep going.
+///
+/// A full sync is several hundred pages. Fetched back to back that is
+/// unmistakably a script, and GuildJen already answers traffic it dislikes
+/// with a block page - see [`looks_like_blocked_page`], which exists because
+/// that happened.
+///
+/// The gap is jittered because an exactly regular cadence is itself the
+/// signature: 1.000s four hundred times over is more obviously automated than
+/// no delay at all. Jitter comes from the clock rather than a `rand`
+/// dependency - this needs irregularity, not randomness, and nothing here is
+/// security sensitive.
+///
+/// Sleeps in slices so Cancel still lands promptly. `false` means cancelled.
+fn pace(should_cancel: &dyn Fn() -> bool) -> bool {
+    let (lo, hi) = PACE_MS;
+    let jitter = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::from(d.subsec_nanos()))
+        .unwrap_or(0);
+    let extra = THROTTLE_MS.load(std::sync::atomic::Ordering::Relaxed);
+    let mut left = std::time::Duration::from_millis(lo + jitter % (hi - lo) + extra);
+    let slice = std::time::Duration::from_millis(100);
+    while !left.is_zero() {
+        if should_cancel() {
+            return false;
+        }
+        let step = slice.min(left);
+        std::thread::sleep(step);
+        left -= step;
+    }
+    true
+}
+
+/// Statuses worth asking again for. 429 is the site saying "slower", not
+/// "no"; 5xx and 408 are the upstream having a moment. 403 is in the set
+/// because a bot filter answers with one and that IS transient - the whole
+/// point is that the run recovers rather than losing every remaining page.
+/// 404 is an answer, and asking twice will not change it.
+fn retryable_status(status: u16) -> bool {
+    matches!(status, 403 | 408 | 425 | 429 | 500 | 502 | 503 | 504)
+}
+
+/// Statuses that mean "you are going too fast", as opposed to "I am unwell".
+fn throttling_status(status: u16) -> bool {
+    matches!(status, 403 | 429 | 503)
+}
+
+/// Longest `Retry-After` honoured inside a single fetch.
+///
+/// This wait cannot poll cancellation, so it stays short; anything the site
+/// asks for beyond it is handed to [`THROTTLE_MS`], which spreads the wait
+/// across later gaps where Cancel does land.
+const MAX_RETRY_AFTER_MS: u64 = 15_000;
+
+/// The site's own `Retry-After`, in milliseconds, when it gave one in seconds.
+fn retry_after_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(|secs| secs.saturating_mul(1_000))
+}
+
+/// Attempts per page when something went wrong at the transport.
+const FETCH_ATTEMPTS: u32 = 3;
+/// Attempts per page when the site is rate limiting.
+///
+/// Higher than [`FETCH_ATTEMPTS`] on purpose. A rate limit is a wait, not a
+/// refusal: the page is there and the site has told us when to come back for
+/// it. Giving up after three tries turns a delay into a missing build, and a
+/// stretch of 429s into a sync that quietly returns half the data. With the
+/// run-wide slowdown widening every gap at the same time, these attempts are
+/// spread over minutes, not hammered.
+const THROTTLED_ATTEMPTS: u32 = 8;
+
+/// One page, retried through the failures a long sync actually hits.
+///
+/// A full sync is several hundred requests spread over many minutes. At that
+/// length a dropped connection or a single 429 is ordinary, and every caller
+/// here discards a failure silently (`if let Ok(b) = ...`), so one blip used
+/// to cost a build with nothing said about it. Backoff grows and is jittered,
+/// for the same reason the pacing is.
 fn fetch_html(client: &reqwest::blocking::Client, url: &str) -> Result<String, String> {
+    let mut last = String::new();
+    let mut wait_ms = 0u64;
+    // Raised the moment the site says "slower": that answer means the page
+    // exists and we asked too soon, so the sync waits it out rather than
+    // dropping the build.
+    let mut attempts = FETCH_ATTEMPTS;
+    let mut attempt = 0;
+    while attempt < attempts {
+        if attempt > 0 {
+            let jitter = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| u64::from(d.subsec_nanos()) % 1_500)
+                .unwrap_or(0);
+            // The site's own number when it gave one, our growing backoff
+            // otherwise. Asking again sooner than it said is how a soft
+            // "slow down" turns into a hard "no".
+            let base = wait_ms.max(2_000 * u64::from(attempt));
+            std::thread::sleep(std::time::Duration::from_millis(base + jitter));
+        }
+        match fetch_html_once(client, url) {
+            Ok(html) => {
+                throttle_down();
+                return Ok(html);
+            }
+            Err(FetchFailure {
+                retryable,
+                throttled,
+                retry_after_ms,
+                message,
+            }) => {
+                last = message;
+                if throttled {
+                    throttle_up();
+                    attempts = THROTTLED_ATTEMPTS;
+                }
+                // Beyond what one fetch can wait for, the remainder lands on
+                // the run-wide gap, where Cancel still works.
+                wait_ms = retry_after_ms.unwrap_or(0).min(MAX_RETRY_AFTER_MS);
+                if !retryable {
+                    break;
+                }
+            }
+        }
+        attempt += 1;
+    }
+    Err(last)
+}
+
+/// Why one attempt failed, and what to do about it.
+struct FetchFailure {
+    /// Worth another attempt at this URL.
+    retryable: bool,
+    /// The site asked us to slow down, so the whole run should.
+    throttled: bool,
+    /// What it asked for, if it said.
+    retry_after_ms: Option<u64>,
+    message: String,
+}
+
+impl FetchFailure {
+    fn permanent(message: String) -> Self {
+        Self {
+            retryable: false,
+            throttled: false,
+            retry_after_ms: None,
+            message,
+        }
+    }
+
+    /// A transport failure: dropped connection, DNS hiccup, timeout. Worth
+    /// another try, but not a sign we are being too quick.
+    fn transient(message: String) -> Self {
+        Self {
+            retryable: true,
+            throttled: false,
+            retry_after_ms: None,
+            message,
+        }
+    }
+}
+
+/// One attempt, classified so [`fetch_html`] can tell "ask again" from "no"
+/// and "you are going too fast" from "I am unwell".
+fn fetch_html_once(client: &reqwest::blocking::Client, url: &str) -> Result<String, FetchFailure> {
     let resp = client
         .get(url)
         .send()
-        .map_err(|e| format!("HTTP error fetching {}: {}", url, e))?;
+        .map_err(|e| FetchFailure::transient(format!("HTTP error fetching {}: {}", url, e)))?;
 
     let status = resp.status();
     if !status.is_success() {
-        return Err(format!(
-            "HTTP {} fetching {} (expected 2xx)",
-            status.as_u16(),
-            url
-        ));
+        let code = status.as_u16();
+        return Err(FetchFailure {
+            retryable: retryable_status(code),
+            throttled: throttling_status(code),
+            retry_after_ms: retry_after_ms(resp.headers()),
+            message: format!("HTTP {} fetching {} (expected 2xx)", code, url),
+        });
     }
 
     // Cap the body: a hostile endpoint must not stream unbounded bytes into
     // the game process. Build pages are well under 1 MiB.
     let bytes = gw2_api::transport::read_body_capped(resp, 2 * 1024 * 1024)
-        .map_err(|e| format!("error reading {}: {}", url, e))?;
-    String::from_utf8(bytes).map_err(|_| format!("UTF-8 error reading {}", url))
+        .map_err(|e| FetchFailure::transient(format!("error reading {}: {}", url, e)))?;
+    let html = String::from_utf8(bytes)
+        .map_err(|_| FetchFailure::permanent(format!("UTF-8 error reading {}", url)))?;
+
+    // A filter that answers 200 with an interstitial is still a refusal, and
+    // reading it as a build page would file its text as a benchmark.
+    if looks_rate_limited(&html) {
+        return Err(FetchFailure {
+            retryable: true,
+            throttled: true,
+            retry_after_ms: None,
+            message: format!("rate-limit or challenge page returned for {}", url),
+        });
+    }
+    Ok(html)
+}
+
+/// Whether a 200 body is an anti-bot interstitial rather than the page.
+///
+/// Cloudflare and friends answer with a normal status and a challenge, so
+/// status alone does not see this. Kept narrow and paired with a length
+/// check: a real build page mentioning "rate limit" in prose is long, an
+/// interstitial is not.
+fn looks_rate_limited(html: &str) -> bool {
+    if html.len() > 8_192 {
+        return false;
+    }
+    let lower = html.to_lowercase();
+    [
+        "rate limit",
+        "too many requests",
+        "checking your browser",
+        "cf-browser-verification",
+        "attention required",
+        "unusual traffic",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 /// Heuristic: does this look like a network/security interstitial (block page,
@@ -833,6 +1371,27 @@ fn guildjen_fallback_categories() -> Vec<(String, &'static str)> {
     .iter()
     .map(|slug| (format!("https://guildjen.com/{slug}/"), category_mode(slug)))
     .collect()
+}
+
+/// Short display name for a category index, from its slug.
+///
+/// `/gw2-open-world-builds/` reads as "Open World". The mode alone is not
+/// enough: raid, fractal and open world are all PvE, so progress lines from
+/// three different indexes were indistinguishable.
+fn category_label(url: &str) -> String {
+    let slug = url.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    let words = slug
+        .trim_start_matches("gw2-")
+        .trim_end_matches("-builds")
+        .replace('-', " ");
+    if words.is_empty() {
+        return "Builds".to_string();
+    }
+    words
+        .split(' ')
+        .map(title_case)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Game mode from a category slug. Everything that is neither WvW nor PvP is
@@ -896,60 +1455,6 @@ fn find_ci(haystack: &str, needle: &str, from: usize) -> Option<usize> {
         return None;
     }
     (from..=bytes.len() - pat.len()).find(|&i| bytes[i..i + pat.len()].eq_ignore_ascii_case(pat))
-}
-
-/// Build links from GuildJen's index tables, and only from those tables.
-///
-/// Every category page also renders "Trending" and "Popular Posts" sidebars
-/// that link builds from OTHER categories — the WvW "Power Reaper Roaming
-/// Build" is listed on the PvP page — so a whole-document scan files builds
-/// under whichever page happened to mention them. The tables are the listing;
-/// the sidebars are decoration.
-///
-/// A build page is a flat slug on the site root ending in `-build/`
-/// (`/power-hammer-luminary-roaming-build/`). Category pages end in `-builds/`
-/// and guides in `-guide/`, so the singular suffix is what separates them.
-fn extract_table_build_links(html: &str, max: usize) -> Vec<String> {
-    let mut links: Vec<String> = Vec::new();
-    let mut pos = 0;
-
-    while let Some(open) = find_ci(html, "<table", pos) {
-        let end = find_ci(html, "</table", open).unwrap_or(html.len());
-        let table = &html[open..end];
-
-        let mut tpos = 0;
-        while let Some(href_start) = find_ci(table, "href=\"", tpos) {
-            let abs = href_start + 6;
-            let Some(close) = table[abs..].find('"') else {
-                break;
-            };
-            let href = &table[abs..abs + close];
-            if is_guildjen_build_link(href) && !links.contains(&href.to_string()) {
-                links.push(href.to_string());
-                if links.len() >= max {
-                    return links;
-                }
-            }
-            tpos = abs + close + 1;
-        }
-        pos = end + 1;
-    }
-    links
-}
-
-/// Whether an href points at a single GuildJen build page.
-fn is_guildjen_build_link(href: &str) -> bool {
-    let path = href
-        .strip_prefix("https://guildjen.com")
-        .or_else(|| href.strip_prefix("http://guildjen.com"))
-        .unwrap_or(href);
-    // Off-site links and anything with a query or fragment are not builds.
-    if path.starts_with("http") || path.contains('?') || path.contains('#') {
-        return false;
-    }
-    let trimmed = path.trim_end_matches('/');
-    // Root-level slug only: `/a-build` has one leading slash and no others.
-    trimmed.starts_with('/') && !trimmed[1..].contains('/') && trimmed.ends_with("-build")
 }
 
 fn extract_build_links(html: &str, needle: &str, max: usize) -> Vec<String> {
@@ -1117,20 +1622,6 @@ fn title_case(s: &str) -> String {
         .join(" ")
 }
 
-/// Extract GW2 build template code (e.g. "[&...]").
-fn extract_build_code(html: &str) -> Option<String> {
-    // Build codes start with [& and end with ]
-    let start = html.find("[&")?;
-    let end = html[start..].find(']')?;
-    let code = &html[start..start + end + 1];
-    // Basic sanity: build codes are base64 and typically 44-60 chars
-    if code.len() >= 10 {
-        Some(code.to_string())
-    } else {
-        None
-    }
-}
-
 /// Space-padded alnum words — same boundary idea as `prefix_named_in_text`.
 fn padded_alnum_words(text: &str) -> String {
     format!(
@@ -1189,147 +1680,118 @@ fn extract_gear_prefix(html: &str) -> String {
     String::new()
 }
 
-/// Longest prefix of `s` of at most `max` bytes that ends on a char
-/// boundary. Slicing mid-UTF-8 panics, and build-site HTML is
-/// attacker-influenced content.
-fn take_chars_window(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        return s;
-    }
-    let mut bound = max;
-    while !s.is_char_boundary(bound) {
-        bound -= 1;
-    }
-    &s[..bound]
+/// The sources this addon scrapes. A file naming any other is not ours.
+const KNOWN_SOURCES: &[&str] = &["snowcrows", "hardstuck", "guildjen"];
+/// Game modes, lowercased as [`save_builds`] writes them.
+const KNOWN_MODES: &[&str] = &["pve", "pvp", "wvw"];
+
+/// Whether a benchmark filename is one the current scraper could have written.
+///
+/// [`save_builds`] names every file `{source}_{profession}_{mode}.json` with
+/// all three lowercased, so anything else in that folder came from a version
+/// that filed builds under something that is not a profession.
+fn is_current_benchmark_file(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".json") else {
+        return false;
+    };
+    let parts: Vec<&str> = stem.split('_').collect();
+    let [source, profession, mode] = parts[..] else {
+        return false;
+    };
+    KNOWN_SOURCES.contains(&source)
+        && CORE_PROFESSIONS.contains(&profession)
+        && KNOWN_MODES.contains(&mode)
 }
 
-/// Extract rune name from HTML.
-fn extract_rune(html: &str) -> String {
-    // Rune names follow "Rune of" or "Superior Rune"
-    for marker in &["Rune of the ", "Rune of ", "Superior Rune"] {
-        if let Some(pos) = html.find(marker) {
-            let after = &html[pos..];
-            // Take up to 60 bytes and trim at next HTML tag or quote
-            let raw = take_chars_window(after, 60);
-            let end = raw.find(['<', '"', '\n']).unwrap_or(raw.len());
-            let name = raw[..end].trim().to_string();
-            if name.len() > 5 {
-                return name;
+/// Delete benchmark files the current scraper could never have written, and
+/// report how many went.
+///
+/// Until 1.11.30 the GuildJen scraper read the profession out of a URL path
+/// segment the site no longer has, so it filed builds under whatever it found
+/// there. A real install collected `guildjen_1.0_pvp.json`,
+/// `guildjen_comments_wvw.json`, `guildjen_fonts_pvp.json`,
+/// `guildjen_pages_pvp.json`, `guildjen_https__wvw.json` and
+/// `guildjen_guildjen.com_pvp.json`. Nothing generates those names any more,
+/// so nothing will ever overwrite them: they sit in the folder looking like
+/// benchmark data for the life of the install, on every machine that ran a
+/// sync before the fix. They are swept at the start of each run.
+///
+/// Only the name is judged, and only against names this code writes. A file
+/// that parses as `{known source}_{known profession}_{known mode}` is kept
+/// whatever is inside it - deciding a build is stale is a different question
+/// from deciding a filename is impossible.
+fn prune_stale_benchmarks(dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.ends_with(".json") || is_current_benchmark_file(name) {
+            continue;
+        }
+        if std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// Builds already on disk from a sync run today, keyed by their page URL.
+///
+/// A sync of every row is several hundred requests over ten minutes or more,
+/// and the reasons to run one twice in a day are ordinary: it was cancelled,
+/// the game was closed, a source failed and you want it again. Refetching a
+/// page we already read today buys nothing and spends the politeness budget
+/// that keeps the sync working at all.
+///
+/// Same-day is the whole freshness rule, deliberately. Anything longer and a
+/// deliberate re-sync would quietly do nothing, which is worse than slow;
+/// anything shorter and this does not help. So: running it twice today costs
+/// what running it once did, and tomorrow it all refreshes.
+fn load_todays_builds(dir: &Path, today: &str) -> HashMap<String, BenchmarkBuild> {
+    let mut known = HashMap::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return known;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if !name.to_str().is_some_and(is_current_benchmark_file) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let Ok(builds) = serde_json::from_str::<Vec<BenchmarkBuild>>(&text) else {
+            continue;
+        };
+        for build in builds {
+            // A row is reusable only if it was written today *and* by an
+            // extractor that reads ids. Without the second condition the
+            // day's own cache defeats the fix: a sync run earlier today
+            // wrote rows with no ids, and re-running would copy them
+            // straight back to disk without refetching, so the store would
+            // only heal after midnight. An id-less row is refetched instead.
+            // Prose joins that condition for the same reason. Every real
+            // page yields some, so an empty one means the fetch or the parse
+            // failed — and a row written by a build that did not capture
+            // prose at all must be refetched once, or today's own cache
+            // would hold the upgrade back until midnight.
+            let reusable = build.scraped_at == today
+                && !build.source_url.is_empty()
+                && !build.published.is_empty()
+                && !build.published.prose.is_empty();
+            if reusable {
+                known.insert(build.source_url.clone(), build);
             }
         }
     }
-    String::new()
+    known
 }
 
-/// Extract sigil names from HTML.
-fn extract_sigils(html: &str) -> Vec<String> {
-    let mut sigils = Vec::new();
-    for marker in &["Superior Sigil of ", "Sigil of "] {
-        let mut pos = 0;
-        while let Some(idx) = html[pos..].find(marker) {
-            let abs = pos + idx;
-            let after = take_chars_window(&html[abs..], 60);
-            let end = after.find(['<', '"', '\n']).unwrap_or(after.len());
-            let name = after[..end].trim().to_string();
-            if name.len() > 5 && !sigils.contains(&name) {
-                sigils.push(name);
-            }
-            pos = abs + marker.len();
-            if sigils.len() >= 4 {
-                break;
-            }
-        }
-    }
-    sigils
-}
-
-/// Extract relic name from HTML.
-fn extract_relic(html: &str) -> String {
-    for marker in &["Relic of ", "Superior Relic"] {
-        if let Some(pos) = html.find(marker) {
-            let after = &html[pos..];
-            let raw = take_chars_window(after, 60);
-            let end = raw.find(['<', '"', '\n']).unwrap_or(raw.len());
-            let name = raw[..end].trim().to_string();
-            if name.len() > 5 {
-                return name;
-            }
-        }
-    }
-    String::new()
-}
-
-/// Extract specialization/profession names from HTML (known names as section headers).
-fn extract_traits(html: &str) -> Vec<String> {
-    const CORE_PROFESSIONS: &[&str] = &[
-        "Guardian",
-        "Warrior",
-        "Engineer",
-        "Ranger",
-        "Thief",
-        "Elementalist",
-        "Mesmer",
-        "Necromancer",
-        "Revenant",
-    ];
-    let mut traits = Vec::new();
-    let elites = KNOWN_SPECS.iter().map(|s| title_case(s));
-    let cores = CORE_PROFESSIONS.iter().copied().map(str::to_string);
-    for spec in elites.chain(cores) {
-        if html.contains(&spec) && !traits.contains(&spec) {
-            traits.push(spec);
-            if traits.len() >= 3 {
-                break;
-            }
-        }
-    }
-    traits
-}
-
-/// Extract skill names from HTML.
-fn extract_skills(html: &str) -> Vec<String> {
-    // Common skill markers on build sites
-    let markers = ["Heal:", "Utility:", "Elite:", "utility-skill", "heal-skill"];
-    let mut skills = Vec::new();
-    for marker in &markers {
-        if let Some(pos) = html.find(marker) {
-            let after = &html[pos + marker.len()..];
-            // Truncate on a char boundary — slicing mid-UTF-8 panics, and
-            // build-site HTML is attacker-influenced content.
-            let bound = after
-                .char_indices()
-                .map(|(i, _)| i)
-                .take_while(|&i| i <= 80)
-                .last()
-                .unwrap_or(0);
-            let raw = &after[..bound];
-            // Strip HTML tags
-            let text = strip_tags(raw);
-            let name = text.trim().trim_matches(':').trim().to_string();
-            if name.len() > 3 && name.len() < 50 {
-                skills.push(name);
-            }
-        }
-        if skills.len() >= 5 {
-            break;
-        }
-    }
-    skills
-}
-
-fn strip_tags(s: &str) -> String {
-    let mut result = String::new();
-    let mut in_tag = false;
-    for c in s.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => result.push(c),
-            _ => {}
-        }
-    }
-    result
-}
 fn save_builds(builds: &[BenchmarkBuild], dir: &Path) -> Result<(), String> {
     if builds.is_empty() {
         return Ok(());
@@ -1409,8 +1871,40 @@ fn redirect_stays_on_request_host(request_host: Option<&str>, next_host: Option<
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 fn build_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
+    // What Firefox sends on a top-level navigation, because that is what
+    // [`USER_AGENT`] claims to be. Half a fingerprint is worth less than
+    // none: a browser string with no Accept-Language and no Sec-Fetch-Mode
+    // is a mismatch any filter can read.
+    let mut headers = reqwest::header::HeaderMap::new();
+    let mut set = |name: reqwest::header::HeaderName, value: &'static str| {
+        headers.insert(name, reqwest::header::HeaderValue::from_static(value));
+    };
+    set(
+        reqwest::header::ACCEPT,
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,\
+         image/webp,image/png,image/svg+xml,*/*;q=0.8",
+    );
+    set(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.5");
+    set(reqwest::header::UPGRADE_INSECURE_REQUESTS, "1");
+    set(
+        reqwest::header::HeaderName::from_static("sec-fetch-dest"),
+        "document",
+    );
+    set(
+        reqwest::header::HeaderName::from_static("sec-fetch-mode"),
+        "navigate",
+    );
+    set(
+        reqwest::header::HeaderName::from_static("sec-fetch-site"),
+        "none",
+    );
+    set(
+        reqwest::header::HeaderName::from_static("sec-fetch-user"),
+        "?1",
+    );
     reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
+        .default_headers(headers)
         .timeout(std::time::Duration::from_secs(15))
         // Origin pins at enqueue are end-to-end only if redirects cannot hop hosts.
         .redirect(reqwest::redirect::Policy::custom(same_host_redirect))
@@ -1498,29 +1992,234 @@ mod tests {
         assert_eq!(links[0], "/builds/guardian/firebrand");
     }
 
-    /// Build links live in the category table. Every GuildJen page also
-    /// renders "Trending" and "Popular Posts" sidebars carrying builds from
-    /// OTHER categories, so a whole-document scan files a WvW build under PvP.
-    /// Category pages (`-builds/`) and guides (`-guide/`) are not builds.
+    /// Only today's builds are reusable, and only from files this version
+    /// writes, and only if they carry ids AND prose. Yesterday's have to be
+    /// refetched or a re-sync would silently serve stale references forever;
+    /// a row from earlier today that is missing either has to be refetched
+    /// too, or the day's own cache would keep handing back what the previous
+    /// extractor wrote and the upgrade would not land until midnight.
     #[test]
-    fn table_build_links_ignore_sidebars_and_non_builds() {
-        let html = concat!(
-            r#"<table><tr><td><a href="/power-hammer-luminary-roaming-build/">in table</a></td>"#,
-            r#"<td><a href="https://guildjen.com/support-luminary-cloud-build/">abs</a></td></tr>"#,
-            r#"<tr><td><a href="/gw2-wvw-builds/">category</a>"#,
-            r#"<a href="/legendary-armor-guide/">guide</a>"#,
-            r#"<a href="https://evil.example/fake-build/">off-site</a></td></tr></table>"#,
-            r#"<aside><a href="/power-reaper-roaming-build/">sidebar</a></aside>"#,
+    fn only_todays_builds_are_reused() {
+        let tmp = std::env::temp_dir().join(format!(
+            "gw2bo-reuse-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&tmp).expect("temp dir");
+
+        let build = |url: &str, when: &str| BenchmarkBuild {
+            source: "guildjen".into(),
+            profession: "Necromancer".into(),
+            spec_name: "Scourge".into(),
+            mode: "WvW".into(),
+            role: "WvW Zerg Support".into(),
+            build_code: None,
+            gear_prefix: "Minstrel's".into(),
+            source_url: url.into(),
+            scraped_at: when.into(),
+            published: crate::providers::ProviderBuild {
+                rune_id: Some(24839),
+                prose: "Opener\nFrost Trap\nWeapon Swap\nMaul".into(),
+                ..Default::default()
+            },
+        };
+        // What the old extractor wrote: today's date, no ids.
+        let id_less = |url: &str| BenchmarkBuild {
+            published: crate::providers::ProviderBuild::default(),
+            ..build(url, "2026-09-06")
+        };
+        // Ids but no rotation: written today, before the scrape kept prose.
+        let prose_less = |url: &str| BenchmarkBuild {
+            published: crate::providers::ProviderBuild {
+                prose: String::new(),
+                ..build(url, "2026-09-06").published
+            },
+            ..build(url, "2026-09-06")
+        };
+
+        std::fs::write(
+            tmp.join("guildjen_necromancer_wvw.json"),
+            serde_json::to_string(&vec![
+                build("https://guildjen.com/fresh-build/", "2026-09-06"),
+                build("https://guildjen.com/stale-build/", "2026-09-05"),
+                // No URL is no key: it could never be matched anyway.
+                build("", "2026-09-06"),
+                // Today's, but written before the parsers existed.
+                id_less("https://guildjen.com/written-this-morning/"),
+                // Today's, with ids, but written before prose was kept.
+                prose_less("https://guildjen.com/no-rotation-yet/"),
+            ])
+            .unwrap(),
+        )
+        .expect("seed");
+
+        // An old-format file is not a source of truth even if it parses.
+        std::fs::write(
+            tmp.join("guildjen_comments_wvw.json"),
+            serde_json::to_string(&vec![build(
+                "https://guildjen.com/from-junk/",
+                "2026-09-06",
+            )])
+            .unwrap(),
+        )
+        .expect("seed");
+
+        let known = load_todays_builds(&tmp, "2026-09-06");
+        assert_eq!(known.len(), 1, "one reusable entry: {known:?}");
+        assert!(known.contains_key("https://guildjen.com/fresh-build/"));
+        assert!(!known.contains_key("https://guildjen.com/stale-build/"));
+        assert!(!known.contains_key("https://guildjen.com/from-junk/"));
+        assert!(
+            !known.contains_key("https://guildjen.com/written-this-morning/"),
+            "an id-less row is refetched, so the day's own cache cannot \
+             keep serving what the old extractor wrote"
         );
-        let links = extract_table_build_links(html, 10);
-        assert_eq!(
-            links,
-            vec![
-                "/power-hammer-luminary-roaming-build/".to_string(),
-                "https://guildjen.com/support-luminary-cloud-build/".to_string(),
-            ],
-            "only in-table build links, and never the sidebar"
+        assert!(
+            !known.contains_key("https://guildjen.com/no-rotation-yet/"),
+            "a row with ids but no prose is refetched too, or the sync that \
+             first captures rotations would reuse its way past every page"
         );
+
+        // A folder with nothing in it is not an error, it is a first run.
+        let empty = tmp.join("empty");
+        std::fs::create_dir_all(&empty).expect("temp dir");
+        assert!(load_todays_builds(&empty, "2026-09-06").is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Fixture is the real thing: these are the exact names found in a
+    /// player's benchmarks folder on 2026-09-05, written by the scraper
+    /// before it stopped reading the profession out of a URL path.
+    #[test]
+    fn prune_removes_only_what_no_version_still_writes() {
+        let tmp = std::env::temp_dir().join(format!(
+            "gw2bo-prune-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&tmp).expect("temp dir");
+
+        let junk = [
+            "guildjen_1.0_pvp.json",
+            "guildjen_10_wvw.json",
+            "guildjen_comments_pvp.json",
+            "guildjen_fonts_wvw.json",
+            "guildjen_pages_pvp.json",
+            "guildjen_https__wvw.json",
+            "guildjen_guildjen.com_pvp.json",
+        ];
+        let keep = [
+            "guildjen_guardian_pve.json",
+            "guildjen_necromancer_wvw.json",
+            "snowcrows_elementalist_pve.json",
+            "hardstuck_revenant_pvp.json",
+        ];
+        // Not ours, not a benchmark, not touched.
+        let bystander = "notes.txt";
+
+        for name in junk.iter().chain(keep.iter()) {
+            std::fs::write(tmp.join(name), "[]").expect("seed");
+        }
+        std::fs::write(tmp.join(bystander), "hello").expect("seed");
+
+        assert_eq!(prune_stale_benchmarks(&tmp), junk.len());
+        for name in junk {
+            assert!(!tmp.join(name).exists(), "{name} should be gone");
+        }
+        for name in keep {
+            assert!(tmp.join(name).exists(), "{name} must survive");
+        }
+        assert!(
+            tmp.join(bystander).exists(),
+            "a non-json file is none of our business"
+        );
+
+        // Idempotent: a second run finds nothing left to do.
+        assert_eq!(prune_stale_benchmarks(&tmp), 0);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The name test on its own, including the shapes that are nearly right.
+    #[test]
+    fn only_source_profession_mode_names_are_ours() {
+        assert!(is_current_benchmark_file("guildjen_necromancer_wvw.json"));
+        assert!(is_current_benchmark_file("snowcrows_guardian_pve.json"));
+
+        // Right shape, wrong middle: this is the whole bug class.
+        assert!(!is_current_benchmark_file("guildjen_comments_pvp.json"));
+        // A specialization is not a profession; save_builds writes the class.
+        assert!(!is_current_benchmark_file("guildjen_scourge_wvw.json"));
+        // Unknown source, unknown mode, empty segment, missing segment.
+        assert!(!is_current_benchmark_file("metabattle_guardian_pve.json"));
+        assert!(!is_current_benchmark_file("guildjen_guardian_raids.json"));
+        assert!(!is_current_benchmark_file("guildjen_https__wvw.json"));
+        assert!(!is_current_benchmark_file("guildjen_guardian.json"));
+        assert!(!is_current_benchmark_file("guildjen_guardian_pve.txt"));
+    }
+
+    /// A rate limit is a wait, not a refusal. Everything that means "slower"
+    /// has to be retryable AND slow the run down; everything that means "no"
+    /// must not be retried forever.
+    #[test]
+    fn pushback_is_told_apart_from_refusal() {
+        // Slow down: retried, and the whole run eases off.
+        for code in [403, 429, 503] {
+            assert!(retryable_status(code), "{code} must be retried");
+            assert!(throttling_status(code), "{code} must slow the run");
+        }
+        // Upstream having a moment: retried, but we were not the problem.
+        for code in [408, 425, 500, 502, 504] {
+            assert!(retryable_status(code), "{code} must be retried");
+            assert!(!throttling_status(code), "{code} is not about our rate");
+        }
+        // An answer. Asking again will not change it.
+        assert!(!retryable_status(404));
+        assert!(!retryable_status(410));
+    }
+
+    /// A challenge page arrives with status 200, so only the body gives it
+    /// away - and a real build page that happens to say "rate limit" in
+    /// prose must not be mistaken for one.
+    #[test]
+    fn rate_limit_interstitials_are_recognised_by_body() {
+        assert!(looks_rate_limited(
+            "<html><body>Attention Required! | Cloudflare</body></html>"
+        ));
+        assert!(looks_rate_limited("<html>Checking your browser...</html>"));
+        assert!(looks_rate_limited("<html>429 Too Many Requests</html>"));
+
+        let real_page = format!(
+            "<html><body>{}<p>Sigil of Concentration has no rate limit.</p></body></html>",
+            "<div>build content</div>".repeat(500)
+        );
+        assert!(real_page.len() > 8_192);
+        assert!(
+            !looks_rate_limited(&real_page),
+            "a full page is not an interstitial, whatever it mentions"
+        );
+    }
+
+    /// The site's own number wins over our guess, and only when it gave one
+    /// in the seconds form.
+    #[test]
+    fn retry_after_is_read_when_the_site_gives_one() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        assert_eq!(retry_after_ms(&headers), None);
+
+        headers.insert(
+            reqwest::header::RETRY_AFTER,
+            reqwest::header::HeaderValue::from_static("30"),
+        );
+        assert_eq!(retry_after_ms(&headers), Some(30_000));
+
+        // HTTP-date form: not parsed, and must not be read as 0.
+        headers.insert(
+            reqwest::header::RETRY_AFTER,
+            reqwest::header::HeaderValue::from_static("Wed, 21 Oct 2026 07:28:00 GMT"),
+        );
+        assert_eq!(retry_after_ms(&headers), None);
     }
 
     /// The category list is read off the sitemap so a category added or
@@ -1693,13 +2392,45 @@ mod tests {
         assert_eq!(extract_gear_prefix(html), "Viper's");
     }
 
+    /// A build is only what the page published as ids. The "Related Posts"
+    /// list at the foot of a GuildJen build names other builds'
+    /// specializations in prose, which is how 431 of 739 scraped builds
+    /// recorded Firebrand / Willbender / Dragonhunter whatever profession
+    /// they were.
+    ///
+    /// The old defence was to truncate the page at the chat code, which
+    /// helped only because the footer came after it. Reading ids instead
+    /// makes the position irrelevant: prose names nothing, wherever it sits.
     #[test]
-    fn test_extract_build_code() {
-        let html =
-            r#"Build code: [&DQYAAAAqASsATgA2ADYARgBGAEYARgAAAAAAAAAAAAAAAAAAAAAAAAA=] use it"#;
-        let code = extract_build_code(html);
-        assert!(code.is_some());
-        assert!(code.unwrap().starts_with("[&"));
+    fn prose_names_no_specializations_wherever_it_sits() {
+        let build = "[&DQYAAAAqASsATgA2ADYARgBGAEYARgAAAAAAAAAAAAAAAAAAAAAAAAA=]";
+        let html = format!(
+            "<aside>Related Posts: Firebrand, Willbender, Dragonhunter</aside>\
+             <h1>Celestial Tempest Roaming</h1><p>Tempest is the elite.</p>\
+             <code>{build}</code>\
+             <aside>More: Scourge, Reaper, Harbinger</aside>"
+        );
+        let b = benchmark_from_html(
+            &html,
+            "https://guildjen.com/celestial-tempest-roaming-build/",
+            "2026-09-06",
+            "guildjen",
+            "Elementalist".into(),
+            "Tempest".into(),
+            "WvW",
+            "WvW Roaming",
+        );
+        assert_eq!(
+            b.build_code.as_deref(),
+            Some(build),
+            "the code is found even with furniture on both sides of it"
+        );
+        assert!(
+            b.published.specs.is_empty(),
+            "no traitline was embedded, so the build claims none: {:?}",
+            b.published.specs
+        );
+        assert!(b.published.gear.is_empty(), "nor any gear");
     }
 
     #[test]
@@ -1712,36 +2443,9 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_rune() {
-        let html = "equip Superior Rune of the Scholar for best results";
-        let rune = extract_rune(html);
-        assert!(
-            rune.contains("Scholar"),
-            "rune='{}' should contain Scholar",
-            rune
-        );
-    }
-
-    #[test]
-    fn test_strip_tags() {
-        assert_eq!(strip_tags("<b>hello</b> world"), "hello world");
-        assert_eq!(strip_tags("no tags here"), "no tags here");
-    }
-
-    #[test]
     fn test_title_case() {
         assert_eq!(title_case("power-dps"), "Power-dps");
         assert_eq!(title_case("guardian firebrand"), "Guardian Firebrand");
-    }
-
-    #[test]
-    fn extract_traits_includes_luminary_from_shared_known_specs() {
-        assert!(
-            KNOWN_SPECS.contains(&"luminary"),
-            "KNOWN_SPECS must include luminary"
-        );
-        let traits = extract_traits("<h2>Luminary</h2>");
-        assert_eq!(traits, vec!["Luminary".to_string()]);
     }
 
     #[test]
@@ -1920,7 +2624,13 @@ mod tests {
         let client = build_client().expect("client build must succeed");
 
         let start = Instant::now();
-        let result = scrape_snowcrows(&client, "2026-04-16", &predicate, &|_, _| {});
+        let result = scrape_snowcrows(
+            &client,
+            "2026-04-16",
+            &HashMap::new(),
+            &predicate,
+            &|_, _| {},
+        );
         let elapsed = start.elapsed();
 
         assert!(
@@ -1929,7 +2639,7 @@ mod tests {
             elapsed
         );
         match result {
-            Ok((builds, cancelled)) => {
+            Ok((builds, cancelled, _failed)) => {
                 assert!(cancelled, "cancelled flag must be true");
                 assert!(
                     builds.is_empty(),
@@ -1961,7 +2671,13 @@ mod tests {
         let client = build_client().expect("client build must succeed");
 
         let start = Instant::now();
-        let result = scrape_hardstuck(&client, "2026-04-16", &predicate, &|_, _| {});
+        let result = scrape_hardstuck(
+            &client,
+            "2026-04-16",
+            &HashMap::new(),
+            &predicate,
+            &|_, _| {},
+        );
         let elapsed = start.elapsed();
 
         assert!(
@@ -1970,7 +2686,7 @@ mod tests {
             elapsed
         );
         match result {
-            Ok((builds, cancelled)) => {
+            Ok((builds, cancelled, _failed)) => {
                 assert!(cancelled, "cancelled flag must be true");
                 assert!(
                     builds.is_empty(),
@@ -2013,11 +2729,15 @@ mod tests {
                 println!("  {mode:4} {url}");
             }
             assert!(
-                categories.iter().any(|(u, m)| u.contains("wvw") && *m == "WvW"),
+                categories
+                    .iter()
+                    .any(|(u, m)| u.contains("wvw") && *m == "WvW"),
                 "the WvW category must be discovered"
             );
             assert!(
-                categories.iter().any(|(u, m)| u.contains("pvp") && *m == "PvP"),
+                categories
+                    .iter()
+                    .any(|(u, m)| u.contains("pvp") && *m == "PvP"),
                 "the PvP category must be discovered"
             );
             assert!(
@@ -2029,25 +2749,58 @@ mod tests {
 
         if let Ok(p) = std::env::var("GUILDJEN_CATEGORY_HTML") {
             let html = std::fs::read_to_string(&p).expect("category html readable");
-            let links = extract_table_build_links(&html, 500);
-            println!("-- {} build links from the category tables --", links.len());
-            assert!(!links.is_empty(), "a category page must yield build links");
+            let rows = crate::providers::guildjen::index_rows(&html);
+            println!("-- {} builds listed by the index --", rows.len());
+            assert!(!rows.is_empty(), "a category page must list builds");
 
-            // Every link has to name a profession or the scrape drops it.
+            // The index files each build under a profession itself, so the
+            // slug is only the fallback. A row with neither is dropped.
             let mut unfiled = Vec::new();
-            for href in &links {
-                let slug = href.trim_end_matches('/').rsplit('/').next().unwrap_or("");
-                match profession_from_slug(slug) {
-                    Some((prof, spec)) => println!("  {prof:12} {spec:14} {slug}"),
-                    None => unfiled.push(slug.to_string()),
+            for row in &rows {
+                let slug = row
+                    .url
+                    .trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or("");
+                if !row.profession.is_empty() {
+                    println!(
+                        "  {:12} {:24} roles {:?} play {:?}",
+                        row.profession, row.name, row.roles, row.playstyles
+                    );
+                } else if let Some((prof, spec)) = profession_from_slug(slug) {
+                    println!("  {prof:12} {spec:14} {slug}  (from slug)");
+                } else {
+                    unfiled.push(slug.to_string());
                 }
             }
             assert!(
                 unfiled.is_empty(),
                 "{} of {} builds name no profession and would be dropped: {:?}",
                 unfiled.len(),
-                links.len(),
+                rows.len(),
                 unfiled
+            );
+
+            // What the sync asks for, and the classes it covers. Every row
+            // is fetched now, so this is the whole table.
+            let links = rows.clone();
+            let by_class = group_rows_by_profession(rows);
+            let covered: Vec<String> = by_class
+                .iter()
+                .map(|(c, l)| format!("{c} x{}", l.len()))
+                .collect();
+            let fetched: usize = by_class.iter().map(|(_, l)| l.len()).sum();
+            println!(
+                "-- {fetched} fetched across {} classes: {} --",
+                by_class.len(),
+                covered.join(", ")
+            );
+            assert_eq!(fetched, links.len(), "every listed build is fetched");
+            assert!(
+                by_class.len() >= 8,
+                "a full page must cover nearly every class, got {}: {covered:?}",
+                by_class.len()
             );
             checked += 1;
         }
@@ -2075,7 +2828,13 @@ mod tests {
         let client = build_client().expect("client build must succeed");
 
         let start = Instant::now();
-        let result = scrape_guildjen(&client, "2026-04-16", &predicate, &|_, _| {});
+        let result = scrape_guildjen(
+            &client,
+            "2026-04-16",
+            &HashMap::new(),
+            &predicate,
+            &|_, _| {},
+        );
         let elapsed = start.elapsed();
 
         assert!(
@@ -2084,7 +2843,7 @@ mod tests {
             elapsed
         );
         match result {
-            Ok((builds, cancelled)) => {
+            Ok((builds, cancelled, _failed)) => {
                 assert!(cancelled, "cancelled flag must be true");
                 assert!(
                     builds.is_empty(),
@@ -2099,23 +2858,21 @@ mod tests {
         );
     }
 
-    fn sample_guardian_pve(notes: &str) -> BenchmarkBuild {
+    /// `marker` rides on `spec_name` so a test can tell one written row from
+    /// another on disk. It does not affect the filename, which is built from
+    /// source, profession and mode.
+    fn sample_guardian_pve(marker: &str) -> BenchmarkBuild {
         BenchmarkBuild {
             source: "snowcrows".into(),
             profession: "Guardian".into(),
-            spec_name: "Firebrand".into(),
+            spec_name: marker.into(),
             mode: "PvE".into(),
             role: "Power DPS".into(),
             build_code: None,
             gear_prefix: "Berserker's".into(),
-            rune: "Scholar".into(),
-            sigils: vec!["Force".into(), "Accuracy".into()],
-            relic: "Fireworks".into(),
-            traits: vec!["Radiance".into(), "Honor".into(), "Firebrand".into()],
-            skills: vec![],
             source_url: "https://snowcrows.com/builds/raids/guardian/firebrand".into(),
             scraped_at: "2026-08-01".into(),
-            notes: notes.into(),
+            ..Default::default()
         }
     }
 
@@ -2141,7 +2898,7 @@ mod tests {
         let before = std::fs::read(&seeded_path).expect("read seed");
 
         let partial = sample_guardian_pve("SHOULD_NOT_LAND_ON_DISK");
-        let result = finish_source("snowcrows", Ok((vec![partial], true)), &tmp, &|_, _| {});
+        let result = finish_source("snowcrows", Ok((vec![partial], true, 0)), &tmp, &|_, _| {});
 
         assert_eq!(
             result.error.as_deref(),
@@ -2166,7 +2923,7 @@ mod tests {
         );
         assert!(
             !on_disk.contains("SHOULD_NOT_LAND_ON_DISK"),
-            "partial notes must not replace the last-good file"
+            "the partial must not replace the last-good file"
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -2189,7 +2946,7 @@ mod tests {
         );
         let result = finish_source(
             "snowcrows",
-            Ok((vec![sample_guardian_pve("x")], false)),
+            Ok((vec![sample_guardian_pve("x")], false, 0)),
             &missing,
             &|_, _| {},
         );
@@ -2197,6 +2954,149 @@ mod tests {
             result.error.as_ref().is_some_and(|e| e.contains("write")),
             "finish_source must not report done on silent write, got {:?}",
             result.error
+        );
+    }
+
+    /// The stored role is where the build is played, then what it does
+    /// there — in the words the player's own role chips use, because
+    /// `find_best_benchmark` ranks candidates by word overlap between the
+    /// two. Every one of these vocabularies was measured across GuildJen's
+    /// five category indexes on 2026-09-06.
+    #[test]
+    fn the_role_reads_as_scale_then_job_in_the_players_own_words() {
+        use crate::providers::guildjen::IndexRow;
+        let row = |name: &str, roles: &[&str], playstyles: &[&str]| IndexRow {
+            url: "https://guildjen.com/x-build/".into(),
+            name: name.into(),
+            profession: "Guardian".into(),
+            roles: roles.iter().map(|r| r.to_string()).collect(),
+            playstyles: playstyles.iter().map(|p| p.to_string()).collect(),
+            difficulty: "easy".into(),
+        };
+
+        for (mode, category, name, roles, playstyles, want) in [
+            // Open world states a playstyle and usually no role, so the
+            // build's own name is the whole answer.
+            (
+                "PvE",
+                "Open World",
+                "Power Vengeance Dragonhunter",
+                &[][..],
+                &["bossing"][..],
+                "Open World Power DPS",
+            ),
+            (
+                "PvE",
+                "Open World",
+                "Heal DPS Luminary",
+                &["support", "tank"][..],
+                &["cooperative"][..],
+                "Open World Healer",
+            ),
+            // A raid states `dps`, which does not say which kind. The name
+            // does.
+            (
+                "PvE",
+                "Raid",
+                "Condition Reaper",
+                &["dps"][..],
+                &[][..],
+                "Raid Condi DPS",
+            ),
+            (
+                "PvE",
+                "Fractal",
+                "Heal Alacrity Druid",
+                &["support"][..],
+                &[][..],
+                "Fractal Healer",
+            ),
+            // WvW: the site's role words are the ones the chips use, and
+            // reading the name instead would call this a Hybrid.
+            (
+                "WvW",
+                "Wvw",
+                "Celestial Spear Antiquary",
+                &["bruiser"][..],
+                &["roaming"][..],
+                "Roaming Bruiser",
+            ),
+            // Smallest playstyle first: a havoc build can join a cloud.
+            (
+                "WvW",
+                "Wvw",
+                "Power Staff Daredevil",
+                &["assassin"][..],
+                &["cloud", "havoc"][..],
+                "Havoc Assassin",
+            ),
+            // PvP is always five a side, so it records no scale.
+            (
+                "PvP",
+                "Pvp",
+                "Support Firebrand",
+                &["support"][..],
+                &[][..],
+                "Support",
+            ),
+            (
+                "PvP",
+                "Pvp",
+                "Power Willbender",
+                &["duelist"][..],
+                &[][..],
+                "Duelist",
+            ),
+        ] {
+            let row = row(name, roles, playstyles);
+            let got = crate::providers::role_label(
+                &guildjen_scale(mode, category, &row),
+                &guildjen_job(mode, &row),
+            );
+            assert_eq!(got, want, "{mode} {name}");
+        }
+    }
+
+    /// Every branch of the old classifier returned a WvW label, including
+    /// the fallback, so all 411 stored GuildJen rows read "WvW Roaming" —
+    /// Elementalist PvE ones included.
+    #[test]
+    fn a_pve_build_is_never_labelled_with_wvw_words() {
+        use crate::providers::guildjen::IndexRow;
+        let row = IndexRow {
+            url: "https://guildjen.com/celestial-tempest-open-world-build/".into(),
+            name: "Celestial Earthquake Tempest".into(),
+            profession: "Elementalist".into(),
+            roles: vec![],
+            playstyles: vec!["cooperative".into()],
+            difficulty: "medium".into(),
+        };
+        let role = crate::providers::role_label(
+            &guildjen_scale("PvE", "Open World", &row),
+            &guildjen_job("PvE", &row),
+        );
+        assert_eq!(role, "Open World Hybrid");
+        for wvw_word in ["Roaming", "Havoc", "Cloud", "Zerg", "WvW"] {
+            assert!(
+                !role.contains(wvw_word),
+                "a PvE build must not be labelled {wvw_word}: {role}"
+            );
+        }
+    }
+    /// The em dash that killed a 328-page sync was a byte-index slice into
+    /// text exactly like this. Every cut point here lands mid-character.
+    #[test]
+    fn prose_is_cut_on_a_character_boundary() {
+        let text = "Sword 2 \u{2014} Dagger 5 \u{2014} Sword 111";
+        for limit in 0..text.len() + 4 {
+            let cut = truncate_chars(text, limit);
+            assert!(cut.len() <= limit, "{limit}: {cut:?} exceeds the cap");
+            assert!(text.starts_with(&cut), "{limit}: {cut:?} is not a prefix");
+        }
+        assert_eq!(
+            truncate_chars(text, text.len()),
+            text,
+            "under the cap, intact"
         );
     }
 }

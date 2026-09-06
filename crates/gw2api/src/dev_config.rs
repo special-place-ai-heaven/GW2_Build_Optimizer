@@ -14,9 +14,8 @@ use std::path::PathBuf;
 const FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../dev.cfg");
 
 pub fn load() -> Result<HashMap<String, String>, String> {
-    let text = std::fs::read_to_string(FILE).map_err(|e| {
-        format!("{FILE}: {e}. Copy dev.cfg.example to dev.cfg and set addons_dir.")
-    })?;
+    let text = std::fs::read_to_string(FILE)
+        .map_err(|e| format!("{FILE}: {e}. Copy dev.cfg.example to dev.cfg and set addons_dir."))?;
     Ok(text
         .lines()
         .map(str::trim)
@@ -39,9 +38,7 @@ pub fn addons_dir() -> Result<PathBuf, String> {
 /// The addon's cache directory, `<addons_dir>/<addon dir>/cache`, the same
 /// layout Nexus gives the running DLL.
 pub fn cache_dir() -> Result<PathBuf, String> {
-    Ok(addons_dir()?
-        .join(gw2_core::ADDON_DIR_NAME)
-        .join("cache"))
+    Ok(addons_dir()?.join(gw2_core::ADDON_DIR_NAME).join("cache"))
 }
 
 /// `cache_dir`, or exit 2 with the reason on stderr. For examples.
