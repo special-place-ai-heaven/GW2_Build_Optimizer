@@ -413,6 +413,21 @@ mod tests {
     }
 
     #[test]
+    fn onboarding_howto_falls_back_to_english() {
+        with_lang("en", || {
+            assert_ne!(t("setup.ai_howto"), "setup.ai_howto");
+            assert!(t("setup.ai_howto").contains("do not have to pay"));
+        });
+        with_lang("de", || {
+            assert_eq!(
+                t("setup.ai_howto"),
+                "The addon needs an API key from an AI company. You do not have to pay. Most people make a free OpenRouter or Google account and stay on free models."
+            );
+            assert_eq!(t("setup.free_tag"), "(free)");
+        });
+    }
+
+    #[test]
     fn french_translates_settings() {
         with_lang("fr", || {
             assert_eq!(t("tab.settings"), "Paramètres");

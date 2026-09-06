@@ -2,6 +2,7 @@ use nexus::imgui::Ui;
 
 use crate::state::{AddonState, DownloadState, KeyStatus, Screen, SetupStep};
 use crate::ui::theme;
+use gw2_core::config::LlmProvider;
 use gw2_core::i18n::{t, tf};
 
 thread_local! {
@@ -317,19 +318,26 @@ fn render_gw2_key_step(ui: &Ui, state: &mut AddonState) {
 }
 
 fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
-    use gw2_core::config::LlmProvider;
-
     theme::header(ui, &t("setup.ai_header"));
     ui.spacing();
 
-    ui.text_wrapped(t("setup.ai_intro"));
+    ui.text_wrapped(t("setup.ai_howto"));
+    ui.spacing();
+    ui.text_wrapped(t("setup.ai_pick"));
     ui.spacing();
 
-    // Provider radio buttons
+    // Provider radio buttons. Gemini and OpenRouter are the free-account path
+    // 1.12.0 was built around; the tag is so that is visible before the
+    // per-provider steps below.
     ui.text(t("setup.provider"));
     for provider in &LlmProvider::ALL {
-        let label = provider.label();
-        if ui.radio_button_bool(label, state.config.active_provider == *provider)
+        let label = match provider {
+            LlmProvider::Gemini | LlmProvider::OpenRouter => {
+                format!("{} {}", provider.label(), t("setup.free_tag"))
+            }
+            _ => provider.label().to_string(),
+        };
+        if ui.radio_button_bool(&label, state.config.active_provider == *provider)
             && state.config.active_provider != *provider
         {
             state.config.active_provider = provider.clone();
@@ -346,28 +354,10 @@ fn render_llm_key_step(ui: &Ui, state: &mut AddonState) {
     ui.spacing();
 
     // Provider-specific help text and URL
-    let (help_key, url, next_key) = match state.config.active_provider {
-        LlmProvider::Gemini => (
-            "setup.gemini_help",
-            "https://aistudio.google.com/apikey",
-            "setup.gemini_next",
-        ),
-        LlmProvider::OpenAI => (
-            "setup.openai_help",
-            "https://platform.openai.com/api-keys",
-            "setup.openai_next",
-        ),
-        LlmProvider::Anthropic => (
-            "setup.anthropic_help",
-            "https://console.anthropic.com/settings/keys",
-            "setup.anthropic_next",
-        ),
-        LlmProvider::OpenRouter => (
-            "setup.openrouter_help",
-            "https://openrouter.ai/keys",
-            "setup.openrouter_next",
-        ),
-    };
+    let provider = &state.config.active_provider;
+    let help_key = provider.setup_howto_key();
+    let url = provider.key_page_url();
+    let next_key = provider.setup_steps_key();
     let help_text = t(help_key);
     let url_instructions = t(next_key);
 
@@ -809,5 +799,20 @@ mod tests {
             key_field_is_masked(llm_default_revealed),
             "the LLM key field must be masked on first render"
         );
+    }
+
+    /// New howto keys live in en.json only; `t()` must not echo the key name.
+    /// URLs come from [`LlmProvider::key_page_url`] — one table for both screens.
+    #[test]
+    fn every_provider_has_english_howto() {
+        for provider in &LlmProvider::ALL {
+            let help = provider.setup_howto_key();
+            let next = provider.setup_steps_key();
+            assert_ne!(t(help), help, "{help} is missing from the English catalog");
+            assert_ne!(t(next), next, "{next} is missing from the English catalog");
+        }
+        assert_ne!(t("setup.ai_howto"), "setup.ai_howto");
+        assert_ne!(t("setup.ai_pick"), "setup.ai_pick");
+        assert_ne!(t("setup.free_tag"), "setup.free_tag");
     }
 }
