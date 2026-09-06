@@ -789,7 +789,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W026
 
-- Task: T039 [US3]. Status: **planned**.
+- Task: T039 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/gemini_tools.rs:1913`.
 - Dependencies: W032.
 
@@ -797,7 +797,7 @@ Claim: This is the third independent parser of GW2 rune-bonus strings in the opt
 
 Remediation decision: Extract one tokenizer (markup strip + number/percent/stat-name extraction) into a shared module and have all three call sites map its output into their own result type, rather than each re-scanning the raw string.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `text_util::percent_clauses` walks every `N%`; combat `parse_percent_clauses` and synergy (via `apply_upgrade_text`) consume it. Gemini `extract_number` is `first_number(strip_gw2_markup(text))`. `percent_clauses_keeps_each_clause`, `first_number_reads_stat_bonus`, and `parse_percent_clauses_keeps_both_duration_bonuses` passed.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
@@ -971,7 +971,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W043
 
-- Task: T052 [US3]. Status: **planned**.
+- Task: T052 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/text_util.rs:14`.
 - Dependencies: W032.
 
@@ -979,7 +979,7 @@ Claim: `extract_percent_before` is gated `#[cfg(test)]`, so it is not compiled i
 
 Remediation decision: Either delete `extract_percent_before` and its 6 tests outright, or drop the `#[cfg(test)]` gate and make combat.rs/synergy.rs actually call it — then the comment becomes true. Do not leave it as-is. If deleted, move the closest-percent regression assertion onto whichever production function now owns that behaviour.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Deleted `extract_percent_before` and its tests. Multi-clause regression now lives on `parse_percent_clauses_keeps_both_duration_bonuses` (10% condi + 5% boon both land).
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 

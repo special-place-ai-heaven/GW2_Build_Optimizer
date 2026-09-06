@@ -1080,59 +1080,34 @@ fn parse_rune_modifier(mods: &mut DamageModifiers, bonus: &str) {
 pub(crate) fn parse_percent_clauses(mods: &mut DamageModifiers, text: &str) -> bool {
     let s = strip_gw2_markup(text).trim().to_lowercase();
     let stacks = stack_multiplier(&s);
-    let mut from = 0;
     let mut any = false;
-    while let Some(rel) = s[from..].find('%') {
-        let pct_idx = from + rel;
-        let is_num_part = |c: char| c.is_ascii_digit() || c == '.' || c == '-' || c == '−';
-        let num_start = s[..pct_idx]
-            .char_indices()
-            .rev()
-            .find(|(_, c)| !is_num_part(*c))
-            .map(|(i, c)| i + c.len_utf8())
-            .unwrap_or(0);
-        if num_start >= pct_idx {
-            from = pct_idx + 1;
+    for clause in crate::text_util::percent_clauses(text) {
+        let hay = &clause.hay;
+        if percent_text_is_ignored(hay) {
             continue;
         }
-        let num = s[num_start..pct_idx].replace('−', "-");
-        let Ok(value) = num.parse::<f64>() else {
-            from = pct_idx + 1;
-            continue;
-        };
-        let rest = s[pct_idx + 1..].trim();
-        let before = s[..num_start].trim();
-        let hay = format!("{before} {rest}");
-        if percent_text_is_ignored(&hay) {
-            from = pct_idx + 1;
+        if percent_is_vs_target(&clause.after) {
             continue;
         }
-        if percent_is_vs_target(rest) {
-            from = pct_idx + 1;
+        if upgrade_unreliable(&s) || upgrade_unreliable(hay) {
             continue;
         }
-        if upgrade_unreliable(&s) || upgrade_unreliable(&hay) {
-            from = pct_idx + 1;
-            continue;
-        }
-        if percent_text_is_conditional(&hay)
+        if percent_text_is_conditional(hay)
             && stacks <= 1.0
-            && !text_lower_has_90hp(&hay)
-            && !easy_rotation_trigger(&hay)
+            && !text_lower_has_90hp(hay)
+            && !easy_rotation_trigger(hay)
         {
-            from = pct_idx + 1;
             continue;
         }
         let stacks = if upgrade_unreliable(&s) { 0.0 } else { stacks };
         let uptime = upgrade_uptime(&s);
-        let scaled = value * stacks * uptime;
+        let scaled = clause.value * stacks * uptime;
         let decimal = scaled / 100.0;
-        if apply_percent_category(mods, &hay, scaled, decimal, false) {
+        if apply_percent_category(mods, hay, scaled, decimal, false) {
             any = true;
         } else {
             mods.unparsed.push(text.to_string());
         }
-        from = pct_idx + 1;
     }
     any
 }
@@ -1948,6 +1923,19 @@ mod tests {
             icon: None,
             percent: Some(percent),
         }
+    }
+
+    #[test]
+    fn parse_percent_clauses_keeps_both_duration_bonuses() {
+        let mut mods = DamageModifiers::default();
+        assert!(parse_percent_clauses(
+            &mut mods,
+            "+10% condition duration. +5% boon duration.",
+        ));
+        assert_eq!(mods.condi_duration_pct.len(), 1);
+        assert!((mods.condi_duration_pct[0] - 0.10).abs() < 0.001);
+        assert_eq!(mods.boon_duration_pct.len(), 1);
+        assert!((mods.boon_duration_pct[0] - 0.05).abs() < 0.001);
     }
 
     #[test]
