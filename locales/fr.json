@@ -309,6 +309,7 @@
   "btn.cancel": "Annuler",
   "btn.clear_results": "Effacer les résultats",
   "btn.clear_cache": "Vider le cache",
+  "settings.clear_cache_q": "Supprimer les {size} de données Guild Wars 2 téléchargées — chaque objet, compétence, trait et icône — et tout retélécharger ? Pas besoin de ça pour rafraîchir des données périmées : Actualiser les données est là pour ça.",
   "btn.refresh_game": "Actualiser les données",
   "btn.reset_setup": "Réinitialiser",
   "btn.yes_reset": "Oui, réinitialiser",

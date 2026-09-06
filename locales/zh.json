@@ -309,6 +309,7 @@
   "btn.cancel": "取消",
   "btn.clear_results": "清除结果",
   "btn.clear_cache": "清除缓存",
+  "settings.clear_cache_q": "删除已下载的全部 Guild Wars 2 数据（{size}）——每一个物品、技能、特性和图标——并重新下载？刷新过期数据不需要这样做：那用刷新游戏数据即可。",
   "btn.refresh_game": "刷新游戏数据",
   "btn.reset_setup": "重置设置向导",
   "btn.yes_reset": "是，重置",

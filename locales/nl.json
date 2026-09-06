@@ -309,6 +309,7 @@
   "btn.cancel": "Annuleren",
   "btn.clear_results": "Resultaten wissen",
   "btn.clear_cache": "Cache wissen",
+  "settings.clear_cache_q": "Alle {size} aan gedownloade Guild Wars 2-data wissen — elk item, elke skill, elke trait en elk icoon — en alles opnieuw downloaden? Dat is niet nodig om verouderde data te verversen: gebruik daarvoor Speldata vernieuwen.",
   "btn.refresh_game": "Speldata vernieuwen",
   "btn.reset_setup": "Setup resetten",
   "btn.yes_reset": "Ja, resetten",

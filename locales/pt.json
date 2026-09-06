@@ -309,6 +309,7 @@
   "btn.cancel": "Cancelar",
   "btn.clear_results": "Limpar resultados",
   "btn.clear_cache": "Limpar cache",
+  "settings.clear_cache_q": "Apagar os {size} de dados descarregados do Guild Wars 2 — cada item, skill, trait e ícone — e descarregar tudo outra vez? Não é preciso para refrescar dados antigos: para isso usa Atualizar dados do jogo.",
   "btn.refresh_game": "Atualizar dados do jogo",
   "btn.reset_setup": "Repor configuração",
   "btn.yes_reset": "Sim, repor",

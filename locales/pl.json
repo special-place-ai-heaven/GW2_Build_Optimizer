@@ -309,6 +309,7 @@
   "btn.cancel": "Anuluj",
   "btn.clear_results": "Wyczyść wyniki",
   "btn.clear_cache": "Wyczyść pamięć podręczną",
+  "settings.clear_cache_q": "Usunąć wszystkie pobrane dane Guild Wars 2 ({size}) — każdy przedmiot, umiejętność, trait i ikonę — i pobrać wszystko od nowa? Do odświeżenia nieaktualnych danych to niepotrzebne: służy do tego Odśwież dane gry.",
   "btn.refresh_game": "Odśwież dane gry",
   "btn.reset_setup": "Zresetuj konfigurację",
   "btn.yes_reset": "Tak, zresetuj",

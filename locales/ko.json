@@ -309,6 +309,7 @@
   "btn.cancel": "취소",
   "btn.clear_results": "결과 지우기",
   "btn.clear_cache": "캐시 지우기",
+  "settings.clear_cache_q": "내려받은 Guild Wars 2 데이터 {size}, 즉 아이템, 스킬, 특성, 아이콘 전부를 지우고 다시 받을까요? 오래된 데이터를 갱신하는 데는 필요 없습니다. 그건 게임 데이터 새로고침으로 하세요.",
   "btn.refresh_game": "게임 데이터 새로고침",
   "btn.reset_setup": "설정 초기화",
   "btn.yes_reset": "예, 초기화",
