@@ -282,12 +282,18 @@ impl LlmClient for OpenAiClient {
             reasoning_details: None,
         }];
 
+        let gathering_until = std::time::Instant::now() + super::openai_compat::TOOL_PHASE_BUDGET;
         for turn in 0..max_turns {
             // Between turns as well as inside the stream: a tool loop is up to
             // max_turns whole requests, so checking only inside one of them
             // still leaves the worker running after the flag flips.
             if super::cancel::is_cancelled() {
                 return Err(LlmError::Unavailable(super::cancel::CANCELLED.to_string()));
+            }
+            // Out of clock for lookups. Every tool result so far is already in
+            // `messages`, so the closing request below answers from them.
+            if turn > 0 && std::time::Instant::now() >= gathering_until {
+                break;
             }
             trim_openai_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
             let response = match self.send_chat(&messages, Some(tools)) {
@@ -297,6 +303,11 @@ impl LlmClient for OpenAiClient {
                 Err(e) if is_function_call_failure(&e) => {
                     self.send_chat(&closing_request(&messages), None)?
                 }
+                // One round ran out its deadline. Earlier rounds gathered real
+                // tool results and throwing them away to report a stopwatch is
+                // the worst of both: the player waited and got nothing. Break
+                // to the closing request and answer from what is in hand.
+                Err(e) if super::openai_compat::is_deadline(&e) && turn > 0 => break,
                 Err(e) => return Err(e),
             };
 

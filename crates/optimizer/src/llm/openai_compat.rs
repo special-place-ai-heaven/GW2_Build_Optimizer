@@ -100,6 +100,33 @@ pub(crate) fn is_function_call_failure(err: &LlmError) -> bool {
         .contains("MALFORMED_FUNCTION_CALL")
 }
 
+/// Marker written into the error a per-request deadline produces, so a tool
+/// loop can tell "this round ran out of clock" from any other transport
+/// failure. See [`is_deadline`].
+pub(crate) const DEADLINE_MARKER: &str = "(no reply within";
+
+/// Whether `err` is a per-request deadline rather than a transport failure.
+pub(crate) fn is_deadline(err: &LlmError) -> bool {
+    matches!(err, LlmError::Http(message) if message.contains(DEADLINE_MARKER))
+}
+
+/// Wall clock for the tool-*gathering* phase of one logical call, after which
+/// the loop stops looking things up and writes the answer from what it has.
+///
+/// [`CHAT_REQUEST_TIMEOUT`] bounds one request. Nothing bounded the run: a
+/// chat message is up to `max_turns` tool rounds plus a closing request, and
+/// the chat flow gives a refused plate a second go, so one message was up to
+/// 18 sequential completions of 420 s each. In-game 2026-09-06 the player's
+/// usage counter recorded 8 requests in one minute for a single message on
+/// `minimax/minimax-m3:free` and the run ended on the deadline with nothing
+/// served - which is what "no free model gives any result" was.
+///
+/// A free model answers a tool round in 20-90 s, so 150 s buys two or three
+/// rounds and a paid model still finishes its five in under thirty. The point
+/// is not to make slow models fast; it is that a run must end in an answer
+/// rather than in a stopwatch.
+pub(crate) const TOOL_PHASE_BUDGET: Duration = Duration::from_secs(150);
+
 /// Completion ceiling per chat completion, hidden thinking included, so a
 /// reasoning model cannot spend the budget deliberating and have nothing left
 /// to answer with.
@@ -422,7 +449,7 @@ pub(crate) fn send_chat(
             // chat loop runs up to eight of them.
             Err(e) if e.is_timeout() => {
                 return Err(LlmError::Http(format!(
-                    "{e} (no reply within {}s)",
+                    "{e} {DEADLINE_MARKER} {}s)",
                     core.request_timeout.as_secs()
                 )));
             }
