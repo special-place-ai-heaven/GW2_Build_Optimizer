@@ -34,7 +34,39 @@ fn main() {
             std::process::exit(2);
         }
     };
-    println!("{} synced builds, {} skills in db", builds.len(), db.skills.len());
+    println!(
+        "{} synced builds, {} skills, {} palette entries in db",
+        builds.len(),
+        db.skills.len(),
+        db.palette_to_skill.len()
+    );
+    {
+        let mut have_code = 0;
+        let mut decoded = 0;
+        let mut resolved = 0;
+        let mut marked = 0;
+        for b in &builds {
+            if !b.published.skill_ids.is_empty() {
+                marked += 1;
+            }
+            let Some(code) = b.published.build_code.as_deref() else {
+                continue;
+            };
+            have_code += 1;
+            let Some(t) = gw2_optimizer::build_template::decode(code) else {
+                continue;
+            };
+            decoded += 1;
+            if t.skills.iter().any(|pid| {
+                *pid != 0 && db.palette_to_skill.get(pid).is_some_and(|id| db.skills.contains_key(id))
+            }) {
+                resolved += 1;
+            }
+        }
+        println!(
+            "  skills marked up on {marked}; chat code on {have_code}, decodes {decoded},              palette resolves for {resolved}"
+        );
+    }
 
     // gate -> (passed, failed); plus the first few failing notes per gate so a
     // number can be chased back to a build.
@@ -187,14 +219,16 @@ fn plate_from(build: &BenchmarkBuild, db: &GameDb) -> Option<GeminiBuildResponse
         .map(|g| g.slot.clone())
         .filter(|s| WEAPONS.contains(&s.to_lowercase().as_str()))
         .collect();
+    // Heal, three utilities and elite. Sites vary on whether they mark these
+    // up at all — GuildJen mostly does not — but nearly every page publishes
+    // a chat code, and the code carries them as palette ids. Weapons decide
+    // skills 1-5 and are resolved from the profession; 6-0 are chosen, and
+    // this is where the choice is written down.
+    let skills = published_skills(p, db);
     Some(GeminiBuildResponse {
         specializations,
         weapons,
-        skills: p
-            .skill_ids
-            .iter()
-            .filter_map(|id| db.skills.get(id).map(|s| s.name.clone()))
-            .collect(),
+        skills,
         rune: name(p.rune_id),
         sigils: p
             .sigil_ids
@@ -207,6 +241,60 @@ fn plate_from(build: &BenchmarkBuild, db: &GameDb) -> Option<GeminiBuildResponse
             .unwrap_or_else(|| build.gear_prefix.clone()),
         ..Default::default()
     })
+}
+
+/// The slot skills a build published, labelled the way a plate labels them.
+///
+/// `validation::parse_skill_names_from_response` reads `Heal: `, `Utils: `
+/// and `Elite: ` prefixes, not a bare list — the model answers in labelled
+/// lines and this has to speak the same shape.
+///
+/// Both sources are POSITIONAL: heal, three utilities, elite, with a zero or
+/// a gap for an empty slot. Compacting the list before labelling it turns a
+/// build with no elite into one whose elite is its last utility.
+fn published_skills(p: &gw2_optimizer::providers::ProviderBuild, db: &GameDb) -> Vec<String> {
+    let by_id = |id: u32| db.skills.get(&id).map(|s| s.name.clone());
+    let slots: Vec<Option<String>> = if !p.skill_ids.is_empty() {
+        p.skill_ids.iter().map(|id| by_id(*id)).collect()
+    } else {
+        // Nearly every page ships a chat code even when it marks up no
+        // skills, and the code carries the slot bar as PALETTE ids.
+        let Some(template) = p
+            .build_code
+            .as_deref()
+            .and_then(gw2_optimizer::build_template::decode)
+        else {
+            return Vec::new();
+        };
+        template
+            .skills
+            .iter()
+            .map(|palette| {
+                if *palette == 0 {
+                    return None;
+                }
+                db.palette_to_skill.get(palette).copied().and_then(by_id)
+            })
+            .collect()
+    };
+
+    let mut lines = Vec::new();
+    if let Some(Some(heal)) = slots.first() {
+        lines.push(format!("Heal: {heal}"));
+    }
+    let utils: Vec<String> = slots
+        .iter()
+        .skip(1)
+        .take(3)
+        .filter_map(|s| s.clone())
+        .collect();
+    if !utils.is_empty() {
+        lines.push(format!("Utils: {}", utils.join(", ")));
+    }
+    if let Some(Some(elite)) = slots.get(4) {
+        lines.push(format!("Elite: {elite}"));
+    }
+    lines
 }
 
 /// The scenario a published build was written for, as near as its own labels say.
