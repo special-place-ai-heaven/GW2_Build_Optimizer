@@ -604,9 +604,14 @@ fn draw_quip_bubble(
             let (sn, cs) = ang.sin_cos();
             let p2 = [bc[0] + cs * 52.0 - sn * 5.0, bc[1] + sn * 52.0 + cs * 5.0];
             let p3 = [bc[0] + cs * 52.0 + sn * 5.0, bc[1] + sn * 52.0 - cs * 5.0];
-            dl.add_triangle(bc, p2, p3, theme::with_alpha(theme::pal().gold, 0.12 * alpha))
-                .filled(true)
-                .build();
+            dl.add_triangle(
+                bc,
+                p2,
+                p3,
+                theme::with_alpha(theme::pal().gold, 0.12 * alpha),
+            )
+            .filled(true)
+            .build();
         }
     }
 

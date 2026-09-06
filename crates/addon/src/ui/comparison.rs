@@ -1092,7 +1092,10 @@ fn render_benchmark_delta(ui: &Ui, suggestion: &BuildSuggestion) {
         None => {
             // No data — show subtle hint in collapsed section
             if ui.collapsing_header(t("bench.header"), TreeNodeFlags::empty()) {
-                ui.text_colored(crate::ui::theme::pal().muted, format!("  {}", t("bench.none")));
+                ui.text_colored(
+                    crate::ui::theme::pal().muted,
+                    format!("  {}", t("bench.none")),
+                );
                 ui.text_colored(
                     crate::ui::theme::pal().muted,
                     format!("  {}", t("bench.sync_hint")),

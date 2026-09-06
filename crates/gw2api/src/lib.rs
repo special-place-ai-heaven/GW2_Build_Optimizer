@@ -1,6 +1,6 @@
 pub mod cache;
-pub mod dev_config;
 pub mod client;
+pub mod dev_config;
 pub mod download;
 pub mod graphics;
 pub mod transport;

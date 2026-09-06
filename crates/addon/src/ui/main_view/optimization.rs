@@ -1037,12 +1037,9 @@ pub(super) fn attach_chat_stats(
                 suggestion.quality_reasons.push(warning.clone());
             }
         }
-        for reason in gw2_optimizer::engine::gear_quality_reasons(
-            validated,
-            db,
-            profession,
-            &balance_ctx,
-        ) {
+        for reason in
+            gw2_optimizer::engine::gear_quality_reasons(validated, db, profession, &balance_ctx)
+        {
             let text = reason.to_string();
             if !suggestion.quality_reasons.iter().any(|r| r == &text) {
                 suggestion.quality_reasons.push(text);
@@ -1085,7 +1082,6 @@ pub(super) fn attach_chat_stats(
     suggestion.combat_party = party;
     suggestion.combat_squad = squad;
 }
-
 
 /// Merge validator-resolved names onto the raw LLM tasting so the plate is edible.
 pub(super) fn gemini_from_validated(
@@ -1636,9 +1632,8 @@ mod tests {
     use super::super::chat_flow::plate_is_servable;
     use super::{
         apply_radar_prefix, attach_chat_stats, chat_display_text, fill_holes_from_loadout,
-        format_provider_issue,
-        gemini_from_validated, keep_equipped_weapons, keep_loadout_pets, kitchen_brief,
-        leftover_plate_quality, snapshot_ranger_pets, suggestion_to_chat_code,
+        format_provider_issue, gemini_from_validated, keep_equipped_weapons, keep_loadout_pets,
+        kitchen_brief, leftover_plate_quality, snapshot_ranger_pets, suggestion_to_chat_code,
     };
     use crate::ui::comparison::BuildSuggestion;
     use base64::Engine as _;
@@ -2402,7 +2397,6 @@ mod tests {
         );
     }
 
-
     fn prefix_stat(
         id: u32,
         name: &str,
@@ -2495,8 +2489,8 @@ mod tests {
         );
 
         let mut suggestion = BuildSuggestion {
-        // Ours, not published anywhere.
-        source_url: String::new(),
+            // Ours, not published anywhere.
+            source_url: String::new(),
             stat_prefix: "Berserker's".into(),
             ..Default::default()
         };
@@ -2525,8 +2519,8 @@ mod tests {
         let db = mixed_chat_db();
         let validated = mixed_validated();
         let mut suggestion = BuildSuggestion {
-        // Ours, not published anywhere.
-        source_url: String::new(),
+            // Ours, not published anywhere.
+            source_url: String::new(),
             stat_prefix: "Berserker's".into(),
             ..Default::default()
         };
@@ -2552,5 +2546,4 @@ mod tests {
             land.1.power
         );
     }
-
 }

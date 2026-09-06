@@ -236,7 +236,10 @@ mod tests {
 
     #[test]
     fn sanitize_drops_empty_lines() {
-        assert_eq!(sanitize_batch("\n   \n1.\n\"\"\nreal quip\n"), vec!["real quip"]);
+        assert_eq!(
+            sanitize_batch("\n   \n1.\n\"\"\nreal quip\n"),
+            vec!["real quip"]
+        );
     }
 
     #[test]

@@ -1424,7 +1424,10 @@ After gathering data, respond with ONLY a JSON build object:
         let w = OptimizationWeights::preset_power_dps();
         for (name, prompt) in [
             ("new", new_build_prompt_with_tools("Necromancer", &w, "WvW")),
-            ("improve", improve_build_prompt_with_tools("Necromancer", &w, "WvW")),
+            (
+                "improve",
+                improve_build_prompt_with_tools("Necromancer", &w, "WvW"),
+            ),
             (
                 "chat",
                 chat_refinement_prompt_with_tools(

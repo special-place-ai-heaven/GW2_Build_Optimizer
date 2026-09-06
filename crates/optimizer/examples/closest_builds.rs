@@ -23,9 +23,13 @@ fn main() {
         }
     };
     let builds = gw2_optimizer::scraper::load_benchmarks(&addon_dir);
-    println!("{} benchmark rows from {}", builds.len(), addon_dir.display());
+    println!(
+        "{} benchmark rows from {}",
+        builds.len(),
+        addon_dir.display()
+    );
 
-    let cache = gw2_api::cache::DataCache::new(&addon_dir.join("cache"));
+    let cache = gw2_api::cache::DataCache::new(addon_dir.join("cache"));
     let db = match gw2_optimizer::gamedb::GameDb::load(&cache) {
         Ok(db) => db,
         Err(e) => {

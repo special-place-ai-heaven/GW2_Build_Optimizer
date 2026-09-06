@@ -394,10 +394,14 @@ pub fn paint_changed_circle(draw: &DrawListMut, center: [f32; 2], radius: f32) {
 }
 
 pub fn paint_header_accent(draw: &DrawListMut, left: f32, top: f32, height: f32) {
-    draw.add_rect([left, top], [left + HEADER_ACCENT_W, top + height], pal().gold)
-        .filled(true)
-        .rounding(2.0)
-        .build();
+    draw.add_rect(
+        [left, top],
+        [left + HEADER_ACCENT_W, top + height],
+        pal().gold,
+    )
+    .filled(true)
+    .rounding(2.0)
+    .build();
 }
 
 fn fade(c: [f32; 4], opacity: f32) -> [f32; 4] {
@@ -658,7 +662,11 @@ pub fn switch(ui: &Ui, label: &str, anim: f32, id: &str) -> bool {
     // lines up with text of any scale.
     let row_h = h.max(text[1]);
     let ty = p[1] + (row_h - h) * 0.5;
-    let off = [th.chip_idle_fill[0], th.chip_idle_fill[1], th.chip_idle_fill[2]];
+    let off = [
+        th.chip_idle_fill[0],
+        th.chip_idle_fill[1],
+        th.chip_idle_fill[2],
+    ];
     let on = [th.gold_fill[0], th.gold_fill[1], th.gold_fill[2]];
     let mix = |a: f32, b: f32| a + (b - a) * anim;
     let fill = [
@@ -723,7 +731,11 @@ pub fn select_chip(ui: &Ui, label: &str, selected: bool, id: &str, pip: Option<[
     } else {
         th.chip_idle_rim
     };
-    let text = if selected { th.gold_button_text } else { th.cream };
+    let text = if selected {
+        th.gold_button_text
+    } else {
+        th.cream
+    };
     {
         let dl = ui.get_window_draw_list();
         dl.add_rect([p[0], p[1]], [p[0] + w, p[1] + h], fill)
@@ -1100,7 +1112,9 @@ pub fn download_scribble(ui: &Ui, fraction: f32, caption: &str) {
         while x <= track_x1 {
             let wobble = ((x * 0.18 + t * 0.04).sin()) * 1.1;
             let cur = [x, line_y + wobble];
-            dl.add_line(prev, cur, theme.gold_dim).thickness(1.2).build();
+            dl.add_line(prev, cur, theme.gold_dim)
+                .thickness(1.2)
+                .build();
             prev = cur;
             x += 5.0;
         }
@@ -1635,7 +1649,10 @@ fn draw_free_quip(ui: &Ui, dl: &DrawListMut, center: [f32; 2], size: f32, rise: 
     let max = [min[0] + w, min[1] + h];
     let p = pal();
     let bg = [p.gold_fill[0], p.gold_fill[1], p.gold_fill[2], alpha * 0.95];
-    dl.add_rect(min, max, color_u32(bg)).filled(true).rounding(5.0).build();
+    dl.add_rect(min, max, color_u32(bg))
+        .filled(true)
+        .rounding(5.0)
+        .build();
     // The tail, pointing down at whoever is talking.
     dl.add_triangle(
         [center[0] - tail, max[1]],
@@ -1889,7 +1906,11 @@ mod tests {
             let ab = contrast(p.accent, p.bg);
             assert!(ab >= 4.0, "{}: accent/bg contrast {ab:.2} < 4.0", p.id);
             let na = contrast(near_black, p.accent);
-            assert!(na >= 6.0, "{}: dark-text/accent contrast {na:.2} < 6.0", p.id);
+            assert!(
+                na >= 6.0,
+                "{}: dark-text/accent contrast {na:.2} < 6.0",
+                p.id
+            );
         }
     }
 
@@ -1944,8 +1965,16 @@ mod tests {
             ("header_hovered", d.header_hovered, s.header_hovered),
             ("title_bg", d.title_bg, s.title_bg),
             ("title_bg_active", d.title_bg_active, s.title_bg_active),
-            ("gold_button_hovered", d.gold_button_hovered, s.gold_button_hovered),
-            ("gold_button_active", d.gold_button_active, s.gold_button_active),
+            (
+                "gold_button_hovered",
+                d.gold_button_hovered,
+                s.gold_button_hovered,
+            ),
+            (
+                "gold_button_active",
+                d.gold_button_active,
+                s.gold_button_active,
+            ),
             ("gold_button_text", d.gold_button_text, s.gold_button_text),
             ("chip_idle_fill", d.chip_idle_fill, s.chip_idle_fill),
             ("chip_idle_rim", d.chip_idle_rim, s.chip_idle_rim),
@@ -2029,7 +2058,11 @@ mod tests {
         );
 
         super::apply_theme(&cfg("tyrian-gold"));
-        assert_eq!(super::pal(), super::TYRIAN, "tyrian-gold is the shipped palette");
+        assert_eq!(
+            super::pal(),
+            super::TYRIAN,
+            "tyrian-gold is the shipped palette"
+        );
     }
 
     #[test]

@@ -417,10 +417,7 @@ fn prefer_youtube_still(url: String) -> String {
         "https://i4.ytimg.com/vi/",
         "https://img.youtube.com/vi/",
     ];
-    let Some(rest) = YT_STILL_PREFIXES
-        .iter()
-        .find_map(|p| url.strip_prefix(p))
-    else {
+    let Some(rest) = YT_STILL_PREFIXES.iter().find_map(|p| url.strip_prefix(p)) else {
         return url;
     };
     let Some((id, _)) = rest.split_once('/') else {
@@ -1080,10 +1077,7 @@ mod tests {
             Some("https://d3qqidoz8mm2hm.cloudfront.net/wp-content/x.jpg".into())
         );
         // A host nobody allowlisted is still dropped, scheme-relative or not.
-        assert_eq!(
-            item_image(r#"<img src="//evil.example/track.png"/>"#),
-            None
-        );
+        assert_eq!(item_image(r#"<img src="//evil.example/track.png"/>"#), None);
     }
 
     #[test]

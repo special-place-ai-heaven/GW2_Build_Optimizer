@@ -155,9 +155,7 @@ impl ModelInfo {
 ///
 /// Providers name these freely and the list is not closed, so an effort that
 /// is not here simply has no rank and is never chosen over one that does.
-const EFFORT_ORDER: [&str; 7] = [
-    "none", "minimal", "low", "medium", "high", "max", "xhigh",
-];
+const EFFORT_ORDER: [&str; 7] = ["none", "minimal", "low", "medium", "high", "max", "xhigh"];
 
 /// Result of a detailed key validation with user-friendly messages.
 #[derive(Debug, Clone)]
@@ -620,6 +618,9 @@ mod tool_arg_tests {
         assert!(agentic(1.1).rank() < coding(52.6).rank());
         assert!(agentic(39.7).rank() < agentic(31.0).rank(), "higher first");
         assert!(coding(52.6).rank() < coding(39.3).rank());
-        assert!(coding(13.8).rank() < ModelInfo::default().rank(), "scored first");
+        assert!(
+            coding(13.8).rank() < ModelInfo::default().rank(),
+            "scored first"
+        );
     }
 }

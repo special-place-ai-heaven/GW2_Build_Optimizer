@@ -287,7 +287,6 @@ pub(crate) fn stack_multiplier(text: &str) -> f64 {
 mod tests {
     use super::*;
 
-    #[test]
     /// "vs." is an abbreviation. Splitting the clause there dropped the
     /// marker that says a bonus only applies to one kind of target, and a
     /// slaying sigil's +7% vs Demons was counted against everything.

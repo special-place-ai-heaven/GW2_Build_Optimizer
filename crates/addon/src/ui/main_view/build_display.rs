@@ -196,7 +196,11 @@ fn paint_group_header(ui: &Ui, x: f32, y: f32, w: f32, h: f32, title: &str) {
 
 fn paint_vdiv(ui: &Ui, x: f32, y: f32, h: f32) {
     ui.get_window_draw_list()
-        .add_line([x, y + 1.0], [x, y + h - 1.0], crate::ui::theme::pal().gold_dim)
+        .add_line(
+            [x, y + 1.0],
+            [x, y + h - 1.0],
+            crate::ui::theme::pal().gold_dim,
+        )
         .thickness(1.0)
         .build();
 }
@@ -661,7 +665,12 @@ pub fn render_suggestion_skills(
 ) {
     let parsed = crate::ui::gear_diff::parse_suggestion_skills(&suggestion.skills);
     let worn = worn.map(|b| WornSkills {
-        heal: b.skills.heal.as_ref().map(|s| s.name.clone()).unwrap_or_default(),
+        heal: b
+            .skills
+            .heal
+            .as_ref()
+            .map(|s| s.name.clone())
+            .unwrap_or_default(),
         utilities: b
             .skills
             .utilities
@@ -669,7 +678,12 @@ pub fn render_suggestion_skills(
             .flatten()
             .map(|s| s.name.clone())
             .collect(),
-        elite: b.skills.elite.as_ref().map(|s| s.name.clone()).unwrap_or_default(),
+        elite: b
+            .skills
+            .elite
+            .as_ref()
+            .map(|s| s.name.clone())
+            .unwrap_or_default(),
         pets: b.pets.clone(),
     });
     render_skill_bar(

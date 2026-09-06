@@ -425,7 +425,6 @@ pub(super) fn check_api_health(state: &mut AddonState) {
     }
 }
 
-
 /// Status-bar chip when the live `/v2/build` is not the verified manifest build.
 pub(super) fn render_manifest_staleness(ui: &nexus::imgui::Ui, state: &crate::state::AddonState) {
     if let Some(reason) = state
@@ -449,7 +448,6 @@ pub(super) fn render_manifest_staleness(ui: &nexus::imgui::Ui, state: &crate::st
         ui.tooltip_text(msg);
     }
 }
-
 
 /// Load GameDb once on main screen entry (S11-T06)
 pub(super) fn load_game_db(state: &mut AddonState) {

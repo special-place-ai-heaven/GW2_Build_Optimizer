@@ -26,7 +26,7 @@ fn main() {
         }
     };
     let builds = gw2_optimizer::scraper::load_benchmarks(&addon_dir);
-    let cache = gw2_api::cache::DataCache::new(&addon_dir.join("cache"));
+    let cache = gw2_api::cache::DataCache::new(addon_dir.join("cache"));
     let db = match GameDb::load(&cache) {
         Ok(db) => db,
         Err(e) => {
@@ -58,7 +58,11 @@ fn main() {
             };
             decoded += 1;
             if t.skills.iter().any(|pid| {
-                *pid != 0 && db.palette_to_skill.get(pid).is_some_and(|id| db.skills.contains_key(id))
+                *pid != 0
+                    && db
+                        .palette_to_skill
+                        .get(pid)
+                        .is_some_and(|id| db.skills.contains_key(id))
             }) {
                 resolved += 1;
             }
@@ -95,10 +99,7 @@ fn main() {
             if bad_examples.len() < 5 {
                 bad_examples.push(format!(
                     "{} {} [{}] {}",
-                    build.source,
-                    build.profession,
-                    build.role,
-                    validated.errors[0].detail
+                    build.source, build.profession, build.role, validated.errors[0].detail
                 ));
             }
             continue;
@@ -165,11 +166,19 @@ fn main() {
     let mut roles: Vec<_> = by_role.into_iter().collect();
     roles.sort_by_key(|(_, (p, f))| {
         let total = p + f;
-        if total == 0 { 100 } else { (*p as i64 * 100) / total as i64 }
+        if total == 0 {
+            100
+        } else {
+            (*p as i64 * 100) / total as i64
+        }
     });
     for (role, (pass, fail)) in roles.iter().take(14) {
         let total = pass + fail;
-        let pct = if total > 0 { *pass as f64 * 100.0 / total as f64 } else { 0.0 };
+        let pct = if total > 0 {
+            *pass as f64 * 100.0 / total as f64
+        } else {
+            0.0
+        };
         println!("  {role:<28} {pass:>4}/{total:<4} {pct:>5.0}%");
     }
 
@@ -210,8 +219,23 @@ fn plate_from(build: &BenchmarkBuild, db: &GameDb) -> Option<GeminiBuildResponse
             .unwrap_or_default()
     };
     const WEAPONS: [&str; 17] = [
-        "axe", "dagger", "mace", "pistol", "scepter", "sword", "focus", "shield", "torch",
-        "warhorn", "greatsword", "hammer", "longbow", "rifle", "shortbow", "staff", "spear",
+        "axe",
+        "dagger",
+        "mace",
+        "pistol",
+        "scepter",
+        "sword",
+        "focus",
+        "shield",
+        "torch",
+        "warhorn",
+        "greatsword",
+        "hammer",
+        "longbow",
+        "rifle",
+        "shortbow",
+        "staff",
+        "spear",
     ];
     let weapons: Vec<String> = p
         .gear

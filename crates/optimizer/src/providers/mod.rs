@@ -282,9 +282,11 @@ pub(crate) fn unescape_entities(text: &str) -> String {
             "gt" => Some('>'),
             "quot" => Some('"'),
             "apos" => Some('\''),
-            hex if hex.starts_with("#x") || hex.starts_with("#X") => u32::from_str_radix(&hex[2..], 16)
-                .ok()
-                .and_then(char::from_u32),
+            hex if hex.starts_with("#x") || hex.starts_with("#X") => {
+                u32::from_str_radix(&hex[2..], 16)
+                    .ok()
+                    .and_then(char::from_u32)
+            }
             dec if dec.starts_with('#') => dec[1..].parse().ok().and_then(char::from_u32),
             _ => None,
         };
@@ -494,7 +496,10 @@ mod tests {
             "the Livewire snapshot array is not a build code, got {code}"
         );
         let decoded = crate::build_template::decode(&code).expect("a real template");
-        assert_eq!(decoded.profession, 8, "8 is Necromancer, as the page title says");
+        assert_eq!(
+            decoded.profession, 8,
+            "8 is Necromancer, as the page title says"
+        );
 
         // A page carrying only the decoy yields nothing rather than the decoy.
         assert_eq!(
@@ -533,7 +538,10 @@ mod tests {
             let code = build_code_in(&page).unwrap_or_else(|| panic!("{label}"));
             let decoded = crate::build_template::decode(&code)
                 .unwrap_or_else(|| panic!("{label}: {code} must decode"));
-            assert!(decoded.profession >= 1 && decoded.profession <= 9, "{label}");
+            assert!(
+                decoded.profession >= 1 && decoded.profession <= 9,
+                "{label}"
+            );
         }
 
         // Waypoints alone are not a build, however many there are.

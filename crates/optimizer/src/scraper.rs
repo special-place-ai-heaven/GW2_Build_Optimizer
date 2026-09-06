@@ -468,6 +468,11 @@ fn truncate_chars(text: &str, max_bytes: usize) -> String {
     text[..end].to_string()
 }
 
+// Eight facts about one page, each already computed by the caller and none
+// derivable from the others: where it came from, when, which site, and the
+// four labels the index carried. Bundling them into a struct would move the
+// same eight assignments one line up and add a type nobody else uses.
+#[allow(clippy::too_many_arguments)]
 fn benchmark_from_html(
     html: &str,
     url: &str,
@@ -536,8 +541,8 @@ fn scrape_snowcrows_build(
     // but the heading is the site's statement rather than our reading of a
     // URL, and it goes through the same vocabulary as the other two sources
     // so the stored roles stay comparable.
-    let name = crate::providers::snowcrows::build_name(&html)
-        .unwrap_or_else(|| slug.replace('-', " "));
+    let name =
+        crate::providers::snowcrows::build_name(&html).unwrap_or_else(|| slug.replace('-', " "));
     let role = crate::providers::role_label(
         crate::providers::snowcrows::scale_from_url(url),
         crate::providers::role_in_name(&name).unwrap_or_default(),
@@ -816,8 +821,7 @@ fn scrape_guildjen(
         // The index states the profession, role and playstyle of every build
         // it lists, so nothing below has to infer them from a slug or from
         // the body text of the build page.
-        let by_class =
-            group_rows_by_profession(crate::providers::guildjen::index_rows(&html));
+        let by_class = group_rows_by_profession(crate::providers::guildjen::index_rows(&html));
         let cap: usize = by_class.iter().map(|(_, l)| l.len()).sum();
         let mut i = 0usize;
 
@@ -936,7 +940,11 @@ fn scrape_guildjen_build(
 /// PvE is split by the index it was listed on — open world, fractal, raid —
 /// which is the solo, group and squad distinction. WvW is split by the
 /// site's playstyle instead, since all of it is one index.
-fn guildjen_scale(mode: &str, category: &str, row: &crate::providers::guildjen::IndexRow) -> String {
+fn guildjen_scale(
+    mode: &str,
+    category: &str,
+    row: &crate::providers::guildjen::IndexRow,
+) -> String {
     match mode {
         "PvE" => category.to_string(),
         // A WvW build commonly carries two: `havoc` and `cloud` together.
@@ -1006,7 +1014,12 @@ fn group_rows_by_profession(
         let profession = if !row.profession.is_empty() {
             row.profession.clone()
         } else {
-            let slug = row.url.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+            let slug = row
+                .url
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or("");
             match profession_from_slug(slug) {
                 Some((profession, _)) => profession,
                 None => continue,
@@ -1979,7 +1992,6 @@ mod tests {
         assert_eq!(links[0], "/builds/guardian/firebrand");
     }
 
-
     /// Only today's builds are reusable, and only from files this version
     /// writes, and only if they carry ids AND prose. Yesterday's have to be
     /// refetched or a re-sync would silently serve stale references forever;
@@ -2210,7 +2222,6 @@ mod tests {
         assert_eq!(retry_after_ms(&headers), None);
     }
 
-
     /// The category list is read off the sitemap so a category added or
     /// retired by the site needs no code change. The hub itself, the sub-80
     /// levelling category, guide pages and anything off-site are excluded.
@@ -2381,7 +2392,6 @@ mod tests {
         assert_eq!(extract_gear_prefix(html), "Viper's");
     }
 
-
     /// A build is only what the page published as ids. The "Related Posts"
     /// list at the foot of a GuildJen build names other builds'
     /// specializations in prose, which is how 431 of 739 scraped builds
@@ -2432,14 +2442,11 @@ mod tests {
         );
     }
 
-
-
     #[test]
     fn test_title_case() {
         assert_eq!(title_case("power-dps"), "Power-dps");
         assert_eq!(title_case("guardian firebrand"), "Guardian Firebrand");
     }
-
 
     #[test]
     fn redirect_stays_on_request_host_same_host_case_insensitive() {
@@ -2750,7 +2757,12 @@ mod tests {
             // slug is only the fallback. A row with neither is dropped.
             let mut unfiled = Vec::new();
             for row in &rows {
-                let slug = row.url.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+                let slug = row
+                    .url
+                    .trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or("");
                 if !row.profession.is_empty() {
                     println!(
                         "  {:12} {:24} roles {:?} play {:?}",
@@ -2965,24 +2977,76 @@ mod tests {
         for (mode, category, name, roles, playstyles, want) in [
             // Open world states a playstyle and usually no role, so the
             // build's own name is the whole answer.
-            ("PvE", "Open World", "Power Vengeance Dragonhunter", &[][..], &["bossing"][..],
-             "Open World Power DPS"),
-            ("PvE", "Open World", "Heal DPS Luminary", &["support", "tank"][..], &["cooperative"][..],
-             "Open World Healer"),
+            (
+                "PvE",
+                "Open World",
+                "Power Vengeance Dragonhunter",
+                &[][..],
+                &["bossing"][..],
+                "Open World Power DPS",
+            ),
+            (
+                "PvE",
+                "Open World",
+                "Heal DPS Luminary",
+                &["support", "tank"][..],
+                &["cooperative"][..],
+                "Open World Healer",
+            ),
             // A raid states `dps`, which does not say which kind. The name
             // does.
-            ("PvE", "Raid", "Condition Reaper", &["dps"][..], &[][..], "Raid Condi DPS"),
-            ("PvE", "Fractal", "Heal Alacrity Druid", &["support"][..], &[][..], "Fractal Healer"),
+            (
+                "PvE",
+                "Raid",
+                "Condition Reaper",
+                &["dps"][..],
+                &[][..],
+                "Raid Condi DPS",
+            ),
+            (
+                "PvE",
+                "Fractal",
+                "Heal Alacrity Druid",
+                &["support"][..],
+                &[][..],
+                "Fractal Healer",
+            ),
             // WvW: the site's role words are the ones the chips use, and
             // reading the name instead would call this a Hybrid.
-            ("WvW", "Wvw", "Celestial Spear Antiquary", &["bruiser"][..], &["roaming"][..],
-             "Roaming Bruiser"),
+            (
+                "WvW",
+                "Wvw",
+                "Celestial Spear Antiquary",
+                &["bruiser"][..],
+                &["roaming"][..],
+                "Roaming Bruiser",
+            ),
             // Smallest playstyle first: a havoc build can join a cloud.
-            ("WvW", "Wvw", "Power Staff Daredevil", &["assassin"][..], &["cloud", "havoc"][..],
-             "Havoc Assassin"),
+            (
+                "WvW",
+                "Wvw",
+                "Power Staff Daredevil",
+                &["assassin"][..],
+                &["cloud", "havoc"][..],
+                "Havoc Assassin",
+            ),
             // PvP is always five a side, so it records no scale.
-            ("PvP", "Pvp", "Support Firebrand", &["support"][..], &[][..], "Support"),
-            ("PvP", "Pvp", "Power Willbender", &["duelist"][..], &[][..], "Duelist"),
+            (
+                "PvP",
+                "Pvp",
+                "Support Firebrand",
+                &["support"][..],
+                &[][..],
+                "Support",
+            ),
+            (
+                "PvP",
+                "Pvp",
+                "Power Willbender",
+                &["duelist"][..],
+                &[][..],
+                "Duelist",
+            ),
         ] {
             let row = row(name, roles, playstyles);
             let got = crate::providers::role_label(
@@ -3029,6 +3093,10 @@ mod tests {
             assert!(cut.len() <= limit, "{limit}: {cut:?} exceeds the cap");
             assert!(text.starts_with(&cut), "{limit}: {cut:?} is not a prefix");
         }
-        assert_eq!(truncate_chars(text, text.len()), text, "under the cap, intact");
+        assert_eq!(
+            truncate_chars(text, text.len()),
+            text,
+            "under the cap, intact"
+        );
     }
 }

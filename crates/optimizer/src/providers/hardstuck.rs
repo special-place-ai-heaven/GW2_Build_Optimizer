@@ -39,8 +39,8 @@ use super::{GearRow, ProviderBuild, SpecLine};
 /// the visible one is at least the build a reader would see.
 pub fn parse(html: &str) -> ProviderBuild {
     let document = ::html::Html::parse_document(html);
-    let active = ::html::Selector::parse("div.build-variant.variant-is-active")
-        .expect("valid selector");
+    let active =
+        ::html::Selector::parse("div.build-variant.variant-is-active").expect("valid selector");
     let any = ::html::Selector::parse("div.build-variant").expect("valid selector");
     let Some(variant) = document
         .select(&active)
@@ -121,8 +121,9 @@ fn specs(variant: &::html::ElementRef<'_>) -> Vec<SpecLine> {
         "div.gw2-biuld-traits gw2object.specialization[type=specialization]:not(.gw2objectembed)",
     )
     .expect("valid selector");
-    let chosen = ::html::Selector::parse("gw2object[type=trait].trait_major:not(.trait_unselected)")
-        .expect("valid selector");
+    let chosen =
+        ::html::Selector::parse("gw2object[type=trait].trait_major:not(.trait_unselected)")
+            .expect("valid selector");
     variant
         .select(&line)
         .filter_map(|spec| {
@@ -315,7 +316,13 @@ pub fn mode_and_scale(html: &str) -> Option<(&'static str, &'static str)> {
     let title = ::html::Selector::parse("title").expect("valid selector");
     let text = document.select(&title).next()?.text().collect::<String>();
     // "Power Dragonhunter Build (Group PvE)  - Hardstuck"
-    let inside = text.split_once('(')?.1.split_once(')')?.0.trim().to_ascii_lowercase();
+    let inside = text
+        .split_once('(')?
+        .1
+        .split_once(')')?
+        .0
+        .trim()
+        .to_ascii_lowercase();
     // Matched by the words present, not by the whole string. Hardstuck also
     // files builds under compound types like "WvW - Zerg", and an exact-match
     // table silently dropped the scale on those, calling a zerg build plain
@@ -438,7 +445,10 @@ mod tests {
         let build = parse(PAGE);
         assert_eq!(
             build.specs,
-            vec![SpecLine { id: 19, trait_ids: vec![780] }],
+            vec![SpecLine {
+                id: 19,
+                trait_ids: vec![780]
+            }],
             "780 is chosen; 788 and 1876 are unselected and 792 is a minor"
         );
     }
@@ -448,7 +458,11 @@ mod tests {
     #[test]
     fn only_worn_gear_counts_not_what_the_prose_suggests() {
         let build = parse(PAGE);
-        assert_eq!(build.rune_id, Some(24836), "the second object in the armour piece");
+        assert_eq!(
+            build.rune_id,
+            Some(24836),
+            "the second object in the armour piece"
+        );
         assert_ne!(build.rune_id, Some(21176), "21176 is only mentioned");
         assert!(!build.gear.iter().any(|r| r.item_id == Some(21176)));
     }
@@ -457,8 +471,16 @@ mod tests {
     fn sigils_come_off_the_weapon_and_slotted_is_not_trusted() {
         let build = parse(PAGE);
         assert_eq!(build.sigil_ids, vec![21149, 21152]);
-        let weapon = build.gear.iter().find(|r| r.slot == "Hammer").expect("weapon");
-        assert_eq!(weapon.item_id, Some(91652), "the weapon itself is the first child");
+        let weapon = build
+            .gear
+            .iter()
+            .find(|r| r.slot == "Hammer")
+            .expect("weapon");
+        assert_eq!(
+            weapon.item_id,
+            Some(91652),
+            "the weapon itself is the first child"
+        );
     }
 
     /// The relic's alt is always the literal "Relic icon" whatever relic it
@@ -473,7 +495,9 @@ mod tests {
         let build = parse(PAGE);
         let code = build.build_code.as_deref().expect("a chat code");
         assert_eq!(
-            crate::build_template::decode(code).expect("decodes").profession,
+            crate::build_template::decode(code)
+                .expect("decodes")
+                .profession,
             8,
             "8 is Necromancer"
         );
@@ -518,7 +542,11 @@ mod tests {
 
         let build = parse(PVP);
         assert_eq!(build.rune_id, Some(21202), "worn, not slotted into armour");
-        assert_eq!(build.relic_id, Some(99997), "the relic shares the container");
+        assert_eq!(
+            build.relic_id,
+            Some(99997),
+            "the relic shares the container"
+        );
         assert_eq!(build.amulet_id, Some(8));
         assert_eq!(
             build.dominant_stat(),
@@ -555,7 +583,9 @@ mod tests {
                 "Group",
             ),
         ] {
-            let page = format!("<html><head><title>{title}</title></head><body><h1>{heading}</h1></body></html>");
+            let page = format!(
+                "<html><head><title>{title}</title></head><body><h1>{heading}</h1></body></html>"
+            );
             assert_eq!(
                 build_name(&page).as_deref(),
                 Some(name),
@@ -589,9 +619,15 @@ mod tests {
             format!("<html><head><title>A Build ({game_type})  - Hardstuck</title></head></html>")
         };
         assert_eq!(mode_and_scale(&page("WvW - Zerg")), Some(("WvW", "Zerg")));
-        assert_eq!(mode_and_scale(&page("WvW - Roaming")), Some(("WvW", "Roaming")));
+        assert_eq!(
+            mode_and_scale(&page("WvW - Roaming")),
+            Some(("WvW", "Roaming"))
+        );
         assert_eq!(mode_and_scale(&page("WvW")), Some(("WvW", "")));
-        assert_eq!(mode_and_scale(&page("Open World")), Some(("PvE", "Open World")));
+        assert_eq!(
+            mode_and_scale(&page("Open World")),
+            Some(("PvE", "Open World"))
+        );
         assert_eq!(mode_and_scale(&page("Group PvE")), Some(("PvE", "Group")));
         assert_eq!(mode_and_scale(&page("PvP")), Some(("PvP", "")));
         assert_eq!(mode_and_scale(&page("Something Else")), None);
