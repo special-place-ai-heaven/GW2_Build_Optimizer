@@ -29,9 +29,27 @@ const ID_JA: &str = "GW2BO_FONT_JA";
 const ID_KO: &str = "GW2BO_FONT_KO";
 const ID_TICKER: &str = "GW2BO_FONT_TICKER";
 
-/// Inclusive pairs, 0-terminated. Latin-1 + Ext-A (Polish) + Cyrillic + dashes/ellipsis.
+/// Inclusive pairs, 0-terminated. Latin-1 + Ext-A (Polish) + Cyrillic +
+/// General Punctuation + arrows + math + symbols.
+///
+/// Most of this text is written by a language model, not by us, and a glyph
+/// the atlas lacks reaches the player as '?'. Our own strings can be held to
+/// ASCII by a test; the model's cannot, and it writes em dashes, curly quotes,
+/// bullets, `->` as an arrow and `>=` as a relation without being asked.
+/// General Punctuation was cut at 0x2027, which covered dashes and the
+/// ellipsis but stopped short of the primes and the wider quotes; arrows and
+/// math were absent entirely. Rasterizing the rest costs a few kilobytes of a
+/// 16 px atlas, which is cheaper than one more round of hunting a question
+/// mark through twelve catalogs.
 const LATIN_RANGES: &[ImWchar] = &[
-    0x0020, 0x00FF, 0x0100, 0x017F, 0x0400, 0x04FF, 0x2010, 0x2027, 0x2600, 0x27BF, 0,
+    0x0020, 0x00FF, // Latin-1
+    0x0100, 0x017F, // Latin Extended-A (Polish)
+    0x0400, 0x04FF, // Cyrillic (Russian)
+    0x2010, 0x205E, // General Punctuation: dashes, quotes, ellipsis, bullets
+    0x2190, 0x21FF, // Arrows
+    0x2200, 0x22FF, // Mathematical Operators
+    0x2600, 0x27BF, // Misc symbols + dingbats
+    0,
 ];
 
 static LATIN: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
@@ -174,20 +192,27 @@ pub fn push_ticker() -> Option<FontGuard> {
     Some(FontGuard)
 }
 
-/// Whether every char of `text` is inside the ticker face's glyph ranges —
-/// this MUST mirror `LATIN_RANGES` exactly. A gate narrower than the font
-/// shipped a regression: one decoration symbol (stars, notes) anywhere in a
-/// title kicked the whole string to the blurry 3x bitmap path, where the
-/// ASCII-only base atlas also turned every accented char into '?'. CJK
-/// titles still fall back to the scaled UI font rather than 42 px tofu.
+/// Whether `u` is one of the codepoints the Latin face is built with.
+///
+/// Read straight off `LATIN_RANGES` rather than restated as a chain of range
+/// checks, which is what the constant is for. The restatement drifted once
+/// already: a gate narrower than the font meant one decoration symbol (stars,
+/// notes) anywhere in a title kicked the whole string to the blurry 3x bitmap
+/// path, where the ASCII-only base atlas also turned every accented char into
+/// '?'. A copy that must be kept in step by hand eventually is not.
+fn in_latin_ranges(u: u32) -> bool {
+    // Pairs are inclusive; the terminating 0 is left over and ignored.
+    LATIN_RANGES
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .any(|[lo, hi]| (u32::from(*lo)..=u32::from(*hi)).contains(&u))
+}
+
+/// Whether every char of `text` is inside the ticker face's glyph ranges.
+/// CJK titles fall back to the scaled UI font rather than 42 px tofu.
 pub fn ticker_can_render(text: &str) -> bool {
-    text.chars().all(|c| {
-        let u = c as u32;
-        (0x0020..=0x017F).contains(&u)
-            || (0x0400..=0x04FF).contains(&u)
-            || (0x2010..=0x2027).contains(&u)
-            || (0x2600..=0x27BF).contains(&u)
-    })
+    text.chars().all(|c| in_latin_ranges(c as u32))
 }
 
 fn try_add(id: &str, path: Option<PathBuf>, config: Option<&ImFontConfig>, size_px: f32) {
@@ -257,8 +282,22 @@ pub fn resolve_font_id(pref: &str, ui_language: &str) -> Option<&'static str> {
             "zh" => Some(ID_ZH),
             "ja" => Some(ID_JA),
             "ko" => Some(ID_KO),
-            "ru" | "pl" => Some(ID_LATIN),
-            _ => None,
+            // Every Latin language, English included. This used to be
+            // `"ru" | "pl" => Some(ID_LATIN), _ => None`, so an English
+            // player drew in the Nexus/GW2 typeface - an atlas we neither
+            // build nor declare ranges on, whose missing glyphs ImGui
+            // replaces with '?'. Declaring `LATIN_RANGES` could not help,
+            // because it configures a font English never pushed. In-game
+            // 2026-09-06 the model wrote "Minstrel's has zero toughness -
+            // focus fire was always going to eat you first" and the player
+            // read a question mark mid-sentence.
+            //
+            // The face is loaded either way (the ticker uses it), so this
+            // spends no extra memory, and anyone who prefers the game
+            // typeface still picks "game" in Settings. If no Windows TTF
+            // is found, `live_ptr` returns null and `push` falls back to
+            // exactly the old behaviour.
+            _ => Some(ID_LATIN),
         },
     }
 }
@@ -351,8 +390,40 @@ mod tests {
         assert_eq!(resolve_font_id("auto", "ko"), Some(ID_KO));
         assert_eq!(resolve_font_id("auto", "ru"), Some(ID_LATIN));
         assert_eq!(resolve_font_id("auto", "pl"), Some(ID_LATIN));
-        assert_eq!(resolve_font_id("auto", "en"), None);
-        assert_eq!(resolve_font_id("auto", "fr"), None);
+    }
+
+    /// English used to resolve to `None`, which drew the whole overlay in the
+    /// Nexus/GW2 typeface - an atlas we do not build, so `LATIN_RANGES` bought
+    /// it nothing and a missing glyph reached the player as '?'.
+    #[test]
+    fn auto_gives_every_latin_language_the_face_we_declare_ranges_on() {
+        for lang in ["en", "fr", "de", "es", "it", "pt", "cs"] {
+            assert_eq!(
+                resolve_font_id("auto", lang),
+                Some(ID_LATIN),
+                "{lang} must draw in the face whose glyph ranges we control"
+            );
+        }
+    }
+
+    /// The model writes this text, and no test can hold it to ASCII. In-game
+    /// 2026-09-06 it wrote an em dash and the player read a question mark.
+    #[test]
+    fn the_typography_a_model_writes_is_inside_the_atlas() {
+        for c in "—–…“”‘’•·→←≥≤×≈".chars() {
+            assert!(
+                in_latin_ranges(c as u32),
+                "U+{:04X} {c:?} is not in LATIN_RANGES; it would draw as '?'",
+                c as u32
+            );
+        }
+    }
+
+    #[test]
+    fn the_ticker_gate_tracks_the_font_it_guards() {
+        assert!(ticker_can_render("Cafe - Bloc Party"));
+        assert!(ticker_can_render("Пикник ★"));
+        assert!(!ticker_can_render("東京"));
     }
 
     #[test]
