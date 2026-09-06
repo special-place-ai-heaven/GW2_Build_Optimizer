@@ -433,6 +433,9 @@ impl LlmClient for OpenAiClient {
                 super::ModelInfo {
                     id: m.id,
                     display_name: display,
+                    // OpenAI publishes no free tier and no per-model price in
+                    // its catalog: every model here bills.
+                    free: false,
                 }
             })
             .collect();

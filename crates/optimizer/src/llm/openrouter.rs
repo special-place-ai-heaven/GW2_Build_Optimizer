@@ -434,6 +434,20 @@ impl LlmClient for OpenRouterClient {
             /// "Claude Sonnet 4.5"). Falls back to the slug when missing.
             #[serde(default)]
             name: Option<String>,
+            /// Absent on nothing in the live catalog, but absent means
+            /// unknown, and unknown must not read as free.
+            #[serde(default)]
+            pricing: Option<Pricing>,
+        }
+        /// Prices arrive as decimal STRINGS — `"0"`, `"0.00001"` — not
+        /// numbers, so they are parsed rather than compared as text: `"0.0"`
+        /// and `"0"` both mean free.
+        #[derive(Deserialize)]
+        struct Pricing {
+            #[serde(default)]
+            prompt: Option<String>,
+            #[serde(default)]
+            completion: Option<String>,
         }
 
         let body: ModelsResponse = json_capped(resp)?;
@@ -442,6 +456,20 @@ impl LlmClient for OpenRouterClient {
         let mut models: Vec<super::ModelInfo> = entries
             .into_iter()
             .map(|m| super::ModelInfo {
+                // Priced at zero both ways. Measured against the live
+                // catalogue on 2026-09-06: 22 of 431 models, of which 19
+                // carry the `:free` suffix and three do not — `openrouter/free`
+                // and two Lyria previews. So the price is the fact and the
+                // suffix is only a habit; reading the suffix would have
+                // missed three and would break the day they rename one.
+                free: m.pricing.as_ref().is_some_and(|p| {
+                    let zero = |v: &Option<String>| {
+                        v.as_deref()
+                            .and_then(|s| s.parse::<f64>().ok())
+                            .is_some_and(|n| n == 0.0)
+                    };
+                    zero(&p.prompt) && zero(&p.completion)
+                }),
                 display_name: m.name.unwrap_or_else(|| m.id.clone()),
                 id: m.id,
             })

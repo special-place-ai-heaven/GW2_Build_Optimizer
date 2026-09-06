@@ -75,6 +75,25 @@ impl GeminiLlmClient {
     }
 }
 
+/// Whether Google's free tier covers this model.
+///
+/// The API does not say — `/v1beta/models` carries no pricing at all — but
+/// the pricing page does, per model, as a Free Tier column reading either
+/// "Free of charge" or "Not available". Read on 2026-09-06, only three models
+/// had no free tier: Gemini Omni Flash, Omni Flash Preview and Gemini 3.1 Pro
+/// Preview. Every Flash and Flash-Lite was free, as was Gemini 2.5 Pro.
+///
+/// So: Flash is free unless it is Omni, plus 2.5 Pro. Deliberately a rule and
+/// not a list of today's model names — those turn over every few months, and
+/// a stale list would either hide a new free model or, far worse, offer a
+/// paid one as free. A Pro model we have not heard of is treated as paid,
+/// which is the safe direction to be wrong in: it stays selectable with the
+/// filter off.
+fn gemini_has_free_tier(id: &str) -> bool {
+    let id = id.to_ascii_lowercase();
+    (id.contains("flash") && !id.contains("omni")) || id.starts_with("gemini-2.5-pro")
+}
+
 /// Convert provider-neutral `ToolDefinition` to Gemini-specific wire format.
 ///
 /// Gemini validates the tool schema *before* generation and hard-400s the
@@ -217,6 +236,7 @@ impl LlmClient for GeminiLlmClient {
         Ok(raw_models
             .into_iter()
             .map(|(id, display)| super::ModelInfo {
+                free: gemini_has_free_tier(&id),
                 id,
                 display_name: display,
             })
@@ -345,5 +365,38 @@ mod tests {
     fn test_remaining_quota_default() {
         let client = GeminiLlmClient::new("fake-key", "gemini-2.5-flash").unwrap();
         assert_eq!(client.remaining_quota(), 250);
+    }
+
+    /// Every case here is a row read off Google's pricing page on
+    /// 2026-09-06. If Google changes who gets a free tier, this is the test
+    /// that should fail — not a player who picked a model expecting it to
+    /// cost nothing.
+    #[test]
+    fn free_tier_follows_googles_published_pricing() {
+        for id in [
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+        ] {
+            assert!(gemini_has_free_tier(id), "{id} has a free tier");
+        }
+        for id in [
+            "gemini-omni-flash",
+            "gemini-omni-flash-preview",
+            "gemini-3.1-pro-preview",
+        ] {
+            assert!(!gemini_has_free_tier(id), "{id} is paid only");
+        }
+        // Omni is the one Flash that bills, so the exclusion has to beat the
+        // Flash rule rather than sit beside it.
+        assert!(!gemini_has_free_tier("GEMINI-OMNI-FLASH"), "case ignored");
+        // A Pro we have not heard of reads as paid: wrong in the safe
+        // direction, and still selectable with the filter off.
+        assert!(!gemini_has_free_tier("gemini-9-pro"), "unknown Pro is paid");
     }
 }
