@@ -189,11 +189,22 @@ fn gear_rows(document: &::html::Html) -> Vec<GearRow> {
         };
         let (slot, stat) = match named(&slot).or_else(|| named(&prefix)) {
             Some(kind) => (kind, String::new()),
-            // A weapon row is labelled `Main Hand` with the weapon's type in
-            // the prefix cell — "Grieving Spear". Stat prefixes are one word,
-            // so the first is the stat and the rest is the weapon.
+            // A weapon row is labelled `Main Hand` or `Off Hand`, with the
+            // weapon's TYPE in the prefix cell — "Grieving Spear". Stat
+            // prefixes are one word, so the first word is the stat and the
+            // rest names the weapon.
+            //
+            // The weapon becomes the slot, as it already is on the other two
+            // sites. It is not decoration: a weapon determines skills 1-5, so
+            // it selects five of the build's skills and every trigger they
+            // carry. Keeping only "Main Hand" left 180 Snowcrows builds whose
+            // published rotation could not be read at all — `Shortbow 5` is
+            // unresolvable without knowing there is a shortbow.
             None => {
-                let stat = prefix.split_whitespace().next().unwrap_or("").to_string();
+                let mut words = prefix.split_whitespace();
+                let stat = words.next().unwrap_or("").to_string();
+                let weapon = words.collect::<Vec<_>>().join(" ");
+                let slot = if weapon.is_empty() { slot } else { weapon };
                 (slot, stat)
             }
         };
@@ -301,6 +312,19 @@ mod tests {
         };
         assert_eq!(stat_of("Helm"), "Grieving");
         assert_eq!(stat_of("Ring"), "Viper's", "a genuinely mixed set");
+        // The weapon is the slot, as on the other two sites. Losing it left
+        // a build whose published rotation could not be read: a numbered
+        // skill means nothing without knowing what is in hand.
+        assert_eq!(
+            stat_of("Spear"),
+            "Grieving",
+            "the weapon type names the row, not 'Main Hand'"
+        );
+        assert!(
+            build.gear.iter().any(|r| r.slot == "Spear"),
+            "the weapon type survives: {:?}",
+            build.gear.iter().map(|r| &r.slot).collect::<Vec<_>>()
+        );
         assert_eq!(
             stat_of("Relic"),
             "",
