@@ -876,6 +876,9 @@ fn gate_remedy(gate: &gw2_optimizer::referee::ViabilityGate) -> &'static str {
         }
         G::MobilityOut => "add a disengage: stealth, an evade, a block, or a movement skill",
         G::HarasserStrip => "strip or corrupt boons before the damage lands, not after",
+        G::BoonUptime => {
+            "keep the boons up: Concentration for duration, a source with a shorter cooldown,              or one that pulses instead of firing once"
+        }
         G::EncounterOutcome => "raise damage - the target does not go down inside the clock",
         G::SecureCompletion => "add an interrupt so the target cannot recover",
         G::ProtectedExecution => {
