@@ -2,7 +2,7 @@
 
 Source: docs/audit/AUDIT-REPORT-2026-09-05.md (2026-09-05). Baseline: main at 2d66490 / 1.11.27. Original source line numbers are audit anchors, not current edit coordinates.
 
-267 W findings + B001. No remedy is marked complete merely by being planned. R001–R003 remain excluded per the report. Original severity is preserved; execution order is risk-adjusted in tasks.md. For every row below: use SymForge get_file_context/get_symbol/find_references before edits, edit_plan before symbol edits, analyze_file_impact after file changes. Code deletion requires fresh caller and compatibility analysis.
+268 W findings + B001 (W268 is campaign-added, 2026-09-06). No remedy is marked complete merely by being planned. R001–R003 remain excluded per the report. Original severity is preserved; execution order is risk-adjusted in tasks.md. For every row below: use SymForge get_file_context/get_symbol/find_references before edits, edit_plan before symbol edits, analyze_file_impact after file changes. Code deletion requires fresh caller and compatibility analysis.
 
 ## Closure rules
 
@@ -20,7 +20,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 6 | [B001](#b001) | S2/observed | US2 | verified-scoped | `crates/addon/src/ui/main_view/optimization.rs:1050` |
 | 7 | [W025](#w025) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/gemini_tools.rs:1529` |
 | 8 | [W035](#w035) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/rotation/simulator.rs:220` |
-| 9 | [W019](#w019) | S2/confirmed | US2 | planned | `crates/optimizer/src/data/objective_profiles.rs:86` |
+| 9 | [W019](#w019) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/data/objective_profiles.rs:86` |
 | 10 | [W044](#w044) | S2/confirmed | US2 | verified-scoped | `data/normalized_effects/2026-01-13/pve.json:2` |
 | 11 | [W013](#w013) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/balance.rs:11` |
 | 12 | [W015](#w015) | S2/confirmed | US2 | verified-scoped | `crates/optimizer/src/data/manifests.rs:43` |
@@ -280,6 +280,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 266 | [W265](#w265) | S4/contested | US5 | planned | `crates/optimizer/examples/nudge_druid_check.rs:140` |
 | 267 | [W266](#w266) | S4/contested | US5 | planned | `crates/optimizer/src/llm/anthropic.rs:797` |
 | 268 | [W267](#w267) | S4/contested | US5 | planned | `crates/optimizer/src/search_v2.rs:1221` |
+| 269 | [W268](#w268) | S4/observed | US5 | planned | `crates/gw2api/src/client.rs:1446` |
 
 ## Finding details
 
@@ -397,17 +398,17 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W019
 
-- Task: T011 [US2]. Status: **planned**.
+- Task: T011 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/data/objective_profiles.rs:86`.
-- Dependencies: W044.
+- Dependencies: W044. Implemented on `fc58746` (PR #18 merged).
 
-Claim: Five of this struct's six fields deserialize from `data/objective_profiles/*.json` and are then read by nobody. `grep -rn --include=*.rs '<field>' crates server` for `min_stunbreaks`, `requires_stability`, `min_cleanse_count`, `min_cleanse_rate_per_20s`, and `boon_uptime_floors` returns hits only inside this file (the declarations). The sole consumed field is `ehp_floor`, read at referee.rs:541 (`.and_then(|p| p.viability_gates.ehp_floor)`); grepping `viability_gates.` repo-wide returns only `ehp_floor` accesses.
+Claim: Five of `viability_gates`' six fields deserialized and were read by nobody. `ehp_floor` was the only consumer.
 
-Remediation decision: Implement profile viability requirements in the referee with failed/pass boundary tests; preserve mode-specific semantics.
+Remediation decision: Optional overrides of the #18 consts, same shape as `ehp_floor`. `requires_stability`: `None` = cover-or-stab; `Some(true)` = stab only; `Some(false)` = skip the gate. `boon_uptime_floors` emits `ViabilityGate::BoonUptime` only when non-empty. `ViabilityGate::blocks()` not edited. Rates stay 582 scored / 2026-09-06.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Embedded `data/objective_profiles/*.json` still omit `viability_gates`, so deserialize-default leaves all five unset. `calibrate_viability` (2026-09-06, after this wiring) scored the same table as `ViabilityGate::blocks()`: MobilityOut 100, EffectiveHealth 96, StabilityAccess 96, StunbreakCount 88, SustainRecovery 82, CleanseRate 80, ResourceLegality 77, SecureCompletion 63, EncounterOutcome 37, ProtectedExecution 27, HarasserStrip 11. No `BoonUptime` row. **No gate moved.** Tests: `profile_min_stunbreaks_overrides_const`, `profile_requires_stability_true_rejects_cover_only`, `profile_requires_stability_false_skips_the_gate`, `profile_min_cleanse_count_and_rate_override_consts`, `profile_boon_uptime_floors_emit_a_gate`. Full `referee::` suite 50 passed. `evaluate_viability_gates_for`'s doc names the five fields as live overrides (the #18 "only ehp_floor" comment is gone).
 
-Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
+Acceptance: Each of the five fields changes a real gate outcome when set; unset keeps the #18 consts. No `blocks()` edit. No threshold retune.
 
 ### W044
 
@@ -2251,11 +2252,13 @@ Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the s
 - Audit: S3, confirmed; location: `crates/optimizer/src/llm/body.rs:17`.
 - Dependencies: story entry gate.
 
-Claim: body.rs:17-18 and anthropic.rs:34 both state MAX_COMPLETION_TOKENS is 16_384; openai_compat.rs:55 defines it as 65_536 and its own doc (line 50) says 'Raised from 16_384'. The margin argument in body.rs ('two orders of magnitude under' the 8 MiB cap) no longer holds: 65_536 tokens x 20 bytes is about 1.3 MiB, roughly 6x under the cap, not 100x.
+Claim: body.rs restated `MAX_COMPLETION_TOKENS`'s value and a stale margin. On main at ea4ef40 the const was 65_536 and the comment still said 16_384 / "two orders of magnitude". PR #18 set the const to 32_768 (~640 KiB at 20 bytes/token — one order under 8 MiB, not two) and, after review, rewrote the comment to match. anthropic.rs:34 had the same class of lie.
 
-Remediation decision: Reference the constant by name without repeating its value, or restate the arithmetic against the current 65_536 (and note that MAX_LLM_BODY must be revisited if it grows again); fix anthropic.rs:34 the same way.
+Remediation decision: After #18 merge, re-read `body.rs` / `anthropic.rs`. If they name the const and the current arithmetic, close this. If a value is still copied into a comment, replace it with the symbol.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Number and comment fix landed on PR #18 (other agent, 2026-09-06). Not on this checkout until merge.
+
+Acceptance: No comment restates a token ceiling that disagrees with `MAX_COMPLETION_TOKENS`. `MAX_LLM_BODY` still covers the current ceiling.
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 
@@ -4036,6 +4039,22 @@ Remediation decision: Move one stemmer into text_util (next to normalize_sigil_f
 Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
 
 Acceptance: Verify current evidence, then record tested correction, duplicate closure, refutation, or retained-deliberate rationale/trigger. Cosmetic edits need formatting/reference checks, not redundant tests.
+
+### W268
+
+- Task: T274 [US5]. Status: **planned**.
+- Audit: campaign-added 2026-09-06, observed; location: `crates/gw2api/src/client.rs:1446`.
+- Dependencies: none. File-disjoint from PR #18.
+
+Claim: `gw2api client::tests::fetch_bytes_rejects_a_body_over_the_icon_cap` is flaky. Sprint 3 (`verification.md`) recorded it as a parallel-load / wall-clock flake that passes in isolation. That diagnosis is wrong. On 2026-09-06 it **failed under `--test-threads=1`**, passed in the parallel crate run, and passed 6/6 when invoked by name — so the coupling is **order / accumulated state between tests in this crate**, not thread interleaving. Pre-existing; PR #18 never touches `crates/gw2api`. CI has passed with it green; that does not make it deterministic.
+
+Observed failure (other agent, 2026-09-06, twice in recent full-suite runs): `Internal("icon read failed: request or response body error")` instead of `Api` with `"exceeds"`. The transport reports a broken body before the size cap produces its own error — a race in `fetch_bytes`' cap path (`read_body_capped`), not only test order. `transport_retry` only retries `ApiError::Http`, so this Internal fails the match. Do not "fix" it by loosening the assertion or bumping a sleep.
+
+Remediation decision: Find the shared state the serial run trips over; isolate this test from it (or reset that state in the suite). Keep the cap assertion. Leave a one-shot check: the test name under `--test-threads=1` after the rest of `gw2api::client::tests`.
+
+Verification: Other agent's serial-fail / isolate-pass observation, 2026-09-06. Root cause not yet chased.
+
+Acceptance: The named test passes 6/6 after a full `client::tests` serial run, and still passes in isolation. No production cap change.
 
 ## Excluded report entries
 

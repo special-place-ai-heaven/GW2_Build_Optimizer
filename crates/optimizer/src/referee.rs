@@ -20,6 +20,27 @@ const MIN_STUNBREAKS: u32 = 1;
 const MIN_CLEANSE_COUNT: u32 = 1;
 const MIN_CLEANSE_RATE_PER_20S: f64 = 2.0;
 
+fn stunbreak_floor(profile: Option<&crate::data::ObjectiveProfile>) -> u32 {
+    profile
+        .and_then(|p| p.viability_gates.min_stunbreaks)
+        .unwrap_or(MIN_STUNBREAKS)
+}
+
+fn cleanse_count_floor(profile: Option<&crate::data::ObjectiveProfile>) -> u32 {
+    profile
+        .and_then(|p| p.viability_gates.min_cleanse_count)
+        .unwrap_or(MIN_CLEANSE_COUNT)
+}
+
+fn cleanse_rate_floor(
+    scenario: &ScenarioSpec,
+    profile: Option<&crate::data::ObjectiveProfile>,
+) -> f64 {
+    profile
+        .and_then(|p| p.viability_gates.min_cleanse_rate_per_20s)
+        .unwrap_or_else(|| required_cleanse_rate(scenario))
+}
+
 /// Minimum effective health for PvE viability.
 /// Evidence: a glass Berserker Guardian (vit~1000, no toughness investment) computes
 /// ~18,030 blended EHP (65% strike / 35% condition). A minimal test build with empty
@@ -90,6 +111,8 @@ pub enum ViabilityGate {
     SustainRecovery,
     /// WvW: priority actions obey the modeled profession-resource paywall.
     ResourceLegality,
+    /// Profile `boon_uptime_floors` — only emitted when that map is non-empty.
+    BoonUptime,
 }
 
 impl ViabilityGate {
@@ -273,15 +296,10 @@ pub fn evaluate_viability_gates(
     evaluate_viability_gates_for(rotation, combat_perf, scenario, None)
 }
 
-/// Same as [`evaluate_viability_gates`], applying the profile's `ehp_floor`
-/// when it sets one. Unset keeps the hardcoded mode/tier default.
-///
-/// Only `ehp_floor`. `ViabilityGates` also carries `min_stunbreaks`,
-/// `requires_stability`, `min_cleanse_count`, `min_cleanse_rate` and
-/// `boon_uptime_floors`, and nothing reads them — those gates still use the
-/// `MIN_STUNBREAKS` and `MIN_CLEANSE_COUNT` constants below. Said plainly
-/// because the doc used to say "floors", plural, which reads as though a
-/// profile could set them and left the next person to discover otherwise.
+/// Same as [`evaluate_viability_gates`], applying profile `viability_gates`
+/// when a field is set. Unset fields keep the hardcoded defaults
+/// (`MIN_STUNBREAKS`, cover-or-stab, `MIN_CLEANSE_*`, mode/tier EHP).
+/// `boon_uptime_floors` adds [`ViabilityGate::BoonUptime`] only when non-empty.
 pub fn evaluate_viability_gates_for(
     rotation: Option<&SimulationResult>,
     combat_perf: &CombatPerformance,
@@ -295,15 +313,17 @@ pub fn evaluate_viability_gates_for(
     let mut graded: Vec<ViabilityGate> = Vec::new();
 
     let requires_pvp_gates = matches!(scenario.game_mode, GameMode::WvW | GameMode::PvP);
+    let need_stunbreaks = stunbreak_floor(profile);
+    let need_cleanses = cleanse_count_floor(profile);
 
     if requires_pvp_gates {
         // ── Stunbreak gate ──────────────────────────────────────────────────
         gates.push(match rotation {
             Some(rot) => {
-                let passed = rot.stunbreak_count >= MIN_STUNBREAKS;
+                let passed = rot.stunbreak_count >= need_stunbreaks;
                 if !passed {
-                    shortfall += (MIN_STUNBREAKS.saturating_sub(rot.stunbreak_count)) as f64
-                        / MIN_STUNBREAKS.max(1) as f64;
+                    shortfall += (need_stunbreaks.saturating_sub(rot.stunbreak_count)) as f64
+                        / need_stunbreaks.max(1) as f64;
                     graded.push(ViabilityGate::StunbreakCount);
                 }
                 GateResult {
@@ -311,7 +331,7 @@ pub fn evaluate_viability_gates_for(
                     passed,
                     note: format!(
                         "stunbreak_count={} (required >={})",
-                        rot.stunbreak_count, MIN_STUNBREAKS
+                        rot.stunbreak_count, need_stunbreaks
                     ),
                 }
             }
@@ -322,45 +342,55 @@ pub fn evaluate_viability_gates_for(
             },
         });
 
-        // Cover, not Stability-only. Meta roam (Daredevil stealth/evade, Mesmer
-        // Distortion, Fresh Air invuln, Spellbreaker Full Counter) survives without
-        // a dedicated stab utility. Roam also counts interrupt/disable-first.
-        gates.push(match rotation {
-            Some(rot) => {
-                let roam = scenario.combat_tier == CombatTier::Solo;
-                let passed =
-                    rot.has_stability || rot.has_cover_answer || (roam && rot.has_interrupt);
-                let note = if rot.has_stability {
-                    "stability available".into()
-                } else if rot.has_cover_answer {
-                    "cover: evade/block/invuln/stealth".into()
-                } else if roam && rot.has_interrupt {
-                    "interrupt/disable before incoming CC".into()
-                } else {
-                    "no cover (stability, evade, block, invuln, stealth) and no interrupt".into()
-                };
-                GateResult {
-                    gate: ViabilityGate::StabilityAccess,
-                    passed,
-                    note,
+        // Cover, not Stability-only — unless the profile sets requires_stability.
+        // None: stab OR cover OR (roam AND interrupt). Some(true): stab only.
+        // Some(false): skip the gate.
+        if profile.and_then(|p| p.viability_gates.requires_stability) != Some(false) {
+            let require_stab =
+                profile.and_then(|p| p.viability_gates.requires_stability) == Some(true);
+            gates.push(match rotation {
+                Some(rot) => {
+                    let roam = scenario.combat_tier == CombatTier::Solo;
+                    let passed = if require_stab {
+                        rot.has_stability
+                    } else {
+                        rot.has_stability || rot.has_cover_answer || (roam && rot.has_interrupt)
+                    };
+                    let note = if rot.has_stability {
+                        "stability available".into()
+                    } else if require_stab {
+                        "stability required by profile".into()
+                    } else if rot.has_cover_answer {
+                        "cover: evade/block/invuln/stealth".into()
+                    } else if roam && rot.has_interrupt {
+                        "interrupt/disable before incoming CC".into()
+                    } else {
+                        "no cover (stability, evade, block, invuln, stealth) and no interrupt"
+                            .into()
+                    };
+                    GateResult {
+                        gate: ViabilityGate::StabilityAccess,
+                        passed,
+                        note,
+                    }
                 }
-            }
-            None => GateResult {
-                gate: ViabilityGate::StabilityAccess,
-                passed: false,
-                note: "rotation unavailable".into(),
-            },
-        });
+                None => GateResult {
+                    gate: ViabilityGate::StabilityAccess,
+                    passed: false,
+                    note: "rotation unavailable".into(),
+                },
+            });
+        }
 
         // ── Cleanse gate ────────────────────────────────────────────────────
         gates.push(match rotation {
             Some(rot) => {
-                let required_rate = effective_cleanse_requirement(scenario, rot);
-                let passed = rot.cleanse_count >= MIN_CLEANSE_COUNT
+                let required_rate = effective_cleanse_requirement(scenario, rot, profile);
+                let passed = rot.cleanse_count >= need_cleanses
                     && rot.cleanse_rate_per_20s >= required_rate;
                 if !passed {
-                    let count_short = (MIN_CLEANSE_COUNT.saturating_sub(rot.cleanse_count)) as f64
-                        / MIN_CLEANSE_COUNT.max(1) as f64;
+                    let count_short = (need_cleanses.saturating_sub(rot.cleanse_count)) as f64
+                        / need_cleanses.max(1) as f64;
                     let rate_short =
                         ((required_rate - rot.cleanse_rate_per_20s) / required_rate).clamp(0.0, 1.0);
                     shortfall += count_short.max(rate_short);
@@ -371,7 +401,7 @@ pub fn evaluate_viability_gates_for(
                     passed,
                     note: format!(
                         "cleanse_count={}, rate={:.1}/20s (required count >={}, rate >={required_rate:.1}/20s)",
-                        rot.cleanse_count, rot.cleanse_rate_per_20s, MIN_CLEANSE_COUNT
+                        rot.cleanse_count, rot.cleanse_rate_per_20s, need_cleanses
                     ),
                 }
             }
@@ -612,6 +642,43 @@ pub fn evaluate_viability_gates_for(
         ),
     });
 
+    let floors = profile
+        .map(|p| &p.viability_gates.boon_uptime_floors)
+        .filter(|m| !m.is_empty());
+    if let Some(floors) = floors {
+        gates.push(match rotation {
+            Some(rot) => {
+                let mut missed: Vec<String> = floors
+                    .iter()
+                    .filter_map(|(boon, floor)| {
+                        let have = rot.buff_uptime.get(boon).copied().unwrap_or(0.0);
+                        (have < *floor).then(|| format!("{boon}={have:.2}<{floor:.2}"))
+                    })
+                    .collect();
+                missed.sort();
+                let passed = missed.is_empty();
+                if !passed {
+                    shortfall += 1.0;
+                    graded.push(ViabilityGate::BoonUptime);
+                }
+                GateResult {
+                    gate: ViabilityGate::BoonUptime,
+                    passed,
+                    note: if passed {
+                        "boon uptime floors met".into()
+                    } else {
+                        format!("boon floors missed: {}", missed.join(", "))
+                    },
+                }
+            }
+            None => GateResult {
+                gate: ViabilityGate::BoonUptime,
+                passed: false,
+                note: "rotation unavailable".into(),
+            },
+        });
+    }
+
     let is_viable = gates.iter().all(|g| g.passed);
     for g in &gates {
         if !g.passed && !graded.contains(&g.gate) {
@@ -645,14 +712,18 @@ pub fn required_cleanse_rate(scenario: &ScenarioSpec) -> f64 {
 /// tick through it, so the reduction is capped at 75%. Uses the same
 /// `buff_uptime` map the Stability gate reads; a kit with no Resistance sees
 /// exactly the scenario floor. Shared by the gate and the off-bar pass.
-pub fn effective_cleanse_requirement(scenario: &ScenarioSpec, rot: &SimulationResult) -> f64 {
+pub fn effective_cleanse_requirement(
+    scenario: &ScenarioSpec,
+    rot: &SimulationResult,
+    profile: Option<&crate::data::ObjectiveProfile>,
+) -> f64 {
     let resistance = rot
         .buff_uptime
         .get("Resistance")
         .copied()
         .unwrap_or(0.0)
         .clamp(0.0, 0.75);
-    required_cleanse_rate(scenario) * (1.0 - resistance)
+    cleanse_rate_floor(scenario, profile) * (1.0 - resistance)
 }
 
 /// Seconds after "cooldown" in gear/trait tooltip text ("(Cooldown: 9
@@ -778,23 +849,24 @@ pub fn apply_offbar_cleanse(
     validated: &ValidatedBuild,
     db: &GameDb,
     scenario: &ScenarioSpec,
+    profile: Option<&crate::data::ObjectiveProfile>,
 ) {
     let Some(rot) = rotation else { return };
     let gear = kit_cleanse_rate_from_gear(validated, db);
     if gear <= 0.0 {
         return;
     }
-    let required = effective_cleanse_requirement(scenario, rot);
-    let count_short = (MIN_CLEANSE_COUNT.saturating_sub(rot.cleanse_count)) as f64
-        / MIN_CLEANSE_COUNT.max(1) as f64;
+    let required = effective_cleanse_requirement(scenario, rot, profile);
+    let need = cleanse_count_floor(profile);
+    let count_short = (need.saturating_sub(rot.cleanse_count)) as f64 / need.max(1) as f64;
     let short = |rate: f64| {
         let rate_short = ((required - rate) / required).clamp(0.0, 1.0);
         count_short.max(rate_short)
     };
     let before = rot.cleanse_rate_per_20s;
     let after = before + gear;
-    let was_failing = rot.cleanse_count < MIN_CLEANSE_COUNT || before < required;
-    let now_passes = rot.cleanse_count >= MIN_CLEANSE_COUNT && after >= required;
+    let was_failing = rot.cleanse_count < need || before < required;
+    let now_passes = rot.cleanse_count >= need && after >= required;
     let mut changed = false;
     for g in &mut report.gates {
         if g.gate != ViabilityGate::CleanseRate {
@@ -802,7 +874,7 @@ pub fn apply_offbar_cleanse(
         }
         g.note = format!(
             "cleanse_count={}, rate={:.1}/20s incl. {:.1} from sigils/rune/relic/traits (required count >={}, rate >={required:.1}/20s)",
-            rot.cleanse_count, after, gear, MIN_CLEANSE_COUNT
+            rot.cleanse_count, after, gear, need
         );
         if was_failing {
             let prev = short(before);
@@ -1022,17 +1094,21 @@ pub fn evaluate_validated_build(
         .map(|p| engine::simulate_prepared(p, validated, db, Some(scenario)));
     // ── Viability gating ──────────────────────────────────────────────────────
     // Run before score computation. Non-viable builds receive sentinel score -1.0.
-    let mut viability = evaluate_viability_gates_for(
-        rotation.as_ref(),
-        &primary_combat,
+    let profile = objective_profile_for(
         scenario,
-        objective_profile_for(
-            scenario,
-            crate::data::objective_profiles::objective_profiles(),
-        ),
+        crate::data::objective_profiles::objective_profiles(),
     );
+    let mut viability =
+        evaluate_viability_gates_for(rotation.as_ref(), &primary_combat, scenario, profile);
     apply_offbar_stability(&mut viability, validated, db);
-    apply_offbar_cleanse(&mut viability, rotation.as_ref(), validated, db, scenario);
+    apply_offbar_cleanse(
+        &mut viability,
+        rotation.as_ref(),
+        validated,
+        db,
+        scenario,
+        profile,
+    );
 
     // The flow simulation is most of an evaluation's cost and nothing reads
     // its axes for a build the gates already sent to -1.0.
@@ -1307,7 +1383,7 @@ mod tests {
         let mut rot = make_viable_rotation();
         rot.cleanse_count = MIN_CLEANSE_COUNT;
         // Same requirement the gate and the off-bar pass use (Resistance-aware).
-        let required = effective_cleanse_requirement(&scenario, &rot);
+        let required = effective_cleanse_requirement(&scenario, &rot, None);
         rot.cleanse_rate_per_20s = required * 0.5; // fails on rate only
         let combat = make_viable_combat();
         let mut report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
@@ -1324,7 +1400,7 @@ mod tests {
             "rate shortfall is 0.5: {}",
             report.shortfall
         );
-        apply_offbar_cleanse(&mut report, Some(&rot), &b, &db, &scenario);
+        apply_offbar_cleanse(&mut report, Some(&rot), &b, &db, &scenario, None);
         assert!(cleanse(&report).passed, "{}", cleanse(&report).note);
         assert!(report.is_viable);
         assert!(
@@ -1661,6 +1737,124 @@ mod tests {
             fail.gates[0].note.contains("25000"),
             "note should reflect the 25k override: {}",
             fail.gates[0].note
+        );
+    }
+
+    fn blank_profile(mode: &str) -> crate::data::ObjectiveProfile {
+        crate::data::objective_profiles::objective_profiles()
+            .default_for_mode(mode)
+            .expect("embedded default")
+            .clone()
+    }
+
+    #[test]
+    fn profile_min_stunbreaks_overrides_const() {
+        let mut rot = make_viable_rotation();
+        rot.stunbreak_count = 1;
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let mut high = blank_profile("WvW");
+        high.viability_gates.min_stunbreaks = Some(2);
+
+        let pass = evaluate_viability_gates_for(Some(&rot), &combat, &scenario, None);
+        let fail = evaluate_viability_gates_for(Some(&rot), &combat, &scenario, Some(&high));
+        let g_pass = gate_by_kind(&pass.gates, &ViabilityGate::StunbreakCount).unwrap();
+        let g_fail = gate_by_kind(&fail.gates, &ViabilityGate::StunbreakCount).unwrap();
+        assert!(g_pass.passed, "default floor is 1: {}", g_pass.note);
+        assert!(!g_fail.passed, "profile floor 2: {}", g_fail.note);
+        assert!(g_fail.note.contains("required >=2"), "{}", g_fail.note);
+    }
+
+    #[test]
+    fn profile_requires_stability_true_rejects_cover_only() {
+        let mut rot = make_viable_rotation();
+        rot.has_stability = false;
+        rot.has_cover_answer = true;
+        rot.has_interrupt = false;
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let mut strict = blank_profile("WvW");
+        strict.viability_gates.requires_stability = Some(true);
+
+        let cover = evaluate_viability_gates_for(Some(&rot), &combat, &scenario, None);
+        let stab = evaluate_viability_gates_for(Some(&rot), &combat, &scenario, Some(&strict));
+        assert!(
+            gate_by_kind(&cover.gates, &ViabilityGate::StabilityAccess)
+                .unwrap()
+                .passed
+        );
+        let g = gate_by_kind(&stab.gates, &ViabilityGate::StabilityAccess).unwrap();
+        assert!(!g.passed, "{}", g.note);
+        assert!(g.note.contains("required by profile"), "{}", g.note);
+    }
+
+    #[test]
+    fn profile_requires_stability_false_skips_the_gate() {
+        let mut rot = make_viable_rotation();
+        rot.has_stability = false;
+        rot.has_cover_answer = false;
+        rot.has_interrupt = false;
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let mut off = blank_profile("WvW");
+        off.viability_gates.requires_stability = Some(false);
+
+        let report = evaluate_viability_gates_for(Some(&rot), &combat, &scenario, Some(&off));
+        assert!(gate_by_kind(&report.gates, &ViabilityGate::StabilityAccess).is_none());
+    }
+
+    #[test]
+    fn profile_min_cleanse_count_and_rate_override_consts() {
+        let mut rot = make_viable_rotation();
+        rot.cleanse_count = 1;
+        rot.cleanse_rate_per_20s = 4.0;
+        let combat = make_viable_combat();
+        let scenario = make_wvw_scenario();
+        let mut count = blank_profile("WvW");
+        count.viability_gates.min_cleanse_count = Some(2);
+        let mut rate = blank_profile("WvW");
+        rate.viability_gates.min_cleanse_rate_per_20s = Some(10.0);
+
+        let default = evaluate_viability_gates_for(Some(&rot), &combat, &scenario, None);
+        let by_count = evaluate_viability_gates_for(Some(&rot), &combat, &scenario, Some(&count));
+        let by_rate = evaluate_viability_gates_for(Some(&rot), &combat, &scenario, Some(&rate));
+        assert!(
+            gate_by_kind(&default.gates, &ViabilityGate::CleanseRate)
+                .unwrap()
+                .passed
+        );
+        assert!(
+            !gate_by_kind(&by_count.gates, &ViabilityGate::CleanseRate)
+                .unwrap()
+                .passed
+        );
+        let g = gate_by_kind(&by_rate.gates, &ViabilityGate::CleanseRate).unwrap();
+        assert!(!g.passed, "{}", g.note);
+        assert!(g.note.contains("10.0"), "{}", g.note);
+    }
+
+    #[test]
+    fn profile_boon_uptime_floors_emit_a_gate() {
+        let mut rot = make_viable_rotation();
+        let combat = make_viable_combat();
+        let scenario = make_pve_scenario();
+        let mut floors = blank_profile("PvE");
+        floors
+            .viability_gates
+            .boon_uptime_floors
+            .insert("Quickness".into(), 0.9);
+
+        let miss = evaluate_viability_gates_for(Some(&rot), &combat, &scenario, Some(&floors));
+        let g = gate_by_kind(&miss.gates, &ViabilityGate::BoonUptime).unwrap();
+        assert!(!g.passed, "{}", g.note);
+        assert!(g.note.contains("Quickness"), "{}", g.note);
+
+        rot.buff_uptime.insert("Quickness".into(), 0.95);
+        let hit = evaluate_viability_gates_for(Some(&rot), &combat, &scenario, Some(&floors));
+        assert!(
+            gate_by_kind(&hit.gates, &ViabilityGate::BoonUptime)
+                .unwrap()
+                .passed
         );
     }
 

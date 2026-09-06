@@ -31,7 +31,7 @@ Independent acceptance: see spec.md US2; each item must satisfy its own ledger a
 - [X] T008 [US2] B001: Pass the accepted ValidatedBuild into attach_chat_stats and use engine::calculate_validated_stats with balance context and returned modifiers. Target: `crates/addon/src/ui/main_view/optimization.rs`. Record evidence in ledger.md#b001.
 - [X] T009 [US2] W025: Return an explicit tool error when prefix/stat resolution fails; never invent a stat block. Target: `crates/optimizer/src/gemini_tools.rs`. Record evidence in ledger.md#w025.
 - [X] T010 [US2] W035: Build SimParams from resolved stats and balance mode in the tool and call simulate_with; restrict the basic test convenience to actual test consumers. Target: `crates/optimizer/src/rotation/simulator.rs`. Depends on W025. Record evidence in ledger.md#w035.
-- [ ] T011 [US2] W019: Implement profile viability requirements in the referee with failed/pass boundary tests; preserve mode-specific semantics. Target: `crates/optimizer/src/data/objective_profiles.rs`. Depends on W044. Record evidence in ledger.md#w019.
+- [X] T011 [US2] W019: After PR #18 merge, wire the five still-unread `viability_gates` fields as optional overrides of the referee consts (same shape as `ehp_floor`). Failed/pass boundary tests. Any threshold change goes through `calibrate_viability` and names which gate moved. Do not hand-edit `ViabilityGate::blocks()`. Target: `crates/optimizer/src/data/objective_profiles.rs`. Depends on W044. Record evidence in ledger.md#w019.
 - [X] T012 [US2] W044: Make normalized-effect patch mismatch explicit in production and active-manifest consistency validation; historical data must not be silently relabeled as current verified evidence. Target: `data/normalized_effects/2026-01-13/pve.json`. Record evidence in ledger.md#w044.
 - [X] T013 [US2] W013: Derive the active patch from manifests, retain explicit historical lookup, and make unsupported live-build/patch mismatch observable. Target: `crates/optimizer/src/balance.rs`. Depends on W044. Record evidence in ledger.md#w013.
 - [X] T014 [US2] W015: Wire manifest staleness detection to the live build-number result and visible data status. Target: `crates/optimizer/src/data/manifests.rs`. Depends on W013. Record evidence in ledger.md#w015.
@@ -306,10 +306,11 @@ Independent acceptance: see spec.md US5; each item must satisfy its own ledger a
 - [ ] T268 [US5] W265: Either use real 0.35/0.25 multipliers for the injected rows (so the numbers are on the same scale as the rest of the output), or skip the forced-prefix block entirely when the prefix is not in the live cache and print why, rather than inventing a row. Target: `crates/optimizer/examples/nudge_druid_check.rs`. Record evidence in ledger.md#w265.
 - [ ] T269 [US5] W266: Replace with the ScriptedServer pattern already used in openai_compat.rs tests: point ANTHROPIC_API_BASE at a loopback server, call validate_key/validate_key_detailed, and assert the recorded request is GET /models. Target: `crates/optimizer/src/llm/anthropic.rs`. Record evidence in ledger.md#w266.
 - [ ] T270 [US5] W267: Move one stemmer into text_util (next to normalize_sigil_family) and use it from all four sites. Target: `crates/optimizer/src/search_v2.rs`. Record evidence in ledger.md#w267.
+- [ ] T274 [US5] W268: Isolate order-dependent state in `gw2api client::tests::fetch_bytes_rejects_a_body_over_the_icon_cap` (fails serial, passes parallel and 6/6 isolation). Keep the icon-cap assertion. Target: `crates/gw2api/src/client.rs`. Record evidence in ledger.md#w268.
 
 ## Final phase: Campaign verification
 
-- [ ] T271 Reconcile all 268 entries, duplicate closure and exclusions in specs/003-audit-remediation/ledger.md; no unexplained open finding.
+- [ ] T271 Reconcile all 269 entries, duplicate closure and exclusions in specs/003-audit-remediation/ledger.md; no unexplained open finding.
 - [ ] T272 Execute applicable workspace/server checks and document outcomes in specs/003-audit-remediation/verification.md.
 - [ ] T273 Complete per-batch versioned DLL handoff and user in-game acceptance in specs/003-audit-remediation/verification.md before any commit/push/release.
 
