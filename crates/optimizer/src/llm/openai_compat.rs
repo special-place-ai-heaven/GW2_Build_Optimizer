@@ -43,15 +43,6 @@ pub(crate) const METADATA_TIMEOUT: Duration = Duration::from_secs(20);
 const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(5);
 /// Ceiling for a retry backoff, including a provider-supplied `Retry-After`.
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
-/// Completion ceiling per chat completion. Reasoning models spend the same
-/// budget on hidden thinking, so the cap must cover both or the answer gets
-/// truncated (or arrives empty) with finish_reason "length".
-///
-/// Raised from 16_384: a build is worth real tokens. The reasoning cap used
-/// to be HALF of this, so a thinking model could spend the entire budget
-/// deliberating and have nothing left to answer with. Designing a build from
-/// live tool data — trait columns for three specs, skill facts, upgrade
-/// ranking, then a rotation sim — is not a 16k job.
 /// The turn that closes a tool loop which ran out of rounds.
 ///
 /// Withholding the tool declarations is not enough on its own: the system
@@ -107,7 +98,25 @@ pub(crate) fn is_function_call_failure(err: &LlmError) -> bool {
     message.to_ascii_uppercase().contains("MALFORMED_FUNCTION_CALL")
 }
 
-pub(crate) const MAX_COMPLETION_TOKENS: u32 = 65_536;
+/// Completion ceiling per chat completion, hidden thinking included, so a
+/// reasoning model cannot spend the budget deliberating and have nothing left
+/// to answer with.
+///
+/// This was 16_384, then 65_536 on the argument that designing a build from
+/// live tool data is not a 16k job. That argument stands and 16k is not
+/// coming back — but 65_536 cannot be *delivered* inside
+/// [`CHAT_REQUEST_TIMEOUT`], which is a total deadline, not an idle one. At
+/// 100 tokens/s a full budget needs 655 s against a 420 s deadline; at 50
+/// tok/s, 1311 s. A model that took us at our word could not finish, and two
+/// unrelated models timed out in exactly that way.
+///
+/// 32_768 fits at 100 tok/s with room to spare and keeps twice the ceiling
+/// the 16k argument was made against. It is a ceiling, not a target: what
+/// stops it being reached is choosing a reasoning effort the model actually
+/// lists (see [`crate::llm::ModelInfo::effort`]) instead of the dearest one
+/// on offer. It also widens routing, since OpenRouter routes only to
+/// providers that can serve the `max_tokens` asked for.
+pub(crate) const MAX_COMPLETION_TOKENS: u32 = 32_768;
 /// How hard a thinking model may think (OpenRouter `reasoning.effort`;
 /// ignored by providers without thinking support).
 ///
@@ -402,6 +411,19 @@ pub(crate) fn send_chat(
 
         let resp = match req.json(&request).send() {
             Ok(r) => r,
+            // A timeout is not a transport hiccup and must not be retried.
+            // `request_timeout` is a reqwest TOTAL deadline — connect through
+            // last byte — so a request that hit it did not fail to start, it
+            // ran out the whole budget. Handing it an identical budget cannot
+            // end differently; it only doubles the silence. With two attempts
+            // and a 420s deadline that was 845s per logical call, and the
+            // chat loop runs up to eight of them.
+            Err(e) if e.is_timeout() => {
+                return Err(LlmError::Http(format!(
+                    "{e} (no reply within {}s)",
+                    core.request_timeout.as_secs()
+                )));
+            }
             Err(e) => {
                 if attempt == core.max_retries - 1 {
                     return Err(LlmError::Http(e.to_string()));

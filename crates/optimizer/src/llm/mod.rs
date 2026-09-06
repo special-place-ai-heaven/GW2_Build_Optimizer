@@ -104,16 +104,31 @@ impl ModelInfo {
 
     /// The reasoning effort to send, given what we would prefer.
     ///
-    /// Prefers our own choice, falls back to something the model does accept,
-    /// and keeps our choice when the model publishes no list at all — an
-    /// unpublished list is silence, not a refusal.
+    /// Never MORE thinking than we asked for. Where our own choice is not on
+    /// the model's list, this takes the dearest option at or below it, and
+    /// only if there is none does it take the cheapest on offer.
+    ///
+    /// The order matters more than it looks. `z-ai/glm-5.3` lists
+    /// `["max", "high", "low"]` and has mandatory reasoning; taking the first
+    /// entry — which an earlier version of this did — asked a model that must
+    /// think to think as hard as it can, on every message. Sorting by cost
+    /// turns that into `low`.
     pub fn effort(&self, preferred: &str) -> Option<String> {
         if self.supported_efforts.is_empty()
             || self.supported_efforts.iter().any(|e| e == preferred)
         {
             return Some(preferred.to_string());
         }
-        self.supported_efforts.first().cloned()
+        let cost = |e: &str| EFFORT_ORDER.iter().position(|x| *x == e);
+        let want = cost(preferred)?;
+        let mut listed: Vec<&String> = self.supported_efforts.iter().collect();
+        listed.sort_by_key(|e| cost(e).unwrap_or(usize::MAX));
+        listed
+            .iter()
+            .rev()
+            .find(|e| cost(e).is_some_and(|c| c <= want))
+            .or_else(|| listed.first())
+            .map(|e| (*e).clone())
     }
 
     /// How many completion tokens to ask for, given our own ceiling.
@@ -135,6 +150,14 @@ impl ModelInfo {
         }
     }
 }
+
+/// Reasoning efforts from cheapest to dearest.
+///
+/// Providers name these freely and the list is not closed, so an effort that
+/// is not here simply has no rank and is never chosen over one that does.
+const EFFORT_ORDER: [&str; 7] = [
+    "none", "minimal", "low", "medium", "high", "max", "xhigh",
+];
 
 /// Result of a detailed key validation with user-friendly messages.
 #[derive(Debug, Clone)]
@@ -501,7 +524,10 @@ mod tool_arg_tests {
             agentic_index: Some(39.7),
             ..Default::default()
         };
-        assert_eq!(glm.effort("medium").as_deref(), Some("xhigh"), "not medium");
+        // Neither listed value is at or below `medium`, so it takes the
+        // cheapest on offer — `high`, never the `xhigh` that merely happens
+        // to be first in the array.
+        assert_eq!(glm.effort("medium").as_deref(), Some("high"), "cheapest");
         assert_eq!(glm.completion_budget(65_536), 65_536, "ours is smaller");
         assert!(glm.usable());
 
@@ -511,6 +537,15 @@ mod tool_arg_tests {
             ..Default::default()
         };
         assert_eq!(nemotron.effort("medium").as_deref(), Some("medium"));
+
+        // glm-5.3: mandatory reasoning, and `max` is simply first in the
+        // array. Taking the first entry told a model that must think to think
+        // as hard as it can, on every message.
+        let glm53 = ModelInfo {
+            supported_efforts: vec!["max".into(), "high".into(), "low".into()],
+            ..Default::default()
+        };
+        assert_eq!(glm53.effort("medium").as_deref(), Some("low"), "never max");
 
         // Publishes no list at all: silence is not refusal, keep ours.
         let quiet = ModelInfo::default();
