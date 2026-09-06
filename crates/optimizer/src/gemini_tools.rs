@@ -137,6 +137,103 @@ pub fn tool_declarations() -> Vec<Tool> {
     }]
 }
 
+/// Everything about a profession the model would otherwise fetch a round at a
+/// time, rendered once for the prompt.
+///
+/// Measured in-game 2026-09-06, Necromancer, one chat message on a free model:
+///
+/// | round | calls | took |
+/// |---|---|---|
+/// | 1 | get_profession_info | 9.1s |
+/// | 2-4 | get_spec_traits x8 | 5.1s |
+/// | 5, 7 | get_skill_info x10 | 4.7s |
+/// | 8 | get_trait_details x6 | 2.2s |
+///
+/// 21.1 s of a 30.8 s tool phase, and six whole-conversation uploads, spent
+/// enumerating data that is already in memory behind O(1) lookups. Rounds 5
+/// and 7 are a guessing game: `list_runes`, `list_sigils` and `list_relics`
+/// exist, but nothing lists a profession's skills, so the model has to
+/// remember a name and call `get_skill_info` to find out whether it was real -
+/// which is also how a wrong name reaches a player's build.
+///
+/// About 10.5k tokens for a Necromancer, against a 100k prompt budget.
+pub fn profession_reference(db: &GameDb, profession_name: &str) -> String {
+    // `get_profession_info` and `get_spec_traits` read only `db` and
+    // `profession_name`; the rest of the context is required by the type and
+    // unused here. Going through `execute_tool` rather than re-deriving the
+    // data keeps this byte-identical to what a call would have returned, so
+    // the model reads one shape whether it was handed the data or fetched it.
+    let balance_ctx = BalanceContext::new(gw2_core::types::GameMode::WvW);
+    let ctx = ToolContext {
+        db,
+        profession_name,
+        candidates: &[],
+        current_build_summary: None,
+        weights: OptimizationWeights::default(),
+        balance_ctx: &balance_ctx,
+    };
+
+    let info = execute_tool("get_profession_info", &json!({}), &ctx);
+    if info.get("error").is_some() {
+        return String::new();
+    }
+
+    let mut out = format!(
+        "\nPROFESSION REFERENCE - {profession_name}, read from the live game \
+         data at the moment you were asked. It is complete: every \
+         specialization, every trait, every heal/utility/elite skill this \
+         profession can take. Do NOT call get_profession_info, get_spec_traits \
+         or get_trait_details for anything below - you already have their \
+         answers, and a round spent re-reading this is a round the player \
+         waits for nothing. Use tools for what is NOT here: gear, runes, \
+         sigils, relics, stats, simulation.\n\n{info}\n"
+    );
+
+    for name in info["specializations"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|s| s["name"].as_str())
+    {
+        let traits = execute_tool("get_spec_traits", &json!({ "spec_name": name }), &ctx);
+        out.push('\n');
+        out.push_str(&traits.to_string());
+        out.push('\n');
+    }
+
+    // No tool lists these, so the shape is ours. Name, slot and the game's own
+    // description is what picking a skill needs; the facts behind it are a
+    // `get_skill_info` call away for the few the model actually shortlists.
+    let mut skills: Vec<&gw2_api::models::Skill> = db
+        .skills
+        .values()
+        .filter(|s| {
+            s.professions.iter().any(|p| p == profession_name)
+                && matches!(s.slot.as_deref(), Some("Heal" | "Utility" | "Elite"))
+        })
+        .collect();
+    // `HashMap::values()` order is unspecified; without this the same request
+    // produces a different prompt on different runs.
+    skills.sort_by(|a, b| a.slot.cmp(&b.slot).then(a.name.cmp(&b.name)));
+    if !skills.is_empty() {
+        out.push_str(
+            "\nSlot skills. These names are exact and this list is exhaustive - \
+             a name not on it does not exist for this profession:\n",
+        );
+        for s in skills {
+            let slot = s.slot.as_deref().unwrap_or("");
+            let gate = s
+                .specialization
+                .and_then(|id| db.spec(id))
+                .map(|spec| format!(" [{}]", spec.name))
+                .unwrap_or_default();
+            let desc = s.description.as_deref().unwrap_or("");
+            out.push_str(&format!("{slot}: {}{gate} - {desc}\n", s.name));
+        }
+    }
+    out
+}
+
 /// Execute a tool call by name, dispatching to the appropriate handler.
 pub fn execute_tool(name: &str, args: &Value, ctx: &ToolContext) -> Value {
     match name {
@@ -2890,6 +2987,62 @@ mod tests {
             tool_strike,
             with.strike_dps.round(),
             "tool must call simulate_with on resolved stats, not simulate()/basic: {result}"
+        );
+    }
+
+    /// The reference replaces tool rounds, so it has to carry what those
+    /// rounds returned - and step aside cleanly when there is nothing to
+    /// carry, because with no character selected the tools are the only
+    /// source left.
+    #[test]
+    fn the_profession_reference_carries_the_rounds_it_replaces() {
+        let mut db = db_with_itemstats(vec![]);
+        assert_eq!(
+            profession_reference(&db, "unknown"),
+            "",
+            "no profession means no reference; the prompt must fall back to the tools"
+        );
+
+        db.professions.insert(
+            "Necromancer".into(),
+            gw2_api::models::Profession {
+                id: "Necromancer".into(),
+                name: "Necromancer".into(),
+                code: None,
+                specializations: vec![],
+                weapons: HashMap::new(),
+                training: vec![],
+                skills_by_palette: vec![],
+                icon: None,
+                icon_big: None,
+            },
+        );
+        for (id, name, slot) in [
+            (2, "Well of Blood", "Heal"),
+            (1, "Trail of Anguish", "Utility"),
+            (3, "Chilled to the Bone!", "Elite"),
+        ] {
+            let mut skill = make_skill(id, name);
+            skill.professions = vec!["Necromancer".into()];
+            skill.slot = Some(slot.into());
+            db.skills.insert(id, skill);
+        }
+
+        let reference = profession_reference(&db, "Necromancer");
+        for name in ["Well of Blood", "Trail of Anguish", "Chilled to the Bone!"] {
+            assert!(
+                reference.contains(name),
+                "the skill palette is what stops the model guessing names: {reference}"
+            );
+        }
+        assert!(
+            reference.contains("Do NOT call get_profession_info"),
+            "without this the model re-fetches what it was just handed: {reference}"
+        );
+        assert_eq!(
+            reference,
+            profession_reference(&db, "Necromancer"),
+            "HashMap order must not leak into the prompt"
         );
     }
 }
