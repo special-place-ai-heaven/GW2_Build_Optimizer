@@ -12,6 +12,17 @@ use gw2_core::i18n::{t, tf};
 use gw2_optimizer::balance::BalanceContext;
 use gw2_optimizer::gamedb::GameDb;
 
+/// How long the first attempt may take before a refused plate is served as-is
+/// instead of being composed again.
+///
+/// A refusal costs a whole second tool run. On a fast model the first is over
+/// in well under a minute and the second is cheap insurance; on a free one it
+/// is minutes, and stacking two is how a refusal became a wait long enough to
+/// read as a hang. Past this mark the player is better served by the plate in
+/// hand with its caveat written on it - which is what the tail of the loop
+/// already does.
+const SECOND_ATTEMPT_CUTOFF: std::time::Duration = std::time::Duration::from_secs(180);
+
 /// Hand a background worker its own reference to the shared game database.
 ///
 /// `GameDb` is loaded once and can be tens of megabytes; a chat worker needs
@@ -221,23 +232,30 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         nexus::log::LogLevel::Info,
                         "GW2BuildOpt",
                         match reference.as_ref() {
-                            Some((line, verdict)) => {
-                                format!("Choya reference for {profession}: {line} | {verdict}")
+                            Some(r) => {
+                                format!(
+                                    "Choya reference for {profession}: {} | {}",
+                                    r.line, r.verdict
+                                )
                             }
                             None => format!(
                                 "Choya has no deterministic reference for {profession}                                  (pipeline produced none) - composing unaided"
                             ),
                         },
                     );
-                    if let Some((line, verdict)) = reference.as_ref() {
+                    if let Some(r) = reference.as_ref() {
+                        // Not "which already passes every viability check": it
+                        // sometimes does not, and the verdict line below now
+                        // says which. Asserting a pass over notes that read
+                        // fail told the model the bar was clearable when the
+                        // search had already proved it was not.
                         kitchen.push_str(
                             "\nWorked answer from the deterministic optimizer for \
-                             this exact Mode/Scale/Role, which already passes every \
-                             viability check:\n  ",
+                             this exact Mode/Scale/Role:\n  ",
                         );
-                        kitchen.push_str(line);
+                        kitchen.push_str(&r.line);
                         kitchen.push_str("\n  ");
-                        kitchen.push_str(verdict);
+                        kitchen.push_str(&r.verdict);
                         kitchen.push_str(
                             "\nThat is your floor, not your answer: it ignores what \
                              the player just asked for. Match its survivability at \
@@ -274,6 +292,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     let mut feedback: Option<String> = None;
                     let mut rejected: Option<String> = None;
                     let mut last_plate: Option<gw2_optimizer::prompts::GeminiBuildResponse> = None;
+                    let started = std::time::Instant::now();
                     for attempt in 1..=2u32 {
                         if token.is_cancelled() {
                             return Err("Cancelled".into());
@@ -317,6 +336,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         // call with no text ("No response text"), while
                         // glm-5.3-flash - which had taken the tools branch -
                         // worked. The contradiction was the bug, not the model.
+                        let mut round_started = std::time::Instant::now();
                         let response = {
                             client
                                 .generate_with_tools_progress(
@@ -344,6 +364,27 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     // request (measured in-game 2026-09-05).
                                     8,
                                     &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
+                                        // How long each round actually took.
+                                        // Without it a run that ends on a
+                                        // deadline says only that it ended -
+                                        // not whether one round stalled or
+                                        // eight were merely slow, which are
+                                        // opposite faults with opposite fixes.
+                                        let round = round_started.elapsed();
+                                        round_started = std::time::Instant::now();
+                                        nexus::log::log(
+                                            nexus::log::LogLevel::Info,
+                                            "GW2BuildOpt",
+                                            format!(
+                                                "Choya round {turn}/{max_turns} took {:.1}s: {}",
+                                                round.as_secs_f32(),
+                                                if tool_names.is_empty() {
+                                                    "writing the build".to_string()
+                                                } else {
+                                                    tool_names.join(", ")
+                                                }
+                                            ),
+                                        );
                                         let tools_str = humanize_tool_names(tool_names);
                                         crate::state::with_state(|s| {
                                             if s.main.chat_epoch != epoch {
@@ -426,6 +467,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             &weights,
                             &chat_balance_ctx,
                             &scenario,
+                            reference.as_ref().map_or(&[][..], |r| &r.unreachable),
                         ) {
                             // Served, with whatever the non-blocking gates
                             // had to say written on it. A caveat the player
@@ -445,14 +487,26 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 return Ok(parsed);
                             }
                             Err(why) => {
+                                let spent = started.elapsed();
                                 nexus::log::log(
                                     nexus::log::LogLevel::Info,
                                     "GW2BuildOpt",
-                                    format!("Choya plate refused (attempt {attempt}): {why}"),
+                                    format!(
+                                        "Choya plate refused (attempt {attempt}, {:.0}s spent): {why}",
+                                        spent.as_secs_f32()
+                                    ),
                                 );
                                 feedback = Some(why.clone());
                                 rejected = Some(why);
                                 last_plate = Some(parsed);
+                                // A second go is another whole tool run. On a
+                                // slow model the first one can already have
+                                // eaten the player's patience, and two stacked
+                                // runs are how a refusal turned into a wait
+                                // long enough to read as a hang.
+                                if spent >= SECOND_ATTEMPT_CUTOFF {
+                                    break;
+                                }
                             }
                         }
                     }
@@ -752,6 +806,20 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
 /// The synergy pipeline is the cheap tier - measured at 28ms against the
 /// player's own cache - and its answer is already referee-viable, so there is
 /// no reason for the chat to reason from nothing.
+/// The deterministic optimizer's best answer for one request, and what the
+/// referee made of it.
+struct Reference {
+    /// One-line build summary, handed to the model as its floor.
+    line: String,
+    /// Gate-by-gate notes, prefixed with whether it actually passed.
+    verdict: String,
+    /// Blocking gates this build could not clear. An exhaustive search over
+    /// the whole profession missed them, so they are not a bar the model can
+    /// be held to either: for this one request they caveat a plate instead of
+    /// refusing it. Empty in the normal case, where the seed passes.
+    unreachable: Vec<gw2_optimizer::referee::ViabilityGate>,
+}
+
 fn reference_build(
     db: &GameDb,
     profession_name: &str,
@@ -759,7 +827,7 @@ fn reference_build(
     ctx: &BalanceContext,
     locks: &gw2_core::types::BuildLocks,
     scenario: &gw2_optimizer::scenario::ScenarioSpec,
-) -> Option<(String, String)> {
+) -> Option<Reference> {
     let prefix = gw2_optimizer::scoring::select_gear_prefix(weights).primary;
     let seed = gw2_optimizer::synergy_pipeline::optimize_synergy(
         db,
@@ -812,14 +880,41 @@ fn reference_build(
         ctx,
         scenario,
     );
-    let verdict = report
+    let notes = report
         .viability
         .gates
         .iter()
         .map(|g| format!("{:?}: {}", g.gate, g.note))
         .collect::<Vec<_>>()
         .join("; ");
-    Some((line, format!("It passes with - {verdict}")))
+    let unreachable: Vec<gw2_optimizer::referee::ViabilityGate> = report
+        .viability
+        .gates
+        .iter()
+        .filter(|g| !g.passed && g.gate.blocks())
+        .map(|g| g.gate.clone())
+        .collect();
+    // "It passes with" used to be printed unconditionally, over gate notes
+    // that said otherwise. In-game 2026-09-06, Necromancer WvW Roam/Support:
+    // the seed came back `SustainRecovery: survived=true, health=34%,
+    // margin=-951/s, repeatable=false` - a fail - and was handed to the model
+    // as a worked answer that "already passes every viability check". Every
+    // plate the model then composed was refused on that same gate, twice per
+    // message, which is where the free-model timeouts were being spent.
+    let verdict = if unreachable.is_empty() {
+        format!("It passes with - {notes}")
+    } else {
+        let names: Vec<String> = unreachable.iter().map(|g| format!("{g:?}")).collect();
+        format!(
+            "It is the best build the search could find and it still fails {} - {notes}",
+            names.join(", ")
+        )
+    };
+    Some(Reference {
+        line,
+        verdict,
+        unreachable,
+    })
 }
 
 fn rank_current_build(
@@ -893,6 +988,21 @@ fn gate_remedy(gate: &gw2_optimizer::referee::ViabilityGate) -> &'static str {
     }
 }
 
+/// Whether a failed gate refuses a plate outright, or only writes a caveat on
+/// it.
+///
+/// `blocks` is the population answer and `unreachable` the per-request one;
+/// see the comment in [`plate_shortfall`] for what each measures.
+fn gate_vetoes(
+    gate: &gw2_optimizer::referee::ViabilityGate,
+    unreachable: &[gw2_optimizer::referee::ViabilityGate],
+) -> bool {
+    gate.blocks() && !unreachable.contains(gate)
+}
+
+// Every argument is one input the referee needs and none has a sensible
+// default; bundling them into a struct would move the same list one line up.
+#[allow(clippy::too_many_arguments)]
 fn plate_shortfall(
     plate: &gw2_optimizer::validation::ValidatedBuild,
     baseline: Option<&gw2_optimizer::referee::RefereeReport>,
@@ -901,6 +1011,7 @@ fn plate_shortfall(
     weights: &gw2_optimizer::scoring::OptimizationWeights,
     ctx: &BalanceContext,
     scenario: &gw2_optimizer::scenario::ScenarioSpec,
+    unreachable: &[gw2_optimizer::referee::ViabilityGate],
 ) -> Result<Vec<String>, String> {
     let report = gw2_optimizer::referee::evaluate_validated_build(
         plate,
@@ -910,14 +1021,29 @@ fn plate_shortfall(
         ctx,
         scenario,
     );
-    // Gates the published meta itself fails do not veto — see
-    // `ViabilityGate::blocks` — but they are the honest caveats on a build,
-    // so they are collected whether or not anything blocked.
+    // Two ways a failed gate loses its veto.
+    //
+    // `ViabilityGate::blocks` is the population answer: a gate the published
+    // meta itself fails is describing us, not the game.
+    //
+    // `unreachable` is the per-request one. The deterministic optimizer
+    // searched this exact profession, mode, scale and role and its best answer
+    // failed these gates too, so they are not a bar a plate can be refused
+    // against - the search already proved nothing clears them here. Without
+    // this the loop is unwinnable: every plate is refused, both attempts burn
+    // a whole tool run each, and the player waits out the request deadline for
+    // an answer that could never have been served. Measured in-game
+    // 2026-09-06, Necromancer WvW Roam/Support on SustainRecovery.
+    //
+    // Either way the gate still becomes a caveat the player reads. Nothing is
+    // hidden, and the plate must still beat their equipped build below.
+    let vetoes =
+        |g: &gw2_optimizer::referee::GateResult| !g.passed && gate_vetoes(&g.gate, unreachable);
     let concerns: Vec<String> = report
         .viability
         .gates
         .iter()
-        .filter(|g| !g.passed && !g.gate.blocks())
+        .filter(|g| !g.passed && !vetoes(g))
         .map(|g| gate_remedy(&g.gate).to_string())
         .collect();
     if !report.viability.is_viable {
@@ -925,7 +1051,7 @@ fn plate_shortfall(
             .viability
             .gates
             .iter()
-            .filter(|g| !g.passed && g.gate.blocks())
+            .filter(|g| vetoes(g))
             .map(|g| format!("{:?} ({}) - {}", g.gate, g.note, gate_remedy(&g.gate)))
             .collect();
         if !failed.is_empty() {
@@ -965,7 +1091,36 @@ pub(super) fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -
 
 #[cfg(test)]
 mod tests {
-    use super::plate_is_servable;
+    use super::{gate_vetoes, plate_is_servable};
+    use gw2_optimizer::referee::ViabilityGate as G;
+
+    /// In-game 2026-09-06, Necromancer WvW Roam/Support: the deterministic
+    /// optimizer's own best answer came back `SustainRecovery: survived=true,
+    /// health=34%, margin=-951/s, repeatable=false`. A dedicated healer's
+    /// output goes to allies, so it never wins the solo sustain race the gate
+    /// models, and `CombatKind::Support` demands `repeatable`. Every plate the
+    /// model composed was refused on that gate, twice per message - two whole
+    /// tool runs spent on a bar an exhaustive search had already proved
+    /// nothing could clear.
+    #[test]
+    fn a_gate_the_search_could_not_clear_cannot_refuse_a_plate() {
+        assert!(
+            gate_vetoes(&G::SustainRecovery, &[]),
+            "the gate still refuses a plate on a request where the seed passed"
+        );
+        assert!(
+            !gate_vetoes(&G::SustainRecovery, &[G::SustainRecovery]),
+            "the seed failed this gate too, so it caveats the plate, not refuses it"
+        );
+        assert!(
+            gate_vetoes(&G::SustainRecovery, &[G::CleanseRate]),
+            "an unrelated unreachable gate must not disarm this one"
+        );
+        assert!(
+            !gate_vetoes(&G::HarasserStrip, &[]),
+            "gates the published meta itself fails were never vetoes"
+        );
+    }
 
     #[test]
     fn plate_is_servable_needs_full_bar() {
