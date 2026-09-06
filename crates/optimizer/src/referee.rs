@@ -182,8 +182,30 @@ pub struct ViabilityReport {
     pub shortfall: f64,
     /// Results for each gate that was evaluated.
     pub gates: Vec<GateResult>,
-    /// Whether all evaluated gates passed.
+    /// Whether every *blocking* gate passed - see [`ViabilityGate::blocks`].
+    ///
+    /// It used to mean every gate, full stop, and that made it a constant.
+    /// Measured on the synced WvW corpus 2026-09-07: **0 of 124** published
+    /// builds were viable under the old rule, 61 under this one. Nothing reads
+    /// `is_viable` gently - a false collapses `user_intent_score`,
+    /// `raw_direction_score` and `stat_direction_score` to the -1.0 sentinel
+    /// and skips `simulate_flow` entirely - so the search's primary score was
+    /// the same number for every build a real player has ever published,
+    /// decided by gates the table in `blocks` already declares have no
+    /// authority to refuse anything.
+    ///
+    /// The non-blocking failures are not discarded; they are the concerns
+    /// written onto a served build.
     pub is_viable: bool,
+}
+
+/// Whether every gate with the authority to refuse a build passed.
+///
+/// A gate `blocks()` excludes still reports, still grades into `shortfall`,
+/// and still becomes a caveat on a served build - it just cannot be the reason
+/// a build scores -1.0.
+fn gates_all_blocking_passed(gates: &[GateResult]) -> bool {
+    gates.iter().all(|g| g.passed || !g.gate.blocks())
 }
 
 impl ViabilityReport {
@@ -216,10 +238,18 @@ pub fn search_rank(report: &RefereeReport) -> [i64; 9] {
                 CombatKind::StrikeSpike | CombatKind::CondiRamp | CombatKind::Harasser => {
                     i64::from(fight.target_reached)
                 }
+                // Survival, not `repeatable`. This is the search's objective
+                // key, ranked second only to viability, and `repeatable` is
+                // reached by 0% of the published Support builds in the corpus
+                // - so it was a constant zero, and every support build tied
+                // on the key meant to separate them. Survival is reached by
+                // about half of them, which is what a ranking key has to do.
+                // Key 7 still carries `repeatable` as a tiebreak for the
+                // kinds that do reach it.
                 CombatKind::Disabler
                 | CombatKind::Support
                 | CombatKind::Commander
-                | CombatKind::Staller => i64::from(fight.repeatable),
+                | CombatKind::Staller => i64::from(fight.player_survived),
             })
             .unwrap_or(0);
         let execution = wvw
@@ -466,22 +496,41 @@ pub fn evaluate_viability_gates_for(
 
             gates.push(match rotation.and_then(|rotation| rotation.wvw.as_ref()) {
                 Some(fight) => {
-                    let requires_repeat = matches!(
-                        scenario.combat_kind,
-                        CombatKind::CondiRamp
-                            | CombatKind::Support
-                            | CombatKind::Commander
-                            | CombatKind::Staller
-                    );
-                    let passed = fight.player_survived && (!requires_repeat || fight.repeatable);
+                    // Survival, and only survival.
+                    //
+                    // This used to also demand `repeatable` of CondiRamp,
+                    // Support, Commander and Staller. Measured on the synced
+                    // corpus 2026-09-07, keyed on `combat_kind`, the clause
+                    // has no support in the evidence at all:
+                    //
+                    // | kind | n | gate passes | repeatable |
+                    // |---|---|---|---|
+                    // | Support | 14 | 0% | 0% |
+                    // | CondiRamp | 2 | 0% | 0% |
+                    // | StrikeSpike | 23 | 100% | 4% |
+                    // | Harasser | 85 | 93% | 28% |
+                    //
+                    // Every kind the clause applied to failed, every kind it
+                    // did not apply to passed. `repeatable` is rare for
+                    // everyone - it wants the exchange to end at half health,
+                    // net-positive sustain, or a kill - and it was demanded
+                    // only of the roles that never reach it.
+                    //
+                    // They never reach it because of the clock, not the
+                    // build. `simulation_window_ms_for_mode` gives these
+                    // kinds 20 s where StrikeSpike gets 5 s, and
+                    // `WvwProfile::for_scenario` runs a constant-rate
+                    // pressure loop for the whole of it, so a support soaks
+                    // roughly 3.3x the total damage of a DPS - alone, with no
+                    // allies modelled, which is the one thing a support's
+                    // survival actually depends on. They pass
+                    // `EffectiveHealth` 100%: the tankiest builds in the
+                    // corpus, dying to the window.
+                    let passed = fight.player_survived;
                     if !passed {
-                        // Not repeatable but alive: closer to repeatable the
-                        // more health is left, so that is the gradient.
-                        shortfall += if fight.player_survived {
-                            (1.0 - fight.remaining_health_ratio).clamp(0.0, 1.0)
-                        } else {
-                            1.0
-                        };
+                        // Dead is dead; `remaining_health_ratio` is already 0
+                        // here, so there is no gradient left to grade on.
+                        shortfall += 1.0;
                         graded.push(ViabilityGate::SustainRecovery);
                     }
                     GateResult {
@@ -679,7 +728,7 @@ pub fn evaluate_viability_gates_for(
         });
     }
 
-    let is_viable = gates.iter().all(|g| g.passed);
+    let is_viable = gates_all_blocking_passed(&gates);
     for g in &gates {
         if !g.passed && !graded.contains(&g.gate) {
             shortfall += 1.0;
@@ -887,7 +936,7 @@ pub fn apply_offbar_cleanse(
         }
     }
     if changed {
-        report.is_viable = report.gates.iter().all(|g| g.passed);
+        report.is_viable = gates_all_blocking_passed(&report.gates);
     }
 }
 
@@ -967,7 +1016,7 @@ pub fn apply_offbar_stability(
         }
     }
     if changed {
-        report.is_viable = report.gates.iter().all(|g| g.passed);
+        report.is_viable = gates_all_blocking_passed(&report.gates);
         // StabilityAccess has no graded metric, so it counted 1.0 when failed.
         report.shortfall = (report.shortfall - 1.0).max(0.0);
     }
@@ -2593,8 +2642,14 @@ mod tests {
         scenario.combat_kind = crate::scenario::CombatKind::Harasser;
         let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
         let g = gate_by_kind(&report.gates, &ViabilityGate::HarasserStrip).unwrap();
-        assert!(!g.passed);
-        assert!(!report.is_viable);
+        assert!(!g.passed, "the missing strip has to be detected");
+        // ...and reported without refusing the build. 11% of published
+        // roamers clear this gate, which is why `blocks` excludes it; a fault
+        // it names is a caveat, not a veto.
+        assert!(
+            report.is_viable,
+            "a non-blocking gate must not send a build to the -1.0 sentinel"
+        );
     }
 
     #[test]
@@ -2632,8 +2687,11 @@ mod tests {
         scenario.combat_kind = crate::scenario::CombatKind::Harasser;
         let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
         let g = gate_by_kind(&report.gates, &ViabilityGate::EncounterOutcome).unwrap();
-        assert!(!g.passed);
-        assert!(!report.is_viable);
+        assert!(!g.passed, "the unreached threshold has to be detected");
+        assert!(
+            report.is_viable,
+            "a non-blocking gate must not send a build to the -1.0 sentinel"
+        );
     }
 
     #[test]
@@ -2645,8 +2703,11 @@ mod tests {
         scenario.combat_kind = crate::scenario::CombatKind::Harasser;
         let report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
         let g = gate_by_kind(&report.gates, &ViabilityGate::SecureCompletion).unwrap();
-        assert!(!g.passed);
-        assert!(!report.is_viable);
+        assert!(!g.passed, "the missing interrupt has to be detected");
+        assert!(
+            report.is_viable,
+            "a non-blocking gate must not send a build to the -1.0 sentinel"
+        );
     }
 
     #[test]
