@@ -17,7 +17,7 @@ pub struct ScenarioSpec {
     pub objective_profile_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum CombatTier {
     Solo,
     Party,
@@ -111,7 +111,7 @@ impl ScenarioSpec {
 /// Scale retunes WvW Support: Roam/Havoc is self-reliant; Cloud/Zerg specializes.
 ///
 /// Legacy WvW/PvP variants stay so old mappings and tests still compile.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RoleObjective {
     PowerDps,
     CondiDps,
