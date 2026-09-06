@@ -243,55 +243,32 @@ fn plate_from(build: &BenchmarkBuild, db: &GameDb) -> Option<GeminiBuildResponse
     })
 }
 
-/// The slot skills a build published, labelled the way a plate labels them.
+/// The slot bar, labelled the way a plate labels it.
 ///
 /// `validation::parse_skill_names_from_response` reads `Heal: `, `Utils: `
-/// and `Elite: ` prefixes, not a bare list — the model answers in labelled
-/// lines and this has to speak the same shape.
-///
-/// Both sources are POSITIONAL: heal, three utilities, elite, with a zero or
-/// a gap for an empty slot. Compacting the list before labelling it turns a
-/// build with no elite into one whose elite is its last utility.
+/// and `Elite: ` prefixes rather than a bare list, so this has to speak the
+/// same shape. Where the ids come from is `ProviderBuild::slot_skills`.
 fn published_skills(p: &gw2_optimizer::providers::ProviderBuild, db: &GameDb) -> Vec<String> {
-    let by_id = |id: u32| db.skills.get(&id).map(|s| s.name.clone());
-    let slots: Vec<Option<String>> = if !p.skill_ids.is_empty() {
-        p.skill_ids.iter().map(|id| by_id(*id)).collect()
-    } else {
-        // Nearly every page ships a chat code even when it marks up no
-        // skills, and the code carries the slot bar as PALETTE ids.
-        let Some(template) = p
-            .build_code
-            .as_deref()
-            .and_then(gw2_optimizer::build_template::decode)
-        else {
-            return Vec::new();
-        };
-        template
-            .skills
-            .iter()
-            .map(|palette| {
-                if *palette == 0 {
-                    return None;
-                }
-                db.palette_to_skill.get(palette).copied().and_then(by_id)
-            })
-            .collect()
+    let slots = p.slot_skills(db);
+    let name = |slot: Option<&Option<u32>>| {
+        slot.and_then(|s| *s)
+            .and_then(|id| db.skills.get(&id))
+            .map(|s| s.name.clone())
     };
-
     let mut lines = Vec::new();
-    if let Some(Some(heal)) = slots.first() {
+    if let Some(heal) = name(slots.first()) {
         lines.push(format!("Heal: {heal}"));
     }
     let utils: Vec<String> = slots
         .iter()
         .skip(1)
         .take(3)
-        .filter_map(|s| s.clone())
+        .filter_map(|slot| name(Some(slot)))
         .collect();
     if !utils.is_empty() {
         lines.push(format!("Utils: {}", utils.join(", ")));
     }
-    if let Some(Some(elite)) = slots.get(4) {
+    if let Some(elite) = name(slots.get(4)) {
         lines.push(format!("Elite: {elite}"));
     }
     lines
