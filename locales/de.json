@@ -339,6 +339,8 @@
   "cmp.ai": "KI-Synergieanalyse...",
   "cmp.none": "Keine Vorschläge. Zuerst den Optimierer starten.",
   "cmp.also_like": "Weitere Vorschläge, die dir gefallen könnten",
+  "fmt.plated_with_concern": "Hier ist der Build, aber Achtung: {concern}",
+  "fmt.plate_concern": "Achtung: {concern}",
   "cmp.also_like_short": "Vielleicht auch interessant",
   "fmt.open_from": "Diesen {site}-Build öffnen",
   "fmt.site_link": "{site}-Link",

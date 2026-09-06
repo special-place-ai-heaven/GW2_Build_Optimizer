@@ -339,6 +339,8 @@
   "cmp.ai": "正在运行 AI 协同分析...",
   "cmp.none": "暂无建议，请先运行优化器。",
   "cmp.also_like": "你可能还会喜欢的推荐",
+  "fmt.plated_with_concern": "这是构建，但请注意：{concern}",
+  "fmt.plate_concern": "请注意：{concern}",
   "cmp.also_like_short": "你可能也喜欢",
   "fmt.open_from": "打开这个 {site} 构建",
   "fmt.site_link": "{site} 链接",

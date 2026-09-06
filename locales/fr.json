@@ -339,6 +339,8 @@
   "cmp.ai": "Analyse de synergie IA...",
   "cmp.none": "Aucune suggestion. Lance d'abord l'optimiseur.",
   "cmp.also_like": "Autres suggestions qui pourraient vous plaire",
+  "fmt.plated_with_concern": "Voici le build, mais attention : {concern}",
+  "fmt.plate_concern": "Attention : {concern}",
   "cmp.also_like_short": "Cela pourrait aussi vous plaire",
   "fmt.open_from": "Ouvrir ce build {site}",
   "fmt.site_link": "Lien {site}",

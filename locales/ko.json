@@ -339,6 +339,8 @@
   "cmp.ai": "AI 시너지 분석 중...",
   "cmp.none": "제안이 없습니다. 먼저 최적화기를 실행하세요.",
   "cmp.also_like": "마음에 들 만한 추가 제안",
+  "fmt.plated_with_concern": "빌드입니다. 다만 주의하세요: {concern}",
+  "fmt.plate_concern": "주의하세요: {concern}",
   "cmp.also_like_short": "이런 빌드는 어떠세요",
   "fmt.open_from": "{site}의 이 빌드 열기",
   "fmt.site_link": "{site} 링크",
