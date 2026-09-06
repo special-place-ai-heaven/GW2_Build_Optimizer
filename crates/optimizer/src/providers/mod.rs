@@ -253,6 +253,44 @@ pub(crate) fn build_code_in(html: &str) -> Option<String> {
     crate::build_template::find_in_text(&unescape_entities(html)).map(|(code, _)| code)
 }
 
+/// `open-world` becomes `Open World`, `guardian` becomes `Guardian`.
+///
+/// The sites publish their taxonomy as slugs, and every one of them reaches
+/// a player's screen.
+pub(crate) fn title_case(slug: &str) -> String {
+    slug.split(['-', '_', ' '])
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The role string stored on a benchmark: where the build is played, then
+/// what it does there.
+///
+/// One vocabulary for all three sites, because matching depends on it.
+/// `find_best_benchmark` ranks candidates by word overlap between the
+/// player's chosen role and the stored one, so "Roamer" against "WvW
+/// Roaming" scores zero and every candidate ties — which is how the
+/// reference shown became whichever row happened to sort first. Both halves
+/// of the comparison now draw on the same words.
+///
+/// Either half may be empty: a PvP build has no scale, and a build whose
+/// name states no job records only where it is played.
+pub fn role_label(scale: &str, job: &str) -> String {
+    match (scale.trim(), job.trim()) {
+        ("", job) => job.to_string(),
+        (scale, "") => scale.to_string(),
+        (scale, job) => format!("{scale} {job}"),
+    }
+}
+
 /// The job a build's own name states.
 ///
 /// All three sites title a build the same way — "Power Dragonhunter", "Heal

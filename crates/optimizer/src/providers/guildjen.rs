@@ -32,6 +32,89 @@ use super::{build_code_in, ids_in, GearRow, ProviderBuild, SpecLine};
 /// How many specialization lines a build has.
 const SPEC_SLOTS: usize = 3;
 
+/// One build as a category index lists it.
+///
+/// GuildJen's WordPress theme prints its taxonomy as classes on the row:
+///
+/// ```html
+/// <tr id="post-row-77896" class="post-row … category-gw2-builds-open-world
+///     category-gw2-builds-raid tag-alacrity tag-luminary tag-support
+///     post_class-guardian post_difficulty-easy post_playstyle-cooperative
+///     post_role-support post_role-tank">
+/// ```
+///
+/// So the index states the profession, the role and the playstyle of every
+/// build it lists, and there is nothing left to infer from the slug or from
+/// the body text of the build page.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IndexRow {
+    /// Absolute URL of the build page.
+    pub url: String,
+    /// Link text — "Heal DPS Luminary", "Power Vengeance Dragonhunter".
+    pub name: String,
+    /// Profession, from `post_class-*`. Title-cased.
+    pub profession: String,
+    /// Roles the site assigns, from `post_role-*`. Often empty in open
+    /// world, where the playstyle is the distinction instead.
+    pub roles: Vec<String>,
+    /// Playstyles, from `post_playstyle-*`. Multi-valued: a WvW build is
+    /// commonly both `havoc` and `cloud`.
+    pub playstyles: Vec<String>,
+    /// Difficulty, from `post_difficulty-*`.
+    pub difficulty: String,
+}
+
+/// Every build a category index lists, deduplicated by URL.
+///
+/// Deduplication is not optional: each index repeats its whole catalogue in
+/// a searchable table at the foot of the page, so the open-world index has
+/// 162 rows for 86 builds and a naive walk fetches each one twice.
+pub fn index_rows(html: &str) -> Vec<IndexRow> {
+    let document = ::html::Html::parse_document(html);
+    let row = ::html::Selector::parse("tr[id]").expect("valid selector");
+    let link = ::html::Selector::parse(r#"a[href*="guildjen.com/"]"#).expect("valid selector");
+
+    let mut rows: Vec<IndexRow> = Vec::new();
+    for tr in document.select(&row) {
+        let element = tr.value();
+        if !element.id().is_some_and(|id| id.starts_with("post-row-")) {
+            continue;
+        }
+        let Some(anchor) = tr.select(&link).next() else {
+            continue;
+        };
+        let Some(url) = anchor.value().attr("href") else {
+            continue;
+        };
+        if rows.iter().any(|seen| seen.url == url) {
+            continue;
+        }
+
+        let mut found = IndexRow {
+            url: url.to_string(),
+            name: anchor.text().collect::<String>().trim().to_string(),
+            ..Default::default()
+        };
+        for class in element.classes() {
+            if let Some(profession) = class.strip_prefix("post_class-") {
+                found.profession = crate::providers::title_case(profession);
+            } else if let Some(role) = class.strip_prefix("post_role-") {
+                found.roles.push(role.to_string());
+            } else if let Some(playstyle) = class.strip_prefix("post_playstyle-") {
+                found.playstyles.push(playstyle.to_string());
+            } else if let Some(difficulty) = class.strip_prefix("post_difficulty-") {
+                found.difficulty = difficulty.to_string();
+            }
+        }
+        // `classes()` yields in document order per element but the set is
+        // unordered across parses; sorting keeps a run reproducible.
+        found.roles.sort();
+        found.playstyles.sort();
+        rows.push(found);
+    }
+    rows
+}
+
 /// Read one GuildJen build page.
 ///
 /// Takes the raw response. Pruning to the article would be pointless here —
@@ -300,6 +383,78 @@ mod tests {
             build.sigil_ids,
             vec![21152, 94901],
             "one embed carries both, and the repeat is not a third sigil"
+        );
+    }
+
+    /// A category index row verbatim from guildjen.com/gw2-open-world-builds/
+    /// on 2026-09-06, plus the sidebar and the repeat that a naive scan
+    /// picks up.
+    const INDEX: &str = r#"
+      <table><tbody>
+      <tr id="post-row-77896" entity_id="77896" class="post-row post-77896 post type-post
+          status-publish category-gw2-builds-open-world category-gw2-builds-raid
+          tag-alacrity tag-luminary tag-support post_class-guardian post_difficulty-easy
+          post_playstyle-cooperative post_role-support post_role-tank">
+        <td><img alt=""></td>
+        <td><p><a href="https://guildjen.com/heal-dps-luminary-support-build/">Heal DPS Luminary</a></p></td></tr>
+      <tr id="post-row-77900" class="post-row post_class-thief post_difficulty-hard
+          post_playstyle-cloud post_playstyle-havoc post_role-dps
+          category-gw2-builds-wvw">
+        <td><p><a href="https://guildjen.com/power-staff-daredevil-havoc-build/">Power Staff Daredevil</a></p></td></tr>
+      <tr id="post-row-77896" class="post-row post_class-guardian">
+        <td><p><a href="https://guildjen.com/heal-dps-luminary-support-build/">Heal DPS Luminary</a></p></td></tr>
+      <tr class="not-a-post-row"><td>
+        <a href="https://guildjen.com/power-reaper-roaming-build/">Trending row</a></td></tr>
+      </tbody></table>
+      <aside class="main-sidebar">
+        <a href="https://guildjen.com/celestial-weaver-open-world-build/">Popular Posts</a></aside>"#;
+
+    /// The index states the profession, the role and the playstyle, so
+    /// nothing downstream has to read them out of a slug or page text.
+    #[test]
+    fn an_index_row_states_profession_role_and_playstyle() {
+        let rows = index_rows(INDEX);
+        assert_eq!(rows.len(), 2, "two distinct builds: {rows:?}");
+
+        let first = &rows[0];
+        assert_eq!(first.name, "Heal DPS Luminary");
+        assert_eq!(first.profession, "Guardian");
+        assert_eq!(first.roles, ["support", "tank"], "a build can hold two");
+        assert_eq!(first.playstyles, ["cooperative"]);
+        assert_eq!(first.difficulty, "easy");
+
+        let second = &rows[1];
+        assert_eq!(second.profession, "Thief");
+        assert_eq!(second.roles, ["dps"]);
+        assert_eq!(
+            second.playstyles,
+            ["cloud", "havoc"],
+            "a WvW build commonly carries two"
+        );
+    }
+
+    /// Each index repeats its whole catalogue in a searchable table at the
+    /// foot of the page — 162 rows for 86 builds on the open-world index —
+    /// so a walk that does not deduplicate fetches every page twice. The
+    /// "Trending" sidebar is excluded structurally: it is not a `post-row`.
+    #[test]
+    fn the_repeat_table_and_the_sidebar_are_not_extra_builds() {
+        let rows = index_rows(INDEX);
+        assert_eq!(
+            rows.iter()
+                .filter(|r| r.url.contains("heal-dps-luminary"))
+                .count(),
+            1,
+            "the repeat is the same build"
+        );
+        assert!(
+            !rows.iter().any(|r| r.url.contains("power-reaper-roaming")),
+            "a row that is not a post-row is not a build: {rows:?}"
+        );
+        assert!(
+            !rows.iter().any(|r| r.url.contains("celestial-weaver")),
+            "the Popular Posts sidebar links builds from other categories, \
+             which is how a WvW build got filed under PvP: {rows:?}"
         );
     }
 

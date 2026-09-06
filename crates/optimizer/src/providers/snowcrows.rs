@@ -35,6 +35,42 @@ use super::{build_code_in, ids_in, GearRow, ProviderBuild, SpecLine};
 /// prefix count.
 const NAMED_NOT_STATTED: [&str; 5] = ["relic", "food", "utility", "infusion", "jade bot core"];
 
+/// The build's own name — `<h1>Condition Reaper</h1>` — which is where the
+/// job is stated, in the same words the other two sites use.
+pub fn build_name(html: &str) -> Option<String> {
+    let document = ::html::Html::parse_document(html);
+    let h1 = ::html::Selector::parse("h1").expect("valid selector");
+    let name = document
+        .select(&h1)
+        .next()?
+        .text()
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!name.is_empty()).then_some(name)
+}
+
+/// Where the build is played, from the section of the URL it was listed
+/// under.
+///
+/// Snowcrows organises by content rather than by game mode — every section
+/// is PvE — so the section is the scale: a raid is ten players, a fractal
+/// five, open world one.
+pub fn scale_from_url(url: &str) -> &'static str {
+    for (segment, scale) in [
+        ("/builds/raids/", "Raid"),
+        ("/builds/fractals/", "Fractal"),
+        ("/builds/strikes/", "Strike"),
+        ("/builds/open-world/", "Open World"),
+    ] {
+        if url.contains(segment) {
+            return scale;
+        }
+    }
+    ""
+}
+
 /// Read one Snowcrows build page from the raw response.
 pub fn parse(html: &str) -> ProviderBuild {
     let document = ::html::Html::parse_document(html);

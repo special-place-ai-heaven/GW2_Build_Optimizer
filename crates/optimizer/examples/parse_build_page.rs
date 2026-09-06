@@ -17,6 +17,33 @@ fn main() {
     let html = std::fs::read_to_string(&path).expect("read the saved page");
     println!("{site}  {path}  ({} bytes)", html.len());
 
+    if site == "guildjen-index" {
+        let rows = providers::guildjen::index_rows(&html);
+        println!("  {} distinct builds listed", rows.len());
+        let mut by_class: std::collections::BTreeMap<&str, usize> = Default::default();
+        let mut roles: std::collections::BTreeMap<&str, usize> = Default::default();
+        let mut plays: std::collections::BTreeMap<&str, usize> = Default::default();
+        for row in &rows {
+            *by_class.entry(row.profession.as_str()).or_default() += 1;
+            for role in &row.roles {
+                *roles.entry(role.as_str()).or_default() += 1;
+            }
+            for play in &row.playstyles {
+                *plays.entry(play.as_str()).or_default() += 1;
+            }
+        }
+        println!("  professions: {by_class:?}");
+        println!("  roles      : {roles:?}");
+        println!("  playstyles : {plays:?}");
+        for row in rows.iter().take(6) {
+            println!(
+                "    {:<12} {:<32} roles {:?} play {:?}",
+                row.profession, row.name, row.roles, row.playstyles
+            );
+        }
+        return;
+    }
+
     let build = match site.as_str() {
         "guildjen" => providers::guildjen::parse(&html),
         "snowcrows" => providers::snowcrows::parse(&html),
