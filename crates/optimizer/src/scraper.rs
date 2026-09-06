@@ -1762,9 +1762,15 @@ fn load_todays_builds(dir: &Path, today: &str) -> HashMap<String, BenchmarkBuild
             // wrote rows with no ids, and re-running would copy them
             // straight back to disk without refetching, so the store would
             // only heal after midnight. An id-less row is refetched instead.
+            // Prose joins that condition for the same reason. Every real
+            // page yields some, so an empty one means the fetch or the parse
+            // failed — and a row written by a build that did not capture
+            // prose at all must be refetched once, or today's own cache
+            // would hold the upgrade back until midnight.
             let reusable = build.scraped_at == today
                 && !build.source_url.is_empty()
-                && !build.published.is_empty();
+                && !build.published.is_empty()
+                && !build.published.prose.is_empty();
             if reusable {
                 known.insert(build.source_url.clone(), build);
             }
@@ -1975,10 +1981,11 @@ mod tests {
 
 
     /// Only today's builds are reusable, and only from files this version
-    /// writes, and only if they carry ids. Yesterday's have to be refetched
-    /// or a re-sync would silently serve stale references forever; an
-    /// id-less row from earlier today has to be refetched too, or the day's
-    /// own cache would keep handing back what the old extractor wrote.
+    /// writes, and only if they carry ids AND prose. Yesterday's have to be
+    /// refetched or a re-sync would silently serve stale references forever;
+    /// a row from earlier today that is missing either has to be refetched
+    /// too, or the day's own cache would keep handing back what the previous
+    /// extractor wrote and the upgrade would not land until midnight.
     #[test]
     fn only_todays_builds_are_reused() {
         let tmp = std::env::temp_dir().join(format!(
@@ -2000,12 +2007,21 @@ mod tests {
             scraped_at: when.into(),
             published: crate::providers::ProviderBuild {
                 rune_id: Some(24839),
+                prose: "Opener\nFrost Trap\nWeapon Swap\nMaul".into(),
                 ..Default::default()
             },
         };
         // What the old extractor wrote: today's date, no ids.
         let id_less = |url: &str| BenchmarkBuild {
             published: crate::providers::ProviderBuild::default(),
+            ..build(url, "2026-09-06")
+        };
+        // Ids but no rotation: written today, before the scrape kept prose.
+        let prose_less = |url: &str| BenchmarkBuild {
+            published: crate::providers::ProviderBuild {
+                prose: String::new(),
+                ..build(url, "2026-09-06").published
+            },
             ..build(url, "2026-09-06")
         };
 
@@ -2018,6 +2034,8 @@ mod tests {
                 build("", "2026-09-06"),
                 // Today's, but written before the parsers existed.
                 id_less("https://guildjen.com/written-this-morning/"),
+                // Today's, with ids, but written before prose was kept.
+                prose_less("https://guildjen.com/no-rotation-yet/"),
             ])
             .unwrap(),
         )
@@ -2043,6 +2061,11 @@ mod tests {
             !known.contains_key("https://guildjen.com/written-this-morning/"),
             "an id-less row is refetched, so the day's own cache cannot \
              keep serving what the old extractor wrote"
+        );
+        assert!(
+            !known.contains_key("https://guildjen.com/no-rotation-yet/"),
+            "a row with ids but no prose is refetched too, or the sync that \
+             first captures rotations would reuse its way past every page"
         );
 
         // A folder with nothing in it is not an error, it is a first run.
