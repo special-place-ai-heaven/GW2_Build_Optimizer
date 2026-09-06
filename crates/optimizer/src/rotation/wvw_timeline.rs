@@ -290,6 +290,12 @@ struct ProtectedActionEvent {
     skill_id: u32,
     control_ms: u32,
     applies_condition: bool,
+    /// Healed, barriered, cleansed, or handed out a boon.
+    ///
+    /// A protected window is worth having because something happened inside
+    /// it. For a damage build that is damage; for a healer it is the healing
+    /// and the cleansing, which are not lesser outcomes — they are the job.
+    supports_allies: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -602,6 +608,16 @@ impl<'a> Timeline<'a> {
         let applies_condition = effects
             .iter()
             .any(|effect| matches!(effect, SkillEffect::ApplyCondition { .. }));
+        let supports_allies = effects.iter().any(|effect| {
+            matches!(
+                effect,
+                SkillEffect::Healing { .. }
+                    | SkillEffect::Barrier { .. }
+                    | SkillEffect::RemovesCondition { .. }
+                    | SkillEffect::ConvertConditions
+                    | SkillEffect::ApplyBuff { .. }
+            )
+        });
         for effect in effects {
             self.apply_skill_effect(skill_id, &effect, protected_before);
         }
@@ -617,6 +633,7 @@ impl<'a> Timeline<'a> {
                 skill_id,
                 control_ms: self.control_landed_ms.saturating_sub(control_before),
                 applies_condition,
+                supports_allies,
             });
         }
     }
@@ -788,6 +805,16 @@ impl<'a> Timeline<'a> {
             .effects
             .iter()
             .any(|effect| matches!(effect, SkillEffect::ApplyCondition { .. }));
+        let supports_allies = self.skills[idx].effects.iter().any(|effect| {
+            matches!(
+                effect,
+                SkillEffect::Healing { .. }
+                    | SkillEffect::Barrier { .. }
+                    | SkillEffect::RemovesCondition { .. }
+                    | SkillEffect::ConvertConditions
+                    | SkillEffect::ApplyBuff { .. }
+            )
+        });
         for effect in self.skills[idx].effects.clone() {
             self.apply_skill_effect(skill_id, &effect, true);
         }
@@ -801,6 +828,7 @@ impl<'a> Timeline<'a> {
             skill_id,
             control_ms: self.control_landed_ms.saturating_sub(control_before),
             applies_condition,
+            supports_allies,
         });
     }
 
@@ -1715,7 +1743,14 @@ fn secured_sequence_summary(
             .sum();
         let control_ms = actions.iter().map(|action| action.control_ms).sum();
         let applies_condition = actions.iter().any(|action| action.applies_condition);
-        if damage <= 0.0 && control_ms == 0 && !applies_condition {
+        let supports_allies = actions.iter().any(|action| action.supports_allies);
+        // A window in which nothing happened is not a sequence. A window in
+        // which the player healed and cleansed under pressure is — and it
+        // used to be discarded, because the test asked only for damage,
+        // control or a condition. That made every support build unable to
+        // complete a chain and therefore unable to pass ProtectedExecution,
+        // whatever else it did: a WvW healer failed the gate by doing its job.
+        if damage <= 0.0 && control_ms == 0 && !applies_condition && !supports_allies {
             continue;
         }
         if !summary.completed

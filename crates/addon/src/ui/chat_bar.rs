@@ -34,6 +34,14 @@ pub struct ChatMessage {
     /// Clickable "Build is ready" card under this reply.
     #[serde(default)]
     pub open_result: bool,
+    /// This reply was meant to be a build and is not one.
+    ///
+    /// Recorded rather than inferred from the absence of a build card: a
+    /// greeting has no build card either, and offering somebody else's raid
+    /// build in answer to "hello" is not help. Only a reply that tried and
+    /// failed earns the community cards.
+    #[serde(default)]
+    pub build_failed: bool,
 }
 
 pub enum ChatAction {
@@ -90,6 +98,7 @@ pub fn queue_user_message(state: &mut ChatBarState, msg: &str) -> Option<String>
         text: msg.to_string(),
         chips: Vec::new(),
         open_result: false,
+        build_failed: false,
     });
     trim_history(&mut state.history);
     state.input.clear();
@@ -242,6 +251,7 @@ pub fn render_chat_bar(
                 let from_user = state.history[i].from_user;
                 let text = state.history[i].text.clone();
                 let open_result = state.history[i].open_result;
+                let build_failed = state.history[i].build_failed;
                 let (lines, bw, bh) = bubble_size(ui, &text, avail, from_user);
                 let origin = ui.cursor_screen_pos();
                 let bubble_h = bh.max(AVATAR);
@@ -307,9 +317,20 @@ pub fn render_chat_bar(
                     // conversation does not sprout cards against builds that
                     // have long since been replaced.
                     if i + 1 == state.history.len() && !picks.is_empty() {
-                        if let Some(n) = render_pick_cards(ui, picks, i) {
+                        if let Some(n) = render_pick_cards(ui, picks, i, false) {
                             action = Some(ChatAction::OpenPick(n));
                         }
+                    }
+                } else if build_failed && i + 1 == state.history.len() && !picks.is_empty() {
+                    // The dead end. Choya tried and produced nothing usable,
+                    // so the answer is not an apology on its own — it is the
+                    // apology and somewhere to go next. These are the builds
+                    // other people published for the same job.
+                    let cy = ui.cursor_screen_pos()[1] + 6.0;
+                    ui.set_cursor_screen_pos([bub_x, cy]);
+                    ui.dummy([0.0, 0.0]);
+                    if let Some(n) = render_pick_cards(ui, picks, i, true) {
+                        action = Some(ChatAction::OpenPick(n));
                     }
                 }
                 let end_y = ui.cursor_screen_pos()[1].max(origin[1] + bubble_h) + ROW_GAP;
@@ -399,14 +420,28 @@ fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
 /// Compact on purpose: a site mark, the specialization, and the job. Enough
 /// to tell three apart and decide which to open; the build itself is one
 /// click away and this is a chat, not a catalogue.
-fn render_pick_cards(ui: &Ui, picks: &[PickCard], msg_i: usize) -> Option<usize> {
+fn render_pick_cards(ui: &Ui, picks: &[PickCard], msg_i: usize, alone: bool) -> Option<usize> {
     const GAP: f32 = 18.0;
     const PAD: f32 = 9.0;
     let row_top = ui.item_rect_min()[1];
-    let row_h = ui.item_rect_size()[1];
-    let mut x = ui.item_rect_max()[0] + GAP;
+    // Standing alone there is no card to match, so the row is sized from the
+    // text it holds instead of from a neighbour that is not there.
+    let row_h = if alone {
+        ui.text_line_height() * 2.0 + 18.0
+    } else {
+        ui.item_rect_size()[1]
+    };
+    let mut x = if alone {
+        ui.item_rect_min()[0]
+    } else {
+        ui.item_rect_max()[0] + GAP
+    };
 
-    let label = t("cmp.also_like_short");
+    let label = if alone {
+        t("cmp.none_of_mine")
+    } else {
+        t("cmp.also_like_short")
+    };
     let label_sz = ui.calc_text_size(&label);
     {
         let dl = ui.get_window_draw_list();
@@ -644,10 +679,23 @@ pub fn add_plated_response(
         text: display,
         chips,
         open_result,
+        build_failed: false,
     });
     trim_history(&mut state.history);
     state.scroll_to_end = true;
     state.dirty = true;
+}
+
+/// Add a reply that was supposed to be a build and could not be one.
+///
+/// The distinction matters at draw time: this is the reply that gets the
+/// community builds offered under it, because it is the one that left the
+/// player with nothing.
+pub fn add_failed_build_response(state: &mut ChatBarState, text: String) {
+    add_ai_response(state, text);
+    if let Some(last) = state.history.last_mut() {
+        last.build_failed = true;
+    }
 }
 
 /// Attach inbound chips to the latest player message.

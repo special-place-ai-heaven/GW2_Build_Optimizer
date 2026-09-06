@@ -155,6 +155,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                 return;
             }
 
+            // Set when Choya tried to plate a build and could not serve one.
+            // Recorded here rather than guessed downstream: a reply with no
+            // build looks identical to a greeting from the outside, and only
+            // one of the two should be answered with other people's builds.
+            let plate_refused = std::cell::Cell::new(false);
             let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
                 let client = gw2_optimizer::llm::create_client(&config, &addon_dir)
                     .map_err(|e| e.to_string())?;
@@ -465,10 +470,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     // ponytail: plain English like `KEPT_GEAR_HEADLINE` in
                     // optimize_flow; move behind `t("choya.kept")` when
                     // `locales/` is next open.
+                    plate_refused.set(true);
                     Ok(gw2_optimizer::prompts::GeminiBuildResponse {
-                        explanation: format!(
-                            "I kept your build - nothing I plated beat it. {}",
-                            rejected.unwrap_or_default()
+                        explanation: tf(
+                            "fmt.kept_your_build",
+                            &[("why", &rejected.unwrap_or_default())],
                         ),
                         ..Default::default()
                     })
@@ -544,14 +550,22 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                             v.errors.iter().map(|e| e.detail.clone()).collect()
                                         })
                                         .unwrap_or_default();
-                                    crate::ui::chat_bar::add_ai_response(
-                                        &mut s.main.chat,
-                                        chat_display_text(
-                                            &raw.explanation,
-                                            raw.specializations.len(),
-                                            &errors,
-                                        ),
+                                    let body = chat_display_text(
+                                        &raw.explanation,
+                                        raw.specializations.len(),
+                                        &errors,
                                     );
+                                    // A refused plate is a dead end, and a
+                                    // dead end gets somewhere to go: the
+                                    // community builds are offered under it.
+                                    if plate_refused.get() {
+                                        crate::ui::chat_bar::add_failed_build_response(
+                                            &mut s.main.chat,
+                                            body,
+                                        );
+                                    } else {
+                                        crate::ui::chat_bar::add_ai_response(&mut s.main.chat, body);
+                                    }
                                 });
                             } else {
                                 // Heavy phase — runs WITHOUT the state lock. The

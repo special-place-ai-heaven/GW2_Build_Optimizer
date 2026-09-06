@@ -358,8 +358,17 @@ pub fn evaluate_viability_gates_for(
                     GateResult {
                         gate: ViabilityGate::ProtectedExecution,
                         passed,
+                        // `chain_completed` decides this gate — for a
+                        // Support build it decides it alone, since the damage
+                        // route is unconditional there — so it is named. It
+                        // used to be omitted, leaving a note whose every
+                        // number looked healthy above its stated minimum
+                        // while the gate failed, which reads as a broken
+                        // calculation rather than an unfinished chain.
                         note: format!(
-                            "protected={}ms, actions={}, 2s spike={:.0}, sequence control={}ms, interrupted={} (minimum {}ms secured inside the sequence)",
+                            "chain completed={}, damage route={}, protected={}ms, actions={}, 2s spike={:.0}, sequence control={}ms, interrupted={} (minimum {}ms secured inside the sequence)",
+                            fight.chain_completed,
+                            damage_route,
                             fight.longest_protected_window_ms,
                             fight.protected_action_count,
                             fight.peak_protected_damage_2s,

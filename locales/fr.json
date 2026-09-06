@@ -339,6 +339,8 @@
   "cmp.ai": "Analyse de synergie IA...",
   "cmp.none": "Aucune suggestion. Lance d'abord l'optimiseur.",
   "cmp.also_like": "Autres suggestions qui pourraient vous plaire",
+  "cmp.none_of_mine": "Désolé, je n'ai pas pu faire mieux. Ceux-ci pourraient vous plaire",
+  "fmt.kept_your_build": "J'ai gardé votre build - rien de ce que j'ai fait ne le battait. {why}",
   "fmt.plated_with_concern": "Voici le build, mais attention : {concern}",
   "fmt.plate_concern": "Attention : {concern}",
   "cmp.also_like_short": "Cela pourrait aussi vous plaire",

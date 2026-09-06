@@ -339,6 +339,8 @@
   "cmp.ai": "正在运行 AI 协同分析...",
   "cmp.none": "暂无建议，请先运行优化器。",
   "cmp.also_like": "你可能还会喜欢的推荐",
+  "cmp.none_of_mine": "抱歉，我没能做得更好。也许你会喜欢这些",
+  "fmt.kept_your_build": "我保留了你的构建 — 我做的都没能超过它。{why}",
   "fmt.plated_with_concern": "这是构建，但请注意：{concern}",
   "fmt.plate_concern": "请注意：{concern}",
   "cmp.also_like_short": "你可能也喜欢",
