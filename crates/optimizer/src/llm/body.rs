@@ -15,8 +15,8 @@ use std::io::Read;
 use super::LlmError;
 
 /// Ceiling for one streamed completion body. `MAX_COMPLETION_TOKENS` is
-/// 16_384; even at a pathological 20 bytes per token plus SSE framing a
-/// legitimate stream stays two orders of magnitude under this.
+/// 32_768; even at a pathological 20 bytes per token plus SSE framing that
+/// is about 640 KiB, an order of magnitude under this.
 pub(crate) const MAX_LLM_BODY: u64 = 8 * 1024 * 1024;
 
 /// Ceiling for a non-streamed body: API error payloads and the `/models`

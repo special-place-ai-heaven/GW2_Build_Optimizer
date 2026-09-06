@@ -273,8 +273,15 @@ pub fn evaluate_viability_gates(
     evaluate_viability_gates_for(rotation, combat_perf, scenario, None)
 }
 
-/// Same as [`evaluate_viability_gates`], applying `profile.viability_gates`
-/// floors when present. Unset fields keep the hardcoded mode/tier defaults.
+/// Same as [`evaluate_viability_gates`], applying the profile's `ehp_floor`
+/// when it sets one. Unset keeps the hardcoded mode/tier default.
+///
+/// Only `ehp_floor`. `ViabilityGates` also carries `min_stunbreaks`,
+/// `requires_stability`, `min_cleanse_count`, `min_cleanse_rate` and
+/// `boon_uptime_floors`, and nothing reads them — those gates still use the
+/// `MIN_STUNBREAKS` and `MIN_CLEANSE_COUNT` constants below. Said plainly
+/// because the doc used to say "floors", plural, which reads as though a
+/// profile could set them and left the next person to discover otherwise.
 pub fn evaluate_viability_gates_for(
     rotation: Option<&SimulationResult>,
     combat_perf: &CombatPerformance,
