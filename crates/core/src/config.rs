@@ -362,8 +362,40 @@ fn default_theme_preset() -> String {
 pub struct ThemeConfig {
     #[serde(default = "default_theme_preset")]
     pub preset: String,
+    /// The theme being edited. Always the live buffer, whether it is a new
+    /// one or a copy of a saved theme.
     #[serde(default)]
     pub custom: CustomTheme,
+    /// Themes the player has named and kept.
+    ///
+    /// Naming a theme used to be the end of it: the one custom slot took the
+    /// new name, the "Custom" row in the picker became that name, and there
+    /// was no way back to an unnamed slot to start a second one. Named
+    /// themes live here, and the picker keeps "Custom" beneath them.
+    #[serde(default)]
+    pub saved: Vec<CustomTheme>,
+}
+
+impl ThemeConfig {
+    /// Keep `theme` in the saved list, replacing any entry of the same name.
+    ///
+    /// Name is the identity because it is what the picker shows: two rows
+    /// reading "Rob" would be indistinguishable to the person choosing one.
+    /// An unnamed theme is the scratch slot and is never saved.
+    pub fn remember(&mut self, theme: &CustomTheme) {
+        let name = theme.name.trim();
+        if name.is_empty() {
+            return;
+        }
+        match self
+            .saved
+            .iter_mut()
+            .find(|kept| kept.name.trim().eq_ignore_ascii_case(name))
+        {
+            Some(kept) => *kept = theme.clone(),
+            None => self.saved.push(theme.clone()),
+        }
+    }
 }
 
 impl Default for ThemeConfig {
@@ -371,6 +403,7 @@ impl Default for ThemeConfig {
         Self {
             preset: default_theme_preset(),
             custom: CustomTheme::default(),
+            saved: Vec::new(),
         }
     }
 }
@@ -1604,6 +1637,7 @@ mod tests {
             theme: ThemeConfig {
                 preset: "glacial-ward".into(),
                 custom: CustomTheme::default(),
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -1631,5 +1665,51 @@ mod tests {
         assert!(old_layout.show_images);
         assert_eq!(NewsSource::Youtube.kind(), NewsKind::Video);
         assert_eq!(NewsSource::Official.kind(), NewsKind::Articles);
+    }
+
+    /// Naming a theme is what keeps it, and a second theme must be able to
+    /// follow the first. Before this, the one custom slot took the new name
+    /// and the "Custom" row in the picker became that name, so there was no
+    /// unnamed slot left to start another from.
+    #[test]
+    fn naming_a_theme_keeps_it_and_leaves_room_for_the_next() {
+        let mut theme = ThemeConfig::default();
+        let named = |name: &str| CustomTheme {
+            name: name.into(),
+            ..CustomTheme::default()
+        };
+
+        // The scratch slot is not a theme until it has a name.
+        theme.remember(&CustomTheme::default());
+        theme.remember(&named("   "));
+        assert!(theme.saved.is_empty(), "an unnamed theme is not kept");
+
+        theme.remember(&named("Rob"));
+        theme.remember(&named("Dusk"));
+        assert_eq!(
+            theme.saved.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            ["Rob", "Dusk"],
+            "each named theme joins the list in turn"
+        );
+
+        // Editing one updates it in place rather than adding a twin: two
+        // rows reading "Rob" would be indistinguishable in the picker.
+        let mut recoloured = named("rob");
+        recoloured.accent = [0.1, 0.2, 0.3];
+        theme.remember(&recoloured);
+        assert_eq!(theme.saved.len(), 2, "same name replaces, ignoring case");
+        assert_eq!(theme.saved[0].accent, [0.1, 0.2, 0.3]);
+    }
+
+    /// A config written before saved themes existed must still load, and must
+    /// report that it has none rather than failing to parse.
+    #[test]
+    fn a_theme_config_written_before_saved_themes_still_loads() {
+        let legacy = r#"{"preset":"custom","custom":{"name":"Rob",
+            "bg":[0.0,0.0,0.0],"panel":[0.1,0.1,0.1],"accent":[1.0,0.8,0.3],
+            "text":[1.0,1.0,1.0],"muted":[0.5,0.5,0.5]}}"#;
+        let theme: ThemeConfig = serde_json::from_str(legacy).expect("legacy theme loads");
+        assert_eq!(theme.custom.name, "Rob");
+        assert!(theme.saved.is_empty());
     }
 }
