@@ -618,6 +618,79 @@ pub fn pill_pulse(ui: &Ui, label: &str, selected: bool, id: &str, pulse: f32) ->
     clicked
 }
 
+/// Width of [`switch`] for a given label, so a row can be laid out before it
+/// is drawn.
+pub fn switch_width(ui: &Ui, label: &str) -> f32 {
+    let h = switch_height(ui);
+    h * 1.9 + 6.0 + ui.calc_text_size(label)[0]
+}
+
+fn switch_height(ui: &Ui) -> f32 {
+    (ui.current_font_size() * 0.85).round().max(12.0)
+}
+
+/// A sliding on/off switch: track, knob, label to its right.
+///
+/// ImGui has no such widget — it ships `checkbox` — so this is drawn the same
+/// way [`pill`] is, an invisible button under two draw calls.
+///
+/// `anim` is the eased 0..1 the caller already keeps for this state, not a
+/// second copy of it. The knob travels with it and the track colour lerps
+/// along the same value, so the switch and whatever else the state drives
+/// move together instead of one snapping while the other slides. Pass `on as
+/// u8 as f32` to get an unanimated switch.
+///
+/// Returns true on the frame it is clicked.
+pub fn switch(ui: &Ui, label: &str, anim: f32, id: &str) -> bool {
+    let th = pal();
+    let h = switch_height(ui);
+    let track_w = h * 1.9;
+    let gap = 6.0;
+    let text = ui.calc_text_size(label);
+    let p = ui.cursor_screen_pos();
+    // The whole thing is the hit target, label included — a knob this size is
+    // a small thing to ask someone to hit.
+    let clicked = ui.invisible_button(id, [track_w + gap + text[0], h.max(text[1])]);
+    let hovered = ui.is_item_hovered();
+    let anim = anim.clamp(0.0, 1.0);
+
+    // Vertically centred against the taller of knob and label, so the switch
+    // lines up with text of any scale.
+    let row_h = h.max(text[1]);
+    let ty = p[1] + (row_h - h) * 0.5;
+    let off = [th.chip_idle_fill[0], th.chip_idle_fill[1], th.chip_idle_fill[2]];
+    let on = [th.gold_fill[0], th.gold_fill[1], th.gold_fill[2]];
+    let mix = |a: f32, b: f32| a + (b - a) * anim;
+    let fill = [
+        mix(off[0], on[0]),
+        mix(off[1], on[1]),
+        mix(off[2], on[2]),
+        if hovered { 1.0 } else { 0.92 },
+    ];
+    let rim = if hovered { th.gold } else { th.chip_idle_rim };
+
+    let dl = ui.get_window_draw_list();
+    dl.add_rect([p[0], ty], [p[0] + track_w, ty + h], fill)
+        .filled(true)
+        .rounding(h * 0.5)
+        .build();
+    dl.add_rect([p[0], ty], [p[0] + track_w, ty + h], rim)
+        .rounding(h * 0.5)
+        .build();
+    // Left at rest, right when on, and every point between while it moves.
+    let r = h * 0.5 - 2.0;
+    let cx = p[0] + r + 2.0 + (track_w - (r + 2.0) * 2.0) * anim;
+    dl.add_circle([cx, ty + h * 0.5], r, th.cream)
+        .filled(true)
+        .build();
+    dl.add_text(
+        [p[0] + track_w + gap, p[1] + (row_h - text[1]) * 0.5],
+        color_u32(th.cream),
+        label,
+    );
+    clicked
+}
+
 pub const PIP_DAMAGE: [f32; 4] = [0.90, 0.32, 0.28, 1.0];
 pub const PIP_FRONT: [f32; 4] = [0.80, 0.82, 0.86, 1.0];
 pub const PIP_HEAL: [f32; 4] = [0.32, 0.78, 0.48, 1.0];
