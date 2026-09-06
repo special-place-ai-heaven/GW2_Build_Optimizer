@@ -775,6 +775,7 @@ mod tests {
                 text: format!("m{i}"),
                 chips: Vec::new(),
                 open_result: false,
+                build_failed: false,
             });
         }
         let t = recent_transcript(&history, 3);
@@ -828,6 +829,7 @@ mod tests {
             text: "[&AgEEYQAA]".into(),
             chips: Vec::new(),
             open_result: false,
+            build_failed: false,
         });
         attach_order_chips(
             &mut state,
@@ -862,6 +864,7 @@ mod tests {
                 code: encode_item(24836),
             }],
             open_result: false,
+            build_failed: false,
         }];
         save_history(&dir, &history);
         let loaded = load_history(&dir);

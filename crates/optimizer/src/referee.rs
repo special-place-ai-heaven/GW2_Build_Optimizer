@@ -92,6 +92,48 @@ pub enum ViabilityGate {
     ResourceLegality,
 }
 
+impl ViabilityGate {
+    /// Whether failing this gate should refuse a build outright.
+    ///
+    /// Measured, not decided. `cargo run -p gw2-optimizer --example
+    /// calibrate_viability` runs every synced community build through these
+    /// gates, and a gate that the published meta fails is not describing the
+    /// game — it is describing us. Rates on 582 builds, 2026-09-06:
+    ///
+    /// | gate | meta passes |
+    /// |---|---|
+    /// | MobilityOut | 100% |
+    /// | EffectiveHealth | 96% |
+    /// | StabilityAccess | 96% |
+    /// | StunbreakCount | 88% |
+    /// | SustainRecovery | 82% |
+    /// | CleanseRate | 80% |
+    /// | ResourceLegality | 77% |
+    /// | SecureCompletion | 63% |
+    /// | EncounterOutcome | 37% |
+    /// | ProtectedExecution | 27% |
+    /// | HarasserStrip | 11% |
+    ///
+    /// The top group is a floor real builds clear, so failing one is a real
+    /// fault and blocks. The bottom four reject most of what people actually
+    /// play — HarasserStrip refuses 89% of published roamers — so they are
+    /// reported as concerns and do not veto. That is not leniency: a rule
+    /// contradicted by the entire body of evidence it claims to describe has
+    /// no authority to reject anything.
+    ///
+    /// This table is a measurement with a date on it. When a gate is fixed,
+    /// rerun the harness and move it.
+    pub fn blocks(&self) -> bool {
+        !matches!(
+            self,
+            ViabilityGate::HarasserStrip
+                | ViabilityGate::ProtectedExecution
+                | ViabilityGate::EncounterOutcome
+                | ViabilityGate::SecureCompletion
+        )
+    }
+}
+
 /// Result of a single viability gate check.
 #[derive(Debug, Clone)]
 pub struct GateResult {

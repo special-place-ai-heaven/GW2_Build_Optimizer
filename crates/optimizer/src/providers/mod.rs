@@ -164,6 +164,42 @@ pub struct ProviderBuild {
 }
 
 impl ProviderBuild {
+    /// Heal, three utilities and elite, as skill ids — from the markup if
+    /// the site published it, otherwise from the chat code.
+    ///
+    /// Weapons decide skills 1-5 and are resolved from the profession, so
+    /// no site needs to publish those. The slot bar is a choice, and most
+    /// sites do not mark it up: 328 of 740 synced rows carry `skill_ids`.
+    /// Nearly all of them carry a chat code — 739 of 740 — and the code
+    /// holds the bar as PALETTE ids, which `GameDb::palette_to_skill` maps
+    /// across.
+    ///
+    /// Positional, with `None` for an empty slot, because that is what a
+    /// caller needs to label them: compacting the list first turns a build
+    /// with no elite into one whose elite is its last utility.
+    pub fn slot_skills(&self, db: &crate::gamedb::GameDb) -> Vec<Option<u32>> {
+        if !self.skill_ids.is_empty() {
+            return self.skill_ids.iter().map(|id| Some(*id)).collect();
+        }
+        let Some(template) = self
+            .build_code
+            .as_deref()
+            .and_then(crate::build_template::decode)
+        else {
+            return Vec::new();
+        };
+        template
+            .skills
+            .iter()
+            .map(|palette| {
+                if *palette == 0 {
+                    return None;
+                }
+                db.palette_to_skill.get(palette).copied()
+            })
+            .collect()
+    }
+
     /// Whether the page yielded nothing at all.
     ///
     /// Every field the parsers *extract* counts — `prose` deliberately does

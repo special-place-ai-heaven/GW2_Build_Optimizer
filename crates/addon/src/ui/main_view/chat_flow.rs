@@ -427,7 +427,23 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             &chat_balance_ctx,
                             &scenario,
                         ) {
-                            Ok(()) => return Ok(parsed),
+                            // Served, with whatever the non-blocking gates
+                            // had to say written on it. A caveat the player
+                            // can read beats a gate that silently vetoes.
+                            Ok(concerns) => {
+                                if !concerns.is_empty() {
+                                    let note =
+                                        tf("fmt.plate_concern", &[("concern", &concerns.join("; "))]);
+                                    parsed.explanation = if parsed.explanation.trim().is_empty() {
+                                        note
+                                    } else {
+                                        format!("{}
+
+{}", parsed.explanation.trim(), note)
+                                    };
+                                }
+                                return Ok(parsed);
+                            }
                             Err(why) => {
                                 nexus::log::log(
                                     nexus::log::LogLevel::Info,
@@ -882,7 +898,7 @@ fn plate_shortfall(
     weights: &gw2_optimizer::scoring::OptimizationWeights,
     ctx: &BalanceContext,
     scenario: &gw2_optimizer::scenario::ScenarioSpec,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let report = gw2_optimizer::referee::evaluate_validated_build(
         plate,
         db,
@@ -891,29 +907,42 @@ fn plate_shortfall(
         ctx,
         scenario,
     );
+    // Gates the published meta itself fails do not veto — see
+    // `ViabilityGate::blocks` — but they are the honest caveats on a build,
+    // so they are collected whether or not anything blocked.
+    let concerns: Vec<String> = report
+        .viability
+        .gates
+        .iter()
+        .filter(|g| !g.passed && !g.gate.blocks())
+        .map(|g| gate_remedy(&g.gate).to_string())
+        .collect();
     if !report.viability.is_viable {
         let failed: Vec<String> = report
             .viability
             .gates
             .iter()
-            .filter(|g| !g.passed)
+            .filter(|g| !g.passed && g.gate.blocks())
             .map(|g| format!("{:?} ({}) - {}", g.gate, g.note, gate_remedy(&g.gate)))
             .collect();
-        return Err(format!(
-            "that build is not viable in this game mode. Failed checks: {}",
-            failed.join("; ")
-        ));
+        if !failed.is_empty() {
+            return Err(format!(
+                "that build is not viable in this game mode. Failed checks: {}",
+                failed.join("; ")
+            ));
+        }
+
     }
     // No baseline is not a pass mark, it is an unarmed gate: viability alone
     // still had to hold above.
     let Some(baseline) = baseline else {
-        return Ok(());
+        return Ok(concerns);
     };
     if super::optimize_flow::beats_baseline(
         &gw2_optimizer::referee::search_rank(&report),
         &gw2_optimizer::referee::search_rank(baseline),
     ) {
-        return Ok(());
+        return Ok(concerns);
     }
     Err(format!(
         "that build does not beat what the player is already wearing \
