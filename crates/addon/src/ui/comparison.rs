@@ -1208,6 +1208,7 @@ fn viability_gate_label(gate: &gw2_optimizer::ViabilityGate) -> &'static str {
         EffectiveHealth => "Effective health",
         MobilityOut => "Disengage",
         HarasserStrip => "Boon strip",
+        BoonUptime => "Boon uptime",
         EncounterOutcome => "Encounter",
         SecureCompletion => "Secure",
         ProtectedExecution => "Protected execution",
