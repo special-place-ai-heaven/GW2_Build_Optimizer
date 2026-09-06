@@ -434,8 +434,11 @@ impl LlmClient for OpenAiClient {
                     id: m.id,
                     display_name: display,
                     // OpenAI publishes no free tier and no per-model price in
-                    // its catalog: every model here bills.
+                    // its catalog: every model here bills. Nor does it publish
+                    // capabilities, so the rest stays at its default of "not
+                    // stated" rather than being invented here.
                     free: false,
+                    ..Default::default()
                 }
             })
             .collect();

@@ -43,6 +43,13 @@ pub struct OpenRouterClient {
     cache: crate::llm::response_cache::ResponseCache,
     rate: Mutex<RateTracker>,
     usage_path: Option<PathBuf>,
+    /// What the catalog says this model will accept, fetched once.
+    ///
+    /// Every model in OpenRouter's catalog answers differently, and until
+    /// this existed we sent the same request to all of them: a completion
+    /// budget 36% of them cannot serve, and a reasoning effort 34 of them
+    /// reject outright — including the highest-scoring free model there is.
+    caps: std::sync::OnceLock<super::ModelInfo>,
 }
 
 impl OpenRouterClient {
@@ -55,6 +62,7 @@ impl OpenRouterClient {
             cache: crate::llm::response_cache::ResponseCache::new(1800, 64),
             rate: Mutex::new(RateTracker::new(RPM_LIMIT)),
             usage_path: None,
+            caps: std::sync::OnceLock::new(),
         })
     }
 
@@ -84,6 +92,23 @@ impl OpenRouterClient {
             cache: crate::llm::response_cache::ResponseCache::new(1800, 64),
             rate: Mutex::new(rate),
             usage_path: Some(usage_path),
+            caps: std::sync::OnceLock::new(),
+        })
+    }
+
+    /// What the catalog says about the model in use, fetched once per client.
+    ///
+    /// A catalog we cannot reach yields the default, which claims nothing:
+    /// the request then goes out exactly as it did before this existed. A
+    /// model missing from the catalog does the same. Neither is worth failing
+    /// a chat over — the point is to send a *better* request when we know
+    /// enough to, not to make knowing a precondition for talking at all.
+    fn caps(&self) -> &super::ModelInfo {
+        self.caps.get_or_init(|| {
+            self.list_models()
+                .ok()
+                .and_then(|models| models.into_iter().find(|m| m.id == self.model))
+                .unwrap_or_default()
         })
     }
 
@@ -92,12 +117,7 @@ impl OpenRouterClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, LlmError> {
-        self.send_chat_capped(
-            messages,
-            tools,
-            MAX_COMPLETION_TOKENS,
-            Some(REASONING_EFFORT),
-        )
+        self.send_chat_capped(messages, tools, MAX_COMPLETION_TOKENS, Some(REASONING_EFFORT))
     }
 
     /// `send_chat` with an explicit completion budget. `generate_brief` passes
@@ -115,6 +135,16 @@ impl OpenRouterClient {
             ("X-Title", OPENROUTER_X_TITLE.to_string()),
         ];
         let is_cancelled = super::cancel::is_cancelled;
+        let caps = self.caps();
+        // Asking for more than the model can produce does not get truncated,
+        // it narrows the routing pool: OpenRouter only routes to providers
+        // that can serve the `max_tokens` requested. 153 of 431 models
+        // publish a ceiling below the one we used to send unconditionally.
+        let max_tokens = caps.completion_budget(max_tokens);
+        // And the effort has to be one this model lists. `glm-5.2:free`, the
+        // highest-scoring free model in the catalog, accepts only `xhigh` and
+        // `high` — our old constant `medium` was simply invalid there.
+        let reasoning_effort = reasoning_effort.and_then(|preferred| caps.effort(preferred));
         let core = ProviderCore {
             http: &self.http,
             rate: &self.rate,
@@ -438,6 +468,50 @@ impl LlmClient for OpenRouterClient {
             /// unknown, and unknown must not read as free.
             #[serde(default)]
             pricing: Option<Pricing>,
+            #[serde(default)]
+            supported_parameters: Option<Vec<String>>,
+            #[serde(default)]
+            architecture: Option<Architecture>,
+            #[serde(default)]
+            top_provider: Option<TopProvider>,
+            #[serde(default)]
+            reasoning: Option<Reasoning>,
+            #[serde(default)]
+            context_length: Option<u32>,
+            #[serde(default)]
+            benchmarks: Option<Benchmarks>,
+            /// "The date after which the model may be removed."
+            #[serde(default)]
+            expiration_date: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct Architecture {
+            #[serde(default)]
+            output_modalities: Option<Vec<String>>,
+        }
+        /// The primary provider's numbers, not the model's — endpoints
+        /// disagree, and this is the one OpenRouter puts forward.
+        #[derive(Deserialize)]
+        struct TopProvider {
+            #[serde(default)]
+            max_completion_tokens: Option<u32>,
+        }
+        #[derive(Deserialize)]
+        struct Reasoning {
+            #[serde(default)]
+            supported_efforts: Option<Vec<String>>,
+        }
+        #[derive(Deserialize)]
+        struct Benchmarks {
+            #[serde(default)]
+            artificial_analysis: Option<ArtificialAnalysis>,
+        }
+        #[derive(Deserialize)]
+        struct ArtificialAnalysis {
+            #[serde(default)]
+            agentic_index: Option<f32>,
+            #[serde(default)]
+            coding_index: Option<f32>,
         }
         /// Prices arrive as decimal STRINGS — `"0"`, `"0.00001"` — not
         /// numbers, so they are parsed rather than compared as text: `"0.0"`
@@ -470,14 +544,45 @@ impl LlmClient for OpenRouterClient {
                     };
                     zero(&p.prompt) && zero(&p.completion)
                 }),
+                // Model-level `supported_parameters` is the UNION across this
+                // model's provider endpoints, and OpenRouter calls tool
+                // routing "best effort" — so this is a necessary condition,
+                // not a guarantee. Absent, though, is a definite no.
+                tools: m
+                    .supported_parameters
+                    .as_ref()
+                    .is_some_and(|p| p.iter().any(|x| x == "tools")),
+                text_output: m
+                    .architecture
+                    .as_ref()
+                    .and_then(|a| a.output_modalities.as_ref())
+                    .is_some_and(|out| out.iter().any(|x| x == "text")),
+                max_completion_tokens: m.top_provider.and_then(|t| t.max_completion_tokens),
+                supported_efforts: m
+                    .reasoning
+                    .and_then(|r| r.supported_efforts)
+                    .unwrap_or_default(),
+                context_length: m.context_length,
+                agentic_index: m
+                    .benchmarks
+                    .as_ref()
+                    .and_then(|b| b.artificial_analysis.as_ref())
+                    .and_then(|a| a.agentic_index),
+                coding_index: m
+                    .benchmarks
+                    .as_ref()
+                    .and_then(|b| b.artificial_analysis.as_ref())
+                    .and_then(|a| a.coding_index),
+                expires: m.expiration_date,
                 display_name: m.name.unwrap_or_else(|| m.id.clone()),
                 id: m.id,
             })
             .collect();
 
-        // Sort alphabetically by id — gives a stable, easily-scannable list
-        // grouped by upstream provider (anthropic/*, google/*, openai/*…).
-        models.sort_by(|a, b| a.id.cmp(&b.id));
+        // Best first, then alphabetically within a band. Alphabetical alone
+        // put `anthropic/*` at the top of 431 rows and left the model someone
+        // should actually pick two hundred lines down.
+        models.sort_by(|a, b| a.rank().cmp(&b.rank()).then_with(|| a.id.cmp(&b.id)));
 
         Ok(models)
     }

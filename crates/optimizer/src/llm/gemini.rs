@@ -239,6 +239,7 @@ impl LlmClient for GeminiLlmClient {
                 free: gemini_has_free_tier(&id),
                 id,
                 display_name: display,
+                ..Default::default()
             })
             .collect())
     }
