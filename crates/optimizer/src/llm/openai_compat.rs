@@ -588,13 +588,23 @@ mod tests {
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         let body = drain_request(&stream)?;
-        stream.write_all(response.as_bytes())?;
-        stream.flush()?;
-        // Record as soon as the response is on the wire — before the lingering
-        // drain below — so `served()` and `bodies()` are already accurate by
-        // the time the client returns and the test asserts on them.
+        // Recorded BEFORE the response is written, not after. The request is
+        // already fully read here, so the count is honest — and the client
+        // cannot see a byte of the reply until the write below, which means
+        // it cannot return from `send_chat` and assert on `served()` before
+        // this has happened.
+        //
+        // Recording after the flush was a race with no ordering between the
+        // two threads: the client could receive, parse and return while this
+        // thread was still between `flush` and `fetch_add`, and the test read
+        // a count of zero. Narrow enough to pass twelve runs on a developer
+        // machine and still redden CI, which is where it was caught —
+        // `permanent_failures_are_not_retried` on the 1.12.0 merge commit,
+        // whose tree is byte-identical to one that had passed three times.
         bodies.lock().unwrap_or_else(|e| e.into_inner()).push(body);
         served.fetch_add(1, Ordering::SeqCst);
+        stream.write_all(response.as_bytes())?;
+        stream.flush()?;
         // Wait for the client to close before dropping the socket. Closing a
         // Windows socket that still has unread inbound data sends an RST, and
         // the client reports that as a send failure rather than the status we
