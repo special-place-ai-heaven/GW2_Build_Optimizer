@@ -634,6 +634,32 @@ mod tests {
         }
     }
 
+    /// No catalog string may use a dash the overlay cannot draw.
+    ///
+    /// The on-ramp check above guards the `setup.*` keys, which is where the
+    /// '?' was first seen. It was never only those: 327 of these dashes were
+    /// spread across all twelve catalogs - role hints, the attribute notes,
+    /// the cache warning, the ranch. Every one reached a player as a question
+    /// mark.
+    ///
+    /// Whole-catalog rather than a key list, because the next one will be
+    /// written by somebody who has not read this comment.
+    #[test]
+    fn no_catalog_uses_a_dash_the_overlay_cannot_draw() {
+        const FORBIDDEN: &[char] = &['\u{2013}', '\u{2014}', '\u{2015}'];
+        for (lang, cat) in catalogs() {
+            for (key, text) in cat {
+                for ch in FORBIDDEN {
+                    assert!(
+                        !text.contains(*ch),
+                        "{lang} {key} contains U+{:04X}; use ASCII '-'",
+                        *ch as u32
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn choya_name_french() {
         assert_eq!(choya_name_for("fr"), "French");
