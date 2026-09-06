@@ -1,3 +1,4 @@
+mod cache_bounds;
 mod chat_links;
 mod clipboard;
 mod feedback;

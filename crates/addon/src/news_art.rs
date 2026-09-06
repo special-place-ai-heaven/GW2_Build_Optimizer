@@ -1,6 +1,10 @@
 //! Still images for news (JPEG/PNG). No video, no web pages.
+//!
+//! Nexus never frees textures until game exit (nexus-rs issue #138). Stills
+//! share the logos discipline: a session [`MAX_TEXTURES`] cap before upload,
+//! and [`MAX_CACHE_FILES`] on disk with oldest-mtime eviction after each write.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -19,6 +23,10 @@ const TIMEOUT: Duration = Duration::from_secs(8);
 /// across the five live feeds, and every still over MAX_EDGE is downscaled
 /// before it is written, so this bounds the DOWNLOAD, not what we keep.
 const MAX_BYTES: usize = 4_000_000;
+/// Session texture budget — Nexus never frees these (issue #138).
+const MAX_TEXTURES: usize = 200;
+/// Disk cap for `cache/news`; oldest by mtime evicted on write.
+const MAX_CACHE_FILES: usize = 500;
 
 #[derive(Clone)]
 enum Slot {
@@ -28,10 +36,19 @@ enum Slot {
 }
 
 static SLOTS: OnceLock<Mutex<HashMap<String, Slot>>> = OnceLock::new();
+/// Texture ids whose creation was kicked — its len IS the session budget.
+static CREATED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn slots() -> std::sync::MutexGuard<'static, HashMap<String, Slot>> {
     SLOTS
         .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+fn created() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    CREATED
+        .get_or_init(|| Mutex::new(HashSet::new()))
         .lock()
         .unwrap_or_else(|e| e.into_inner())
 }
@@ -358,6 +375,7 @@ pub fn download(
     let tmp = path.with_extension(format!("{ext}.tmp"));
     std::fs::write(&tmp, &bytes).ok()?;
     std::fs::rename(&tmp, &path).ok()?;
+    crate::cache_bounds::evict_oldest(dir, MAX_CACHE_FILES);
     Some((path, aspect))
 }
 
@@ -447,6 +465,12 @@ pub fn texture(url: &str) -> Option<TextureId> {
             _ => None,
         }
     }?;
+    {
+        let mut set = created();
+        if !crate::cache_bounds::admit_texture(&mut set, &id, MAX_TEXTURES) {
+            return None;
+        }
+    }
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         nexus::texture::get_texture_or_create_from_file(&id, &path)
     }))
@@ -706,5 +730,18 @@ mod tests {
         png.extend_from_slice(&320u32.to_be_bytes());
         png.extend_from_slice(&180u32.to_be_bytes());
         assert_eq!(pixel_size(&png), Some((320, 180)));
+    }
+
+    #[test]
+    fn stills_reuse_logo_cache_bounds() {
+        let src = include_str!("news_art.rs");
+        assert!(
+            src.contains("crate::cache_bounds::evict_oldest(dir, MAX_CACHE_FILES)"),
+            "download must evict after write"
+        );
+        assert!(
+            src.contains("crate::cache_bounds::admit_texture(&mut set, &id, MAX_TEXTURES)"),
+            "texture must gate Nexus uploads"
+        );
     }
 }

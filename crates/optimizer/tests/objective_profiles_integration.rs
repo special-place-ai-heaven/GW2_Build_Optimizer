@@ -1,17 +1,13 @@
-//! Integration tests for P3-15: Objective Profiles and Typed State-Aware Scorer Isolation.
+//! Integration tests for P3-15: Objective Profiles and live `score_with_weights`.
 //!
 //! Validates that:
 //! - Different objective profiles produce different build rankings
-//! - Changing boon priorities changes scoring behavior
-//! - Changing condition priorities changes scoring behavior
-//! - ObjectiveScorer wires through correctly from profiles to scoring
+//! - Boon/condition priorities differ across embedded profiles
 //! - Backward compatibility (old "disable" field deserializes correctly)
 
 use gw2_optimizer::combat::CombatPerformance;
 use gw2_optimizer::data::objective_profiles;
-use gw2_optimizer::scoring::{
-    score_with_weights, ObjectiveScorer, OptimizationWeights, WEIGHT_BUDGET,
-};
+use gw2_optimizer::scoring::{score_with_weights, OptimizationWeights, WEIGHT_BUDGET};
 
 // ─── Helpers ───
 
@@ -299,77 +295,7 @@ fn test_pvp_sustain_profile_prefers_sustain_build() {
     );
 }
 
-// ─── ObjectiveScorer Wiring Tests ───
-
-#[test]
-fn test_objective_scorer_from_mode_produces_valid_scorer() {
-    let weights = OptimizationWeights::preset_balanced();
-    let scorer = ObjectiveScorer::from_mode(weights.clone(), "PvE");
-
-    assert_eq!(scorer.weight_budget, 2.0);
-    assert!(scorer.strike_dps_norm > 0.0);
-    assert!(scorer.condi_dps_norm > 0.0);
-    assert!(
-        !scorer.boon_priorities.is_empty(),
-        "PvE should have boon priorities"
-    );
-    assert!(
-        !scorer.condition_priorities.is_empty(),
-        "PvE should have condition priorities"
-    );
-}
-
-#[test]
-fn test_objective_scorer_from_profile_uses_profile_norms() {
-    let data = objective_profiles::objective_profiles();
-    let profile = data.profile_by_id("PvE_Power_DPS").unwrap();
-    let weights = OptimizationWeights::preset_power_dps();
-    let scorer = ObjectiveScorer::from_profile(weights, profile);
-
-    assert_eq!(
-        scorer.strike_dps_norm, profile.normalization_constants.strike_dps_norm,
-        "Scorer should use profile's strike_dps_norm"
-    );
-    assert_eq!(
-        scorer.condi_dps_norm, profile.normalization_constants.condi_dps_norm,
-        "Scorer should use profile's condi_dps_norm"
-    );
-}
-
-#[test]
-fn test_objective_scorer_fallback_uses_defaults() {
-    let weights = OptimizationWeights::preset_balanced();
-    let scorer = ObjectiveScorer::fallback(weights);
-
-    assert_eq!(scorer.weight_budget, WEIGHT_BUDGET);
-    assert!(
-        scorer.boon_priorities.is_empty(),
-        "Fallback should have no boon priorities"
-    );
-    assert!(
-        scorer.condition_priorities.is_empty(),
-        "Fallback should have no condition priorities"
-    );
-}
-
-#[test]
-fn test_objective_scorer_score_matches_score_with_weights() {
-    let weights = OptimizationWeights::preset_power_dps();
-    let scorer = ObjectiveScorer::fallback(weights.clone());
-    let perf = power_dps_perf();
-
-    let scorer_result = scorer.score(&perf);
-    let direct_result = score_with_weights(&perf, &weights);
-
-    assert!(
-        (scorer_result - direct_result).abs() < f64::EPSILON,
-        "ObjectiveScorer.score() ({:.6}) should match score_with_weights() ({:.6})",
-        scorer_result,
-        direct_result
-    );
-}
-
-// ─── Boon Priority Tests ───
+// ─── Profile priority data ───
 
 #[test]
 fn test_boon_priorities_differ_between_profiles() {
@@ -377,14 +303,16 @@ fn test_boon_priorities_differ_between_profiles() {
     let power_profile = data.profile_by_id("PvE_Power_DPS").unwrap();
     let healer_profile = data.profile_by_id("PvE_Healer").unwrap();
 
-    let power_scorer =
-        ObjectiveScorer::from_profile(OptimizationWeights::preset_power_dps(), power_profile);
-    let healer_scorer =
-        ObjectiveScorer::from_profile(OptimizationWeights::preset_healer(), healer_profile);
-
-    // Healer should prioritize Regeneration more than power DPS
-    let power_regen = power_scorer.boon_priority("Regeneration");
-    let healer_regen = healer_scorer.boon_priority("Regeneration");
+    let power_regen = power_profile
+        .boon_priorities
+        .get("Regeneration")
+        .copied()
+        .unwrap_or(0.5);
+    let healer_regen = healer_profile
+        .boon_priorities
+        .get("Regeneration")
+        .copied()
+        .unwrap_or(0.5);
     assert!(
         healer_regen > power_regen,
         "Healer should prioritize Regeneration ({:.2}) more than Power DPS ({:.2})",
@@ -394,35 +322,21 @@ fn test_boon_priorities_differ_between_profiles() {
 }
 
 #[test]
-fn test_boon_priority_defaults_when_missing() {
-    let weights = OptimizationWeights::preset_balanced();
-    let scorer = ObjectiveScorer::fallback(weights);
-
-    // Fallback scorer has no boon priorities, should default to 0.5
-    let priority = scorer.boon_priority("Might");
-    assert!(
-        (priority - 0.5).abs() < f64::EPSILON,
-        "Missing boon should default to 0.5, got {}",
-        priority
-    );
-}
-
-// ─── Condition Priority Tests ───
-
-#[test]
 fn test_condition_priorities_differ_between_profiles() {
     let data = objective_profiles::objective_profiles();
     let power_profile = data.profile_by_id("PvE_Power_DPS").unwrap();
     let condi_profile = data.profile_by_id("PvE_Condi_DPS").unwrap();
 
-    let power_scorer =
-        ObjectiveScorer::from_profile(OptimizationWeights::preset_power_dps(), power_profile);
-    let condi_scorer =
-        ObjectiveScorer::from_profile(OptimizationWeights::preset_condi_dps(), condi_profile);
-
-    // Condi profile should prioritize Burning higher than power profile
-    let power_burning = power_scorer.condition_priority("Burning");
-    let condi_burning = condi_scorer.condition_priority("Burning");
+    let power_burning = power_profile
+        .condition_priorities
+        .get("Burning")
+        .copied()
+        .unwrap_or(0.5);
+    let condi_burning = condi_profile
+        .condition_priorities
+        .get("Burning")
+        .copied()
+        .unwrap_or(0.5);
     assert!(
         condi_burning > power_burning,
         "Condi profile should prioritize Burning ({:.2}) more than Power profile ({:.2})",
@@ -432,41 +346,12 @@ fn test_condition_priorities_differ_between_profiles() {
 }
 
 #[test]
-fn test_condition_priority_defaults_when_missing() {
-    let weights = OptimizationWeights::preset_balanced();
-    let scorer = ObjectiveScorer::fallback(weights);
-
-    let priority = scorer.condition_priority("Bleeding");
-    assert!(
-        (priority - 0.5).abs() < f64::EPSILON,
-        "Missing condition should default to 0.5, got {}",
-        priority
-    );
-}
-
-// ─── Interaction Priority Tests ───
-
-#[test]
 fn test_interaction_priorities_loaded() {
     let data = objective_profiles::objective_profiles();
-    // WvW Disruptor should have high interaction priorities for boon denial
     let disruptor = data.profile_by_id("WvW_Disruptor").unwrap();
     assert!(
         !disruptor.interaction_priorities.is_empty(),
         "WvW_Disruptor should have interaction priorities"
-    );
-}
-
-#[test]
-fn test_interaction_priority_defaults_when_missing() {
-    let weights = OptimizationWeights::preset_balanced();
-    let scorer = ObjectiveScorer::fallback(weights);
-
-    let priority = scorer.interaction_priority("removes_boon");
-    assert!(
-        (priority - 0.5).abs() < f64::EPSILON,
-        "Missing interaction should default to 0.5, got {}",
-        priority
     );
 }
 
@@ -551,10 +436,10 @@ fn test_pve_and_pvp_default_profiles_produce_different_scores() {
     );
 }
 
-// ─── Full Pipeline: Profile -> Scorer -> Score -> Ranking ───
+// ─── Full Pipeline: Profile weights -> score_with_weights -> Ranking ───
 
 #[test]
-fn test_full_pipeline_ranking_with_objective_scorer() {
+fn test_full_pipeline_ranking_with_score_with_weights() {
     let builds = [
         ("Power DPS", power_dps_perf()),
         ("Condi DPS", condi_dps_perf()),
@@ -562,23 +447,19 @@ fn test_full_pipeline_ranking_with_objective_scorer() {
         ("Sustain", sustain_perf()),
     ];
 
-    // Power DPS profile should rank Power DPS highest
-    let power_scorer =
-        ObjectiveScorer::from_mode(OptimizationWeights::default_for_mode("PvE"), "PvE");
+    let pve = OptimizationWeights::default_for_mode("PvE");
     let mut power_rankings: Vec<(&str, f64)> = builds
         .iter()
-        .map(|(name, perf)| (*name, power_scorer.score(perf)))
+        .map(|(name, perf)| (*name, score_with_weights(perf, &pve)))
         .collect();
     power_rankings.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-    // With default PvE profile (Power DPS), power build should be ranked highly
     assert_eq!(
         power_rankings[0].0, "Power DPS",
         "Default PvE profile should rank Power DPS first, got: {:?}",
         power_rankings
     );
 
-    // Healer profile should rank Support highest
     let data = objective_profiles::objective_profiles();
     let healer_profile = data.profile_by_id("PvE_Healer").unwrap();
     let healer_weights = OptimizationWeights {
@@ -589,10 +470,9 @@ fn test_full_pipeline_ranking_with_objective_scorer() {
         sustain: healer_profile.axis_weights.sustain,
         control: healer_profile.axis_weights.control,
     };
-    let healer_scorer = ObjectiveScorer::from_mode(healer_weights, "PvE");
     let mut healer_rankings: Vec<(&str, f64)> = builds
         .iter()
-        .map(|(name, perf)| (*name, healer_scorer.score(perf)))
+        .map(|(name, perf)| (*name, score_with_weights(perf, &healer_weights)))
         .collect();
     healer_rankings.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 

@@ -368,7 +368,7 @@ fn layout_and_find(ui: &Ui, state: &mut AddonState) {
         if layout == NewsLayout::Magazine {
             state.news.expanded = None;
         }
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
     }
 
     let search_w = (ui.content_region_avail()[0] * 0.42).clamp(140.0, 260.0);
@@ -393,7 +393,7 @@ fn layout_and_find(ui: &Ui, state: &mut AddonState) {
     let mut images = state.config.news.show_images;
     if ui.checkbox(format!("{}##news_stills", stills), &mut images) {
         state.config.news.show_images = images;
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
     }
     ui.same_line_with_spacing(0.0, 10.0);
     if theme::gold_button_sized(ui, refresh, [0.0, 0.0]) {
