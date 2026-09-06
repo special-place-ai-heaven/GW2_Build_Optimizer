@@ -229,7 +229,7 @@ pub(crate) struct ChatRequest {
 /// ignore unknown parameters (per OpenRouter's parameter docs).
 #[derive(Serialize, Debug, Clone)]
 pub(crate) struct ReasoningConfig {
-    pub(crate) effort: &'static str,
+    pub(crate) effort: String,
 }
 
 /// OpenRouter `provider` routing preferences.
@@ -303,7 +303,10 @@ pub(crate) struct ProviderCore<'a> {
     pub(crate) label: &'a str,
     pub(crate) max_tokens: u32,
     /// OpenRouter `reasoning.effort`. `None` omits the field.
-    pub(crate) reasoning_effort: Option<&'static str>,
+    /// Owned, because it is chosen per model from what the catalog says the
+    /// model accepts — not a constant we picked once. See
+    /// [`crate::llm::ModelInfo::effort`].
+    pub(crate) reasoning_effort: Option<String>,
     /// Whether this base URL understands the OpenRouter-only top-level
     /// `provider` block. `api.openai.com` rejects unknown top-level body
     /// arguments, so sending it there breaks the OpenAI provider outright
@@ -362,6 +365,7 @@ pub(crate) fn send_chat(
         stream: Some(true),
         reasoning: core
             .reasoning_effort
+            .clone()
             .map(|effort| ReasoningConfig { effort }),
         // OpenRouter-only body field. `api.openai.com` rejects unknown
         // top-level arguments, so posting it to every OpenAI-compatible base
@@ -830,7 +834,7 @@ mod tests {
         let mut core = test_core(&http, &rate, &server.base_url, &no_cancel);
         core.supports_provider_prefs = true;
         core.require_tool_endpoints = true;
-        core.reasoning_effort = Some(REASONING_EFFORT);
+        core.reasoning_effort = Some(REASONING_EFFORT.to_string());
         send_chat(core, &[user("hi")], None).expect("ok");
 
         let body = server.posted_body(0);
@@ -953,7 +957,7 @@ mod tests {
             extra_headers: &[],
             label: "OpenRouter",
             max_tokens: MAX_COMPLETION_TOKENS,
-            reasoning_effort: Some(REASONING_EFFORT),
+            reasoning_effort: Some(REASONING_EFFORT.to_string()),
             supports_provider_prefs: true,
             require_tool_endpoints: false,
             request_timeout: CHAT_REQUEST_TIMEOUT,

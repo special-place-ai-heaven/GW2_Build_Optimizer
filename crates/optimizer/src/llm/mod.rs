@@ -33,6 +33,107 @@ pub struct ModelInfo {
     /// OpenRouter publishes a price per model, Google publishes a free tier
     /// per model, OpenAI and Anthropic have neither.
     pub free: bool,
+    /// Whether the model takes tool definitions at all.
+    ///
+    /// We send tools on every chat request, so a model without them cannot
+    /// serve this addon. Defaults to true where a provider does not publish
+    /// it: absent is not "no".
+    pub tools: bool,
+    /// Whether the model answers in text. The catalog carries image, audio
+    /// and video generators alongside the chat models — not alternatives to a
+    /// chat model, just a different thing in the same list.
+    pub text_output: bool,
+    /// The largest reply the model will produce, when published.
+    ///
+    /// Not decoration: OpenRouter routes only to providers that can serve the
+    /// `max_tokens` asked for, so asking for more than this quietly narrows
+    /// the pool. `None` means unpublished — send our own figure.
+    pub max_completion_tokens: Option<u32>,
+    /// Reasoning efforts the model accepts. Empty means unpublished.
+    ///
+    /// Sending an effort a model does not list is an error we would author
+    /// ourselves, and it is not hypothetical: the highest-scoring free model
+    /// in OpenRouter's catalogue accepts only `xhigh` and `high`.
+    pub supported_efforts: Vec<String>,
+    /// Total context, when published.
+    pub context_length: Option<u32>,
+    /// Artificial Analysis' agentic score, when published.
+    ///
+    /// The closest published measure of what this addon asks a model to do:
+    /// call tools, respect hard rules, revise when refused. It orders the
+    /// picker, so the best model is the first line rather than the two
+    /// hundredth.
+    pub agentic_index: Option<f32>,
+    /// Artificial Analysis' coding score, when published. Wider coverage than
+    /// [`Self::agentic_index`], so it orders the models that lack one.
+    pub coding_index: Option<f32>,
+    /// The date after which the provider may remove the model, if it said so.
+    pub expires: Option<String>,
+}
+
+impl Default for ModelInfo {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            display_name: String::new(),
+            free: false,
+            // Absent is not "no": a provider that publishes no capability
+            // data must not have every one of its models pruned as useless.
+            tools: true,
+            text_output: true,
+            max_completion_tokens: None,
+            supported_efforts: Vec::new(),
+            context_length: None,
+            agentic_index: None,
+            coding_index: None,
+            expires: None,
+        }
+    }
+}
+
+impl ModelInfo {
+    /// Whether this model can serve a request from this addon at all.
+    ///
+    /// Only reasons no request shape can fix. A model that merely needs a
+    /// smaller `max_tokens` or a different reasoning effort is not unusable —
+    /// it is a request we have to build correctly, and pruning those would
+    /// throw away half of OpenRouter's free catalogue.
+    pub fn usable(&self) -> bool {
+        self.tools && self.text_output && !self.id.ends_with(":batch") && self.expires.is_none()
+    }
+
+    /// The reasoning effort to send, given what we would prefer.
+    ///
+    /// Prefers our own choice, falls back to something the model does accept,
+    /// and keeps our choice when the model publishes no list at all — an
+    /// unpublished list is silence, not a refusal.
+    pub fn effort(&self, preferred: &str) -> Option<String> {
+        if self.supported_efforts.is_empty()
+            || self.supported_efforts.iter().any(|e| e == preferred)
+        {
+            return Some(preferred.to_string());
+        }
+        self.supported_efforts.first().cloned()
+    }
+
+    /// How many completion tokens to ask for, given our own ceiling.
+    pub fn completion_budget(&self, ours: u32) -> u32 {
+        self.max_completion_tokens.map_or(ours, |cap| ours.min(cap))
+    }
+
+    /// Order for the picker: best first.
+    ///
+    /// Agentic where it exists, then coding, then everything unscored. The
+    /// two indices are kept in separate bands rather than mixed — a coding
+    /// 52.6 and an agentic 39.7 are not the same number, and interleaving
+    /// them would rank by which benchmark a model happened to publish.
+    pub fn rank(&self) -> (u8, i32) {
+        match (self.agentic_index, self.coding_index) {
+            (Some(a), _) => (0, -(a * 100.0) as i32),
+            (None, Some(c)) => (1, -(c * 100.0) as i32),
+            (None, None) => (2, 0),
+        }
+    }
 }
 
 /// Result of a detailed key validation with user-friendly messages.
@@ -343,7 +444,7 @@ mod billing_tests {
 
 #[cfg(test)]
 mod tool_arg_tests {
-    use super::{parse_tool_arguments, run_tool_or_parse_error, unparseable_tool_input};
+    use super::{parse_tool_arguments, run_tool_or_parse_error, unparseable_tool_input, ModelInfo};
     use serde_json::Value;
 
     #[test]
@@ -385,5 +486,105 @@ mod tool_arg_tests {
         );
         assert!(!ran, "truncated args must not execute the tool");
         assert!(unparseable_tool_input(&result));
+    }
+    /// Every number here is a row from OpenRouter's live catalog on
+    /// 2026-09-06 — the cases that were silently wrong before the client read
+    /// any of this.
+    #[test]
+    fn a_model_gets_a_request_it_can_actually_serve() {
+        // The best free model in the catalog, and it does not take the effort
+        // we used to send every model.
+        let glm = ModelInfo {
+            id: "z-ai/glm-5.2:free".into(),
+            supported_efforts: vec!["xhigh".into(), "high".into()],
+            max_completion_tokens: Some(230_400),
+            agentic_index: Some(39.7),
+            ..Default::default()
+        };
+        assert_eq!(glm.effort("medium").as_deref(), Some("xhigh"), "not medium");
+        assert_eq!(glm.completion_budget(65_536), 65_536, "ours is smaller");
+        assert!(glm.usable());
+
+        // Publishes a list that does include ours: ours wins.
+        let nemotron = ModelInfo {
+            supported_efforts: vec!["high".into(), "medium".into()],
+            ..Default::default()
+        };
+        assert_eq!(nemotron.effort("medium").as_deref(), Some("medium"));
+
+        // Publishes no list at all: silence is not refusal, keep ours.
+        let quiet = ModelInfo::default();
+        assert_eq!(quiet.effort("medium").as_deref(), Some("medium"));
+        assert_eq!(quiet.completion_budget(65_536), 65_536, "no cap stated");
+
+        // Caps replies far below our ceiling. Asking for more does not
+        // truncate the reply, it narrows the routing pool.
+        let gemma = ModelInfo {
+            max_completion_tokens: Some(32_768),
+            ..Default::default()
+        };
+        assert_eq!(gemma.completion_budget(65_536), 32_768, "clamped to theirs");
+    }
+
+    #[test]
+    fn only_models_no_request_could_fix_are_unusable() {
+        let ok = ModelInfo {
+            id: "z-ai/glm-5.2:free".into(),
+            ..Default::default()
+        };
+        assert!(ok.usable());
+
+        let no_tools = ModelInfo {
+            tools: false,
+            ..ok.clone()
+        };
+        assert!(!no_tools.usable(), "we send tools on every request");
+
+        let audio = ModelInfo {
+            text_output: false,
+            ..ok.clone()
+        };
+        assert!(!audio.usable(), "a music model is not a chat model");
+
+        let batch = ModelInfo {
+            id: "google/gemini-3.8-flash:batch".into(),
+            ..ok.clone()
+        };
+        assert!(!batch.usable(), "answers within 24 hours, not now");
+
+        let retiring = ModelInfo {
+            expires: Some("2026-09-10".into()),
+            ..ok.clone()
+        };
+        assert!(!retiring.usable(), "the provider may remove it");
+
+        // A small ceiling or an unusual effort list is ours to send
+        // correctly, not a reason to hide the model — pruning these would
+        // cost half the free catalogue.
+        let small = ModelInfo {
+            max_completion_tokens: Some(8_192),
+            supported_efforts: vec!["low".into()],
+            ..ok
+        };
+        assert!(small.usable(), "fixable by building the request properly");
+    }
+
+    #[test]
+    fn the_picker_orders_by_what_this_addon_asks_a_model_to_do() {
+        let agentic = |a: f32| ModelInfo {
+            agentic_index: Some(a),
+            ..Default::default()
+        };
+        let coding = |c: f32| ModelInfo {
+            coding_index: Some(c),
+            ..Default::default()
+        };
+        // A high coding score never outranks any agentic score: they are
+        // different measures, and mixing them would rank by which benchmark a
+        // model happened to publish.
+        assert!(agentic(1.1).rank() < coding(52.6).rank());
+        assert!(agentic(39.7).rank() < agentic(31.0).rank(), "higher first");
+        assert!(coding(52.6).rank() < coding(39.3).rank());
+        assert!(coding(13.8).rank() < ModelInfo::default().rank(), "scored first");
     }
 }
