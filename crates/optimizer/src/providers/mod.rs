@@ -307,12 +307,19 @@ pub fn role_label(scale: &str, job: &str) -> String {
 /// heals, and a "Quickness Dragonhunter" is a boon build that also does
 /// damage. `None` when the name names no job, so the caller can say so
 /// instead of defaulting to Power DPS.
+/// The words are `RoleObjective::label()`'s on purpose. `find_best_benchmark`
+/// ranks candidates by word overlap between the player's chosen role and the
+/// stored one, so "Heal Support" against the `Healer` chip scores zero and
+/// "Condition DPS" against `Condi DPS` scores only on the shared "DPS".
+/// Sharing the vocabulary is the whole point of writing it down here.
 pub fn role_in_name(name: &str) -> Option<&'static str> {
     let name = name.to_ascii_lowercase();
     let has = |word: &str| name.contains(word);
-    // Most specific first — "heal alacrity" is a healer, not a boon DPS.
+    // Most specific first — "Heal Alacrity Druid" is a healer, not a boon
+    // DPS, and "Condition Quickness Scrapper" is a boon build that also
+    // does damage.
     if has("heal") {
-        return Some("Heal Support");
+        return Some("Healer");
     }
     if has("support") {
         return Some("Support");
@@ -324,7 +331,7 @@ pub fn role_in_name(name: &str) -> Option<&'static str> {
         return Some("Boon DPS");
     }
     if has("condition") || has("condi") {
-        return Some("Condition DPS");
+        return Some("Condi DPS");
     }
     if has("celestial") || has("hybrid") {
         return Some("Hybrid");

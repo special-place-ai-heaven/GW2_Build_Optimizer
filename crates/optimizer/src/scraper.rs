@@ -883,7 +883,7 @@ fn scrape_guildjen_build(
     // Elementalist PvE ones included. The index states it instead.
     let role = crate::providers::role_label(
         &guildjen_scale(mode, category, row),
-        &guildjen_job(row),
+        &guildjen_job(mode, row),
     );
 
     Ok(benchmark_from_html(
@@ -912,24 +912,41 @@ fn guildjen_scale(mode: &str, category: &str, row: &crate::providers::guildjen::
     }
 }
 
-/// What a GuildJen build does, preferring its own name over the index's
-/// coarser tag.
+/// What a GuildJen build does, from whichever source says more in that mode.
 ///
-/// The name is the same vocabulary the other two sites use — "Heal DPS
-/// Luminary", "Power Vengeance Dragonhunter" — so it keeps the stored roles
-/// comparable across sources. `post_role-*` is the fallback, and it is the
-/// only answer on the open-world index, where most rows carry no role at all
-/// and the playstyle is the distinction the site draws.
-fn guildjen_job(row: &crate::providers::guildjen::IndexRow) -> String {
-    if let Some(job) = crate::providers::role_in_name(&row.name) {
-        return job.to_string();
-    }
-    if let Some(role) = row.roles.first() {
-        return crate::providers::title_case(role);
-    }
-    row.playstyles
-        .first()
-        .map(|playstyle| crate::providers::title_case(playstyle))
+/// Measured across all five indexes: PvE's role tags are only `dps`,
+/// `support`, `tank`, `kiter` and `quickness`, and most open-world rows
+/// carry none at all — so in PvE the build's own name is the better source,
+/// and "Heal DPS Luminary" is a Healer where the tag says only `support`.
+///
+/// WvW and PvP are the other way round. Their tags are rich — bruiser,
+/// assassin, medic, roamer, duelist — and the name is not: reading it would
+/// call a "Celestial Spear Antiquary" a Hybrid rather than the Bruiser the
+/// site says it is.
+///
+/// Whichever comes second is the fallback, and a row with neither falls back
+/// to the playstyle, which on the open-world index is the distinction the
+/// site actually draws.
+fn guildjen_job(mode: &str, row: &crate::providers::guildjen::IndexRow) -> String {
+    let named = crate::providers::role_in_name(&row.name).map(str::to_string);
+    let tagged = row.roles.first().map(|role| match role.as_str() {
+        // Not a word to title-case, and on its own it does not say which
+        // kind of damage — so the name wins where there is one.
+        "dps" => "DPS".to_string(),
+        other => crate::providers::title_case(other),
+    });
+    let (first, second) = if mode == "PvE" {
+        (named, tagged)
+    } else {
+        (tagged, named)
+    };
+    first
+        .or(second)
+        .or_else(|| {
+            row.playstyles
+                .first()
+                .map(|playstyle| crate::providers::title_case(playstyle))
+        })
         .unwrap_or_default()
 }
 
@@ -2865,6 +2882,78 @@ mod tests {
         );
     }
 
+    /// The stored role is where the build is played, then what it does
+    /// there — in the words the player's own role chips use, because
+    /// `find_best_benchmark` ranks candidates by word overlap between the
+    /// two. Every one of these vocabularies was measured across GuildJen's
+    /// five category indexes on 2026-09-06.
+    #[test]
+    fn the_role_reads_as_scale_then_job_in_the_players_own_words() {
+        use crate::providers::guildjen::IndexRow;
+        let row = |name: &str, roles: &[&str], playstyles: &[&str]| IndexRow {
+            url: "https://guildjen.com/x-build/".into(),
+            name: name.into(),
+            profession: "Guardian".into(),
+            roles: roles.iter().map(|r| r.to_string()).collect(),
+            playstyles: playstyles.iter().map(|p| p.to_string()).collect(),
+            difficulty: "easy".into(),
+        };
 
+        for (mode, category, name, roles, playstyles, want) in [
+            // Open world states a playstyle and usually no role, so the
+            // build's own name is the whole answer.
+            ("PvE", "Open World", "Power Vengeance Dragonhunter", &[][..], &["bossing"][..],
+             "Open World Power DPS"),
+            ("PvE", "Open World", "Heal DPS Luminary", &["support", "tank"][..], &["cooperative"][..],
+             "Open World Healer"),
+            // A raid states `dps`, which does not say which kind. The name
+            // does.
+            ("PvE", "Raid", "Condition Reaper", &["dps"][..], &[][..], "Raid Condi DPS"),
+            ("PvE", "Fractal", "Heal Alacrity Druid", &["support"][..], &[][..], "Fractal Healer"),
+            // WvW: the site's role words are the ones the chips use, and
+            // reading the name instead would call this a Hybrid.
+            ("WvW", "Wvw", "Celestial Spear Antiquary", &["bruiser"][..], &["roaming"][..],
+             "Roaming Bruiser"),
+            // Smallest playstyle first: a havoc build can join a cloud.
+            ("WvW", "Wvw", "Power Staff Daredevil", &["assassin"][..], &["cloud", "havoc"][..],
+             "Havoc Assassin"),
+            // PvP is always five a side, so it records no scale.
+            ("PvP", "Pvp", "Support Firebrand", &["support"][..], &[][..], "Support"),
+            ("PvP", "Pvp", "Power Willbender", &["duelist"][..], &[][..], "Duelist"),
+        ] {
+            let row = row(name, roles, playstyles);
+            let got = crate::providers::role_label(
+                &guildjen_scale(mode, category, &row),
+                &guildjen_job(mode, &row),
+            );
+            assert_eq!(got, want, "{mode} {name}");
+        }
+    }
 
+    /// Every branch of the old classifier returned a WvW label, including
+    /// the fallback, so all 411 stored GuildJen rows read "WvW Roaming" —
+    /// Elementalist PvE ones included.
+    #[test]
+    fn a_pve_build_is_never_labelled_with_wvw_words() {
+        use crate::providers::guildjen::IndexRow;
+        let row = IndexRow {
+            url: "https://guildjen.com/celestial-tempest-open-world-build/".into(),
+            name: "Celestial Earthquake Tempest".into(),
+            profession: "Elementalist".into(),
+            roles: vec![],
+            playstyles: vec!["cooperative".into()],
+            difficulty: "medium".into(),
+        };
+        let role = crate::providers::role_label(
+            &guildjen_scale("PvE", "Open World", &row),
+            &guildjen_job("PvE", &row),
+        );
+        assert_eq!(role, "Open World Hybrid");
+        for wvw_word in ["Roaming", "Havoc", "Cloud", "Zerg", "WvW"] {
+            assert!(
+                !role.contains(wvw_word),
+                "a PvE build must not be labelled {wvw_word}: {role}"
+            );
+        }
+    }
 }

@@ -223,7 +223,7 @@ fn talk_context(state: &AddonState) -> String {
     let role = state
         .main
         .selected_role
-        .map(super::super::role_i18n_key)
+        .map(|role| super::super::role_i18n_key(&state.main.game_mode, role))
         .map(t)
         .unwrap_or_else(|| t("talk.no_role"));
     format!(

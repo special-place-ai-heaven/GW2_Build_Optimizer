@@ -492,7 +492,7 @@ pub struct MainState {
     pub game_mode: GameMode,
     /// WvW combat sub-tier: Solo (Roaming), Party (Havoc/small group), Squad (Zerg).
     /// Only meaningful when game_mode == WvW. Defaults to Squad.
-    pub wvw_combat_tier: gw2_optimizer::scenario::CombatTier,
+    pub combat_tier: gw2_optimizer::scenario::CombatTier,
     /// Selected role objective for 'Create New Build' flow. None = no role chosen yet.
     pub selected_role: Option<gw2_optimizer::scenario::RoleObjective>,
     pub current_build: Option<ResolvedBuild>,
