@@ -448,31 +448,33 @@ fn benchmark_from_html(
     mode: &str,
     role: &str,
 ) -> BenchmarkBuild {
-    let build_code = extract_build_code(html);
-    // Everything after the chat code is the page, not the build: a video
-    // embed, share buttons, the author card, and a "Related Posts" list of
-    // other builds whose specializations are not this one's. Confirmed
-    // against guildjen.com/support-troubadour-cloud-build/ on 2026-09-06.
-    let body = build_code
-        .as_deref()
-        .and_then(|code| html.find(code).map(|at| &html[..at + code.len()]))
-        .unwrap_or(html);
+    // Each site publishes ids its own way, so the parser is chosen by site
+    // rather than by trying all three. An unknown source gets GuildJen's
+    // reader, which finds nothing rather than inventing something.
+    let published = match source {
+        "snowcrows" => crate::providers::snowcrows::parse(html),
+        "hardstuck" => crate::providers::hardstuck::parse(html),
+        _ => crate::providers::guildjen::parse(html),
+    };
+    // The prefix the gear actually states, when it states one. Falling back
+    // to a text scan is worth it only if the ids gave nothing, and the scan
+    // wants prose — so this is the one place the article pruner belongs.
+    // Running it before the parsers would delete the ids: Snowcrows' embeds
+    // are empty divs and Hardstuck's chat code lives in an `<input value>`.
+    let gear_prefix = published.dominant_stat().unwrap_or_else(|| {
+        extract_gear_prefix(&crate::article::prune_to_article(html))
+    });
     BenchmarkBuild {
         source: source.into(),
         profession,
         spec_name,
         mode: mode.into(),
         role: role.to_string(),
-        gear_prefix: extract_gear_prefix(body),
-        rune: extract_rune(body),
-        sigils: extract_sigils(body),
-        relic: extract_relic(body),
-        traits: extract_traits(body),
-        skills: extract_skills(body),
-        build_code,
+        gear_prefix,
+        build_code: published.build_code.clone(),
         source_url: url.to_string(),
         scraped_at: today.to_string(),
-        notes: String::new(),
+        published,
     }
 }
 
@@ -1555,38 +1557,6 @@ fn title_case(s: &str) -> String {
         .join(" ")
 }
 
-/// Extract GW2 build template code (e.g. "[&...]").
-/// The page's build template, if it prints one.
-///
-/// Every chat link on a page shares the `[&...]` syntax — items, skills,
-/// traits, WvW objectives — and the build's own code is rarely the first.
-/// Taking the first one that is at least ten characters long recorded the
-/// five-byte item link `[&BPcAAAA=]` as the build code of 407 of 739 scraped
-/// builds (measured 2026-09-06). The decoder settles it: a build template
-/// announces itself with a `0x0D` header and is long enough to carry a skill
-/// bar, and nothing else is accepted.
-///
-/// Searched twice: once as sent, once with entity references resolved. Two
-/// of the three sites escape the code, differently, and neither decodes raw.
-///
-/// - Snowcrows prints it in a JS string inside an `onclick`, so the ampersand
-///   arrives as `&amp;` and the base64 body reads `amp;DQgn…`. The only other
-///   `[&` on the page is `[&quot;div&quot;,…]`, a JSON array in a Livewire
-///   `wire:snapshot` attribute — and that decoy is what all 180 Snowcrows
-///   rows in the store recorded as their build code.
-/// - GuildJen prints it in `<pre class="wp-block-code">` with the *bracket*
-///   escaped too, and not consistently: `&#91;&amp;DQcX…]` on one page,
-///   `[&amp;DQEQ…]` on another. A literal replace of either form alone misses
-///   the other. Measured over 27 pages: 0/27 decode raw, 27/27 unescaped.
-///
-/// Unescaping cannot corrupt a valid link — none of `&`, `#`, `;` are in the
-/// base64 alphabet. The 71 `[&…]` waypoint links GuildJen ships in a
-/// world-boss-timer JSON blob are still rejected, by the decoder rather than
-/// by luck: they are five-byte item links with no `0x0D` header.
-fn extract_build_code(html: &str) -> Option<String> {
-    crate::providers::build_code_in(html)
-}
-
 /// Space-padded alnum words — same boundary idea as `prefix_named_in_text`.
 fn padded_alnum_words(text: &str) -> String {
     format!(
@@ -1645,147 +1615,6 @@ fn extract_gear_prefix(html: &str) -> String {
     String::new()
 }
 
-/// Longest prefix of `s` of at most `max` bytes that ends on a char
-/// boundary. Slicing mid-UTF-8 panics, and build-site HTML is
-/// attacker-influenced content.
-fn take_chars_window(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        return s;
-    }
-    let mut bound = max;
-    while !s.is_char_boundary(bound) {
-        bound -= 1;
-    }
-    &s[..bound]
-}
-
-/// Extract rune name from HTML.
-fn extract_rune(html: &str) -> String {
-    // Rune names follow "Rune of" or "Superior Rune"
-    for marker in &["Rune of the ", "Rune of ", "Superior Rune"] {
-        if let Some(pos) = html.find(marker) {
-            let after = &html[pos..];
-            // Take up to 60 bytes and trim at next HTML tag or quote
-            let raw = take_chars_window(after, 60);
-            let end = raw.find(['<', '"', '\n']).unwrap_or(raw.len());
-            let name = raw[..end].trim().to_string();
-            if name.len() > 5 {
-                return name;
-            }
-        }
-    }
-    String::new()
-}
-
-/// Extract sigil names from HTML.
-fn extract_sigils(html: &str) -> Vec<String> {
-    let mut sigils = Vec::new();
-    for marker in &["Superior Sigil of ", "Sigil of "] {
-        let mut pos = 0;
-        while let Some(idx) = html[pos..].find(marker) {
-            let abs = pos + idx;
-            let after = take_chars_window(&html[abs..], 60);
-            let end = after.find(['<', '"', '\n']).unwrap_or(after.len());
-            let name = after[..end].trim().to_string();
-            if name.len() > 5 && !sigils.contains(&name) {
-                sigils.push(name);
-            }
-            pos = abs + marker.len();
-            if sigils.len() >= 4 {
-                break;
-            }
-        }
-    }
-    sigils
-}
-
-/// Extract relic name from HTML.
-fn extract_relic(html: &str) -> String {
-    for marker in &["Relic of ", "Superior Relic"] {
-        if let Some(pos) = html.find(marker) {
-            let after = &html[pos..];
-            let raw = take_chars_window(after, 60);
-            let end = raw.find(['<', '"', '\n']).unwrap_or(raw.len());
-            let name = raw[..end].trim().to_string();
-            if name.len() > 5 {
-                return name;
-            }
-        }
-    }
-    String::new()
-}
-
-/// Extract specialization/profession names from HTML (known names as section headers).
-fn extract_traits(html: &str) -> Vec<String> {
-    const CORE_PROFESSIONS: &[&str] = &[
-        "Guardian",
-        "Warrior",
-        "Engineer",
-        "Ranger",
-        "Thief",
-        "Elementalist",
-        "Mesmer",
-        "Necromancer",
-        "Revenant",
-    ];
-    let mut traits = Vec::new();
-    let elites = KNOWN_SPECS.iter().map(|s| title_case(s));
-    let cores = CORE_PROFESSIONS.iter().copied().map(str::to_string);
-    for spec in elites.chain(cores) {
-        if html.contains(&spec) && !traits.contains(&spec) {
-            traits.push(spec);
-            if traits.len() >= 3 {
-                break;
-            }
-        }
-    }
-    traits
-}
-
-/// Extract skill names from HTML.
-fn extract_skills(html: &str) -> Vec<String> {
-    // Common skill markers on build sites
-    let markers = ["Heal:", "Utility:", "Elite:", "utility-skill", "heal-skill"];
-    let mut skills = Vec::new();
-    for marker in &markers {
-        if let Some(pos) = html.find(marker) {
-            let after = &html[pos + marker.len()..];
-            // Truncate on a char boundary — slicing mid-UTF-8 panics, and
-            // build-site HTML is attacker-influenced content.
-            let bound = after
-                .char_indices()
-                .map(|(i, _)| i)
-                .take_while(|&i| i <= 80)
-                .last()
-                .unwrap_or(0);
-            let raw = &after[..bound];
-            // Strip HTML tags
-            let text = strip_tags(raw);
-            let name = text.trim().trim_matches(':').trim().to_string();
-            if name.len() > 3 && name.len() < 50 {
-                skills.push(name);
-            }
-        }
-        if skills.len() >= 5 {
-            break;
-        }
-    }
-    skills
-}
-
-fn strip_tags(s: &str) -> String {
-    let mut result = String::new();
-    let mut in_tag = false;
-    for c in s.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => result.push(c),
-            _ => {}
-        }
-    }
-    result
-}
 /// The sources this addon scrapes. A file naming any other is not ours.
 const KNOWN_SOURCES: &[&str] = &["snowcrows", "hardstuck", "guildjen"];
 /// Game modes, lowercased as [`save_builds`] writes them.
@@ -1875,7 +1704,16 @@ fn load_todays_builds(dir: &Path, today: &str) -> HashMap<String, BenchmarkBuild
             continue;
         };
         for build in builds {
-            if build.scraped_at == today && !build.source_url.is_empty() {
+            // A row is reusable only if it was written today *and* by an
+            // extractor that reads ids. Without the second condition the
+            // day's own cache defeats the fix: a sync run earlier today
+            // wrote rows with no ids, and re-running would copy them
+            // straight back to disk without refetching, so the store would
+            // only heal after midnight. An id-less row is refetched instead.
+            let reusable = build.scraped_at == today
+                && !build.source_url.is_empty()
+                && !build.published.is_empty();
+            if reusable {
                 known.insert(build.source_url.clone(), build);
             }
         }
@@ -2109,8 +1947,10 @@ mod tests {
     }
 
     /// Only today's builds are reusable, and only from files this version
-    /// writes. Yesterday's have to be refetched or a re-sync would silently
-    /// serve stale references forever.
+    /// writes, and only if they carry ids. Yesterday's have to be refetched
+    /// or a re-sync would silently serve stale references forever; an
+    /// id-less row from earlier today has to be refetched too, or the day's
+    /// own cache would keep handing back what the old extractor wrote.
     #[test]
     fn only_todays_builds_are_reused() {
         let tmp = std::env::temp_dir().join(format!(
@@ -2128,14 +1968,17 @@ mod tests {
             role: "WvW Zerg Support".into(),
             build_code: None,
             gear_prefix: "Minstrel's".into(),
-            rune: String::new(),
-            sigils: vec![],
-            relic: String::new(),
-            traits: vec![],
-            skills: vec![],
             source_url: url.into(),
             scraped_at: when.into(),
-            notes: String::new(),
+            published: crate::providers::ProviderBuild {
+                rune_id: Some(24839),
+                ..Default::default()
+            },
+        };
+        // What the old extractor wrote: today's date, no ids.
+        let id_less = |url: &str| BenchmarkBuild {
+            published: crate::providers::ProviderBuild::default(),
+            ..build(url, "2026-09-06")
         };
 
         std::fs::write(
@@ -2145,6 +1988,8 @@ mod tests {
                 build("https://guildjen.com/stale-build/", "2026-09-05"),
                 // No URL is no key: it could never be matched anyway.
                 build("", "2026-09-06"),
+                // Today's, but written before the parsers existed.
+                id_less("https://guildjen.com/written-this-morning/"),
             ])
             .unwrap(),
         )
@@ -2166,6 +2011,11 @@ mod tests {
         assert!(known.contains_key("https://guildjen.com/fresh-build/"));
         assert!(!known.contains_key("https://guildjen.com/stale-build/"));
         assert!(!known.contains_key("https://guildjen.com/from-junk/"));
+        assert!(
+            !known.contains_key("https://guildjen.com/written-this-morning/"),
+            "an id-less row is refetched, so the day's own cache cannot \
+             keep serving what the old extractor wrote"
+        );
 
         // A folder with nothing in it is not an error, it is a first run.
         let empty = tmp.join("empty");
@@ -2517,33 +2367,24 @@ mod tests {
         assert_eq!(extract_gear_prefix(html), "Viper's");
     }
 
+
+    /// A build is only what the page published as ids. The "Related Posts"
+    /// list at the foot of a GuildJen build names other builds'
+    /// specializations in prose, which is how 431 of 739 scraped builds
+    /// recorded Firebrand / Willbender / Dragonhunter whatever profession
+    /// they were.
+    ///
+    /// The old defence was to truncate the page at the chat code, which
+    /// helped only because the footer came after it. Reading ids instead
+    /// makes the position irrelevant: prose names nothing, wherever it sits.
     #[test]
-    fn test_extract_build_code() {
-        let build = "[&DQYAAAAqASsATgA2ADYARgBGAEYARgAAAAAAAAAAAAAAAAAAAAAAAAA=]";
-        let html = format!("Build code: {build} use it");
-        assert_eq!(extract_build_code(&html).as_deref(), Some(build));
-
-        // The regression: an item link earlier on the page was taken as the
-        // build code on 407 of 739 scraped builds, because the old rule was
-        // "first [&...] of at least ten characters".
-        let with_item = format!("<p>Uses [&BPcAAAA=] and [&BkgAAAA=]</p><code>{build}</code>");
-        assert_eq!(extract_build_code(&with_item).as_deref(), Some(build));
-
-        // A page that prints no template gets none, rather than an item.
-        assert_eq!(extract_build_code("<p>Uses [&BPcAAAA=]</p>"), None);
-    }
-
-    /// Everything after the chat code is the page, not the build. The
-    /// "Related Posts" list at the foot of a GuildJen build names other
-    /// builds' specializations, which is how 431 of 739 scraped builds
-    /// recorded Firebrand / Willbender / Dragonhunter whatever they were.
-    #[test]
-    fn extraction_stops_at_the_build_code() {
+    fn prose_names_no_specializations_wherever_it_sits() {
         let build = "[&DQYAAAAqASsATgA2ADYARgBGAEYARgAAAAAAAAAAAAAAAAAAAAAAAAA=]";
         let html = format!(
-            "<h1>Celestial Tempest Roaming</h1><p>Tempest is the elite.</p>\
+            "<aside>Related Posts: Firebrand, Willbender, Dragonhunter</aside>\
+             <h1>Celestial Tempest Roaming</h1><p>Tempest is the elite.</p>\
              <code>{build}</code>\
-             <aside>Related Posts: Firebrand, Willbender, Dragonhunter</aside>"
+             <aside>More: Scourge, Reaper, Harbinger</aside>"
         );
         let b = benchmark_from_html(
             &html,
@@ -2555,17 +2396,17 @@ mod tests {
             "WvW",
             "WvW Roaming",
         );
-        assert_eq!(b.build_code.as_deref(), Some(build));
-        assert!(
-            !b.traits.iter().any(|t| t == "Firebrand"),
-            "the footer must not reach the build: {:?}",
-            b.traits
+        assert_eq!(
+            b.build_code.as_deref(),
+            Some(build),
+            "the code is found even with furniture on both sides of it"
         );
         assert!(
-            b.traits.iter().any(|t| t == "Tempest"),
-            "what the article itself names still counts: {:?}",
-            b.traits
+            b.published.specs.is_empty(),
+            "no traitline was embedded, so the build claims none: {:?}",
+            b.published.specs
         );
+        assert!(b.published.gear.is_empty(), "nor any gear");
     }
 
     #[test]
@@ -2577,22 +2418,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_extract_rune() {
-        let html = "equip Superior Rune of the Scholar for best results";
-        let rune = extract_rune(html);
-        assert!(
-            rune.contains("Scholar"),
-            "rune='{}' should contain Scholar",
-            rune
-        );
-    }
 
-    #[test]
-    fn test_strip_tags() {
-        assert_eq!(strip_tags("<b>hello</b> world"), "hello world");
-        assert_eq!(strip_tags("no tags here"), "no tags here");
-    }
 
     #[test]
     fn test_title_case() {
@@ -2600,15 +2426,6 @@ mod tests {
         assert_eq!(title_case("guardian firebrand"), "Guardian Firebrand");
     }
 
-    #[test]
-    fn extract_traits_includes_luminary_from_shared_known_specs() {
-        assert!(
-            KNOWN_SPECS.contains(&"luminary"),
-            "KNOWN_SPECS must include luminary"
-        );
-        let traits = extract_traits("<h2>Luminary</h2>");
-        assert_eq!(traits, vec!["Luminary".to_string()]);
-    }
 
     #[test]
     fn redirect_stays_on_request_host_same_host_case_insensitive() {
@@ -3007,23 +2824,21 @@ mod tests {
         );
     }
 
-    fn sample_guardian_pve(notes: &str) -> BenchmarkBuild {
+    /// `marker` rides on `spec_name` so a test can tell one written row from
+    /// another on disk. It does not affect the filename, which is built from
+    /// source, profession and mode.
+    fn sample_guardian_pve(marker: &str) -> BenchmarkBuild {
         BenchmarkBuild {
             source: "snowcrows".into(),
             profession: "Guardian".into(),
-            spec_name: "Firebrand".into(),
+            spec_name: marker.into(),
             mode: "PvE".into(),
             role: "Power DPS".into(),
             build_code: None,
             gear_prefix: "Berserker's".into(),
-            rune: "Scholar".into(),
-            sigils: vec!["Force".into(), "Accuracy".into()],
-            relic: "Fireworks".into(),
-            traits: vec!["Radiance".into(), "Honor".into(), "Firebrand".into()],
-            skills: vec![],
             source_url: "https://snowcrows.com/builds/raids/guardian/firebrand".into(),
             scraped_at: "2026-08-01".into(),
-            notes: notes.into(),
+            ..Default::default()
         }
     }
 
@@ -3074,7 +2889,7 @@ mod tests {
         );
         assert!(
             !on_disk.contains("SHOULD_NOT_LAND_ON_DISK"),
-            "partial notes must not replace the last-good file"
+            "the partial must not replace the last-good file"
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -3108,77 +2923,6 @@ mod tests {
         );
     }
 
-    /// Snowcrows prints the build template inside a JS string inside an
-    /// `onclick`, so the ampersand arrives HTML-escaped and the base64 body
-    /// reads `amp;DQgn…`. The only other `[&` on the page is a JSON array in
-    /// a Livewire `wire:snapshot` attribute — and that decoy is what all 180
-    /// Snowcrows rows in the store recorded as their build code.
-    ///
-    /// Both shapes verbatim from snowcrows.com/builds/raids/necromancer/
-    /// condition-reaper as the server sent it on 2026-09-06.
-    #[test]
-    fn an_escaped_build_code_is_found_and_the_livewire_decoy_is_not() {
-        const PAGE: &str = concat!(
-            r#"<div wire:snapshot="[&quot;div&quot;,&quot;9ZtEYc0ZeKP5qDXJEd3X&quot;]">"#,
-            r#"<a class="tab mr-2" icon="fa-code" href="javascript://" onclick="#,
-            r#"navigator.clipboard.writeText('[&amp;DQgnNzInIibBEgAAgAAAAEABAACm"#,
-            r#"EgAAkgAAAAAAAAAAAAAAAAAAAAAAAAA=]');">Build Template</a></div>"#,
-        );
 
-        let code = extract_build_code(PAGE).expect("the escaped template must be found");
-        assert!(
-            code.starts_with("[&DQ"),
-            "the decoded code must be the unescaped template, got {code}"
-        );
-        assert!(
-            !code.contains("quot;"),
-            "the Livewire snapshot array is not a build code, got {code}"
-        );
-        let decoded = crate::build_template::decode(&code).expect("a real template");
-        assert_eq!(decoded.profession, 8, "8 is Necromancer, as the page title says");
-
-        // A page carrying only the decoy yields nothing rather than the decoy.
-        assert_eq!(
-            extract_build_code(
-                r#"<div wire:snapshot="[&quot;div&quot;,&quot;9ZtEYc0ZeKP5qDXJEd3X&quot;]"></div>"#
-            ),
-            None
-        );
-    }
-
-    /// GuildJen escapes the bracket as well as the ampersand, and not
-    /// consistently between pages — so a literal replace of either form alone
-    /// misses the other. Both spellings verbatim from the live site,
-    /// 2026-09-06. Measured over 27 pages: 0/27 decode raw, 27/27 unescaped.
-    ///
-    /// The waypoint link is one of 71 that GuildJen ships on every page in a
-    /// world-boss-timer JSON blob. It is the literal source of the code
-    /// recorded on 407 of 739 stored builds, and the decoder — not luck —
-    /// is what rejects it.
-    #[test]
-    fn guildjen_escapes_the_bracket_too_and_waypoints_are_not_builds() {
-        const WAYPOINT: &str = r#"{"name":"Shadow Behemoth","wp":"[&BPcAAAA=]"}"#;
-        const ESCAPED_BRACKET: &str = concat!(
-            r#"<pre class="wp-block-code"><code>&#91;&amp;DQcXFi02STqJHQ8BhQFmAYQdfwFr"#,
-            r#"HWQBbR2aAQAAAAAAAAAAAAAAAAAAAAADVQBaADEAAA==]</code></pre>"#,
-        );
-        const BARE_BRACKET: &str = concat!(
-            r#"<pre class="wp-block-code"><code>[&amp;DQEQOS4XQSkmDyYPRwFIAdgaRwFM"#,
-            r#"AbkBiRKJEgAAAAAAAAAAAAAAAAAAAAA=]</code></pre>"#,
-        );
-
-        for (label, page) in [
-            ("bracket escaped", format!("{WAYPOINT}{ESCAPED_BRACKET}")),
-            ("bracket bare", format!("{WAYPOINT}{BARE_BRACKET}")),
-        ] {
-            let code = extract_build_code(&page).unwrap_or_else(|| panic!("{label}"));
-            let decoded = crate::build_template::decode(&code)
-                .unwrap_or_else(|| panic!("{label}: {code} must decode"));
-            assert!(decoded.profession >= 1 && decoded.profession <= 9, "{label}");
-        }
-
-        // Waypoints alone are not a build, however many there are.
-        assert_eq!(extract_build_code(&WAYPOINT.repeat(71)), None);
-    }
 
 }
