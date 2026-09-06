@@ -608,6 +608,14 @@ pub struct MainState {
     /// can do and orders on how well it does it, and the request builder
     /// sizes itself from the same data.
     pub available_models: Vec<gw2_optimizer::llm::ModelInfo>,
+    /// Published builds closest to the current proposal, one per site.
+    ///
+    /// Recomputed only when [`Self::provider_picks_key`] changes: matching
+    /// reads every benchmark row on disk, which is not a per-frame job.
+    pub provider_picks: Vec<gw2_optimizer::benchmark::BenchmarkBuild>,
+    /// What `provider_picks` was computed for — profession, mode, role and
+    /// the proposal's specs. Empty means nothing has been matched yet.
+    pub provider_picks_key: String,
     /// How far the Free-filter Choya has risen, 0 hidden to 1 fully up.
     ///
     /// Eased per frame rather than stored as a bool so the sprite slides and

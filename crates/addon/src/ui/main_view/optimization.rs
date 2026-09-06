@@ -248,6 +248,8 @@ pub(super) fn synergy_result_to_suggestion(
     );
 
     let mut suggestion = BuildSuggestion {
+        // Ours, not published anywhere.
+        source_url: String::new(),
         label,
         build_summary: format!("Gear: {gear_summary}"),
         stat_prefix: v
@@ -459,6 +461,8 @@ pub(super) fn candidate_to_suggestion(
     };
 
     let mut suggestion = BuildSuggestion {
+        // Ours, not published anywhere.
+        source_url: String::new(),
         label: format!("Score: {:.2}", candidate.score),
         build_summary: format!("Gear: {}", candidate.gear.stat_prefix_name),
         stat_prefix: candidate.gear.stat_prefix_name.clone(),
@@ -2491,6 +2495,8 @@ mod tests {
         );
 
         let mut suggestion = BuildSuggestion {
+        // Ours, not published anywhere.
+        source_url: String::new(),
             stat_prefix: "Berserker's".into(),
             ..Default::default()
         };
@@ -2519,6 +2525,8 @@ mod tests {
         let db = mixed_chat_db();
         let validated = mixed_validated();
         let mut suggestion = BuildSuggestion {
+        // Ours, not published anywhere.
+        source_url: String::new(),
             stat_prefix: "Berserker's".into(),
             ..Default::default()
         };

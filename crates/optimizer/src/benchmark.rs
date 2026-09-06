@@ -134,6 +134,140 @@ pub fn find_best_benchmark<'a>(
         .max_by_key(|b| role_similarity(&b.role.to_lowercase(), &role_lower))
 }
 
+/// What a proposed build looks like, for finding published ones like it.
+///
+/// Names rather than ids, because that is what the proposal has: the model
+/// answers in names and they are resolved against the API on the way in.
+/// Everything is compared lowercased.
+#[derive(Debug, Clone, Default)]
+pub struct BuildShape {
+    pub profession: String,
+    pub mode: String,
+    /// Specialization names, elite included.
+    pub specs: Vec<String>,
+    /// Weapon type names — `Greatsword`, `Dagger`.
+    pub weapons: Vec<String>,
+    pub stat_prefix: String,
+    pub rune: String,
+    pub relic: String,
+    /// The job as this addon names it — healer, DPS, support. Carries nearly
+    /// the weight of a specialization: it is what someone means when they say
+    /// they want a healer for their spec.
+    pub role: String,
+}
+
+/// How close a published build is to a proposed one. Higher is closer.
+///
+/// Weighted by how much each agreement actually says. Two builds sharing all
+/// three specializations are the same build with different gear; two sharing
+/// a stat prefix might have nothing else in common. So specializations
+/// dominate, then the job, then the weapons that decide five skills each,
+/// then the single choices — rune, relic, prefix.
+///
+/// The job is weighted near a specialization on purpose. A healing Firebrand
+/// and a power Firebrand share all three specializations and are opposite
+/// jobs; if the role only broke ties it could never tell them apart, and the
+/// card offered to someone asking for a healer would be a DPS build wearing
+/// the same specs. Matching on specs alone is how a Firebrand zerg healer
+/// got matched to a Scrapper before any of this existed.
+///
+/// Zero means nothing in common, which is not the same as no data. A row
+/// published without a rune cannot agree about runes and is not punished for
+/// it beyond not scoring.
+pub fn closeness(shape: &BuildShape, build: &BenchmarkBuild, db: &crate::gamedb::GameDb) -> u32 {
+    let published = &build.published;
+    let lower = |s: &str| s.to_lowercase();
+
+    let their_specs: Vec<String> = published
+        .specs
+        .iter()
+        .filter_map(|line| db.specializations.get(&line.id))
+        .map(|spec| lower(&spec.name))
+        .collect();
+    let spec_hits = shape
+        .specs
+        .iter()
+        .filter(|name| their_specs.iter().any(|theirs| theirs == &lower(name)))
+        .count() as u32;
+
+    // Weapons live in the gear rows' slot, which every site names with the
+    // weapon type: `Greatsword`, `Dagger`, `Warhorn`.
+    let their_weapons: Vec<String> = published.gear.iter().map(|g| lower(&g.slot)).collect();
+    let weapon_hits = shape
+        .weapons
+        .iter()
+        .filter(|name| their_weapons.iter().any(|theirs| theirs == &lower(name)))
+        .count() as u32;
+
+    let named = |id: Option<u32>| {
+        id.and_then(|id| db.items.get(&id))
+            .map(|item| lower(&item.name))
+            .unwrap_or_default()
+    };
+    let rune_hit = !shape.rune.is_empty() && named(published.rune_id) == lower(&shape.rune);
+    let relic_hit = !shape.relic.is_empty() && named(published.relic_id) == lower(&shape.relic);
+
+    let prefix_hit = !shape.stat_prefix.is_empty()
+        && (lower(&build.gear_prefix) == lower(&shape.stat_prefix)
+            || published
+                .dominant_stat()
+                .is_some_and(|stat| lower(&stat) == lower(&shape.stat_prefix)));
+
+    spec_hits * 10
+        + weapon_hits * 4
+        + u32::from(rune_hit) * 3
+        + u32::from(relic_hit) * 3
+        + u32::from(prefix_hit) * 2
+        + role_similarity(&lower(&build.role), &lower(&shape.role)) as u32 * 8
+}
+
+/// The closest published build from each site, for "you might also like".
+///
+/// One per source rather than one overall, because the sites disagree and
+/// that disagreement is the useful part: three takes on the same job tell a
+/// player more than three rows from whichever site writes the most builds.
+///
+/// Only rows carrying real published data qualify. A row scraped before the
+/// per-site parsers existed has a name and a URL and nothing to compare, so
+/// this stays empty until the player has actually synced — which is the
+/// intended gate, not a side effect. Rows with nothing at all in common are
+/// dropped too: an unrelated build offered as a suggestion is worse than no
+/// suggestion.
+pub fn closest_per_source<'a>(
+    builds: &'a [BenchmarkBuild],
+    shape: &BuildShape,
+    db: &crate::gamedb::GameDb,
+) -> Vec<(&'a BenchmarkBuild, u32)> {
+    let prof = shape.profession.to_lowercase();
+    let mode = shape.mode.to_lowercase();
+
+    let mut best: std::collections::BTreeMap<&str, (u32, &BenchmarkBuild)> = Default::default();
+    for build in builds {
+        if build.published.is_empty()
+            || !build.profession.to_lowercase().contains(&prof)
+            || build.mode.to_lowercase() != mode
+        {
+            continue;
+        }
+        let score = closeness(shape, build, db);
+        if score == 0 {
+            continue;
+        }
+        best.entry(build.source.as_str())
+            .and_modify(|held| {
+                if score > held.0 {
+                    *held = (score, build);
+                }
+            })
+            .or_insert((score, build));
+    }
+    let mut picks: Vec<(&BenchmarkBuild, u32)> =
+        best.into_values().map(|(score, b)| (b, score)).collect();
+    // Closest first, whichever site it came from.
+    picks.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.source.cmp(&b.0.source)));
+    picks
+}
+
 /// Compute a simple word-overlap similarity score between two role strings.
 fn role_similarity(a: &str, b: &str) -> usize {
     if a.is_empty() || b.is_empty() {
