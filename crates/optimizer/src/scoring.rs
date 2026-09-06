@@ -18,10 +18,6 @@ pub const STRIKE_DPS_NORM: f64 = 3000.0;
 pub const CONDI_DPS_NORM: f64 = 3500.0;
 pub const EFFECTIVE_HEALTH_NORM: f64 = 50000.0;
 pub const HEALING_NORM: f64 = 1500.0;
-/// Default normalization for boon support scoring axis.
-pub const BOON_SUPPORT_NORM: f64 = 1.0;
-/// Default normalization for control scoring axis.
-pub const CONTROL_NORM: f64 = 1.0;
 
 /// Norms for the REALIZED axes: what the 60s flow simulation measures a build
 /// actually producing, as opposed to the closed-form stat indices above.
@@ -79,6 +75,7 @@ pub const DEFAULT_WEIGHT_BUDGET: f64 = 2.0;
 pub const WEIGHT_BUDGET: f64 = DEFAULT_WEIGHT_BUDGET;
 
 /// A named UI preset: display label paired with a constructor for the weights.
+#[cfg(test)]
 type WeightPreset = (&'static str, fn() -> OptimizationWeights);
 
 /// 6-axis optimization weights. Each axis 0.0-1.0, total constrained to weight budget.
@@ -365,8 +362,8 @@ impl OptimizationWeights {
         // total = 2.0
     }
 
-    /// Named presets for UI buttons. These serve as quick-access shortcuts;
-    /// the full named profile system is available through objective profile data.
+    /// Named presets used by unit tests. Live rank uses `score_with_weights`.
+    #[cfg(test)]
     pub const PRESETS: [WeightPreset; 6] = [
         ("Power DPS", Self::preset_power_dps),
         ("Condi DPS", Self::preset_condi_dps),
@@ -389,117 +386,6 @@ pub struct StatWeights {
     pub concentration: f64,
     pub ferocity: f64,
     pub healing_power: f64,
-}
-
-// ─── ObjectiveScorer ───
-
-/// Wraps OptimizationWeights + objective profile data to provide a single
-/// entry point for scoring. Contains normalization constants, boon/condition
-/// priorities, interaction priorities, and weight budget from the profile.
-#[derive(Debug, Clone)]
-pub struct ObjectiveScorer {
-    /// User-editable weight vector.
-    pub weights: OptimizationWeights,
-    /// Weight budget from the objective profile.
-    pub weight_budget: f64,
-    /// Per-axis normalization constants from the profile.
-    pub strike_dps_norm: f64,
-    pub condi_dps_norm: f64,
-    pub boon_support_norm: f64,
-    pub healing_power_norm: f64,
-    pub effective_health_norm: f64,
-    pub control_norm: f64,
-    /// Boon type -> priority (0.0-1.0).
-    pub boon_priorities: std::collections::HashMap<String, f64>,
-    /// Condition type -> priority (0.0-1.0).
-    pub condition_priorities: std::collections::HashMap<String, f64>,
-    /// Interaction operation type -> priority (0.0-1.0).
-    pub interaction_priorities: std::collections::HashMap<String, f64>,
-}
-
-impl ObjectiveScorer {
-    /// Create a scorer from explicit weights using the default objective profile
-    /// for the given mode.
-    pub fn from_mode(weights: OptimizationWeights, mode: &str) -> Self {
-        let profiles = objective_profiles::objective_profiles();
-        if let Some(profile) = profiles.default_for_mode(mode) {
-            Self::from_profile(weights, profile)
-        } else {
-            Self::fallback(weights)
-        }
-    }
-
-    /// Create a scorer from an explicit objective profile.
-    pub fn from_profile(
-        weights: OptimizationWeights,
-        profile: &objective_profiles::ObjectiveProfile,
-    ) -> Self {
-        let nc = &profile.normalization_constants;
-        Self {
-            weights,
-            weight_budget: profile.weight_budget,
-            strike_dps_norm: nc.strike_dps_norm,
-            condi_dps_norm: nc.condi_dps_norm,
-            boon_support_norm: nc.boon_support_norm,
-            healing_power_norm: nc.healing_power_norm,
-            effective_health_norm: nc.effective_health_norm,
-            control_norm: nc.control_norm,
-            boon_priorities: profile.boon_priorities.clone(),
-            condition_priorities: profile.condition_priorities.clone(),
-            interaction_priorities: profile.interaction_priorities.clone(),
-        }
-    }
-
-    /// Create a fallback scorer with default normalization constants and empty priorities.
-    pub fn fallback(weights: OptimizationWeights) -> Self {
-        Self {
-            weights,
-            weight_budget: DEFAULT_WEIGHT_BUDGET,
-            strike_dps_norm: STRIKE_DPS_NORM,
-            condi_dps_norm: CONDI_DPS_NORM,
-            boon_support_norm: BOON_SUPPORT_NORM,
-            healing_power_norm: HEALING_NORM,
-            effective_health_norm: EFFECTIVE_HEALTH_NORM,
-            control_norm: CONTROL_NORM,
-            boon_priorities: std::collections::HashMap::new(),
-            condition_priorities: std::collections::HashMap::new(),
-            interaction_priorities: std::collections::HashMap::new(),
-        }
-    }
-
-    /// Score a build using this scorer's weights and profile-loaded normalization constants.
-    /// Distinct from `score_with_weights` which uses module-level defaults.
-    pub fn score(&self, perf: &CombatPerformance) -> f64 {
-        score_with_norms(
-            perf,
-            &self.weights,
-            self.strike_dps_norm,
-            self.condi_dps_norm,
-            self.effective_health_norm,
-            self.healing_power_norm,
-        )
-    }
-
-    /// Get boon priority, defaulting to 0.5 if not specified.
-    pub fn boon_priority(&self, boon_name: &str) -> f64 {
-        self.boon_priorities.get(boon_name).copied().unwrap_or(0.5)
-    }
-
-    /// Get condition priority, defaulting to 0.5 if not specified.
-    pub fn condition_priority(&self, condition_name: &str) -> f64 {
-        self.condition_priorities
-            .get(condition_name)
-            .copied()
-            .unwrap_or(0.5)
-    }
-
-    /// Get interaction operation priority, defaulting to 0.5 if not specified.
-    pub fn interaction_priority(&self, operation: &str) -> f64 {
-        self.interaction_priorities
-            .get(operation)
-            .copied()
-            .unwrap_or(0.5)
-    }
 }
 
 /// Per-axis realized output as fractions of the realized norms, uncapped.
@@ -656,8 +542,6 @@ pub fn score_with_weights(perf: &CombatPerformance, weights: &OptimizationWeight
 
 /// Inner scoring function with explicit normalization divisors.
 /// `score_with_weights` (live rank) always passes module-level defaults.
-/// `ObjectiveScorer::score()` may pass profile-loaded JSON norms; that path
-/// is not the referee live rank.
 fn score_with_norms(
     perf: &CombatPerformance,
     weights: &OptimizationWeights,
@@ -1821,57 +1705,11 @@ mod tests {
         }
     }
 
-    // --- ObjectiveScorer Tests ---
-
-    #[test]
-    fn test_objective_scorer_from_mode() {
-        let w = OptimizationWeights::preset_power_dps();
-        let scorer = ObjectiveScorer::from_mode(w.clone(), "PvE");
-        assert!((scorer.weight_budget - 2.0).abs() < 0.001);
-        assert!(!scorer.boon_priorities.is_empty());
-        assert!(!scorer.condition_priorities.is_empty());
-    }
-
-    #[test]
-    fn test_objective_scorer_fallback() {
-        let w = OptimizationWeights::preset_power_dps();
-        let scorer = ObjectiveScorer::fallback(w.clone());
-        assert!((scorer.weight_budget - 2.0).abs() < 0.001);
-        assert!(scorer.boon_priorities.is_empty());
-        assert_eq!(scorer.weights, w);
-    }
-
-    #[test]
-    fn test_objective_scorer_boon_priority() {
-        let w = OptimizationWeights::preset_power_dps();
-        let scorer = ObjectiveScorer::from_mode(w, "PvE");
-        let might_prio = scorer.boon_priority("Might");
-        assert!(
-            might_prio > 0.0,
-            "Might should have positive priority in PvE"
-        );
-        // Unknown boon returns 0.5 default
-        let unknown = scorer.boon_priority("Unknown");
-        assert!((unknown - 0.5).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_objective_scorer_condition_priority() {
-        let w = OptimizationWeights::preset_condi_dps();
-        let scorer = ObjectiveScorer::from_mode(w, "PvE");
-        let burning_prio = scorer.condition_priority("Burning");
-        assert!(
-            burning_prio > 0.0,
-            "Burning should have positive priority in PvE Condi"
-        );
-    }
-
     #[test]
     fn test_default_for_mode_uses_profile_data() {
         let pve = OptimizationWeights::default_for_mode("PvE");
         let pvp = OptimizationWeights::default_for_mode("PvP");
         let wvw = OptimizationWeights::default_for_mode("WvW");
-        // They should be different
         assert_ne!(pve, pvp, "PvE and PvP defaults should differ");
         assert_ne!(pve, wvw, "PvE and WvW defaults should differ");
     }
@@ -1890,12 +1728,7 @@ mod tests {
             .expect("embedded PvE default")
             .clone();
         profile.normalization_constants.strike_dps_norm = 1.0;
-        let scorer = ObjectiveScorer::from_profile(weights.clone(), &profile);
-        assert_ne!(
-            scorer.score(&perf),
-            live,
-            "ObjectiveScorer::score may honor JSON norms; that is not live rank"
-        );
+        let _ = profile;
         assert_eq!(
             score_with_weights(&perf, &weights),
             live,
@@ -1903,10 +1736,8 @@ mod tests {
         );
     }
 
-    /// Mode scorers differ because axis *weights* differ, not because JSON *norms*
-    /// move live rank. `score_with_weights` (referee) uses module consts.
     #[test]
-    fn test_objective_scorer_uses_profile_norms() {
+    fn score_with_weights_differs_when_axis_weights_differ() {
         use crate::balance::BalanceContext;
         use crate::combat::{
             self, buff_profiles_for_profession, condition_weights_for_profession, DamageModifiers,
@@ -1930,60 +1761,11 @@ mod tests {
             &stats, &derived, &mods, profile, &cw, "Guardian", &ctx,
         );
 
-        // PvE Power DPS scorer
-        let pve_scorer = ObjectiveScorer::from_mode(OptimizationWeights::preset_power_dps(), "PvE");
-        // WvW Roamer scorer (different axis weights; JSON norms do not move live rank)
-        let wvw_scorer =
-            ObjectiveScorer::from_mode(OptimizationWeights::default_for_mode("WvW"), "WvW");
-
-        let score_pve = pve_scorer.score(&perf);
-        let score_wvw = wvw_scorer.score(&perf);
-
-        // Scores should differ because profiles have different weights
+        let score_pve = score_with_weights(&perf, &OptimizationWeights::preset_power_dps());
+        let score_wvw = score_with_weights(&perf, &OptimizationWeights::default_for_mode("WvW"));
         assert_ne!(
             score_pve, score_wvw,
-            "PvE Power DPS scorer and WvW scorer should produce different scores for the same build"
-        );
-    }
-
-    /// ObjectiveScorer::score() and score_with_weights() agree when using same weights and
-    /// the default normalization constants (fallback scorer == module-level constants).
-    #[test]
-    fn test_objective_scorer_fallback_matches_score_with_weights() {
-        use crate::balance::BalanceContext;
-        use crate::combat::{
-            self, buff_profiles_for_profession, condition_weights_for_profession, DamageModifiers,
-        };
-        use crate::stats;
-
-        let ctx = BalanceContext::pve();
-        let stats = stats::StatBlock {
-            power: 2000.0,
-            precision: 1500.0,
-            ferocity: 800.0,
-            toughness: 1000.0,
-            vitality: 1000.0,
-            ..Default::default()
-        };
-        let derived = stats::compute_derived(&stats, "Warrior");
-        let mods = DamageModifiers::default();
-        let cw = condition_weights_for_profession("Warrior", &ctx);
-        let profile = &buff_profiles_for_profession("Warrior", &ctx)[0];
-        let perf = combat::calculate_combat_performance(
-            &stats, &derived, &mods, profile, &cw, "Warrior", &ctx,
-        );
-
-        let weights = OptimizationWeights::preset_power_dps();
-        let fallback_scorer = ObjectiveScorer::fallback(weights.clone());
-
-        let score_scorer = fallback_scorer.score(&perf);
-        let score_fn = score_with_weights(&perf, &weights);
-
-        assert!(
-            (score_scorer - score_fn).abs() < 0.0001,
-            "Fallback scorer (score={}) should match score_with_weights (score={})",
-            score_scorer,
-            score_fn
+            "PvE Power DPS weights and WvW defaults should score the same build differently"
         );
     }
 }

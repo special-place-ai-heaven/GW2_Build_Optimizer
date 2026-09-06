@@ -523,7 +523,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W009
 
-- Task: T020 [US2]. Status: **planned**.
+- Task: T020 [US2]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/addon/src/ui/main_view/tabs/settings.rs:60`.
 - Dependencies: story entry gate.
 
@@ -531,7 +531,7 @@ Claim: 19 Settings/News click handlers persist config with `let _ = state.config
 
 Remediation decision: Replace every `let _ = state.config.save(&state.config_path)` in settings.rs and news.rs with `crate::ui::save_config_detached(state)` (already used in the theme section of the same file); if a synchronous save is genuinely required somewhere, `if let Err(e) = .. { nexus::log::log(Warning, ..) }` as settings.rs:238 already does.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: 17 settings.rs + 2 news.rs `let _ =` saves now call `save_config_detached`. The settings.rs:238 `if let Err` path is unchanged. `settings_and_news_saves_are_detached` pins both files. Setup/keybind remain synchronous.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
@@ -565,7 +565,7 @@ Acceptance: Reproduce the observed calculation/state discrepancy; check the corr
 
 ### W225
 
-- Task: T023 [US2]. Status: **planned**.
+- Task: T023 [US2]. Status: **verified-scoped**.
 - Audit: S4, confirmed; location: `crates/optimizer/src/llm/openai.rs:325`.
 - Dependencies: story entry gate.
 
@@ -573,7 +573,7 @@ Claim: Malformed tool-call arguments from the model (typically a JSON string tru
 
 Remediation decision: On parse failure push a tool result of {"error":"unparseable arguments: <err>"} (so the model can retry) and count/report it the way sse.rs reports skipped payloads, instead of executing with empty args.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `parse_tool_arguments` / `run_tool_or_parse_error` in `llm/mod.rs` push `{"error":"unparseable arguments: …"}` and skip `execute_tool`. OpenAI, OpenRouter, and Anthropic stream assemble use it. `truncated_json_is_error_not_empty_object`, `valid_args_reach_the_tool`, and `unparseable_args_do_not_execute` passed.
 
 Acceptance: Reproduce the observed calculation/state discrepancy; check the corrected output against canonical or independent inputs and verify affected consumers.
 
@@ -901,7 +901,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W036
 
-- Task: T047 [US3]. Status: **planned**.
+- Task: T047 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/rotation/skill_timings.rs:18`.
 - Dependencies: story entry gate.
 
@@ -909,7 +909,7 @@ Claim: Cast times have two live sources of truth. builder.rs:147-148 reads `sour
 
 Remediation decision: Consolidate sourced activation timings in balance override data while preserving explicit aftercast semantics and fallback evidence; test overlapping skills before removing the table.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Removed Heartseeker (13097) from `timing_for`. Remaining table rows keep aftercast + fallback for patches without `activation_ms`. `heartseeker_is_not_a_table_row` and `sourced_skill_values_are_isolated_by_mode` (activation_ms = 750 on PvE/PvP/WvW) passed.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
@@ -929,7 +929,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W040
 
-- Task: T049 [US3]. Status: **planned**.
+- Task: T049 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/scoring.rs:400`.
 - Dependencies: story entry gate.
 
@@ -937,7 +937,7 @@ Claim: `ObjectiveScorer` (struct L400-418 + impl L420-503, ~105 lines: from_mode
 
 Remediation decision: Remove the uncalled ObjectiveScorer twin after reference checks; preserve live calibrated score_with_weights constants and regression expectations.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Deleted `ObjectiveScorer` plus `BOON_SUPPORT_NORM` / `CONTROL_NORM`. Live rank remains `score_with_weights`. Integration ranking and profile-priority tests now read weights/priorities directly. `score_with_weights_ignores_json_norms` and `score_with_weights_differs_when_axis_weights_differ` passed.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 
@@ -1041,7 +1041,7 @@ Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the s
 
 ### W049
 
-- Task: T057 [US4]. Status: **planned**.
+- Task: T057 [US4]. Status: **verified-scoped**.
 - Audit: S3, confirmed; location: `crates/addon/src/news_art.rs:394`.
 - Dependencies: story entry gate.
 
@@ -1049,7 +1049,7 @@ Claim: News stills are uploaded as Nexus textures and written to `cache/news` wi
 
 Remediation decision: Reuse the logos discipline in news_art: a `CREATED` set gated by a `MAX_TEXTURES` cap before `get_texture_or_create_from_file`, and a call to a shared `evict_oldest(dir, MAX_CACHE_FILES)` after the tmp+rename write in `download`. `evict_victims` in logos.rs:388 is already pure and unit-tested — lift it to a shared helper rather than copying it.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Lifted `admit_texture` / `evict_oldest` / `evict_victims` to `cache_bounds.rs`. News stills and radio logos both gate uploads at 200 and evict disk at 500. `admit_texture_caps_distinct_ids`, `evict_victims_drops_oldest_beyond_cap`, and `stills_reuse_logo_cache_bounds` passed.
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 
@@ -1583,7 +1583,7 @@ Claim: `render_presets` has no caller anywhere. `grep -rn --include=*.rs 'render
 
 Remediation decision: Delete `render_presets`; then `OptimizationWeights::PRESETS` and its six preset fns have no non-test consumer and can follow in the optimizer crate.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: Deleted `render_presets`. `OptimizationWeights::PRESETS` is `#[cfg(test)]` (the six preset constructors stay `pub` for integration tests). `test_preset_roundtrip` and `test_all_presets_within_budget` still compile against it.
 
 Acceptance: Demonstrate the claimed defect/debt at current symbols, verify the selected correction through its consumer, and record checks or current-code refutation.
 
