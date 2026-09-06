@@ -280,7 +280,7 @@ Implemented means code changed; verified means relevant checks passed; accepted-
 | 266 | [W265](#w265) | S4/contested | US5 | planned | `crates/optimizer/examples/nudge_druid_check.rs:140` |
 | 267 | [W266](#w266) | S4/contested | US5 | planned | `crates/optimizer/src/llm/anthropic.rs:797` |
 | 268 | [W267](#w267) | S4/contested | US5 | planned | `crates/optimizer/src/search_v2.rs:1221` |
-| 269 | [W268](#w268) | S4/observed | US5 | planned | `crates/gw2api/src/client.rs:1446` |
+| 269 | [W268](#w268) | S4/observed | US5 | verified-scoped | `crates/gw2api/src/client.rs:1446` |
 
 ## Finding details
 
@@ -4042,19 +4042,17 @@ Acceptance: Verify current evidence, then record tested correction, duplicate cl
 
 ### W268
 
-- Task: T274 [US5]. Status: **planned**.
+- Task: T274 [US5]. Status: **verified-scoped**.
 - Audit: campaign-added 2026-09-06, observed; location: `crates/gw2api/src/client.rs:1446`.
-- Dependencies: none. File-disjoint from PR #18.
+- Dependencies: none.
 
-Claim: `gw2api client::tests::fetch_bytes_rejects_a_body_over_the_icon_cap` is flaky. Sprint 3 (`verification.md`) recorded it as a parallel-load / wall-clock flake that passes in isolation. That diagnosis is wrong. On 2026-09-06 it **failed under `--test-threads=1`**, passed in the parallel crate run, and passed 6/6 when invoked by name — so the coupling is **order / accumulated state between tests in this crate**, not thread interleaving. Pre-existing; PR #18 never touches `crates/gw2api`. CI has passed with it green; that does not make it deterministic.
+Claim: `fetch_bytes_rejects_a_body_over_the_icon_cap` returned `Internal("icon read failed: request or response body error")` instead of `Api`/`exceeds`. `read_body_capped` streamed the 4 MiB+ mock body; a mid-transfer reset became a generic IO error before `take(max+1)` could return `InvalidData`. `transport_retry` only retries `Http`.
 
-Observed failure (other agent, 2026-09-06, twice in recent full-suite runs): `Internal("icon read failed: request or response body error")` instead of `Api` with `"exceeds"`. The transport reports a broken body before the size cap produces its own error — a race in `fetch_bytes`' cap path (`read_body_capped`), not only test order. `transport_retry` only retries `ApiError::Http`, so this Internal fails the match. Do not "fix" it by loosening the assertion or bumping a sleep.
+Remediation decision: Refuse from `Content-Length` when it is over `MAX_ICON_BYTES`, before any body byte is read. Keep `read_body_capped` for missing/lying lengths. Do not loosen the assertion.
 
-Remediation decision: Find the shared state the serial run trips over; isolate this test from it (or reset that state in the suite). Keep the cap assertion. Leave a one-shot check: the test name under `--test-threads=1` after the rest of `gw2api::client::tests`.
+Verification: `client::` serial suite 39 passed including the cap test; the named test 6/6 in isolation. Cap value unchanged.
 
-Verification: Other agent's serial-fail / isolate-pass observation, 2026-09-06. Root cause not yet chased.
-
-Acceptance: The named test passes 6/6 after a full `client::tests` serial run, and still passes in isolation. No production cap change.
+Acceptance: The named test passes after a full `client::tests` serial run, and in isolation. No production cap change.
 
 ## Excluded report entries
 

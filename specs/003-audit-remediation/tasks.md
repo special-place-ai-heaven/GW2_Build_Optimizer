@@ -306,7 +306,7 @@ Independent acceptance: see spec.md US5; each item must satisfy its own ledger a
 - [ ] T268 [US5] W265: Either use real 0.35/0.25 multipliers for the injected rows (so the numbers are on the same scale as the rest of the output), or skip the forced-prefix block entirely when the prefix is not in the live cache and print why, rather than inventing a row. Target: `crates/optimizer/examples/nudge_druid_check.rs`. Record evidence in ledger.md#w265.
 - [ ] T269 [US5] W266: Replace with the ScriptedServer pattern already used in openai_compat.rs tests: point ANTHROPIC_API_BASE at a loopback server, call validate_key/validate_key_detailed, and assert the recorded request is GET /models. Target: `crates/optimizer/src/llm/anthropic.rs`. Record evidence in ledger.md#w266.
 - [ ] T270 [US5] W267: Move one stemmer into text_util (next to normalize_sigil_family) and use it from all four sites. Target: `crates/optimizer/src/search_v2.rs`. Record evidence in ledger.md#w267.
-- [ ] T274 [US5] W268: Isolate order-dependent state in `gw2api client::tests::fetch_bytes_rejects_a_body_over_the_icon_cap` (fails serial, passes parallel and 6/6 isolation). Keep the icon-cap assertion. Target: `crates/gw2api/src/client.rs`. Record evidence in ledger.md#w268.
+- [X] T274 [US5] W268: Isolate order-dependent state in `gw2api client::tests::fetch_bytes_rejects_a_body_over_the_icon_cap` (fails serial, passes parallel and 6/6 isolation). Keep the icon-cap assertion. Target: `crates/gw2api/src/client.rs`. Record evidence in ledger.md#w268.
 
 ## Final phase: Campaign verification
 
