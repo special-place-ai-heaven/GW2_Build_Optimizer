@@ -446,6 +446,8 @@
   "btn.retry": "重试",
   "fmt.synced_when": "已同步 {when}",
   "bench.failed": "失败",
+  "settings.free_only": "免费",
+  "settings.free_none": "此提供商没有免费模型。",
   "bench.throttled": "已暂停 - 网站要求降低访问速度。同步正在等待，稍后会自动继续。",
   "bench.sync_hint": "前往 设置 > 同步基准数据 以下载参考配装。",
   "bench.on_par": "持平",

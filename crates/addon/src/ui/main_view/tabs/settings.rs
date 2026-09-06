@@ -397,9 +397,20 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     }
 }
 
-fn model_catalog(state: &AddonState) -> Vec<(String, String)> {
+/// Every model the active provider offers, before any of the user's filters.
+///
+/// Pruned to the ones that could serve a request from this addon at all — a
+/// music generator and a batch job that answers tomorrow are not alternatives
+/// to a chat model, they are noise in a list someone has to read.
+fn model_catalog(state: &AddonState) -> Vec<gw2_optimizer::llm::ModelInfo> {
     if !state.main.available_models.is_empty() {
-        return state.main.available_models.clone();
+        return state
+            .main
+            .available_models
+            .iter()
+            .filter(|m| m.usable())
+            .cloned()
+            .collect();
     }
     let hardcoded: &[(&str, &str)] = match state.config.active_provider {
         gw2_core::config::LlmProvider::Gemini => gw2_core::config::GEMINI_MODELS,
@@ -407,9 +418,32 @@ fn model_catalog(state: &AddonState) -> Vec<(String, String)> {
         gw2_core::config::LlmProvider::Anthropic => gw2_core::config::ANTHROPIC_MODELS,
         gw2_core::config::LlmProvider::OpenRouter => gw2_core::config::OPENROUTER_MODELS,
     };
+    // The offline fallback states no capabilities, so it claims none — see
+    // `ModelInfo::default`. Nothing here is filtered out for lack of data.
     hardcoded
         .iter()
-        .map(|(id, label)| (id.to_string(), label.to_string()))
+        .map(|(id, label)| gw2_optimizer::llm::ModelInfo {
+            id: (*id).to_string(),
+            display_name: (*label).to_string(),
+            ..Default::default()
+        })
+        .collect()
+}
+
+/// The catalog as the picker should show it, honouring the Free filter.
+///
+/// The filter is dropped rather than applied when it would empty the list:
+/// showing someone nothing because their provider has no free models teaches
+/// them less than showing them what there is.
+fn visible_models(
+    state: &AddonState,
+    catalog: &[gw2_optimizer::llm::ModelInfo],
+) -> Vec<gw2_optimizer::llm::ModelInfo> {
+    let any_free = catalog.iter().any(|m| m.free);
+    catalog
+        .iter()
+        .filter(|m| !state.config.free_models_only || !any_free || m.free)
+        .cloned()
         .collect()
 }
 
@@ -417,7 +451,7 @@ fn render_model_combo(
     ui: &Ui,
     state: &mut AddonState,
     preview: &str,
-    display_models: &[(String, String)],
+    display_models: &[gw2_optimizer::llm::ModelInfo],
     current_model: &str,
     id: &str,
     width: f32,
@@ -437,7 +471,8 @@ fn render_model_combo(
         .build();
         let needle = state.main.settings_model_search.trim().to_lowercase();
         let mut visible = 0usize;
-        for (mid, label) in display_models {
+        for model in display_models {
+            let (mid, label) = (&model.id, &model.display_name);
             if !needle.is_empty()
                 && !mid.to_lowercase().contains(&needle)
                 && !label.to_lowercase().contains(&needle)
@@ -450,6 +485,13 @@ fn render_model_combo(
                 state.config.set_active_model_id(mid.clone());
                 state.main.provider_issue = None;
                 crate::ui::save_config_detached(state);
+            }
+            // The score the row was ordered by, so the order is legible
+            // rather than mysterious. Agentic where it exists — it measures
+            // the thing this addon asks of a model.
+            if let Some(score) = model.agentic_index.or(model.coding_index) {
+                ui.same_line();
+                ui.text_colored(theme::pal().muted, format!("{score:.0}"));
             }
         }
         if visible == 0 && !needle.is_empty() {
@@ -475,8 +517,8 @@ pub(in crate::ui::main_view) fn render_talk_model_row(ui: &Ui, state: &mut Addon
     let display_models = model_catalog(state);
     let preview = display_models
         .iter()
-        .find(|(id, _)| *id == current_model)
-        .map(|(_, l)| l.as_str())
+        .find(|m| m.id == current_model)
+        .map(|m| m.display_name.as_str())
         .unwrap_or(&current_model)
         .to_string();
 
@@ -564,24 +606,12 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     if state.main.available_models.is_empty() && !state.main.models_loading && has_key {
         stats::start_fetch_models(state);
     }
-    let display_models: Vec<(String, String)> = if !state.main.available_models.is_empty() {
-        state.main.available_models.clone()
-    } else {
-        let hardcoded: &[(&str, &str)] = match state.config.active_provider {
-            gw2_core::config::LlmProvider::Gemini => gw2_core::config::GEMINI_MODELS,
-            gw2_core::config::LlmProvider::OpenAI => gw2_core::config::OPENAI_MODELS,
-            gw2_core::config::LlmProvider::Anthropic => gw2_core::config::ANTHROPIC_MODELS,
-            gw2_core::config::LlmProvider::OpenRouter => gw2_core::config::OPENROUTER_MODELS,
-        };
-        hardcoded
-            .iter()
-            .map(|(id, label)| (id.to_string(), label.to_string()))
-            .collect()
-    };
+    let catalog = model_catalog(state);
+    let display_models = visible_models(state, &catalog);
     let preview = display_models
         .iter()
-        .find(|(id, _)| *id == current_model)
-        .map(|(_, l)| l.as_str())
+        .find(|m| m.id == current_model)
+        .map(|m| m.display_name.as_str())
         .unwrap_or(&current_model);
     let row_w = (col_w - 8.0).max(80.0);
     let origin = ui.cursor_screen_pos();
@@ -590,7 +620,14 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let refresh = t("btn.refresh");
     let refresh_w = theme::gold_button_width(ui, refresh.as_str());
     let gap = 8.0;
-    let combo_w = (row_w - label_w - refresh_w - gap * 2.0).max(48.0);
+    // The Free filter sits between the list it filters and the button that
+    // refills it. Greyed where the provider has no free models at all —
+    // OpenAI and Anthropic publish none, so the control would be a promise
+    // the provider cannot keep.
+    let free_label = t("settings.free_only");
+    let any_free = catalog.iter().any(|m| m.free);
+    let free_w = theme::gold_button_width(ui, free_label.as_str());
+    let combo_w = (row_w - label_w - refresh_w - free_w - gap * 3.0).max(48.0);
     let row_h = ui.frame_height().max(theme::control_height(ui));
 
     ui.set_cursor_screen_pos([
@@ -608,6 +645,41 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         config_field,
         combo_w,
     );
+    let free_x = origin[0] + row_w - refresh_w - gap - free_w;
+    ui.set_cursor_screen_pos([free_x, origin[1]]);
+    if any_free {
+        if theme::pill(
+            ui,
+            &free_label,
+            state.config.free_models_only,
+            "##free_models",
+        ) {
+            state.config.free_models_only = !state.config.free_models_only;
+            crate::ui::save_config_detached(state);
+        }
+    } else {
+        let dim = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+        theme::pill(ui, &free_label, false, "##free_models_off");
+        dim.pop();
+        if ui.is_item_hovered() {
+            ui.tooltip_text(t("settings.free_none"));
+        }
+    }
+    // Rises while the filter is on, sinks while it is off. Eased per frame so
+    // it slides and fades rather than blinking into place.
+    let want = if any_free && state.config.free_models_only {
+        1.0
+    } else {
+        0.0
+    };
+    state.main.free_choya_rise += (want - state.main.free_choya_rise) * 0.08;
+    theme::draw_free_choya(
+        ui,
+        [free_x + free_w * 0.5, origin[1]],
+        row_h,
+        state.main.free_choya_rise,
+    );
+
     ui.set_cursor_screen_pos([origin[0] + row_w - refresh_w, origin[1]]);
     if state.main.models_loading {
         ui.text_colored(theme::pal().muted, "...");

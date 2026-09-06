@@ -446,6 +446,8 @@
   "btn.retry": "Повтор",
   "fmt.synced_when": "Синхронизировано {when}",
   "bench.failed": "Ошибки",
+  "settings.free_only": "Бесплатно",
+  "settings.free_none": "У этого провайдера нет бесплатных моделей.",
   "bench.throttled": "Пауза - сайт попросил снизить скорость. Синхронизация ждёт и продолжится сама.",
   "bench.sync_hint": "Открой Настройки > Sync Benchmarks, чтобы скачать эталонные билды.",
   "bench.on_par": "на уровне",
