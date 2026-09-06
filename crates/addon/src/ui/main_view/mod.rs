@@ -126,11 +126,15 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     let content_indent = state.config.content_indent;
     let avail = ui.content_region_avail();
     let left_panel_width = {
-        let roam = t("scale.roam");
-        let havoc = t("scale.havoc");
-        let cloud = t("scale.cloud");
-        let scale_row =
-            theme::segment_row_min_width(ui, &[roam.as_str(), havoc.as_str(), cloud.as_str()]);
+        // The scale row is the widest thing in the rail, and its words
+        // change with the mode — "Open World" is longer than "Roam" — so the
+        // rail is sized for whichever mode is showing, not for WvW always.
+        let labels: Vec<String> = [CombatTier::Solo, CombatTier::Party, CombatTier::Squad]
+            .iter()
+            .map(|tier| t(scale_i18n_key(&state.main.game_mode, *tier)))
+            .collect();
+        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let scale_row = theme::segment_row_min_width(ui, &labels);
         let min_left = (scale_row + pad * 2.0 + 18.0).max(360.0);
         let want = (state.config.left_panel_width * scale).max(min_left);
         let cap = (avail[0] * 0.58).max(min_left);
@@ -585,24 +589,32 @@ pub(super) fn render_left_section_header(ui: &Ui, title: &str, spacing: f32) {
     ui.dummy([0.0, spacing * 0.5]);
 }
 
-/// WvW fight scale: Roam / Havoc / Cloud/Zerg.
-/// Retunes Support: small groups self-reliant; Cloud/Zerg specialists.
-fn render_wvw_sub_role(ui: &Ui, state: &mut AddonState) {
+/// How many people are in the fight.
+///
+/// The same three tiers mean different things per mode, and the words are
+/// not interchangeable: WvW fights at Roam / Havoc / Cloud, PvE at Open
+/// World / Group / Squad. Showing WvW's words in PvE — which is what every
+/// mode used to get — offered a solo open-world player a choice between
+/// "Havoc" and "Cloud/Zerg".
+///
+/// PvP has no scale to pick: conquest is always five a side.
+fn render_scale_row(ui: &Ui, state: &mut AddonState) {
     render_left_section_header(ui, &t("section.scale"), state.config.section_spacing);
     let tiers = [CombatTier::Solo, CombatTier::Party, CombatTier::Squad];
-    let roam = t("scale.roam");
-    let havoc = t("scale.havoc");
-    let cloud = t("scale.cloud");
-    let labels = [roam.as_str(), havoc.as_str(), cloud.as_str()];
+    let labels: Vec<String> = tiers
+        .iter()
+        .map(|tier| t(scale_i18n_key(&state.main.game_mode, *tier)))
+        .collect();
+    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
     let selected = tiers
         .iter()
-        .position(|t| *t == state.main.wvw_combat_tier)
+        .position(|t| *t == state.main.combat_tier)
         .unwrap_or(2);
     if let Some(i) = theme::segment_row(ui, &labels, selected, "##scale") {
-        state.main.wvw_combat_tier = tiers[i];
+        state.main.combat_tier = tiers[i];
         if let Some(role) = state.main.selected_role {
             state.main.weights =
-                role.to_weights_for(&state.main.game_mode, state.main.wvw_combat_tier);
+                role.to_weights_for(&state.main.game_mode, state.main.combat_tier);
         }
         state.main.comparison.suggestions.clear();
         state.main.comparison.error = None;
@@ -639,42 +651,61 @@ fn named_tab(n: u32, name: Option<&str>) -> String {
 
 fn apply_role(state: &mut AddonState, role: RoleObjective) {
     state.main.selected_role = Some(role);
-    state.main.weights = role.to_weights_for(&state.main.game_mode, state.main.wvw_combat_tier);
+    state.main.weights = role.to_weights_for(&state.main.game_mode, state.main.combat_tier);
     state.main.comparison.suggestions.clear();
     state.main.comparison.selected_suggestion = 0;
     state.main.comparison.error = None;
 }
 
-pub(crate) fn scale_i18n_key(tier: CombatTier) -> &'static str {
-    match tier {
-        CombatTier::Solo => "scale.roam",
-        CombatTier::Party => "scale.havoc",
-        CombatTier::Squad => "scale.cloud",
+/// Scale labels are per mode: the same three tiers are Roam / Havoc /
+/// Cloud in WvW and Open World / Group / Squad in PvE, and PvP has no
+/// scale of its own.
+pub(crate) fn scale_i18n_key(game_mode: &GameMode, tier: CombatTier) -> &'static str {
+    match (game_mode, tier) {
+        (GameMode::WvW, CombatTier::Solo) => "scale.roam",
+        (GameMode::WvW, CombatTier::Party) => "scale.havoc",
+        (GameMode::WvW, CombatTier::Squad) => "scale.cloud",
+        (_, CombatTier::Solo) => "scale.open_world",
+        (_, CombatTier::Party) => "scale.group",
+        (_, CombatTier::Squad) => "scale.squad",
     }
 }
 
-pub(crate) fn role_i18n_key(role: RoleObjective) -> &'static str {
+/// The front-line role is a Commander in WvW and a Tank in PvE and PvP —
+/// same job, and the only chip whose name changes with the mode. A raid
+/// tank holds a boss's attention; a WvW commander holds a line.
+fn tank_is_commander(game_mode: &GameMode) -> bool {
+    *game_mode == GameMode::WvW
+}
+
+pub(crate) fn role_i18n_key(game_mode: &GameMode, role: RoleObjective) -> &'static str {
     match role {
         RoleObjective::WvWRoamer => "role.roamer",
         RoleObjective::PowerDps => "role.damage",
+        RoleObjective::CondiDps => "role.condi",
+        RoleObjective::Healer => "role.heal",
         RoleObjective::Sustain => "role.bruiser",
         RoleObjective::Staller => "role.troll",
         RoleObjective::Buffer => "role.support",
         RoleObjective::Disabler => "role.disable",
-        RoleObjective::Tank => "role.commander",
+        RoleObjective::Tank if tank_is_commander(game_mode) => "role.commander",
+        RoleObjective::Tank => "role.tank",
         _ => "label.pick_role",
     }
 }
 
-fn role_hint_key(role: RoleObjective) -> &'static str {
+fn role_hint_key(game_mode: &GameMode, role: RoleObjective) -> &'static str {
     match role {
         RoleObjective::WvWRoamer => "role.hint.roamer",
         RoleObjective::PowerDps => "role.hint.damage",
+        RoleObjective::CondiDps => "role.hint.condi",
+        RoleObjective::Healer => "role.hint.heal",
         RoleObjective::Sustain => "role.hint.bruiser",
         RoleObjective::Staller => "role.hint.troll",
         RoleObjective::Buffer => "role.hint.support",
         RoleObjective::Disabler => "role.hint.disable",
-        RoleObjective::Tank => "role.hint.commander",
+        RoleObjective::Tank if tank_is_commander(game_mode) => "role.hint.commander",
+        RoleObjective::Tank => "role.hint.tank",
         _ => "label.pick_role",
     }
 }
@@ -686,8 +717,8 @@ fn render_role_chips(ui: &Ui, state: &mut AddonState) {
     let avail = ui.content_region_avail()[0];
     let mut row_x = 0.0_f32;
     let mut picked: Option<RoleObjective> = None;
-    for role in RoleObjective::PLAY_ROLES {
-        let label = t(role_i18n_key(role));
+    for &role in RoleObjective::play_roles_for(&state.main.game_mode) {
+        let label = t(role_i18n_key(&state.main.game_mode, role));
         let id = format!("##play_{:?}", role);
         let [cw, _] = theme::select_chip_size(ui, &label, true);
         theme::wrap_chip(ui, avail, &mut row_x, cw, 4.0);
@@ -696,7 +727,7 @@ fn render_role_chips(ui: &Ui, state: &mut AddonState) {
             picked = Some(role);
         }
         if ui.is_item_hovered() {
-            ui.tooltip_text(t(role_hint_key(role)));
+            ui.tooltip_text(t(role_hint_key(&state.main.game_mode, role)));
         }
     }
     if let Some(role) = picked {
@@ -881,8 +912,16 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     if let Some(i) = theme::segment_row(ui, &["PvE", "PvP", "WvW"], mode_idx, "##mode") {
         let mode = GameMode::ALL[i].clone();
         state.main.game_mode = mode.clone();
+        // The modes do not share a role list, so a chip chosen in one may
+        // not exist in the next. Keeping it would leave the focus line
+        // naming a role with no chip lit anywhere in the row.
+        if let Some(role) = state.main.selected_role {
+            if !RoleObjective::play_roles_for(&mode).contains(&role) {
+                state.main.selected_role = None;
+            }
+        }
         state.main.weights = if let Some(role) = state.main.selected_role {
-            role.to_weights_for(&mode, state.main.wvw_combat_tier)
+            role.to_weights_for(&mode, state.main.combat_tier)
         } else {
             OptimizationWeights::default_for_mode(mode.label())
         };
@@ -893,8 +932,9 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         resolution::resolve_selected_build(state);
     }
 
-    if state.main.game_mode == GameMode::WvW {
-        render_wvw_sub_role(ui, state);
+    // PvP is always five a side, so it gets no scale row.
+    if state.main.game_mode != GameMode::PvP {
+        render_scale_row(ui, state);
     }
 
     render_role_chips(ui, state);
@@ -903,17 +943,17 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
     let role_bit = state
         .main
         .selected_role
-        .map(|r| t(role_i18n_key(r)))
+        .map(|r| t(role_i18n_key(&state.main.game_mode, r)))
         .unwrap_or_else(|| t("label.pick_role"));
-    let focus = if state.main.game_mode == GameMode::WvW {
+    let focus = if state.main.game_mode == GameMode::PvP {
+        format!("{} · {}", state.main.game_mode.label(), role_bit)
+    } else {
         format!(
             "{} · {} · {}",
             state.main.game_mode.label(),
-            t(scale_i18n_key(state.main.wvw_combat_tier)),
+            t(scale_i18n_key(&state.main.game_mode, state.main.combat_tier)),
             role_bit
         )
-    } else {
-        format!("{} · {}", state.main.game_mode.label(), role_bit)
     };
     theme::wrapped(ui, theme::CURRENT, &focus);
 
@@ -967,7 +1007,7 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         btn_label_owned = t("btn.improve_build");
         &btn_label_owned
     } else if let Some(role) = state.main.selected_role {
-        let role_l = t(role_i18n_key(role));
+        let role_l = t(role_i18n_key(&state.main.game_mode, role));
         btn_label_owned = tf("btn.optimize_role", &[("role", &role_l)]);
         &btn_label_owned
     } else {
@@ -1036,5 +1076,64 @@ fn render_main_content(ui: &Ui, state: &mut AddonState) {
         MainTab::Radio => {
             tabs::radio::render_radio_tab(ui, state);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gw2_core::i18n;
+
+    /// Every chip a mode offers has to have a label and a hint of its own.
+    ///
+    /// `role_i18n_key` and `role_hint_key` both fall back to
+    /// `label.pick_role` for a role they do not know, so a role added to a
+    /// mode's list without a mapping renders as a chip reading "Pick a role"
+    /// — no compile error, no panic, just a nonsense menu. That is exactly
+    /// what would have happened when PvE gained the Condi and Heal chips.
+    #[test]
+    fn every_offered_role_has_its_own_label_and_hint() {
+        for mode in GameMode::ALL {
+            for &role in RoleObjective::play_roles_for(&mode) {
+                let label = role_i18n_key(&mode, role);
+                let hint = role_hint_key(&mode, role);
+                assert_ne!(
+                    label, "label.pick_role",
+                    "{mode:?} offers {role:?} with no label key"
+                );
+                assert_ne!(
+                    hint, "label.pick_role",
+                    "{mode:?} offers {role:?} with no hint key"
+                );
+                // And the key has to resolve — a mapping to a key no locale
+                // defines renders the key itself on screen.
+                assert_ne!(i18n::t(label), label, "{label} is not in the locales");
+                assert_ne!(i18n::t(hint), hint, "{hint} is not in the locales");
+            }
+        }
+    }
+
+    /// The scale words are per mode, and PvE must not be shown WvW's.
+    #[test]
+    fn each_mode_scales_in_its_own_words() {
+        for mode in GameMode::ALL {
+            for tier in [CombatTier::Solo, CombatTier::Party, CombatTier::Squad] {
+                let key = scale_i18n_key(&mode, tier);
+                assert_ne!(i18n::t(key), key, "{key} is not in the locales");
+            }
+        }
+        assert_eq!(
+            scale_i18n_key(&GameMode::WvW, CombatTier::Solo),
+            "scale.roam"
+        );
+        assert_eq!(
+            scale_i18n_key(&GameMode::PvE, CombatTier::Solo),
+            "scale.open_world",
+            "a solo open-world player is not choosing between Havoc and Cloud"
+        );
+        assert_eq!(
+            scale_i18n_key(&GameMode::PvE, CombatTier::Squad),
+            "scale.squad"
+        );
     }
 }

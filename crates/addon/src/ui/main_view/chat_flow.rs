@@ -81,7 +81,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         .unwrap_or_default();
     let game_mode_label = state.main.game_mode.label().to_string();
     let scale = if state.main.game_mode == gw2_core::types::GameMode::WvW {
-        state.main.wvw_combat_tier.label()
+        state.main.combat_tier.label()
     } else {
         "n/a"
     };
@@ -93,7 +93,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     let role_brief = state
         .main
         .selected_role
-        .map(|r| r.family_brief(&state.main.game_mode, state.main.wvw_combat_tier))
+        .map(|r| r.family_brief(&state.main.game_mode, state.main.combat_tier))
         .unwrap_or("No role chip. Infer the job from the player's words.");
     let keep_weapons = keep_equipped_weapons(&display);
     let on_the_pass = state
@@ -136,7 +136,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     // scenario the Improve button builds — same tier mapping, same role
     // profile. Without one there is nothing for the referee to judge against.
     let combat_tier = match state.main.game_mode {
-        gw2_core::types::GameMode::WvW => state.main.wvw_combat_tier,
+        gw2_core::types::GameMode::WvW => state.main.combat_tier,
         gw2_core::types::GameMode::PvP => gw2_optimizer::scenario::CombatTier::Solo,
         gw2_core::types::GameMode::PvE => gw2_optimizer::scenario::CombatTier::Party,
     };

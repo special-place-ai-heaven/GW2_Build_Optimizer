@@ -15,11 +15,11 @@ fn render_scenario_ready(ui: &Ui, state: &AddonState) {
     let role = state
         .main
         .selected_role
-        .map(super::super::role_i18n_key)
+        .map(|role| super::super::role_i18n_key(&state.main.game_mode, role))
         .map(t)
         .unwrap_or_else(|| t("label.pick_role"));
     let line = if state.main.game_mode == gw2_core::types::GameMode::WvW {
-        let scale = match state.main.wvw_combat_tier {
+        let scale = match state.main.combat_tier {
             CombatTier::Solo => t("scale.roam"),
             CombatTier::Party => t("scale.havoc"),
             CombatTier::Squad => t("scale.cloud"),

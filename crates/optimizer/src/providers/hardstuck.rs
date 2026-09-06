@@ -515,7 +515,7 @@ mod tests {
         assert_eq!(super::super::role_in_name("Blood Harbinger"), None);
         assert_eq!(
             super::super::role_in_name("Heal Alacrity Tempest"),
-            Some("Heal Support"),
+            Some("Healer"),
             "a healer first, not a boon build"
         );
         assert_eq!(

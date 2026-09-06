@@ -121,7 +121,7 @@ fn start_optimization_inner(state: &mut AddonState, profession_name: &str, entry
     let selected_role = state.main.selected_role;
     let build_locks = state.main.build_locks.clone();
     let combat_tier = match game_mode {
-        gw2_core::types::GameMode::WvW => state.main.wvw_combat_tier,
+        gw2_core::types::GameMode::WvW => state.main.combat_tier,
         gw2_core::types::GameMode::PvP => gw2_optimizer::scenario::CombatTier::Solo,
         gw2_core::types::GameMode::PvE => gw2_optimizer::scenario::CombatTier::Party,
     };
