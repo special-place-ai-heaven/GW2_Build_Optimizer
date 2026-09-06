@@ -208,7 +208,20 @@ pub(crate) fn unescape_entities(text: &str) -> String {
         out.push_str(&rest[..at]);
         let tail = &rest[at..];
         // A reference is `&…;` and short; anything longer is a bare ampersand.
-        let Some(end) = tail[..tail.len().min(12)].find(';') else {
+        //
+        // Scanned by character, never by byte. `&tail[..12]` panics when a
+        // multi-byte character straddles the limit, and these pages are
+        // full of them — an em dash in GuildJen's prose ended a sync mid-run
+        // and lost every page it had already read. The same trap is
+        // documented on `take_chars_window`; this is attacker-influenced
+        // markup and every index into it has to be a boundary.
+        const LONGEST_REFERENCE: usize = 12;
+        let end = tail
+            .char_indices()
+            .take_while(|(at, _)| *at < LONGEST_REFERENCE)
+            .find(|(_, c)| *c == ';')
+            .map(|(at, _)| at);
+        let Some(end) = end else {
             out.push('&');
             rest = &tail[1..];
             continue;
@@ -486,6 +499,35 @@ mod tests {
         assert_eq!(unescape_entities("a &nbsp; b"), "a &nbsp; b");
         assert_eq!(unescape_entities("R&D and Q&A"), "R&D and Q&A");
         assert_eq!(unescape_entities("&amp"), "&amp", "no semicolon, no change");
+    }
+
+    /// A multi-byte character straddling the reference-length limit must not
+    /// panic. An em dash in GuildJen's prose landed across byte 12 of an
+    /// `&`-tail and killed a sync that had already read 328 pages.
+    ///
+    /// Every offset here is deliberate: the dash is placed so that a naive
+    /// `&tail[..12]` splits it.
+    #[test]
+    fn a_multibyte_character_at_the_scan_limit_does_not_panic() {
+        for pad in 0..16 {
+            let text = format!("&{}—more", "a".repeat(pad));
+            let out = unescape_entities(&text);
+            assert!(out.contains('—'), "pad {pad} lost the dash: {out}");
+        }
+        // The shape from the live page: an ampersand, then prose.
+        assert_eq!(
+            unescape_entities("Bleed &amp; burn — poison, torment."),
+            "Bleed & burn — poison, torment."
+        );
+        // Non-Latin scripts hit the same limit differently.
+        for text in [
+            "&コンディション;",
+            "&症状——流血;",
+            "R&D — 研究",
+            "&#91;&amp;DQ— trailing",
+        ] {
+            let _ = unescape_entities(text);
+        }
     }
 
     #[test]
