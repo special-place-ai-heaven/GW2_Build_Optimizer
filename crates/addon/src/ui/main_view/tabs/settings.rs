@@ -45,6 +45,10 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
 
     ui.dummy([0.0, 8.0]);
 
+    // Where Optimization Defaults begins, so Theme can start level with it
+    // in the column beside. Columns only offset x, so a y taken in one is
+    // directly comparable in the other.
+    let defaults_y = ui.cursor_pos()[1];
     build_display::render_card_header(ui, &t("settings.opt_defaults"), theme::pal().gold);
     {
         ui.text(t("settings.default_mode"));
@@ -101,7 +105,7 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.indent_by(gutter);
 
     build_display::render_card_header(ui, &t("settings.ui_prefs"), theme::pal().gold);
-    render_theme_section(ui, state, col_w);
+    render_theme_section(ui, state, col_w, defaults_y);
 
     ui.unindent_by(gutter);
     ui.columns(1, "##settings_split_end", false);
@@ -737,7 +741,7 @@ fn news_source_tick(ui: &Ui, state: &mut AddonState, src: NewsSource) {
     }
 }
 
-fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
+fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32, theme_align_y: f32) {
     let right_item_w = col_w - 12.0;
     // Paired two to a row. Each of these was a label on one line and a
     // control on the next, so four settings cost eight rows in a panel that
@@ -880,7 +884,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     });
 
     ui.dummy([0.0, 8.0]);
-    render_theme_style_section(ui, state, right_item_w);
+    render_theme_style_section(ui, state, right_item_w, theme_align_y);
 
     ui.spacing();
     ui.text_colored(theme::pal().muted, t("settings.layout"));
@@ -1032,7 +1036,17 @@ fn seed_custom_from_preset(theme: &mut ThemeConfig) -> bool {
 /// change for live preview — while persistence uses the same
 /// deactivate-after-edit debounce as the radio volume slider (persist once on
 /// release/defocus, not per drag tick or keystroke).
-fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32) {
+fn render_theme_style_section(
+    ui: &Ui,
+    state: &mut AddonState,
+    right_item_w: f32,
+    align_y: f32,
+) {
+    // Start level with Optimization Defaults in the column beside, unless
+    // UI Preferences already runs past it - never backwards, or the header
+    // would be drawn over the sliders above it.
+    let at = ui.cursor_pos();
+    ui.set_cursor_pos([at[0], at[1].max(align_y)]);
     theme::header(ui, &t("settings.theme_section"));
 
     let is_custom = state.config.theme.preset == "custom";
@@ -1056,12 +1070,42 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
     let fh = ui.frame_height();
     let gap = style.item_spacing[0];
 
+    // The grid | picker split is decided here rather than further down,
+    // because the preset row has to respect it: a theme-name field run to
+    // the pane's right edge sat over the picker's column and forced the
+    // picker a whole row lower than it needed to be.
+    let lane = 12.0; // caret + ring live here, left of the swatch
+    let col_gap = 12.0; // grid | picker gutter
+    let trail = 6.0; // so the row plate does not end flush against the text
+    let picker_w = (fh * 7.0).min(right_item_w).max(fh * 4.0);
+    let labels: [String; 5] = std::array::from_fn(|i| t(THEME_SLOTS[i].0));
+    // Measure the labels, never assume them: "Background" is 10 chars,
+    // "Gedämpfter Text" 15, "Przygaszony tekst" 17, "Приглушённый текст" 18.
+    // The grid sits beside the picker only when the widest label in the
+    // CURRENT language at the CURRENT font scale actually fits there; below
+    // that the section stacks. In side-by-side mode `cell_w` is at least the
+    // width this test demanded, so a label cannot clip by construction.
+    let widest = labels
+        .iter()
+        .map(|l| ui.calc_text_size(l)[0])
+        .fold(0.0_f32, f32::max);
+    let grid_need = lane + (fh + gap + widest + trail) * 2.0 + gap;
+    let side_by_side = right_item_w >= grid_need + col_gap + picker_w;
+    let grid_w = if side_by_side {
+        right_item_w - col_gap - picker_w
+    } else {
+        right_item_w
+    };
+
     // Preset combo and theme name share one line: the name only exists in
     // custom mode, so a full row of its own bought nothing but height in the
-    // one direction this panel has least of.
-    let combo_w = (right_item_w * 0.42).max(fh * 5.0).min(right_item_w);
-    let name_w = right_item_w - combo_w - gap;
+    // one direction this panel has least of. Both stay inside the grid
+    // column so the picker can rise to meet them.
+    let combo_w = (grid_w * 0.42).max(fh * 5.0).min(grid_w);
+    let name_w = grid_w - combo_w - gap;
     let name_beside = name_w >= fh * 6.0;
+    // Where the preset row starts, so the picker can be placed level with it.
+    let preset_row = ui.cursor_pos();
 
     ui.set_next_item_width(combo_w);
     if let Some(_c) = ComboBox::new("##theme_preset")
@@ -1132,29 +1176,6 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
     // numbers.
     const ROWS: usize = 3;
     let fs = state.config.font_scale.max(0.5);
-    let lane = 12.0; // caret + ring live here, left of the swatch
-    let col_gap = 12.0; // grid | picker gutter
-    let trail = 6.0; // so the row plate does not end flush against the text
-    let picker_w = (fh * 7.0).min(right_item_w).max(fh * 4.0);
-
-    let labels: [String; 5] = std::array::from_fn(|i| t(THEME_SLOTS[i].0));
-    // Measure the labels, never assume them: "Background" is 10 chars,
-    // "Gedämpfter Text" 15, "Przygaszony tekst" 17, "Приглушённый текст" 18.
-    // The grid sits beside the picker only when the widest label in the
-    // CURRENT language at the CURRENT font scale actually fits there; below
-    // that the section stacks. In side-by-side mode `cell_w` is at least the
-    // width this test demanded, so a label cannot clip by construction.
-    let widest = labels
-        .iter()
-        .map(|l| ui.calc_text_size(l)[0])
-        .fold(0.0_f32, f32::max);
-    let grid_need = lane + (fh + gap + widest + trail) * 2.0 + gap;
-    let side_by_side = right_item_w >= grid_need + col_gap + picker_w;
-    let grid_w = if side_by_side {
-        right_item_w - col_gap - picker_w
-    } else {
-        right_item_w
-    };
     // Cells are sized to their content, not stretched to the pane: a row plate
     // running the full width of the column was pure decoration and made the
     // five look like menu entries rather than swatches.
@@ -1242,13 +1263,16 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
     }
     let slot = state.main.theme_edit_slot.min(4);
 
-    // Plain `same_line` (offset 0) means "previous line end + spacing", which
-    // after a group is the rail's right edge. NOT `same_line_with_pos`: that
-    // offset is measured from the window position plus group and column
-    // offsets and excludes window padding, so inside this two-column settings
-    // layout the number passed is not the x you get.
+    // The picker rises to the preset row rather than starting level with the
+    // swatch grid, which is a row and a half of height back. `preset_row`
+    // came from `cursor_pos`, so feeding it to `set_cursor_pos` round-trips
+    // in the same space — unlike `same_line_with_pos`, whose offset excludes
+    // window padding and is measured from the window plus group and column
+    // offsets, so inside this two-column layout the number passed is not the
+    // x you get.
+    let grid_bottom = ui.cursor_pos()[1];
     if side_by_side {
-        ui.same_line_with_spacing(0.0, col_gap);
+        ui.set_cursor_pos([preset_row[0] + grid_w + col_gap, preset_row[1]]);
     }
     let edited = {
         let value = theme_base_mut(&mut state.config.theme.custom, slot);
@@ -1284,6 +1308,14 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
     // Deactivated status flags to the group item — the same release/defocus
     // debounce the old ColorEdit rows used.
     let commit = ui.is_item_deactivated_after_edit();
+
+    // Whichever column is taller decides where the section ends. The picker
+    // was moved up, so it can now finish ABOVE the swatch grid — carrying on
+    // from the picker alone would draw the next paragraph over the swatches.
+    if side_by_side {
+        let below = grid_bottom.max(ui.cursor_pos()[1]);
+        ui.set_cursor_pos([preset_row[0], below]);
+    }
 
     if edited {
         theme::apply_theme(&state.config.theme);
