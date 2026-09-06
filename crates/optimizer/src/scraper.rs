@@ -674,12 +674,16 @@ fn scrape_hardstuck_build(
         .or_else(|| crate::providers::hardstuck::game_mode(&html).map(|mode| (mode, "")))
         .unwrap_or(("PvE", ""));
     let name = crate::providers::hardstuck::build_name(&html).unwrap_or_default();
-    let role = match crate::providers::role_in_name(&name) {
-        Some(job) if scale.is_empty() => job.to_string(),
-        Some(job) => format!("{scale} {job}"),
-        // The name states no job. Saying so beats claiming Power DPS.
-        None => scale.to_string(),
-    };
+    // The name first, because it distinguishes power from condition from
+    // heal where Hardstuck's own tag says only "Damage". Its tag second,
+    // because it is the only thing that names the job on a build whose title
+    // does not: "Blood Harbinger" is a Bruiser and nothing in that name says
+    // so. 20 of 148 rows recorded no role at all before this.
+    let job = crate::providers::role_in_name(&name)
+        .map(str::to_string)
+        .or_else(|| crate::providers::hardstuck::build_role(&html))
+        .unwrap_or_default();
+    let role = crate::providers::role_label(scale, &job);
 
     Ok(benchmark_from_html(
         &html,
