@@ -664,12 +664,18 @@ impl LlmClient for AnthropicClient {
             content: AnthropicContent::Text(prompt.to_string()),
         }];
 
+        let gathering_until = std::time::Instant::now() + super::openai_compat::TOOL_PHASE_BUDGET;
         for turn in 0..max_turns {
             // Between turns as well as inside the stream: a tool loop is up to
             // max_turns whole requests, so checking only inside one of them
             // still leaves the worker running after the flag flips.
             if super::cancel::is_cancelled() {
                 return Err(LlmError::Unavailable(CANCELLED.to_string()));
+            }
+            // Out of clock for lookups. Every tool result so far is already in
+            // `messages`, so the closing request below answers from them.
+            if turn > 0 && std::time::Instant::now() >= gathering_until {
+                break;
             }
             trim_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
             let response =
