@@ -309,6 +309,7 @@
   "btn.cancel": "キャンセル",
   "btn.clear_results": "結果をクリア",
   "btn.clear_cache": "キャッシュを消去",
+  "settings.clear_cache_q": "ダウンロード済みの Guild Wars 2 データ {size} をすべて削除し、アイテム、スキル、トレイト、アイコンをまとめて再ダウンロードしますか？古いデータの更新にこれは不要です。それには「ゲームデータを更新」を使ってください。",
   "btn.refresh_game": "ゲームデータを更新",
   "btn.reset_setup": "セットアップをリセット",
   "btn.yes_reset": "はい、リセット",

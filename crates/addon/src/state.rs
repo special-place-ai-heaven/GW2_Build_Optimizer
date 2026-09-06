@@ -585,6 +585,14 @@ pub struct MainState {
     pub confirm_delete: Option<String>,
     /// Name of the saved build pending overwrite confirmation.
     pub confirm_overwrite: Option<String>,
+    /// Whether Clear Cache is waiting to be confirmed.
+    ///
+    /// It reads like a tidy-up and is the most expensive button in the addon:
+    /// it throws away every item, skill, trait and icon the API ever sent and
+    /// makes the next start re-download all of it. Nothing about the label
+    /// says so, and it sits beside Refresh Game Data, which is the one people
+    /// actually want.
+    pub confirm_clear_cache: bool,
     /// In-progress note drafts keyed by save name.
     pub note_drafts: std::collections::HashMap<String, String>,
     /// Generation for in-flight kitchen orders. Timeout and send bump it; late applies are ignored.

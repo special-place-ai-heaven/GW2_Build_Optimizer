@@ -309,6 +309,7 @@
   "btn.cancel": "Cancelar",
   "btn.clear_results": "Borrar resultados",
   "btn.clear_cache": "Vaciar caché",
+  "settings.clear_cache_q": "¿Borrar los {size} de datos descargados de Guild Wars 2 — cada objeto, habilidad, rasgo e icono — y volver a descargarlo todo? No hace falta para refrescar datos anticuados: para eso está Actualizar datos.",
   "btn.refresh_game": "Actualizar datos",
   "btn.reset_setup": "Restablecer",
   "btn.yes_reset": "Sí, restablecer",

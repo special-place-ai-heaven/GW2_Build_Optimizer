@@ -1369,6 +1369,9 @@ fn cached_pack_status(
 }
 
 fn render_cache_section(ui: &Ui, state: &mut AddonState) {
+    // Set by the confirmation below, acted on after it, so the borrow of
+    // `state` for the buttons is finished before the clear runs.
+    let mut clear_requested = false;
     if let Some(ref key) = state.config.gw2_api_key {
         let display = if key.chars().count() > 12 {
             let pre: String = key.chars().take(8).collect();
@@ -1429,11 +1432,45 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
     );
     ui.same_line();
     let refreshing = state.main.game_db_loading;
+    // Clear Cache reads like a tidy-up and is the most expensive button in
+    // the addon: it discards every item, skill, trait and icon the API ever
+    // sent, and the next start re-downloads all of it. It also sits beside
+    // Refresh Game Data, which is what someone chasing stale data actually
+    // wants. So it asks first, and the question names the cost rather than
+    // saying "are you sure".
     if refreshing {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
         theme::gold_button_sized(ui, t("btn.clear_cache"), [100.0, 0.0]);
         style.pop();
+        state.main.confirm_clear_cache = false;
+    } else if state.main.confirm_clear_cache {
+        if theme::gold_button_sized(ui, t("btn.yes"), [56.0, 0.0]) {
+            state.main.confirm_clear_cache = false;
+            clear_requested = true;
+        }
+        ui.same_line();
+        if ui.button_with_size(t("btn.no"), [56.0, 0.0]) {
+            state.main.confirm_clear_cache = false;
+        }
     } else if theme::gold_button_sized(ui, t("btn.clear_cache"), [100.0, 0.0]) {
+        state.main.confirm_clear_cache = true;
+    }
+    if state.main.confirm_clear_cache {
+        theme::wrapped(
+            ui,
+            theme::WARN,
+            &tf(
+                "settings.clear_cache_q",
+                &[(
+                    "size",
+                    &format_bytes(
+                        state.main.settings_cache_size + state.main.settings_graphics_size,
+                    ),
+                )],
+            ),
+        );
+    }
+    if clear_requested {
         let cache = gw2_api::cache::DataCache::new(&cache_dir);
         if let Err(e) = cache.clear_all() {
             state.main.error = Some(tf("fmt.err_clear_cache", &[("err", &e.to_string())]));

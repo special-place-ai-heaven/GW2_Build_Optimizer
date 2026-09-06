@@ -315,6 +315,7 @@
   "btn.cancel": "Cancel",
   "btn.clear_results": "Clear Results",
   "btn.clear_cache": "Clear Cache",
+  "settings.clear_cache_q": "Delete all {size} of downloaded Guild Wars 2 data — every item, skill, trait and icon — and download it all again? This is not needed to refresh stale data: use Refresh Game Data for that.",
   "btn.refresh_game": "Refresh Game Data",
   "btn.reset_setup": "Reset Setup",
   "btn.yes_reset": "Yes, Reset",

@@ -309,6 +309,7 @@
   "btn.cancel": "Abbrechen",
   "btn.clear_results": "Ergebnisse leeren",
   "btn.clear_cache": "Cache leeren",
+  "settings.clear_cache_q": "Die gesamten {size} heruntergeladener Guild-Wars-2-Daten löschen — jedes Item, jede Fertigkeit, jeden Trait und jedes Icon — und alles neu herunterladen? Zum Auffrischen veralteter Daten ist das nicht nötig: dafür ist Spieldaten aktualisieren da.",
   "btn.refresh_game": "Spieldaten aktualisieren",
   "btn.reset_setup": "Setup zurücksetzen",
   "btn.yes_reset": "Ja, zurücksetzen",
