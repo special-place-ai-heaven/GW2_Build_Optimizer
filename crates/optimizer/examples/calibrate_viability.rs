@@ -77,6 +77,18 @@ fn main() {
     let mut tally: BTreeMap<String, (u32, u32)> = BTreeMap::new();
     let mut examples: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut by_role: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    // (gate, job family) -> (passed, failed). One number per gate hides the
+    // thing that decides whether a gate is describing the game: a gate can
+    // look healthy across the whole corpus and still be unreachable for one
+    // job, which is a veto nothing of that job can ever clear.
+    let mut by_gate_family: BTreeMap<(String, String), (u32, u32)> = BTreeMap::new();
+    // The metrics the thresholds are set against, per family, so a floor can
+    // be read off the corpus instead of chosen.
+    let mut health: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    let mut margin: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    let mut repeatable: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    let mut viable_all_gates = 0u32;
+    let mut viable_blocking_only = 0u32;
     let mut unusable = 0u32;
     let mut no_plate = 0u32;
     let mut bad_examples: Vec<String> = Vec::new();
@@ -117,9 +129,38 @@ fn main() {
         );
         scored += 1;
 
+        // Keyed on `combat_kind`, not the published role string: that is the
+        // field the referee branches on, so a table built from anything else
+        // would be measuring a different question than the one the gate asks.
+        let family = format!("{:?}", scenario.combat_kind);
+        if let Some(fight) = report.rotation.as_ref().and_then(|r| r.wvw.as_ref()) {
+            health
+                .entry(family.clone())
+                .or_default()
+                .push(fight.remaining_health_ratio);
+            margin
+                .entry(family.clone())
+                .or_default()
+                .push(fight.sustain_margin);
+            let r = repeatable.entry(family.clone()).or_default();
+            if fight.repeatable {
+                r.0 += 1;
+            } else {
+                r.1 += 1;
+            }
+        }
+
         let mut all_passed = true;
         for gate in &report.viability.gates {
             let key = format!("{:?}", gate.gate);
+            let fam = by_gate_family
+                .entry((key.clone(), family.clone()))
+                .or_default();
+            if gate.passed {
+                fam.0 += 1;
+            } else {
+                fam.1 += 1;
+            }
             let slot = tally.entry(key.clone()).or_default();
             if gate.passed {
                 slot.0 += 1;
@@ -141,6 +182,21 @@ fn main() {
         } else {
             role.1 += 1;
         }
+        // `is_viable` is every gate; `blocks()` is the measured set that may
+        // refuse a build. The gap between them is builds the referee scores at
+        // the -1.0 sentinel on the authority of a gate it has already
+        // published as having no authority.
+        if report
+            .viability
+            .gates
+            .iter()
+            .all(|g| g.passed || !g.gate.blocks())
+        {
+            viable_blocking_only += 1;
+        }
+        if report.viability.is_viable {
+            viable_all_gates += 1;
+        }
     }
 
     println!(
@@ -150,6 +206,23 @@ fn main() {
     for note in &bad_examples {
         println!("   rejected: {note}");
     }
+    println!();
+    let pct_of_scored = |n: u32| {
+        if scored > 0 {
+            n as f64 * 100.0 / scored as f64
+        } else {
+            0.0
+        }
+    };
+    println!(
+        "is_viable (every gate):      {viable_all_gates:>4}/{scored} {:>5.0}%",
+        pct_of_scored(viable_all_gates)
+    );
+    println!(
+        "blocking gates only:         {viable_blocking_only:>4}/{scored} {:>5.0}%   \
+         <- the rest are scored -1.0 by a gate blocks() says cannot refuse",
+        pct_of_scored(viable_blocking_only)
+    );
     println!();
     println!("{:<24} {:>7} {:>7} {:>7}", "gate", "pass", "fail", "pass%");
     for (gate, (pass, fail)) in &tally {
@@ -180,6 +253,75 @@ fn main() {
             0.0
         };
         println!("  {role:<28} {pass:>4}/{total:<4} {pct:>5.0}%");
+    }
+
+    const FAMILIES: [&str; 6] = [
+        "Support",
+        "StrikeSpike",
+        "CondiRamp",
+        "Harasser",
+        "Disabler",
+        "Commander",
+    ];
+
+    println!("\npass rate per gate per job family:");
+    print!("{:<24}", "gate");
+    for f in FAMILIES {
+        print!("{f:>11}");
+    }
+    println!();
+    let gate_names: Vec<String> = tally.keys().cloned().collect();
+    for gate in &gate_names {
+        print!("{gate:<24}");
+        for f in FAMILIES {
+            match by_gate_family.get(&(gate.clone(), f.to_string())) {
+                Some((pass, fail)) if pass + fail > 0 => {
+                    print!("{:>10.0}%", *pass as f64 * 100.0 / (pass + fail) as f64)
+                }
+                _ => print!("{:>11}", "-"),
+            }
+        }
+        println!();
+    }
+
+    println!("\nwhat the corpus actually reaches, per family:");
+    println!(
+        "{:<10} {:>5} {:>8} {:>8} {:>8} {:>8} {:>11}",
+        "family", "n", "hp p10", "hp p25", "hp p50", "hp p90", "repeatable"
+    );
+    let quantile = |sorted: &[f64], q: f64| -> f64 {
+        let i = ((sorted.len() as f64 - 1.0) * q).round() as usize;
+        sorted[i]
+    };
+    for f in FAMILIES {
+        let Some(hp) = health.get(f) else { continue };
+        let mut hp = hp.clone();
+        hp.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let (rp, rf) = repeatable.get(f).copied().unwrap_or((0, 0));
+        println!(
+            "{f:<10} {:>5} {:>7.0}% {:>7.0}% {:>7.0}% {:>7.0}% {:>10.0}%",
+            hp.len(),
+            quantile(&hp, 0.10) * 100.0,
+            quantile(&hp, 0.25) * 100.0,
+            quantile(&hp, 0.50) * 100.0,
+            quantile(&hp, 0.90) * 100.0,
+            if rp + rf > 0 {
+                rp as f64 * 100.0 / (rp + rf) as f64
+            } else {
+                0.0
+            },
+        );
+    }
+    for f in FAMILIES {
+        let Some(m) = margin.get(f) else { continue };
+        let mut m = m.clone();
+        m.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        println!(
+            "  {f:<8} sustain margin/s   p10 {:>8.0}  p50 {:>8.0}  p90 {:>8.0}",
+            quantile(&m, 0.10),
+            quantile(&m, 0.50),
+            quantile(&m, 0.90),
+        );
     }
 
     println!("\nfailing examples:");

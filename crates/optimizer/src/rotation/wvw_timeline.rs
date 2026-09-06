@@ -23,6 +23,93 @@ use super::{CoverKind, MobilityKind, RotationSkill, SkillEffect, SkillSlot};
 
 const TIMELINE_TICK_MS: u32 = 50;
 pub const MIN_PROTECTED_WINDOW_MS: u32 = 2_000;
+
+/// How often the enemy can open on you again.
+///
+/// The event script below is a burst: control, strike, condition, boon strip,
+/// control, a bigger strike, an unblockable finisher, over 4.4 s. It used to
+/// repeat every 5 s, which left 600 ms between the finisher and the next
+/// opener - a metronome, not a fight. Pressure in WvW is never sustained. It
+/// oscillates: someone spends their cooldowns on you, and then they do not
+/// have them for a while.
+///
+/// That is not a cosmetic difference, it decides what the sustain gates can
+/// measure. Under a metronome the only thing that survives is raw mitigation
+/// per second, because a heal on a 25 s cooldown can never catch up with a
+/// drip - so the test became an accumulation race that longer windows always
+/// won. Support and CondiRamp get a 20 s window against StrikeSpike's 5 s, so
+/// they ate four uninterrupted bursts and died: measured on the synced corpus
+/// 2026-09-07, `SustainRecovery` passed 100% of StrikeSpike, 93% of Harasser
+/// (10 s), 50% of CondiRamp and 14% of Support - monotonic in window length,
+/// which means the gate was measuring the clock.
+///
+/// With a real lull the same window measures the thing a support build is
+/// actually for: eat the spike, recover before the next one.
+const BURST_PERIOD_MS: u32 = 10_000;
+
+/// The burst's shape, as multiples of the base strike: damage ramps up,
+/// reaches a peak, and whatever is not evaded or blocked at the peak has to be
+/// healed before the next one.
+///
+/// These four sum to 2.90, which is exactly what the flat 1.00/1.20/0.70
+/// script totalled, so this redistributes the burst rather than sharpening it.
+/// The peak is now 4.6x the opening chip instead of 1.2x. That ratio is the
+/// point: `receive_strike` drops a blockable hit entirely on evade, block or
+/// invulnerability, so a peak barely above the chip made active defence worth
+/// almost nothing and left raw mitigation per second as the only thing the
+/// sustain gates could see.
+/// The peak magnitude is the one free number here, and it is calibrated, not
+/// chosen. Swept against the synced WvW corpus 2026-09-07, `SustainRecovery`
+/// pass rate per combat kind:
+///
+/// | peak | Support | StrikeSpike | Harasser | spread |
+/// |---|---|---|---|---|
+/// | flat 1.20 (old) | 14% | 100% | 93% | 86 pts |
+/// | 1.60 | 100% | 100% | 100% | 0, but nothing fails |
+/// | **2.60** | **93%** | **91%** | **99%** | **8 pts** |
+/// | 4.00 | 57% | 70% | 96% | 39 pts |
+/// | 5.50 | 7% | 43% | 82% | 75 pts |
+///
+/// The old script's spread was the window length, not the build. 2.60 is
+/// where that bias disappears while the gate still refuses real builds - five
+/// of the corpus - so it is measuring sustain rather than the clock or
+/// nothing at all. Too high and the bias returns inverted, because a support
+/// carries less active defence than a roamer and starts eating peaks.
+const RAMP_OPEN: f64 = 0.35;
+const RAMP_BUILD: f64 = 0.55;
+const PEAK: f64 = 2.60;
+const RESIDUAL: f64 = 0.40;
+
+/// How long an applied condition sits on you.
+///
+/// This was 4,000 ms against a burst period that is now 10,000 ms, which
+/// meant every condition expired during the lull. Nothing had to be cleansed:
+/// waiting was a complete answer, so `CleanseRate` was a rule about the skill
+/// bar with no consequence anywhere in the simulation, and a build that
+/// brought no cleanse at all measured the same as one built around it.
+///
+/// Condition damage is not strike damage. Armour does not reduce it,
+/// Protection does not reduce it, and an evade or a block cannot avoid what
+/// is already ticking - the tick is `(base + coefficient x Condition Damage)`
+/// per stack per second, for as long as the duration the attacker's Expertise
+/// bought. Removal is the only counter. So the duration has to reach the next
+/// burst: uncleansed stacks then overlap the new ones and the pressure
+/// compounds, which is the thing that makes cleansing worth a utility slot.
+const CONDITION_DURATION_MS: u32 = 10_000;
+
+/// Chilled: skills recharge at 34% of the normal rate.
+///
+/// The enemy's answer to Alacrity, and the reason a condition that deals no
+/// damage at all can still be the one that kills you.
+const CHILLED_RECHARGE_PERCENT: u32 = 34;
+
+/// How long the opener's Chill sits on you.
+///
+/// Shorter than [`CONDITION_DURATION_MS`]: a damaging condition ticks for as
+/// long as it lasts, but Chill only has to cover the recovery window to do its
+/// job, and a chill that outlasted the lull would mean the heal never comes
+/// back at all rather than comes back late.
+const CHILL_DURATION_MS: u32 = 4_000;
 pub const TARGET_PROTECTED_WINDOW_MS: u32 = 5_000;
 
 /// Wiki Barrier: disappears 5s after applied; WvW cap is 25% of max health.
@@ -171,10 +258,13 @@ impl WvwProfile {
                     unblockable: false,
                 },
             });
+            // The ramp. Chip damage while they build to the thing that
+            // actually kills you - small enough that a real build's healing
+            // covers it, which is what makes healing worth having.
             events.push(EnemyEvent {
                 at_ms: cycle + 850,
                 kind: EnemyEventKind::Strike {
-                    damage: strike,
+                    damage: strike * RAMP_OPEN,
                     unblockable: false,
                 },
             });
@@ -191,12 +281,33 @@ impl WvwProfile {
                     } else {
                         2
                     },
-                    duration_ms: 4_000,
+                    duration_ms: CONDITION_DURATION_MS,
                 },
             });
             events.push(EnemyEvent {
                 at_ms: cycle + 2_350,
+                kind: EnemyEventKind::Strike {
+                    damage: strike * RAMP_BUILD,
+                    unblockable: false,
+                },
+            });
+            // Strip the cover, then land the CC, then hit. That order is the
+            // whole of a WvW opener and it is why the peak is worth spending
+            // an evade on.
+            events.push(EnemyEvent {
+                at_ms: cycle + 2_600,
                 kind: EnemyEventKind::BoonStrip { count: 1 },
+            });
+            // Chill goes on before the peak, so the recovery window after it
+            // is spent waiting rather than healing. It deals no damage; it
+            // costs you the answer to the damage.
+            events.push(EnemyEvent {
+                at_ms: cycle + 2_800,
+                kind: EnemyEventKind::Condition {
+                    condition: "Chilled".into(),
+                    stacks: 1,
+                    duration_ms: CHILL_DURATION_MS,
+                },
             });
             events.push(EnemyEvent {
                 at_ms: cycle + 3_050,
@@ -205,21 +316,27 @@ impl WvwProfile {
                     unblockable: false,
                 },
             });
+            // The peak. Blockable on purpose: this is the hit evades, blocks
+            // and invulnerability exist for, and a model where the biggest
+            // number of the fight cannot be answered cannot tell a build that
+            // brought an answer from one that did not.
             events.push(EnemyEvent {
                 at_ms: cycle + 3_550,
                 kind: EnemyEventKind::Strike {
-                    damage: strike * 1.20,
+                    damage: strike * PEAK,
                     unblockable: false,
                 },
             });
+            // What is left after the peak, unblockable, so surviving is never
+            // purely a matter of holding one button at the right moment.
             events.push(EnemyEvent {
                 at_ms: cycle + 4_400,
                 kind: EnemyEventKind::Strike {
-                    damage: strike * 0.70,
+                    damage: strike * RESIDUAL,
                     unblockable: true,
                 },
             });
-            cycle += 5_000;
+            cycle += BURST_PERIOD_MS;
         }
         events.retain(|event| event.at_ms < duration_ms);
         events.sort_by_key(|event| event.at_ms);
@@ -556,13 +673,36 @@ impl<'a> Timeline<'a> {
             }
 
             self.now_ms = self.now_ms.saturating_add(TIMELINE_TICK_MS);
-            self.tick_alacrity_recharge();
+            self.tick_recharge_rate();
         }
     }
 
-    /// Dummy clock: 100ms wall consumes 125ms CD. Apply *4/5 at set is the leftover snapshot.
-    fn tick_alacrity_recharge(&mut self) {
+    /// How fast skills come back this tick.
+    ///
+    /// Dummy clock: 100ms wall consumes 125ms CD under Alacrity, and 34ms
+    /// under Chilled. Apply *4/5 at set is the leftover snapshot.
+    ///
+    /// Only the Alacrity half of this existed. Nothing the enemy did could
+    /// touch skill availability, which leaves out the thing that actually
+    /// kills a support: Chilled does not have to out-damage your healing, it
+    /// only has to keep your heal on cooldown until the next burst lands. It
+    /// is also what makes cleansing existential rather than a damage tax -
+    /// the cleanse is buying back the heal, not the 130/s tick.
+    fn tick_recharge_rate(&mut self) {
         if !self.now_ms.is_multiple_of(100) {
+            return;
+        }
+        // Chilled wins: the wiki is explicit that Alacrity and Chilled are
+        // both recharge-rate modifiers and the slow applies to the already
+        // hastened rate, but a build that is Chilled through its whole
+        // recovery window is in the situation this models either way.
+        if self.has_condition("Chilled") {
+            let lost = 100 - CHILLED_RECHARGE_PERCENT;
+            for ready in &mut self.cooldown_ready_ms {
+                if *ready > self.now_ms {
+                    *ready = ready.saturating_add(lost);
+                }
+            }
             return;
         }
         let extra = alacrity_cd_advance_ms(100, self.has_buff("Alacrity")).saturating_sub(100);
@@ -574,6 +714,13 @@ impl<'a> Timeline<'a> {
                 *ready = ready.saturating_sub(extra);
             }
         }
+    }
+
+    /// Whether a condition the enemy applied is currently on the player.
+    fn has_condition(&self, name: &str) -> bool {
+        self.incoming_conditions
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case(name) && c.expires_at_ms > self.now_ms)
     }
 
     fn expire_timed_state(&mut self) {
@@ -2133,6 +2280,169 @@ mod tests {
         assert_eq!(report.total_damage, 0.0);
     }
 
+    /// Chilled has to cost the player skill uptime, or it is just a word.
+    ///
+    /// It deals no damage at all, so nothing in the damage model can see it.
+    /// What it does is keep the heal on cooldown until the next burst lands,
+    /// which is the actual way a support dies, and the reason cleansing is
+    /// worth a utility slot rather than a damage tax.
+    #[test]
+    fn chilled_keeps_a_skill_on_cooldown_longer() {
+        // One skill, short cooldown, nothing else to do but recast it.
+        let bar = vec![skill(1, SkillSlot::Weapon1, 200, 2_000, vec![])];
+        let params = params();
+
+        let clear = run_report(
+            &bar,
+            &[],
+            open_enemy(false),
+            profile(12_000, vec![]),
+            &params,
+        );
+        let chilled = run_report(
+            &bar,
+            &[],
+            open_enemy(false),
+            profile(
+                12_000,
+                vec![EnemyEvent {
+                    at_ms: 100,
+                    kind: EnemyEventKind::Condition {
+                        condition: "Chilled".into(),
+                        stacks: 1,
+                        duration_ms: 10_000,
+                    },
+                }],
+            ),
+            &params,
+        );
+
+        assert!(
+            chilled.successful_action_count < clear.successful_action_count,
+            "Chilled must cost casts over the same window - clear {}, chilled {}",
+            clear.successful_action_count,
+            chilled.successful_action_count
+        );
+    }
+
+    /// Conditions have to outlast the lull, or cleansing is decoration.
+    ///
+    /// The applied duration used to be 4,000 ms against a burst period that is
+    /// now 10,000 ms, so every condition expired on its own before the next
+    /// burst. Waiting was a complete answer and a build with no cleanse
+    /// measured exactly the same as one built around cleansing, which is the
+    /// opposite of how condition damage works: armour does not reduce it,
+    /// Protection does not reduce it, and an evade cannot dodge what is
+    /// already ticking. Removal is the only counter.
+    #[test]
+    fn an_uncleansed_condition_costs_health_a_cleanse_saves() {
+        let events = vec![EnemyEvent {
+            at_ms: 200,
+            kind: EnemyEventKind::Condition {
+                condition: "Bleeding".into(),
+                stacks: 8,
+                duration_ms: CONDITION_DURATION_MS,
+            },
+        }];
+        let params = params();
+
+        let exposed = run_report(
+            &[],
+            &[],
+            open_enemy(false),
+            profile(CONDITION_DURATION_MS, events.clone()),
+            &params,
+        );
+        assert!(
+            exposed.incoming_damage > 0.0,
+            "a condition nobody removes has to actually tick: {exposed:?}"
+        );
+
+        let cleanse = vec![skill(
+            1,
+            SkillSlot::Utility,
+            50,
+            600,
+            vec![SkillEffect::RemovesCondition {
+                conditions_removed: 3,
+            }],
+        )];
+        let cleansed = run_report(
+            &cleanse,
+            &[],
+            open_enemy(false),
+            profile(CONDITION_DURATION_MS, events),
+            &params,
+        );
+
+        assert!(
+            cleansed.incoming_damage < exposed.incoming_damage,
+            "cleansing has to cost the enemy damage - uncleansed {:.0}, cleansed {:.0}",
+            exposed.incoming_damage,
+            cleansed.incoming_damage
+        );
+        assert!(
+            cleansed.remaining_health_ratio > exposed.remaining_health_ratio,
+            "and has to show up as health left on the bar - uncleansed {:.0}%, cleansed {:.0}%",
+            exposed.remaining_health_ratio * 100.0,
+            cleansed.remaining_health_ratio * 100.0
+        );
+    }
+
+    /// Pressure oscillates: ramp, peak, then a lull long enough to recover in.
+    ///
+    /// A flat script makes raw mitigation per second the only thing the
+    /// sustain gates can see, and turns a longer window into nothing but more
+    /// total damage - which is how a 20 s support window came to fail
+    /// `SustainRecovery` for 86% of the published corpus while a 5 s DPS
+    /// window passed 100% of it.
+    #[test]
+    fn the_generated_burst_peaks_and_then_lets_go() {
+        let scenario = ScenarioSpec {
+            game_mode: GameMode::WvW,
+            combat_tier: CombatTier::Solo,
+            combat_kind: CombatKind::Support,
+            target_profile: TargetProfile::Single,
+            optimization_target: OptimizationTarget {
+                label: "burst shape".into(),
+            },
+            patch_id: None,
+            objective_profile_id: None,
+        };
+        let params = params();
+        let profile = WvwProfile::for_scenario(&scenario, &open_enemy(false), &params, 20_000);
+
+        let strikes: Vec<(u32, f64)> = profile
+            .enemy_events
+            .iter()
+            .filter_map(|e| match e.kind {
+                EnemyEventKind::Strike { damage, .. } => Some((e.at_ms, damage)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            strikes.len() >= 4,
+            "a 20 s window has to carry more than one burst: {strikes:?}"
+        );
+
+        let biggest = strikes.iter().map(|(_, d)| *d).fold(0.0_f64, f64::max);
+        let smallest = strikes.iter().map(|(_, d)| *d).fold(f64::MAX, f64::min);
+        assert!(
+            biggest >= smallest * 4.0,
+            "the peak has to dwarf the chip or an evade spent on it buys nothing:              {smallest:.0} .. {biggest:.0}"
+        );
+
+        // The lull. Consecutive event gaps must include one long enough to
+        // land a heal and have it matter.
+        let mut times: Vec<u32> = profile.enemy_events.iter().map(|e| e.at_ms).collect();
+        times.sort_unstable();
+        let longest_gap = times.windows(2).map(|w| w[1] - w[0]).max().unwrap_or(0);
+        assert!(
+            longest_gap >= MIN_PROTECTED_WINDOW_MS,
+            "no recovery window in the script: longest gap {longest_gap}ms"
+        );
+    }
+
     #[test]
     fn recovery_kit_outlasts_the_same_pressure_script() {
         let events = vec![
@@ -3109,7 +3419,7 @@ mod tests {
         );
         for _ in 0..160 {
             timeline.now_ms += TIMELINE_TICK_MS;
-            timeline.tick_alacrity_recharge();
+            timeline.tick_recharge_rate();
         }
         assert!(
             timeline.cooldown_ready_ms[0] <= timeline.now_ms,
@@ -3145,13 +3455,13 @@ mod tests {
         timeline.set_skill_cooldown(1, 10_000);
         for _ in 0..40 {
             timeline.now_ms += TIMELINE_TICK_MS;
-            timeline.tick_alacrity_recharge();
+            timeline.tick_recharge_rate();
         }
         assert_eq!(timeline.cooldown_ready_ms[0], 10_000);
         timeline.apply_buff("Alacrity", 1, 30_000, false);
         for _ in 0..128 {
             timeline.now_ms += TIMELINE_TICK_MS;
-            timeline.tick_alacrity_recharge();
+            timeline.tick_recharge_rate();
         }
         assert!(
             timeline.cooldown_ready_ms[0] <= timeline.now_ms,
