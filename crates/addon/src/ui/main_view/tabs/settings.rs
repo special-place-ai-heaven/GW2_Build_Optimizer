@@ -725,9 +725,16 @@ fn news_source_tick(ui: &Ui, state: &mut AddonState, src: NewsSource) {
 
 fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let right_item_w = col_w - 12.0;
+    // Paired two to a row. Each of these was a label on one line and a
+    // control on the next, so four settings cost eight rows in a panel that
+    // is short on height and has width to spare.
+    //
+    // `ui.group` + `same_line`, never a nested `ui.columns`: this renders
+    // inside the tab's right-hand column, and opening a column set here
+    // would end that one and drop the rest of the tab into a single
+    // full-width column. Same rule as `render_news_sources`.
+    let pair_w = (right_item_w - 12.0) * 0.5;
 
-    ui.text(t("settings.language"));
-    ui.set_next_item_width(right_item_w * 0.6);
     let resolved = gw2_core::i18n::resolve(&state.config.ui_language);
     let cache = gw2_api::cache::DataCache::new(state.addon_dir.join("cache"));
     let build = state
@@ -760,6 +767,9 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
                 .unwrap_or(state.config.ui_language.as_str())
         )
     };
+    ui.group(|| {
+    ui.text(t("settings.language"));
+    ui.set_next_item_width(pair_w);
     if let Some(_c) = ComboBox::new("##ui_language")
         .preview_value(&preview)
         .begin(ui)
@@ -793,11 +803,37 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             }
         }
     }
+    });
+    ui.same_line();
+    ui.group(|| {
+        ui.text(t("settings.font"));
+        ui.set_next_item_width(pair_w);
+        let current_font = state.config.ui_font.clone();
+        let font_preview = t(crate::ui::fonts::label_key(&current_font));
+        if let Some(_c) = ComboBox::new("##ui_font")
+            .preview_value(&font_preview)
+            .begin(ui)
+        {
+            for (id, key) in crate::ui::fonts::combo_options() {
+                let label = t(key);
+                let sel = current_font == id;
+                if Selectable::new(&label).selected(sel).build(ui) && !sel {
+                    state.config.ui_font = id.to_string();
+                    crate::ui::save_config_detached(state);
+                }
+            }
+        }
+    });
+    // Both legends below the pair rather than inside it: wrapped prose in a
+    // group is measured against the whole column, which would widen the
+    // first group and push the second off the panel.
     theme::wrapped(ui, theme::pal().muted, &t("settings.lang_pack_legend"));
+    theme::wrapped(ui, theme::pal().muted, &t("settings.font_hint"));
     ui.spacing();
 
+    ui.group(|| {
     ui.text(t("settings.opacity"));
-    ui.set_next_item_width(right_item_w * 0.6);
+    ui.set_next_item_width(pair_w);
     let mut opacity = state.config.window_opacity;
     if nexus::imgui::Slider::new("##opacity", 0.3, 1.0)
         .display_format("%.2f")
@@ -806,36 +842,20 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         state.config.window_opacity = opacity;
         crate::ui::save_config_detached(state);
     }
-
-    ui.text(t("settings.scale"));
-    ui.set_next_item_width(right_item_w * 0.6);
-    let mut scale = state.config.font_scale;
-    if nexus::imgui::Slider::new("##font_scale", 0.5, 2.0)
-        .display_format("%.2f")
-        .build(ui, &mut scale)
-    {
-        state.config.font_scale = scale;
-        crate::ui::save_config_detached(state);
-    }
-
-    ui.text(t("settings.font"));
-    ui.set_next_item_width(right_item_w * 0.6);
-    let current_font = state.config.ui_font.clone();
-    let font_preview = t(crate::ui::fonts::label_key(&current_font));
-    if let Some(_c) = ComboBox::new("##ui_font")
-        .preview_value(&font_preview)
-        .begin(ui)
-    {
-        for (id, key) in crate::ui::fonts::combo_options() {
-            let label = t(key);
-            let sel = current_font == id;
-            if Selectable::new(&label).selected(sel).build(ui) && !sel {
-                state.config.ui_font = id.to_string();
-                crate::ui::save_config_detached(state);
-            }
+    });
+    ui.same_line();
+    ui.group(|| {
+        ui.text(t("settings.scale"));
+        ui.set_next_item_width(pair_w);
+        let mut scale = state.config.font_scale;
+        if nexus::imgui::Slider::new("##font_scale", 0.5, 2.0)
+            .display_format("%.2f")
+            .build(ui, &mut scale)
+        {
+            state.config.font_scale = scale;
+            crate::ui::save_config_detached(state);
         }
-    }
-    theme::wrapped(ui, theme::pal().muted, &t("settings.font_hint"));
+    });
 
     ui.dummy([0.0, 8.0]);
     render_theme_style_section(ui, state, right_item_w);
