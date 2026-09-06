@@ -253,6 +253,50 @@ pub(crate) fn build_code_in(html: &str) -> Option<String> {
     crate::build_template::find_in_text(&unescape_entities(html)).map(|(code, _)| code)
 }
 
+/// The job a build's own name states.
+///
+/// All three sites title a build the same way — "Power Dragonhunter", "Heal
+/// Alacrity Tempest", "Condition Reaper", "Celestial Willbender" — so the
+/// name is a statement of the role rather than a guess about it.
+///
+/// The alternative, asking whether the page text contains a word, fails on
+/// every site for the same reason: a build page discusses the options it
+/// rejected. Hardstuck's scan for "condi" answered yes on nearly every page,
+/// which is how 142 of its 157 stored rows became "Condi DPS" and only six
+/// anything else.
+///
+/// Boon roles are checked before damage ones: a "Heal Alacrity Tempest"
+/// heals, and a "Quickness Dragonhunter" is a boon build that also does
+/// damage. `None` when the name names no job, so the caller can say so
+/// instead of defaulting to Power DPS.
+pub fn role_in_name(name: &str) -> Option<&'static str> {
+    let name = name.to_ascii_lowercase();
+    let has = |word: &str| name.contains(word);
+    // Most specific first — "heal alacrity" is a healer, not a boon DPS.
+    if has("heal") {
+        return Some("Heal Support");
+    }
+    if has("support") {
+        return Some("Support");
+    }
+    if has("tank") {
+        return Some("Tank");
+    }
+    if has("alacrity") || has("quickness") || has("boon") {
+        return Some("Boon DPS");
+    }
+    if has("condition") || has("condi") {
+        return Some("Condition DPS");
+    }
+    if has("celestial") || has("hybrid") {
+        return Some("Hybrid");
+    }
+    if has("power") {
+        return Some("Power DPS");
+    }
+    None
+}
+
 /// Split a `data-gw2-id="21152,94901"` style attribute into ids.
 ///
 /// One embed can carry a whole skill bar, or both sigils of a PvP weapon
