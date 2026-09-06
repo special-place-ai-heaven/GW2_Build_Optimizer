@@ -339,6 +339,8 @@
   "cmp.ai": "AIシナジー分析中...",
   "cmp.none": "提案がありません。先にオプティマイザーを実行してください。",
   "cmp.also_like": "他にもおすすめのビルド",
+  "cmp.none_of_mine": "すみません、これ以上よくできませんでした。こちらはいかがですか",
+  "fmt.kept_your_build": "あなたのビルドを維持しました。上回るものが作れませんでした。{why}",
   "fmt.plated_with_concern": "ビルドはこちら。ただし注意: {concern}",
   "fmt.plate_concern": "注意: {concern}",
   "cmp.also_like_short": "こちらもおすすめ",

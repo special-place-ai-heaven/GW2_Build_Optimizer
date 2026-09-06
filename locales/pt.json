@@ -339,6 +339,8 @@
   "cmp.ai": "Executando análise de sinergia por IA...",
   "cmp.none": "Nenhuma sugestão disponível. Execute o otimizador primeiro.",
   "cmp.also_like": "Outras sugestões de que pode gostar",
+  "cmp.none_of_mine": "Desculpa, não consegui melhorar. Talvez estas",
+  "fmt.kept_your_build": "Mantive a tua build - nada do que fiz a superou. {why}",
   "fmt.plated_with_concern": "Aqui está a build, mas atenção: {concern}",
   "fmt.plate_concern": "Atenção: {concern}",
   "cmp.also_like_short": "Também pode gostar",

@@ -345,6 +345,8 @@
   "cmp.ai": "Running AI synergy analysis...",
   "cmp.none": "No suggestions available. Run the optimizer first.",
   "cmp.also_like": "Additional suggestions you might like",
+  "cmp.none_of_mine": "Sorry, I could not improve on that. You might like these",
+  "fmt.kept_your_build": "I kept your build - nothing I plated beat it. {why}",
   "fmt.plated_with_concern": "Here is the build, but be warned: {concern}",
   "fmt.plate_concern": "Be warned: {concern}",
   "cmp.also_like_short": "You might also like",

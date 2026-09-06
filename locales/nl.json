@@ -339,6 +339,8 @@
   "cmp.ai": "AI-synergieanalyse bezig...",
   "cmp.none": "Geen suggesties beschikbaar. Voer eerst de optimizer uit.",
   "cmp.also_like": "Meer suggesties die je misschien bevallen",
+  "cmp.none_of_mine": "Sorry, ik kon het niet verbeteren. Misschien deze",
+  "fmt.kept_your_build": "Ik heb je build behouden - niets van mij was beter. {why}",
   "fmt.plated_with_concern": "Hier is de build, maar let op: {concern}",
   "fmt.plate_concern": "Let op: {concern}",
   "cmp.also_like_short": "Misschien ook interessant",
