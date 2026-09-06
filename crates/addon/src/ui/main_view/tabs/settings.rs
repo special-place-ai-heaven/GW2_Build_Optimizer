@@ -626,7 +626,7 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     // the provider cannot keep.
     let free_label = t("settings.free_only");
     let any_free = catalog.iter().any(|m| m.free);
-    let free_w = theme::gold_button_width(ui, free_label.as_str());
+    let free_w = theme::switch_width(ui, free_label.as_str());
     let combo_w = (row_w - label_w - refresh_w - free_w - gap * 3.0).max(48.0);
     let row_h = ui.frame_height().max(theme::control_height(ui));
 
@@ -646,33 +646,29 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         combo_w,
     );
     let free_x = origin[0] + row_w - refresh_w - gap - free_w;
-    ui.set_cursor_screen_pos([free_x, origin[1]]);
-    if any_free {
-        if theme::pill(
-            ui,
-            &free_label,
-            state.config.free_models_only,
-            "##free_models",
-        ) {
-            state.config.free_models_only = !state.config.free_models_only;
-            crate::ui::save_config_detached(state);
-        }
-    } else {
-        let dim = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::pill(ui, &free_label, false, "##free_models_off");
-        dim.pop();
-        if ui.is_item_hovered() {
-            ui.tooltip_text(t("settings.free_none"));
-        }
-    }
-    // Rises while the filter is on, sinks while it is off. Eased per frame so
-    // it slides and fades rather than blinking into place.
+    ui.set_cursor_screen_pos([free_x, origin[1] + (row_h - ui.text_line_height()) * 0.5]);
+    // One eased value drives the knob and the Choya together, so the switch
+    // does not snap while the dancer slides.
     let want = if any_free && state.config.free_models_only {
         1.0
     } else {
         0.0
     };
     state.main.free_choya_rise += (want - state.main.free_choya_rise) * 0.08;
+    let slide = state.main.free_choya_rise;
+    if any_free {
+        if theme::switch(ui, &free_label, slide, "##free_models") {
+            state.config.free_models_only = !state.config.free_models_only;
+            crate::ui::save_config_detached(state);
+        }
+    } else {
+        let dim = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
+        theme::switch(ui, &free_label, 0.0, "##free_models_off");
+        dim.pop();
+        if ui.is_item_hovered() {
+            ui.tooltip_text(t("settings.free_none"));
+        }
+    }
     theme::draw_free_choya(
         ui,
         [free_x + free_w * 0.5, origin[1]],
