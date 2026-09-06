@@ -7,6 +7,7 @@ use gw2_core::types::GameMode;
 use gw2_optimizer::scenario::{CombatTier, RoleObjective};
 use gw2_optimizer::scoring::OptimizationWeights;
 
+pub(in crate::ui) mod provider_picks;
 pub(crate) mod build_display;
 mod character;
 mod chat_flow;

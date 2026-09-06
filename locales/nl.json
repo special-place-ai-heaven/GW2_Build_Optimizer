@@ -339,6 +339,8 @@
   "cmp.ai": "AI-synergieanalyse bezig...",
   "cmp.none": "Geen suggesties beschikbaar. Voer eerst de optimizer uit.",
   "cmp.also_like": "Meer suggesties die je misschien bevallen",
+  "cmp.also_like_short": "Misschien ook interessant",
+  "fmt.open_from": "Deze {site}-build openen",
   "fmt.site_link": "{site}-link",
   "fmt.published_by": "Gepubliceerd door {source} als {role}.",
   "cmp.sync_for_more": "Meer buildsuggesties? Synchroniseer de community-builds één keer en Choya toont de dichtstbijzijnde gepubliceerde build van elke site.",

@@ -129,6 +129,10 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 }
                 ui.same_line_with_spacing(0.0, 12.0);
             }
+            crate::ui::comparison::render_source_link(
+                ui,
+                &state.main.comparison.suggestions[selected],
+            );
             crate::ui::comparison::render_result_pane_tabs(
                 ui,
                 &mut state.main.comparison.result_pane,

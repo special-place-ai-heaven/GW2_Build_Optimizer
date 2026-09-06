@@ -339,6 +339,8 @@
   "cmp.ai": "Analisi sinergia IA in corso...",
   "cmp.none": "Nessun suggerimento disponibile. Esegui prima l'ottimizzatore.",
   "cmp.also_like": "Altri suggerimenti che potrebbero piacerti",
+  "cmp.also_like_short": "Potrebbe piacerti anche",
+  "fmt.open_from": "Apri questa build di {site}",
   "fmt.site_link": "Link {site}",
   "fmt.published_by": "Pubblicata da {source} come {role}.",
   "cmp.sync_for_more": "Vuoi altri suggerimenti? Sincronizza le build della community una volta e Choya ti mostrerà la build pubblicata più simile di ogni sito.",

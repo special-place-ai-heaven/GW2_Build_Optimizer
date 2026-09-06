@@ -339,6 +339,8 @@
   "cmp.ai": "正在运行 AI 协同分析...",
   "cmp.none": "暂无建议，请先运行优化器。",
   "cmp.also_like": "你可能还会喜欢的推荐",
+  "cmp.also_like_short": "你可能也喜欢",
+  "fmt.open_from": "打开这个 {site} 构建",
   "fmt.site_link": "{site} 链接",
   "fmt.published_by": "由 {source} 以 {role} 发布。",
   "cmp.sync_for_more": "想要更多构建推荐？同步一次社区构建，Choya 就会显示每个网站最接近的已发布构建。",
