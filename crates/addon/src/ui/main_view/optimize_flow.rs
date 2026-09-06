@@ -664,7 +664,7 @@ fn enrich_with_llm(
     // Build tool-aware prompt. Which prompt to use is the entry point's call,
     // not something to re-derive from whether a build summary happens to be
     // non-empty: a New Build run on a geared character has a summary too.
-    let prompt = match entry {
+    let mut prompt = match entry {
         OptimizeEntry::Improve => gw2_optimizer::prompts::improve_build_prompt_with_tools(
             profession_name,
             weights,
@@ -674,6 +674,12 @@ fn enrich_with_llm(
             gw2_optimizer::prompts::new_build_prompt_with_tools(profession_name, weights, game_mode)
         }
     };
+    // Handed over, not fetched — same reason as the chat path. See
+    // `profession_reference`.
+    prompt.push_str(&gw2_optimizer::gemini_tools::profession_reference(
+        db,
+        profession_name,
+    ));
 
     let tools = gw2_optimizer::llm::tools::tool_definitions();
     let build_summary_owned = current_build_summary.map(|s| s.to_string());
