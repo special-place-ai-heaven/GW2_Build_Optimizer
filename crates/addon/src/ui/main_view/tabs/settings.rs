@@ -1780,8 +1780,26 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
             .map(|mode| ui.calc_text_size(mode)[0])
             .fold(ui.calc_text_size("8888")[0], f32::max)
             + 12.0 * scale;
-        let retry_w = 76.0 * scale;
-        let spare = ui.content_region_avail()[0] - label_w - retry_w;
+        // Measured, not guessed: `gold_button_sized` grows a button past the
+        // width it is given when the label needs more, so a fixed 76px
+        // reservation was wrong at any font scale where "Retry" got wider
+        // than that, and the button hung off the panel.
+        let retry_button_w =
+            theme::gold_button_width(ui, t("btn.retry")).max(56.0 * scale);
+        // Reserved only when a source actually has failures. The column is
+        // drawn per row under the same condition, so reserving it
+        // unconditionally spent a fifth of the panel on nothing in the
+        // ordinary case where every source read cleanly.
+        let any_failed = BENCHMARK_SOURCES
+            .iter()
+            .any(|(key, _)| state.main.benchmark_failed.get(*key).copied().unwrap_or(0) > 0);
+        let retry_w = if any_failed {
+            ui.calc_text_size("88")[0] + ui.clone_style().item_spacing[0] + retry_button_w
+        } else {
+            0.0
+        };
+        let avail = ui.content_region_avail()[0];
+        let spare = avail - label_w - retry_w;
         let mode_w = (spare / BENCHMARK_MODES.len() as f32).max(min_mode_w);
 
         // Cells are placed with `set_cursor_pos` from the row's own starting
@@ -1790,6 +1808,12 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         // counts were drawn on top of the source names — "Snowcr180".
         let row_x = ui.cursor_pos()[0];
         let column_at = |n: usize| row_x + label_w + mode_w * n as f32;
+        // The failure column is pinned inside the panel. `mode_w` takes
+        // whichever is larger of its share and a readable minimum, so when
+        // the minimum wins the mode columns are wider than the space they
+        // were dealt and the column after them lands past the right edge —
+        // which is where the Retry button went.
+        let fail_x = column_at(BENCHMARK_MODES.len()).min(row_x + avail - retry_w);
 
         // Header: an empty corner cell, then the modes.
         let header_y = ui.cursor_pos()[1];
@@ -1822,7 +1846,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
                 .copied()
                 .unwrap_or(0);
             if bad > 0 {
-                ui.set_cursor_pos([column_at(BENCHMARK_MODES.len()), row_y]);
+                ui.set_cursor_pos([fail_x, row_y]);
                 ui.text_colored([1.0, 0.4, 0.2, 1.0], bad.to_string());
                 ui.same_line();
                 // Only where there is something to retry, and cheap to take:
@@ -1831,7 +1855,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
                 if theme::gold_button_sized(
                     ui,
                     format!("{}##retry_{key}", t("btn.retry")),
-                    [56.0 * scale, 0.0],
+                    [retry_button_w, 0.0],
                 ) {
                     retry_requested = true;
                 }
