@@ -250,6 +250,54 @@ fn amulet(variant: &::html::ElementRef<'_>) -> Option<u32> {
         .find_map(|a| a.value().attr("objid")?.trim().parse().ok())
 }
 
+/// The build's own name, which is where its role is stated.
+///
+/// `<h1>` reads `Power Dragonhunter` then a publication date on its own
+/// line; the title says the same thing followed by " Build (Group PvE)".
+/// Either names the job — Power, Condition, Heal Alacrity, Support — where
+/// asking whether the page text contains "condi" answers yes on nearly
+/// every page, which is why 142 of 157 stored Hardstuck rows are "Condi
+/// DPS".
+pub fn build_name(html: &str) -> Option<String> {
+    let document = ::html::Html::parse_document(html);
+    let h1 = ::html::Selector::parse("h1").expect("valid selector");
+    let raw = document.select(&h1).next()?.text().collect::<String>();
+    // `<h1>Heal Alacrity Tempest\t\t\t\t\tFebruary 2025</h1>` — the date
+    // trails the name inside the same element, separated by a run of
+    // whitespace. Splitting on that run is what tells them apart; splitting
+    // on the first digit would keep "February", and normalising the
+    // whitespace first would destroy the only separator there is.
+    let name = raw
+        .char_indices()
+        .zip(raw.char_indices().skip(1))
+        .find(|((_, a), (_, b))| a.is_whitespace() && b.is_whitespace())
+        .map_or(raw.as_str(), |((at, _), _)| &raw[..at]);
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!name.is_empty()).then_some(name)
+}
+
+/// Mode and scale as the page files them, from the game type in `<title>`.
+///
+/// Hardstuck's four game types are `open-world`, `group-pve`, `wvw` and
+/// `pvp` — the same solo/group/competitive split GuildJen makes with its
+/// category pages. The scale is empty outside PvE, where the mode already
+/// says how many people are involved.
+pub fn mode_and_scale(html: &str) -> Option<(&'static str, &'static str)> {
+    let document = ::html::Html::parse_document(html);
+    let title = ::html::Selector::parse("title").expect("valid selector");
+    let text = document.select(&title).next()?.text().collect::<String>();
+    // "Power Dragonhunter Build (Group PvE)  - Hardstuck"
+    let inside = text.split_once('(')?.1.split_once(')')?.0.trim().to_ascii_lowercase();
+    match inside.as_str() {
+        "open world" | "open-world" => Some(("PvE", "Open World")),
+        "group pve" | "group-pve" => Some(("PvE", "Group")),
+        "pve" => Some(("PvE", "")),
+        "wvw" => Some(("WvW", "")),
+        "pvp" => Some(("PvP", "")),
+        _ => None,
+    }
+}
+
 /// The game mode the page states, rather than one inferred from its text.
 ///
 /// The old heuristic asked whether the page contained "pvp", and every
@@ -419,6 +467,60 @@ mod tests {
             build.dominant_stat(),
             None,
             "PvP states no gear prefix — the amulet is the stat source"
+        );
+    }
+
+    /// Titles and headings verbatim from three Hardstuck pages, 2026-09-06.
+    /// The heading carries the publication date after a run of tabs, and the
+    /// title carries the game type in parentheses.
+    #[test]
+    fn the_name_and_game_type_are_read_from_what_the_page_states() {
+        for (title, heading, name, mode, scale) in [
+            (
+                "Power Dragonhunter Build (Group PvE)  - Hardstuck",
+                "Power Dragonhunter\t\t\t\t\t\tJune 2024",
+                "Power Dragonhunter",
+                "PvE",
+                "Group",
+            ),
+            (
+                "Blood Harbinger Build (PvP)  - Hardstuck",
+                "Blood Harbinger\t\t\t\t\t\tFebruary 2025",
+                "Blood Harbinger",
+                "PvP",
+                "",
+            ),
+            (
+                "Heal Alacrity Tempest Build (Group PvE)  - Hardstuck",
+                "Heal Alacrity Tempest\t\t\t\t\t\tFebruary 2025",
+                "Heal Alacrity Tempest",
+                "PvE",
+                "Group",
+            ),
+        ] {
+            let page = format!("<html><head><title>{title}</title></head><body><h1>{heading}</h1></body></html>");
+            assert_eq!(
+                build_name(&page).as_deref(),
+                Some(name),
+                "the date must not join the name: {heading:?}"
+            );
+            assert_eq!(mode_and_scale(&page), Some((mode, scale)), "{title:?}");
+        }
+    }
+
+    /// A build whose name states no job says so, rather than defaulting to
+    /// Power DPS the way the old text scan did.
+    #[test]
+    fn a_name_without_a_job_claims_none() {
+        assert_eq!(super::super::role_in_name("Blood Harbinger"), None);
+        assert_eq!(
+            super::super::role_in_name("Heal Alacrity Tempest"),
+            Some("Heal Support"),
+            "a healer first, not a boon build"
+        );
+        assert_eq!(
+            super::super::role_in_name("Power Dragonhunter"),
+            Some("Power DPS")
         );
     }
 

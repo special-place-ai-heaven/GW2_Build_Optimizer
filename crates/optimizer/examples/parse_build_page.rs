@@ -21,7 +21,11 @@ fn main() {
         "guildjen" => providers::guildjen::parse(&html),
         "snowcrows" => providers::snowcrows::parse(&html),
         "hardstuck" => {
-            println!("  game mode  : {:?}", providers::hardstuck::game_mode(&html));
+            let name = providers::hardstuck::build_name(&html).unwrap_or_default();
+            println!("  name       : {name:?}");
+            println!("  mode/scale : {:?}", providers::hardstuck::mode_and_scale(&html));
+            println!("  class says : {:?}", providers::hardstuck::game_mode(&html));
+            println!("  role       : {:?}", providers::role_in_name(&name));
             providers::hardstuck::parse(&html)
         }
         other => {

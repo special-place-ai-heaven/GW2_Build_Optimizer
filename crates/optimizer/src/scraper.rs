@@ -664,30 +664,23 @@ fn scrape_hardstuck_build(
     // Spec name from slug (same approach as Snowcrows)
     let spec_name = extract_spec_from_slug(slug);
 
-    // Mode: try to extract from page content — Hardstuck tags with PVP/WVW/PVE labels
-    let html_lower = html.to_lowercase();
-    let mode = if html_lower.contains("pvp") || html_lower.contains("player vs player") {
-        "PvP"
-    } else if html_lower.contains("wvw") || html_lower.contains("world vs world") {
-        "WvW"
-    } else {
-        "PvE"
-    };
-
-    // Role from page content
-    let role = if html_lower.contains("condi") || html_lower.contains("condition damage") {
-        "Condi DPS"
-    } else if html_lower.contains("support")
-        || html_lower.contains("healer")
-        || html_lower.contains("heal")
-    {
-        "Heal Support"
-    } else if html_lower.contains("bruiser") || html_lower.contains("sustain") {
-        "Sustain / Bruiser"
-    } else if html_lower.contains("roamer") || html_lower.contains("roaming") {
-        "WvW Roaming"
-    } else {
-        "Power DPS"
+    // Mode and role as the page states them, never scanned out of its text.
+    // Both used to be `html.contains(..)` over the whole page, and both were
+    // wrong nearly always: every Hardstuck page names all three modes in its
+    // filter nav, so the mode scan answered PvP for all eleven pages
+    // measured while the page's own class said six PvE, four PvP and one
+    // WvW — hence nine `hardstuck_*_pvp.json` files and no PvE or WvW ones.
+    // The role scan matched "condi" on nearly every page, giving 142 of 157
+    // stored rows the role "Condi DPS".
+    let (mode, scale) = crate::providers::hardstuck::mode_and_scale(&html)
+        .or_else(|| crate::providers::hardstuck::game_mode(&html).map(|mode| (mode, "")))
+        .unwrap_or(("PvE", ""));
+    let name = crate::providers::hardstuck::build_name(&html).unwrap_or_default();
+    let role = match crate::providers::role_in_name(&name) {
+        Some(job) if scale.is_empty() => job.to_string(),
+        Some(job) => format!("{scale} {job}"),
+        // The name states no job. Saying so beats claiming Power DPS.
+        None => scale.to_string(),
     };
 
     Ok(benchmark_from_html(
@@ -698,7 +691,7 @@ fn scrape_hardstuck_build(
         profession,
         spec_name,
         mode,
-        role,
+        &role,
     ))
 }
 
