@@ -53,18 +53,26 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
             .default_game_mode
             .clone()
             .unwrap_or_else(|| "PvE".into());
-        // Three even columns rather than a stack: the labels are four
-        // characters, the panel is short on height and has width to spare.
-        ui.columns(3, "##default_mode_cols", false);
-        for mode in ["PvE", "PvP", "WvW"] {
-            let is_sel = current_default == mode;
+        // One row rather than a stack: the labels are three characters and
+        // the panel is short on height.
+        //
+        // `same_line`, never a nested `ui.columns`. ImGui columns do not
+        // nest: opening a set inside another ENDS the outer one, and closing
+        // it with `columns(1)` leaves the rest of the tab in a single
+        // full-width column. That is what happened here — everything from
+        // this row down rendered full width, the right-hand column never
+        // appeared, and UI Preferences picked up the right column's 48px
+        // indent while sitting under News.
+        for (at, mode) in ["PvE", "PvP", "WvW"].iter().enumerate() {
+            if at > 0 {
+                ui.same_line();
+            }
+            let is_sel = current_default == *mode;
             if ui.radio_button_bool(mode, is_sel) && !is_sel {
-                state.config.default_game_mode = Some(mode.to_string());
+                state.config.default_game_mode = Some((*mode).to_string());
                 let _ = state.config.save(&state.config_path);
             }
-            ui.next_column();
         }
-        ui.columns(1, "##default_mode_end", false);
     }
 
     ui.dummy([0.0, 8.0]);
@@ -98,17 +106,19 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
     ui.unindent_by(gutter);
     ui.columns(1, "##settings_split_end", false);
 
+    // Cache and Benchmarks run full width, one under the other, rather than
+    // side by side. The benchmark grid is a five-column table — providers
+    // down the side, game modes across — and a column set cannot be opened
+    // inside another one: doing so would end the pair and leave the rest of
+    // the tab single-column, which is the same fault that was breaking
+    // everything below Default Game Mode. It wants the width anyway.
     ui.dummy([0.0, 8.0]);
-    ui.columns(2, "##settings_bottom", false);
-    ui.set_column_width(0, col_w);
     build_display::render_card_header(ui, &t("settings.cache"), theme::pal().gold);
     render_cache_section(ui, state);
-    ui.next_column();
-    ui.indent_by(gutter);
+
+    ui.dummy([0.0, 8.0]);
     build_display::render_card_header(ui, &t("settings.benchmarks"), [0.6, 0.8, 1.0, 1.0]);
     render_benchmark_section(ui, state);
-    ui.unindent_by(gutter);
-    ui.columns(1, "##settings_end", false);
 
     // ── Footer ─────────────────────────────────────────────────────
     ui.dummy([0.0, 4.0]);
