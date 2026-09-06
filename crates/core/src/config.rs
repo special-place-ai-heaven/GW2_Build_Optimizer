@@ -621,8 +621,6 @@ pub const DEFAULT_WINDOW_POS: [f32; 2] = [80.0, 80.0];
 /// [`initial_window_size`] (~80% of the monitor, width capped at 1920).
 pub const DEFAULT_WINDOW_SIZE: [f32; 2] = [1536.0, 864.0];
 pub const MIN_WINDOW_SIZE: [f32; 2] = [640.0, 400.0];
-/// First-run size before 1.7.22. Reset / missing size no longer uses this.
-pub const LEGACY_FIRST_WINDOW_SIZE: [f32; 2] = [800.0, 600.0];
 
 /// First-run and "Reset layout" size: 80% of the monitor. Ultrawide
 /// (`width/height > 2`) is sized as 1920-wide so the overlay does not

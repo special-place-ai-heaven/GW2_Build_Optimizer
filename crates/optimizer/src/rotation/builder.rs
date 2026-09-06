@@ -1068,6 +1068,9 @@ mod tests {
             sourced_skill_value(&wvw, 13097, "damage_coefficient:below_25"),
             Some(2.0)
         );
+        assert_eq!(sourced_skill_u32(&pve, 13097, "activation_ms"), Some(750));
+        assert_eq!(sourced_skill_u32(&pvp, 13097, "activation_ms"), Some(750));
+        assert_eq!(sourced_skill_u32(&wvw, 13097, "activation_ms"), Some(750));
     }
 
     #[test]

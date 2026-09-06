@@ -25,7 +25,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use nexus::imgui::TextureId;
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -175,11 +175,8 @@ pub fn texture(url: &str) -> Option<TextureId> {
     // so past the cap this session renders letter plates instead.
     {
         let mut set = created();
-        if !set.contains(&id) {
-            if set.len() >= MAX_TEXTURES {
-                return None;
-            }
-            set.insert(id.clone());
+        if !crate::cache_bounds::admit_texture(&mut set, &id, MAX_TEXTURES) {
+            return None;
         }
     }
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -333,42 +330,8 @@ fn download(url: &str, dir: &Path, token: &CancellationToken, version: &str) -> 
     let tmp = path.with_extension(format!("{ext}.tmp"));
     std::fs::write(&tmp, &bytes).ok()?;
     std::fs::rename(&tmp, &path).ok()?;
-    evict_oldest(dir, MAX_CACHE_FILES);
+    crate::cache_bounds::evict_oldest(dir, MAX_CACHE_FILES);
     Some(path)
-}
-
-/// Keep the cache folder bounded across months: after a write, delete the
-/// oldest files (by mtime) beyond the cap. Worker thread only. A file evicted
-/// while its slot is still `Ready` just falls back to the letter plate and
-/// self-heals next session.
-fn evict_oldest(dir: &Path, cap: usize) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let files: Vec<(SystemTime, PathBuf)> = rd
-        .filter_map(|e| {
-            let e = e.ok()?;
-            let md = e.metadata().ok()?;
-            if !md.is_file() {
-                return None;
-            }
-            Some((md.modified().ok()?, e.path()))
-        })
-        .collect();
-    for path in evict_victims(files, cap) {
-        let _ = std::fs::remove_file(&path);
-    }
-}
-
-/// Pure eviction pick: everything beyond `cap`, oldest first.
-fn evict_victims(mut files: Vec<(SystemTime, PathBuf)>, cap: usize) -> Vec<PathBuf> {
-    if files.len() <= cap {
-        return Vec::new();
-    }
-    files.sort_by_key(|(t, _)| *t);
-    let n = files.len() - cap;
-    files.truncate(n);
-    files.into_iter().map(|(_, p)| p).collect()
 }
 
 #[cfg(test)]
@@ -481,40 +444,17 @@ mod tests {
 
     #[test]
     fn texture_budget_admits_distinct_ids_up_to_cap() {
-        // Mirrors the gate in `texture()`: distinct ids up to the cap, known
-        // ids always (re-creation after a deferred first call is free).
         let mut set: HashSet<String> = HashSet::new();
-        let admit = |set: &mut HashSet<String>, id: &str, cap: usize| -> bool {
-            if !set.contains(id) {
-                if set.len() >= cap {
-                    return false;
-                }
-                set.insert(id.to_string());
-            }
-            true
-        };
-        assert!(admit(&mut set, "a", 2));
-        assert!(admit(&mut set, "b", 2));
-        assert!(!admit(&mut set, "c", 2), "over budget: letter plate");
-        assert!(admit(&mut set, "a", 2), "known id stays creatable");
-        assert!(admit(&mut set, "b", 2));
-    }
-
-    #[test]
-    fn evict_victims_drops_oldest_beyond_cap() {
-        use std::time::UNIX_EPOCH;
-        let t = |s: u64| UNIX_EPOCH + Duration::from_secs(s);
-        let files = vec![
-            (t(30), PathBuf::from("c")),
-            (t(10), PathBuf::from("a")),
-            (t(20), PathBuf::from("b")),
-        ];
-        assert_eq!(evict_victims(files.clone(), 2), vec![PathBuf::from("a")]);
-        assert_eq!(
-            evict_victims(files.clone(), 1),
-            vec![PathBuf::from("a"), PathBuf::from("b")]
+        assert!(crate::cache_bounds::admit_texture(&mut set, "a", 2));
+        assert!(crate::cache_bounds::admit_texture(&mut set, "b", 2));
+        assert!(
+            !crate::cache_bounds::admit_texture(&mut set, "c", 2),
+            "over budget: letter plate"
         );
-        assert!(evict_victims(files, 3).is_empty());
-        assert!(evict_victims(Vec::new(), 0).is_empty());
+        assert!(
+            crate::cache_bounds::admit_texture(&mut set, "a", 2),
+            "known id stays creatable"
+        );
+        assert!(crate::cache_bounds::admit_texture(&mut set, "b", 2));
     }
 }

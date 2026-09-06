@@ -856,7 +856,7 @@ fn select_skills(
                 Some(spec_id) => candidate.spec_ids.contains(&spec_id),
                 None => true,
             })
-            .filter(|s| db.skill_to_palette.is_empty() || db.skill_palette_id(s.id) != 0)
+            .filter(|s| db.skill_palette_id(s.id) != 0)
             .collect();
 
         // Heal skill
@@ -2093,6 +2093,7 @@ pub(crate) mod runtime_diagnostics_tests {
         db.skills_by_profession
             .insert("Warrior".into(), skills.iter().map(|s| s.id).collect());
         for skill in skills {
+            db.skill_to_palette.insert(skill.id, skill.id);
             db.skills.insert(skill.id, skill);
         }
 

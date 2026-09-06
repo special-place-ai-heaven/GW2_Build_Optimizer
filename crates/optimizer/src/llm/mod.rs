@@ -276,6 +276,31 @@ pub fn create_client(
     }
 }
 
+/// Parse tool-call argument JSON. Failure is a tool result the model can
+/// retry from — never an empty-object execute.
+pub(crate) fn parse_tool_arguments(raw: &str) -> Result<Value, Value> {
+    serde_json::from_str(raw)
+        .map_err(|e| serde_json::json!({ "error": format!("unparseable arguments: {e}") }))
+}
+
+pub(crate) fn run_tool_or_parse_error(
+    execute_tool: &mut dyn FnMut(&str, &Value) -> Value,
+    name: &str,
+    raw_args: &str,
+) -> Value {
+    match parse_tool_arguments(raw_args) {
+        Ok(args) => execute_tool(name, &args),
+        Err(err) => err,
+    }
+}
+
+pub(crate) fn unparseable_tool_input(input: &Value) -> bool {
+    input
+        .get("error")
+        .and_then(|e| e.as_str())
+        .is_some_and(|s| s.starts_with("unparseable arguments:"))
+}
+
 #[cfg(test)]
 mod billing_tests {
     use super::has_billing_keyword;
@@ -304,5 +329,52 @@ mod billing_tests {
         assert!(!has_billing_keyword("Bad request: missing required field"));
         assert!(!has_billing_keyword("Internal server error"));
         assert!(!has_billing_keyword(""));
+    }
+}
+
+#[cfg(test)]
+mod tool_arg_tests {
+    use super::{parse_tool_arguments, run_tool_or_parse_error, unparseable_tool_input};
+    use serde_json::Value;
+
+    #[test]
+    fn truncated_json_is_error_not_empty_object() {
+        let err = parse_tool_arguments(r#"{"profession":"War"#).expect_err("truncated");
+        let msg = err["error"].as_str().expect("error string");
+        assert!(msg.starts_with("unparseable arguments:"), "got {msg}");
+        assert!(!unparseable_tool_input(&Value::Object(Default::default())));
+        assert!(unparseable_tool_input(&err));
+    }
+
+    #[test]
+    fn valid_args_reach_the_tool() {
+        let mut ran = false;
+        let result = run_tool_or_parse_error(
+            &mut |name, args| {
+                ran = true;
+                assert_eq!(name, "square");
+                assert_eq!(args["n"], 7);
+                serde_json::json!({ "ok": true })
+            },
+            "square",
+            r#"{"n":7}"#,
+        );
+        assert!(ran);
+        assert_eq!(result["ok"], true);
+    }
+
+    #[test]
+    fn unparseable_args_do_not_execute() {
+        let mut ran = false;
+        let result = run_tool_or_parse_error(
+            &mut |_, _| {
+                ran = true;
+                serde_json::json!({})
+            },
+            "square",
+            r#"{"n":"#,
+        );
+        assert!(!ran, "truncated args must not execute the tool");
+        assert!(unparseable_tool_input(&result));
     }
 }

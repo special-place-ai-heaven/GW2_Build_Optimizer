@@ -608,6 +608,10 @@ pub struct MainState {
     pub api_health_checking: bool,
     /// Live `/v2/build` id. Compared to `cache_build_number` to prompt a data refresh.
     pub live_build_number: Option<u32>,
+    /// Active-manifest vs live `/v2/build` warning from `check_staleness`.
+    pub manifest_staleness: Option<String>,
+    /// Result of `gw2_optimizer::data::initialize()` at addon load.
+    pub data_state: Option<gw2_optimizer::data::DataState>,
     /// Cached "Usage today" count for the active provider's persisted usage
     /// file, displayed in the Settings tab. Refreshed every ~60 frames (~1s)
     /// instead of reading the file every render frame.
@@ -839,13 +843,11 @@ pub fn init(addon_dir: PathBuf) {
         Screen::Main
     } else if !config.has_gw2_key() {
         Screen::Setup(SetupStep::Language)
-    } else if config.has_gw2_key() && config.has_active_llm_key() {
-        // Keys present but cache missing — go to download
+    } else if config.has_active_llm_key() {
+        // GW2 key is present; cache missing — go to download
         Screen::Setup(SetupStep::DataDownload)
-    } else if config.has_gw2_key() {
-        Screen::Setup(SetupStep::LlmApiKey)
     } else {
-        Screen::Setup(SetupStep::Gw2ApiKey)
+        Screen::Setup(SetupStep::LlmApiKey)
     };
 
     let mut setup = SetupState::default();
@@ -862,6 +864,14 @@ pub fn init(addon_dir: PathBuf) {
     gw2_core::i18n::set_language(&config.ui_language);
     // Surface any config parse error in the UI status bar
     main.error = config_err;
+    let data_state = gw2_optimizer::data::initialize();
+    if let Some(reason) = data_state.optimize_block_reason() {
+        worker_log(reason.clone());
+        if main.error.is_none() {
+            main.error = Some(reason);
+        }
+    }
+    main.data_state = Some(data_state);
     // Apply saved default game mode from config
     let default_mode_label = config.default_game_mode.as_deref().unwrap_or("PvE");
     main.game_mode = match default_mode_label {
@@ -903,7 +913,9 @@ pub fn toggle_window() {
         }
         (state.config.clone(), state.config_path.clone())
     };
-    let _ = snapshot.0.save(&snapshot.1);
+    if let Err(e) = snapshot.0.save(&snapshot.1) {
+        crate::ui::log_disk_error(format!("config save failed: {e}"));
+    }
 }
 
 pub fn persist_window() {
@@ -915,7 +927,9 @@ pub fn persist_window() {
         state.config.window_visible = state.window_visible;
         (state.config.clone(), state.config_path.clone())
     };
-    let _ = snapshot.0.save(&snapshot.1);
+    if let Err(e) = snapshot.0.save(&snapshot.1) {
+        crate::ui::log_disk_error(format!("config save failed: {e}"));
+    }
 }
 
 pub fn is_window_visible() -> bool {
@@ -1223,7 +1237,7 @@ mod tests {
     // ── init() screen routing ─────────────────────────────────────────────────
 
     #[test]
-    fn test_init_routes_to_gw2_key_when_no_keys() {
+    fn test_init_routes_to_language_when_no_keys() {
         let _serial = state_test_guard();
         reset_state();
         // No config.json in the dir → AppConfig::load returns default (no keys).
@@ -1863,12 +1877,20 @@ mod tests {
         let reset = pin_fn(src, "reset_to_first_run");
 
         assert!(
+            toggle.contains("log_disk_error"),
+            "toggle_window must log a failed config save"
+        );
+        assert!(
             !toggle.contains("state.config.save"),
             "toggle_window must not save through the locked AddonState"
         );
         assert!(
             brace_depth_at(toggle, ".save(") < brace_depth_at(toggle, "lock_state()"),
             "toggle_window must drop the STATE guard before writing config.json"
+        );
+        assert!(
+            persist.contains("log_disk_error"),
+            "persist_window must log a failed config save"
         );
         assert!(
             !persist.contains("state.config.save"),

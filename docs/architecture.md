@@ -15,11 +15,16 @@ Four crates (see `Cargo.toml` `[workspace]`) compile into one `cdylib`:
 
 ## Optimization Pipeline (3-Tier Fallback)
 
-Each tier falls back to the next on failure with a Warning log:
+Each tier falls back to the next on failure with a Warning log. The addon
+calls only the cancellable entry points (`optimize_flow.rs`).
 
-1. **`engine::optimize_deterministic()`** — pure-Rust synergy pipeline, no LLM call.
-2. **`engine::optimize_with_gemini()`** — cosine-similarity gear-prefix selection + pre-computed context (~40-50K tokens) + a single LLM call + `validate_gemini_build()`.
-3. **Legacy `engine::optimize()` -> `enrich_with_gemini()`** — deterministic gear+spec search, Gemini enriches post-hoc.
+1. **`engine::optimize_v2`** — beam search over complete build states. An LLM
+   advisor pass is optional and skipped if no client is configured.
+2. **`engine::optimize_deterministic_cancellable`** — pure-Rust synergy
+   pipeline. The LLM client is optional here too (advisor / naming, not
+   selection).
+3. **`engine::optimize_cancellable`** — legacy gear + spec search. Improve
+   skips this tier when a ranked baseline already exists.
 
 ### Mode-aware evaluation
 

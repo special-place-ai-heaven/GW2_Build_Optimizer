@@ -70,7 +70,7 @@ pub(in crate::ui::main_view) fn render_settings_tab(ui: &Ui, state: &mut AddonSt
             let is_sel = current_default == *mode;
             if ui.radio_button_bool(mode, is_sel) && !is_sel {
                 state.config.default_game_mode = Some((*mode).to_string());
-                let _ = state.config.save(&state.config_path);
+                crate::ui::save_config_detached(state);
             }
         }
     }
@@ -350,7 +350,7 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
                     state.config.openrouter_api_key = Some(key.clone())
                 }
             }
-            let _ = state.config.save(&state.config_path);
+            crate::ui::save_config_detached(state);
             state.main.settings_key_input.clear();
             state.main.settings_key_status = Some(t("settings.saved_validating"));
             state.main.settings_key_valid = false;
@@ -433,7 +433,7 @@ fn render_model_combo(
             if Selectable::new(label).selected(sel).build(ui) {
                 state.config.set_active_model_id(mid.clone());
                 state.main.provider_issue = None;
-                let _ = state.config.save(&state.config_path);
+                crate::ui::save_config_detached(state);
             }
         }
         if visible == 0 && !needle.is_empty() {
@@ -497,7 +497,7 @@ pub(in crate::ui::main_view) fn render_talk_model_row(ui: &Ui, state: &mut Addon
                 state.main.models_error = None;
                 state.main.settings_model_search.clear();
                 state.main.provider_issue = None;
-                let _ = state.config.save(&state.config_path);
+                crate::ui::save_config_detached(state);
             }
         }
     }
@@ -668,7 +668,7 @@ fn render_news_sources(ui: &Ui, state: &mut AddonState, col_w: f32) {
                     2 => NewsLayout::Reader,
                     _ => NewsLayout::Desk,
                 };
-                let _ = state.config.save(&state.config_path);
+                crate::ui::save_config_detached(state);
             }
         });
     // The stills toggle keeps the layout row's line only while the column can
@@ -680,7 +680,7 @@ fn render_news_sources(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let mut images = state.config.news.show_images;
     if ui.checkbox(&stills, &mut images) {
         state.config.news.show_images = images;
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
     }
     if ui.is_item_hovered() {
         theme::wide_tooltip(ui, |ui| ui.text(t("settings.news_hint")));
@@ -715,7 +715,7 @@ fn news_source_tick(ui: &Ui, state: &mut AddonState, src: NewsSource) {
     let label = format!("{}##news_src_{}", t(src.label_key()), src.index());
     if ui.checkbox(label, &mut on) {
         state.config.news.set(src, on);
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
         if on {
             crate::news::kick(state, &[src]);
         }
@@ -775,7 +775,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             if Selectable::new(&auto_label).selected(auto_sel).build(ui) && !auto_sel {
                 state.config.ui_language = "auto".into();
                 gw2_core::i18n::set_language("auto");
-                let _ = state.config.save(&state.config_path);
+                crate::ui::save_config_detached(state);
                 super::super::stats::ensure_localized_names(state);
             }
         }
@@ -790,7 +790,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             if Selectable::new(&label).selected(sel).build(ui) && !sel {
                 state.config.ui_language = lang.code.into();
                 gw2_core::i18n::set_language(lang.code);
-                let _ = state.config.save(&state.config_path);
+                crate::ui::save_config_detached(state);
                 super::super::stats::ensure_localized_names(state);
             }
         }
@@ -806,7 +806,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         .build(ui, &mut opacity)
     {
         state.config.window_opacity = opacity;
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
     }
 
     ui.text(t("settings.scale"));
@@ -817,7 +817,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         .build(ui, &mut scale)
     {
         state.config.font_scale = scale;
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
     }
 
     ui.text(t("settings.font"));
@@ -833,7 +833,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             let sel = current_font == id;
             if Selectable::new(&label).selected(sel).build(ui) && !sel {
                 state.config.ui_font = id.to_string();
-                let _ = state.config.save(&state.config_path);
+                crate::ui::save_config_detached(state);
             }
         }
     }
@@ -881,7 +881,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         state.config.panel_padding = vals[1];
         state.config.section_spacing = vals[2];
         state.config.content_indent = vals[3];
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
     }
 
     ui.spacing();
@@ -895,7 +895,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         state.config.window_w = None;
         state.config.window_h = None;
         state.force_window_pos = true;
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
     }
 }
 
@@ -952,9 +952,14 @@ fn draw_slot_marker(ui: &Ui, swatch: [f32; 2], sw: f32) {
         .rounding(4.0)
         .build();
     let cy = y + sw * 0.5;
-    dl.add_triangle([x - 5.0, cy], [x - 11.0, cy - 5.0], [x - 11.0, cy + 5.0], p.cream)
-        .filled(true)
-        .build();
+    dl.add_triangle(
+        [x - 5.0, cy],
+        [x - 11.0, cy - 5.0],
+        [x - 11.0, cy + 5.0],
+        p.cream,
+    )
+    .filled(true)
+    .build();
 }
 
 /// Copy the current preset's five base colors into an UNTOUCHED custom theme,
@@ -1146,21 +1151,18 @@ fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32
                 // localized label, which ImGui's built-in color tooltip shows
                 // as the tooltip title — free, localized, and a bonus cue
                 // rather than the only one.
-                if ColorButton::new(
-                    format!("{label}###theme_sw_{i}"),
-                    [c[0], c[1], c[2], 1.0],
-                )
-                .size([fh, fh])
-                .alpha(false)
-                // Without the border, a swatch set to the panel color
-                // dissolves into the plate behind it.
-                .border(true)
-                // ColorButton is a drag-drop SOURCE by default. A drag off a
-                // swatch eats the press so the click never lands, and a
-                // dropped color mutates a base with no ActiveId transition,
-                // which the commit-on-deactivate save below would miss.
-                .drag_drop(false)
-                .build(ui)
+                if ColorButton::new(format!("{label}###theme_sw_{i}"), [c[0], c[1], c[2], 1.0])
+                    .size([fh, fh])
+                    .alpha(false)
+                    // Without the border, a swatch set to the panel color
+                    // dissolves into the plate behind it.
+                    .border(true)
+                    // ColorButton is a drag-drop SOURCE by default. A drag off a
+                    // swatch eats the press so the click never lands, and a
+                    // dropped color mutates a base with no ActiveId transition,
+                    // which the commit-on-deactivate save below would miss.
+                    .drag_drop(false)
+                    .build(ui)
                 {
                     pick = Some(i);
                 }
@@ -1439,7 +1441,7 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
             state.main.error = Some(tf("fmt.err_clear_cache", &[("err", &e.to_string())]));
         } else {
             state.config.cache_build_number = None;
-            let _ = state.config.save(&state.config_path);
+            crate::ui::save_config_detached(state);
             state.main.game_db = None;
             state.setup.download_progress = None;
             // Force the cached "Cache: …" label to recompute on the next frame
@@ -1461,7 +1463,7 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
         &mut auto_refresh,
     ) {
         state.config.auto_refresh_cache = auto_refresh;
-        let _ = state.config.save(&state.config_path);
+        crate::ui::save_config_detached(state);
     }
 
     ui.spacing();
@@ -1489,7 +1491,7 @@ fn render_cache_section(ui: &Ui, state: &mut AddonState) {
             state.main.error = Some(tf("fmt.err_refresh", &[("err", &e.to_string())]));
         } else {
             state.config.cache_build_number = None;
-            let _ = state.config.save(&state.config_path);
+            crate::ui::save_config_detached(state);
             state.main.game_db = None;
             state.setup.download_progress = None;
             // Force the cached "Cache: …" label to recompute on the next frame.

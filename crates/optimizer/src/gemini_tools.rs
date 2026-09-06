@@ -1521,12 +1521,10 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
             )
         });
     };
-    let base = stats::base_stats();
-    let power = base.power + gear_stats.power;
-    let condition_damage = base.condition_damage + gear_stats.condition_damage;
-    let weapon_strength = 1100.0;
+    let mut full = stats::base_stats();
+    full += &gear_stats;
+    let params = rotation_sim_params(&full, ctx.profession_name, ctx.balance_ctx);
 
-    // Build rotation skills from the provided IDs
     let rotation_skills =
         rotation::builder::build_rotation_skills_for_context(&skill_ids, ctx.db, ctx.balance_ctx);
 
@@ -1534,13 +1532,11 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
         return json!({ "error": "No valid skills found for the provided IDs" });
     }
 
-    // Run simulation
-    let result = rotation::simulator::simulate(
+    let result = rotation::simulator::simulate_with(
         &rotation_skills,
         duration_s * 1000,
-        power,
-        condition_damage,
-        weapon_strength,
+        &params,
+        rotation::combat_model::EnemyDummy::open(),
     );
 
     // Format condition uptimes
@@ -1624,6 +1620,45 @@ fn calculate_full_set_stats(
         // zeroed stat sheet is not an estimate, so say there is none.
         Some(_) => None,
         None => Some(gear_stats),
+    }
+}
+
+
+/// Prefix-only combat inputs for the LLM rotation tool. Trait mods stay at
+/// default — the tool sees a named prefix, not a validated trait line.
+/// Weapon strength stays 1100 until W068 publishes `REFERENCE_WEAPON_STRENGTH`.
+fn rotation_sim_params(
+    full: &stats::StatBlock,
+    profession: &str,
+    ctx: &BalanceContext,
+) -> crate::rotation::simulator::SimParams {
+    let derived = stats::compute_derived(full, profession);
+    let mods = DamageModifiers::default();
+    let mode = ctx.game_mode.clone();
+    crate::rotation::simulator::SimParams {
+        power: full.power,
+        condition_damage: full.condition_damage,
+        weapon_strength: 1100.0,
+        precision: full.precision,
+        ferocity: full.ferocity,
+        crit_chance_bonus: 0.0,
+        fury_crit_chance_bonus: crate::data::boon_condition_formulas::boons()
+            .fury_crit_bonus(mode.clone())
+            * 100.0,
+        strike_mult: 1.0,
+        condition_mult: 1.0,
+        condition_duration_mult: combat::outgoing_condition_duration_mult(
+            full.expertise,
+            &mods,
+            ctx,
+        ),
+        boon_duration_mult: combat::outgoing_boon_duration_mult(full.concentration, &mods, ctx),
+        healing_power: full.healing_power,
+        healing_mult: 1.0,
+        max_health: derived.health,
+        armor: derived.armor,
+        mode,
+        intent: None,
     }
 }
 
@@ -2645,7 +2680,7 @@ mod tests {
         // Independent proof through the real tool entry point: an absurd
         // duration_seconds must come back clamped in the tool's own JSON answer,
         // and the call must return promptly — a hang here would mean the clamp
-        // never reached `rotation::simulator::simulate`.
+        // never reached `rotation::simulator::simulate_with`.
         let mut db = db_with_itemstats(vec![(1, "Berserker's")]);
         db.itemstats.insert(
             1,
@@ -2779,6 +2814,102 @@ mod tests {
             "unresolved prefix must be a tool error, not invented DPS: {result}"
         );
         assert!(result.get("dps").is_none());
+    }
+
+    #[test]
+    fn simulate_rotation_uses_resolved_crit_not_basic_defaults() {
+        let mut db = db_with_itemstats(vec![(1, "Berserker's")]);
+        db.itemstats.insert(
+            1,
+            ItemStat {
+                id: 1,
+                name: "Berserker's".into(),
+                attributes: vec![
+                    StatAttribute {
+                        attribute: "Power".into(),
+                        multiplier: 0.35,
+                        value: 0,
+                    },
+                    StatAttribute {
+                        attribute: "Precision".into(),
+                        multiplier: 0.25,
+                        value: 0,
+                    },
+                    StatAttribute {
+                        attribute: "Ferocity".into(),
+                        multiplier: 0.25,
+                        value: 0,
+                    },
+                ],
+            },
+        );
+        let mut skill = make_skill(999, "Test Strike");
+        skill.facts = vec![Fact::Damage {
+            text: None,
+            icon: None,
+            hit_count: Some(1),
+            dmg_multiplier: Some(1.0),
+        }];
+        db.skills.insert(999, skill);
+        let balance_ctx = BalanceContext::new(gw2_core::types::GameMode::PvE);
+        let ctx = ToolContext {
+            db: &db,
+            profession_name: "Guardian",
+            candidates: &[],
+            current_build_summary: None,
+            weights: OptimizationWeights::default(),
+            balance_ctx: &balance_ctx,
+        };
+        let result = exec_simulate_rotation(
+            &json!({
+                "skill_ids": [999],
+                "gear_prefix": "Berserker's",
+                "duration_seconds": 10
+            }),
+            &ctx,
+        );
+        let tool_strike: f64 = result["dps"]["strike"]
+            .as_str()
+            .expect("priced strike skill must report strike DPS")
+            .parse()
+            .expect("strike DPS is a formatted number");
+
+        let skills = crate::rotation::builder::build_rotation_skills_for_context(
+            &[999],
+            &db,
+            &balance_ctx,
+        );
+        let gear = calculate_full_set_stats(
+            &db,
+            find_itemstat_by_name(&db, "Berserker's").expect("seeded prefix"),
+            &balance_ctx,
+        )
+        .expect("Berserker's is priceable");
+        let mut full = stats::base_stats();
+        full += &gear;
+        let basic = crate::rotation::simulator::simulate(
+            &skills,
+            10_000,
+            full.power,
+            full.condition_damage,
+            1100.0,
+        );
+        let with = crate::rotation::simulator::simulate_with(
+            &skills,
+            10_000,
+            &rotation_sim_params(&full, "Guardian", &balance_ctx),
+            crate::rotation::combat_model::EnemyDummy::open(),
+        );
+        assert_ne!(
+            basic.strike_dps.round(),
+            with.strike_dps.round(),
+            "Berserker precision must move strike off SimParams::basic (precision=0)"
+        );
+        assert_eq!(
+            tool_strike,
+            with.strike_dps.round(),
+            "tool must call simulate_with on resolved stats, not simulate()/basic: {result}"
+        );
     }
 
 }

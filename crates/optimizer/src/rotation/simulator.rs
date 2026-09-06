@@ -217,6 +217,9 @@ pub struct SimParams {
 }
 
 impl SimParams {
+    /// Test convenience: PvE, precision/ferocity 0 (skips crit), fury 25,
+    /// 20k health / 2k armor. Shipping paths must build a full [`SimParams`]
+    /// and call [`simulate_with`].
     pub fn basic(power: f64, condition_damage: f64, weapon_strength: f64) -> Self {
         Self {
             power,
@@ -240,6 +243,7 @@ impl SimParams {
     }
 }
 
+#[cfg(test)]
 /// Run a rotation simulation with the given skills and parameters.
 ///
 /// Skills should have their `weapon_set` field set:
@@ -264,6 +268,7 @@ pub fn simulate(
     )
 }
 
+#[cfg(test)]
 /// Like [`simulate`], but the dummy can start with Protection/Stability.
 pub fn simulate_against(
     skills: &[RotationSkill],
@@ -613,7 +618,7 @@ impl SimState {
         self.active_weapon_set = if self.active_weapon_set == 1 { 2 } else { 1 };
         self.weapon_swap_cooldown_ms = WEAPON_SWAP_COOLDOWN_MS;
         // Weapon swap is instant in GW2 (no cast time), but add minimal delay
-        self.next_action_ms = self.current_time_ms + MIN_SKILL_GAP_MS;
+        self.next_action_ms = self.current_time_ms.saturating_add(MIN_SKILL_GAP_MS);
     }
 
     /// Use a skill: apply effects, set cooldown, advance next_action time.
@@ -724,7 +729,7 @@ impl SimState {
                         let previous_end = self.enemy_disabled_until_ms.max(self.current_time_ms);
                         let new_end = self
                             .enemy_disabled_until_ms
-                            .max(self.current_time_ms + *duration_ms);
+                            .max(self.current_time_ms.saturating_add(*duration_ms));
                         self.control_ms += new_end.saturating_sub(previous_end) as f64;
                         self.enemy_disabled_until_ms = new_end;
                     }
@@ -756,8 +761,9 @@ impl SimState {
         };
 
         // Next action = now + effective_cast + human delay
-        self.next_action_ms =
-            self.current_time_ms + effective_cast + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS;
+        self.next_action_ms = self.current_time_ms.saturating_add(effective_cast)
+            .saturating_add(HUMAN_DELAY_MS)
+            .saturating_add(MIN_SKILL_GAP_MS);
     }
 
     /// Soft control present this tick: half weight per distinct condition.
