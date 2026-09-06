@@ -123,7 +123,7 @@ target/release/gw2_build_optimizer.dll
 - Guild Wars 2 on Windows.
 - [Nexus](https://raidcore.gg/Nexus) ([RaidcoreGG/Nexus](https://github.com/RaidcoreGG/Nexus)).
 - A GW2 API key from ArenaNet.
-- An AI provider key for the setup wizard: Gemini, OpenAI, Anthropic, or OpenRouter.
+- An AI provider key for the setup wizard. A free OpenRouter or Google account is enough.
 
 ## Install
 
@@ -150,14 +150,28 @@ Create a key at <https://account.arena.net/applications> with:
 
 ### 2. AI provider key
 
-Pick one provider and paste its key:
+You need a key from an AI company. You do not have to pay. Most people
+create a free OpenRouter or Google account and stay on free models.
 
-- Gemini: <https://aistudio.google.com/apikey>
+The URL opens a sign-in page first. Create the account there, then make a
+key and paste it into the wizard.
+
+**Free path (pick one):**
+
+- OpenRouter (one key, many free models): <https://openrouter.ai/keys>
+  Sign in with Google, GitHub, or email (Sign up if you need an account).
+  Then create a key and copy it. Skip adding credits — free models work at $0.
+- Google Gemini: <https://aistudio.google.com/apikey>
+  Sign in with Google (Create account if you need one). Then create an API
+  key, pick any project, and copy it.
+
+**Paid, if you already have an account there:**
+
 - OpenAI: <https://platform.openai.com/api-keys>
 - Anthropic: <https://console.anthropic.com/settings/keys>
-- OpenRouter: <https://openrouter.ai/keys>
 
-Gemini is the default.
+The wizard still defaults to Gemini. Switch the radio to OpenRouter if that
+is the account you made. After setup, Settings has a Free filter on by default.
 
 ### 3. Game data download
 
