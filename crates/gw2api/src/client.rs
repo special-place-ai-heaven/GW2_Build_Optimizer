@@ -716,6 +716,12 @@ impl Gw2Client {
     /// rather than a truncated buffer: `download_missing` writes what it gets to
     /// disk, and a half-PNG would be cached as a permanent bad icon.
     ///
+    /// `Content-Length` over the cap is refused from the headers, before any
+    /// body byte is read. Streaming 4 MiB+ just to hit `read_body_capped` is
+    /// how a mid-body reset became `Internal("icon read failed: request or
+    /// response body error")` instead of the cap — the transport broke the
+    /// stream before `take(max+1)` could return `InvalidData` (W268).
+    ///
     /// A connection-level failure gets one immediate redial (`ICON_ATTEMPTS`),
     /// because a refresh fetches ~10k icons and a single dropped socket should
     /// not cost the user one. An HTTP error status is *not* retried: that is
@@ -739,6 +745,13 @@ impl Gw2Client {
                     status: status.as_u16(),
                     url_path: url.chars().take(80).collect(),
                     body_snippet: String::new(),
+                });
+            }
+            if resp.content_length().is_some_and(|n| n > MAX_ICON_BYTES) {
+                return Err(ApiError::Api {
+                    status: status.as_u16(),
+                    url_path: url.chars().take(80).collect(),
+                    body_snippet: format!("icon body exceeds {} bytes", MAX_ICON_BYTES),
                 });
             }
             let bytes = match crate::transport::read_body_capped(resp, MAX_ICON_BYTES) {
@@ -1442,6 +1455,9 @@ mod tests {
         m.assert();
     }
 
+    /// Mockito sets Content-Length from the body. `fetch_bytes` must refuse
+    /// from that header — streaming 4 MiB+ is what raced into Internal
+    /// ("icon read failed: request or response body error") as W268.
     #[test]
     fn fetch_bytes_rejects_a_body_over_the_icon_cap() {
         let (mut server, client) = mock_server();
