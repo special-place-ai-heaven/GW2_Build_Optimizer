@@ -855,12 +855,20 @@ impl GeminiClient {
 
         let mut last_text: Option<String> = None;
 
+        let gathering_until =
+            std::time::Instant::now() + crate::llm::openai_compat::TOOL_PHASE_BUDGET;
         for turn in 0..max_turns {
             // Between turns as well as inside the stream: a tool loop is up to
             // max_turns whole requests, so checking only inside one of them
             // still leaves the worker running after the flag flips.
             if is_cancelled() {
                 return Err(GeminiError::Unavailable(CANCELLED.to_string()));
+            }
+            // Out of clock for lookups. Every function response so far is
+            // already in `contents`, so the closing request below answers
+            // from them.
+            if turn > 0 && std::time::Instant::now() >= gathering_until {
+                break;
             }
             trim_contents(&mut contents, crate::llm::trim::SAFE_PROMPT_BUDGET_TOKENS);
             let request = GenerateRequest {
@@ -909,8 +917,35 @@ impl GeminiClient {
             });
         }
 
-        // If we exceeded max_turns but had text, return it rather than error
-        last_text.ok_or_else(|| {
+        // Gathering is over, either on turns or on the clock, and the model was
+        // still calling tools. Every function response is already in
+        // `contents`, so one request with the tools withheld makes it answer
+        // from what it gathered - the same exit the OpenAI-compatible clients
+        // take. Without it this path returned "Tool loop exceeded 8 turns with
+        // no text response", which is the "no result" a player reports.
+        if is_cancelled() {
+            return Err(GeminiError::Unavailable(CANCELLED.to_string()));
+        }
+        // Empty tool list: the caller renders this as "writing", not as
+        // another lookup round.
+        on_progress(max_turns, max_turns, &[]);
+        contents.push(Content {
+            role: Some("user".into()),
+            parts: vec![Part::text(crate::llm::openai_compat::CLOSING_TURN)],
+        });
+        trim_contents(&mut contents, crate::llm::trim::SAFE_PROMPT_BUDGET_TOKENS);
+        let closing = self.send_request(&GenerateRequest {
+            contents,
+            tools: None,
+        });
+        let closing_text = match closing {
+            Ok(content) => content.parts.iter().find_map(|p| p.text.clone()),
+            // The closing request is the last chance, not the only evidence:
+            // text from an earlier turn still beats an error.
+            Err(e) if last_text.is_none() => return Err(e),
+            Err(_) => None,
+        };
+        closing_text.or(last_text).ok_or_else(|| {
             GeminiError::Parse(format!(
                 "Tool loop exceeded {} turns with no text response",
                 max_turns
