@@ -430,12 +430,34 @@ mod tests {
             "setup.openrouter_steps",
             "setup.gemini_steps",
         ];
+        // Overlay fonts we ship do not draw U+2014; it rendered as '?' on the
+        // Anthropic howto. Keep the on-ramp in ASCII punctuation.
+        const FORBIDDEN: &[char] = &['\u{2013}', '\u{2014}', '\u{2015}'];
         for lang in LANGUAGES.iter().map(|l| l.code) {
             with_lang(lang, || {
                 for key in ON_RAMP {
                     let text = t(key);
                     assert_ne!(text, key, "{lang} has no {key}");
                     assert!(text.len() > 20, "{lang} {key} is too short to be prose");
+                    for ch in FORBIDDEN {
+                        assert!(
+                            !text.contains(*ch),
+                            "{lang} {key} contains U+{:04X} which the overlay draws as ?",
+                            *ch as u32
+                        );
+                    }
+                }
+                for provider in crate::config::LlmProvider::ALL {
+                    for key in [provider.setup_howto_key(), provider.setup_steps_key()] {
+                        let text = t(key);
+                        for ch in FORBIDDEN {
+                            assert!(
+                                !text.contains(*ch),
+                                "{lang} {key} contains U+{:04X} which the overlay draws as ?",
+                                *ch as u32
+                            );
+                        }
+                    }
                 }
             });
         }
