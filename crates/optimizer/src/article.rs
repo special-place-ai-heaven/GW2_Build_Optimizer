@@ -163,6 +163,32 @@ pub fn prune_to_article(document: &str) -> String {
     out
 }
 
+/// The article's readable text, one line per text node.
+///
+/// [`prune_to_article`] keeps the tags because our id extractors need them.
+/// This is for the other reader: the prose a site writes around the build —
+/// the rotation (`Sword 2 > Dagger 5 > Sword 111`) and the description of
+/// what the role is supposed to do. Markup is ~half the bytes of a build
+/// page and none of that half is readable, so text is what gets stored.
+///
+/// Node boundaries become line boundaries rather than spaces: a published
+/// rotation sits inside one element, so this keeps it on one line instead of
+/// welding it to the heading above it.
+pub fn article_text(document: &str) -> String {
+    let pruned = prune_to_article(document);
+    let parsed = ::html::Html::parse_fragment(&pruned);
+    let mut out = String::with_capacity(pruned.len() / 4);
+    for node in parsed.root_element().text() {
+        let line = node.trim();
+        if line.is_empty() {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 /// Deepest nesting this walk will follow.
 ///
 /// The walk is mutual recursion over attacker-shaped input, on a worker

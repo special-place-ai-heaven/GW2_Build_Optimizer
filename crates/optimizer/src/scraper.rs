@@ -438,6 +438,36 @@ fn scrape_snowcrows(
 // Builder over per-site fields already derived by the caller; bundling the HTML
 // and metadata into a struct would just mirror the argument list.
 #[allow(clippy::too_many_arguments)]
+/// A per-build ceiling, so one pathological page cannot bloat the day's file.
+///
+/// Measured over saved pages from all three sites: 8.6 KB for a Hardstuck
+/// build, 14 KB and 24 KB for GuildJen's largest, 19 KB for a Snowcrows one.
+/// So this holds every real page with room to spare, and the worst case is
+/// ~24 MB across a full sync — beside a 118 MB game-data cache the addon
+/// already loads, that is not the thing to optimise.
+///
+/// It cuts from the END, which is where the rotation sits on a Hardstuck
+/// page. Do not lower it without re-measuring.
+const PROSE_LIMIT: usize = 32_768;
+
+/// Truncate to at most `max_bytes`, on a character boundary.
+///
+/// Slicing a `&str` at a byte index panics when a multi-byte character
+/// straddles it. An em dash in a build description did exactly that once and
+/// killed a 328-page sync mid-run, so no byte index touches this text.
+fn truncate_chars(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_string();
+    }
+    let end = text
+        .char_indices()
+        .map(|(at, _)| at)
+        .take_while(|at| *at <= max_bytes)
+        .last()
+        .unwrap_or(0);
+    text[..end].to_string()
+}
+
 fn benchmark_from_html(
     html: &str,
     url: &str,
@@ -451,19 +481,25 @@ fn benchmark_from_html(
     // Each site publishes ids its own way, so the parser is chosen by site
     // rather than by trying all three. An unknown source gets GuildJen's
     // reader, which finds nothing rather than inventing something.
-    let published = match source {
+    let mut published = match source {
         "snowcrows" => crate::providers::snowcrows::parse(html),
         "hardstuck" => crate::providers::hardstuck::parse(html),
         _ => crate::providers::guildjen::parse(html),
     };
-    // The prefix the gear actually states, when it states one. Falling back
-    // to a text scan is worth it only if the ids gave nothing, and the scan
-    // wants prose — so this is the one place the article pruner belongs.
-    // Running it before the parsers would delete the ids: Snowcrows' embeds
-    // are empty divs and Hardstuck's chat code lives in an `<input value>`.
-    let gear_prefix = published.dominant_stat().unwrap_or_else(|| {
-        extract_gear_prefix(&crate::article::prune_to_article(html))
-    });
+    // The pruner runs once here and serves both readers below. It must not
+    // run *before* the parsers: it deletes the ids — Snowcrows' embeds are
+    // empty divs and Hardstuck's chat code lives in an `<input value>`.
+    let article = crate::article::prune_to_article(html);
+    let prose = crate::article::article_text(html);
+    // The prefix the gear actually states, when it states one; otherwise a
+    // text scan, which is what wanted the prose in the first place.
+    let gear_prefix = published
+        .dominant_stat()
+        .unwrap_or_else(|| extract_gear_prefix(&article));
+    // The rotation and the role's operating instructions live in this text.
+    // Captured during the scrape because the alternative is fetching every
+    // page a second time.
+    published.prose = truncate_chars(&prose, PROSE_LIMIT);
     BenchmarkBuild {
         source: source.into(),
         profession,
@@ -2959,5 +2995,17 @@ mod tests {
                 "a PvE build must not be labelled {wvw_word}: {role}"
             );
         }
+    }
+    /// The em dash that killed a 328-page sync was a byte-index slice into
+    /// text exactly like this. Every cut point here lands mid-character.
+    #[test]
+    fn prose_is_cut_on_a_character_boundary() {
+        let text = "Sword 2 \u{2014} Dagger 5 \u{2014} Sword 111";
+        for limit in 0..text.len() + 4 {
+            let cut = truncate_chars(text, limit);
+            assert!(cut.len() <= limit, "{limit}: {cut:?} exceeds the cap");
+            assert!(text.starts_with(&cut), "{limit}: {cut:?} is not a prefix");
+        }
+        assert_eq!(truncate_chars(text, text.len()), text, "under the cap, intact");
     }
 }
