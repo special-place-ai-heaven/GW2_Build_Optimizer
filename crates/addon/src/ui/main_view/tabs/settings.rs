@@ -233,11 +233,25 @@ fn spawn_key_validation(
 
 fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     let mut provider_changed = false;
-    for provider in &gw2_core::config::LlmProvider::ALL {
-        let is_selected = state.config.active_provider == *provider;
-        if ui.radio_button_bool(provider.label(), is_selected) && !is_selected {
-            state.config.active_provider = provider.clone();
-            provider_changed = true;
+    // Two to a row rather than a stack of four. The labels are short and the
+    // column is wide, so a single file of radios spent four rows on what
+    // fits in two — and this panel is short on height.
+    //
+    // The second is placed at a fixed offset instead of by `same_line`, so
+    // the right-hand radios line up down the column whatever the labels say.
+    let start_x = ui.cursor_pos()[0];
+    let second_x = start_x + (col_w - 12.0) * 0.5;
+    for pair in gw2_core::config::LlmProvider::ALL.chunks(2) {
+        let row_y = ui.cursor_pos()[1];
+        for (at, provider) in pair.iter().enumerate() {
+            if at > 0 {
+                ui.set_cursor_pos([second_x, row_y]);
+            }
+            let is_selected = state.config.active_provider == *provider;
+            if ui.radio_button_bool(provider.label(), is_selected) && !is_selected {
+                state.config.active_provider = provider.clone();
+                provider_changed = true;
+            }
         }
     }
     if provider_changed {
@@ -734,6 +748,12 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     // would end that one and drop the rest of the tab into a single
     // full-width column. Same rule as `render_news_sources`.
     let pair_w = (right_item_w - 12.0) * 0.5;
+    // Where the right-hand half of every pair starts. Fixed, not
+    // `same_line`: after a group `same_line` resumes from the group's own
+    // baseline, which left the right column sitting a few pixels low and
+    // its controls not lining up with the row above.
+    let pair_x = ui.cursor_pos()[0];
+    let second_x = pair_x + pair_w + 12.0;
 
     let resolved = gw2_core::i18n::resolve(&state.config.ui_language);
     let cache = gw2_api::cache::DataCache::new(state.addon_dir.join("cache"));
@@ -767,6 +787,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
                 .unwrap_or(state.config.ui_language.as_str())
         )
     };
+    let lang_row_y = ui.cursor_pos()[1];
     ui.group(|| {
     ui.text(t("settings.language"));
     ui.set_next_item_width(pair_w);
@@ -804,7 +825,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         }
     }
     });
-    ui.same_line();
+    ui.set_cursor_pos([second_x, lang_row_y]);
     ui.group(|| {
         ui.text(t("settings.font"));
         ui.set_next_item_width(pair_w);
@@ -831,6 +852,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     theme::wrapped(ui, theme::pal().muted, &t("settings.font_hint"));
     ui.spacing();
 
+    let slider_row_y = ui.cursor_pos()[1];
     ui.group(|| {
     ui.text(t("settings.opacity"));
     ui.set_next_item_width(pair_w);
@@ -843,7 +865,7 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
         crate::ui::save_config_detached(state);
     }
     });
-    ui.same_line();
+    ui.set_cursor_pos([second_x, slider_row_y]);
     ui.group(|| {
         ui.text(t("settings.scale"));
         ui.set_next_item_width(pair_w);
