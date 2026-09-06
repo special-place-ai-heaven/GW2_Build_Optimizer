@@ -1022,7 +1022,11 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
 
     if disabled {
         let style = ui.push_style_var(nexus::imgui::StyleVar::Alpha(0.4));
-        theme::gold_button_sized(ui, btn_label, [-1.0, 28.0]);
+        // Height 0 means `control_height`, which follows the font scale. A
+        // hardcoded 28px was the only control in the panel that did not, so
+        // at any scale above the default the primary action was the
+        // shortest thing on screen.
+        theme::gold_button_sized(ui, btn_label, [-1.0, 0.0]);
         style.pop();
         if ui.is_item_hovered() {
             ui.tooltip_text(if state.main.optimizing {
@@ -1035,7 +1039,7 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
                 t("status.select_character")
             });
         }
-    } else if theme::gold_button_sized(ui, btn_label, [-1.0, 28.0]) {
+    } else if theme::gold_button_sized(ui, btn_label, [-1.0, 0.0]) {
         if is_improve {
             let profession_name = state
                 .main
