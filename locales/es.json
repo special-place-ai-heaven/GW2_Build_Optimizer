@@ -445,6 +445,7 @@
   "bench.none": "No hay datos de benchmark.",
   "btn.retry": "Reintentar",
   "fmt.synced_when": "Sincronizado {when}",
+  "bench.failed": "Fallidos",
   "bench.throttled": "En pausa - el sitio nos pidió ir más despacio. La sincronización está esperando y continuará sola.",
   "bench.sync_hint": "Ajustes > Sync benchmarks para descargar referencias.",
   "bench.on_par": "a la par",

@@ -451,6 +451,7 @@
   "bench.none": "No benchmark data available.",
   "btn.retry": "Retry",
   "fmt.synced_when": "Synced {when}",
+  "bench.failed": "Failed",
   "bench.throttled": "Paused - the site asked us to slow down. The sync is waiting and will carry on by itself.",
   "bench.sync_hint": "Go to Settings > Sync Benchmarks to download reference builds.",
   "bench.on_par": "on-par",

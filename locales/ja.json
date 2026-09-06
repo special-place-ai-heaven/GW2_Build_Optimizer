@@ -445,6 +445,7 @@
   "bench.none": "ベンチマークデータがありません。",
   "btn.retry": "再試行",
   "fmt.synced_when": "同期済み {when}",
+  "bench.failed": "失敗",
   "bench.throttled": "一時停止 - サイトから速度を落とすよう求められました。同期は待機中で、自動的に再開します。",
   "bench.sync_hint": "設定 > Sync Benchmarksで参照ビルドをダウンロードしてください。",
   "bench.on_par": "同水準",
