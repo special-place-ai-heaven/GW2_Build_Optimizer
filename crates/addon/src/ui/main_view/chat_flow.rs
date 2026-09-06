@@ -268,6 +268,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     // burn the player's tokens on a model that cannot get there.
                     let mut feedback: Option<String> = None;
                     let mut rejected: Option<String> = None;
+                    let mut last_plate: Option<gw2_optimizer::prompts::GeminiBuildResponse> = None;
                     for attempt in 1..=2u32 {
                         if token.is_cancelled() {
                             return Err("Cancelled".into());
@@ -430,12 +431,36 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 );
                                 feedback = Some(why.clone());
                                 rejected = Some(why);
+                                last_plate = Some(parsed);
                             }
                         }
                     }
 
-                    // Both attempts lost to the player's own build. Serving the
-                    // second one anyway is the bug this gate exists to stop, so
+                    // Nothing to keep. The gate exists to stop a worse build
+                    // replacing one the player is already wearing, and with
+                    // no character selected there is no such build — so
+                    // refusing here hands back nothing at all, which is the
+                    // one outcome worse than an imperfect build. Serve the
+                    // last plate and say what is weak about it.
+                    if baseline.is_none() {
+                        if let Some(mut plate) = last_plate {
+                            let concern = rejected.unwrap_or_default();
+                            plate.explanation = if plate.explanation.trim().is_empty() {
+                                tf("fmt.plated_with_concern", &[("concern", &concern)])
+                            } else {
+                                format!(
+                                    "{}\n\n{}",
+                                    plate.explanation.trim(),
+                                    tf("fmt.plate_concern", &[("concern", &concern)])
+                                )
+                            };
+                            return Ok(plate);
+                        }
+                    }
+
+                    // Both attempts lost to the player's own build — which
+                    // only reaches here when there IS one. Serving the second
+                    // one anyway is the bug this gate exists to stop, so
                     // Choya says what happened and the build stands.
                     // ponytail: plain English like `KEPT_GEAR_HEADLINE` in
                     // optimize_flow; move behind `t("choya.kept")` when
