@@ -151,16 +151,29 @@ pub struct ProviderBuild {
     /// PvP amulet, the stat source in that mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub amulet_id: Option<u32>,
+    /// The page's own prose, pruned to the article body.
+    ///
+    /// Not decoration. This is where every site writes its rotation —
+    /// `Sword 2 > Dagger 5 > Sword 111 > 3` — and the operating instructions
+    /// for the role, which say how the build produces its result rather than
+    /// just naming it. Kept raw and parsed offline: the notation varies, so
+    /// getting the parse right takes several passes, and a re-scrape costs
+    /// hundreds of fetches.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub prose: String,
 }
 
 impl ProviderBuild {
     /// Whether the page yielded nothing at all.
     ///
-    /// Every field counts. This decides two things that must agree: whether
-    /// the record is written to disk at all, and whether a row cached
-    /// earlier today may be reused instead of refetched. A partial check —
-    /// one that ignored, say, a page that published only its rune — would
-    /// drop that rune on save and then refetch the page forever.
+    /// Every field the parsers *extract* counts — `prose` deliberately does
+    /// not. This decides two things that must agree: whether the record is
+    /// written to disk at all, and whether a row cached earlier today may be
+    /// reused instead of refetched. A partial check — one that ignored, say,
+    /// a page that published only its rune — would drop that rune on save and
+    /// then refetch the page forever. Prose is the mirror image: nearly every
+    /// page has some, so counting it would mark a page whose ids all failed to
+    /// parse as a success and stop us ever refetching it.
     pub fn is_empty(&self) -> bool {
         self.build_code.is_none()
             && self.specs.is_empty()

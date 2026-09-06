@@ -89,4 +89,11 @@ fn main() {
             row.slot, row.stat, row.item_id, row.upgrade_ids
         );
     }
+    // The scrape stores this text on every build; only a real page shows
+    // whether the pruner keeps the rotation or throws it out with the chrome.
+    let prose = gw2_optimizer::article::article_text(&html);
+    println!("  prose ({} bytes pruned from {}):", prose.len(), html.len());
+    for line in prose.lines().filter(|l| !l.trim().is_empty()).take(400) {
+        println!("    | {}", line.trim());
+    }
 }
