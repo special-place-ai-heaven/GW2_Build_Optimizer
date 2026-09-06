@@ -302,64 +302,55 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             text: Some(ref text),
             percent: Some(pct),
             ..
-        } => {
-            if crate::combat::percent_text_is_conditional(text) {
-                return effects;
-            }
-            let text_lower = text.to_lowercase();
-            let pct = if text_lower.contains("90") && text_lower.contains("health") {
-                *pct * 0.9
-            } else {
-                *pct
-            };
-            match crate::combat::classify_percent_text(text, pct) {
-                Some(crate::combat::PercentClass::Strike) => {
+        } => match crate::combat::interpret_percent_fact(text, *pct) {
+            crate::combat::PercentInterp::Classified(class, pct) => match class {
+                crate::combat::PercentClass::Strike => {
                     effects.push(NormalizedEffect::DamageModifier {
                         category: DamageCategory::Strike,
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::Condition) => {
+                crate::combat::PercentClass::Condition => {
                     effects.push(NormalizedEffect::DamageModifier {
                         category: DamageCategory::Condition,
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::CritDamagePts) => {
+                crate::combat::PercentClass::CritDamagePts => {
                     effects.push(NormalizedEffect::DamageModifier {
                         category: DamageCategory::Crit,
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::Healing) => {
+                crate::combat::PercentClass::Healing => {
                     effects.push(NormalizedEffect::DamageModifier {
                         category: DamageCategory::Healing,
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::BoonDuration) => {
+                crate::combat::PercentClass::BoonDuration => {
                     effects.push(NormalizedEffect::DurationBonus {
                         kind: DurationKind::AllBoon,
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::CondiDuration) => {
+                crate::combat::PercentClass::CondiDuration => {
                     effects.push(NormalizedEffect::DurationBonus {
                         kind: DurationKind::AllCondition,
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::SpecificCondiDuration(canonical)) => {
+                crate::combat::PercentClass::SpecificCondiDuration(canonical) => {
                     effects.push(NormalizedEffect::DurationBonus {
                         kind: DurationKind::SpecificCondition(canonical),
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::CritChancePts)
-                | Some(crate::combat::PercentClass::Ignore)
-                | None => {}
-            }
-        }
+                crate::combat::PercentClass::CritChancePts
+                | crate::combat::PercentClass::Ignore => {}
+            },
+            crate::combat::PercentInterp::Skip | crate::combat::PercentInterp::Unknown(_) => {}
+        },
         Fact::Buff {
             status: Some(ref status),
             duration: Some(dur),

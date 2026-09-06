@@ -873,7 +873,7 @@ Acceptance: One verified policy/implementation remains; production callers and c
 
 ### W032
 
-- Task: T045 [US3]. Status: **planned**.
+- Task: T045 [US3]. Status: **verified-scoped**.
 - Audit: S2, confirmed; location: `crates/optimizer/src/parser_consistency_tests.rs:3`.
 - Dependencies: story entry gate.
 
@@ -881,7 +881,7 @@ Claim: This module's own doc is the codebase admitting to two independently-main
 
 Remediation decision: Extract a production Fact classification core consumed by combat and synergy, preserving independent output projection tests across handled Fact variants.
 
-Verification: Report evidence imported; current symbols and consumers must be checked before implementation.
+Verification: `interpret_percent_fact` is the standing-percent policy (conditional skip, Scholar 90% scale, `classify_percent_text`). Combat and synergy both call it, then project independently. `interpret_percent_fact_skips_conditionals_and_scales_scholar`, `parsers_agree_on_modifier_classification`, `damage_fact_is_not_a_percent_modifier`, and `buff_status_is_synergy_only` passed.
 
 Acceptance: One verified policy/implementation remains; production callers and compatibility are preserved; affected behavioral tests and strict Clippy pass.
 

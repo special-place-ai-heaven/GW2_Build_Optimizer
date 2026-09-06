@@ -1,28 +1,20 @@
 //! Cross-parser consistency guard.
 //!
-//! The optimizer has TWO parallel `Fact` parsers that must agree on what a
-//! modifier *means*:
+//! Standing-percent policy lives in one place: `combat::interpret_percent_fact`
+//! (conditional skip, Scholar 90% HP scale, [`combat::classify_percent_text`]).
+//! Combat projects that into `DamageModifiers`; synergy projects it into
+//! `NormalizedEffect`. Those projections stay independent — this module only
+//! asserts they agree on [`FactClass`].
 //!
-//! - `combat::extract_modifier_from_fact` — populates a `DamageModifiers`
-//!   struct used by the combat math model.
-//! - `synergy::extract_effects_from_fact` — emits `NormalizedEffect`s used by
-//!   the synergy pipeline.
+//! They used to be two full parsers and have silently diverged before
+//! (condition-damage dropped in one, "Poison" vs "Poisoned" key mismatch,
+//! first-vs-closest percent branch). Each parser is run through a
+//! `#[cfg(test)] pub(crate)` shim that collapses output into [`FactClass`].
 //!
-//! They are independent code paths over the same input and have silently
-//! diverged before (condition-damage dropped in one, "Poison" vs "Poisoned"
-//! key mismatch, first-vs-closest percent branch). Each individual bug got a
-//! narrow regression test in its own module, but nothing asserted the two
-//! parsers stay CONSISTENT with each other. This module is that guard.
-//!
-//! Each parser is run through a `#[cfg(test)] pub(crate)` shim
-//! (`combat::tests_consistency_shim::classify_fact` /
-//! `synergy::tests_consistency_shim::classify_fact`) that collapses its output
-//! into the comparable [`FactClass`] set below. For every `Fact` in the corpus
-//! we assert the two shims produce the same classification set.
-//!
-//! If a case is found where the parsers STILL disagree, that is a real bug:
-//! it must be fixed in the parser, not papered over in the test. Any
-//! intentional asymmetry must be documented inline (see [`Expectation`]).
+//! If a case is found where the projections STILL disagree, that is a real
+//! bug: fix the projection, not this test. Intentional asymmetry (combat
+//! ignores status-application Facts; synergy emits `AppliesStatus`) is
+//! tested separately.
 
 /// A parser-agnostic classification of what a modifier `Fact` means.
 ///
@@ -236,6 +228,40 @@ mod tests {
             wrong.is_empty(),
             "Parsers agree but on the WRONG classification:\n{}",
             wrong.join("\n")
+        );
+    }
+
+    #[test]
+    fn damage_fact_is_not_a_percent_modifier() {
+        let fact = Fact::Damage {
+            text: Some("Damage".into()),
+            icon: None,
+            hit_count: Some(1),
+            dmg_multiplier: Some(1.0),
+        };
+        assert_eq!(normalized(classify_combat(&fact)), Vec::<FactClass>::new());
+        assert_eq!(normalized(classify_synergy(&fact)), Vec::<FactClass>::new());
+    }
+
+    #[test]
+    fn buff_status_is_synergy_only() {
+        let fact = Fact::Buff {
+            text: Some("Poison".into()),
+            icon: None,
+            duration: Some(6),
+            status: Some("Poison".into()),
+            description: None,
+            apply_count: Some(1),
+        };
+        assert_eq!(
+            normalized(classify_combat(&fact)),
+            Vec::<FactClass>::new(),
+            "combat does not treat Buff as a standing percent modifier"
+        );
+        assert_eq!(
+            normalized(classify_synergy(&fact)),
+            Vec::<FactClass>::new(),
+            "AppliesStatus is out of FactClass — synergy shim must keep dropping it"
         );
     }
 }
