@@ -8,6 +8,31 @@ pub(crate) struct PercentClause {
     pub after: String,
 }
 
+/// Where the sentence starting at `from` ends.
+///
+/// Not simply the next `.`: "vs." is an abbreviation, not a full stop, and
+/// splitting there truncated the clause "+7% strike damage vs. demons" to
+/// "strike damage vs" — which is the exact marker the caller then looks for
+/// to know the bonus is conditional. A slaying sigil's target-only bonus was
+/// counted as if it applied to everything.
+fn sentence_end(s: &str, from: usize) -> usize {
+    const ABBREVIATIONS: [&str; 1] = ["vs"];
+    let mut at = from;
+    while let Some(rel) = s[at..].find('.') {
+        let dot = at + rel;
+        let head = &s[..dot];
+        if ABBREVIATIONS
+            .iter()
+            .any(|abbr| head.ends_with(abbr) && !head.ends_with(&format!("{abbr}{abbr}")))
+        {
+            at = dot + 1;
+            continue;
+        }
+        return dot;
+    }
+    s.len()
+}
+
 /// Walk every `N%` in `text` after markup strip. Callers project `hay`.
 pub(crate) fn percent_clauses(text: &str) -> Vec<PercentClause> {
     let s = strip_gw2_markup(text).trim().to_lowercase();
@@ -32,10 +57,7 @@ pub(crate) fn percent_clauses(text: &str) -> Vec<PercentClause> {
             continue;
         };
         let clause_start = s[..num_start].rfind('.').map(|i| i + 1).unwrap_or(0);
-        let clause_end = s[pct_idx + 1..]
-            .find('.')
-            .map(|i| pct_idx + 1 + i)
-            .unwrap_or(s.len());
+        let clause_end = sentence_end(&s, pct_idx + 1);
         let rest = s[pct_idx + 1..clause_end].trim();
         let before = s[clause_start..num_start].trim();
         out.push(PercentClause {
@@ -264,6 +286,26 @@ pub(crate) fn stack_multiplier(text: &str) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    /// "vs." is an abbreviation. Splitting the clause there dropped the
+    /// marker that says a bonus only applies to one kind of target, and a
+    /// slaying sigil's +7% vs Demons was counted against everything.
+    #[test]
+    fn a_vs_abbreviation_does_not_end_the_clause() {
+        let clauses = percent_clauses("+7% Strike Damage vs. Demons. +3% Strike Damage.");
+        assert_eq!(clauses.len(), 2, "two bonuses: {clauses:?}");
+        assert!(
+            clauses[0].after.contains("vs."),
+            "the conditional marker survives: {:?}",
+            clauses[0].after
+        );
+        assert!(
+            !clauses[1].after.contains("vs."),
+            "the unconditional one is not tainted by it: {:?}",
+            clauses[1].after
+        );
+    }
 
     #[test]
     fn percent_clauses_keeps_each_clause() {
