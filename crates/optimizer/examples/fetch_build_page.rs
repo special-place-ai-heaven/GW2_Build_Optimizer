@@ -33,7 +33,9 @@ fn main() {
         reqwest::header::HeaderValue::from_static("en-US,en;q=0.5"),
     );
     let client = reqwest::blocking::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0")
+        .user_agent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0",
+        )
         .default_headers(headers)
         .timeout(std::time::Duration::from_secs(15))
         .build()
@@ -66,8 +68,16 @@ fn main() {
         pruned.len(),
         100.0 * pruned.len() as f64 / html.len() as f64
     );
-    for label in ["Superior Rune", "Superior Sigil", "Relic of", "Dragonhunter"] {
-        println!("    after prune {label:<14}: {}", pruned.matches(label).count());
+    for label in [
+        "Superior Rune",
+        "Superior Sigil",
+        "Relic of",
+        "Dragonhunter",
+    ] {
+        println!(
+            "    after prune {label:<14}: {}",
+            pruned.matches(label).count()
+        );
     }
 
     // Every chat link on the page, by kind. The rendered page shows rune and
@@ -100,8 +110,11 @@ fn main() {
             Some(0x06) => *kinds.entry("skill").or_default() += 1,
             Some(0x07) => *kinds.entry("trait").or_default() += 1,
             Some(0x0D) => *kinds.entry("BUILD TEMPLATE").or_default() += 1,
-            Some(other) => *kinds.entry(Box::leak(format!("0x{other:02X}").into_boxed_str()))
-                .or_default() += 1,
+            Some(other) => {
+                *kinds
+                    .entry(Box::leak(format!("0x{other:02X}").into_boxed_str()))
+                    .or_default() += 1
+            }
             None => {}
         }
     }
@@ -111,7 +124,11 @@ fn main() {
     }
     item_ids.sort_unstable();
     item_ids.dedup();
-    println!("  distinct item ids: {} -> {:?}", item_ids.len(), &item_ids[..item_ids.len().min(12)]);
+    println!(
+        "  distinct item ids: {} -> {:?}",
+        item_ids.len(),
+        &item_ids[..item_ids.len().min(12)]
+    );
 
     // Which convention this page publishes ids in. Each site has its own,
     // and a count of zero is the first thing to check when a parser that

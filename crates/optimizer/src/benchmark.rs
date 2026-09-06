@@ -501,8 +501,7 @@ pub fn closest_per_source<'a>(
         // The label says the job where it can; the gear says it where the
         // label was vague. "Roamer" and a bare "DPS" name no job at all, and
         // a Celestial roamer is a bruiser whatever the page called it.
-        let want_job = job_family(&shape.role)
-            .or_else(|| prefix_job(&shape.stat_prefix, db));
+        let want_job = job_family(&shape.role).or_else(|| prefix_job(&shape.stat_prefix, db));
         let their_job = job_family(&build.role).or_else(|| {
             prefix_job(
                 &build
@@ -521,8 +520,8 @@ pub fn closest_per_source<'a>(
         // gear first and the label only when the gear is silent: a site that
         // writes "Roaming DPS" and equips Marauder has told us it is a power
         // build without using the word.
-        let want_flavour = damage_flavour(&shape.role)
-            .or_else(|| prefix_flavour(&shape.stat_prefix, db));
+        let want_flavour =
+            damage_flavour(&shape.role).or_else(|| prefix_flavour(&shape.stat_prefix, db));
         // Label first on both sides, gear only where the label is silent. A
         // build that says "Condi DPS" is a condition build even on Celestial
         // — Celestial grants power too, so reading the gear first made it
@@ -548,8 +547,7 @@ pub fn closest_per_source<'a>(
         let hybrid = matches!(their_flavour, Some(Flavour::Hybrid))
             || matches!(want_flavour, Some(Flavour::Hybrid));
         if !hybrid {
-            if let (Some(want), Some(theirs)) = (role_scale(&shape.role), role_scale(&build.role))
-            {
+            if let (Some(want), Some(theirs)) = (role_scale(&shape.role), role_scale(&build.role)) {
                 if theirs.self_reliance() > want.self_reliance() {
                     continue;
                 }
@@ -711,7 +709,10 @@ mod tests {
         assert_eq!(build.profession, "Elementalist");
         assert_eq!(build.mode, "PvE");
         assert_eq!(build.gear_prefix, "Plaguedoctor's");
-        assert_eq!(build.source_url, "https://guildjen.com/heal-dps-evoker-build/");
+        assert_eq!(
+            build.source_url,
+            "https://guildjen.com/heal-dps-evoker-build/"
+        );
         // The six deleted fields are ignored rather than fatal, and the row
         // reports honestly that it carries no ids.
         assert!(
@@ -864,8 +865,16 @@ mod tests {
         // Words that say nothing about the job rule nothing out: a Roamer
         // may be any of these, and refusing to guess is not the same as
         // guessing wrong.
-        assert_eq!(job_family("Open World Hybrid"), Some(Damage), "hybrid deals damage");
-        assert_eq!(job_family("Sidenoder"), Some(Duelist), "holds a point alone");
+        assert_eq!(
+            job_family("Open World Hybrid"),
+            Some(Damage),
+            "hybrid deals damage"
+        );
+        assert_eq!(
+            job_family("Sidenoder"),
+            Some(Duelist),
+            "holds a point alone"
+        );
         // These say nothing about the job and are left saying nothing: a PvP
         // Roamer may be any of them, and refusing to guess is not the same
         // as guessing wrong.

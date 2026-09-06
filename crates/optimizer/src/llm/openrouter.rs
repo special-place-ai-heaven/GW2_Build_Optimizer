@@ -117,7 +117,12 @@ impl OpenRouterClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, LlmError> {
-        self.send_chat_capped(messages, tools, MAX_COMPLETION_TOKENS, Some(REASONING_EFFORT))
+        self.send_chat_capped(
+            messages,
+            tools,
+            MAX_COMPLETION_TOKENS,
+            Some(REASONING_EFFORT),
+        )
     }
 
     /// `send_chat` with an explicit completion budget. `generate_brief` passes

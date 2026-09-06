@@ -95,7 +95,9 @@ pub(crate) fn is_function_call_failure(err: &LlmError) -> bool {
     let LlmError::Parse(message) = err else {
         return false;
     };
-    message.to_ascii_uppercase().contains("MALFORMED_FUNCTION_CALL")
+    message
+        .to_ascii_uppercase()
+        .contains("MALFORMED_FUNCTION_CALL")
 }
 
 /// Completion ceiling per chat completion, hidden thinking included, so a

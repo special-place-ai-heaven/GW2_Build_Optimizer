@@ -104,7 +104,11 @@ fn main() {
     } else {
         weights
     };
-    let tier = if wvw { CombatTier::Solo } else { CombatTier::Party };
+    let tier = if wvw {
+        CombatTier::Solo
+    } else {
+        CombatTier::Party
+    };
     let ctx = BalanceContext::new(mode.clone());
     let role = RoleObjective::WvWRoamer;
     let scenario = ScenarioSpec {
@@ -132,8 +136,13 @@ fn main() {
         &mut |_| {},
     )
     .expect("seed");
-    let seed_rep = referee::evaluate_validated_build(&seed.validated, &db, prof, &weights, &ctx, &scenario);
-    println!("SEED   {}\n       rank={:?}", describe(&seed.validated), referee::search_rank(&seed_rep));
+    let seed_rep =
+        referee::evaluate_validated_build(&seed.validated, &db, prof, &weights, &ctx, &scenario);
+    println!(
+        "SEED   {}\n       rank={:?}",
+        describe(&seed.validated),
+        referee::search_rank(&seed_rep)
+    );
     for g in &seed_rep.viability.gates {
         println!("       gate {:?} passed={} {}", g.gate, g.passed, g.note);
     }
@@ -156,7 +165,11 @@ fn main() {
     )
     .expect("search");
     let rep = referee::evaluate_validated_build(&result, &db, prof, &weights, &ctx, &scenario);
-    println!("RESULT {}\n       rank={:?}", describe(&result), referee::search_rank(&rep));
+    println!(
+        "RESULT {}\n       rank={:?}",
+        describe(&result),
+        referee::search_rank(&rep)
+    );
     for g in &rep.viability.gates {
         println!("       gate {:?} passed={} {}", g.gate, g.passed, g.note);
     }
@@ -192,32 +205,58 @@ fn main() {
         break;
     }
     println!("FILL PROBE: {probes} utilities tried in first empty slot, {moved} changed the rank");
-    let holes = result.skills.utilities.iter().filter(|u| u.is_none()).count()
+    let holes = result
+        .skills
+        .utilities
+        .iter()
+        .filter(|u| u.is_none())
+        .count()
         + usize::from(result.skills.heal.is_none())
         + usize::from(result.skills.elite.is_none());
     assert_eq!(holes, 0, "optimized bar has {holes} empty slot(s)");
 
     // Simulator cost on the winning kit: gate window vs 60s flow window.
-    let prep = gw2_optimizer::engine::prepare_validated_rotation(&result, &db, &rep.stats, Some(&scenario))
-        .expect("rotation");
+    let prep = gw2_optimizer::engine::prepare_validated_rotation(
+        &result,
+        &db,
+        &rep.stats,
+        Some(&scenario),
+    )
+    .expect("rotation");
     let t0 = std::time::Instant::now();
     for _ in 0..200 {
-        std::hint::black_box(gw2_optimizer::engine::simulate_prepared(&prep, &result, &db, Some(&scenario)));
+        std::hint::black_box(gw2_optimizer::engine::simulate_prepared(
+            &prep,
+            &result,
+            &db,
+            Some(&scenario),
+        ));
     }
     let gate_ms = t0.elapsed().as_secs_f64() * 1000.0 / 200.0;
     let t0 = std::time::Instant::now();
     for _ in 0..200 {
-        std::hint::black_box(gw2_optimizer::engine::simulate_flow(&prep, &weights, Some(&scenario)));
+        std::hint::black_box(gw2_optimizer::engine::simulate_flow(
+            &prep,
+            &weights,
+            Some(&scenario),
+        ));
     }
     let flow_ms = t0.elapsed().as_secs_f64() * 1000.0 / 200.0;
     let t0 = std::time::Instant::now();
     for _ in 0..200 {
-        std::hint::black_box(gw2_optimizer::engine::prepare_validated_rotation(&result, &db, &rep.stats, Some(&scenario)));
+        std::hint::black_box(gw2_optimizer::engine::prepare_validated_rotation(
+            &result,
+            &db,
+            &rep.stats,
+            Some(&scenario),
+        ));
     }
     let prep_ms = t0.elapsed().as_secs_f64() * 1000.0 / 200.0;
     let t0 = std::time::Instant::now();
     for _ in 0..200 {
-        std::hint::black_box(referee::evaluate_validated_build(&result, &db, prof, &weights, &ctx, &scenario));
+        std::hint::black_box(referee::evaluate_validated_build(
+            &result, &db, prof, &weights, &ctx, &scenario,
+        ));
     }
     let eval_ms = t0.elapsed().as_secs_f64() * 1000.0 / 200.0;
     println!("COST prepare={prep_ms:.3}ms gate_sim={gate_ms:.3}ms flow_sim={flow_ms:.3}ms full_eval={eval_ms:.3}ms skills={}", prep.skills.len());
@@ -226,7 +265,8 @@ fn main() {
     let mut emptied = result.clone();
     emptied.skills.utilities = vec![None, None, None];
     emptied.skills.elite = None;
-    let rep_empty = referee::evaluate_validated_build(&emptied, &db, prof, &weights, &ctx, &scenario);
+    let rep_empty =
+        referee::evaluate_validated_build(&emptied, &db, prof, &weights, &ctx, &scenario);
     println!(
         "EMPTIED rank={:?}\n        realized full={:?}\n        realized empty={:?}",
         referee::search_rank(&rep_empty),

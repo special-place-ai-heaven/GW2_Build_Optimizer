@@ -109,47 +109,47 @@ mod tests {
     /// All patch_ids referenced in normalized_effects files must exist in manifests.
     #[test]
     fn test_normalized_effects_patch_ids_exist_in_manifests() {
-            let ms = manifests::manifests();
-            let manifest_ids: std::collections::HashSet<&str> =
-                ms.iter().map(|m| m.patch_id.as_str()).collect();
-            let effects = normalized_effects::effects();
-            let active = manifests::latest_manifest();
+        let ms = manifests::manifests();
+        let manifest_ids: std::collections::HashSet<&str> =
+            ms.iter().map(|m| m.patch_id.as_str()).collect();
+        let effects = normalized_effects::effects();
+        let active = manifests::latest_manifest();
 
-            assert_eq!(
-                effects.file_count(),
-                3,
-                "expected 3 effects files (PvE, PvP, WvW)",
+        assert_eq!(
+            effects.file_count(),
+            3,
+            "expected 3 effects files (PvE, PvP, WvW)",
+        );
+
+        for (patch, mode) in effects.loaded_snapshots() {
+            assert!(
+                manifest_ids.contains(patch),
+                "normalized_effects patch '{patch}' ({mode}) is not in manifests",
             );
-
-            for (patch, mode) in effects.loaded_snapshots() {
-                assert!(
-                    manifest_ids.contains(patch),
-                    "normalized_effects patch '{patch}' ({mode}) is not in manifests",
-                );
-            }
-
-            for mode in ["PvE", "PvP", "WvW"] {
-                assert!(
-                    effects.effects_for(&active.patch_id, mode).is_none(),
-                    "active {} must not claim a NE file it does not have",
-                    mode,
-                );
-                let (slice, sourced) = effects
-                    .effects_for_resolved(&active.patch_id, mode)
-                    .expect("active patch must inherit a historical NE snapshot, not invent one");
-                assert_ne!(
-                    sourced,
-                    active.patch_id.as_str(),
-                    "inherited NE must keep the historical patch_id, not relabel as {}",
-                    active.patch_id
-                );
-                assert!(!slice.is_empty(), "{mode} inherited snapshot is empty");
-                assert!(
-                    effects.effects_for(sourced, mode).is_some(),
-                    "sourced patch {sourced} must have an explicit {mode} file",
-                );
-            }
         }
+
+        for mode in ["PvE", "PvP", "WvW"] {
+            assert!(
+                effects.effects_for(&active.patch_id, mode).is_none(),
+                "active {} must not claim a NE file it does not have",
+                mode,
+            );
+            let (slice, sourced) = effects
+                .effects_for_resolved(&active.patch_id, mode)
+                .expect("active patch must inherit a historical NE snapshot, not invent one");
+            assert_ne!(
+                sourced,
+                active.patch_id.as_str(),
+                "inherited NE must keep the historical patch_id, not relabel as {}",
+                active.patch_id
+            );
+            assert!(!slice.is_empty(), "{mode} inherited snapshot is empty");
+            assert!(
+                effects.effects_for(sourced, mode).is_some(),
+                "sourced patch {sourced} must have an explicit {mode} file",
+            );
+        }
+    }
 
     /// All patch_ids referenced in patch ledgers must exist in manifests.
     #[test]

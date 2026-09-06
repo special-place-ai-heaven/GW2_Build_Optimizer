@@ -50,8 +50,14 @@ fn main() {
         "hardstuck" => {
             let name = providers::hardstuck::build_name(&html).unwrap_or_default();
             println!("  name       : {name:?}");
-            println!("  mode/scale : {:?}", providers::hardstuck::mode_and_scale(&html));
-            println!("  class says : {:?}", providers::hardstuck::game_mode(&html));
+            println!(
+                "  mode/scale : {:?}",
+                providers::hardstuck::mode_and_scale(&html)
+            );
+            println!(
+                "  class says : {:?}",
+                providers::hardstuck::game_mode(&html)
+            );
             println!("  role       : {:?}", providers::role_in_name(&name));
             providers::hardstuck::parse(&html)
         }
@@ -92,7 +98,11 @@ fn main() {
     // The scrape stores this text on every build; only a real page shows
     // whether the pruner keeps the rotation or throws it out with the chrome.
     let prose = gw2_optimizer::article::article_text(&html);
-    println!("  prose ({} bytes pruned from {}):", prose.len(), html.len());
+    println!(
+        "  prose ({} bytes pruned from {}):",
+        prose.len(),
+        html.len()
+    );
     for line in prose.lines().filter(|l| !l.trim().is_empty()).take(400) {
         println!("    | {}", line.trim());
     }

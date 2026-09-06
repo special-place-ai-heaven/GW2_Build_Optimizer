@@ -861,41 +861,41 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32, theme_align
     };
     let lang_row_y = ui.cursor_pos()[1];
     ui.group(|| {
-    ui.text(t("settings.language"));
-    ui.set_next_item_width(pair_w);
-    if let Some(_c) = ComboBox::new("##ui_language")
-        .preview_value(&preview)
-        .begin(ui)
-    {
-        let auto_sel = state.config.ui_language.eq_ignore_ascii_case("auto");
-        let auto_code = gw2_core::i18n::resolve("auto");
-        let (auto_mark, auto_color) = pack_mark(cached_pack_status(&cache, auto_code, build));
+        ui.text(t("settings.language"));
+        ui.set_next_item_width(pair_w);
+        if let Some(_c) = ComboBox::new("##ui_language")
+            .preview_value(&preview)
+            .begin(ui)
         {
-            let auto_label = format!("{auto_mark} {}", t("settings.language_auto"));
-            let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, auto_color);
-            if Selectable::new(&auto_label).selected(auto_sel).build(ui) && !auto_sel {
-                state.config.ui_language = "auto".into();
-                gw2_core::i18n::set_language("auto");
-                crate::ui::save_config_detached(state);
-                super::super::stats::ensure_localized_names(state);
+            let auto_sel = state.config.ui_language.eq_ignore_ascii_case("auto");
+            let auto_code = gw2_core::i18n::resolve("auto");
+            let (auto_mark, auto_color) = pack_mark(cached_pack_status(&cache, auto_code, build));
+            {
+                let auto_label = format!("{auto_mark} {}", t("settings.language_auto"));
+                let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, auto_color);
+                if Selectable::new(&auto_label).selected(auto_sel).build(ui) && !auto_sel {
+                    state.config.ui_language = "auto".into();
+                    gw2_core::i18n::set_language("auto");
+                    crate::ui::save_config_detached(state);
+                    super::super::stats::ensure_localized_names(state);
+                }
+            }
+            for lang in gw2_core::i18n::LANGUAGES {
+                let sel = state.config.ui_language == lang.code;
+                let (mark, color) = pack_mark(cached_pack_status(&cache, lang.code, build));
+                let label = format!(
+                    "{mark} {}",
+                    crate::ui::fonts::language_label(lang, &font_pref, &ui_lang_pref)
+                );
+                let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, color);
+                if Selectable::new(&label).selected(sel).build(ui) && !sel {
+                    state.config.ui_language = lang.code.into();
+                    gw2_core::i18n::set_language(lang.code);
+                    crate::ui::save_config_detached(state);
+                    super::super::stats::ensure_localized_names(state);
+                }
             }
         }
-        for lang in gw2_core::i18n::LANGUAGES {
-            let sel = state.config.ui_language == lang.code;
-            let (mark, color) = pack_mark(cached_pack_status(&cache, lang.code, build));
-            let label = format!(
-                "{mark} {}",
-                crate::ui::fonts::language_label(lang, &font_pref, &ui_lang_pref)
-            );
-            let _color = ui.push_style_color(nexus::imgui::StyleColor::Text, color);
-            if Selectable::new(&label).selected(sel).build(ui) && !sel {
-                state.config.ui_language = lang.code.into();
-                gw2_core::i18n::set_language(lang.code);
-                crate::ui::save_config_detached(state);
-                super::super::stats::ensure_localized_names(state);
-            }
-        }
-    }
     });
     ui.set_cursor_pos([second_x, lang_row_y]);
     ui.group(|| {
@@ -926,16 +926,16 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32, theme_align
 
     let slider_row_y = ui.cursor_pos()[1];
     ui.group(|| {
-    ui.text(t("settings.opacity"));
-    ui.set_next_item_width(pair_w);
-    let mut opacity = state.config.window_opacity;
-    if nexus::imgui::Slider::new("##opacity", 0.3, 1.0)
-        .display_format("%.2f")
-        .build(ui, &mut opacity)
-    {
-        state.config.window_opacity = opacity;
-        crate::ui::save_config_detached(state);
-    }
+        ui.text(t("settings.opacity"));
+        ui.set_next_item_width(pair_w);
+        let mut opacity = state.config.window_opacity;
+        if nexus::imgui::Slider::new("##opacity", 0.3, 1.0)
+            .display_format("%.2f")
+            .build(ui, &mut opacity)
+        {
+            state.config.window_opacity = opacity;
+            crate::ui::save_config_detached(state);
+        }
     });
     ui.set_cursor_pos([second_x, slider_row_y]);
     ui.group(|| {
@@ -1104,12 +1104,7 @@ fn seed_custom_from_preset(theme: &mut ThemeConfig) -> bool {
 /// change for live preview — while persistence uses the same
 /// deactivate-after-edit debounce as the radio volume slider (persist once on
 /// release/defocus, not per drag tick or keystroke).
-fn render_theme_style_section(
-    ui: &Ui,
-    state: &mut AddonState,
-    right_item_w: f32,
-    align_y: f32,
-) {
+fn render_theme_style_section(ui: &Ui, state: &mut AddonState, right_item_w: f32, align_y: f32) {
     // Start level with Optimization Defaults in the column beside, unless
     // UI Preferences already runs past it - never backwards, or the header
     // would be drawn over the sliders above it.
@@ -1872,8 +1867,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         // width it is given when the label needs more, so a fixed 76px
         // reservation was wrong at any font scale where "Retry" got wider
         // than that, and the button hung off the panel.
-        let retry_button_w =
-            theme::gold_button_width(ui, t("btn.retry")).max(56.0 * scale);
+        let retry_button_w = theme::gold_button_width(ui, t("btn.retry")).max(56.0 * scale);
         let avail = ui.content_region_avail()[0];
 
         // Cells are placed with `set_cursor_pos` from the row's own starting
@@ -1888,8 +1882,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         // all. Content-sized columns keep the grid far short of the edge at
         // any ordinary width, so this clamp does nothing until the panel is
         // genuinely too small.
-        let retry_x = column_at(BENCHMARK_MODES.len() + 1)
-            .min(row_x + avail - retry_button_w);
+        let retry_x = column_at(BENCHMARK_MODES.len() + 1).min(row_x + avail - retry_button_w);
 
         // Header: an empty corner cell, then the modes.
         let header_y = ui.cursor_pos()[1];
@@ -1917,12 +1910,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
                     ui.text_colored(theme::pal().muted, "-");
                 }
             }
-            let bad = state
-                .main
-                .benchmark_failed
-                .get(*key)
-                .copied()
-                .unwrap_or(0);
+            let bad = state.main.benchmark_failed.get(*key).copied().unwrap_or(0);
             ui.set_cursor_pos([fail_x, row_y]);
             if bad > 0 {
                 ui.text_colored([1.0, 0.4, 0.2, 1.0], bad.to_string());

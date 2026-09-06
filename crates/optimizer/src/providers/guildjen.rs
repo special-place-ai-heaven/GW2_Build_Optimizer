@@ -170,8 +170,8 @@ fn specs(document: &::html::Html) -> Vec<SpecLine> {
 fn gear_rows(document: &::html::Html) -> Vec<GearRow> {
     let row = ::html::Selector::parse("tr").expect("valid selector");
     let cell = ::html::Selector::parse("td").expect("valid selector");
-    let embed =
-        ::html::Selector::parse(r#"[data-gw2-embed="items"][data-gw2-id]"#).expect("valid selector");
+    let embed = ::html::Selector::parse(r#"[data-gw2-embed="items"][data-gw2-id]"#)
+        .expect("valid selector");
     let slot_label = ::html::Selector::parse("strong").expect("valid selector");
     let stat_label = ::html::Selector::parse("em").expect("valid selector");
 
@@ -349,9 +349,18 @@ mod tests {
         assert_eq!(
             build.specs,
             vec![
-                SpecLine { id: 45, trait_ids: vec![675, 673, 1687] },
-                SpecLine { id: 23, trait_ids: vec![738, 751, 2005] },
-                SpecLine { id: 73, trait_ids: vec![2326, 2367, 2441] },
+                SpecLine {
+                    id: 45,
+                    trait_ids: vec![675, 673, 1687]
+                },
+                SpecLine {
+                    id: 23,
+                    trait_ids: vec![738, 751, 2005]
+                },
+                SpecLine {
+                    id: 73,
+                    trait_ids: vec![2326, 2367, 2441]
+                },
             ]
         );
         assert!(
@@ -377,7 +386,11 @@ mod tests {
           </tbody></table>"#;
 
         let build = parse(PVP);
-        assert_eq!(build.rune_id, Some(72415), "first embedded item is the rune");
+        assert_eq!(
+            build.rune_id,
+            Some(72415),
+            "first embedded item is the rune"
+        );
         assert_eq!(build.relic_id, Some(99965), "second is the relic");
         assert_eq!(
             build.sigil_ids,

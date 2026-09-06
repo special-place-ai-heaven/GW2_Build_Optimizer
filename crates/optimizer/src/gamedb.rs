@@ -847,7 +847,11 @@ mod tests {
         let mut db = GameDb::empty_for_tests();
         db.skills = skills;
         db.skills_by_profession = index;
-        let usable: Vec<u32> = db.skills_usable_by("Warrior").iter().map(|s| s.id).collect();
+        let usable: Vec<u32> = db
+            .skills_usable_by("Warrior")
+            .iter()
+            .map(|s| s.id)
+            .collect();
         assert_eq!(usable, vec![1, 2]);
         assert!(db.skills_usable_by("Revenant").is_empty());
     }

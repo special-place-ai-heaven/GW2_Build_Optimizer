@@ -1011,9 +1011,8 @@ pub fn render_optimized_specs_panel(
                                 .build();
                             if is_selected
                                 && worn_traits.is_some_and(|w| {
-                                    trait_info.is_some_and(|ti| {
-                                        !optimized_trait_selected(w, &ti.name)
-                                    })
+                                    trait_info
+                                        .is_some_and(|ti| !optimized_trait_selected(w, &ti.name))
                                 })
                             {
                                 crate::ui::theme::paint_changed_circle(

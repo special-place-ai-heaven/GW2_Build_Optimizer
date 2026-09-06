@@ -45,7 +45,6 @@ pub enum ManifestFreshness {
     Stale { verified: u64, live: u64 },
 }
 
-
 /// Whether the live game build matches the active manifest.
 pub fn freshness(live_build_id: u64) -> ManifestFreshness {
     let verified = latest_manifest().game_build_id;
@@ -264,7 +263,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn freshness_is_current_or_stale() {
         let m = latest_manifest();
@@ -282,7 +280,6 @@ mod tests {
             }
         );
     }
-
 
     #[test]
     fn test_manifest_has_authoring_notes() {

@@ -84,7 +84,10 @@ pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
 /// Choya cooked, they are what other people published for the same job. They
 /// appear only once the player has synced, because until then there is
 /// nothing to compare against.
-pub(in crate::ui::main_view) fn render_provider_picks(ui: &Ui, state: &AddonState) -> Option<usize> {
+pub(in crate::ui::main_view) fn render_provider_picks(
+    ui: &Ui,
+    state: &AddonState,
+) -> Option<usize> {
     if state.main.provider_picks.is_empty() {
         return None;
     }
@@ -122,15 +125,27 @@ pub(in crate::ui::main_view) fn render_provider_picks(ui: &Ui, state: &AddonStat
         {
             let dl = ui.get_window_draw_list();
             let p = theme::pal();
-            let fill = if hovered { p.gold_hover } else { p.chip_idle_fill };
+            let fill = if hovered {
+                p.gold_hover
+            } else {
+                p.chip_idle_fill
+            };
             dl.add_rect(origin, [origin[0] + width, origin[1] + height], fill)
                 .filled(true)
                 .rounding(4.0)
                 .build();
-            dl.add_rect(origin, [origin[0] + width, origin[1] + height], p.chip_idle_rim)
-                .rounding(4.0)
-                .build();
-            dl.add_text([origin[0] + 6.0, origin[1] + 4.0], crate::ui::color_u32(p.gold), &title);
+            dl.add_rect(
+                origin,
+                [origin[0] + width, origin[1] + height],
+                p.chip_idle_rim,
+            )
+            .rounding(4.0)
+            .build();
+            dl.add_text(
+                [origin[0] + 6.0, origin[1] + 4.0],
+                crate::ui::color_u32(p.gold),
+                &title,
+            );
             let after = ui.calc_text_size(&title)[0] + 12.0;
             dl.add_text(
                 [origin[0] + after, origin[1] + 4.0],
@@ -161,8 +176,23 @@ pub(in crate::ui::main_view) fn render_provider_picks(ui: &Ui, state: &AddonStat
 /// is a weapon name is a weapon — see `providers::GearRow::slot`.
 fn published_weapons(build: &gw2_optimizer::benchmark::BenchmarkBuild) -> Vec<String> {
     const WEAPONS: [&str; 17] = [
-        "axe", "dagger", "mace", "pistol", "scepter", "sword", "focus", "shield", "torch",
-        "warhorn", "greatsword", "hammer", "longbow", "rifle", "shortbow", "staff", "spear",
+        "axe",
+        "dagger",
+        "mace",
+        "pistol",
+        "scepter",
+        "sword",
+        "focus",
+        "shield",
+        "torch",
+        "warhorn",
+        "greatsword",
+        "hammer",
+        "longbow",
+        "rifle",
+        "shortbow",
+        "staff",
+        "spear",
     ];
     let mut seen: Vec<String> = Vec::new();
     for row in &build.published.gear {
@@ -314,11 +344,8 @@ pub(in crate::ui::main_view) fn adopt_provider_pick(state: &mut AddonState, inde
     // Stats, computed the same way a plated build's are. Without this the
     // panel showed a column of zeroes beside the player's real numbers, which
     // reads as a build with no stats rather than a build we did not measure.
-    let validated = gw2_optimizer::validation::validate_gemini_build(
-        &plate,
-        &db,
-        &build.profession,
-    );
+    let validated =
+        gw2_optimizer::validation::validate_gemini_build(&plate, &db, &build.profession);
     let game_mode = state.main.game_mode.clone();
     crate::ui::main_view::optimization::attach_chat_stats(
         &mut suggestion,

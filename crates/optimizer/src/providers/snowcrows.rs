@@ -160,7 +160,11 @@ fn gear_rows(document: &::html::Html) -> Vec<GearRow> {
         else {
             continue;
         };
-        let ids = equipped.value().attr("data-armory-ids").map(ids_in).unwrap_or_default();
+        let ids = equipped
+            .value()
+            .attr("data-armory-ids")
+            .map(ids_in)
+            .unwrap_or_default();
         // A gear row equips one thing; a multi-id embed is something else.
         let [item_id] = ids[..] else { continue };
 
@@ -175,7 +179,12 @@ fn gear_rows(document: &::html::Html) -> Vec<GearRow> {
             .map(|s| s.text().collect::<String>().trim().to_string())
             .unwrap_or_default();
         let whole = caption.text().collect::<String>();
-        let prefix = whole.trim().strip_suffix(slot.trim()).unwrap_or("").trim().to_string();
+        let prefix = whole
+            .trim()
+            .strip_suffix(slot.trim())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         // Consumables and the relic reuse the prefix cell for a name, and put
         // something that is not a slot in the span — the infusion row reads
         // `<p>Infusion<span>x18</span></p>`. Whichever half names the kind,

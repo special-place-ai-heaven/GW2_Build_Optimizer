@@ -1233,17 +1233,27 @@ mod tests {
         let mut db = GameDb::empty_for_tests();
         db.items.insert(1, sigil_item(1, "Superior Sigil of Cleansing",
             "Remove 1 condition when you swap to this weapon while in combat. (Cooldown: 9 Seconds)"));
-        db.items.insert(2, sigil_item(2, "Superior Sigil of Force", "+5% Damage"));
+        db.items
+            .insert(2, sigil_item(2, "Superior Sigil of Force", "+5% Damage"));
         let mut b = ValidatedBuild {
             sigils: vec![
-                ValidatedItem { id: 1, name: "Cleansing".into() },
-                ValidatedItem { id: 2, name: "Force".into() },
+                ValidatedItem {
+                    id: 1,
+                    name: "Cleansing".into(),
+                },
+                ValidatedItem {
+                    id: 2,
+                    name: "Force".into(),
+                },
             ],
             ..Default::default()
         };
         let rate = kit_cleanse_rate_from_gear(&b, &db);
         assert!((rate - 20.0 / 9.0).abs() < 1e-9, "got {rate}");
-        b.sigils.push(ValidatedItem { id: 1, name: "Cleansing".into() });
+        b.sigils.push(ValidatedItem {
+            id: 1,
+            name: "Cleansing".into(),
+        });
         // Only the two active seats count.
         assert!((kit_cleanse_rate_from_gear(&b, &db) - 20.0 / 9.0).abs() < 1e-9);
         assert_eq!(cleanse_count_in_text("Remove 2 conditions from allies"), 2);
@@ -1259,7 +1269,10 @@ mod tests {
         use crate::validation::ValidatedItem;
         let db = GameDb::empty_for_tests();
         let b = ValidatedBuild {
-            sigils: vec![ValidatedItem { id: 67340, name: "Cleansing".into() }],
+            sigils: vec![ValidatedItem {
+                id: 67340,
+                name: "Cleansing".into(),
+            }],
             ..Default::default()
         };
         let rate = kit_cleanse_rate_from_gear(&b, &db);
@@ -1276,7 +1289,10 @@ mod tests {
         db.items.insert(1, sigil_item(1, "Superior Sigil of Cleansing",
             "Remove 1 condition when you swap to this weapon while in combat. (Cooldown: 9 Seconds)"));
         let b = ValidatedBuild {
-            sigils: vec![ValidatedItem { id: 1, name: "Cleansing".into() }],
+            sigils: vec![ValidatedItem {
+                id: 1,
+                name: "Cleansing".into(),
+            }],
             ..Default::default()
         };
         let mut scenario = make_wvw_scenario();
@@ -1289,14 +1305,26 @@ mod tests {
         let combat = make_viable_combat();
         let mut report = evaluate_viability_gates(Some(&rot), &combat, &scenario);
         let cleanse = |r: &ViabilityReport| {
-            r.gates.iter().find(|g| g.gate == ViabilityGate::CleanseRate).cloned().unwrap()
+            r.gates
+                .iter()
+                .find(|g| g.gate == ViabilityGate::CleanseRate)
+                .cloned()
+                .unwrap()
         };
         assert!(!cleanse(&report).passed);
-        assert!((report.shortfall - 0.5).abs() < 1e-9, "rate shortfall is 0.5: {}", report.shortfall);
+        assert!(
+            (report.shortfall - 0.5).abs() < 1e-9,
+            "rate shortfall is 0.5: {}",
+            report.shortfall
+        );
         apply_offbar_cleanse(&mut report, Some(&rot), &b, &db, &scenario);
         assert!(cleanse(&report).passed, "{}", cleanse(&report).note);
         assert!(report.is_viable);
-        assert!(report.shortfall.abs() < 1e-9, "shortfall must be zero: {}", report.shortfall);
+        assert!(
+            report.shortfall.abs() < 1e-9,
+            "shortfall must be zero: {}",
+            report.shortfall
+        );
     }
 
     fn make_rank_report(rotation: SimulationResult) -> RefereeReport {

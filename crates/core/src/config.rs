@@ -1700,7 +1700,11 @@ mod tests {
         theme.remember(&named("Rob"));
         theme.remember(&named("Dusk"));
         assert_eq!(
-            theme.saved.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            theme
+                .saved
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect::<Vec<_>>(),
             ["Rob", "Dusk"],
             "each named theme joins the list in turn"
         );

@@ -91,7 +91,10 @@ mod tests {
     fn for_patch_keeps_historical_ids_and_flags_unknown() {
         let old = BalanceContext::for_patch(GameMode::WvW, "2026-01-13");
         assert_eq!(old.patch_id, "2026-01-13");
-        assert!(old.patch_is_known(), "historical manifest must stay reachable");
+        assert!(
+            old.patch_is_known(),
+            "historical manifest must stay reachable"
+        );
         let unknown = BalanceContext::for_patch(GameMode::PvE, "9999-99-99");
         assert!(!unknown.patch_is_known());
     }

@@ -931,7 +931,6 @@ fn plate_shortfall(
                 failed.join("; ")
             ));
         }
-
     }
     // No baseline is not a pass mark, it is an unarmed gate: viability alone
     // still had to hold above.

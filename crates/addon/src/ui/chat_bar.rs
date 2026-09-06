@@ -194,7 +194,11 @@ fn draw_bubble_rect(ui: &Ui, p: [f32; 2], bw: f32, bh: f32, from_user: bool) {
 
 fn draw_copy_glyph(ui: &Ui, p: [f32; 2], size: f32, copied: bool) {
     let dl = ui.get_window_draw_list();
-    let col = if copied { theme::pal().gold } else { theme::pal().muted };
+    let col = if copied {
+        theme::pal().gold
+    } else {
+        theme::pal().muted
+    };
     let back = [p[0] + size * 0.28, p[1]];
     let back_br = [p[0] + size, p[1] + size * 0.78];
     let front = [p[0], p[1] + size * 0.22];
@@ -406,7 +410,11 @@ fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
         let tx = p[0] + PAD_X + gem_w + GEM_GAP;
         let ty = p[1] + (h - text_h) * 0.5;
         dl.add_text([tx, ty], color_u32(theme::pal().gold), &title);
-        dl.add_text([tx, ty + title_sz[1] + 4.0], color_u32(theme::pal().muted), &sub);
+        dl.add_text(
+            [tx, ty + title_sz[1] + 4.0],
+            color_u32(theme::pal().muted),
+            &sub,
+        );
     }
     if hovered {
         ui.tooltip_text(t("chat.open_optimized"));
@@ -476,9 +484,13 @@ fn render_pick_cards(ui: &Ui, picks: &[PickCard], msg_i: usize, alone: bool) -> 
                 .filled(true)
                 .rounding(10.0)
                 .build();
-            dl.add_rect([x, row_top], [x + w, row_top + h], theme::pal().chip_idle_rim)
-                .rounding(10.0)
-                .build();
+            dl.add_rect(
+                [x, row_top],
+                [x + w, row_top + h],
+                theme::pal().chip_idle_rim,
+            )
+            .rounding(10.0)
+            .build();
             let text_h = title_sz[1] + 4.0 + detail_sz[1];
             let ty = row_top + (h - text_h) * 0.5;
             let mid = [x + PAD + mark * 0.5, row_top + h * 0.5];
@@ -514,7 +526,11 @@ fn render_pick_cards(ui: &Ui, picks: &[PickCard], msg_i: usize, alone: bool) -> 
 }
 
 fn draw_send_icon(ui: &Ui, c: [f32; 2], on: bool) {
-    let col = if on { theme::pal().gold } else { theme::pal().muted };
+    let col = if on {
+        theme::pal().gold
+    } else {
+        theme::pal().muted
+    };
     let dl = ui.get_window_draw_list();
     let s = 11.0;
     dl.add_triangle(

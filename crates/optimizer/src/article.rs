@@ -348,7 +348,10 @@ mod tests {
              <td><img alt=\"Superior Rune of the Water\" src=\"r.png\"></td></tr></table>\
              </div></body></html>";
         let article = prune_to_article(page);
-        assert!(article.contains("<table"), "table structure kept: {article}");
+        assert!(
+            article.contains("<table"),
+            "table structure kept: {article}"
+        );
         assert!(
             article.contains("Superior Rune of the Water"),
             "image alt kept: {article}"

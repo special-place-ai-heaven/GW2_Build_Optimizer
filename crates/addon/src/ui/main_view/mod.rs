@@ -7,13 +7,13 @@ use gw2_core::types::GameMode;
 use gw2_optimizer::scenario::{CombatTier, RoleObjective};
 use gw2_optimizer::scoring::OptimizationWeights;
 
-pub(in crate::ui) mod provider_picks;
 pub(crate) mod build_display;
 mod character;
 mod chat_flow;
 pub mod lock_panel;
 mod optimization;
 mod optimize_flow;
+pub(in crate::ui) mod provider_picks;
 mod resolution;
 mod stats;
 mod tabs;
@@ -214,7 +214,9 @@ fn render_top_status_bar(ui: &Ui, state: &mut AddonState) {
 
     // API health indicator
     let (label, color) = match state.main.api_status {
-        crate::state::ApiStatus::Unknown => (t("status.checking_api"), crate::ui::theme::pal().muted),
+        crate::state::ApiStatus::Unknown => {
+            (t("status.checking_api"), crate::ui::theme::pal().muted)
+        }
         crate::state::ApiStatus::Online => (t("status.api_ready"), crate::ui::theme::OPTIMIZED),
         crate::state::ApiStatus::Degraded => (t("status.api_slow"), crate::ui::theme::pal().gold),
         crate::state::ApiStatus::Offline => (t("status.api_offline"), crate::ui::theme::ERR),
@@ -378,7 +380,11 @@ pub(super) fn render_optimization_progress(ui: &Ui, stage: &str, frame_count: i3
             let alpha = 0.3 + 0.7 * (phase * std::f32::consts::PI * 2.0).sin().abs();
             let dot_x = start[0] + 16.0 + i as f32 * 12.0;
             draw_list
-                .add_circle([dot_x, dot_y], 3.5, theme::with_alpha(theme::pal().gold, alpha))
+                .add_circle(
+                    [dot_x, dot_y],
+                    3.5,
+                    theme::with_alpha(theme::pal().gold, alpha),
+                )
                 .filled(true)
                 .build();
         }
@@ -615,8 +621,7 @@ fn render_scale_row(ui: &Ui, state: &mut AddonState) {
     if let Some(i) = theme::segment_row(ui, &labels, selected, "##scale") {
         state.main.combat_tier = tiers[i];
         if let Some(role) = state.main.selected_role {
-            state.main.weights =
-                role.to_weights_for(&state.main.game_mode, state.main.combat_tier);
+            state.main.weights = role.to_weights_for(&state.main.game_mode, state.main.combat_tier);
         }
         state.main.comparison.suggestions.clear();
         state.main.comparison.error = None;
@@ -953,7 +958,10 @@ fn render_left_build_controls(ui: &Ui, state: &mut AddonState) {
         format!(
             "{} · {} · {}",
             state.main.game_mode.label(),
-            t(scale_i18n_key(&state.main.game_mode, state.main.combat_tier)),
+            t(scale_i18n_key(
+                &state.main.game_mode,
+                state.main.combat_tier
+            )),
             role_bit
         )
     };

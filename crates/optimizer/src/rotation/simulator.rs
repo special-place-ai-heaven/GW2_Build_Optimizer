@@ -176,8 +176,7 @@ impl StaticCast {
         Self {
             strike_coeff,
             rest,
-            cast_time_s: (skill.cast_time_ms + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS) as f64
-                / 1000.0,
+            cast_time_s: (skill.cast_time_ms + HUMAN_DELAY_MS + MIN_SKILL_GAP_MS) as f64 / 1000.0,
         }
     }
 }
@@ -582,7 +581,9 @@ impl SimState {
         }
         let strike = sc.strike_coeff * effective_power * crit_factor;
         match &self.params.intent {
-            Some(weights) => intent_value(&CastValue { strike, ..sc.rest }, weights) / sc.cast_time_s,
+            Some(weights) => {
+                intent_value(&CastValue { strike, ..sc.rest }, weights) / sc.cast_time_s
+            }
             None => (strike + sc.rest.condition + sc.rest.boon_dps) / sc.cast_time_s,
         }
     }
@@ -761,7 +762,9 @@ impl SimState {
         };
 
         // Next action = now + effective_cast + human delay
-        self.next_action_ms = self.current_time_ms.saturating_add(effective_cast)
+        self.next_action_ms = self
+            .current_time_ms
+            .saturating_add(effective_cast)
             .saturating_add(HUMAN_DELAY_MS)
             .saturating_add(MIN_SKILL_GAP_MS);
     }
@@ -978,9 +981,7 @@ impl SimState {
             .iter()
             .zip(&self.buff_active_ms)
             .filter(|(name, _)| !name.eq_ignore_ascii_case("Might"))
-            .map(|(name, ms)| {
-                boon_value(name) * (*ms as f64 / self.duration_ms as f64).min(1.0)
-            })
+            .map(|(name, ms)| boon_value(name) * (*ms as f64 / self.duration_ms as f64).min(1.0))
             .sum::<f64>()
             + might_stacks_avg / 25.0;
 
@@ -1061,7 +1062,9 @@ fn boon_value(status: &str) -> f64 {
 
 fn is_soft_control(status: &str) -> bool {
     let canonical = crate::data::boon_condition_formulas::canonical_condition_name(status);
-    SOFT_CONTROL.iter().any(|s| s.eq_ignore_ascii_case(canonical))
+    SOFT_CONTROL
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case(canonical))
 }
 
 /// What one cast produces, per radar axis, before dividing by cast time.
@@ -1449,7 +1452,10 @@ mod tests {
             "stuns land on cooldown: {}",
             flow.control_uptime
         );
-        assert!(flow.strike_dps > 0.0, "the filler still swings between casts");
+        assert!(
+            flow.strike_dps > 0.0,
+            "the filler still swings between casts"
+        );
     }
 
     /// A stunned dummy with Stability takes nothing, so the scheduler must
@@ -1474,7 +1480,10 @@ mod tests {
             flow.skill_usage
         );
         let open = simulate_with(&skills, 30_000, &params, EnemyDummy::open());
-        assert!(open.skill_usage.iter().any(|u| u.name == "Stun" && u.cast_count >= 1));
+        assert!(open
+            .skill_usage
+            .iter()
+            .any(|u| u.name == "Stun" && u.cast_count >= 1));
     }
 
     fn status_skill(id: u32, status: &str, stacks: u32, duration_ms: u32) -> RotationSkill {
@@ -1512,7 +1521,10 @@ mod tests {
         let with_conc = simulate_with(&skills, 30_000, &concentration, EnemyDummy::open());
         let with_exp = simulate_with(&skills, 30_000, &expertise, EnemyDummy::open());
         assert!(plain.control_uptime > 0.0);
-        assert_eq!(with_conc.control_uptime, plain.control_uptime, "Concentration must not touch Chill");
+        assert_eq!(
+            with_conc.control_uptime, plain.control_uptime,
+            "Concentration must not touch Chill"
+        );
         assert!(
             with_exp.control_uptime > plain.control_uptime,
             "Expertise must lengthen Chill: {} vs {}",
@@ -1535,7 +1547,10 @@ mod tests {
         // Cast at 0 s and 30 s in a 60 s window: 10 s of presence.
         let result = simulate_with(&skills, 60_000, &params, EnemyDummy::open());
         let uptime = result.buff_uptime["Stability"];
-        assert!((uptime - 10.0 / 60.0).abs() < 0.02, "presence uptime: {uptime}");
+        assert!(
+            (uptime - 10.0 / 60.0).abs() < 0.02,
+            "presence uptime: {uptime}"
+        );
         assert!(
             (result.boon_equivalents - uptime).abs() < 1e-9,
             "Stability is a full-value boon: {}",
@@ -1590,12 +1605,13 @@ mod tests {
         });
         let flow = simulate_with(&skills, 30_000, &params, EnemyDummy::open());
         assert!(
-            flow.skill_usage.iter().any(|u| u.name == "Staff Heal" && u.cast_count >= 1),
+            flow.skill_usage
+                .iter()
+                .any(|u| u.name == "Staff Heal" && u.cast_count >= 1),
             "must swap to the set that heals: {:?}",
             flow.skill_usage
         );
     }
-
 
     #[test]
     fn might_average_keeps_the_stacks_the_uptime_cap_loses() {
