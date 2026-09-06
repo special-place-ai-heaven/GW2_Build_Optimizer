@@ -264,6 +264,15 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         );
                     }
 
+                    // Handed over, not fetched. See `profession_reference`:
+                    // enumerating the specs, traits and skills cost 21s of a
+                    // 31s tool phase and six round-trips, for data that is
+                    // already in memory.
+                    kitchen.push_str(&gw2_optimizer::gemini_tools::profession_reference(
+                        db,
+                        &profession,
+                    ));
+
                     let tools = gw2_optimizer::llm::tools::tool_definitions();
                     let empty_candidates = vec![];
                     let ctx = gw2_optimizer::gemini_tools::ToolContext {
