@@ -2,7 +2,45 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
-## 1.11.32 - 2026-09-05
+## 1.11.32 - 2026-09-06
+
+### Choya
+
+- Choya answers with a build when no character is selected. It used to ask which profession, and ask again when pressed, and serve nothing either time - the prompt named the profession as `unknown` and never said what to do about that. It now picks the profession that suits what was asked for and says in one clause which it chose and why. The chat also says so above the reply, in warning colour, rather than leaving "no character" in grey among three other facts where it went unnoticed.
+- A refused build is no longer reported as "I kept your build" when there is no build to keep. The viability gate exists to stop a worse build replacing one already being worn; with nothing worn there is nothing to protect, so the plate is served with the concern written on it. Told what is weak, you can decide. Told that something was kept, you were given neither a build nor the truth.
+- Requests stopped timing out. Three faults, all ours: a completion budget of 65,536 tokens cannot be delivered inside a 420-second deadline at any realistic speed, so any model that used it ran out the clock; where a model did not accept our reasoning effort the fallback took the first entry of its list, which on `z-ai/glm-5.3` means `max`, so a model that must think was told to think as hard as it can on every message; and a timeout was retried on an identical budget, which cannot end differently and only doubles the silence.
+
+### Community builds
+
+- Under every proposal, the closest published build from each site, and clicking one opens it here as a suggestion of its own with the site's own link beside it. 740 community builds were already on disk and the only thing reading them was a percentage.
+- Closest means closest to the build, not to the profession. Specializations weigh most, then the job, then the weapons that decide five skills each, then rune, relic and prefix - two builds sharing all three specializations are the same build with different gear.
+- A card must be the job, the damage flavour and the scale that was asked for. A healer and a DPS are opposite jobs; assassin and duelist are their own. Power and condition are different builds, decided by the label where it is explicit and by the gear where it is not - one site publishes a Marauder Reaper as plain "Roaming DPS", which is a power build whatever the label omits. Scale disqualifies asymmetrically: a roaming build can walk into a zerg because it carries its own sustain, but a zerg build cannot go roaming, where it leans on twenty people's boons and dies alone. Hybrids are exempt, being self-sufficient by construction.
+- Where nothing qualifies, nothing is shown. Nobody publishes a roaming Necromancer healer, and saying so by offering no card is better than answering with a build that would die in the fight it was asked about.
+
+### Providers and models
+
+- The model list shows only models that can serve this addon, best first. It was every id the provider returned in alphabetical order - on OpenRouter that is 431 rows sorted so the one worth picking is two hundred lines down. Models without tool support, without text output, batch jobs that answer within 24 hours and models carrying a retirement date are gone; what remains is ordered by published agentic score, with the score beside the name.
+- A Free filter, on by default, greyed for providers that have no free models. Free is read from each provider's own data - OpenRouter states a price per model, Google publishes a free tier per model - never from a list we maintain. Turning it on brings out a Choya in sunglasses.
+- Every request is now built for the model it is sent to. Its completion budget is clamped to what that model will produce and its reasoning effort chosen from the list that model publishes: 153 of OpenRouter's 431 models cannot serve the budget we used to send unconditionally, and 34 reject the effort - including the highest-scoring free model there is, which accepts only `xhigh` and `high`.
+
+### Viability
+
+- The viability gates were measured against the 740 community builds rather than set by taste. Every published PvE build passed; not one published WvW build did. `cargo run -p gw2-optimizer --example calibrate_viability` prints the pass rate per gate, so a miscalibrated one is a number rather than an argument.
+- A protected sequence now completes on support output. It used to require damage, control or a condition, so a healer's protected window - healing and cleansing - was discarded, and a WvW healer failed the gate by doing its job.
+- Gates the published meta itself fails no longer refuse a build; they report. `HarasserStrip` rejects 89% of published roamers and `ProtectedExecution` 73% of what it judges - a rule contradicted by the whole body of evidence it describes has no authority to reject anything. Nothing is silently forgiven: a gate that fails travels with the build as a caveat.
+
+### Benchmarks
+
+- The scrape keeps each page's prose, which is where every site writes its rotation and what the role is actually for. 188 of the synced builds carry an explicit `Weapon Swap` in an ordered chain. The parts list was being kept and the assembly order thrown away.
+- Weapon types are read from Snowcrows rather than the hand they sit in, so `Shortbow 5` in a published rotation can be resolved at all.
+- Hardstuck's own role and game type are read from the page instead of inferred, and an em dash in a build description no longer ends a sync - a byte-indexed slice through a multi-byte character killed a 328-page run.
+
+### Settings
+
+- The benchmark table sizes itself to its contents instead of sharing out the whole panel between three columns of three digits, and Failed is a column with a heading rather than a number hanging off the right edge. It stays on screen at any window width, and stays visible while a sync runs and before the first one.
+- The Optimize button follows the font scale like every other control instead of being fixed at 28 pixels.
+- Theme, provider and preference rows are paired two to a row, and a named theme joins a list rather than replacing the last one.
+
 
 ### Choya
 
