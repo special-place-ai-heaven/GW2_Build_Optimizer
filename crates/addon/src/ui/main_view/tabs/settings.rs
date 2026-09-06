@@ -290,6 +290,24 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
             [1.0, 0.5, 0.0, 1.0],
             tf("fmt.key_not_set", &[("provider", &provider_label)]),
         );
+        // The same on-ramp the first-run wizard shows, from the same keys —
+        // see `LlmProvider::setup_howto_key`. Anyone who skipped the wizard,
+        // or who comes back to change provider, lands here instead, and
+        // "Key not set for OpenRouter" on its own is the dead end the wizard
+        // used to have: true, and no help at all to somebody who has never
+        // made an API key.
+        let provider = state.config.active_provider.clone();
+        ui.spacing();
+        theme::wrapped(ui, theme::pal().muted, &t(provider.setup_howto_key()));
+        // A button rather than the wizard's read-only URL field: this panel
+        // has no room for one, and the page is what the reader wants.
+        if ui.small_button(t("news.open")) {
+            let _ = crate::feedback::shell::open_url(provider.key_page_url());
+        }
+        if ui.is_item_hovered() {
+            ui.tooltip_text(provider.key_page_url());
+        }
+        theme::wrapped(ui, theme::pal().muted, &t(provider.setup_steps_key()));
     }
     let after_status = ui.cursor_screen_pos();
 
@@ -2051,6 +2069,29 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {
         format!("{} B", bytes)
+    }
+}
+
+#[cfg(test)]
+mod key_howto_tests {
+    use gw2_core::config::LlmProvider;
+    use gw2_core::i18n::t;
+
+    /// Settings shows the on-ramp from the same keys the wizard uses, so the
+    /// two screens cannot drift apart. If either ever needs different words,
+    /// that is a second key, not a second copy of this one.
+    #[test]
+    fn every_provider_has_a_reachable_key_page_and_words_for_it() {
+        for provider in &LlmProvider::ALL {
+            let url = provider.key_page_url();
+            assert!(url.starts_with("https://"), "{url} must be openable");
+
+            for key in [provider.setup_howto_key(), provider.setup_steps_key()] {
+                let text = t(key);
+                assert_ne!(text, key, "{key} is missing from the catalog");
+                assert!(text.len() > 20, "{key} is too short to help anyone");
+            }
+        }
     }
 }
 
