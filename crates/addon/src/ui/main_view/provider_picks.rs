@@ -228,11 +228,29 @@ pub(in crate::ui::main_view) fn adopt_provider_pick(state: &mut AddonState, inde
         })
         .collect();
 
-    let skills: Vec<String> = published
-        .skill_ids
-        .iter()
-        .filter_map(|id| db.skills.get(id).map(|s| s.name.clone()))
-        .collect();
+    // The slot bar, positionally: heal, three utilities, elite. Read from the
+    // chat code where the site marks up no skills, which is most of them —
+    // reading `skill_ids` alone left the heal and elite slots empty on every
+    // GuildJen build.
+    let slots = published.slot_skills(&db);
+    let slot_name = |at: usize| {
+        slots
+            .get(at)
+            .and_then(|id| *id)
+            .and_then(|id| db.skills.get(&id))
+            .map(|s| s.name.clone())
+    };
+    let mut skills: Vec<String> = Vec::new();
+    if let Some(heal) = slot_name(0) {
+        skills.push(format!("Heal: {heal}"));
+    }
+    let utils: Vec<String> = (1..4).filter_map(slot_name).collect();
+    if !utils.is_empty() {
+        skills.push(format!("Utils: {}", utils.join(", ")));
+    }
+    if let Some(elite) = slot_name(4) {
+        skills.push(format!("Elite: {elite}"));
+    }
 
     let item_name = |id: Option<u32>| {
         id.and_then(|id| db.items.get(&id))
@@ -257,7 +275,21 @@ pub(in crate::ui::main_view) fn adopt_provider_pick(state: &mut AddonState, inde
         summary.push_str(&weapons.join(" / "));
     }
 
-    let suggestion = crate::ui::comparison::BuildSuggestion {
+    // The same build in the shape validation reads, so the stats below come
+    // from the published gear rather than from the summary strings.
+    let plate = gw2_optimizer::prompts::GeminiBuildResponse {
+        specializations: specializations.clone(),
+        weapons: weapons.clone(),
+        skills: skills.clone(),
+        rune: item_name(published.rune_id),
+        sigils: sigils.clone(),
+        relic: item_name(published.relic_id),
+        stat_prefix: published
+            .dominant_stat()
+            .unwrap_or_else(|| build.gear_prefix.clone()),
+        ..Default::default()
+    };
+    let mut suggestion = crate::ui::comparison::BuildSuggestion {
         label,
         build_summary: summary,
         stat_prefix: published
@@ -279,8 +311,38 @@ pub(in crate::ui::main_view) fn adopt_provider_pick(state: &mut AddonState, inde
         source_url: build.source_url.clone(),
         ..Default::default()
     };
-    state.main.comparison.suggestions.push(suggestion);
-    state.main.comparison.selected_suggestion = state.main.comparison.suggestions.len() - 1;
+    // Stats, computed the same way a plated build's are. Without this the
+    // panel showed a column of zeroes beside the player's real numbers, which
+    // reads as a build with no stats rather than a build we did not measure.
+    let validated = gw2_optimizer::validation::validate_gemini_build(
+        &plate,
+        &db,
+        &build.profession,
+    );
+    let game_mode = state.main.game_mode.clone();
+    crate::ui::main_view::optimization::attach_chat_stats(
+        &mut suggestion,
+        &db,
+        &build.profession,
+        &game_mode,
+        Some(&validated),
+    );
+
+    // Opening the same card twice is one build, not two. Select the tab that
+    // already holds it instead of stacking another beside it.
+    if let Some(at) = state
+        .main
+        .comparison
+        .suggestions
+        .iter()
+        .position(|s| !s.source_url.is_empty() && s.source_url == suggestion.source_url)
+    {
+        state.main.comparison.suggestions[at] = suggestion;
+        state.main.comparison.selected_suggestion = at;
+    } else {
+        state.main.comparison.suggestions.push(suggestion);
+        state.main.comparison.selected_suggestion = state.main.comparison.suggestions.len() - 1;
+    }
     // Same landing as Choya's own plate: the tab where a build is actually
     // shown. Opening a build and leaving the player on the page they opened
     // it from is a click that appears to do nothing.
