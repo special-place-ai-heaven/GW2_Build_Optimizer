@@ -412,18 +412,40 @@ mod tests {
         });
     }
 
+    /// The on-ramp reaches a first-time user in their own language.
+    ///
+    /// Written first to assert that German fell back to English, which was
+    /// true only while German had no on-ramp. It does now — and a test that
+    /// pins a fallback is a test that fails the moment somebody does the
+    /// translation, which is the wrong thing to make expensive.
+    ///
+    /// What is worth holding is that the strings are real in every language
+    /// and are not the key names leaking through, so the check is the same
+    /// for all of them.
     #[test]
-    fn onboarding_howto_falls_back_to_english() {
+    fn every_language_has_its_own_onboarding() {
+        const ON_RAMP: [&str; 4] = [
+            "setup.ai_howto",
+            "setup.ai_pick",
+            "setup.openrouter_steps",
+            "setup.gemini_steps",
+        ];
+        for lang in LANGUAGES.iter().map(|l| l.code) {
+            with_lang(lang, || {
+                for key in ON_RAMP {
+                    let text = t(key);
+                    assert_ne!(text, key, "{lang} has no {key}");
+                    assert!(text.len() > 20, "{lang} {key} is too short to be prose");
+                }
+            });
+        }
         with_lang("en", || {
-            assert_ne!(t("setup.ai_howto"), "setup.ai_howto");
             assert!(t("setup.ai_howto").contains("do not have to pay"));
         });
+        // Not a fallback: German says it in German.
         with_lang("de", || {
-            assert_eq!(
-                t("setup.ai_howto"),
-                "The addon needs an API key from an AI company. You do not have to pay. Most people make a free OpenRouter or Google account and stay on free models."
-            );
-            assert_eq!(t("setup.free_tag"), "(free)");
+            assert!(t("setup.ai_howto").contains("Bezahlen musst du nicht"));
+            assert_eq!(t("setup.free_tag"), "(gratis)");
         });
     }
 
