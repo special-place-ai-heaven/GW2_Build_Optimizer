@@ -1509,7 +1509,10 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
 
     let duration_s = clamp_rotation_duration(args.get("duration_seconds").and_then(|v| v.as_u64()));
 
-    let gear_prefix = args.get("gear_prefix").and_then(|v| v.as_str()).unwrap_or("");
+    let gear_prefix = args
+        .get("gear_prefix")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Some(gear_stats) = find_itemstat_by_name(ctx.db, gear_prefix)
         .and_then(|istat| calculate_full_set_stats(ctx.db, istat, ctx.balance_ctx))
     else {
@@ -1622,7 +1625,6 @@ fn calculate_full_set_stats(
         None => Some(gear_stats),
     }
 }
-
 
 /// Prefix-only combat inputs for the LLM rotation tool. Trait mods stay at
 /// default — the tool sees a named prefix, not a validated trait line.
@@ -2024,25 +2026,7 @@ fn extract_stat_bonus(text: &str) -> Option<Value> {
 
 /// Extract the first number from text.
 fn extract_number(text: &str) -> Option<f64> {
-    let mut num_str = String::new();
-    let mut found_digit = false;
-    for ch in text.chars() {
-        if ch.is_ascii_digit()
-            || (ch == '.' && found_digit)
-            || (ch == '+' && !found_digit)
-            || (ch == '-' && !found_digit)
-        {
-            if ch != '+' {
-                num_str.push(ch);
-            }
-            if ch.is_ascii_digit() {
-                found_digit = true;
-            }
-        } else if found_digit {
-            break;
-        }
-    }
-    num_str.parse::<f64>().ok()
+    crate::text_util::first_number(&crate::text_util::strip_gw2_markup(text))
 }
 
 /// Format a single Fact into a JSON value for tool responses.
@@ -2760,7 +2744,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn simulate_rotation_errors_when_prefix_cannot_be_priced() {
         let mut db = db_with_itemstats(vec![]);
@@ -2808,9 +2791,10 @@ mod tests {
             &ctx,
         );
         assert!(
-            result.get("error").and_then(|v| v.as_str()).is_some_and(|e| {
-                e.contains("NotARealPrefix") && e.contains("No stat sheet")
-            }),
+            result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .is_some_and(|e| { e.contains("NotARealPrefix") && e.contains("No stat sheet") }),
             "unresolved prefix must be a tool error, not invented DPS: {result}"
         );
         assert!(result.get("dps").is_none());
@@ -2874,11 +2858,8 @@ mod tests {
             .parse()
             .expect("strike DPS is a formatted number");
 
-        let skills = crate::rotation::builder::build_rotation_skills_for_context(
-            &[999],
-            &db,
-            &balance_ctx,
-        );
+        let skills =
+            crate::rotation::builder::build_rotation_skills_for_context(&[999], &db, &balance_ctx);
         let gear = calculate_full_set_stats(
             &db,
             find_itemstat_by_name(&db, "Berserker's").expect("seeded prefix"),
@@ -2911,5 +2892,4 @@ mod tests {
             "tool must call simulate_with on resolved stats, not simulate()/basic: {result}"
         );
     }
-
 }
