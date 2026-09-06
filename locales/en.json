@@ -345,6 +345,8 @@
   "cmp.ai": "Running AI synergy analysis...",
   "cmp.none": "No suggestions available. Run the optimizer first.",
   "cmp.also_like": "Additional suggestions you might like",
+  "cmp.also_like_short": "You might also like",
+  "fmt.open_from": "Open this {site} build",
   "fmt.site_link": "{site} link",
   "fmt.published_by": "Published by {source} as {role}.",
   "cmp.sync_for_more": "Want more build suggestions? Sync the community builds once and Choya will show you the closest published build from each site.",

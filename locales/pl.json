@@ -339,6 +339,8 @@
   "cmp.ai": "Analiza synergii SI...",
   "cmp.none": "Brak sugestii. Najpierw uruchom optymalizator.",
   "cmp.also_like": "Dodatkowe propozycje, które mogą ci się spodobać",
+  "cmp.also_like_short": "Może ci się też spodobać",
+  "fmt.open_from": "Otwórz ten build z {site}",
   "fmt.site_link": "Link {site}",
   "fmt.published_by": "Opublikowany przez {source} jako {role}.",
   "cmp.sync_for_more": "Chcesz więcej propozycji? Zsynchronizuj buildy społeczności raz, a Choya pokaże najbliższy opublikowany build z każdej strony.",

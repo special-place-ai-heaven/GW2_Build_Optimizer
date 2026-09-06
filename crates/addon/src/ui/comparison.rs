@@ -399,7 +399,7 @@ pub struct ComparisonState {
 /// than on the card that opened it, because this is where someone is when
 /// they decide they want to read the author's own write-up — which is the
 /// one thing worth going to a website for, since we show the build itself.
-fn render_source_link(ui: &Ui, suggestion: &BuildSuggestion) {
+pub(crate) fn render_source_link(ui: &Ui, suggestion: &BuildSuggestion) {
     if suggestion.source_url.is_empty() {
         return;
     }

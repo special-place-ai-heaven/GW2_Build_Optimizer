@@ -339,6 +339,8 @@
   "cmp.ai": "KI-Synergieanalyse...",
   "cmp.none": "Keine Vorschläge. Zuerst den Optimierer starten.",
   "cmp.also_like": "Weitere Vorschläge, die dir gefallen könnten",
+  "cmp.also_like_short": "Vielleicht auch interessant",
+  "fmt.open_from": "Diesen {site}-Build öffnen",
   "fmt.site_link": "{site}-Link",
   "fmt.published_by": "Von {source} als {role} veröffentlicht.",
   "cmp.sync_for_more": "Mehr Build-Vorschläge? Synchronisiere die Community-Builds einmal, und Choya zeigt dir den ähnlichsten veröffentlichten Build jeder Seite.",

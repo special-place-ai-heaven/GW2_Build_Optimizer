@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::chat_links::ChatChip;
 use crate::ui::{color_u32, icons, theme};
-use gw2_core::i18n::t;
+use gw2_core::i18n::{t, tf};
 
 /// State for the talk-tab transcript.
 #[derive(Default)]
@@ -39,6 +39,22 @@ pub struct ChatMessage {
 pub enum ChatAction {
     Send(String),
     OpenBuild,
+    /// A published build offered beside ours was chosen, by index.
+    OpenPick(usize),
+}
+
+/// One community build, as much of it as a card beside the reply can show.
+///
+/// Display strings rather than the row itself: this module draws a chat and
+/// knows nothing about benchmarks, and it should stay that way.
+#[derive(Debug, Clone, Default)]
+pub struct PickCard {
+    /// Elite specialization, or the profession when the site did not name one.
+    pub title: String,
+    /// The site, lowercased as it is stored — `guildjen`, `hardstuck`.
+    pub source: String,
+    /// The job, and the stat prefix when there is one.
+    pub detail: String,
 }
 
 /// Maximum chat history entries retained. Beyond this, the oldest entries are
@@ -196,6 +212,7 @@ pub fn render_chat_bar(
     cooking: Option<&str>,
     user_icon: Option<&str>,
     user_letter: char,
+    picks: &[PickCard],
 ) -> Option<ChatAction> {
     let mut action = None;
 
@@ -284,6 +301,16 @@ pub fn render_chat_bar(
                     if render_build_card(ui, i) {
                         action = Some(ChatAction::OpenBuild);
                     }
+                    // Beside our own card, not under it: they are the same
+                    // kind of thing — a build you can open — and reading them
+                    // as a row says so. Only on the newest reply, so an old
+                    // conversation does not sprout cards against builds that
+                    // have long since been replaced.
+                    if i + 1 == state.history.len() && !picks.is_empty() {
+                        if let Some(n) = render_pick_cards(ui, picks, i) {
+                            action = Some(ChatAction::OpenPick(n));
+                        }
+                    }
                 }
                 let end_y = ui.cursor_screen_pos()[1].max(origin[1] + bubble_h) + ROW_GAP;
                 ui.set_cursor_screen_pos([origin[0], end_y]);
@@ -364,6 +391,91 @@ fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
         ui.tooltip_text(t("chat.open_optimized"));
     }
     clicked
+}
+
+/// "You might also like" and the published builds, in a row to the right of
+/// our own card.
+///
+/// Compact on purpose: a site mark, the specialization, and the job. Enough
+/// to tell three apart and decide which to open; the build itself is one
+/// click away and this is a chat, not a catalogue.
+fn render_pick_cards(ui: &Ui, picks: &[PickCard], msg_i: usize) -> Option<usize> {
+    const GAP: f32 = 18.0;
+    const PAD: f32 = 9.0;
+    let row_top = ui.item_rect_min()[1];
+    let row_h = ui.item_rect_size()[1];
+    let mut x = ui.item_rect_max()[0] + GAP;
+
+    let label = t("cmp.also_like_short");
+    let label_sz = ui.calc_text_size(&label);
+    {
+        let dl = ui.get_window_draw_list();
+        dl.add_text(
+            [x, row_top + (row_h - label_sz[1]) * 0.5],
+            color_u32(theme::pal().muted),
+            &label,
+        );
+    }
+    x += label_sz[0] + GAP * 0.5;
+
+    let mut chosen = None;
+    for (n, pick) in picks.iter().enumerate() {
+        let mark = ui.text_line_height();
+        let title_sz = ui.calc_text_size(&pick.title);
+        let detail_sz = ui.calc_text_size(&pick.detail);
+        let text_w = title_sz[0].max(detail_sz[0]);
+        let w = PAD + mark + 8.0 + text_w + PAD;
+        let h = row_h;
+
+        ui.set_cursor_screen_pos([x, row_top]);
+        let clicked = ui.invisible_button(format!("##pick{msg_i}_{n}"), [w, h]);
+        let hovered = ui.is_item_hovered();
+        let fill = if hovered {
+            theme::with_alpha(theme::pal().gold_hover, 0.96)
+        } else {
+            theme::pal().plate
+        };
+        {
+            let dl = ui.get_window_draw_list();
+            dl.add_rect([x, row_top], [x + w, row_top + h], fill)
+                .filled(true)
+                .rounding(10.0)
+                .build();
+            dl.add_rect([x, row_top], [x + w, row_top + h], theme::pal().chip_idle_rim)
+                .rounding(10.0)
+                .build();
+            let text_h = title_sz[1] + 4.0 + detail_sz[1];
+            let ty = row_top + (h - text_h) * 0.5;
+            let mid = [x + PAD + mark * 0.5, row_top + h * 0.5];
+            match theme::site_tex(&pick.source) {
+                Some(tid) => {
+                    let r = mark * 0.5;
+                    dl.add_image(tid, [mid[0] - r, mid[1] - r], [mid[0] + r, mid[1] + r])
+                        .build();
+                }
+                None => {
+                    dl.add_circle(mid, 3.0, theme::pal().gold)
+                        .filled(true)
+                        .build();
+                }
+            }
+            let tx = x + PAD + mark + 8.0;
+            dl.add_text([tx, ty], color_u32(theme::pal().gold), &pick.title);
+            dl.add_text(
+                [tx, ty + title_sz[1] + 4.0],
+                color_u32(theme::pal().muted),
+                &pick.detail,
+            );
+        }
+        if hovered {
+            ui.tooltip_text(tf("fmt.open_from", &[("site", &pick.source)]));
+        }
+        if clicked {
+            chosen = Some(n);
+        }
+        x += w + GAP * 0.5;
+    }
+    chosen
 }
 
 fn draw_send_icon(ui: &Ui, c: [f32; 2], on: bool) {

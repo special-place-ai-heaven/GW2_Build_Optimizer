@@ -339,6 +339,8 @@
   "cmp.ai": "AIシナジー分析中...",
   "cmp.none": "提案がありません。先にオプティマイザーを実行してください。",
   "cmp.also_like": "他にもおすすめのビルド",
+  "cmp.also_like_short": "こちらもおすすめ",
+  "fmt.open_from": "{site} のこのビルドを開く",
   "fmt.site_link": "{site} のページ",
   "fmt.published_by": "{source} が {role} として公開。",
   "cmp.sync_for_more": "他のビルドも見たいですか？ コミュニティビルドを一度同期すると、各サイトで最も近いビルドを表示します。",
