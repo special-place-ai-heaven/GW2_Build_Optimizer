@@ -1748,11 +1748,24 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         if gw2_optimizer::scraper::sync_backoff_ms() > 0 {
             ui.text_colored([0.9, 0.8, 0.2, 1.0], t("bench.throttled"));
         }
-    } else if let Some(ref last) = state.main.benchmark_last_synced {
+        ui.spacing();
+    }
+    {
         // A row per source: what came back, and what did not. One joined
         // line of three totals could not say that a source listed 157 pages
         // and returned 148 - the nine that failed simply vanished.
-        ui.text_colored(theme::pal().muted, tf("fmt.synced_when", &[("when", last)]));
+        //
+        // Drawn whether or not a sync has ever run, and left up while one is
+        // running. A grid of dashes still answers the question the table
+        // exists for — which modes are not covered — so the progress rows
+        // belong above it rather than in place of it.
+        let synced = state.main.benchmark_last_synced.clone();
+        match synced {
+            Some(ref last) => {
+                ui.text_colored(theme::pal().muted, tf("fmt.synced_when", &[("when", last)]))
+            }
+            None => ui.text_colored(theme::pal().muted, t("settings.never_synced")),
+        }
         // Providers down the side, game modes across: the sources do not
         // cover the same modes, and one total per source could not say
         // whether the one you play is covered at all. The red column is what
@@ -1764,43 +1777,36 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         // out full width the grid also read badly: three counts and a dash
         // stretched across the whole window with nothing between them.
         //
-        // Widths come from the text so the grid follows the font scale, then
-        // share out whatever the panel has left — the counts sat jammed
-        // against the source names in a column with room to spare.
+        // Every width comes from the text it holds, so the grid follows the
+        // font scale and takes only the room it needs. It does NOT share out
+        // the panel: three counts of at most four digits, dealt a third of
+        // the window each, left a hand's width of empty space inside every
+        // column and still pushed the failure column off the right edge. The
+        // slack belongs after the last column, not inside each one.
         let scale = state.config.font_scale.max(0.5);
         let label_w = BENCHMARK_SOURCES
             .iter()
             .map(|(_, label)| ui.calc_text_size(label)[0])
             .fold(0.0_f32, f32::max)
             + 16.0 * scale;
-        // Room for a four-digit count, the widest mode name, and the failure
-        // column with its Retry button.
-        let min_mode_w = BENCHMARK_MODES
+        // Room for a four-digit count or the widest heading, whichever is
+        // wider, plus a gap so the next column does not touch it. Failed is
+        // one of the headings: it is a column of the same table, not an
+        // annotation hung off the end of it.
+        let failed_label = t("bench.failed");
+        let mode_w = BENCHMARK_MODES
             .iter()
             .map(|mode| ui.calc_text_size(mode)[0])
+            .chain(std::iter::once(ui.calc_text_size(&failed_label)[0]))
             .fold(ui.calc_text_size("8888")[0], f32::max)
-            + 12.0 * scale;
+            + 24.0 * scale;
         // Measured, not guessed: `gold_button_sized` grows a button past the
         // width it is given when the label needs more, so a fixed 76px
         // reservation was wrong at any font scale where "Retry" got wider
         // than that, and the button hung off the panel.
         let retry_button_w =
             theme::gold_button_width(ui, t("btn.retry")).max(56.0 * scale);
-        // Reserved only when a source actually has failures. The column is
-        // drawn per row under the same condition, so reserving it
-        // unconditionally spent a fifth of the panel on nothing in the
-        // ordinary case where every source read cleanly.
-        let any_failed = BENCHMARK_SOURCES
-            .iter()
-            .any(|(key, _)| state.main.benchmark_failed.get(*key).copied().unwrap_or(0) > 0);
-        let retry_w = if any_failed {
-            ui.calc_text_size("88")[0] + ui.clone_style().item_spacing[0] + retry_button_w
-        } else {
-            0.0
-        };
         let avail = ui.content_region_avail()[0];
-        let spare = avail - label_w - retry_w;
-        let mode_w = (spare / BENCHMARK_MODES.len() as f32).max(min_mode_w);
 
         // Cells are placed with `set_cursor_pos` from the row's own starting
         // x, NOT `same_line_with_pos`. That offset ignores the indent, and
@@ -1808,12 +1814,14 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         // counts were drawn on top of the source names — "Snowcr180".
         let row_x = ui.cursor_pos()[0];
         let column_at = |n: usize| row_x + label_w + mode_w * n as f32;
-        // The failure column is pinned inside the panel. `mode_w` takes
-        // whichever is larger of its share and a readable minimum, so when
-        // the minimum wins the mode columns are wider than the space they
-        // were dealt and the column after them lands past the right edge —
-        // which is where the Retry button went.
-        let fail_x = column_at(BENCHMARK_MODES.len()).min(row_x + avail - retry_w);
+        let fail_x = column_at(BENCHMARK_MODES.len());
+        // The button follows the Failed column, pinned inside the panel as a
+        // floor for a window narrowed past the point where the grid fits at
+        // all. Content-sized columns keep the grid far short of the edge at
+        // any ordinary width, so this clamp does nothing until the panel is
+        // genuinely too small.
+        let retry_x = column_at(BENCHMARK_MODES.len() + 1)
+            .min(row_x + avail - retry_button_w);
 
         // Header: an empty corner cell, then the modes.
         let header_y = ui.cursor_pos()[1];
@@ -1822,6 +1830,8 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
             ui.set_cursor_pos([column_at(n), header_y]);
             ui.text_colored(theme::pal().muted, *mode);
         }
+        ui.set_cursor_pos([fail_x, header_y]);
+        ui.text_colored(theme::pal().muted, &failed_label);
         for (key, label) in BENCHMARK_SOURCES {
             let row_y = ui.cursor_pos()[1];
             ui.text_colored(theme::pal().gold, *label);
@@ -1845,13 +1855,13 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
                 .get(*key)
                 .copied()
                 .unwrap_or(0);
+            ui.set_cursor_pos([fail_x, row_y]);
             if bad > 0 {
-                ui.set_cursor_pos([fail_x, row_y]);
                 ui.text_colored([1.0, 0.4, 0.2, 1.0], bad.to_string());
-                ui.same_line();
                 // Only where there is something to retry, and cheap to take:
                 // a re-run today skips every page already read and fetches
                 // exactly these.
+                ui.set_cursor_pos([retry_x, row_y]);
                 if theme::gold_button_sized(
                     ui,
                     format!("{}##retry_{key}", t("btn.retry")),
@@ -1859,10 +1869,12 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
                 ) {
                     retry_requested = true;
                 }
+            } else {
+                // A dash, not a zero. Failures are not written to disk, so
+                // after a restart this is unknown rather than clean.
+                ui.text_colored(theme::pal().muted, "-");
             }
         }
-    } else {
-        ui.text_colored(theme::pal().muted, t("settings.never_synced"));
     }
     if let Some(ref err) = state.main.benchmark_error.clone() {
         let short = if err.chars().count() > 80 {

@@ -445,6 +445,7 @@
   "bench.none": "벤치마크 데이터가 없습니다.",
   "btn.retry": "재시도",
   "fmt.synced_when": "동기화됨 {when}",
+  "bench.failed": "실패",
   "bench.throttled": "일시 중지 - 사이트에서 속도를 낮춰 달라고 요청했습니다. 동기화는 대기 중이며 자동으로 계속됩니다.",
   "bench.sync_hint": "설정 > Sync Benchmarks에서 참조 빌드를 내려받으세요.",
   "bench.on_par": "동등",

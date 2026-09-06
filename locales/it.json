@@ -445,6 +445,7 @@
   "bench.none": "Nessun dato di riferimento disponibile.",
   "btn.retry": "Riprova",
   "fmt.synced_when": "Sincronizzato {when}",
+  "bench.failed": "Falliti",
   "bench.throttled": "In pausa - il sito ci ha chiesto di rallentare. La sincronizzazione è in attesa e riprenderà da sola.",
   "bench.sync_hint": "Vai in Impostazioni > Sync Benchmarks per scaricare le build di riferimento.",
   "bench.on_par": "in linea",

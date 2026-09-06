@@ -445,6 +445,7 @@
   "bench.none": "Geen benchmarkgegevens beschikbaar.",
   "btn.retry": "Opnieuw",
   "fmt.synced_when": "Gesynchroniseerd {when}",
+  "bench.failed": "Mislukt",
   "bench.throttled": "Gepauzeerd - de site vraagt ons om langzamer te gaan. De synchronisatie wacht en gaat vanzelf verder.",
   "bench.sync_hint": "Ga naar Instellingen > Sync Benchmarks om referentiebuilds te downloaden.",
   "bench.on_par": "gelijk",
