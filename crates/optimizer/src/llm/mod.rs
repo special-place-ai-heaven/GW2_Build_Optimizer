@@ -24,6 +24,15 @@ pub struct ModelInfo {
     pub id: String,
     /// Human-readable display name (e.g. "GPT-4o", "Gemini 2.5 Flash", "Claude Sonnet 4.6").
     pub display_name: String,
+    /// Whether this model can be used without paying.
+    ///
+    /// Most people who install this addon will make a free account and never
+    /// spend anything, so which models are free is not trivia — it is the
+    /// difference between a usable model list and 400 entries to rummage
+    /// through. Each provider answers it from its own data where it can:
+    /// OpenRouter publishes a price per model, Google publishes a free tier
+    /// per model, OpenAI and Anthropic have neither.
+    pub free: bool,
 }
 
 /// Result of a detailed key validation with user-friendly messages.

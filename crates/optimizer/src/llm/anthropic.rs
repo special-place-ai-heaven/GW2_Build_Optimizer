@@ -785,6 +785,9 @@ impl LlmClient for AnthropicClient {
         let mut models: Vec<super::ModelInfo> = entries
             .into_iter()
             .map(|m| super::ModelInfo {
+                // Anthropic publishes no free tier and no per-model price in
+                // its catalog: every model here bills.
+                free: false,
                 display_name: m.display_name.unwrap_or_else(|| m.id.clone()),
                 id: m.id,
             })
