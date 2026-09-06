@@ -2,6 +2,69 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.12.0 - 2026-09-06
+
+### Choya
+
+- Choya answers with a build when no character is selected. It used to ask which profession, and ask again when pressed, and serve nothing either time - the prompt named the profession as `unknown` and never said what to do about that. It now picks the profession that suits what was asked for and says in one clause which it chose and why. The chat also says so above the reply, in warning colour, rather than leaving "no character" in grey among three other facts where it went unnoticed.
+- A refused build is no longer reported as "I kept your build" when there is no build to keep. The viability gate exists to stop a worse build replacing one already being worn; with nothing worn there is nothing to protect, so the plate is served with the concern written on it. Told what is weak, you can decide. Told that something was kept, you were given neither a build nor the truth.
+- Requests stopped timing out. Three faults, all ours: a completion budget of 65,536 tokens cannot be delivered inside a 420-second deadline at any realistic speed, so any model that used it ran out the clock; where a model did not accept our reasoning effort the fallback took the first entry of its list, which on `z-ai/glm-5.3` means `max`, so a model that must think was told to think as hard as it can on every message; and a timeout was retried on an identical budget, which cannot end differently and only doubles the silence.
+
+### Community builds
+
+- Under every proposal, the closest published build from each site, and clicking one opens it here as a suggestion of its own with the site's own link beside it. 740 community builds were already on disk and the only thing reading them was a percentage.
+- Closest means closest to the build, not to the profession. Specializations weigh most, then the job, then the weapons that decide five skills each, then rune, relic and prefix - two builds sharing all three specializations are the same build with different gear.
+- A card must be the job, the damage flavour and the scale that was asked for. A healer and a DPS are opposite jobs; assassin and duelist are their own. Power and condition are different builds, decided by the label where it is explicit and by the gear where it is not - one site publishes a Marauder Reaper as plain "Roaming DPS", which is a power build whatever the label omits. Scale disqualifies asymmetrically: a roaming build can walk into a zerg because it carries its own sustain, but a zerg build cannot go roaming, where it leans on twenty people's boons and dies alone. Hybrids are exempt, being self-sufficient by construction.
+- Where nothing qualifies, nothing is shown. Nobody publishes a roaming Necromancer healer, and saying so by offering no card is better than answering with a build that would die in the fight it was asked about.
+
+### Providers and models
+
+- The model list shows only models that can serve this addon, best first. It was every id the provider returned in alphabetical order - on OpenRouter that is 431 rows sorted so the one worth picking is two hundred lines down. Models without tool support, without text output, batch jobs that answer within 24 hours and models carrying a retirement date are gone; what remains is ordered by published agentic score, with the score beside the name.
+- A Free filter, on by default, greyed for providers that have no free models. Free is read from each provider's own data - OpenRouter states a price per model, Google publishes a free tier per model - never from a list we maintain. Turning it on brings out a Choya in sunglasses.
+- Every request is now built for the model it is sent to. Its completion budget is clamped to what that model will produce and its reasoning effort chosen from the list that model publishes: 153 of OpenRouter's 431 models cannot serve the budget we used to send unconditionally, and 34 reject the effort - including the highest-scoring free model there is, which accepts only `xhigh` and `high`.
+
+### Viability
+
+- The viability gates were measured against the 740 community builds rather than set by taste. Every published PvE build passed; not one published WvW build did. `cargo run -p gw2-optimizer --example calibrate_viability` prints the pass rate per gate, so a miscalibrated one is a number rather than an argument.
+- A protected sequence now completes on support output. It used to require damage, control or a condition, so a healer's protected window - healing and cleansing - was discarded, and a WvW healer failed the gate by doing its job.
+- Gates the published meta itself fails no longer refuse a build; they report. `HarasserStrip` rejects 89% of published roamers and `ProtectedExecution` 73% of what it judges - a rule contradicted by the whole body of evidence it describes has no authority to reject anything. Nothing is silently forgiven: a gate that fails travels with the build as a caveat.
+
+### Benchmarks
+
+- The scrape keeps each page's prose, which is where every site writes its rotation and what the role is actually for. 188 of the synced builds carry an explicit `Weapon Swap` in an ordered chain. The parts list was being kept and the assembly order thrown away.
+- Weapon types are read from Snowcrows rather than the hand they sit in, so `Shortbow 5` in a published rotation can be resolved at all.
+- Hardstuck's own role and game type are read from the page instead of inferred, and an em dash in a build description no longer ends a sync - a byte-indexed slice through a multi-byte character killed a 328-page run.
+
+### Settings
+
+- The benchmark table sizes itself to its contents instead of sharing out the whole panel between three columns of three digits, and Failed is a column with a heading rather than a number hanging off the right edge. It stays on screen at any window width, and stays visible while a sync runs and before the first one.
+- The Optimize button follows the font scale like every other control instead of being fixed at 28 pixels.
+- Theme, provider and preference rows are paired two to a row, and a named theme joins a list rather than replacing the last one.
+
+
+### Choya
+
+- Choya no longer composes a build from nothing. The chat advertised a `get_optimizer_results` tool and then handed it an empty list, so every call answered "No optimizer results available" and Choya reasoned from the player's message alone - while the deterministic optimizer could answer the same scenario, respecting the same locks, in about 30 milliseconds, with a build that already passes every viability check. Measured 2026-09-05 against a real character: WvW Roam Support with Scourge locked, the deterministic answer sits at 68% health and repeatable; the plate Choya composed blind that evening sat at 44% and could not repeat, so the referee refused it and the second attempt timed out. That worked answer is now in Choya's Context as a floor: match its survivability at least, then beat it on what the player actually asked for, and be able to say why if you depart from it.
+
+### Benchmarks
+
+- Sync Benchmarks downloads every build the sources list, class by class. It used to take the top 15 rows of each GuildJen category and the first 45 from Snowcrows and Hardstuck - and because the tables are grouped by profession, those 15 bought Elementalist and part of Necromancer while the other seven classes got no reference at all. Measured 2026-09-05: the store held Guardian, Mesmer, Revenant, Thief and Warrior, and a Necromancer looking at WvW was told "No benchmark data available" while the sync was working exactly as written. The WvW page alone lists 99 builds across 8 classes; all of them are fetched now, and progress names the class it is on, so cancelling leaves whole classes finished rather than a slice of each.
+- The sync paces itself. One page at a time with a gap of roughly one to two seconds, jittered rather than fixed - several hundred pages fetched back to back is unmistakably a script, and GuildJen already answers traffic it dislikes with a block page. A full run is now minutes rather than seconds; it reports progress throughout and Cancel stops it promptly, including mid-wait.
+- Benchmark data reads as a grid: providers down the side, PvE / PvP / WvW across. The sources do not cover the same modes - Snowcrows is PvE, GuildJen is WvW and PvP - so a single total each could not tell you whether the mode you actually play is covered. Pages a run listed but could not read are counted in red at the end of that provider's row, with a Retry beside them; a retry costs almost nothing, because a re-run the same day skips every page already read and fetches exactly those. Before this, a source that listed 157 builds and returned 148 reported "done 148" and the nine simply vanished.
+- While a sync runs, GuildJen names the category it is on rather than just the mode. Raid, fractal and open world are all PvE and each index restarts the count with its own total, so three of them in a row read as one list whose total kept shrinking.
+- The default game mode radio buttons sit in one row instead of a stack of three.
+
+- Running the sync twice in a day only downloads what is new or missing. Every build already read today is taken from disk and its page is not requested again - no fetch, and none of the wait that goes with one. So a run that was cancelled, or interrupted by closing the game, or that lost one source to an error, can simply be run again: it picks up where it left off in seconds rather than starting the whole several-hundred-page walk over. Same day only, deliberately - tomorrow every build refreshes, because a sync that quietly did nothing would be worse than one that takes its time.
+
+- Benchmark files from the old format are cleared automatically at the start of every sync. Until 1.11.30 the GuildJen scraper read the profession out of a URL path segment the site no longer has, so it filed builds under whatever it found there - a real install had collected `guildjen_1.0_pvp.json`, `guildjen_comments_wvw.json`, `guildjen_fonts_pvp.json`, `guildjen_pages_pvp.json`, `guildjen_https__wvw.json` and `guildjen_guildjen.com_pvp.json`, fourteen files in all. Nothing generates those names any more, so nothing would ever have overwritten them: they would have sat there looking like benchmark data for the life of the install, on every machine that synced before the fix. Anything not named for a real source, profession and game mode is now removed before a run starts, and the sync says how many went.
+
+- A rate limit no longer costs you builds. When a source answers "slow down" - a 429, a 403 from a bot filter, or a challenge page served with a normal status - the sync treats it as a wait rather than a refusal: it honours the site's own Retry-After, eases the gap between every following request, and gives that page up to eight attempts instead of three. The slowdown decays as pages start coming through again, so a rough patch costs minutes rather than the rest of the run. Settings says so while it happens, in yellow, instead of showing a bar that looks stuck.
+- A failed page is retried instead of silently dropped. Timeouts, dropped connections and the statuses that mean "slower" or "later" (408, 425, 429, 5xx) get up to three attempts with growing backoff; a 403 or 404 is taken at its word. Requests also carry the Accept and Accept-Language headers any reader sends, which they did not before. A sync cancelled before it starts now makes no network requests at all.
+
+### Overlay
+
+- The arrow in "Go to Settings > Sync Benchmarks", "Settings > Cache > Refresh Game Data" and the stale-data notice is no longer a question mark. Those strings used a typographic arrow, which is outside the glyph range the Latin overlay font is built with, so it reached the player as "?". Latin languages only - the CJK fonts carry it.
+
 ## 1.11.31 - 2026-09-05
 
 ### Choya

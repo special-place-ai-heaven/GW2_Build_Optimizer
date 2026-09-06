@@ -17,7 +17,7 @@ pub struct ScenarioSpec {
     pub objective_profile_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum CombatTier {
     Solo,
     Party,
@@ -111,7 +111,7 @@ impl ScenarioSpec {
 /// Scale retunes WvW Support: Roam/Havoc is self-reliant; Cloud/Zerg specializes.
 ///
 /// Legacy WvW/PvP variants stay so old mappings and tests still compile.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RoleObjective {
     PowerDps,
     CondiDps,
@@ -135,6 +135,10 @@ pub enum RoleObjective {
 
 impl RoleObjective {
     /// Shared overlay chips. Families, not finished jobs. Conversation picks the lean.
+    ///
+    /// The WvW set, and the historical set for every mode. Prefer
+    /// [`RoleObjective::play_roles_for`], which offers a mode only the roles
+    /// it has.
     pub const PLAY_ROLES: [RoleObjective; 7] = [
         RoleObjective::WvWRoamer,
         RoleObjective::PowerDps,
@@ -144,6 +148,47 @@ impl RoleObjective {
         RoleObjective::Disabler,
         RoleObjective::Tank,
     ];
+
+    /// Roles for PvE. Damage split by kind, plus the three support jobs a
+    /// group or squad actually slots.
+    const PVE_ROLES: [RoleObjective; 5] = [
+        RoleObjective::PowerDps,
+        RoleObjective::CondiDps,
+        RoleObjective::Buffer,
+        RoleObjective::Healer,
+        RoleObjective::Tank,
+    ];
+
+    /// Roles for PvP: conquest jobs, which are about holding and taking
+    /// points rather than about squad composition.
+    const PVP_ROLES: [RoleObjective; 5] = [
+        RoleObjective::PowerDps,
+        RoleObjective::WvWRoamer,
+        RoleObjective::Sustain,
+        RoleObjective::Buffer,
+        RoleObjective::Disabler,
+    ];
+
+    /// The roles a mode actually has.
+    ///
+    /// The three modes do not share a vocabulary, and the build sites agree
+    /// on that: measured across every build GuildJen lists, PvE roles are
+    /// dps, support, tank and kiter; WvW's are bruiser, assassin, medic,
+    /// support, dps and tank; PvP's are dps, roamer, duelist and support.
+    ///
+    /// One list for all three offered PvE a "Roamer" and a "Troll", which no
+    /// PvE reference build is, and withheld the Condi and Heal chips, which
+    /// most of them are. That is not only a wrong menu: the chosen role is
+    /// matched against the stored one by word overlap, so a chip no source
+    /// ever writes can never match anything, and the reference shown falls
+    /// back to whichever row happened to sort first.
+    pub fn play_roles_for(game_mode: &GameMode) -> &'static [RoleObjective] {
+        match game_mode {
+            GameMode::PvE => &Self::PVE_ROLES,
+            GameMode::PvP => &Self::PVP_ROLES,
+            GameMode::WvW => &Self::PLAY_ROLES,
+        }
+    }
 
     /// Display label shown in the UI.
     pub fn label(&self) -> &'static str {
@@ -558,12 +603,46 @@ mod tests {
         );
     }
 
+    /// The three modes offer different roles, and a mode must never offer
+    /// one belonging to another: no PvE reference build is a Roamer or a
+    /// Troll, and no source writes those words for PvE, so such a chip could
+    /// never match a stored benchmark.
+    #[test]
+    fn each_mode_offers_only_roles_it_has() {
+        for mode in [GameMode::PvE, GameMode::PvP, GameMode::WvW] {
+            let roles = RoleObjective::play_roles_for(&mode);
+            assert!(!roles.is_empty(), "{mode:?} must offer some role");
+            let mut unique = roles.to_vec();
+            unique.sort_by_key(|role| format!("{role:?}"));
+            unique.dedup();
+            assert_eq!(unique.len(), roles.len(), "{mode:?} lists a role twice");
+        }
+
+        let pve = RoleObjective::play_roles_for(&GameMode::PvE);
+        for absent in [RoleObjective::WvWRoamer, RoleObjective::Staller] {
+            assert!(
+                !pve.contains(&absent),
+                "{absent:?} is a WvW job and has no PvE reference build"
+            );
+        }
+        for present in [RoleObjective::CondiDps, RoleObjective::Healer] {
+            assert!(
+                pve.contains(&present),
+                "{present:?} is most of what PvE sources publish"
+            );
+        }
+        assert!(
+            !RoleObjective::play_roles_for(&GameMode::PvP).contains(&RoleObjective::Staller),
+            "conquest has no troll job"
+        );
+    }
+
     #[test]
     fn play_roles_have_unique_weights_in_every_mode() {
         for mode in [GameMode::PvE, GameMode::PvP, GameMode::WvW] {
             for tier in [CombatTier::Solo, CombatTier::Party, CombatTier::Squad] {
                 let mut seen: Vec<(RoleObjective, [i32; 6])> = Vec::new();
-                for role in RoleObjective::PLAY_ROLES {
+                for &role in RoleObjective::play_roles_for(&mode) {
                     let w = role.to_weights_for(&mode, tier);
                     let key = [
                         (w.power * 100.0).round() as i32,

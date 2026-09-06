@@ -20,8 +20,13 @@ fn why(text: &str) -> String {
         if let Some(i) = lower.find(verb) {
             let lo = i.saturating_sub(24);
             let hi = (i + 40).min(lower.len());
-            let lo = (lo..=i).rev().find(|&b| lower.is_char_boundary(b)).unwrap_or(0);
-            let hi = (hi..lower.len()).find(|&b| lower.is_char_boundary(b)).unwrap_or(lower.len());
+            let lo = (lo..=i)
+                .rev()
+                .find(|&b| lower.is_char_boundary(b))
+                .unwrap_or(0);
+            let hi = (hi..lower.len())
+                .find(|&b| lower.is_char_boundary(b))
+                .unwrap_or(lower.len());
             return format!("...{}...", lower[lo..hi].replace('\n', " "));
         }
     }
@@ -47,14 +52,18 @@ fn main() {
                     continue;
                 };
                 if !k.name.eq_ignore_ascii_case(&s.name) {
-                    flag(format!("skill {} name {:?} != cache {:?}", s.id, s.name, k.name));
+                    flag(format!(
+                        "skill {} name {:?} != cache {:?}",
+                        s.id, s.name, k.name
+                    ));
                     problems += 1;
                 }
                 // Trait-granted skills (Lesser Smite Condition, Invoke Torment)
                 // carry no profession in the API; the table names the one that
                 // grants them, which the cache cannot confirm or deny.
                 if !k.professions.is_empty()
-                    && (k.professions.len() != 1 || Some(&k.professions[0]) != s.profession.as_ref())
+                    && (k.professions.len() != 1
+                        || Some(&k.professions[0]) != s.profession.as_ref())
                 {
                     flag(format!(
                         "skill {} {:?} profession {:?} != cache {:?}",
@@ -91,7 +100,10 @@ fn main() {
                     continue;
                 };
                 if !t.name.eq_ignore_ascii_case(&s.name) {
-                    flag(format!("trait {} name {:?} != cache {:?}", s.id, s.name, t.name));
+                    flag(format!(
+                        "trait {} name {:?} != cache {:?}",
+                        s.id, s.name, t.name
+                    ));
                     problems += 1;
                 }
                 let sp = db.specializations.get(&t.specialization);
@@ -126,7 +138,10 @@ fn main() {
                     continue;
                 };
                 if !it.name.eq_ignore_ascii_case(&s.name) {
-                    flag(format!("item {} name {:?} != cache {:?}", s.id, s.name, it.name));
+                    flag(format!(
+                        "item {} name {:?} != cache {:?}",
+                        s.id, s.name, it.name
+                    ));
                     problems += 1;
                 }
                 gear += 1;
@@ -134,7 +149,11 @@ fn main() {
         }
     }
 
-    println!("\nREGISTRY {} sources (game build {})", reg.all().len(), reg.game_build);
+    println!(
+        "\nREGISTRY {} sources (game build {})",
+        reg.all().len(),
+        reg.game_build
+    );
     for (p, [skills, traits]) in &per_prof {
         println!("  {p:<13} skills={skills:<3} traits={traits}");
     }

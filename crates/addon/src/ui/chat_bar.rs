@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::chat_links::ChatChip;
 use crate::ui::{color_u32, icons, theme};
-use gw2_core::i18n::t;
+use gw2_core::i18n::{t, tf};
 
 /// State for the talk-tab transcript.
 #[derive(Default)]
@@ -34,11 +34,35 @@ pub struct ChatMessage {
     /// Clickable "Build is ready" card under this reply.
     #[serde(default)]
     pub open_result: bool,
+    /// This reply was meant to be a build and is not one.
+    ///
+    /// Recorded rather than inferred from the absence of a build card: a
+    /// greeting has no build card either, and offering somebody else's raid
+    /// build in answer to "hello" is not help. Only a reply that tried and
+    /// failed earns the community cards.
+    #[serde(default)]
+    pub build_failed: bool,
 }
 
 pub enum ChatAction {
     Send(String),
     OpenBuild,
+    /// A published build offered beside ours was chosen, by index.
+    OpenPick(usize),
+}
+
+/// One community build, as much of it as a card beside the reply can show.
+///
+/// Display strings rather than the row itself: this module draws a chat and
+/// knows nothing about benchmarks, and it should stay that way.
+#[derive(Debug, Clone, Default)]
+pub struct PickCard {
+    /// Elite specialization, or the profession when the site did not name one.
+    pub title: String,
+    /// The site, lowercased as it is stored — `guildjen`, `hardstuck`.
+    pub source: String,
+    /// The job, and the stat prefix when there is one.
+    pub detail: String,
 }
 
 /// Maximum chat history entries retained. Beyond this, the oldest entries are
@@ -74,6 +98,7 @@ pub fn queue_user_message(state: &mut ChatBarState, msg: &str) -> Option<String>
         text: msg.to_string(),
         chips: Vec::new(),
         open_result: false,
+        build_failed: false,
     });
     trim_history(&mut state.history);
     state.input.clear();
@@ -169,7 +194,11 @@ fn draw_bubble_rect(ui: &Ui, p: [f32; 2], bw: f32, bh: f32, from_user: bool) {
 
 fn draw_copy_glyph(ui: &Ui, p: [f32; 2], size: f32, copied: bool) {
     let dl = ui.get_window_draw_list();
-    let col = if copied { theme::pal().gold } else { theme::pal().muted };
+    let col = if copied {
+        theme::pal().gold
+    } else {
+        theme::pal().muted
+    };
     let back = [p[0] + size * 0.28, p[1]];
     let back_br = [p[0] + size, p[1] + size * 0.78];
     let front = [p[0], p[1] + size * 0.22];
@@ -196,6 +225,7 @@ pub fn render_chat_bar(
     cooking: Option<&str>,
     user_icon: Option<&str>,
     user_letter: char,
+    picks: &[PickCard],
 ) -> Option<ChatAction> {
     let mut action = None;
 
@@ -225,6 +255,7 @@ pub fn render_chat_bar(
                 let from_user = state.history[i].from_user;
                 let text = state.history[i].text.clone();
                 let open_result = state.history[i].open_result;
+                let build_failed = state.history[i].build_failed;
                 let (lines, bw, bh) = bubble_size(ui, &text, avail, from_user);
                 let origin = ui.cursor_screen_pos();
                 let bubble_h = bh.max(AVATAR);
@@ -283,6 +314,27 @@ pub fn render_chat_bar(
                     ui.set_cursor_screen_pos([bub_x, cy]);
                     if render_build_card(ui, i) {
                         action = Some(ChatAction::OpenBuild);
+                    }
+                    // Beside our own card, not under it: they are the same
+                    // kind of thing — a build you can open — and reading them
+                    // as a row says so. Only on the newest reply, so an old
+                    // conversation does not sprout cards against builds that
+                    // have long since been replaced.
+                    if i + 1 == state.history.len() && !picks.is_empty() {
+                        if let Some(n) = render_pick_cards(ui, picks, i, false) {
+                            action = Some(ChatAction::OpenPick(n));
+                        }
+                    }
+                } else if build_failed && i + 1 == state.history.len() && !picks.is_empty() {
+                    // The dead end. Choya tried and produced nothing usable,
+                    // so the answer is not an apology on its own — it is the
+                    // apology and somewhere to go next. These are the builds
+                    // other people published for the same job.
+                    let cy = ui.cursor_screen_pos()[1] + 6.0;
+                    ui.set_cursor_screen_pos([bub_x, cy]);
+                    ui.dummy([0.0, 0.0]);
+                    if let Some(n) = render_pick_cards(ui, picks, i, true) {
+                        action = Some(ChatAction::OpenPick(n));
                     }
                 }
                 let end_y = ui.cursor_screen_pos()[1].max(origin[1] + bubble_h) + ROW_GAP;
@@ -358,7 +410,11 @@ fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
         let tx = p[0] + PAD_X + gem_w + GEM_GAP;
         let ty = p[1] + (h - text_h) * 0.5;
         dl.add_text([tx, ty], color_u32(theme::pal().gold), &title);
-        dl.add_text([tx, ty + title_sz[1] + 4.0], color_u32(theme::pal().muted), &sub);
+        dl.add_text(
+            [tx, ty + title_sz[1] + 4.0],
+            color_u32(theme::pal().muted),
+            &sub,
+        );
     }
     if hovered {
         ui.tooltip_text(t("chat.open_optimized"));
@@ -366,8 +422,115 @@ fn render_build_card(ui: &Ui, msg_i: usize) -> bool {
     clicked
 }
 
+/// "You might also like" and the published builds, in a row to the right of
+/// our own card.
+///
+/// Compact on purpose: a site mark, the specialization, and the job. Enough
+/// to tell three apart and decide which to open; the build itself is one
+/// click away and this is a chat, not a catalogue.
+fn render_pick_cards(ui: &Ui, picks: &[PickCard], msg_i: usize, alone: bool) -> Option<usize> {
+    const GAP: f32 = 18.0;
+    const PAD: f32 = 9.0;
+    let row_top = ui.item_rect_min()[1];
+    // Standing alone there is no card to match, so the row is sized from the
+    // text it holds instead of from a neighbour that is not there.
+    let row_h = if alone {
+        ui.text_line_height() * 2.0 + 18.0
+    } else {
+        ui.item_rect_size()[1]
+    };
+    let mut x = if alone {
+        ui.item_rect_min()[0]
+    } else {
+        ui.item_rect_max()[0] + GAP
+    };
+
+    let label = if alone {
+        t("cmp.none_of_mine")
+    } else {
+        t("cmp.also_like_short")
+    };
+    let label_sz = ui.calc_text_size(&label);
+    {
+        let dl = ui.get_window_draw_list();
+        dl.add_text(
+            [x, row_top + (row_h - label_sz[1]) * 0.5],
+            color_u32(theme::pal().muted),
+            &label,
+        );
+    }
+    x += label_sz[0] + GAP * 0.5;
+
+    let mut chosen = None;
+    for (n, pick) in picks.iter().enumerate() {
+        let mark = ui.text_line_height();
+        let title_sz = ui.calc_text_size(&pick.title);
+        let detail_sz = ui.calc_text_size(&pick.detail);
+        let text_w = title_sz[0].max(detail_sz[0]);
+        let w = PAD + mark + 8.0 + text_w + PAD;
+        let h = row_h;
+
+        ui.set_cursor_screen_pos([x, row_top]);
+        let clicked = ui.invisible_button(format!("##pick{msg_i}_{n}"), [w, h]);
+        let hovered = ui.is_item_hovered();
+        let fill = if hovered {
+            theme::with_alpha(theme::pal().gold_hover, 0.96)
+        } else {
+            theme::pal().plate
+        };
+        {
+            let dl = ui.get_window_draw_list();
+            dl.add_rect([x, row_top], [x + w, row_top + h], fill)
+                .filled(true)
+                .rounding(10.0)
+                .build();
+            dl.add_rect(
+                [x, row_top],
+                [x + w, row_top + h],
+                theme::pal().chip_idle_rim,
+            )
+            .rounding(10.0)
+            .build();
+            let text_h = title_sz[1] + 4.0 + detail_sz[1];
+            let ty = row_top + (h - text_h) * 0.5;
+            let mid = [x + PAD + mark * 0.5, row_top + h * 0.5];
+            match theme::site_tex(&pick.source) {
+                Some(tid) => {
+                    let r = mark * 0.5;
+                    dl.add_image(tid, [mid[0] - r, mid[1] - r], [mid[0] + r, mid[1] + r])
+                        .build();
+                }
+                None => {
+                    dl.add_circle(mid, 3.0, theme::pal().gold)
+                        .filled(true)
+                        .build();
+                }
+            }
+            let tx = x + PAD + mark + 8.0;
+            dl.add_text([tx, ty], color_u32(theme::pal().gold), &pick.title);
+            dl.add_text(
+                [tx, ty + title_sz[1] + 4.0],
+                color_u32(theme::pal().muted),
+                &pick.detail,
+            );
+        }
+        if hovered {
+            ui.tooltip_text(tf("fmt.open_from", &[("site", &pick.source)]));
+        }
+        if clicked {
+            chosen = Some(n);
+        }
+        x += w + GAP * 0.5;
+    }
+    chosen
+}
+
 fn draw_send_icon(ui: &Ui, c: [f32; 2], on: bool) {
-    let col = if on { theme::pal().gold } else { theme::pal().muted };
+    let col = if on {
+        theme::pal().gold
+    } else {
+        theme::pal().muted
+    };
     let dl = ui.get_window_draw_list();
     let s = 11.0;
     dl.add_triangle(
@@ -532,10 +695,23 @@ pub fn add_plated_response(
         text: display,
         chips,
         open_result,
+        build_failed: false,
     });
     trim_history(&mut state.history);
     state.scroll_to_end = true;
     state.dirty = true;
+}
+
+/// Add a reply that was supposed to be a build and could not be one.
+///
+/// The distinction matters at draw time: this is the reply that gets the
+/// community builds offered under it, because it is the one that left the
+/// player with nothing.
+pub fn add_failed_build_response(state: &mut ChatBarState, text: String) {
+    add_ai_response(state, text);
+    if let Some(last) = state.history.last_mut() {
+        last.build_failed = true;
+    }
 }
 
 /// Attach inbound chips to the latest player message.
@@ -566,12 +742,20 @@ pub fn load_history(addon_dir: &Path) -> Vec<ChatMessage> {
 
 pub fn save_history(addon_dir: &Path, history: &[ChatMessage]) {
     let path = addon_dir.join("kitchen.json");
-    let Ok(json) = serde_json::to_vec(history) else {
-        return;
+    let json = match serde_json::to_vec(history) {
+        Ok(json) => json,
+        Err(e) => {
+            crate::ui::log_disk_error(format!("chat history serialize failed: {e}"));
+            return;
+        }
     };
     let tmp = addon_dir.join("kitchen.json.tmp");
-    if std::fs::write(&tmp, json).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
+    if let Err(e) = std::fs::write(&tmp, json) {
+        crate::ui::log_disk_error(format!("chat history write failed: {e}"));
+        return;
+    }
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        crate::ui::log_disk_error(format!("chat history rename failed: {e}"));
     }
 }
 
@@ -607,6 +791,7 @@ mod tests {
                 text: format!("m{i}"),
                 chips: Vec::new(),
                 open_result: false,
+                build_failed: false,
             });
         }
         let t = recent_transcript(&history, 3);
@@ -660,6 +845,7 @@ mod tests {
             text: "[&AgEEYQAA]".into(),
             chips: Vec::new(),
             open_result: false,
+            build_failed: false,
         });
         attach_order_chips(
             &mut state,
@@ -694,6 +880,7 @@ mod tests {
                 code: encode_item(24836),
             }],
             open_result: false,
+            build_failed: false,
         }];
         save_history(&dir, &history);
         let loaded = load_history(&dir);
@@ -701,6 +888,20 @@ mod tests {
         assert_eq!(loaded[0].text, "plate this");
         assert_eq!(loaded[0].chips[0].code, encode_item(24836));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_history_logs_when_directory_is_missing() {
+        let dir = std::env::temp_dir().join(format!(
+            "gw2_kitchen_missing_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        save_history(&dir, &[]);
+        assert!(!dir.join("kitchen.json").exists());
     }
 
     #[test]

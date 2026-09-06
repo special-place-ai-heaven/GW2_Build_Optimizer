@@ -41,7 +41,7 @@ pub fn report_context(state: &AddonState) -> ReportContext {
         locale: gw2_core::i18n::current(),
         mode: main.game_mode.label().to_string(),
         scale: if main.game_mode == GameMode::WvW {
-            main.wvw_combat_tier.label().to_string()
+            main.combat_tier.label().to_string()
         } else {
             String::new()
         },
@@ -946,7 +946,7 @@ mod tests {
         with_fresh_state("ctx_privacy", |state| {
             state.config.gw2_api_key = Some(BAIT_KEY.into());
             state.main.game_mode = GameMode::WvW;
-            state.main.wvw_combat_tier = gw2_optimizer::scenario::CombatTier::Solo;
+            state.main.combat_tier = gw2_optimizer::scenario::CombatTier::Solo;
             state.main.selected_role = Some(gw2_optimizer::scenario::RoleObjective::PowerDps);
             state.main.live_build_number = Some(174122);
             state.main.current_build = Some(ranger_untamed());

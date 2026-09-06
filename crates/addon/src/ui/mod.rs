@@ -158,11 +158,10 @@ static CONFIG_WRITES: SerialWriter = SerialWriter::new("config-save");
 /// config and hands the write to a tracked worker, so the frame never waits on
 /// disk and no background worker waits on the frame.
 ///
-/// This is the only config save that runs with `STATE` released — Settings,
-/// setup and the keybind handler still save synchronously — so it is the reason
-/// `AppConfig::save` stages through a private per-save file rather than one
-/// shared `config.tmp`. Two of these can now overlap safely: the rename is the
-/// only step they share, and it is atomic.
+/// Settings and News persist through this path. Setup and the keybind handler
+/// still save synchronously. `AppConfig::save` stages through a private
+/// per-save file rather than one shared `config.tmp`, so two detached writes
+/// can overlap: the rename is the only step they share, and it is atomic.
 pub(crate) fn save_config_detached(state: &AddonState) {
     let config = state.config.clone();
     let path = state.config_path.clone();
@@ -191,6 +190,12 @@ pub(crate) fn window_needs_snap(pos: [f32; 2], size: [f32; 2], display: [f32; 2]
     vis_area < total * 0.75
 }
 
+/// First-run / reset apply when size is missing or the player forced a snap.
+/// Pre-1.7.22 800×600 is a normal persisted size, not a migrate trigger.
+fn window_needs_default_size(unset: bool, force_snap: bool) -> bool {
+    unset || force_snap
+}
+
 pub fn render(ui: &Ui) {
     // Before the visibility check and outside `with_state`: a copy that lost the
     // race for the clipboard must still land if the player closed the overlay
@@ -209,11 +214,7 @@ pub fn render(ui: &Ui) {
         let snap = s.force_window_pos;
         s.force_window_pos = false;
         let unset = s.config.window_w.is_none() || s.config.window_h.is_none();
-        let legacy = {
-            let (_, sz) = s.config.window_rect();
-            sz == gw2_core::config::LEGACY_FIRST_WINDOW_SIZE
-        };
-        let apply = snap || unset || legacy;
+        let apply = window_needs_default_size(unset, snap);
         if apply {
             let size = gw2_core::config::initial_window_size(display);
             let pos = if snap {
@@ -323,7 +324,7 @@ pub fn render(ui: &Ui) {
 
 #[cfg(test)]
 mod tests {
-    use super::window_needs_snap;
+    use super::{window_needs_default_size, window_needs_snap};
 
     /// The window rect, "overlay closed", and the build number a finished data
     /// refresh writes are all saved from inside `with_state`, on the render
@@ -415,11 +416,40 @@ mod tests {
     }
 
     #[test]
+    fn window_init_is_only_missing_size_or_forced_snap() {
+        assert!(window_needs_default_size(true, false));
+        assert!(window_needs_default_size(false, true));
+        assert!(!window_needs_default_size(false, false));
+    }
+
+    #[test]
     fn ultrawide_keeps_rightish_window() {
         assert!(!window_needs_snap(
             [1880.0, 293.0],
             [800.0, 600.0],
             [3440.0, 1440.0]
         ));
+    }
+
+    #[test]
+    fn settings_and_news_saves_are_detached() {
+        let settings = include_str!("main_view/tabs/settings.rs");
+        let news = include_str!("main_view/tabs/news.rs");
+        assert!(
+            !settings.contains("let _ = state.config.save(&state.config_path)"),
+            "settings.rs still swallows a sync config save"
+        );
+        assert!(
+            !news.contains("let _ = state.config.save(&state.config_path)"),
+            "news.rs still swallows a sync config save"
+        );
+        assert!(
+            settings.contains("crate::ui::save_config_detached(state)"),
+            "settings.rs must persist via save_config_detached"
+        );
+        assert!(
+            news.contains("crate::ui::save_config_detached(state)"),
+            "news.rs must persist via save_config_detached"
+        );
     }
 }

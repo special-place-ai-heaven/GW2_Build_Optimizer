@@ -76,18 +76,6 @@ pub enum DurationKind {
     SpecificCondition(String),
 }
 
-/// Proc trigger kind (for estimated uptime).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ProcTrigger {
-    OnCrit,
-    OnHit,
-    OnDodge,
-    OnWeaponSwap,
-    OnKill,
-    OnHealthThreshold,
-    Passive,
-}
-
 // ─── NormalizedEffect ───
 
 /// Unified representation for all synergy-relevant effects from any build component.
@@ -107,11 +95,6 @@ pub enum NormalizedEffect {
         duration_s: u32,
         stacks: u32,
     },
-    /// Benefits when a status is present (e.g. +X% while Fury is active).
-    BenefitsFromStatus {
-        status: String,
-        effect: Box<NormalizedEffect>,
-    },
     /// Converts one stat to another (e.g. 7% of Toughness to Power).
     StatConversion {
         source: StatType,
@@ -125,12 +108,6 @@ pub enum NormalizedEffect {
         requires_trait_id: u32,
         overrides_index: Option<u32>,
         effect: Box<NormalizedEffect>,
-    },
-    /// Proc-based effect with estimated uptime (0.0-1.0).
-    ProcEffect {
-        trigger: ProcTrigger,
-        effect: Box<NormalizedEffect>,
-        estimated_uptime: f64,
     },
 }
 
@@ -159,7 +136,6 @@ pub struct SynergyLink {
 #[derive(Debug, Clone)]
 pub enum SynergyLinkType {
     TraitedFact,
-    EnablerPayoff,
     ConditionStacking,
     ModifierStacking,
     DurationAlignment,
@@ -326,64 +302,55 @@ fn extract_effects_from_fact(fact: &Fact) -> Vec<NormalizedEffect> {
             text: Some(ref text),
             percent: Some(pct),
             ..
-        } => {
-            if crate::combat::percent_text_is_conditional(text) {
-                return effects;
-            }
-            let text_lower = text.to_lowercase();
-            let pct = if text_lower.contains("90") && text_lower.contains("health") {
-                *pct * 0.9
-            } else {
-                *pct
-            };
-            match crate::combat::classify_percent_text(text, pct) {
-                Some(crate::combat::PercentClass::Strike) => {
+        } => match crate::combat::interpret_percent_fact(text, *pct) {
+            crate::combat::PercentInterp::Classified(class, pct) => match class {
+                crate::combat::PercentClass::Strike => {
                     effects.push(NormalizedEffect::DamageModifier {
                         category: DamageCategory::Strike,
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::Condition) => {
+                crate::combat::PercentClass::Condition => {
                     effects.push(NormalizedEffect::DamageModifier {
                         category: DamageCategory::Condition,
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::CritDamagePts) => {
+                crate::combat::PercentClass::CritDamagePts => {
                     effects.push(NormalizedEffect::DamageModifier {
                         category: DamageCategory::Crit,
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::Healing) => {
+                crate::combat::PercentClass::Healing => {
                     effects.push(NormalizedEffect::DamageModifier {
                         category: DamageCategory::Healing,
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::BoonDuration) => {
+                crate::combat::PercentClass::BoonDuration => {
                     effects.push(NormalizedEffect::DurationBonus {
                         kind: DurationKind::AllBoon,
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::CondiDuration) => {
+                crate::combat::PercentClass::CondiDuration => {
                     effects.push(NormalizedEffect::DurationBonus {
                         kind: DurationKind::AllCondition,
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::SpecificCondiDuration(canonical)) => {
+                crate::combat::PercentClass::SpecificCondiDuration(canonical) => {
                     effects.push(NormalizedEffect::DurationBonus {
                         kind: DurationKind::SpecificCondition(canonical),
                         percent: pct,
                     });
                 }
-                Some(crate::combat::PercentClass::CritChancePts)
-                | Some(crate::combat::PercentClass::Ignore)
-                | None => {}
-            }
-        }
+                crate::combat::PercentClass::CritChancePts
+                | crate::combat::PercentClass::Ignore => {}
+            },
+            crate::combat::PercentInterp::Skip | crate::combat::PercentInterp::Unknown(_) => {}
+        },
         Fact::Buff {
             status: Some(ref status),
             duration: Some(dur),
@@ -663,10 +630,6 @@ pub fn score_normalized_effect(effect: &NormalizedEffect, weights: &Optimization
                 boon_weight(status, weights) * 0.05
             }
         }
-        NormalizedEffect::BenefitsFromStatus { effect, .. } => {
-            // Base value of the inner effect, discounted
-            score_normalized_effect(effect, weights) * 0.3
-        }
         NormalizedEffect::StatConversion {
             source,
             target,
@@ -691,11 +654,6 @@ pub fn score_normalized_effect(effect: &NormalizedEffect, weights: &Optimization
             // Conditional effects get partial credit (may or may not be activated)
             score_normalized_effect(effect, weights) * 0.4
         }
-        NormalizedEffect::ProcEffect {
-            effect,
-            estimated_uptime,
-            ..
-        } => score_normalized_effect(effect, weights) * estimated_uptime,
     }
 }
 
@@ -749,63 +707,7 @@ pub fn compute_marginal_synergy(
                 }
             }
 
-            // 2. Enabler→Payoff: AppliesStatus meets BenefitsFromStatus
-            if let NormalizedEffect::AppliesStatus {
-                status: applied, ..
-            } = new_eff
-            {
-                if let NormalizedEffect::BenefitsFromStatus {
-                    status: needed,
-                    effect,
-                } = existing_eff
-                {
-                    if applied == needed {
-                        let bonus = score_normalized_effect(effect, weights) * 0.5;
-                        synergy += bonus;
-                        links.push(SynergyLink {
-                            source: existing_id.clone(),
-                            source_name: format!("Benefits from {}", needed),
-                            target: new_target(existing_id),
-                            target_name: format!("Applies {}", applied),
-                            link_type: SynergyLinkType::EnablerPayoff,
-                            score: bonus,
-                            description: gw2_core::i18n::tf(
-                                "explain.applies_enables",
-                                &[("status", &applied.to_string())],
-                            ),
-                        });
-                    }
-                }
-            }
-            if let NormalizedEffect::BenefitsFromStatus {
-                status: needed,
-                effect,
-            } = new_eff
-            {
-                if let NormalizedEffect::AppliesStatus {
-                    status: applied, ..
-                } = existing_eff
-                {
-                    if applied == needed {
-                        let bonus = score_normalized_effect(effect, weights) * 0.5;
-                        synergy += bonus;
-                        links.push(SynergyLink {
-                            source: existing_id.clone(),
-                            source_name: format!("Applies {}", applied),
-                            target: new_target(existing_id),
-                            target_name: format!("Benefits from {}", needed),
-                            link_type: SynergyLinkType::EnablerPayoff,
-                            score: bonus,
-                            description: gw2_core::i18n::tf(
-                                "explain.existing_feeds",
-                                &[("status", &applied.to_string())],
-                            ),
-                        });
-                    }
-                }
-            }
-
-            // 3. Condition stacking: multiple sources of same condition
+            // Condition stacking: multiple sources of same condition
             if let NormalizedEffect::AppliesStatus {
                 status: s1,
                 is_condition: true,

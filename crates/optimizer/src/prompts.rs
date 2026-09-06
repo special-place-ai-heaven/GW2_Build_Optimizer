@@ -309,6 +309,8 @@ Role chips are families, not finished jobs. The player's words pick the lean (po
 
 Named gear prefix in the player's message wins (including Celestial). Ignore a prefix they negated ("not minstrel").
 
+Profession `unknown` is not a reason to refuse. If they ask for a build without a character selected, PICK the profession that best serves what they asked for, plate the whole build, and say in one clause which you chose and why ("Firebrand, because nothing else stacks stability like that"). They can always tell you a different one and you re-plate. Asking them to pick first and serving nothing is the one thing you must not do — a player who wanted a build and got a question twice has been given nothing at all.
+
 If they greet you, ask a question, or are just chatting — no build. Reply with JSON:
 {{"explanation": "<your spoken reply>", "specializations": []}}
 
@@ -1422,7 +1424,10 @@ After gathering data, respond with ONLY a JSON build object:
         let w = OptimizationWeights::preset_power_dps();
         for (name, prompt) in [
             ("new", new_build_prompt_with_tools("Necromancer", &w, "WvW")),
-            ("improve", improve_build_prompt_with_tools("Necromancer", &w, "WvW")),
+            (
+                "improve",
+                improve_build_prompt_with_tools("Necromancer", &w, "WvW"),
+            ),
             (
                 "chat",
                 chat_refinement_prompt_with_tools(

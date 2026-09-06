@@ -1,55 +1,93 @@
 //! Shared string-parsing helpers used across the optimizer crate.
 
-/// Extract a percentage number associated with `keyword` from text.
-/// Picks the `N%` occurrence closest (by char distance) to the keyword,
-/// in either direction.
+/// One `N%` clause and the surrounding words combat/synergy/LLM map from.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PercentClause {
+    pub value: f64,
+    pub hay: String,
+    pub after: String,
+}
+
+/// Where the sentence starting at `from` ends.
 ///
-/// Examples:
-/// - `"10% burning duration"` + `"burning duration"` → `Some(10.0)`
-/// - `"increases outgoing healing by 15%"` + `"healing"` → `Some(15.0)`
-/// - `"+10% condition duration. +5% boon duration."` + `"boon duration"`
-///   → `Some(5.0)` (the closer percent, not the first one).
-///
-/// Uses char-level iteration to avoid UTF-8 boundary panics.
-#[cfg(test)]
-pub(crate) fn extract_percent_before(text: &str, keyword: &str) -> Option<f64> {
-    let chars: Vec<char> = text.chars().collect();
-    let keyword_chars: Vec<char> = keyword.chars().collect();
-    if keyword_chars.is_empty() || keyword_chars.len() > chars.len() {
-        return None;
+/// Not simply the next `.`: "vs." is an abbreviation, not a full stop, and
+/// splitting there truncated the clause "+7% strike damage vs. demons" to
+/// "strike damage vs" — which is the exact marker the caller then looks for
+/// to know the bonus is conditional. A slaying sigil's target-only bonus was
+/// counted as if it applied to everything.
+fn sentence_end(s: &str, from: usize) -> usize {
+    const ABBREVIATIONS: [&str; 1] = ["vs"];
+    let mut at = from;
+    while let Some(rel) = s[at..].find('.') {
+        let dot = at + rel;
+        let head = &s[..dot];
+        if ABBREVIATIONS.iter().any(|abbr| head.ends_with(abbr)) {
+            at = dot + 1;
+            continue;
+        }
+        return dot;
     }
-    // Find the first occurrence of keyword as a char-window in chars.
-    let kw_start = (0..=chars.len() - keyword_chars.len())
-        .find(|&i| chars[i..i + keyword_chars.len()] == keyword_chars[..])?;
-    let kw_end = kw_start + keyword_chars.len();
-    // Find the `%` whose distance to the keyword span is minimal.
-    let pct_pos = chars
-        .iter()
-        .enumerate()
-        .filter(|(_, &c)| c == '%')
-        .map(|(i, _)| {
-            let dist = if i < kw_start {
-                kw_start - i
-            } else if i >= kw_end {
-                i - (kw_end - 1)
-            } else {
-                0
-            };
-            (dist, i)
-        })
-        .min_by_key(|(d, _)| *d)
-        .map(|(_, i)| i)?;
-    // Walk backwards from `%` to find the start of the number.
-    let start = chars[..pct_pos]
-        .iter()
-        .rposition(|c| !c.is_ascii_digit() && *c != '.')
-        .map(|i| i + 1)
-        .unwrap_or(0);
-    if start >= pct_pos {
-        return None;
+    s.len()
+}
+
+/// Walk every `N%` in `text` after markup strip. Callers project `hay`.
+pub(crate) fn percent_clauses(text: &str) -> Vec<PercentClause> {
+    let s = strip_gw2_markup(text).trim().to_lowercase();
+    let mut from = 0;
+    let mut out = Vec::new();
+    while let Some(rel) = s[from..].find('%') {
+        let pct_idx = from + rel;
+        let is_num_part = |c: char| c.is_ascii_digit() || c == '.' || c == '-' || c == '−';
+        let num_start = s[..pct_idx]
+            .char_indices()
+            .rev()
+            .find(|(_, c)| !is_num_part(*c))
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(0);
+        if num_start >= pct_idx {
+            from = pct_idx + 1;
+            continue;
+        }
+        let num = s[num_start..pct_idx].replace('−', "-");
+        let Ok(value) = num.parse::<f64>() else {
+            from = pct_idx + 1;
+            continue;
+        };
+        let clause_start = s[..num_start].rfind('.').map(|i| i + 1).unwrap_or(0);
+        let clause_end = sentence_end(&s, pct_idx + 1);
+        let rest = s[pct_idx + 1..clause_end].trim();
+        let before = s[clause_start..num_start].trim();
+        out.push(PercentClause {
+            value,
+            hay: format!("{before} {rest}"),
+            after: rest.to_string(),
+        });
+        from = pct_idx + 1;
     }
-    let num: String = chars[start..pct_pos].iter().collect();
-    num.parse::<f64>().ok()
+    out
+}
+
+/// First signed number in `text` (markup already stripped by the caller).
+pub(crate) fn first_number(text: &str) -> Option<f64> {
+    let mut num_str = String::new();
+    let mut found_digit = false;
+    for ch in text.chars() {
+        if ch.is_ascii_digit()
+            || (ch == '.' && found_digit)
+            || (ch == '+' && !found_digit)
+            || (ch == '-' && !found_digit)
+        {
+            if ch != '+' {
+                num_str.push(ch);
+            }
+            if ch.is_ascii_digit() {
+                found_digit = true;
+            }
+        } else if found_digit {
+            break;
+        }
+    }
+    num_str.parse::<f64>().ok()
 }
 
 /// Uppercase the first character of `s`, leaving the rest unchanged.
@@ -101,7 +139,9 @@ pub(crate) fn text_describes_condition_cleanse(text: &str) -> bool {
         let hi = (i + len + WINDOW).min(lower.len());
         lower[lo..hi].contains("condit")
     };
-    for verb in ["remov", "cleanse", "cure", "purg", "transfer", "consum", "send", "sent"] {
+    for verb in [
+        "remov", "cleanse", "cure", "purg", "transfer", "consum", "send", "sent",
+    ] {
         for (i, _) in lower.match_indices(verb) {
             if !at_word_start(i) || !near_condit(i, verb.len()) {
                 continue;
@@ -244,84 +284,49 @@ pub(crate) fn stack_multiplier(text: &str) -> f64 {
 mod tests {
     use super::*;
 
+    /// "vs." is an abbreviation. Splitting the clause there dropped the
+    /// marker that says a bonus only applies to one kind of target, and a
+    /// slaying sigil's +7% vs Demons was counted against everything.
     #[test]
-    fn test_extract_percent_before_basic() {
-        assert_eq!(
-            extract_percent_before("10% burning duration", "burning duration"),
-            Some(10.0)
+    fn a_vs_abbreviation_does_not_end_the_clause() {
+        let clauses = percent_clauses("+7% Strike Damage vs. Demons. +3% Strike Damage.");
+        assert_eq!(clauses.len(), 2, "two bonuses: {clauses:?}");
+        assert!(
+            clauses[0].after.contains("vs."),
+            "the conditional marker survives: {:?}",
+            clauses[0].after
         );
-        assert_eq!(
-            extract_percent_before("+10% condition duration", "condition duration"),
-            Some(10.0)
-        );
-        assert_eq!(
-            extract_percent_before("grants 5% damage bonus", "damage"),
-            Some(5.0)
-        );
-        // No match
-        assert_eq!(extract_percent_before("no number here", "damage"), None);
-        // Keyword not found
-        assert_eq!(
-            extract_percent_before("10% burning duration", "poison duration"),
-            None
+        assert!(
+            !clauses[1].after.contains("vs."),
+            "the unconditional one is not tainted by it: {:?}",
+            clauses[1].after
         );
     }
 
     #[test]
-    fn test_extract_percent_before_unicode_safe() {
-        // Should not panic on non-ASCII characters
-        assert_eq!(extract_percent_before("—5% damage", "damage"), Some(5.0));
-        assert_eq!(
-            extract_percent_before("résumé 10% condition duration", "condition duration"),
-            Some(10.0)
-        );
+    fn percent_clauses_keeps_each_clause() {
+        let clauses = percent_clauses("+10% condition duration. +5% boon duration.");
+        assert_eq!(clauses.len(), 2);
+        assert!((clauses[0].value - 10.0).abs() < f64::EPSILON);
+        assert!(clauses[0].hay.contains("condition duration"));
+        assert!((clauses[1].value - 5.0).abs() < f64::EPSILON);
+        assert!(clauses[1].hay.contains("boon duration"));
     }
 
     #[test]
-    fn extract_percent_before_simple() {
-        assert_eq!(
-            extract_percent_before("10% burning duration", "burning duration"),
-            Some(10.0)
-        );
-        assert_eq!(extract_percent_before("+7% damage", "damage"), Some(7.0));
+    fn percent_clauses_handles_decimals_and_unicode_minus() {
+        let clauses = percent_clauses("—5% damage");
+        assert_eq!(clauses.len(), 1);
+        assert!((clauses[0].value - 5.0).abs() < f64::EPSILON);
+        let dec = percent_clauses("+0.5% burning duration");
+        assert_eq!(dec.len(), 1);
+        assert!((dec[0].value - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn extract_percent_before_picks_closest_when_multiple_percents() {
-        // Bug regression: previously the synergy.rs copy returned the FIRST `%`
-        // in the text, so this case would return 10.0 for `"boon duration"`
-        // instead of 5.0. The shared closest-percent implementation now protects
-        // BOTH the combat path and the synergy path against this regression.
-        let text = "+10% condition duration. +5% boon duration.";
-        assert_eq!(extract_percent_before(text, "boon duration"), Some(5.0));
-        assert_eq!(
-            extract_percent_before(text, "condition duration"),
-            Some(10.0)
-        );
-    }
-
-    #[test]
-    fn extract_percent_before_missing_keyword() {
-        assert_eq!(extract_percent_before("10% damage", "boon duration"), None);
-    }
-
-    #[test]
-    fn extract_percent_before_percent_after_keyword() {
-        // Real GW2 description form: "increases outgoing healing by 15%" —
-        // percent appears AFTER the keyword. The picker is direction-agnostic
-        // and returns the closest percent in either direction.
-        assert_eq!(
-            extract_percent_before("increases outgoing healing by 15%", "healing"),
-            Some(15.0),
-        );
-    }
-
-    #[test]
-    fn extract_percent_before_handles_decimals() {
-        assert_eq!(
-            extract_percent_before("+0.5% burning damage", "burning damage"),
-            Some(0.5)
-        );
+    fn first_number_reads_stat_bonus() {
+        assert_eq!(first_number("+175 Power"), Some(175.0));
+        assert_eq!(first_number("no number here"), None);
     }
 
     #[test]
@@ -373,14 +378,22 @@ mod tests {
         assert!(text_describes_condition_cleanse(
             "become spectral, consuming conditions for life force"
         ));
-        assert!(text_describes_condition_cleanse("Conditions Converted to Boons"));
-        assert!(text_describes_condition_cleanse("Convert conditions into boons."));
-        assert!(text_describes_condition_cleanse("Purge conditions from allies."));
+        assert!(text_describes_condition_cleanse(
+            "Conditions Converted to Boons"
+        ));
+        assert!(text_describes_condition_cleanse(
+            "Convert conditions into boons."
+        ));
+        assert!(text_describes_condition_cleanse(
+            "Purge conditions from allies."
+        ));
         // Not cleanses.
         assert!(!text_describes_condition_cleanse(
             "Corrupt boons on your foe, converting their boons into conditions."
         ));
-        assert!(!text_describes_condition_cleanse("Boons Converted to Conditions"));
+        assert!(!text_describes_condition_cleanse(
+            "Boons Converted to Conditions"
+        ));
         assert!(!text_describes_condition_cleanse(
             "Gain condition damage based on a percentage of your toughness. (Chaotic Transference)"
         ));

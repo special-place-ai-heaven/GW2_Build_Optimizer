@@ -427,9 +427,6 @@ fn tags_from(effects: &[NormalizedEffect], chunks: &[String]) -> Vec<String> {
                     tags.insert(format!("duration:{}", c.to_lowercase()));
                 }
             },
-            NormalizedEffect::BenefitsFromStatus { status, .. } => {
-                tags.insert(format!("needs:{}", status.to_lowercase()));
-            }
             _ => {}
         }
     }

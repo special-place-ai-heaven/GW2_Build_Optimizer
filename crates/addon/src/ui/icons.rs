@@ -162,7 +162,9 @@ pub fn paint_avatar(ui: &Ui, url: Option<&str>, p: [f32; 2], size: f32, letter: 
             &s,
         );
     }
-    dl.add_rect(p, p_max, theme::pal().gold_dim).rounding(r).build();
+    dl.add_rect(p, p_max, theme::pal().gold_dim)
+        .rounding(r)
+        .build();
 }
 
 pub fn item_url(db: &GameDb, id: u32) -> Option<&str> {

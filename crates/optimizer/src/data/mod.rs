@@ -8,6 +8,7 @@ mod consistency_tests;
 pub mod manifests;
 pub mod normalized_effects;
 pub mod objective_profiles;
+#[cfg(test)]
 pub mod patch_ledger;
 pub mod profession_profiles;
 pub mod quality;
@@ -15,18 +16,15 @@ pub mod rotation_profiles;
 pub mod slot_budgets;
 pub mod universal_formulas;
 
-pub use balance_overrides::{
-    check_wvw_quality, known_mode_splits, BalanceOverrides, KnownModeSplit, OverrideResult,
-};
+pub use balance_overrides::{known_mode_splits, BalanceOverrides, KnownModeSplit, OverrideResult};
 pub use boon_condition_formulas::{boons, conditions, BoonFormulas, ConditionFormulas};
 pub use cleanse_sources::{CleanseRegistry, CleanseSource, SourceKind};
-pub use manifests::{check_staleness, PatchManifest};
+pub use manifests::{check_staleness, freshness, ManifestFreshness, PatchManifest};
 pub use normalized_effects::{
-    map_legacy_effect, score_effect, EffectCategory, NormalizedEffect, SourceType, StackingRule,
-    StatusOperation, TriggerRule, UptimeModel,
+    EffectCategory, NormalizedEffect, SourceType, StackingRule, StatusOperation, TriggerRule,
+    UptimeModel,
 };
 pub use objective_profiles::{ObjectiveProfile, ObjectiveProfileData, ObjectiveProfileFile};
-pub use patch_ledger::PatchLedger;
 pub use profession_profiles::ProfessionProfiles;
 pub use quality::{DataQuality, DataQualityReason, FactualValue};
 pub use rotation_profiles::{
@@ -128,6 +126,23 @@ pub enum DataState {
     Disabled { errors: Vec<DataLoadError> },
 }
 
+impl DataState {
+    /// `Disabled` is a hard stop. `Degraded` is optional-data loss, not a fake Ready.
+    pub fn optimize_block_reason(&self) -> Option<String> {
+        match self {
+            Self::Disabled { errors } => Some(format!(
+                "Balance data failed to load: {}",
+                errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )),
+            Self::Ready | Self::Degraded { .. } => None,
+        }
+    }
+}
+
 /// Load all Phase A data and return overall health status.
 ///
 /// Calls each loader's `try_load()` function. If any required loader fails,
@@ -188,6 +203,24 @@ mod tests {
             "expected DataState::Ready, got {:?}",
             state,
         );
+        assert!(state.optimize_block_reason().is_none());
+    }
+
+    #[test]
+    fn disabled_blocks_optimize_and_is_not_ready() {
+        let state = DataState::Disabled {
+            errors: vec![DataLoadError::MissingRequired {
+                source: "test".into(),
+            }],
+        };
+        let reason = state.optimize_block_reason().expect("Disabled must block");
+        assert!(reason.contains("test"));
+        assert!(DataState::Ready.optimize_block_reason().is_none());
+        assert!(DataState::Degraded {
+            reasons: vec!["optional".into()]
+        }
+        .optimize_block_reason()
+        .is_none());
     }
 
     #[test]

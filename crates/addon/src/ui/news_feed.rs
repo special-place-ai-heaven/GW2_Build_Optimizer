@@ -210,11 +210,18 @@ fn index_row(ui: &Ui, view: &Workspace<'_>, index: usize, on: bool) -> bool {
     let inner = (p[0] + w - 8.0 - text_x).max(20.0);
     ui.set_cursor_screen_pos([text_x, p[1] + 6.0]);
     ui.text_colored(
-        if on { theme::pal().gold } else { theme::pal().cream },
+        if on {
+            theme::pal().gold
+        } else {
+            theme::pal().cream
+        },
         clip_label(ui, &item.title, inner),
     );
     ui.set_cursor_screen_pos([text_x, p[1] + 6.0 + lh + 2.0]);
-    ui.text_colored(theme::pal().muted, clip_label(ui, &kicker_line(item), inner));
+    ui.text_colored(
+        theme::pal().muted,
+        clip_label(ui, &kicker_line(item), inner),
+    );
     ui.set_cursor_screen_pos([p[0], p[1] + h]);
     hit
 }
@@ -383,10 +390,14 @@ fn paint_still(ui: &Ui, url: Option<&str>, origin: [f32; 2], max_size: [f32; 2])
     let oy = origin[1] + (max_size[1] - fitted[1]) * 0.5;
     let dl = ui.get_window_draw_list();
     let plate = [origin[0] + max_size[0], origin[1] + max_size[1]];
-    dl.add_rect(origin, plate, theme::with_alpha(theme::pal().chip_idle_fill, 0.9))
-        .filled(true)
-        .rounding(theme::ICON_ROUNDING)
-        .build();
+    dl.add_rect(
+        origin,
+        plate,
+        theme::with_alpha(theme::pal().chip_idle_fill, 0.9),
+    )
+    .filled(true)
+    .rounding(theme::ICON_ROUNDING)
+    .build();
     if let Some(tid) = url.and_then(crate::news_art::texture) {
         image_rounded(&dl, tid, [ox, oy], [ox + fitted[0], oy + fitted[1]]);
     }

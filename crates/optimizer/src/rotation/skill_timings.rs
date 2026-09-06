@@ -17,23 +17,23 @@ pub const MIN_SKILL_GAP_MS: u32 = 100;
 /// IDs from live api.guildwars2.com; times from wiki skill pages (2026-08-14).
 pub fn timing_for(skill_id: u32, slot: SkillSlot) -> SkillTiming {
     match skill_id {
-        13005 => SkillTiming::new(250, 0),  // Backstab ¼ s
-        13097 => SkillTiming::new(750, 0),  // Heartseeker ¾ s
-        13115 => SkillTiming::new(0, 0),    // Sneak Attack (no activation)
-        29887 => SkillTiming::new(750, 0),  // Spear of Justice ¾ s
-        30229 => SkillTiming::new(750, 0),  // True Shot ¾ s
-        30364 => SkillTiming::new(500, 0),  // Procession of Blades ½ s
+        13005 => SkillTiming::new(250, 0), // Backstab ¼ s
+        // Heartseeker (13097) lives in balance_overrides/*/activation_ms.
+        13115 => SkillTiming::new(0, 0), // Sneak Attack (no activation)
+        29887 => SkillTiming::new(750, 0), // Spear of Justice ¾ s
+        30229 => SkillTiming::new(750, 0), // True Shot ¾ s
+        30364 => SkillTiming::new(500, 0), // Procession of Blades ½ s
         30628 => SkillTiming::new(1000, 0), // Hunter's Ward 1 s channel
-        30557 => SkillTiming::new(250, 0),  // Executioner's Scythe ¼ s
-        29855 => SkillTiming::new(500, 0),  // Nightfall ½ s
-        30825 => SkillTiming::new(250, 0),  // Death's Charge ¼ s
-        9080 => SkillTiming::new(500, 0),   // Leap of Faith ½ s
-        13002 => SkillTiming::new(0, 0),    // Shadowstep instant
-        44165 => SkillTiming::new(500, 0),  // Full Counter ½ s
-        44364 => SkillTiming::new(0, 0),    // Tome of Justice open
-        10192 => SkillTiming::new(0, 0),    // Distortion shatter
-        10671 => SkillTiming::new(500, 0),  // Well of Corruption
-        10674 => SkillTiming::new(500, 0),  // Well of Suffering
+        30557 => SkillTiming::new(250, 0), // Executioner's Scythe ¼ s
+        29855 => SkillTiming::new(500, 0), // Nightfall ½ s
+        30825 => SkillTiming::new(250, 0), // Death's Charge ¼ s
+        9080 => SkillTiming::new(500, 0), // Leap of Faith ½ s
+        13002 => SkillTiming::new(0, 0), // Shadowstep instant
+        44165 => SkillTiming::new(500, 0), // Full Counter ½ s
+        44364 => SkillTiming::new(0, 0), // Tome of Justice open
+        10192 => SkillTiming::new(0, 0), // Distortion shatter
+        10671 => SkillTiming::new(500, 0), // Well of Corruption
+        10674 => SkillTiming::new(500, 0), // Well of Suffering
         45333 => SkillTiming::new(1500, 0), // Winds of Disenchantment 1½ s
         _ => default_timing(slot),
     }
@@ -153,5 +153,15 @@ mod tests {
     fn instant_outs_are_zero_cast() {
         assert_eq!(timing_for(13002, SkillSlot::Utility).cast_ms, 0);
         assert_eq!(timing_for(10192, SkillSlot::Profession).cast_ms, 0);
+    }
+
+    #[test]
+    fn heartseeker_is_not_a_table_row() {
+        // Sourced in data/balance_overrides/2026-07-15/*/activation_ms = 750.
+        // The table must not duplicate that id; aftercast stays on the slot default.
+        let table = timing_for(13097, SkillSlot::Weapon2);
+        let slot = default_timing(SkillSlot::Weapon2);
+        assert_eq!(table.cast_ms, slot.cast_ms);
+        assert_eq!(table.aftercast_ms, slot.aftercast_ms);
     }
 }

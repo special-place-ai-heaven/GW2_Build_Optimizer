@@ -40,9 +40,22 @@ fn describe(v: &ValidatedBuild) -> String {
     )
 }
 
-fn print_report(tag: &str, v: &ValidatedBuild, db: &GameDb, prof: &str, w: &OptimizationWeights, ctx: &BalanceContext, sc: &ScenarioSpec) {
+fn print_report(
+    tag: &str,
+    v: &ValidatedBuild,
+    db: &GameDb,
+    prof: &str,
+    w: &OptimizationWeights,
+    ctx: &BalanceContext,
+    sc: &ScenarioSpec,
+) {
     let rep = referee::evaluate_validated_build(v, db, prof, w, ctx, sc);
-    println!("{tag} {}\n       rank={:?} viable={}", describe(v), referee::search_rank(&rep), rep.viability.is_viable);
+    println!(
+        "{tag} {}\n       rank={:?} viable={}",
+        describe(v),
+        referee::search_rank(&rep),
+        rep.viability.is_viable
+    );
     for g in &rep.viability.gates {
         println!("       gate {:?} passed={} {}", g.gate, g.passed, g.note);
     }
@@ -54,11 +67,16 @@ fn print_report(tag: &str, v: &ValidatedBuild, db: &GameDb, prof: &str, w: &Opti
         sc.combat_kind,
     );
     let (stats, _) = gw2_optimizer::engine::calculate_validated_stats(v, db, prof, ctx);
-    let Some(prep) = gw2_optimizer::engine::prepare_validated_rotation(v, db, &stats, Some(sc)) else {
+    let Some(prep) = gw2_optimizer::engine::prepare_validated_rotation(v, db, &stats, Some(sc))
+    else {
         println!("       (no rotation)");
         return;
     };
-    println!("       window={}ms, recovery deadline={}ms", window, window + 5_000);
+    println!(
+        "       window={}ms, recovery deadline={}ms",
+        window,
+        window + 5_000
+    );
     for s in &prep.skills {
         let flag = if s.cooldown_ms > window + 5_000 {
             "  <-- can never be ready by the deadline if cast at t>0"
@@ -103,7 +121,10 @@ fn main() {
         patch_id: Some(ctx.patch_id.clone()),
         objective_profile_id: Some(role.profile_id_for(&mode, tier).to_string()),
     };
-    println!("scenario kind={:?} tier={:?} profile={:?}", scenario.combat_kind, tier, scenario.objective_profile_id);
+    println!(
+        "scenario kind={:?} tier={:?} profile={:?}",
+        scenario.combat_kind, tier, scenario.objective_profile_id
+    );
     let scourge = db
         .specializations
         .values()
@@ -115,6 +136,7 @@ fn main() {
     let prefix = gw2_optimizer::scoring::select_gear_prefix(&weights).primary;
     println!("prefix={prefix}");
 
+    let seed_started = std::time::Instant::now();
     let seed = synergy_pipeline::optimize_synergy(
         &db,
         prof,
@@ -126,7 +148,16 @@ fn main() {
         &mut |_| {},
     )
     .expect("seed");
-    print_report("SEED  ", &seed.validated, &db, prof, &weights, &ctx, &scenario);
+    println!("seed took {:?}", seed_started.elapsed());
+    print_report(
+        "SEED  ",
+        &seed.validated,
+        &db,
+        prof,
+        &weights,
+        &ctx,
+        &scenario,
+    );
 
     let result = search_v2::optimize_v2_search(
         &db,

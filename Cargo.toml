@@ -9,7 +9,7 @@ exclude = ["server/feedback"]
 resolver = "2"
 
 [workspace.package]
-version = "1.11.31"
+version = "1.12.0"
 edition = "2021"
 license = "MIT"
 
@@ -21,6 +21,13 @@ thiserror = "2"
 urlencoding = "2"
 chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
+# html5ever with CSS selectors. Renamed: `crate::scraper` is ours, and the
+# benchmark work needs both a tree walk and targeted selection.
+# `main` is scraper's own CLI demo and drags in getopts; a cdylib in a game
+# process has no use for an argument parser.
+html = { package = "scraper", version = "0.25", default-features = false, features = [
+    "errors",
+] }
 serde_yaml = "0.9"
 uuid = { version = "1", features = ["v4"] }
 # Radio playback stack. stream-download is pinned to 0.22.x on purpose: 0.23+

@@ -2,10 +2,10 @@
 //! `choya_radio.png` atlas (1536x1024 RGBA, embedded).
 //!
 //! Self-contained: own embedded-texture helper (mirroring `theme::embedded_tex`),
-//! own rect tables, draw-list blits only — nothing here is interactive. The
-//! DJ lives INSIDE the player bar: [`draw_dj_choya`] takes the bar rect,
-//! sizes the sprite to it, and hard-clips every blit to that rect, so
-//! nothing here can ever paint over the station list (hearts included).
+//! own rect tables, draw-list blits only — nothing here is interactive. Sprite
+//! blits in [`draw_dj_choya`] are clipped to the player-bar rect. The quip
+//! bubble is deliberately on the foreground draw list above everything; a
+//! `right_limit` clamp keeps it off the hearts column.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -20,7 +20,7 @@ const SHEET_H: f32 = 1024.0;
 
 // Pixel rects on `choya_radio.png`: x, y, w, h. Every rect below was verified
 // frame-by-frame against a rendered montage of the atlas (2026-08-31). The
-// auto-measured DANCE[0], ONAIR, ZZZ and EQ_WARM rects were wrong and are
+// auto-measured DANCE[0], ONAIR, and ZZZ rects were wrong and are
 // corrected here — see the comments on each.
 const RADIO_DJ_IDLE: [[f32; 4]; 5] = [
     [5.0, 10.0, 212.0, 200.0],
@@ -492,8 +492,8 @@ fn draw_dj_states(
 /// Speech bubble for the quip: warm dark rounded plate + soft border + a
 /// small tail pointing back at the choya. All the unpredictability derives
 /// from the slot hash `h` with zero stored state: a hash-picked anchor
-/// (three leans above the head, or muffled mumbling down by the feet at 60%
-/// alpha), a per-slot pixel nudge, a live bass bob applied identically to
+/// among five above-the-head slots (center, left/right leans, higher,
+/// lower), a per-slot pixel nudge, a live bass bob applied identically to
 /// plate, tail and text, a ~10 frame ease-out scale-in pop, a mood emote
 /// drip of tiny atlas sprites while the bubble shows, and a deterministic
 /// 1-in-64 ON-AIR overload (badge pulse, spotlight rays, text shiver).
@@ -521,7 +521,6 @@ fn draw_quip_bubble(
     // land inside the now-playing ticker): centered, left/right leans, and
     // higher/lower altitude variants.
     let anchor = (h >> 8) % 5;
-    let a = alpha;
 
     // Real measurement at the bubble's own font scale, greedy word-wrap into
     // short lines — the text always fits INSIDE the plate (the old blind
@@ -597,7 +596,7 @@ fn draw_quip_bubble(
     // Rare ON-AIR overload: pure-hash 1-in-64 jackpot, self-terminating
     // after ~2 s of the visible window. Same track slot always jackpots.
     let jackpot = lcg(h).is_multiple_of(64) && vis < 120;
-    let fill = theme::with_alpha(theme::pal().plate, 0.92 * a);
+    let fill = theme::with_alpha(theme::pal().plate, 0.92 * alpha);
     if jackpot {
         // Three thin spotlight rays rotating behind the bubble.
         for r in 0..3 {
@@ -605,9 +604,14 @@ fn draw_quip_bubble(
             let (sn, cs) = ang.sin_cos();
             let p2 = [bc[0] + cs * 52.0 - sn * 5.0, bc[1] + sn * 52.0 + cs * 5.0];
             let p3 = [bc[0] + cs * 52.0 + sn * 5.0, bc[1] + sn * 52.0 - cs * 5.0];
-            dl.add_triangle(bc, p2, p3, theme::with_alpha(theme::pal().gold, 0.12 * a))
-                .filled(true)
-                .build();
+            dl.add_triangle(
+                bc,
+                p2,
+                p3,
+                theme::with_alpha(theme::pal().gold, 0.12 * alpha),
+            )
+            .filled(true)
+            .build();
         }
     }
 
@@ -618,7 +622,7 @@ fn draw_quip_bubble(
     dl.add_rect(
         bmin,
         bmax,
-        theme::with_alpha(theme::pal().gold_fill, 0.9 * a),
+        theme::with_alpha(theme::pal().gold_fill, 0.9 * alpha),
     )
     .rounding(5.0)
     .thickness(1.0)
@@ -640,14 +644,18 @@ fn draw_quip_bubble(
         let lw = ui.calc_text_size(line)[0];
         let ly = by - text_h * 0.5 + li as f32 * (line_h + LINE_GAP);
         let lp = s([bx - lw * 0.5, ly]);
-        dl.add_text([lp[0] + 1.0, lp[1] + 1.0], [0.0, 0.0, 0.0, 0.75 * a], line);
-        dl.add_text(lp, theme::with_alpha(theme::pal().gold, a), line);
+        dl.add_text(
+            [lp[0] + 1.0, lp[1] + 1.0],
+            [0.0, 0.0, 0.0, 0.75 * alpha],
+            line,
+        );
+        dl.add_text(lp, theme::with_alpha(theme::pal().gold, alpha), line);
         if jackpot && bass > 0.6 {
             // The choya seized the mic: 1 px shiver double-draw.
             let dx = (lcg(t.wrapping_add(li as u32)) % 3) as f32 - 1.0;
             dl.add_text(
                 [lp[0] + dx, lp[1]],
-                theme::with_alpha(theme::pal().gold, 0.6 * a),
+                theme::with_alpha(theme::pal().gold, 0.6 * alpha),
                 line,
             );
         }
@@ -661,7 +669,7 @@ fn draw_quip_bubble(
             [bmax[0] - 4.0, bmin[1] - 4.0],
             34.0 * pulse,
             RADIO_ONAIR,
-            a,
+            alpha,
         );
     }
 
