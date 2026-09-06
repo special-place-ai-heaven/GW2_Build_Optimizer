@@ -240,6 +240,7 @@
   "status.online": "Онлайн",
   "status.set_api_key": "Задать ключ API",
   "talk.no_character": "нет персонажа",
+  "talk.pick_character": "Персонаж не выбран — Choya выберет профессию за вас.",
   "talk.any_profession": "любая профессия",
   "talk.no_role": "нет роли",
   "starter.power": "Силовой билд",

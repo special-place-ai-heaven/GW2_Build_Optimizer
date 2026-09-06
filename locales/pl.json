@@ -240,6 +240,7 @@
   "status.online": "Online",
   "status.set_api_key": "Ustaw klucz API",
   "talk.no_character": "brak postaci",
+  "talk.pick_character": "Nie wybrano postaci — Choya wybierze profesję za ciebie.",
   "talk.any_profession": "dowolna profesja",
   "talk.no_role": "brak roli",
   "starter.power": "Build mocy",

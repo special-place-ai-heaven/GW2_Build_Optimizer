@@ -33,6 +33,14 @@ pub(in crate::ui::main_view) fn render_talk_tab(ui: &Ui, state: &mut AddonState)
     render_choya_identity(ui, state);
 
     ui.spacing();
+    // No character is the one part of this line worth interrupting for: it
+    // changes what Choya can know about you, and in muted grey among three
+    // other facts it reads as scenery. Choya will still plate a build and
+    // pick a profession itself — this says why the build is a guess rather
+    // than yours.
+    if state.main.selected_character.is_none() {
+        ui.text_colored(theme::WARN, t("talk.pick_character"));
+    }
     theme::wrapped(ui, theme::pal().muted, &talk_context(state));
     ui.spacing();
     render_starters(ui, state);

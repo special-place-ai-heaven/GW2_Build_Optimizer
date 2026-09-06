@@ -240,6 +240,7 @@
   "status.online": "オンライン",
   "status.set_api_key": "APIキーを設定",
   "talk.no_character": "キャラ未選択",
+  "talk.pick_character": "キャラクター未選択 — Choya が職業を選びます。",
   "talk.any_profession": "任意のプロフェッション",
   "talk.no_role": "ロール未選択",
   "starter.power": "パワービルド",
