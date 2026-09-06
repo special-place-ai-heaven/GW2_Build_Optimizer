@@ -276,6 +276,34 @@ pub fn build_name(html: &str) -> Option<String> {
     (!name.is_empty()).then_some(name)
 }
 
+/// The role Hardstuck files the build under.
+///
+/// Its own taxonomy, in `dataLayer_content` in the head:
+///
+/// ```json
+/// "pagePostTerms": { "gw2gametype": ["PvP"], "gw2buildrole": ["Bruiser"] }
+/// ```
+///
+/// Measured vocabulary: Damage, Roamer, Bruiser, Defensive Support. It is
+/// the only thing that names the job on a build whose title does not — a
+/// "Blood Harbinger" is a Bruiser, and nothing in that name says so.
+///
+/// Read with a bounded scan rather than by parsing the whole blob: the JSON
+/// is a page-analytics payload carrying serialized PHP, and it does not need
+/// to be understood to pull one term out of it.
+pub fn build_role(html: &str) -> Option<String> {
+    let at = html.find(r#""gw2buildrole":"#)?;
+    let open = html[at..].find('[')? + at;
+    let close = html[open..].find(']')? + open;
+    let role = html[open + 1..close]
+        .split(',')
+        .next()?
+        .trim()
+        .trim_matches('"')
+        .trim();
+    (!role.is_empty()).then(|| role.to_string())
+}
+
 /// Mode and scale as the page files them, from the game type in `<title>`.
 ///
 /// Hardstuck's four game types are `open-world`, `group-pve`, `wvw` and
@@ -288,14 +316,43 @@ pub fn mode_and_scale(html: &str) -> Option<(&'static str, &'static str)> {
     let text = document.select(&title).next()?.text().collect::<String>();
     // "Power Dragonhunter Build (Group PvE)  - Hardstuck"
     let inside = text.split_once('(')?.1.split_once(')')?.0.trim().to_ascii_lowercase();
-    match inside.as_str() {
-        "open world" | "open-world" => Some(("PvE", "Open World")),
-        "group pve" | "group-pve" => Some(("PvE", "Group")),
-        "pve" => Some(("PvE", "")),
-        "wvw" => Some(("WvW", "")),
-        "pvp" => Some(("PvP", "")),
-        _ => None,
+    // Matched by the words present, not by the whole string. Hardstuck also
+    // files builds under compound types like "WvW - Zerg", and an exact-match
+    // table silently dropped the scale on those, calling a zerg build plain
+    // WvW.
+    let has = |word: &str| inside.contains(word);
+    if has("wvw") || has("world vs world") {
+        let scale = if has("zerg") {
+            "Zerg"
+        } else if has("havoc") {
+            "Havoc"
+        } else if has("roam") {
+            "Roaming"
+        } else {
+            ""
+        };
+        return Some(("WvW", scale));
     }
+    if has("pvp") {
+        return Some(("PvP", ""));
+    }
+    // Everything else Hardstuck publishes is PvE; the words say at what scale.
+    let scale = if has("open world") {
+        "Open World"
+    } else if has("raid") {
+        "Raid"
+    } else if has("fractal") {
+        "Fractal"
+    } else if has("strike") {
+        "Strike"
+    } else if has("group") {
+        "Group"
+    } else {
+        ""
+    };
+    // "Open World" names no mode of its own, so the scale alone is enough to
+    // call it PvE. A game type that names neither is not guessed at.
+    (!scale.is_empty() || has("pve")).then_some(("PvE", scale))
 }
 
 /// The game mode the page states, rather than one inferred from its text.
@@ -506,6 +563,38 @@ mod tests {
             );
             assert_eq!(mode_and_scale(&page), Some((mode, scale)), "{title:?}");
         }
+    }
+
+    /// The site files a role of its own, and it is the only thing that names
+    /// the job on a build whose title does not.
+    #[test]
+    fn the_stated_role_is_read_from_the_page() {
+        const HEAD: &str = r#"<script>var dataLayer_content = {"pageTitle":"x",
+            "pagePostTerms":{"gw2profession":["Necromancer"],"gw2gametype":["PvP"],
+            "gw2buildrole":["Bruiser"],"gw2buildvariant":["Spear","Sword"]}};</script>"#;
+        assert_eq!(build_role(HEAD).as_deref(), Some("Bruiser"));
+        assert_eq!(
+            super::super::role_in_name("Blood Harbinger"),
+            None,
+            "the name says nothing, which is why the tag matters"
+        );
+        assert_eq!(build_role("<p>no analytics blob here</p>"), None);
+    }
+
+    /// Compound game types carry the scale, and an exact-match table dropped
+    /// it — calling a zerg build plain WvW.
+    #[test]
+    fn a_compound_game_type_keeps_its_scale() {
+        let page = |game_type: &str| {
+            format!("<html><head><title>A Build ({game_type})  - Hardstuck</title></head></html>")
+        };
+        assert_eq!(mode_and_scale(&page("WvW - Zerg")), Some(("WvW", "Zerg")));
+        assert_eq!(mode_and_scale(&page("WvW - Roaming")), Some(("WvW", "Roaming")));
+        assert_eq!(mode_and_scale(&page("WvW")), Some(("WvW", "")));
+        assert_eq!(mode_and_scale(&page("Open World")), Some(("PvE", "Open World")));
+        assert_eq!(mode_and_scale(&page("Group PvE")), Some(("PvE", "Group")));
+        assert_eq!(mode_and_scale(&page("PvP")), Some(("PvP", "")));
+        assert_eq!(mode_and_scale(&page("Something Else")), None);
     }
 
     /// A build whose name states no job says so, rather than defaulting to

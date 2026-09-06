@@ -703,10 +703,23 @@ impl MainState {
             return;
         }
         let mut counts = std::collections::HashMap::new();
+        let mut mode_counts = std::collections::HashMap::new();
         for b in &builds {
             *counts.entry(b.source.clone()).or_insert(0) += 1;
+            // Same key the live sync writes, or the grid reads a dash for
+            // every cell. Only a sync used to fill this, so after a restart
+            // the benchmarks table showed nothing at all while several
+            // hundred builds sat on disk — a store that looked empty and was
+            // not.
+            *mode_counts
+                .entry(format!("{}|{}", b.source, b.mode))
+                .or_insert(0) += 1;
         }
         self.benchmark_counts = counts;
+        self.benchmark_mode_counts = mode_counts;
+        // `benchmark_failed` is deliberately left alone: what a run could not
+        // read is not written to disk, so after a restart we do not know, and
+        // an invented zero would show a clean grid over an unknown one.
         let stamp = std::fs::metadata(addon_dir.join("benchmarks"))
             .ok()
             .and_then(|m| m.modified().ok())
