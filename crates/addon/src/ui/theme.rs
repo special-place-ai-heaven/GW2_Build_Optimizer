@@ -1204,6 +1204,30 @@ fn mystic_coin_tex(metal: usize) -> Option<TextureId> {
     embedded_tex(key, bytes)
 }
 
+/// A community site's own mark, for the button that links to it.
+///
+/// Their favicon, shown beside a link to their page: it says where the URL
+/// goes before you click it, which is the whole job. A site we have no mark
+/// for returns None and the caller draws a coloured pip instead.
+pub fn site_tex(site: &str) -> Option<TextureId> {
+    let (key, bytes): (&str, &[u8]) = match site.to_lowercase().as_str() {
+        "guildjen" => (
+            "GW2BO_SITE_GUILDJEN",
+            include_bytes!("../../assets/guildjen.png"),
+        ),
+        "hardstuck" => (
+            "GW2BO_SITE_HARDSTUCK",
+            include_bytes!("../../assets/hardstuck.png"),
+        ),
+        "snowcrows" => (
+            "GW2BO_SITE_SNOWCROWS",
+            include_bytes!("../../assets/snowcrows.png"),
+        ),
+        _ => return None,
+    };
+    embedded_tex(key, bytes)
+}
+
 /// Ko-fi logomark (creator kit), used only for the coffee tile and header button.
 pub fn kofi_tex() -> Option<TextureId> {
     embedded_tex(

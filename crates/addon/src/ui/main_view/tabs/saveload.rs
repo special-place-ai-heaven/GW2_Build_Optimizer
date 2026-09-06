@@ -879,6 +879,8 @@ fn saved_to_suggestion(
         .unwrap_or((None, None, None));
 
     let mut suggestion = crate::ui::comparison::BuildSuggestion {
+        // Ours, not published anywhere.
+        source_url: String::new(),
         label: if saved.label.is_empty() {
             saved.name.clone()
         } else {
