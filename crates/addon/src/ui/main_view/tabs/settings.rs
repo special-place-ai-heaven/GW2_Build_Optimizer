@@ -1764,31 +1764,45 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
         // out full width the grid also read badly: three counts and a dash
         // stretched across the whole window with nothing between them.
         //
-        // Widths come from the text so the grid follows the font scale, and
-        // stay wide enough for a four-digit count.
+        // Widths come from the text so the grid follows the font scale, then
+        // share out whatever the panel has left — the counts sat jammed
+        // against the source names in a column with room to spare.
         let scale = state.config.font_scale.max(0.5);
         let label_w = BENCHMARK_SOURCES
             .iter()
             .map(|(_, label)| ui.calc_text_size(label)[0])
             .fold(0.0_f32, f32::max)
-            + 14.0 * scale;
-        let mode_w = BENCHMARK_MODES
+            + 16.0 * scale;
+        // Room for a four-digit count, the widest mode name, and the failure
+        // column with its Retry button.
+        let min_mode_w = BENCHMARK_MODES
             .iter()
             .map(|mode| ui.calc_text_size(mode)[0])
             .fold(ui.calc_text_size("8888")[0], f32::max)
             + 12.0 * scale;
-        let column_at = |n: usize| label_w + mode_w * n as f32;
+        let retry_w = 76.0 * scale;
+        let spare = ui.content_region_avail()[0] - label_w - retry_w;
+        let mode_w = (spare / BENCHMARK_MODES.len() as f32).max(min_mode_w);
+
+        // Cells are placed with `set_cursor_pos` from the row's own starting
+        // x, NOT `same_line_with_pos`. That offset ignores the indent, and
+        // this section renders inside the right column's 48px one, so the
+        // counts were drawn on top of the source names — "Snowcr180".
+        let row_x = ui.cursor_pos()[0];
+        let column_at = |n: usize| row_x + label_w + mode_w * n as f32;
 
         // Header: an empty corner cell, then the modes.
+        let header_y = ui.cursor_pos()[1];
         ui.text(" ");
         for (n, mode) in BENCHMARK_MODES.iter().enumerate() {
-            ui.same_line_with_pos(column_at(n));
+            ui.set_cursor_pos([column_at(n), header_y]);
             ui.text_colored(theme::pal().muted, *mode);
         }
         for (key, label) in BENCHMARK_SOURCES {
+            let row_y = ui.cursor_pos()[1];
             ui.text_colored(theme::pal().gold, *label);
             for (n, mode) in BENCHMARK_MODES.iter().enumerate() {
-                ui.same_line_with_pos(column_at(n));
+                ui.set_cursor_pos([column_at(n), row_y]);
                 let count = state
                     .main
                     .benchmark_mode_counts
@@ -1808,7 +1822,7 @@ fn render_benchmark_section(ui: &Ui, state: &mut AddonState) {
                 .copied()
                 .unwrap_or(0);
             if bad > 0 {
-                ui.same_line_with_pos(column_at(BENCHMARK_MODES.len()));
+                ui.set_cursor_pos([column_at(BENCHMARK_MODES.len()), row_y]);
                 ui.text_colored([1.0, 0.4, 0.2, 1.0], bad.to_string());
                 ui.same_line();
                 // Only where there is something to retry, and cheap to take:
