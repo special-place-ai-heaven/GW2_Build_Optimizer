@@ -240,6 +240,7 @@
   "status.online": "在线",
   "status.set_api_key": "设置 API 密钥",
   "talk.no_character": "未选角色",
+  "talk.pick_character": "未选择角色 — Choya 将为你挑选职业。",
   "talk.any_profession": "任意职业",
   "talk.no_role": "未选职责",
   "starter.power": "威力配装",

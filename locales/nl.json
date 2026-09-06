@@ -240,6 +240,7 @@
   "status.online": "Online",
   "status.set_api_key": "API-sleutel instellen",
   "talk.no_character": "geen personage",
+  "talk.pick_character": "Geen personage gekozen — Choya kiest een professie voor je.",
   "talk.any_profession": "elk beroep",
   "talk.no_role": "geen rol",
   "starter.power": "Power-build",
