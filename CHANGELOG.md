@@ -2,6 +2,26 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.13.0 - 2026-09-07
+
+### The build it recommends
+
+- The optimizer can tell your builds apart again. A build that failed any viability check was scored -1.0 on every axis and skipped the rotation simulation entirely - and measured against the 124 synced community builds, **not one of them passed every check**. The score that carries what you asked for was the same number for every build a real player has ever published, so it could not order anything. Only the checks that the published meta actually clears may refuse a build now; the rest are written on it as caveats. 67 of 124 pass.
+- WvW support builds stopped being judged on a rule none of them can satisfy. The sustain check demanded that a healer end the modelled fight able to repeat it, which no published support build does, so every one of them was refused and every one of them tied on the ranking key meant to separate them. It now asks whether you survived, which about half of them do.
+- The enemy no longer attacks at a constant rate. It used to repeat one four-second burst forever with six-tenths of a second between the last hit and the next opener, which is not a fight - it is a drip, and against a drip nothing matters except raw mitigation per second, because a heal on a twenty-five second cooldown can never catch up. Support builds are watched for twenty seconds where a DPS is watched for five, so they ate four uninterrupted bursts and died. Damage now ramps to a peak worth spending an evade on, and then lets go long enough to heal. The published support builds went from 14% to 79% on the sustain check, and the DPS builds barely moved.
+- Conditions have to be cleansed. They used to expire during the lull between bursts, so waiting was a complete answer and a build carrying no cleanse at all measured exactly the same as one built around cleansing. Condition damage is not strike damage: armour does not reduce it, protection does not reduce it, and an evade cannot dodge what is already ticking.
+- Chill costs you your skills. Alacrity made cooldowns come back faster and nothing anywhere made them come back slower, so the enemy could not touch your skill availability - which leaves out the way a support actually dies. Chill does not have to out-damage your healing. It only has to keep your heal on cooldown until the next burst lands.
+
+### Choya
+
+- Choya answers instead of running out the clock. One message could cost eighteen sequential requests: up to eight tool rounds plus a closing request, twice over, because a refused build was always composed again. On a free model that is minutes of silence ending in "request timed out". Looking things up is now bounded, a round that runs out its own deadline answers from what it gathered rather than throwing it away, and a second attempt only starts if the first left time.
+- Choya is handed the profession instead of fetching it. It used to spend its first rounds asking what specializations exist, then what traits each one has, then guessing skill names one at a time to find out which were real - twenty-one seconds of a thirty-one second run, and six round trips, for data already in memory. It is all in the first message now. The skills in particular were a guessing game: there is a list of every rune, sigil and relic, but there was never one of a profession's skills, so a wrong name was found the hard way.
+- Google models answer instead of giving up. When one used all its tool rounds it returned "tool loop exceeded" and nothing else. It now writes the build from whatever it gathered, the same as the other providers.
+
+### Reading it
+
+- Dashes, quotes and arrows draw. English drew the whole addon in the game's own typeface - a set of glyphs we do not control - so an em dash reached you as a question mark mid-sentence, including in text the model wrote. Every Latin language now uses the face whose glyph coverage we do control, and it covers punctuation, arrows and mathematical symbols, because no test can hold a language model's prose to ASCII. The game typeface is still there under Settings for anyone who prefers it.
+
 ## 1.12.0 - 2026-09-06
 
 ### Choya
