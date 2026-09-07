@@ -463,6 +463,7 @@
   "info.on_skill": "all'uso dell'abilità",
   "quality.verified_tip": "Tutti i dati di input sono verificati e basati su fonti.",
   "quality.provisional_tip": "Alcuni dati sono stimati o provvisori. I risultati sono utilizzabili ma meno certi.",
+  "quality.coverage_line": "Non simulato: {detail}",
   "quality.blocked_tip": "Dati critici mancanti. I risultati potrebbero non essere affidabili.",
   "label.reasons": "Motivi:",
   "bench.header": "vs Meta della Community",

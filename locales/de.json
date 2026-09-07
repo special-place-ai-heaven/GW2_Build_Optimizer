@@ -463,6 +463,7 @@
   "info.on_skill": "bei Fertigkeit",
   "quality.verified_tip": "Alle Eingabedaten sind quellenbasiert und geprüft.",
   "quality.provisional_tip": "Einige Daten sind geschätzt. Nutzbar, aber unsicherer.",
+  "quality.coverage_line": "Nicht simuliert: {detail}",
   "quality.blocked_tip": "Kritische Daten fehlen. Ergebnisse unsicher.",
   "label.reasons": "Gründe:",
   "bench.header": "vs Community-Meta",
