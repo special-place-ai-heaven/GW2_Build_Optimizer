@@ -152,7 +152,26 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         gw2_core::types::GameMode::PvE => gw2_optimizer::scenario::CombatTier::Party,
     };
     let selected_role = state.main.selected_role;
-    let chat_locks = state.main.build_locks.clone();
+    // The message outranks the left panel. A specialization the player
+    // names replaces the panel's elite lock for this request, so the
+    // deterministic reference handed to the model is a build in the
+    // specialization they asked for, not the one they happen to have
+    // equipped. Name none, and the panel's selection is what gets improved.
+    let mut chat_locks = state.main.build_locks.clone();
+    if let Some(db) = state.main.game_db.as_deref() {
+        if let Some(wished) = wished_elite_spec(db, &message) {
+            if let Some(spec) = db
+                .specializations
+                .values()
+                .find(|s| s.elite && s.name.eq_ignore_ascii_case(&wished))
+            {
+                if chat_locks.specs[2] != Some(spec.id) {
+                    chat_locks.specs[2] = Some(spec.id);
+                    chat_locks.trait_locks.clear();
+                }
+            }
+        }
+    }
     let chat_balance_ctx = BalanceContext::new(state.main.game_mode.clone());
 
     let spawned = state.spawn_worker("chat-message", move |token| {
