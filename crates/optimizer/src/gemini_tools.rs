@@ -115,6 +115,7 @@ pub fn upgrade_reference(
         current_build_summary: None,
         weights: weights.clone(),
         balance_ctx,
+        scenario: crate::scenario::ScenarioSpec::from_balance_context(balance_ctx),
     };
     let runes = execute_tool("list_runes", &json!({}), &ctx);
     let sigils = execute_tool("list_sigils", &json!({}), &ctx);
@@ -137,6 +138,11 @@ pub struct ToolContext<'a> {
     pub current_build_summary: Option<&'a str>,
     pub weights: OptimizationWeights,
     pub balance_ctx: &'a BalanceContext,
+    /// The addon's current scenario (mode, tier, kind). `score_build`'s
+    /// full-build mode evaluates against it, never against an argument, so
+    /// a PvP amulet cannot be scored as WvW. Owned like `weights`: it is a
+    /// few enums and a label, cloned once per request.
+    pub scenario: crate::scenario::ScenarioSpec,
 }
 
 /// Build the Gemini tool declarations for all available tools.
@@ -203,6 +209,7 @@ pub fn profession_reference(db: &GameDb, profession_name: &str) -> String {
         current_build_summary: None,
         weights: OptimizationWeights::default(),
         balance_ctx: &balance_ctx,
+        scenario: crate::scenario::ScenarioSpec::from_balance_context(&balance_ctx),
     };
 
     let info = execute_tool("get_profession_info", &json!({}), &ctx);
@@ -488,16 +495,55 @@ fn decl_simulate_combat() -> FunctionDeclaration {
 fn decl_score_build() -> FunctionDeclaration {
     FunctionDeclaration {
         name: "score_build".into(),
-        description: "Score a gear prefix against the player's optimization weights. Returns the combat-based score and breakdown.".into(),
+        description: "Score a build against the player's optimization weights. Pass `build` (the whole plate, same JSON shape as your final answer) to get the app's own referee verdict for the current game mode and scenario: viable, gate results, user_intent_score, the six realized axes, data quality and what was not simulated. Pass only `gear_prefix` for the old prefix-only stat score (no traits, upgrades or rotation). Nothing is evaluated when both are missing.".into(),
         parameters: json!({
             "type": "object",
             "properties": {
                 "gear_prefix": {
                     "type": "string",
-                    "description": "Stat prefix name (e.g. 'Berserker\\'s')"
+                    "description": "Prefix-only mode: stat prefix name (e.g. 'Berserker\\'s')"
+                },
+                "build": {
+                    "type": "object",
+                    "description": "Full-build mode: the complete plate in the answer's JSON shape",
+                    "properties": {
+                        "specializations": {
+                            "type": "array",
+                            "description": "Three objects: {\"name\": \"Spite\", \"traits\": [three trait names]}",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "traits": {"type": "array", "items": {"type": "string"}}
+                                }
+                            }
+                        },
+                        "weapons": {
+                            "type": "object",
+                            "description": "{\"set1\": {\"main\": \"Greatsword\", \"off\": null}, \"set2\": {\"main\": \"Axe\", \"off\": \"Focus\"}}"
+                        },
+                        "skills": {
+                            "type": "object",
+                            "description": "{\"heal\": name, \"utilities\": [three names], \"elite\": name}"
+                        },
+                        "rune": {"type": "string"},
+                        "sigils": {
+                            "type": "array",
+                            "description": "Four sigil names: set1 main, set1 off, set2 main, set2 off",
+                            "items": {"type": "string"}
+                        },
+                        "relic": {"type": "string"},
+                        "stat_prefix": {"type": "string"},
+                        "gear_slots": {
+                            "type": "object",
+                            "description": "Optional per-slot prefix override: kebab slot name (helm, ring-1, weapon-set-1-main, ...) to prefix name"
+                        },
+                        "pets": {"type": "array", "items": {"type": "string"}},
+                        "legends": {"type": "array", "items": {"type": "string"}}
+                    }
                 }
             },
-            "required": ["gear_prefix"]
+            "required": []
         }),
     }
 }
@@ -641,7 +687,7 @@ fn decl_get_build_synergy_report() -> FunctionDeclaration {
 fn decl_simulate_rotation() -> FunctionDeclaration {
     FunctionDeclaration {
         name: "simulate_rotation".into(),
-        description: "Simulate a skill rotation to estimate real DPS, condition uptime, buff uptime, and control metrics. Validates whether a build's skills actually work together over time.".into(),
+        description: "Simulate a skill rotation to estimate real DPS, condition uptime, buff uptime, and control metrics. Validates whether a build's skills actually work together over time. Estimates a skill list on an open dummy; not a full-build verdict; use score_build with a build for that.".into(),
         parameters: json!({
             "type": "object",
             "properties": {
@@ -1069,8 +1115,83 @@ fn exec_simulate_combat(args: &Value, ctx: &ToolContext) -> Value {
     })
 }
 
+/// Full-build mode of `score_build`: the same path the app runs at plate
+/// acceptance — `validate_gemini_build`, then the referee — so the verdict
+/// Choya reads is the one the player would get. Scenario and mode come from
+/// the context, never from the argument. An omitted `build` is refused by
+/// the caller; nothing here ever substitutes the equipped loadout.
+fn score_full_build(build: &Value, ctx: &ToolContext) -> Value {
+    let plate = match crate::prompts::parse_gemini_build(&build.to_string()) {
+        Ok(plate) => plate,
+        Err(e) => {
+            return json!({ "mode": "full_build", "errors": [format!("unreadable build: {e}")] })
+        }
+    };
+    let validated = crate::validation::validate_gemini_build(&plate, ctx.db, ctx.profession_name);
+    if !validated.errors.is_empty() {
+        return json!({
+            "mode": "full_build",
+            "errors": validated.errors.iter().map(|e| e.detail.clone()).collect::<Vec<_>>(),
+            "warnings": validated.warnings,
+        });
+    }
+    let report = crate::referee::evaluate_validated_build_with(
+        &validated,
+        ctx.db,
+        ctx.profession_name,
+        &ctx.weights,
+        ctx.balance_ctx,
+        &ctx.scenario,
+        &[],
+    );
+    let coverage_note = report
+        .quality_reasons
+        .iter()
+        .find(|r| r.field == crate::data::quality::COVERAGE_FIELD)
+        .map(|r| {
+            r.explanation
+                .strip_prefix(crate::data::quality::COVERAGE_PREFIX)
+                .unwrap_or(&r.explanation)
+                .to_string()
+        });
+    json!({
+        "mode": "full_build",
+        "scenario": format!("{} {:?}/{:?}", ctx.scenario.game_mode.label(), ctx.scenario.combat_tier, ctx.scenario.combat_kind),
+        "viable": report.viability.is_viable,
+        "gates": report.viability.gates.iter().map(|g| json!({
+            "gate": format!("{:?}", g.gate),
+            "passed": g.passed,
+            "note": g.note,
+        })).collect::<Vec<_>>(),
+        "user_intent_score": report.user_intent_score,
+        "realized": {
+            "power": report.realized.power,
+            "condition": report.realized.condition,
+            "boon_support": report.realized.boon_support,
+            "healing": report.realized.healing,
+            "sustain": report.realized.sustain,
+            "control": report.realized.control,
+        },
+        "quality": format!("{:?}", report.quality),
+        "quality_reasons": report.quality_reasons.iter().map(|r| r.to_string()).collect::<Vec<_>>(),
+        "coverage_note": coverage_note,
+        "warnings": validated.warnings,
+        "errors": Vec::<String>::new(),
+    })
+}
+
 fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
-    let gear_prefix = args["gear_prefix"].as_str().unwrap_or("");
+    if let Some(build) = args.get("build").filter(|b| b.is_object()) {
+        return score_full_build(build, ctx);
+    }
+    let Some(gear_prefix) = args["gear_prefix"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty())
+    else {
+        return json!({
+            "error": "no build supplied: pass `build` (the whole plate) for the referee verdict, or `gear_prefix` for a prefix-only stat score"
+        });
+    };
 
     let itemstat = find_itemstat_by_name(ctx.db, gear_prefix);
 
@@ -1106,6 +1227,8 @@ fn exec_score_build(args: &Value, ctx: &ToolContext) -> Value {
     let score = scoring::score_with_weights(&perf, &ctx.weights);
 
     json!({
+        "mode": "prefix_only",
+        "scope": "prefix only; traits, upgrades and rotation not evaluated",
         "prefix": &itemstat.name,
         "weights_summary": ctx.weights.summary_label(),
         "score": format!("{:.4}", score),
@@ -2574,6 +2697,7 @@ mod tests {
             current_build_summary: None,
             weights: OptimizationWeights::default(),
             balance_ctx: &bal,
+            scenario: crate::scenario::ScenarioSpec::from_balance_context(&bal),
         };
         let v = execute_tool("get_skill_info", &json!({ "skill_name": "" }), &ctx);
         assert!(
@@ -2632,6 +2756,7 @@ mod tests {
             current_build_summary: None,
             weights: OptimizationWeights::default(),
             balance_ctx: bal,
+            scenario: crate::scenario::ScenarioSpec::from_balance_context(bal),
         }
     }
 
@@ -2829,6 +2954,7 @@ mod tests {
             current_build_summary: Some(raw_summary.as_str()),
             weights: OptimizationWeights::default(),
             balance_ctx: &balance_ctx,
+            scenario: crate::scenario::ScenarioSpec::from_balance_context(&balance_ctx),
         };
 
         let result = exec_get_current_build(&ctx);
@@ -2940,6 +3066,7 @@ mod tests {
             current_build_summary: None,
             weights: OptimizationWeights::default(),
             balance_ctx: &balance_ctx,
+            scenario: crate::scenario::ScenarioSpec::from_balance_context(&balance_ctx),
         };
         let args = json!({
             "skill_ids": [999],
@@ -2997,6 +3124,7 @@ mod tests {
             current_build_summary: None,
             weights: OptimizationWeights::default(),
             balance_ctx: &balance_ctx,
+            scenario: crate::scenario::ScenarioSpec::from_balance_context(&balance_ctx),
         };
         let result = exec_simulate_rotation(
             &json!({ "skill_ids": [999], "gear_prefix": "NotARealPrefix" }),
@@ -3055,6 +3183,7 @@ mod tests {
             current_build_summary: None,
             weights: OptimizationWeights::default(),
             balance_ctx: &balance_ctx,
+            scenario: crate::scenario::ScenarioSpec::from_balance_context(&balance_ctx),
         };
         let result = exec_simulate_rotation(
             &json!({
@@ -3159,5 +3288,181 @@ mod tests {
             profession_reference(&db, "Necromancer"),
             "HashMap order must not leak into the prompt"
         );
+    }
+    // ── score_build full-build mode (specs/004-simulator-trust, FR-018) ────
+
+    fn reaper_ctx<'a>(
+        db: &'a GameDb,
+        bal: &'a BalanceContext,
+        scenario: &crate::scenario::ScenarioSpec,
+        summary: Option<&'a str>,
+    ) -> ToolContext<'a> {
+        ToolContext {
+            db,
+            profession_name: "Necromancer",
+            candidates: &[],
+            current_build_summary: summary,
+            weights: OptimizationWeights::default(),
+            balance_ctx: bal,
+            scenario: scenario.clone(),
+        }
+    }
+
+    fn reaper_plate() -> Value {
+        json!({
+            "specializations": [
+                {"name": "Spite", "traits": ["Spite Adept Left", "Spite Master Left", "Spite Grandmaster Left"]},
+                {"name": "Soul Reaping", "traits": ["Soul Reaping Adept Left", "Soul Reaping Master Left", "Soul Reaping Grandmaster Left"]},
+                {"name": "Reaper", "traits": ["Reaper Adept Left", "Reaper Master Left", "Reaper Grandmaster Left"]}
+            ],
+            "weapons": {"set1": {"main": "Greatsword", "off": null}, "set2": {"main": "Axe", "off": "Focus"}},
+            "skills": {
+                "heal": "Signet of Vampirism",
+                "utilities": ["Well of Suffering", "Well of Darkness", "\"You Are All Weaklings!\""],
+                "elite": "\"Chilled to the Bone!\""
+            },
+            "rune": "Superior Rune of the Scholar",
+            "sigils": ["Superior Sigil of Fire", "Superior Sigil of Force"],
+            "relic": "Relic of the Thief",
+            "stat_prefix": "Marauder",
+            "explanation": "fixture plate"
+        })
+    }
+
+    #[test]
+    fn score_build_full_mode_matches_referee() {
+        use crate::rotation::reaper_fixture as fx;
+        let db = fx::db();
+        let (bal, scenario) = fx::scenario();
+        let ctx = reaper_ctx(&db, &bal, &scenario, None);
+        let plate = reaper_plate();
+        let v = execute_tool("score_build", &json!({ "build": plate.clone() }), &ctx);
+        assert_eq!(v["mode"], "full_build", "{v}");
+        assert!(
+            v["errors"].as_array().is_some_and(|e| e.is_empty()),
+            "the fixture plate validates: {v}"
+        );
+
+        let parsed = crate::prompts::parse_gemini_build(&plate.to_string()).expect("plate parses");
+        let validated = crate::validation::validate_gemini_build(&parsed, &db, "Necromancer");
+        assert!(validated.errors.is_empty(), "{:?}", validated.errors);
+        let report = crate::referee::evaluate_validated_build_with(
+            &validated,
+            &db,
+            "Necromancer",
+            &ctx.weights,
+            &bal,
+            &scenario,
+            &[],
+        );
+        let eq = |name: &str, tool: f64, referee: f64| {
+            assert!(
+                (tool - referee).abs() <= 1e-9,
+                "{name}: tool {tool} vs referee {referee}"
+            );
+        };
+        eq(
+            "user_intent_score",
+            v["user_intent_score"].as_f64().unwrap(),
+            report.user_intent_score,
+        );
+        eq(
+            "power",
+            v["realized"]["power"].as_f64().unwrap(),
+            report.realized.power,
+        );
+        eq(
+            "condition",
+            v["realized"]["condition"].as_f64().unwrap(),
+            report.realized.condition,
+        );
+        eq(
+            "boon_support",
+            v["realized"]["boon_support"].as_f64().unwrap(),
+            report.realized.boon_support,
+        );
+        eq(
+            "healing",
+            v["realized"]["healing"].as_f64().unwrap(),
+            report.realized.healing,
+        );
+        eq(
+            "sustain",
+            v["realized"]["sustain"].as_f64().unwrap(),
+            report.realized.sustain,
+        );
+        eq(
+            "control",
+            v["realized"]["control"].as_f64().unwrap(),
+            report.realized.control,
+        );
+        assert_eq!(v["viable"].as_bool(), Some(report.viability.is_viable));
+        assert_eq!(
+            v["quality"].as_str(),
+            Some(format!("{:?}", report.quality).as_str())
+        );
+        assert_eq!(
+            v["gates"].as_array().map(|g| g.len()),
+            Some(report.viability.gates.len())
+        );
+        // The unsupported on-crit sigil reaches Choya's evidence by name.
+        assert!(
+            v["coverage_note"]
+                .as_str()
+                .is_some_and(|s| s.contains("Superior Sigil of Fire (on-crit)")),
+            "coverage_note: {}",
+            v["coverage_note"]
+        );
+    }
+
+    #[test]
+    fn score_build_without_build_or_prefix_errors() {
+        use crate::rotation::reaper_fixture as fx;
+        let db = fx::db();
+        let (bal, scenario) = fx::scenario();
+        let ctx = reaper_ctx(&db, &bal, &scenario, None);
+        let v = execute_tool("score_build", &json!({}), &ctx);
+        assert!(
+            v["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("no build supplied")),
+            "{v}"
+        );
+        assert!(v.get("viable").is_none() && v.get("score").is_none());
+        let empty = execute_tool("score_build", &json!({ "gear_prefix": "  " }), &ctx);
+        assert!(
+            empty["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("no build supplied")),
+            "{empty}"
+        );
+    }
+
+    #[test]
+    fn score_build_never_substitutes_equipped_build() {
+        use crate::rotation::reaper_fixture as fx;
+        let db = fx::db();
+        let (bal, scenario) = fx::scenario();
+        let kitchen = "EQUIPPED: Reaper greatsword, Marauder, Scholar";
+        let ctx = reaper_ctx(&db, &bal, &scenario, Some(kitchen));
+        let v = execute_tool("score_build", &json!({}), &ctx);
+        assert!(
+            v.get("error").is_some(),
+            "an omitted build is an error, never the equipped loadout: {v}"
+        );
+        assert!(v.get("viable").is_none() && v.get("user_intent_score").is_none());
+    }
+
+    #[test]
+    fn score_build_prefix_only_mode_is_labelled() {
+        use crate::rotation::reaper_fixture as fx;
+        let db = fx::db();
+        let (bal, scenario) = fx::scenario();
+        let ctx = reaper_ctx(&db, &bal, &scenario, None);
+        let v = execute_tool("score_build", &json!({ "gear_prefix": "Marauder" }), &ctx);
+        assert_eq!(v["mode"], "prefix_only", "{v}");
+        assert!(v["scope"]
+            .as_str()
+            .is_some_and(|s| s.contains("prefix only")));
     }
 }
