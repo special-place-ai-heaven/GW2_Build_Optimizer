@@ -127,6 +127,23 @@ pub(crate) fn is_deadline(err: &LlmError) -> bool {
 /// rather than in a stopwatch.
 pub(crate) const TOOL_PHASE_BUDGET: Duration = Duration::from_secs(150);
 
+/// Completion cap for the closing request — the one that writes the plate.
+///
+/// It went out with the lookup rounds' [`MAX_COMPLETION_TOKENS`] and
+/// [`REASONING_EFFORT`], which invites a reasoning model to deliberate over
+/// eight rounds of tool results before writing a few thousand tokens of
+/// JSON. Measured 2026-09-07 on `minimax/minimax-m3:free`: tool phase done in
+/// 65 s, closing request still silent at 77 s when the player gave up, and
+/// the run before it ran the whole 420 s deadline out and served nothing.
+/// Writing a plate is not a 32k job; it is not a thinking job either.
+pub(crate) const CLOSING_MAX_TOKENS: u32 = 8_192;
+
+/// Deadline for the closing request. A plate at 8k tokens streams in well
+/// under this on any model that can stream at all; a model that cannot make
+/// it is not going to at 420 s either, and the caller has a fallback answer
+/// to serve instead of a stopwatch.
+pub(crate) const CLOSING_REQUEST_TIMEOUT: Duration = Duration::from_secs(150);
+
 /// Completion ceiling per chat completion, hidden thinking included, so a
 /// reasoning model cannot spend the budget deliberating and have nothing left
 /// to answer with.

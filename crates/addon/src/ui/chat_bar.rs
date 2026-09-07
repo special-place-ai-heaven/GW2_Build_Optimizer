@@ -553,7 +553,9 @@ fn render_composer(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
         origin[0] + COMPOSER_CHOYA * 0.5,
         origin[1] + COMPOSER_H * 0.52,
     ];
-    if theme::composer_choya_bobbing(state.last_typed, std::time::Instant::now()) {
+    if state.waiting {
+        theme::draw_choya_thinking(ui, choya_c, COMPOSER_CHOYA);
+    } else if theme::composer_choya_bobbing(state.last_typed, std::time::Instant::now()) {
         theme::draw_choya_walk(ui, choya_c, COMPOSER_CHOYA);
     } else {
         theme::draw_choya_sleep(ui, choya_c, COMPOSER_CHOYA);

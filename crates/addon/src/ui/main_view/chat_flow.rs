@@ -171,6 +171,10 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
             // build looks identical to a greeting from the outside, and only
             // one of the two should be answered with other people's builds.
             let plate_refused = std::cell::Cell::new(false);
+            // The optimizer's own build for this request, kept outside the
+            // closure so a model failure can still serve it.
+            let fallback_reference: std::cell::RefCell<Option<String>> =
+                std::cell::RefCell::new(None);
             let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
                 let client = gw2_optimizer::llm::create_client(&config, &addon_dir)
                     .map_err(|e| e.to_string())?;
@@ -228,6 +232,9 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     // a plate is refused: a build that lands far below a
                     // reference it was shown is a different failure from one
                     // that never saw a reference at all.
+                    *fallback_reference.borrow_mut() = reference
+                        .as_ref()
+                        .map(|r| format!("{}\n{}", r.line, r.verdict));
                     nexus::log::log(
                         nexus::log::LogLevel::Info,
                         "GW2BuildOpt",
@@ -273,7 +280,18 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         &profession,
                     ));
 
-                    let tools = gw2_optimizer::llm::tools::tool_definitions();
+                    // The reference above IS the profession. A model that
+                    // re-fetches it anyway (MiniMax M3, 2026-09-07: three
+                    // rounds and 27 s of get_profession_info / get_spec_traits
+                    // against a first message that already held every line)
+                    // cannot when the tools are not on the table.
+                    let mut tools = gw2_optimizer::llm::tools::tool_definitions();
+                    tools.retain(|tool| {
+                        !matches!(
+                            tool.name.as_str(),
+                            "get_profession_info" | "get_spec_traits"
+                        )
+                    });
                     let empty_candidates = vec![];
                     let ctx = gw2_optimizer::gemini_tools::ToolContext {
                         db,
@@ -769,7 +787,24 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     s.config.active_model_id(),
                                 );
                                 s.main.provider_issue = Some(msg.clone());
-                                crate::ui::chat_bar::add_ai_response(&mut s.main.chat, msg);
+                                // The run must end in a build. The optimizer's
+                                // own answer for this request has been in hand
+                                // since before the first round; a model that
+                                // ran out of clock does not take it with it.
+                                match fallback_reference.borrow().as_deref() {
+                                    Some(build) => {
+                                        crate::ui::chat_bar::add_ai_response(
+                                            &mut s.main.chat,
+                                            format!(
+                                                "{msg}\n\n{}\n{build}",
+                                                t("choya.fallback_reference")
+                                            ),
+                                        );
+                                    }
+                                    None => {
+                                        crate::ui::chat_bar::add_ai_response(&mut s.main.chat, msg);
+                                    }
+                                }
                             });
                         }
                     }

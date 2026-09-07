@@ -516,6 +516,7 @@
   "err.bad_key": "Clé API refusée. Vérifie Paramètres.",
   "err.billing": "Problème de facturation ou de quota. Vérifie le compte ou change de fournisseur.",
   "err.timeout": "Délai dépassé. Essaie un modèle plus grand/plus rapide.",
+  "choya.fallback_reference": "Le modèle a manqué de temps. Voici le build de l'optimiseur lui-même pour ta demande, vérifié par l'arbitre :",
   "err.overloaded": "Fournisseur saturé. Réessaie ou change de modèle.",
   "fmt.internal_panic": "Erreur interne (panic) : {msg}",
   "err.opt_panic": "Erreur interne : le fil d'optimisation a planté",
