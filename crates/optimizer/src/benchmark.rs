@@ -423,11 +423,22 @@ pub fn closeness(shape: &BuildShape, build: &BenchmarkBuild, db: &crate::gamedb:
         .filter_map(|line| db.specializations.get(&line.id))
         .map(|spec| lower(&spec.name))
         .collect();
-    let spec_hits = shape
+    // The elite specialization is the build's identity: a player who asked
+    // for a Ritualist and got a Reaper card was not shown "something like
+    // it" (in-game 2026-09-07, where a Harbinger and a Reaper outscored the
+    // three published Ritualist roaming builds on shared core lines and
+    // weapons). One elite match outweighs two core matches and the weapons.
+    let is_elite = |name: &str| {
+        db.specializations
+            .values()
+            .any(|spec| spec.elite && lower(&spec.name) == lower(name))
+    };
+    let spec_points: u32 = shape
         .specs
         .iter()
         .filter(|name| their_specs.iter().any(|theirs| theirs == &lower(name)))
-        .count() as u32;
+        .map(|name| if is_elite(name) { 30 } else { 10 })
+        .sum();
 
     // Weapons live in the gear rows' slot, which every site names with the
     // weapon type: `Greatsword`, `Dagger`, `Warhorn`.
@@ -457,7 +468,7 @@ pub fn closeness(shape: &BuildShape, build: &BenchmarkBuild, db: &crate::gamedb:
                 .dominant_stat()
                 .is_some_and(|stat| lower(&stat) == lower(&shape.stat_prefix)));
 
-    spec_hits * 10
+    spec_points
         + weapon_hits * 4
         + u32::from(rune_hit) * 3
         + u32::from(relic_hit) * 3
