@@ -65,17 +65,21 @@ fn main() {
     let mut kitchen =
         String::from("Mode: WvW. Scale: Roam. Role: Roamer.\nCurrent build: none equipped.\n");
     kitchen.push_str(&profession_reference(&db, PROFESSION));
+    let weights = gw2_optimizer::scoring::OptimizationWeights::preset_power_dps();
+    let balance = gw2_optimizer::balance::BalanceContext::new(gw2_core::types::GameMode::WvW);
+    kitchen.push_str(&gw2_optimizer::gemini_tools::upgrade_reference(
+        &db, &weights, &balance,
+    ));
     let prompt = gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
         PROFESSION, "WvW", REQUEST, &kitchen, "English",
     );
     let tools = gw2_optimizer::llm::tools::tool_definitions();
-    let balance = gw2_optimizer::balance::BalanceContext::new(gw2_core::types::GameMode::WvW);
     let ctx = ToolContext {
         db: &db,
         profession_name: PROFESSION,
         candidates: &[],
         current_build_summary: Some(kitchen.as_str()),
-        weights: gw2_optimizer::scoring::OptimizationWeights::preset_power_dps(),
+        weights: weights.clone(),
         balance_ctx: &balance,
     };
     println!(

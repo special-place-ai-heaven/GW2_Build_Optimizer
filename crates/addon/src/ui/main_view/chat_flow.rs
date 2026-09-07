@@ -374,6 +374,16 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         db,
                         &profession,
                     ));
+                    kitchen.push_str(&gw2_optimizer::gemini_tools::upgrade_reference(
+                        db,
+                        &weights,
+                        &chat_balance_ctx,
+                    ));
+                    kitchen.push_str(&gw2_optimizer::gemini_tools::upgrade_reference(
+                        db,
+                        &weights,
+                        &chat_balance_ctx,
+                    ));
 
                     // Every tool stays on the table, including the two whose
                     // answer is already in the first message. Withholding

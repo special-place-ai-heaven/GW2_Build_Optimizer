@@ -1782,7 +1782,7 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         const { assert!(CONNECT_TIMEOUT_SECS > 0 && CONNECT_TIMEOUT_SECS <= 30) };
         assert_eq!(
             CHAT_REQUEST_TIMEOUT,
-            Duration::from_secs(420),
+            Duration::from_secs(120),
             "one completion budget shared with every other provider"
         );
         assert!(
