@@ -6,6 +6,7 @@ pub mod cleanse_sources;
 #[cfg(test)]
 mod consistency_tests;
 pub mod manifests;
+pub mod modifier_buckets;
 pub mod normalized_effects;
 pub mod objective_profiles;
 #[cfg(test)]

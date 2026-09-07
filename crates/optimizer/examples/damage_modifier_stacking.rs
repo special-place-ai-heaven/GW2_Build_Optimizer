@@ -44,6 +44,8 @@ struct Row {
     count: usize,
     multiplicative: f64,
     additive: f64,
+    actual: f64,
+    bucketed: usize,
     profession: String,
     has_upgrades: bool,
     unparsed: usize,
@@ -97,12 +99,22 @@ fn main() {
             &db.items,
             &ctx,
         );
-        let multiplicative = mods.total_strike_mult();
-        let additive = 1.0 + mods.strike_pct.iter().sum::<f64>();
+        // The two extremes bracket the truth; `actual` is the bucketed model.
+        let all: Vec<f64> = mods
+            .strike_pct
+            .iter()
+            .chain(mods.strike_add_pct.iter())
+            .copied()
+            .collect();
+        let multiplicative = all.iter().fold(1.0, |acc, m| acc * (1.0 + m));
+        let additive = 1.0 + all.iter().sum::<f64>();
+        let actual = mods.total_strike_mult();
         rows.push(Row {
             label: format!("{} {}", build.spec_name, build.role),
             profession: build.profession.clone(),
-            count: mods.strike_pct.len(),
+            count: all.len(),
+            bucketed: mods.strike_add_pct.len(),
+            actual,
             multiplicative,
             additive,
             has_upgrades: p.rune_id.is_some() || !p.sigil_ids.is_empty() || p.relic_id.is_some(),
@@ -121,6 +133,12 @@ fn main() {
     for r in &rows {
         *by_count.entry(r.count).or_default() += 1;
     }
+    let with_bucket = rows.iter().filter(|r| r.bucketed > 0).count();
+    let bucketed_total: usize = rows.iter().map(|r| r.bucketed).sum();
+    println!(
+        "modifier_buckets.json reached {with_bucket} builds ({bucketed_total} additive entries)
+"
+    );
     println!("strike modifiers per build:");
     for (n, hits) in &by_count {
         println!("  {n:2} modifiers  {hits:3} builds  {}", "#".repeat(*hits));
@@ -312,6 +330,23 @@ fn main() {
         "  spread (max - min): {}",
         pct(gaps.last().unwrap() - gaps[0])
     );
+
+    // Where the bucketed model actually lands between the two extremes.
+    let mut shift: Vec<f64> = rows
+        .iter()
+        .filter(|r| r.bucketed > 0)
+        .map(|r| r.multiplicative / r.actual - 1.0)
+        .collect();
+    shift.sort_by(|a, b| a.total_cmp(b));
+    if let (Some(lo), Some(hi)) = (shift.first(), shift.last()) {
+        println!(
+            "
+all-multiplicative over the bucketed model, builds with an additive entry:
+  min {}   max {}",
+            pct(*lo),
+            pct(*hi)
+        );
+    }
 
     // Rank churn: strike damage scales linearly with the multiplier, so ranking
     // builds by it is directly comparable between the two models.
