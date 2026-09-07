@@ -1512,6 +1512,13 @@ pub fn draw_choya_thinking(ui: &Ui, center: [f32; 2], size: f32) {
     blit_choya_frame(&ui.get_window_draw_list(), center, size, CHOYA_IDLE[i]);
 }
 
+/// The chat row's working pose: the nine-frame maraca bob from sheet 1.
+/// Header paces, row bobs, composer blinks — three slots, three motions.
+pub fn draw_choya_thinking_row(ui: &Ui, center: [f32; 2], size: f32) {
+    let i = (ui.frame_count() as usize / 6) % CHOYA_IDLE.len();
+    blit_choya_frame(&ui.get_window_draw_list(), center, size, CHOYA_IDLE[i]);
+}
+
 /// Peeking-from-the-rock pose, kept for whoever wants a shy Choya.
 #[allow(dead_code)]
 pub fn draw_choya_peek(ui: &Ui, center: [f32; 2], size: f32) {

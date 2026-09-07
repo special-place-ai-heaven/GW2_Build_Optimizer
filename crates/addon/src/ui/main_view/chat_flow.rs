@@ -443,7 +443,45 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         let mut parsed = match gw2_optimizer::prompts::parse_gemini_build(&response)
                         {
                             Ok(p) => p,
+                            // Prose where a plate was due. In-game 2026-09-07
+                            // (minimax-m3:free): eight rounds of lookups, then
+                            // a paragraph naming the traits and no JSON - a
+                            // build the player could read and not wear. One
+                            // repair request, no tools, asks for the plate of
+                            // what it just wrote; only if that fails too is
+                            // the prose served as conversation.
                             Err(_) => {
+                                let repair = format!(
+                                    "You answered in prose:\n\n{response}\n\nServe that \
+                                     as the plate now: ONLY the JSON build object from \
+                                     your instructions - \"specializations\" as objects \
+                                     with \"name\", \"elite\" and \"traits\" (three each), \
+                                     \"weapons\" with set1/set2 main/off, \"skills\" with \
+                                     heal/utilities/elite, \"rune\", \"sigils\", \"relic\", \
+                                     \"stat_prefix\", \"explanation\". No text outside \
+                                     the JSON."
+                                );
+                                let repaired = client
+                                    .generate_brief(&repair, 8_192)
+                                    .ok()
+                                    .and_then(|r| {
+                                        gw2_optimizer::prompts::parse_gemini_build(&r).ok()
+                                    });
+                                nexus::log::log(
+                                    nexus::log::LogLevel::Info,
+                                    "GW2BuildOpt",
+                                    format!(
+                                        "Choya answered in prose; repair request {}",
+                                        if repaired.is_some() {
+                                            "produced a plate"
+                                        } else {
+                                            "did not"
+                                        }
+                                    ),
+                                );
+                                if let Some(p) = repaired {
+                                    p
+                                } else {
                                 let explanation: String =
                                     response.chars().filter(|c| *c != '`').take(800).collect();
                                 let explanation = explanation.trim().to_string();
@@ -453,6 +491,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 gw2_optimizer::prompts::GeminiBuildResponse {
                                     explanation,
                                     ..Default::default()
+                                }
                                 }
                             }
                         };

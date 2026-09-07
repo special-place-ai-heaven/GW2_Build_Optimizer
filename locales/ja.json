@@ -172,7 +172,7 @@
   "settings.font_yahei": "Microsoft YaHei",
   "settings.font_japanese": "游ゴシック",
   "settings.font_korean": "Malgun Gothic",
-  "settings.font_hint": "Windows のフォントで中国語・日本語・韓国語・ロシア語・ポーランド語を表示します。ゲームは Nexus の書体のままです。",
+  "settings.font_hint": "このPCにインストールされた任意のフォントと、同梱のオープンソース書体5種。中国語・日本語・韓国語は常にそれぞれの書体で描画されます。「ゲーム」はNexusの書体のままです。",
   "settings.theme_section": "テーマ",
   "settings.theme_custom": "カスタム",
   "settings.theme_name_hint": "テーマ名を入力...",

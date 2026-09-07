@@ -172,7 +172,7 @@
   "settings.font_yahei": "Microsoft YaHei",
   "settings.font_japanese": "Yu Gothic",
   "settings.font_korean": "Malgun Gothic",
-  "settings.font_hint": "Windows-Schriften zeigen Chinesisch, Japanisch, Koreanisch, Russisch und Polnisch. Spiel behält die Nexus-Schrift.",
+  "settings.font_hint": "Jede auf diesem PC installierte Schrift plus fünf mitgelieferte Open-Source-Schriften. Chinesisch, Japanisch und Koreanisch zeichnen immer in ihrer eigenen Schrift. Spiel behält die Nexus-Schrift.",
   "settings.theme_section": "FARBSCHEMA",
   "settings.theme_custom": "Eigenes",
   "settings.theme_name_hint": "Farbschema benennen...",

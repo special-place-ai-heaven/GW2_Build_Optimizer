@@ -189,7 +189,7 @@
   "settings.font_yahei": "Microsoft YaHei",
   "settings.font_japanese": "Yu Gothic",
   "settings.font_korean": "Malgun Gothic",
-  "settings.font_hint": "Windows fonts draw Chinese, Japanese, Korean, Russian, and Polish. Game keeps the Nexus typeface.",
+  "settings.font_hint": "Any font installed on this PC, plus five bundled open-source faces. Chinese, Japanese and Korean always draw in their own script font. Game keeps the Nexus typeface.",
   "settings.theme_section": "THEME",
   "settings.theme_custom": "Custom",
   "settings.theme_name_hint": "Name your theme...",

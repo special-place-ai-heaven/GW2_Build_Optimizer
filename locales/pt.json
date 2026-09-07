@@ -172,7 +172,7 @@
   "settings.font_yahei": "Microsoft YaHei",
   "settings.font_japanese": "Yu Gothic",
   "settings.font_korean": "Malgun Gothic",
-  "settings.font_hint": "As fontes do Windows cobrem chinês, japonês, coreano, russo e polonês. Jogo mantém a tipografia do Nexus.",
+  "settings.font_hint": "Qualquer fonte instalada neste PC, mais cinco fontes de código aberto incluídas. Chinês, japonês e coreano sempre usam a própria fonte. Jogo mantém a tipografia do Nexus.",
   "settings.theme_section": "TEMA",
   "settings.theme_custom": "Personalizado",
   "settings.theme_name_hint": "Dê um nome ao tema...",

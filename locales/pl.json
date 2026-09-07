@@ -172,7 +172,7 @@
   "settings.font_yahei": "Microsoft YaHei",
   "settings.font_japanese": "Yu Gothic",
   "settings.font_korean": "Malgun Gothic",
-  "settings.font_hint": "Czcionki Windows wyświetlają chiński, japoński, koreański, rosyjski i polski. Gra zostawia krój Nexus.",
+  "settings.font_hint": "Dowolna czcionka zainstalowana na tym PC oraz pięć dołączonych czcionek open source. Chiński, japoński i koreański zawsze używają własnej czcionki. Gra zachowuje krój Nexus.",
   "settings.theme_section": "MOTYW",
   "settings.theme_custom": "Własny",
   "settings.theme_name_hint": "Nazwij swój motyw...",

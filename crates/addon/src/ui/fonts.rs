@@ -2,32 +2,75 @@
 //!
 //! Do not call `io.Fonts->AddFontFromFileTTF` here — Nexus rebuilds the atlas
 //! for every addon. Missing glyphs (`?`) are the default GW2/Nexus Latin-only
-//! atlas; we load one Windows TTF per script and `igPushFont` for our window.
+//! atlas; we register faces with Nexus and `igPushFont` for our window.
+//!
+//! The catalog is the player's own font folder, plus five bundled OFL faces
+//! for a bare system. A picked font draws every Latin language; Chinese,
+//! Japanese and Korean always draw in their script face, because no Latin
+//! font can draw them and offering one was a trap (a Japanese face picked
+//! for an English UI drew the model's em dash as '?', 2026-09-07).
 
-use nexus::font::add_font_from_file;
+use nexus::font::{add_font_from_file, add_font_from_memory};
 use nexus::imgui::sys::{
     self, ImFont, ImFontAtlas_GetGlyphRangesChineseSimplifiedCommon,
     ImFontAtlas_GetGlyphRangesJapanese, ImFontAtlas_GetGlyphRangesKorean, ImFontConfig,
     ImFontConfig_ImFontConfig, ImFontConfig_destroy, ImWchar,
 };
 use nexus::log::{log, LogLevel};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::Mutex;
 
 const SIZE_PX: f32 = 16.0;
 /// Native size for the now-playing ticker face — rasterized crisp at this
 /// size instead of bitmap-upscaling the 16 px atlas (which reads as a badly
 /// scaled image in-game).
 const TICKER_SIZE_PX: f32 = 42.0;
+/// The Latin face used when the player has not picked one.
 const LATIN_FILES: &[&str] = &["segoeui.ttf", "arial.ttf", "tahoma.ttf", "calibri.ttf"];
 const ZH_FILES: &[&str] = &["msyh.ttc", "msyh.ttf", "simsun.ttc"];
 const JA_FILES: &[&str] = &["YuGothM.ttc", "YuGothR.ttc", "meiryo.ttc", "msgothic.ttc"];
 const KO_FILES: &[&str] = &["malgun.ttf", "malgunsl.ttf"];
-const ID_LATIN: &str = "GW2BO_FONT_LATIN";
 const ID_ZH: &str = "GW2BO_FONT_ZH";
 const ID_JA: &str = "GW2BO_FONT_JA";
 const ID_KO: &str = "GW2BO_FONT_KO";
 const ID_TICKER: &str = "GW2BO_FONT_TICKER";
+const FILE_PREFIX: &str = "file:";
+const BUNDLED_PREFIX: &str = "bundled:";
+const ID_FILE_PREFIX: &str = "GW2BO_FONT_FILE_";
+const ID_BUNDLED_PREFIX: &str = "GW2BO_FONT_BUNDLED_";
+
+/// Faces shipped inside the DLL (SIL Open Font License, see
+/// `assets/fonts/OFL-*.txt`). Chosen for character, not coverage: Latin and,
+/// where the file has it, Cyrillic. Every one is small.
+const BUNDLED: &[(&str, &str, &[u8])] = &[
+    (
+        "cinzel",
+        "Cinzel",
+        include_bytes!("../../assets/fonts/Cinzel.ttf"),
+    ),
+    (
+        "medievalsharp",
+        "MedievalSharp",
+        include_bytes!("../../assets/fonts/MedievalSharp.ttf"),
+    ),
+    (
+        "caveat",
+        "Caveat",
+        include_bytes!("../../assets/fonts/Caveat.ttf"),
+    ),
+    (
+        "comicneue",
+        "Comic Neue",
+        include_bytes!("../../assets/fonts/ComicNeue.ttf"),
+    ),
+    (
+        "pressstart2p",
+        "Press Start 2P",
+        include_bytes!("../../assets/fonts/PressStart2P.ttf"),
+    ),
+];
 
 /// Inclusive pairs, 0-terminated. Latin-1 + Ext-A (Polish) + Cyrillic +
 /// General Punctuation + arrows + math + symbols.
@@ -52,10 +95,12 @@ const LATIN_RANGES: &[ImWchar] = &[
     0,
 ];
 
-static LATIN: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
-static ZH: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
-static JA: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
-static KO: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
+/// Font pointers by Nexus identifier, as handed to us by the font callback.
+/// Null during an atlas rebuild.
+static SLOTS: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
+/// Identifiers we already asked Nexus for, so a face whose file is broken is
+/// not re-requested every frame.
+static REQUESTED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 static TICKER: AtomicPtr<ImFont> = AtomicPtr::new(std::ptr::null_mut());
 
 const RECEIVE: nexus::font::RawFontReceive = nexus::font_receive!(|id, font| {
@@ -66,24 +111,31 @@ const RECEIVE: nexus::font::RawFontReceive = nexus::font_receive!(|id, font| {
 });
 
 fn store_ptr(id: &str, ptr: *mut ImFont) {
-    match id {
-        ID_LATIN => LATIN.store(ptr, Ordering::Release),
-        ID_ZH => ZH.store(ptr, Ordering::Release),
-        ID_JA => JA.store(ptr, Ordering::Release),
-        ID_KO => KO.store(ptr, Ordering::Release),
-        ID_TICKER => TICKER.store(ptr, Ordering::Release),
-        _ => {}
+    if id == ID_TICKER {
+        TICKER.store(ptr, Ordering::Release);
+        return;
+    }
+    if let Ok(mut slots) = SLOTS.lock() {
+        slots
+            .get_or_insert_with(HashMap::new)
+            .insert(id.to_string(), ptr as usize);
     }
 }
 
 fn slot_ptr(id: &str) -> *mut ImFont {
-    match id {
-        ID_LATIN => LATIN.load(Ordering::Acquire),
-        ID_ZH => ZH.load(Ordering::Acquire),
-        ID_JA => JA.load(Ordering::Acquire),
-        ID_KO => KO.load(Ordering::Acquire),
-        _ => std::ptr::null_mut(),
-    }
+    SLOTS
+        .lock()
+        .ok()
+        .and_then(|slots| slots.as_ref().and_then(|s| s.get(id).copied()))
+        .unwrap_or(0) as *mut ImFont
+}
+
+/// True the first time an identifier is seen, false after.
+fn first_request(id: &str) -> bool {
+    REQUESTED
+        .lock()
+        .map(|mut set| set.get_or_insert_with(HashSet::new).insert(id.to_string()))
+        .unwrap_or(false)
 }
 
 /// Pops the font Nexus/`igPushFont` pushed. Must drop even if the window panics.
@@ -104,7 +156,7 @@ pub fn init(pref: &str, ui_language: &str) {
     let Some(id) = resolve_font_id(pref, ui_language) else {
         return;
     };
-    if !slot_ptr(id).is_null() {
+    if !slot_ptr(&id).is_null() || !first_request(&id) {
         return;
     }
     let atlas = unsafe {
@@ -120,16 +172,7 @@ pub fn init(pref: &str, ui_language: &str) {
 
     let dir = windows_fonts_dir();
     // ImGui copies ImFontConfig during AddFont; only GlyphRanges must outlive Build.
-    match id {
-        ID_LATIN => {
-            let latin_cfg = make_cfg(LATIN_RANGES.as_ptr(), 2);
-            try_add(
-                ID_LATIN,
-                first_existing(&dir, LATIN_FILES),
-                Some(&latin_cfg),
-                SIZE_PX,
-            );
-        }
+    match id.as_str() {
         ID_ZH => {
             let zh_cfg = make_cfg(
                 with_latin(unsafe { ImFontAtlas_GetGlyphRangesChineseSimplifiedCommon(atlas) }),
@@ -166,6 +209,24 @@ pub fn init(pref: &str, ui_language: &str) {
                 SIZE_PX,
             );
         }
+        id if id.starts_with(ID_BUNDLED_PREFIX) => {
+            let key = &id[ID_BUNDLED_PREFIX.len()..];
+            let Some((_, label, bytes)) = BUNDLED.iter().find(|(k, _, _)| *k == key) else {
+                return;
+            };
+            let cfg = make_cfg(LATIN_RANGES.as_ptr(), 2);
+            add_font_from_memory(id, bytes, SIZE_PX, Some(&cfg), RECEIVE).revert_on_unload();
+            log(
+                LogLevel::Info,
+                "GW2 Build Optimizer",
+                format!("overlay font {id}: bundled {label}"),
+            );
+        }
+        id if id.starts_with(ID_FILE_PREFIX) => {
+            let file = &id[ID_FILE_PREFIX.len()..];
+            let cfg = make_cfg(LATIN_RANGES.as_ptr(), 2);
+            try_add(id, find_font_file(file), Some(&cfg), SIZE_PX);
+        }
         _ => {}
     }
 }
@@ -174,7 +235,7 @@ pub fn init(pref: &str, ui_language: &str) {
 /// English UI included: the marquee wants a crisp large font, not a 3x
 /// bitmap upscale of the 16 px atlas. Safe to call every frame.
 pub fn init_ticker() {
-    if !TICKER.load(Ordering::Acquire).is_null() {
+    if !TICKER.load(Ordering::Acquire).is_null() || !first_request(ID_TICKER) {
         return;
     }
     let dir = windows_fonts_dir();
@@ -227,7 +288,7 @@ fn try_add(id: &str, path: Option<PathBuf>, config: Option<&ImFontConfig>, size_
         log(
             LogLevel::Info,
             "GW2 Build Optimizer",
-            format!("overlay font {id}: no Windows TTF found, skipping"),
+            format!("overlay font {id}: no font file found, skipping"),
         );
         return;
     };
@@ -289,7 +350,7 @@ fn make_cfg(ranges: *const ImWchar, oversample_h: i32) -> ImFontConfig {
 /// Push the configured overlay font. `None` keeps the Nexus/GW2 typeface.
 pub fn push(pref: &str, ui_language: &str) -> Option<FontGuard> {
     let wanted = resolve_font_id(pref, ui_language)?;
-    let ptr = live_ptr(wanted);
+    let ptr = live_ptr(&wanted);
     if ptr.is_null() {
         return None;
     }
@@ -299,68 +360,95 @@ pub fn push(pref: &str, ui_language: &str) -> Option<FontGuard> {
     Some(FontGuard)
 }
 
+/// The requested face, or the default Latin face while it is still loading
+/// or if its file turned out unusable.
 fn live_ptr(id: &str) -> *mut ImFont {
     let ptr = slot_ptr(id);
     if !ptr.is_null() {
         return ptr;
     }
-    if id != ID_LATIN {
-        return LATIN.load(Ordering::Acquire);
+    let fallback = default_latin_id();
+    if id != fallback {
+        return slot_ptr(&fallback);
     }
     std::ptr::null_mut()
 }
 
-/// `"auto"` follows language; `"game"` never pushes.
-pub fn resolve_font_id(pref: &str, ui_language: &str) -> Option<&'static str> {
-    match pref {
-        "game" => None,
-        "segoe" => Some(ID_LATIN),
-        "zh" => Some(ID_ZH),
-        "ja" => Some(ID_JA),
-        "ko" => Some(ID_KO),
-        _ => match gw2_core::i18n::resolve(ui_language) {
-            "zh" => Some(ID_ZH),
-            "ja" => Some(ID_JA),
-            "ko" => Some(ID_KO),
-            // Every Latin language, English included. This used to be
-            // `"ru" | "pl" => Some(ID_LATIN), _ => None`, so an English
-            // player drew in the Nexus/GW2 typeface - an atlas we neither
-            // build nor declare ranges on, whose missing glyphs ImGui
-            // replaces with '?'. Declaring `LATIN_RANGES` could not help,
-            // because it configures a font English never pushed. In-game
-            // 2026-09-06 the model wrote "Minstrel's has zero toughness -
-            // focus fire was always going to eat you first" and the player
-            // read a question mark mid-sentence.
-            //
-            // The face is loaded either way (the ticker uses it), so this
-            // spends no extra memory, and anyone who prefers the game
-            // typeface still picks "game" in Settings. If no Windows TTF
-            // is found, `live_ptr` returns null and `push` falls back to
-            // exactly the old behaviour.
-            _ => Some(ID_LATIN),
-        },
-    }
+fn default_latin_id() -> String {
+    let dir = windows_fonts_dir();
+    let file = LATIN_FILES
+        .iter()
+        .find(|f| dir.join(f).is_file())
+        .copied()
+        .unwrap_or(LATIN_FILES[0]);
+    format!("{ID_FILE_PREFIX}{file}")
 }
 
-pub fn combo_options() -> Vec<(&'static str, &'static str)> {
-    let dir = windows_fonts_dir();
+/// Which Nexus font identifier a preference resolves to for a UI language.
+///
+/// `"game"` never pushes. Chinese, Japanese and Korean always take their
+/// script face — a Latin pick cannot draw them, so it is not offered there.
+/// Everywhere else: `file:<name>` is a font in the player's font folders,
+/// `bundled:<key>` one of ours, anything else (`auto`, the retired `segoe` /
+/// `zh` / `ja` / `ko` values) the default Latin face.
+pub fn resolve_font_id(pref: &str, ui_language: &str) -> Option<String> {
+    if pref == "game" {
+        return None;
+    }
+    match gw2_core::i18n::resolve(ui_language) {
+        "zh" => return Some(ID_ZH.to_string()),
+        "ja" => return Some(ID_JA.to_string()),
+        "ko" => return Some(ID_KO.to_string()),
+        _ => {}
+    }
+    if let Some(file) = pref.strip_prefix(FILE_PREFIX) {
+        return Some(format!("{ID_FILE_PREFIX}{file}"));
+    }
+    if let Some(key) = pref.strip_prefix(BUNDLED_PREFIX) {
+        if BUNDLED.iter().any(|(k, _, _)| *k == key) {
+            return Some(format!("{ID_BUNDLED_PREFIX}{key}"));
+        }
+    }
+    Some(default_latin_id())
+}
+
+/// The picker: preference value and the label to show for it.
+///
+/// Auto and Game first, then the bundled faces, then every `.ttf`/`.otf`/
+/// `.ttc` in the system and per-user font folders — style variants (bold,
+/// italic) folded away where the base file exists. For Chinese, Japanese and
+/// Korean the list stops after Game: the script face is automatic.
+pub fn combo_options(ui_language: &str) -> Vec<(String, String)> {
     let mut v = vec![
-        ("auto", "settings.font_auto"),
-        ("game", "settings.font_game"),
+        ("auto".to_string(), gw2_core::i18n::t("settings.font_auto")),
+        ("game".to_string(), gw2_core::i18n::t("settings.font_game")),
     ];
-    if first_existing(&dir, LATIN_FILES).is_some() {
-        v.push(("segoe", "settings.font_segoe"));
+    if matches!(gw2_core::i18n::resolve(ui_language), "zh" | "ja" | "ko") {
+        return v;
     }
-    if first_existing(&dir, ZH_FILES).is_some() {
-        v.push(("zh", "settings.font_yahei"));
+    for (key, label, _) in BUNDLED {
+        v.push((format!("{BUNDLED_PREFIX}{key}"), (*label).to_string()));
     }
-    if first_existing(&dir, JA_FILES).is_some() {
-        v.push(("ja", "settings.font_japanese"));
-    }
-    if first_existing(&dir, KO_FILES).is_some() {
-        v.push(("ko", "settings.font_korean"));
+    for (file, label) in system_fonts() {
+        v.push((format!("{FILE_PREFIX}{file}"), label));
     }
     v
+}
+
+/// What the picker shows for a saved preference.
+pub fn label_for(pref: &str) -> String {
+    if pref == "game" {
+        return gw2_core::i18n::t("settings.font_game");
+    }
+    if let Some(file) = pref.strip_prefix(FILE_PREFIX) {
+        return pretty_font_name(file);
+    }
+    if let Some(key) = pref.strip_prefix(BUNDLED_PREFIX) {
+        if let Some((_, label, _)) = BUNDLED.iter().find(|(k, _, _)| *k == key) {
+            return (*label).to_string();
+        }
+    }
+    gw2_core::i18n::t("settings.font_auto")
 }
 
 /// zh/ja/ko native names need a CJK face. Otherwise use the English catalog name.
@@ -372,8 +460,9 @@ pub fn language_label(
     if !matches!(lang.code, "zh" | "ja" | "ko") {
         return lang.native_name;
     }
+    let resolved = resolve_font_id(pref, ui_language);
     let ok = matches!(
-        (lang.code, resolve_font_id(pref, ui_language)),
+        (lang.code, resolved.as_deref()),
         ("zh", Some(ID_ZH)) | ("ja", Some(ID_JA)) | ("ko", Some(ID_KO))
     );
     if ok {
@@ -383,14 +472,146 @@ pub fn language_label(
     }
 }
 
-pub fn label_key(pref: &str) -> &'static str {
-    match pref {
-        "game" => "settings.font_game",
-        "segoe" => "settings.font_segoe",
-        "zh" => "settings.font_yahei",
-        "ja" => "settings.font_japanese",
-        "ko" => "settings.font_korean",
-        _ => "settings.font_auto",
+/// Every usable font file the player has, as (file name, display label),
+/// sorted by label. Symbol and icon fonts are left out; a bold/italic
+/// variant is folded away when its base file is present.
+pub fn system_fonts() -> Vec<(String, String)> {
+    let mut files: Vec<String> = Vec::new();
+    for dir in font_dirs() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let lower = name.to_ascii_lowercase();
+            if !(lower.ends_with(".ttf") || lower.ends_with(".otf") || lower.ends_with(".ttc")) {
+                continue;
+            }
+            if is_symbol_font(&lower) {
+                continue;
+            }
+            files.push(name);
+        }
+    }
+    let stems: HashSet<String> = files.iter().map(|f| stem_of(f)).collect();
+    let mut out: Vec<(String, String)> = files
+        .into_iter()
+        .filter(|f| !is_style_variant(&stem_of(f), &stems))
+        .map(|f| {
+            let label = pretty_font_name(&f);
+            (f, label)
+        })
+        .collect();
+    out.sort_by_key(|(_, label)| label.to_lowercase());
+    out.dedup_by(|a, b| a.1.eq_ignore_ascii_case(&b.1));
+    out
+}
+
+fn font_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![windows_fonts_dir()];
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        dirs.push(
+            PathBuf::from(local)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Fonts"),
+        );
+    }
+    dirs
+}
+
+fn find_font_file(file: &str) -> Option<PathBuf> {
+    font_dirs()
+        .into_iter()
+        .map(|d| d.join(file))
+        .find(|p| p.is_file())
+}
+
+fn stem_of(file: &str) -> String {
+    Path::new(file)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+/// Icon and symbol faces: nothing a chat bubble can be read in.
+fn is_symbol_font(lower: &str) -> bool {
+    [
+        "webdings",
+        "wingding",
+        "symbol",
+        "marlett",
+        "mdl2",
+        "segoeicons",
+        "seguiemj",
+        "seguisym",
+        "holomdl",
+        "bssym",
+        "outlook",
+        "refspcl",
+        "msuighur",
+    ]
+    .iter()
+    .any(|s| lower.contains(s))
+}
+
+/// `arialbd` is Arial Bold: fold it away when `arial` is on the list too.
+fn is_style_variant(stem: &str, stems: &HashSet<String>) -> bool {
+    const SUFFIXES: [&str; 14] = [
+        "bd", "bi", "b", "i", "z", "l", "li", "lt", "it", "bl", "sb", "sbi", "blk", "k",
+    ];
+    SUFFIXES.iter().any(|suffix| {
+        stem.strip_suffix(suffix)
+            .is_some_and(|base| !base.is_empty() && stems.contains(base))
+    })
+}
+
+/// `segoeui.ttf` → "Segoe UI" where a known name exists, else the stem with
+/// its first letter up.
+fn pretty_font_name(file: &str) -> String {
+    let stem = stem_of(file);
+    let known = [
+        ("segoeui", "Segoe UI"),
+        ("seguisb", "Segoe UI Semibold"),
+        ("segoeuil", "Segoe UI Light"),
+        ("arial", "Arial"),
+        ("ariblk", "Arial Black"),
+        ("verdana", "Verdana"),
+        ("georgia", "Georgia"),
+        ("calibri", "Calibri"),
+        ("cambria", "Cambria"),
+        ("tahoma", "Tahoma"),
+        ("trebuc", "Trebuchet MS"),
+        ("consola", "Consolas"),
+        ("cour", "Courier New"),
+        ("times", "Times New Roman"),
+        ("comic", "Comic Sans MS"),
+        ("impact", "Impact"),
+        ("lucon", "Lucida Console"),
+        ("pala", "Palatino Linotype"),
+        ("bahnschrift", "Bahnschrift"),
+        ("candara", "Candara"),
+        ("constan", "Constantia"),
+        ("corbel", "Corbel"),
+        ("ebrima", "Ebrima"),
+        ("gadugi", "Gadugi"),
+        ("sylfaen", "Sylfaen"),
+        ("mmrtext", "Myanmar Text"),
+        ("ntailu", "Microsoft New Tai Lue"),
+        ("micross", "Microsoft Sans Serif"),
+        ("msyh", "Microsoft YaHei"),
+        ("yugothm", "Yu Gothic"),
+        ("malgun", "Malgun Gothic"),
+        ("meiryo", "Meiryo"),
+        ("simsun", "SimSun"),
+    ];
+    if let Some((_, name)) = known.iter().find(|(k, _)| *k == stem) {
+        return (*name).to_string();
+    }
+    let mut chars = stem.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => stem,
     }
 }
 
@@ -424,26 +645,58 @@ mod tests {
     }
 
     #[test]
-    fn resolve_auto_picks_script() {
-        assert_eq!(resolve_font_id("auto", "zh"), Some(ID_ZH));
-        assert_eq!(resolve_font_id("auto", "ja"), Some(ID_JA));
-        assert_eq!(resolve_font_id("auto", "ko"), Some(ID_KO));
-        assert_eq!(resolve_font_id("auto", "ru"), Some(ID_LATIN));
-        assert_eq!(resolve_font_id("auto", "pl"), Some(ID_LATIN));
+    fn cjk_languages_always_take_their_script_face() {
+        assert_eq!(resolve_font_id("auto", "zh").as_deref(), Some(ID_ZH));
+        assert_eq!(resolve_font_id("auto", "ja").as_deref(), Some(ID_JA));
+        assert_eq!(resolve_font_id("auto", "ko").as_deref(), Some(ID_KO));
+        // A Latin pick cannot draw kanji, so it is not honoured there.
+        assert_eq!(
+            resolve_font_id("file:georgia.ttf", "ja").as_deref(),
+            Some(ID_JA)
+        );
     }
 
     /// English used to resolve to `None`, which drew the whole overlay in the
     /// Nexus/GW2 typeface - an atlas we do not build, so `LATIN_RANGES` bought
     /// it nothing and a missing glyph reached the player as '?'.
     #[test]
-    fn auto_gives_every_latin_language_the_face_we_declare_ranges_on() {
-        for lang in ["en", "fr", "de", "es", "it", "pt", "cs"] {
-            assert_eq!(
-                resolve_font_id("auto", lang),
-                Some(ID_LATIN),
-                "{lang} must draw in the face whose glyph ranges we control"
+    fn auto_gives_every_latin_language_a_face_we_declare_ranges_on() {
+        for lang in ["en", "fr", "de", "es", "it", "pt", "cs", "ru", "pl"] {
+            let id = resolve_font_id("auto", lang).unwrap();
+            assert!(
+                id.starts_with(ID_FILE_PREFIX),
+                "{lang} must draw in a face whose glyph ranges we control, got {id}"
             );
         }
+    }
+
+    /// The retired script picks. `ui_font: "ja"` on an English UI drew the
+    /// model's em dash as '?' (2026-09-07); it now means Auto.
+    #[test]
+    fn retired_script_picks_mean_auto_on_a_latin_ui() {
+        for legacy in ["ja", "zh", "ko", "segoe"] {
+            assert_eq!(
+                resolve_font_id(legacy, "en"),
+                resolve_font_id("auto", "en"),
+                "{legacy}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_picked_file_and_a_bundled_face_resolve_to_their_own_ids() {
+        assert_eq!(
+            resolve_font_id("file:georgia.ttf", "en").as_deref(),
+            Some("GW2BO_FONT_FILE_georgia.ttf")
+        );
+        assert_eq!(
+            resolve_font_id("bundled:cinzel", "de").as_deref(),
+            Some("GW2BO_FONT_BUNDLED_cinzel")
+        );
+        assert_eq!(
+            resolve_font_id("bundled:nope", "en"),
+            resolve_font_id("auto", "en")
+        );
     }
 
     /// The model writes this text, and no test can hold it to ASCII. In-game
@@ -467,8 +720,37 @@ mod tests {
     }
 
     #[test]
-    fn resolve_explicit_segoe() {
-        assert_eq!(resolve_font_id("segoe", "zh"), Some(ID_LATIN));
+    fn style_variants_fold_into_their_base_file() {
+        let stems: HashSet<String> = ["arial", "arialbd", "georgia", "georgiaz", "cinzel"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(is_style_variant("arialbd", &stems));
+        assert!(is_style_variant("georgiaz", &stems));
+        assert!(!is_style_variant("arial", &stems));
+        // No base file on the list: keep it, whatever its name ends in.
+        assert!(!is_style_variant("cinzel", &stems));
+    }
+
+    #[test]
+    fn names_read_like_the_font_menu_elsewhere() {
+        assert_eq!(pretty_font_name("segoeui.ttf"), "Segoe UI");
+        assert_eq!(pretty_font_name("trebuc.ttf"), "Trebuchet MS");
+        assert_eq!(pretty_font_name("unknownface.otf"), "Unknownface");
+        assert!(is_symbol_font("wingding.ttf"));
+        assert!(!is_symbol_font("georgia.ttf"));
+    }
+
+    #[test]
+    fn bundled_faces_are_real_font_files() {
+        for (key, _, bytes) in BUNDLED {
+            // TrueType starts with 0x00010000 or 'true'; OpenType CFF with 'OTTO'.
+            let magic = &bytes[..4];
+            assert!(
+                magic == [0, 1, 0, 0] || magic == b"true" || magic == b"OTTO",
+                "{key} does not start like a font"
+            );
+        }
     }
 
     #[test]
@@ -481,47 +763,5 @@ mod tests {
         assert_eq!(found.as_deref(), Some(hit.as_path()));
         assert!(first_existing(&dir, &["nope.ttf"]).is_none());
         fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn label_key_defaults_to_auto() {
-        assert_eq!(label_key("auto"), "settings.font_auto");
-        assert_eq!(label_key(""), "settings.font_auto");
-        assert_eq!(label_key("game"), "settings.font_game");
-    }
-
-    #[test]
-    fn combo_lists_faces_present_on_disk() {
-        let ids: Vec<_> = combo_options().into_iter().map(|(id, _)| id).collect();
-        assert!(ids.contains(&"auto"));
-        assert!(ids.contains(&"game"));
-        let dir = windows_fonts_dir();
-        if first_existing(&dir, LATIN_FILES).is_some() {
-            assert!(ids.contains(&"segoe"), "{ids:?}");
-        }
-        if first_existing(&dir, ZH_FILES).is_some() {
-            assert!(ids.contains(&"zh"), "{ids:?}");
-        }
-        if first_existing(&dir, JA_FILES).is_some() {
-            assert!(ids.contains(&"ja"), "{ids:?}");
-        }
-        if first_existing(&dir, KO_FILES).is_some() {
-            assert!(ids.contains(&"ko"), "{ids:?}");
-        }
-    }
-
-    #[test]
-    fn cjk_language_rows_use_english_until_that_face_is_active() {
-        let zh = gw2_core::i18n::language_by_code("zh").unwrap();
-        let ja = gw2_core::i18n::language_by_code("ja").unwrap();
-        let ko = gw2_core::i18n::language_by_code("ko").unwrap();
-        assert_eq!(language_label(zh, "auto", "en"), "Simplified Chinese");
-        assert_eq!(language_label(ja, "game", "en"), "Japanese");
-        assert_eq!(language_label(ko, "segoe", "en"), "Korean");
-        assert_eq!(language_label(zh, "zh", "en"), zh.native_name);
-        assert_eq!(language_label(ja, "ja", "en"), ja.native_name);
-        assert_eq!(language_label(ko, "ko", "en"), ko.native_name);
-        let ru = gw2_core::i18n::language_by_code("ru").unwrap();
-        assert_eq!(language_label(ru, "auto", "en"), ru.native_name);
     }
 }
