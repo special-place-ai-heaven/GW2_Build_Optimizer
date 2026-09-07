@@ -383,7 +383,7 @@ impl LlmClient for OpenAiClient {
         match resp.status().as_u16() {
             200 => {}
             401 => return Err(LlmError::InvalidKey),
-            429 => return Err(LlmError::RateLimited),
+            429 => return Err(LlmError::RateLimited(read_body_capped(resp))),
             status => {
                 let body = read_body_capped(resp);
                 return Err(LlmError::Api {
@@ -529,7 +529,7 @@ mod tests {
             "a fresh client must inherit the minute window, not reset it"
         );
         assert!(
-            matches!(rate.check_and_reserve(), Err(LlmError::RateLimited)),
+            matches!(rate.check_and_reserve(), Err(LlmError::RateLimited(_))),
             "the RPM limit must still bite after create_client"
         );
         drop(rate);

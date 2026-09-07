@@ -9,6 +9,7 @@
 //! is the addon's default pipeline, so it had the most to lose from being the
 //! one client with its own rules.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -42,8 +43,8 @@ pub enum GeminiError {
     Api { status: u16, message: String },
     #[error("Invalid API key")]
     InvalidKey,
-    #[error("Rate limited — try again later")]
-    RateLimited,
+    #[error("Rate limited: {0}")]
+    RateLimited(String),
     #[error("Parse error: {0}")]
     Parse(String),
     #[error("LLM unavailable: {0}")]
@@ -189,8 +190,18 @@ impl GeminiClient {
 
 /// Length of the per-minute window.
 const MINUTE: Duration = Duration::from_secs(60);
+/// Requests per minute assumed for a model until Google says otherwise.
+/// The older free-tier Flash models allow 10; `gemini-3.8-flash` allows 5,
+/// which its first 429 teaches the tracker (`learn_rpm`).
+const DEFAULT_RPM: u32 = 10;
+/// Longest a per-minute quota is waited out rather than reported.
+const MAX_QUOTA_WAIT: Duration = Duration::from_secs(65);
 
 struct RateTracker {
+    /// Which model's per-minute quota applies. Empty in unit tests.
+    model: String,
+    /// Per-minute limits Google has stated, by model, kept across runs.
+    rpm_limits: HashMap<String, u32>,
     requests_this_minute: u32,
     minute_start: Instant,
     requests_today: u32,
@@ -212,6 +223,8 @@ struct PersistedUsage {
     minute_start_epoch: u64,
     #[serde(default)]
     requests_this_minute: u32,
+    #[serde(default)]
+    rpm_limits: HashMap<String, u32>,
 }
 
 fn current_epoch_secs() -> u64 {
@@ -228,11 +241,41 @@ fn current_epoch_day() -> u64 {
 impl RateTracker {
     fn new() -> Self {
         Self {
+            model: String::new(),
+            rpm_limits: HashMap::new(),
             requests_this_minute: 0,
             minute_start: Instant::now(),
             requests_today: 0,
             current_day: current_epoch_day(),
         }
+    }
+
+    fn for_model(mut self, model: &str) -> Self {
+        self.model = model.to_string();
+        self
+    }
+
+    fn rpm_limit(&self) -> u32 {
+        self.rpm_limits
+            .get(&self.model)
+            .copied()
+            .unwrap_or(DEFAULT_RPM)
+    }
+
+    /// Google stated this model's per-minute quota in a 429; keep it.
+    fn learn_rpm(&mut self, limit: u32) {
+        self.rpm_limits.insert(self.model.clone(), limit.max(1));
+    }
+
+    /// How long until the window admits another request, if it is full.
+    /// Pacing to this beats spending the request on a 429: a run that needs
+    /// six requests on a five-a-minute tier then waits instead of failing
+    /// (gemini-3.8-flash free tier, in-game 2026-09-07).
+    fn wait_for_window(&self) -> Option<Duration> {
+        if self.requests_this_minute < self.rpm_limit() {
+            return None;
+        }
+        MINUTE.checked_sub(self.minute_start.elapsed())
     }
 
     fn from_persisted(persisted: PersistedUsage) -> Self {
@@ -259,6 +302,8 @@ impl RateTracker {
         };
 
         Self {
+            model: String::new(),
+            rpm_limits: persisted.rpm_limits,
             requests_this_minute,
             minute_start,
             requests_today,
@@ -285,8 +330,11 @@ impl RateTracker {
             self.minute_start = now;
         }
 
-        if self.requests_this_minute >= 10 {
-            return Err(GeminiError::RateLimited);
+        if self.requests_this_minute >= self.rpm_limit() {
+            return Err(GeminiError::RateLimited(format!(
+                "{} requests per minute on this model",
+                self.rpm_limit()
+            )));
         }
         if self.requests_today >= 240 {
             return Err(GeminiError::Unavailable(
@@ -334,8 +382,70 @@ impl RateTracker {
             requests_today: self.requests_today,
             minute_start_epoch: current_epoch_secs().saturating_sub(age),
             requests_this_minute: self.requests_this_minute,
+            rpm_limits: self.rpm_limits.clone(),
         }
     }
+}
+
+/// A quota refusal, as Google states it in a 429 body:
+/// `QuotaFailure.violations[].quotaId` naming `PerMinute` or `PerDay` with a
+/// `quotaValue`, and `RetryInfo.retryDelay` ("39s"). Measured 2026-09-07 on
+/// the free tier of gemini-3.8-flash: 5 per minute, **20 per day**.
+struct QuotaRefusal {
+    limit: u32,
+    per_day: bool,
+    retry_after: Duration,
+}
+
+impl QuotaRefusal {
+    fn summary(&self) -> String {
+        if self.per_day {
+            format!(
+                "{} requests per day on this model's free tier; it resets at midnight Pacific time",
+                self.limit
+            )
+        } else {
+            format!(
+                "{} requests per minute on this model's tier; Google asked for {}s",
+                self.limit,
+                self.retry_after.as_secs()
+            )
+        }
+    }
+}
+
+fn quota_refusal(body: &str) -> Option<QuotaRefusal> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    let details = v["error"]["details"].as_array()?;
+    let mut limit = None;
+    let mut per_day = false;
+    let mut retry_after = None;
+    for d in details {
+        if let Some(violations) = d["violations"].as_array() {
+            for violation in violations {
+                let id = violation["quotaId"].as_str().unwrap_or_default();
+                if id.contains("PerMinute") || id.contains("PerDay") {
+                    per_day = id.contains("PerDay");
+                    limit = violation["quotaValue"]
+                        .as_str()
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .or_else(|| violation["quotaValue"].as_u64().map(|n| n as u32));
+                }
+            }
+        }
+        if let Some(delay) = d["retryDelay"].as_str() {
+            retry_after = delay
+                .trim_end_matches('s')
+                .parse::<f64>()
+                .ok()
+                .map(Duration::from_secs_f64);
+        }
+    }
+    Some(QuotaRefusal {
+        limit: limit?,
+        per_day,
+        retry_after: retry_after.unwrap_or(MINUTE),
+    })
 }
 
 /// Holds the rate slot taken by [`RateTracker::check_and_reserve`] and gives
@@ -658,7 +768,7 @@ fn denied_from_body(status: u16, body: &str) -> GeminiError {
     }
     match status {
         403 => GeminiError::InvalidKey,
-        429 => GeminiError::RateLimited,
+        429 => GeminiError::RateLimited(body.to_string()),
         _ => GeminiError::Api {
             status,
             message: body.to_string(),
@@ -766,7 +876,7 @@ impl GeminiClient {
             model: model.to_string(),
             http: gemini_http_client()?,
             cache: crate::llm::response_cache::ResponseCache::new(1800, 64),
-            rate: Mutex::new(RateTracker::new()),
+            rate: Mutex::new(RateTracker::new().for_model(model)),
             usage_path: None,
         })
     }
@@ -795,7 +905,7 @@ impl GeminiClient {
             model: model.to_string(),
             http: gemini_http_client()?,
             cache: crate::llm::response_cache::ResponseCache::new(1800, 64),
-            rate: Mutex::new(rate),
+            rate: Mutex::new(rate.for_model(model)),
             usage_path: Some(usage_path),
         })
     }
@@ -978,6 +1088,18 @@ impl GeminiClient {
     fn send_request(&self, request: &GenerateRequest) -> Result<Content, GeminiError> {
         const MAX_RETRIES: u32 = 3;
 
+        // Pace to the model's stated per-minute quota before spending a
+        // request on the 429 that would say the same thing.
+        let wait = self
+            .rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .wait_for_window();
+        if let Some(wait) = wait {
+            if !sleep_observing(wait + Duration::from_secs(1), &is_cancelled) {
+                return Err(GeminiError::Unavailable(CANCELLED.to_string()));
+            }
+        }
         // Atomically check rate limit and reserve a slot
         self.rate
             .lock()
@@ -1024,7 +1146,30 @@ impl GeminiClient {
                 }
                 StatusAction::InvalidKey => return Err(GeminiError::InvalidKey),
                 StatusAction::Denied => {
-                    return Err(denied_from_body(status, &read_body_capped(resp)))
+                    let body = read_body_capped(resp);
+                    // A per-minute quota is weather, not a verdict: Google
+                    // names the limit and the wait. Learn the one, sleep the
+                    // other, try again. Per-day quotas fall through to the
+                    // terminal path below, where a retry would only burn
+                    // the player's remaining slots.
+                    if status == 429 {
+                        if let Some(quota) = quota_refusal(&body) {
+                            if quota.per_day {
+                                return Err(GeminiError::RateLimited(quota.summary()));
+                            }
+                            self.rate
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .learn_rpm(quota.limit);
+                            if attempt + 1 < MAX_RETRIES && quota.retry_after <= MAX_QUOTA_WAIT {
+                                next_delay = quota.retry_after + Duration::from_secs(1);
+                                last_error = Some(GeminiError::RateLimited(quota.summary()));
+                                continue;
+                            }
+                            return Err(GeminiError::RateLimited(quota.summary()));
+                        }
+                    }
+                    return Err(denied_from_body(status, &body));
                 }
                 StatusAction::Retry => {
                     if let Some(delay) = retry_after_delay(resp.headers()) {
@@ -1136,6 +1281,7 @@ mod tests {
     fn test_rate_tracker_persistence_day_rollover_resets_daily() {
         let yesterday = current_epoch_day().saturating_sub(1);
         let persisted = PersistedUsage {
+            rpm_limits: HashMap::new(),
             day: yesterday,
             requests_today: 200,
             minute_start_epoch: 0,
@@ -1169,6 +1315,7 @@ mod tests {
     fn test_rate_tracker_daily_limit_enforced_after_reload() {
         // Simulate a DLL reload mid-day with the daily budget nearly exhausted.
         let persisted = PersistedUsage {
+            rpm_limits: HashMap::new(),
             day: current_epoch_day(),
             requests_today: 240,
             minute_start_epoch: 0,
@@ -1701,7 +1848,7 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         ));
         assert!(matches!(
             denied_from_body(429, ""),
-            GeminiError::RateLimited
+            GeminiError::RateLimited(_)
         ));
         assert!(matches!(
             denied_from_body(429, "RESOURCE_EXHAUSTED"),
@@ -1865,6 +2012,58 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         assert!(
             shared.contains("is_cancelled()"),
             "the shared tool loop must poll is_cancelled between turns"
+        );
+    }
+}
+
+#[cfg(test)]
+mod minute_quota_tests {
+    use super::*;
+
+    /// The body gemini-3.8-flash returned in-game on 2026-09-07 20:04.
+    const BODY: &str = r#"{"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://ai.google.dev/gemini-api/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerMinutePerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash"},"quotaValue":"5"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"39s"}]}}"#;
+
+    #[test]
+    fn a_per_minute_quota_names_its_limit_and_wait() {
+        let q = quota_refusal(BODY).expect("per-minute quota");
+        assert!(!q.per_day);
+        assert_eq!(q.limit, 5);
+        assert_eq!(q.retry_after, Duration::from_secs(39));
+        assert!(q.retry_after <= MAX_QUOTA_WAIT);
+    }
+
+    #[test]
+    fn a_per_day_quota_is_named_and_not_waited_out() {
+        let body = BODY.replace("PerMinutePerProjectPerModel", "PerDayPerProjectPerModel");
+        let q = quota_refusal(&body).expect("per-day quota");
+        assert!(q.per_day);
+        assert!(q.summary().contains("per day"), "{}", q.summary());
+        assert!(quota_refusal("not json").is_none());
+        assert!(quota_refusal(r#"{"error":{"code":429}}"#).is_none());
+    }
+
+    #[test]
+    fn a_learned_limit_paces_the_next_run_and_survives_a_reload() {
+        let mut t = RateTracker::new().for_model("gemini-3.8-flash");
+        assert_eq!(t.rpm_limit(), DEFAULT_RPM);
+        t.learn_rpm(5);
+        for _ in 0..5 {
+            t.check_and_reserve().expect("under the learned limit");
+        }
+        assert!(t.wait_for_window().is_some(), "sixth request waits");
+        assert!(t.check_and_reserve().is_err());
+
+        let reloaded = RateTracker::from_persisted(t.to_persisted()).for_model("gemini-3.8-flash");
+        assert_eq!(
+            reloaded.rpm_limit(),
+            5,
+            "the stated limit is kept across runs"
+        );
+        let other = RateTracker::from_persisted(t.to_persisted()).for_model("gemini-flash-latest");
+        assert_eq!(
+            other.rpm_limit(),
+            DEFAULT_RPM,
+            "one model's quota is not another's"
         );
     }
 }

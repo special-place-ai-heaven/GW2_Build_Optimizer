@@ -539,7 +539,9 @@ pub(in crate::ui::main_view) fn render_talk_model_row(ui: &Ui, state: &mut Addon
         stats::start_fetch_models(state);
     }
     let current_model = state.config.active_model_id().to_string();
-    let display_models = model_catalog(state);
+    // The same list Settings shows: the Free switch is one preference, not
+    // one per screen (the talk row ignored it until 2026-09-07).
+    let display_models = visible_models(state, &model_catalog(state));
     let preview = display_models
         .iter()
         .find(|m| m.id == current_model)
@@ -712,6 +714,16 @@ fn render_model_picker_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
     ui.set_cursor_screen_pos([origin[0], origin[1] + row_h + 4.0]);
     if let Some(ref err) = state.main.models_error {
         ui.text_colored([1.0, 0.5, 0.0, 1.0], format!("  {}", err));
+    }
+    // Seven of this player's fifteen free OpenRouter models answered 404
+    // "guardrail restrictions and data policy" (2026-09-07): an account
+    // setting the addon cannot change, and nothing in the picker said so.
+    if matches!(
+        state.config.active_provider,
+        gw2_core::config::LlmProvider::OpenRouter
+    ) && any_free
+    {
+        theme::wrapped(ui, theme::pal().muted, &t("settings.data_sharing_hint"));
     }
 
     ui.spacing();

@@ -204,8 +204,11 @@ pub enum LlmError {
     Api { status: u16, message: String },
     #[error("Invalid API key")]
     InvalidKey,
-    #[error("Rate limited — try again later")]
-    RateLimited,
+    /// Carries the provider's own words: "temporarily rate-limited upstream"
+    /// (their pool) and "free-models-per-day" (the player's cap) need
+    /// different advice, and both used to arrive here as the same unit.
+    #[error("Rate limited: {0}")]
+    RateLimited(String),
     #[error("Parse error: {0}")]
     Parse(String),
     #[error("LLM unavailable: {0}")]
@@ -267,7 +270,7 @@ pub trait LlmClient: Send + Sync {
                 ),
                 warning: None,
             },
-            Err(LlmError::RateLimited) => KeyValidationResult {
+            Err(LlmError::RateLimited(_)) => KeyValidationResult {
                 valid: true,
                 message: format!("{} key is valid.", self.provider_name()),
                 warning: Some("Currently rate-limited. Try again shortly.".into()),

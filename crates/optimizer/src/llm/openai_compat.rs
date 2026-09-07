@@ -325,7 +325,7 @@ pub(crate) fn is_retryable_status(status: u16) -> bool {
 /// whether it arrived as an HTTP status or inside a 200 body.
 pub(crate) fn as_transport_error(status: u16, message: String) -> LlmError {
     if status == 429 {
-        LlmError::RateLimited
+        LlmError::RateLimited(message)
     } else {
         LlmError::Api { status, message }
     }
@@ -987,7 +987,7 @@ mod tests {
         let error = send_chat(core, &[user("hi")], None).expect_err("all attempts rate limited");
 
         assert!(
-            matches!(error, LlmError::RateLimited),
+            matches!(error, LlmError::RateLimited(_)),
             "an in-band 429 must surface as RateLimited, got: {error}"
         );
         assert_eq!(server.served(), 3);
