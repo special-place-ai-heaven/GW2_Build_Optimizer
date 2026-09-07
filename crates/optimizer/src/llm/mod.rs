@@ -6,6 +6,7 @@ pub mod anthropic;
 pub(crate) mod body;
 pub mod cancel;
 pub mod gemini;
+pub mod models_dev;
 pub mod openai;
 pub(crate) mod openai_compat;
 pub mod openrouter;
@@ -62,6 +63,11 @@ pub struct ModelInfo {
     /// `response_format`, `structured_outputs`, `reasoning`, ... Empty means
     /// unpublished (OpenAI, Anthropic, Google do not list it).
     pub supported_parameters: Vec<String>,
+    /// Whether the model holds to a JSON Schema (`response_format: json_schema`),
+    /// per models.dev. `None` means nobody has said. `Some(false)` is the free
+    /// tier of a model whose paid tier can - the plate then comes from the
+    /// repair request, not the API, and the picker says so.
+    pub structured_output: Option<bool>,
     /// Artificial Analysis' agentic score, when published.
     ///
     /// The closest published measure of what this addon asks a model to do:
@@ -90,6 +96,7 @@ impl Default for ModelInfo {
             supported_efforts: Vec::new(),
             context_length: None,
             supported_parameters: Vec::new(),
+            structured_output: None,
             agentic_index: None,
             coding_index: None,
             expires: None,
@@ -155,10 +162,17 @@ impl ModelInfo {
     /// 52.6 and an agentic 39.7 are not the same number, and interleaving
     /// them would rank by which benchmark a model happened to publish.
     pub fn rank(&self) -> (u8, i32) {
+        // A model the plate can be enforced on outranks one it cannot, inside
+        // the same score band; an unknown sits between.
+        let plate = match self.structured_output {
+            Some(true) => 0,
+            None => 1,
+            Some(false) => 2,
+        };
         match (self.agentic_index, self.coding_index) {
-            (Some(a), _) => (0, -(a * 100.0) as i32),
-            (None, Some(c)) => (1, -(c * 100.0) as i32),
-            (None, None) => (2, 0),
+            (Some(a), _) => (0, -(a * 100.0) as i32 * 4 + plate),
+            (None, Some(c)) => (1, -(c * 100.0) as i32 * 4 + plate),
+            (None, None) => (2, plate),
         }
     }
 }

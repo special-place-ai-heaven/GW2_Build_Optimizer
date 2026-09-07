@@ -499,7 +499,15 @@ fn render_model_combo(
             }
             visible += 1;
             let sel = *mid == current_model;
-            if Selectable::new(label).selected(sel).build(ui) {
+            // A model that cannot be held to the plate's schema still works -
+            // the plate comes from a repair request - but the player should
+            // know why it is slower and rarer to get right the first time.
+            let shown = if model.structured_output == Some(false) {
+                format!("{label} · {}", t("settings.model_no_schema"))
+            } else {
+                label.clone()
+            };
+            if Selectable::new(&shown).selected(sel).build(ui) {
                 state.config.set_active_model_id(mid.clone());
                 state.main.provider_issue = None;
                 crate::ui::save_config_detached(state);

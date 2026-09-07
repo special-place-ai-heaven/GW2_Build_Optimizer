@@ -141,7 +141,10 @@ impl OpenRouterClient {
         // whole build inside "explanation". Ask each model for what it can
         // actually do.
         let caps = self.caps();
-        let response_format = if caps.supports("structured_outputs") {
+        let schema_ok = caps.supports("structured_outputs")
+            || super::models_dev::facts("openrouter", &self.model)
+                .is_some_and(|f| f.structured_output);
+        let response_format = if schema_ok {
             Some(super::openai_compat::plate_response_format())
         } else if caps.supports("response_format") {
             Some(serde_json::json!({ "type": "json_object" }))
@@ -627,6 +630,7 @@ impl LlmClient for OpenRouterClient {
                 // suffix is only a habit; reading the suffix would have
                 // missed three and would break the day they rename one.
                 supported_parameters: m.supported_parameters.clone().unwrap_or_default(),
+                structured_output: None,
                 free: m.pricing.as_ref().is_some_and(|p| {
                     let zero = |v: &Option<String>| {
                         v.as_deref()

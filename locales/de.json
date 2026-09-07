@@ -516,6 +516,7 @@
   "err.bad_key": "API-Schlüssel abgelehnt. Einstellungen prüfen.",
   "err.billing": "Abrechnung oder Kontingent. Konto prüfen oder Anbieter wechseln.",
   "err.timeout": "Zeitüberschreitung. Größeres/schnelleres Modell versuchen.",
+  "settings.model_no_schema": "keine strukturierte Ausgabe",
   "choya.fallback_reference": "Das Modell hat die Zeit überschritten. Das ist der eigene Build des Optimizers für deine Anfrage, vom Schiedsrichter geprüft:",
   "err.overloaded": "Anbieter überlastet. Erneut versuchen oder anderes Modell.",
   "fmt.internal_panic": "Interner Fehler (Panic): {msg}",

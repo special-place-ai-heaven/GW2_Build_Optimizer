@@ -516,6 +516,7 @@
   "err.bad_key": "Chave de API rejeitada. Verifique Configurações.",
   "err.billing": "Problema de faturamento ou cota neste provedor. Verifique a conta ou troque de provedor.",
   "err.timeout": "A requisição expirou. Tente um modelo maior/mais rápido.",
+  "settings.model_no_schema": "sem saída estruturada",
   "choya.fallback_reference": "O modelo ficou sem tempo. Esta é a build do próprio otimizador para o que você pediu, verificada pelo árbitro:",
   "err.overloaded": "O provedor está sobrecarregado. Tente novamente ou escolha outro modelo.",
   "fmt.internal_panic": "Erro interno (panic): {msg}",
