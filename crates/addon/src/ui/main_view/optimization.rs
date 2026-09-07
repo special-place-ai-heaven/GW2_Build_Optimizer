@@ -1548,7 +1548,13 @@ pub(super) fn result_alert_tab(has_current: bool) -> crate::state::MainTab {
 
 pub(super) fn format_provider_issue(err: &str, provider: &str, model: &str) -> String {
     let lower = err.to_lowercase();
-    let detail = if lower.contains("rate limit") || lower.contains("429") {
+    let detail = if lower.contains("data policy") || lower.contains("guardrail") {
+        // OpenRouter, 404: "0 endpoints out of N requested are available
+        // matching your guardrail restrictions and data policy ... Free
+        // model training". The account's privacy settings exclude the
+        // provider; nothing in the request can change that.
+        t("err.data_policy")
+    } else if lower.contains("rate limit") || lower.contains("429") {
         t("err.rate_limited")
     } else if lower.contains("invalid api key")
         || lower.contains("401")

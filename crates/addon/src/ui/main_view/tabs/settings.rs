@@ -422,17 +422,18 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
 /// to a chat model, they are noise in a list someone has to read.
 fn model_catalog(state: &AddonState) -> Vec<gw2_optimizer::llm::ModelInfo> {
     if !state.main.available_models.is_empty() {
-        // The list is the models that work - tools, text, and a plate the
-        // API can hold to its schema. A model models.dev says cannot be held
-        // to one is left out rather than labelled: a player wants a model,
-        // not a caveat to decode. The one already chosen stays visible so
-        // nothing disappears from under them.
-        let current = state.config.active_model_id();
+        // Every model that can drive tools and answer in text. Structured
+        // output ORDERS the list (see `ModelInfo::rank`); it does not gate it.
+        // Gating on it was tried 2026-09-07 and left two free models in the
+        // picker, both of which the player's OpenRouter data policy then
+        // refused, while the free models that had been working were hidden.
+        // A model without schema support gets its plate from the repair
+        // request; that is a slower path, not a broken one.
         return state
             .main
             .available_models
             .iter()
-            .filter(|m| m.usable() && (m.structured_output != Some(false) || m.id == current))
+            .filter(|m| m.usable())
             .cloned()
             .collect();
     }

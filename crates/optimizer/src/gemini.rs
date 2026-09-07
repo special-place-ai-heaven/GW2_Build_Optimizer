@@ -410,6 +410,16 @@ struct Part {
     function_call: Option<FunctionCall>,
     #[serde(rename = "functionResponse", skip_serializing_if = "Option::is_none")]
     function_response: Option<FunctionResponse>,
+    /// Gemini 3 signs each function call with an opaque thought signature
+    /// and refuses the next turn if the call comes back without it
+    /// ("Function call is missing a thought_signature in functionCall
+    /// parts", 400, in-game 2026-09-07 on gemini-3.8-flash). Carried back
+    /// verbatim; never inspected.
+    #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
+    thought_signature: Option<String>,
+    /// Marks a thinking part; kept so a round-tripped turn stays as it came.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thought: Option<bool>,
 }
 
 impl Part {
@@ -418,6 +428,8 @@ impl Part {
             text: Some(s.into()),
             function_call: None,
             function_response: None,
+            thought_signature: None,
+            thought: None,
         }
     }
 
@@ -429,6 +441,8 @@ impl Part {
                 name: name.into(),
                 response,
             }),
+            thought_signature: None,
+            thought: None,
         }
     }
 }
@@ -552,6 +566,8 @@ fn read_gemini_stream<R: std::io::Read>(reader: R) -> Result<Content, GeminiErro
                     text: None,
                     function_call: Some(call),
                     function_response: None,
+                    thought_signature: part.thought_signature,
+                    thought: None,
                 });
             }
         }
@@ -1263,6 +1279,8 @@ mod tests {
             Content {
                 role: Some("model".into()),
                 parts: vec![Part {
+                    thought_signature: None,
+                    thought: None,
                     text: None,
                     function_call: Some(FunctionCall {
                         name: name.into(),
