@@ -121,7 +121,10 @@ impl RateTracker {
         }
 
         if self.requests_this_minute >= self.rpm_limit {
-            return Err(LlmError::RateLimited);
+            return Err(LlmError::RateLimited(format!(
+                "{} requests this minute is the addon's own ceiling for this provider",
+                self.rpm_limit
+            )));
         }
 
         self.requests_this_minute += 1;
@@ -257,7 +260,7 @@ mod tests {
         let mut reloaded = RateTracker::from_persisted(tracker.to_persisted(), 4);
         assert_eq!(reloaded.requests_this_minute, 4);
         assert!(
-            matches!(reloaded.check_and_reserve(), Err(LlmError::RateLimited)),
+            matches!(reloaded.check_and_reserve(), Err(LlmError::RateLimited(_))),
             "a reload must not hand back a fresh minute"
         );
     }

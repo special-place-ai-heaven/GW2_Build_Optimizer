@@ -39,7 +39,7 @@ impl From<GeminiError> for LlmError {
             GeminiError::Http(inner) => LlmError::Http(inner.to_string()),
             GeminiError::Api { status, message } => LlmError::Api { status, message },
             GeminiError::InvalidKey => LlmError::InvalidKey,
-            GeminiError::RateLimited => LlmError::RateLimited,
+            GeminiError::RateLimited(detail) => LlmError::RateLimited(detail),
             GeminiError::Parse(msg) => LlmError::Parse(msg),
             GeminiError::Unavailable(msg) => LlmError::Unavailable(msg),
         }
@@ -163,7 +163,7 @@ impl LlmClient for GeminiLlmClient {
                 message: "Invalid Gemini API key. Check that you copied the full key from aistudio.google.com/apikey.".into(),
                 warning: None,
             },
-            Err(GeminiError::RateLimited) => KeyValidationResult {
+            Err(GeminiError::RateLimited(_)) => KeyValidationResult {
                 valid: true,
                 message: "Gemini key is valid!".into(),
                 warning: Some("Currently rate-limited. Try again shortly.".into()),
@@ -263,9 +263,9 @@ mod tests {
         let le: LlmError = ge.into();
         assert!(matches!(le, LlmError::InvalidKey));
 
-        let ge = GeminiError::RateLimited;
+        let ge = GeminiError::RateLimited("quota".into());
         let le: LlmError = ge.into();
-        assert!(matches!(le, LlmError::RateLimited));
+        assert!(matches!(le, LlmError::RateLimited(_)));
 
         let ge = GeminiError::Api {
             status: 500,

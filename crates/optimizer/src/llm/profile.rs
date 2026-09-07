@@ -71,6 +71,23 @@ const STALE_AFTER_SECS: u64 = 7 * 24 * 3600;
 
 /// Turn budgets the profile hands the run.
 impl ModelProfile {
+    /// What to assume of a model the probe could not reach: the full job,
+    /// with `probed_at: 0` so the next run probes again.
+    pub fn assumed(model: &str) -> ModelProfile {
+        ModelProfile {
+            model: model.to_string(),
+            tools: ToolSupport::Native,
+            json: JsonDiscipline::Wrapped,
+            narrates: false,
+            probe_ms: 0,
+            runs: 0,
+            repairs: 0,
+            failures: 0,
+            round_secs: 10.0,
+            probed_at: 0,
+        }
+    }
+
     /// How many tool rounds to allow. A model that cannot drive tools gets
     /// none; a slow one gets fewer, so the whole run still ends in a plate
     /// inside the tool-phase budget.
@@ -157,7 +174,11 @@ const PROBE_PROMPT: &str = "This is a connectivity check. Call the `ping` tool \
      exactly this JSON object and nothing else: {\"ok\": true, \"echo\": \"handshake\"}";
 
 /// One tiny exchange that exercises everything the real job needs.
-pub fn probe(client: &dyn LlmClient, model: &str, now_secs: u64) -> ModelProfile {
+///
+/// `Err` when the provider never answered at all (a guardrail 404, an
+/// upstream 429, a timeout) and no tool was called: that measures the route
+/// today, not the model, and the caller must not keep it.
+pub fn probe(client: &dyn LlmClient, model: &str, now_secs: u64) -> Result<ModelProfile, LlmError> {
     let started = Instant::now();
     let mut calls: Vec<Value> = Vec::new();
     let tools = [probe_tool()];
@@ -176,6 +197,10 @@ pub fn probe(client: &dyn LlmClient, model: &str, now_secs: u64) -> ModelProfile
         },
     );
     let probe_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
+    let outcome = match outcome {
+        Err(e) if calls.is_empty() => return Err(e),
+        other => other,
+    };
 
     let tools = match calls.as_slice() {
         [] => ToolSupport::None,
@@ -188,7 +213,7 @@ pub fn probe(client: &dyn LlmClient, model: &str, now_secs: u64) -> ModelProfile
         Ok(text) => classify_json_reply(text),
         Err(_) => (JsonDiscipline::Prose, false),
     };
-    ModelProfile {
+    Ok(ModelProfile {
         model: model.to_string(),
         tools,
         json,
@@ -199,7 +224,7 @@ pub fn probe(client: &dyn LlmClient, model: &str, now_secs: u64) -> ModelProfile
         failures: 0,
         round_secs: probe_ms as f32 / 1000.0,
         probed_at: now_secs,
-    }
+    })
 }
 
 /// Strict when the whole reply is the object; wrapped when the object is in
@@ -231,6 +256,9 @@ pub struct Store {
     pub profiles: HashMap<String, ModelProfile>,
     #[serde(skip)]
     path: Option<PathBuf>,
+    /// Why the last `ensure` could not probe, for the caller's log.
+    #[serde(skip)]
+    pub last_probe_error: Option<String>,
 }
 
 impl Store {
@@ -273,10 +301,28 @@ impl Store {
                 return (p.clone(), false);
             }
         }
-        let p = probe(client, model, now_secs);
-        self.profiles.insert(model.to_string(), p.clone());
-        self.save();
-        (p, true)
+        match probe(client, model, now_secs) {
+            Ok(p) => {
+                self.last_probe_error = None;
+                self.profiles.insert(model.to_string(), p.clone());
+                self.save();
+                (p, true)
+            }
+            // Kept out of the store: whatever is on file, stale or nothing,
+            // beats a week of a measurement that never happened. In-game
+            // 2026-09-07 a guardrail 404 and an upstream 429 were both saved
+            // as "no tools, prose". The run goes ahead on the assumed
+            // profile, so a model behind a passing 429 still gets its turn.
+            Err(e) => {
+                self.last_probe_error = Some(e.to_string());
+                let p = self
+                    .profiles
+                    .get(model)
+                    .cloned()
+                    .unwrap_or_else(|| ModelProfile::assumed(model));
+                (p, true)
+            }
+        }
     }
 
     pub fn record_run(&mut self, model: &str, round_secs: &[f32], repaired: bool, failed: bool) {

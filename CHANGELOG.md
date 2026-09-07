@@ -2,6 +2,22 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.1 - 2026-09-07
+
+The evening's question was why no free model produced a build any more. The answer is written down, with the numbers, in `docs/llm-requirements.md`, and this release fixes the parts that were ours.
+
+### Choya
+
+- Google's free tier allows five requests per minute on Gemini 3.8 Flash, and a Choya run had grown to six or more. The sixth was refused with "retry in 39 s" and the addon treated that as final. Choya now learns each model's stated limit from that reply, keeps it, paces itself to it, and waits the seconds Google asks for instead of giving up. A daily quota is still final; waiting a minute does nothing for that.
+- The profession reference handed to the model - every specialization, trait and slot skill, about 26 KB - was being cut to its first 2,000 characters on the way into the prompt, while the prompt promised the model it was complete. Every run started by fetching through tools what it should have been reading. The reference now arrives whole.
+- A model whose handshake got no answer at all (a 404 from an account setting, a 429 from a busy pool) was recorded as "no tools, answers in prose" for a week. A handshake that never happened is no longer kept.
+- The chat's own two-minute stopwatch fired while the model was still legitimately writing the build, threw the result away, and showed "timed out" with no build at all. The worker owns the deadlines and always ends in a build; the stopwatch is a backstop again.
+- A rate limit now says whose it is: "the provider is throttling everyone right now" reads differently from "your daily quota is used up" or "this tier allows a few requests a minute", and the addon had been showing one line for all three.
+- Free models on OpenRouter think at low effort. A free reasoning model given medium spent its whole closing budget thinking and returned nothing.
+- Settings says how to get more free models on OpenRouter: some are hidden unless the account allows prompt sharing with their providers, which is a switch at openrouter.ai/settings/privacy, not in the addon.
+- The Free switch in Settings now also filters the model list in the Choya row.
+- `cargo run -p gw2-optimizer --example choya_live -- <provider> <model>` runs the real contract against the configured keys and prints PASS or FAIL with the request count. This is what "the model works" means from now on.
+
 ## 1.14.0 - 2026-09-07
 
 Every number in this release was checked against a wiki page, and the page is named at the constant it justifies. Where the wiki has no dev statement, the code says "community-tested" rather than pretending.

@@ -204,6 +204,13 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         profile.summary()
                     ),
                 );
+                if let Some(e) = profiles.borrow().last_probe_error.as_deref() {
+                    nexus::log::log(
+                        nexus::log::LogLevel::Warning,
+                        "GW2BuildOpt",
+                        format!("Choya handshake got no answer ({e}); running on the assumed profile"),
+                    );
+                }
                 if token.is_cancelled() {
                     return Err("Cancelled".into());
                 }

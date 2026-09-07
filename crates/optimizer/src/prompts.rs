@@ -386,11 +386,19 @@ weapon-set-2-main, weapon-set-2-off. A key naming a slot the build does not wear
     )
 }
 
+/// Longest kitchen the prompt will carry, in characters. The profession
+/// reference alone is ~26 KB (`prompt_prefill_size` example); the old cap of
+/// 2,000 characters cut it to its first few lines while the prompt promised
+/// the model it was "complete and already in front of you", so every run
+/// refetched specs and traits through tools (2026-09-07). The 100k-token
+/// trimmer in `llm::trim` is the real ceiling; this only bounds one field.
+pub(crate) const KITCHEN_CHAR_CAP: usize = 80_000;
+
 /// Sanitize build summary text for safe inclusion in prompts.
 /// Strips backticks (fence injection) and caps length.
 pub(crate) fn sanitize_build_summary(s: &str) -> String {
     s.chars()
-        .take(2000)
+        .take(KITCHEN_CHAR_CAP)
         .filter(|c| *c != '`' && *c != '<' && *c != '>')
         .collect()
 }
@@ -1490,6 +1498,27 @@ After gathering data, respond with ONLY a JSON build object:
         assert!(
             !prompt.contains("Write the \"explanation\" field in English"),
             "must not also demand English"
+        );
+    }
+}
+
+#[cfg(test)]
+mod kitchen_cap_tests {
+    /// The profession reference is ~26 KB. It has to reach the model whole.
+    #[test]
+    fn a_full_profession_reference_survives_the_prompt() {
+        let reference = "PROFESSION REFERENCE\n".to_string() + &"trait line\n".repeat(3_000);
+        assert!(reference.len() > 30_000);
+        let prompt = super::chat_refinement_prompt_with_tools(
+            "Necromancer",
+            "WvW",
+            "power",
+            &reference,
+            "en",
+        );
+        assert!(
+            prompt.matches("trait line").count() == 3_000,
+            "the kitchen was cut before it reached the prompt"
         );
     }
 }

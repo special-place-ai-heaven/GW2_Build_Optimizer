@@ -135,7 +135,7 @@ impl OpenRouterClient {
         messages: &[Message],
         tools: &[ToolDefinition],
     ) -> Result<Message, LlmError> {
-        self.send_chat_capped(
+        match self.send_chat_capped(
             messages,
             Some(tools),
             MAX_COMPLETION_TOKENS,
@@ -143,7 +143,18 @@ impl OpenRouterClient {
             CHAT_REQUEST_TIMEOUT,
             None,
             Some("required"),
-        )
+        ) {
+            // The catalog lists `tool_choice` for the model, but the one
+            // endpoint serving it does not take `required`: 404 "No endpoints
+            // found that support the provided 'tool_choice' value"
+            // (dots-studio/dots-3-note-preview:free, 2026-09-07). The
+            // forcing was a nicety; the turn is not.
+            Err(LlmError::Api {
+                status: 404,
+                message,
+            }) if message.contains("tool_choice") => self.send_chat(messages, Some(tools)),
+            other => other,
+        }
     }
 
     /// The request that writes the plate from what the tool rounds gathered:
@@ -211,7 +222,12 @@ impl OpenRouterClient {
         // And the effort has to be one this model lists. `glm-5.2:free`, the
         // highest-scoring free model in the catalog, accepts only `xhigh` and
         // `high` — our old constant `medium` was simply invalid there.
-        let reasoning_effort = reasoning_effort.and_then(|preferred| caps.effort(preferred));
+        // Free models think at "low". Given "medium", a free reasoning model
+        // spent its whole closing budget on reasoning and returned no content
+        // (cohere/north-mini-code via openrouter/free, 2026-09-07).
+        let reasoning_effort = reasoning_effort
+            .map(|preferred| if caps.free { "low" } else { preferred })
+            .and_then(|preferred| caps.effort(preferred));
         let core = ProviderCore {
             tool_choice,
             http: &self.http,
@@ -486,7 +502,7 @@ impl LlmClient for OpenRouterClient {
         match resp.status().as_u16() {
             200 => {}
             401 => return Err(LlmError::InvalidKey),
-            429 => return Err(LlmError::RateLimited),
+            429 => return Err(LlmError::RateLimited(read_body_capped(resp))),
             status => {
                 let body = read_body_capped(resp);
                 return Err(LlmError::Api {

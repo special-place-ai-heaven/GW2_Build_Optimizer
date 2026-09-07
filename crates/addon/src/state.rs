@@ -597,7 +597,7 @@ pub struct MainState {
     pub note_drafts: std::collections::HashMap<String, String>,
     /// Generation for in-flight kitchen orders. Timeout and send bump it; late applies are ignored.
     pub chat_epoch: u64,
-    /// Wall-clock start of the current kitchen wait (120s, not frame-counted).
+    /// Wall-clock start of the current kitchen wait (400s, not frame-counted).
     pub chat_wait_started: Option<std::time::Instant>,
     /// Frame counter for "Copied!" tooltip feedback.
     pub copy_feedback_frames: u32,
