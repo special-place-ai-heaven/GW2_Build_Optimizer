@@ -280,18 +280,13 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         &profession,
                     ));
 
-                    // The reference above IS the profession. A model that
-                    // re-fetches it anyway (MiniMax M3, 2026-09-07: three
-                    // rounds and 27 s of get_profession_info / get_spec_traits
-                    // against a first message that already held every line)
-                    // cannot when the tools are not on the table.
-                    let mut tools = gw2_optimizer::llm::tools::tool_definitions();
-                    tools.retain(|tool| {
-                        !matches!(
-                            tool.name.as_str(),
-                            "get_profession_info" | "get_spec_traits"
-                        )
-                    });
+                    // Every tool stays on the table, including the two whose
+                    // answer is already in the first message. Withholding
+                    // them was tried 2026-09-07: the prompt still names them,
+                    // so the model narrated "I'll start by checking what
+                    // specs..." with no call to make, and a text-only turn is
+                    // the final answer. A wasted round beats a wasted run.
+                    let tools = gw2_optimizer::llm::tools::tool_definitions();
                     let empty_candidates = vec![];
                     let ctx = gw2_optimizer::gemini_tools::ToolContext {
                         db,
