@@ -122,10 +122,10 @@ pub(crate) fn weights_context(weights: &OptimizationWeights) -> String {
 /// them. A model told not to look things up will guess, and a guess that is
 /// not in the game is worth nothing.
 const BUILD_DISCIPLINE: &str = r#"NO ASSUMPTIONS. THIS IS THE RULE THAT MATTERS MOST.
-Every specialization, trait, skill, rune, sigil and relic name you output must have come back from a tool call in THIS conversation. Not from memory. Your training data is older than the live game build, names change between patches, and a name that does not exist today is discarded — the player then gets no build at all, which is the worst possible answer.
-- Before you name traits for a specialization, read them off the PROFESSION REFERENCE: it lists every specialization and every trait, and choosing from anything else is how a name that does not exist reaches the player. Only if no reference is present (no character selected) call get_spec_traits instead. Either way, choose ONLY from what one of them gives you.
+Every specialization, trait, skill, rune, sigil and relic name you output must come from evidence in THIS conversation: the PROFESSION REFERENCE in Context, or a tool result. Not from memory. Your training data is older than the live game build, names change between patches, and a name that does not exist today is discarded — the player then gets no build at all, which is the worst possible answer.
+- Specializations, their traits, and the slot skills (heal, utility, elite) are all in the PROFESSION REFERENCE. Take those names from it; do not call get_profession_info, get_spec_traits or get_skill_info to re-read what it already says. Only if no reference is present (no character selected) call get_spec_traits instead.
 - Every specialization has exactly 3 trait columns (Adept, Master, Grandmaster). Pick exactly one trait from EACH column: 3 traits, never two from one column, never a minor trait (those are automatic and cannot be chosen).
-- Before you name a skill, rune, sigil or relic, confirm it exists with the matching tool.
+- Runes, sigils and relics are NOT in the reference: take them from search_upgrades, list_runes, list_sigils or list_relics. A skill's exact numbers (cooldown, conditions applied) come from get_skill_info; a trait's triggers from get_trait_details. Batch such calls into one round.
 - If a tool does not return what you expected, choose from what it DID return. Never fall back on a remembered name.
 
 REASON WITH MECHANISM AND NUMBERS, NOT VIBES.
@@ -316,7 +316,7 @@ If they greet you, ask a question, or are just chatting — no build. Reply with
 
 If they want a build, a loadout, an improve, or anything to equip: reply with the FULL JSON build object (specializations, weapons, skills, rune, sigils, relic, pets, legends, stat_prefix). Never explanation-only. Weapon type names match the API: Shortbow, Longbow, Greatsword (no spaces). An equipped Character loadout in Context is your STARTING POINT, not a licence to name traits from memory — every legal trait name for every specialization is in the PROFESSION REFERENCE, so take them from there rather than from that summary or from recall. Always fill in both weapon sets, all four sigils and the relic, every time you plate a build. Leaving a slot out is not "keep what they had" - it reaches the player as an empty slot. Keep their weapons only if they pinned them; otherwise pick the pair that serves this build and say so. explanation: 2-4 sentences in {reply_language}.
 
-Take as many tool rounds as the build needs — a wrong name costs the player the entire build, a few extra calls cost seconds. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: 2-4 sentences in {reply_language}.
+The PROFESSION REFERENCE in Context already holds every specialization, trait and slot skill: plate from it. Call tools only for a fact it does not carry (a rune, sigil or relic ranking, a skill's exact numbers, a simulation), and batch those calls into as few rounds as possible — every round is a request against a small quota. A wrong name still costs the player the entire build, so take a name only from the reference or a tool result. Rank runes/sigils/relics on the 6-axis radar (never A–Z dumps). explanation: 2-4 sentences in {reply_language}.
 
 The player's message:
 <message>
@@ -1154,10 +1154,10 @@ Phase 4 — Verify the complete build:
 14. Call simulate_rotation with selected skill IDs to see real DPS, condition uptime, buff uptime, and control metrics (stunbreaks, stability)
 
 NO ASSUMPTIONS. THIS IS THE RULE THAT MATTERS MOST.
-Every specialization, trait, skill, rune, sigil and relic name you output must have come back from a tool call in THIS conversation. Not from memory. Your training data is older than the live game build, names change between patches, and a name that does not exist today is discarded — the player then gets no build at all, which is the worst possible answer.
-- Before you name traits for a specialization, read them off the PROFESSION REFERENCE: it lists every specialization and every trait, and choosing from anything else is how a name that does not exist reaches the player. Only if no reference is present (no character selected) call get_spec_traits instead. Either way, choose ONLY from what one of them gives you.
+Every specialization, trait, skill, rune, sigil and relic name you output must come from evidence in THIS conversation: the PROFESSION REFERENCE in Context, or a tool result. Not from memory. Your training data is older than the live game build, names change between patches, and a name that does not exist today is discarded — the player then gets no build at all, which is the worst possible answer.
+- Specializations, their traits, and the slot skills (heal, utility, elite) are all in the PROFESSION REFERENCE. Take those names from it; do not call get_profession_info, get_spec_traits or get_skill_info to re-read what it already says. Only if no reference is present (no character selected) call get_spec_traits instead.
 - Every specialization has exactly 3 trait columns (Adept, Master, Grandmaster). Pick exactly one trait from EACH column: 3 traits, never two from one column, never a minor trait (those are automatic and cannot be chosen).
-- Before you name a skill, rune, sigil or relic, confirm it exists with the matching tool.
+- Runes, sigils and relics are NOT in the reference: take them from search_upgrades, list_runes, list_sigils or list_relics. A skill's exact numbers (cooldown, conditions applied) come from get_skill_info; a trait's triggers from get_trait_details. Batch such calls into one round.
 - If a tool does not return what you expected, choose from what it DID return. Never fall back on a remembered name.
 
 REASON WITH MECHANISM AND NUMBERS, NOT VIBES.
@@ -1216,10 +1216,10 @@ After gathering data, respond with ONLY a JSON build object:
 Improve the player's current Power build for Guardian in PvE.
 
 NO ASSUMPTIONS. THIS IS THE RULE THAT MATTERS MOST.
-Every specialization, trait, skill, rune, sigil and relic name you output must have come back from a tool call in THIS conversation. Not from memory. Your training data is older than the live game build, names change between patches, and a name that does not exist today is discarded — the player then gets no build at all, which is the worst possible answer.
-- Before you name traits for a specialization, read them off the PROFESSION REFERENCE: it lists every specialization and every trait, and choosing from anything else is how a name that does not exist reaches the player. Only if no reference is present (no character selected) call get_spec_traits instead. Either way, choose ONLY from what one of them gives you.
+Every specialization, trait, skill, rune, sigil and relic name you output must come from evidence in THIS conversation: the PROFESSION REFERENCE in Context, or a tool result. Not from memory. Your training data is older than the live game build, names change between patches, and a name that does not exist today is discarded — the player then gets no build at all, which is the worst possible answer.
+- Specializations, their traits, and the slot skills (heal, utility, elite) are all in the PROFESSION REFERENCE. Take those names from it; do not call get_profession_info, get_spec_traits or get_skill_info to re-read what it already says. Only if no reference is present (no character selected) call get_spec_traits instead.
 - Every specialization has exactly 3 trait columns (Adept, Master, Grandmaster). Pick exactly one trait from EACH column: 3 traits, never two from one column, never a minor trait (those are automatic and cannot be chosen).
-- Before you name a skill, rune, sigil or relic, confirm it exists with the matching tool.
+- Runes, sigils and relics are NOT in the reference: take them from search_upgrades, list_runes, list_sigils or list_relics. A skill's exact numbers (cooldown, conditions applied) come from get_skill_info; a trait's triggers from get_trait_details. Batch such calls into one round.
 - If a tool does not return what you expected, choose from what it DID return. Never fall back on a remembered name.
 
 REASON WITH MECHANISM AND NUMBERS, NOT VIBES.

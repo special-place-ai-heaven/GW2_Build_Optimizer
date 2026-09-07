@@ -52,19 +52,14 @@ pub struct Turn {
 /// How the driver should shape a turn's request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnMode {
-    /// A lookup round: tools on, the usual budget. `force_tool` asks for
-    /// `tool_choice: required` where the provider supports it.
-    Explore { force_tool: bool },
+    /// A lookup round: tools on, the usual budget. The first round used to
+    /// force a tool call (`tool_choice: required`); with the profession
+    /// reference in the prompt a model that plates on turn one is right, and
+    /// the narration nudge covers the one that talks instead (2026-09-07).
+    Explore,
     /// The request that writes the answer: no tools, small cap, no
     /// reasoning budget, the plate's schema where the model can hold it.
     Closing,
-}
-
-/// What the loop may ask of a provider.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct LoopCaps {
-    /// `tool_choice: required` is understood.
-    pub tool_choice: bool,
 }
 
 /// A provider's side of the loop: its conversation, its wire format, its
@@ -88,7 +83,6 @@ pub(crate) trait TurnDriver {
     ) -> Result<Turn, Self::Err>;
     fn push_tool_results(&self, conv: &mut Self::Conv, results: &[(ToolCall, Value)]);
     fn push_user(&self, conv: &mut Self::Conv, text: &str);
-    fn caps(&self) -> LoopCaps;
 
     fn cancelled(&self) -> Self::Err;
     fn no_answer(&self, detail: String) -> Self::Err;
@@ -108,7 +102,6 @@ pub(crate) fn run<D: TurnDriver>(
     on_progress: &mut dyn FnMut(usize, usize, &[String]),
 ) -> Result<String, D::Err> {
     let mut conv = driver.open(prompt);
-    let caps = driver.caps();
     let gathering_until = Instant::now() + TOOL_PHASE_BUDGET;
     let mut last_round = Duration::ZERO;
     let mut nudged = false;
@@ -129,9 +122,7 @@ pub(crate) fn run<D: TurnDriver>(
         }
         let round_started = Instant::now();
         driver.trim(&mut conv);
-        let mode = TurnMode::Explore {
-            force_tool: turn_index == 0 && caps.tool_choice && !tools.is_empty(),
-        };
+        let mode = TurnMode::Explore;
         let turn = match driver.turn(&mut conv, Some(tools), mode) {
             Ok(turn) => turn,
             // The model cannot drive our tools at all; answer without them.
@@ -311,7 +302,6 @@ mod tests {
     struct Script {
         turns: RefCell<Vec<Turn>>,
         log: RefCell<Vec<String>>,
-        caps: LoopCaps,
     }
 
     impl Script {
@@ -319,7 +309,6 @@ mod tests {
             Self {
                 turns: RefCell::new(turns),
                 log: RefCell::new(Vec::new()),
-                caps: LoopCaps { tool_choice: true },
             }
         }
     }
@@ -359,9 +348,6 @@ mod tests {
         }
         fn push_user(&self, conv: &mut Vec<String>, text: &str) {
             conv.push(format!("user:{text}"));
-        }
-        fn caps(&self) -> LoopCaps {
-            self.caps
         }
         fn cancelled(&self) -> String {
             "cancelled".into()
@@ -510,8 +496,7 @@ mod tests {
         .unwrap();
         assert_eq!(out, "Here is the answer.");
         let log = script.log.borrow();
-        assert!(log[0].contains("force_tool: true"));
-        assert!(log[1].contains("force_tool: false"));
+        assert!(log[0].contains("Explore"), "{}", log[0]);
     }
 
     #[test]
@@ -542,9 +527,6 @@ mod tests {
             }
             fn push_user(&self, c: &mut Vec<String>, t: &str) {
                 self.0.push_user(c, t)
-            }
-            fn caps(&self) -> LoopCaps {
-                self.0.caps()
             }
             fn cancelled(&self) -> String {
                 self.0.cancelled()

@@ -591,11 +591,6 @@ impl super::tool_loop::TurnDriver for AnthropicClient {
             content: AnthropicContent::Text(text.to_string()),
         });
     }
-    fn caps(&self) -> super::tool_loop::LoopCaps {
-        // `tool_choice` is a Messages API field, but forcing a tool on the
-        // first round has not been measured here; the nudge covers it.
-        super::tool_loop::LoopCaps { tool_choice: false }
-    }
     fn cancelled(&self) -> LlmError {
         LlmError::Unavailable(CANCELLED.to_string())
     }

@@ -610,6 +610,7 @@ pub(crate) fn send_chat(
             req = req.header(*name, value);
         }
 
+        super::HTTP_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let resp = match req.json(&request).send() {
             Ok(r) => r,
             // A timeout is not a transport hiccup and must not be retried.

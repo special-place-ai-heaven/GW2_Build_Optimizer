@@ -16,7 +16,8 @@ use std::time::Instant;
 
 use gw2_core::config::{AppConfig, LlmProvider};
 use gw2_optimizer::gemini_tools::{execute_tool, profession_reference, ToolContext};
-use gw2_optimizer::llm::profile;
+use gw2_optimizer::llm::{profile, HTTP_ATTEMPTS};
+use std::sync::atomic::Ordering;
 
 const PROFESSION: &str = "Necromancer";
 const REQUEST: &str = "WvW roaming power build";
@@ -89,6 +90,7 @@ fn main() {
         config.set_active_model_id(model.clone());
         let started = Instant::now();
         let mut requests = 0usize;
+        let wire_before = HTTP_ATTEMPTS.load(Ordering::Relaxed);
         let outcome = (|| -> Result<String, String> {
             let client = gw2_optimizer::llm::create_client(&config, &addon_dir)
                 .map_err(|e| e.to_string())?;
@@ -99,7 +101,7 @@ fn main() {
                     } else {
                         2
                     };
-                    println!("  handshake: {}", p.summary());
+                    println!("  handshake (cold probe, every run here): {}", p.summary());
                     p
                 }
                 Err(e) => {
@@ -108,7 +110,7 @@ fn main() {
                     profile::ModelProfile::assumed(model)
                 }
             };
-            let response = if profile.max_turns() == 0 {
+            let response = if profile.max_turns(client.thrifty()) == 0 {
                 requests += 1;
                 client
                     .generate_brief(&prompt, 8_192)
@@ -120,7 +122,7 @@ fn main() {
                         &prompt,
                         &tools,
                         &mut |name, args| execute_tool(name, args, &ctx),
-                        profile.max_turns(),
+                        profile.max_turns(client.thrifty()),
                         &mut |turn, max, names| {
                             requests += 1;
                             println!(
@@ -190,12 +192,17 @@ fn main() {
                 .join(" | "))
         })();
         let secs = started.elapsed().as_secs_f32();
+        // Rounds are what the callback saw; wire is every HTTP attempt,
+        // retries included, which is what a quota counts.
+        let wire = HTTP_ATTEMPTS.load(Ordering::Relaxed) - wire_before;
         match outcome {
-            Ok(plate) => println!("PASS  {model:<48} {requests:>2} req {secs:6.1}s  {plate}"),
+            Ok(plate) => println!(
+                "PASS  {model:<48} {requests:>2} rounds {wire:>2} wire {secs:6.1}s  {plate}"
+            ),
             Err(e) => {
                 failed = true;
                 let e: String = e.chars().take(200).collect();
-                println!("FAIL  {model:<48} {requests:>2} req {secs:6.1}s  {e}");
+                println!("FAIL  {model:<48} {requests:>2} rounds {wire:>2} wire {secs:6.1}s  {e}");
             }
         }
     }

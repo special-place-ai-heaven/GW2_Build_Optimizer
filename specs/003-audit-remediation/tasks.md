@@ -330,4 +330,18 @@ No tasks are marked [P] for concurrent implementation while another agent is cha
 
 ## Incremental delivery
 
+### Planned simulator connection follow-up
+
+Scope and acceptance are in [Simulator connections and build-quality plan](../../docs/simulator-trust-plan.md). These local IDs are separate from the original audit tasks; no runtime work is marked complete.
+
+- [ ] CONN-00: Capture current ownership-safe baseline, audit overlap, and first build/scenario fixtures.
+- [ ] CONN-01: Trace data, validation, simulation, ranking, AI tool and UI paths; classify coverage with source evidence.
+- [ ] CONN-02: Establish positive/negative, timing, ablation and cross-path tests; add bounded diagnostics only where needed.
+- [ ] CONN-03: Fix demonstrated evaluation, quality-projection or mechanic gaps using existing infrastructure.
+- [ ] CONN-04: Verify equal-budget search reachability for coherent interaction packages; improve only reproduced gaps.
+- [ ] CONN-05: Deliver grounded explanations, comparable alternatives and accurate fallback/uncertainty presentation.
+- [ ] CONN-06: Record local quality and AI delivery separately, verify in-game tradeoffs, and prioritize further coverage.
+
+### Existing audit delivery
+
 Deliver US1 as the first coherent verified batch, then the B001 stat correction, then the remaining stories. Update individual checkboxes only after their acceptance criteria pass. An in-game handoff is a checkpoint; it does not mark pending campaign items complete. The audit's deliberate no-action proposals require documented dispositions, not artificial changes.

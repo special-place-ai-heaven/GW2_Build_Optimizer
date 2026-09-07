@@ -87,21 +87,6 @@ impl OpenAiClient {
         )
     }
 
-    /// A lookup round that must call a tool (`tool_choice: required`).
-    fn send_forcing_tools(
-        &self,
-        messages: &[Message],
-        tools: &[ToolDefinition],
-    ) -> Result<Message, LlmError> {
-        self.send_chat_capped(
-            messages,
-            Some(tools),
-            MAX_COMPLETION_TOKENS,
-            CHAT_REQUEST_TIMEOUT,
-            Some("required"),
-        )
-    }
-
     /// The request that writes the plate: small cap, its own deadline. See
     /// [`super::openai_compat::CLOSING_MAX_TOKENS`].
     fn send_closing(&self, messages: &[Message]) -> Result<Message, LlmError> {
@@ -182,10 +167,7 @@ impl super::tool_loop::TurnDriver for OpenAiClient {
         mode: super::tool_loop::TurnMode,
     ) -> Result<super::tool_loop::Turn, LlmError> {
         let message = match (mode, tools) {
-            (super::tool_loop::TurnMode::Explore { force_tool: true }, Some(tools)) => {
-                self.send_forcing_tools(conv, tools)?
-            }
-            (super::tool_loop::TurnMode::Explore { .. }, tools) => self.send_chat(conv, tools)?,
+            (super::tool_loop::TurnMode::Explore, tools) => self.send_chat(conv, tools)?,
             (super::tool_loop::TurnMode::Closing, _) => self.send_closing(conv)?,
         };
         Ok(super::openai_compat::absorb_turn(conv, message))
@@ -199,9 +181,6 @@ impl super::tool_loop::TurnDriver for OpenAiClient {
     }
     fn push_user(&self, conv: &mut Vec<Message>, text: &str) {
         super::openai_compat::push_user(conv, text);
-    }
-    fn caps(&self) -> super::tool_loop::LoopCaps {
-        super::tool_loop::LoopCaps { tool_choice: true }
     }
     fn cancelled(&self) -> LlmError {
         LlmError::Unavailable(super::cancel::CANCELLED.to_string())

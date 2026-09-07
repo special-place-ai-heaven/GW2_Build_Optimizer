@@ -195,6 +195,11 @@ pub struct KeyValidationResult {
     pub warning: Option<String>,
 }
 
+/// Every chat request actually put on the wire, retries included. Read by
+/// the `choya_live` example to report what a run really cost; the rounds a
+/// progress callback sees are not the requests a quota counts.
+pub static HTTP_ATTEMPTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// Provider-neutral error type for all LLM operations.
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
@@ -318,6 +323,15 @@ pub trait LlmClient: Send + Sync {
 
     /// Text generation with response caching (same prompt within TTL returns cached result).
     fn generate_cached(&self, prompt: &str) -> Result<String, LlmError>;
+
+    /// Whether requests to this model are scarce enough that a run should
+    /// spend as few as it can: a free OpenRouter model (20/min, shared
+    /// upstream pools), a Gemini key whose stated quota is five a minute and
+    /// twenty a day. Callers cap the lookup rounds on it
+    /// ([`profile::ModelProfile::max_turns`]).
+    fn thrifty(&self) -> bool {
+        false
+    }
 
     /// Multi-turn generation with tool/function calling.
     ///

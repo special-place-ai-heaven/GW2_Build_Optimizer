@@ -69,6 +69,9 @@ pub struct ModelProfile {
 /// change, and a free tier's speed on Tuesday says little about Friday.
 const STALE_AFTER_SECS: u64 = 7 * 24 * 3600;
 
+/// Lookup rounds when requests are scarce. See [`ModelProfile::max_turns`].
+pub const THRIFTY_TURNS: usize = 2;
+
 /// Turn budgets the profile hands the run.
 impl ModelProfile {
     /// What to assume of a model the probe could not reach: the full job,
@@ -91,12 +94,21 @@ impl ModelProfile {
     /// How many tool rounds to allow. A model that cannot drive tools gets
     /// none; a slow one gets fewer, so the whole run still ends in a plate
     /// inside the tool-phase budget.
-    pub fn max_turns(&self) -> usize {
-        match self.tools {
+    ///
+    /// `thrifty` is the client's word that requests are scarce (a free
+    /// OpenRouter model, a Gemini key on a five-a-minute tier): two lookup
+    /// rounds, then the plate, so a run is about three requests.
+    pub fn max_turns(&self, thrifty: bool) -> usize {
+        let unhurried = match self.tools {
             ToolSupport::None => 0,
             _ if self.round_secs > 40.0 || self.probe_ms > 40_000 => 4,
             _ if self.round_secs > 20.0 || self.probe_ms > 20_000 => 6,
             _ => 8,
+        };
+        if thrifty {
+            unhurried.min(THRIFTY_TURNS)
+        } else {
+            unhurried
         }
     }
 
@@ -383,16 +395,22 @@ mod tests {
     #[test]
     fn a_slow_or_toolless_model_gets_fewer_rounds() {
         assert_eq!(
-            profile(ToolSupport::Native, JsonDiscipline::Strict).max_turns(),
+            profile(ToolSupport::Native, JsonDiscipline::Strict).max_turns(false),
             8
         );
         assert_eq!(
-            profile(ToolSupport::None, JsonDiscipline::Strict).max_turns(),
-            0
+            profile(ToolSupport::Native, JsonDiscipline::Strict).max_turns(true),
+            THRIFTY_TURNS,
+            "scarce requests: two lookups then the plate"
+        );
+        assert_eq!(
+            profile(ToolSupport::None, JsonDiscipline::Strict).max_turns(true),
+            0,
+            "thrifty never grants rounds a toolless model cannot use"
         );
         let mut slow = profile(ToolSupport::Native, JsonDiscipline::Strict);
         slow.round_secs = 45.0;
-        assert_eq!(slow.max_turns(), 4);
+        assert_eq!(slow.max_turns(false), 4);
     }
 
     #[test]
