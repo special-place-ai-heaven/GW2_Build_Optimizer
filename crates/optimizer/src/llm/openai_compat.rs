@@ -96,21 +96,53 @@ pub(crate) fn is_narration(text: &str) -> bool {
     .any(|marker| lower.contains(marker))
 }
 
-/// `messages` plus the turn that closes a tool loop. Send it with no tools.
-///
-/// Both ways out of a tool loop need it: rounds exhausted, and a model that
-/// cannot emit a usable function call at all. Withholding the declarations is
-/// only half of either fix — see [`CLOSING_TURN`].
-pub(crate) fn closing_request(messages: &[Message]) -> Vec<Message> {
-    let mut closing = messages.to_vec();
-    closing.push(Message {
+/// Fold one assistant message into the conversation and read it as a turn.
+/// The message is pushed whole, reasoning details and all: OpenRouter's
+/// "Preserving Reasoning" contract wants the blocks back untouched.
+pub(crate) fn absorb_turn(conv: &mut Vec<Message>, message: Message) -> super::tool_loop::Turn {
+    let calls = message
+        .tool_calls
+        .iter()
+        .flatten()
+        .map(|tc| super::tool_loop::ToolCall {
+            id: tc.id.clone(),
+            name: tc.function.name.clone(),
+            // A JSON string on this wire; unparseable ones travel as an
+            // error object the loop hands straight back to the model.
+            args: match super::parse_tool_arguments(&tc.function.arguments) {
+                Ok(v) => v,
+                Err(e) => e,
+            },
+        })
+        .collect();
+    let text = message.content.clone();
+    conv.push(message);
+    super::tool_loop::Turn { text, calls }
+}
+
+pub(crate) fn push_tool_results(
+    conv: &mut Vec<Message>,
+    results: &[(super::tool_loop::ToolCall, Value)],
+) {
+    for (call, value) in results {
+        conv.push(Message {
+            role: "tool".to_string(),
+            content: Some(serde_json::to_string(value).unwrap_or_default()),
+            tool_calls: None,
+            tool_call_id: Some(call.id.clone()),
+            reasoning_details: None,
+        });
+    }
+}
+
+pub(crate) fn push_user(conv: &mut Vec<Message>, text: &str) {
+    conv.push(Message {
         role: "user".to_string(),
-        content: Some(CLOSING_TURN.to_string()),
+        content: Some(text.to_string()),
         tool_calls: None,
         tool_call_id: None,
         reasoning_details: None,
     });
-    closing
 }
 
 /// Whether a failure means "this model could not produce a usable function
@@ -323,6 +355,10 @@ pub(crate) struct ChatRequest {
     /// catalog lists `response_format` or `structured_outputs`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) response_format: Option<Value>,
+    /// `none` / `auto` / `required`. `required` on the first lookup round
+    /// stops a model narrating its plan instead of calling anything.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tool_choice: Option<String>,
 }
 
 /// The plate, as the JSON Schema the API enforces on the closing request.
@@ -484,6 +520,8 @@ pub(crate) struct ProviderCore<'a> {
     pub(crate) provider_sort: Option<&'static str>,
     /// `response_format` for this request; `None` omits it.
     pub(crate) response_format: Option<Value>,
+    /// `tool_choice` for this request; `None` omits it.
+    pub(crate) tool_choice: Option<&'static str>,
     /// Per-request wall-clock cap. This is a reqwest *total* deadline, not an
     /// idle timeout: provider keep-alives hold the connection open but do not
     /// extend it. See [`CHAT_REQUEST_TIMEOUT`].
@@ -544,6 +582,7 @@ pub(crate) fn send_chat(
             sort: core.provider_sort.map(str::to_string),
         }),
         response_format: core.response_format.clone(),
+        tool_choice: core.tool_choice.map(str::to_string),
     };
 
     let url = format!("{}/chat/completions", core.base_url);
@@ -893,6 +932,7 @@ mod tests {
         is_cancelled: &'a dyn Fn() -> bool,
     ) -> ProviderCore<'a> {
         ProviderCore {
+            tool_choice: None,
             response_format: None,
             provider_sort: None,
             http,
@@ -1049,6 +1089,7 @@ mod tests {
     #[test]
     fn openai_request_omits_the_openrouter_provider_block() {
         let base = ChatRequest {
+            tool_choice: None,
             response_format: None,
             model: "gpt-4o".into(),
             messages: vec![user("hi")],
@@ -1066,6 +1107,7 @@ mod tests {
         assert!(body.get("reasoning").is_none());
 
         let routed = ChatRequest {
+            tool_choice: None,
             response_format: None,
             provider: Some(ProviderPrefs {
                 sort: None,
@@ -1148,6 +1190,7 @@ mod tests {
         let messages = vec![user(&prompt)];
         let no_cancel = || false;
         let core = ProviderCore {
+            tool_choice: None,
             response_format: None,
             provider_sort: None,
             http: &http,

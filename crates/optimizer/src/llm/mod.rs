@@ -14,6 +14,7 @@ pub mod profile;
 pub(crate) mod rate;
 pub(crate) mod response_cache;
 pub(crate) mod sse;
+pub mod tool_loop;
 pub mod tools;
 pub(crate) mod trim;
 
@@ -440,6 +441,7 @@ pub(crate) fn parse_tool_arguments(raw: &str) -> Result<Value, Value> {
         .map_err(|e| serde_json::json!({ "error": format!("unparseable arguments: {e}") }))
 }
 
+#[cfg(test)]
 pub(crate) fn run_tool_or_parse_error(
     execute_tool: &mut dyn FnMut(&str, &Value) -> Value,
     name: &str,

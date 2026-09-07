@@ -59,6 +59,97 @@ pub struct GeminiClient {
     usage_path: Option<PathBuf>,
 }
 
+impl crate::llm::tool_loop::TurnDriver for GeminiClient {
+    type Conv = Vec<Content>;
+    type Err = GeminiError;
+
+    fn open(&self, prompt: &str) -> Vec<Content> {
+        vec![Content {
+            role: Some("user".into()),
+            parts: vec![Part::text(prompt)],
+        }]
+    }
+    fn trim(&self, conv: &mut Vec<Content>) {
+        trim_contents(conv, crate::llm::trim::SAFE_PROMPT_BUDGET_TOKENS);
+    }
+    fn turn(
+        &self,
+        conv: &mut Vec<Content>,
+        tools: Option<&[crate::llm::ToolDefinition]>,
+        _mode: crate::llm::tool_loop::TurnMode,
+    ) -> Result<crate::llm::tool_loop::Turn, GeminiError> {
+        let tools = tools.map(|defs| {
+            vec![Tool {
+                function_declarations: defs
+                    .iter()
+                    .map(|d| FunctionDeclaration {
+                        name: d.name.clone(),
+                        description: d.description.clone(),
+                        parameters: d.parameters.clone(),
+                    })
+                    .collect(),
+            }]
+        });
+        let content = self.send_request(&GenerateRequest {
+            contents: conv.clone(),
+            tools,
+        })?;
+        let text = content.parts.iter().find_map(|p| p.text.clone());
+        let calls = content
+            .parts
+            .iter()
+            .filter_map(|p| p.function_call.as_ref())
+            .map(|fc| crate::llm::tool_loop::ToolCall {
+                // Gemini matches responses by name, not by id.
+                id: fc.name.clone(),
+                name: fc.name.clone(),
+                args: fc.args.clone(),
+            })
+            .collect();
+        conv.push(content);
+        Ok(crate::llm::tool_loop::Turn { text, calls })
+    }
+    fn push_tool_results(
+        &self,
+        conv: &mut Vec<Content>,
+        results: &[(crate::llm::tool_loop::ToolCall, serde_json::Value)],
+    ) {
+        conv.push(Content {
+            role: Some("user".into()),
+            parts: results
+                .iter()
+                .map(|(call, value)| Part::function_response(&call.name, value.clone()))
+                .collect(),
+        });
+    }
+    fn push_user(&self, conv: &mut Vec<Content>, text: &str) {
+        conv.push(Content {
+            role: Some("user".into()),
+            parts: vec![Part::text(text)],
+        });
+    }
+    fn caps(&self) -> crate::llm::tool_loop::LoopCaps {
+        // Gemini's `toolConfig.functionCallingConfig.mode: ANY` is the
+        // equivalent and is not wired; the nudge covers it.
+        crate::llm::tool_loop::LoopCaps { tool_choice: false }
+    }
+    fn cancelled(&self) -> GeminiError {
+        GeminiError::Unavailable(CANCELLED.to_string())
+    }
+    fn no_answer(&self, detail: String) -> GeminiError {
+        GeminiError::Parse(format!("Gemini: {detail}"))
+    }
+    fn is_deadline(&self, err: &GeminiError) -> bool {
+        err.to_string()
+            .contains(crate::llm::openai_compat::DEADLINE_MARKER)
+    }
+    fn is_function_call_failure(&self, err: &GeminiError) -> bool {
+        err.to_string()
+            .to_ascii_uppercase()
+            .contains("MALFORMED_FUNCTION_CALL")
+    }
+}
+
 impl GeminiClient {
     fn stream_url(&self) -> String {
         format!(
@@ -303,7 +394,7 @@ struct GenerateRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct Content {
+pub(crate) struct Content {
     #[serde(skip_serializing_if = "Option::is_none")]
     role: Option<String>,
     parts: Vec<Part>,
@@ -848,109 +939,18 @@ impl GeminiClient {
         max_turns: usize,
         on_progress: &mut dyn FnMut(usize, usize, &[String]),
     ) -> Result<String, GeminiError> {
-        let mut contents = vec![Content {
-            role: Some("user".into()),
-            parts: vec![Part::text(prompt)],
-        }];
-
-        let mut last_text: Option<String> = None;
-
-        let gathering_until =
-            std::time::Instant::now() + crate::llm::openai_compat::TOOL_PHASE_BUDGET;
-        for turn in 0..max_turns {
-            // Between turns as well as inside the stream: a tool loop is up to
-            // max_turns whole requests, so checking only inside one of them
-            // still leaves the worker running after the flag flips.
-            if is_cancelled() {
-                return Err(GeminiError::Unavailable(CANCELLED.to_string()));
-            }
-            // Out of clock for lookups. Every function response so far is
-            // already in `contents`, so the closing request below answers
-            // from them.
-            if turn > 0 && std::time::Instant::now() >= gathering_until {
-                break;
-            }
-            trim_contents(&mut contents, crate::llm::trim::SAFE_PROMPT_BUDGET_TOKENS);
-            let request = GenerateRequest {
-                contents: contents.clone(),
-                tools: Some(tools.clone()),
-            };
-
-            let response_content = self.send_request(&request)?;
-
-            // Capture any text from this response (Gemini may send text + calls)
-            if let Some(text) = response_content.parts.iter().find_map(|p| p.text.clone()) {
-                last_text = Some(text);
-            }
-
-            // Check if model wants to call a function
-            let function_calls: Vec<&FunctionCall> = response_content
-                .parts
-                .iter()
-                .filter_map(|p| p.function_call.as_ref())
-                .collect();
-
-            if function_calls.is_empty() {
-                // No function calls — return text response
-                return last_text
-                    .ok_or_else(|| GeminiError::Parse("No response text from Gemini".into()));
-            }
-
-            // Report progress: which tools are being called this turn
-            let tool_names: Vec<String> = function_calls.iter().map(|fc| fc.name.clone()).collect();
-            on_progress(turn + 1, max_turns, &tool_names);
-
-            // Add model's response to conversation history
-            contents.push(response_content.clone());
-
-            // Execute each function call and build response parts
-            let mut response_parts = Vec::new();
-            for fc in &function_calls {
-                let result = execute_tool(&fc.name, &fc.args);
-                response_parts.push(Part::function_response(&fc.name, result));
-            }
-
-            // Send function responses back
-            contents.push(Content {
-                role: Some("user".into()),
-                parts: response_parts,
-            });
-        }
-
-        // Gathering is over, either on turns or on the clock, and the model was
-        // still calling tools. Every function response is already in
-        // `contents`, so one request with the tools withheld makes it answer
-        // from what it gathered - the same exit the OpenAI-compatible clients
-        // take. Without it this path returned "Tool loop exceeded 8 turns with
-        // no text response", which is the "no result" a player reports.
-        if is_cancelled() {
-            return Err(GeminiError::Unavailable(CANCELLED.to_string()));
-        }
-        // Empty tool list: the caller renders this as "writing", not as
-        // another lookup round.
-        on_progress(max_turns, max_turns, &[]);
-        contents.push(Content {
-            role: Some("user".into()),
-            parts: vec![Part::text(crate::llm::openai_compat::CLOSING_TURN)],
-        });
-        trim_contents(&mut contents, crate::llm::trim::SAFE_PROMPT_BUDGET_TOKENS);
-        let closing = self.send_request(&GenerateRequest {
-            contents,
-            tools: None,
-        });
-        let closing_text = match closing {
-            Ok(content) => content.parts.iter().find_map(|p| p.text.clone()),
-            // The closing request is the last chance, not the only evidence:
-            // text from an earlier turn still beats an error.
-            Err(e) if last_text.is_none() => return Err(e),
-            Err(_) => None,
-        };
-        closing_text.or(last_text).ok_or_else(|| {
-            GeminiError::Parse(format!(
-                "Tool loop exceeded {} turns with no text response",
-                max_turns
-            ))
-        })
+        // The shared loop validates arguments against the declarations, so
+        // it takes the provider-neutral form; the driver turns them back.
+        let defs: Vec<crate::llm::ToolDefinition> = tools
+            .iter()
+            .flat_map(|t| t.function_declarations.iter())
+            .map(|d| crate::llm::ToolDefinition {
+                name: d.name.clone(),
+                description: d.description.clone(),
+                parameters: d.parameters.clone(),
+            })
+            .collect();
+        crate::llm::tool_loop::run(self, prompt, &defs, execute_tool, max_turns, on_progress)
     }
 
     /// Low-level: send a request and return the response Content.
@@ -1837,9 +1837,16 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
             .nth(1)
             .and_then(|s| s.split("fn send_request").next())
             .expect("tool loop body");
+        // The loop itself is shared (`llm::tool_loop`); this provider only
+        // drives turns. The cancel poll lives in the shared loop.
         assert!(
-            tool_loop.contains("is_cancelled()"),
-            "tool loop must poll is_cancelled between turns"
+            tool_loop.contains("tool_loop::run("),
+            "the Gemini tool loop must be the shared one"
+        );
+        let shared = include_str!("llm/tool_loop.rs");
+        assert!(
+            shared.contains("is_cancelled()"),
+            "the shared tool loop must poll is_cancelled between turns"
         );
     }
 }

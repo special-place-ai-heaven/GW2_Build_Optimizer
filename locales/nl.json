@@ -516,7 +516,6 @@
   "err.bad_key": "API-sleutel geweigerd. Controleer Instellingen.",
   "err.billing": "Facturerings- of quotaprobleem bij deze aanbieder. Controleer het account of wissel van aanbieder.",
   "err.timeout": "Aanvraag verlopen. Probeer een groter/sneller model.",
-  "settings.model_no_schema": "geen gestructureerde uitvoer",
   "choya.fallback_reference": "Het model kwam tijd tekort. Dit is de eigen build van de optimizer voor wat je vroeg, gecontroleerd door de scheidsrechter:",
   "err.overloaded": "Aanbieder is overbelast. Probeer opnieuw of kies een ander model.",
   "fmt.internal_panic": "Interne fout (panic): {msg}",

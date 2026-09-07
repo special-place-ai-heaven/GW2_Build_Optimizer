@@ -516,7 +516,6 @@
   "err.bad_key": "Clave API rechazada. Revisa Ajustes.",
   "err.billing": "Problema de facturación o cuota. Revisa la cuenta o cambia de proveedor.",
   "err.timeout": "Tiempo agotado. Prueba un modelo más grande/rápido.",
-  "settings.model_no_schema": "sin salida estructurada",
   "choya.fallback_reference": "El modelo se quedó sin tiempo. Esta es la build propia del optimizador para lo que pediste, comprobada por el árbitro:",
   "err.overloaded": "Proveedor saturado. Reintenta o elige otro modelo.",
   "fmt.internal_panic": "Error interno (panic): {msg}",
