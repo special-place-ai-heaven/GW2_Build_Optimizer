@@ -296,6 +296,7 @@ impl LlmClient for OpenAiClient {
 
         let gathering_until = std::time::Instant::now() + super::openai_compat::TOOL_PHASE_BUDGET;
         let mut last_round = std::time::Duration::ZERO;
+        let mut nudged = false;
         for turn in 0..max_turns {
             // Between turns as well as inside the stream: a tool loop is up to
             // max_turns whole requests, so checking only inside one of them
@@ -332,6 +333,28 @@ impl LlmClient for OpenAiClient {
                     // Done. Only THIS turn's text is the answer: text carried
                     // by an earlier turn arrived alongside that turn's tool
                     // calls, which means the model was still working.
+                    // Narration is not an answer. Push what it said, tell it
+                    // to act, and spend one more round - once per run, so a
+                    // genuine prose reply is never chased into a loop.
+                    if !nudged
+                        && turn + 1 < max_turns
+                        && response
+                            .content
+                            .as_deref()
+                            .is_some_and(super::openai_compat::is_narration)
+                    {
+                        nudged = true;
+                        messages.push(response);
+                        messages.push(Message {
+                            role: "user".to_string(),
+                            content: Some(super::openai_compat::CONTINUE_TURN.to_string()),
+                            tool_calls: None,
+                            tool_call_id: None,
+                            reasoning_details: None,
+                        });
+                        last_round = round_started.elapsed();
+                        continue;
+                    }
                     return response
                         .content
                         .filter(|text| !text.is_empty())

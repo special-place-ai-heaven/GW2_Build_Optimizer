@@ -60,6 +60,42 @@ pub(crate) const CLOSING_TURN: &str = "Stop calling tools. You have every tool \
      stat_prefix, explanation. No prose outside the JSON. A build described \
      in sentences is not an answer; the JSON is.";
 
+/// The turn that answers a model which narrated its plan instead of acting
+/// on it. In-game 2026-09-07 (minimax-m3:free): "I'll start by checking what
+/// specs Necromancer has and pulling the Ritualist trait list" — no tool
+/// call, no plate, and a text-only turn is otherwise the final answer.
+pub(crate) const CONTINUE_TURN: &str = "Do it now. Call the tools you need, or \
+     if you already have what you need, serve the finished plate as the JSON \
+     build object. Do not describe what you are about to do.";
+
+/// Whether a text-only turn is the model announcing what it will do rather
+/// than an answer: short, first person, forward-looking, no JSON. A real
+/// prose answer to a question ("what does Dread do?") is none of those and
+/// must never be nudged into a loop.
+pub(crate) fn is_narration(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.len() > 600 || trimmed.contains('{') {
+        return false;
+    }
+    let lower = trimmed.to_lowercase();
+    [
+        "i'll ",
+        "i will ",
+        "let me ",
+        "start by",
+        "i'm going to",
+        "i am going to",
+        "going to check",
+        "going to pull",
+        "first, i",
+        "next, i",
+        "i need to check",
+        "i need to look",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
 /// `messages` plus the turn that closes a tool loop. Send it with no tools.
 ///
 /// Both ways out of a tool loop need it: rounds exhausted, and a model that
@@ -1058,5 +1094,25 @@ mod tests {
                 println!("ERR after {:.1}s: {e:?}", t0.elapsed().as_secs_f64());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod narration_tests {
+    use super::is_narration;
+
+    #[test]
+    fn a_plan_is_narration_and_an_answer_is_not() {
+        assert!(is_narration(
+            "I'll start by checking what specs Necromancer has and pulling the Ritualist trait list - that's the centerpiece."
+        ));
+        assert!(is_narration("Let me look up the Reaper traits first."));
+        // A real answer to a question: not chased.
+        assert!(!is_narration(
+            "Dread grants fury when you inflict fear and increases damage against feared foes."
+        ));
+        // A plate is never narration, however it opens.
+        assert!(!is_narration("I'll serve it: {\"specializations\": []}"));
+        assert!(!is_narration(""));
     }
 }
