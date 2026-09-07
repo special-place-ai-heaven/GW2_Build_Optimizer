@@ -127,7 +127,7 @@
   "choya.need_key": "Définis d'abord une clé API d'IA dans Paramètres.",
   "choya.optimize_running": "L'optimisation est encore en cours. Attends la fin.",
   "choya.data_loading": "Les données de jeu chargent encore. Réessaie dans un instant.",
-  "choya.select_first": "Choisis d'abord un personnage et un build. Je ne peux pas assaisonner une marmite vide, même pas avec une figue de Barbarie.",
+  "choya.select_first": "Améliorer quoi, exactement ? Tu n'as rien sélectionné. Choisis un personnage à gauche, puis un onglet build et un onglet équipement, et je te dirai tout ce qui cloche. Je ne peux pas assaisonner une marmite vide, et j'ai essayé : figue de Barbarie, viande de scarabée, rien n'accroche.",
   "choya.assistant": "Assistant de build",
   "setup.title": "PREMIÈRE CONFIGURATION",
   "setup.step_gw2": "Clé GW2",

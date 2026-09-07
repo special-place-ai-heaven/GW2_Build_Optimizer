@@ -127,7 +127,7 @@
   "choya.need_key": "请先在设置中填写 AI API 密钥。",
   "choya.optimize_running": "优化仍在进行，请等待完成。",
   "choya.data_loading": "游戏数据仍在加载，请稍后再试。",
-  "choya.select_first": "请先选择角色和构建。空锅我可没法调味，哪怕是用仙人掌果。",
+  "choya.select_first": "改进什么？你什么都没选。先在左边选一个角色，再选一个构建页签和一个装备页签，我就把它所有的毛病都告诉你。空锅我没法调味，我试过了：仙人掌果、圣甲虫肉，什么都粘不住。",
   "choya.assistant": "配装助手",
   "setup.title": "首次设置",
   "setup.step_gw2": "GW2 密钥",

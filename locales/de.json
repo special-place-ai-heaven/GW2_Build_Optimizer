@@ -127,7 +127,7 @@
   "choya.need_key": "Lege zuerst einen KI-API-Schlüssel unter Einstellungen fest.",
   "choya.optimize_running": "Optimierung läuft noch. Warte, bis sie fertig ist.",
   "choya.data_loading": "Spieldaten laden noch. Versuche es gleich erneut.",
-  "choya.select_first": "Wähl zuerst einen Charakter und einen Build. Einen leeren Topf kann ich nicht würzen - nicht mal mit Kaktusfeige.",
+  "choya.select_first": "Verbessern - was genau? Du hast nichts ausgewählt. Wähl links einen Charakter, dann einen Build-Tab und einen Ausrüstungs-Tab, und ich sag dir alles, was daran falsch ist. Einen leeren Topf kann ich nicht würzen, ich hab's versucht - Kaktusfeige, Skarabäusfleisch, nichts bleibt hängen.",
   "choya.assistant": "Build-Assistent",
   "setup.title": "ERSTEINRICHTUNG",
   "setup.step_gw2": "GW2-Key",
