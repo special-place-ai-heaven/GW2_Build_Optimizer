@@ -133,10 +133,21 @@ impl OpenRouterClient {
     /// `response_format`, so the API holds the shape instead of the prompt
     /// asking for it. See [`super::openai_compat::CLOSING_MAX_TOKENS`].
     fn send_closing(&self, messages: &[Message]) -> Result<Message, LlmError> {
+        // OpenRouter's parameter docs: `structured_outputs` means the model
+        // takes a JSON Schema and holds to it; `response_format` alone means
+        // JSON mode - valid JSON guaranteed, shape not. minimax-m3:free lists
+        // the second and not the first (catalog read 2026-09-07), and given
+        // the schema anyway it answered the conversational shape with the
+        // whole build inside "explanation". Ask each model for what it can
+        // actually do.
         let caps = self.caps();
-        let response_format = (caps.supports("structured_outputs")
-            || caps.supports("response_format"))
-        .then(super::openai_compat::plate_response_format);
+        let response_format = if caps.supports("structured_outputs") {
+            Some(super::openai_compat::plate_response_format())
+        } else if caps.supports("response_format") {
+            Some(serde_json::json!({ "type": "json_object" }))
+        } else {
+            None
+        };
         self.send_chat_capped(
             messages,
             None,

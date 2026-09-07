@@ -539,6 +539,52 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         }
                         apply_radar_prefix(&mut parsed, &weights, &message);
 
+                        // The prompt allows a spoken reply with no plate for
+                        // greetings and questions. In-game 2026-09-07
+                        // (minimax-m3:free) a build request came back in that
+                        // shape with the whole build inside "explanation" -
+                        // valid JSON, so the parse-failure repair never saw
+                        // it. A build request answered with no plate gets the
+                        // same one repair: serve what you just said.
+                        if parsed.specializations.is_empty() && wants_a_build(&message) {
+                            let repair = format!(
+                                "You described the build in prose:\n\n{}\n\nServe that \
+                                 as the plate now: ONLY the JSON build object from your \
+                                 instructions - \"specializations\" as three objects with \
+                                 \"name\", \"elite\" and \"traits\" (three each), \"weapons\" \
+                                 with set1/set2 main/off, \"skills\" with \
+                                 heal/utilities/elite, \"rune\", \"sigils\", \"relic\", \
+                                 \"stat_prefix\", \"explanation\". Empty \"specializations\" \
+                                 is not an answer to a build request.",
+                                parsed.explanation
+                            );
+                            let plated = client
+                                .generate_brief(&repair, 8_192)
+                                .ok()
+                                .and_then(|r| gw2_optimizer::prompts::parse_gemini_build(&r).ok())
+                                .filter(|p| !p.specializations.is_empty());
+                            nexus::log::log(
+                                nexus::log::LogLevel::Info,
+                                "GW2BuildOpt",
+                                format!(
+                                    "Choya spoke the build instead of plating it; repair request {}",
+                                    if plated.is_some() {
+                                        "produced a plate"
+                                    } else {
+                                        "did not"
+                                    }
+                                ),
+                            );
+                            if let Some(p) = plated {
+                                repair_used.set(true);
+                                parsed = p;
+                                if let Some(ref cur) = loadout {
+                                    fill_holes_from_loadout(&mut parsed, cur);
+                                }
+                                apply_radar_prefix(&mut parsed, &weights, &message);
+                            }
+                        }
+
                         // A reply with no complete kit is conversation, not a
                         // build. Nothing to rank, nothing to refuse.
                         let mut plate_profession = profession.clone();
@@ -1205,6 +1251,31 @@ fn plate_shortfall(
     ))
 }
 
+/// Whether the player asked for something to equip, as opposed to chatting.
+/// Decides only whether an empty plate is a failure worth one repair
+/// request; a false positive costs one short request, a false negative
+/// costs the player the build.
+pub(super) fn wants_a_build(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    [
+        "build",
+        "loadout",
+        "improve",
+        "gear",
+        "setup",
+        "set up",
+        "spec ",
+        "make me",
+        "give me",
+        "optimi",
+        "rotation",
+        "what should i run",
+        "what should i play",
+    ]
+    .iter()
+    .any(|k| lower.contains(k))
+}
+
 pub(super) fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -> bool {
     // Weapon/prefix typos stay as warnings in the bubble. A complete kit still plates.
     v.specializations.len() == 3
@@ -1216,7 +1287,16 @@ pub(super) fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -
 
 #[cfg(test)]
 mod tests {
-    use super::{gate_vetoes, plate_is_servable};
+    use super::{gate_vetoes, plate_is_servable, wants_a_build};
+
+    #[test]
+    fn a_build_request_is_told_from_chat() {
+        assert!(wants_a_build("Make me a badass Ritualist build."));
+        assert!(wants_a_build("improve this"));
+        assert!(wants_a_build("what should I run in wvw?"));
+        assert!(!wants_a_build("hi choya"));
+        assert!(!wants_a_build("what does Dread do?"));
+    }
     use gw2_optimizer::referee::ViabilityGate as G;
 
     /// In-game 2026-09-06, Necromancer WvW Roam/Support: the deterministic
