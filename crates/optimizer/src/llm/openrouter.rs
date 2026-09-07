@@ -28,6 +28,8 @@ use super::{KeyValidationResult, LlmClient, LlmError, ToolDefinition};
 
 /// OpenRouter's conservative default requests-per-minute ceiling.
 const RPM_LIMIT: u32 = 60;
+/// Deadline for one lookup round on a free model. See `send_chat`.
+const FREE_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
 const OPENROUTER_API_BASE: &str = "https://openrouter.ai/api/v1";
 /// Identify this app in OpenRouter's request logs / leaderboards. Optional
@@ -117,44 +119,24 @@ impl OpenRouterClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, LlmError> {
+        // A free endpoint that takes three minutes on one lookup round is
+        // the run (openrouter/free in-game 2026-09-07: 36 s, 48 s, 179 s,
+        // then the closing request timed out at seven minutes total). A
+        // lookup that slow is abandoned; the loop closes on what it has.
+        let timeout = if self.thrifty() {
+            FREE_LOOKUP_TIMEOUT
+        } else {
+            CHAT_REQUEST_TIMEOUT
+        };
         self.send_chat_capped(
             messages,
             tools,
             MAX_COMPLETION_TOKENS,
             Some(REASONING_EFFORT),
-            CHAT_REQUEST_TIMEOUT,
+            timeout,
             None,
             None,
         )
-    }
-
-    /// A lookup round that must call a tool: `tool_choice: required`, where
-    /// the catalog lists it. Stops a model from narrating its plan instead.
-    fn send_forcing_tools(
-        &self,
-        messages: &[Message],
-        tools: &[ToolDefinition],
-    ) -> Result<Message, LlmError> {
-        match self.send_chat_capped(
-            messages,
-            Some(tools),
-            MAX_COMPLETION_TOKENS,
-            Some(REASONING_EFFORT),
-            CHAT_REQUEST_TIMEOUT,
-            None,
-            Some("required"),
-        ) {
-            // The catalog lists `tool_choice` for the model, but the one
-            // endpoint serving it does not take `required`: 404 "No endpoints
-            // found that support the provided 'tool_choice' value"
-            // (dots-studio/dots-3-note-preview:free, 2026-09-07). The
-            // forcing was a nicety; the turn is not.
-            Err(LlmError::Api {
-                status: 404,
-                message,
-            }) if message.contains("tool_choice") => self.send_chat(messages, Some(tools)),
-            other => other,
-        }
     }
 
     /// The request that writes the plate from what the tool rounds gathered:
@@ -283,10 +265,7 @@ impl super::tool_loop::TurnDriver for OpenRouterClient {
         mode: super::tool_loop::TurnMode,
     ) -> Result<super::tool_loop::Turn, LlmError> {
         let message = match (mode, tools) {
-            (super::tool_loop::TurnMode::Explore { force_tool: true }, Some(tools)) => {
-                self.send_forcing_tools(conv, tools)?
-            }
-            (super::tool_loop::TurnMode::Explore { .. }, tools) => self.send_chat(conv, tools)?,
+            (super::tool_loop::TurnMode::Explore, tools) => self.send_chat(conv, tools)?,
             (super::tool_loop::TurnMode::Closing, _) => self.send_closing(conv)?,
         };
         Ok(super::openai_compat::absorb_turn(conv, message))
@@ -300,11 +279,6 @@ impl super::tool_loop::TurnDriver for OpenRouterClient {
     }
     fn push_user(&self, conv: &mut Vec<Message>, text: &str) {
         super::openai_compat::push_user(conv, text);
-    }
-    fn caps(&self) -> super::tool_loop::LoopCaps {
-        super::tool_loop::LoopCaps {
-            tool_choice: self.caps().supports("tool_choice"),
-        }
     }
     fn cancelled(&self) -> LlmError {
         LlmError::Unavailable(super::cancel::CANCELLED.to_string())
@@ -321,6 +295,13 @@ impl super::tool_loop::TurnDriver for OpenRouterClient {
 }
 
 impl LlmClient for OpenRouterClient {
+    fn thrifty(&self) -> bool {
+        // The catalog's price-is-zero rule first (three free models carry
+        // no `:free` suffix); the id second, because `caps()` on a catalog
+        // miss is `ModelInfo::default()` with `free: false`, and nine
+        // requests is a dear way to discover you were poor.
+        self.caps().free || self.model.ends_with(":free") || self.model == "openrouter/free"
+    }
     fn provider_name(&self) -> &str {
         "OpenRouter"
     }

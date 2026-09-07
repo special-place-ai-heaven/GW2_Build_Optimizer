@@ -4054,6 +4054,10 @@ Verification: `client::` serial suite 39 passed including the cap test; the name
 
 Acceptance: The named test passes after a full `client::tests` serial run, and in isolation. No production cap change.
 
+## Planned follow-up: simulator connections (CONN-00 through CONN-06)
+
+Status: planned only, 2026-09-07. See [Simulator connections and build-quality plan](../../docs/simulator-trust-plan.md). This follow-up traces existing mechanics through data, simulation, referee, AI tools and UI before proposing runtime changes. It does not add to the original audit finding count or reopen verified remedies. Relevant prior work includes B001, W025/W035, W013/W015/W016/W044, W038/W039 and pending W034; reconcile actual overlap during CONN-00. No implementation, test run or in-game acceptance is claimed by this planning entry.
+
 ## Excluded report entries
 
 - R001: rate-tracker duplication refuted by the audit; no change planned.

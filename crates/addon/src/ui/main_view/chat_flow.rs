@@ -394,7 +394,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         // A model the handshake found cannot drive tools is
                         // not asked to: it gets the whole kitchen in one
                         // message and writes the plate from it.
-                        let response = if profile.max_turns() == 0 {
+                        let response = if profile.max_turns(client.thrifty()) == 0 {
                             client
                                 .generate_brief(&prompt, 8_192)
                                 .map_err(|e| e.to_string())?
@@ -426,7 +426,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     // Eight for a model the handshake found
                                     // quick; fewer for a slow one, so the run
                                     // still ends in a plate inside the budget.
-                                    profile.max_turns(),
+                                    profile.max_turns(client.thrifty()),
                                     &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
                                         // How long each round actually took.
                                         // Without it a run that ends on a

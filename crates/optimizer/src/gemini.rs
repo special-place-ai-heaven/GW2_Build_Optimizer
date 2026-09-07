@@ -77,7 +77,7 @@ impl crate::llm::tool_loop::TurnDriver for GeminiClient {
         &self,
         conv: &mut Vec<Content>,
         tools: Option<&[crate::llm::ToolDefinition]>,
-        _mode: crate::llm::tool_loop::TurnMode,
+        mode: crate::llm::tool_loop::TurnMode,
     ) -> Result<crate::llm::tool_loop::Turn, GeminiError> {
         let tools = tools.map(|defs| {
             vec![Tool {
@@ -94,6 +94,11 @@ impl crate::llm::tool_loop::TurnDriver for GeminiClient {
         let content = self.send_request(&GenerateRequest {
             contents: conv.clone(),
             tools,
+            generation_config: matches!(mode, crate::llm::tool_loop::TurnMode::Closing).then(
+                || GenerationConfig {
+                    max_output_tokens: crate::llm::openai_compat::CLOSING_MAX_TOKENS,
+                },
+            ),
         })?;
         let text = content.parts.iter().find_map(|p| p.text.clone());
         let calls = content
@@ -128,11 +133,6 @@ impl crate::llm::tool_loop::TurnDriver for GeminiClient {
             role: Some("user".into()),
             parts: vec![Part::text(text)],
         });
-    }
-    fn caps(&self) -> crate::llm::tool_loop::LoopCaps {
-        // Gemini's `toolConfig.functionCallingConfig.mode: ANY` is the
-        // equivalent and is not wired; the nudge covers it.
-        crate::llm::tool_loop::LoopCaps { tool_choice: false }
     }
     fn cancelled(&self) -> GeminiError {
         GeminiError::Unavailable(CANCELLED.to_string())
@@ -256,10 +256,14 @@ impl RateTracker {
     }
 
     fn rpm_limit(&self) -> u32 {
-        self.rpm_limits
-            .get(&self.model)
-            .copied()
-            .unwrap_or(DEFAULT_RPM)
+        self.stated_rpm().unwrap_or(DEFAULT_RPM)
+    }
+
+    /// The per-minute quota Google has actually stated for this model, if
+    /// any. `None` is not "generous": it is "not yet told", and a fresh
+    /// free-tier key spends its 20-a-day finding out.
+    fn stated_rpm(&self) -> Option<u32> {
+        self.rpm_limits.get(&self.model).copied()
     }
 
     /// Google stated this model's per-minute quota in a 429; keep it.
@@ -501,6 +505,16 @@ struct GenerateRequest {
     contents: Vec<Content>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<Tool>>,
+    /// Set on the closing turn only: the plate is ~600 tokens, and a model
+    /// left uncapped has reasoned for minutes on that request.
+    #[serde(rename = "generationConfig", skip_serializing_if = "Option::is_none")]
+    generation_config: Option<GenerationConfig>,
+}
+
+#[derive(Serialize)]
+struct GenerationConfig {
+    #[serde(rename = "maxOutputTokens")]
+    max_output_tokens: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -1018,9 +1032,23 @@ impl GeminiClient {
         Ok(text)
     }
 
+    /// Whether a run should spend as few requests as it can. Yes until
+    /// Google has stated a per-minute quota at or above the default: an
+    /// assumed 10 is not evidence that eight lookups are affordable, and a
+    /// paid key loses nothing but a few lookups the reference already
+    /// covers.
+    pub fn thrifty(&self) -> bool {
+        self.rate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .stated_rpm()
+            .is_none_or(|stated| stated < DEFAULT_RPM)
+    }
+
     /// Send a prompt to Gemini (no caching). Checks rate limits first.
     pub fn generate(&self, prompt: &str) -> Result<String, GeminiError> {
         let request = GenerateRequest {
+            generation_config: None,
             contents: vec![Content {
                 role: Some("user".into()),
                 parts: vec![Part::text(prompt)],
@@ -1121,6 +1149,7 @@ impl GeminiClient {
                 next_delay = doubled_backoff(next_delay);
             }
 
+            crate::llm::HTTP_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let resp = match self.stream_request(request).send() {
                 Ok(r) => r,
                 Err(e) => {
@@ -1770,6 +1799,7 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         let client = GeminiClient::new("test-key-not-a-real-one", "gemini-2.5-flash")
             .expect("client builds offline");
         let generate = GenerateRequest {
+            generation_config: None,
             contents: vec![Content {
                 role: Some("user".into()),
                 parts: vec![Part::text("hi")],
@@ -2046,7 +2076,9 @@ mod minute_quota_tests {
     fn a_learned_limit_paces_the_next_run_and_survives_a_reload() {
         let mut t = RateTracker::new().for_model("gemini-3.8-flash");
         assert_eq!(t.rpm_limit(), DEFAULT_RPM);
+        assert_eq!(t.stated_rpm(), None, "a default is not a statement");
         t.learn_rpm(5);
+        assert_eq!(t.stated_rpm(), Some(5));
         for _ in 0..5 {
             t.check_and_reserve().expect("under the learned limit");
         }
@@ -2065,5 +2097,35 @@ mod minute_quota_tests {
             DEFAULT_RPM,
             "one model's quota is not another's"
         );
+    }
+}
+
+#[cfg(test)]
+mod closing_cap_tests {
+    use super::*;
+
+    /// The closing turn caps the reply; lookup turns do not send the field.
+    #[test]
+    fn only_the_closing_turn_carries_an_output_cap() {
+        let closing = GenerateRequest {
+            contents: vec![],
+            tools: None,
+            generation_config: Some(GenerationConfig {
+                max_output_tokens: crate::llm::openai_compat::CLOSING_MAX_TOKENS,
+            }),
+        };
+        let json = serde_json::to_string(&closing).unwrap();
+        assert!(
+            json.contains("\"generationConfig\":{\"maxOutputTokens\":8192}"),
+            "{json}"
+        );
+        let lookup = GenerateRequest {
+            contents: vec![],
+            tools: None,
+            generation_config: None,
+        };
+        assert!(!serde_json::to_string(&lookup)
+            .unwrap()
+            .contains("generationConfig"));
     }
 }

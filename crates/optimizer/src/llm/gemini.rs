@@ -143,6 +143,9 @@ fn strip_unsupported_schema_keywords(mut schema: Value) -> Value {
 }
 
 impl LlmClient for GeminiLlmClient {
+    fn thrifty(&self) -> bool {
+        self.inner.thrifty()
+    }
     fn provider_name(&self) -> &str {
         "Gemini"
     }

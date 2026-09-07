@@ -16,6 +16,9 @@ The evening's question was why no free model produced a build any more. The answ
 - Free models on OpenRouter think at low effort. A free reasoning model given medium spent its whole closing budget thinking and returned nothing.
 - Settings says how to get more free models on OpenRouter: some are hidden unless the account allows prompt sharing with their providers, which is a switch at openrouter.ai/settings/privacy, not in the addon.
 - The Free switch in Settings now also filters the model list in the Choya row.
+- A run on a free model, or on a Gemini key whose quota Google has not stated as generous, is now two lookup rounds and the plate: about five requests including the handshake, where it was six to ten. Measured on the same free model, four runs before took 46 to 199 seconds; three runs after took 30 to 86, all with a valid build. The instructions no longer tell the model to confirm with a tool what the profession reference in front of it already says, and no longer force a tool call on the first turn.
+- A free endpoint that takes minutes on one lookup no longer takes the whole run with it: a lookup on a free model is abandoned after 90 seconds and Choya plates from what it has. One in-game run had sat 179 seconds on a single lookup and then timed out writing the build.
+- Gemini's closing request now carries an output cap, so a model that reasons at length cannot spend minutes on it.
 - `cargo run -p gw2-optimizer --example choya_live -- <provider> <model>` runs the real contract against the configured keys and prints PASS or FAIL with the request count. This is what "the model works" means from now on.
 
 ## 1.14.0 - 2026-09-07
