@@ -73,6 +73,12 @@ fn main() {
     let prompt = gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
         PROFESSION, "WvW", REQUEST, &kitchen, "English",
     );
+    let prompt = match std::env::var("CHOYA_REQUEST") {
+        Ok(request) => gw2_optimizer::prompts::chat_refinement_prompt_with_tools(
+            PROFESSION, "WvW", &request, &kitchen, "English",
+        ),
+        Err(_) => prompt,
+    };
     let tools = gw2_optimizer::llm::tools::tool_definitions();
     let ctx = ToolContext {
         db: &db,
@@ -187,6 +193,27 @@ fn main() {
                         .collect::<Vec<_>>()
                         .join(" | ")
                 ));
+            }
+            if !validated.errors.is_empty() {
+                return Err(format!(
+                    "{} validation error(s): {}",
+                    validated.errors.len(),
+                    validated
+                        .errors
+                        .iter()
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ));
+            }
+            if validated.weapons.set1.main_hand.is_none()
+                || validated.weapons.set2.main_hand.is_none()
+                || validated.rune.is_none()
+                || validated.relic.is_none()
+                || validated.sigils.len() != 4
+                || validated.gear_slots.map.is_empty()
+            {
+                return Err("plate has missing weapons, upgrades or gear prefixes".to_string());
             }
             Ok(parsed
                 .specializations
