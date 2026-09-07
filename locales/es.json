@@ -127,7 +127,7 @@
   "choya.need_key": "Pon primero una clave de API de IA en Ajustes.",
   "choya.optimize_running": "La optimización sigue en curso. Espera a que termine.",
   "choya.data_loading": "Los datos del juego aún se cargan. Prueba en un momento.",
-  "choya.select_first": "Elige primero un personaje y una build. No puedo sazonar una olla vacía, ni con tuna.",
+  "choya.select_first": "¿Mejorar qué, exactamente? No tienes nada seleccionado. Elige un personaje a la izquierda, luego una pestaña de build y una de equipo, y te diré todo lo que tiene mal. No puedo sazonar una olla vacía, y lo he intentado: tuna, carne de escarabajo, nada se pega.",
   "choya.assistant": "Asistente de builds",
   "setup.title": "CONFIGURACIÓN INICIAL",
   "setup.step_gw2": "Clave GW2",
