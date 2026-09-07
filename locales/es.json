@@ -516,6 +516,7 @@
   "err.bad_key": "Clave API rechazada. Revisa Ajustes.",
   "err.billing": "Problema de facturación o cuota. Revisa la cuenta o cambia de proveedor.",
   "err.timeout": "Tiempo agotado. Prueba un modelo más grande/rápido.",
+  "choya.fallback_reference": "El modelo se quedó sin tiempo. Esta es la build propia del optimizador para lo que pediste, comprobada por el árbitro:",
   "err.overloaded": "Proveedor saturado. Reintenta o elige otro modelo.",
   "fmt.internal_panic": "Error interno (panic): {msg}",
   "err.opt_panic": "Error interno: el hilo de optimización falló",

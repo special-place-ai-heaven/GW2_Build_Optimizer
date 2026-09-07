@@ -522,6 +522,7 @@
   "err.bad_key": "API key rejected. Check Settings.",
   "err.billing": "Billing or quota issue on this provider. Check the account or switch provider.",
   "err.timeout": "Request timed out. Try a larger/faster model.",
+  "choya.fallback_reference": "The model ran out of time. This is the optimizer's own build for what you asked, checked by the referee:",
   "err.overloaded": "Provider is overloaded. Retry or pick another model.",
   "fmt.internal_panic": "Internal error (panic): {msg}",
   "err.opt_panic": "Internal error: optimization thread panicked",

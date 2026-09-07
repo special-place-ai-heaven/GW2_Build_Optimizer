@@ -516,6 +516,7 @@
   "err.bad_key": "API 密钥被拒绝，请检查设置。",
   "err.billing": "该提供商存在计费或额度问题，请检查账户或更换提供商。",
   "err.timeout": "请求超时，请尝试更大或更快的模型。",
+  "choya.fallback_reference": "模型超时了。这是优化器自己为你的请求生成的构建，已经过裁判检查：",
   "err.overloaded": "提供商负载过高，请重试或更换模型。",
   "fmt.internal_panic": "内部错误（panic）：{msg}",
   "err.opt_panic": "内部错误：优化线程发生 panic",

@@ -78,7 +78,18 @@ impl OpenAiClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
     ) -> Result<Message, LlmError> {
-        self.send_chat_capped(messages, tools, MAX_COMPLETION_TOKENS)
+        self.send_chat_capped(messages, tools, MAX_COMPLETION_TOKENS, CHAT_REQUEST_TIMEOUT)
+    }
+
+    /// The request that writes the plate: small cap, its own deadline. See
+    /// [`super::openai_compat::CLOSING_MAX_TOKENS`].
+    fn send_closing(&self, messages: &[Message]) -> Result<Message, LlmError> {
+        self.send_chat_capped(
+            messages,
+            None,
+            super::openai_compat::CLOSING_MAX_TOKENS,
+            super::openai_compat::CLOSING_REQUEST_TIMEOUT,
+        )
     }
 
     /// `send_chat` with an explicit completion budget (see `generate_brief`).
@@ -87,6 +98,7 @@ impl OpenAiClient {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
         max_tokens: u32,
+        request_timeout: std::time::Duration,
     ) -> Result<Message, LlmError> {
         let extra_headers: [(&str, String); 0] = [];
         let is_cancelled = super::cancel::is_cancelled;
@@ -107,7 +119,7 @@ impl OpenAiClient {
             reasoning_effort: None,
             supports_provider_prefs: false,
             require_tool_endpoints: tools.is_some(),
-            request_timeout: CHAT_REQUEST_TIMEOUT,
+            request_timeout,
             max_retries: 2,
             is_cancelled: &is_cancelled,
         };
@@ -249,7 +261,7 @@ impl LlmClient for OpenAiClient {
             tool_call_id: None,
             reasoning_details: None,
         }];
-        let response = self.send_chat_capped(&messages, None, max_tokens)?;
+        let response = self.send_chat_capped(&messages, None, max_tokens, CHAT_REQUEST_TIMEOUT)?;
         response
             .content
             .ok_or_else(|| LlmError::Parse("No response text from OpenAI".into()))
@@ -283,6 +295,7 @@ impl LlmClient for OpenAiClient {
         }];
 
         let gathering_until = std::time::Instant::now() + super::openai_compat::TOOL_PHASE_BUDGET;
+        let mut last_round = std::time::Duration::ZERO;
         for turn in 0..max_turns {
             // Between turns as well as inside the stream: a tool loop is up to
             // max_turns whole requests, so checking only inside one of them
@@ -292,16 +305,17 @@ impl LlmClient for OpenAiClient {
             }
             // Out of clock for lookups. Every tool result so far is already in
             // `messages`, so the closing request below answers from them.
-            if turn > 0 && std::time::Instant::now() >= gathering_until {
+            if turn > 0 && std::time::Instant::now() + last_round >= gathering_until {
                 break;
             }
             trim_openai_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
+            let round_started = std::time::Instant::now();
             let response = match self.send_chat(&messages, Some(tools)) {
                 Ok(response) => response,
                 // The model cannot drive our tools at all. Losing the whole
                 // conversation over that is worse than answering without them.
                 Err(e) if is_function_call_failure(&e) => {
-                    self.send_chat(&closing_request(&messages), None)?
+                    self.send_closing(&closing_request(&messages))?
                 }
                 // One round ran out its deadline. Earlier rounds gathered real
                 // tool results and throwing them away to report a stopwatch is
@@ -354,6 +368,7 @@ impl LlmClient for OpenAiClient {
                     reasoning_details: None,
                 });
             }
+            last_round = round_started.elapsed();
         }
 
         // Turns exhausted while the model was still calling tools. Every tool
@@ -369,7 +384,7 @@ impl LlmClient for OpenAiClient {
         on_progress(max_turns, max_turns, &[]);
         let mut messages = closing_request(&messages);
         trim_openai_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
-        self.send_chat(&messages, None)?
+        self.send_closing(&messages)?
             .content
             .filter(|text| !text.is_empty())
             .ok_or_else(|| {
