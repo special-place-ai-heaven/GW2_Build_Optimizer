@@ -87,6 +87,7 @@ fn main() {
         current_build_summary: Some(kitchen.as_str()),
         weights: weights.clone(),
         balance_ctx: &balance,
+        scenario: gw2_optimizer::scenario::ScenarioSpec::from_balance_context(&balance),
     };
     println!(
         "prompt {} chars (~{} tokens), {} tools",
