@@ -101,7 +101,11 @@ const CONDITION_DURATION_MS: u32 = 10_000;
 ///
 /// The enemy's answer to Alacrity, and the reason a condition that deals no
 /// damage at all can still be the one that kills you.
-const CHILLED_RECHARGE_PERCENT: u32 = 34;
+// Wiki `Chilled` (read 2026-09-07): "for every 1.66 seconds chilled, only 1
+// second of cooldown will have expired" — a 60% recharge rate. The tooltip's
+// "cooldown increased by 66%" is the same fact from the other side; it is
+// not a 34% rate.
+const CHILLED_RECHARGE_PERCENT: u32 = 60;
 
 /// How long the opener's Chill sits on you.
 ///
@@ -116,7 +120,11 @@ pub const TARGET_PROTECTED_WINDOW_MS: u32 = 5_000;
 const BARRIER_LIFETIME_MS: u32 = 5_000;
 const WVW_BARRIER_HEALTH_FRACTION: f64 = 0.25;
 /// Wiki Interrupt: interrupted skills get a 5 second cooldown.
-const INTERRUPT_COOLDOWN_MS: u32 = 5_000;
+// Wiki `Activation time` (edited 2026-07-30) and `Channeled skill` say an
+// interrupted activation puts the skill on a 4-second recharge; `Skill` and
+// `Interrupt` (edited 2026-02-19) say 5. The wiki disagrees with itself; the
+// newest page wins until someone measures it.
+const INTERRUPT_COOLDOWN_MS: u32 = 4_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResourceKind {
@@ -357,6 +365,8 @@ struct TimedDefense {
     expires_at_ms: u32,
     stacks: u32,
     strippable: bool,
+    /// First application. Extensions do not touch it — strips go by this.
+    applied_at_ms: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -746,6 +756,16 @@ impl<'a> Timeline<'a> {
             return;
         }
         self.pending = None;
+        // Wiki `Skill` (read 2026-09-07): "Once the activation is complete a
+        // skill will enter a recharge time before it may be used again."
+        // ponytail: channels really start recharging at the start of their
+        // active phase (wiki `Channeled skill`); we have no phase data, so a
+        // channel's recharge runs late by its channel length here.
+        {
+            let skill = &self.skills[pending.skill_idx];
+            let (skill_id, cooldown_ms) = (skill.skill_id, skill.cooldown_ms);
+            self.set_skill_cooldown(skill_id, cooldown_ms);
+        }
         self.successful_action_count += 1;
         let protected_before = pending.protected_at_start || pending.saved_by_charge;
         let first_damage_event = self.damage_events.len();
@@ -797,7 +817,9 @@ impl<'a> Timeline<'a> {
             skill.cast_time_ms
         }
         .max(TIMELINE_TICK_MS);
-        self.set_skill_cooldown(skill.skill_id, skill.cooldown_ms);
+        // Recharge starts when the cast resolves, not here — see
+        // `resolve_pending_cast`. An interrupted cast gets the short interrupt
+        // recharge instead, which only works if the full one is not yet set.
         self.pending = Some(PendingCast {
             skill_idx,
             started_at_ms: self.now_ms,
@@ -1061,13 +1083,17 @@ impl<'a> Timeline<'a> {
     }
 
     fn receive_boon_strip(&mut self, count: u32) {
+        // Generic strips are last-in-first-out over first application
+        // (community-tested, not dev-stated: MetaBattle WvW Firebrand guide,
+        // forum 153106, read 2026-09-07). Corrupts are random since the
+        // 2015-06-23 patch; the enemy script only strips, so no random path.
         for _ in 0..count {
             let Some((idx, _)) = self
                 .defenses
                 .iter()
                 .enumerate()
                 .filter(|(_, defense)| defense.strippable)
-                .min_by_key(|(_, defense)| defense.expires_at_ms)
+                .max_by_key(|(_, defense)| defense.applied_at_ms)
             else {
                 break;
             };
@@ -1170,7 +1196,7 @@ impl<'a> Timeline<'a> {
 
     fn tick_conditions(&mut self) {
         let mut outgoing_damage = 0.0;
-        let might = self.buff_stacks("Might").min(25) as f64;
+        let might = self.buff_stacks("Might") as f64;
         let condition_damage = self.params.condition_damage
             + might * crate::data::boon_condition_formulas::boons().might_condi_per_stack();
         for condition in &mut self.outgoing_conditions {
@@ -1234,7 +1260,7 @@ impl<'a> Timeline<'a> {
                 hit_count,
                 dmg_multiplier,
             } => {
-                let might = self.buff_stacks("Might").min(25) as f64;
+                let might = self.buff_stacks("Might") as f64;
                 let power = self.params.power
                     + might * crate::data::boon_condition_formulas::boons().might_power_per_stack();
                 let fury_bonus = if self.has_buff("Fury") {
@@ -1416,6 +1442,12 @@ impl<'a> Timeline<'a> {
         } else {
             duration_ms
         };
+        // Wiki `Effect stacking`: most boons cap at 30 s remaining, Swiftness
+        // at 60 s, Might/Aegis/Regeneration uncapped — data/formulas/boons.json.
+        let duration = match crate::data::boons().get(name).and_then(|b| b.max_duration) {
+            Some(cap_s) => duration.min(cap_s * 1_000),
+            None => duration,
+        };
         self.buffs.push(TimedBuff {
             name: name.into(),
             stacks,
@@ -1443,6 +1475,7 @@ impl<'a> Timeline<'a> {
                 expires_at_ms: self.at(duration_ms),
                 stacks,
                 strippable,
+                applied_at_ms: self.now_ms,
             });
         }
     }
@@ -1656,11 +1689,18 @@ impl<'a> Timeline<'a> {
     }
 
     fn buff_stacks(&self, name: &str) -> u32 {
-        self.buffs
+        let total: u32 = self
+            .buffs
             .iter()
             .filter(|buff| buff.name.eq_ignore_ascii_case(name) && buff.expires_at_ms > self.now_ms)
             .map(|buff| buff.stacks)
-            .sum()
+            .sum();
+        // Stack caps come from data/formulas/boons.json (wiki: Might and
+        // Stability 25, duration-stacking boons 1) rather than an inline 25.
+        match crate::data::boons().get(name) {
+            Some(def) => total.min(def.max_stacks),
+            None => total,
+        }
     }
 
     fn cleanse(&mut self, count: u32) {
@@ -3544,7 +3584,7 @@ mod tests {
     }
 
     #[test]
-    fn interrupt_sets_five_second_cooldown() {
+    fn interrupt_sets_four_second_cooldown() {
         let skills = vec![skill(
             1,
             SkillSlot::Weapon2,
@@ -3567,12 +3607,151 @@ mod tests {
             0,
         );
         timeline.start_cast(0);
-        assert_eq!(timeline.cooldown_ready_ms[0], 30_000);
+        assert_eq!(
+            timeline.cooldown_ready_ms[0], 0,
+            "no recharge until the cast resolves"
+        );
         timeline.now_ms = 200;
         timeline.receive_control(900, false);
         assert_eq!(timeline.interrupted_casts, 1);
         assert!(timeline.pending.is_none());
-        assert_eq!(timeline.cooldown_ready_ms[0], 5_200);
+        assert_eq!(timeline.cooldown_ready_ms[0], 4_200);
+    }
+
+    #[test]
+    fn recharge_starts_when_the_cast_resolves() {
+        let skills = vec![skill(
+            1,
+            SkillSlot::Weapon2,
+            1_000,
+            30_000,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        )];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.start_cast(0);
+        timeline.now_ms = 1_000;
+        timeline.resolve_pending_cast();
+        assert!(timeline.pending.is_none());
+        assert_eq!(timeline.cooldown_ready_ms[0], 31_000);
+    }
+
+    #[test]
+    fn a_strip_takes_the_most_recently_applied_boon() {
+        let skills = vec![skill(
+            1,
+            SkillSlot::Weapon2,
+            1_000,
+            30_000,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        )];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        // Stability first with a long duration, Protection second and short:
+        // the soonest-expiring rule would take Protection, LIFO takes it too —
+        // so extend Stability afterwards to prove extension does not re-sort.
+        timeline.apply_buff("Stability", 3, 20_000, false);
+        timeline.now_ms = 1_000;
+        timeline.apply_buff("Protection", 1, 5_000, false);
+        timeline.now_ms = 2_000;
+        timeline.apply_buff("Stability", 3, 20_000, false);
+        timeline.receive_boon_strip(1);
+        let kinds: Vec<CoverKind> = timeline.defenses.iter().map(|d| d.kind).collect();
+        assert!(kinds.contains(&CoverKind::Stability), "{kinds:?}");
+        assert!(!kinds.contains(&CoverKind::Protection), "{kinds:?}");
+    }
+
+    #[test]
+    fn boon_duration_caps_follow_the_wiki() {
+        let skills = vec![skill(
+            1,
+            SkillSlot::Weapon2,
+            1_000,
+            30_000,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        )];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.apply_buff("Fury", 1, 90_000, false);
+        timeline.apply_buff("Swiftness", 1, 90_000, false);
+        timeline.apply_buff("Might", 1, 90_000, false);
+        let expires = |t: &Timeline, name: &str| {
+            t.buffs
+                .iter()
+                .find(|b| b.name == name)
+                .map(|b| b.expires_at_ms)
+                .unwrap()
+        };
+        assert_eq!(expires(&timeline, "Fury"), 30_000);
+        assert_eq!(expires(&timeline, "Swiftness"), 60_000);
+        assert_eq!(expires(&timeline, "Might"), 90_000);
+    }
+
+    #[test]
+    fn might_stacks_cap_at_the_wiki_twenty_five() {
+        let skills = vec![skill(
+            1,
+            SkillSlot::Weapon2,
+            1_000,
+            30_000,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 1,
+                dmg_multiplier: 1.0,
+            }],
+        )];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.apply_buff("Might", 20, 10_000, false);
+        timeline.apply_buff("Might", 10, 10_000, false);
+        assert_eq!(timeline.buff_stacks("Might"), 25);
+        timeline.apply_buff("Fury", 1, 10_000, false);
+        timeline.apply_buff("Fury", 1, 10_000, false);
+        assert_eq!(timeline.buff_stacks("Fury"), 1);
     }
 
     #[test]

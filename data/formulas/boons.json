@@ -22,7 +22,6 @@
   "Might": {
     "stacking_mode": "Intensity",
     "max_stacks": 25,
-    "max_duration": 30,
     "effect_class": "OffensiveStat",
     "effects": {
       "all_modes": {
@@ -111,7 +110,6 @@
   "Aegis": {
     "stacking_mode": "Duration",
     "max_stacks": 1,
-    "max_duration": 30,
     "effect_class": "Defensive",
     "effects": {
       "all_modes": {}
@@ -152,7 +150,6 @@
   "Regeneration": {
     "stacking_mode": "Duration",
     "max_stacks": 1,
-    "max_duration": 30,
     "effect_class": "Sustain",
     "effects": {
       "all_modes": {}
