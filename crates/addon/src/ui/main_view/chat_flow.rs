@@ -91,13 +91,16 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     let switched_profession = wished_profession
         .as_ref()
         .is_some_and(|p| !p.eq_ignore_ascii_case(&profession));
+    let named_a_spec = wished_profession.is_some();
     if let (true, Some(p)) = (switched_profession, wished_profession) {
         profession = p;
     }
-    // "Improve my build" with no character and no build selected and no
-    // specialization named: there is nothing to improve, and no model call
-    // can find out what the player meant. Say so, in Choya's voice.
-    if no_character && profession == "unknown" && asks_about_own_build(&message) {
+    // "Improve my build" with no character, or a character with no build
+    // and equipment resolved, and no specialization named: there is nothing
+    // to improve, and no model call can find out what the player meant. Say
+    // so, in Choya's voice. A named specialization bypasses this: that is a
+    // build request, and the selection on the left does not matter to it.
+    if no_character && !named_a_spec && asks_about_own_build(&message) {
         crate::ui::chat_bar::add_ai_response(&mut state.main.chat, t("choya.select_first"));
         return;
     }
