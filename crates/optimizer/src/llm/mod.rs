@@ -9,6 +9,7 @@ pub mod gemini;
 pub mod openai;
 pub(crate) mod openai_compat;
 pub mod openrouter;
+pub mod profile;
 pub(crate) mod rate;
 pub(crate) mod response_cache;
 pub(crate) mod sse;
@@ -57,6 +58,10 @@ pub struct ModelInfo {
     pub supported_efforts: Vec<String>,
     /// Total context, when published.
     pub context_length: Option<u32>,
+    /// Everything the catalog says the model's endpoints accept - `tools`,
+    /// `response_format`, `structured_outputs`, `reasoning`, ... Empty means
+    /// unpublished (OpenAI, Anthropic, Google do not list it).
+    pub supported_parameters: Vec<String>,
     /// Artificial Analysis' agentic score, when published.
     ///
     /// The closest published measure of what this addon asks a model to do:
@@ -84,6 +89,7 @@ impl Default for ModelInfo {
             max_completion_tokens: None,
             supported_efforts: Vec::new(),
             context_length: None,
+            supported_parameters: Vec::new(),
             agentic_index: None,
             coding_index: None,
             expires: None,
@@ -132,6 +138,12 @@ impl ModelInfo {
     }
 
     /// How many completion tokens to ask for, given our own ceiling.
+    /// Whether the catalog lists `param` for this model. Unpublished is
+    /// `false`: a request shape the catalog cannot vouch for is not sent.
+    pub fn supports(&self, param: &str) -> bool {
+        self.supported_parameters.iter().any(|p| p == param)
+    }
+
     pub fn completion_budget(&self, ours: u32) -> u32 {
         self.max_completion_tokens.map_or(ours, |cap| ours.min(cap))
     }
@@ -568,24 +580,28 @@ mod tool_arg_tests {
         assert!(ok.usable());
 
         let no_tools = ModelInfo {
+            supported_parameters: Vec::new(),
             tools: false,
             ..ok.clone()
         };
         assert!(!no_tools.usable(), "we send tools on every request");
 
         let audio = ModelInfo {
+            supported_parameters: Vec::new(),
             text_output: false,
             ..ok.clone()
         };
         assert!(!audio.usable(), "a music model is not a chat model");
 
         let batch = ModelInfo {
+            supported_parameters: Vec::new(),
             id: "google/gemini-3.8-flash:batch".into(),
             ..ok.clone()
         };
         assert!(!batch.usable(), "answers within 24 hours, not now");
 
         let retiring = ModelInfo {
+            supported_parameters: Vec::new(),
             expires: Some("2026-09-10".into()),
             ..ok.clone()
         };
@@ -595,6 +611,7 @@ mod tool_arg_tests {
         // correctly, not a reason to hide the model — pruning these would
         // cost half the free catalogue.
         let small = ModelInfo {
+            supported_parameters: Vec::new(),
             max_completion_tokens: Some(8_192),
             supported_efforts: vec!["low".into()],
             ..ok

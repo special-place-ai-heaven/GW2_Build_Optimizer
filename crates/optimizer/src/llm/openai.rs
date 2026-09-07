@@ -119,6 +119,8 @@ impl OpenAiClient {
             reasoning_effort: None,
             supports_provider_prefs: false,
             require_tool_endpoints: tools.is_some(),
+            provider_sort: None,
+            response_format: None,
             request_timeout,
             max_retries: 2,
             is_cancelled: &is_cancelled,
