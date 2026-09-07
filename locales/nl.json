@@ -127,6 +127,7 @@
   "choya.need_key": "Stel eerst een AI-API-sleutel in bij Instellingen.",
   "choya.optimize_running": "Optimalisatie loopt nog. Wacht tot die klaar is.",
   "choya.data_loading": "Spelgegevens laden nog. Probeer het zo opnieuw.",
+  "choya.select_first": "Kies eerst een personage en een build. Een lege pan kan ik niet kruiden, zelfs niet met cactusvijg.",
   "choya.assistant": "Build-assistent",
   "setup.title": "EERSTE INSTALLATIE",
   "setup.step_gw2": "GW2-sleutel",

@@ -129,6 +129,7 @@
   "choya.need_key": "Set an AI API key in Settings first.",
   "choya.optimize_running": "Optimize is still running. Wait for it to finish.",
   "choya.data_loading": "Game data is still loading. Try again in a moment.",
+  "choya.select_first": "Select a character and a build first. I can't season an empty pot - not even a prickly pear.",
   "choya.assistant": "Build assistant",
   "setup.title": "FIRST-TIME SETUP",
   "setup.step_lang": "Language",

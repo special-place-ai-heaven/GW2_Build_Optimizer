@@ -76,6 +76,32 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         }
     }
 
+    // A specialization the player names decides the profession, over the
+    // character on the left. Scourge equipped and "make me a ritualist" is
+    // still a Necromancer; a Guardian selected and "make me a ritualist" is
+    // a Necromancer build with nothing equipped to compare against.
+    let no_character = state.main.current_build.is_none();
+    let wished_profession: Option<String> = state.main.game_db.as_deref().and_then(|db| {
+        let wished = wished_elite_spec(db, &message)?;
+        db.specializations
+            .values()
+            .find(|s| s.elite && s.name.eq_ignore_ascii_case(&wished))
+            .map(|s| s.profession.clone())
+    });
+    let switched_profession = wished_profession
+        .as_ref()
+        .is_some_and(|p| !p.eq_ignore_ascii_case(&profession));
+    if let (true, Some(p)) = (switched_profession, wished_profession) {
+        profession = p;
+    }
+    // "Improve my build" with no character and no build selected and no
+    // specialization named: there is nothing to improve, and no model call
+    // can find out what the player meant. Say so, in Choya's voice.
+    if no_character && profession == "unknown" && asks_about_own_build(&message) {
+        crate::ui::chat_bar::add_ai_response(&mut state.main.chat, t("choya.select_first"));
+        return;
+    }
+
     state.main.chat_epoch = state.main.chat_epoch.wrapping_add(1);
     let epoch = state.main.chat_epoch;
     state.main.chat.waiting = true;
@@ -84,12 +110,16 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     state.main.optimize_stage = t("choya.thinking");
 
     let config = state.config.clone();
-    let character = state
-        .main
-        .current_build
-        .as_ref()
-        .map(summarize_resolved_build)
-        .unwrap_or_default();
+    let character = if switched_profession {
+        String::new()
+    } else {
+        state
+            .main
+            .current_build
+            .as_ref()
+            .map(summarize_resolved_build)
+            .unwrap_or_default()
+    };
     let game_mode_label = state.main.game_mode.label().to_string();
     let scale = if state.main.game_mode == gw2_core::types::GameMode::WvW {
         state.main.combat_tier.label()
@@ -142,7 +172,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     let addon_dir = state.addon_dir.clone();
     let db_clone = clone_game_db_for_worker(&state.main.game_db);
     let weights = state.main.weights.clone();
-    let loadout = state.main.current_build.clone();
+    let loadout = if switched_profession {
+        None
+    } else {
+        state.main.current_build.clone()
+    };
     // The plate is ranked before it is served, so the chat path needs the same
     // scenario the Improve button builds — same tier mapping, same role
     // profile. Without one there is nothing for the referee to judge against.
@@ -320,6 +354,13 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                              least, then beat it on what they actually said. If you \
                              depart from it, be able to say why.",
                         );
+                    }
+
+                    // Who on the account can wear this. Only when the plate is
+                    // not for the selected character: a named specialization
+                    // of another profession, or no character at all.
+                    if switched_profession || no_character {
+                        kitchen.push_str(&roster_note(&addon_dir, &profession));
                     }
 
                     // Handed over, not fetched. See `profession_reference`:
@@ -1318,6 +1359,67 @@ pub(super) fn wants_a_build(message: &str) -> bool {
     .any(|k| lower.contains(k))
 }
 
+/// Whether the message is about the player's own equipped build rather than
+/// a build they describe: "improve this", "my current build", "what I have
+/// on". Only meaningful when nothing is selected, where it decides between
+/// asking them to pick a character and composing blind.
+pub(super) fn asks_about_own_build(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    [
+        "improve",
+        "my build",
+        "my current",
+        "this build",
+        "this character",
+        "equipped",
+        "what i have",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+/// One line about the player's own characters for a build not tied to the
+/// selected one: who could wear it, or that nobody on the account can yet.
+/// Read from the character cache, so it costs no API call.
+fn roster_note(addon_dir: &std::path::Path, profession: &str) -> String {
+    let cache = gw2_api::cache::DataCache::new(addon_dir.join("cache"));
+    let names = cache.load_characters().ok().flatten().unwrap_or_default();
+    let roster: Vec<(String, String)> = names
+        .iter()
+        .filter_map(|name| {
+            let tabs: serde_json::Value = cache.load_character(name, "buildtabs").ok()??;
+            let prof = tabs
+                .as_array()?
+                .iter()
+                .find_map(|t| t["build"]["profession"].as_str().map(String::from))?;
+            Some((name.clone(), prof))
+        })
+        .collect();
+    let wearers: Vec<&str> = roster
+        .iter()
+        .filter(|(_, p)| p.eq_ignore_ascii_case(profession))
+        .map(|(n, _)| n.as_str())
+        .collect();
+    if roster.is_empty() {
+        return String::new();
+    }
+    if wearers.is_empty() {
+        let others: Vec<String> = roster.iter().map(|(n, p)| format!("{n} ({p})")).collect();
+        format!(
+            "\nThe player has no {profession} on this account (their characters: {}). Plate the \
+             {profession} build they asked for anyway, say in one clause that they have no \
+             {profession} yet, and do not refuse. There is no equipped gear to compare against.\n",
+            others.join(", ")
+        )
+    } else {
+        format!(
+            "\nThe player's {profession} characters: {}. This build is for one of them; they \
+             have not selected that character, so there is no equipped gear to compare against.\n",
+            wearers.join(", ")
+        )
+    }
+}
+
 /// The elite specialization the player named in their message, if any and
 /// not negated ("not scourge", "no scourge"). Matched on whole words against
 /// the game data, so "reaper" in "grim reaper of a build" still counts and
@@ -1350,7 +1452,19 @@ pub(super) fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -
 
 #[cfg(test)]
 mod tests {
-    use super::{gate_vetoes, plate_is_servable, wants_a_build, wished_elite_spec};
+    use super::{
+        asks_about_own_build, gate_vetoes, plate_is_servable, wants_a_build, wished_elite_spec,
+    };
+
+    #[test]
+    fn improving_nothing_is_told_from_asking_for_something() {
+        assert!(asks_about_own_build(
+            "Improve my current equipped build. Keep the playstyle, raise the weak axes."
+        ));
+        assert!(asks_about_own_build("can you improve this?"));
+        assert!(!asks_about_own_build("Make me a badass Ritualist build."));
+        assert!(!asks_about_own_build("Build me a WvW roaming loadout."));
+    }
 
     fn necro_db() -> gw2_optimizer::gamedb::GameDb {
         let mut db = gw2_optimizer::gamedb::GameDb::empty_for_tests();

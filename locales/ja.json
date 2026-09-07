@@ -127,6 +127,7 @@
   "choya.need_key": "まず設定でAIのAPIキーを設定してください。",
   "choya.optimize_running": "最適化がまだ実行中です。完了するまで待ってください。",
   "choya.data_loading": "ゲームデータを読み込み中です。しばらくしてから再試行してください。",
+  "choya.select_first": "まずキャラクターとビルドを選んでください。空っぽの鍋には味付けできません。ウチワサボテンの実でもね。",
   "choya.assistant": "ビルドアシスタント",
   "setup.title": "初期セットアップ",
   "setup.step_gw2": "GW2キー",
