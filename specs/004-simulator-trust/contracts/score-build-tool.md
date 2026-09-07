@@ -9,8 +9,8 @@ Provider-neutral tool exposed to Choya through `gemini_tools::tool_declarations(
   "gear_prefix": "Marauder",                 // optional, legacy prefix-only mode
   "build": {                                 // optional; when present, full-build mode
     "specializations": [{"name": "Spite", "traits": ["Spiteful Talisman", "Chill of Death", "Signets of Suffering"]}, ...],
-    "weapons": {"set1": {"main_hand": "Greatsword"}, "set2": {"main_hand": "Axe", "off_hand": "Focus"}},
-    "skills": ["Signet of Vampirism", ...],
+    "weapons": {"set1": {"main": "Greatsword", "off": null}, "set2": {"main": "Axe", "off": "Focus"}},
+    "skills": {"heal": "Signet of Vampirism", "utilities": ["Well of Suffering", "Well of Darkness", "\"You Are All Weaklings!\""], "elite": "\"Chilled to the Bone!\""},
     "rune": "Superior Rune of the Scholar",
     "sigils": ["Superior Sigil of Fire", "Superior Sigil of Force", "...", "..."],
     "relic": "Relic of the Thief",
@@ -20,7 +20,7 @@ Provider-neutral tool exposed to Choya through `gemini_tools::tool_declarations(
   }
 }
 ```
-Field names and semantics are exactly those of the plate the model already emits (`prompts::GeminiBuildResponse`). Scenario and game mode are NOT arguments; they come from the addon's current `ScenarioSpec` and `BalanceContext`.
+Field names and semantics are exactly those of the plate the model already emits, as read by `prompts::parse_gemini_build` (weapons as `set1`/`set2` objects with `main`/`off`, skills as `heal`/`utilities`/`elite`, sigils as a four-name array or a `set1_main`… map). `ToolContext.scenario` is an owned `ScenarioSpec` (like `weights`), not a reference. Scenario and game mode are NOT arguments; they come from the addon's current `ScenarioSpec` and `BalanceContext`.
 
 ## Response
 

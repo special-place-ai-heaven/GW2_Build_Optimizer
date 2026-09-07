@@ -546,8 +546,15 @@ struct Timeline<'a> {
     combo_activations: u32,
     proc_specs: Vec<ProcSpec>,
     unmodeled_proc_keys: HashSet<(u8, u32)>,
-    /// Every source not simulated, `"{name} ({why})"`, deduplicated.
+    /// Every source the timeline itself could not simulate, `"{name} ({why})"`,
+    /// deduplicated. Reported first: these are the mechanics a player would
+    /// expect to see executed.
     unmodeled_names: Vec<String>,
+    /// Equipped sources with no record for this mode, named by the caller.
+    /// Reported after `unmodeled_names`: most traits and every weapon skill
+    /// have no proc record, so this list is long and least specific
+    /// (CONN-01-06).
+    no_record_names: Vec<String>,
     trace_enabled: bool,
     trace: Vec<TraceEvent>,
     trace_truncated: bool,
@@ -652,7 +659,8 @@ impl<'a> Timeline<'a> {
             combo_activations: 0,
             proc_specs: Vec::new(),
             unmodeled_proc_keys: HashSet::new(),
-            unmodeled_names: unmodeled_sources,
+            unmodeled_names: Vec::new(),
+            no_record_names: unmodeled_sources,
             trace_enabled: false,
             trace: Vec::new(),
             trace_truncated: false,
@@ -1791,6 +1799,9 @@ impl<'a> Timeline<'a> {
         for name in self.unmodeled_names.clone() {
             self.trace(TraceKind::ProcUnmodeled, &name, "no firing site");
         }
+        for name in self.no_record_names.clone() {
+            self.trace(TraceKind::ProcUnmodeled, &name, "no record");
+        }
     }
 
     fn skill_name(&self, skill_id: u32) -> String {
@@ -2143,7 +2154,12 @@ impl<'a> Timeline<'a> {
             resource_blocked_actions: self.resource_blocked_skills.len() as u32,
             resource_legal: self.resource_blocked_skills.is_empty(),
             resource_model_complete: self.resource_model_complete,
-            unmodeled_sources: self.unmodeled_names.clone(),
+            unmodeled_sources: self
+                .unmodeled_names
+                .iter()
+                .chain(&self.no_record_names)
+                .cloned()
+                .collect(),
             trace: self.trace.clone(),
             trace_truncated: self.trace_truncated,
         }
@@ -4542,14 +4558,26 @@ mod reaper_experiments {
         let fight = engine::simulate_prepared_traced(&prepared, &build, &db, Some(&scenario))
             .wvw
             .expect("WvW");
+        let record_events: Vec<&TraceEvent> = fight
+            .trace
+            .iter()
+            .filter(|e| {
+                e.source.starts_with("Signet of Undeath")
+                    && (matches!(e.kind, TraceKind::ProcFired | TraceKind::ProcSkippedIcd)
+                        || (e.kind == TraceKind::ProcUnmodeled && e.detail == "unsupported proc"))
+            })
+            .collect();
+        assert!(
+            record_events.is_empty(),
+            "a PvE-only record is never loaded as a proc under WvW: {record_events:?}"
+        );
         assert!(
             fight
-                .trace
+                .unmodeled_sources
                 .iter()
-                .all(|e| !(e.source.starts_with("Signet of Undeath")
-                    && matches!(e.kind, TraceKind::ProcFired | TraceKind::ProcSkippedIcd))),
-            "a PvE-only record neither fires nor waits on cooldown under WvW: {:?}",
-            fight.trace
+                .any(|s| s == "Signet of Undeath (no record)"),
+            "under WvW the skill is an equipped source with no record, not a loaded proc: {:?}",
+            fight.unmodeled_sources
         );
 
         // (b) Sigil of Fire stowed on weapon set 2 while set 1 is worn is
@@ -4785,6 +4813,41 @@ mod reaper_experiments {
                 .any(|s| s == "Superior Sigil of Fire (on-crit)"),
             "the report names the unmodeled source: {:?}",
             with_fire.unmodeled_sources
+        );
+    }
+    // ── Fixture records against the runtime's own semantics ─────────────────
+
+    #[test]
+    fn reaper_fixture_records_follow_runtime_semantics() {
+        let p = prepared();
+        let records = fx::records();
+        let refs: Vec<&NormalizedEffect> = records.iter().collect();
+        let report = run(
+            &p.skills,
+            &p.params,
+            &p.opener,
+            &refs,
+            open_profile(15_000, vec![]),
+        );
+        assert!(
+            !events(&report, TraceKind::ProcFired, "Path of Corruption").is_empty(),
+            "the OnHit record fires"
+        );
+        assert!(
+            report
+                .unmodeled_sources
+                .iter()
+                .any(|s| s == "Superior Sigil of Fire (on-crit)"),
+            "the OnCrit record is named, not fired: {:?}",
+            report.unmodeled_sources
+        );
+        assert!(
+            report
+                .unmodeled_sources
+                .iter()
+                .all(|s| !s.starts_with("Superior Sigil of Force")),
+            "the passive record is folded into SimParams upstream and never listed: {:?}",
+            report.unmodeled_sources
         );
     }
 }

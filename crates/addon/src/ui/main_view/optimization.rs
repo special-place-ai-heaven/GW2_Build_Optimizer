@@ -6,7 +6,6 @@ use gw2_optimizer::balance::BalanceContext;
 /// Convert a SynergyResult from the new pipeline into a BuildSuggestion for display.
 // Display adapter; db, profession, scenario, role, and result are distinct
 // inputs threaded straight through — a params struct adds no clarity here.
-#[allow(clippy::too_many_arguments)]
 /// The coverage detail of the referee's `wvw_timeline.effects` reason: the
 /// names after `Not simulated: `, ready for the `quality.coverage_line`
 /// locale key. The referee is the one source; every projection reads it.
@@ -24,6 +23,7 @@ pub(super) fn coverage_note_from(
         })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn synergy_result_to_suggestion(
     result: &gw2_optimizer::engine::SynergyResult,
     db: &gw2_optimizer::gamedb::GameDb,

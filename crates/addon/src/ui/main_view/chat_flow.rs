@@ -405,7 +405,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         current_build_summary: Some(kitchen.as_str()),
                         weights: weights.clone(),
                         balance_ctx: &chat_balance_ctx,
+                        scenario: scenario.clone(),
                     };
+                    // Full-build referee evaluations this request may spend
+                    // (CONN-00-11: the referee has no cancellation probe).
+                    let full_build_evaluations = std::cell::Cell::new(0u32);
                     // What the plate has to beat. Ranked once: the player's
                     // gear does not change while Choya is thinking.
                     let baseline = rank_current_build(
@@ -488,6 +492,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                         .unwrap_or(true);
                                         if stale {
                                             return serde_json::json!({"error": "cancelled"});
+                                        }
+                                        if let Some(refusal) =
+                                            full_build_budget(name, args, &full_build_evaluations)
+                                        {
+                                            return refusal;
                                         }
                                         gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx)
                                     },
@@ -1295,6 +1304,28 @@ fn gate_vetoes(
 
 // Every argument is one input the referee needs and none has a sensible
 // default; bundling them into a struct would move the same list one line up.
+/// Full-build `score_build` calls one chat request may make. The referee
+/// runs a gate simulation plus a 60 s flow simulation with no cancellation
+/// probe (CONN-00-11), so the count is the bound.
+pub(super) const FULL_BUILD_EVALUATIONS_PER_REQUEST: u32 = 3;
+
+/// `Some(refusal)` when this call is a full-build `score_build` past the
+/// budget; otherwise counts it (full-build only) and lets it through.
+pub(super) fn full_build_budget(
+    name: &str,
+    args: &serde_json::Value,
+    used: &std::cell::Cell<u32>,
+) -> Option<serde_json::Value> {
+    if name != "score_build" || !args.get("build").is_some_and(|b| b.is_object()) {
+        return None;
+    }
+    if used.get() >= FULL_BUILD_EVALUATIONS_PER_REQUEST {
+        return Some(serde_json::json!({ "error": "evaluation budget spent" }));
+    }
+    used.set(used.get() + 1);
+    None
+}
+
 #[allow(clippy::too_many_arguments)]
 fn plate_shortfall(
     plate: &gw2_optimizer::validation::ValidatedBuild,
@@ -1714,5 +1745,22 @@ mod arc_gamedb_tests {
         // allocation rather than, say, a `&'static` alias of some kind.
         drop(worker_db);
         assert_eq!(Arc::strong_count(&db), 2);
+    }
+    #[test]
+    fn full_build_budget_allows_three_then_refuses() {
+        let used = std::cell::Cell::new(0u32);
+        let full = serde_json::json!({ "build": { "rune": "x" } });
+        let prefix = serde_json::json!({ "gear_prefix": "Marauder" });
+        use super::{full_build_budget, FULL_BUILD_EVALUATIONS_PER_REQUEST};
+        for _ in 0..FULL_BUILD_EVALUATIONS_PER_REQUEST {
+            assert!(full_build_budget("score_build", &full, &used).is_none());
+        }
+        assert_eq!(used.get(), FULL_BUILD_EVALUATIONS_PER_REQUEST);
+        let refused = full_build_budget("score_build", &full, &used).expect("fourth is refused");
+        assert_eq!(refused["error"], "evaluation budget spent");
+        // Prefix-only calls and other tools are never counted or refused.
+        assert!(full_build_budget("score_build", &prefix, &used).is_none());
+        assert!(full_build_budget("get_skill_info", &full, &used).is_none());
+        assert_eq!(used.get(), FULL_BUILD_EVALUATIONS_PER_REQUEST);
     }
 }

@@ -1603,9 +1603,9 @@ fn land_weapon_slot_type(
 /// names of the equipped sources that have no record at all, formatted
 /// `"{name} (no record)"` and sorted, so the report can say what it did not
 /// simulate instead of counting it.
-fn active_normalized_effects<'a>(
+fn active_normalized_effects(
     validated: &ValidatedBuild,
-    rotation_skills: &'a [rotation::RotationSkill],
+    rotation_skills: &[rotation::RotationSkill],
     db: &GameDb,
     mode: &str,
 ) -> (

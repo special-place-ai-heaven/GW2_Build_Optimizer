@@ -111,16 +111,17 @@ fn upgrade_json(id: u32, name: &str, kind: &str, bonuses: &[&str]) -> gw2_api::m
     .expect("fixture upgrade")
 }
 
-/// Spec `id` with three minors (`id*10+1..=3`) and nine majors
-/// (`id*10+11..=19`, three per tier).
+/// Spec `id` with three minors (`id*100+1..=3`) and nine majors
+/// (`id*100+11..=19`, three per tier); a hundred per spec so no spec's
+/// majors collide with the next spec's minors.
 fn spec_json(id: u32, name: &str, elite: bool) -> gw2_api::models::Specialization {
     gw2_api::models::Specialization {
         id,
         name: name.into(),
         profession: "Necromancer".into(),
         elite,
-        minor_traits: (1..=3).map(|n| id * 10 + n).collect(),
-        major_traits: (11..=19).map(|n| id * 10 + n).collect(),
+        minor_traits: (1..=3).map(|n| id * 100 + n).collect(),
+        major_traits: (11..=19).map(|n| id * 100 + n).collect(),
         weapon_trait: None,
         icon: None,
         background: None,
@@ -131,7 +132,7 @@ fn spec_json(id: u32, name: &str, elite: bool) -> gw2_api::models::Specializatio
 
 /// The three selected majors of a spec: tier 1, 2 and 3, first column.
 fn chosen_majors(spec: u32) -> Vec<u32> {
-    vec![spec * 10 + 11, spec * 10 + 14, spec * 10 + 17]
+    vec![spec * 100 + 11, spec * 100 + 14, spec * 100 + 17]
 }
 
 /// A `GameDb` holding exactly the Reaper slice: one profession, three
@@ -147,12 +148,16 @@ pub fn db() -> GameDb {
         (SPEC_REAPER, "Reaper", true),
     ] {
         let spec = spec_json(id, name, elite);
+        // Word names, not "Spite 1.1": the validator's name matcher keys on
+        // letters and would read every numbered major of a spec as one name.
+        const TIERS: [&str; 3] = ["Adept", "Master", "Grandmaster"];
+        const COLUMNS: [&str; 3] = ["Left", "Middle", "Right"];
         for (tier, minor) in spec.minor_traits.iter().enumerate() {
             db.traits.insert(
                 *minor,
                 trait_json(
                     *minor,
-                    &format!("{name} minor {}", tier + 1),
+                    &format!("{name} {} Minor", TIERS[tier]),
                     id,
                     tier as u32 + 1,
                     "Minor",
@@ -161,12 +166,11 @@ pub fn db() -> GameDb {
         }
         for (i, major) in spec.major_traits.iter().enumerate() {
             let tier = (i / 3) as u32 + 1;
-            let column = i % 3 + 1;
             db.traits.insert(
                 *major,
                 trait_json(
                     *major,
-                    &format!("{name} {tier}.{column}"),
+                    &format!("{name} {} {}", TIERS[i / 3], COLUMNS[i % 3]),
                     id,
                     tier,
                     "Major",
@@ -359,6 +363,12 @@ pub fn db() -> GameDb {
             .entry("Necromancer".into())
             .or_default()
             .push(skill.id);
+        // The validator only slots skills with a build-template palette id;
+        // a synthetic 1:1 mapping is enough for that gate.
+        if matches!(skill.slot.as_deref(), Some("Heal" | "Utility" | "Elite")) {
+            db.skill_to_palette.insert(skill.id, skill.id);
+            db.palette_to_skill.insert(skill.id, skill.id);
+        }
         db.skills.insert(skill.id, skill);
     }
 
@@ -494,7 +504,7 @@ fn spec(id: u32, name: &str, elite: bool, db: &GameDb) -> ValidatedSpec {
         elite,
         trait_names: majors.iter().map(|t| db.traits[t].name.clone()).collect(),
         all_trait_ids: (1..=3)
-            .map(|n| id * 10 + n)
+            .map(|n| id * 100 + n)
             .chain(majors.iter().copied())
             .collect(),
         trait_ids: majors,

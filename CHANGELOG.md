@@ -21,6 +21,12 @@ The evening's question was why no free model produced a build any more. The answ
 - Gemini's closing request now carries an output cap, so a model that reasons at length cannot spend minutes on it.
 - `cargo run -p gw2-optimizer --example choya_live -- <provider> <model>` runs the real contract against the configured keys and prints PASS or FAIL with the request count. This is what "the model works" means from now on.
 
+### What the simulator did not simulate
+
+- A build's result now says what it did not simulate, by name, instead of counting it: the quality marker on a comparison carries "Not simulated: Superior Sigil of Fire (on-crit), … and N others" beside it, the same line is in Choya's evidence and appended to a plate's concerns, and a plate served by Choya now shows the referee's Provisional / Verified marker instead of Verified regardless. Nothing is scored differently; the line qualifies, it does not penalise.
+- Choya can ask for the app's own verdict on a whole build: `score_build` takes the complete plate and returns viable, the gate results, the score, the six realized axes, the data quality and the coverage line, computed by the same validated-build and referee path the app uses. The old prefix-only form still works and says so. Three such evaluations per chat request. `simulate_rotation` now says it estimates a skill list on an open dummy and is not a full-build verdict.
+- `docs/simulator-connection-audit.md`: the first slice (Necromancer Reaper, WvW) traced end to end, with the findings, the 8 × 8 matrix and seven kinds of causal experiment behind the line above.
+
 ## 1.14.0 - 2026-09-07
 
 Every number in this release was checked against a wiki page, and the page is named at the constant it justifies. Where the wiki has no dev statement, the code says "community-tested" rather than pretending.

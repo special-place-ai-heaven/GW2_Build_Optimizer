@@ -26,6 +26,9 @@ fn main() {
         current_build_summary: None,
         weights: gw2_optimizer::scoring::OptimizationWeights::preset_power_dps(),
         balance_ctx: &gw2_optimizer::balance::BalanceContext::new(gw2_core::types::GameMode::WvW),
+        scenario: gw2_optimizer::scenario::ScenarioSpec::from_balance_context(
+            &gw2_optimizer::balance::BalanceContext::new(gw2_core::types::GameMode::WvW),
+        ),
     };
 
     let est = |s: &str| s.bytes().filter(|b| b.is_ascii()).count() / 4;
