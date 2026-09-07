@@ -422,11 +422,17 @@ fn render_api_keys_section(ui: &Ui, state: &mut AddonState, col_w: f32) {
 /// to a chat model, they are noise in a list someone has to read.
 fn model_catalog(state: &AddonState) -> Vec<gw2_optimizer::llm::ModelInfo> {
     if !state.main.available_models.is_empty() {
+        // The list is the models that work - tools, text, and a plate the
+        // API can hold to its schema. A model models.dev says cannot be held
+        // to one is left out rather than labelled: a player wants a model,
+        // not a caveat to decode. The one already chosen stays visible so
+        // nothing disappears from under them.
+        let current = state.config.active_model_id();
         return state
             .main
             .available_models
             .iter()
-            .filter(|m| m.usable())
+            .filter(|m| m.usable() && (m.structured_output != Some(false) || m.id == current))
             .cloned()
             .collect();
     }
@@ -499,15 +505,7 @@ fn render_model_combo(
             }
             visible += 1;
             let sel = *mid == current_model;
-            // A model that cannot be held to the plate's schema still works -
-            // the plate comes from a repair request - but the player should
-            // know why it is slower and rarer to get right the first time.
-            let shown = if model.structured_output == Some(false) {
-                format!("{label} · {}", t("settings.model_no_schema"))
-            } else {
-                label.clone()
-            };
-            if Selectable::new(&shown).selected(sel).build(ui) {
+            if Selectable::new(label).selected(sel).build(ui) {
                 state.config.set_active_model_id(mid.clone());
                 state.main.provider_issue = None;
                 crate::ui::save_config_detached(state);

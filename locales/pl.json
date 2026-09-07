@@ -516,7 +516,6 @@
   "err.bad_key": "Klucz API odrzucony. Sprawdź Ustawienia.",
   "err.billing": "Problem z rozliczeniem lub limitem u tego dostawcy. Sprawdź konto lub zmień dostawcę.",
   "err.timeout": "Upłynął limit czasu żądania. Spróbuj większego/szybszego modelu.",
-  "settings.model_no_schema": "brak ustrukturyzowanego wyjścia",
   "choya.fallback_reference": "Modelowi zabrakło czasu. Oto własny build optymalizatora dla twojej prośby, sprawdzony przez sędziego:",
   "err.overloaded": "Dostawca jest przeciążony. Spróbuj ponownie lub wybierz inny model.",
   "fmt.internal_panic": "Błąd wewnętrzny (panika): {msg}",

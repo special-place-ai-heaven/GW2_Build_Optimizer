@@ -516,7 +516,6 @@
   "err.bad_key": "Chiave API rifiutata. Controlla Impostazioni.",
   "err.billing": "Problema di fatturazione o quota su questo fornitore. Controlla l'account o cambia fornitore.",
   "err.timeout": "Richiesta scaduta. Prova un modello più grande/veloce.",
-  "settings.model_no_schema": "nessun output strutturato",
   "choya.fallback_reference": "Il modello ha esaurito il tempo. Questa è la build dell'ottimizzatore per ciò che hai chiesto, verificata dall'arbitro:",
   "err.overloaded": "Il fornitore è sovraccarico. Riprova o scegli un altro modello.",
   "fmt.internal_panic": "Errore interno (panic): {msg}",

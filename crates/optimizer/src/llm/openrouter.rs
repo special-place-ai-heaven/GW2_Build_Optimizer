@@ -19,8 +19,8 @@ use serde_json::Value;
 
 use super::body::{json_capped, read_body_capped};
 use super::openai_compat::{
-    closing_request, http_client, is_function_call_failure, send_chat, Message, ProviderCore,
-    CHAT_REQUEST_TIMEOUT, MAX_COMPLETION_TOKENS, METADATA_TIMEOUT, REASONING_EFFORT,
+    http_client, send_chat, Message, ProviderCore, CHAT_REQUEST_TIMEOUT, MAX_COMPLETION_TOKENS,
+    METADATA_TIMEOUT, REASONING_EFFORT,
 };
 use super::rate::{persist_usage, PersistedUsage, RateTracker};
 use super::trim::trim_openai_messages;
@@ -124,6 +124,25 @@ impl OpenRouterClient {
             Some(REASONING_EFFORT),
             CHAT_REQUEST_TIMEOUT,
             None,
+            None,
+        )
+    }
+
+    /// A lookup round that must call a tool: `tool_choice: required`, where
+    /// the catalog lists it. Stops a model from narrating its plan instead.
+    fn send_forcing_tools(
+        &self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+    ) -> Result<Message, LlmError> {
+        self.send_chat_capped(
+            messages,
+            Some(tools),
+            MAX_COMPLETION_TOKENS,
+            Some(REASONING_EFFORT),
+            CHAT_REQUEST_TIMEOUT,
+            None,
+            Some("required"),
         )
     }
 
@@ -158,12 +177,16 @@ impl OpenRouterClient {
             None,
             super::openai_compat::CLOSING_REQUEST_TIMEOUT,
             response_format,
+            None,
         )
     }
 
     /// `send_chat` with an explicit completion budget. `generate_brief` passes
     /// a small cap and no reasoning budget so a three-line answer cannot think
     /// for minutes.
+    // Eight knobs because eight things vary per request; a struct would be
+    // the same eight lines at every call site.
+    #[allow(clippy::too_many_arguments)]
     fn send_chat_capped(
         &self,
         messages: &[Message],
@@ -172,6 +195,7 @@ impl OpenRouterClient {
         reasoning_effort: Option<&'static str>,
         request_timeout: std::time::Duration,
         response_format: Option<Value>,
+        tool_choice: Option<&'static str>,
     ) -> Result<Message, LlmError> {
         let extra_headers = [
             ("HTTP-Referer", OPENROUTER_HTTP_REFERER.to_string()),
@@ -189,6 +213,7 @@ impl OpenRouterClient {
         // `high` — our old constant `medium` was simply invalid there.
         let reasoning_effort = reasoning_effort.and_then(|preferred| caps.effort(preferred));
         let core = ProviderCore {
+            tool_choice,
             http: &self.http,
             rate: &self.rate,
             api_key: &self.api_key,
@@ -220,6 +245,62 @@ impl OpenRouterClient {
 
     fn persist_usage(&self, rate: &RateTracker) {
         persist_usage(self.usage_path.as_deref(), rate);
+    }
+}
+
+impl super::tool_loop::TurnDriver for OpenRouterClient {
+    type Conv = Vec<Message>;
+    type Err = LlmError;
+
+    fn open(&self, prompt: &str) -> Vec<Message> {
+        let mut conv = Vec::new();
+        super::openai_compat::push_user(&mut conv, prompt);
+        conv
+    }
+    fn trim(&self, conv: &mut Vec<Message>) {
+        trim_openai_messages(conv, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
+    }
+    fn turn(
+        &self,
+        conv: &mut Vec<Message>,
+        tools: Option<&[ToolDefinition]>,
+        mode: super::tool_loop::TurnMode,
+    ) -> Result<super::tool_loop::Turn, LlmError> {
+        let message = match (mode, tools) {
+            (super::tool_loop::TurnMode::Explore { force_tool: true }, Some(tools)) => {
+                self.send_forcing_tools(conv, tools)?
+            }
+            (super::tool_loop::TurnMode::Explore { .. }, tools) => self.send_chat(conv, tools)?,
+            (super::tool_loop::TurnMode::Closing, _) => self.send_closing(conv)?,
+        };
+        Ok(super::openai_compat::absorb_turn(conv, message))
+    }
+    fn push_tool_results(
+        &self,
+        conv: &mut Vec<Message>,
+        results: &[(super::tool_loop::ToolCall, Value)],
+    ) {
+        super::openai_compat::push_tool_results(conv, results);
+    }
+    fn push_user(&self, conv: &mut Vec<Message>, text: &str) {
+        super::openai_compat::push_user(conv, text);
+    }
+    fn caps(&self) -> super::tool_loop::LoopCaps {
+        super::tool_loop::LoopCaps {
+            tool_choice: self.caps().supports("tool_choice"),
+        }
+    }
+    fn cancelled(&self) -> LlmError {
+        LlmError::Unavailable(super::cancel::CANCELLED.to_string())
+    }
+    fn no_answer(&self, detail: String) -> LlmError {
+        LlmError::Parse(format!("OpenRouter: {detail}"))
+    }
+    fn is_deadline(&self, err: &LlmError) -> bool {
+        super::openai_compat::is_deadline(err)
+    }
+    fn is_function_call_failure(&self, err: &LlmError) -> bool {
+        super::openai_compat::is_function_call_failure(err)
     }
 }
 
@@ -355,6 +436,7 @@ impl LlmClient for OpenRouterClient {
             None,
             CHAT_REQUEST_TIMEOUT,
             None,
+            None,
         )?;
         response
             .content
@@ -380,139 +462,7 @@ impl LlmClient for OpenRouterClient {
         max_turns: usize,
         on_progress: &mut dyn FnMut(usize, usize, &[String]),
     ) -> Result<String, LlmError> {
-        let mut messages = vec![Message {
-            role: "user".to_string(),
-            content: Some(prompt.to_string()),
-            tool_calls: None,
-            tool_call_id: None,
-            reasoning_details: None,
-        }];
-
-        let gathering_until = std::time::Instant::now() + super::openai_compat::TOOL_PHASE_BUDGET;
-        // How long the last round took, so the budget is judged before a
-        // round starts rather than after one has overrun it.
-        let mut last_round = std::time::Duration::ZERO;
-        let mut nudged = false;
-        for turn in 0..max_turns {
-            // Between turns as well as inside the stream: a tool loop is up to
-            // max_turns whole requests, so checking only inside one of them
-            // still leaves the worker running after the flag flips.
-            if super::cancel::is_cancelled() {
-                return Err(LlmError::Unavailable(super::cancel::CANCELLED.to_string()));
-            }
-            // Out of clock for lookups — or about to be, if the next round
-            // takes what the last one did. Every tool result so far is already
-            // in `messages`, so the closing request below answers from them.
-            if turn > 0 && std::time::Instant::now() + last_round >= gathering_until {
-                break;
-            }
-            let round_started = std::time::Instant::now();
-            trim_openai_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
-            let response = match self.send_chat(&messages, Some(tools)) {
-                Ok(response) => response,
-                // The model cannot drive our tools at all. Losing the whole
-                // conversation over that is worse than answering without them.
-                Err(e) if is_function_call_failure(&e) => {
-                    self.send_closing(&closing_request(&messages))?
-                }
-                // One round ran out its deadline. Earlier rounds gathered real
-                // tool results and throwing them away to report a stopwatch is
-                // the worst of both: the player waited and got nothing. Break
-                // to the closing request and answer from what is in hand.
-                Err(e) if super::openai_compat::is_deadline(&e) && turn > 0 => break,
-                Err(e) => return Err(e),
-            };
-
-            // Check for tool calls
-            let tool_calls = match response.tool_calls {
-                Some(ref calls) if !calls.is_empty() => calls.clone(),
-                _ => {
-                    // Done. Only THIS turn's text is the answer: text carried
-                    // by an earlier turn arrived alongside that turn's tool
-                    // calls, which means the model was still working.
-                    // Narration is not an answer. Push what it said, tell it
-                    // to act, and spend one more round - once per run, so a
-                    // genuine prose reply is never chased into a loop.
-                    if !nudged
-                        && turn + 1 < max_turns
-                        && response
-                            .content
-                            .as_deref()
-                            .is_some_and(super::openai_compat::is_narration)
-                    {
-                        nudged = true;
-                        messages.push(response);
-                        messages.push(Message {
-                            role: "user".to_string(),
-                            content: Some(super::openai_compat::CONTINUE_TURN.to_string()),
-                            tool_calls: None,
-                            tool_call_id: None,
-                            reasoning_details: None,
-                        });
-                        last_round = round_started.elapsed();
-                        continue;
-                    }
-                    return response
-                        .content
-                        .filter(|text| !text.is_empty())
-                        .ok_or_else(|| LlmError::Parse("No response text from OpenRouter".into()));
-                }
-            };
-
-            // Report progress
-            let tool_names: Vec<String> = tool_calls
-                .iter()
-                .map(|tc| tc.function.name.clone())
-                .collect();
-            on_progress(turn + 1, max_turns, &tool_names);
-
-            // Add assistant message (with tool_calls) to conversation
-            messages.push(response);
-
-            // Execute each tool call and add responses
-            for tc in &tool_calls {
-                // OpenAI-compat arguments are a JSON *string*. Truncated JSON
-                // is an error the model can retry — not an empty-object run.
-                let result = super::run_tool_or_parse_error(
-                    execute_tool,
-                    &tc.function.name,
-                    &tc.function.arguments,
-                );
-                let result_str = serde_json::to_string(&result).unwrap_or_default();
-
-                messages.push(Message {
-                    role: "tool".to_string(),
-                    content: Some(result_str),
-                    tool_calls: None,
-                    tool_call_id: Some(tc.id.clone()),
-                    reasoning_details: None,
-                });
-            }
-            last_round = round_started.elapsed();
-        }
-
-        // Turns exhausted while the model was still calling tools. Every tool
-        // result is already in `messages`, so one final request with the tools
-        // withheld makes it answer from what it gathered. Returning the last
-        // text seen instead is how a model's turn-1 scratch JSON reached the
-        // chat bubble verbatim (glm-5.3-flash, measured 2026-09-05).
-        if super::cancel::is_cancelled() {
-            return Err(LlmError::Unavailable(super::cancel::CANCELLED.to_string()));
-        }
-        // Empty tool list: the caller renders this as "writing", not as
-        // another lookup round. Without it the UI freezes on (N/N) for the
-        // whole closing request, which is the longest one of the run.
-        on_progress(max_turns, max_turns, &[]);
-        let mut messages = closing_request(&messages);
-        trim_openai_messages(&mut messages, super::trim::SAFE_PROMPT_BUDGET_TOKENS);
-        self.send_closing(&messages)?
-            .content
-            .filter(|text| !text.is_empty())
-            .ok_or_else(|| {
-                LlmError::Parse(format!(
-                    "Tool loop exceeded {max_turns} turns with no answer"
-                ))
-            })
+        super::tool_loop::run(self, prompt, tools, execute_tool, max_turns, on_progress)
     }
 
     fn list_models(&self) -> Result<Vec<super::ModelInfo>, LlmError> {
