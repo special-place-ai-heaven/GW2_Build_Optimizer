@@ -512,11 +512,38 @@ impl ComparisonState {
 /// Mutates suggestion tab + result pane. `db` is used for hover inspect.
 pub fn render_comparison(
     ui: &Ui,
-    current_build: &ResolvedBuild,
+    current_build: Option<&ResolvedBuild>,
     current_stats: Option<&StatBlock>,
     comparison: &mut ComparisonState,
     db: Option<&GameDb>,
 ) {
+    // No character selected: the plate is shown on its own. The "current"
+    // side is an empty build of the plate's profession, so every diff column
+    // reads as "new", and the current/optimized toggle has nothing to
+    // toggle to.
+    let placeholder;
+    let (current_build, has_current) = match current_build {
+        Some(b) => (b, true),
+        None => {
+            let profession = comparison
+                .suggestions
+                .get(comparison.selected_suggestion)
+                .zip(db)
+                .and_then(|(s, db)| {
+                    gw2_optimizer::validation::infer_profession_from_spec_names(
+                        db,
+                        s.specializations.iter().map(|(n, _)| n.as_str()),
+                    )
+                })
+                .unwrap_or_default();
+            placeholder = ResolvedBuild {
+                profession,
+                ..Default::default()
+            };
+            comparison.show_optimized = true;
+            (&placeholder, false)
+        }
+    };
     if comparison.loading {
         ui.text(t("cmp.optimizing"));
         ui.text(t("cmp.ai"));
@@ -571,7 +598,7 @@ pub fn render_comparison(
     render_data_quality_badge(ui, &comparison.suggestions[idx]);
     render_source_link(ui, &comparison.suggestions[idx]);
     render_result_pane_tabs(ui, &mut comparison.result_pane);
-    if comparison.result_pane == ResultPane::Build {
+    if comparison.result_pane == ResultPane::Build && has_current {
         ui.same_line_with_spacing(0.0, 16.0);
         crate::ui::gear_sheet::render_view_toggle(ui, &mut comparison.show_optimized);
     }

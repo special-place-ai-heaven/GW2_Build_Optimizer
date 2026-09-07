@@ -27,11 +27,29 @@ pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
     else {
         return;
     };
+    // The plate's own profession, read from its specializations, so a
+    // build made with no character selected still gets its cards. Taking
+    // it from the selected character left the profession empty and the
+    // cards absent for exactly the player who had nothing else to look at
+    // (a Ritualist plate, three published Ritualist builds, no card,
+    // 2026-09-07).
     let profession = state
         .main
-        .current_build
-        .as_ref()
-        .map(|b| b.profession.clone())
+        .game_db
+        .as_deref()
+        .and_then(|db| {
+            gw2_optimizer::validation::infer_profession_from_spec_names(
+                db,
+                suggestion.specializations.iter().map(|(n, _)| n.as_str()),
+            )
+        })
+        .or_else(|| {
+            state
+                .main
+                .current_build
+                .as_ref()
+                .map(|b| b.profession.clone())
+        })
         .unwrap_or_default();
     let role = state
         .main
