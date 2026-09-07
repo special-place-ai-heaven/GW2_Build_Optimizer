@@ -98,7 +98,8 @@ impl Drop for FontGuard {
 
 /// Register only the face this frame will push. Safe to call every frame.
 ///
-/// English/`auto` returns before touching the atlas.
+/// Only `"game"` returns before touching the atlas; every language, English
+/// included, loads the face `resolve_font_id` picks.
 pub fn init(pref: &str, ui_language: &str) {
     let Some(id) = resolve_font_id(pref, ui_language) else {
         return;
@@ -131,7 +132,7 @@ pub fn init(pref: &str, ui_language: &str) {
         }
         ID_ZH => {
             let zh_cfg = make_cfg(
-                unsafe { ImFontAtlas_GetGlyphRangesChineseSimplifiedCommon(atlas) },
+                with_latin(unsafe { ImFontAtlas_GetGlyphRangesChineseSimplifiedCommon(atlas) }),
                 1,
             );
             try_add(
@@ -142,7 +143,10 @@ pub fn init(pref: &str, ui_language: &str) {
             );
         }
         ID_JA => {
-            let ja_cfg = make_cfg(unsafe { ImFontAtlas_GetGlyphRangesJapanese(atlas) }, 1);
+            let ja_cfg = make_cfg(
+                with_latin(unsafe { ImFontAtlas_GetGlyphRangesJapanese(atlas) }),
+                1,
+            );
             try_add(
                 ID_JA,
                 first_existing(&dir, JA_FILES),
@@ -151,7 +155,10 @@ pub fn init(pref: &str, ui_language: &str) {
             );
         }
         ID_KO => {
-            let ko_cfg = make_cfg(unsafe { ImFontAtlas_GetGlyphRangesKorean(atlas) }, 1);
+            let ko_cfg = make_cfg(
+                with_latin(unsafe { ImFontAtlas_GetGlyphRangesKorean(atlas) }),
+                1,
+            );
             try_add(
                 ID_KO,
                 first_existing(&dir, KO_FILES),
@@ -230,6 +237,39 @@ fn try_add(id: &str, path: Option<PathBuf>, config: Option<&ImFontConfig>, size_
         "GW2 Build Optimizer",
         format!("overlay font {id}: {}", path.display()),
     );
+}
+
+/// ImGui's built-in CJK range lists cover their script plus Latin-1 and stop
+/// there: no General Punctuation, no arrows, no math. A player who picks the
+/// Japanese face for an English UI (`ui_font: "ja"`, seen 2026-09-07) then
+/// reads the model's em dash as '?', exactly the bug the Latin face was
+/// fixed for the day before. Append [`LATIN_RANGES`] to the built-in list so
+/// no face choice can lose the punctuation a language model writes.
+///
+/// The merged list must outlive the atlas build, so it is leaked once per
+/// face — three small allocations for the life of the process.
+fn with_latin(builtin: *const ImWchar) -> *const ImWchar {
+    let mut merged: Vec<ImWchar> = Vec::new();
+    if !builtin.is_null() {
+        let mut i = 0;
+        // Safety: ImGui range lists are 0-terminated pairs.
+        loop {
+            let v = unsafe { *builtin.add(i) };
+            if v == 0 {
+                break;
+            }
+            merged.push(v);
+            i += 1;
+        }
+    }
+    merged.extend(
+        LATIN_RANGES
+            .iter()
+            .copied()
+            .take(LATIN_RANGES.len().saturating_sub(1)),
+    );
+    merged.push(0);
+    Box::leak(merged.into_boxed_slice()).as_ptr()
 }
 
 fn make_cfg(ranges: *const ImWchar, oversample_h: i32) -> ImFontConfig {
