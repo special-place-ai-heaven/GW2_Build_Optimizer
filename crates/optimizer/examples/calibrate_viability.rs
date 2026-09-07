@@ -93,6 +93,7 @@ fn main() {
     let mut no_plate = 0u32;
     let mut bad_examples: Vec<String> = Vec::new();
     let mut scored = 0u32;
+    let mut with_opener = 0u32;
 
     for build in &builds {
         if let Some(ref want) = only_mode {
@@ -119,13 +120,25 @@ fn main() {
         let scenario = scenario_for(build);
         let weights = gw2_optimizer::scoring::OptimizationWeights::default();
         let ctx = gw2_optimizer::balance::BalanceContext::new(scenario.game_mode.clone());
-        let report = gw2_optimizer::referee::evaluate_validated_build(
+        // The page's own rotation line, when it wrote one — the referee then
+        // judges the build on the rotation the site plays, not on the
+        // timeline's guess.
+        let opener = gw2_optimizer::rotation::prose::parse_rotation(
+            &build.published.prose,
+            &build.profession,
+            &db,
+        );
+        if !opener.is_empty() {
+            with_opener += 1;
+        }
+        let report = gw2_optimizer::referee::evaluate_validated_build_with(
             &validated,
             &db,
             &build.profession,
             &weights,
             &ctx,
             &scenario,
+            &opener,
         );
         scored += 1;
 
@@ -200,7 +213,7 @@ fn main() {
     }
 
     println!(
-        "scored {scored}; skipped {no_plate} with no three-spec plate, \
+        "scored {scored} ({with_opener} with a published rotation line); skipped {no_plate} with no three-spec plate, \
          {unusable} that failed validation"
     );
     for note in &bad_examples {

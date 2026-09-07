@@ -4,6 +4,7 @@
 
 pub mod builder;
 pub mod combat_model;
+pub mod prose;
 pub mod simulator;
 pub mod skill_timings;
 pub mod wvw_timeline;

@@ -1587,6 +1587,77 @@ fn clamp_rotation_duration(raw: Option<u64>) -> u32 {
         .unwrap_or(30)
 }
 
+/// Sort a flat skill list into (set 1, set 2, non-weapon) by the weapon each
+/// skill belongs to. Two-handers and main-hand skills (slots 1-3) open a set;
+/// off-hand skills (slots 4-5) join the first set without an off-hand.
+fn split_weapon_sets(
+    skill_ids: &[u32],
+    db: &crate::gamedb::GameDb,
+) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
+    const TWO_HANDED: [&str; 9] = [
+        "Greatsword",
+        "Hammer",
+        "Longbow",
+        "Rifle",
+        "Shortbow",
+        "Staff",
+        "Spear",
+        "Speargun",
+        "Trident",
+    ];
+    let mut sets: [(Option<String>, Option<String>, Vec<u32>); 2] =
+        [(None, None, Vec::new()), (None, None, Vec::new())];
+    let mut other = Vec::new();
+    for &id in skill_ids {
+        let Some(skill) = db.skills.get(&id) else {
+            continue;
+        };
+        let (Some(weapon), Some(slot)) = (skill.weapon_type.as_deref(), skill.slot.as_deref())
+        else {
+            other.push(id);
+            continue;
+        };
+        if !slot.starts_with("Weapon_") {
+            other.push(id);
+            continue;
+        }
+        let two_handed = TWO_HANDED.iter().any(|w| w.eq_ignore_ascii_case(weapon));
+        let main_hand = two_handed || matches!(slot, "Weapon_1" | "Weapon_2" | "Weapon_3");
+        // A weapon already placed keeps its set.
+        let placed = sets.iter().position(|(main, off, _)| {
+            main.as_deref()
+                .is_some_and(|m| m.eq_ignore_ascii_case(weapon))
+                || off
+                    .as_deref()
+                    .is_some_and(|o| o.eq_ignore_ascii_case(weapon))
+        });
+        let target = placed.or_else(|| {
+            if main_hand {
+                sets.iter().position(|(main, _, _)| main.is_none())
+            } else {
+                sets.iter().position(|(_, off, _)| off.is_none())
+            }
+        });
+        let Some(target) = target else {
+            other.push(id);
+            continue;
+        };
+        if placed.is_none() {
+            if main_hand {
+                sets[target].0 = Some(weapon.to_string());
+                if two_handed {
+                    sets[target].1 = Some(weapon.to_string());
+                }
+            } else {
+                sets[target].1 = Some(weapon.to_string());
+            }
+        }
+        sets[target].2.push(id);
+    }
+    let [(_, _, set1), (_, _, set2)] = sets;
+    (set1, set2, other)
+}
+
 fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
     use crate::rotation;
 
@@ -1625,8 +1696,20 @@ fn exec_simulate_rotation(args: &Value, ctx: &ToolContext) -> Value {
     full += &gear_stats;
     let params = rotation_sim_params(&full, ctx.profession_name, ctx.balance_ctx);
 
-    let rotation_skills =
-        rotation::builder::build_rotation_skills_for_context(&skill_ids, ctx.db, ctx.balance_ctx);
+    // The model hands over a flat id list. Weapon skills belong to a set —
+    // two weapons cannot both be in hand — so group them the way the engine
+    // does: first weapon seen is set 1, the next main-hand weapon is set 2,
+    // off-hands fill whichever set still has room. Everything else is set 0.
+    let (set1_ids, set2_ids, other_ids) = split_weapon_sets(&skill_ids, ctx.db);
+    let mut rotation_skills =
+        rotation::builder::build_rotation_skills_for_context(&other_ids, ctx.db, ctx.balance_ctx);
+    let mut set1 =
+        rotation::builder::build_rotation_skills_for_context(&set1_ids, ctx.db, ctx.balance_ctx);
+    rotation::builder::tag_weapon_set(&mut set1, 1);
+    let mut set2 =
+        rotation::builder::build_rotation_skills_for_context(&set2_ids, ctx.db, ctx.balance_ctx);
+    rotation::builder::tag_weapon_set(&mut set2, 2);
+    rotation_skills.extend(rotation::builder::merge_weapon_sets(set1, set2));
 
     if rotation_skills.is_empty() {
         return json!({ "error": "No valid skills found for the provided IDs" });

@@ -5,6 +5,7 @@ pub mod boon_condition_formulas;
 pub mod cleanse_sources;
 #[cfg(test)]
 mod consistency_tests;
+pub mod hit_timing;
 pub mod manifests;
 pub mod modifier_buckets;
 pub mod normalized_effects;

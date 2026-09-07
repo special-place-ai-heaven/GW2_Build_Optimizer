@@ -187,6 +187,9 @@ pub struct WvwCombatReport {
 
 pub struct WvwTimelineInput<'a> {
     pub skills: &'a [RotationSkill],
+    /// The published rotation, as skill ids in press order. Followed while
+    /// it can be; the timeline improvises once it runs out or cannot comply.
+    pub opener: &'a [u32],
     pub duration_ms: u32,
     pub params: &'a SimParams,
     pub enemy: EnemyDummy,
@@ -369,6 +372,15 @@ struct TimedDefense {
     applied_at_ms: u32,
 }
 
+/// One hit of a cast in flight, landing at `at_ms` with its share of the
+/// skill's damage. Cancelled with the cast if the cast is interrupted.
+#[derive(Debug, Clone)]
+struct ScheduledHit {
+    at_ms: u32,
+    skill_id: u32,
+    dmg_multiplier: f64,
+}
+
 #[derive(Debug, Clone)]
 struct TimedBuff {
     name: String,
@@ -456,8 +468,11 @@ struct Timeline<'a> {
     active_weapon_set: u8,
     weapon_swap_ready_ms: u32,
     weapon_swap_cooldown_ms: Option<u32>,
+    opener: &'a [u32],
+    opener_cursor: usize,
     cooldown_ready_ms: Vec<u32>,
     pending: Option<PendingCast>,
+    scheduled_hits: Vec<ScheduledHit>,
     defenses: Vec<TimedDefense>,
     buffs: Vec<TimedBuff>,
     outgoing_conditions: Vec<TimedCondition>,
@@ -501,6 +516,7 @@ struct Timeline<'a> {
 pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
     let WvwTimelineInput {
         skills,
+        opener,
         duration_ms,
         params,
         enemy,
@@ -523,6 +539,7 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
         unmodeled_effect_sources,
     );
     timeline.weapon_swap_cooldown_ms = weapon_swap_cooldown_ms;
+    timeline.opener = opener;
     timeline.run();
     timeline.report()
 }
@@ -553,9 +570,12 @@ impl<'a> Timeline<'a> {
             disabled_until_ms: 0,
             active_weapon_set: 1,
             weapon_swap_ready_ms: 0,
+            opener: &[],
+            opener_cursor: 0,
             weapon_swap_cooldown_ms: Some(10_000),
             cooldown_ready_ms: vec![0; skills.len()],
             pending: None,
+            scheduled_hits: Vec::new(),
             defenses: Vec::new(),
             buffs: Vec::new(),
             outgoing_conditions: Vec::new(),
@@ -664,6 +684,7 @@ impl<'a> Timeline<'a> {
             self.charge_cover_consumed_this_tick = false;
             self.expire_timed_state();
             self.regenerate_resources();
+            self.land_scheduled_hits();
             self.resolve_pending_cast();
             self.tick_conditions();
             self.process_enemy_events();
@@ -684,6 +705,11 @@ impl<'a> Timeline<'a> {
 
             self.now_ms = self.now_ms.saturating_add(TIMELINE_TICK_MS);
             self.tick_recharge_rate();
+        }
+        // A cast that finishes as the window closes still delivered its hits.
+        if self.player_health > 0.0 {
+            self.now_ms = self.now_ms.min(self.profile.duration_ms);
+            self.land_scheduled_hits();
         }
     }
 
@@ -748,6 +774,37 @@ impl<'a> Timeline<'a> {
         }
     }
 
+    /// Land every scheduled hit that is due, in the order they were queued.
+    /// Protection is judged when the hit lands, the same way a resolved cast
+    /// judges it, so a channel that starts inside a window and runs out of it
+    /// splits its hits between the two.
+    fn land_scheduled_hits(&mut self) {
+        if self.scheduled_hits.is_empty() {
+            return;
+        }
+        let protected = self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.protected_at_start || pending.saved_by_charge)
+            || self.control_owned();
+        let mut i = 0;
+        while i < self.scheduled_hits.len() {
+            if self.scheduled_hits[i].at_ms > self.now_ms {
+                i += 1;
+                continue;
+            }
+            let hit = self.scheduled_hits.remove(i);
+            self.apply_skill_effect(
+                hit.skill_id,
+                &SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: hit.dmg_multiplier,
+                },
+                protected,
+            );
+        }
+    }
+
     fn resolve_pending_cast(&mut self) {
         let Some(pending) = self.pending.clone() else {
             return;
@@ -755,6 +812,9 @@ impl<'a> Timeline<'a> {
         if pending.resolves_at_ms > self.now_ms {
             return;
         }
+        // The final hit is scheduled for this very tick; land it before the
+        // cast's other effects so the order matches the game.
+        self.land_scheduled_hits();
         self.pending = None;
         // Wiki `Skill` (read 2026-09-07): "Once the activation is complete a
         // skill will enter a recharge time before it may be used again."
@@ -786,6 +846,10 @@ impl<'a> Timeline<'a> {
             )
         });
         for effect in effects {
+            // Strikes were scheduled at cast start and have landed by now.
+            if matches!(effect, SkillEffect::StrikeDamage { .. }) {
+                continue;
+            }
             self.apply_skill_effect(skill_id, &effect, protected_before);
         }
         self.trigger_procs(TriggerRule::OnSkillUse, Some(skill_id), protected_before);
@@ -817,6 +881,33 @@ impl<'a> Timeline<'a> {
             skill.cast_time_ms
         }
         .max(TIMELINE_TICK_MS);
+        // Strikes land across the activation, not as one lump at the end:
+        // measured spacing where data/formulas/hit_timing.json has it, an
+        // even spread otherwise. Everything else the skill does resolves at
+        // cast end as before.
+        let hits: Vec<ScheduledHit> = skill
+            .effects
+            .iter()
+            .filter_map(|effect| match effect {
+                SkillEffect::StrikeDamage {
+                    hit_count,
+                    dmg_multiplier,
+                } => Some((*hit_count, *dmg_multiplier)),
+                _ => None,
+            })
+            .flat_map(|(hit_count, dmg_multiplier)| {
+                let per_hit = dmg_multiplier / hit_count.max(1) as f64;
+                crate::data::hit_timing::hit_schedule(&skill.name, cast_ms, hit_count)
+                    .into_iter()
+                    .map(move |offset| (offset, per_hit))
+            })
+            .map(|(offset, per_hit)| ScheduledHit {
+                at_ms: self.at(offset),
+                skill_id: skill.skill_id,
+                dmg_multiplier: per_hit,
+            })
+            .collect();
+        self.scheduled_hits.extend(hits);
         // Recharge starts when the cast resolves, not here — see
         // `resolve_pending_cast`. An interrupted cast gets the short interrupt
         // recharge instead, which only works if the full one is not yet set.
@@ -833,6 +924,34 @@ impl<'a> Timeline<'a> {
     }
 
     fn pick_skill(&mut self) -> Option<usize> {
+        // Follow the published rotation while it can be followed. A skill
+        // already on recharge was pressed; one on the other set asks for a
+        // swap when the swap is ready and is skipped when it is not; one the
+        // build cannot pay for hands over to the scorer below.
+        while let Some(&want) = self.opener.get(self.opener_cursor) {
+            let Some(idx) = self.skills.iter().position(|s| s.skill_id == want) else {
+                self.opener_cursor += 1;
+                continue;
+            };
+            if self.cooldown_ready_ms[idx] > self.now_ms {
+                self.opener_cursor += 1;
+                continue;
+            }
+            if !self.skill_available(&self.skills[idx]) {
+                if self.weapon_swap_cooldown_ms.is_some()
+                    && self.now_ms >= self.weapon_swap_ready_ms
+                {
+                    return None;
+                }
+                self.opener_cursor += 1;
+                continue;
+            }
+            if !self.can_pay_resource(want) {
+                break;
+            }
+            self.opener_cursor += 1;
+            return Some(idx);
+        }
         let health_ratio = self.player_health / self.params.max_health.max(1.0);
         let cover_remaining = self.control_cover_remaining_ms();
         let enemy_event_soon = self
@@ -1061,6 +1180,8 @@ impl<'a> Timeline<'a> {
             if pending.started_at_ms < self.now_ms {
                 self.interrupted_casts += 1;
             }
+            // Hits that had not landed yet die with the cast.
+            self.scheduled_hits.clear();
             let skill_id = self.skills[pending.skill_idx].skill_id;
             self.set_skill_cooldown(skill_id, INTERRUPT_COOLDOWN_MS);
         }
@@ -3616,6 +3737,87 @@ mod tests {
         assert_eq!(timeline.interrupted_casts, 1);
         assert!(timeline.pending.is_none());
         assert_eq!(timeline.cooldown_ready_ms[0], 4_200);
+    }
+
+    #[test]
+    fn a_channel_lands_its_hits_across_the_cast_and_loses_the_rest_on_interrupt() {
+        let skills = vec![skill(
+            1,
+            SkillSlot::Weapon2,
+            1_000,
+            30_000,
+            vec![SkillEffect::StrikeDamage {
+                hit_count: 4,
+                dmg_multiplier: 2.0,
+            }],
+        )];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(2_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        timeline.start_cast(0);
+        assert_eq!(timeline.scheduled_hits.len(), 4);
+        timeline.now_ms = 500;
+        timeline.land_scheduled_hits();
+        assert_eq!(timeline.damage_events.len(), 2, "hits at 250 and 500 ms");
+        timeline.receive_control(900, true);
+        assert!(timeline.pending.is_none());
+        assert!(
+            timeline.scheduled_hits.is_empty(),
+            "the last two hits died with the cast"
+        );
+        assert_eq!(timeline.damage_events.len(), 2);
+    }
+
+    #[test]
+    fn the_published_opener_is_pressed_in_order_then_the_scorer_takes_over() {
+        let strike = |id: u32, slot: SkillSlot, mult: f64| {
+            skill(
+                id,
+                slot,
+                500,
+                10_000,
+                vec![SkillEffect::StrikeDamage {
+                    hit_count: 1,
+                    dmg_multiplier: mult,
+                }],
+            )
+        };
+        // The scorer alone would open with the 3.0x skill.
+        let skills = vec![
+            strike(1, SkillSlot::Weapon2, 3.0),
+            strike(2, SkillSlot::Weapon3, 1.0),
+            strike(3, SkillSlot::Weapon4, 1.0),
+        ];
+        let params = params();
+        let mut timeline = Timeline::new(
+            &skills,
+            &params,
+            profile(5_000, vec![]),
+            open_enemy(false),
+            &[],
+            &[],
+            true,
+            0,
+        );
+        let opener = [3u32, 2];
+        timeline.opener = &opener;
+        assert_eq!(timeline.pick_skill(), Some(2), "page says skill 3 first");
+        timeline.set_skill_cooldown(3, 10_000);
+        assert_eq!(timeline.pick_skill(), Some(1), "then skill 2");
+        timeline.set_skill_cooldown(2, 10_000);
+        assert_eq!(
+            timeline.pick_skill(),
+            Some(0),
+            "opener spent: scorer picks the 3.0x"
+        );
     }
 
     #[test]
