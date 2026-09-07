@@ -180,9 +180,44 @@ pub struct WvwCombatReport {
     /// False when the active profession mechanic needs a state model that this
     /// bounded resource ledger does not yet provide.
     pub resource_model_complete: bool,
-    /// Number of equipped effect sources for which the timeline had no timed
-    /// normalized record. This never silently becomes verified data.
-    pub unmodeled_effect_sources: u32,
+    /// Every equipped or triggered effect source the timeline did not
+    /// simulate, as `"{name} ({why})"` — `no record`, `on-crit`,
+    /// `on-skill-use`, `on-health-threshold`, `conditional`, `unresolved
+    /// value`, `unsupported proc`, `partial combo`, `dark field`. Deduplicated.
+    /// This never silently becomes verified data: the referee turns it into
+    /// the `wvw_timeline.effects` coverage reason.
+    pub unmodeled_sources: Vec<String>,
+    /// Bounded event trace. Empty unless [`WvwTimelineInput::trace`] was set;
+    /// capped at [`TRACE_CAP`] events.
+    pub trace: Vec<TraceEvent>,
+    /// True when an event past the cap was dropped.
+    pub trace_truncated: bool,
+}
+
+/// Upper bound on [`WvwCombatReport::trace`]. The 513th event is dropped and
+/// `trace_truncated` is set.
+pub const TRACE_CAP: usize = 512;
+
+/// One observable runtime event, for the causal experiments in
+/// `specs/004-simulator-trust`. Never serialized into a prompt.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraceEvent {
+    pub t_ms: u32,
+    pub kind: TraceKind,
+    /// The skill, trait, sigil or relic name the event belongs to.
+    pub source: String,
+    /// Kind-specific detail: landed damage, proc category, hits lost, set.
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceKind {
+    HitLanded,
+    ProcFired,
+    ProcSkippedIcd,
+    ProcUnmodeled,
+    CastInterrupted,
+    WeaponSwap,
 }
 
 pub struct WvwTimelineInput<'a> {
@@ -197,10 +232,17 @@ pub struct WvwTimelineInput<'a> {
     pub active_effects: &'a [&'a NormalizedEffect],
     pub resource_rules: &'a [SkillResourceRule],
     pub resource_model_complete: bool,
-    pub unmodeled_effect_sources: u32,
+    /// Equipped sources with no record for this mode, already named by the
+    /// caller (`engine::active_normalized_effects`).
+    pub unmodeled_sources: Vec<String>,
     /// Exact in-combat weapon swap cooldown for this profession. `None`
     /// means the active specialization cannot swap weapons in combat.
     pub weapon_swap_cooldown_ms: Option<u32>,
+    /// Record a bounded [`TraceEvent`] log on the report. Diagnostics only:
+    /// no production caller sets this — `engine::simulate_prepared` passes
+    /// `false`, the search and the Choya tools go through it, and nothing
+    /// appends the trace to a prompt (`trace_is_empty_unless_requested`).
+    pub trace: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -449,6 +491,7 @@ struct SecuredSequenceSummary {
 struct ProcSpec {
     source_type: SourceType,
     source_id: u32,
+    source_name: String,
     trigger: TriggerRule,
     category: EffectCategory,
     value: f64,
@@ -502,8 +545,12 @@ struct Timeline<'a> {
     conditions_cleansed: u32,
     combo_activations: u32,
     proc_specs: Vec<ProcSpec>,
-    unmodeled_effect_sources: u32,
     unmodeled_proc_keys: HashSet<(u8, u32)>,
+    /// Every source not simulated, `"{name} ({why})"`, deduplicated.
+    unmodeled_names: Vec<String>,
+    trace_enabled: bool,
+    trace: Vec<TraceEvent>,
+    trace_truncated: bool,
     protection_multiplier: f64,
     resource_rules: HashMap<u32, SkillResourceRule>,
     resources: HashMap<ResourceKind, f64>,
@@ -524,8 +571,9 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
         active_effects,
         resource_rules,
         resource_model_complete,
-        unmodeled_effect_sources,
+        unmodeled_sources,
         weapon_swap_cooldown_ms,
+        trace,
     } = input;
     let profile = WvwProfile::for_scenario(scenario, &enemy, params, duration_ms);
     let mut timeline = Timeline::new(
@@ -536,10 +584,12 @@ pub fn evaluate_wvw_timeline(input: WvwTimelineInput<'_>) -> WvwCombatReport {
         active_effects,
         resource_rules,
         resource_model_complete,
-        unmodeled_effect_sources,
+        unmodeled_sources,
     );
     timeline.weapon_swap_cooldown_ms = weapon_swap_cooldown_ms;
     timeline.opener = opener;
+    timeline.trace_enabled = trace;
+    timeline.trace_loaded_unmodeled();
     timeline.run();
     timeline.report()
 }
@@ -554,7 +604,7 @@ impl<'a> Timeline<'a> {
         active_effects: &[&NormalizedEffect],
         resource_rules: &[SkillResourceRule],
         resource_model_complete: bool,
-        unmodeled_effect_sources: u32,
+        unmodeled_sources: Vec<String>,
     ) -> Self {
         let mut state = Self {
             skills,
@@ -601,8 +651,11 @@ impl<'a> Timeline<'a> {
             conditions_cleansed: 0,
             combo_activations: 0,
             proc_specs: Vec::new(),
-            unmodeled_effect_sources,
             unmodeled_proc_keys: HashSet::new(),
+            unmodeled_names: unmodeled_sources,
+            trace_enabled: false,
+            trace: Vec::new(),
+            trace_truncated: false,
             protection_multiplier: crate::data::boon_condition_formulas::boons()
                 .protection_multiplier(),
             resource_rules: resource_rules
@@ -636,17 +689,22 @@ impl<'a> Timeline<'a> {
                 || (matches!(effect.trigger_rule, TriggerRule::OnSkillUse)
                     && matches!(effect.source_type, SourceType::Skill));
             if !supported {
-                self.unmodeled_effect_sources += 1;
+                self.note_unmodeled(format!(
+                    "{} ({})",
+                    effect.source_name,
+                    trigger_label(&effect.trigger_rule)
+                ));
                 continue;
             }
             let Some(&value) = resolved(&effect.value) else {
-                self.unmodeled_effect_sources += 1;
+                self.note_unmodeled(format!("{} (unresolved value)", effect.source_name));
                 continue;
             };
 
             self.proc_specs.push(ProcSpec {
                 source_type: effect.source_type.clone(),
                 source_id: effect.source_id,
+                source_name: effect.source_name.clone(),
                 trigger: effect.trigger_rule.clone(),
                 category: effect
                     .inner_category
@@ -1052,6 +1110,7 @@ impl<'a> Timeline<'a> {
             self.active_weapon_set = other;
             self.weapon_swap_ready_ms = self.at(cooldown_ms);
             self.next_action_ms = self.at(MIN_SKILL_GAP_MS);
+            self.trace(TraceKind::WeaponSwap, "weapon swap", format!("set {other}"));
         }
     }
 
@@ -1181,8 +1240,17 @@ impl<'a> Timeline<'a> {
                 self.interrupted_casts += 1;
             }
             // Hits that had not landed yet die with the cast.
+            let lost = self.scheduled_hits.len();
             self.scheduled_hits.clear();
             let skill_id = self.skills[pending.skill_idx].skill_id;
+            if self.trace_enabled {
+                let name = self.skill_name(skill_id);
+                self.trace(
+                    TraceKind::CastInterrupted,
+                    &name,
+                    format!("{lost} hits lost"),
+                );
+            }
             self.set_skill_cooldown(skill_id, INTERRUPT_COOLDOWN_MS);
         }
         self.disabled_until_ms = self.disabled_until_ms.max(self.at(duration_ms));
@@ -1402,6 +1470,10 @@ impl<'a> Timeline<'a> {
                     damage *= self.protection_multiplier;
                 }
                 self.record_damage(damage, protected);
+                if self.trace_enabled {
+                    let name = self.skill_name(skill_id);
+                    self.trace(TraceKind::HitLanded, &name, format!("{damage:.1}"));
+                }
                 self.remove_defense(CoverKind::Stealth);
                 self.gain_resource_on_hit(skill_id);
                 self.trigger_procs(TriggerRule::OnHit, Some(skill_id), protected);
@@ -1509,15 +1581,18 @@ impl<'a> Timeline<'a> {
     fn resolve_combo(&mut self, finisher_type: &str, percent: u32) {
         if percent < 100 {
             if percent > 0 {
-                self.unmodeled_effect_sources += 1;
+                self.note_unmodeled(format!("{finisher_type} finisher (partial combo)"));
             }
             return;
         }
         let Some(field) = self.combo_field.as_ref() else {
             return;
         };
-        let field_type = field.field_type.to_lowercase();
+        let field_name = field.field_type.clone();
+        let field_type = field_name.to_lowercase();
         let finisher = finisher_type.to_lowercase();
+        let unmodeled =
+            |why: &str| format!("{field_name} field + {finisher_type} finisher ({why})");
         self.combo_activations += 1;
         if field_type.contains("smoke") {
             if finisher.contains("blast") || finisher.contains("leap") {
@@ -1525,7 +1600,7 @@ impl<'a> Timeline<'a> {
             } else if finisher.contains("projectile") || finisher.contains("whirl") {
                 self.apply_defense(CoverKind::Blind, 3_000, 1, false);
             } else {
-                self.unmodeled_effect_sources += 1;
+                self.note_unmodeled(unmodeled("unmodeled combo"));
             }
         } else if field_type.contains("water") {
             if finisher.contains("blast") {
@@ -1535,25 +1610,25 @@ impl<'a> Timeline<'a> {
             } else {
                 // Projectile/whirl apply regeneration; periodic regeneration
                 // is not represented by this timeline yet.
-                self.unmodeled_effect_sources += 1;
+                self.note_unmodeled(unmodeled("unmodeled combo"));
             }
         } else if field_type.contains("light") {
             if finisher.contains("blast") {
                 self.cleanse(1);
             } else {
-                self.unmodeled_effect_sources += 1;
+                self.note_unmodeled(unmodeled("unmodeled combo"));
             }
         } else if field_type.contains("fire") {
             if finisher.contains("blast") {
                 self.apply_buff("Might", 3, 20_000, true);
             } else {
-                self.unmodeled_effect_sources += 1;
+                self.note_unmodeled(unmodeled("unmodeled combo"));
             }
         } else if field_type.contains("dark") {
             // Dark finishers produce auras or life-steal effects, not Blind.
-            self.unmodeled_effect_sources += 1;
+            self.note_unmodeled(unmodeled("dark field"));
         } else {
-            self.unmodeled_effect_sources += 1;
+            self.note_unmodeled(unmodeled("unmodeled combo"));
         }
     }
 
@@ -1663,7 +1738,7 @@ impl<'a> Timeline<'a> {
         self.now_ms.saturating_add(offset_ms)
     }
 
-    fn note_unmodeled_proc(&mut self, source_type: &SourceType, source_id: u32) {
+    fn note_unmodeled_proc(&mut self, source_type: &SourceType, source_id: u32, name: &str) {
         let tag = match source_type {
             SourceType::Trait => 0,
             SourceType::Skill => 1,
@@ -1671,9 +1746,59 @@ impl<'a> Timeline<'a> {
             SourceType::Sigil => 3,
             SourceType::Relic => 4,
         };
+        // Deduplicated by source key, not by name: two sources may share a
+        // name and still be two lines.
         if self.unmodeled_proc_keys.insert((tag, source_id)) {
-            self.unmodeled_effect_sources += 1;
+            self.unmodeled_names
+                .push(format!("{name} (unsupported proc)"));
+            self.trace(TraceKind::ProcUnmodeled, name, "unsupported proc");
         }
+    }
+
+    /// Record one source the timeline is not simulating. Deduplicated by the
+    /// full `"{name} ({why})"` string, so a combo that resolves every cast
+    /// or a proc that is skipped every hit is one line, not one per tick.
+    fn note_unmodeled(&mut self, name: String) {
+        if !self.unmodeled_names.contains(&name) {
+            self.unmodeled_names.push(name);
+        }
+    }
+
+    /// Append one trace event when tracing is on; the 513th sets
+    /// `trace_truncated` and is dropped.
+    fn trace(&mut self, kind: TraceKind, source: &str, detail: impl Into<String>) {
+        if !self.trace_enabled {
+            return;
+        }
+        if self.trace.len() >= TRACE_CAP {
+            self.trace_truncated = true;
+            return;
+        }
+        self.trace.push(TraceEvent {
+            t_ms: self.now_ms,
+            kind,
+            source: source.into(),
+            detail: detail.into(),
+        });
+    }
+
+    /// The sources `load_normalized_effects` could not model are known before
+    /// tracing is switched on; replay them as events once it is.
+    fn trace_loaded_unmodeled(&mut self) {
+        if !self.trace_enabled {
+            return;
+        }
+        for name in self.unmodeled_names.clone() {
+            self.trace(TraceKind::ProcUnmodeled, &name, "no firing site");
+        }
+    }
+
+    fn skill_name(&self, skill_id: u32) -> String {
+        self.skills
+            .iter()
+            .find(|skill| skill.skill_id == skill_id)
+            .map(|skill| skill.name.clone())
+            .unwrap_or_else(|| format!("skill {skill_id}"))
     }
 
     fn trigger_procs(
@@ -1683,18 +1808,31 @@ impl<'a> Timeline<'a> {
         protected: bool,
     ) {
         let mut ready = Vec::new();
+        let mut on_cooldown = Vec::new();
         for (idx, proc_spec) in self.proc_specs.iter().enumerate() {
             let source_matches = !matches!(proc_spec.source_type, SourceType::Skill)
                 || activating_skill_id == Some(proc_spec.source_id);
-            if same_trigger(&proc_spec.trigger, &trigger)
-                && source_matches
-                && proc_spec.next_ready_ms <= self.now_ms
-            {
-                ready.push(idx);
+            if same_trigger(&proc_spec.trigger, &trigger) && source_matches {
+                if proc_spec.next_ready_ms <= self.now_ms {
+                    ready.push(idx);
+                } else {
+                    on_cooldown.push(idx);
+                }
             }
         }
+        for idx in on_cooldown {
+            let (name, ready_at) = (
+                self.proc_specs[idx].source_name.clone(),
+                self.proc_specs[idx].next_ready_ms,
+            );
+            self.trace(
+                TraceKind::ProcSkippedIcd,
+                &name,
+                format!("ready at {ready_at} ms"),
+            );
+        }
         for idx in ready {
-            let (category, value, duration_ms, operation, cooldown) = {
+            let (category, value, duration_ms, operation, cooldown, name) = {
                 let proc_spec = &mut self.proc_specs[idx];
                 proc_spec.next_ready_ms =
                     self.now_ms.saturating_add(proc_spec.internal_cooldown_ms);
@@ -1704,6 +1842,7 @@ impl<'a> Timeline<'a> {
                     proc_spec.duration_ms,
                     proc_spec.operation.clone(),
                     proc_spec.internal_cooldown_ms,
+                    proc_spec.source_name.clone(),
                 )
             };
             match category {
@@ -1712,6 +1851,7 @@ impl<'a> Timeline<'a> {
                         / reference_armor()
                         * as_ratio(value);
                     self.record_damage(proc_damage, protected);
+                    self.trace(TraceKind::ProcFired, &name, format!("{category:?}"));
                 }
                 EffectCategory::AppliesBoon
                 | EffectCategory::AppliesCondition
@@ -1719,13 +1859,19 @@ impl<'a> Timeline<'a> {
                 | EffectCategory::CorruptsBoon
                 | EffectCategory::RemovesCondition
                 | EffectCategory::ConvertsConditionToBoon
-                | EffectCategory::TransfersCondition => self.apply_operation(operation.as_ref()),
-                EffectCategory::OutgoingHealingPct if duration_ms > 0 => self.heal(value.max(0.0)),
+                | EffectCategory::TransfersCondition => {
+                    self.apply_operation(operation.as_ref());
+                    self.trace(TraceKind::ProcFired, &name, format!("{category:?}"));
+                }
+                EffectCategory::OutgoingHealingPct if duration_ms > 0 => {
+                    self.heal(value.max(0.0));
+                    self.trace(TraceKind::ProcFired, &name, format!("{category:?}"));
+                }
                 _ => {
                     let _ = cooldown;
                     let source_type = self.proc_specs[idx].source_type.clone();
                     let source_id = self.proc_specs[idx].source_id;
-                    self.note_unmodeled_proc(&source_type, source_id);
+                    self.note_unmodeled_proc(&source_type, source_id, &name);
                 }
             }
         }
@@ -1997,7 +2143,9 @@ impl<'a> Timeline<'a> {
             resource_blocked_actions: self.resource_blocked_skills.len() as u32,
             resource_legal: self.resource_blocked_skills.is_empty(),
             resource_model_complete: self.resource_model_complete,
-            unmodeled_effect_sources: self.unmodeled_effect_sources,
+            unmodeled_sources: self.unmodeled_names.clone(),
+            trace: self.trace.clone(),
+            trace_truncated: self.trace_truncated,
         }
     }
 
@@ -2163,6 +2311,18 @@ fn leftover_condition_fraction(condition: &TimedCondition) -> f64 {
     remaining_ms as f64 / 1_000.0
 }
 
+/// Human label for the coverage line: `Superior Sigil of Fire (on-crit)`.
+fn trigger_label(trigger: &TriggerRule) -> &'static str {
+    match trigger {
+        TriggerRule::Passive => "passive",
+        TriggerRule::OnCrit => "on-crit",
+        TriggerRule::OnHit => "on-hit",
+        TriggerRule::OnSkillUse => "on-skill-use",
+        TriggerRule::OnHealthThreshold => "on-health-threshold",
+        TriggerRule::Conditional => "conditional",
+    }
+}
+
 fn same_trigger(left: &TriggerRule, right: &TriggerRule) -> bool {
     matches!(
         (left, right),
@@ -2264,7 +2424,8 @@ mod tests {
         profile: WvwProfile,
         params: &SimParams,
     ) -> WvwCombatReport {
-        let mut timeline = Timeline::new(skills, params, profile, enemy, &[], rules, true, 0);
+        let mut timeline =
+            Timeline::new(skills, params, profile, enemy, &[], rules, true, Vec::new());
         timeline.run();
         timeline.report()
     }
@@ -3082,7 +3243,7 @@ mod tests {
             &[],
             &rules,
             true,
-            0,
+            Vec::new(),
         );
         for _ in 0..3 {
             assert!(timeline.can_pay_resource(1));
@@ -3102,7 +3263,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.outgoing_conditions.push(TimedCondition {
             name: "Bleeding".into(),
@@ -3136,7 +3297,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.apply_defense(CoverKind::Resistance, 2_000, 1, false);
         timeline.receive_condition("Burning".into(), 1, 1_000);
@@ -3161,7 +3322,7 @@ mod tests {
             &[],
             &rules,
             true,
-            0,
+            Vec::new(),
         );
         timeline.disabled_until_ms = 1_000;
         timeline.try_stunbreak();
@@ -3188,7 +3349,7 @@ mod tests {
             &[effect],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.incoming_conditions.push(TimedCondition {
             name: "Burning".into(),
@@ -3220,10 +3381,10 @@ mod tests {
             &[effect],
             &[],
             true,
-            0,
+            Vec::new(),
         );
 
-        assert_eq!(timeline.unmodeled_effect_sources, 1);
+        assert_eq!(timeline.unmodeled_names.len(), 1);
         assert!(timeline.proc_specs.is_empty());
     }
 
@@ -3270,16 +3431,16 @@ mod tests {
             &[&flat, &heal],
             &[],
             true,
-            0,
+            Vec::new(),
         );
-        assert_eq!(timeline.unmodeled_effect_sources, 0);
+        assert_eq!(timeline.unmodeled_names.len(), 0);
         assert_eq!(timeline.proc_specs.len(), 2);
 
         for _ in 0..5 {
             timeline.trigger_procs(TriggerRule::OnHit, None, false);
         }
 
-        assert_eq!(timeline.unmodeled_effect_sources, 2);
+        assert_eq!(timeline.unmodeled_names.len(), 2);
         assert_eq!(timeline.healing, 0.0);
     }
 
@@ -3294,7 +3455,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.now_ms = u32::MAX - 10;
         assert_eq!(timeline.at(20), u32::MAX);
@@ -3312,7 +3473,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         incoming.apply_skill_effect(
             1,
@@ -3335,7 +3496,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         let mut prot = Timeline::new(
             &[],
@@ -3349,7 +3510,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         let strike = SkillEffect::StrikeDamage {
             hit_count: 1,
@@ -3373,7 +3534,7 @@ mod tests {
             &[],
             &rules,
             true,
-            0,
+            Vec::new(),
         );
         for _ in 0..2 {
             assert!(timeline.can_pay_resource(1));
@@ -3397,7 +3558,7 @@ mod tests {
             &[],
             &rules,
             true,
-            0,
+            Vec::new(),
         );
         timeline.resources.insert(ResourceKind::Adrenaline, 0.0);
         assert!(!timeline.can_pay_resource(1));
@@ -3421,7 +3582,7 @@ mod tests {
             &[],
             &rules,
             true,
-            0,
+            Vec::new(),
         );
         assert!(!timeline.can_pay_resource(2));
         timeline.gain_resource_on_hit(1);
@@ -3445,7 +3606,7 @@ mod tests {
             &[],
             &rules,
             true,
-            0,
+            Vec::new(),
         );
         assert!(!timeline.can_pay_resource(2));
         timeline.gain_resource_on_hit(1);
@@ -3470,7 +3631,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
 
         timeline.set_skill_cooldown(42, 5_000);
@@ -3494,7 +3655,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.weapon_swap_cooldown_ms = Some(5_000);
 
@@ -3536,7 +3697,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.apply_defense(CoverKind::Stealth, 3_000, 1, false);
 
@@ -3570,7 +3731,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.apply_buff("Alacrity", 1, 30_000, false);
         timeline.set_skill_cooldown(1, 10_000);
@@ -3611,7 +3772,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.set_skill_cooldown(1, 10_000);
         for _ in 0..40 {
@@ -3652,7 +3813,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.receive_condition("Confusion".into(), 1, 10_000);
         let before = timeline.incoming_damage;
@@ -3685,7 +3846,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         let cap = params.max_health * WVW_BARRIER_HEALTH_FRACTION;
         timeline.apply_barrier(params.max_health);
@@ -3725,7 +3886,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.start_cast(0);
         assert_eq!(
@@ -3760,7 +3921,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.start_cast(0);
         assert_eq!(timeline.scheduled_hits.len(), 4);
@@ -3805,7 +3966,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         let opener = [3u32, 2];
         timeline.opener = &opener;
@@ -3841,7 +4002,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.start_cast(0);
         timeline.now_ms = 1_000;
@@ -3871,7 +4032,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         // Stability first with a long duration, Protection second and short:
         // the soonest-expiring rule would take Protection, LIFO takes it too —
@@ -3908,7 +4069,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.apply_buff("Fury", 1, 90_000, false);
         timeline.apply_buff("Swiftness", 1, 90_000, false);
@@ -3946,7 +4107,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.apply_buff("Might", 20, 10_000, false);
         timeline.apply_buff("Might", 10, 10_000, false);
@@ -4017,7 +4178,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.outgoing_conditions.push(TimedCondition {
             name: "Bleeding".into(),
@@ -4114,9 +4275,9 @@ mod tests {
             &[&effect],
             &[],
             true,
-            0,
+            Vec::new(),
         );
-        assert_eq!(timeline.unmodeled_effect_sources, 1);
+        assert_eq!(timeline.unmodeled_names.len(), 1);
         assert!(timeline.proc_specs.is_empty());
     }
 
@@ -4131,7 +4292,7 @@ mod tests {
             &[],
             &[],
             true,
-            0,
+            Vec::new(),
         );
         timeline.enemy_protection = true;
         timeline.apply_skill_effect(1, &SkillEffect::CorruptBoons, false);
@@ -4146,5 +4307,484 @@ mod tests {
         timeline.apply_skill_effect(1, &SkillEffect::StealBoons, false);
         assert_eq!(timeline.outgoing_conditions.len(), conditions);
         assert_eq!(timeline.buffs.len(), buffs);
+    }
+}
+
+/// Causal experiments on the hand-authored Reaper slice
+/// (`specs/004-simulator-trust`, audit section 6). Each test names its kind.
+/// Every one was seen failing once under the disabling change recorded in
+/// `docs/simulator-connection-audit.md`.
+#[cfg(test)]
+mod reaper_experiments {
+    use super::*;
+    use crate::engine;
+    use crate::rotation::reaper_fixture as fx;
+    use crate::sigil_slots::SigilSlots;
+    use crate::validation::ValidatedBuild;
+
+    fn prepared() -> engine::PreparedRotation {
+        let db = fx::db();
+        let build = fx::build();
+        let (ctx, scenario) = fx::scenario();
+        let (stats, _) = engine::calculate_validated_stats(&build, &db, "Necromancer", &ctx);
+        let mut prepared = engine::prepare_validated_rotation(&build, &db, &stats, Some(&scenario))
+            .expect("the fixture prepares a rotation");
+        prepared.opener = fx::opener();
+        prepared
+    }
+
+    /// The fixture through the production entry point, with the trace on.
+    fn traced(build: &ValidatedBuild, precision: Option<f64>) -> WvwCombatReport {
+        let db = fx::db();
+        let (ctx, scenario) = fx::scenario();
+        let (stats, _) = engine::calculate_validated_stats(build, &db, "Necromancer", &ctx);
+        let mut prepared = engine::prepare_validated_rotation(build, &db, &stats, Some(&scenario))
+            .expect("the fixture prepares a rotation");
+        prepared.opener = fx::opener();
+        if let Some(precision) = precision {
+            prepared.params.precision = precision;
+        }
+        engine::simulate_prepared_traced(&prepared, build, &db, Some(&scenario))
+            .wvw
+            .expect("WvW scenario runs the timeline")
+    }
+
+    fn open_profile(duration_ms: u32, events: Vec<EnemyEvent>) -> WvwProfile {
+        WvwProfile {
+            duration_ms,
+            target_health: None,
+            enemy_events: events.into(),
+            required_window_ms: MIN_PROTECTED_WINDOW_MS,
+            desired_window_ms: TARGET_PROTECTED_WINDOW_MS.min(duration_ms),
+        }
+    }
+
+    fn still_enemy() -> EnemyDummy {
+        EnemyDummy {
+            protection: false,
+            stability: true,
+            hp: None,
+        }
+    }
+
+    /// A pinned run: `opener` pressed in order, no enemy pressure unless the
+    /// profile says so, trace on.
+    fn run(
+        skills: &[RotationSkill],
+        params: &SimParams,
+        opener: &[u32],
+        effects: &[&NormalizedEffect],
+        profile: WvwProfile,
+    ) -> WvwCombatReport {
+        let mut timeline = Timeline::new(
+            skills,
+            params,
+            profile,
+            still_enemy(),
+            effects,
+            &[],
+            false,
+            Vec::new(),
+        );
+        timeline.opener = opener;
+        timeline.trace_enabled = true;
+        timeline.trace_loaded_unmodeled();
+        timeline.run();
+        timeline.report()
+    }
+
+    fn only(skills: &[RotationSkill], ids: &[u32]) -> Vec<RotationSkill> {
+        skills
+            .iter()
+            .filter(|skill| ids.contains(&skill.skill_id))
+            .cloned()
+            .collect()
+    }
+
+    fn events<'a>(
+        report: &'a WvwCombatReport,
+        kind: TraceKind,
+        source: &str,
+    ) -> Vec<&'a TraceEvent> {
+        report
+            .trace
+            .iter()
+            .filter(|event| event.kind == kind && event.source.starts_with(source))
+            .collect()
+    }
+
+    fn landed(report: &WvwCombatReport, skill: &str) -> Vec<f64> {
+        events(report, TraceKind::HitLanded, skill)
+            .iter()
+            .map(|event| event.detail.parse::<f64>().expect("damage detail"))
+            .collect()
+    }
+
+    // ── Diagnostics (T022) ──────────────────────────────────────────────────
+
+    #[test]
+    fn trace_is_empty_unless_requested() {
+        let db = fx::db();
+        let build = fx::build();
+        let (_, scenario) = fx::scenario();
+        let prepared = prepared();
+        let production = engine::simulate_prepared(&prepared, &build, &db, Some(&scenario))
+            .wvw
+            .expect("WvW");
+        assert!(
+            production.trace.is_empty() && !production.trace_truncated,
+            "the production entry point never traces"
+        );
+        let traced = engine::simulate_prepared_traced(&prepared, &build, &db, Some(&scenario))
+            .wvw
+            .expect("WvW");
+        assert!(!traced.trace.is_empty(), "the test entry point does");
+    }
+
+    #[test]
+    fn trace_caps_at_512_and_flags_truncation() {
+        let params = SimParams::basic(2_000.0, 0.0, 1_100.0);
+        let mut timeline = Timeline::new(
+            &[],
+            &params,
+            open_profile(1_000, vec![]),
+            still_enemy(),
+            &[],
+            &[],
+            true,
+            Vec::new(),
+        );
+        timeline.trace_enabled = true;
+        for _ in 0..600 {
+            timeline.trace(TraceKind::HitLanded, "x", "");
+        }
+        assert_eq!(timeline.trace.len(), TRACE_CAP);
+        assert!(timeline.trace_truncated);
+        let report = timeline.report();
+        assert_eq!(report.trace.len(), TRACE_CAP);
+        assert!(report.trace_truncated);
+    }
+
+    // ── Positive control ────────────────────────────────────────────────────
+
+    #[test]
+    fn reaper_positive_control_onhit_proc_changes_events() {
+        let p = prepared();
+        let record = fx::path_of_corruption();
+        let with = run(
+            &p.skills,
+            &p.params,
+            &p.opener,
+            &[&record],
+            open_profile(15_000, vec![]),
+        );
+        let without = run(
+            &p.skills,
+            &p.params,
+            &p.opener,
+            &[],
+            open_profile(15_000, vec![]),
+        );
+
+        let fired = events(&with, TraceKind::ProcFired, "Path of Corruption");
+        assert!(
+            !fired.is_empty(),
+            "Path of Corruption fires on the opener's landed hits when its record is active; trace: {:?}",
+            with.trace.iter().take(12).collect::<Vec<_>>()
+        );
+        assert!(
+            events(&without, TraceKind::ProcFired, "Path of Corruption").is_empty(),
+            "nothing fires without the record"
+        );
+        assert!(
+            events(&with, TraceKind::ProcUnmodeled, "Path of Corruption").is_empty(),
+            "an executed OnHit record is never reported as unmodeled"
+        );
+        assert_eq!(with.unmodeled_sources, without.unmodeled_sources);
+    }
+
+    // ── Negative control ────────────────────────────────────────────────────
+
+    #[test]
+    fn reaper_negative_control_wrong_mode_and_stowed_set() {
+        // (a) A record that exists only in the PvE file is not selected for
+        // the WvW scenario. Signet of Undeath (skill 10611, OnSkillUse) is
+        // such a record on the 2026-01-13 manifest.
+        let data = crate::data::normalized_effects::effects();
+        assert!(
+            data.effects_for_mode("PvE")
+                .iter()
+                .any(|e| e.source_id == 10611),
+            "control premise: the record exists in the PvE file"
+        );
+        assert!(
+            !data
+                .effects_for_mode("WvW")
+                .iter()
+                .any(|e| e.source_id == 10611),
+            "control premise: and not in the WvW file"
+        );
+        let mut db = fx::db();
+        let signet: gw2_api::models::Skill = serde_json::from_value(serde_json::json!({
+            "id": 10611, "name": "Signet of Undeath", "slot": "Utility",
+            "professions": ["Necromancer"],
+            "facts": [{"type": "Recharge", "value": 60.0}]
+        }))
+        .expect("fixture skill");
+        db.skills.insert(10611, signet);
+        let mut build = fx::build();
+        build.skills.utilities[1] = Some((10611, "Signet of Undeath".into()));
+        let (ctx, scenario) = fx::scenario();
+        let (stats, _) = engine::calculate_validated_stats(&build, &db, "Necromancer", &ctx);
+        let mut prepared = engine::prepare_validated_rotation(&build, &db, &stats, Some(&scenario))
+            .expect("prepares");
+        prepared.opener = vec![10611, fx::GRAVEDIGGER];
+        let fight = engine::simulate_prepared_traced(&prepared, &build, &db, Some(&scenario))
+            .wvw
+            .expect("WvW");
+        assert!(
+            fight
+                .trace
+                .iter()
+                .all(|e| !(e.source.starts_with("Signet of Undeath")
+                    && matches!(e.kind, TraceKind::ProcFired | TraceKind::ProcSkippedIcd))),
+            "a PvE-only record neither fires nor waits on cooldown under WvW: {:?}",
+            fight.trace
+        );
+
+        // (b) Sigil of Fire stowed on weapon set 2 while set 1 is worn is
+        // absent from the fight entirely: not fired, not counted, not named.
+        let worn = traced(&fx::build(), None);
+        let mut stowed_build = fx::build();
+        stowed_build.sigil_seats = SigilSlots::new([
+            None,
+            Some(fx::SIGIL_OF_FORCE),
+            Some(fx::SIGIL_OF_FIRE),
+            None,
+        ]);
+        let stowed = traced(&stowed_build, None);
+        assert!(
+            !events(&worn, TraceKind::ProcUnmodeled, "Superior Sigil of Fire").is_empty(),
+            "worn: the on-crit sigil is at least named as unmodeled"
+        );
+        assert!(
+            events(&stowed, TraceKind::ProcUnmodeled, "Superior Sigil of Fire").is_empty()
+                && events(&stowed, TraceKind::ProcFired, "Superior Sigil of Fire").is_empty(),
+            "stowed: the sigil is absent from the fight"
+        );
+        assert_eq!(
+            stowed.unmodeled_sources.len() + 1,
+            worn.unmodeled_sources.len(),
+            "stowed: one fewer unmodeled source than worn: {:?} vs {:?}",
+            stowed.unmodeled_sources,
+            worn.unmodeled_sources
+        );
+    }
+
+    // ── Timing ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn reaper_timing_icd_interrupt_and_late_buff() {
+        let p = prepared();
+
+        // (1) Internal cooldown: consecutive procs are at least 10 s apart.
+        let record = fx::path_of_corruption();
+        let report = run(
+            &p.skills,
+            &p.params,
+            &p.opener,
+            &[&record],
+            open_profile(30_000, vec![]),
+        );
+        let fired: Vec<u32> = events(&report, TraceKind::ProcFired, "Path of Corruption")
+            .iter()
+            .map(|e| e.t_ms)
+            .collect();
+        assert!(
+            fired.len() >= 2,
+            "need two procs in 30 s to test spacing: {fired:?}"
+        );
+        for pair in fired.windows(2) {
+            assert!(
+                pair[1] - pair[0] >= 10_000,
+                "procs {} ms and {} ms are inside the 10 s ICD",
+                pair[0],
+                pair[1]
+            );
+        }
+        assert!(
+            !events(&report, TraceKind::ProcSkippedIcd, "Path of Corruption").is_empty(),
+            "hits inside the ICD are recorded as skipped, not silently dropped"
+        );
+
+        // (2) Interrupt: a control landing mid-channel loses the later hit.
+        // Gravedigger (fixture): 500 ms cast, two hits at 250 and 500 ms.
+        let gravedigger = only(&p.skills, &[fx::GRAVEDIGGER]);
+        let calm = run(
+            &gravedigger,
+            &p.params,
+            &[fx::GRAVEDIGGER],
+            &[],
+            open_profile(1_000, vec![]),
+        );
+        let control = EnemyEvent {
+            at_ms: 300,
+            kind: EnemyEventKind::Control {
+                duration_ms: 1_000,
+                unblockable: true,
+            },
+        };
+        let cut = run(
+            &gravedigger,
+            &p.params,
+            &[fx::GRAVEDIGGER],
+            &[],
+            open_profile(1_000, vec![control]),
+        );
+        assert!(
+            !events(&cut, TraceKind::CastInterrupted, "Gravedigger").is_empty(),
+            "the control interrupted the cast: {:?}",
+            cut.trace
+        );
+        assert!(
+            landed(&cut, "Gravedigger").len() < landed(&calm, "Gravedigger").len(),
+            "interrupted {} hits vs calm {} hits",
+            landed(&cut, "Gravedigger").len(),
+            landed(&calm, "Gravedigger").len()
+        );
+
+        // (3) Late buff: Might applied after a hit does not raise that hit;
+        // it raises the next one.
+        let pair = only(&p.skills, &[fx::GRAVEDIGGER, fx::YOU_ARE_ALL_WEAKLINGS]);
+        let plain = run(
+            &gravedigger,
+            &p.params,
+            &[fx::GRAVEDIGGER],
+            &[],
+            open_profile(12_000, vec![]),
+        );
+        let late = run(
+            &pair,
+            &p.params,
+            &[fx::GRAVEDIGGER, fx::YOU_ARE_ALL_WEAKLINGS],
+            &[],
+            open_profile(12_000, vec![]),
+        );
+        let plain_hits = landed(&plain, "Gravedigger");
+        let late_hits = landed(&late, "Gravedigger");
+        assert!(
+            plain_hits.len() >= 3 && late_hits.len() >= 3,
+            "{plain_hits:?} {late_hits:?}"
+        );
+        assert_eq!(
+            plain_hits[..2],
+            late_hits[..2],
+            "the hits before the buff are priced the same"
+        );
+        assert!(
+            late_hits.last().unwrap() > plain_hits.last().unwrap(),
+            "the recast under Might hits harder: {late_hits:?} vs {plain_hits:?}"
+        );
+    }
+
+    // ── Ablation ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn reaper_ablation_enabler_and_payoff() {
+        let p = prepared();
+        let record = fx::path_of_corruption();
+        let complete_kit = only(&p.skills, &[fx::GRAVEDIGGER, fx::WELL_OF_DARKNESS]);
+        let no_enabler_kit = only(&p.skills, &[fx::WELL_OF_DARKNESS]);
+        let opener = [fx::WELL_OF_DARKNESS, fx::GRAVEDIGGER];
+        // Expected event difference, stated before the assertion: the
+        // complete kit lands Gravedigger and the OnHit record fires at least
+        // once; without the strike (enabler) there is no landed hit to fire
+        // on; without the record (payoff) there is nothing to fire. Equal
+        // counts are allowed only when the ICD saturates, which needs at
+        // least one proc on both sides — impossible for either ablation.
+        let complete = run(
+            &complete_kit,
+            &p.params,
+            &opener,
+            &[&record],
+            open_profile(5_000, vec![]),
+        );
+        let missing_enabler = run(
+            &no_enabler_kit,
+            &p.params,
+            &opener,
+            &[&record],
+            open_profile(5_000, vec![]),
+        );
+        let missing_payoff = run(
+            &complete_kit,
+            &p.params,
+            &opener,
+            &[],
+            open_profile(5_000, vec![]),
+        );
+        let procs =
+            |r: &WvwCombatReport| events(r, TraceKind::ProcFired, "Path of Corruption").len();
+        assert!(
+            procs(&complete) >= 1,
+            "complete mechanism fires: {:?}",
+            complete.trace
+        );
+        assert!(
+            procs(&complete) > procs(&missing_enabler),
+            "complete {} vs missing enabler {}",
+            procs(&complete),
+            procs(&missing_enabler)
+        );
+        assert!(
+            procs(&complete) > procs(&missing_payoff),
+            "complete {} vs missing payoff {}",
+            procs(&complete),
+            procs(&missing_payoff)
+        );
+    }
+
+    // ── Unsupported control (regression test of the coverage remedy) ────────
+
+    #[test]
+    fn reaper_unsupported_oncrit_is_named_not_zeroed() {
+        // Precision forced to a 100 % critical chance: if on-crit procs
+        // fired anywhere, they would fire here.
+        let with_fire = traced(&fx::build(), Some(3_000.0));
+        assert!(
+            events(&with_fire, TraceKind::ProcFired, "Superior Sigil of Fire").is_empty(),
+            "no on-crit proc fires (there is no firing site)"
+        );
+        assert!(
+            !events(
+                &with_fire,
+                TraceKind::ProcUnmodeled,
+                "Superior Sigil of Fire"
+            )
+            .is_empty(),
+            "the sigil is reported as unmodeled, not silently zeroed"
+        );
+
+        let mut bare_build = fx::build();
+        bare_build.sigils.retain(|s| s.id != fx::SIGIL_OF_FIRE);
+        bare_build.sigil_seats = SigilSlots::new([None, Some(fx::SIGIL_OF_FORCE), None, None]);
+        let bare = traced(&bare_build, Some(3_000.0));
+        assert!(
+            (with_fire.total_damage - bare.total_damage).abs() < 1e-6,
+            "the sigil adds nothing to the fight either way: {} vs {}",
+            with_fire.total_damage,
+            bare.total_damage
+        );
+
+        // The remedy (CONN-00-04): the report carries the name, and the
+        // referee's coverage line is built from it.
+        assert!(
+            with_fire
+                .unmodeled_sources
+                .iter()
+                .any(|s| s == "Superior Sigil of Fire (on-crit)"),
+            "the report names the unmodeled source: {:?}",
+            with_fire.unmodeled_sources
+        );
     }
 }
