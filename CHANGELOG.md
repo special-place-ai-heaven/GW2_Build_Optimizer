@@ -2,6 +2,25 @@
 
 All notable changes to GW2 Build Optimizer are documented here.
 
+## 1.14.0 - 2026-09-07
+
+Every number in this release was checked against a wiki page, and the page is named at the constant it justifies. Where the wiki has no dev statement, the code says "community-tested" rather than pretending.
+
+### The build it recommends
+
+- Skills recharge when the cast finishes, not when it starts. Every skill had been getting its whole cast time back for free, which flattered long casts most. The wiki's rule - "once the activation is complete a skill will enter a recharge time" - is what runs now. A channelled skill really starts recharging a little earlier, at the start of its active phase; there is no public data on where that phase begins, so channels now err late by their own length, where before everything erred early.
+- Chill is 60% recharge, not 34%. Yesterday's release read the tooltip's "cooldown increased by 66%" as a 34% rate. The wiki puts it plainly: for every 1.66 seconds chilled, one second of cooldown expires. Supports under Chill get their heals back sooner than 1.13.0 said, and later than 1.12.0 said.
+- A boon strip takes what you applied last. It used to take whatever was about to expire anyway, which is the one thing a strip never does. Last in, first out - the reason every WvW guide says "stability out first, then cover it" - is what the enemy does now, and extending a boon no longer moves it to the front of the queue. Cleanses already worked that way.
+- Damage modifiers stack the way the game stacks them. The wiki is explicit that some sigils, traits and utility effects add together before the rest multiply, and it gives no rule for which is which - it is a tested fact per effect. Seventy-nine effects are now named in the data as additive, unnamed ones multiply as before, so nothing that was right can have gone wrong. Warrior's Peak Performance, Berserker's Power, Warrior's Sprint and Fierce as Fire are all additive, and Warrior is exactly where the old model over-ranked stacked bonuses.
+- A multi-hit skill lands its hits across the cast. Both simulations used to drop the whole thing as one lump, which undercut the premise this addon is built on: a hit that lands inside a burst window is worth more than the same hit outside it, and a channel that starts inside a window and runs out of it is worth something in between. Hits are now spaced by measured timing where anyone has measured it - Guardian and Ranger, from gw2combat's log-audited files - and evenly across the cast everywhere else. An interrupt drops the hits that had not landed.
+- The referee plays the rotation the page wrote. Every build site writes its rotation as `Rifle 3 > Shred > Rifle 5 > 2 > Demolish` and nothing read it, so a published build was judged on an opener the simulation invented. Seventy-four of the 124 synced WvW builds are now judged on their own rotation line, and the timeline improvises only after it runs out.
+- Boons cap where the wiki caps them: 30 seconds for most, 60 for Swiftness, none for Might, Aegis and Regeneration - the last three had been capped at 30 in the data. Stack caps come from the same data instead of a number typed into two places.
+- An interrupted cast goes on a 4-second recharge. The wiki disagrees with itself (two pages say 4, two say 5); the newest page wins and the disagreement is written at the constant.
+
+### Choya
+
+- When Choya simulates a rotation it now keeps the two weapon sets apart. The tool it calls was handed a flat list and put both sets in hand at once, so a rotation could weave Greatsword and Longbow skills with no swap between them.
+
 ## 1.13.0 - 2026-09-07
 
 ### The build it recommends
