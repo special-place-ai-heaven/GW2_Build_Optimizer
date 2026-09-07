@@ -96,6 +96,38 @@ fn find_itemstat_by_name<'a>(db: &'a GameDb, needle: &str) -> Option<&'a ItemSta
     db.itemstat_by_name(needle)
 }
 
+/// The rune, sigil and relic rankings for this radar, handed to the model
+/// in the prompt the way [`profession_reference`] hands it the profession.
+///
+/// In-game 2026-09-07 every run opened with two or three `search_upgrades`
+/// rounds and a `list_sigils`, ten to forty seconds each on a thinking
+/// model, to learn what these twelve-a-kind lists say. Same shape as the
+/// tool answers, so the model reads one format whether handed or fetched.
+pub fn upgrade_reference(
+    db: &GameDb,
+    weights: &OptimizationWeights,
+    balance_ctx: &BalanceContext,
+) -> String {
+    let ctx = ToolContext {
+        db,
+        profession_name: "",
+        candidates: &[],
+        current_build_summary: None,
+        weights: weights.clone(),
+        balance_ctx,
+    };
+    let runes = execute_tool("list_runes", &json!({}), &ctx);
+    let sigils = execute_tool("list_sigils", &json!({}), &ctx);
+    let relics = execute_tool("list_relics", &json!({}), &ctx);
+    format!(
+        "\nUPGRADE REFERENCE - the runes, sigils and relics ranked for this \
+         player's radar, read from the live game data. These are the answers \
+         list_runes, list_sigils and list_relics would give: do NOT call them. \
+         Call search_upgrades only for a focus or tag these lists do not \
+         cover.\n{runes}\n{sigils}\n{relics}\n"
+    )
+}
+
 /// Runtime context for tool execution — holds references to all game data
 /// and optimizer state needed by the tools.
 pub struct ToolContext<'a> {

@@ -32,7 +32,13 @@ pub(crate) const CONNECT_TIMEOUT_SECS: u64 = 15;
 /// This is a reqwest *total* deadline — connect through last body byte — not
 /// an idle timeout. Keep-alives hold the server side open; they do not extend
 /// the client deadline (GLM F14). 420 s is the budget for one completion.
-pub(crate) const CHAT_REQUEST_TIMEOUT: Duration = Duration::from_secs(420);
+// 120 s, down from 420: a lookup round on google/gemini-3.8-flash hung for
+// over five minutes in-game (2026-09-07, round 8 after seven rounds of
+// context) and the player's screen read "thinking" until the UI backstop
+// gave up with nothing. A lookup that has not answered in two minutes is
+// not answering; the loop then closes on what it has and the plate is
+// served. The closing request has its own deadline.
+pub(crate) const CHAT_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// Per-request wall clock for the metadata endpoints — key validation and the
 /// model catalog. These are small, fast calls made from the Settings UI; they
 /// used to ride the 900 s client default, so one hung endpoint stalled the
