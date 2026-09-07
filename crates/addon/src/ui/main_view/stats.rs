@@ -175,6 +175,15 @@ pub(super) fn start_fetch_models(state: &mut AddonState) {
     state.main.models_error = None;
     let addon_dir = state.addon_dir.clone();
     let config_snapshot = state.config.clone();
+    /// models.dev's id for one of our providers.
+    fn models_dev_provider(provider: gw2_core::config::LlmProvider) -> &'static str {
+        match provider {
+            gw2_core::config::LlmProvider::Gemini => "google",
+            gw2_core::config::LlmProvider::OpenAI => "openai",
+            gw2_core::config::LlmProvider::Anthropic => "anthropic",
+            gw2_core::config::LlmProvider::OpenRouter => "openrouter",
+        }
+    }
     let spawned = state.spawn_worker("fetch-models", move |token| {
         let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // Always reset models_loading on every exit path. Without this, an early
@@ -185,7 +194,20 @@ pub(super) fn start_fetch_models(state: &mut AddonState) {
             } else {
                 let r = gw2_optimizer::llm::create_client(&config_snapshot, &addon_dir)
                     .map_err(|e| e.to_string())
-                    .and_then(|c| c.list_models().map_err(|e| e.to_string()));
+                    .and_then(|c| c.list_models().map_err(|e| e.to_string()))
+                    .map(|mut models| {
+                        // What models.dev knows on top of what the provider
+                        // said: tools where the provider's catalog is silent
+                        // (OpenAI, Anthropic, Google), structured output
+                        // everywhere. Refreshed daily at launch; a stale or
+                        // absent file changes nothing here.
+                        gw2_optimizer::llm::models_dev::load(&addon_dir);
+                        gw2_optimizer::llm::models_dev::enrich(
+                            models_dev_provider(config_snapshot.active_provider),
+                            &mut models,
+                        );
+                        models
+                    });
                 if token.is_cancelled() {
                     None
                 } else {
