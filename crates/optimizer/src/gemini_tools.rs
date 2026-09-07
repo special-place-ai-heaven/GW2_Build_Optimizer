@@ -119,12 +119,27 @@ pub fn upgrade_reference(
     let runes = execute_tool("list_runes", &json!({}), &ctx);
     let sigils = execute_tool("list_sigils", &json!({}), &ctx);
     let relics = execute_tool("list_relics", &json!({}), &ctx);
+    // Prefix spelling is evidence too: e.g. inventing a possessive suffix
+    // can turn an otherwise legal plate into a rejected gear selection.
+    let mut prefixes: Vec<&str> = db
+        .itemstats
+        .values()
+        .map(|stat| stat.name.as_str())
+        .filter(|name| !name.trim().is_empty())
+        .collect();
+    prefixes.sort_unstable();
+    prefixes.dedup();
+    let prefixes = json!(prefixes);
     format!(
         "\nUPGRADE REFERENCE - the runes, sigils and relics ranked for this \
          player's radar, read from the live game data. These are the answers \
          list_runes, list_sigils and list_relics would give: do NOT call them. \
          Call search_upgrades only for a focus or tag these lists do not \
-         cover.\n{runes}\n{sigils}\n{relics}\n"
+         cover.\n{runes}\n{sigils}\n{relics}\n\n\
+         STAT PREFIX REFERENCE - exact names from the local game database. \
+         Copy stat_prefix and gear_slots values exactly from this list; do not \
+         invent spelling or possessive suffixes. This is a name list, not a \
+         stat calculation or a guarantee of PvP amulet availability:\n{prefixes}\n"
     )
 }
 

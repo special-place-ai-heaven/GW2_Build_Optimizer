@@ -335,6 +335,8 @@ Prefer search_upgrades / upgrade_synergies over list_* dumps.
 
 {discipline}
 
+Before serving the JSON, check its contents against Context: exactly THREE distinct specialization objects, each with three major traits from its own columns; at most one elite specialization. Fill heal, exactly three utilities, elite, both weapon sets, four sigils and the relic. Skills and weapons must be usable with the specialization you actually selected. For stat_prefix and every gear_slots value, copy the exact spelling from STAT PREFIX REFERENCE when present; do not invent an apostrophe or suffix. Pets are only for Ranger and legends only for Revenant; otherwise omit those fields. These are checks on your finished object, not extra simulation requests.
+
 A turn is either tool calls or the finished plate, never both: call tools with no text beside them, then plate in a turn of its own. When plating a build, serve ONLY JSON. specializations MUST be objects with name and traits (not a bare array of strings).
 ```json
 {{
