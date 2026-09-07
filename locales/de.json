@@ -127,6 +127,7 @@
   "choya.need_key": "Lege zuerst einen KI-API-Schlüssel unter Einstellungen fest.",
   "choya.optimize_running": "Optimierung läuft noch. Warte, bis sie fertig ist.",
   "choya.data_loading": "Spieldaten laden noch. Versuche es gleich erneut.",
+  "choya.select_first": "Wähl zuerst einen Charakter und einen Build. Einen leeren Topf kann ich nicht würzen - nicht mal mit Kaktusfeige.",
   "choya.assistant": "Build-Assistent",
   "setup.title": "ERSTEINRICHTUNG",
   "setup.step_gw2": "GW2-Key",

@@ -127,6 +127,7 @@
   "choya.need_key": "Defina primeiro uma chave de API de IA em Configurações.",
   "choya.optimize_running": "A otimização ainda está em andamento. Espere terminar.",
   "choya.data_loading": "Os dados do jogo ainda estão carregando. Tente de novo em um momento.",
+  "choya.select_first": "Escolha primeiro um personagem e uma build. Não consigo temperar uma panela vazia, nem com figo-da-índia.",
   "choya.assistant": "Assistente de build",
   "setup.title": "CONFIGURAÇÃO INICIAL",
   "setup.step_gw2": "Chave GW2",

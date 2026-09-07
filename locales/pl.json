@@ -127,6 +127,7 @@
   "choya.need_key": "Najpierw ustaw klucz API SI w Ustawieniach.",
   "choya.optimize_running": "Optymalizacja nadal trwa. Poczekaj na koniec.",
   "choya.data_loading": "Dane gry nadal się wczytują. Spróbuj za chwilę.",
+  "choya.select_first": "Najpierw wybierz postać i build. Pustego garnka nie doprawię, nawet opuncją.",
   "choya.assistant": "Asystent buildów",
   "setup.title": "PIERWSZA KONFIGURACJA",
   "setup.step_gw2": "Klucz GW2",
