@@ -910,6 +910,7 @@ fn saved_to_suggestion(
         benchmark_delta: None,
         data_quality: gw2_optimizer::data::DataQuality::Verified,
         quality_reasons: vec![],
+        coverage_note: None,
     };
     if let Some(db) = game_db {
         suggestion.chat_code = optimization::suggestion_to_chat_code(&suggestion, db);

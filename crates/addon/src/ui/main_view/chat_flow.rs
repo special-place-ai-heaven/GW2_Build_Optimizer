@@ -1,7 +1,7 @@
 use super::optimization::{
     apply_gemini_response, apply_radar_prefix, attach_chat_stats, chat_display_text,
-    fill_holes_from_loadout, format_provider_issue, gemini_from_validated, humanize_tool_names,
-    keep_equipped_weapons, keep_loadout_pets, kitchen_brief, result_alert_tab,
+    coverage_note_from, fill_holes_from_loadout, format_provider_issue, gemini_from_validated,
+    humanize_tool_names, keep_equipped_weapons, keep_loadout_pets, kitchen_brief, result_alert_tab,
     simulate_suggestion_rotation, suggestion_to_chat_code, summarize_resolved_build,
     summarize_suggestion, validated_build_to_chat_code,
 };
@@ -227,6 +227,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
             // build looks identical to a greeting from the outside, and only
             // one of the two should be answered with other people's builds.
             let plate_refused = std::cell::Cell::new(false);
+            // The referee report of the served plate, kept so the suggestion
+            // carries the referee's quality and coverage line instead of a
+            // default `Verified` (CONN-00-05).
+            let plate_report: std::cell::RefCell<Option<gw2_optimizer::referee::RefereeReport>> =
+                std::cell::RefCell::new(None);
             // The optimizer's own build for this request, kept outside the
             // closure so a model failure can still serve it.
             let fallback_reference: std::cell::RefCell<Option<String>> =
@@ -714,7 +719,17 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             // Served, with whatever the non-blocking gates
                             // had to say written on it. A caveat the player
                             // can read beats a gate that silently vetoes.
-                            Ok(concerns) => {
+                            Ok((mut concerns, report)) => {
+                                // What the referee did not simulate is a
+                                // concern the player reads, same as a gate.
+                                if let Some(detail) = coverage_note_from(&report.quality_reasons)
+                                {
+                                    concerns.push(tf(
+                                        "quality.coverage_line",
+                                        &[("detail", &detail)],
+                                    ));
+                                }
+                                *plate_report.borrow_mut() = Some(report);
                                 if !concerns.is_empty() {
                                     let note =
                                         tf("fmt.plate_concern", &[("concern", &concerns.join("; "))]);
@@ -955,6 +970,17 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     }
                                     let balance_ctx = BalanceContext::new(live_mode.clone());
                                     simulate_suggestion_rotation(&mut suggestion, db, &balance_ctx);
+                                }
+                                if let Some(report) = plate_report.borrow().as_ref() {
+                                    suggestion.data_quality = report.quality.clone();
+                                    for reason in &report.quality_reasons {
+                                        let text = reason.to_string();
+                                        if !suggestion.quality_reasons.iter().any(|r| r == &text) {
+                                            suggestion.quality_reasons.push(text);
+                                        }
+                                    }
+                                    suggestion.coverage_note =
+                                        coverage_note_from(&report.quality_reasons);
                                 }
                                 let chips = match (live_db.as_ref(), validated.as_ref()) {
                                     (Some(db), Some(v)) => crate::chat_links::chips_from_plate(
@@ -1279,7 +1305,7 @@ fn plate_shortfall(
     ctx: &BalanceContext,
     scenario: &gw2_optimizer::scenario::ScenarioSpec,
     unreachable: &[gw2_optimizer::referee::ViabilityGate],
-) -> Result<Vec<String>, String> {
+) -> Result<(Vec<String>, gw2_optimizer::referee::RefereeReport), String> {
     let report = gw2_optimizer::referee::evaluate_validated_build(
         plate,
         db,
@@ -1331,13 +1357,13 @@ fn plate_shortfall(
     // No baseline is not a pass mark, it is an unarmed gate: viability alone
     // still had to hold above.
     let Some(baseline) = baseline else {
-        return Ok(concerns);
+        return Ok((concerns, report));
     };
     if super::optimize_flow::beats_baseline(
         &gw2_optimizer::referee::search_rank(&report),
         &gw2_optimizer::referee::search_rank(baseline),
     ) {
-        return Ok(concerns);
+        return Ok((concerns, report));
     }
     Err(format!(
         "that build does not beat what the player is already wearing \

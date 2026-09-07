@@ -463,6 +463,7 @@
   "info.on_skill": "スキル使用時",
   "quality.verified_tip": "すべての入力データはソースに基づき検証済みです。",
   "quality.provisional_tip": "一部のデータは推定または暫定です。結果は使用できますが確実性は低くなります。",
+  "quality.coverage_line": "未シミュレート: {detail}",
   "quality.blocked_tip": "重要なデータが不足しています。結果は信頼できない可能性があります。",
   "label.reasons": "理由:",
   "bench.header": "コミュニティメタ比較",

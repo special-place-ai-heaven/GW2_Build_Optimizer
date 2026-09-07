@@ -50,6 +50,12 @@ pub struct BuildSuggestion {
     pub data_quality: gw2_optimizer::data::DataQuality,
     /// Human-readable reasons for quality degradation (empty when Verified).
     pub quality_reasons: Vec<String>,
+    /// The referee's coverage detail — the source names after
+    /// "Not simulated: " — drawn beside the quality marker through the
+    /// `quality.coverage_line` locale key. `None` when every equipped source
+    /// with a record was executed (which is not a claim that every mechanic
+    /// is modeled). One line, one source of truth (specs/004, FR-010).
+    pub coverage_note: Option<String>,
     /// Where this build was published, when it came from a community site
     /// rather than from Choya. Empty for anything we cooked ourselves.
     ///
@@ -1110,6 +1116,13 @@ fn render_data_quality_badge(ui: &Ui, suggestion: &BuildSuggestion) {
                 }
             }
         });
+    }
+    if let Some(note) = suggestion.coverage_note.as_deref() {
+        ui.same_line();
+        ui.text_colored(
+            crate::ui::theme::pal().muted,
+            tf("quality.coverage_line", &[("detail", note)]),
+        );
     }
 }
 

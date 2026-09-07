@@ -1225,17 +1225,13 @@ pub fn evaluate_validated_build_with(
     }
 
     if let Some(fight) = rotation.as_ref().and_then(|result| result.wvw.as_ref()) {
-        if fight.unmodeled_effect_sources > 0 {
+        if let Some(reason) = crate::data::quality::coverage_reason(
+            profession_name,
+            &ctx.game_mode,
+            &fight.unmodeled_sources,
+        ) {
             quality = quality.merge(&DataQuality::Provisional);
-            quality_reasons.push(DataQualityReason {
-                field: "wvw_timeline.effects".into(),
-                entity: profession_name.into(),
-                modes: vec![ctx.game_mode.label().to_string()],
-                explanation: format!(
-                    "{} equipped or triggered effect sources are not yet represented by timed rules",
-                    fight.unmodeled_effect_sources
-                ),
-            });
+            quality_reasons.push(reason);
         }
         if !fight.resource_model_complete {
             quality = quality.merge(&DataQuality::Provisional);
@@ -1350,7 +1346,9 @@ mod tests {
                 resource_blocked_actions: 0,
                 resource_legal: true,
                 resource_model_complete: true,
-                unmodeled_effect_sources: 0,
+                unmodeled_sources: Vec::new(),
+                trace: Vec::new(),
+                trace_truncated: false,
             }),
         }
     }
@@ -2818,5 +2816,165 @@ mod tests {
             }
         };
         assert!(search_rank(&mk(0.7)) > search_rank(&mk(0.5)));
+    }
+    // ── Reaper slice (specs/004-simulator-trust) ────────────────────────────
+
+    #[test]
+    fn reaper_fixture_evaluates_without_errors() {
+        use crate::rotation::reaper_fixture as fx;
+        let db = fx::db();
+        let build = fx::build();
+        let (ctx, scenario) = fx::scenario();
+        let weights = OptimizationWeights::default();
+        assert!(build.errors.is_empty(), "{:?}", build.errors);
+        let report = super::evaluate_validated_build_with(
+            &build,
+            &db,
+            "Necromancer",
+            &weights,
+            &ctx,
+            &scenario,
+            &fx::opener(),
+        );
+        assert!(
+            !report.viability.gates.is_empty(),
+            "the referee ran its gates on the fixture"
+        );
+        let fight = report
+            .rotation
+            .as_ref()
+            .and_then(|r| r.wvw.as_ref())
+            .expect("a WvW scenario runs the timeline");
+        assert!(fight.total_damage > 0.0, "the opener landed strikes");
+        assert!(
+            report.stats.power > 1_000.0,
+            "Marauder gear was priced: power {}",
+            report.stats.power
+        );
+    }
+    #[test]
+    fn reaper_parity_referee_matches_optimize_suggestion() {
+        use crate::rotation::reaper_fixture as fx;
+        let db = fx::db();
+        let build = fx::build();
+        let (ctx, scenario) = fx::scenario();
+        let weights = OptimizationWeights::default();
+        // Empty opener on both sides: `synergy_result_from_validated` (the
+        // Optimize exposure) has no opener parameter.
+        let report = super::evaluate_validated_build_with(
+            &build,
+            &db,
+            "Necromancer",
+            &weights,
+            &ctx,
+            &scenario,
+            &[],
+        );
+        let synergy = crate::engine::synergy_result_from_validated(
+            build.clone(),
+            &db,
+            "Necromancer",
+            &ctx,
+            Some(&scenario),
+        );
+        let eq = |name: &str, a: f64, b: f64| {
+            assert!((a - b).abs() <= 1e-9, "{name}: referee {a} vs optimize {b}");
+        };
+        eq("power", report.stats.power, synergy.stats.power);
+        eq("precision", report.stats.precision, synergy.stats.precision);
+        eq("ferocity", report.stats.ferocity, synergy.stats.ferocity);
+        eq("vitality", report.stats.vitality, synergy.stats.vitality);
+        eq(
+            "effective_power",
+            report.combat_solo.effective_power,
+            synergy.combat_solo.effective_power,
+        );
+        eq(
+            "total_dps_index",
+            report.combat_solo.total_dps_index,
+            synergy.combat_solo.total_dps_index,
+        );
+        eq(
+            "effective_health",
+            report.combat_solo.effective_health,
+            synergy.combat_solo.effective_health,
+        );
+        assert_eq!(
+            report.quality, synergy.data_quality,
+            "quality classification"
+        );
+        let referee_fight = report
+            .rotation
+            .as_ref()
+            .and_then(|r| r.wvw.as_ref())
+            .expect("WvW");
+        let optimize_fight = synergy
+            .rotation
+            .as_ref()
+            .and_then(|r| r.wvw.as_ref())
+            .expect("WvW");
+        eq(
+            "total_damage",
+            referee_fight.total_damage,
+            optimize_fight.total_damage,
+        );
+        assert_eq!(
+            referee_fight.unmodeled_sources, optimize_fight.unmodeled_sources,
+            "unmodeled source names"
+        );
+        let coverage = |reasons: &[crate::data::DataQualityReason]| {
+            reasons
+                .iter()
+                .find(|r| r.field == "wvw_timeline.effects")
+                .map(|r| r.explanation.clone())
+        };
+        assert_eq!(
+            coverage(&report.quality_reasons),
+            coverage(&synergy.quality_reasons),
+            "the coverage reason is projected unchanged"
+        );
+        // `user_intent_score`, `realized` and `viability` are not on
+        // `SynergyResult`; the Optimize exposure recomputes gates with a
+        // narrower set (CONN-00-10) and never carries the rank score
+        // (CONN-01-04). They cannot be compared here.
+    }
+
+    #[test]
+    fn reaper_pve_comparison_uses_adaptive_scheduler_not_opener() {
+        use crate::rotation::reaper_fixture as fx;
+        let db = fx::db();
+        let build = fx::build();
+        let (ctx, scenario) = fx::pve_scenario();
+        let weights = OptimizationWeights::default();
+        let report = super::evaluate_validated_build_with(
+            &build,
+            &db,
+            "Necromancer",
+            &weights,
+            &ctx,
+            &scenario,
+            &fx::opener(),
+        );
+        let rotation = report
+            .rotation
+            .as_ref()
+            .expect("PvE runs the gate simulation");
+        assert!(
+            rotation.wvw.is_none(),
+            "PvE never runs the timeline; the opener is not pressed and no record executes (CONN-01-03)"
+        );
+        // The 2 s PvE Solo gate window is spent on setup-priority casts (the
+        // elite and the stability skill), so the gate simulation lands no
+        // strike at all for this kit (CONN-01-05); the 60 s flow simulation
+        // behind `realized` does.
+        assert!(
+            report.realized.power > 0.0,
+            "the adaptive flow scheduler produced strike damage: {:?}",
+            report.realized
+        );
+        assert_eq!(
+            rotation.total_dps, 0.0,
+            "gate-sim DPS in the 2 s PvE Solo window is zero for this kit (CONN-01-05);              if this changes, update the audit"
+        );
     }
 }

@@ -463,6 +463,7 @@
   "info.on_skill": "bij vaardigheidsgebruik",
   "quality.verified_tip": "Alle invoergegevens zijn brongebaseerd en geverifieerd.",
   "quality.provisional_tip": "Sommige data zijn geschat of voorlopig. Resultaten zijn bruikbaar maar minder zeker.",
+  "quality.coverage_line": "Niet gesimuleerd: {detail}",
   "quality.blocked_tip": "Kritieke data ontbreekt. Resultaten zijn mogelijk onbetrouwbaar.",
   "label.reasons": "Redenen:",
   "bench.header": "vs Community-meta",

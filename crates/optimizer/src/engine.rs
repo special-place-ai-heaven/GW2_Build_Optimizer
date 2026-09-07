@@ -1351,6 +1351,28 @@ pub fn simulate_prepared(
     db: &GameDb,
     scenario: Option<&crate::scenario::ScenarioSpec>,
 ) -> rotation::SimulationResult {
+    simulate_prepared_with(prepared, validated, db, scenario, false)
+}
+
+/// [`simulate_prepared`] with the WvW event trace switched on. Experiments
+/// only; production never traces.
+#[cfg(test)]
+pub(crate) fn simulate_prepared_traced(
+    prepared: &PreparedRotation,
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    scenario: Option<&crate::scenario::ScenarioSpec>,
+) -> rotation::SimulationResult {
+    simulate_prepared_with(prepared, validated, db, scenario, true)
+}
+
+fn simulate_prepared_with(
+    prepared: &PreparedRotation,
+    validated: &ValidatedBuild,
+    db: &GameDb,
+    scenario: Option<&crate::scenario::ScenarioSpec>,
+    trace: bool,
+) -> rotation::SimulationResult {
     let rotation_skills = &prepared.skills;
     let params = &prepared.params;
     let profession_name = prepared.profession_name.as_str();
@@ -1381,7 +1403,7 @@ pub fn simulate_prepared(
 
     if let Some(scenario) = scenario.filter(|scenario| scenario.game_mode == GameMode::WvW) {
         let (active_effects, unmodeled_sources) =
-            active_normalized_effects(validated, rotation_skills, mode.label());
+            active_normalized_effects(validated, rotation_skills, db, mode.label());
         let (resource_rules, resource_model_complete) =
             wvw_resource_rules(validated, rotation_skills, db, profession_name, &sim_ctx);
         result.wvw = Some(rotation::wvw_timeline::evaluate_wvw_timeline(
@@ -1395,8 +1417,9 @@ pub fn simulate_prepared(
                 active_effects: &active_effects,
                 resource_rules: &resource_rules,
                 resource_model_complete,
-                unmodeled_effect_sources: unmodeled_sources,
+                unmodeled_sources,
                 weapon_swap_cooldown_ms: wvw_weapon_swap_cooldown_ms(profession_name, validated),
+                trace,
             },
         ));
     }
@@ -1576,13 +1599,18 @@ fn land_weapon_slot_type(
     }
 }
 
-fn active_normalized_effects(
+/// The normalized-effect records selected for this build in `mode`, plus the
+/// names of the equipped sources that have no record at all, formatted
+/// `"{name} (no record)"` and sorted, so the report can say what it did not
+/// simulate instead of counting it.
+fn active_normalized_effects<'a>(
     validated: &ValidatedBuild,
-    rotation_skills: &[rotation::RotationSkill],
+    rotation_skills: &'a [rotation::RotationSkill],
+    db: &GameDb,
     mode: &str,
 ) -> (
     Vec<&'static crate::data::normalized_effects::NormalizedEffect>,
-    u32,
+    Vec<String>,
 ) {
     use crate::data::normalized_effects::SourceType;
 
@@ -1644,7 +1672,26 @@ fn active_normalized_effects(
             .iter()
             .map(|id| (source_type_tag(&SourceType::Relic), *id)),
     );
-    let unmodeled = equipped.difference(&modeled).count() as u32;
+    let name_of = |tag: u8, id: u32| -> String {
+        let name = match tag {
+            0 => db.traits.get(&id).map(|t| t.name.clone()),
+            1 => rotation_skills
+                .iter()
+                .find(|skill| skill.skill_id == id)
+                .map(|skill| skill.name.clone())
+                .or_else(|| db.skills.get(&id).map(|s| s.name.clone())),
+            _ => db.items.get(&id).map(|item| item.name.clone()),
+        };
+        name.unwrap_or_else(|| {
+            let kind = ["trait", "skill", "rune", "sigil", "relic"][tag as usize];
+            format!("{kind} {id}")
+        })
+    };
+    let mut unmodeled: Vec<String> = equipped
+        .difference(&modeled)
+        .map(|(tag, id)| format!("{} (no record)", name_of(*tag, *id)))
+        .collect();
+    unmodeled.sort();
     (active, unmodeled)
 }
 
@@ -1879,17 +1926,13 @@ pub fn synergy_result_from_validated(
         quality_reasons.extend(gear_reasons);
     }
     if let Some(fight) = rotation.as_ref().and_then(|result| result.wvw.as_ref()) {
-        if fight.unmodeled_effect_sources > 0 {
+        if let Some(reason) = data::quality::coverage_reason(
+            profession_name,
+            &ctx.game_mode,
+            &fight.unmodeled_sources,
+        ) {
             data_quality = data_quality.merge(&data::DataQuality::Provisional);
-            quality_reasons.push(data::DataQualityReason {
-                field: "wvw_timeline.effects".into(),
-                entity: profession_name.into(),
-                modes: vec![ctx.game_mode.label().to_string()],
-                explanation: format!(
-                    "{} equipped or triggered effect sources are not yet represented by timed rules",
-                    fight.unmodeled_effect_sources
-                ),
-            });
+            quality_reasons.push(reason);
         }
         if !fight.resource_model_complete {
             data_quality = data_quality.merge(&data::DataQuality::Provisional);
