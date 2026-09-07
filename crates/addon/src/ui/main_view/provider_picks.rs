@@ -71,9 +71,30 @@ pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
         return;
     };
     let builds = gw2_optimizer::scraper::load_benchmarks(&state.addon_dir);
+    // The elite specialization the plate wears is what the player asked for.
+    // A published build without it is not "something like it", whatever
+    // else it shares (2026-09-07: a Ritualist plate, a Reaper card). A site
+    // with no build in that specialization shows nothing rather than the
+    // nearest wrong thing.
+    let elite: Option<String> = shape.specs.iter().find_map(|name| {
+        db.specializations
+            .values()
+            .find(|spec| spec.elite && spec.name.eq_ignore_ascii_case(name))
+            .map(|spec| spec.name.clone())
+    });
     state.main.provider_picks = gw2_optimizer::benchmark::closest_per_source(&builds, &shape, &db)
         .into_iter()
         .map(|(build, _)| build.clone())
+        .filter(|build| {
+            elite.as_ref().is_none_or(|elite| {
+                build
+                    .published
+                    .specs
+                    .iter()
+                    .filter_map(|line| db.specializations.get(&line.id))
+                    .any(|spec| spec.name.eq_ignore_ascii_case(elite))
+            })
+        })
         .collect();
 }
 
