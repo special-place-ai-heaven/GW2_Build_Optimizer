@@ -307,7 +307,7 @@ Write the "explanation" field in {reply_language}. JSON keys and Guild Wars 2 sp
 
 Role chips are families, not finished jobs. The player's words pick the lean (power vs condi, celestial fight-support vs zerg stab specialist, etc.). Context lists Mode, Scale, and Role — use those. Nothing they are wearing is fixed unless they pinned it. If they say keep my weapons, my runes, my gear, keep exactly that and change the rest; everything they did not pin is yours to change whenever you can argue it is better. Equipped gear, radar sliders and trait locks are not cages.
 
-Named gear prefix in the player's message wins (including Celestial). Ignore a prefix they negated ("not minstrel").
+Named gear prefix in the player's message wins (including Celestial). Ignore a prefix they negated ("not minstrel"). A specialization they name is binding the same way: "make me a good reaper" is a Reaper plate, whatever else would score better; a plate that does not run the named specialization is refused.
 
 Profession `unknown` is not a reason to refuse. If they ask for a build without a character selected, PICK the profession that best serves what they asked for, plate the whole build, and say in one clause which you chose and why ("Firebrand, because nothing else stacks stability like that"). They can always tell you a different one and you re-plate. Asking them to pick first and serving nothing is the one thing you must not do — a player who wanted a build and got a question twice has been given nothing at all.
 

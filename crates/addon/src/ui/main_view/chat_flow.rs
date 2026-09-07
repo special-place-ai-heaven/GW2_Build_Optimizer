@@ -612,16 +612,32 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             return Ok(parsed);
                         }
 
-                        match plate_shortfall(
-                            &validated,
-                            baseline.as_ref(),
-                            db,
-                            &plate_profession,
-                            &weights,
-                            &chat_balance_ctx,
-                            &scenario,
-                            reference.as_ref().map_or(&[][..], |r| &r.unreachable),
-                        ) {
+                        // The specialization the player named is not a
+                        // preference the ranking may trade away: "scourge"
+                        // means a Scourge plate, whatever else scores better.
+                        let shortfall = match wished_elite_spec(db, &message) {
+                            Some(wished)
+                                if !parsed
+                                    .specializations
+                                    .iter()
+                                    .any(|(name, _)| name.eq_ignore_ascii_case(&wished)) =>
+                            {
+                                Err(format!(
+                                    "the player asked for {wished} and this plate does not run {wished}"
+                                ))
+                            }
+                            _ => plate_shortfall(
+                                &validated,
+                                baseline.as_ref(),
+                                db,
+                                &plate_profession,
+                                &weights,
+                                &chat_balance_ctx,
+                                &scenario,
+                                reference.as_ref().map_or(&[][..], |r| &r.unreachable),
+                            ),
+                        };
+                        match shortfall {
                             // Served, with whatever the non-blocking gates
                             // had to say written on it. A caveat the player
                             // can read beats a gate that silently vetoes.
@@ -1283,6 +1299,27 @@ pub(super) fn wants_a_build(message: &str) -> bool {
     .any(|k| lower.contains(k))
 }
 
+/// The elite specialization the player named in their message, if any and
+/// not negated ("not scourge", "no scourge"). Matched on whole words against
+/// the game data, so "reaper" in "grim reaper of a build" still counts and
+/// "harbingers" does not misread as a different spec.
+pub(super) fn wished_elite_spec(db: &GameDb, message: &str) -> Option<String> {
+    let words: Vec<String> = message
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_lowercase().trim_end_matches('s').to_string())
+        .collect();
+    let mut specs: Vec<&gw2_api::models::Specialization> =
+        db.specializations.values().filter(|s| s.elite).collect();
+    specs.sort_by_key(|s| s.id);
+    specs.into_iter().find_map(|spec| {
+        let wanted = spec.name.to_lowercase().trim_end_matches('s').to_string();
+        let at = words.iter().position(|w| *w == wanted)?;
+        let negated = at > 0 && matches!(words[at - 1].as_str(), "not" | "no" | "without");
+        (!negated).then(|| spec.name.clone())
+    })
+}
+
 pub(super) fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -> bool {
     // Weapon/prefix typos stay as warnings in the bubble. A complete kit still plates.
     v.specializations.len() == 3
@@ -1294,7 +1331,67 @@ pub(super) fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -
 
 #[cfg(test)]
 mod tests {
-    use super::{gate_vetoes, plate_is_servable, wants_a_build};
+    use super::{gate_vetoes, plate_is_servable, wants_a_build, wished_elite_spec};
+
+    fn necro_db() -> gw2_optimizer::gamedb::GameDb {
+        let mut db = gw2_optimizer::gamedb::GameDb::empty_for_tests();
+        for (id, name, elite) in [
+            (53, "Reaper", true),
+            (34, "Scourge", true),
+            (39, "Curses", false),
+        ] {
+            db.specializations.insert(
+                id,
+                gw2_api::models::Specialization {
+                    id,
+                    name: name.into(),
+                    profession: "Necromancer".into(),
+                    elite,
+                    minor_traits: vec![],
+                    major_traits: vec![],
+                    weapon_trait: None,
+                    icon: None,
+                    background: None,
+                    profession_icon: None,
+                    profession_icon_big: None,
+                },
+            );
+        }
+        db
+    }
+
+    #[test]
+    fn the_named_elite_spec_is_read_from_the_message() {
+        let db = necro_db();
+        assert_eq!(
+            wished_elite_spec(&db, "Make me a badass Scourge build."),
+            Some("Scourge".into())
+        );
+        assert_eq!(
+            wished_elite_spec(&db, "reaper, power, roaming"),
+            Some("Reaper".into())
+        );
+        assert_eq!(
+            wished_elite_spec(&db, "make me a good reaper"),
+            Some("Reaper".into())
+        );
+        assert_eq!(
+            wished_elite_spec(&db, "one of those reapers"),
+            Some("Reaper".into()),
+            "plural"
+        );
+        assert_eq!(
+            wished_elite_spec(&db, "anything but not scourge"),
+            None,
+            "negated"
+        );
+        assert_eq!(
+            wished_elite_spec(&db, "a curses build"),
+            None,
+            "core line is not an elite wish"
+        );
+        assert_eq!(wished_elite_spec(&db, "power build please"), None);
+    }
 
     #[test]
     fn a_build_request_is_told_from_chat() {
