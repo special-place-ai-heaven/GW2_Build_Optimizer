@@ -123,19 +123,27 @@ impl OpenRouterClient {
             MAX_COMPLETION_TOKENS,
             Some(REASONING_EFFORT),
             CHAT_REQUEST_TIMEOUT,
+            None,
         )
     }
 
     /// The request that writes the plate from what the tool rounds gathered:
-    /// small cap, no reasoning budget, its own deadline. See
-    /// [`super::openai_compat::CLOSING_MAX_TOKENS`].
+    /// small cap, no reasoning budget, its own deadline — and, where the
+    /// catalog says this model takes it, the plate's JSON Schema as
+    /// `response_format`, so the API holds the shape instead of the prompt
+    /// asking for it. See [`super::openai_compat::CLOSING_MAX_TOKENS`].
     fn send_closing(&self, messages: &[Message]) -> Result<Message, LlmError> {
+        let caps = self.caps();
+        let response_format = (caps.supports("structured_outputs")
+            || caps.supports("response_format"))
+        .then(super::openai_compat::plate_response_format);
         self.send_chat_capped(
             messages,
             None,
             super::openai_compat::CLOSING_MAX_TOKENS,
             None,
             super::openai_compat::CLOSING_REQUEST_TIMEOUT,
+            response_format,
         )
     }
 
@@ -149,6 +157,7 @@ impl OpenRouterClient {
         max_tokens: u32,
         reasoning_effort: Option<&'static str>,
         request_timeout: std::time::Duration,
+        response_format: Option<Value>,
     ) -> Result<Message, LlmError> {
         let extra_headers = [
             ("HTTP-Referer", OPENROUTER_HTTP_REFERER.to_string()),
@@ -179,6 +188,9 @@ impl OpenRouterClient {
             // `provider` routing block.
             supports_provider_prefs: true,
             require_tool_endpoints: tools.is_some(),
+            // A free model has no price to sort by; sort its hosts by speed.
+            provider_sort: caps.free.then_some("throughput"),
+            response_format,
             request_timeout,
             max_retries: 2,
             is_cancelled: &is_cancelled,
@@ -322,8 +334,14 @@ impl LlmClient for OpenRouterClient {
             tool_call_id: None,
             reasoning_details: None,
         }];
-        let response =
-            self.send_chat_capped(&messages, None, max_tokens, None, CHAT_REQUEST_TIMEOUT)?;
+        let response = self.send_chat_capped(
+            &messages,
+            None,
+            max_tokens,
+            None,
+            CHAT_REQUEST_TIMEOUT,
+            None,
+        )?;
         response
             .content
             .ok_or_else(|| LlmError::Parse("No response text from OpenRouter".into()))
@@ -597,6 +615,7 @@ impl LlmClient for OpenRouterClient {
                 // and two Lyria previews. So the price is the fact and the
                 // suffix is only a habit; reading the suffix would have
                 // missed three and would break the day they rename one.
+                supported_parameters: m.supported_parameters.clone().unwrap_or_default(),
                 free: m.pricing.as_ref().is_some_and(|p| {
                     let zero = |v: &Option<String>| {
                         v.as_deref()

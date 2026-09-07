@@ -175,10 +175,35 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
             // closure so a model failure can still serve it.
             let fallback_reference: std::cell::RefCell<Option<String>> =
                 std::cell::RefCell::new(None);
+            // The handshake. What this model can do, measured once and kept;
+            // the run below is shaped by it and refines it afterwards.
+            let model_id = config.active_model_id().to_string();
+            let profiles =
+                std::cell::RefCell::new(gw2_optimizer::llm::profile::Store::load(&addon_dir));
+            let round_secs: std::cell::RefCell<Vec<f32>> = std::cell::RefCell::new(Vec::new());
+            let repair_used = std::cell::Cell::new(false);
             let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
                 let client = gw2_optimizer::llm::create_client(&config, &addon_dir)
                     .map_err(|e| e.to_string())?;
 
+                if token.is_cancelled() {
+                    return Err("Cancelled".into());
+                }
+
+                let (profile, probed) = profiles.borrow_mut().ensure(
+                    client.as_ref(),
+                    &model_id,
+                    gw2_optimizer::llm::profile::now_secs(),
+                );
+                nexus::log::log(
+                    nexus::log::LogLevel::Info,
+                    "GW2BuildOpt",
+                    format!(
+                        "Choya handshake{}: {}",
+                        if probed { " (probed now)" } else { "" },
+                        profile.summary()
+                    ),
+                );
                 if token.is_cancelled() {
                     return Err("Cancelled".into());
                 }
@@ -359,7 +384,14 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         // glm-5.3-flash - which had taken the tools branch -
                         // worked. The contradiction was the bug, not the model.
                         let mut round_started = std::time::Instant::now();
-                        let response = {
+                        // A model the handshake found cannot drive tools is
+                        // not asked to: it gets the whole kitchen in one
+                        // message and writes the plate from it.
+                        let response = if profile.max_turns() == 0 {
+                            client
+                                .generate_brief(&prompt, 8_192)
+                                .map_err(|e| e.to_string())?
+                        } else {
                             client
                                 .generate_with_tools_progress(
                                     &prompt,
@@ -384,7 +416,10 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     // was the number contradicting it, and
                                     // gemini-flash-latest ran out on every
                                     // request (measured in-game 2026-09-05).
-                                    8,
+                                    // Eight for a model the handshake found
+                                    // quick; fewer for a slow one, so the run
+                                    // still ends in a plate inside the budget.
+                                    profile.max_turns(),
                                     &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
                                         // How long each round actually took.
                                         // Without it a run that ends on a
@@ -394,6 +429,9 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                         // opposite faults with opposite fixes.
                                         let round = round_started.elapsed();
                                         round_started = std::time::Instant::now();
+                                        if !tool_names.is_empty() {
+                                            round_secs.borrow_mut().push(round.as_secs_f32());
+                                        }
                                         nexus::log::log(
                                             nexus::log::LogLevel::Info,
                                             "GW2BuildOpt",
@@ -480,6 +518,7 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     ),
                                 );
                                 if let Some(p) = repaired {
+                                    repair_used.set(true);
                                     p
                                 } else {
                                 let explanation: String =
@@ -613,6 +652,14 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     Err("Game data not loaded".into())
                 }
             })();
+            // The run refines the handshake: how long a round really took
+            // here, whether the plate needed repairing, whether it failed.
+            profiles.borrow_mut().record_run(
+                &model_id,
+                &round_secs.borrow(),
+                repair_used.get(),
+                result.is_err(),
+            );
 
             let mut profession = profession;
             if let (Ok(parsed), Some(db)) = (result.as_ref(), db_clone.as_ref()) {

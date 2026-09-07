@@ -317,6 +317,71 @@ pub(crate) struct ChatRequest {
     pub(crate) reasoning: Option<ReasoningConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) provider: Option<ProviderPrefs>,
+    /// OpenAI/OpenRouter structured output: `{"type":"json_schema", ...}`.
+    /// The API's own way to get the plate as JSON, instead of asking nicely
+    /// in the prompt and repairing prose afterwards. Sent only where the
+    /// catalog lists `response_format` or `structured_outputs`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) response_format: Option<Value>,
+}
+
+/// The plate, as the JSON Schema the API enforces on the closing request.
+/// Mirrors the shape in `prompts.rs`; `strict` is off so a model that adds a
+/// field is not refused, and every field the parser can do without is
+/// optional.
+pub(crate) fn plate_response_format() -> Value {
+    let name_list = |desc: &str| serde_json::json!({ "type": "array", "items": { "type": "string" }, "description": desc });
+    serde_json::json!({
+        "type": "json_schema",
+        "json_schema": {
+            "name": "build_plate",
+            "strict": false,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "specializations": {
+                        "type": "array",
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string" },
+                                "elite": { "type": "boolean" },
+                                "traits": { "type": "array", "items": { "type": "string" }, "minItems": 3, "maxItems": 3 }
+                            },
+                            "required": ["name", "traits"]
+                        }
+                    },
+                    "weapons": {
+                        "type": "object",
+                        "properties": {
+                            "set1": { "type": "object", "properties": { "main": { "type": ["string", "null"] }, "off": { "type": ["string", "null"] } } },
+                            "set2": { "type": "object", "properties": { "main": { "type": ["string", "null"] }, "off": { "type": ["string", "null"] } } }
+                        }
+                    },
+                    "skills": {
+                        "type": "object",
+                        "properties": {
+                            "heal": { "type": "string" },
+                            "utilities": name_list("three utility skills"),
+                            "elite": { "type": "string" }
+                        }
+                    },
+                    "rune": { "type": "string" },
+                    "sigils": { "type": "object" },
+                    "relic": { "type": "string" },
+                    "pets": { "type": "object" },
+                    "legends": name_list("revenant legends"),
+                    "stat_prefix": { "type": "string" },
+                    "gear_slots": { "type": "object" },
+                    "changes_made": name_list("what changed"),
+                    "explanation": { "type": "string" }
+                },
+                "required": ["specializations", "weapons", "skills", "stat_prefix", "explanation"]
+            }
+        }
+    })
 }
 
 /// OpenRouter `reasoning` parameter — caps hidden thinking so the completion
@@ -333,6 +398,11 @@ pub(crate) struct ProviderPrefs {
     /// Only route to endpoints that natively support every parameter in the
     /// request — never to one that fakes tools through a prompt template.
     pub(crate) require_parameters: bool,
+    /// OpenRouter `provider.sort`: `"throughput"` sends a free model to the
+    /// host that streams it fastest instead of the default price ordering,
+    /// which for a free model is a tie broken by nothing useful.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) sort: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -410,6 +480,10 @@ pub(crate) struct ProviderCore<'a> {
     pub(crate) supports_provider_prefs: bool,
     /// OpenRouter `provider.require_parameters` when tools are present.
     pub(crate) require_tool_endpoints: bool,
+    /// OpenRouter `provider.sort`; `None` keeps the default ordering.
+    pub(crate) provider_sort: Option<&'static str>,
+    /// `response_format` for this request; `None` omits it.
+    pub(crate) response_format: Option<Value>,
     /// Per-request wall-clock cap. This is a reqwest *total* deadline, not an
     /// idle timeout: provider keep-alives hold the connection open but do not
     /// extend it. See [`CHAT_REQUEST_TIMEOUT`].
@@ -467,7 +541,9 @@ pub(crate) fn send_chat(
         // URL made the OpenAI provider fail outright (Claude F8).
         provider: core.supports_provider_prefs.then_some(ProviderPrefs {
             require_parameters: core.require_tool_endpoints,
+            sort: core.provider_sort.map(str::to_string),
         }),
+        response_format: core.response_format.clone(),
     };
 
     let url = format!("{}/chat/completions", core.base_url);
@@ -817,6 +893,8 @@ mod tests {
         is_cancelled: &'a dyn Fn() -> bool,
     ) -> ProviderCore<'a> {
         ProviderCore {
+            response_format: None,
+            provider_sort: None,
             http,
             rate,
             api_key: "test-key",
@@ -971,6 +1049,7 @@ mod tests {
     #[test]
     fn openai_request_omits_the_openrouter_provider_block() {
         let base = ChatRequest {
+            response_format: None,
             model: "gpt-4o".into(),
             messages: vec![user("hi")],
             tools: None,
@@ -987,7 +1066,9 @@ mod tests {
         assert!(body.get("reasoning").is_none());
 
         let routed = ChatRequest {
+            response_format: None,
             provider: Some(ProviderPrefs {
+                sort: None,
                 require_parameters: true,
             }),
             ..base
@@ -1067,6 +1148,8 @@ mod tests {
         let messages = vec![user(&prompt)];
         let no_cancel = || false;
         let core = ProviderCore {
+            response_format: None,
+            provider_sort: None,
             http: &http,
             rate: &rate,
             api_key: &key,
