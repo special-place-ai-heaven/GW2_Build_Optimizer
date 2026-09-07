@@ -54,7 +54,11 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
 /// for that one request.
 pub(crate) const CLOSING_TURN: &str = "Stop calling tools. You have every tool \
      result you are going to get, and no tools are available on this request. \
-     Answer now, in full, using only what you have already gathered.";
+     Serve the finished plate now, using only what you have already gathered: \
+     ONLY the JSON build object your instructions describe - specializations \
+     as objects with name and traits, weapons, skills, rune, sigils, relic, \
+     stat_prefix, explanation. No prose outside the JSON. A build described \
+     in sentences is not an answer; the JSON is.";
 
 /// `messages` plus the turn that closes a tool loop. Send it with no tools.
 ///

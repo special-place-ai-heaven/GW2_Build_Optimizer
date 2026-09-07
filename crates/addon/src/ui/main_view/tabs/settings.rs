@@ -920,16 +920,15 @@ fn render_theme_section(ui: &Ui, state: &mut AddonState, col_w: f32, theme_align
         ui.text(t("settings.font"));
         ui.set_next_item_width(pair_w);
         let current_font = state.config.ui_font.clone();
-        let font_preview = t(crate::ui::fonts::label_key(&current_font));
+        let font_preview = crate::ui::fonts::label_for(&current_font);
         if let Some(_c) = ComboBox::new("##ui_font")
             .preview_value(&font_preview)
             .begin(ui)
         {
-            for (id, key) in crate::ui::fonts::combo_options() {
-                let label = t(key);
+            for (id, label) in crate::ui::fonts::combo_options(&state.config.ui_language) {
                 let sel = current_font == id;
                 if Selectable::new(&label).selected(sel).build(ui) && !sel {
-                    state.config.ui_font = id.to_string();
+                    state.config.ui_font = id;
                     crate::ui::save_config_detached(state);
                 }
             }

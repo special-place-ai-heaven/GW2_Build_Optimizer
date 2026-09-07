@@ -350,7 +350,7 @@ pub fn render_chat_bar(
                 let origin = ui.cursor_screen_pos();
                 ui.invisible_button("##talk_thinking", [avail, row_h]);
                 let av_x = origin[0];
-                theme::draw_choya_thinking(
+                theme::draw_choya_thinking_row(
                     ui,
                     [av_x + AVATAR * 0.5, origin[1] + AVATAR * 0.5],
                     AVATAR,
@@ -554,7 +554,8 @@ fn render_composer(ui: &Ui, state: &mut ChatBarState) -> Option<String> {
         origin[1] + COMPOSER_H * 0.52,
     ];
     if state.waiting {
-        theme::draw_choya_thinking(ui, choya_c, COMPOSER_CHOYA);
+        // Faces cycling (blink, wink, gasp): awake, and not the header's walk.
+        theme::draw_choya_avatar(ui, choya_c, COMPOSER_CHOYA);
     } else if theme::composer_choya_bobbing(state.last_typed, std::time::Instant::now()) {
         theme::draw_choya_walk(ui, choya_c, COMPOSER_CHOYA);
     } else {
@@ -677,6 +678,33 @@ pub fn add_ai_response(state: &mut ChatBarState, text: String) {
     add_plated_response(state, text, Vec::new(), false);
 }
 
+/// Fold the punctuation a language model writes into what every atlas can
+/// draw. Three font fixes in two days each covered one face and the player
+/// read a '?' in the next one (`ui_font: "ja"`, 2026-09-07). A bubble does
+/// not need an em dash; it needs to never show a question mark the model
+/// did not write. Glyph ranges stay declared for the faces that honour them.
+pub fn fold_punctuation(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\u{2014}' | '\u{2013}' | '\u{2012}' | '\u{2015}' => out.push_str(" - "),
+            '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{2032}' => out.push('\''),
+            '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{2033}' => out.push('"'),
+            '\u{2026}' => out.push_str("..."),
+            '\u{2022}' | '\u{25CF}' | '\u{25E6}' => out.push('*'),
+            '\u{2192}' | '\u{27A1}' | '\u{2794}' => out.push_str("->"),
+            '\u{2190}' => out.push_str("<-"),
+            '\u{2265}' => out.push_str(">="),
+            '\u{2264}' => out.push_str("<="),
+            '\u{2260}' => out.push_str("!="),
+            '\u{00D7}' => out.push('x'),
+            '\u{00A0}' | '\u{202F}' | '\u{2009}' => out.push(' '),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// Add an assistant reply and optional GW2 chat-link chips.
 pub fn add_plated_response(
     state: &mut ChatBarState,
@@ -685,6 +713,7 @@ pub fn add_plated_response(
     open_result: bool,
 ) {
     state.waiting = false;
+    let text = fold_punctuation(&text);
     // Cap for the bubble, not the suggestion panel. Char-safe (no UTF-8 panic).
     let display = if text.chars().count() > 600 {
         let truncated: String = text.chars().take(600).collect();

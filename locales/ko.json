@@ -172,7 +172,7 @@
   "settings.font_yahei": "Microsoft YaHei",
   "settings.font_japanese": "Yu Gothic",
   "settings.font_korean": "맑은 고딕",
-  "settings.font_hint": "Windows 글꼴은 중국어, 일본어, 한국어, 러시아어, 폴란드어를 표시합니다. 게임은 Nexus 서체를 유지합니다.",
+  "settings.font_hint": "이 PC에 설치된 모든 글꼴과 번들로 제공되는 오픈 소스 서체 5종. 중국어, 일본어, 한국어는 항상 각자의 서체로 표시됩니다. 게임은 Nexus 서체를 유지합니다.",
   "settings.theme_section": "테마",
   "settings.theme_custom": "사용자 지정",
   "settings.theme_name_hint": "테마 이름 입력...",
