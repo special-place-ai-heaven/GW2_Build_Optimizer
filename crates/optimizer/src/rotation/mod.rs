@@ -41,6 +41,8 @@ pub struct RotationSkill {
     /// API `Skill.slot` as published (`Heal`, `Utility`, `Elite`,
     /// `Profession_1`, `Weapon_1`, ...).
     pub slot_name: Option<String>,
+    /// API `Number of Targets` fact, 1 when absent (fight population, FR-003a).
+    pub targets: u32,
 }
 
 /// The Necromancer shroud bar as a third "weapon set": its skills are held
