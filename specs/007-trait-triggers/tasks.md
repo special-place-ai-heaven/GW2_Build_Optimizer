@@ -189,13 +189,13 @@ Rust workspace. Optimizer crate at `crates/optimizer/src/`; data at `data/`; evi
 
 **Purpose**: the automated acceptance from `quickstart.md`, then the release the spec asks for.
 
-- [ ] T067 Run `python docs/audit/disable_and_run.py shroud_enter prereq scope population coverage`; confirm each fails with the quoted block and the tree is byte-identical afterwards; note the run in audit 9.1–9.4
-- [ ] T068 [P] Run `MSYS_NO_PATHCONV=1 cargo test -p gw2-optimizer --lib wvw_timeline::reaper_experiments::reaper_results_repeat_identically` and `..::reaper_trace_fits_under_cap`; run the lib harness three times and write the timing beside the T004 baseline in audit 9.6 (SC-006: within 10 %)
-- [ ] T069 [P] Run `MSYS_NO_PATHCONV=1 cargo test -p gw2-optimizer --lib pve_output_unchanged` and `cargo test -p gw2-optimizer --test scoring_regression`; confirm identical to the last digit (SC-004)
-- [ ] T070 Sweep the diff for machine paths, `poslj`, `scratchpad`, `DEBUG`, `mock`, fixture ids inside `data/`, and any edit under `crates/optimizer/src/prompts.rs`, `crates/optimizer/src/llm/`, `crates/optimizer/examples/choya_live.rs`; fix anything found
-- [ ] T071 Run `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo build --release`
-- [ ] T072 Add the CHANGELOG entry under Unreleased naming Necromancer and the six trigger kinds; bump the patch version in the workspace `Cargo.toml` files; commit `release: x.y.z` with the session footers
-- [ ] T073 Push `007-trait-triggers`, open the PR against `main` (body ends with the Claude Code footer), `gh release create` with the DLL and `SHA256SUMS.txt`; stop: the user merges
+- [X] T067 Run `python docs/audit/disable_and_run.py shroud_enter prereq scope population coverage`; confirm each fails with the quoted block and the tree is byte-identical afterwards; note the run in audit 9.1–9.4
+- [X] T068 [P] Run `MSYS_NO_PATHCONV=1 cargo test -p gw2-optimizer --lib wvw_timeline::reaper_experiments::reaper_results_repeat_identically` and `..::reaper_trace_fits_under_cap`; run the lib harness three times and write the timing beside the T004 baseline in audit 9.6 (SC-006: within 10 %)
+- [X] T069 [P] Run `MSYS_NO_PATHCONV=1 cargo test -p gw2-optimizer --lib pve_output_unchanged` and `cargo test -p gw2-optimizer --test scoring_regression`; confirm identical to the last digit (SC-004)
+- [X] T070 Sweep the diff for machine paths, `poslj`, `scratchpad`, `DEBUG`, `mock`, fixture ids inside `data/`, and any edit under `crates/optimizer/src/prompts.rs`, `crates/optimizer/src/llm/`, `crates/optimizer/examples/choya_live.rs`; fix anything found
+- [X] T071 Run `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `cargo build --release`
+- [X] T072 Add the CHANGELOG entry under Unreleased naming Necromancer and the six trigger kinds; bump the patch version in the workspace `Cargo.toml` files; commit `release: x.y.z` with the session footers
+- [X] T073 Push `007-trait-triggers`, open the PR against `main` (body ends with the Claude Code footer), `gh release create` with the DLL and `SHA256SUMS.txt`; stop: the user merges — pushed and PR opened; the GitHub release is held until the user has run the copied DLL once (standing rule: test the DLL before a release)
 
 ---
 
@@ -203,7 +203,7 @@ Rust workspace. Optimizer crate at `crates/optimizer/src/`; data at `data/`; evi
 
 **Purpose**: repeat Phase 7 and Phase 8 for the remaining eight professions on the shipped mechanism.
 
-- [ ] T074 [US3] Determine the profession order: read the `profession` field of each entry in `<addons_dir>/gw2_build_optimizer/cache/characters.json` (fall back to alphabetical if the field is absent), then the remaining professions alphabetically; write the order at the top of audit section 10 in `docs/simulator-connection-audit.md`
+- [X] T074 [US3] Determine the profession order: read the `profession` field of each entry in `<addons_dir>/gw2_build_optimizer/cache/characters.json` (fall back to alphabetical if the field is absent), then the remaining professions alphabetically; write the order at the top of audit section 10 in `docs/simulator-connection-audit.md`
 - [ ] T075 [US3] For profession 2: branch `007-trait-triggers-<prof>` off the increment-1 tip; create `crates/optimizer/src/rotation/<prof>_fixture.rs` (opener reaching every trigger kind the profession's traits use + GuildJen WvW published build with URL and scrape date); read the 111 trait pages; write records and `coverage` blocks into `data/normalized_effects/2026-01-13/wvw.json`; add any new `NeedsMechanic` name to the contract list; add `<prof>_experiments` tests in `crates/optimizer/src/rotation/wvw_timeline.rs`; add the profession to the shipped list in T052; run T052 and T053; ranking-direction test; run Phase 8 gates T067–T073
 - [ ] T076 [US3] Profession 3: same as T075
 - [ ] T077 [US3] Profession 4: same as T075
