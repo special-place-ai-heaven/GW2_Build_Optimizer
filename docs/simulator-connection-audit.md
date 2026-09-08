@@ -264,6 +264,24 @@ Deferred to 9.5: a timed strike bonus after a proc (Soul Barbs' +10 % for 10 s) 
 
 ### 9.3 Prerequisites and scopes
 
+US2 closed for the mechanism. `prerequisite_holds` evaluates `foe_condition` against the unexpired outgoing conditions, `in_shroud` against the shroud state and `foe_health` against `enemy_health / target_health` (never met on an open dummy, reason `foe health unknown`); every refusal is traced as `ProcSkippedPrerequisite` and a record that never fired for that reason gets one `prerequisite never met` summary at the end of the run. `RotationSkill.categories` / `slot_name` come from the API skill; `scope_admits` matches `Category`, `Slot` (slot head before `_`) and `Status` (the name of the status trigger in progress, `Timeline.trigger_status`), and the loader admits a trait `OnSkillUse` that carries a scope. New sites: `apply_outgoing_condition` (the one push for skill facts, corrupts and record operations) fires `OnConditionApplied`; `apply_buff` fires `OnBoonApplied`; `remove_enemy_boons` fires `OnBoonStripped` per boon; the tick fires `Periodic` when a periodic record is loaded (period = `internal_cooldown`, first fire at 0 ms). Status triggers never nest (`status_trigger_depth`), so a boon-on-boon record cannot feed itself. `GainsLifeForce` credits the pool through `gain_life_force_percent` (capped, `LifeForceGained` trace); `Heal` heals `value + coefficient × healing power`; `scale_by: ConditionsRemoved` multiplies by the conditions the same trigger's earlier record removed.
+
+Two WvW-only routings found on the way (PvE/PvP builder output untouched, FR-009): a non-damaging condition on a skill fact (Chilled, Crippled, Weakness, Vulnerability, ...) reaches the timeline as `ApplyBuff` and used to land on the *player* as a self-buff; it is now an outgoing condition on the foe when `data/formulas/conditions.json` knows the name. Fear and Taunt are crowd control *and* conditions, so the control arm also applies them as conditions. No `reaper_*` pin moved.
+
+| kind | test | disabled by (harness entry) | seen failing | passes now |
+|---|---|---|---|---|
+| positive/negative (foe prerequisite) | `necro_chilled_prerequisite_gates_chilling_nova` | `prereq`: the `foe not Chilled` refusal gated off | fires from the first crit at 400 ms: `never before the chill` | refused at 400/750/2 000 ms, fires at 2 500/2 800 ms, refused again after 7 100 ms; unchilled opener never fires |
+| scope (category) | `necro_shout_scope_fires_on_shouts_only` | `scope`: the `Category` arm forced false | `one fire inside the 30 s cooldown: left: 0 right: 1` | one fire, `ProcSkippedIcd` on the second shout, none without the category |
+| scope (slot) | `necro_slot_scope_fires_on_elite_only` | `scope` run | — | Elite fires once, Heal never |
+| status site (condition) | `necro_fear_applied_fires_dread` | — | Fear was control only: `left: 0 right: 1` | `Status("Fear")` fires on the fear skill, `Status("Chilled")` on Grasping Darkness, in that order |
+| status sites (boon) | `necro_boon_applied_and_stripped_fire` | — | — | one fire each on a Fury cast and on a corrupted Stability, both into the life force ledger |
+| timing (periodic) and scaling | `necro_periodic_and_exit_life_force` | — | — | ticks at 0/3 000/6 000/9 000 ms; exit cleanse removes 2, the scaled record credits `14% →` |
+| heal route | `necro_heal_route_uses_healing_power` | — | — | healing delta = 133 + 0.1 × healing power |
+| refusal summary | `necro_prerequisite_never_met_is_traced_not_listed` | — | — | `prerequisite never met` at the end, absent from `coverage` |
+| timing (cooldown) | `necro_long_cooldown_fires_once_and_traces_refusal` | — | — | one fire, `ProcSkippedIcd` after |
+
+Quoted blocks: `docs/audit/sprint3-failures.md` §§ prereq, scope. Full lib run after the step: 1 181 passed, 15.64 s (baseline median 17.01 s, SC-006 holds).
+
 ### 9.4 Population
 
 ### 9.5 Necromancer catalogue

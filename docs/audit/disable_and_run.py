@@ -92,8 +92,18 @@ CONTROLS = {
         "        let _ = (TriggerRule::OnShroudEnter, skill_id); // seen-failing: entry site off",
         "necro_shroud_enter_fires_once_at_entry",
     ),
-    "prereq": (WT, "", "", "necro_chilled_prerequisite_gates_chilling_nova"),
-    "scope": (WT, "", "", "necro_shout_scope_fires_on_shouts_only"),
+    "prereq": (
+        WT,
+        "            if !carried {\n                return Err(format!(\"foe not {condition}\"));",
+        "            if !carried && false {\n                return Err(format!(\"foe not {condition}\"));",
+        "necro_chilled_prerequisite_gates_chilling_nova",
+    ),
+    "scope": (
+        WT,
+        "            crate::data::normalized_effects::TriggerScope::Category(category) => skill_id",
+        "            crate::data::normalized_effects::TriggerScope::Category(category) => false && skill_id",
+        "necro_shout_scope_fires_on_shouts_only",
+    ),
     "population": (WT, "", "", "population_havoc_credits_five_or_cap"),
     "coverage": (
         EN,

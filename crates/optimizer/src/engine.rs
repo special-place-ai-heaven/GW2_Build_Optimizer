@@ -2835,6 +2835,8 @@ mod tests {
         }
         fn rotation_skill(id: u32, weapon_set: u8) -> rotation::RotationSkill {
             rotation::RotationSkill {
+                categories: Vec::new(),
+                slot_name: None,
                 skill_id: id,
                 name: format!("skill {id}"),
                 slot: rotation::SkillSlot::Utility,

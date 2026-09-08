@@ -35,6 +35,12 @@ pub struct RotationSkill {
     /// [`SHROUD_SET`]=only while in shroud). Non-weapon skills
     /// (heal/utility/elite) use 0.
     pub weapon_set: u8,
+    // Sprint 3 (specs/007-trait-triggers): trait-owned skill-use scopes
+    /// API `Skill.categories` (`Shout`, `Well`, `Signet`, ...).
+    pub categories: Vec<String>,
+    /// API `Skill.slot` as published (`Heal`, `Utility`, `Elite`,
+    /// `Profession_1`, `Weapon_1`, ...).
+    pub slot_name: Option<String>,
 }
 
 /// The Necromancer shroud bar as a third "weapon set": its skills are held
