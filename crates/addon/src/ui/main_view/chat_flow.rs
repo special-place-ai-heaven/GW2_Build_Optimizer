@@ -105,6 +105,34 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         return;
     }
 
+    // What the fallback answers with if the model does not (specs/006 US4).
+    // The model itself still gets the message unchanged.
+    let plate_for_verdict: Option<(gw2_optimizer::prompts::GeminiBuildResponse, String)> =
+        crate::ui::main_view::provider_picks::plate_suggestion(&state.main.comparison.suggestions)
+            .map(|s| {
+                let plate_profession = state
+                    .main
+                    .game_db
+                    .as_deref()
+                    .and_then(|db| {
+                        gw2_optimizer::validation::infer_profession_from_spec_names(
+                            db,
+                            s.specializations.iter().map(|(n, _)| n.as_str()),
+                        )
+                    })
+                    .unwrap_or_else(|| profession.clone());
+                (plate_from_suggestion(s), plate_profession)
+            });
+    let kind = classify(
+        &message,
+        plate_for_verdict.is_some(),
+        state
+            .main
+            .game_db
+            .as_deref()
+            .and_then(|db| wished_elite_spec(db, &message)),
+    );
+
     state.main.chat_epoch = state.main.chat_epoch.wrapping_add(1);
     let epoch = state.main.chat_epoch;
     state.main.chat.waiting = true;
@@ -243,6 +271,30 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                 std::cell::RefCell::new(gw2_optimizer::llm::profile::Store::load(&addon_dir));
             let round_secs: std::cell::RefCell<Vec<f32>> = std::cell::RefCell::new(Vec::new());
             let repair_used = std::cell::Cell::new(false);
+            // The scenario every referee call in this request judges against,
+            // the fallback verdict included.
+            let scenario = gw2_optimizer::scenario::ScenarioSpec {
+                game_mode: chat_balance_ctx.game_mode.clone(),
+                combat_tier,
+                combat_kind: selected_role
+                    .map(|r| r.combat_kind_for_weights(&weights))
+                    .unwrap_or_else(|| {
+                        if weights.condition > weights.power {
+                            gw2_optimizer::scenario::CombatKind::CondiRamp
+                        } else {
+                            gw2_optimizer::scenario::CombatKind::StrikeSpike
+                        }
+                    }),
+                target_profile: gw2_optimizer::scenario::TargetProfile::Single,
+                optimization_target: gw2_optimizer::scenario::OptimizationTarget {
+                    label: game_mode_label.clone(),
+                },
+                patch_id: Some(chat_balance_ctx.patch_id.clone()),
+                objective_profile_id: selected_role.map(|r| {
+                    r.profile_id_for(&chat_balance_ctx.game_mode, combat_tier)
+                        .to_string()
+                }),
+            };
             let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
                 let client = gw2_optimizer::llm::create_client(&config, &addon_dir)
                     .map_err(|e| e.to_string())?;
@@ -277,28 +329,6 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                 }
 
                 if let Some(ref db) = db_clone {
-                    let scenario = gw2_optimizer::scenario::ScenarioSpec {
-                        game_mode: chat_balance_ctx.game_mode.clone(),
-                        combat_tier,
-                        combat_kind: selected_role
-                            .map(|r| r.combat_kind_for_weights(&weights))
-                            .unwrap_or_else(|| {
-                                if weights.condition > weights.power {
-                                    gw2_optimizer::scenario::CombatKind::CondiRamp
-                                } else {
-                                    gw2_optimizer::scenario::CombatKind::StrikeSpike
-                                }
-                            }),
-                        target_profile: gw2_optimizer::scenario::TargetProfile::Single,
-                        optimization_target: gw2_optimizer::scenario::OptimizationTarget {
-                            label: game_mode_label.clone(),
-                        },
-                        patch_id: Some(chat_balance_ctx.patch_id.clone()),
-                        objective_profile_id: selected_role.map(|r| {
-                            r.profile_id_for(&chat_balance_ctx.game_mode, combat_tier)
-                                .to_string()
-                        }),
-                    };
                     // A worked answer for this exact scenario, handed to the
                     // model in Context.
                     //
@@ -1035,33 +1065,72 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                 "GW2BuildOpt",
                                 format!("Choya request failed: {e}"),
                             );
-                            crate::state::with_state(|s| {
-                                if s.main.chat_epoch != epoch {
-                                    return;
+                            let Some(msg) = crate::state::with_state(|s| {
+                                (s.main.chat_epoch == epoch).then(|| {
+                                    format_provider_issue(
+                                        &e,
+                                        s.config.active_provider.short_label(),
+                                        s.config.active_model_id(),
+                                    )
+                                })
+                            })
+                            .flatten() else {
+                                return;
+                            };
+                            // The fallback answers the question asked, not a
+                            // different one (specs/006 US4). The referee runs
+                            // here, outside the state lock.
+                            let body = match &kind {
+                                RequestKind::AboutPlate => {
+                                    let verdict = plate_for_verdict.as_ref().zip(db_clone.as_ref()).and_then(
+                                        |((plate, plate_profession), db)| {
+                                            let v = gw2_optimizer::validation::validate_gemini_build(
+                                                plate,
+                                                db,
+                                                plate_profession,
+                                            );
+                                            v.errors.is_empty().then(|| {
+                                                verdict_reply(&gw2_optimizer::referee::evaluate_validated_build(
+                                                    &v,
+                                                    db,
+                                                    plate_profession,
+                                                    &weights,
+                                                    &chat_balance_ctx,
+                                                    &scenario,
+                                                ))
+                                            })
+                                        },
+                                    );
+                                    match verdict {
+                                        Some(v) => format!("{msg}\n\n{v}"),
+                                        None => format!("{msg}\n\n{}", t("choya.fallback_no_plate")),
+                                    }
                                 }
-                                let msg = format_provider_issue(
-                                    &e,
-                                    s.config.active_provider.short_label(),
-                                    s.config.active_model_id(),
-                                );
-                                s.main.provider_issue = Some(msg.clone());
                                 // The run must end in a build. The optimizer's
                                 // own answer for this request has been in hand
                                 // since before the first round; a model that
                                 // ran out of clock does not take it with it.
-                                match fallback_reference.borrow().as_deref() {
+                                RequestKind::Build { .. } => match fallback_reference.borrow().as_deref() {
                                     Some(build) => {
-                                        crate::ui::chat_bar::add_ai_response(
-                                            &mut s.main.chat,
-                                            format!(
-                                                "{msg}\n\n{}\n{build}",
-                                                t("choya.fallback_reference")
-                                            ),
-                                        );
+                                        format!("{msg}\n\n{}\n{build}", t("choya.fallback_reference"))
                                     }
-                                    None => {
-                                        crate::ui::chat_bar::add_ai_response(&mut s.main.chat, msg);
-                                    }
+                                    None => msg.clone(),
+                                },
+                                RequestKind::Chat => format!("{msg}\n\n{}", t("choya.fallback_chat")),
+                            };
+                            let is_build = matches!(kind, RequestKind::Build { .. });
+                            crate::state::with_state(|s| {
+                                if s.main.chat_epoch != epoch {
+                                    return;
+                                }
+                                s.main.provider_issue = Some(msg);
+                                if is_build {
+                                    crate::ui::chat_bar::add_failed_build_response(&mut s.main.chat, body);
+                                } else {
+                                    crate::ui::chat_bar::add_ai_response(&mut s.main.chat, body);
+                                }
+                                if let Some(last) = s.main.chat.history.last_mut() {
+                                    last.retry_of = Some(message.clone());
                                 }
                             });
                         }
@@ -1429,6 +1498,102 @@ pub(super) fn wants_a_build(message: &str) -> bool {
     .any(|k| lower.contains(k))
 }
 
+/// What the fallback answers with when the model does not (specs/006 US4).
+/// Drives the fallback only; the model still receives every message unchanged.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum RequestKind {
+    Build { elite: Option<String> },
+    AboutPlate,
+    Chat,
+}
+
+/// `wished` is the elite specialization named in the message, if any.
+/// Ambiguous messages count as questions, so the cards stay.
+pub(super) fn classify(message: &str, has_plate: bool, wished: Option<String>) -> RequestKind {
+    let lower = message.to_lowercase();
+    let about_plate = [
+        "score",
+        "gate",
+        "simulat",
+        "why",
+        "explain",
+        "rate ",
+        "rate it",
+        "rating",
+        "compare",
+        "what was not",
+        "verdict",
+        "viable",
+    ]
+    .iter()
+    .any(|k| lower.contains(k));
+    if has_plate && about_plate {
+        RequestKind::AboutPlate
+    } else if wants_a_build(message) {
+        RequestKind::Build { elite: wished }
+    } else {
+        RequestKind::Chat
+    }
+}
+
+/// The plate as the validator reads it, from what the strip holds.
+fn plate_from_suggestion(
+    s: &crate::ui::comparison::BuildSuggestion,
+) -> gw2_optimizer::prompts::GeminiBuildResponse {
+    gw2_optimizer::prompts::GeminiBuildResponse {
+        specializations: s.specializations.clone(),
+        weapons: s.weapons.clone(),
+        skills: s.skills.clone(),
+        rune: s.rune.clone(),
+        sigils: s.sigils.clone(),
+        relic: s.relic.clone(),
+        stat_prefix: s.stat_prefix.clone(),
+        ..Default::default()
+    }
+}
+
+/// The referee's verdict on the plated build, as the bubble draws it.
+fn verdict_reply(report: &gw2_optimizer::referee::RefereeReport) -> String {
+    let gates: Vec<(String, bool, String)> = report
+        .viability
+        .gates
+        .iter()
+        .map(|g| (format!("{:?}", g.gate), g.passed, g.note.clone()))
+        .collect();
+    verdict_lines(
+        report.viability.is_viable,
+        report.user_intent_score,
+        &gates,
+        coverage_note_from(&report.quality_reasons).as_deref(),
+    )
+}
+
+fn verdict_lines(
+    viable: bool,
+    score: f64,
+    gates: &[(String, bool, String)],
+    coverage: Option<&str>,
+) -> String {
+    let mut out = t("choya.fallback_verdict");
+    out.push_str(&format!(
+        "\n- **Viable**: {}\n- **Score**: {score:.0}\n- **Gates**:",
+        if viable { "yes" } else { "no" }
+    ));
+    for (gate, passed, note) in gates {
+        out.push_str(&format!(
+            "\n  - **{gate}**: {} - {note}",
+            if *passed { "pass" } else { "fail" }
+        ));
+    }
+    if let Some(detail) = coverage {
+        out.push_str(&format!(
+            "\n! {}",
+            tf("quality.coverage_line", &[("detail", detail)])
+        ));
+    }
+    out
+}
+
 /// Whether the message is about the player's own equipped build rather than
 /// a build they describe: "improve this", "my current build", "what I have
 /// on". Only meaningful when nothing is selected, where it decides between
@@ -1523,8 +1688,74 @@ pub(super) fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -
 #[cfg(test)]
 mod tests {
     use super::{
-        asks_about_own_build, gate_vetoes, plate_is_servable, wants_a_build, wished_elite_spec,
+        asks_about_own_build, classify, gate_vetoes, plate_is_servable, verdict_lines,
+        wants_a_build, wished_elite_spec, RequestKind,
     };
+
+    #[test]
+    fn classify_scoring_question_with_plate() {
+        let q = "Score that exact build and tell me the gates and what was not simulated.";
+        assert_eq!(classify(q, true, None), RequestKind::AboutPlate);
+        assert_eq!(
+            classify("why is it viable?", true, None),
+            RequestKind::AboutPlate
+        );
+    }
+
+    #[test]
+    fn classify_same_without_plate_is_a_build_or_chat() {
+        let q = "Score that exact build and tell me the gates and what was not simulated.";
+        assert!(matches!(
+            classify(q, false, None),
+            RequestKind::Build { .. }
+        ));
+        assert_eq!(classify("why though?", false, None), RequestKind::Chat);
+    }
+
+    #[test]
+    fn classify_build_with_elite() {
+        assert_eq!(
+            classify("make me a reaper build", false, Some("Reaper".into())),
+            RequestKind::Build {
+                elite: Some("Reaper".into())
+            }
+        );
+        assert_eq!(
+            classify("make me a reaper build", true, Some("Reaper".into())),
+            RequestKind::Build {
+                elite: Some("Reaper".into())
+            }
+        );
+    }
+
+    #[test]
+    fn classify_ambiguous_is_chat() {
+        assert_eq!(classify("hello there", true, None), RequestKind::Chat);
+        assert_eq!(classify("thanks!", false, None), RequestKind::Chat);
+    }
+
+    #[test]
+    fn verdict_bullets_shape() {
+        let gates = vec![
+            (
+                "StunbreakCount".to_string(),
+                true,
+                "2 stunbreaks".to_string(),
+            ),
+            ("CleanseRate".to_string(), false, "0/s".to_string()),
+        ];
+        let out = verdict_lines(false, 61.4, &gates, Some("Sigil of Fire"));
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(lines[1].starts_with("- **Viable**: no"));
+        assert!(lines[2].starts_with("- **Score**: 61"));
+        assert_eq!(lines[3], "- **Gates**:");
+        assert!(lines[4].contains("StunbreakCount") && lines[4].contains("pass"));
+        assert!(lines[5].contains("CleanseRate") && lines[5].contains("fail"));
+        assert!(lines[6].starts_with("! "));
+        assert!(lines[6].contains("Sigil of Fire"));
+        let none = verdict_lines(true, 80.0, &[], None);
+        assert!(!none.contains("! "));
+    }
 
     #[test]
     fn improving_nothing_is_told_from_asking_for_something() {
