@@ -64,6 +64,12 @@ CONTROLS = {
         "            spec.stacks += 1;",
         "reaper_thief_stacks_cap_and_expire",
     ),
+    "dark": (
+        WT,
+        "                let damage = 198.0 + 0.03 * self.params.power;",
+        "                self.note_unmodeled(unmodeled(\"dark field\"));\n                return;\n                #[allow(unreachable_code)]\n                let damage = 198.0 + 0.03 * self.params.power;",
+        "reaper_dark_whirl_life_steals",
+    ),
 }
 
 

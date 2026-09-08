@@ -1702,6 +1702,12 @@ impl<'a> Timeline<'a> {
             }
         }
         if incoming_damage > 0.0 {
+            // wiki `Dark Aura` (read 2026-09-08): incoming condition damage
+            // reduced by 20 %. Its torment-on-strike retaliation is not
+            // modeled (the dummy has no incoming strike ledger for it).
+            if self.has_buff("Dark Aura") {
+                incoming_damage *= 0.8;
+            }
             self.absorb_damage(incoming_damage);
         }
         self.outgoing_conditions
@@ -1791,7 +1797,7 @@ impl<'a> Timeline<'a> {
             SkillEffect::ComboFinisher {
                 finisher_type,
                 percent,
-            } => self.resolve_combo(finisher_type, *percent),
+            } => self.resolve_combo(skill_id, finisher_type, *percent),
             SkillEffect::Healing { hit_count } => {
                 let amount = (1_200.0 + self.params.healing_power * 0.45)
                     * *hit_count as f64
@@ -1860,7 +1866,7 @@ impl<'a> Timeline<'a> {
         }
     }
 
-    fn resolve_combo(&mut self, finisher_type: &str, percent: u32) {
+    fn resolve_combo(&mut self, skill_id: u32, finisher_type: &str, percent: u32) {
         if percent < 100 {
             if percent > 0 {
                 self.note_unmodeled(format!("{finisher_type} finisher (partial combo)"));
@@ -1907,8 +1913,39 @@ impl<'a> Timeline<'a> {
                 self.note_unmodeled(unmodeled("unmodeled combo"));
             }
         } else if field_type.contains("dark") {
-            // Dark finishers produce auras or life-steal effects, not Blind.
-            self.note_unmodeled(unmodeled("dark field"));
+            // wiki `Combo` (read 2026-09-08): blast = area Dark Aura 3 s,
+            // leap = Dark Aura 5 s, projectile = life stealing, whirl =
+            // leeching bolts.
+            let protected = self.control_owned();
+            let outcome = if finisher.contains("whirl") {
+                // wiki `Leeching Bolts` (read 2026-09-08): per bolt 198 damage
+                // (0.03 × power) and 170 healing (0.05 × healing power).
+                // ponytail: the page does not state the bolt count; one bolt
+                // per activation is the stated lower bound, not a guess.
+                let damage = 198.0 + 0.03 * self.params.power;
+                let healing = 170.0 + 0.05 * self.params.healing_power;
+                self.record_damage(damage, protected);
+                self.heal(healing);
+                Some("leeching bolt")
+            } else if finisher.contains("leap") {
+                self.apply_buff("Dark Aura", 1, 5_000, true);
+                Some("Dark Aura 5 s")
+            } else if finisher.contains("blast") {
+                self.apply_buff("Dark Aura", 1, 3_000, true);
+                Some("area Dark Aura 3 s")
+            } else {
+                // Projectile life stealing: numbers not read yet.
+                self.note_unmodeled(unmodeled("life stealing unread"));
+                None
+            };
+            if let Some(outcome) = outcome {
+                let name = self.skill_name(skill_id);
+                self.trace(
+                    TraceKind::ComboResolved,
+                    &name,
+                    format!("{field_name} field + {finisher_type} finisher → {outcome}"),
+                );
+            }
         } else {
             self.note_unmodeled(unmodeled("unmodeled combo"));
         }
@@ -5242,6 +5279,111 @@ mod reaper_experiments {
             .is_empty(),
             "never executed with an invented number"
         );
+    }
+
+    // ── US4: dark field combos (T035, T036) ─────────────────────────────────
+
+    /// US4 scenario 1: Soul Spiral (whirl) inside Nightfall (dark field)
+    /// resolves to leeching bolts: damage plus healing, traced, and no
+    /// longer counted as a degraded combo.
+    #[test]
+    fn reaper_dark_whirl_life_steals() {
+        let p = prepared();
+        let skills = only(&p.skills, &[fx::NIGHTFALL, fx::SHROUD_4, fx::GS_AUTO]);
+        // A wound first, so the leeching heal has something to fill.
+        let wound = p.params.max_health * 0.3;
+        let with_field = run(
+            &skills,
+            &p.params,
+            &[fx::NIGHTFALL, fx::SHROUD_4],
+            &[],
+            open_profile(4_000, vec![strike_at(100, wound)]),
+        );
+        let without_field = run(
+            &skills,
+            &p.params,
+            &[fx::SHROUD_4],
+            &[],
+            open_profile(4_000, vec![strike_at(100, wound)]),
+        );
+        let resolved = events(&with_field, TraceKind::ComboResolved, "Soul Spiral");
+        assert!(
+            resolved
+                .iter()
+                .any(|e| e.detail.contains("Dark field + Whirl finisher")),
+            "the dark whirl combo resolves: {resolved:?}"
+        );
+        assert!(
+            with_field.healing > without_field.healing,
+            "leeching bolts heal: {} vs {}",
+            with_field.healing,
+            without_field.healing
+        );
+        assert!(
+            with_field.total_damage > without_field.total_damage,
+            "leeching bolts damage: {} vs {}",
+            with_field.total_damage,
+            without_field.total_damage
+        );
+        assert!(
+            !with_field
+                .unmodeled_sources
+                .iter()
+                .any(|s| s.contains("dark field")),
+            "no longer degraded: {:?}",
+            with_field.unmodeled_sources
+        );
+        assert!(with_field.combo_activations >= 1);
+    }
+
+    /// US4 scenario 2 (regression guard): a finisher after the field has
+    /// expired makes no combo.
+    #[test]
+    fn reaper_expired_field_makes_no_combo() {
+        let p = prepared();
+        let skills = only(
+            &p.skills,
+            &[
+                fx::NIGHTFALL,
+                fx::SHROUD_4,
+                fx::GRAVEDIGGER,
+                fx::DEATH_SPIRAL,
+                fx::GRASPING_DARKNESS,
+                fx::YOU_ARE_ALL_WEAKLINGS,
+                fx::SIGNET_OF_VAMPIRISM,
+                fx::GS_AUTO,
+            ],
+        );
+        // Nightfall lasts 5 s; five casts push Soul Spiral past it.
+        let report = run(
+            &skills,
+            &p.params,
+            &[
+                fx::NIGHTFALL,
+                fx::GRAVEDIGGER,
+                fx::DEATH_SPIRAL,
+                fx::GRASPING_DARKNESS,
+                fx::YOU_ARE_ALL_WEAKLINGS,
+                fx::SIGNET_OF_VAMPIRISM,
+                fx::SHROUD_4,
+            ],
+            &[],
+            open_profile(12_000, vec![]),
+        );
+        let spiral_cast = events(&report, TraceKind::HitLanded, "Soul Spiral")
+            .first()
+            .map(|e| e.t_ms)
+            .expect("Soul Spiral lands");
+        assert!(
+            spiral_cast > 5_000,
+            "the finisher comes after the field: {spiral_cast}"
+        );
+        assert!(
+            events(&report, TraceKind::ComboResolved, "Soul Spiral").is_empty(),
+            "no combo without a live field: {:?}",
+            events(&report, TraceKind::ComboResolved, "Soul Spiral")
+        );
+        assert_eq!(report.combo_activations, 0);
     }
 
     // ── Diagnostics (T022) ──────────────────────────────────────────────────
