@@ -228,3 +228,21 @@ The cached build's nine traits (Bitter Chill, Spiteful Fortitude, Dread, Shroude
 - Dark Aura's torment-on-strike retaliation is not modeled.
 - Overflow damage past the life force pool reaches health at the reduced value.
 - A shroud entry the pool cannot afford is skipped in the opener with a reason, not queued.
+
+## 9. Sprint 3 — trait triggers are the build (`specs/007-trait-triggers`)
+
+Baseline for this section: branch `007-trait-triggers` off `255371f`; plan `0e50a51`, tasks `91a64aa`. Every control below is seen failing before its mechanism exists and again under `python docs/audit/disable_and_run.py <entry>`; the quoted blocks are in `docs/audit/sprint3-failures.md`.
+
+### 9.1 Coverage truth
+
+### 9.2 Shroud
+
+### 9.3 Prerequisites and scopes
+
+### 9.4 Population
+
+### 9.5 Necromancer catalogue
+
+### 9.6 Timing
+
+Sprint 2 baseline re-measured 2026-09-08 at `79e731d` before any Sprint 3 code: `cargo test -p gw2-optimizer --lib` reports `finished in` 19.08 s, 17.01 s, 16.65 s (1 157 tests, 5 ignored). SC-006 cap for Sprint 3: within 10 % of the median 17.01 s, i.e. under 18.7 s harness time on a warm run.

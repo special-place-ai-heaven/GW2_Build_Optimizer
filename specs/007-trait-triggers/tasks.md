@@ -21,10 +21,10 @@ Rust workspace. Optimizer crate at `crates/optimizer/src/`; data at `data/`; evi
 
 **Purpose**: discovery and the evidence scaffolding every later phase writes into.
 
-- [ ] T001 Call SymForge `status`, then `find_references` for `TriggerRule`, `TriggerScope`, `EffectCategory`, `NormalizedEffect`, `ProcSpec`, `ConditionalKind`, `RotationSkill`, `WvwCombatReport`, `search_rank`, `active_normalized_effects`; record the consumer list per symbol at the top of `docs/audit/sprint3-failures.md` (new file, "Consumers touched" section)
-- [ ] T002 [P] Add a `## Sprint 3 controls` block to `docs/audit/disable_and_run.py` with empty control entries named `shroud_enter`, `prereq`, `scope`, `population`, `coverage` (each entry: the source line to comment out, the test filter, the expected failure fragment); wire them into `--list`
-- [ ] T003 [P] Add section 9 heading "Sprint 3: trait triggers" with subsections 9.1–9.6 (Coverage truth, Shroud, Prerequisites and scopes, Population, Necromancer catalogue, Timing) to `docs/simulator-connection-audit.md`
-- [ ] T004 [P] Record the Sprint 2 timing baseline: run `cargo test -p gw2-optimizer --lib 2>&1 | tail -3` three times and write the wall-clock values under 9.6 in `docs/simulator-connection-audit.md`
+- [X] T001 Call SymForge `status`, then `find_references` for `TriggerRule`, `TriggerScope`, `EffectCategory`, `NormalizedEffect`, `ProcSpec`, `ConditionalKind`, `RotationSkill`, `WvwCombatReport`, `search_rank`, `active_normalized_effects`; record the consumer list per symbol at the top of `docs/audit/sprint3-failures.md` (new file, "Consumers touched" section)
+- [X] T002 [P] Add a `## Sprint 3 controls` block to `docs/audit/disable_and_run.py` with empty control entries named `shroud_enter`, `prereq`, `scope`, `population`, `coverage` (each entry: the source line to comment out, the test filter, the expected failure fragment); wire them into `--list`
+- [X] T003 [P] Add section 9 heading "Sprint 3: trait triggers" with subsections 9.1–9.6 (Coverage truth, Shroud, Prerequisites and scopes, Population, Necromancer catalogue, Timing) to `docs/simulator-connection-audit.md`
+- [X] T004 [P] Record the Sprint 2 timing baseline: run `cargo test -p gw2-optimizer --lib 2>&1 | tail -3` three times and write the wall-clock values under 9.6 in `docs/simulator-connection-audit.md`
 
 ---
 
@@ -32,14 +32,14 @@ Rust workspace. Optimizer crate at `crates/optimizer/src/`; data at `data/`; evi
 
 **Purpose**: the record schema every story reads. All additions optional and `serde(default)`; the fourteen records in `data/normalized_effects/2026-01-13/wvw.json` must load unchanged.
 
-- [ ] T005 Add `TriggerRule::{OnShroudEnter, OnShroudExit, OnConditionApplied, OnBoonApplied, OnBoonStripped, Periodic}` in `crates/optimizer/src/data/normalized_effects.rs`; extend every exhaustive match found by T001 (`same_trigger`, `trigger_label`, loader arms) with a compile-clean arm that keeps unknown-to-runtime kinds on the coverage path
-- [ ] T006 Add `TriggerScope::{Category(String), Slot(String), Status(String)}` in `crates/optimizer/src/data/normalized_effects.rs` with serde forms `{"Category":"Shout"}`, `{"Slot":"Elite"}`, `{"Status":"Fear"}` per `contracts/normalized-effect-schema.md`
-- [ ] T007 Add `EffectCategory::{GainsLifeForce, Heal}` and the `healing_power_coefficient: Option<FactualValue<f64>>` field in `crates/optimizer/src/data/normalized_effects.rs`
-- [ ] T008 Add `Prerequisite { foe_condition: Option<String>, in_shroud: Option<bool>, foe_health: Option<HealthThreshold> }`, `ScaleBy::ConditionsRemoved`, `CoverageBlock { class: CoverageClass, mechanic: Option<String> }` and the `prerequisite`, `scale_by`, `coverage` fields on `NormalizedEffect` in `crates/optimizer/src/data/normalized_effects.rs`
-- [ ] T009 Add validation in `crates/optimizer/src/data/normalized_effects.rs` (`load_normalized_effects` / the existing validate fn): empty `prerequisite` rejected; `source_type: Trait` + `OnSkillUse` requires scope ≠ `Any`; `Periodic` requires `internal_cooldown`; `coverage` block forbids `status_operation`, `inner_category`, `prerequisite` and a resolved `value`; `NeedsMechanic` requires `mechanic`, other classes forbid it; `healing_power_coefficient` only with `Heal`; `scale_by` only with `GainsLifeForce` or `Heal`
-- [ ] T010 Add round-trip and validation tests in `crates/optimizer/src/data/normalized_effects.rs` (`#[cfg(test)]`): one record per new trigger kind and scope, one per validation rule (each rejected case asserts the error text), and `sprint2_records_still_load` asserting all fourteen existing records load
-- [ ] T011 Add `ReasonClass { NoRecord, PassiveNoEffect, NeedsMechanic(String), UnresolvedValue, NoFiringSite }` with `suffix()` returning the strings in `contracts/wvw-report.md` and `CoverageEntry { name, class, detail }` in `crates/optimizer/src/data/quality.rs`; unit test the five suffixes
-- [ ] T012 Commit: `schema: trigger kinds, scopes, prerequisite, coverage block (007 step 1)` with the session footers
+- [X] T005 Add `TriggerRule::{OnShroudEnter, OnShroudExit, OnConditionApplied, OnBoonApplied, OnBoonStripped, Periodic}` in `crates/optimizer/src/data/normalized_effects.rs`; extend every exhaustive match found by T001 (`same_trigger`, `trigger_label`, loader arms) with a compile-clean arm that keeps unknown-to-runtime kinds on the coverage path
+- [X] T006 Add `TriggerScope::{Category(String), Slot(String), Status(String)}` in `crates/optimizer/src/data/normalized_effects.rs` with serde forms `{"Category":"Shout"}`, `{"Slot":"Elite"}`, `{"Status":"Fear"}` per `contracts/normalized-effect-schema.md`
+- [X] T007 Add `EffectCategory::{GainsLifeForce, Heal}` and the `healing_power_coefficient: Option<FactualValue<f64>>` field in `crates/optimizer/src/data/normalized_effects.rs`
+- [X] T008 Add `Prerequisite { foe_condition: Option<String>, in_shroud: Option<bool>, foe_health: Option<HealthThreshold> }`, `ScaleBy::ConditionsRemoved`, `CoverageBlock { class: CoverageClass, mechanic: Option<String> }` and the `prerequisite`, `scale_by`, `coverage` fields on `NormalizedEffect` in `crates/optimizer/src/data/normalized_effects.rs`
+- [X] T009 Add validation in `crates/optimizer/src/data/normalized_effects.rs` (`load_normalized_effects` / the existing validate fn): empty `prerequisite` rejected; `source_type: Trait` + `OnSkillUse` requires scope ≠ `Any`; `Periodic` requires `internal_cooldown`; `coverage` block forbids `status_operation`, `inner_category`, `prerequisite` and a resolved `value`; `NeedsMechanic` requires `mechanic`, other classes forbid it; `healing_power_coefficient` only with `Heal`; `scale_by` only with `GainsLifeForce` or `Heal`
+- [X] T010 Add round-trip and validation tests in `crates/optimizer/src/data/normalized_effects.rs` (`#[cfg(test)]`): one record per new trigger kind and scope, one per validation rule (each rejected case asserts the error text), and `sprint2_records_still_load` asserting all fourteen existing records load
+- [X] T011 Add `ReasonClass { NoRecord, PassiveNoEffect, NeedsMechanic(String), UnresolvedValue, NoFiringSite }` with `suffix()` returning the strings in `contracts/wvw-report.md` and `CoverageEntry { name, class, detail }` in `crates/optimizer/src/data/quality.rs`; unit test the five suffixes
+- [X] T012 Commit: `schema: trigger kinds, scopes, prerequisite, coverage block (007 step 1)` with the session footers
 
 **Checkpoint**: `cargo test -p gw2-optimizer --lib normalized_effects` green; fourteen records load.
 

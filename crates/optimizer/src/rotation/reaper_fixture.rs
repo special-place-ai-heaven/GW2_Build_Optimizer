@@ -740,6 +740,10 @@ fn record(
         health_threshold: None,
         proc_chance: None,
         trigger_scope: None,
+        prerequisite: None,
+        scale_by: None,
+        healing_power_coefficient: None,
+        coverage: None,
     }
 }
 

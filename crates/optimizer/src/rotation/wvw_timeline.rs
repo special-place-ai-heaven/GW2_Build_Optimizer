@@ -2368,6 +2368,10 @@ impl<'a> Timeline<'a> {
             crate::data::normalized_effects::TriggerScope::WeaponSkillWithRecharge => skill_id
                 .and_then(|id| self.skills.iter().find(|s| s.skill_id == id))
                 .is_some_and(|s| s.weapon_set != 0 && s.cooldown_ms > 0),
+            // Sprint 3 scopes are admitted by the category/slot/status sites (T033).
+            crate::data::normalized_effects::TriggerScope::Category(_)
+            | crate::data::normalized_effects::TriggerScope::Slot(_)
+            | crate::data::normalized_effects::TriggerScope::Status(_) => false,
         }
     }
 
@@ -3024,6 +3028,12 @@ fn trigger_label(trigger: &TriggerRule) -> &'static str {
         TriggerRule::OnSkillUse => "on-skill-use",
         TriggerRule::OnHealthThreshold => "on-health-threshold",
         TriggerRule::Conditional => "conditional",
+        TriggerRule::OnShroudEnter => "on-shroud-enter",
+        TriggerRule::OnShroudExit => "on-shroud-exit",
+        TriggerRule::OnConditionApplied => "on-condition-applied",
+        TriggerRule::OnBoonApplied => "on-boon-applied",
+        TriggerRule::OnBoonStripped => "on-boon-stripped",
+        TriggerRule::Periodic => "periodic",
     }
 }
 
@@ -3039,6 +3049,15 @@ fn same_trigger(left: &TriggerRule, right: &TriggerRule) -> bool {
                 TriggerRule::OnHealthThreshold
             )
             | (TriggerRule::Conditional, TriggerRule::Conditional)
+            | (TriggerRule::OnShroudEnter, TriggerRule::OnShroudEnter)
+            | (TriggerRule::OnShroudExit, TriggerRule::OnShroudExit)
+            | (
+                TriggerRule::OnConditionApplied,
+                TriggerRule::OnConditionApplied
+            )
+            | (TriggerRule::OnBoonApplied, TriggerRule::OnBoonApplied)
+            | (TriggerRule::OnBoonStripped, TriggerRule::OnBoonStripped)
+            | (TriggerRule::Periodic, TriggerRule::Periodic)
     )
 }
 
@@ -4129,6 +4148,10 @@ mod tests {
             health_threshold: None,
             proc_chance: None,
             trigger_scope: None,
+            prerequisite: None,
+            scale_by: None,
+            healing_power_coefficient: None,
+            coverage: None,
         }
     }
 
@@ -4982,6 +5005,10 @@ mod tests {
             health_threshold: None,
             proc_chance: None,
             trigger_scope: None,
+            prerequisite: None,
+            scale_by: None,
+            healing_power_coefficient: None,
+            coverage: None,
         };
         let params = params();
         let timeline = Timeline::new(

@@ -25,7 +25,7 @@ Applies to every file under `data/normalized_effects/<patch>/{pve,pvp,wvw}.json`
 { "Status": "Fear" }        // a boon or condition name, for the three status triggers
 ```
 
-Rule: a record with `source_type: Trait` and `trigger_rule: OnSkillUse` MUST carry a scope other than `Any`.
+Rule: a record with `source_type: Trait` and `trigger_rule: OnSkillUse` MUST carry a scope other than `Any` to execute. Validation rejects an explicit `Any`; an absent scope is accepted (three Sprint 1 records: Vicious Expression, Plague Sending, Pure of Voice) and the record stays on the coverage line as `(on-skill-use)` until it gets a scope.
 
 ## Prerequisite
 

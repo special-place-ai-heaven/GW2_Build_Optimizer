@@ -71,6 +71,49 @@ pub const COVERAGE_FIELD: &str = "wvw_timeline.effects";
 pub const COVERAGE_PREFIX: &str = "Not simulated: ";
 const COVERAGE_NAMED: usize = 3;
 
+/// Why a source sits on the coverage line (specs/007-trait-triggers, US4).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReasonClass {
+    /// No record and no consumed fact.
+    NoRecord,
+    /// Classified: the trait changes nothing the simulator measures.
+    PassiveNoEffect,
+    /// Classified: needs a mechanic the simulator has no state for.
+    NeedsMechanic(String),
+    /// A record exists but its number is unresolved.
+    UnresolvedValue,
+    /// A record exists but its trigger has no runtime firing site.
+    NoFiringSite,
+}
+
+impl ReasonClass {
+    /// The suffix rendered after the name: `Gravedigger (no record)`.
+    pub fn suffix(&self) -> String {
+        match self {
+            ReasonClass::NoRecord => "no record".into(),
+            ReasonClass::PassiveNoEffect => "passive, no simulated effect".into(),
+            ReasonClass::NeedsMechanic(m) => format!("needs: {m}"),
+            ReasonClass::UnresolvedValue => "unresolved value".into(),
+            ReasonClass::NoFiringSite => "no firing site".into(),
+        }
+    }
+}
+
+/// One skipped source on the coverage line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoverageEntry {
+    pub name: String,
+    pub class: ReasonClass,
+    pub detail: Option<String>,
+}
+
+impl CoverageEntry {
+    /// `"{name} ({suffix})"`, the string `unmodeled_sources` carries.
+    pub fn rendered(&self) -> String {
+        format!("{} ({})", self.name, self.class.suffix())
+    }
+}
+
 /// `a, b, c and N others` for up to three named sources; `None` when nothing
 /// is unmodeled. The names are game item names and are not translated.
 pub fn coverage_detail(unmodeled: &[String]) -> Option<String> {
@@ -124,6 +167,26 @@ mod coverage_tests {
         .take(n)
         .map(|s| s.to_string())
         .collect()
+    }
+
+    #[test]
+    fn reason_class_suffixes_match_the_contract() {
+        let cases = [
+            (ReasonClass::NoRecord, "no record"),
+            (ReasonClass::PassiveNoEffect, "passive, no simulated effect"),
+            (ReasonClass::NeedsMechanic("minions".into()), "needs: minions"),
+            (ReasonClass::UnresolvedValue, "unresolved value"),
+            (ReasonClass::NoFiringSite, "no firing site"),
+        ];
+        for (class, suffix) in cases {
+            assert_eq!(class.suffix(), suffix);
+        }
+        let entry = CoverageEntry {
+            name: "Flesh of the Master".into(),
+            class: ReasonClass::NeedsMechanic("minions".into()),
+            detail: None,
+        };
+        assert_eq!(entry.rendered(), "Flesh of the Master (needs: minions)");
     }
 
     #[test]
