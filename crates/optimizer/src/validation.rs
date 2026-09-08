@@ -38,9 +38,7 @@ pub const TRINKET_SLOTS: [GearSlot; 6] = [
 /// Set 2 never draws slot budgets today (inactive-set invariant).
 pub const WEAPON_SET1_SLOTS: [GearSlot; 2] = [GearSlot::WeaponSet1Main, GearSlot::WeaponSet1Off];
 
-// ---------------------------------------------------------------------------
 // Public types
-// ---------------------------------------------------------------------------
 
 /// A fully validated and resolved build from Gemini output.
 pub type ValidatedPets = (Option<u32>, Option<u32>, Option<u32>, Option<u32>);
@@ -447,10 +445,6 @@ impl std::fmt::Display for ValidationReject {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Main entry point
-// ---------------------------------------------------------------------------
-
 /// Validate a parsed Gemini build response against the GameDb.
 /// Always returns a ValidatedBuild, even if there are errors.
 // The result is populated incrementally as each validation stage runs; a single
@@ -618,9 +612,7 @@ pub fn validate_gemini_build(
     result
 }
 
-// ---------------------------------------------------------------------------
 // Sub-validators
-// ---------------------------------------------------------------------------
 
 fn validate_specializations(
     response: &GeminiBuildResponse,
@@ -1340,9 +1332,7 @@ fn validate_gear_slot_map(
     }
 }
 
-// ---------------------------------------------------------------------------
 // Lookup helpers
-// ---------------------------------------------------------------------------
 
 /// Find a specialization by name (case-insensitive) within a profession's spec list.
 /// Apply is `names_eq` only. A substring of another spec (e.g. "Fire" → Firebrand)
@@ -1642,9 +1632,7 @@ fn find_weapon<'a>(
         .find(|(k, _)| gw2_core::i18n::weapon_type_key(k) == needle)
 }
 
-// ---------------------------------------------------------------------------
 // Parsing helpers
-// ---------------------------------------------------------------------------
 
 /// A single weapon set as (main-hand, off-hand) names.
 type WeaponSlots = (Option<String>, Option<String>);

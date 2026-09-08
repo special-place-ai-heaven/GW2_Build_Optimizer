@@ -212,7 +212,6 @@ impl RotationProfileData {
             gw2_core::types::GameMode::WvW => &self.wvw,
         };
 
-        // 1. Exact match (profession + elite_spec)
         if let Some(spec) = elite_spec {
             if let Some(p) = profiles
                 .iter()
@@ -222,7 +221,6 @@ impl RotationProfileData {
             }
         }
 
-        // 2. Profession-only match
         if let Some(p) = profiles
             .iter()
             .find(|p| p.profession == profession && p.elite_spec.is_none())
@@ -230,11 +228,9 @@ impl RotationProfileData {
             return Some(p);
         }
 
-        // 3. Generic fallback
         profiles.iter().find(|p| p.profession == "Generic")
     }
 
-    /// Get all profiles for a given mode.
     pub fn profiles_for_mode(&self, mode: &gw2_core::types::GameMode) -> &[RotationProfile] {
         match mode {
             gw2_core::types::GameMode::PvE => &self.pve,

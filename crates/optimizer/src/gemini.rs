@@ -1274,7 +1274,6 @@ impl GeminiClient {
         }
     }
 
-    /// Get remaining daily quota.
     pub fn remaining_quota(&self) -> u32 {
         self.rate
             .lock()

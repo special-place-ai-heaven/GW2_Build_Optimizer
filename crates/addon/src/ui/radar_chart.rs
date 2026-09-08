@@ -138,13 +138,11 @@ pub fn render_radar_chart(
         WEIGHTS_OUTLINE,
     );
 
-    // Handle dragging
     let mouse_pos = ui.io().mouse_pos;
     let mouse_down = ui.io().mouse_down[0];
 
     if mouse_down {
         if dragging.is_none() {
-            // Check if mouse is near a handle (start drag)
             for (i, &wi) in w.iter().enumerate() {
                 let handle_pos = axis_point(center, radius, i, wi as f32);
                 let dx = mouse_pos[0] - handle_pos[0];

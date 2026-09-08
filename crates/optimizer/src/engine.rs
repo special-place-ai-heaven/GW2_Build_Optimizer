@@ -945,7 +945,6 @@ fn select_best_major_traits(
     for (col_idx, col_start) in (0..9).step_by(3).enumerate() {
         let column = &major_traits[col_start..col_start + 3];
 
-        // Check if this column is locked
         if let Some(locked_id) = trait_lock.and_then(|t| t[col_idx]) {
             if column.contains(&locked_id) {
                 selected.push(locked_id);

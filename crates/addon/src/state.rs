@@ -340,9 +340,7 @@ pub struct AddonState {
     pub config_path: PathBuf,
     pub addon_dir: PathBuf,
     pub screen: Screen,
-    // Setup wizard transient state
     pub setup: SetupState,
-    // Main UI state
     pub main: MainState,
     /// Cancellation token — cloned into every background thread.
     /// Cancelled on addon unload so threads exit early.

@@ -647,11 +647,10 @@ pub fn optimize_v2_search(
         return Err("Cancelled".into());
     }
 
-    // Step 1: select gear prefix (cosine sim).
+    // Cosine similarity against the weight vector.
     let gear_match = scoring::select_gear_prefix(weights);
     let prefix_name = gear_match.primary;
 
-    // Step 2: seed from synergy pipeline.
     on_progress(OptimizeProgress {
         stage: "Seeding from synergy pipeline...".into(),
         done: false,
@@ -708,7 +707,6 @@ pub fn optimize_v2_search(
         seed_result.validated = validated;
     }
 
-    // Step 3: evaluate seed.
     let seed_report = referee::evaluate_validated_build(
         &seed_result.validated,
         db,
@@ -718,7 +716,6 @@ pub fn optimize_v2_search(
         scenario,
     );
 
-    // Step 4: initialise beam.
     let mut beam: Vec<BeamCandidate> = vec![BeamCandidate {
         validated: seed_result.validated,
         report: seed_report,
@@ -784,7 +781,7 @@ pub fn optimize_v2_search(
     // Index of the FIRST rank key that differs from the seed; 9 = identical.
     let mut fn_first_diff = [0usize; 10];
 
-    // Step 5: beam loop — keep permuting until the clock or eval budget is gone.
+    // Permute until the clock or eval budget is gone.
     while eval_count < config.eval_budget && Instant::now() < deadline && !is_cancelled() {
         generation += 1;
         on_progress(OptimizeProgress {
@@ -1538,7 +1535,6 @@ fn swap_utility_skills(
                 None => continue,
             };
             let mut b = candidate.validated.clone();
-            // Ensure utilities vec has enough entries.
             while b.skills.utilities.len() <= slot_idx {
                 b.skills.utilities.push(None);
             }

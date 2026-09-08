@@ -586,9 +586,7 @@ pub fn shutdown() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Session lifecycle
-// ---------------------------------------------------------------------------
 
 fn start_session(station: RbStation) {
     let my_gen = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
@@ -1110,10 +1108,6 @@ fn set_error(my_gen: u64, msg: String) {
     });
 }
 
-// ---------------------------------------------------------------------------
-// Plumbing
-// ---------------------------------------------------------------------------
-
 /// Lazily create the playback runtime and hand out a handle to it.
 fn runtime_handle() -> Result<tokio::runtime::Handle, String> {
     let mut guard = lock_or_recover(&RUNTIME);
@@ -1188,9 +1182,7 @@ fn radio_log(message: String) {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Pure helpers (unit-tested)
-// ---------------------------------------------------------------------------
+// Volume/gain helpers (unit-tested)
 
 /// The gain for a volume percent: a log taper over a 60 dB range
 /// (`1000^(p/100 - 1)`). 0% is silence, 100% is stream level, 80% ~ -12 dB.

@@ -100,7 +100,6 @@ impl DataCache {
         meta.build != current_build
     }
 
-    /// Get the cached build number for a key, if it exists.
     pub fn cached_build(&self, key: &str) -> Option<u32> {
         let path = self.path_for(key);
         let file = std::fs::File::open(&path).ok()?;
@@ -165,7 +164,6 @@ impl DataCache {
         self.base_path.join("graphics")
     }
 
-    // --- Character-specific cache methods ---
     // Character data changes independently of game patches, so these use
     // simple JSON files without build-number invalidation.
 
