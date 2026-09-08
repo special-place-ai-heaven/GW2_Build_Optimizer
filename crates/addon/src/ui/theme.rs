@@ -639,7 +639,51 @@ pub fn tab_tint(kind: [f32; 4]) -> TabTint {
     tab_tint_in(&pal(), kind)
 }
 
+/// Perceived brightness, 0..1 (Rec. 601 weights on gamma-encoded values;
+/// close enough to pick a direction to tint in).
+fn brightness(c: [f32; 3]) -> f32 {
+    0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+}
+
+/// A kind colour (a site's brand, or CURRENT / OPTIMIZED) adapted to the
+/// theme: on a dark ground a dark brand is lifted toward the text colour,
+/// on a light ground a bright brand is pulled toward the dark button text,
+/// so the tint reads as that brand without vanishing into the panel.
+pub fn adapt_kind(p: &Palette, kind: [f32; 4]) -> [f32; 4] {
+    let k = [kind[0], kind[1], kind[2]];
+    let ground = brightness([p.ink[0], p.ink[1], p.ink[2]]);
+    let kb = brightness(k);
+    // Brightness is scaled, not lerped to a neutral: pulling two blues toward
+    // the same grey made them one colour (custom-white, Current vs Snowcrows).
+    let scaled = |target: f32| {
+        let s = target / kb.max(0.01);
+        [
+            (k[0] * s).min(1.0),
+            (k[1] * s).min(1.0),
+            (k[2] * s).min(1.0),
+        ]
+    };
+    let out = if ground < 0.5 {
+        // Dark theme: want the kind at least ~0.45 bright. A brand too dark
+        // to scale up (near black) is lifted toward the text colour instead.
+        if kb >= 0.45 {
+            k
+        } else {
+            let up = scaled(0.45);
+            let short = ((0.45 - brightness(up)) / 0.45).clamp(0.0, 1.0);
+            lerp3(up, [p.cream[0], p.cream[1], p.cream[2]], short)
+        }
+    } else if kb > 0.55 {
+        // Light theme: want the kind at most ~0.55 bright.
+        scaled(0.55)
+    } else {
+        k
+    };
+    [out[0], out[1], out[2], kind[3]]
+}
+
 pub fn tab_tint_in(p: &Palette, kind: [f32; 4]) -> TabTint {
+    let kind = adapt_kind(p, kind);
     let k = [kind[0], kind[1], kind[2]];
     let idle = [
         p.chip_idle_fill[0],
@@ -667,6 +711,7 @@ pub fn tinted_pill(ui: &Ui, label: &str, selected: bool, id: &str, kind: [f32; 4
     let clicked = ui.invisible_button(id, [w, h]);
     let hovered = ui.is_item_hovered();
     let tint = tab_tint(kind);
+    let kind = adapt_kind(&pal(), kind);
     let fill = if selected {
         tint.selected_fill
     } else if hovered {
@@ -2342,13 +2387,14 @@ mod tab_tint_tests {
                 [0.4, 0.4, 0.4],
             ),
         ));
-        // Current, optimized, and the three published-site colours.
+        // Current, optimized, and the three published-site brand colours
+        // (GuildJen pink, Hardstuck red, Snowcrows sky blue).
         let kinds = [
             CURRENT,
             OPTIMIZED,
-            [0.44, 0.75, 0.36, 1.0],
-            [0.85, 0.34, 0.31, 1.0],
-            [0.36, 0.75, 0.87, 1.0],
+            [0.95, 0.42, 0.72, 1.0],
+            [0.90, 0.30, 0.28, 1.0],
+            [0.35, 0.82, 0.86, 1.0],
         ];
         for (id, p) in &palettes {
             let fills: Vec<[f32; 3]> = kinds.iter().map(|k| rgb(tab_tint_in(p, *k).fill)).collect();
@@ -2366,6 +2412,13 @@ mod tab_tint_tests {
                 assert!(
                     d >= 0.15,
                     "{id}: selected tab {i} indistinct from idle ({d:.3})"
+                );
+                // The adapted brand stays readable against the ground.
+                let adapted = rgb(adapt_kind(p, kinds[i]));
+                let db = (brightness(adapted) - brightness(rgb(p.ink))).abs();
+                assert!(
+                    db >= 0.3,
+                    "{id}: kind {i} too close to the ground in brightness ({db:.3})"
                 );
             }
         }

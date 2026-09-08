@@ -438,15 +438,18 @@ pub(crate) fn render_source_link(ui: &Ui, suggestion: &BuildSuggestion) {
     }
 }
 
-/// A stable colour per community site, for telling their links apart.
+/// Each community site's own brand colour, for telling their links and
+/// tabs apart: GuildJen's pink mark, Hardstuck's red, Snowcrows' sky blue.
+/// The tab tint adapts these to the active theme (`theme::tab_tint`), so
+/// they stay legible on a dark or a light background.
 ///
 /// Anything unrecognised gets the theme's gold, so a fourth site added later
 /// looks deliberate rather than broken.
 fn site_colour(site: &str) -> [f32; 4] {
     match site.to_lowercase().as_str() {
-        "guildjen" => [0.44, 0.75, 0.36, 1.0],
-        "hardstuck" => [0.85, 0.34, 0.31, 1.0],
-        "snowcrows" => [0.36, 0.75, 0.87, 1.0],
+        "guildjen" => [0.95, 0.42, 0.72, 1.0],
+        "hardstuck" => [0.90, 0.30, 0.28, 1.0],
+        "snowcrows" => [0.35, 0.82, 0.86, 1.0],
         _ => crate::ui::theme::pal().gold,
     }
 }
