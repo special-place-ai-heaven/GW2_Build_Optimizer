@@ -92,6 +92,15 @@ pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
             .find(|spec| spec.elite && spec.name.eq_ignore_ascii_case(name))
             .map(|spec| spec.name.clone())
     });
+    // The picks changed with the plate: the old published tabs go, the new
+    // picks come in as tabs beside the plate, which stays selected.
+    state
+        .main
+        .comparison
+        .suggestions
+        .retain(|s| s.source_url.is_empty());
+    state.main.comparison.selected_suggestion =
+        state.main.comparison.suggestions.len().saturating_sub(1);
     state.main.provider_picks = gw2_optimizer::benchmark::closest_per_source(&builds, &shape, &db)
         .into_iter()
         .map(|(build, _)| build.clone())
@@ -106,6 +115,9 @@ pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
             })
         })
         .collect();
+    for i in 0..state.main.provider_picks.len() {
+        adopt_pick_tab(state, i);
+    }
 }
 
 /// The plate the cards belong to: the newest build this addon cooked itself
@@ -280,12 +292,25 @@ pub(in crate::ui::main_view) fn take_sync_invite(ui: &Ui, state: &AddonState) ->
 /// somebody published this for this job, here it is next to what Choya
 /// cooked, compare them.
 pub(in crate::ui::main_view) fn adopt_provider_pick(state: &mut AddonState, index: usize) {
-    let Some(build) = state.main.provider_picks.get(index).cloned() else {
+    let Some(at) = adopt_pick_tab(state, index) else {
         return;
     };
-    let Some(db) = state.main.game_db.clone() else {
-        return;
-    };
+    state.main.comparison.selected_suggestion = at;
+    state.main.comparison.show_optimized = true;
+    // Same landing as Choya's own plate: the tab where a build is actually
+    // shown. Opening a build and leaving the player on the page they opened
+    // it from is a click that appears to do nothing.
+    state.main.active_tab =
+        crate::ui::main_view::optimization::result_alert_tab(state.main.current_build.is_some());
+}
+
+/// Put a published pick on the strip as its own tab without selecting it
+/// or leaving the current tab. Every card the chat shows gets a tab this
+/// way as soon as it is matched (in-game 2026-09-08: a tab only appeared
+/// after its card was clicked). Returns the tab's index.
+fn adopt_pick_tab(state: &mut AddonState, index: usize) -> Option<usize> {
+    let build = state.main.provider_picks.get(index).cloned()?;
+    let db = state.main.game_db.clone()?;
     let published = &build.published;
 
     let specializations: Vec<(String, Vec<String>)> = published
@@ -400,26 +425,22 @@ pub(in crate::ui::main_view) fn adopt_provider_pick(state: &mut AddonState, inde
         Some(&validated),
     );
 
-    // Opening the same card twice is one build, not two. Select the tab that
+    // The same card twice is one build, not two: replace the tab that
     // already holds it instead of stacking another beside it.
-    if let Some(at) = state
-        .main
-        .comparison
-        .suggestions
+    let strip = &mut state.main.comparison.suggestions;
+    match strip
         .iter()
         .position(|s| !s.source_url.is_empty() && s.source_url == suggestion.source_url)
     {
-        state.main.comparison.suggestions[at] = suggestion;
-        state.main.comparison.selected_suggestion = at;
-    } else {
-        state.main.comparison.suggestions.push(suggestion);
-        state.main.comparison.selected_suggestion = state.main.comparison.suggestions.len() - 1;
+        Some(at) => {
+            strip[at] = suggestion;
+            Some(at)
+        }
+        None => {
+            strip.push(suggestion);
+            Some(strip.len() - 1)
+        }
     }
-    // Same landing as Choya's own plate: the tab where a build is actually
-    // shown. Opening a build and leaving the player on the page they opened
-    // it from is a click that appears to do nothing.
-    state.main.active_tab =
-        crate::ui::main_view::optimization::result_alert_tab(state.main.current_build.is_some());
 }
 
 #[cfg(test)]
