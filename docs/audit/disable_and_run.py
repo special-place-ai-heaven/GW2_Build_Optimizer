@@ -90,7 +90,12 @@ CONTROLS = {
     "prereq": (WT, "", "", "necro_chilled_prerequisite_gates_chilling_nova"),
     "scope": (WT, "", "", "necro_shout_scope_fires_on_shouts_only"),
     "population": (WT, "", "", "population_havoc_credits_five_or_cap"),
-    "coverage": (EN, "", "", "coverage_line_never_names_executed_weapon_skills"),
+    "coverage": (
+        EN,
+        "        if executed_from_facts {\n            continue;\n        }",
+        "        if executed_from_facts && false {\n            continue;\n        }",
+        "coverage_line_never_names_executed_weapon_skills",
+    ),
 }
 
 

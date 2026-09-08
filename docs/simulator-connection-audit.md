@@ -235,6 +235,17 @@ Baseline for this section: branch `007-trait-triggers` off `255371f`; plan `0e50
 
 ### 9.1 Coverage truth
 
+CONN-01-06 closed. `active_normalized_effects` now returns a `Vec<CoverageEntry>` (`data/quality.rs`: `ReasonClass::{NoRecord, PassiveNoEffect, NeedsMechanic, UnresolvedValue, NoFiringSite}`): a trait the parser consumed a fact from (`DamageModifiers.consumed_trait_ids`, carried on `PreparedRotation`) or a skill the builder produced a `SkillEffect` for is executed and never named; a record with a `coverage` block puts its class on the list; the timeline's own load-time notes (`(on-crit)`, `(unresolved value)`, `(partial combo)`) are classified back into entries in `report()` and keep their wording. `WvwCombatReport.coverage` is the typed list and `unmodeled_sources` its rendering; an empty list yields no coverage reason (`coverage_reason` unchanged).
+
+| kind | test | disabled by (harness entry) | seen failing | passes now |
+|---|---|---|---|---|
+| coverage (executed skills) | `coverage_line_never_names_executed_weapon_skills` | `coverage`: the `executed_from_facts` skip gated off | `executed weapon skills leave the coverage line: ["\"Chilled to the Bone!\" (no record)", …, "Gravedigger (no record)", …]` (40 names) | no weapon skill on the line |
+| coverage (class) | `coverage_entry_carries_its_class` | — (could not compile before `coverage`) | — | `Flesh of the Master (needs: minions)`, class `NeedsMechanic("minions")` |
+| coverage (empty) | `nothing_skipped_is_verified` | — | — | empty `coverage`, empty line, no reason |
+| PvE pin | `pve_trait_fact_consumption_set_unchanged` | — | — | fixture consumed set empty in PvE and WvW; a percent-fact trait consumed, a bare one not |
+
+Quoted blocks: `docs/audit/sprint3-failures.md` § coverage. Full lib run after the step: 1 165 passed, 17.95 s.
+
 ### 9.2 Shroud
 
 ### 9.3 Prerequisites and scopes

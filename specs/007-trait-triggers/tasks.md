@@ -53,17 +53,17 @@ Rust workspace. Optimizer crate at `crates/optimizer/src/`; data at `data/`; evi
 
 ### Tests (seen-failing first)
 
-- [ ] T013 [US4] Write `coverage_line_never_names_executed_weapon_skills` in `crates/optimizer/src/rotation/wvw_timeline.rs` (`reaper_experiments`): score the fixture, assert "Gravedigger" is absent from `unmodeled_sources`; run it, paste the failure into `docs/audit/sprint3-failures.md` under `coverage`
-- [ ] T014 [P] [US4] Write `coverage_entry_carries_its_class` and `nothing_skipped_is_verified` in `crates/optimizer/src/rotation/wvw_timeline.rs`: a record with `coverage: NeedsMechanic("minions")` renders `(needs: minions)`; an input whose sources are all executed yields empty `coverage` and Verified
+- [X] T013 [US4] Write `coverage_line_never_names_executed_weapon_skills` in `crates/optimizer/src/rotation/wvw_timeline.rs` (`reaper_experiments`): score the fixture, assert "Gravedigger" is absent from `unmodeled_sources`; run it, paste the failure into `docs/audit/sprint3-failures.md` under `coverage`
+- [X] T014 [P] [US4] Write `coverage_entry_carries_its_class` and `nothing_skipped_is_verified` in `crates/optimizer/src/rotation/wvw_timeline.rs`: a record with `coverage: NeedsMechanic("minions")` renders `(needs: minions)`; an input whose sources are all executed yields empty `coverage` and Verified
 
 ### Implementation
 
-- [ ] T015 [US4] Make the trait-fact walk in `crates/optimizer/src/combat.rs` (around the line-740 region found by T001) return the set of trait ids whose facts it consumed; no numeric change; keep the existing signature via a wrapper if callers are many
-- [ ] T016 [US4] Record in `crates/optimizer/src/rotation/builder.rs` the set of skill ids for which at least one `SkillEffect` was produced (a field on the built rotation or a returned set)
-- [ ] T017 [US4] Rewrite the "(no record)" list in `engine::active_normalized_effects` (`crates/optimizer/src/engine.rs`): subtract the T015 and T016 sets; classify each remainder into a `CoverageEntry` (record with `coverage` block → its class; record with unresolved value → `UnresolvedValue`; record whose trigger has no runtime site → `NoFiringSite`; else `NoRecord`); render `unmodeled_sources` as `"{name} ({suffix})"`
-- [ ] T018 [US4] Add `coverage: Vec<CoverageEntry>` to `WvwCombatReport` in `crates/optimizer/src/rotation/wvw_timeline.rs`, fill it from the engine's list, and make `DataQuality::Verified` iff it is empty in `crates/optimizer/src/data/quality.rs` (`coverage_reason`)
-- [ ] T019 [US4] Add a PvE pin `pve_trait_fact_consumption_set_unchanged` in `crates/optimizer/src/combat.rs` asserting the T015 set for the fixture build equals a hard-coded list of trait ids (guards double counting when records arrive)
-- [ ] T020 [US4] Fill the `coverage` control in `docs/audit/disable_and_run.py` (disable the T017 subtraction), run it, quote the failure in `docs/audit/sprint3-failures.md` and audit 9.1; commit `coverage: only skipped mechanics, each with its class (007 step 2)`
+- [X] T015 [US4] Make the trait-fact walk in `crates/optimizer/src/combat.rs` (around the line-740 region found by T001) return the set of trait ids whose facts it consumed; no numeric change; keep the existing signature via a wrapper if callers are many
+- [X] T016 [US4] Record in `crates/optimizer/src/rotation/builder.rs` the set of skill ids for which at least one `SkillEffect` was produced (a field on the built rotation or a returned set) — no builder change needed: `RotationSkill.effects` already carries it; the engine reads `!effects.is_empty()`
+- [X] T017 [US4] Rewrite the "(no record)" list in `engine::active_normalized_effects` (`crates/optimizer/src/engine.rs`): subtract the T015 and T016 sets; classify each remainder into a `CoverageEntry` (record with `coverage` block → its class; record with unresolved value → `UnresolvedValue`; record whose trigger has no runtime site → `NoFiringSite`; else `NoRecord`); render `unmodeled_sources` as `"{name} ({suffix})"`
+- [X] T018 [US4] Add `coverage: Vec<CoverageEntry>` to `WvwCombatReport` in `crates/optimizer/src/rotation/wvw_timeline.rs`, fill it from the engine's list, and make `DataQuality::Verified` iff it is empty in `crates/optimizer/src/data/quality.rs` (`coverage_reason`)
+- [X] T019 [US4] Add a PvE pin `pve_trait_fact_consumption_set_unchanged` in `crates/optimizer/src/combat.rs` asserting the T015 set for the fixture build equals a hard-coded list of trait ids (guards double counting when records arrive)
+- [X] T020 [US4] Fill the `coverage` control in `docs/audit/disable_and_run.py` (disable the T017 subtraction), run it, quote the failure in `docs/audit/sprint3-failures.md` and audit 9.1; commit `coverage: only skipped mechanics, each with its class (007 step 2)`
 
 **Checkpoint**: T013, T014 green; PvE guard `pve_output_unchanged_by_conditional_tagging` green.
 

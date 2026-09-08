@@ -108,9 +108,32 @@ pub struct CoverageEntry {
 }
 
 impl CoverageEntry {
-    /// `"{name} ({suffix})"`, the string `unmodeled_sources` carries.
+    /// `"{name} ({suffix})"`, the string `unmodeled_sources` carries. A
+    /// runtime note keeps its own wording in `detail` (`on-crit`, `partial
+    /// combo`), so the Sprint 1 and 2 lines read as they always did.
     pub fn rendered(&self) -> String {
-        format!("{} ({})", self.name, self.class.suffix())
+        let why = self.detail.clone().unwrap_or_else(|| self.class.suffix());
+        format!("{} ({})", self.name, why)
+    }
+
+    /// Back from a timeline note `"{name} ({why})"`: the two classes the
+    /// loader names verbatim, everything else a trigger with no runtime site.
+    pub fn from_runtime_note(note: &str) -> CoverageEntry {
+        let (name, why) = note
+            .strip_suffix(')')
+            .and_then(|s| s.rsplit_once(" ("))
+            .unwrap_or((note, "no firing site"));
+        let class = match why {
+            "no record" => ReasonClass::NoRecord,
+            "unresolved value" => ReasonClass::UnresolvedValue,
+            _ => ReasonClass::NoFiringSite,
+        };
+        let detail = (why != class.suffix()).then(|| why.to_string());
+        CoverageEntry {
+            name: name.to_string(),
+            class,
+            detail,
+        }
     }
 }
 
@@ -174,7 +197,10 @@ mod coverage_tests {
         let cases = [
             (ReasonClass::NoRecord, "no record"),
             (ReasonClass::PassiveNoEffect, "passive, no simulated effect"),
-            (ReasonClass::NeedsMechanic("minions".into()), "needs: minions"),
+            (
+                ReasonClass::NeedsMechanic("minions".into()),
+                "needs: minions",
+            ),
             (ReasonClass::UnresolvedValue, "unresolved value"),
             (ReasonClass::NoFiringSite, "no firing site"),
         ];
@@ -187,6 +213,13 @@ mod coverage_tests {
             detail: None,
         };
         assert_eq!(entry.rendered(), "Flesh of the Master (needs: minions)");
+
+        let note = CoverageEntry::from_runtime_note("Superior Sigil of Fire (on-crit)");
+        assert_eq!(note.class, ReasonClass::NoFiringSite);
+        assert_eq!(note.rendered(), "Superior Sigil of Fire (on-crit)");
+        let note = CoverageEntry::from_runtime_note("Scholar (unresolved value)");
+        assert_eq!(note.class, ReasonClass::UnresolvedValue);
+        assert_eq!(note.detail, None);
     }
 
     #[test]

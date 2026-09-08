@@ -55,6 +55,11 @@ pub struct DamageModifiers {
     /// threshold record; every other path keeps the flattened value
     /// (specs/005-wvw-proc-sites, R4).
     pub conditional_strike: Vec<ConditionalClause>,
+    /// Equipped traits at least one of whose facts became a modifier above
+    /// (specs/007-trait-triggers, US4). The coverage line drops these: the
+    /// parser executed them. A trait whose facts all fell into `unparsed`
+    /// is not consumed.
+    pub consumed_trait_ids: Vec<u32>,
 }
 
 /// One flattened, health-gated strike clause and where it came from.
@@ -97,6 +102,24 @@ impl DamageModifiers {
 
     fn mark(&self) -> (usize, usize) {
         (self.strike_pct.len(), self.condition_pct.len())
+    }
+
+    /// Any modifier at all (`unparsed` does not count).
+    fn has_modifiers(&self) -> bool {
+        !(self.strike_pct.is_empty()
+            && self.strike_add_pct.is_empty()
+            && self.condition_pct.is_empty()
+            && self.condition_add_pct.is_empty()
+            && self.specific_condi.is_empty()
+            && self.crit_damage_pct.is_empty()
+            && self.condi_duration_pct.is_empty()
+            && self.specific_condi_duration.is_empty()
+            && self.trait_condi_duration_pct.is_empty()
+            && self.trait_specific_condi_duration.is_empty()
+            && self.boon_duration_pct.is_empty()
+            && self.trait_boon_duration_pct.is_empty()
+            && self.healing_pct.is_empty()
+            && self.crit_chance_pct.is_empty())
     }
 
     /// Total multiplicative condition damage modifier for a specific condition.
@@ -763,6 +786,9 @@ pub fn extract_damage_modifiers(
         }
 
         trait_mods.route_additive(&t.name, (0, 0));
+        if trait_mods.has_modifiers() {
+            mods.consumed_trait_ids.push(trait_id);
+        }
         // Two same-category values are the API's PvE/competitive split. Collapse
         // them within one trait so they can never stack simultaneously.
         absorb_mode_pairs(&mut mods, trait_mods, competitive);
@@ -3112,6 +3138,52 @@ mod tests {
         );
         assert_eq!(mods.trait_condi_duration_pct.len(), 1);
         assert!((mods.trait_condi_duration_pct[0] - 0.50).abs() < 0.001);
+    }
+
+    /// US4 pin (specs/007-trait-triggers): the fixture traits whose facts the
+    /// parser consumes, in PvE and in WvW. Guards double counting when a
+    /// trait gains a record: the record must carry only what the parser does
+    /// not already read. Update the list only with a fixture change.
+    #[test]
+    fn pve_trait_fact_consumption_set_unchanged() {
+        use crate::rotation::reaper_fixture as fx;
+        let db = fx::db();
+        let build = fx::build();
+        let trait_ids: Vec<u32> = build
+            .specializations
+            .iter()
+            .flat_map(|s| s.all_trait_ids.iter().copied())
+            .collect();
+        for (ctx, _) in [fx::pve_scenario(), fx::scenario()] {
+            let mods =
+                extract_damage_modifiers(&trait_ids, None, &[], None, &db.traits, &db.items, &ctx);
+            let mut consumed = mods.consumed_trait_ids.clone();
+            consumed.sort_unstable();
+            assert_eq!(
+                consumed,
+                Vec::<u32>::new(),
+                "{:?}: the fixture's synthetic traits carry no percent facts",
+                ctx.game_mode
+            );
+        }
+        // The set is fed by real percent facts and by nothing else.
+        let mut traits = db.traits.clone();
+        traits.insert(
+            900_001,
+            percent_trait(900_001, "Consumed", &[("Increased damage", 10.0)]),
+        );
+        traits.insert(900_002, percent_trait(900_002, "Bare", &[]));
+        let (ctx, _) = fx::scenario();
+        let mods = extract_damage_modifiers(
+            &[900_001, 900_002],
+            None,
+            &[],
+            None,
+            &traits,
+            &db.items,
+            &ctx,
+        );
+        assert_eq!(mods.consumed_trait_ids, vec![900_001]);
     }
 
     #[test]

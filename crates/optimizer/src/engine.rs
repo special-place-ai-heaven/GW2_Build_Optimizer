@@ -196,7 +196,6 @@ pub fn optimize_cancellable(
         candidate.score = score_with_weights(&perf, weights);
     }
 
-    // Sort by score descending
     gear_candidates.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -352,7 +351,6 @@ pub fn optimize_cancellable(
         done: false,
     });
 
-    // Sort and return top N
     all_candidates.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -1177,6 +1175,9 @@ pub struct PreparedRotation {
     /// `params.strike_mult`; the WvW timeline divides out the ones whose
     /// threshold record it executes (R4).
     pub conditional_strike: Vec<combat::ConditionalClause>,
+    /// Traits the parser consumed a fact from (US4): executed from facts, so
+    /// the coverage line never names them.
+    pub consumed_trait_ids: Vec<u32>,
     profession_name: String,
 }
 
@@ -1344,6 +1345,7 @@ pub fn prepare_validated_rotation(
     Some(PreparedRotation {
         opener: Vec::new(),
         conditional_strike: mods.conditional_strike.clone(),
+        consumed_trait_ids: mods.consumed_trait_ids.clone(),
         skills: rotation_skills,
         params,
         profession_name: profession_name.to_string(),
@@ -1419,8 +1421,15 @@ fn simulate_prepared_with(
         rotation::simulator::simulate_with(rotation_skills, duration_ms, params, enemy);
 
     if let Some(scenario) = scenario.filter(|scenario| scenario.game_mode == GameMode::WvW) {
-        let (active_effects, unmodeled_sources, sigil_sets) =
-            active_normalized_effects(validated, rotation_skills, db, mode.label());
+        let executed_traits: std::collections::HashSet<u32> =
+            prepared.consumed_trait_ids.iter().copied().collect();
+        let (active_effects, coverage, sigil_sets) = active_normalized_effects(
+            validated,
+            rotation_skills,
+            db,
+            crate::data::normalized_effects::effects().effects_for_mode(mode.label()),
+            &executed_traits,
+        );
         let (resource_rules, resource_model_complete) = wvw_resource_rules(
             validated,
             rotation_skills,
@@ -1445,7 +1454,7 @@ fn simulate_prepared_with(
                 active_effects: &active_effects,
                 resource_rules: &resource_rules,
                 resource_model_complete,
-                unmodeled_sources,
+                coverage,
                 sigil_sets,
                 weapon_swap_cooldown_ms: wvw_weapon_swap_cooldown_ms(profession_name, validated),
                 trace,
@@ -1657,23 +1666,29 @@ fn land_weapon_slot_type(
     }
 }
 
-/// The normalized-effect records selected for this build in `mode`, the
-/// names of the equipped sources that have no record at all, formatted
-/// `"{name} (no record)"` and sorted, so the report can say what it did not
-/// simulate instead of counting it, and each sigil's weapon set (1, 2, or 0
-/// when the same sigil is socketed on both) so the timeline fires it only
-/// while that set is held (CONN-00-07).
-fn active_normalized_effects(
+/// The records in `effects` selected for this build, the coverage list (US4,
+/// specs/007-trait-triggers: every equipped source the timeline will not
+/// simulate, each with its class, sorted by name, executed sources dropped),
+/// and each sigil's weapon set (1, 2, or 0 when the same sigil is socketed on
+/// both) so the timeline fires it only while that set is held (CONN-00-07).
+///
+/// Executed means: a trait in `executed_traits` (the parser consumed one of
+/// its facts), or a skill the builder produced at least one `SkillEffect`
+/// for. A record with a `coverage` block puts its class on the list; records
+/// the timeline cannot execute add their own notes at load time.
+pub(crate) fn active_normalized_effects<'e>(
     validated: &ValidatedBuild,
     rotation_skills: &[rotation::RotationSkill],
     db: &GameDb,
-    mode: &str,
+    effects: &'e [crate::data::normalized_effects::NormalizedEffect],
+    executed_traits: &std::collections::HashSet<u32>,
 ) -> (
-    Vec<&'static crate::data::normalized_effects::NormalizedEffect>,
-    Vec<String>,
+    Vec<&'e crate::data::normalized_effects::NormalizedEffect>,
+    Vec<crate::data::quality::CoverageEntry>,
     std::collections::HashMap<u32, u8>,
 ) {
-    use crate::data::normalized_effects::SourceType;
+    use crate::data::normalized_effects::{CoverageClass, SourceType};
+    use crate::data::quality::{CoverageEntry, ReasonClass};
 
     let trait_ids: std::collections::HashSet<u32> = validated
         .specializations
@@ -1708,7 +1723,6 @@ fn active_normalized_effects(
         SourceType::Relic => relic_ids.contains(&source_id),
     };
 
-    let effects = crate::data::normalized_effects::effects().effects_for_mode(mode);
     let active: Vec<_> = effects
         .iter()
         .filter(|effect| selected(&effect.source_type, effect.source_id))
@@ -1756,12 +1770,45 @@ fn active_normalized_effects(
             format!("{kind} {id}")
         })
     };
-    let mut unmodeled: Vec<String> = equipped
-        .difference(&modeled)
-        .map(|(tag, id)| format!("{} (no record)", name_of(*tag, *id)))
+    let executed_skills: std::collections::HashSet<u32> = rotation_skills
+        .iter()
+        .filter(|skill| !skill.effects.is_empty())
+        .map(|skill| skill.skill_id)
         .collect();
-    unmodeled.sort();
-    (active, unmodeled, sigil_sets)
+    let mut coverage: Vec<CoverageEntry> = active
+        .iter()
+        .filter_map(|effect| {
+            let block = effect.coverage.as_ref()?;
+            Some(CoverageEntry {
+                name: effect.source_name.clone(),
+                class: match block.class {
+                    CoverageClass::PassiveNoEffect => ReasonClass::PassiveNoEffect,
+                    CoverageClass::NeedsMechanic => {
+                        ReasonClass::NeedsMechanic(block.mechanic.clone().unwrap_or_default())
+                    }
+                },
+                detail: None,
+            })
+        })
+        .collect();
+    for (tag, id) in equipped.difference(&modeled) {
+        let executed_from_facts = match tag {
+            0 => executed_traits.contains(id),
+            1 => executed_skills.contains(id),
+            _ => false,
+        };
+        if executed_from_facts {
+            continue;
+        }
+        coverage.push(CoverageEntry {
+            name: name_of(*tag, *id),
+            class: ReasonClass::NoRecord,
+            detail: None,
+        });
+    }
+    coverage.sort_by(|a, b| a.name.cmp(&b.name));
+    coverage.dedup_by(|a, b| a.name == b.name);
+    (active, coverage, sigil_sets)
 }
 
 fn source_type_tag(source_type: &crate::data::normalized_effects::SourceType) -> u8 {
@@ -2216,7 +2263,6 @@ pub fn optimize_deterministic_cancellable(
     if is_cancelled() {
         return Err("Cancelled".into());
     }
-    // 1. DETERMINISTIC gear prefix selection (reuse existing)
     on_progress(OptimizeProgress {
         stage: "Selecting gear prefix...".into(),
         done: false,
@@ -2224,7 +2270,6 @@ pub fn optimize_deterministic_cancellable(
     let gear_match = scoring::select_gear_prefix(weights);
     let determined_prefix = gear_match.primary;
 
-    // 2. Run the full synergy pipeline
     let mut result = crate::synergy_pipeline::optimize_synergy_cancellable(
         db,
         profession_name,
@@ -2237,7 +2282,6 @@ pub fn optimize_deterministic_cancellable(
         is_cancelled,
     )?;
 
-    // 3. Optional: LLM explanation pass
     if is_cancelled() {
         return Err("Cancelled".into());
     }
@@ -2247,7 +2291,6 @@ pub fn optimize_deterministic_cancellable(
             done: false,
         });
 
-        // Build a compact summary for the LLM
         let specs_summary: Vec<String> = result
             .validated
             .specializations
@@ -2610,7 +2653,6 @@ pub fn llm_advisor(
     locks: &gw2_core::types::BuildLocks,
     llm_client: &dyn LlmClient,
 ) -> crate::validation::ValidatedBuild {
-    // Build a compact prompt asking for 3 specific swaps to try.
     let current_gear = current
         .primary_prefix()
         .map(|p| p.name.as_str())
@@ -2647,7 +2689,6 @@ pub fn llm_advisor(
         weights.power, weights.condition, weights.sustain, weights.control,
     );
 
-    // Get current score for comparison baseline.
     let current_report = crate::referee::evaluate_validated_build(
         &current,
         db,
@@ -2657,7 +2698,6 @@ pub fn llm_advisor(
         scenario,
     );
 
-    // Call LLM.
     let response = match llm_client.generate_brief(&prompt, BRIEF_REPLY_TOKENS) {
         Ok(r) => r,
         Err(_) => {
@@ -2666,7 +2706,6 @@ pub fn llm_advisor(
         }
     };
 
-    // Parse SWAP: lines from response.
     let mut best_validated = current.clone();
     let mut best_rank = crate::referee::search_rank(&current_report);
 
