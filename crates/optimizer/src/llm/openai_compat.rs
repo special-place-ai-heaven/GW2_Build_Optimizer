@@ -216,11 +216,14 @@ pub(crate) const TOOL_PHASE_BUDGET: Duration = Duration::from_secs(150);
 /// Writing a plate is not a 32k job; it is not a thinking job either.
 pub(crate) const CLOSING_MAX_TOKENS: u32 = 8_192;
 
-/// Deadline for the closing request. A plate at 8k tokens streams in well
-/// under this on any model that can stream at all; a model that cannot make
-/// it is not going to at 420 s either, and the caller has a fallback answer
-/// to serve instead of a stopwatch.
-pub(crate) const CLOSING_REQUEST_TIMEOUT: Duration = Duration::from_secs(150);
+/// Ceiling for the closing request. It was 150 s and it ended the player's
+/// wait with "no reply within 150s" while the model was still writing
+/// (in-game 2026-09-08). The wait is now open-ended from the player's side:
+/// the thinking bubble shows what is arriving and a stall line when nothing
+/// is, and Stop is theirs to press (specs/006 US5). This only bounds a
+/// runaway nobody is watching. (`reqwest::blocking` has no per-read idle
+/// timeout; the stall line is the idle signal.)
+pub(crate) const CLOSING_REQUEST_TIMEOUT: Duration = Duration::from_secs(1800);
 
 /// Completion ceiling per chat completion, hidden thinking included, so a
 /// reasoning model cannot spend the budget deliberating and have nothing left
