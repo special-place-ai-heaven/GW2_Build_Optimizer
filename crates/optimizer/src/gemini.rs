@@ -504,7 +504,6 @@ impl Drop for RateReserve<'_> {
     }
 }
 
-// ─── Gemini API Types ───
 
 #[derive(Serialize)]
 struct GenerateRequest {
@@ -606,7 +605,7 @@ pub struct FunctionResponse {
     pub response: serde_json::Value,
 }
 
-// ─── Tool Declarations ───
+// Tool Declarations
 
 #[derive(Serialize, Debug, Clone)]
 pub struct Tool {
@@ -621,7 +620,7 @@ pub struct FunctionDeclaration {
     pub parameters: serde_json::Value,
 }
 
-// ─── SSE Streaming ───
+// SSE Streaming
 
 /// One Gemini SSE `data:` payload (streamGenerateContent?alt=sse chunks are
 /// full GenerateContentResponse objects with partial candidates).
@@ -853,7 +852,6 @@ fn gemini_http_client() -> Result<reqwest::blocking::Client, GeminiError> {
     http_client().map_err(|e| GeminiError::Http(e.to_string()))
 }
 
-// ─── Response Types ───
 
 #[derive(Deserialize)]
 struct Candidate {
@@ -1602,7 +1600,7 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         }
     }
 
-    // ─── Transport parity (leaf-1.1.6) ───
+    // Transport parity (leaf-1.1.6)
 
     /// A newline-free body that reports exactly how many bytes were pulled
     /// off it. The uncapped reader grew one `String` for the whole thing;
@@ -1803,7 +1801,7 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
         use crate::llm::openai_compat::{CONNECT_TIMEOUT_SECS, REQUEST_TIMEOUT_SECS};
         use std::time::Duration;
 
-        // ── Timeouts ──
+        // Timeouts
         gemini_http_client().expect("the shared client factory builds");
         // Compile-time: a connect bound must exist at all. Without one the OS
         // default applies, which on Windows is minutes of a frozen worker.
@@ -1873,7 +1871,7 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
             "a Settings-tab call gets the short budget"
         );
 
-        // ── Stream-read errors are transport, not parse ──
+        // Stream-read errors are transport, not parse
         let err = read_gemini_stream(dying_after_one_frame())
             .expect_err("a reset socket must fail the read");
         assert!(
@@ -1890,7 +1888,7 @@ data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":
             "an empty-but-healthy stream stays a parse failure: {err:?}"
         );
 
-        // ── Status classification ──
+        // Status classification
         assert_eq!(classify_status(200), StatusAction::Read);
         assert_eq!(classify_status(401), StatusAction::InvalidKey);
         assert_eq!(classify_status(403), StatusAction::Denied);

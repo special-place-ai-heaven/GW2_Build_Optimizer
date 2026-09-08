@@ -21,7 +21,7 @@ mod tests {
     use crate::data::universal_formulas;
     use crate::data::EvidenceLevel;
 
-    // ─── Cross-file: Profession Profiles referenced by other modules ───
+    // Cross-file: Profession Profiles referenced by other modules
 
     /// All 9 canonical professions must be present in profession_profiles.
     #[test]
@@ -80,7 +80,7 @@ mod tests {
         }
     }
 
-    // ─── Cross-file: Patch manifest references ───
+    // Cross-file: Patch manifest references
 
     /// All patch_ids referenced in balance_override files must exist in manifests.
     #[test]
@@ -177,7 +177,7 @@ mod tests {
         }
     }
 
-    // ─── Cross-file: Normalized effects structural validation ───
+    // Cross-file: Normalized effects structural validation
 
     /// All normalized_effects entries must have valid EffectCategory values.
     /// (Enforced by serde deserialization, but this test confirms the data
@@ -273,7 +273,7 @@ mod tests {
         }
     }
 
-    // ─── Evidence classification: Factual entries must have source citations ───
+    // Evidence classification: Factual entries must have source citations
 
     /// All profession_profiles Factual entries must have non-empty sources.
     #[test]
@@ -453,7 +453,7 @@ mod tests {
         }
     }
 
-    // ─── Cross-file: Effect ID uniqueness across modes ───
+    // Cross-file: Effect ID uniqueness across modes
 
     /// Effect IDs within each mode file must be unique (already enforced by
     /// the loader, but verify the embedded data).
@@ -475,7 +475,7 @@ mod tests {
         }
     }
 
-    // ─── Cross-file: Manifest supported_modes cover effect/override modes ───
+    // Cross-file: Manifest supported_modes cover effect/override modes
 
     /// The active manifest's supported_modes must include all modes for which
     /// we have normalized_effects and balance_overrides data.
@@ -495,7 +495,7 @@ mod tests {
         }
     }
 
-    // ─── Evidence level distribution summary ───
+    // Evidence level distribution summary
 
     /// Summary test that counts evidence levels across all normalized_effects.
     /// Not an assertion test — prints the distribution for the report.
@@ -544,7 +544,7 @@ mod tests {
         }
     }
 
-    // ─── Uptime model consistency ───
+    // Uptime model consistency
 
     /// Effects with Estimated uptime must have Heuristic evidence_level.
     /// Effects with AlwaysOn uptime for Passive triggers should be Factual or Derived.
@@ -583,7 +583,7 @@ mod tests {
         }
     }
 
-    // ─── Cross-dataset: Rotation profile professions ↔ profession_profiles.json ───
+    // Cross-dataset: Rotation profile professions ↔ profession_profiles.json
 
     /// Every profession that appears in `data/rotation_profiles/{pve,pvp,wvw}.json`
     /// must also be present in `data/profession_profiles.json`.
@@ -639,7 +639,7 @@ mod tests {
         );
     }
 
-    // ─── Cross-dataset: Objective profile boon_priorities ↔ formulas/boons.json ───
+    // Cross-dataset: Objective profile boon_priorities ↔ formulas/boons.json
 
     /// Every boon name referenced in any `boon_priorities` map of
     /// `data/objective_profiles/{pve,pvp,wvw}.json` must exist as a key in
@@ -684,7 +684,7 @@ mod tests {
         );
     }
 
-    // ─── Cross-dataset: Objective profile condition_priorities ↔ formulas/conditions.json ───
+    // Cross-dataset: Objective profile condition_priorities ↔ formulas/conditions.json
 
     /// Every condition name referenced in any `condition_priorities` map of
     /// `data/objective_profiles/{pve,pvp,wvw}.json` must exist as a key in
@@ -725,7 +725,7 @@ mod tests {
         );
     }
 
-    // ─── Cross-dataset: Objective profile interaction_priorities ↔ valid operations ───
+    // Cross-dataset: Objective profile interaction_priorities ↔ valid operations
 
     /// Every operation name referenced in any `interaction_priorities` map of
     /// `data/objective_profiles/{pve,pvp,wvw}.json` must be a recognized
@@ -783,7 +783,7 @@ mod tests {
         );
     }
 
-    // ─── Cross-dataset: Interaction operations ↔ normalized_effects usage ───
+    // Cross-dataset: Interaction operations ↔ normalized_effects usage
 
     /// Every operation name in the canonical interaction operations list (the same
     /// list mirrored by `consistency_test_interaction_priorities_are_valid_operations`
@@ -880,7 +880,7 @@ mod tests {
         );
     }
 
-    // ─── Cross-dataset: Per-mode interaction operations ↔ normalized_effects usage ───
+    // Cross-dataset: Per-mode interaction operations ↔ normalized_effects usage
 
     /// Stricter per-mode counterpart to
     /// `consistency_test_interaction_operations_used_by_normalized_effects` (which
@@ -977,7 +977,7 @@ mod tests {
         );
     }
 
-    // ─── Data completeness: All data loaders produce Ready state ───
+    // Data completeness: All data loaders produce Ready state
 
     /// The full initialize() pipeline should return Ready, meaning all loaders
     /// parse and validate successfully.

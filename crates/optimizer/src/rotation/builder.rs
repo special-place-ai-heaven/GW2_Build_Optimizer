@@ -1322,7 +1322,7 @@ mod tests {
         assert!(rs.is_stunbreak);
     }
 
-    // ─── Tests for enrich_with_cleanse ───
+    // Tests for enrich_with_cleanse
 
     use crate::data::normalized_effects::{
         AmountMode, EffectCategory, NormalizedEffect, OperationType, SourceType, StackingRule,

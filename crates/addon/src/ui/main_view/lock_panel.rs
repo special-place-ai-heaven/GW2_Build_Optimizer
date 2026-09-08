@@ -7,7 +7,7 @@ use gw2_core::types::{BuildLocks, GearSlot};
 use gw2_optimizer::gamedb::GameDb;
 use nexus::imgui::Ui;
 
-// ─── Colors ───
+// Colors
 
 const SELECTED_COLOR: [f32; 4] = [0.5, 0.8, 1.0, 1.0]; // Cyan — selected but unlocked
 const DIM_COLOR: [f32; 4] = [0.35, 0.35, 0.35, 0.8]; // Gray — unselected
@@ -21,7 +21,7 @@ fn locked_color() -> [f32; 4] {
 
 use crate::ui::color_u32;
 
-// ─── Geometry helpers ───
+// Geometry helpers
 
 /// Draw a hexagon at center position with given radius.
 fn draw_hexagon(
@@ -117,7 +117,7 @@ fn draw_ghost_link(draw_list: &nexus::imgui::DrawListMut, from: [f32; 2], to: [f
     }
 }
 
-// ─── Hover animation ───
+// Hover animation
 
 /// Identifies a single interactive element inside the lock panel for hover tracking.
 ///
@@ -204,7 +204,6 @@ fn lock_empty_state_key(db: Option<&GameDb>, profession_name: &str) -> Option<&'
     }
 }
 
-// ─── Main render function ───
 
 /// Lock only the three supported specialization slots, even for malformed API/cache input.
 fn lock_current_specs(locks: &mut BuildLocks, db: &GameDb, current_specs: &[(u32, Vec<u32>)]) {
@@ -316,7 +315,7 @@ pub fn render_lock_panel(
         let grid_height = row_height * 3.0 + 8.0 * s;
         let section_height = total_row_height.max(grid_height);
 
-        // ── Hexagon (spec identity) ──
+        // Hexagon (spec identity)
         let hex_center = [
             row_start[0] + hex_area_width / 2.0,
             row_start[1] + section_height / 2.0,
@@ -477,7 +476,7 @@ pub fn render_lock_panel(
             }
         }
 
-        // ── Trait grid (3 columns × 3 rows) ──
+        // Trait grid (3 columns × 3 rows)
         // Only show traits when a spec is set (locked or from current build)
         let active_spec_id = spec_id.or_else(|| current_specs.get(slot).map(|(id, _)| *id));
         let selected_traits: Vec<u32> = current_specs
@@ -648,7 +647,6 @@ pub fn render_lock_panel(
                                         let entry =
                                             locks.trait_locks.entry(sid).or_insert([None; 3]);
                                         entry[col] = Some(trait_id);
-                                        // Also lock the spec if not already
                                         if locks.specs[slot].is_none() {
                                             locks.specs[slot] = Some(sid);
                                         }
@@ -701,7 +699,7 @@ pub fn render_lock_panel(
         }
     }
 
-    // ── Lock All / Unlock All buttons ──
+    // Lock All / Unlock All buttons
     ui.dummy([0.0, 4.0]);
     let btn_width = (avail_width - 6.0) / 2.0;
     if crate::ui::theme::gold_button_sized(ui, t("btn.lock_all"), [btn_width, 0.0]) {
@@ -889,7 +887,7 @@ pub fn render_optimized_specs_panel(
         });
         let spec_changed = worn_traits.is_some_and(|w| w.is_empty());
 
-        // ── Hexagon (spec identity) ──
+        // Hexagon (spec identity)
         let hex_center = [
             row_start[0] + hex_area_width / 2.0,
             row_start[1] + section_height / 2.0,
@@ -957,7 +955,7 @@ pub fn render_optimized_specs_panel(
             );
         }
 
-        // ── Trait display (3 columns, 3 rows each) ──
+        // Trait display (3 columns, 3 rows each)
         if let Some(spec) = spec_info {
             if spec.major_traits.len() == 9 {
                 let grid_x = row_start[0] + hex_area_width + 4.0;

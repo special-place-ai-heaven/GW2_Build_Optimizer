@@ -50,7 +50,7 @@ mod optional_factual {
     }
 }
 
-// ─── Embedded baseline JSON (compile-time) ───
+// Embedded baseline JSON (compile-time)
 
 const PVE_EFFECTS_JSON: &str =
     include_str!("../../../../data/normalized_effects/2026-01-13/pve.json");
@@ -79,7 +79,6 @@ pub fn try_load_normalized_effects() -> Result<(), Vec<DataLoadError>> {
     )
 }
 
-// ─── Error type ───
 
 #[derive(Debug, Error)]
 pub enum NormalizedEffectError {
@@ -89,7 +88,6 @@ pub enum NormalizedEffectError {
     ValidationError(String),
 }
 
-// ─── Enums ───
 
 /// The type of game entity that produces this effect.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -201,7 +199,7 @@ pub enum TriggerScope {
     WeaponSkillWithRecharge,
 }
 
-// ─── Uptime model ───
+// Uptime model
 
 /// How the uptime value was determined.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -229,7 +227,7 @@ pub struct UptimeModel {
     pub uptime: Option<FactualValue<f64>>,
 }
 
-// ─── StatusOperation ───
+// StatusOperation
 
 /// The type of boon/condition operation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -321,7 +319,7 @@ pub struct StatusOperation {
     pub source_duration_multiplier: Option<FactualValue<f64>>,
 }
 
-// ─── NormalizedEffect ───
+// NormalizedEffect
 
 /// A single normalized effect — the structured representation of one modifier
 /// produced by a trait, skill, rune, sigil, or relic.
@@ -402,7 +400,6 @@ pub struct NormalizedEffect {
     pub trigger_scope: Option<TriggerScope>,
 }
 
-// ─── File wrapper ───
 
 /// A single normalized effects file for one game mode in a specific patch.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -412,7 +409,6 @@ pub struct NormalizedEffectsFile {
     pub effects: Vec<NormalizedEffect>,
 }
 
-// ─── Container ───
 
 /// Container for all loaded normalized effects, keyed by (patch_id, mode).
 #[derive(Debug)]
@@ -488,7 +484,6 @@ impl NormalizedEffectsData {
     }
 }
 
-// ─── Loading ───
 
 /// Parse and validate a single normalized effects file from JSON text.
 pub fn load_effects_file(json: &str) -> Result<NormalizedEffectsFile, NormalizedEffectError> {
@@ -619,7 +614,6 @@ pub(crate) mod tests_alias_helpers {
 mod tests {
     use super::*;
 
-    // ─── Helper to build a minimal NormalizedEffect for testing ───
 
     fn minimal_effect(effect_id: &str) -> NormalizedEffect {
         NormalizedEffect {
@@ -686,7 +680,7 @@ mod tests {
         }
     }
 
-    // ─── 1. Serde round-trip for each enum ───
+    // Serde round-trip for each enum
 
     #[test]
     fn test_serde_roundtrip_source_type() {
@@ -864,7 +858,7 @@ mod tests {
         }
     }
 
-    // ─── 2. Serde round-trip for NormalizedEffect with all fields ───
+    // Serde round-trip for NormalizedEffect with all fields
 
     #[test]
     fn test_serde_roundtrip_full_effect() {
@@ -874,7 +868,7 @@ mod tests {
         assert_eq!(effect, parsed);
     }
 
-    // ─── 3. Serde round-trip for NormalizedEffect with minimal fields ───
+    // Serde round-trip for NormalizedEffect with minimal fields
 
     #[test]
     fn test_serde_roundtrip_minimal_effect() {
@@ -911,7 +905,7 @@ mod tests {
         );
     }
 
-    // ─── 4. NormalizedEffectsFile with empty effects array ───
+    // NormalizedEffectsFile with empty effects array
 
     #[test]
     fn test_effects_file_empty_effects() {
@@ -926,7 +920,7 @@ mod tests {
         assert!(file.effects.is_empty());
     }
 
-    // ─── 5. Validation: duplicate effect_id → error ───
+    // Validation: duplicate effect_id → error
 
     #[test]
     fn test_validation_duplicate_effect_id() {
@@ -947,7 +941,7 @@ mod tests {
         );
     }
 
-    // ─── 6. Validation: Estimated uptime with Factual evidence → error ───
+    // Validation: Estimated uptime with Factual evidence → error
 
     #[test]
     fn test_validation_estimated_uptime_requires_heuristic() {
@@ -973,7 +967,7 @@ mod tests {
         );
     }
 
-    // ─── 7. Validation: Passive trigger with ICD → error ───
+    // Validation: Passive trigger with ICD → error
 
     #[test]
     fn test_validation_passive_with_icd() {
@@ -996,7 +990,7 @@ mod tests {
         );
     }
 
-    // ─── 8. Validation: TriggeredEffect without inner_category → error ───
+    // Validation: TriggeredEffect without inner_category → error
 
     #[test]
     fn test_validation_health_threshold_required_for_on_health_threshold() {
@@ -1094,7 +1088,7 @@ mod tests {
         );
     }
 
-    // ─── 9. Validation: AppliesBoon without status_operation → warning (error) ───
+    // Validation: AppliesBoon without status_operation → warning (error)
 
     #[test]
     fn test_validation_applies_boon_requires_status_operation() {
@@ -1146,7 +1140,7 @@ mod tests {
         }
     }
 
-    // ─── 10. Loader: baseline files parse successfully ───
+    // Loader: baseline files parse successfully
 
     /// Sprint 2 (T043): every record that uses this sprint's fields, or the
     /// coefficient form of a proc, cites a dated wiki read.
@@ -1243,7 +1237,7 @@ mod tests {
         assert!(!wvw.is_empty());
     }
 
-    // ─── 11. Loader: malformed JSON → DataLoadError ───
+    // Loader: malformed JSON → DataLoadError
 
     #[test]
     fn test_malformed_json_returns_error() {
@@ -1257,7 +1251,7 @@ mod tests {
         );
     }
 
-    // ─── 12. Full NormalizedEffect with StatusOperation deserialization ───
+    // Full NormalizedEffect with StatusOperation deserialization
 
     #[test]
     fn test_full_effect_with_status_operation_from_json() {
@@ -1325,7 +1319,7 @@ mod tests {
         assert_eq!(op.internal_cooldown_ms, Some(FactualValue::Resolved(1000)));
     }
 
-    // ─── 13. TargetSide/TargetScope "self" rename ───
+    // TargetSide/TargetScope "self" rename
 
     #[test]
     fn test_self_rename_in_json() {
@@ -1342,7 +1336,7 @@ mod tests {
         assert_eq!(parsed, TargetScope::Self_);
     }
 
-    // ─── Validation: valid effects pass ───
+    // Validation: valid effects pass
 
     #[test]
     fn test_validation_valid_effect_passes() {
@@ -1401,7 +1395,7 @@ mod tests {
         );
     }
 
-    // ─── is_status_operation helper ───
+    // is_status_operation helper
 
     #[test]
     fn test_is_status_operation() {
@@ -1422,7 +1416,7 @@ mod tests {
         assert!(!EffectCategory::TriggeredEffect.is_status_operation());
     }
 
-    // ─── Error path: empty patch_id and invalid mode ───
+    // Error path: empty patch_id and invalid mode
 
     #[test]
     fn test_empty_patch_id_rejected() {
@@ -1451,7 +1445,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("invalid mode"));
     }
 
-    // ─── StatusOperation serde round-trip ───
+    // StatusOperation serde round-trip
 
     #[test]
     fn test_serde_roundtrip_status_operation() {
@@ -1472,7 +1466,7 @@ mod tests {
         assert_eq!(op, parsed);
     }
 
-    // ─── UptimeModel serde round-trip ───
+    // UptimeModel serde round-trip
 
     #[test]
     fn test_serde_roundtrip_uptime_model_always_on() {
@@ -1496,7 +1490,7 @@ mod tests {
         assert_eq!(model, parsed);
     }
 
-    // ─── Deserialization from various source types ───
+    // Deserialization from various source types
 
     #[test]
     fn test_all_source_types_in_json() {
@@ -1527,7 +1521,7 @@ mod tests {
         }
     }
 
-    // ─── TriggeredEffect with inner_category round-trip ───
+    // TriggeredEffect with inner_category round-trip
 
     #[test]
     fn test_triggered_effect_with_inner_category_roundtrip() {
@@ -1542,7 +1536,7 @@ mod tests {
         assert_eq!(parsed.inner_category, Some(EffectCategory::AppliesBoon));
     }
 
-    // ─── Non-passive trigger with ICD is valid ───
+    // Non-passive trigger with ICD is valid
 
     #[test]
     fn test_on_crit_with_icd_is_valid() {
@@ -1562,7 +1556,7 @@ mod tests {
         );
     }
 
-    // ─── FactualValue deserialization: null → Unknown ───
+    // FactualValue deserialization: null → Unknown
 
     #[test]
     fn test_value_null_deserializes_to_unknown() {
@@ -1582,7 +1576,7 @@ mod tests {
         assert_eq!(effect.value, FactualValue::Unknown);
     }
 
-    // ─── 3-state Option<FactualValue<T>> test ───
+    // 3-state Option<FactualValue<T>> test
 
     #[test]
     fn test_three_state_option_factual_value() {
@@ -1658,7 +1652,7 @@ mod tests {
         );
     }
 
-    // ─── StatusOperation with FactualValue fields ───
+    // StatusOperation with FactualValue fields
 
     #[test]
     fn test_status_operation_amount_value_unknown() {
@@ -1674,7 +1668,7 @@ mod tests {
         assert_eq!(op.amount_value, FactualValue::Unknown);
     }
 
-    // ─── P3-10b: baseline data tests ───
+    // P3-10b: baseline data tests
 
     #[test]
     fn test_baseline_data_loads_and_validates() {
@@ -1775,7 +1769,7 @@ mod tests {
         );
     }
 
-    // ─── P3-10b: category coverage in baseline ───
+    // P3-10b: category coverage in baseline
 
     #[test]
     fn test_baseline_category_coverage() {
@@ -1805,7 +1799,7 @@ mod tests {
         }
     }
 
-    // ─── P3-10b: source type coverage ───
+    // P3-10b: source type coverage
 
     #[test]
     fn test_baseline_source_type_coverage() {

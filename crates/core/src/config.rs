@@ -479,7 +479,7 @@ pub struct AppConfig {
     pub gw2_api_key: Option<String>,
     pub cache_build_number: Option<u32>,
 
-    // ─── AI Provider Configuration ───
+    // AI Provider Configuration
     /// Active LLM provider. Defaults to Gemini for backward compat.
     #[serde(default)]
     pub active_provider: LlmProvider,
@@ -519,7 +519,7 @@ pub struct AppConfig {
     #[serde(default = "default_true")]
     pub free_models_only: bool,
 
-    // ─── UI Preferences ───
+    // UI Preferences
     /// Window opacity (0.0–1.0). Default 1.0.
     #[serde(default = "default_opacity")]
     pub window_opacity: f32,
@@ -530,7 +530,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub theme: ThemeConfig,
 
-    // ─── Layout Tuning ───
+    // Layout Tuning
     /// Left panel width in pixels. Default 360.
     #[serde(default = "default_left_panel_width")]
     pub left_panel_width: f32,
@@ -558,7 +558,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub window_h: Option<f32>,
 
-    // ─── Optimization Defaults ───
+    // Optimization Defaults
     /// Default game mode for new optimizations.
     #[serde(default)]
     pub default_game_mode: Option<String>,
@@ -569,7 +569,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub default_role: Option<String>,
 
-    // ─── Cache & Data ───
+    // Cache & Data
     /// Auto-refresh game data cache on startup.
     #[serde(default)]
     pub auto_refresh_cache: bool,

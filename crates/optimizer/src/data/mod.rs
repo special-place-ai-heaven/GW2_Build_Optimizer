@@ -52,7 +52,7 @@ pub enum EvidenceLevel {
     Unknown,
 }
 
-// ─── Error and State Types ───
+// Error and State Types
 
 /// Typed error for data loading failures. Used by `try_load()` functions
 /// and the `initialize()` health check.
@@ -256,7 +256,7 @@ mod tests {
         assert_eq!(err.to_string(), "Missing required data: test_source");
     }
 
-    // ─── Error-path tests for each loader's try_load() ───
+    // Error-path tests for each loader's try_load()
 
     #[test]
     fn test_try_load_slot_budgets_malformed_json() {

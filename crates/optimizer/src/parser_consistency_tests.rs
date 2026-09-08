@@ -80,7 +80,7 @@ mod tests {
     fn corpus() -> Vec<Case> {
         use FactClass::*;
         vec![
-            // ── Strike damage ──
+            // Strike damage
             Case {
                 label: "explicit strike damage",
                 text: "+10% Strike Damage",
@@ -93,7 +93,7 @@ mod tests {
                 percent: 7.0,
                 expected: vec![Strike],
             },
-            // ── Condition damage (the dropped-without-"increase" bug) ──
+            // Condition damage (the dropped-without-"increase" bug)
             Case {
                 label: "condition damage, no 'increase' keyword",
                 text: "Condition Damage: +8%",
@@ -106,21 +106,21 @@ mod tests {
                 percent: 5.0,
                 expected: vec![ConditionDamage],
             },
-            // ── All-condition duration ──
+            // All-condition duration
             Case {
                 label: "all condition duration",
                 text: "+10% Condition Duration",
                 percent: 10.0,
                 expected: vec![AllConditionDuration],
             },
-            // ── All-boon duration ──
+            // All-boon duration
             Case {
                 label: "all boon duration",
                 text: "+10% Boon Duration",
                 percent: 10.0,
                 expected: vec![AllBoonDuration],
             },
-            // ── Specific-condition duration (canonical-key bugs) ──
+            // Specific-condition duration (canonical-key bugs)
             Case {
                 label: "burning duration keeps 'Burning' key",
                 text: "+7% Burning Duration",
@@ -135,21 +135,21 @@ mod tests {
                 percent: 10.0,
                 expected: vec![SpecificConditionDuration("Poisoned".to_string())],
             },
-            // ── Outgoing healing ──
+            // Outgoing healing
             Case {
                 label: "outgoing healing",
                 text: "+15% Outgoing Healing",
                 percent: 15.0,
                 expected: vec![Healing],
             },
-            // ── Critical damage ──
+            // Critical damage
             Case {
                 label: "critical damage",
                 text: "+10% Critical Damage",
                 percent: 10.0,
                 expected: vec![Crit],
             },
-            // ── Screenshot / standing-percent rejects ──
+            // Screenshot / standing-percent rejects
             Case {
                 label: "Precise Strike 100% is not standing crit",
                 text: "Critical Chance Increase",
