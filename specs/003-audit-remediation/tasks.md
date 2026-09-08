@@ -330,6 +330,14 @@ No tasks are marked [P] for concurrent implementation while another agent is cha
 
 ## Incremental delivery
 
+### Choya latency experiment (2026-09-07/08)
+
+- [x] LAT-00: Inspect the brief through SymForge and establish the optimizer unit baseline (1112 passed, 4 ignored).
+- [x] LAT-01: Tighten live harness acceptance to reject validation errors and missing slots; add a request override for holdout scenarios (local commit 09740ce).
+- [x] LAT-02: Compare prefilled-evidence prompts, preserving failures and wire counts. Baseline 3/6 valid; direct-only rejected at 1/6; combined prefix/direct candidate 5/6, provisional only.
+- [x] LAT-03: Run fresh holdouts and record bounded results in `autoresearch/loop-260907-2209/` and `docs/choya-latency-review.md`. OpenRouter 2/2 passed; native Gemini 0/2. Predicate remains PENDING; in-game/referee quality is unverified.
+- [ ] LAT-04: Define a prospective comparison permitting baseline failures; resolve incomplete Sante plates and native Gemini transport failures before accepting the provisional candidate.
+
 ### Planned simulator connection follow-up
 
 Scope and acceptance are in [Simulator connections and build-quality plan](../../docs/simulator-trust-plan.md). These local IDs are separate from the original audit tasks; no runtime work is marked complete.

@@ -1,0 +1,23 @@
+{"at":"2026-09-07T22:43:52.769Z","event":"start","label":"candidate-2"}
+{"at":"2026-09-07T22:43:54.040Z","event":"prompt","chars":67241,"tools":20}
+{"at":"2026-09-07T22:44:06.525Z","event":"round","turn":1,"max":8,"seconds":7.2,"tools":"search_upgrades, calculate_stats"}
+{"at":"2026-09-07T22:44:14.023Z","event":"round","turn":2,"max":8,"seconds":7.5,"tools":"search_upgrades"}
+{"at":"2026-09-07T22:46:14.071Z","event":"round","turn":8,"max":8,"seconds":120,"tools":"writing the build"}
+{"at":"2026-09-07T22:48:44.080Z","event":"result","status":"FAIL","model":"google/gemini-3.8-flash","rounds":5,"wire":6,"seconds":290,"failure_kind":"transport","specs":[]}
+{"at":"2026-09-07T22:49:14.614Z","event":"result","status":"PASS","model":"inclusionai/ling-3.0-flash-sante:free","rounds":2,"wire":3,"seconds":30.5,"failure_kind":null,"specs":["Reaper","Soul Reaping","Blood Magic"]}
+{"at":"2026-09-07T22:49:30.327Z","event":"round","turn":1,"max":8,"seconds":11.1,"tools":"calculate_stats, search_upgrades, search_upgrades"}
+{"at":"2026-09-07T22:49:36.558Z","event":"round","turn":2,"max":8,"seconds":6.2,"tools":"search_upgrades, search_upgrades"}
+{"at":"2026-09-07T22:49:47.004Z","event":"round","turn":3,"max":8,"seconds":10.4,"tools":"search_upgrades, search_upgrades"}
+{"at":"2026-09-07T22:49:57.155Z","event":"round","turn":4,"max":8,"seconds":10.2,"tools":"get_skill_info, get_skill_info, get_skill_info"}
+{"at":"2026-09-07T22:50:06.465Z","event":"round","turn":5,"max":8,"seconds":9.3,"tools":"get_skill_info, get_skill_info"}
+{"at":"2026-09-07T22:50:14.750Z","event":"round","turn":6,"max":8,"seconds":8.3,"tools":"get_trait_details, get_trait_details"}
+{"at":"2026-09-07T22:50:28.553Z","event":"round","turn":7,"max":8,"seconds":13.8,"tools":"get_build_synergy_report"}
+{"at":"2026-09-07T22:50:50.545Z","event":"result","status":"PASS","model":"google/gemini-3.8-flash","rounds":9,"wire":10,"seconds":95.9,"failure_kind":null,"specs":["Spite","Soul Reaping","Reaper"]}
+{"at":"2026-09-07T22:51:09.793Z","event":"round","turn":1,"max":2,"seconds":15,"tools":"search_upgrades, search_upgrades, search_upgrades"}
+{"at":"2026-09-07T22:51:49.044Z","event":"result","status":"FAIL","model":"inclusionai/ling-3.0-flash-sante:free","rounds":3,"wire":4,"seconds":58.5,"failure_kind":"validation","validation_detail":"1 validation error(s): Sigil 'Superior [PERSON_NAME] of the Night' not found in game data","specs":[]}
+{"at":"2026-09-07T22:52:05.797Z","event":"round","turn":1,"max":8,"seconds":10.2,"tools":"calculate_stats"}
+{"at":"2026-09-07T22:52:13.685Z","event":"round","turn":2,"max":8,"seconds":7.9,"tools":"search_upgrades"}
+{"at":"2026-09-07T22:52:20.470Z","event":"round","turn":3,"max":8,"seconds":6.8,"tools":"search_upgrades"}
+{"at":"2026-09-07T22:52:41.594Z","event":"round","turn":4,"max":8,"seconds":21.1,"tools":"get_skill_info"}
+{"at":"2026-09-07T22:52:48.353Z","event":"round","turn":5,"max":8,"seconds":6.8,"tools":"get_skill_info"}
+{"at":"2026-09-07T22:52:53.766Z","event":"round","turn":6,"max":8,"seconds":5.4,"tools":"get_skill_info"}

@@ -4058,6 +4058,10 @@ Acceptance: The named test passes after a full `client::tests` serial run, and i
 
 Status: planned only, 2026-09-07. See [Simulator connections and build-quality plan](../../docs/simulator-trust-plan.md). This follow-up traces existing mechanics through data, simulation, referee, AI tools and UI before proposing runtime changes. It does not add to the original audit finding count or reopen verified remedies. Relevant prior work includes B001, W025/W035, W013/W015/W016/W044, W038/W039 and pending W034; reconcile actual overlap during CONN-00. No implementation, test run or in-game acceptance is claimed by this planning entry.
 
+## Choya latency follow-up (LAT-00 through LAT-04)
+
+2026-09-07/08, separate from the original audit counts. SymForge inspection found mandatory simulation instructions conflicting with supplied reference data; the shared loop already accepts a completed Explore answer without Closing. Commit 09740ce tightens harness validation and enables held-out requests. Direct-only prompt rejected (1/6 valid versus baseline 3/6). Exact stat-prefix evidence plus conditional verification (2d11cb6, fb0136f, efd83fe) produced 5/6 valid ordinary builds; retained provisionally for review. Fresh OpenRouter holdouts passed 2/2; native Gemini failed 2/2. Final optimizer guard: 1112 passed, 0 failed, 4 ignored; example build, strict Clippy and formatting passed. Pinned predicate remains PENDING: immutable baseline failures prevent convergence, and candidate reliability is incomplete. LAT-04 remains open; no accepted latency win or in-game/referee acceptance is claimed. Evidence: `docs/choya-latency-review.md`, `autoresearch/loop-260907-2209/`.
+
 ## Excluded report entries
 
 - R001: rate-tracker duplication refuted by the audit; no change planned.
