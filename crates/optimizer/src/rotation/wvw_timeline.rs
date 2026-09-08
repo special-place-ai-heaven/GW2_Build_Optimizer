@@ -558,6 +558,32 @@ struct ProcSpec {
     scope: crate::data::normalized_effects::TriggerScope,
 }
 
+/// A rune or relic strike bonus that holds only while its prerequisite does
+/// (specs/005-wvw-proc-sites, US3): a health threshold read against the
+/// regular health pool, or a stack count fed by qualifying hits.
+struct ConditionalSpec {
+    source_name: String,
+    kind: ConditionalKind,
+    /// Percent per activation or per stack (record `value`).
+    percent: f64,
+    /// Threshold state as of the last evaluation.
+    active: bool,
+    stacks: u32,
+    expires_at_ms: u32,
+}
+
+enum ConditionalKind {
+    Threshold {
+        above: bool,
+        percent: f64,
+    },
+    Stacking {
+        max: u32,
+        duration_ms: u32,
+        scope: crate::data::normalized_effects::TriggerScope,
+    },
+}
+
 /// Unequipped weapon strength (wiki `Weapon strength`, read 2026-09-08): the
 /// value sigil flame blasts and similar procs use instead of the held weapon.
 const UNEQUIPPED_WEAPON_STRENGTH: f64 = 690.5;
@@ -644,6 +670,7 @@ struct Timeline<'a> {
     conditions_cleansed: u32,
     combo_activations: u32,
     proc_specs: Vec<ProcSpec>,
+    conditional_specs: Vec<ConditionalSpec>,
     unmodeled_proc_keys: HashSet<(u8, u32)>,
     /// Every source the timeline itself could not simulate, `"{name} ({why})"`,
     /// deduplicated. Reported first: these are the mechanics a player would
@@ -814,6 +841,7 @@ impl<'a> Timeline<'a> {
             conditions_cleansed: 0,
             combo_activations: 0,
             proc_specs: Vec::new(),
+            conditional_specs: Vec::new(),
             unmodeled_proc_keys: HashSet::new(),
             unmodeled_names: Vec::new(),
             no_record_names: unmodeled_sources,
@@ -849,6 +877,61 @@ impl<'a> Timeline<'a> {
             if matches!(effect.source_type, SourceType::Skill)
                 && self.skill_directly_models_effect(effect)
             {
+                continue;
+            }
+
+            // Conditional strike bonuses (US3): a health threshold or a
+            // stacking bonus on strike damage becomes a ConditionalSpec.
+            let strike_bonus = matches!(effect.category, EffectCategory::StrikeDamagePct)
+                || matches!(effect.inner_category, Some(EffectCategory::StrikeDamagePct));
+            if strike_bonus && matches!(effect.trigger_rule, TriggerRule::OnHealthThreshold) {
+                let (Some(threshold), Some(&percent)) =
+                    (effect.health_threshold.as_ref(), resolved(&effect.value))
+                else {
+                    self.note_unmodeled(format!("{} (unresolved value)", effect.source_name));
+                    continue;
+                };
+                let Some(&line) = resolved(&threshold.percent) else {
+                    self.note_unmodeled(format!("{} (unresolved value)", effect.source_name));
+                    continue;
+                };
+                self.conditional_specs.push(ConditionalSpec {
+                    source_name: effect.source_name.clone(),
+                    kind: ConditionalKind::Threshold {
+                        above: threshold.above,
+                        percent: line,
+                    },
+                    percent,
+                    active: false,
+                    stacks: 0,
+                    expires_at_ms: 0,
+                });
+                continue;
+            }
+            if strike_bonus
+                && matches!(effect.trigger_rule, TriggerRule::OnHit)
+                && effect.max_stacks.is_some()
+            {
+                let (Some(&max), Some(&duration), Some(&percent)) = (
+                    effect.max_stacks.as_ref().and_then(resolved),
+                    effect.effect_duration.as_ref().and_then(resolved),
+                    resolved(&effect.value),
+                ) else {
+                    self.note_unmodeled(format!("{} (unresolved value)", effect.source_name));
+                    continue;
+                };
+                self.conditional_specs.push(ConditionalSpec {
+                    source_name: effect.source_name.clone(),
+                    kind: ConditionalKind::Stacking {
+                        max,
+                        duration_ms: (duration * 1_000.0).round() as u32,
+                        scope: effect.trigger_scope.clone().unwrap_or_default(),
+                    },
+                    percent,
+                    active: false,
+                    stacks: 0,
+                    expires_at_ms: 0,
+                });
                 continue;
             }
 
@@ -996,6 +1079,7 @@ impl<'a> Timeline<'a> {
     }
 
     fn expire_timed_state(&mut self) {
+        self.update_conditionals();
         self.defenses
             .retain(|defense| defense.expires_at_ms > self.now_ms);
         self.buffs.retain(|buff| buff.expires_at_ms > self.now_ms);
@@ -1652,6 +1736,9 @@ impl<'a> Timeline<'a> {
                 if self.enemy_protection {
                     damage *= self.protection_multiplier;
                 }
+                // Conditional bonuses (US3), evaluated at the strike.
+                self.update_conditionals();
+                damage *= self.strike_conditional_mult();
                 self.record_damage(damage, protected);
                 if self.trace_enabled {
                     let name = self.skill_name(skill_id);
@@ -1659,6 +1746,7 @@ impl<'a> Timeline<'a> {
                 }
                 self.remove_defense(CoverKind::Stealth);
                 self.gain_resource_on_hit(skill_id);
+                self.gain_conditional_stacks(skill_id);
                 self.trigger_procs(TriggerRule::OnHit, Some(skill_id), protected, 1.0);
                 // On-crit procs (CONN-00-06): one chance per landed hit at the
                 // crit chance the damage line above already priced in.
@@ -1987,6 +2075,103 @@ impl<'a> Timeline<'a> {
         });
     }
 
+    /// Re-read every threshold against the regular health pool and expire
+    /// stacks, tracing each state change (US3).
+    fn update_conditionals(&mut self) {
+        let ratio = self.player_health / self.params.max_health.max(1.0);
+        let now = self.now_ms;
+        let mut changes = Vec::new();
+        for spec in &mut self.conditional_specs {
+            match spec.kind {
+                ConditionalKind::Threshold { above, percent } => {
+                    let holds = if above {
+                        ratio > percent / 100.0
+                    } else {
+                        ratio < percent / 100.0
+                    };
+                    if holds != spec.active {
+                        spec.active = holds;
+                        changes.push((
+                            spec.source_name.clone(),
+                            holds,
+                            format!("health {:.0}%", ratio * 100.0),
+                        ));
+                    }
+                }
+                ConditionalKind::Stacking { .. } => {
+                    if spec.stacks > 0 && spec.expires_at_ms <= now {
+                        spec.stacks = 0;
+                        changes.push((
+                            spec.source_name.clone(),
+                            false,
+                            "stacks expired".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+        for (name, on, detail) in changes {
+            let kind = if on {
+                TraceKind::ConditionalActivated
+            } else {
+                TraceKind::ConditionalExpired
+            };
+            self.trace(kind, &name, detail);
+        }
+    }
+
+    /// The strike multiplier of every conditional bonus that holds now.
+    fn strike_conditional_mult(&self) -> f64 {
+        self.conditional_specs
+            .iter()
+            .map(|spec| match spec.kind {
+                ConditionalKind::Threshold { .. } if spec.active => 1.0 + spec.percent / 100.0,
+                ConditionalKind::Stacking { .. } => 1.0 + spec.stacks as f64 * spec.percent / 100.0,
+                _ => 1.0,
+            })
+            .product()
+    }
+
+    /// Whether `skill_id` counts for a trigger scope.
+    fn scope_admits(
+        &self,
+        scope: &crate::data::normalized_effects::TriggerScope,
+        skill_id: Option<u32>,
+    ) -> bool {
+        match scope {
+            crate::data::normalized_effects::TriggerScope::Any => true,
+            crate::data::normalized_effects::TriggerScope::WeaponSkillWithRecharge => skill_id
+                .and_then(|id| self.skills.iter().find(|s| s.skill_id == id))
+                .is_some_and(|s| s.weapon_set != 0 && s.cooldown_ms > 0),
+        }
+    }
+
+    /// A landed hit from `skill_id` feeds every stacking bonus in scope.
+    fn gain_conditional_stacks(&mut self, skill_id: u32) {
+        let now = self.now_ms;
+        let mut gained = Vec::new();
+        for idx in 0..self.conditional_specs.len() {
+            let ConditionalKind::Stacking {
+                max,
+                duration_ms,
+                ref scope,
+            } = self.conditional_specs[idx].kind
+            else {
+                continue;
+            };
+            if !self.scope_admits(scope, Some(skill_id)) {
+                continue;
+            }
+            let spec = &mut self.conditional_specs[idx];
+            spec.stacks = (spec.stacks + 1).min(max);
+            spec.expires_at_ms = now.saturating_add(duration_ms);
+            gained.push((spec.source_name.clone(), format!("{}/{max}", spec.stacks)));
+        }
+        for (name, detail) in gained {
+            self.trace(TraceKind::StackGained, &name, detail);
+        }
+    }
+
     /// Tag each sigil's procs with the weapon set it is socketed on.
     fn assign_sigil_sets(&mut self, sigil_sets: &HashMap<u32, u8>) {
         for spec in &mut self.proc_specs {
@@ -2048,14 +2233,7 @@ impl<'a> Timeline<'a> {
             let source_matches = !matches!(proc_spec.source_type, SourceType::Skill)
                 || activating_skill_id == Some(proc_spec.source_id);
             let set_held = proc_spec.weapon_set == 0 || proc_spec.weapon_set == held_set;
-            let scope_ok = match proc_spec.scope {
-                crate::data::normalized_effects::TriggerScope::Any => true,
-                crate::data::normalized_effects::TriggerScope::WeaponSkillWithRecharge => {
-                    activating_skill_id
-                        .and_then(|id| self.skills.iter().find(|s| s.skill_id == id))
-                        .is_some_and(|s| s.weapon_set != 0 && s.cooldown_ms > 0)
-                }
-            };
+            let scope_ok = self.scope_admits(&proc_spec.scope, activating_skill_id);
             if same_trigger(&proc_spec.trigger, &trigger) && source_matches && set_held && scope_ok
             {
                 if proc_spec.next_ready_ms <= self.now_ms {
@@ -4871,6 +5049,198 @@ mod reaper_experiments {
             sets,
             vec![1, 2],
             "the swap opener crosses from set 1 to set 2"
+        );
+    }
+
+    // ── US3: conditional bonuses (T027, T028) ───────────────────────────────
+
+    fn strike_at(at_ms: u32, damage: f64) -> EnemyEvent {
+        EnemyEvent {
+            at_ms,
+            kind: EnemyEventKind::Strike {
+                damage,
+                unblockable: true,
+            },
+        }
+    }
+
+    /// US3 scenarios 1 and 2: the Scholar bonus applies from t = 0 while the
+    /// player stays above 90 % health and drops out at the crossing.
+    #[test]
+    fn reaper_scholar_applies_only_above_threshold() {
+        let p = prepared();
+        let records = fx::records_with_threshold_and_stack();
+        let scholar = &records[0];
+        let opener = [fx::GRAVEDIGGER, fx::DEATH_SPIRAL];
+        let bare = run(
+            &p.skills,
+            &p.params,
+            &opener,
+            &[],
+            open_profile(3_000, vec![]),
+        );
+        let healthy = run(
+            &p.skills,
+            &p.params,
+            &opener,
+            &[scholar],
+            open_profile(3_000, vec![]),
+        );
+        let activated = events(
+            &healthy,
+            TraceKind::ConditionalActivated,
+            "Superior Rune of the Scholar",
+        );
+        assert!(
+            activated.first().is_some_and(|e| e.t_ms == 0),
+            "the threshold is true at the start of the fight: {activated:?}"
+        );
+        let bare_hits = landed(&bare, "Gravedigger");
+        let boosted_hits = landed(&healthy, "Gravedigger");
+        assert_eq!(bare_hits.len(), boosted_hits.len());
+        for (bare_hit, boosted) in bare_hits.iter().zip(&boosted_hits) {
+            // The trace prints one decimal.
+            assert!(
+                (boosted - bare_hit * 1.05).abs() < 0.06,
+                "every strike above the threshold carries +5 %: {bare_hit} → {boosted}"
+            );
+        }
+
+        // Incoming damage takes the player to 75 % at 1 000 ms.
+        let hit = p.params.max_health * 0.25;
+        let wounded = run(
+            &p.skills,
+            &p.params,
+            &opener,
+            &[scholar],
+            open_profile(3_000, vec![strike_at(1_000, hit)]),
+        );
+        let expired = events(
+            &wounded,
+            TraceKind::ConditionalExpired,
+            "Superior Rune of the Scholar",
+        );
+        assert!(
+            expired
+                .first()
+                .is_some_and(|e| (1_000..=1_000 + TIMELINE_TICK_MS).contains(&e.t_ms)),
+            "the bonus expires at the crossing: {expired:?}"
+        );
+        let crossing = expired[0].t_ms;
+        let late_bare: Vec<f64> = events(&bare, TraceKind::HitLanded, "Death Spiral")
+            .iter()
+            .filter(|e| e.t_ms >= crossing)
+            .map(|e| e.detail.parse::<f64>().unwrap())
+            .collect();
+        let late_wounded: Vec<f64> = events(&wounded, TraceKind::HitLanded, "Death Spiral")
+            .iter()
+            .filter(|e| e.t_ms >= crossing)
+            .map(|e| e.detail.parse::<f64>().unwrap())
+            .collect();
+        assert!(!late_wounded.is_empty(), "hits land after the crossing");
+        for (a, b) in late_bare.iter().zip(&late_wounded) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "strikes below the threshold carry no bonus: {a} vs {b}"
+            );
+        }
+    }
+
+    /// US3 scenario 3: the Thief stacks cap at five, a sixth qualifying hit
+    /// refreshes, and the stacks expire 6 s after the last one.
+    #[test]
+    fn reaper_thief_stacks_cap_and_expire() {
+        let p = prepared();
+        let records = fx::records_with_threshold_and_stack();
+        let thief = &records[1];
+        let skills = only(
+            &p.skills,
+            &[
+                fx::GRAVEDIGGER,
+                fx::DEATH_SPIRAL,
+                fx::GRASPING_DARKNESS,
+                fx::GS_AUTO,
+            ],
+        );
+        let report = run(
+            &skills,
+            &p.params,
+            &[fx::GRAVEDIGGER, fx::DEATH_SPIRAL, fx::GRASPING_DARKNESS],
+            &[thief],
+            open_profile(12_000, vec![]),
+        );
+        let gained = events(&report, TraceKind::StackGained, "Relic of the Thief");
+        assert!(
+            gained.len() >= 6,
+            "six qualifying weapon-skill hits gain or refresh: {gained:?}"
+        );
+        assert!(
+            gained.iter().all(|e| !e.detail.starts_with("6/")),
+            "never a sixth stack: {gained:?}"
+        );
+        assert!(
+            gained
+                .iter()
+                .filter(|e| e.detail.starts_with("5/5"))
+                .count()
+                >= 2,
+            "the cap is reached and then refreshed: {gained:?}"
+        );
+        let expired = events(&report, TraceKind::ConditionalExpired, "Relic of the Thief");
+        assert!(
+            expired.iter().any(|e| {
+                let last_gain_before = gained
+                    .iter()
+                    .filter(|g| g.t_ms < e.t_ms)
+                    .map(|g| g.t_ms)
+                    .max()
+                    .unwrap_or(0);
+                (6_000 - TIMELINE_TICK_MS..=6_000 + TIMELINE_TICK_MS)
+                    .contains(&(e.t_ms - last_gain_before))
+            }),
+            "stacks expire 6 s after the last qualifying hit: {gained:?}, {expired:?}"
+        );
+        assert!(
+            events(&report, TraceKind::StackGained, "Relic of the Thief")
+                .iter()
+                .all(|e| e.source != "Dusk Strike"),
+            "auto-attacks without a recharge do not stack"
+        );
+    }
+
+    /// US3 scenario 4 (FR-008): an unresolved threshold stays on the
+    /// coverage line and never executes.
+    #[test]
+    fn reaper_unresolved_conditional_stays_named() {
+        let p = prepared();
+        let mut records = fx::records_with_threshold_and_stack();
+        records[0].health_threshold = Some(crate::data::normalized_effects::HealthThreshold {
+            above: true,
+            percent: FactualValue::Unknown,
+        });
+        let report = run(
+            &p.skills,
+            &p.params,
+            &[fx::GRAVEDIGGER],
+            &[&records[0]],
+            open_profile(2_000, vec![]),
+        );
+        assert!(
+            report
+                .unmodeled_sources
+                .iter()
+                .any(|s| s == "Superior Rune of the Scholar (unresolved value)"),
+            "named as unresolved: {:?}",
+            report.unmodeled_sources
+        );
+        assert!(
+            events(
+                &report,
+                TraceKind::ConditionalActivated,
+                "Superior Rune of the Scholar"
+            )
+            .is_empty(),
+            "never executed with an invented number"
         );
     }
 

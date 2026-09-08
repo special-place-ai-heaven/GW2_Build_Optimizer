@@ -1174,6 +1174,10 @@ pub struct PreparedRotation {
     /// Skill ids in the order a published page says to press them. Empty
     /// means the timeline improvises from the first tick.
     pub opener: Vec<u32>,
+    /// Health-gated strike clauses the parser flattened into
+    /// `params.strike_mult`; the WvW timeline divides out the ones whose
+    /// threshold record it executes (R4).
+    pub conditional_strike: Vec<combat::ConditionalClause>,
     profession_name: String,
 }
 
@@ -1327,6 +1331,7 @@ pub fn prepare_validated_rotation(
 
     Some(PreparedRotation {
         opener: Vec::new(),
+        conditional_strike: mods.conditional_strike.clone(),
         skills: rotation_skills,
         params,
         profession_name: profession_name.to_string(),
@@ -1406,12 +1411,17 @@ fn simulate_prepared_with(
             active_normalized_effects(validated, rotation_skills, db, mode.label());
         let (resource_rules, resource_model_complete) =
             wvw_resource_rules(validated, rotation_skills, db, profession_name, &sim_ctx);
+        let wvw_params = wvw_params_without_executed_conditionals(
+            params,
+            &prepared.conditional_strike,
+            &active_effects,
+        );
         result.wvw = Some(rotation::wvw_timeline::evaluate_wvw_timeline(
             rotation::wvw_timeline::WvwTimelineInput {
                 skills: rotation_skills,
                 opener: &prepared.opener,
                 duration_ms,
-                params,
+                params: &wvw_params,
                 enemy,
                 scenario,
                 active_effects: &active_effects,
@@ -1426,6 +1436,35 @@ fn simulate_prepared_with(
     }
 
     result
+}
+
+/// The timeline's parameters: `params` with each flattened health-gated
+/// clause divided out of `strike_mult` when the timeline will execute that
+/// source's threshold record per strike, so the bonus is counted once
+/// (CONN-01-01). A clause whose record is absent or unresolved stays
+/// flattened, exactly as every other path sees it.
+fn wvw_params_without_executed_conditionals(
+    params: &rotation::simulator::SimParams,
+    clauses: &[combat::ConditionalClause],
+    active_effects: &[&crate::data::normalized_effects::NormalizedEffect],
+) -> rotation::simulator::SimParams {
+    use crate::data::normalized_effects::TriggerRule;
+    let mut out = params.clone();
+    for clause in clauses {
+        let executed = active_effects.iter().any(|effect| {
+            effect.source_id == clause.source_id
+                && effect.trigger_rule == TriggerRule::OnHealthThreshold
+                && effect
+                    .health_threshold
+                    .as_ref()
+                    .is_some_and(|t| t.percent.is_resolved())
+                && effect.value.is_resolved()
+        });
+        if executed {
+            out.strike_mult /= 1.0 + clause.value;
+        }
+    }
+    out
 }
 
 /// Flow simulation: `FLOW_WINDOW_MS` on the scenario's dummy with no

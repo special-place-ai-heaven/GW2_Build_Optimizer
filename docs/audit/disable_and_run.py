@@ -52,6 +52,18 @@ CONTROLS = {
         "spec.weapon_set = sigil_sets.get(&spec.source_id).copied().unwrap_or(0).min(1);",
         "reaper_swap_loads_set_two_sigils",
     ),
+    "threshold": (
+        WT,
+        "                    let holds = if above {",
+        "                    let holds = true || if above {",
+        "reaper_scholar_applies_only_above_threshold",
+    ),
+    "stack": (
+        WT,
+        "            spec.stacks = (spec.stacks + 1).min(max);",
+        "            spec.stacks += 1;",
+        "reaper_thief_stacks_cap_and_expire",
+    ),
 }
 
 
