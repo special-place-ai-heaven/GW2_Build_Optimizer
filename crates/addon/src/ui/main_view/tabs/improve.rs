@@ -26,7 +26,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
         ui.spacing();
     }
 
-    // ── Optimization progress banner ──
+    // Optimization progress banner
     if state.main.optimizing {
         render_optimization_progress(ui, &state.main.optimize_stage, ui.frame_count());
     }
@@ -46,7 +46,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
                 .map(|s| s.name.clone())
         });
 
-    // ── Two-panel layout: Current Build | Optimized Build ──
+    // Two-panel layout: Current Build | Optimized Build
     let has_suggestion = !state.main.comparison.suggestions.is_empty();
     let footer = if has_suggestion {
         ui.current_font_size() + 22.0
@@ -78,7 +78,7 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
             crate::ui::comparison::render_tab_strip(ui, &mut state.main.comparison, true);
             ui.spacing();
 
-            // ── Gate outcome banner ──
+            // Gate outcome banner
             // "We could not beat this" is a state of the Improve tab, not a
             // line buried in the quality footnotes: the player waited through a
             // full optimization and is now looking at their own gear. Show it

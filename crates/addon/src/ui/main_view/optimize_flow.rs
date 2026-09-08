@@ -218,7 +218,7 @@ fn start_optimization_inner(state: &mut AddonState, profession_name: &str, entry
                     }
                 };
 
-                // ═══ Improve always-better baseline (spec §12.4): rank the
+                // Improve always-better baseline (spec §12.4): rank the
                 // user's OWN current gear under this run's weights so a worse
                 // optimizer result is refused. New Build has no baseline.
                 let improve_baseline = capture_improve_baseline(
@@ -231,7 +231,7 @@ fn start_optimization_inner(state: &mut AddonState, profession_name: &str, entry
                     &scenario,
                 );
 
-                // ═══ Primary: optimize_v2 — beam search over complete build states ═══
+                // Primary: optimize_v2 — beam search over complete build states
                 {
                     let token_v2 = token.clone();
                     // Create LLM client for the advisor pass (optional — errors silently skip).
@@ -310,7 +310,7 @@ fn start_optimization_inner(state: &mut AddonState, profession_name: &str, entry
                     }
                 }
 
-                // ═══ Fallback 1: Deterministic synergy engine (no LLM for build selection) ═══
+                // Fallback 1: Deterministic synergy engine (no LLM for build selection)
                 {
                     let llm_client_opt: Option<Box<dyn gw2_optimizer::llm::LlmClient>> =
                         gw2_optimizer::llm::create_client(&config, &addon_dir).ok();
@@ -376,7 +376,7 @@ fn start_optimization_inner(state: &mut AddonState, profession_name: &str, entry
                     }
                 }
 
-                // ═══ Fallback 2: Legacy pipeline (no LLM invent-a-build) ═══
+                // Fallback 2: Legacy pipeline (no LLM invent-a-build)
                 //
                 // Tier 3 returns `BuildCandidate`s, which the referee never
                 // ranks, so this tier cannot show that it beat the player's own
@@ -766,9 +766,7 @@ fn enrich_with_llm(
     Ok(())
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 // Improve always-better baseline gate (spec §12.4: Improve locks existing gear)
-// ────────────────────────────────────────────────────────────────────────────
 
 /// Diagnostics from the always-better gate.
 ///

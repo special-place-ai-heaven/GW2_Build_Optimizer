@@ -169,12 +169,10 @@ pub enum FactualValue<T> {
 }
 
 impl<T> FactualValue<T> {
-    /// Returns true if this value is Resolved.
     pub fn is_resolved(&self) -> bool {
         matches!(self, FactualValue::Resolved(_))
     }
 
-    /// Returns true if this value is Unknown.
     pub fn is_unknown(&self) -> bool {
         matches!(self, FactualValue::Unknown)
     }
@@ -233,7 +231,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for FactualValue<T> {
     }
 }
 
-// ─── Arithmetic for FactualValue<f64> ───
+// Arithmetic for FactualValue<f64>
 
 impl Mul<f64> for FactualValue<f64> {
     type Output = FactualValue<f64>;
@@ -327,7 +325,7 @@ impl Div<FactualValue<f64>> for FactualValue<f64> {
 mod tests {
     use super::*;
 
-    // ─── DataQuality tests ───
+    // DataQuality tests
 
     #[test]
     fn test_data_quality_display() {
@@ -372,7 +370,7 @@ mod tests {
         );
     }
 
-    // ─── DataQualityReason tests ───
+    // DataQualityReason tests
 
     #[test]
     fn test_data_quality_reason_display() {
@@ -388,7 +386,7 @@ mod tests {
         );
     }
 
-    // ─── FactualValue basic tests ───
+    // FactualValue basic tests
 
     #[test]
     fn test_factual_value_is_resolved() {
@@ -436,7 +434,7 @@ mod tests {
         assert_eq!(FactualValue::<f64>::Unknown.to_string(), "Unknown");
     }
 
-    // ─── FactualValue<f64> arithmetic with scalar ───
+    // FactualValue<f64> arithmetic with scalar
 
     #[test]
     fn test_resolved_mul_scalar() {
@@ -490,7 +488,7 @@ mod tests {
         assert_eq!(FactualValue::<f64>::Unknown / 2.0, FactualValue::Unknown);
     }
 
-    // ─── FactualValue<f64> arithmetic with FactualValue<f64> ───
+    // FactualValue<f64> arithmetic with FactualValue<f64>
 
     #[test]
     fn test_resolved_add_resolved() {
@@ -572,7 +570,7 @@ mod tests {
         );
     }
 
-    // ─── DataQuality defaults to Verified for baseline ───
+    // DataQuality defaults to Verified for baseline
 
     #[test]
     fn test_data_quality_baseline_is_verified() {
@@ -581,7 +579,7 @@ mod tests {
         assert_eq!(quality, DataQuality::Verified);
     }
 
-    // ─── FactualValue serde tests ───
+    // FactualValue serde tests
 
     #[test]
     fn test_factual_value_serde_resolved() {

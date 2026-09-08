@@ -9,9 +9,6 @@ use gw2_optimizer::combat::CombatPerformance;
 use gw2_optimizer::data::objective_profiles;
 use gw2_optimizer::scoring::{score_with_weights, OptimizationWeights, WEIGHT_BUDGET};
 
-// ─── Helpers ───
-
-/// Create a CombatPerformance biased toward strike/power damage.
 fn power_dps_perf() -> CombatPerformance {
     CombatPerformance {
         effective_power: 4500.0,
@@ -28,7 +25,6 @@ fn power_dps_perf() -> CombatPerformance {
     }
 }
 
-/// Create a CombatPerformance biased toward condition damage.
 fn condi_dps_perf() -> CombatPerformance {
     CombatPerformance {
         effective_power: 1200.0,
@@ -45,7 +41,6 @@ fn condi_dps_perf() -> CombatPerformance {
     }
 }
 
-/// Create a CombatPerformance biased toward boon support / healing.
 fn support_perf() -> CombatPerformance {
     CombatPerformance {
         effective_power: 800.0,
@@ -62,7 +57,6 @@ fn support_perf() -> CombatPerformance {
     }
 }
 
-/// Create a CombatPerformance biased toward tanking / sustain.
 fn sustain_perf() -> CombatPerformance {
     CombatPerformance {
         effective_power: 1000.0,
@@ -79,7 +73,7 @@ fn sustain_perf() -> CombatPerformance {
     }
 }
 
-// ─── Profile Loading Tests ───
+// Profile Loading Tests
 
 #[test]
 fn test_all_embedded_profiles_load_successfully() {
@@ -164,7 +158,7 @@ fn test_profile_by_id_round_trip() {
     }
 }
 
-// ─── Different Profiles Produce Different Rankings ───
+// Different Profiles Produce Different Rankings
 
 #[test]
 fn test_power_profile_prefers_power_build() {
@@ -269,7 +263,7 @@ fn test_boon_support_profile_prefers_support_build() {
     );
 }
 
-// ─── PvP profiles produce different rankings than PvE ───
+// PvP profiles produce different rankings than PvE
 
 #[test]
 fn test_pvp_sustain_profile_prefers_sustain_build() {
@@ -295,7 +289,7 @@ fn test_pvp_sustain_profile_prefers_sustain_build() {
     );
 }
 
-// ─── Profile priority data ───
+// Profile priority data
 
 #[test]
 fn test_boon_priorities_differ_between_profiles() {
@@ -355,7 +349,7 @@ fn test_interaction_priorities_loaded() {
     );
 }
 
-// ─── Backward Compatibility Tests ───
+// Backward Compatibility Tests
 
 #[test]
 fn test_deserialize_old_disable_field_as_control() {
@@ -398,7 +392,7 @@ fn test_deserialize_new_format_with_all_6_axes() {
     assert!((weights.control - 0.4).abs() < f64::EPSILON);
 }
 
-// ─── Cross-Mode Scoring Differentiation ───
+// Cross-Mode Scoring Differentiation
 
 #[test]
 fn test_pve_and_pvp_default_profiles_produce_different_scores() {
@@ -436,7 +430,7 @@ fn test_pve_and_pvp_default_profiles_produce_different_scores() {
     );
 }
 
-// ─── Full Pipeline: Profile weights -> score_with_weights -> Ranking ───
+// Full Pipeline: Profile weights -> score_with_weights -> Ranking
 
 #[test]
 fn test_full_pipeline_ranking_with_score_with_weights() {
@@ -483,7 +477,7 @@ fn test_full_pipeline_ranking_with_score_with_weights() {
     );
 }
 
-// ─── OptimizationWeights 6-axis API Tests ───
+// OptimizationWeights 6-axis API Tests
 
 #[test]
 fn test_as_array_returns_6_elements() {

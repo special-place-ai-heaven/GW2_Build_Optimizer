@@ -1768,7 +1768,7 @@ mod tests {
     #![allow(clippy::field_reassign_with_default)]
     use super::*;
 
-    // ── C17: occupancy stays honest ─────────────────────────────────────────
+    // C17: occupancy stays honest
 
     /// A prefix on a hand that holds nothing is not a gear choice.
     ///
@@ -2138,7 +2138,7 @@ mod tests {
         assert_eq!(tier_label(3), "Grandmaster");
     }
 
-    // ── find_trait_by_name() length guard ────────────────────────────────────
+    // find_trait_by_name() length guard
 
     fn make_trait(id: u32, name: &str) -> GW2Trait {
         GW2Trait {
@@ -2473,7 +2473,7 @@ mod tests {
         assert_eq!(result.specializations.len(), 3);
     }
 
-    // ── validate_gear_prefix() determinism + tie-break ───────────────────────
+    // validate_gear_prefix() determinism + tie-break
 
     fn empty_db_with_itemstats(stats: Vec<(u32, &str)>) -> GameDb {
         let mut itemstats = std::collections::HashMap::new();
@@ -2634,7 +2634,7 @@ mod tests {
         }
     }
 
-    // ── validate_gear_slot_map() — per-slot plate policy (spec §12.3) ────────
+    // validate_gear_slot_map() — per-slot plate policy (spec §12.3)
 
     fn run_validate_slot_map(
         stat_prefix: &str,
@@ -2780,7 +2780,7 @@ mod tests {
         );
     }
 
-    // ── find_skill_by_name() needle-length guard ─────────────────────────────
+    // find_skill_by_name() needle-length guard
 
     fn make_skill(id: u32, name: &str) -> gw2_api::models::Skill {
         gw2_api::models::Skill {

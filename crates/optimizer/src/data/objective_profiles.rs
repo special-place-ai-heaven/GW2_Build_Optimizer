@@ -15,7 +15,7 @@ use thiserror::Error;
 use super::boon_condition_formulas::canonical_condition_name;
 use super::{try_load, DataLoadError, EvidenceLevel};
 
-// ─── Embedded JSON (compile-time) ───
+// Embedded JSON (compile-time)
 
 const PVE_PROFILES_JSON: &str = include_str!("../../../../data/objective_profiles/pve.json");
 const PVP_PROFILES_JSON: &str = include_str!("../../../../data/objective_profiles/pvp.json");
@@ -43,7 +43,6 @@ pub fn try_load_objective_profiles() -> Result<(), Vec<DataLoadError>> {
     )
 }
 
-// ─── Error type ───
 
 #[derive(Debug, Error)]
 pub enum ObjectiveProfileError {
@@ -53,7 +52,6 @@ pub enum ObjectiveProfileError {
     ValidationError(String),
 }
 
-// ─── Types ───
 
 /// Axis weights for a 6-axis objective profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,7 +175,6 @@ impl ObjectiveProfileData {
     }
 }
 
-// ─── Loader ───
 
 fn load_all_objective_profiles() -> Result<ObjectiveProfileData, ObjectiveProfileError> {
     let pve = load_objective_profile_file(PVE_PROFILES_JSON, "PvE")?;

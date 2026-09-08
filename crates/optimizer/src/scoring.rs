@@ -576,7 +576,7 @@ fn score_with_norms(
     )
 }
 
-// ─── Hierarchical Tier Tables ───
+// Hierarchical Tier Tables
 //
 // Each axis has 5 tiers of stat prefixes. The tier tables use 5 axes for gear
 // selection (power, condition, sustain, heal, control/boon_support combined as
@@ -704,7 +704,7 @@ pub fn select_prefixes_by_tiers(weights: &OptimizationWeights) -> Vec<&'static s
     prefixes
 }
 
-// ─── Deterministic Gear Prefix Selection ───
+// Deterministic Gear Prefix Selection
 //
 // Maps radar chart weights to the closest GW2 gear prefix using cosine similarity.
 // Each prefix has a 6-axis "purpose profile" representing what kind of build uses it.
@@ -725,43 +725,43 @@ pub struct GearPrefixMatch {
 /// Format: (name, [power, condition, boon_support, heal, sustain, control])
 /// Values represent "this prefix is intended for builds with these priorities."
 const GEAR_PROFILES: &[(&str, [f64; 6])] = &[
-    // -- Pure Power DPS --
+    // Pure Power DPS
     ("Berserker's", [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
     ("Assassin's", [0.95, 0.0, 0.0, 0.0, 0.0, 0.0]),
-    // -- Power + Survivability --
+    // Power + Survivability
     ("Marauder", [0.75, 0.0, 0.0, 0.0, 0.25, 0.0]),
     ("Dragon's", [0.75, 0.0, 0.0, 0.0, 0.25, 0.0]),
     ("Valkyrie", [0.65, 0.0, 0.0, 0.0, 0.35, 0.0]),
-    // -- Power + Condition hybrid --
+    // Power + Condition hybrid
     ("Grieving", [0.5, 0.5, 0.0, 0.0, 0.0, 0.0]),
-    // -- Condition DPS --
+    // Condition DPS
     ("Viper's", [0.2, 0.65, 0.0, 0.0, 0.0, 0.15]),
     ("Sinister", [0.15, 0.85, 0.0, 0.0, 0.0, 0.0]),
-    // -- Condition + Sustain (tanky condi) --
+    // Condition + Sustain (tanky condi)
     ("Trailblazer's", [0.0, 0.45, 0.0, 0.0, 0.45, 0.1]),
     ("Dire", [0.0, 0.4, 0.0, 0.0, 0.6, 0.0]),
-    // -- Condition + Boon/Condi Duration --
+    // Condition + Boon/Condi Duration
     ("Ritualist's", [0.0, 0.45, 0.2, 0.0, 0.1, 0.25]),
-    // -- Condition + Healing --
+    // Condition + Healing
     ("Plaguedoctor's", [0.0, 0.35, 0.0, 0.35, 0.15, 0.15]),
-    // -- Pure Healer --
+    // Pure Healer
     ("Magi's", [0.0, 0.0, 0.0, 0.85, 0.15, 0.0]),
-    // -- Healing + Boon Support --
+    // Healing + Boon Support
     ("Harrier's", [0.1, 0.0, 0.4, 0.5, 0.0, 0.0]),
     ("Cleric's", [0.2, 0.0, 0.0, 0.55, 0.25, 0.0]),
-    // -- Heal Tank --
+    // Heal Tank
     ("Minstrel's", [0.0, 0.0, 0.25, 0.35, 0.4, 0.0]),
-    // -- Pure Tank --
+    // Pure Tank
     ("Nomad's", [0.0, 0.0, 0.0, 0.1, 0.9, 0.0]),
-    // -- Power Tank --
+    // Power Tank
     ("Soldier's", [0.35, 0.0, 0.0, 0.0, 0.65, 0.0]),
     ("Knight's", [0.35, 0.0, 0.0, 0.0, 0.65, 0.0]),
     ("Cavalier's", [0.3, 0.0, 0.0, 0.0, 0.7, 0.0]),
-    // -- Power + Boon Duration --
+    // Power + Boon Duration
     ("Diviner's", [0.45, 0.0, 0.35, 0.0, 0.0, 0.2]),
-    // -- Condition/Heal/Tank hybrid --
+    // Condition/Heal/Tank hybrid
     ("Apothecary's", [0.0, 0.25, 0.0, 0.4, 0.35, 0.0]),
-    // -- Universal Hybrid --
+    // Universal Hybrid
     ("Celestial", [0.25, 0.25, 0.1, 0.1, 0.1, 0.2]),
 ];
 
