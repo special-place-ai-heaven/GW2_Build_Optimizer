@@ -2941,6 +2941,51 @@ mod tests {
         // (CONN-01-04). They cannot be compared here.
     }
 
+    /// FR-010 guard (Sprint 2, T029): tagging conditional clauses in the
+    /// parser and dividing them out on the WvW path must not move a single
+    /// PvE number. Pinned before the parser change (commit e531a75).
+    #[test]
+    fn pve_output_unchanged_by_conditional_tagging() {
+        use crate::rotation::reaper_fixture as fx;
+        let db = fx::db();
+        let build = fx::build();
+        let (ctx, scenario) = fx::pve_scenario();
+        let weights = OptimizationWeights::default();
+        let report = super::evaluate_validated_build_with(
+            &build,
+            &db,
+            "Necromancer",
+            &weights,
+            &ctx,
+            &scenario,
+            &fx::opener(),
+        );
+        let got = [
+            report.realized.power,
+            report.realized.condition,
+            report.realized.boon_support,
+            report.realized.healing,
+            report.realized.sustain,
+            report.realized.control,
+            report.user_intent_score,
+        ];
+        const PINNED: [f64; 7] = [
+            0.01988142845871873,
+            0.0,
+            0.05594285714285714,
+            0.15,
+            0.4302897574123989,
+            0.03833333333333334,
+            0.09310281831080738,
+        ];
+        for (i, (g, p)) in got.iter().zip(&PINNED).enumerate() {
+            assert!(
+                (g - p).abs() < 1e-9,
+                "PvE value {i} moved: got {got:?}, pinned {PINNED:?}"
+            );
+        }
+    }
+
     #[test]
     fn reaper_pve_comparison_uses_adaptive_scheduler_not_opener() {
         use crate::rotation::reaper_fixture as fx;
