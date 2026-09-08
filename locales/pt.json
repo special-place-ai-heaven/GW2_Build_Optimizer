@@ -170,6 +170,8 @@
   "settings.ai_provider": "PROVEDOR DE IA",
   "settings.opt_defaults": "PADRÕES DE OTIMIZAÇÃO",
   "settings.default_mode": "Modo de jogo padrão:",
+  "settings.default_scale": "Escala padrão:",
+  "settings.default_role": "Função padrão:",
   "settings.legend": "LEGENDA DE QUALIDADE DOS DADOS",
   "settings.verified": "Verificado",
   "settings.verified_note": "-- Todos os dados de entrada têm fonte.",

@@ -170,6 +170,8 @@
   "settings.ai_provider": "AIプロバイダー",
   "settings.opt_defaults": "最適化の既定値",
   "settings.default_mode": "デフォルトのゲームモード:",
+  "settings.default_scale": "既定の規模:",
+  "settings.default_role": "既定の役割:",
   "settings.legend": "データ品質凡例",
   "settings.verified": "検証済み",
   "settings.verified_note": "-- 入力データはすべてソースに裏付けられています。",

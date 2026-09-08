@@ -186,6 +186,8 @@
   "settings.ai_provider": "AI PROVIDER",
   "settings.opt_defaults": "OPTIMIZATION DEFAULTS",
   "settings.default_mode": "Default Game Mode:",
+  "settings.default_scale": "Default Scale:",
+  "settings.default_role": "Default Role:",
   "settings.legend": "DATA QUALITY LEGEND",
   "settings.verified": "Verified",
   "settings.verified_note": "-- All input data is source-backed.",

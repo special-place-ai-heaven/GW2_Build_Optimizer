@@ -170,6 +170,8 @@
   "settings.ai_provider": "KI-ANBIETER",
   "settings.opt_defaults": "OPTIMIERUNGS-DEFAULTS",
   "settings.default_mode": "Standard-Spielmodus:",
+  "settings.default_scale": "Standard-Maßstab:",
+  "settings.default_role": "Standardrolle:",
   "settings.legend": "DATENQUALITÄT",
   "settings.verified": "Verifiziert",
   "settings.verified_note": "-- Alle Eingaben sind quellenbasiert.",
