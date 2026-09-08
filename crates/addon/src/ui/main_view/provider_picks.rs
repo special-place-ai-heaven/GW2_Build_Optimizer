@@ -19,12 +19,10 @@ use crate::ui::theme;
 /// every benchmark row on disk, so it runs when the proposal changes and not
 /// otherwise.
 pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
-    let Some(suggestion) = state
-        .main
-        .comparison
-        .suggestions
-        .get(state.main.comparison.selected_suggestion)
-    else {
+    // The cards belong to the plate, not to whichever tab is selected:
+    // opening a published build or asking a question must not re-key them
+    // (specs/006 US3, in-game 2026-09-08).
+    let Some(suggestion) = plate_suggestion(&state.main.comparison.suggestions) else {
         return;
     };
     // The plate's own profession, read from its specializations, so a
@@ -71,13 +69,7 @@ pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
         relic: suggestion.relic.clone(),
         role,
     };
-    let key = format!(
-        "{}|{}|{}|{}",
-        shape.profession,
-        shape.mode,
-        shape.role,
-        shape.specs.join(",")
-    );
+    let key = picks_key(&shape.profession, &shape.mode, &shape.role, &shape.specs);
     if key == state.main.provider_picks_key {
         return;
     }
@@ -114,6 +106,19 @@ pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
             })
         })
         .collect();
+}
+
+/// The plate the cards belong to: the newest build this addon cooked itself
+/// (empty `source_url`), whatever tab the player has selected.
+pub(crate) fn plate_suggestion(
+    suggestions: &[crate::ui::comparison::BuildSuggestion],
+) -> Option<&crate::ui::comparison::BuildSuggestion> {
+    suggestions.iter().rev().find(|s| s.source_url.is_empty())
+}
+
+/// What the cards were matched against; a change here re-runs the match.
+pub(crate) fn picks_key(profession: &str, mode: &str, role: &str, specs: &[String]) -> String {
+    format!("{profession}|{mode}|{role}|{}", specs.join(","))
 }
 
 /// "Additional suggestions you might like" — the closest published build from
@@ -415,4 +420,37 @@ pub(in crate::ui::main_view) fn adopt_provider_pick(state: &mut AddonState, inde
     // it from is a click that appears to do nothing.
     state.main.active_tab =
         crate::ui::main_view::optimization::result_alert_tab(state.main.current_build.is_some());
+}
+
+#[cfg(test)]
+mod plate_tests {
+    use super::*;
+    use crate::ui::comparison::BuildSuggestion;
+
+    fn build(label: &str, url: &str, specs: &[&str]) -> BuildSuggestion {
+        BuildSuggestion {
+            label: label.into(),
+            source_url: url.into(),
+            specializations: specs.iter().map(|s| (s.to_string(), vec![])).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn picks_key_from_newest_plate() {
+        let strip = vec![
+            build("A", "", &["Reaper"]),
+            build("B", "https://guildjen.com/b", &["Harbinger"]),
+        ];
+        let plate = plate_suggestion(&strip).unwrap();
+        assert_eq!(plate.label, "A", "a published tab is never the plate");
+        let key_a = picks_key("Necromancer", "WvW", "Roam", &["Reaper".into()]);
+        let mut strip = strip;
+        strip.push(build("C", "", &["Scourge"]));
+        assert_eq!(plate_suggestion(&strip).unwrap().label, "C");
+        let key_c = picks_key("Necromancer", "WvW", "Roam", &["Scourge".into()]);
+        assert_ne!(key_a, key_c);
+        assert!(plate_suggestion(&[build("B", "https://x", &[])]).is_none());
+        assert!(plate_suggestion(&[]).is_none());
+    }
 }

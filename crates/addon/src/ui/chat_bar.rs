@@ -117,6 +117,14 @@ pub fn queue_user_message(state: &mut ChatBarState, msg: &str) -> Option<String>
     Some(msg.to_string())
 }
 
+/// The reply the published cards sit under: the newest one that plated a
+/// build or tried to. Follow-up questions do not move it (specs/006 US3).
+pub fn cards_anchor(history: &[ChatMessage]) -> Option<usize> {
+    history
+        .iter()
+        .rposition(|m| !m.from_user && (m.open_result || m.build_failed))
+}
+
 /// Last `n` turns for the LLM brief. Oldest first.
 pub fn recent_transcript(history: &[ChatMessage], n: usize) -> String {
     let start = history.len().saturating_sub(n);
@@ -302,6 +310,7 @@ pub fn render_chat_bar(
                 return;
             }
             let names = state.names.clone().unwrap_or_default();
+            let anchor = cards_anchor(&state.history);
             let n = state.history.len();
             for i in 0..n {
                 let from_user = state.history[i].from_user;
@@ -369,15 +378,15 @@ pub fn render_chat_bar(
                     }
                     // Beside our own card, not under it: they are the same
                     // kind of thing — a build you can open — and reading them
-                    // as a row says so. Only on the newest reply, so an old
-                    // conversation does not sprout cards against builds that
-                    // have long since been replaced.
-                    if i + 1 == state.history.len() && !picks.is_empty() {
+                    // as a row says so. Only under the newest plate, so an
+                    // old conversation does not sprout cards against builds
+                    // that have long since been replaced.
+                    if anchor == Some(i) && !picks.is_empty() {
                         if let Some(n) = render_pick_cards(ui, picks, i, false) {
                             action = Some(ChatAction::OpenPick(n));
                         }
                     }
-                } else if build_failed && i + 1 == state.history.len() && !picks.is_empty() {
+                } else if build_failed && anchor == Some(i) && !picks.is_empty() {
                     // The dead end. Choya tried and produced nothing usable,
                     // so the answer is not an apology on its own — it is the
                     // apology and somewhere to go next. These are the builds
@@ -876,6 +885,29 @@ mod tests {
         assert!(t.contains("m4"));
         assert!(!t.contains("m0"));
         assert!(t.starts_with("Player: m2") || t.contains("Player: m4"));
+    }
+
+    #[test]
+    fn cards_anchor_is_newest_open_result_message() {
+        let msg = |from_user: bool, open_result: bool, build_failed: bool| ChatMessage {
+            from_user,
+            open_result,
+            build_failed,
+            ..Default::default()
+        };
+        let history = vec![
+            msg(true, false, false),
+            msg(false, true, false),
+            msg(true, false, false),
+            msg(false, false, false),
+        ];
+        assert_eq!(cards_anchor(&history), Some(1));
+        let history = vec![msg(false, true, false), msg(false, true, false)];
+        assert_eq!(cards_anchor(&history), Some(1));
+        let history = vec![msg(false, false, true), msg(false, false, false)];
+        assert_eq!(cards_anchor(&history), Some(0));
+        assert_eq!(cards_anchor(&[msg(false, false, false)]), None);
+        assert_eq!(cards_anchor(&[]), None);
     }
 
     #[test]
