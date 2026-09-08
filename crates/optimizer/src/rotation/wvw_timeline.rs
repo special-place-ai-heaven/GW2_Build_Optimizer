@@ -3104,7 +3104,7 @@ impl<'a> Timeline<'a> {
             self.trace(
                 TraceKind::ProcUnmodeled,
                 &entry.rendered(),
-                &entry.class.suffix(),
+                entry.class.suffix(),
             );
         }
     }

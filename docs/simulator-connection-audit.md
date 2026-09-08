@@ -395,3 +395,11 @@ the step: 1 190 passed, 16.27 s.
 ### 9.6 Timing
 
 Sprint 2 baseline re-measured 2026-09-08 at `79e731d` before any Sprint 3 code: `cargo test -p gw2-optimizer --lib` reports `finished in` 19.08 s, 17.01 s, 16.65 s (1 157 tests, 5 ignored). SC-006 cap for Sprint 3: within 10 % of the median 17.01 s, i.e. under 18.7 s harness time on a warm run.
+
+Increment 1 at `ff0eb5b` (Phases 1-7 landed, 1 190 tests, 9 ignored): 16.04 s, 16.29 s, 16.03 s. Median 16.29 s, 4 % under the baseline median: SC-006 holds with 33 more tests. Trial passes and the catalogue's 40 s diagnostic runs are inside that figure. Determinism and trace-cap pins (`reaper_results_repeat_identically`, `reaper_trace_fits_under_cap`, `necro_results_repeat_identically`) green.
+
+Gate run for the increment (T067-T069, 2026-09-08 at `ff0eb5b`): `python docs/audit/disable_and_run.py shroud_enter prereq scope population coverage` fails all five with the quoted blocks and restores each file byte-identically; `pve_output_unchanged_by_conditional_tagging`, `pve_trait_fact_consumption_set_unchanged` and the nine `scoring_regression` tests unchanged to the last digit (SC-004). Sweep (T070): no machine path, `poslj`, `scratchpad`, `DEBUG` or `mock` in code; no fixture id in `data/`; the only lines changed under `prompts.rs` and `llm/` since the base are the concurrent agent's comment-line removals (`601d884`, `c2d75ec`, `79e731d`).
+
+## 10. Sprint 3 increments 2-9
+
+Profession order (T074): `cache/characters.json` holds names only (no `profession` field), so the fallback applies: alphabetical. Elementalist, Engineer, Guardian, Mesmer, Ranger, Revenant, Thief, Warrior. Each is its own branch off the previous increment's tip, its own PR and its own patch version, on the mechanism of section 9; the trait coverage table's `NoRecord` column is the progress bar (Necromancer 0; the other eight 65-85 at `ff0eb5b`).
