@@ -1,0 +1,4 @@
+{"at":"2026-09-08T15:20:51.913Z","event":"start","label":"holdout-3-scourge"}
+{"at":"2026-09-08T15:20:53.199Z","event":"prompt","chars":68326,"tools":20}
+{"at":"2026-09-08T15:24:44.483Z","event":"result","status":"FAIL","model":"gemini-3.8-flash","rounds":2,"wire":5,"seconds":231.3,"failure_kind":"unclassified","specs":[]}
+{"at":"2026-09-08T15:24:44.490Z","event":"exit","code":1}

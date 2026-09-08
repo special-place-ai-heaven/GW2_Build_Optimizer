@@ -76,6 +76,35 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         }
     }
 
+    // A specialization the player names decides the profession, over the
+    // character on the left. Scourge equipped and "make me a ritualist" is
+    // still a Necromancer; a Guardian selected and "make me a ritualist" is
+    // a Necromancer build with nothing equipped to compare against.
+    let no_character = state.main.current_build.is_none();
+    let wished_profession: Option<String> = state.main.game_db.as_deref().and_then(|db| {
+        let wished = wished_elite_spec(db, &message)?;
+        db.specializations
+            .values()
+            .find(|s| s.elite && s.name.eq_ignore_ascii_case(&wished))
+            .map(|s| s.profession.clone())
+    });
+    let switched_profession = wished_profession
+        .as_ref()
+        .is_some_and(|p| !p.eq_ignore_ascii_case(&profession));
+    let named_a_spec = wished_profession.is_some();
+    if let (true, Some(p)) = (switched_profession, wished_profession) {
+        profession = p;
+    }
+    // "Improve my build" with no character, or a character with no build
+    // and equipment resolved, and no specialization named: there is nothing
+    // to improve, and no model call can find out what the player meant. Say
+    // so, in Choya's voice. A named specialization bypasses this: that is a
+    // build request, and the selection on the left does not matter to it.
+    if no_character && !named_a_spec && asks_about_own_build(&message) {
+        crate::ui::chat_bar::add_ai_response(&mut state.main.chat, t("choya.select_first"));
+        return;
+    }
+
     state.main.chat_epoch = state.main.chat_epoch.wrapping_add(1);
     let epoch = state.main.chat_epoch;
     state.main.chat.waiting = true;
@@ -84,12 +113,16 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     state.main.optimize_stage = t("choya.thinking");
 
     let config = state.config.clone();
-    let character = state
-        .main
-        .current_build
-        .as_ref()
-        .map(summarize_resolved_build)
-        .unwrap_or_default();
+    let character = if switched_profession {
+        String::new()
+    } else {
+        state
+            .main
+            .current_build
+            .as_ref()
+            .map(summarize_resolved_build)
+            .unwrap_or_default()
+    };
     let game_mode_label = state.main.game_mode.label().to_string();
     let scale = if state.main.game_mode == gw2_core::types::GameMode::WvW {
         state.main.combat_tier.label()
@@ -142,7 +175,11 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
     let addon_dir = state.addon_dir.clone();
     let db_clone = clone_game_db_for_worker(&state.main.game_db);
     let weights = state.main.weights.clone();
-    let loadout = state.main.current_build.clone();
+    let loadout = if switched_profession {
+        None
+    } else {
+        state.main.current_build.clone()
+    };
     // The plate is ranked before it is served, so the chat path needs the same
     // scenario the Improve button builds — same tier mapping, same role
     // profile. Without one there is nothing for the referee to judge against.
@@ -152,7 +189,26 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
         gw2_core::types::GameMode::PvE => gw2_optimizer::scenario::CombatTier::Party,
     };
     let selected_role = state.main.selected_role;
-    let chat_locks = state.main.build_locks.clone();
+    // The message outranks the left panel. A specialization the player
+    // names replaces the panel's elite lock for this request, so the
+    // deterministic reference handed to the model is a build in the
+    // specialization they asked for, not the one they happen to have
+    // equipped. Name none, and the panel's selection is what gets improved.
+    let mut chat_locks = state.main.build_locks.clone();
+    if let Some(db) = state.main.game_db.as_deref() {
+        if let Some(wished) = wished_elite_spec(db, &message) {
+            if let Some(spec) = db
+                .specializations
+                .values()
+                .find(|s| s.elite && s.name.eq_ignore_ascii_case(&wished))
+            {
+                if chat_locks.specs[2] != Some(spec.id) {
+                    chat_locks.specs[2] = Some(spec.id);
+                    chat_locks.trait_locks.clear();
+                }
+            }
+        }
+    }
     let chat_balance_ctx = BalanceContext::new(state.main.game_mode.clone());
 
     let spawned = state.spawn_worker("chat-message", move |token| {
@@ -171,10 +227,46 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
             // build looks identical to a greeting from the outside, and only
             // one of the two should be answered with other people's builds.
             let plate_refused = std::cell::Cell::new(false);
+            // The optimizer's own build for this request, kept outside the
+            // closure so a model failure can still serve it.
+            let fallback_reference: std::cell::RefCell<Option<String>> =
+                std::cell::RefCell::new(None);
+            // The handshake. What this model can do, measured once and kept;
+            // the run below is shaped by it and refines it afterwards.
+            let model_id = config.active_model_id().to_string();
+            let profiles =
+                std::cell::RefCell::new(gw2_optimizer::llm::profile::Store::load(&addon_dir));
+            let round_secs: std::cell::RefCell<Vec<f32>> = std::cell::RefCell::new(Vec::new());
+            let repair_used = std::cell::Cell::new(false);
             let result = (|| -> Result<gw2_optimizer::prompts::GeminiBuildResponse, String> {
                 let client = gw2_optimizer::llm::create_client(&config, &addon_dir)
                     .map_err(|e| e.to_string())?;
 
+                if token.is_cancelled() {
+                    return Err("Cancelled".into());
+                }
+
+                let (profile, probed) = profiles.borrow_mut().ensure(
+                    client.as_ref(),
+                    &model_id,
+                    gw2_optimizer::llm::profile::now_secs(),
+                );
+                nexus::log::log(
+                    nexus::log::LogLevel::Info,
+                    "GW2BuildOpt",
+                    format!(
+                        "Choya handshake{}: {}",
+                        if probed { " (probed now)" } else { "" },
+                        profile.summary()
+                    ),
+                );
+                if let Some(e) = profiles.borrow().last_probe_error.as_deref() {
+                    nexus::log::log(
+                        nexus::log::LogLevel::Warning,
+                        "GW2BuildOpt",
+                        format!("Choya handshake got no answer ({e}); running on the assumed profile"),
+                    );
+                }
                 if token.is_cancelled() {
                     return Err("Cancelled".into());
                 }
@@ -228,6 +320,9 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     // a plate is refused: a build that lands far below a
                     // reference it was shown is a different failure from one
                     // that never saw a reference at all.
+                    *fallback_reference.borrow_mut() = reference
+                        .as_ref()
+                        .map(|r| format!("{}\n{}", r.line, r.verdict));
                     nexus::log::log(
                         nexus::log::LogLevel::Info,
                         "GW2BuildOpt",
@@ -264,6 +359,13 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         );
                     }
 
+                    // Who on the account can wear this. Only when the plate is
+                    // not for the selected character: a named specialization
+                    // of another profession, or no character at all.
+                    if switched_profession || no_character {
+                        kitchen.push_str(&roster_note(&addon_dir, &profession));
+                    }
+
                     // Handed over, not fetched. See `profession_reference`:
                     // enumerating the specs, traits and skills cost 21s of a
                     // 31s tool phase and six round-trips, for data that is
@@ -272,7 +374,23 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         db,
                         &profession,
                     ));
+                    kitchen.push_str(&gw2_optimizer::gemini_tools::upgrade_reference(
+                        db,
+                        &weights,
+                        &chat_balance_ctx,
+                    ));
+                    kitchen.push_str(&gw2_optimizer::gemini_tools::upgrade_reference(
+                        db,
+                        &weights,
+                        &chat_balance_ctx,
+                    ));
 
+                    // Every tool stays on the table, including the two whose
+                    // answer is already in the first message. Withholding
+                    // them was tried 2026-09-07: the prompt still names them,
+                    // so the model narrated "I'll start by checking what
+                    // specs..." with no call to make, and a text-only turn is
+                    // the final answer. A wasted round beats a wasted run.
                     let tools = gw2_optimizer::llm::tools::tool_definitions();
                     let empty_candidates = vec![];
                     let ctx = gw2_optimizer::gemini_tools::ToolContext {
@@ -346,7 +464,14 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         // glm-5.3-flash - which had taken the tools branch -
                         // worked. The contradiction was the bug, not the model.
                         let mut round_started = std::time::Instant::now();
-                        let response = {
+                        // A model the handshake found cannot drive tools is
+                        // not asked to: it gets the whole kitchen in one
+                        // message and writes the plate from it.
+                        let response = if profile.max_turns(client.thrifty()) == 0 {
+                            client
+                                .generate_brief(&prompt, 8_192)
+                                .map_err(|e| e.to_string())?
+                        } else {
                             client
                                 .generate_with_tools_progress(
                                     &prompt,
@@ -371,7 +496,10 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     // was the number contradicting it, and
                                     // gemini-flash-latest ran out on every
                                     // request (measured in-game 2026-09-05).
-                                    8,
+                                    // Eight for a model the handshake found
+                                    // quick; fewer for a slow one, so the run
+                                    // still ends in a plate inside the budget.
+                                    profile.max_turns(client.thrifty()),
                                     &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
                                         // How long each round actually took.
                                         // Without it a run that ends on a
@@ -381,6 +509,9 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                         // opposite faults with opposite fixes.
                                         let round = round_started.elapsed();
                                         round_started = std::time::Instant::now();
+                                        if !tool_names.is_empty() {
+                                            round_secs.borrow_mut().push(round.as_secs_f32());
+                                        }
                                         nexus::log::log(
                                             nexus::log::LogLevel::Info,
                                             "GW2BuildOpt",
@@ -430,7 +561,46 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                         let mut parsed = match gw2_optimizer::prompts::parse_gemini_build(&response)
                         {
                             Ok(p) => p,
+                            // Prose where a plate was due. In-game 2026-09-07
+                            // (minimax-m3:free): eight rounds of lookups, then
+                            // a paragraph naming the traits and no JSON - a
+                            // build the player could read and not wear. One
+                            // repair request, no tools, asks for the plate of
+                            // what it just wrote; only if that fails too is
+                            // the prose served as conversation.
                             Err(_) => {
+                                let repair = format!(
+                                    "You answered in prose:\n\n{response}\n\nServe that \
+                                     as the plate now: ONLY the JSON build object from \
+                                     your instructions - \"specializations\" as objects \
+                                     with \"name\", \"elite\" and \"traits\" (three each), \
+                                     \"weapons\" with set1/set2 main/off, \"skills\" with \
+                                     heal/utilities/elite, \"rune\", \"sigils\", \"relic\", \
+                                     \"stat_prefix\", \"explanation\". No text outside \
+                                     the JSON."
+                                );
+                                let repaired = client
+                                    .generate_brief(&repair, 8_192)
+                                    .ok()
+                                    .and_then(|r| {
+                                        gw2_optimizer::prompts::parse_gemini_build(&r).ok()
+                                    });
+                                nexus::log::log(
+                                    nexus::log::LogLevel::Info,
+                                    "GW2BuildOpt",
+                                    format!(
+                                        "Choya answered in prose; repair request {}",
+                                        if repaired.is_some() {
+                                            "produced a plate"
+                                        } else {
+                                            "did not"
+                                        }
+                                    ),
+                                );
+                                if let Some(p) = repaired {
+                                    repair_used.set(true);
+                                    p
+                                } else {
                                 let explanation: String =
                                     response.chars().filter(|c| *c != '`').take(800).collect();
                                 let explanation = explanation.trim().to_string();
@@ -441,12 +611,59 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     explanation,
                                     ..Default::default()
                                 }
+                                }
                             }
                         };
                         if let Some(ref cur) = loadout {
                             fill_holes_from_loadout(&mut parsed, cur);
                         }
                         apply_radar_prefix(&mut parsed, &weights, &message);
+
+                        // The prompt allows a spoken reply with no plate for
+                        // greetings and questions. In-game 2026-09-07
+                        // (minimax-m3:free) a build request came back in that
+                        // shape with the whole build inside "explanation" -
+                        // valid JSON, so the parse-failure repair never saw
+                        // it. A build request answered with no plate gets the
+                        // same one repair: serve what you just said.
+                        if parsed.specializations.is_empty() && wants_a_build(&message) {
+                            let repair = format!(
+                                "You described the build in prose:\n\n{}\n\nServe that \
+                                 as the plate now: ONLY the JSON build object from your \
+                                 instructions - \"specializations\" as three objects with \
+                                 \"name\", \"elite\" and \"traits\" (three each), \"weapons\" \
+                                 with set1/set2 main/off, \"skills\" with \
+                                 heal/utilities/elite, \"rune\", \"sigils\", \"relic\", \
+                                 \"stat_prefix\", \"explanation\". Empty \"specializations\" \
+                                 is not an answer to a build request.",
+                                parsed.explanation
+                            );
+                            let plated = client
+                                .generate_brief(&repair, 8_192)
+                                .ok()
+                                .and_then(|r| gw2_optimizer::prompts::parse_gemini_build(&r).ok())
+                                .filter(|p| !p.specializations.is_empty());
+                            nexus::log::log(
+                                nexus::log::LogLevel::Info,
+                                "GW2BuildOpt",
+                                format!(
+                                    "Choya spoke the build instead of plating it; repair request {}",
+                                    if plated.is_some() {
+                                        "produced a plate"
+                                    } else {
+                                        "did not"
+                                    }
+                                ),
+                            );
+                            if let Some(p) = plated {
+                                repair_used.set(true);
+                                parsed = p;
+                                if let Some(ref cur) = loadout {
+                                    fill_holes_from_loadout(&mut parsed, cur);
+                                }
+                                apply_radar_prefix(&mut parsed, &weights, &message);
+                            }
+                        }
 
                         // A reply with no complete kit is conversation, not a
                         // build. Nothing to rank, nothing to refuse.
@@ -468,16 +685,32 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                             return Ok(parsed);
                         }
 
-                        match plate_shortfall(
-                            &validated,
-                            baseline.as_ref(),
-                            db,
-                            &plate_profession,
-                            &weights,
-                            &chat_balance_ctx,
-                            &scenario,
-                            reference.as_ref().map_or(&[][..], |r| &r.unreachable),
-                        ) {
+                        // The specialization the player named is not a
+                        // preference the ranking may trade away: "scourge"
+                        // means a Scourge plate, whatever else scores better.
+                        let shortfall = match wished_elite_spec(db, &message) {
+                            Some(wished)
+                                if !parsed
+                                    .specializations
+                                    .iter()
+                                    .any(|(name, _)| name.eq_ignore_ascii_case(&wished)) =>
+                            {
+                                Err(format!(
+                                    "the player asked for {wished} and this plate does not run {wished}"
+                                ))
+                            }
+                            _ => plate_shortfall(
+                                &validated,
+                                baseline.as_ref(),
+                                db,
+                                &plate_profession,
+                                &weights,
+                                &chat_balance_ctx,
+                                &scenario,
+                                reference.as_ref().map_or(&[][..], |r| &r.unreachable),
+                            ),
+                        };
+                        match shortfall {
                             // Served, with whatever the non-blocking gates
                             // had to say written on it. A caveat the player
                             // can read beats a gate that silently vetoes.
@@ -561,6 +794,14 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                     Err("Game data not loaded".into())
                 }
             })();
+            // The run refines the handshake: how long a round really took
+            // here, whether the plate needed repairing, whether it failed.
+            profiles.borrow_mut().record_run(
+                &model_id,
+                &round_secs.borrow(),
+                repair_used.get(),
+                result.is_err(),
+            );
 
             let mut profession = profession;
             if let (Ok(parsed), Some(db)) = (result.as_ref(), db_clone.as_ref()) {
@@ -769,7 +1010,24 @@ pub(super) fn send_chat_message(state: &mut AddonState, message: String) {
                                     s.config.active_model_id(),
                                 );
                                 s.main.provider_issue = Some(msg.clone());
-                                crate::ui::chat_bar::add_ai_response(&mut s.main.chat, msg);
+                                // The run must end in a build. The optimizer's
+                                // own answer for this request has been in hand
+                                // since before the first round; a model that
+                                // ran out of clock does not take it with it.
+                                match fallback_reference.borrow().as_deref() {
+                                    Some(build) => {
+                                        crate::ui::chat_bar::add_ai_response(
+                                            &mut s.main.chat,
+                                            format!(
+                                                "{msg}\n\n{}\n{build}",
+                                                t("choya.fallback_reference")
+                                            ),
+                                        );
+                                    }
+                                    None => {
+                                        crate::ui::chat_bar::add_ai_response(&mut s.main.chat, msg);
+                                    }
+                                }
                             });
                         }
                     }
@@ -1089,6 +1347,113 @@ fn plate_shortfall(
     ))
 }
 
+/// Whether the player asked for something to equip, as opposed to chatting.
+/// Decides only whether an empty plate is a failure worth one repair
+/// request; a false positive costs one short request, a false negative
+/// costs the player the build.
+pub(super) fn wants_a_build(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    [
+        "build",
+        "loadout",
+        "improve",
+        "gear",
+        "setup",
+        "set up",
+        "spec ",
+        "make me",
+        "give me",
+        "optimi",
+        "rotation",
+        "what should i run",
+        "what should i play",
+    ]
+    .iter()
+    .any(|k| lower.contains(k))
+}
+
+/// Whether the message is about the player's own equipped build rather than
+/// a build they describe: "improve this", "my current build", "what I have
+/// on". Only meaningful when nothing is selected, where it decides between
+/// asking them to pick a character and composing blind.
+pub(super) fn asks_about_own_build(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    [
+        "improve",
+        "my build",
+        "my current",
+        "this build",
+        "this character",
+        "equipped",
+        "what i have",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+/// One line about the player's own characters for a build not tied to the
+/// selected one: who could wear it, or that nobody on the account can yet.
+/// Read from the character cache, so it costs no API call.
+fn roster_note(addon_dir: &std::path::Path, profession: &str) -> String {
+    let cache = gw2_api::cache::DataCache::new(addon_dir.join("cache"));
+    let names = cache.load_characters().ok().flatten().unwrap_or_default();
+    let roster: Vec<(String, String)> = names
+        .iter()
+        .filter_map(|name| {
+            let tabs: serde_json::Value = cache.load_character(name, "buildtabs").ok()??;
+            let prof = tabs
+                .as_array()?
+                .iter()
+                .find_map(|t| t["build"]["profession"].as_str().map(String::from))?;
+            Some((name.clone(), prof))
+        })
+        .collect();
+    let wearers: Vec<&str> = roster
+        .iter()
+        .filter(|(_, p)| p.eq_ignore_ascii_case(profession))
+        .map(|(n, _)| n.as_str())
+        .collect();
+    if roster.is_empty() {
+        return String::new();
+    }
+    if wearers.is_empty() {
+        let others: Vec<String> = roster.iter().map(|(n, p)| format!("{n} ({p})")).collect();
+        format!(
+            "\nThe player has no {profession} on this account (their characters: {}). Plate the \
+             {profession} build they asked for anyway, say in one clause that they have no \
+             {profession} yet, and do not refuse. There is no equipped gear to compare against.\n",
+            others.join(", ")
+        )
+    } else {
+        format!(
+            "\nThe player's {profession} characters: {}. This build is for one of them; they \
+             have not selected that character, so there is no equipped gear to compare against.\n",
+            wearers.join(", ")
+        )
+    }
+}
+
+/// The elite specialization the player named in their message, if any and
+/// not negated ("not scourge", "no scourge"). Matched on whole words against
+/// the game data, so "reaper" in "grim reaper of a build" still counts and
+/// "harbingers" does not misread as a different spec.
+pub(super) fn wished_elite_spec(db: &GameDb, message: &str) -> Option<String> {
+    let words: Vec<String> = message
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_lowercase().trim_end_matches('s').to_string())
+        .collect();
+    let mut specs: Vec<&gw2_api::models::Specialization> =
+        db.specializations.values().filter(|s| s.elite).collect();
+    specs.sort_by_key(|s| s.id);
+    specs.into_iter().find_map(|spec| {
+        let wanted = spec.name.to_lowercase().trim_end_matches('s').to_string();
+        let at = words.iter().position(|w| *w == wanted)?;
+        let negated = at > 0 && matches!(words[at - 1].as_str(), "not" | "no" | "without");
+        (!negated).then(|| spec.name.clone())
+    })
+}
+
 pub(super) fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -> bool {
     // Weapon/prefix typos stay as warnings in the bubble. A complete kit still plates.
     v.specializations.len() == 3
@@ -1100,7 +1465,88 @@ pub(super) fn plate_is_servable(v: &gw2_optimizer::validation::ValidatedBuild) -
 
 #[cfg(test)]
 mod tests {
-    use super::{gate_vetoes, plate_is_servable};
+    use super::{
+        asks_about_own_build, gate_vetoes, plate_is_servable, wants_a_build, wished_elite_spec,
+    };
+
+    #[test]
+    fn improving_nothing_is_told_from_asking_for_something() {
+        assert!(asks_about_own_build(
+            "Improve my current equipped build. Keep the playstyle, raise the weak axes."
+        ));
+        assert!(asks_about_own_build("can you improve this?"));
+        assert!(!asks_about_own_build("Make me a badass Ritualist build."));
+        assert!(!asks_about_own_build("Build me a WvW roaming loadout."));
+    }
+
+    fn necro_db() -> gw2_optimizer::gamedb::GameDb {
+        let mut db = gw2_optimizer::gamedb::GameDb::empty_for_tests();
+        for (id, name, elite) in [
+            (53, "Reaper", true),
+            (34, "Scourge", true),
+            (39, "Curses", false),
+        ] {
+            db.specializations.insert(
+                id,
+                gw2_api::models::Specialization {
+                    id,
+                    name: name.into(),
+                    profession: "Necromancer".into(),
+                    elite,
+                    minor_traits: vec![],
+                    major_traits: vec![],
+                    weapon_trait: None,
+                    icon: None,
+                    background: None,
+                    profession_icon: None,
+                    profession_icon_big: None,
+                },
+            );
+        }
+        db
+    }
+
+    #[test]
+    fn the_named_elite_spec_is_read_from_the_message() {
+        let db = necro_db();
+        assert_eq!(
+            wished_elite_spec(&db, "Make me a badass Scourge build."),
+            Some("Scourge".into())
+        );
+        assert_eq!(
+            wished_elite_spec(&db, "reaper, power, roaming"),
+            Some("Reaper".into())
+        );
+        assert_eq!(
+            wished_elite_spec(&db, "make me a good reaper"),
+            Some("Reaper".into())
+        );
+        assert_eq!(
+            wished_elite_spec(&db, "one of those reapers"),
+            Some("Reaper".into()),
+            "plural"
+        );
+        assert_eq!(
+            wished_elite_spec(&db, "anything but not scourge"),
+            None,
+            "negated"
+        );
+        assert_eq!(
+            wished_elite_spec(&db, "a curses build"),
+            None,
+            "core line is not an elite wish"
+        );
+        assert_eq!(wished_elite_spec(&db, "power build please"), None);
+    }
+
+    #[test]
+    fn a_build_request_is_told_from_chat() {
+        assert!(wants_a_build("Make me a badass Ritualist build."));
+        assert!(wants_a_build("improve this"));
+        assert!(wants_a_build("what should I run in wvw?"));
+        assert!(!wants_a_build("hi choya"));
+        assert!(!wants_a_build("what does Dread do?"));
+    }
     use gw2_optimizer::referee::ViabilityGate as G;
 
     /// In-game 2026-09-06, Necromancer WvW Roam/Support: the deterministic

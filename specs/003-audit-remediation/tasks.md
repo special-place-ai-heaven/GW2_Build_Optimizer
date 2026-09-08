@@ -330,4 +330,26 @@ No tasks are marked [P] for concurrent implementation while another agent is cha
 
 ## Incremental delivery
 
+### Choya latency experiment (2026-09-07/08)
+
+- [x] LAT-00: Inspect the brief through SymForge and establish the optimizer unit baseline (1112 passed, 4 ignored).
+- [x] LAT-01: Tighten live harness acceptance to reject validation errors and missing slots; add a request override for holdout scenarios (local commit 09740ce).
+- [x] LAT-02: Compare prefilled-evidence prompts, preserving failures and wire counts. Baseline 3/6 valid; direct-only rejected at 1/6; combined prefix/direct candidate 5/6, provisional only.
+- [x] LAT-03: Run fresh holdouts and record bounded results in `autoresearch/loop-260907-2209/` and `docs/choya-latency-review.md`. OpenRouter 2/2 passed; native Gemini 0/2. Predicate remains PENDING; in-game/referee quality is unverified.
+- [ ] LAT-04: Define a prospective comparison permitting baseline failures; resolve incomplete Sante plates and native Gemini transport failures before accepting the provisional candidate.
+
+### Planned simulator connection follow-up
+
+Scope and acceptance are in [Simulator connections and build-quality plan](../../docs/simulator-trust-plan.md). These local IDs are separate from the original audit tasks; no runtime work is marked complete.
+
+- [ ] CONN-00: Capture current ownership-safe baseline, audit overlap, and first build/scenario fixtures.
+- [ ] CONN-01: Trace data, validation, simulation, ranking, AI tool and UI paths; classify coverage with source evidence.
+- [ ] CONN-02: Establish positive/negative, timing, ablation and cross-path tests; add bounded diagnostics only where needed.
+- [ ] CONN-03: Fix demonstrated evaluation, quality-projection or mechanic gaps using existing infrastructure.
+- [ ] CONN-04: Verify equal-budget search reachability for coherent interaction packages; improve only reproduced gaps.
+- [ ] CONN-05: Deliver grounded explanations, comparable alternatives and accurate fallback/uncertainty presentation.
+- [ ] CONN-06: Record local quality and AI delivery separately, verify in-game tradeoffs, and prioritize further coverage.
+
+### Existing audit delivery
+
 Deliver US1 as the first coherent verified batch, then the B001 stat correction, then the remaining stories. Update individual checkboxes only after their acceptance criteria pass. An in-game handoff is a checkpoint; it does not mark pending campaign items complete. The audit's deliberate no-action proposals require documented dispositions, not artificial changes.

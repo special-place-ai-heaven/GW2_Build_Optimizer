@@ -1,0 +1,12 @@
+{"at":"2026-09-08T15:20:12.749Z","event":"start","label":"candidate-3"}
+{"at":"2026-09-08T15:20:14.085Z","event":"prompt","chars":68296,"tools":20}
+{"at":"2026-09-08T15:21:05.211Z","event":"result","status":"PASS","model":"google/gemini-3.8-flash","rounds":2,"wire":3,"seconds":51.1,"failure_kind":null,"specs":["Spite","Soul Reaping","Reaper"]}
+{"at":"2026-09-08T15:21:57.960Z","event":"result","status":"FAIL","model":"inclusionai/ling-3.0-flash-sante:free","rounds":2,"wire":3,"seconds":52.7,"failure_kind":"missing-slots","validation_detail":"plate has missing weapons, upgrades or gear prefixes","specs":[]}
+{"at":"2026-09-08T15:22:46.119Z","event":"result","status":"PASS","model":"google/gemini-3.8-flash","rounds":2,"wire":3,"seconds":48.2,"failure_kind":null,"specs":["Spite","Soul Reaping","Reaper"]}
+{"at":"2026-09-08T15:23:16.055Z","event":"result","status":"PASS","model":"inclusionai/ling-3.0-flash-sante:free","rounds":2,"wire":3,"seconds":29.9,"failure_kind":null,"specs":["Reaper","Soul Reaping","Blood Magic"]}
+{"at":"2026-09-08T15:23:58.609Z","event":"round","turn":1,"max":8,"seconds":36.4,"tools":"search_upgrades"}
+{"at":"2026-09-08T15:24:07.211Z","event":"round","turn":2,"max":8,"seconds":8.6,"tools":"search_upgrades"}
+{"at":"2026-09-08T15:24:15.539Z","event":"round","turn":3,"max":8,"seconds":8.3,"tools":"search_upgrades"}
+{"at":"2026-09-08T15:24:41.266Z","event":"result","status":"PASS","model":"google/gemini-3.8-flash","rounds":5,"wire":6,"seconds":85.2,"failure_kind":null,"specs":["Spite","Soul Reaping","Reaper"]}
+{"at":"2026-09-08T15:25:02.376Z","event":"result","status":"PASS","model":"inclusionai/ling-3.0-flash-sante:free","rounds":2,"wire":3,"seconds":21.1,"failure_kind":null,"specs":["Soul Reaping","Spite","Reaper"]}
+{"at":"2026-09-08T15:25:02.382Z","event":"exit","code":1}

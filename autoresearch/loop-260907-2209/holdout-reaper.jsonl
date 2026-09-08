@@ -1,0 +1,5 @@
+{"at":"2026-09-07T22:46:18.034Z","event":"start","label":"holdout-reaper"}
+{"at":"2026-09-07T22:46:19.233Z","event":"prompt","chars":67256,"tools":20}
+{"at":"2026-09-07T22:46:31.688Z","event":"round","turn":1,"max":2,"seconds":10.8,"tools":"search_upgrades"}
+{"at":"2026-09-07T22:46:38.724Z","event":"result","status":"PASS","model":"gemini-2.5-flash","rounds":3,"wire":4,"seconds":19.5,"failure_kind":null,"specs":["Spite","Soul Reaping","Reaper"]}
+{"at":"2026-09-07T22:46:38.765Z","event":"exit","code":0}

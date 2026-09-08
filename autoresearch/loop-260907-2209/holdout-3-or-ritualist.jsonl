@@ -1,0 +1,7 @@
+{"at":"2026-09-08T19:02:00.002Z","event":"start","label":"holdout-3-or-ritualist"}
+{"at":"2026-09-08T19:02:01.243Z","event":"prompt","chars":68338,"tools":20}
+{"at":"2026-09-08T19:02:10.327Z","event":"round","turn":1,"max":8,"seconds":3.5,"tools":"search_upgrades, search_upgrades, search_upgrades"}
+{"at":"2026-09-08T19:02:11.819Z","event":"round","turn":2,"max":8,"seconds":1.5,"tools":"search_upgrades"}
+{"at":"2026-09-08T19:02:18.506Z","event":"round","turn":3,"max":8,"seconds":6.7,"tools":"search_upgrades"}
+{"at":"2026-09-08T19:02:27.137Z","event":"result","status":"PASS","model":"google/gemini-3.8-flash","rounds":5,"wire":6,"seconds":25.9,"failure_kind":null,"specs":["Curses","Death Magic","Ritualist"]}
+{"at":"2026-09-08T19:02:27.178Z","event":"exit","code":0}

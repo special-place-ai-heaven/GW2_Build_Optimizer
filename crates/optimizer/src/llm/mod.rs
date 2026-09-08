@@ -6,12 +6,15 @@ pub mod anthropic;
 pub(crate) mod body;
 pub mod cancel;
 pub mod gemini;
+pub mod models_dev;
 pub mod openai;
 pub(crate) mod openai_compat;
 pub mod openrouter;
+pub mod profile;
 pub(crate) mod rate;
 pub(crate) mod response_cache;
 pub(crate) mod sse;
+pub mod tool_loop;
 pub mod tools;
 pub(crate) mod trim;
 
@@ -57,6 +60,15 @@ pub struct ModelInfo {
     pub supported_efforts: Vec<String>,
     /// Total context, when published.
     pub context_length: Option<u32>,
+    /// Everything the catalog says the model's endpoints accept - `tools`,
+    /// `response_format`, `structured_outputs`, `reasoning`, ... Empty means
+    /// unpublished (OpenAI, Anthropic, Google do not list it).
+    pub supported_parameters: Vec<String>,
+    /// Whether the model holds to a JSON Schema (`response_format: json_schema`),
+    /// per models.dev. `None` means nobody has said. `Some(false)` is the free
+    /// tier of a model whose paid tier can - the plate then comes from the
+    /// repair request, not the API, and the picker says so.
+    pub structured_output: Option<bool>,
     /// Artificial Analysis' agentic score, when published.
     ///
     /// The closest published measure of what this addon asks a model to do:
@@ -84,6 +96,8 @@ impl Default for ModelInfo {
             max_completion_tokens: None,
             supported_efforts: Vec::new(),
             context_length: None,
+            supported_parameters: Vec::new(),
+            structured_output: None,
             agentic_index: None,
             coding_index: None,
             expires: None,
@@ -132,6 +146,12 @@ impl ModelInfo {
     }
 
     /// How many completion tokens to ask for, given our own ceiling.
+    /// Whether the catalog lists `param` for this model. Unpublished is
+    /// `false`: a request shape the catalog cannot vouch for is not sent.
+    pub fn supports(&self, param: &str) -> bool {
+        self.supported_parameters.iter().any(|p| p == param)
+    }
+
     pub fn completion_budget(&self, ours: u32) -> u32 {
         self.max_completion_tokens.map_or(ours, |cap| ours.min(cap))
     }
@@ -143,10 +163,17 @@ impl ModelInfo {
     /// 52.6 and an agentic 39.7 are not the same number, and interleaving
     /// them would rank by which benchmark a model happened to publish.
     pub fn rank(&self) -> (u8, i32) {
+        // A model the plate can be enforced on outranks one it cannot, inside
+        // the same score band; an unknown sits between.
+        let plate = match self.structured_output {
+            Some(true) => 0,
+            None => 1,
+            Some(false) => 2,
+        };
         match (self.agentic_index, self.coding_index) {
-            (Some(a), _) => (0, -(a * 100.0) as i32),
-            (None, Some(c)) => (1, -(c * 100.0) as i32),
-            (None, None) => (2, 0),
+            (Some(a), _) => (0, -(a * 100.0) as i32 * 4 + plate),
+            (None, Some(c)) => (1, -(c * 100.0) as i32 * 4 + plate),
+            (None, None) => (2, plate),
         }
     }
 }
@@ -168,6 +195,11 @@ pub struct KeyValidationResult {
     pub warning: Option<String>,
 }
 
+/// Every chat request actually put on the wire, retries included. Read by
+/// the `choya_live` example to report what a run really cost; the rounds a
+/// progress callback sees are not the requests a quota counts.
+pub static HTTP_ATTEMPTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// Provider-neutral error type for all LLM operations.
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
@@ -177,8 +209,11 @@ pub enum LlmError {
     Api { status: u16, message: String },
     #[error("Invalid API key")]
     InvalidKey,
-    #[error("Rate limited — try again later")]
-    RateLimited,
+    /// Carries the provider's own words: "temporarily rate-limited upstream"
+    /// (their pool) and "free-models-per-day" (the player's cap) need
+    /// different advice, and both used to arrive here as the same unit.
+    #[error("Rate limited: {0}")]
+    RateLimited(String),
     #[error("Parse error: {0}")]
     Parse(String),
     #[error("LLM unavailable: {0}")]
@@ -240,7 +275,7 @@ pub trait LlmClient: Send + Sync {
                 ),
                 warning: None,
             },
-            Err(LlmError::RateLimited) => KeyValidationResult {
+            Err(LlmError::RateLimited(_)) => KeyValidationResult {
                 valid: true,
                 message: format!("{} key is valid.", self.provider_name()),
                 warning: Some("Currently rate-limited. Try again shortly.".into()),
@@ -288,6 +323,15 @@ pub trait LlmClient: Send + Sync {
 
     /// Text generation with response caching (same prompt within TTL returns cached result).
     fn generate_cached(&self, prompt: &str) -> Result<String, LlmError>;
+
+    /// Whether requests to this model are scarce enough that a run should
+    /// spend as few as it can: a free OpenRouter model (20/min, shared
+    /// upstream pools), a Gemini key whose stated quota is five a minute and
+    /// twenty a day. Callers cap the lookup rounds on it
+    /// ([`profile::ModelProfile::max_turns`]).
+    fn thrifty(&self) -> bool {
+        false
+    }
 
     /// Multi-turn generation with tool/function calling.
     ///
@@ -414,6 +458,7 @@ pub(crate) fn parse_tool_arguments(raw: &str) -> Result<Value, Value> {
         .map_err(|e| serde_json::json!({ "error": format!("unparseable arguments: {e}") }))
 }
 
+#[cfg(test)]
 pub(crate) fn run_tool_or_parse_error(
     execute_tool: &mut dyn FnMut(&str, &Value) -> Value,
     name: &str,
@@ -568,24 +613,28 @@ mod tool_arg_tests {
         assert!(ok.usable());
 
         let no_tools = ModelInfo {
+            supported_parameters: Vec::new(),
             tools: false,
             ..ok.clone()
         };
         assert!(!no_tools.usable(), "we send tools on every request");
 
         let audio = ModelInfo {
+            supported_parameters: Vec::new(),
             text_output: false,
             ..ok.clone()
         };
         assert!(!audio.usable(), "a music model is not a chat model");
 
         let batch = ModelInfo {
+            supported_parameters: Vec::new(),
             id: "google/gemini-3.8-flash:batch".into(),
             ..ok.clone()
         };
         assert!(!batch.usable(), "answers within 24 hours, not now");
 
         let retiring = ModelInfo {
+            supported_parameters: Vec::new(),
             expires: Some("2026-09-10".into()),
             ..ok.clone()
         };
@@ -595,6 +644,7 @@ mod tool_arg_tests {
         // correctly, not a reason to hide the model — pruning these would
         // cost half the free catalogue.
         let small = ModelInfo {
+            supported_parameters: Vec::new(),
             max_completion_tokens: Some(8_192),
             supported_efforts: vec!["low".into()],
             ..ok

@@ -27,11 +27,29 @@ pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
     else {
         return;
     };
+    // The plate's own profession, read from its specializations, so a
+    // build made with no character selected still gets its cards. Taking
+    // it from the selected character left the profession empty and the
+    // cards absent for exactly the player who had nothing else to look at
+    // (a Ritualist plate, three published Ritualist builds, no card,
+    // 2026-09-07).
     let profession = state
         .main
-        .current_build
-        .as_ref()
-        .map(|b| b.profession.clone())
+        .game_db
+        .as_deref()
+        .and_then(|db| {
+            gw2_optimizer::validation::infer_profession_from_spec_names(
+                db,
+                suggestion.specializations.iter().map(|(n, _)| n.as_str()),
+            )
+        })
+        .or_else(|| {
+            state
+                .main
+                .current_build
+                .as_ref()
+                .map(|b| b.profession.clone())
+        })
         .unwrap_or_default();
     let role = state
         .main
@@ -71,9 +89,30 @@ pub(in crate::ui::main_view) fn refresh_provider_picks(state: &mut AddonState) {
         return;
     };
     let builds = gw2_optimizer::scraper::load_benchmarks(&state.addon_dir);
+    // The elite specialization the plate wears is what the player asked for.
+    // A published build without it is not "something like it", whatever
+    // else it shares (2026-09-07: a Ritualist plate, a Reaper card). A site
+    // with no build in that specialization shows nothing rather than the
+    // nearest wrong thing.
+    let elite: Option<String> = shape.specs.iter().find_map(|name| {
+        db.specializations
+            .values()
+            .find(|spec| spec.elite && spec.name.eq_ignore_ascii_case(name))
+            .map(|spec| spec.name.clone())
+    });
     state.main.provider_picks = gw2_optimizer::benchmark::closest_per_source(&builds, &shape, &db)
         .into_iter()
         .map(|(build, _)| build.clone())
+        .filter(|build| {
+            elite.as_ref().is_none_or(|elite| {
+                build
+                    .published
+                    .specs
+                    .iter()
+                    .filter_map(|line| db.specializations.get(&line.id))
+                    .any(|spec| spec.name.eq_ignore_ascii_case(elite))
+            })
+        })
         .collect();
 }
 

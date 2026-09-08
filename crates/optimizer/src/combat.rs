@@ -12,13 +12,21 @@ use crate::stats::{self, DerivedStats, StatBlock};
 use crate::text_util::{capitalize, stack_multiplier, strip_gw2_markup};
 
 /// Percentage-based damage modifiers from traits, runes, sigils, relics.
-/// Stacks multiplicatively: total = product(1 + modifier) for each source.
+///
+/// Wiki `Damage_calculation`: most sources are separate multiplicative
+/// factors, but some sigils, traits and utility effects share one additive
+/// bucket — `total = product(1 + m) * (1 + sum(a))`. Which source goes where
+/// is per-effect fact (`data/formulas/modifier_buckets.json`), not a rule.
 #[derive(Debug, Clone, Default)]
 pub struct DamageModifiers {
-    /// Strike damage increase percentages (e.g. 0.05 for +5%)
+    /// Strike damage increase percentages (e.g. 0.05 for +5%), multiplicative
     pub strike_pct: Vec<f64>,
-    /// Global condition damage increase percentages
+    /// Strike damage percentages that add with each other before multiplying
+    pub strike_add_pct: Vec<f64>,
+    /// Global condition damage increase percentages, multiplicative
     pub condition_pct: Vec<f64>,
+    /// Global condition damage percentages in the additive bucket
+    pub condition_add_pct: Vec<f64>,
     /// Per-condition type damage increase (e.g. "Burning" => [0.20])
     pub specific_condi: HashMap<String, Vec<f64>>,
     /// Additive crit damage bonus percentages (added to base 150% + ferocity)
@@ -44,16 +52,35 @@ pub struct DamageModifiers {
 }
 
 impl DamageModifiers {
-    /// Total multiplicative strike damage modifier.
+    /// Total strike damage modifier: multiplicative factors times the one
+    /// additive bucket.
     pub fn total_strike_mult(&self) -> f64 {
         self.strike_pct.iter().fold(1.0, |acc, &m| acc * (1.0 + m))
+            * (1.0 + self.strike_add_pct.iter().sum::<f64>())
     }
 
-    /// Total multiplicative condition damage modifier (global).
+    /// Total condition damage modifier (global), same shape as strike.
     pub fn total_condi_mult(&self) -> f64 {
         self.condition_pct
             .iter()
             .fold(1.0, |acc, &m| acc * (1.0 + m))
+            * (1.0 + self.condition_add_pct.iter().sum::<f64>())
+    }
+
+    /// Move the strike/condition percentages pushed since `mark` into the
+    /// additive bucket when `source` is one of the effects that add.
+    fn route_additive(&mut self, source: &str, mark: (usize, usize)) {
+        if !crate::data::modifier_buckets::is_additive_modifier(source) {
+            return;
+        }
+        let strike: Vec<f64> = self.strike_pct.drain(mark.0..).collect();
+        self.strike_add_pct.extend(strike);
+        let condition: Vec<f64> = self.condition_pct.drain(mark.1..).collect();
+        self.condition_add_pct.extend(condition);
+    }
+
+    fn mark(&self) -> (usize, usize) {
+        (self.strike_pct.len(), self.condition_pct.len())
     }
 
     /// Total multiplicative condition damage modifier for a specific condition.
@@ -634,7 +661,13 @@ pub fn extract_damage_modifiers(
     }
     fn absorb_mode_pairs(dst: &mut DamageModifiers, src: DamageModifiers, competitive: bool) {
         absorb_pair(&mut dst.strike_pct, src.strike_pct, competitive);
+        absorb_pair(&mut dst.strike_add_pct, src.strike_add_pct, competitive);
         absorb_pair(&mut dst.condition_pct, src.condition_pct, competitive);
+        absorb_pair(
+            &mut dst.condition_add_pct,
+            src.condition_add_pct,
+            competitive,
+        );
         absorb_pair(&mut dst.crit_damage_pct, src.crit_damage_pct, competitive);
         absorb_pair(
             &mut dst.condi_duration_pct,
@@ -713,6 +746,7 @@ pub fn extract_damage_modifiers(
             }
         }
 
+        trait_mods.route_additive(&t.name, (0, 0));
         // Two same-category values are the API's PvE/competitive split. Collapse
         // them within one trait so they can never stack simultaneously.
         absorb_mode_pairs(&mut mods, trait_mods, competitive);
@@ -734,14 +768,18 @@ pub fn extract_damage_modifiers(
     // Weapon-swap effects from the other set belong in the timed evaluator.
     for &id in sigil_ids.iter().take(2) {
         if let Some(sigil) = items_cache.get(&id) {
+            let mark = mods.mark();
             parse_sigil_modifier(&mut mods, sigil, ctx);
+            mods.route_additive(&sigil.name, mark);
         }
     }
 
     // 4. Relics — parse known relic effects
     if let Some(id) = relic_id {
         if let Some(relic) = items_cache.get(&id) {
+            let mark = mods.mark();
             parse_relic_modifier(&mut mods, relic);
+            mods.route_additive(&relic.name, mark);
         }
     }
 
@@ -1613,6 +1651,31 @@ mod tests {
             "Fury+Might should boost power"
         );
         assert!(perf.damage_reduction_pct > 0.0, "Protection should give DR");
+    }
+
+    #[test]
+    fn additive_bucket_matches_the_wiki_worked_example() {
+        // Wiki Damage_calculation: (1 + 0.05 + 0.03 + 0.10) * 1.20 * 1.05.
+        let mut mods = DamageModifiers::default();
+        mods.strike_add_pct.extend([0.05, 0.03, 0.10]);
+        mods.strike_pct.extend([0.20, 0.05]);
+        assert!((mods.total_strike_mult() - 1.4868).abs() < 1e-9);
+    }
+
+    #[test]
+    fn route_additive_moves_only_what_the_source_pushed() {
+        let mut mods = DamageModifiers::default();
+        mods.strike_pct.push(0.10); // an earlier, multiplicative source
+        let mark = mods.mark();
+        mods.strike_pct.push(0.05); // Sigil of Force's own entry
+        mods.route_additive("Superior Sigil of Force", mark);
+        assert_eq!(mods.strike_pct, vec![0.10]);
+        assert_eq!(mods.strike_add_pct, vec![0.05]);
+        // An unlisted source stays where it was pushed.
+        let mark = mods.mark();
+        mods.strike_pct.push(0.20);
+        mods.route_additive("Big Game Hunter", mark);
+        assert_eq!(mods.strike_pct, vec![0.10, 0.20]);
     }
 
     #[test]
@@ -3066,8 +3129,11 @@ mod tests {
         );
         let mut strike = wvw.strike_pct.clone();
         strike.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(strike, vec![0.05, 0.07, 0.25]);
-        let expected_mult = 1.05 * 1.07 * 1.25;
+        // Furious Strength is in the additive bucket (modifier_buckets.json);
+        // Wolfsong and Remorseless multiply.
+        assert_eq!(strike, vec![0.05, 0.25]);
+        assert_eq!(wvw.strike_add_pct, vec![0.07]);
+        let expected_mult = 1.05 * 1.25 * 1.07;
         assert!((wvw.total_strike_mult() - expected_mult).abs() < 1e-9);
 
         let pve = extract_damage_modifiers(
@@ -3081,6 +3147,7 @@ mod tests {
         );
         let mut pve_strike = pve.strike_pct.clone();
         pve_strike.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(pve_strike, vec![0.10, 0.15, 0.25]);
+        assert_eq!(pve_strike, vec![0.10, 0.25]);
+        assert_eq!(pve.strike_add_pct, vec![0.15]);
     }
 }

@@ -305,6 +305,14 @@ pub fn simulate_with(
 }
 
 /// Internal simulation state.
+/// One strike of a cast, waiting for its moment.
+#[derive(Debug, Clone)]
+struct ScheduledStrike {
+    at_ms: u32,
+    skill_id: u32,
+    dmg_multiplier: f64,
+}
+
 struct SimState {
     skills: Vec<RotationSkill>,
     skill_states: Vec<SkillState>,
@@ -312,6 +320,8 @@ struct SimState {
     current_time_ms: u32,
     /// Time when the character is free to use the next skill.
     next_action_ms: u32,
+    /// Strikes queued by `use_skill`, landed by `land_scheduled_strikes`.
+    scheduled_hits: Vec<ScheduledStrike>,
 
     // Weapon swap
     active_weapon_set: u8,
@@ -375,6 +385,7 @@ impl SimState {
             duration_ms,
             current_time_ms: 0,
             next_action_ms: 0,
+            scheduled_hits: Vec::new(),
             active_weapon_set: 1,
             weapon_swap_cooldown_ms: 0,
             has_weapon_sets,
@@ -412,6 +423,7 @@ impl SimState {
             // Tick conditions and buffs
             self.tick_conditions(condition_damage);
             self.tick_buffs();
+            self.land_scheduled_strikes(power, weapon_strength);
             self.might_stack_ms += self.live_might_stacks() * TICK_MS as f64;
             self.control_ms += self.soft_control_weight() * TICK_MS as f64;
 
@@ -439,6 +451,9 @@ impl SimState {
 
             self.current_time_ms += TICK_MS;
         }
+        // A cast that finishes as the window closes still delivered its hits.
+        self.current_time_ms = self.duration_ms;
+        self.land_scheduled_strikes(power, weapon_strength);
     }
 
     /// Pick the skill with the highest DPS-per-cast-time (DPCT) that is available.
@@ -623,12 +638,48 @@ impl SimState {
     }
 
     /// Use a skill: apply effects, set cooldown, advance next_action time.
+    /// One strike in flight: lands at `at_ms` with its share of the skill's
+    /// damage, priced with the buffs live at that moment.
+    fn land_scheduled_strikes(&mut self, power: f64, weapon_strength: f64) {
+        let mut i = 0;
+        while i < self.scheduled_hits.len() {
+            if self.scheduled_hits[i].at_ms > self.current_time_ms {
+                i += 1;
+                continue;
+            }
+            let hit = self.scheduled_hits.remove(i);
+            let effective_power = power + self.live_might_stacks() * 30.0;
+            let fury_bonus = if self.buffs.iter().any(|b| b.kind == BuffKind::Fury) {
+                self.params.fury_crit_chance_bonus
+            } else {
+                0.0
+            };
+            let mut damage =
+                weapon_strength * effective_power / reference_armor() * hit.dmg_multiplier;
+            damage *= strike_crit_factor_with_bonus(
+                self.params.precision,
+                self.params.ferocity,
+                self.params.crit_chance_bonus + fury_bonus,
+            ) * self.params.strike_mult;
+            if self.enemy.protection {
+                damage *= crate::data::boon_condition_formulas::boons().protection_multiplier();
+            }
+            self.total_strike_damage += damage;
+            *self.skill_damage.entry(hit.skill_id).or_insert(0.0) += damage;
+            self.apply_dummy_damage(damage);
+        }
+    }
+
     fn use_skill(&mut self, idx: usize, power: f64, weapon_strength: f64) {
         let skill = &self.skills[idx];
         let skill_id = skill.skill_id;
+        let skill_name = skill.name.clone();
         let cast_time = skill.cast_time_ms;
         let cooldown = skill.cooldown_ms;
         let effects = skill.effects.clone();
+        // Sole caller of the strike pricing until hits landed on a schedule;
+        // keep the parameters flowing to the landing site.
+        let _ = (power, weapon_strength);
 
         // Record the cast
         *self.skill_casts.entry(skill_id).or_insert(0) += 1;
@@ -640,27 +691,19 @@ impl SimState {
                     hit_count,
                     dmg_multiplier,
                 } => {
-                    let effective_power = power + self.live_might_stacks() * 30.0;
-                    let fury_bonus = if self.buffs.iter().any(|b| b.kind == BuffKind::Fury) {
-                        self.params.fury_crit_chance_bonus
-                    } else {
-                        0.0
-                    };
-                    let mut damage = weapon_strength * effective_power / reference_armor()
-                        * dmg_multiplier
-                        * (*hit_count as f64);
-                    damage *= strike_crit_factor_with_bonus(
-                        self.params.precision,
-                        self.params.ferocity,
-                        self.params.crit_chance_bonus + fury_bonus,
-                    ) * self.params.strike_mult;
-                    if self.enemy.protection {
-                        damage *=
-                            crate::data::boon_condition_formulas::boons().protection_multiplier();
+                    // Hits land across the activation (measured spacing from
+                    // data/formulas/hit_timing.json, even spread otherwise),
+                    // each priced at the Might and Fury of its own moment.
+                    let per_hit = dmg_multiplier / (*hit_count).max(1) as f64;
+                    for offset in
+                        crate::data::hit_timing::hit_schedule(&skill_name, cast_time, *hit_count)
+                    {
+                        self.scheduled_hits.push(ScheduledStrike {
+                            at_ms: self.current_time_ms.saturating_add(offset),
+                            skill_id,
+                            dmg_multiplier: per_hit,
+                        });
                     }
-                    self.total_strike_damage += damage;
-                    *self.skill_damage.entry(skill_id).or_insert(0.0) += damage;
-                    self.apply_dummy_damage(damage);
                 }
                 SkillEffect::ApplyCondition {
                     condition,
@@ -2131,12 +2174,16 @@ mod tests {
             stability: true,
             hp: None,
         };
+        // Four seconds: hits land at cast end now, so a two-second window
+        // cannot fit the strip's 250 ms plus the autos it buys.
         let with_strip =
-            simulate_against(&[auto_attack(), strip], 2000, 2000.0, 0.0, 1100.0, dummy);
-        let no_strip = simulate_against(&[auto_attack()], 2000, 2000.0, 0.0, 1100.0, dummy);
+            simulate_against(&[auto_attack(), strip], 4000, 2000.0, 0.0, 1100.0, dummy);
+        let no_strip = simulate_against(&[auto_attack()], 4000, 2000.0, 0.0, 1100.0, dummy);
         assert!(
             with_strip.strike_dps > no_strip.strike_dps,
-            "strip should raise delivered DPS vs a Protection dummy"
+            "strip should raise delivered DPS vs a Protection dummy: with {} vs without {}",
+            with_strip.strike_dps,
+            no_strip.strike_dps
         );
     }
 

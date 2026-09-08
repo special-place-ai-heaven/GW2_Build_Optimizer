@@ -32,7 +32,13 @@ pub(crate) const CONNECT_TIMEOUT_SECS: u64 = 15;
 /// This is a reqwest *total* deadline — connect through last body byte — not
 /// an idle timeout. Keep-alives hold the server side open; they do not extend
 /// the client deadline (GLM F14). 420 s is the budget for one completion.
-pub(crate) const CHAT_REQUEST_TIMEOUT: Duration = Duration::from_secs(420);
+// 120 s, down from 420: a lookup round on google/gemini-3.8-flash hung for
+// over five minutes in-game (2026-09-07, round 8 after seven rounds of
+// context) and the player's screen read "thinking" until the UI backstop
+// gave up with nothing. A lookup that has not answered in two minutes is
+// not answering; the loop then closes on what it has and the plate is
+// served. The closing request has its own deadline.
+pub(crate) const CHAT_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// Per-request wall clock for the metadata endpoints — key validation and the
 /// model catalog. These are small, fast calls made from the Settings UI; they
 /// used to ride the 900 s client default, so one hung endpoint stalled the
@@ -54,23 +60,95 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
 /// for that one request.
 pub(crate) const CLOSING_TURN: &str = "Stop calling tools. You have every tool \
      result you are going to get, and no tools are available on this request. \
-     Answer now, in full, using only what you have already gathered.";
+     Serve the finished plate now, using only what you have already gathered: \
+     ONLY the JSON build object your instructions describe - specializations \
+     as objects with name and traits, weapons, skills, rune, sigils, relic, \
+     stat_prefix, explanation. No prose outside the JSON. A build described \
+     in sentences is not an answer; the JSON is.";
 
-/// `messages` plus the turn that closes a tool loop. Send it with no tools.
-///
-/// Both ways out of a tool loop need it: rounds exhausted, and a model that
-/// cannot emit a usable function call at all. Withholding the declarations is
-/// only half of either fix — see [`CLOSING_TURN`].
-pub(crate) fn closing_request(messages: &[Message]) -> Vec<Message> {
-    let mut closing = messages.to_vec();
-    closing.push(Message {
+/// The turn that answers a model which narrated its plan instead of acting
+/// on it. In-game 2026-09-07 (minimax-m3:free): "I'll start by checking what
+/// specs Necromancer has and pulling the Ritualist trait list" — no tool
+/// call, no plate, and a text-only turn is otherwise the final answer.
+pub(crate) const CONTINUE_TURN: &str = "Do it now. Call the tools you need, or \
+     if you already have what you need, serve the finished plate as the JSON \
+     build object. Do not describe what you are about to do.";
+
+/// Whether a text-only turn is the model announcing what it will do rather
+/// than an answer: short, first person, forward-looking, no JSON. A real
+/// prose answer to a question ("what does Dread do?") is none of those and
+/// must never be nudged into a loop.
+pub(crate) fn is_narration(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.len() > 600 || trimmed.contains('{') {
+        return false;
+    }
+    let lower = trimmed.to_lowercase();
+    [
+        "i'll ",
+        "i will ",
+        "let me ",
+        "start by",
+        "i'm going to",
+        "i am going to",
+        "going to check",
+        "going to pull",
+        "first, i",
+        "next, i",
+        "i need to check",
+        "i need to look",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+/// Fold one assistant message into the conversation and read it as a turn.
+/// The message is pushed whole, reasoning details and all: OpenRouter's
+/// "Preserving Reasoning" contract wants the blocks back untouched.
+pub(crate) fn absorb_turn(conv: &mut Vec<Message>, message: Message) -> super::tool_loop::Turn {
+    let calls = message
+        .tool_calls
+        .iter()
+        .flatten()
+        .map(|tc| super::tool_loop::ToolCall {
+            id: tc.id.clone(),
+            name: tc.function.name.clone(),
+            // A JSON string on this wire; unparseable ones travel as an
+            // error object the loop hands straight back to the model.
+            args: match super::parse_tool_arguments(&tc.function.arguments) {
+                Ok(v) => v,
+                Err(e) => e,
+            },
+        })
+        .collect();
+    let text = message.content.clone();
+    conv.push(message);
+    super::tool_loop::Turn { text, calls }
+}
+
+pub(crate) fn push_tool_results(
+    conv: &mut Vec<Message>,
+    results: &[(super::tool_loop::ToolCall, Value)],
+) {
+    for (call, value) in results {
+        conv.push(Message {
+            role: "tool".to_string(),
+            content: Some(serde_json::to_string(value).unwrap_or_default()),
+            tool_calls: None,
+            tool_call_id: Some(call.id.clone()),
+            reasoning_details: None,
+        });
+    }
+}
+
+pub(crate) fn push_user(conv: &mut Vec<Message>, text: &str) {
+    conv.push(Message {
         role: "user".to_string(),
-        content: Some(CLOSING_TURN.to_string()),
+        content: Some(text.to_string()),
         tool_calls: None,
         tool_call_id: None,
         reasoning_details: None,
     });
-    closing
 }
 
 /// Whether a failure means "this model could not produce a usable function
@@ -126,6 +204,23 @@ pub(crate) fn is_deadline(err: &LlmError) -> bool {
 /// is not to make slow models fast; it is that a run must end in an answer
 /// rather than in a stopwatch.
 pub(crate) const TOOL_PHASE_BUDGET: Duration = Duration::from_secs(150);
+
+/// Completion cap for the closing request — the one that writes the plate.
+///
+/// It went out with the lookup rounds' [`MAX_COMPLETION_TOKENS`] and
+/// [`REASONING_EFFORT`], which invites a reasoning model to deliberate over
+/// eight rounds of tool results before writing a few thousand tokens of
+/// JSON. Measured 2026-09-07 on `minimax/minimax-m3:free`: tool phase done in
+/// 65 s, closing request still silent at 77 s when the player gave up, and
+/// the run before it ran the whole 420 s deadline out and served nothing.
+/// Writing a plate is not a 32k job; it is not a thinking job either.
+pub(crate) const CLOSING_MAX_TOKENS: u32 = 8_192;
+
+/// Deadline for the closing request. A plate at 8k tokens streams in well
+/// under this on any model that can stream at all; a model that cannot make
+/// it is not going to at 420 s either, and the caller has a fallback answer
+/// to serve instead of a stopwatch.
+pub(crate) const CLOSING_REQUEST_TIMEOUT: Duration = Duration::from_secs(150);
 
 /// Completion ceiling per chat completion, hidden thinking included, so a
 /// reasoning model cannot spend the budget deliberating and have nothing left
@@ -236,7 +331,7 @@ pub(crate) fn is_retryable_status(status: u16) -> bool {
 /// whether it arrived as an HTTP status or inside a 200 body.
 pub(crate) fn as_transport_error(status: u16, message: String) -> LlmError {
     if status == 429 {
-        LlmError::RateLimited
+        LlmError::RateLimited(message)
     } else {
         LlmError::Api { status, message }
     }
@@ -260,6 +355,75 @@ pub(crate) struct ChatRequest {
     pub(crate) reasoning: Option<ReasoningConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) provider: Option<ProviderPrefs>,
+    /// OpenAI/OpenRouter structured output: `{"type":"json_schema", ...}`.
+    /// The API's own way to get the plate as JSON, instead of asking nicely
+    /// in the prompt and repairing prose afterwards. Sent only where the
+    /// catalog lists `response_format` or `structured_outputs`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) response_format: Option<Value>,
+    /// `none` / `auto` / `required`. `required` on the first lookup round
+    /// stops a model narrating its plan instead of calling anything.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tool_choice: Option<String>,
+}
+
+/// The plate, as the JSON Schema the API enforces on the closing request.
+/// Mirrors the shape in `prompts.rs`; `strict` is off so a model that adds a
+/// field is not refused, and every field the parser can do without is
+/// optional.
+pub(crate) fn plate_response_format() -> Value {
+    let name_list = |desc: &str| serde_json::json!({ "type": "array", "items": { "type": "string" }, "description": desc });
+    serde_json::json!({
+        "type": "json_schema",
+        "json_schema": {
+            "name": "build_plate",
+            "strict": false,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "specializations": {
+                        "type": "array",
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string" },
+                                "elite": { "type": "boolean" },
+                                "traits": { "type": "array", "items": { "type": "string" }, "minItems": 3, "maxItems": 3 }
+                            },
+                            "required": ["name", "traits"]
+                        }
+                    },
+                    "weapons": {
+                        "type": "object",
+                        "properties": {
+                            "set1": { "type": "object", "properties": { "main": { "type": ["string", "null"] }, "off": { "type": ["string", "null"] } } },
+                            "set2": { "type": "object", "properties": { "main": { "type": ["string", "null"] }, "off": { "type": ["string", "null"] } } }
+                        }
+                    },
+                    "skills": {
+                        "type": "object",
+                        "properties": {
+                            "heal": { "type": "string" },
+                            "utilities": name_list("three utility skills"),
+                            "elite": { "type": "string" }
+                        }
+                    },
+                    "rune": { "type": "string" },
+                    "sigils": { "type": "object" },
+                    "relic": { "type": "string" },
+                    "pets": { "type": "object" },
+                    "legends": name_list("revenant legends"),
+                    "stat_prefix": { "type": "string" },
+                    "gear_slots": { "type": "object" },
+                    "changes_made": name_list("what changed"),
+                    "explanation": { "type": "string" }
+                },
+                "required": ["specializations", "weapons", "skills", "stat_prefix", "explanation"]
+            }
+        }
+    })
 }
 
 /// OpenRouter `reasoning` parameter — caps hidden thinking so the completion
@@ -276,6 +440,11 @@ pub(crate) struct ProviderPrefs {
     /// Only route to endpoints that natively support every parameter in the
     /// request — never to one that fakes tools through a prompt template.
     pub(crate) require_parameters: bool,
+    /// OpenRouter `provider.sort`: `"throughput"` sends a free model to the
+    /// host that streams it fastest instead of the default price ordering,
+    /// which for a free model is a tie broken by nothing useful.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) sort: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -353,6 +522,12 @@ pub(crate) struct ProviderCore<'a> {
     pub(crate) supports_provider_prefs: bool,
     /// OpenRouter `provider.require_parameters` when tools are present.
     pub(crate) require_tool_endpoints: bool,
+    /// OpenRouter `provider.sort`; `None` keeps the default ordering.
+    pub(crate) provider_sort: Option<&'static str>,
+    /// `response_format` for this request; `None` omits it.
+    pub(crate) response_format: Option<Value>,
+    /// `tool_choice` for this request; `None` omits it.
+    pub(crate) tool_choice: Option<&'static str>,
     /// Per-request wall-clock cap. This is a reqwest *total* deadline, not an
     /// idle timeout: provider keep-alives hold the connection open but do not
     /// extend it. See [`CHAT_REQUEST_TIMEOUT`].
@@ -410,7 +585,10 @@ pub(crate) fn send_chat(
         // URL made the OpenAI provider fail outright (Claude F8).
         provider: core.supports_provider_prefs.then_some(ProviderPrefs {
             require_parameters: core.require_tool_endpoints,
+            sort: core.provider_sort.map(str::to_string),
         }),
+        response_format: core.response_format.clone(),
+        tool_choice: core.tool_choice.map(str::to_string),
     };
 
     let url = format!("{}/chat/completions", core.base_url);
@@ -438,6 +616,7 @@ pub(crate) fn send_chat(
             req = req.header(*name, value);
         }
 
+        super::HTTP_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let resp = match req.json(&request).send() {
             Ok(r) => r,
             // A timeout is not a transport hiccup and must not be retried.
@@ -760,6 +939,9 @@ mod tests {
         is_cancelled: &'a dyn Fn() -> bool,
     ) -> ProviderCore<'a> {
         ProviderCore {
+            tool_choice: None,
+            response_format: None,
+            provider_sort: None,
             http,
             rate,
             api_key: "test-key",
@@ -812,7 +994,7 @@ mod tests {
         let error = send_chat(core, &[user("hi")], None).expect_err("all attempts rate limited");
 
         assert!(
-            matches!(error, LlmError::RateLimited),
+            matches!(error, LlmError::RateLimited(_)),
             "an in-band 429 must surface as RateLimited, got: {error}"
         );
         assert_eq!(server.served(), 3);
@@ -914,6 +1096,8 @@ mod tests {
     #[test]
     fn openai_request_omits_the_openrouter_provider_block() {
         let base = ChatRequest {
+            tool_choice: None,
+            response_format: None,
             model: "gpt-4o".into(),
             messages: vec![user("hi")],
             tools: None,
@@ -930,7 +1114,10 @@ mod tests {
         assert!(body.get("reasoning").is_none());
 
         let routed = ChatRequest {
+            tool_choice: None,
+            response_format: None,
             provider: Some(ProviderPrefs {
+                sort: None,
                 require_parameters: true,
             }),
             ..base
@@ -1010,6 +1197,9 @@ mod tests {
         let messages = vec![user(&prompt)];
         let no_cancel = || false;
         let core = ProviderCore {
+            tool_choice: None,
+            response_format: None,
+            provider_sort: None,
             http: &http,
             rate: &rate,
             api_key: &key,
@@ -1037,5 +1227,25 @@ mod tests {
                 println!("ERR after {:.1}s: {e:?}", t0.elapsed().as_secs_f64());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod narration_tests {
+    use super::is_narration;
+
+    #[test]
+    fn a_plan_is_narration_and_an_answer_is_not() {
+        assert!(is_narration(
+            "I'll start by checking what specs Necromancer has and pulling the Ritualist trait list - that's the centerpiece."
+        ));
+        assert!(is_narration("Let me look up the Reaper traits first."));
+        // A real answer to a question: not chased.
+        assert!(!is_narration(
+            "Dread grants fury when you inflict fear and increases damage against feared foes."
+        ));
+        // A plate is never narration, however it opens.
+        assert!(!is_narration("I'll serve it: {\"specializations\": []}"));
+        assert!(!is_narration(""));
     }
 }

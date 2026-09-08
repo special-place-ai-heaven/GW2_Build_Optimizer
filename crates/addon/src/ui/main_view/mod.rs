@@ -93,7 +93,14 @@ pub fn render_main(ui: &Ui, state: &mut AddonState) {
     }
 
     // Chat timeout. Wall clock, not FPS. Include the live model so a stall isn't a mystery.
-    const KITCHEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+    //
+    // A backstop for a worker that died, not a budget: the worker owns the
+    // deadlines (150 s of tool rounds, a 150 s closing request, two short
+    // repairs) and ends every run in a build, the optimizer's own if need be.
+    // At 120 s this fired while the closing request was still legitimately
+    // running (openrouter/free, 2026-09-07), discarded the worker's result
+    // and showed "timed out" with no build at all.
+    const KITCHEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(400);
     if state.main.chat.waiting {
         let started = state
             .main

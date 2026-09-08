@@ -138,8 +138,20 @@ fn on_load() {
             return;
         };
 
+        let models_dev_dir = addon_dir.clone();
         state::init(addon_dir);
         let _ = CHROME_AT.set(Instant::now() + CHROME_SETTLE);
+
+        // models.dev is updated most days; refresh our copy of it at launch
+        // in the background so the model picker and the handshake read a
+        // current catalog. A failed fetch keeps yesterday's file.
+        state::with_state(|s| {
+            s.spawn_worker("models-dev-refresh", move |token| {
+                if !token.is_cancelled() {
+                    gw2_optimizer::llm::models_dev::load(&models_dev_dir);
+                }
+            });
+        });
 
         register_keybind_with_string(
             "GW2_BUILD_OPT_TOGGLE",

@@ -1,0 +1,26 @@
+{
+  "goal": "Reduce Choya latency while preserving complete validated plates",
+  "archetype": "optimize-metric",
+  "predicate": "node autoresearch/loop-260907-2209/verify.cjs",
+  "expected_output": "CONVERGED and exit 0",
+  "terminal_choice": "stop-at-verified",
+  "cycle": 3,
+  "max_cycles": 50,
+  "max_experiments": 25,
+  "units_remaining": [1, "unknown", 1],
+  "pipeline_log": [{"hop": "plan", "outcome": "progressed", "note": "Baseline unit guard passed; tightened live harness before timing acceptance"}, {"hop": "loop", "outcome": "failed", "commit": "3ac6d64", "revert": "34ba85e", "note": "Candidate 1: 1/6 valid versus baseline 3/6; diagnostic found missing authoritative gear-prefix names"}],
+  "current_incumbent": "34ba85e",
+  "provisional_candidate": "efd83fe",
+  "final_hops": [
+    {"hop": "loop", "outcome": "blocked", "commit": "2d11cb6", "note": "Prefix-only comparison interrupted after four completed results; no complete metric"},
+    {"hop": "loop", "outcome": "progressed", "commit": "efd83fe", "note": "Combined candidate 5/6 valid, versus baseline 3/6; local guard passed"},
+    {"hop": "verify", "outcome": "blocked", "note": "OpenRouter holdouts 2/2 pass; native Gemini 0/2. Immutable baseline fails pinned all-pass prerequisite. Candidate retained provisionally, not accepted."}
+  ],
+  "status": "BLOCKED",
+  "stop_reason": "Pinned predicate requires an all-pass historical baseline; recorded baseline failures cannot be repaired by candidate changes. Prospective protocol needed; candidate/native reliability also incomplete.",
+  "pending_verify": false,
+  "errors_remaining": 1,
+  "regression_verdict": "UNSTABLE",
+  "untested_gaps": 0,
+  "predicate_met": false
+}

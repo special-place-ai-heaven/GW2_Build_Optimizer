@@ -699,7 +699,13 @@ fn enrich_with_llm(
             &mut |name: &str, args: &serde_json::Value| {
                 gw2_optimizer::gemini_tools::execute_tool(name, args, &ctx)
             },
-            8,
+            // Same quota policy as the chat: a free or five-a-minute model
+            // gets two lookups, then the plate.
+            if client.thrifty() {
+                gw2_optimizer::llm::profile::THRIFTY_TURNS
+            } else {
+                8
+            },
             &mut |turn: usize, max_turns: usize, tool_names: &[String]| {
                 let tools_str = humanize_tool_names(tool_names);
                 crate::state::with_state(|s| {

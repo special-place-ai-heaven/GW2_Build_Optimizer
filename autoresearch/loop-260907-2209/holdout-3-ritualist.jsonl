@@ -1,0 +1,6 @@
+{"at":"2026-09-08T15:26:09.491Z","event":"start","label":"holdout-3-ritualist"}
+{"at":"2026-09-08T15:26:10.780Z","event":"prompt","chars":68338,"tools":20}
+{"at":"2026-09-08T15:29:25.529Z","event":"round","turn":1,"max":2,"seconds":140.7,"tools":"search_upgrades, search_upgrades, search_upgrades"}
+{"at":"2026-09-08T15:29:25.662Z","event":"round","turn":2,"max":2,"seconds":0.1,"tools":"writing the build"}
+{"at":"2026-09-08T15:31:25.679Z","event":"result","status":"FAIL","model":"gemini-3.8-flash","rounds":4,"wire":7,"seconds":314.9,"failure_kind":"transport","specs":[]}
+{"at":"2026-09-08T15:31:25.685Z","event":"exit","code":1}

@@ -1,0 +1,17 @@
+{
+  "subcommand": "loop",
+  "outcome": "blocked",
+  "status": "BLOCKED",
+  "predicate_met": false,
+  "candidate": "efd83fe",
+  "disposition": "provisional local candidate; not an accepted latency improvement",
+  "experiments": 3,
+  "baseline_valid": "3/6",
+  "candidate_valid": "5/6",
+  "holdouts": {"openrouter": "2/2", "native_gemini": "0/2"},
+  "checks": {"optimizer_tests": "1112 passed, 0 failed, 4 ignored", "example_build": "pass", "clippy_lib_examples": "pass", "format": "pass"},
+  "blockers": ["Pinned predicate requires all baseline attempts to pass; historical failures preserved", "Sante candidate omitted slots in one attempt", "Native Gemini holdouts failed"],
+  "untested": ["in-game/referee acceptance", "OpenAI and Anthropic live routes", "reasoning-effort changes", "incremental streaming"],
+  "next": "LAT-04: prospective failure-aware comparison and reliability investigation",
+  "report": "docs/choya-latency-review.md"
+}

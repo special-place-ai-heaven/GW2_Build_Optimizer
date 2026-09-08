@@ -1,0 +1,6 @@
+# metric_direction: lower_is_better
+iteration	timestamp	commit	metric	delta	guard	guard-metric	status	description
+0	2026-09-08T00:33:14+02:00	09740ce	49.75	0	pass	1112	baseline	Median all completed attempts in seconds (failures included); 3/6 valid; per-model acceptance in measurements.json
+1	2026-09-08T00:39:19+02:00	3ac6d64	47	-2.75	pass	1112	discard	Median all completed attempts; only 1/6 valid; reverted by 34ba85e; apparent speed is not a valid-build improvement
+2	2026-09-08	2d11cb6	NA	NA	pass	1112	interrupted	Prefix-only experiment; four completed attempts of six, 2 valid; incomplete comparison
+3	2026-09-08	efd83fe	49.65	-0.10	pass	1112	provisional	All-attempt median, not valid-build latency; 5/6 valid; OpenRouter holdouts 2/2; native 0/2; predicate PENDING
