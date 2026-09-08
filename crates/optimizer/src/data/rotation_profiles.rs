@@ -42,7 +42,6 @@ pub fn try_load_rotation_profiles() -> Result<(), Vec<DataLoadError>> {
     )
 }
 
-
 #[derive(Debug, Error)]
 pub enum RotationProfileError {
     #[error("JSON parse error: {0}")]
@@ -50,7 +49,6 @@ pub enum RotationProfileError {
     #[error("validation error: {0}")]
     ValidationError(String),
 }
-
 
 /// Typed application metrics for conditions, matching P3-04 stacking modes.
 /// Tagged enum: the `mode` field in JSON determines which variant is used.
@@ -181,7 +179,6 @@ impl RotationProfile {
     }
 }
 
-
 /// All loaded rotation profiles, organized by mode.
 #[derive(Debug)]
 pub struct RotationProfileData {
@@ -241,7 +238,6 @@ impl RotationProfileData {
         self.pve.len() + self.pvp.len() + self.wvw.len()
     }
 }
-
 
 fn load_all_rotation_profiles() -> Result<RotationProfileData, RotationProfileError> {
     let pve: Vec<RotationProfile> = serde_json::from_str(PVE_PROFILES_JSON)?;
@@ -464,7 +460,6 @@ impl BuffProfileFromScenario {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

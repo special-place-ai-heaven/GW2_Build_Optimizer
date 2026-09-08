@@ -39,27 +39,22 @@ pub struct Item {
 /// - Common: infusion_slots, attribute_adjustment, infix_upgrade, stat_choices
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemDetails {
-    // Subtype discriminator (varies by item type)
     #[serde(rename = "type")]
     pub detail_type: Option<String>,
 
-    // Armor fields
     pub weight_class: Option<String>,
     pub defense: Option<u32>,
 
-    // Weapon fields
     pub damage_type: Option<String>,
     pub min_power: Option<u32>,
     pub max_power: Option<u32>,
 
-    // Upgrade component fields
     pub suffix: Option<String>,
     #[serde(default)]
     pub bonuses: Vec<String>,
     #[serde(default)]
     pub infusion_upgrade_flags: Vec<String>,
 
-    // Common equipment fields
     #[serde(default)]
     pub infusion_slots: Vec<InfusionSlot>,
     pub attribute_adjustment: Option<f64>,

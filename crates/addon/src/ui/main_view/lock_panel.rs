@@ -23,7 +23,6 @@ use crate::ui::color_u32;
 
 // Geometry helpers
 
-/// Draw a hexagon at center position with given radius.
 fn draw_hexagon(
     draw_list: &nexus::imgui::DrawListMut,
     center: [f32; 2],
@@ -43,7 +42,6 @@ fn draw_hexagon(
         ];
     }
     if filled {
-        // Draw as triangles from center
         for i in 0..6 {
             let next = (i + 1) % 6;
             draw_list
@@ -62,14 +60,12 @@ fn draw_hexagon(
     }
 }
 
-/// Check if mouse position is within a circle of given radius around center.
 fn is_in_circle(mouse: [f32; 2], center: [f32; 2], radius: f32) -> bool {
     let dx = mouse[0] - center[0];
     let dy = mouse[1] - center[1];
     dx * dx + dy * dy <= radius * radius
 }
 
-/// Check if mouse position is within a hexagon of given radius around center.
 fn is_in_hexagon(mouse: [f32; 2], center: [f32; 2], radius: f32) -> bool {
     // Approximate with circle (close enough for click detection)
     is_in_circle(mouse, center, radius)
@@ -164,7 +160,6 @@ fn tick_hover(state: &mut Option<(LockElementId, f32)>, hovered: Option<LockElem
     }
 }
 
-/// Return the hover progress (0.0..=1.0) for `id` if it's the currently animating element.
 fn hover_t_for(state: &Option<(LockElementId, f32)>, id: LockElementId) -> f32 {
     match state {
         Some((stored_id, t)) if *stored_id == id => *t,
@@ -394,7 +389,6 @@ pub fn render_lock_panel(
                 );
             }
 
-            // Lock ring around hexagon when locked
             if spec_locked {
                 draw_list
                     .add_circle(
@@ -582,7 +576,6 @@ pub fn render_lock_panel(
                                         .build();
                                 }
 
-                                // Lock ring
                                 if is_locked {
                                     draw_list
                                         .add_circle(
@@ -638,12 +631,10 @@ pub fn render_lock_panel(
 
                                 if mouse_clicked {
                                     if is_locked {
-                                        // Unlock this trait
                                         if let Some(cols) = locks.trait_locks.get_mut(&sid) {
                                             cols[col] = None;
                                         }
                                     } else {
-                                        // Lock this trait (and select it)
                                         let entry =
                                             locks.trait_locks.entry(sid).or_insert([None; 3]);
                                         entry[col] = Some(trait_id);
@@ -703,7 +694,6 @@ pub fn render_lock_panel(
     ui.dummy([0.0, 4.0]);
     let btn_width = (avail_width - 6.0) / 2.0;
     if crate::ui::theme::gold_button_sized(ui, t("btn.lock_all"), [btn_width, 0.0]) {
-        // Lock all current build specs and traits
         lock_current_specs(locks, db, current_specs);
         let gear_names = resolved_gear_names(current_build);
         for slot in GearSlot::ALL {
@@ -723,7 +713,6 @@ pub fn render_lock_panel(
         modified = true;
     }
 
-    // Lock count indicator
     let lock_count = locks.specs.iter().filter(|s| s.is_some()).count()
         + locks
             .trait_locks
@@ -850,8 +839,6 @@ pub fn render_optimized_specs_panel(
     let row_height = (28.0 * s).round();
     let circle_radius = (row_height * 0.5 - 1.0).max(8.0);
 
-    // Look up spec info from DB for visual rendering
-    // Build name→spec map from DB
     let spec_by_name: std::collections::HashMap<&str, &gw2_api::models::Specialization> = db
         .map(|db| {
             db.specializations

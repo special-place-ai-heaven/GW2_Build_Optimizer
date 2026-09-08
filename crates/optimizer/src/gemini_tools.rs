@@ -2273,7 +2273,6 @@ fn detect_proc_triggers(facts: &[Fact], description: Option<&str>) -> Vec<String
         }
     };
 
-    // Check fact descriptions
     for fact in facts {
         match fact {
             Fact::Buff { text: Some(t), .. }
@@ -2284,7 +2283,6 @@ fn detect_proc_triggers(facts: &[Fact], description: Option<&str>) -> Vec<String
         }
     }
 
-    // Check main description
     if let Some(desc) = description {
         check_text(desc);
     }

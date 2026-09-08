@@ -241,7 +241,6 @@ pub(in crate::ui::main_view) fn render_improve_tab(ui: &Ui, state: &mut AddonSta
         ui.text_colored(theme::pal().muted, t("improve.select"));
     }
 
-    // Save build UI + clear button
     if has_suggestion {
         super::saveload::render_save_build_ui(ui, state);
         ui.same_line();

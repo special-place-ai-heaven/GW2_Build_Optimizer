@@ -48,7 +48,6 @@ pub struct GameDb {
 impl GameDb {
     /// Load all game data from the file cache and build indexes.
     pub fn load(cache: &DataCache) -> Result<Self, String> {
-        // Load raw vectors from cache
         let items_vec: Vec<Item> = cache
             .load("items")
             .map_err(|e| e.to_string())?
@@ -108,7 +107,6 @@ impl GameDb {
             return Err("No items found in cache — game data may not be downloaded".into());
         }
 
-        // Build primary indexes (ID → data)
         let items: HashMap<u32, Item> = items_vec.into_iter().map(|i| (i.id, i)).collect();
         let itemstats: HashMap<u32, ItemStat> =
             itemstats_vec.into_iter().map(|i| (i.id, i)).collect();
@@ -126,7 +124,6 @@ impl GameDb {
             pvp_amulets_vec.into_iter().map(|a| (a.id, a)).collect();
         let pets: HashMap<u32, Pet> = pets_vec.into_iter().map(|p| (p.id, p)).collect();
 
-        // Build derived indexes
         let mut skills_by_profession = profession_skill_index(&skills);
 
         let mut traits_by_spec: HashMap<u32, Vec<u32>> = HashMap::new();

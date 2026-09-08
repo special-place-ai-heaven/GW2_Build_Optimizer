@@ -43,7 +43,6 @@ pub fn try_load_objective_profiles() -> Result<(), Vec<DataLoadError>> {
     )
 }
 
-
 #[derive(Debug, Error)]
 pub enum ObjectiveProfileError {
     #[error("JSON parse error: {0}")]
@@ -51,7 +50,6 @@ pub enum ObjectiveProfileError {
     #[error("validation error: {0}")]
     ValidationError(String),
 }
-
 
 /// Axis weights for a 6-axis objective profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,7 +173,6 @@ impl ObjectiveProfileData {
     }
 }
 
-
 fn load_all_objective_profiles() -> Result<ObjectiveProfileData, ObjectiveProfileError> {
     let pve = load_objective_profile_file(PVE_PROFILES_JSON, "PvE")?;
     let pvp = load_objective_profile_file(PVP_PROFILES_JSON, "PvP")?;
@@ -209,7 +206,6 @@ pub fn load_objective_profile_file(
         profile.condition_priorities = normalized;
     }
 
-    // Validate mode matches filename stem
     if file.mode != expected_mode {
         return Err(ObjectiveProfileError::ValidationError(format!(
             "mode '{}' does not match expected '{}'",
@@ -217,7 +213,6 @@ pub fn load_objective_profile_file(
         )));
     }
 
-    // Validate profiles are non-empty
     if file.profiles.is_empty() {
         return Err(ObjectiveProfileError::ValidationError(format!(
             "{} has no profiles",
@@ -234,7 +229,6 @@ pub fn load_objective_profile_file(
         )));
     }
 
-    // Validate unique IDs
     let mut seen_ids = std::collections::HashSet::new();
     for profile in &file.profiles {
         if !seen_ids.insert(&profile.objective_profile_id) {
@@ -245,7 +239,6 @@ pub fn load_objective_profile_file(
         }
     }
 
-    // Validate each profile
     for profile in &file.profiles {
         validate_profile(profile, expected_mode)?;
     }
@@ -256,7 +249,6 @@ pub fn load_objective_profile_file(
 fn validate_profile(profile: &ObjectiveProfile, mode: &str) -> Result<(), ObjectiveProfileError> {
     let id = &profile.objective_profile_id;
 
-    // Validate axis weights are in range
     let aw = &profile.axis_weights;
     for (name, val) in [
         ("power", aw.power),
@@ -274,7 +266,6 @@ fn validate_profile(profile: &ObjectiveProfile, mode: &str) -> Result<(), Object
         }
     }
 
-    // Validate weight_budget is positive
     if profile.weight_budget <= 0.0 {
         return Err(ObjectiveProfileError::ValidationError(format!(
             "{}/{}: weight_budget {} must be positive",
@@ -282,7 +273,6 @@ fn validate_profile(profile: &ObjectiveProfile, mode: &str) -> Result<(), Object
         )));
     }
 
-    // Validate normalization constants are positive
     let nc = &profile.normalization_constants;
     for (name, val) in [
         ("strike_dps_norm", nc.strike_dps_norm),
@@ -300,7 +290,6 @@ fn validate_profile(profile: &ObjectiveProfile, mode: &str) -> Result<(), Object
         }
     }
 
-    // Validate boon_priorities are non-empty and in range
     if profile.boon_priorities.is_empty() {
         return Err(ObjectiveProfileError::ValidationError(format!(
             "{}/{}: boon_priorities must not be empty",
@@ -316,7 +305,6 @@ fn validate_profile(profile: &ObjectiveProfile, mode: &str) -> Result<(), Object
         }
     }
 
-    // Validate condition_priorities are non-empty and in range
     if profile.condition_priorities.is_empty() {
         return Err(ObjectiveProfileError::ValidationError(format!(
             "{}/{}: condition_priorities must not be empty",
@@ -332,7 +320,6 @@ fn validate_profile(profile: &ObjectiveProfile, mode: &str) -> Result<(), Object
         }
     }
 
-    // Validate interaction_priorities (if present) have valid keys and values
     let valid_interaction_keys = [
         "removes_boon",
         "corrupts_boon",

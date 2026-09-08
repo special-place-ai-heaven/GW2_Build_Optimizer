@@ -2676,7 +2676,6 @@ mod tests {
     /// prefix pool, and it stops when its budget is gone.
     #[test]
     fn nudge_uses_canonical_pool_and_budget() {
-        // the pool
         let mut db = empty_db();
         let power = |id: u32, name: &str, multiplier: f64| gw2_api::models::ItemStat {
             id,
@@ -2742,7 +2741,6 @@ mod tests {
             );
         }
 
-        // the budget
         use crate::synergy_pipeline::runtime_diagnostics_tests::make_diag_db;
 
         let diag = make_diag_db();

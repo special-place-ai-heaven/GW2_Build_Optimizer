@@ -596,7 +596,6 @@ pub fn calculate_full_stats(
 ) -> (StatBlock, DerivedStats) {
     let mut stats = base_stats();
 
-    // Gear stats
     let gear = calculate_gear_stats(&equipment.equipment, items_cache, itemstats_cache);
     stats.power += gear.power;
     stats.precision += gear.precision;
@@ -608,7 +607,6 @@ pub fn calculate_full_stats(
     stats.ferocity += gear.ferocity;
     stats.healing_power += gear.healing_power;
 
-    // Rune bonuses
     let rune_stats = calculate_rune_stats(rune_id, items_cache);
     add_block(&mut stats, &rune_stats);
 
